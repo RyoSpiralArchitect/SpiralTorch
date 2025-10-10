@@ -1,0 +1,21 @@
+[package]
+name = "spiraltorch-rs"
+version = "1.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "SpiralTorch Rust core — PyO3 Python bindings (v1.0.1)"
+authors = ["SpiralTorch Contributors"]
+
+[lib]
+name = "spiraltorch_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = ">=0.21, <0.25", features = ["extension-module"] }
+numpy = "0.21"
+st-core = { path = "../../crates/st-core" }
+
+[features]
+default = []
+blas = ["st-core/blas"]
+abi3 = ["pyo3/abi3-py38"]

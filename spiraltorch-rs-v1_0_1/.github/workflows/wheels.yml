@@ -1,0 +1,128 @@
+name: Build wheels
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-wheels:
+    name: Wheels (${{ matrix.os }} • py${{ matrix.py }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-13, macos-14, windows-2022]
+        py: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+      - uses: PyO3/maturin-action@v1
+        with:
+          rust-toolchain: stable
+          working-directory: bindings/st-py
+          args: >
+            build
+            --release
+            --compatibility manylinux2014
+            --interpreter python${{ matrix.py }}
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-py${{ matrix.py }}
+          path: bindings/st-py/target/wheels/*.whl
+
+  build-wheels-linux-aarch64:
+    name: Wheels (linux • aarch64 • py${{ matrix.py }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        py: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable QEMU (aarch64)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: Build in manylinux2014_aarch64 container
+        uses: addnab/docker-run-action@v3
+        with:
+          image: quay.io/pypa/manylinux2014_aarch64
+          options: -e PIP_DISABLE_PIP_VERSION_CHECK=1 -v ${{ github.workspace }}:/io
+          run: |
+            /opt/python/cp${{ matrix.py//. }}-cp${{ matrix.py//. }}/bin/pip install -U pip maturin
+            cd /io/bindings/st-py
+            /opt/python/cp${{ matrix.py//. }}-cp${{ matrix.py//. }}/bin/maturin build --release --compatibility manylinux2014 --interpreter /opt/python/cp${{ matrix.py//. }}-cp${{ matrix.py//. }}/bin/python
+            chown -R $(id -u):$(id -g) /io
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-aarch64-py${{ matrix.py }}
+          path: bindings/st-py/target/wheels/*.whl
+
+  build-wheels-abi3:
+    name: Wheels (abi3 • universal per-OS)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-13, macos-14, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: PyO3/maturin-action@v1
+        with:
+          rust-toolchain: stable
+          working-directory: bindings/st-py
+          args: >
+            build
+            --release
+            --features abi3
+            --compatibility manylinux2014
+      - name: Upload wheels (abi3)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-abi3-${{ matrix.os }}
+          path: bindings/st-py/target/wheels/*.whl
+
+  sdist:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          rust-toolchain: stable
+          working-directory: bindings/st-py
+          args: sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: bindings/st-py/target/wheels/*.tar.gz
+
+  publish-pypi:
+    needs: [build-wheels, build-wheels-linux-aarch64, build-wheels-abi3, sdist]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Merge artifacts
+        run: |
+          mkdir -p upload
+          find dist -name "*.whl" -exec cp {} upload/ \;
+          find dist -name "*.tar.gz" -exec cp {} upload/ \;
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.8.14
+        with:
+          packages_dir: upload
+          skip_existing: true
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}

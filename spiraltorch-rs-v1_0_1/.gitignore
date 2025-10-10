@@ -1,0 +1,17 @@
+/target
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dylib
+*.dll
+*.whl
+.maturin
+.eggs
+build/
+dist/
+bindings/st-py/target/
+.vscode/
+.idea/
+.DS_Store
