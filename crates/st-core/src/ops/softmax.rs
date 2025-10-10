@@ -1,6 +1,7 @@
 
 use ndarray::{Array2, ArrayD, Ix2};
-use crate::{Tensor, error::Result, autograd::GradFn};
+use crate::{Tensor, error::Result, autograd::{GradFn, BackwardNode, GradBuf}};
+use crate::device::Device;
 
 pub fn softmax2d(x: &Tensor) -> Result<Tensor> {
     let x2 = x.data().clone().into_dimensionality::<Ix2>().expect("softmax2d: expects 2D");
@@ -16,7 +17,7 @@ pub fn softmax2d(x: &Tensor) -> Result<Tensor> {
     let out_t = Tensor::from_array(out.clone().into_dyn());
     if x.0.borrow().requires_grad {
         struct Node { y: Tensor }
-        impl crate::autograd::BackwardNode for Node {
+        impl BackwardNode for Node {
             fn name(&self) -> &'static str { "softmax2d" }
             fn parents(&self) -> Vec<Tensor> { vec![self.y.clone()] }
             fn num_outputs(&self) -> usize { 1 }
@@ -31,6 +32,24 @@ pub fn softmax2d(x: &Tensor) -> Result<Tensor> {
                     for j in 0..cols { gx[[i,j]] = (gi[j] - dot) * yi[j]; }
                 }
                 vec![Some(gx.into_dyn())]
+            }
+            fn supports_device(&self) -> bool { matches!(self.y.device(), Device::Mps) }
+            fn backward_multi_dev(&self, grads_out: &[Option<GradBuf>]) -> Option<Vec<Option<GradBuf>>> {
+                #[cfg(all(feature="mps", target_os="macos"))] {
+                    use crate::backend::{Backend, MpsBackend};
+                    let be = MpsBackend::new();
+                    if self.y.device_array().is_none() { self.y.ensure_device().ok(); }
+                    let y_dev = self.y.device_array()?;
+                    let go_dev = match &grads_out[0] {
+                        Some(GradBuf::Device{arr, ..}) => arr.clone(),
+                        Some(GradBuf::Host(h)) => be.from_host_f32(h).ok()?,
+                        None => return Some(vec![None]),
+                    };
+                    let gx = be.softmax_backward2d(&y_dev, &go_dev).ok()?;
+                    return Some(vec![Some(GradBuf::Device{ arr: gx, shape: self.y.shape(), device: Device::Mps })]);
+                }
+                #[allow(unreachable_code)]
+                None
             }
         }
         out_t.attach_grad_fn(GradFn::new(Node{ y: out_t.clone() }), 0, 1, true);

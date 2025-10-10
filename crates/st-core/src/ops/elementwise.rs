@@ -1,6 +1,7 @@
 
 use ndarray::{ArrayD, IxDyn};
-use crate::{Tensor, error::Result, autograd::{GradFn}};
+use crate::{Tensor, error::Result, autograd::{GradFn, BackwardNode, GradBuf}};
+use crate::device::Device;
 
 fn broadcast_shape(sa: &[usize], sb: &[usize]) -> Vec<usize> {
     let nd = sa.len().max(sb.len());
@@ -17,9 +18,7 @@ fn unbroadcast(mut g: ArrayD<f32>, target: &[usize]) -> ArrayD<f32> {
     let mut t = target.to_vec();
     if gshape.len() > t.len() { let mut pad = vec![1usize; gshape.len() - t.len()]; pad.extend_from_slice(&t); t = pad; }
     for ax in (0..gshape.len()).rev() {
-        if t[ax] == 1 && gshape[ax] != 1 {
-            g = g.sum_axis(ndarray::Axis(ax));
-        }
+        if t[ax] == 1 && gshape[ax] != 1 { g = g.sum_axis(ndarray::Axis(ax)); }
     }
     g.into_dimensionality::<IxDyn>().unwrap()
 }
@@ -31,10 +30,9 @@ pub fn add(a: &Tensor, b: &Tensor) -> Result<Tensor> {
     let bb = b.data().broadcast(IxDyn(&out_shape)).expect("broadcast b").to_owned();
     let y = &aa + &bb;
     let out = Tensor::from_array(y.into_dyn());
-    // autograd
     if a.0.borrow().requires_grad || b.0.borrow().requires_grad {
         struct Node { a: Tensor, b: Tensor }
-        impl crate::autograd::BackwardNode for Node {
+        impl BackwardNode for Node {
             fn name(&self) -> &'static str { "add" }
             fn parents(&self) -> Vec<Tensor> { vec![self.a.clone(), self.b.clone()] }
             fn num_outputs(&self) -> usize { 1 }
@@ -57,10 +55,9 @@ pub fn mul(a: &Tensor, b: &Tensor) -> Result<Tensor> {
     let bb = b.data().broadcast(IxDyn(&out_shape)).expect("broadcast b").to_owned();
     let y = &aa * &bb;
     let out = Tensor::from_array(y.into_dyn());
-    // autograd
     if a.0.borrow().requires_grad || b.0.borrow().requires_grad {
         struct Node { a: Tensor, b: Tensor }
-        impl crate::autograd::BackwardNode for Node {
+        impl BackwardNode for Node {
             fn name(&self) -> &'static str { "mul" }
             fn parents(&self) -> Vec<Tensor> { vec![self.a.clone(), self.b.clone()] }
             fn num_outputs(&self) -> usize { 1 }
@@ -82,7 +79,7 @@ pub fn relu(x: &Tensor) -> Result<Tensor> {
     let out = Tensor::from_array(y.into_dyn());
     if x.0.borrow().requires_grad {
         struct Node { x: Tensor }
-        impl crate::autograd::BackwardNode for Node {
+        impl BackwardNode for Node {
             fn name(&self) -> &'static str { "relu" }
             fn parents(&self) -> Vec<Tensor> { vec![self.x.clone()] }
             fn num_outputs(&self) -> usize { 1 }
@@ -92,6 +89,32 @@ pub fn relu(x: &Tensor) -> Result<Tensor> {
                 let mask = x.mapv(|v| if v>0.0 { 1.0 } else { 0.0 });
                 let gx = go * &mask;
                 vec![Some(gx)]
+            }
+            fn supports_device(&self) -> bool { matches!(self.x.device(), Device::Mps) }
+            fn backward_multi_dev(&self, grads_out: &[Option<GradBuf>]) -> Option<Vec<Option<GradBuf>>> {
+                #[cfg(all(feature="mps", target_os="macos"))] {
+                    use crate::backend::{Backend, MpsBackend};
+                    use crate::backend::mps_impl::NdInfoA;
+                    let be = MpsBackend::new();
+                    if self.x.device_array().is_none() { self.x.ensure_device().ok(); }
+                    let dx = self.x.device_array()?;
+                    let go_dev = match &grads_out[0] {
+                        Some(GradBuf::Device{arr, ..}) => arr.clone(),
+                        Some(GradBuf::Host(h)) => be.from_host_f32(h).ok()?,
+                        None => return Some(vec![None]),
+                    };
+                    let nd = self.x.shape().len().min(6);
+                    let mut info = NdInfoA { ndim: nd as u32, n: self.x.shape().iter().product::<usize>() as u32,
+                                              shape:[1;6], stride_x:[0;6], stride_go:[0;6] };
+                    let shp = self.x.shape();
+                    for i in 0..nd { info.shape[6-nd+i] = shp[i] as u32; }
+                    let mut s = 1i32;
+                    for i in (0..nd).rev() { info.stride_x[6-nd+i]=s; info.stride_go[6-nd+i]=s; s *= shp[i] as i32; }
+                    let dy = be.relu_backward_strided(&dx, &go_dev, &info).ok()?;
+                    return Some(vec![Some(GradBuf::Device{ arr: dy, shape: self.x.shape(), device: Device::Mps })]);
+                }
+                #[allow(unreachable_code)]
+                None
             }
         }
         out.attach_grad_fn(GradFn::new(Node{ x: x.clone() }), 0, 1, true);
