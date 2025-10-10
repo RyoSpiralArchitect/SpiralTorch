@@ -3,7 +3,7 @@
 > **🚨 World's first PyTorch-like tensor library with full Python 3.14 support.**  
 > **🧠 Rust core. Autograd-capable. Fused ops. Wheels included.**
 > **PyTorch is still preparing for Python 3.14.**  
-> **We started yesterday. It already works.**
+> **We started OCT 9, 2025. It already works.**
 
 **SpiralTorch-rs** is a fast, clean Rust implementation of a Torch-like tensor engine with autograd, plus Python bindings via PyO3.
 
