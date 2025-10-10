@@ -1,5 +1,4 @@
 # SpiralTorch-rs (v1.3.2)
-
 [![wheels](https://img.shields.io/github/actions/workflow/status/RyoSpiralArchitect/spiraltorch/wheels.yml?label=wheels&logo=github)](https://github.com/RyoSpiralArchitect/spiraltorch/actions/workflows/wheels.yml)
 ![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)
 ![pyversions](https://img.shields.io/pypi/pyversions/spiraltorch-rs.svg)
