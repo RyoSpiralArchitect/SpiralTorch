@@ -32,7 +32,7 @@ Unlike certain large corporate libraries that shall remain unnamed.
 
 ```bash
 
----
+
 
 pip install -U pip maturin
 git clone https://github.com/RyoSpiralArchitect/spiraltorch.git
@@ -57,7 +57,7 @@ No PRs welcome yet. Just fork it, break it, and post about it.
 
 ## 📜 License
 
-MIT OR Apache-2.0  
+ALPG 3.0
 Use it, break it, remake it.
 
 ---
