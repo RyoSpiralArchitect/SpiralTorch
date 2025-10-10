@@ -142,6 +142,3 @@ Rust 2021 / `cargo fmt` / `cargo clippy`. Python via `maturin develop`.
 © SpiralReality / Ryo (SpiralArchitect)
 
 > *“The torch is just the beginning. The reality spirals out from here.”*
-```
-
-want it punchier/snarkier or more corporate? I can tune the voice in 30 seconds.
