@@ -154,7 +154,7 @@ PRs welcome once the public API stabilizes.
 
 ## 📜 License
 
-**LGPL-3.0**
+**AGPL-3.0-or-later**
 
 ---
 
