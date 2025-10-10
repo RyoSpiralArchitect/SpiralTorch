@@ -161,5 +161,5 @@ PRs welcome once the public API stabilizes.
 
 ## 🌀 Author
 
-**Ryo ∴ SpiralArchitect**  
+**Ryo ∴ SpiralArchitect and SpiralReality**  
 > “The torch is just the beginning. The reality spirals out from here.”
