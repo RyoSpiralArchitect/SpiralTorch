@@ -1,6 +1,1 @@
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Device {
-    Cpu,
-    /// Present even without the 'mps' feature so matches compile.
-    Mps,
-}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum Device { Cpu, Mps, Wgpu, Cuda }
