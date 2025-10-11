@@ -1,4 +1,3 @@
-
 use ndarray::ArrayD;
 use crate::Tensor;
 
@@ -10,9 +9,7 @@ pub trait BackwardNode: Send + Sync + 'static {
 }
 
 pub struct GradFn(pub std::rc::Rc<std::cell::RefCell<GradFnInner>>);
-pub struct GradFnInner {
-    node: Box<dyn BackwardNode>,
-}
+pub struct GradFnInner { node: Box<dyn BackwardNode> }
 impl GradFn {
     pub fn new<N: BackwardNode>(node: N) -> Self {
         GradFn(std::rc::Rc::new(std::cell::RefCell::new(GradFnInner{ node: Box::new(node) })))

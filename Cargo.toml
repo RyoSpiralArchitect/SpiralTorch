@@ -1,4 +1,3 @@
-
 [workspace]
 members = ["crates/st-core", "bindings/st-py"]
 resolver = "2"

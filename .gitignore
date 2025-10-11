@@ -1,10 +1,6 @@
-
 /target
 **/__pycache__/
 *.pyc
-*.pyo
-*.swp
-*.swo
-*.log
 .DS_Store
-.mypy_cache/
+.venv/
+*.zip

@@ -1,4 +1,3 @@
-
 use std::{cell::RefCell, rc::Rc, collections::{HashMap, HashSet}};
 use ndarray::{ArrayD, IxDyn, Axis};
 use crate::{dtype::DType, device::Device, error::Result};
@@ -9,11 +8,7 @@ static mut NEXT_ID: usize = 1;
 #[derive(Clone)]
 pub struct Tensor(pub Rc<RefCell<Inner>>);
 
-pub enum Storage {
-    F32(ArrayD<f32>),
-    I32(ArrayD<i32>),
-    Bool(ArrayD<bool>),
-}
+pub enum Storage { F32(ArrayD<f32>), I32(ArrayD<i32>), Bool(ArrayD<bool>) }
 
 pub struct Inner {
     id: usize,
