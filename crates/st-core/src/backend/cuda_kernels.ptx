@@ -1,0 +1,135 @@
+.version 7.0
+.target sm_70
+.address_size 64
+
+.visible .entry add_vec(
+    .param .u64 pa, .param .u64 pb, .param .u64 pc, .param .u32 pn
+){
+    .reg .pred %p;
+    .reg .b32 %r<6>;
+    .reg .b64 %rd<10>;
+    .reg .f32 %f<4>;
+    ld.param.u64 %rd1, [pa]; ld.param.u64 %rd2, [pb]; ld.param.u64 %rd3, [pc];
+    ld.param.u32 %r1,  [pn];
+    mov.u32 %r2, %tid.x; mov.u32 %r3, %ctaid.x; mov.u32 %r4, %ntid.x;
+    mad.lo.s32 %r5, %r3, %r4, %r2;
+    setp.ge.u32 %p, %r5, %r1; @%p bra ADONE;
+    mul.wide.u32 %rd4, %r5, 4;
+    add.u64 %rd5, %rd1, %rd4; add.u64 %rd6, %rd2, %rd4; add.u64 %rd7, %rd3, %rd4;
+    ld.global.f32 %f1, [%rd5]; ld.global.f32 %f2, [%rd6];
+    add.f32 %f3, %f1, %f2; st.global.f32 [%rd7], %f3;
+ADONE: ret;
+}
+
+.visible .entry transpose_2d(
+    .param .u64 px, .param .u64 py, .param .u32 prows, .param .u32 pcols
+){
+    .reg .pred %p;
+    .reg .b32 %r<12>;
+    .reg .b64 %rd<10>;
+    .reg .f32 %f<2>;
+    ld.param.u64 %rd1, [px]; ld.param.u64 %rd2, [py];
+    ld.param.u32 %r1, [prows]; ld.param.u32 %r2, [pcols];
+    mov.u32 %r3, %tid.x; mov.u32 %r4, %ctaid.x; mov.u32 %r5, %ntid.x;
+    mad.lo.s32 %r6, %r4, %r5, %r3;
+    mul.lo.u32 %r7, %r1, %r2;
+    setp.ge.u32 %p, %r6, %r7; @%p bra TDONE;
+    div.u32 %r8, %r6, %r2; rem.u32 %r9, %r6, %r2;
+    mul.lo.u32 %r10, %r8, %r2; add.u32 %r10, %r10, %r9;
+    mul.lo.u32 %r11, %r9, %r1; add.u32 %r11, %r11, %r8;
+    mul.wide.u32 %rd3, %r10, 4; mul.wide.u32 %rd4, %r11, 4;
+    add.u64 %rd5, %rd1, %rd3; add.u64 %rd6, %rd2, %rd4;
+    ld.global.f32 %f1, [%rd5]; st.global.f32 [%rd6], %f1;
+TDONE: ret;
+}
+
+// Tiled GEMM (16x16 shared memory)
+.visible .entry gemm_tiled_16(
+    .param .u64 pA, .param .u64 pB, .param .u64 pC,
+    .param .u32 pm, .param .u32 pk, .param .u32 pn
+){
+    .reg .pred %p;
+    .reg .b32 %r<40>;
+    .reg .b64 %rd<40>;
+    .reg .f32 %f<8>;
+
+    .shared .align 4 .b8 As[16*16*4];
+    .shared .align 4 .b8 Bs[16*16*4];
+
+    ld.param.u64 %rdA, [pA]; ld.param.u64 %rdB, [pB]; ld.param.u64 %rdC, [pC];
+    ld.param.u32 %rM, [pm]; ld.param.u32 %rK, [pk]; ld.param.u32 %rN, [pn];
+
+    mov.u32 %rBx, %ctaid.x; mov.u32 %rBy, %ctaid.y;
+    mov.u32 %rTx, %tid.x;   mov.u32 %rTy, %tid.y;
+    mov.u32 %rBDx, %ntid.x; mov.u32 %rBDy, %ntid.y;
+
+    mad.lo.s32 %rRow, %rBy, %rBDy, %rTy;
+    mad.lo.s32 %rCol, %rBx, %rBDx, %rTx;
+
+    setp.ge.u32 %p, %rRow, %rM; @%p bra OUT;
+    setp.ge.u32 %p, %rCol, %rN; @%p bra OUT;
+
+    mov.f32 %fAcc, 0f00000000;
+    add.u32 %rTilesTmp, %rK, 15; shr.u32 %rTiles, %rTilesTmp, 4; // /16
+    mov.u32 %rT, 0;
+
+L0:
+    setp.ge.u32 %p, %rT, %rTiles; @%p bra L1;
+
+    shl.b32 %rT16, %rT, 4; // T*16
+
+    // A[row, T*16 + tx]
+    add.u32 %rKoffA, %rT16, %rTx;
+    setp.ge.u32 %p, %rKoffA, %rK;
+    @%p mov.f32 %fA, 0f00000000;
+    @!%p {
+      mul.lo.u32 %rAidx0, %rRow, %rK;
+      add.u32 %rAidx, %rAidx0, %rKoffA;
+      mul.wide.u32 %rdAoff, %rAidx, 4;
+      add.u64 %rdAL, %rdA, %rdAoff;
+      ld.global.f32 %fA, [%rdAL];
+    }
+
+    // B[T*16 + ty, col]
+    add.u32 %rKoffB, %rT16, %rTy;
+    setp.ge.u32 %p, %rKoffB, %rK;
+    @%p mov.f32 %fB, 0f00000000;
+    @!%p {
+      mul.lo.u32 %rBrow, %rKoffB, %rN;
+      add.u32 %rBidx, %rBrow, %rCol;
+      mul.wide.u32 %rdBoff, %rBidx, 4;
+      add.u64 %rdBL, %rdB, %rdBoff;
+      ld.global.f32 %fB, [%rdBL];
+    }
+
+    // store As[ty,tx], Bs[ty,tx]
+    mad.lo.s32 %rSOffA, %rTy, 16, %rTx; mul.wide.u32 %rdSOffA, %rSOffA, 4;
+    cvta.to.shared.u64 %rdSA, As; add.u64 %rdSAp, %rdSA, %rdSOffA; st.shared.f32 [%rdSAp], %fA;
+    mad.lo.s32 %rSOffB, %rTy, 16, %rTx; mul.wide.u32 %rdSOffB, %rSOffB, 4;
+    cvta.to.shared.u64 %rdSB, Bs; add.u64 %rdSBp, %rdSB, %rdSOffB; st.shared.f32 [%rdSBp], %fB;
+
+    bar.sync 0;
+
+    // acc: j=0..15 As[ty,j]*Bs[j,tx]
+    mov.u32 %rJ, 0;
+LJ:
+    setp.ge.u32 %p, %rJ, 16; @%p bra LJ_END;
+    mad.lo.s32 %rAj, %rTy, 16, %rJ; mul.wide.u32 %rdAj, %rAj, 4; add.u64 %rdAjp, %rdSA, %rdAj; ld.shared.f32 %fAj, [%rdAjp];
+    mad.lo.s32 %rBj, %rJ, 16, %rTx; mul.wide.u32 %rdBj, %rBj, 4; add.u64 %rdBjp, %rdSB, %rdBj; ld.shared.f32 %fBj, [%rdBjp];
+    fma.rn.f32 %fAcc, %fAj, %fBj, %fAcc;
+    add.u32 %rJ, %rJ, 1; bra.uni LJ;
+LJ_END:
+
+    bar.sync 0;
+    add.u32 %rT, %rT, 1; bra.uni L0;
+
+L1:
+    // C[row, col] = fAcc
+    mul.lo.u32 %rCoff, %rRow, %rN; add.u32 %rCoff, %rCoff, %rCol;
+    mul.wide.u32 %rdCoff, %rCoff, 4; add.u64 %rdCdst, %rdC, %rdCoff;
+    st.global.f32 [%rdCdst], %fAcc;
+OUT: ret;
+}
+
+// WMMA stub for future Tensor Core path
+.visible .entry gemm_wmma_16x16x16_stub() { ret; }

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "spiraltorch-rs"
+version = "1.3.7"
+description = "SpiralTorch Python bindings (PyO3)"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.9"
+authors = [{ name = "SpiralTorch contributors" }]
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+  "Operating System :: OS Independent",
+]
+
+[tool.maturin]
+features = ["wgpu"]  # or mps/cuda. tweak in CI matrix.
+module-name = "spiraltorch_rs"
+
+[project.urls]
+Repository = "https://github.com/RyoSpiralArchitect/spiraltorch"
