@@ -14,58 +14,19 @@ pub enum BackendArrayF32 {
 }
 
 #[cfg(feature="wgpu")]
+pub mod wgpu_where_nd;
+#[cfg(feature="wgpu")]
+pub mod wgpu_topk_passk;
+#[cfg(feature="wgpu")]
+pub mod wgpu_mask_indices;
+#[cfg(feature="wgpu")]
 pub mod wgpu_topk_unified;
-#[cfg(feature="wgpu")]
-pub mod wgpu_topk_bigk;
-#[cfg(feature="wgpu")]
-pub mod wgpu_topk_blockmerge;
-#[cfg(feature="wgpu")]
-pub mod wgpu_topk_blockmerge_kway;
-#[cfg(feature="wgpu")]
-pub mod wgpu_lse_f16;
-#[cfg(feature="wgpu")]
-pub mod wgpu_ce_f16;
-#[cfg(feature="wgpu")]
-pub mod wgpu_ce_reduce;
-#[cfg(feature="wgpu")]
-pub mod wgpu_ce_fused_nll;
-#[cfg(feature="wgpu")]
-pub mod wgpu_ce_full_fused;
 
-#[cfg(feature="cuda")]
-pub mod cuda_where;
-#[cfg(feature="mps")]
-pub mod mps_where;
+// Placeholders for compatibility (implemented via pass_k internally)
+#[cfg(feature="wgpu")]
+pub mod wgpu_topk_blockmerge_kway { use crate::error::Result; use super::{BackendArrayF32, wgpu_topk_passk::WgpuTopKPassK}; pub struct WgpuTopKBlockMergeKWay; impl WgpuTopKBlockMergeKWay{ pub fn new()->Self{Self} pub fn topk_lastdim(&self, x:&BackendArrayF32, rows:usize, cols:usize, k:usize, _k_lane:usize)->Result<(ndarray::ArrayD<f32>, ndarray::ArrayD<i32>)>{ let (dev, _q)=super::wgpu_topk_passk::WgpuTopKPassK::device(); let (pv, pi)=WgpuTopKPassK::new().pass_k(x, rows, cols, k.min(256))?; let slice_v=pv.slice(..); let slice_i=pi.slice(..); let _=slice_v.map_async(wgpu::MapMode::Read); let _=slice_i.map_async(wgpu::MapMode::Read); dev.poll(wgpu::Maintain::Wait); let dv=slice_v.get_mapped_range().to_vec(); let di=slice_i.get_mapped_range().to_vec(); drop(slice_v); drop(slice_i); pv.unmap(); pi.unmap(); let vals:Vec<f32>=bytemuck::cast_slice::<u8,f32>(&dv).to_vec(); let idxu:Vec<u32>=bytemuck::cast_slice::<u8,u32>(&di).to_vec(); let idxs:Vec<i32>=idxu.into_iter().map(|u|u as i32).collect(); Ok((ndarray::Array2::from_shape_vec((rows, k.min(256)), vals).unwrap().into_dyn(), ndarray::Array2::from_shape_vec((rows, k.min(256)), idxs).unwrap().into_dyn())) } } }
+#[cfg(feature="wgpu")]
+pub mod wgpu_topk_bigk { use crate::error::Result; use super::{BackendArrayF32, wgpu_topk_passk::WgpuTopKPassK}; pub struct WgpuTopKBigK; impl WgpuTopKBigK{ pub fn new()->Self{Self} pub fn topk_lastdim(&self, x:&BackendArrayF32, rows:usize, cols:usize, k:usize)->Result<(ndarray::ArrayD<f32>, ndarray::ArrayD<i32>)>{ let (dev, _q)=super::wgpu_topk_passk::WgpuTopKPassK::device(); let (pv, pi)=WgpuTopKPassK::new().pass_k(x, rows, cols, k.min(256))?; let slice_v=pv.slice(..); let slice_i=pi.slice(..); let _=slice_v.map_async(wgpu::MapMode::Read); let _=slice_i.map_async(wgpu::MapMode::Read); dev.poll(wgpu::Maintain::Wait); let dv=slice_v.get_mapped_range().to_vec(); let di=slice_i.get_mapped_range().to_vec(); drop(slice_v); drop(slice_i); pv.unmap(); pi.unmap(); let vals:Vec<f32>=bytemuck::cast_slice::<u8,f32>(&dv).to_vec(); let idxu:Vec<u32>=bytemuck::cast_slice::<u8,u32>(&di).to_vec(); let idxs:Vec<i32>=idxu.into_iter().map(|u|u as i32).collect(); Ok((ndarray::Array2::from_shape_vec((rows, k.min(256)), vals).unwrap().into_dyn(), ndarray::Array2::from_shape_vec((rows, k.min(256)), idxs).unwrap().into_dyn())) } } }
 
 #[cfg(feature="wgpu")]
 pub const WGPU_KERNELS_ALL: &str = include_str!("wgpu_kernels_all.wgsl");
-
-#[cfg(feature="mps")]
-pub mod mps_pool_autotune {
-    pub struct PoolAutoTune {
-        pub enabled: bool,
-        pub bins: std::collections::BTreeMap<u32, usize>,
-        pub hits: usize, pub misses: usize,
-        pub tune_interval: std::time::Duration,
-        pub window_elapsed: std::time::Duration,
-        pub max_grow: f32,
-    }
-    impl PoolAutoTune {
-        pub fn new()->Self{ Self{ enabled:false, bins:Default::default(), hits:0, misses:0, tune_interval:std::time::Duration::from_secs(10), window_elapsed:std::time::Duration::from_secs(0), max_grow:2.0 } }
-        pub fn enable(mut self)->Self{ self.enabled=true; self }
-        pub fn maybe_tune(&mut self) {}
-        pub fn set_window_secs(&mut self, s:u64){ self.tune_interval = std::time::Duration::from_secs(s); }
-        pub fn set_explore_range(&mut self, g:f32){ self.max_grow = g; }
-    }
-}
-
-#[cfg(feature="mps")]
-pub mod mps_pool_window { include!("mps_pool_window.append.rs"); }
-#[cfg(feature="mps")]
-pub mod mps_pool_auto_explore { include!("mps_pool_auto_explore.append.rs"); }
-#[cfg(feature="mps")]
-pub mod mps_pool_safety { include!("mps_pool_safety.append.rs"); }
-#[cfg(feature="mps")]
-pub mod mps_pool_ema { include!("mps_pool_ema.append.rs"); }
-#[cfg(feature="mps")]
-pub mod mps_pool_dynamic { include!("mps_pool_dynamic_ema_debounce.append.rs"); }
