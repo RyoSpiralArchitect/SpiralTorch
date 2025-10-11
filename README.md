@@ -1,144 +1,61 @@
-# SpiralTorch-rs (v1.3.2)
-![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)
+# SpiralTorch (v1.3.5)
 
-> **🚨 World's first PyTorch-like tensor library with full Python 3.14 support.**
-> **🧠 Rust core. tensors & real autograd. Fast, small, readable. Fused ops. Wheels included.**
-> **We started OCT 9, 2025. It already works.**
-> **SpiralTorch-rs is a fast, clean Rust implementation of a Torch-like tensor engine with autograd, plus Python bindings via PyO3. ⚡ Apple Metal (MPS) on-device.**  
+Rust-first, Torch-like tensors & autograd with **MPS (Metal)**, **WGPU (cross‑platform GPU)**, and **CUDA (skeleton)** backends.
+AGPL‑3.0‑or‑later. Repo URL: https://github.com/RyoSpiralArchitect/spiraltorch
 
+## Highlights (v1.3.5)
+- **WGPU**: unified WGSL kernel file, consolidated PSO setup; shared transpose pipelines for 2D/batched.
+- **WGPU**: 2D GEMM backward on-device using `transpose_2d` + tiled GEMM (`go@Bᵀ`, `Aᵀ@go`).
+- **WGPU**: softmax backward on-device (rowwise dot + fused grad).
+- **WGPU**: sum_axes multi-axis reduction path via flattened rows/cols (1/2‑pass auto switch).
+- **MPS**: **β-accumulate** fused batched backward for matmul; temporary transpose buffers from a pool.
+- **CUDA**: initial PTX (add_vec, transpose_2d) + cust loader; API mirrors MPS/WGPU for drop-in ops dispatch.
+- **Autograd**: device-side grad accumulation via backend `add()` (no host roundtrips).
 
----
+## Build banner
+On successful build, Cargo will print an ASCII banner in warnings (visible in CI logs too).
 
-## ✨ TL;DR
-
-- **Rust-first / Torch-like:** `ndarray` core, **real autograd** (multi-output, topo backward, broadcast/unbroadcast)
-- **Device-first (MPS):** `matmul2d / batched` run via **MPSMatrix** on device;  
-  **N-D reduce (sum)** completes on GPU (only the final 1 float is read back)
-- **Buffer Pool:** power-of-two size classes + LRU cap (env tunable)
-- **Wheels CI:** **universal2** (macOS arm64/x86_64) & **musllinux** (x86_64/aarch64) for Python 3.8–3.14
-
-> Project started **2025-10-09**. It already runs. Results first, excuses later.
-
----
-
-## What’s new in **v1.3.2**
-
-- **MPSMatrix GEMM (forward):** `matmul2d` and **batched forward** on device (CPU fallback available)
-- **N-D reduce (sum):** automatic 1-pass / 2-pass on device
-- **Buffer Pool:** pow2 classes + LRU; tune with env vars
-- **Python bindings** included (PyO3 / maturin) + **wheels CI** (universal2 & musllinux)
-
----
-
-## Install (10 seconds)
-
-**PyPI** (when published)
+## Install / Build (local)
 ```bash
-pip install -U spiraltorch-rs
-```
+# WGPU (Windows/Linux/macOS)
+cargo build -p st-core --features wgpu
 
-**From source (today)**
-```bash
-# Rust core (CPU)
-cargo build -p st-core
-
-# macOS (MPS)
+# MPS (macOS)
 cargo build -p st-core --features mps
 
-# Python bindings (venv recommended)
-pip install -U maturin
-maturin develop -m bindings/st-py/Cargo.toml                    # CPU
-maturin develop -m bindings/st-py/Cargo.toml --features mps     # MPS
+# CUDA (skeleton: add/transpose; extend as needed)
+cargo build -p st-core --features cuda
 ```
 
-Optional pool tuning:
+## Python wheels
+This repo includes **maturin** bindings under `bindings/st-py` and a GitHub Actions workflow to build wheels:
+
+- **macOS**: universal2 (x86_64 + arm64)
+- **Linux**: musllinux_1_2 (x86_64, aarch64)
+- **Windows**: win_amd64
+- Optional: manylinux if you switch the target in workflow
+
+### Local (maturin)
 ```bash
-export SPIRALTORCH_MPS_POOL_MAX_MB=512
-export SPIRALTORCH_MPS_POOL_MAX_PER_CLASS=64
+pipx install maturin  # or pip install maturin
+maturin develop -m bindings/st-py/pyproject.toml --features wgpu    # or --features mps
+# wheel build:
+maturin build   -m bindings/st-py/pyproject.toml --release --features wgpu
+ls -1 target/wheels/*.whl
 ```
 
----
-
-## Quickstart (Python)
-
+## Minimal Python usage
 ```python
-import spiraltorch_rs as st, numpy as np
+import spiraltorch_rs as st
 
-# MPS GEMM (on-device) / CPU fallback elsewhere
-A = st.PyTensor.from_f32(np.random.randn(128,64).astype(np.float32), True).to("mps")
-B = st.PyTensor.from_f32(np.random.randn(64,96).astype(np.float32),  True).to("mps")
-Y = st.matmul2d(A, B)
-st.sum_all(Y).backward()
-print("device-grad?", getattr(A, "grad_device_available", lambda: False)())
-
-# N-D reduce (multi-axis)
-X = st.PyTensor.from_f32(np.random.randn(32,64,4096).astype(np.float32), True).to("mps")
-S = st.sum_axes(X, [1,2], keepdim=True)
-S.backward()
+print(st.__version__)
+print("available backends:", st.backends())
+# (Bindings are a thin skeleton in this archive; extend to expose full Tensor API)
 ```
 
-**einsum (DP planner + greedy fallback)**
-```python
-a = st.PyTensor.from_f32(np.arange(6,dtype=np.float32).reshape(2,3), True)
-b = st.PyTensor.from_f32(np.arange(12,dtype=np.float32).reshape(3,4)/10, True)
-y = st.einsum("ij,jk->ik", (a,b), True)
-st.sum_all(y).backward()
-print(a.grad().shape, b.grad().shape, y.shape())
-```
-
----
-
-## Feature set (core ops)
-
-- **Autograd:** multi-output nodes, topological backward, NumPy-style broadcasting/unbroadcasting  
-- **Generalized einsum:** **DP planning** (batch/broadcast-aware) + greedy fallback  
-- **Segment ops:** `segment_{sum,mean,max,min}` / `unsorted_segment_*` / `ragged_segment_*` / `coalesce_indices`  
-- **index_reduce:** `sum/mean/min/max/amin/amax/prod` (**`prod` has exact grads even with zeros**)  
-- **logprod:** stable log-domain product → returns `(logabs, sign)`; grads flow through `logabs`  
-- **Device-first autograd (GradBuf):** when ops support it, **grads stay on GPU end-to-end**
-
----
-
-## Quick example (Rust)
-
-```rust
-use st_core::{tensor::Tensor, ops::{matmul, reductions}};
-let a = Tensor::ones(&[4, 8]).requires_grad(true);
-let b = Tensor::ones(&[8, 16]).requires_grad(true);
-let y = matmul::matmul2d(&a, &b).unwrap();
-reductions::sum_all(&y).unwrap().backward().unwrap();
-assert!(a.grad().is_some() && b.grad().is_some());
-```
-
----
-
-## Wheels / CI / Release
-
-- Tag `v*.*.*` → **wheels.yml** runs:
-  - **macOS**: universal2 (arm64 / x86_64)
-  - **musllinux**: x86_64 / aarch64
-- Auto-publish to PyPI: set `PYPI_API_TOKEN` in repo secrets (username `__token__`)
-
-**Compatibility**
-| OS / Arch                 | Python  | Wheel           |
-|---------------------------|---------|-----------------|
-| Linux x86_64 / aarch64    | 3.8–3.14| manylinux2014 ✅ |
-| macOS x86_64 / arm64      | 3.8–3.14| universal2 ✅    |
-| Windows x86_64            | 3.8–3.14| ✔️              |
-| abi3 (cp38-abi3, per-OS)  | 3.8+    | optional ✅      |
-
----
-
-## Contributing
-
-Early days. **Fork it, break it, tell us.**  
-Rust 2021 / `cargo fmt` / `cargo clippy`. Python via `maturin develop`.
-
----
+## CI (wheels + release)
+- See `.github/workflows/release-wheels.yml`
+- On pushing a tag like `v1.3.5`, wheels are built and uploaded as workflow artifacts (or as release assets if you enable the Release job).
 
 ## License
-
-**AGPL-3.0-or-later**  
-© SpiralReality / Ryo (SpiralArchitect)
-
-> *“The torch is just the beginning. The reality spirals out from here.”*
+AGPL‑3.0‑or‑later
