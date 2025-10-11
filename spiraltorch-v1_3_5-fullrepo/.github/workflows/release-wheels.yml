@@ -1,0 +1,61 @@
+name: Build Wheels
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: messense/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}-unknown-linux-musl
+          manylinux: 'off'
+          args: >
+            build -m bindings/st-py/pyproject.toml
+            --release
+            --features wgpu
+            --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: dist/*.whl
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: messense/maturin-action@v1
+        with:
+          args: >
+            build -m bindings/st-py/pyproject.toml
+            --release --features mps
+            --universal2
+            --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-universal2
+          path: dist/*.whl
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build wheels (win_amd64)
+        run: |
+          pip install maturin
+          maturin build -m bindings/st-py/pyproject.toml --release --features wgpu --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-amd64
+          path: dist/*.whl
