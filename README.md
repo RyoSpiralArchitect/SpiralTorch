@@ -49,31 +49,81 @@ WGPU is the default, HIP/CUDA absorb the same unified choices. Python wheels tar
 
 ---
 
-## Quick Start
+## ✅ Quick Start
 
-1) **Apply overlay**
+### 1) Clone
 ```bash
-unzip -o spiraltorch-overlay-v1_7_2.zip
+git clone https://github.com/RyoSpiralArchitect/SpiralTorch.git
+cd SpiralTorch
 ```
 
-2) **(Optional) Control `mk` / `tile` via SpiralK**  
-See the env block above, then:
+### 2) Build from source (Rust)
+
+**CPU (default, no GPU deps)**
 ```bash
-cargo build -p st-core --features wgpu,logic,kdsl,kv-redis --release
+cargo build -p st-core --release
 ```
 
-3) **(Optional) Overwrite with a WASM Tuner table**
+**WGPU (WebGPU; Windows/Linux/macOS)**
 ```bash
-python3 tools/tuner/gen_generated_rs.py tools/tuner/tuner_results.json \
-  > crates/st-core/src/backend/wgpu_heuristics_generated.rs
+cargo build -p st-core --features wgpu --release
 ```
 
-4) **Build**
+**MPS (macOS GPU)**
 ```bash
-# WGPU example
-cargo build -p st-core --features wgpu,logic,kdsl,kv-redis --release
+cargo build -p st-core --features mps --release
 ```
 
+**CUDA (optional; NVRTC/CUDA toolkit required)**
+```bash
+cargo build -p st-core --features cuda --release
+```
+
+**HIP / ROCm (optional; real backend is feature-gated)**
+```bash
+export HIPCC=/opt/rocm/bin/hipcc
+export ROCM_PATH=/opt/rocm
+cargo build -p st-core --features hip,st-backend-hip/hip-real --release
+```
+
+### 3) Python wheels (optional)
+```bash
+pip install maturin==1.*
+# CPU + WGPU
+maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
+# 他のバックエンドは features を足すだけ（mps / cuda / hip）
+```
+
+### 4) Minimal examples
+
+**Rust**
+```rust
+use st_core::ops::topk_midk_gpu::{topk2d, Device};
+let (vals, idx) = topk2d(x.view(), 1024, Device::Auto)?;
+```
+
+**Python**
+```python
+import numpy as np, spiraltorch as st
+x = np.random.randn(8, 65536).astype(np.float32)
+vals, idx = st.topk2d(x, k=1024, device="auto")
+```
+
+---
+
+## Heuristics (SpiralK) – optional
+
+```bash
+export SPIRAL_HEUR_SOFT=1
+export SPIRAL_HEUR_K='
+  mk: sel(sg && (k<=128), 2, sel(k<=2048, 1, 0));
+  tile: sel(log2(c)>15.0, 2048, sel(log2(c)>13.0, 1024, sel(log2(c)>12.0, 512, 256)));
+  soft(mk, 2, 0.25, sg && (k<=128));
+  soft(mk, 1, 0.20, (k>128)&&(k<=2048));
+  soft(tile, 2048, 0.20, log2(c)>15.0);
+  soft(tile, 1024, 0.15, (log2(c)>13.0)&&(log2(c)<=15.0));
+'
+```
 ---
 
 ## Two-Layer Consensus (how the final choice is made)
