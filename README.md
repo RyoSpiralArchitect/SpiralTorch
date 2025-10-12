@@ -1,6 +1,7 @@
   <a href="#license"><img alt="AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
   <a href="#"><img alt="Python" src="https://img.shields.io/badge/python-3.11–3.14-3776AB?logo=python"></a>
 </p>
+
 # SpiralTorch v1.7.2 — Self-Tuning GPU Top-K. WGPU-first. Zero-regret fallbacks.
 
 **SpiralK + SoftLogic + WASM Tuner** pick the fastest **merge kind** and **tile width** for your hardware—then **Self-Rewrite** locks wins into your heuristics.  
