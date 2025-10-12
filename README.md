@@ -100,15 +100,7 @@ export HIPCC=/opt/rocm/bin/hipcc
 export ROCM_PATH=/opt/rocm
 cargo build -p st-core --features hip,st-backend-hip/hip-real --release
 ```
-
-### 3) Python wheels (optional)
-```bash
-pip install maturin==1.*
-# CPU + WGPU
-maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
-```
-
-### 4) Minimal examples
+### 3) Minimal examples
 
 **Rust**
 ```rust
