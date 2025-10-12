@@ -1,0 +1,6 @@
+
+.version 7.0
+.target sm_70
+.address_size 64
+.visible .entry topk_passk(.param .u64 p_x,.param .u64 p_outv,.param .u64 p_outi,.param .u32 rows,.param .u32 cols,.param .u32 k){ ret; }
+.visible .entry topk_passk_w4(.param .u64 p_x,.param .u64 p_outv,.param .u64 p_outi,.param .u32 rows,.param .u32 cols,.param .u32 k){ ret; }

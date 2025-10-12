@@ -1,31 +1,29 @@
 
 [package]
 name = "st-core"
-version = "1.3.18"
+version = "1.3.52"
 edition = "2021"
 license = "AGPL-3.0-or-later"
-description = "SpiralTorch core: tensor + autograd + optional GPU backends"
-repository = "https://github.com/RyoSpiralArchitect/spiraltorch"
+description = "SpiralTorch core (Rust): tensors, ops, and multi-backend execution (CPU/WGPU/MPS/CUDA)."
 
 [lib]
 name = "st_core"
 path = "src/lib.rs"
+crate-type = ["rlib"]
 
 [features]
 default = []
-cuda = ["cust"]
-wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
-mps  = ["dep:metal", "dep:objc"]
+wgpu = ["dep:wgpu", "dep:pollster", "dep:once_cell", "dep:bytemuck"]
+mps  = ["dep:metal"]
+cuda = ["dep:cust"]
 
 [dependencies]
 ndarray = "0.15"
 thiserror = "1"
-once_cell = "1"
-bytemuck = { version = "1", optional = true }
-pollster = { version = "0.3", optional = true }
-wgpu = { version = "0.19", optional = true }
-metal = { version = "0.27", optional = true }
-objc = { version = "0.2", optional = true }
-cust = { version = "0.7", optional = true }
+once_cell = { version = "1", optional = true }
+bytemuck = { version = "1", features=["derive"], optional = true }
 
-[build-dependencies]
+wgpu = { version = "0.20", optional = true }
+pollster = { version = "0.3", optional = true }
+metal = { version = "0.28", optional = true }
+cust  = { version = "0.8", features=["nvptx"], optional = true }

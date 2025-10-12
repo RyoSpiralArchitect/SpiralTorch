@@ -1,2 +1,1 @@
-// WGSL base
-enable f16;
+// base

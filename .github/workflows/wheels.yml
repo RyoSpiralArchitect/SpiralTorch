@@ -1,12 +1,6 @@
 
 name: Wheels
-
-on:
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-
+on: { push: { tags: ['v*'] }, workflow_dispatch: {} }
 jobs:
   build-wheels:
     runs-on: ${{ matrix.os }}
@@ -14,64 +8,44 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            manylinux: auto
-            features: ""
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            manylinux: manylinux_2_28
-            features: "--features wgpu"
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            manylinux: musllinux_1_2
-            features: "--features wgpu"
-          - os: macos-13
-            target: x86_64-apple-darwin
-            features: ""
-          - os: macos-14
-            target: aarch64-apple-darwin
-            features: ""
-          - os: macos-14
-            target: universal2-apple-darwin
-            features: "--features wgpu"
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            features: ""
-
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, features: "", manylinux: auto, name: cpu-linux }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, features: "", manylinux: musllinux_1_2, name: cpu-linux-musl-x86_64 }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, features: "", manylinux: musllinux_1_2, name: cpu-linux-musl-aarch64 }
+          - { os: macos-14, target: universal2-apple-darwin, features: "", name: cpu-macos-universal2 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, features: "", name: cpu-win }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, features: "--features wgpu", manylinux: manylinux_2_28, name: wgpu-linux }
+          - { os: macos-14, target: universal2-apple-darwin, features: "--features wgpu", name: wgpu-universal2 }
+          - { os: macos-14, target: aarch64-apple-darwin, features: "--features mps", name: mps-macos-arm }
+  optional-cuda-linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: messense/maturin-action@v1
         with:
-          python-version: '3.12'
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Build wheels
-        uses: messense/maturin-action@v1
-        with:
-          manylinux: ${{ matrix.manylinux }}
-          target: ${{ matrix.target }}
-          args: --release --manifest-path bindings/st-py/Cargo.toml ${{ matrix.features }}
+          manylinux: auto
+          target: x86_64-unknown-linux-gnu
+          args: --release --manifest-path bindings/st-py/Cargo.toml --features cuda
           sdist: false
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-${{ matrix.target }}
-          path: target/wheels/*.whl
-
-  release:
-    needs: build-wheels
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        with: { name: cuda-linux, path: target/wheels/*.whl }
+        continue-on-error: true
+  optional-cuda-windows:
+    runs-on: windows-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: messense/maturin-action@v1
         with:
-          path: dist
-      - name: Gather wheels
-        run: |
-          mkdir -p upload
-          find dist -name "*.whl" -exec cp {} upload/ \;
-      - name: Create GitHub Release & Upload Assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: upload/*.whl
+          target: x86_64-pc-windows-msvc
+          args: --release --manifest-path bindings/st-py/Cargo.toml --features cuda
+          sdist: false
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        with: { name: cuda-windows, path: target/wheels/*.whl }
+        continue-on-error: true

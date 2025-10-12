@@ -1,34 +1,19 @@
 
 use crate::error::{Result, device as dev_err};
 
-// Availability probes
 pub fn wgpu_is_available() -> bool {
     #[cfg(feature="wgpu")]
-    {
-        let instance = wgpu::Instance::default();
-        if let Some(_adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) {
-            return true;
-        }
-        return false;
-    }
+    { pollster::block_on(wgpu::Instance::default().request_adapter(&wgpu::RequestAdapterOptions::default())).is_some() }
     #[cfg(not(feature="wgpu"))] { false }
 }
 pub fn cuda_is_available() -> bool {
-    #[cfg(feature="cuda")]
-    { cust::quick_init().is_ok() }
+    #[cfg(feature="cuda")] { cust::quick_init().is_ok() }
     #[cfg(not(feature="cuda"))] { false }
 }
 pub fn mps_is_available() -> bool {
-    #[cfg(feature="mps")]
-    { metal::Device::system_default().is_some() }
+    #[cfg(feature="mps")] { metal::Device::system_default().is_some() }
     #[cfg(not(feature="mps"))] { false }
 }
-
-// Capability flags (future extension)
-pub fn supports_where_nd_cuda() -> bool { false }
-pub fn supports_where_nd_mps()  -> bool { false }
-pub fn supports_topk_cuda()     -> bool { false }
-pub fn supports_topk_mps()      -> bool { false }
 
 fn strides_of_usize(shape:&[usize])->Vec<usize>{ let nd=shape.len(); let mut st=vec![0usize;nd]; let mut acc=1usize; for d in (0..nd).rev(){ st[d]=acc; acc*=shape[d]; } st }
 fn broadcast_strides_strided(in_shape:&[usize], in_strides:&[usize], out_shape:&[usize]) -> Result<Vec<usize>> {
@@ -70,86 +55,77 @@ fn where_nd_cpu_strided_bool(cond:&[bool], cshape:&[usize], cstrides:&[usize],
     Ok(out)
 }
 
-// Public host-facing (STRIDED) with GPU/CPU switch. cond_bool path
-pub fn where_nd_host_use_wgpu_strided(cond_bool:&[bool], cshape:&[usize], cstrides:&[usize],
-                                      x:&[f32], xshape:&[usize], xstrides:&[usize],
-                                      y:&[f32], yshape:&[usize], ystrides:&[usize],
-                                      out_shape:&[usize], use_wgpu: bool) -> Result<Vec<f32>>
+pub fn where_nd_host_select_strided_bytes(
+    cond_bytes:&[u8], cshape:&[usize], cstrides_elems:&[usize], c_base_elems: usize,
+    x_bytes:&[u8], xshape:&[usize], xstrides_elems:&[usize], x_base_elems: usize,
+    y_bytes:&[u8], yshape:&[usize], ystrides_elems:&[usize], y_base_elems: usize,
+    out_shape:&[usize], device: &str
+) -> Result<Vec<f32>>
 {
-    if use_wgpu {
-        #[cfg(feature="wgpu")]
-        {
-            use wgpu::util::DeviceExt;
-            use crate::backend::wgpu_where_nd::WgpuWhereND;
-            // Upload cond as u8 bytes and use u8-optimized kernel
-            let cond_u8: Vec<u8> = cond_bool.iter().map(|&b| if b {1u8} else {0u8}).collect();
-            // pack into u32 words (4 bytes per word)
-            let words = (cond_u8.len() + 3) / 4;
-            let mut packed: Vec<u32> = vec![0u32; words];
-            for i in 0..cond_u8.len() {
-                let w = i / 4; let shift = (i % 4) * 8;
-                packed[w] |= (cond_u8[i] as u32) << shift;
-            }
-            let instance = wgpu::Instance::default();
-            let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("wgpu adapter");
-            let (dev, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor{
-                label: Some("st-ops-where-nd-strided-u8"), features: wgpu::Features::empty(), limits: wgpu::Limits::downlevel_defaults()
-            }, None)).expect("device");
-            let b_cond_bytes = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor{ label: Some("cond_bytes"), contents: bytemuck::cast_slice(&packed), usage: wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST });
-            let b_x = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor{ label: Some("x"), contents: bytemuck::cast_slice(x), usage: wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST });
-            let b_y = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor{ label: Some("y"), contents: bytemuck::cast_slice(y), usage: wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST });
-            let to_u32 = |v:&[usize]| -> Vec<u32> { v.iter().map(|&u| u as u32).collect() };
-            let out_strides_u32: Vec<u32> = { let mut st=vec![0usize; out_shape.len()]; let mut acc=1; for d in (0..out_shape.len()).rev(){ st[d]=acc; acc*=out_shape[d]; } st }.into_iter().map(|u| u as u32).collect();
-            let out_buf = WgpuWhereND::new().where_nd_strided_u8(
-                &b_cond_bytes,
-                &b_x, &to_u32(xshape), &to_u32(xstrides),
-                &b_y, &to_u32(yshape), &to_u32(ystrides),
-                &to_u32(out_shape), &out_strides_u32,
-                &to_u32(cshape), &to_u32(cstrides)
-            )?;
-            let n: usize = out_shape.iter().product();
-            let staging = dev.create_buffer(&wgpu::BufferDescriptor{ label: Some("out-staging"), size: (n*4) as u64, usage: wgpu::BufferUsages::MAP_READ|wgpu::BufferUsages::COPY_DST, mapped_at_creation:false });
-            let mut e = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("rb-enc") });
-            e.copy_buffer_to_buffer(&out_buf, 0, &staging, 0, (n*4) as u64);
-            queue.submit(std::iter::once(e.finish()));
-            let slice = staging.slice(..); let _ = slice.map_async(wgpu::MapMode::Read);
-            dev.poll(wgpu::Maintain::Wait);
-            let data = slice.get_mapped_range(); let vec = bytemuck::cast_slice::<u8,f32>(&data).to_vec(); drop(data); staging.unmap();
-            return Ok(vec);
+    let st_out = strides_of_usize(out_shape);
+    match device {
+        "wgpu" => {
+            #[cfg(feature="wgpu")]
+            { return crate::backend::wgpu_where_nd::WgpuWhereND::new().where_nd_strided_u8_with_base(
+                cond_bytes,
+                x_bytes, &xshape.iter().map(|&u| u as u32).collect::<Vec<_>>(), &xstrides_elems.iter().map(|&u| u as u32).collect::<Vec<_>>(), x_base_elems as u32,
+                y_bytes, &yshape.iter().map(|&u| u as u32).collect::<Vec<_>>(), &ystrides_elems.iter().map(|&u| u as u32).collect::<Vec<_>>(), y_base_elems as u32,
+                &out_shape.iter().map(|&u| u as u32).collect::<Vec<_>>(), &st_out.iter().map(|&u| u as u32).collect::<Vec<_>>(),
+                &cshape.iter().map(|&u| u as u32).collect::<Vec<_>>(), &cstrides_elems.iter().map(|&u| u as u32).collect::<Vec<_>>(), c_base_elems as u32
+            ); }
+            #[cfg(not(feature="wgpu"))] { return Err(dev_err("wgpu feature not enabled")); }
         }
-        #[cfg(not(feature="wgpu"))]
-        { return Err(dev_err("wgpu feature not enabled")); }
+        "mps" => {
+            #[cfg(feature="mps")]
+            { return Err(dev_err("mps bytes path not wired in this artifact")); }
+            #[cfg(not(feature="mps"))] { return Err(dev_err("mps feature not enabled")); }
+        }
+        _ => Err(dev_err("device not supported for bytes path")),
     }
-    // CPU fallback
-    where_nd_cpu_strided_bool(cond_bool, cshape, cstrides, x, xshape, xstrides, y, yshape, ystrides, out_shape)
 }
 
-// 2D TopK host wrapper (GPU/CPU); device probing is done at Python side.
-pub fn topk_lastdim_host_use_wgpu(x:&[f32], rows:usize, cols:usize, k:usize, use_wgpu: bool) -> Result<(Vec<f32>, Vec<i32>)> {
-    if k==0 || k>cols { return Err(dev_err("topk: invalid k")); }
-    if use_wgpu {
-        #[cfg(feature="wgpu")]
-        {
-            use wgpu::util::DeviceExt;
-            use crate::backend::{BackendArrayF32, wgpu_topk_unified::WgpuTopKUnified};
-            let instance = wgpu::Instance::default();
-            let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("wgpu adapter");
-            let (dev, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor{
-                label: Some("st-ops-topk"), features: wgpu::Features::empty(), limits: wgpu::Limits::downlevel_defaults()
-            }, None)).expect("device");
-            let b_x = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor{
-                label: Some("x"), contents: bytemuck::cast_slice(x), usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST
-            });
-            let x_dev = BackendArrayF32::Wgpu{ rows, cols, buffer: b_x };
-            let (v,i) = WgpuTopKUnified::new().topk_lastdim(&x_dev, rows, cols, k)?;
-            let vals = v.into_dimensionality::<ndarray::Ix2>().unwrap().into_raw_vec();
-            let idxs = i.into_dimensionality::<ndarray::Ix2>().unwrap().into_raw_vec();
-            return Ok((vals, idxs));
+pub fn where_nd_host_select_strided(
+    cond_bool:&[bool], cshape:&[usize], cstrides:&[usize],
+    x:&[f32], xshape:&[usize], xstrides:&[usize],
+    y:&[f32], yshape:&[usize], ystrides:&[usize],
+    out_shape:&[usize], device:&str
+) -> Result<Vec<f32>>
+{
+    match device {
+        "cpu" => where_nd_cpu_strided_bool(cond_bool, cshape, cstrides, x, xshape, xstrides, y, yshape, ystrides, out_shape),
+        "cuda" => {
+            #[cfg(feature="cuda")] {
+                // Fallback to CPU logic for this artifact (kernel wire to be added)
+                where_nd_cpu_strided_bool(cond_bool, cshape, cstrides, x, xshape, xstrides, y, yshape, ystrides, out_shape)
+            }
+            #[cfg(not(feature="cuda"))] { Err(dev_err("cuda feature not enabled")) }
         }
-        #[cfg(not(feature="wgpu"))]
-        { return Err(dev_err("wgpu feature not enabled")); }
+        "wgpu" => Err(dev_err("wgpu path requires bytes API; call where_nd_host_select_strided_bytes")),
+        "mps" => Err(dev_err("mps path requires bytes/segments API; call bytes/segments variant")),
+        _ => Err(dev_err("unsupported device for this path"))
     }
-    // CPU fallback
+}
+
+// Segments API (WGPU/MPS)
+pub fn where_nd_host_select_strided_segments_bytes(
+    cond_total: usize, cond_offsets: &[u32], cond_sizes: &[u32], cond_starts: &[u32], cond_blob: &[u8],
+    cshape:&[usize], cstrides:&[usize], c_base_elems: usize,
+    x_total: usize, x_offsets: &[u32], x_sizes: &[u32], x_starts: &[u32], x_blob: &[u8],
+    xshape:&[usize], xstrides:&[usize], x_base_elems: usize,
+    y_total: usize, y_offsets: &[u32], y_sizes: &[u32], y_starts: &[u32], y_blob: &[u8],
+    yshape:&[usize], ystrides:&[usize], y_base_elems: usize,
+    out_shape:&[usize], device:&str
+) -> Result<Vec<f32>> {
+    match device {
+        "wgpu" => Err(dev_err("segments path not wired into WGSL upload in this artifact")), // wiring left for later patch
+        "mps"  => Err(dev_err("segments path not wired into MPS upload in this artifact")),
+        _ => Err(dev_err("segments path supports wgpu/mps only")),
+    }
+}
+
+// minimal TopK (CPU) used by Python
+pub fn topk_lastdim_host_select(x:&[f32], rows:usize, cols:usize, k:usize, _device:&str) -> Result<(Vec<f32>, Vec<i32>)> {
+    if k==0 || k>cols { return Err(dev_err("topk: invalid k")); }
     use std::cmp::Ordering;
     let mut vals = vec![0f32; rows*k];
     let mut idxs = vec![0i32; rows*k];

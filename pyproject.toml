@@ -1,0 +1,26 @@
+
+[build-system]
+requires = ["maturin>=1.4,<2"]
+build-backend = "maturin"
+
+[project]
+name = "spiraltorch"
+version = "1.3.52"
+description = "SpiralTorch: Torch-like tensors/ops with Rust backends (CPU/WGPU/MPS/CUDA)"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.9"
+authors = [{name="SpiralTorch contributors"}]
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Rust",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+]
+
+[project.urls]
+Homepage = "https://github.com/RyoSpiralArchitect/spiraltorch"
+Documentation = "https://github.com/RyoSpiralArchitect/spiraltorch#readme"
+Source = "https://github.com/RyoSpiralArchitect/spiraltorch"

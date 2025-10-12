@@ -1,0 +1,11 @@
+
+.version 7.0
+.target sm_70
+.address_size 64
+.visible .entry where_nd_strided_u8_v4(
+    .param .u64 p_cond,.param .u64 p_x,.param .u64 p_y,.param .u64 p_out,
+    .param .u64 p_out_shape,.param .u64 p_out_strides,
+    .param .u64 p_c_shape,.param .u64 p_c_strides,.param .u32 c_base,
+    .param .u64 p_x_shape,.param .u64 p_x_strides,.param .u32 x_base,
+    .param .u64 p_y_shape,.param .u64 p_y_strides,.param .u32 y_base,
+    .param .u32 nd,.param .u32 n){ ret; }

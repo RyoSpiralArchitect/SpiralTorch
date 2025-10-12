@@ -1,38 +1,44 @@
-struct RC { nd:u32, n:u32 };
-@group(94) @binding(0) var<storage, read>  cond_bytes: array<u32>; // 4 x u8 per u32 word
-@group(94) @binding(1) var<storage, read>  x: array<f32>;
-@group(94) @binding(2) var<storage, read>  y: array<f32>;
-@group(94) @binding(3) var<storage, read_write> outv: array<f32>;
-@group(94) @binding(4) var<storage, read>  out_shape: array<u32>;
-@group(94) @binding(5) var<storage, read>  out_strides: array<u32>;
-@group(94) @binding(6) var<storage, read>  c_shape: array<u32>;
-@group(94) @binding(7) var<storage, read>  c_strides: array<u32>;
-@group(94) @binding(8) var<storage, read>  x_shape: array<u32>;
-@group(94) @binding(9) var<storage, read>  x_strides: array<u32>;
-@group(94) @binding(10) var<storage, read>  y_shape: array<u32>;
-@group(94) @binding(11) var<storage, read>  y_strides: array<u32>;
-@group(94) @binding(12) var<uniform> rc: RC;
-fn coord_at(i:u32, d:u32)->u32{ (i / out_strides[d]) % out_shape[d] }
-fn cond_at(idx:u32)->bool{
-  let word = cond_bytes[idx>>2u];
-  let shift = (idx & 3u) * 8u;
-  let byte = (word >> shift) & 0xffu;
-  return byte != 0u;
-}
+
+struct RC { nd: u32, n: u32 };
+struct RB { c_base: u32, x_base: u32, y_base: u32 };
+
+@group(0) @binding(0) var<storage, read>  C: array<u32>;
+@group(0) @binding(1) var<storage, read>  X: array<f32>;
+@group(0) @binding(2) var<storage, read>  Y: array<f32>;
+@group(0) @binding(3) var<storage, read_write> O: array<f32>;
+
+@group(0) @binding(4) var<storage, read> OUT_SHAPE: array<u32>;
+@group(0) @binding(5) var<storage, read> OUT_STRIDES: array<u32>;
+@group(0) @binding(6) var<storage, read> C_SHAPE: array<u32>;
+@group(0) @binding(7) var<storage, read> C_STRIDES: array<u32>;
+@group(0) @binding(8) var<storage, read> X_SHAPE: array<u32>;
+@group(0) @binding(9) var<storage, read> X_STRIDES: array<u32>;
+@group(0) @binding(10) var<storage, read> Y_SHAPE: array<u32>;
+@group(0) @binding(11) var<storage, read> Y_STRIDES: array<u32>;
+
+@group(0) @binding(12) var<uniform> rc: RC;
+@group(0) @binding(13) var<uniform> rb: RB;
+
+fn udiv(a:u32, b:u32) -> u32 { return a / b; }
+fn umod(a:u32, b:u32) -> u32 { return a % b; }
+
 @compute @workgroup_size(256)
 fn where_nd_strided_u8(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let i=gid.x; if(i>=rc.n){return;}
-  var oc:u32=0u; var ox:u32=0u; var oy:u32=0u;
-  for(var d:u32=0u; d<rc.nd; d=d+1u){
-    let cd=coord_at(i,d);
-    let ic=select(0u,cd,c_shape[d]>1u);
-    let ix=select(0u,cd,x_shape[d]>1u);
-    let iy=select(0u,cd,y_shape[d]>1u);
-    oc += ic * c_strides[d];
-    ox += ix * x_strides[d];
-    oy += iy * y_strides[d];
-  }
-  let c=cond_at(oc);
-  let vx=x[ox]; let vy=y[oy];
-  outv[i]=select(vy,vx,c);
+    let i = gid.x;
+    if (i >= rc.n) { return; }
+    var rem = i;
+    var oc:u32 = rb.c_base; var ox:u32 = rb.x_base; var oy:u32 = rb.y_base;
+    for (var d:u32=0u32; d<rc.nd; d=d+1u32) {
+        let s = OUT_STRIDES[d];
+        let ho = OUT_SHAPE[d];
+        let cd = umod(udiv(rem, s), ho);
+        rem = umod(rem, s);
+        if (C_SHAPE[d] != 1u) { oc = oc + cd * C_STRIDES[d]; }
+        if (X_SHAPE[d] != 1u) { ox = ox + cd * X_STRIDES[d]; }
+        if (Y_SHAPE[d] != 1u) { oy = oy + cd * Y_STRIDES[d]; }
+    }
+    let pack = C[oc >> 2u];
+    let cbyte = (pack >> ((oc & 3u) * 8u)) & 0xffu;
+    let take_x = (cbyte != 0u);
+    O[i] = select(Y[oy], X[ox], take_x);
 }
