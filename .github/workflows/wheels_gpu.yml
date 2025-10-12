@@ -1,0 +1,37 @@
+name: Build GPU Wheels (opt-in)
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: "OS runner (ubuntu-22.04, macos-14, windows-2022)"
+        required: true
+        default: "ubuntu-22.04"
+      python:
+        description: "Python versions (space-separated tags)"
+        required: true
+        default: "cp311-* cp312-* cp313-* cp314-*"
+      features:
+        description: "Maturin features (comma-separated)"
+        required: true
+        default: "wgpu,hip"
+jobs:
+  gpu-wheels:
+    runs-on: ${{ inputs.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install cibuildwheel==2.* maturin==1.*
+      - name: Build wheels
+        env:
+          CIBW_BUILD: "${{ inputs.python }}"
+          CIBW_ENVIRONMENT: >-
+            MATURIN_PEP517=1
+            MATURIN_FEATURES=${{ inputs.features }}
+            RUSTFLAGS="-C target-cpu=native"
+        run: python -m cibuildwheel --output-dir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-gpu-${{ inputs.os }}
+          path: dist/*.whl
