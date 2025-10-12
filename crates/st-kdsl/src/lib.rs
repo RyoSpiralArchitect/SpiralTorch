@@ -9,8 +9,10 @@ pub struct Choice {
     pub wg:   Option<u32>,
     pub kl:   Option<u32>,
     pub ch:   Option<u32>,
-    pub mk:   Option<u32>,  // 0=bitonic,1=shared,2=warp
-    pub tile: Option<u32>,  // tile_cols
+    pub mk:   Option<u32>,   // 0=bitonic,1=shared,2=warp
+    pub mkd:  Option<u32>,   // 0=auto,1=heap,2=kway,3=bitonic,4=warp_heap,5=warp_bitonic
+    pub tile: Option<u32>,   // 256..8192
+    pub ctile:Option<u32>,   // compaction/scan tile for MidK/BottomK
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -20,7 +22,9 @@ pub enum SoftRule {
     Kl{ val: u32,   w:f32 },
     Ch{ val: u32,   w:f32 },
     Mk{ val: u32,   w:f32 },
+    Mkd{ val: u32,  w:f32 },
     Tl{ val: u32,   w:f32 },
+    Ct{ val: u32,   w:f32 },
 }
 
 #[derive(Error, Debug)]
@@ -48,7 +52,7 @@ fn lex(src:&str)->Result<Vec<Tok>,Err>{
             ':'=>{v.push(Tok::Colon); i+=1;}
             '0'..='9'|'.'=>{
                 let st=i; i+=1;
-                while i<s.len() and ((s[i] as char).is_ascii_digit() or s[i]==b'.'){ i+=1; }
+                while i<s.len() && ((s[i] as char).is_ascii_digit() || s[i]==b'.'){ i+=1; }
                 let n=std::str::from_utf8(&s[st..i]).unwrap().parse::<f64>().map_err(|_|Err::Parse(st))?;
                 v.push(Tok::Num(n));
             }
@@ -89,7 +93,7 @@ enum E{ F(f64), B(bool) }
 impl E{ fn as_f(self)->f64{ match self{E::F(x)=>x,E::B(b)=> if b{1.0}else{0.0}} } fn as_b(self)->bool{ match self{E::B(b)=>b,E::F(x)=> x!=0.0 } } }
 
 #[derive(Clone,Copy,PartialEq,Eq)]
-enum Field{ U2,Wg,Kl,Ch,Mk,Tl } // Tl=tile
+enum Field{ U2,Wg,Kl,Ch,Mk,Mkd,Tl,Ct }
 
 #[derive(Clone)]
 enum Stmt{
@@ -104,7 +108,9 @@ fn parse_field(p:&mut P)->Result<Field,Err>{
         Tok::Id(s) if s=="kl"=>Ok(Field::Kl),
         Tok::Id(s) if s=="ch"=>Ok(Field::Ch),
         Tok::Id(s) if s=="mk"=>Ok(Field::Mk),
+        Tok::Id(s) if s=="mkd"=>Ok(Field::Mkd),
         Tok::Id(s) if s=="tile"=>Ok(Field::Tl),
+        Tok::Id(s) if s=="ctile" || s=="ct"=>Ok(Field::Ct),
         _=>Err(Err::Tok)
     }
 }
@@ -222,7 +228,9 @@ pub fn eval_program(src:&str, ctx:&Ctx) -> Result<Out, Err> {
                     Field::Kl => { hard.kl      = Some( ef(&ctx).as_f().round() as u32 ); }
                     Field::Ch => { hard.ch      = Some( ef(&ctx).as_f().round() as u32 ); }
                     Field::Mk => { hard.mk      = Some( ef(&ctx).as_f().round() as u32 ); }
+                    Field::Mkd=> { hard.mkd     = Some( ef(&ctx).as_f().round() as u32 ); }
                     Field::Tl => { hard.tile    = Some( ef(&ctx).as_f().round() as u32 ); }
+                    Field::Ct => { hard.ctile   = Some( ef(&ctx).as_f().round() as u32 ); }
                 }
             }
             Stmt::Soft(f, vf, wf, cf) => {
@@ -234,7 +242,9 @@ pub fn eval_program(src:&str, ctx:&Ctx) -> Result<Out, Err> {
                         Field::Kl => soft.push(SoftRule::Kl{ val: vf(&ctx), w }),
                         Field::Ch => soft.push(SoftRule::Ch{ val: vf(&ctx), w }),
                         Field::Mk => soft.push(SoftRule::Mk{ val: vf(&ctx), w }),
+                        Field::Mkd=> soft.push(SoftRule::Mkd{val: vf(&ctx), w }),
                         Field::Tl => soft.push(SoftRule::Tl{ val: vf(&ctx), w }),
+                        Field::Ct => soft.push(SoftRule::Ct{ val: vf(&ctx), w }),
                     }
                 }
             }
