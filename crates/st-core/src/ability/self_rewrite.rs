@@ -1,20 +1,26 @@
-//! One-shot Self‑Rewrite aggregator: logs → Wilson CI → append soft(...) to heur.kdsl
-//! Usage:
-//!   let n = self_rewrite_from_logs(None, None, RewriteCfg::default())?;
-//! Env overrides: SPIRAL_HEUR_FILE (default: ~/.spiraltorch/heur.kdsl), SPIRAL_ABLOG_PATH
+//! Self‑Rewrite aggregator with optional staged escalation of win_threshold.
+//! Env:
+//!   ST_REWRITE_WIN_THRESHOLD   - fixed threshold (overrides staged)
+//!   ST_REWRITE_ESCALATE=1      - enable staging via ~/.spiraltorch/rewrite_state.json
 
 use serde::Deserialize;
 use std::io::{BufRead, BufReader, Write};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RewriteCfg {
-    pub alpha: f64,          // Wilson CI alpha (default 0.10)
+    pub alpha: f64,          // Wilson CI alpha
     pub min_trials: u32,     // minimum samples per bucket
-    pub win_threshold: f64,  // accept if lower bound > threshold (default 0.55)
+    pub win_threshold: f64,  // accept if lower bound > threshold
     pub soft_weight: f32,    // weight to write into soft(...)
+    pub escalate: bool,      // enable staged escalation
 }
 impl Default for RewriteCfg {
-    fn default() -> Self { Self{ alpha: 0.10, min_trials: 40, win_threshold: 0.55, soft_weight: 0.15 } }
+    fn default() -> Self {
+        let (stage_thr, stage) = stage_threshold();
+        let wt = std::env::var("ST_REWRITE_WIN_THRESHOLD").ok()
+            .and_then(|s| s.parse::<f64>().ok()).unwrap_or(stage_thr);
+        Self{ alpha: 0.10, min_trials: 40, win_threshold: wt, soft_weight: 0.15, escalate: stage.is_some() }
+    }
 }
 
 #[derive(Deserialize)]
@@ -25,6 +31,10 @@ struct Entry {
     latency_ms: f32, ok: bool, ts_ms: u64
 }
 
+fn state_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    std::path::PathBuf::from(format!("{}/.spiraltorch/rewrite_state.json", home))
+}
 fn ablog_path() -> std::path::PathBuf {
     if let Ok(p) = std::env::var("SPIRAL_ABLOG_PATH") { return p.into(); }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
@@ -37,11 +47,8 @@ fn heur_path() -> std::path::PathBuf {
 }
 
 fn z_from_alpha(alpha:f64)->f64{
-    // quick table
     if alpha<=0.02 { 2.3263 } else if alpha<=0.05 { 1.6449 } else if alpha<=0.10 { 1.2816 } else { 1.0 }
 }
-
-/// Format a SpiralK condition approximating this bucket: log2(c) and k bound.
 fn cond_for(rows:u32, cols: u32, k: u32) -> String {
     let lc = (cols as f64).log2();
     let lc_floor = lc.floor() as i32;
@@ -51,24 +58,51 @@ fn cond_for(rows:u32, cols: u32, k: u32) -> String {
                else { "k>4096".to_string() };
     format!("(log2(c)>={})&&({})", lc_floor, kbin)
 }
-
-/// Append lines into heur.kdsl with safe backup & header.
 fn append_heur_lines(lines:&[String]) -> std::io::Result<()> {
     let path = heur_path();
     if let Some(par) = path.parent() { std::fs::create_dir_all(par)?; }
-    // backup
     if path.exists() {
         let bak = path.with_extension("kdsl.bak");
         std::fs::copy(&path, bak)?;
     }
-    // write (append)
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
     writeln!(f, "\n# ---- AUTO APPEND (Self-Rewrite) ----")?;
     for L in lines { writeln!(f, "{L}")?; }
     Ok(())
 }
 
-pub fn self_rewrite_from_logs(log_path: Option<&str>, heur_out: Option<&str>, cfg: RewriteCfg) -> Result<usize, String> {
+fn stage_threshold() -> (f64, Option<u32>) {
+    // default staging when ST_REWRITE_ESCALATE=1, stage ∈ {0,1,2} → {0.60,0.65,0.70}
+    let esc = std::env::var("ST_REWRITE_ESCALATE").ok().map(|v| v=="1").unwrap_or(false);
+    if !esc { return (0.60, None); }
+    let p = state_path();
+    let mut stage = 0u32;
+    if let Ok(s) = std::fs::read_to_string(&p) {
+        if let Ok(js) = serde_json::from_str::<serde_json::Value>(&s) {
+            stage = js.get("stage").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+        }
+    }
+    let thr = match stage { 0=>0.60, 1=>0.65, _=>0.70 };
+    (thr, Some(stage))
+}
+fn bump_stage() {
+    let esc = std::env::var("ST_REWRITE_ESCALATE").ok().map(|v| v=="1").unwrap_or(false);
+    if !esc { return; }
+    let p = state_path();
+    let mut stage = 0u32;
+    if let Ok(s) = std::fs::read_to_string(&p) {
+        if let Ok(js) = serde_json::from_str::<serde_json::Value>(&s) {
+            stage = js.get("stage").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+        }
+    }
+    if stage < 2 {
+        stage += 1;
+        let _ = std::fs::create_dir_all(p.parent().unwrap());
+        let _ = std::fs::write(p, format!("{{\"stage\": {stage} }}"));
+    }
+}
+
+pub fn self_rewrite_from_logs(log_path: Option<&str>, _heur_out: Option<&str>, cfg: RewriteCfg) -> Result<usize, String> {
     let p = log_path.map(std::path::PathBuf::from).unwrap_or_else(ablog_path);
     let rd = std::fs::File::open(&p).map_err(|e| format!("open ablog failed: {e}"))?;
     let br = BufReader::new(rd);
@@ -85,16 +119,13 @@ pub fn self_rewrite_from_logs(log_path: Option<&str>, heur_out: Option<&str>, cf
     let z = z_from_alpha(cfg.alpha);
     for (_k, v) in buckets.into_iter() {
         if v.len() < cfg.min_trials as usize { continue; }
-        // Tally by (mk,mkd,tile,ctile)
         use std::collections::HashMap;
-        let mut tally: HashMap<(u32,u32,u32,u32), (u32,u32)> = HashMap::new(); // (wins,total)
-        // "win" = lower latency vs median? we'll pick top-1 by count (simpler and robust)
+        let mut tally: HashMap<(u32,u32,u32,u32), (u32,u32)> = HashMap::new();
         for e in v.iter() {
             let key = (e.mk, e.mkd, e.tile, e.ctile);
             let ent = tally.entry(key).or_insert((0,0));
             ent.0 += 1; ent.1 += 1;
         }
-        // Choose best by wins/total → Wilson lower bound
         let mut best = None::<((u32,u32,u32,u32),(u32,u32),f64)>;
         for (key, (wins,total)) in tally.into_iter() {
             let lb = crate::ability::ablog::wilson_lower(wins, total, z);
@@ -106,8 +137,7 @@ pub fn self_rewrite_from_logs(log_path: Option<&str>, heur_out: Option<&str>, cf
                 }
             }
         }
-        if let Some(((mk,mkd,tile,ct),(wins,total),lb)) = best {
-            // Build SpiralK soft(...) with coarse condition
+        if let Some(((mk,mkd,tile,ct),(wins,_total),_lb)) = best {
             let e0 = &v[0];
             let cond = cond_for(e0.rows, e0.cols, e0.k);
             let w = cfg.soft_weight;
@@ -119,6 +149,7 @@ pub fn self_rewrite_from_logs(log_path: Option<&str>, heur_out: Option<&str>, cf
     }
     if !out_lines.is_empty() {
         append_heur_lines(&out_lines).map_err(|e| format!("append heur failed: {e}"))?;
+        if cfg.escalate { bump_stage(); }
     }
     Ok(out_lines.len())
 }
