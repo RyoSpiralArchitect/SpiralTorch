@@ -1,0 +1,17 @@
+name: Build GPU Wheels (optional)
+on: { workflow_dispatch: {} }
+jobs:
+  gpu-wheels:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install cibuildwheel==2.* maturin==1.*
+      - name: Build wheels (features may require custom runners)
+        env:
+          CIBW_BUILD: "cp311-manylinux_x86_64 cp312-manylinux_x86_64"
+          CIBW_ENVIRONMENT: "MATURIN_PEP517=1 RUSTFLAGS='-C target-cpu=native'"
+        run: python -m cibuildwheel --output-dir dist
+      - uses: actions/upload-artifact@v4
+        with: { name: wheels-gpu, path: dist/*.whl }
