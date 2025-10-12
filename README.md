@@ -91,7 +91,6 @@ cargo build -p st-core --features hip,st-backend-hip/hip-real --release
 pip install maturin==1.*
 # CPU + WGPU
 maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
-# 他のバックエンドは features を足すだけ（mps / cuda / hip）
 ```
 
 ### 4) Minimal examples
