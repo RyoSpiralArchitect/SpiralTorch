@@ -1,0 +1,31 @@
+name: Wheels
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+jobs:
+  build-wheels:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, ubuntu-22.04]
+        py: ['3.10', '3.11', '3.12']
+        feat: ['wgpu', 'wgpu,hip', 'wgpu,cuda']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: ${{ matrix.py }} }
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build wheel
+        run: |
+          python -m pip install -U pip wheel maturin
+          # Example: feature flags are illustrative; adapt to your crate layout.
+          maturin build --release -m bindings/st-py/Cargo.toml --features "${{ matrix.feat }}"
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-py${{ matrix.py }}-${{ matrix.feat }}
+          path: target/wheels/*.whl
