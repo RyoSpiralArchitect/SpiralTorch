@@ -58,24 +58,24 @@ fn lex(src:&str)->Result<Vec<Tok>,Err>{
                 });
             }
             _=>{
-                // multi-char ops
                 let two = if i+1<s.len(){Some(((s[i]as char).to_string()+&(s[i+1]as char).to_string()))} else {None};
                 if let Some(op) = two.as_ref().map(|x|x.as_str()){
                     if ["<=",">=","==","!=","&&","||"].contains(&op){
                         v.push(Tok::Op(op.to_string())); i+=2; continue;
                     }
                 }
-                if ["+","-","*","/","<",">"].contains(&&*c.to_string()){
+                let chs = ["+","-","*","/","<",">"];
+                if chs.contains(&&*c.to_string()){
                     v.push(Tok::Op(c.to_string())); i+=1; continue;
                 }
-                return Err::Parse(i);
+                return Err(Err::Parse(i));
             }
         }
     }
     Ok(v)
 }
 
-// ===== Parser/Eval (recursive descent) =====
+// ===== Parser/Eval =====
 #[derive(Clone)]
 struct P{ t:Vec<Tok>, i:usize }
 impl P{
@@ -104,6 +104,8 @@ fn parse_prog(p:&mut P)->Result<Vec<Stmt>,Err>{
 enum Stmt{
     Assign(Field, Box<dyn Fn(&Ctx)->E>),
     Soft(Field, Box<dyn Fn(&Ctx)->u32>, Box<dyn Fn(&Ctx)->f64>, Box<dyn Fn(&Ctx)->bool>),
+    Penalty(Field, Box<dyn Fn(&Ctx)->u32>, Box<dyn Fn(&Ctx)->f64>, Box<dyn Fn(&Ctx)->bool>),
+    PenaltyIf(Box<dyn Fn(&Ctx)->bool>, Box<dyn Fn(&Ctx)->f64>),
 }
 
 fn parse_field(p:&mut P)->Result<Field,Err>{
@@ -117,29 +119,39 @@ fn parse_field(p:&mut P)->Result<Field,Err>{
 }
 
 fn parse_stmt(p:&mut P)->Result<Stmt,Err>{
-    // soft(field, value, weight, cond)
-    if let Some(Tok::Id(id))=p.peek(){ if id=="soft" {
-        p.eat(); p.expect(&Tok::Lp)?;
-        let f=parse_field(p)?;
-        p.expect(&Tok::Comma)?;
-        let vf=parse_expr_u32(p)?;
-        p.expect(&Tok::Comma)?;
-        let wf=parse_expr_f64(p)?;
-        p.expect(&Tok::Comma)?;
-        let cf=parse_expr_bool(p)?;
-        p.expect(&Tok::Rp)?;
-        return Ok(Stmt::Soft(f, vf, wf, cf));
-    }}
-    // <field> : <expr>
+    if let Some(Tok::Id(id))=p.peek(){
+        let idc=id.clone();
+        if idc=="soft" || idc=="penalty" || idc=="penalty_if" {
+            p.eat();
+            if idc=="penalty_if" {
+                p.expect(&Tok::Lp)?;
+                let cond = parse_expr_bool(p)?;
+                p.expect(&Tok::Comma)?;
+                let w = parse_expr_f64(p)?;
+                p.expect(&Tok::Rp)?;
+                return Ok(Stmt::PenaltyIf(cond, w));
+            } else {
+                let is_penalty = idc=="penalty";
+                p.expect(&Tok::Lp)?;
+                let f=parse_field(p)?;
+                p.expect(&Tok::Comma)?;
+                let vf=parse_expr_u32(p)?;
+                p.expect(&Tok::Comma)?;
+                let wf=parse_expr_f64(p)?;
+                p.expect(&Tok::Comma)?;
+                let cf=parse_expr_bool(p)?;
+                p.expect(&Tok::Rp)?;
+                return Ok(if is_penalty { Stmt::Penalty(f, vf, wf, cf) } else { Stmt::Soft(f, vf, wf, cf) });
+            }
+        }
+    }
     let f=parse_field(p)?;
     p.expect(&Tok::Colon)?;
     let ef=parse_expr(p)?;
     Ok(Stmt::Assign(f, ef))
 }
 
-fn parse_expr(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{
-    parse_or(p)
-}
+fn parse_expr(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ parse_or(p) }
 fn parse_or(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{
     let mut lhs=parse_and(p)?;
     while let Some(Tok::Op(op))=p.peek(){ if op=="||" { p.eat(); let rhs=parse_and(p)?; let l=lhs; lhs=Box::new(move |c| E::B(l(c).as_b()||rhs(c).as_b())); } else { break; } }
@@ -215,6 +227,16 @@ fn parse_atom(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{
             expect_lp(p)?; let x=parse_expr_f64(p)?; expect_rp(p)?; 
             Ok(Box::new(move |c| E::F((x(c)).log2()))) 
         }
+        Tok::Id(id) if id=="min" => {
+            expect_lp(p)?; let a=parse_expr_f64(p)?; expect_comma(p)?;
+            let b=parse_expr_f64(p)?; expect_rp(p)?;
+            Ok(Box::new(move |c| E::F(a(c).min(b(c)))))
+        }
+        Tok::Id(id) if id=="max" => {
+            expect_lp(p)?; let a=parse_expr_f64(p)?; expect_comma(p)?;
+            let b=parse_expr_f64(p)?; expect_rp(p)?;
+            Ok(Box::new(move |c| E::F(a(c).max(b(c)))))
+        }
         Tok::Id(id) if id=="sel" => {
             expect_lp(p)?; let cb=parse_expr_bool(p)?; expect_comma(p)?;
             let a=parse_expr(p)?; expect_comma(p)?;
@@ -229,6 +251,11 @@ fn parse_atom(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{
                 let v=x(c); E::F(v.max(lo(c)).min(hi(c)))
             }))
         }
+        Tok::Id(id) if id=="mem" => {
+            expect_lp(p)?; expect_rp(p)?;
+            let elem_bytes: f64 = std::env::var("ST_ELEM_BYTES").ok().and_then(|s| s.parse().ok()).unwrap_or(4.0);
+            Ok(Box::new(move |c| E::F((c.r as f64) * (c.c as f64) * elem_bytes)))
+        }
         Tok::Lp => {
             let e=parse_expr(p)?; expect_rp(p)?; Ok(e)
         }
@@ -238,15 +265,9 @@ fn parse_atom(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{
 fn expect_lp(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Lp) }
 fn expect_rp(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Rp) }
 fn expect_comma(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Comma) }
-fn parse_expr_f64(p:&mut P)->Result<Box<dyn Fn(&Ctx)->f64>,Err>{
-    let e=parse_expr(p)?; Ok(Box::new(move |c| e(c).as_f()))
-}
-fn parse_expr_u32(p:&mut P)->Result<Box<dyn Fn(&Ctx)->u32>,Err>{
-    let e=parse_expr(p)?; Ok(Box::new(move |c| e(c).as_f().round() as u32))
-}
-fn parse_expr_bool(p:&mut P)->Result<Box<dyn Fn(&Ctx)->bool>,Err>{
-    let e=parse_expr(p)?; Ok(Box::new(move |c| e(c).as_b()))
-}
+fn parse_expr_f64(p:&mut P)->Result<Box<dyn Fn(&Ctx)->f64>,Err>{ let e=parse_expr(p)?; Ok(Box::new(move |c| e(c).as_f())) }
+fn parse_expr_u32(p:&mut P)->Result<Box<dyn Fn(&Ctx)->u32>,Err>{ let e=parse_expr(p)?; Ok(Box::new(move |c| e(c).as_f().round() as u32)) }
+fn parse_expr_bool(p:&mut P)->Result<Box<dyn Fn(&Ctx)->bool>,Err>{ let e=parse_expr(p)?; Ok(Box::new(move |c| e(c).as_b())) }
 
 pub struct Out { pub hard: Choice, pub soft: Vec<SoftRule> }
 
@@ -274,6 +295,24 @@ pub fn eval_program(src:&str, ctx:&Ctx) -> Result<Out, Err> {
                         Field::Kl => soft.push(SoftRule::Kl{ val: vf(ctx), w }),
                         Field::Ch => soft.push(SoftRule::Ch{ val: vf(ctx), w }),
                     }
+                }
+            }
+            Stmt::Penalty(f, vf, wf, cf) => {
+                if cf(ctx){
+                    let w = -(wf(ctx) as f32);
+                    match f {
+                        Field::U2 => soft.push(SoftRule::U2{ val: vf(ctx)!=0, w }),
+                        Field::Wg => soft.push(SoftRule::Wg{ val: vf(ctx), w }),
+                        Field::Kl => soft.push(SoftRule::Kl{ val: vf(ctx), w }),
+                        Field::Ch => soft.push(SoftRule::Ch{ val: vf(ctx), w }),
+                    }
+                }
+            }
+            Stmt::PenaltyIf(cond, w) => {
+                if cond(ctx) {
+                    let ww = (w(ctx) as f32) * -1.0;
+                    soft.push(SoftRule::Wg{ val:256, w: ww*0.5 });
+                    soft.push(SoftRule::Ch{ val:8192, w: ww*0.5 });
                 }
             }
         }

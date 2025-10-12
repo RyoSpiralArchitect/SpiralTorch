@@ -1,33 +1,19 @@
 [package]
 name = "st-core"
-version = "1.3.104"
+version = "1.4.6"
 edition = "2021"
 license = "AGPL-3.0-or-later"
-description = "SpiralTorch core (Rust)"
-repository = "https://github.com/RyoSpiralArchitect/spiraltorch"
-
-[lib]
-name = "st_core"
-path = "src/lib.rs"
+description = "SpiralTorch core: unified heuristics + ops + experimental"
 
 [features]
-default = []
-wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:once_cell"]
-mps  = ["dep:metal", "dep:bytemuck"]
-cuda = ["dep:cudarc", "dep:bytemuck"]
+logic = ["dep:st-logic"]
 kdsl = ["dep:st-kdsl"]
+kv-redis = ["dep:st-kv/redis"]
 
 [dependencies]
-once_cell = { version = "1.18", optional = true }
-bytemuck  = { version = "1.14", features = ["derive"], optional = true }
-pollster  = { version = "0.3", optional = true }
-wgpu      = { version = "0.18", optional = true }
-metal     = { version = "0.27", optional = true }
-cudarc    = { version = "0.11", features = ["std", "nvrtc"], optional = true }
-st-kdsl   = { path = "../st-kdsl", optional = true }
-
-thiserror = "1.0"
-logic = ["dep:st-logic"]
-kv-redis = ["dep:st-kv/redis"]
+ndarray = "0.15"
+rand = "0.8"
+thiserror = "1"
 st-logic = { path = "../st-logic", optional = true }
+st-kdsl  = { path = "../st-kdsl",  optional = true }
 st-kv    = { path = "../st-kv",    optional = true }

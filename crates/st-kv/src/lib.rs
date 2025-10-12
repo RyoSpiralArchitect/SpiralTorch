@@ -23,7 +23,8 @@ pub fn redis_get_choice(url:&str, key:&str) -> Result<Option<Choice>, KvErr> {
         struct V{ use_2ce:bool, wg:u32, kl:u32, ch:u32 }
         let v: V = serde_json::from_str(&js).map_err(|_|KvErr::Json)?;
         Ok(Some(Choice{ use_2ce:v.use_2ce, wg:v.wg, kl:v.kl, ch:v.ch }))
-    } else {
-        Ok(None)
-    }
+    } else { Ok(None) }
 }
+
+#[cfg(not(feature="redis"))]
+pub fn redis_get_choice(_url:&str, _key:&str) -> Result<Option<Choice>, ()> { Ok(None) }
