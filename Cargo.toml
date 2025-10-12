@@ -1,3 +1,6 @@
 [workspace]
 members = ["crates/st-core", "crates/st-kdsl", "bindings/st-py"]
+  "crates/st-logic",
+  "crates/st-kdsl",
+  "crates/st-kv",
 resolver = "2"

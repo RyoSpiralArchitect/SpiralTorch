@@ -27,3 +27,7 @@ cudarc    = { version = "0.11", features = ["std", "nvrtc"], optional = true }
 st-kdsl   = { path = "../st-kdsl", optional = true }
 
 thiserror = "1.0"
+logic = ["dep:st-logic"]
+kv-redis = ["dep:st-kv/redis"]
+st-logic = { path = "../st-logic", optional = true }
+st-kv    = { path = "../st-kv",    optional = true }
