@@ -30,3 +30,5 @@ pub mod wgpu_topk_bigk { use crate::error::Result; use super::{BackendArrayF32, 
 
 #[cfg(feature="wgpu")]
 pub const WGPU_KERNELS_ALL: &str = include_str!("wgpu_kernels_all.wgsl");
+#[cfg(feature="wgpu")]
+pub mod wgpu_where_segments;

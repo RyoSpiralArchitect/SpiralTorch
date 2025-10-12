@@ -1,0 +1,35 @@
+
+// Replace where_nd_host_select_strided_segments_bytes in crates/st-core/src/ops/public_api.rs with:
+
+pub fn where_nd_host_select_strided_segments_bytes(
+    cond_total: usize, cond_offsets: &[u32], cond_sizes: &[u32], cond_starts: &[u32], cond_blob: &[u8],
+    cshape:&[usize], cstrides:&[usize], c_base_elems: usize,
+    x_total: usize, x_offsets: &[u32], x_sizes: &[u32], x_starts: &[u32], x_blob: &[u8],
+    xshape:&[usize], xstrides:&[usize], x_base_elems: usize,
+    y_total: usize, y_offsets: &[u32], y_sizes: &[u32], y_starts: &[u32], y_blob: &[u8],
+    yshape:&[usize], ystrides:&[usize], y_base_elems: usize,
+    out_shape:&[usize], device:&str
+) -> Result<Vec<f32>> {
+    match device {
+        "wgpu" => {
+            #[cfg(feature="wgpu")] {
+                let to_u32 = |v:&[usize]| v.iter().map(|&u| u as u32).collect::<Vec<u32>>();
+                return crate::backend::wgpu_where_segments::where_nd_strided_segments_u8_with_base(
+                    cond_total, cond_offsets, cond_sizes, cond_starts, cond_blob,
+                    x_total, x_offsets, x_sizes, x_starts, x_blob,
+                    y_total, y_offsets, y_sizes, y_starts, y_blob,
+                    &to_u32(cshape), &to_u32(cstrides), c_base_elems as u32,
+                    &to_u32(xshape), &to_u32(xstrides), x_base_elems as u32,
+                    &to_u32(yshape), &to_u32(ystrides), y_base_elems as u32,
+                    &to_u32(out_shape)
+                );
+            }
+            #[cfg(not(feature="wgpu"))] { return Err(dev_err("wgpu feature not enabled")); }
+        }
+        "mps" => {
+            #[cfg(feature="mps")] { return Err(dev_err("mps segments wiring: TODO")); }
+            #[cfg(not(feature="mps"))] { return Err(dev_err("mps feature not enabled")); }
+        }
+        _ => Err(dev_err("segments path supports wgpu/mps only")),
+    }
+}

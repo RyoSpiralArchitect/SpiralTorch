@@ -1,7 +1,6 @@
-
 [package]
 name = "st-core"
-version = "1.3.18"
+version = "1.3.30"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 description = "SpiralTorch core: tensor + autograd + optional GPU backends"
@@ -12,6 +11,9 @@ name = "st_core"
 path = "src/lib.rs"
 
 [features]
+cuda = ["dep:cust"]
+cuda = ["dep:cust"]
+cuda = ["dep:cust"]
 default = []
 cuda = ["cust"]
 wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
@@ -26,6 +28,6 @@ pollster = { version = "0.3", optional = true }
 wgpu = { version = "0.19", optional = true }
 metal = { version = "0.27", optional = true }
 objc = { version = "0.2", optional = true }
-cust = { version = "0.7", optional = true }
+cust = { version = "0.3", optional = true }
 
 [build-dependencies]
