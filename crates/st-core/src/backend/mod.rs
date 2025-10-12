@@ -9,7 +9,7 @@ pub mod wgpu_topk_kway;
 #[cfg(feature="wgpu")]
 pub mod wgpu_topk_subgroup;
 
-pub mod wgpu_heuristics; // always compiled (doesn't depend on wgpu crate)
+pub mod wgpu_heuristics; // Always compiled (no wgpu dep)
 
 #[cfg(feature="mps")]
 pub const MSL_WHERE: &str = include_str!("mps_where_nd_strided_u8.metal");

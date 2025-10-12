@@ -1,32 +1,34 @@
-# SpiralTorch (v1.3.98)
+# SpiralTorch (v1.3.104)
 
-**Rust-first, Torch-like tensor & ops**, with optional GPU backends (WGPU / MPS / CUDA) and Python wheels.
+Rust-first, Torch-like tensor & ops, with optional GPU backends (WGPU / MPS / CUDA) and Python wheels.
 
-## What's new (v1.3.98)
-- **CUDA TopK**: Adds a **WMMA-best** path (currently half2/shared fused candidate generation via NVRTC; falls back automatically).  
-  Reuses **`wgpu_heuristics.rs`** for **`KLANE`** and **`ctas_per_row`** mapping when available, keeping strategies aligned across backends.
-- **MPS TopK**: Adds a Metal compute implementation (portable 1CE / 2CE-like) to bring parity with WGPU path.
-- **WGPU TopK**: Subgroup-aware entrypoints compiled **only if feature is present**; Safari-safe defaults remain the baseline.
-- **SpiralK (K-like DSL)**: Extends with `min(x,y)` / `max(x,y)`, enabling minimax-style scoring expressions.  
-  Runtime override via `SPIRAL_HEUR_K` (feature `kdsl`). 
-- **Docs**: Safari/WebGPU compatibility notes; tuner workflow → **k-means table** (and threshold-regression hybrid suggestion).
+## What's new (v1.3.104)
+- **SpiralK (K×Lisp-inspired DSL)** crate (`st-kdsl 0.1.0`) added. Runtime override via env `SPIRAL_HEUR_K`:
+  **SpiralK > WASM-generated table > Fallback** precedence.
+- **Heuristics unification**: WGPU/MPS/CUDA TopK all consume the same `backend::wgpu_heuristics::Choice`.
+- **Build hook**: if `backend/wgpu_heuristics_generated.rs` is missing, `build.rs` writes a stub (so you can commit the tuner output later).
+- **Safari/WebGPU**: portable WGSL kept as default; subgroup path is optional and feature-gated at runtime.
+- **CUDA TopK**: continues to reuse the same heuristics; half2 candidate path retained (WMMA-ready skeleton).
 
-> Target: Aggregate heuristics from **WASM measurements** → ship a table or **SpiralK** program → reuse on **WGPU/MPS/CUDA**.
-
-## Quick Start
-
-### Rust (CPU / WGPU / MPS / CUDA)
+## Quickstart (Rust)
 ```bash
-cargo build -p st-core                          # CPU
-cargo build -p st-core --features wgpu          # WGPU
-cargo build -p st-core --features mps           # MPS (macOS)
-cargo build -p st-core --features cuda          # CUDA (NVRTC; arch via ST_NVRTC_ARCH or compute_80 default)
+# CPU
+cargo build -p st-core
 
-# Optional K-like DSL (SpiralK)
-SPIRAL_HEUR_K='u2:(c>32768)||(k>128); wg:sel(c<4096,128,256); kl:max(8,sel(k>=32,32,sel(k>=16,16,8))); ch:sel(c>16384,8192,0)' cargo build -p st-core --features wgpu,kdsl
+# WGPU (portable defaults; Safari-safe)
+cargo build -p st-core --features wgpu
+
+# MPS (macOS)
+cargo build -p st-core --features mps
+
+# CUDA (NVRTC); arch via ST_NVRTC_ARCH (e.g., compute_80)
+ST_NVRTC_ARCH=--gpu-architecture=compute_80 cargo build -p st-core --features cuda
+
+# SpiralK DSL override
+SPIRAL_HEUR_K='u2:(c>32768)||(k>128); wg:sel(c<4096,128,256); kl:sel(k>=32,32,sel(k>=16,16,8)); ch:sel(c>16384,8192,0)' cargo build -p st-core --features wgpu,kdsl
 ```
 
-### Python Wheels
+## Python
 ```bash
 pip install maturin
 maturin build -m bindings/st-py/Cargo.toml --release               # CPU
@@ -35,15 +37,11 @@ maturin build -m bindings/st-py/Cargo.toml --release --features mps
 maturin build -m bindings/st-py/Cargo.toml --release --features cuda
 ```
 
-### WASM Tuner
-```bash
-rustup target add wasm32-unknown-unknown
-wasm-pack build --release --target web examples/wasm-webgpu-topk-where
-python -m http.server 8000
-# http://localhost:8000/examples/wasm-webgpu-topk-where/www/
-# 1) Grid Scan → 2) k-means → 3) Export `wgpu_heuristics.rs` (nearest-cluster table)
-# (Hybrid: you may maintain both a table and an analytic form via SpiralK)
+## DSL Examples
+```text
+# subgroup-aware tuning
+u2:(c>32768)||(k>128);
+wg:sel(sg,256,128);
+kl:sel(k>=64,32,sel(k>=16,16,8));
+ch:sel(c>32768,8192,sel(c>16384,4096,0))
 ```
-
-## License
-AGPL-3.0-or-later

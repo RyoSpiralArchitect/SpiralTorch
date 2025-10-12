@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "spiraltorch"
-version = "1.3.98"
+version = "1.3.104"
 description = "SpiralTorch: Rust-first, Torch-like ops with optional GPU backends (WGPU/MPS/CUDA)"
 authors = [{name="Ryo SpiralArchitect"}]
 license = {text="AGPL-3.0-or-later"}

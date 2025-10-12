@@ -80,8 +80,8 @@ pub fn where_nd_strided_bytes_direct(
     let b_x_strides   = sbuf_u32(x_strides, "x_strides");
     let b_y_shape     = sbuf_u32(y_shape, "y_shape");
     let b_y_strides   = sbuf_u32(y_strides, "y_strides");
-    let rc = RC{ nd: out_shape.len() as u32, n };
-    let rb = RB{ c_base, x_base, y_base };
+    let rc = super::wgpu_where_direct::RC{ nd: out_shape.len() as u32, n };
+    let rb = super::wgpu_where_direct::RB{ c_base, x_base, y_base };
     let b_rc = ub(&rc, "rc"); let b_rb = ub(&rb, "rb");
     let bind = ctx().device.create_bind_group(&wgpu::BindGroupDescriptor{
         label: Some("where-direct-bind"),

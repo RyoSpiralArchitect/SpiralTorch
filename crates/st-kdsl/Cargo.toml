@@ -1,12 +1,13 @@
 [package]
 name = "st-kdsl"
-version = "0.1.2"
+version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
-description = "SpiralK: tiny K-like DSL for SpiralTorch heuristics"
+description = "SpiralK: K×Lisp inspired tiny DSL for runtime heuristics."
 
-[lib]
-name = "st_kdsl"
-path = "src/lib.rs"
+[features]
+default = ["std"]
+std = []
 
 [dependencies]
+thiserror = "1"

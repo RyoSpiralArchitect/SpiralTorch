@@ -38,11 +38,8 @@ impl MpsTopk {
 }
 
 pub fn topk_kway_2d_autotuned(x:&[f32], rows:u32, cols:u32, k:u32) -> Result<(Vec<f32>, Vec<i32>)> {
-    let (u2, _wg, k_lane, ch) = crate::backend::wgpu_heuristics::choose(rows, cols, k, false)
-        .unwrap_or((cols>32768 || k>128, if cols<4096 {128} else {256}, if k>=32 {32} else if k>=16 {16} else {8}, if cols>16384 {8192} else {0}));
-    let k_lane = k_lane.max(8).min(32) as u32;
-    let chunk_cols = ch as u32;
+    let ch = crate::backend::wgpu_heuristics::choose(rows as usize, cols as usize, k as usize, false);
+    let (k_lane, chunk_cols) = if let Some(ch) = ch { (ch.kl, ch.ch) } else { (if k>=32 {32} else if k>=16 {16} else {8}, if cols>16384 {8192} else {0}) };
     let m = MpsTopk::new()?;
-    // For simplicity, start from 1CE path
     m.run_1ce(x, rows, cols, k, k_lane, chunk_cols)
 }

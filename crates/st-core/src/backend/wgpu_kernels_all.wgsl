@@ -1,1 +1,1 @@
-// WGSL common base
+// WGSL placeholder base

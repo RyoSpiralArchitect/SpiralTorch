@@ -26,7 +26,7 @@ fn ctx()->&'static SubgroupCtx {
         if use_subgroup {
             let code = [
                 "enable subgroups;",
-                include_str!("wgpu_topk_kway.wgsl") // For demo purpose, reuse same WGSL; specialize later.
+                include_str!("wgpu_topk_kway.wgsl")
             ].join("\n");
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
                 label: Some("st-topk-subgroup"), source: wgpu::ShaderSource::Wgsl(code.into())
@@ -40,12 +40,16 @@ fn ctx()->&'static SubgroupCtx {
     })
 }
 
-pub fn available() -> bool {
-    ctx().p_1ce.is_some()
-}
+pub fn available() -> bool { ctx().p_1ce.is_some() }
 
 pub fn topk_kway_2d_subgroup(x:&[f32], rows:u32, cols:u32, k:u32) -> Result<(Vec<f32>, Vec<i32>)> {
     if !available() { return Err(dev_err("subgroup not available")); }
+    let (use_2ce, wg, k_lane, chunk_cols) = {
+        let sg = true;
+        if let Some(ch) = crate::backend::wgpu_heuristics::choose(rows as usize, cols as usize, k as usize, sg) {
+            (ch.use_2ce, ch.wg, ch.kl, ch.ch)
+        } else { (false, 256, if k>=32 {32} else if k>=16 {16} else {8}, 0) }
+    };
     let outv_len = (rows*k) as usize; let outi_len = outv_len;
     let b_x = ctx().device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
         label: Some("x"), contents: bytemuck::cast_slice(x), usage: wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST
@@ -56,7 +60,7 @@ pub fn topk_kway_2d_subgroup(x:&[f32], rows:u32, cols:u32, k:u32) -> Result<(Vec
     let b_outi = ctx().device.create_buffer(&wgpu::BufferDescriptor{
         label: Some("outi"), size: (outi_len*4) as u64, usage: wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_SRC, mapped_at_creation:false
     });
-    let meta = Meta{ rows, cols, k, k_lane:32, chunk_cols:0, cand_cols:256*32 };
+    let meta = Meta{ rows, cols, k, k_lane, chunk_cols, cand_cols: 256*k_lane };
     let b_meta = ctx().device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
         label: Some("meta"), contents: bytemuck::bytes_of(&meta), usage: wgpu::BufferUsages::UNIFORM|wgpu::BufferUsages::COPY_DST
     });
@@ -73,7 +77,7 @@ pub fn topk_kway_2d_subgroup(x:&[f32], rows:u32, cols:u32, k:u32) -> Result<(Vec
     { let mut pass = e.begin_compute_pass(&wgpu::ComputePassDescriptor{ label: Some("pass") });
       pass.set_pipeline(p); pass.set_bind_group(0, &bind, &[]); pass.dispatch_workgroups(rows,1,1); }
     ctx().queue.submit(std::iter::once(e.finish()));
-    // readback
+    // RB
     let rbv = ctx().device.create_buffer(&wgpu::BufferDescriptor{
         label: Some("rbv"), size: (outv_len*4) as u64, usage: wgpu::BufferUsages::MAP_READ|wgpu::BufferUsages::COPY_DST, mapped_at_creation:false
     });

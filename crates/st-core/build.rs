@@ -17,22 +17,16 @@ fn main() {
     println!("cargo:warning=");
     println!("cargo:warning=~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 
-    let heur = Path::new("src/backend/wgpu_heuristics.rs");
-    if !heur.exists() {
-        fs::write(heur, r#"
-#[cfg(feature=\"kdsl\")]
-fn kdsl_choose(rows:u32, cols:u32, k:u32, subgroup: bool) -> Option<(bool,u32,u32,u32)> {
-    use std::env;
-    let prog = env::var(\"SPIRAL_HEUR_K\").ok()?;
-    st_kdsl::choose_from_program(&prog, rows, cols, k, subgroup)
-}
-#[cfg(not(feature=\"kdsl\"))]
-fn kdsl_choose(_rows:u32, _cols:u32, _k:u32, _subgroup: bool) -> Option<(bool,u32,u32,u32)> { None }
-
-pub fn choose(rows:u32, cols:u32, k:u32, subgroup: bool) -> Option<(bool,u32,u32,u32)> {
-    if let Some(v) = kdsl_choose(rows, cols, k, subgroup) { return Some(v); }
-    None
-}
-"#).expect("write wgpu_heuristics.rs");
+    // WASM tuner generated heuristics table stub (if missing)
+    let gen = Path::new("src/backend/wgpu_heuristics_generated.rs");
+    if !gen.exists() {
+        let stub = r#"// auto-generated stub (build.rs)
+// Returning None => use SpiralK env or fallback inside wgpu_heuristics.rs
+pub(super) fn choose_generated(
+    _rows: usize, _cols: usize, _k: usize, _subgroup: bool
+) -> Option<super::Choice> { None }
+"#;
+        fs::write(gen, stub).expect("write heuristics stub");
+        println!("cargo:warning=st-core: wrote stub backend/wgpu_heuristics_generated.rs");
     }
 }
