@@ -1,4 +1,9 @@
-# SpiralTorch v1.7.2 — Self-Tuning GPU Top-K, WGPU-first
+<p align="left">
+  <a href="https://github.com/RyoSpiralArchitect/SpiralTorch/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/RyoSpiralArchitect/SpiralTorch/release_wheels.yml?label=release%20wheels&logo=github"></a>
+  <a href="#license"><img alt="AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
+  <a href="#"><img alt="Python" src="https://img.shields.io/badge/python-3.11–3.14-3776AB?logo=python"></a>
+</p>
+# SpiralTorch v1.7.2 — Self-Tuning GPU Top-K. WGPU-first. Zero-regret fallbacks.
 
 **SpiralK + SoftLogic + WASM Tuner** pick the fastest **merge kind** and **tile width** for your hardware—then **Self-Rewrite** locks wins into your heuristics.  
 WGPU is the default, HIP/CUDA absorb the same unified choices. Python wheels target 3.11–3.14.
@@ -9,6 +14,7 @@ WGPU is the default, HIP/CUDA absorb the same unified choices. Python wheels tar
 - **1-CE Subgroup Top-K:** candidates → final in a single pass (WGPU)
 - **MidK compaction kernels:** 1-CE / 2-CE paths, tile-aware
 - **Ameba Hypergrad:** unrolled & implicit (Neumann / CG) utilities
+  
 ---
 
 ## What’s inside
@@ -46,6 +52,16 @@ WGPU is the default, HIP/CUDA absorb the same unified choices. Python wheels tar
 4. **Generated table sample (WASM Tuner)**  
    - Ships with a simple piecewise `wgpu_heuristics_generated.rs`  
    - Re-generate from browser/Node JSON via `tools/tuner/gen_generated_rs.py`
+---
+
+**Requirements**
+- Rust 1.74+ (stable)
+- Python 3.11–3.14 (for wheels via maturin)
+- Optional GPU SDKs:
+  - WGPU: no extra SDKs (WebGPU drivers)
+  - macOS MPS: Xcode command line tools
+  - CUDA: CUDA toolkit + NVRTC
+  - HIP/ROCm: ROCm toolchain (`hipcc`) when enabling `st-backend-hip/hip-real`
 
 ---
 
@@ -164,6 +180,8 @@ python3 tools/tuner/gen_generated_rs.py tools/tuner/tuner_results.json \
 
 ## Notes
 
+> When enabled, the project may append `soft(...)` rules to `~/.spiraltorch/heur.kdsl` **on your machine only**.  
+> No network calls are performed unless you explicitly use Redis (`REDIS_URL`) or HIP distributed features.
 - The final `mk/tile` are **consumed by the TopK implementation** in each backend.  
   For WGPU: 1CE/2CE and tiling are already wired; you only plug the **choice** in.
 - If you don’t ship a generated table, the chooser remains **safe**:  
