@@ -179,8 +179,8 @@ python3 tools/tuner/gen_generated_rs.py tools/tuner/tuner_results.json \
 
 ## Notes
 
-> When enabled, the project may append `soft(...)` rules to `~/.spiraltorch/heur.kdsl` **on your machine only**.  
-> No network calls are performed unless you explicitly use Redis (`REDIS_URL`) or HIP distributed features.
+- When enabled, the project may append `soft(...)` rules to `~/.spiraltorch/heur.kdsl` **on your machine only**.  
+- No network calls are performed unless you explicitly use Redis (`REDIS_URL`) or HIP distributed features.
 - The final `mk/tile` are **consumed by the TopK implementation** in each backend.  
   For WGPU: 1CE/2CE and tiling are already wired; you only plug the **choice** in.
 - If you don’t ship a generated table, the chooser remains **safe**:  
