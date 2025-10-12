@@ -1,5 +1,3 @@
-<p align="left">
-  <a href="https://github.com/RyoSpiralArchitect/SpiralTorch/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/RyoSpiralArchitect/SpiralTorch/release_wheels.yml?label=release%20wheels&logo=github"></a>
   <a href="#license"><img alt="AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
   <a href="#"><img alt="Python" src="https://img.shields.io/badge/python-3.11–3.14-3776AB?logo=python"></a>
 </p>
