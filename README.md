@@ -1,11 +1,14 @@
-# SpiralTorch v1.7.2 Overlay
+# SpiralTorch v1.7.2 — Self-Tuning GPU Top-K, WGPU-first
 
-**TL;DR**  
-This overlay teaches SpiralTorch to pick **TopK merge kind (`mk`)** and **tile width (`tile_cols`)** using a **two-layer consensus**:
-1) **SpiralK DSL** (runtime, hand-authored rules + soft constraints), and  
-2) **WASM Tuner generated table** (offline measurements).  
-The final choice is exposed as a **unified heuristic** consumed by **WGPU / HIP / CUDA** paths.
+**SpiralK + SoftLogic + WASM Tuner** pick the fastest **merge kind** and **tile width** for your hardware—then **Self-Rewrite** locks wins into your heuristics.  
+WGPU is the default, HIP/CUDA absorb the same unified choices. Python wheels target 3.11–3.14.
 
+**Why it’s different**
+- **Two-layer consensus:** SpiralK (runtime rules) + WASM table (offline measurements)
+- **Unified heuristics:** same `Choice{ mk, tile, … }` across WGPU / HIP / CUDA
+- **1-CE Subgroup Top-K:** candidates → final in a single pass (WGPU)
+- **MidK compaction kernels:** 1-CE / 2-CE paths, tile-aware
+- **Ameba Hypergrad:** unrolled & implicit (Neumann / CG) utilities
 ---
 
 ## What’s inside
