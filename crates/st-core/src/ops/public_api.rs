@@ -1,6 +1,5 @@
 use crate::error::{Result, invalid, device as dev_err};
 
-/// CPU TopK along the last dimension (2D: rows x cols)
 pub fn topk_lastdim_host_select(x:&[f32], rows:usize, cols:usize, k:usize, _want:&str) -> Result<(Vec<f32>, Vec<i32>)> {
     if k==0 || k>cols { return Err(invalid("topk: invalid k")); }
     let mut outv = vec![0f32; rows*k];
@@ -11,8 +10,7 @@ pub fn topk_lastdim_host_select(x:&[f32], rows:usize, cols:usize, k:usize, _want
         v.select_nth_unstable_by(k-1, |a,b| b.0.partial_cmp(&a.0).unwrap());
         v[..k].sort_by(|a,b| b.0.partial_cmp(&a.0).unwrap());
         for i in 0..k {
-            outv[r*k+i] = v[i].0;
-            outi[r*k+i] = v[i].1;
+            outv[r*k+i] = v[i].0; outi[r*k+i] = v[i].1;
         }
     }
     Ok((outv, outi))
@@ -29,58 +27,51 @@ pub fn topk_lastdim_cuda_2d(x:&[f32], rows:usize, cols:usize, k:usize) -> Result
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn where_nd_host_select_strided_segments_bytes(
-    cond_total: usize, cond_offsets: &[u32], cond_sizes: &[u32], cond_starts: &[u32], cond_blob: &[u8],
-    cshape:&[usize], cstrides:&[usize], c_base_elems: usize,
-    x_total: usize, x_offsets: &[u32], x_sizes: &[u32], x_starts: &[u32], x_blob: &[u8],
-    xshape:&[usize], xstrides:&[usize], x_base_elems: usize,
-    y_total: usize, y_offsets: &[u32], y_sizes: &[u32], y_starts: &[u32], y_blob: &[u8],
-    yshape:&[usize], ystrides:&[usize], y_base_elems: usize,
-    out_shape:&[usize], device:&str
+pub fn where_nd_host_select_strided_bytes_direct_wgpu(
+    cond_blob:&[u8], c_base_elems: usize, cshape:&[usize], cstrides:&[usize],
+    x_blob:&[u8], x_base_elems: usize, xshape:&[usize], xstrides:&[usize],
+    y_blob:&[u8], y_base_elems: usize, yshape:&[usize], ystrides:&[usize],
+    out_shape:&[usize]
 ) -> Result<Vec<f32>> {
-    match device {
-        "wgpu" => {
-            #[cfg(feature="wgpu")] {
-                let to_u32 = |v:&[usize]| v.iter().map(|&u| u as u32).collect::<Vec<u32>>();
-                return crate::backend::wgpu_where_segments::where_nd_strided_segments_u8_with_base(
-                    cond_total, cond_offsets, cond_sizes, cond_starts, cond_blob,
-                    x_total, x_offsets, x_sizes, x_starts, x_blob,
-                    y_total, y_offsets, y_sizes, y_starts, y_blob,
-                    &to_u32(cshape), &to_u32(cstrides), c_base_elems as u32,
-                    &to_u32(xshape), &to_u32(xstrides), x_base_elems as u32,
-                    &to_u32(yshape), &to_u32(ystrides), y_base_elems as u32,
-                    &to_u32(out_shape)
-                );
-            }
-            #[cfg(not(feature="wgpu"))] { return Err(dev_err("wgpu feature not enabled")); }
-        }
-        "mps" => {
-            #[cfg(feature="mps")] { return Err(dev_err("use where_nd_host_select_strided_segments_bytes_mps for MPS")); }
-            #[cfg(not(feature="mps"))] { return Err(dev_err("mps feature not enabled")); }
-        }
-        _ => Err(dev_err("segments path supports wgpu/mps only")),
+    #[cfg(feature="wgpu")] {
+        let to_u32 = |v:&[usize]| v.iter().map(|&u| u as u32).collect::<Vec<u32>>();
+        return crate::backend::wgpu_where_direct::where_nd_strided_bytes_direct(
+            cond_blob, c_base_elems as u32, &to_u32(cshape), &to_u32(cstrides),
+            x_blob, x_base_elems as u32, &to_u32(xshape), &to_u32(xstrides),
+            y_blob, y_base_elems as u32, &to_u32(yshape), &to_u32(ystrides),
+            &to_u32(out_shape)
+        );
     }
+    #[cfg(not(feature="wgpu"))] { Err(dev_err("wgpu feature not enabled")) }
 }
 
 #[cfg(feature="mps")]
 #[allow(clippy::too_many_arguments)]
-pub fn where_nd_host_select_strided_segments_bytes_mps(
-    cond_total: usize, cond_offsets: &[u32], cond_sizes: &[u32], cond_starts: &[u32], cond_blob: &[u8],
-    x_total: usize, x_offsets: &[u32], x_sizes: &[u32], x_starts: &[u32], x_blob: &[u8],
-    y_total: usize, y_offsets: &[u32], y_sizes: &[u32], y_starts: &[u32], y_blob: &[u8],
-    out_shape:&[usize], out_strides:&[usize],
-    cshape:&[usize], cstrides:&[usize], c_base_elems: usize,
-    xshape:&[usize], xstrides:&[usize], x_base_elems: usize,
-    yshape:&[usize], ystrides:&[usize], y_base_elems: usize,
+pub fn where_nd_host_select_strided_bytes_direct_mps(
+    cond_blob:&[u8], _c_base_elems: usize, cshape:&[usize], cstrides:&[usize],
+    x_blob:&[u8], _x_base_elems: usize, xshape:&[usize], xstrides:&[usize],
+    y_blob:&[u8], _y_base_elems: usize, yshape:&[usize], ystrides:&[usize],
+    out_shape:&[usize], out_strides:&[usize]
 ) -> Result<Vec<f32>> {
-    let to_u32 = |v:&[usize]| v.iter().map(|&u| u as u32).collect::<Vec<u32>>();
-    crate::backend::mps_where_segments::where_nd_strided_segments_u8_with_base_mps(
-        cond_total, cond_offsets, cond_sizes, cond_starts, cond_blob,
-        x_total, x_offsets, x_sizes, x_starts, x_blob,
-        y_total, y_offsets, y_sizes, y_starts, y_blob,
-        &to_u32(out_shape), &to_u32(out_strides),
-        &to_u32(cshape), &to_u32(cstrides), c_base_elems as u32,
-        &to_u32(xshape), &to_u32(xstrides), x_base_elems as u32,
-        &to_u32(yshape), &to_u32(ystrides), y_base_elems as u32,
-    )
+    use crate::backend::mps_where_direct::MpsWhereDirect;
+    let dev = metal::Device::system_default().ok_or_else(|| dev_err("MPS device not found"))?;
+    let to_u32b = |v:&[usize]| bytemuck::cast_slice::<u32,u8>(&v.iter().map(|&u| u as u32).collect::<Vec<u32>>());
+    let b_out_shape   = dev.new_buffer_with_data(to_u32b(out_shape), metal::MTLResourceOptions::CPUCacheModeDefaultCache);
+    let b_out_strides = dev.new_buffer_with_data(to_u32b(out_strides), metal::MTLResourceOptions::CPUCacheModeDefaultCache);
+    let b_c_shape     = dev.new_buffer_with_data(to_u32b(cshape), metal::MTLResourceOptions::CPUCacheModeDefaultCache);
+    let b_c_strides   = dev.new_buffer_with_data(to_u32b(cstrides), metal::MTLResourceOptions::CPUCacheModeDefaultCache);
+    let b_x_shape     = dev.new_buffer_with_data(to_u32b(xshape), metal::MTLResourceOptions::CPUCacheModeDefaultCache);
+    let b_x_strides   = dev.new_buffer_with_data(to_u32b(xstrides), metal::MTLResourceOptions::CPUCacheModeDefaultCache);
+    let b_y_shape     = dev.new_buffer_with_data(to_u32b(yshape), metal::MTLResourceOptions::CPUCacheModeDefaultCache);
+    let b_y_strides   = dev.new_buffer_with_data(to_u32b(ystrides), metal::MTLResourceOptions::CPUCacheModeDefaultCache);
+    let n: u32 = out_shape.iter().copied().fold(1u32, |a,b| a.saturating_mul(b as u32));
+    let out = MpsWhereDirect::new()?.run_direct(
+        cond_blob, x_blob, y_blob,
+        &b_out_shape, &b_out_strides,
+        &b_c_shape, &b_c_strides, 0,
+        &b_x_shape, &b_x_strides, 0,
+        &b_y_shape, &b_y_strides, 0,
+        out_shape.len() as u32, n as u32
+    )?;
+    Ok(out)
 }

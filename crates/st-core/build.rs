@@ -1,3 +1,5 @@
+use std::{fs, path::Path};
+
 fn main() {
     println!("cargo:warning=");
     println!("cargo:warning=~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
@@ -14,4 +16,15 @@ fn main() {
     println!("cargo:warning=         ?8P                                                                                 ");
     println!("cargo:warning=");
     println!("cargo:warning=~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+
+    // Ensure subgroup-aware heuristics stub exists (can be overwritten by WASM tuner output)
+    let heur = Path::new("src/backend/wgpu_heuristics.rs");
+    if !heur.exists() {
+        fs::write(heur, r#"
+pub fn choose(_rows:u32, _cols:u32, _k:u32, _subgroup: bool) -> Option<(bool, u32, u32, u32)> {
+    // (use_2ce, wg_size, k_lane, chunk_cols)
+    None
+}
+"#).expect("write wgpu_heuristics.rs");
+    }
 }

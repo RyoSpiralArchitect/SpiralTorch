@@ -2,17 +2,24 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>SpiralTorch WASM WebGPU Demo</title>
+  <title>SpiralTorch WASM WebGPU Tuner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style> body{font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial;margin:2rem;} code{background:#f5f5f5;padding:2px 4px;border-radius:4px;} </style>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial;margin:2rem;line-height:1.5}
+    pre{background:#0b1020;color:#cde; padding:12px;border-radius:8px;overflow:auto}
+    button{padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fafafa;cursor:pointer}
+    label{display:inline-block;min-width:120px}
+    .row{margin:.5rem 0}
+  </style>
 </head>
 <body>
-  <h1>SpiralTorch WASM WebGPU Demo</h1>
-  <p>This is a minimal UI scaffold. Build with <code>wasm-pack build --release --target web examples/wasm-webgpu-topk-where</code> and serve <code>pkg/</code> with a static server.</p>
-  <script type="module">
-    import init, { info } from "../pkg/wasm_webgpu_topk_where.js";
-    await init();
-    console.log(info());
-  </script>
+  <h1>SpiralTorch WebGPU Tuner</h1>
+  <p>Measure TopK on this browser/device and export <code>wgpu_heuristics.rs</code> to guide native builds.</p>
+  <div class="row"><label>Rows</label><input id="rows" type="number" value="8"/></div>
+  <div class="row"><label>Cols</label><input id="cols" type="number" value="65536"/></div>
+  <div class="row"><label>K</label><input id="k" type="number" value="1024"/></div>
+  <div class="row"><button id="run">Run Tuner</button> <button id="export">Export wgpu_heuristics.rs</button></div>
+  <pre id="out"></pre>
+  <script type="module" src="./tune.js"></script>
 </body>
 </html>

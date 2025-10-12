@@ -3,8 +3,6 @@ struct Meta { rows:u32, cols:u32, k:u32, k_lane:u32, chunk_cols:u32, cand_cols:u
 @group(0) @binding(1) var<storage, read_write> OUTV: array<f32>;
 @group(0) @binding(2) var<storage, read_write> OUTI: array<i32>;
 @group(0) @binding(3) var<uniform> meta: Meta;
-
-// For 2CE
 @group(0) @binding(4) var<storage, read_write> CANDV: array<f32>;
 @group(0) @binding(5) var<storage, read_write> CANDI: array<i32>;
 
@@ -105,7 +103,7 @@ fn topk_kway_1ce_256(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invoc
   topk_impl_1ce(256u, wid.x, lid.x);
 }
 
-// ---- 2CE: Pass1 candidates (write to CANDV/CANDI), Pass2 final merge from CAND ----
+// 2CE: candidates then final
 fn topk_impl_pass1(wg_size:u32, row:u32, tid:u32) {
   if (row >= meta.rows) { return; }
   let stride = wg_size;
@@ -127,7 +125,6 @@ fn topk_impl_pass1(wg_size:u32, row:u32, tid:u32) {
     if (meta.chunk_cols==0u) { break; }
   }
 
-  // Write candidates to global
   let base_cand = row * meta.cand_cols;
   let offset = tid * k_lane;
   for (var i:u32=0u32; i<k_lane; i=i+1u32) {
@@ -136,11 +133,10 @@ fn topk_impl_pass1(wg_size:u32, row:u32, tid:u32) {
   }
 }
 
-fn topk_impl_pass2(wg_size:u32, row:u32, tid:u32) {
+fn topk_impl_pass2(_wg_size:u32, row:u32, tid:u32) {
   if (row >= meta.rows) { return; }
   let k_lane = meta.k_lane;
   let total = 256u * k_lane;
-  // Load from global candidates
   let base_cand = row * meta.cand_cols;
   let offset = tid * k_lane;
   for (var i:u32=0u32; i<k_lane; i=i+1u32) {
@@ -163,7 +159,6 @@ fn topk_kway_pass1_128(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_inv
 fn topk_kway_pass1_256(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
   topk_impl_pass1(256u, wid.x, lid.x);
 }
-
 @compute @workgroup_size(128)
 fn topk_kway_pass2_128(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
   topk_impl_pass2(128u, wid.x, lid.x);

@@ -1,7 +1,7 @@
 struct RC { nd: u32, n: u32 };
 struct RB { c_base: u32, x_base: u32, y_base: u32 };
 
-@group(0) @binding(0)  var<storage, read>  C: array<u32>;       // byte-packed cond (4 bytes per u32); pad to 4B
+@group(0) @binding(0)  var<storage, read>  C: array<u32>;
 @group(0) @binding(1)  var<storage, read>  X: array<f32>;
 @group(0) @binding(2)  var<storage, read>  Y: array<f32>;
 @group(0) @binding(3)  var<storage, read_write> O: array<f32>;
