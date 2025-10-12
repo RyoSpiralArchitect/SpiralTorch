@@ -12,9 +12,17 @@ fn main(){
 
         let hipcc = env::var("HIPCC").unwrap_or_else(|_| "hipcc".into());
         let kernels = [
+            // existing (must already exist in tree)
             "src/hip_kernels/topk_pass1.cu",
             "src/hip_kernels/hip_kway_merge_bitonic_f32.cu",
-            "src/hip_kernels/pack_vals_idx_u64.cu"
+            "src/hip_kernels/pack_vals_idx_u64.cu",
+            "src/hip_kernels/hip_kway_merge_bitonic_u64.cu",
+            "src/hip_kernels/hip_topk_tile_bitonic_u64.cu",
+            // new keep‑k variants
+            "src/hip_kernels/hip_kway_merge_shared_heap_keepk_u64.cu",
+            "src/hip_kernels/hip_kway_merge_warp_heap_keepk_u64.cu",
+            "src/hip_kernels/hip_kway_merge_shared_heap_real_keepk_u64.cu",
+            "src/hip_kernels/hip_kway_merge_warp_coop_keepk_u64.cu",
         ];
         let mut objs = Vec::new();
         for src in kernels {
@@ -27,10 +35,8 @@ fn main(){
         }
         if !objs.is_empty(){
             let lib = out.join("libsthipkernels.a");
-            let _ = std::process::Command::new("ar")
-                .args(["crus", lib.to_str().unwrap()])
-                .args(objs.iter().map(|p| p.to_str().unwrap()))
-                .status();
+            let _ = std::process::Command::new("ar").args(["crus", lib.to_str().unwrap()])
+                .args(objs.iter().map(|p| p.to_str().unwrap())).status();
             println!("cargo:rustc-link-lib=static=sthipkernels");
             println!("cargo:rustc-link-search=native={}", out.display());
         }

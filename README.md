@@ -1,30 +1,18 @@
-# SpiralTorch (v1.6.5, HIP/WGPU/CUDA-ready skeleton)
+# SpiralTorch v1.6.8 Overlay
+This overlay delivers:
+1) **True keep‑k kernels (HIP)**: shared‑heap & warp‑cooperative (shfl) variants with the *same interface* as bitonic.
+2) **WGPU WGSL keep‑k** implementations (subgroup / workgroup), plus a Rust driver to select pipelines.
+3) **SpiralK/SoftLogic 'mk' (merge_kind)** heuristics end‑to‑end wiring (0=bitonic, 1=shared, 2=warp).
+4) **Orchestrator** updated to auto‑pick bitonic/shared/warp by size & env (`TOPK_KERNEL`), with tile→final preserved.
+5) **Absorb hook points** exposed (engine & optimizer) — no‑op safe and ready for ROCm 1‑bit / ZeRO injection.
 
-This is a **buildable minimal workspace** capturing the latest distributed/HIP + heuristics stack:
-- RCCL communicator bootstrap (**env/file + TTL + retry**)
-- 3-stage TopK orchestrator with **device allgather** and **HIP Pass2 bitonic merge** (replaceable by shared/warp heap)
-- Probabilistic parameter consensus (**mean/median**) via **HIP allgather** or **Redis**
-- Self‑Rewrite knobs (threshold/min_samples/cooldown) via env
-- CI for wheels (opt-in matrix & tag-driven release)
+Apply this over v1.6.6 (or v1.6.5 + 1.6.6 overlay).
 
-> This repo is intentionally minimal and feature-gated so you can drop it into your project or use it standalone to validate the GPU communication/heuristics pipeline.
+## Environment
+- `TOPK_KERNEL=auto|bitonic|shared|warp` (default: auto)
+- `HIP_SHARED_LIMIT_BYTES` (default: 98304)
+- `SPIRAL_HEUR_K` may include `mk:` or `soft(mk, val, w, cond)` where `val ∈ {0,1,2}`
 
-## Build (CPU-only)
-```bash
-cargo build -p st-core
-```
-
-## Build HIP real (ROCm)
-```bash
-export ROCM_PATH=/opt/rocm
-export HIPCC=$ROCM_PATH/bin/hipcc
-
-# Distributed env
-export WORLD_SIZE=4
-export RANK=$LOCAL_RANK
-export RCCL_UNIQUE_ID_FILE=/tmp/rccl_uid.bin   # or set RCCL_UNIQUE_ID_B64
-
-cargo build -p st-core --features hip,st-backend-hip/hip-real --release
-```
-
-See **README-RCCL.md** for RCCL bootstrap details.
+## Build
+- HIP: `cargo build -p st-core --features hip,st-backend-hip/hip-real --release`
+- WGPU: `cargo build -p st-core --features wgpu --release`
