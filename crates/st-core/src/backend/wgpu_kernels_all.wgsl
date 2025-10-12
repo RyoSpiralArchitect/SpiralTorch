@@ -1,1 +1,1 @@
-// WGSL common placeholders
+// WGSL common

@@ -2,23 +2,24 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>SpiralTorch WASM WebGPU Tuner</title>
+  <title>SpiralTorch WebGPU Tuner (v0.2)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body{font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial;margin:2rem;line-height:1.5}
     pre{background:#0b1020;color:#cde; padding:12px;border-radius:8px;overflow:auto}
     button{padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fafafa;cursor:pointer}
-    label{display:inline-block;min-width:120px}
+    label{display:inline-block;min-width:140px}
     .row{margin:.5rem 0}
+    input{width:140px}
   </style>
 </head>
 <body>
   <h1>SpiralTorch WebGPU Tuner</h1>
-  <p>Measure TopK on this browser/device and export <code>wgpu_heuristics.rs</code> to guide native builds.</p>
-  <div class="row"><label>Rows</label><input id="rows" type="number" value="8"/></div>
-  <div class="row"><label>Cols</label><input id="cols" type="number" value="65536"/></div>
-  <div class="row"><label>K</label><input id="k" type="number" value="1024"/></div>
-  <div class="row"><button id="run">Run Tuner</button> <button id="export">Export wgpu_heuristics.rs</button></div>
+  <p>Grid-scan TopK on this device/browser, <b>k-means cluster</b> the best params, and export <code>wgpu_heuristics.rs</code> as a table.</p>
+  <div class="row"><label>Rows (csv)</label><input id="rows" value="4,8,16"/></div>
+  <div class="row"><label>Cols (csv)</label><input id="cols" value="16384,32768,65536,131072"/></div>
+  <div class="row"><label>K (csv)</label><input id="ks" value="64,128,512,2048,8192"/></div>
+  <div class="row"><button id="run">Run Grid Scan</button> <button id="cluster">k-means</button> <button id="export">Export heuristics.rs</button></div>
   <pre id="out"></pre>
   <script type="module" src="./tune.js"></script>
 </body>

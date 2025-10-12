@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/st-core", "bindings/st-py"]
+members = ["crates/st-core", "crates/st-kdsl", "bindings/st-py"]
 resolver = "2"

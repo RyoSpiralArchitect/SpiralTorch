@@ -9,9 +9,7 @@ pub fn topk_lastdim_host_select(x:&[f32], rows:usize, cols:usize, k:usize, _want
         let mut v: Vec<(f32, i32)> = (0..cols).map(|c| (x[base+c], c as i32)).collect();
         v.select_nth_unstable_by(k-1, |a,b| b.0.partial_cmp(&a.0).unwrap());
         v[..k].sort_by(|a,b| b.0.partial_cmp(&a.0).unwrap());
-        for i in 0..k {
-            outv[r*k+i] = v[i].0; outi[r*k+i] = v[i].1;
-        }
+        for i in 0..k { outv[r*k+i] = v[i].0; outi[r*k+i] = v[i].1; }
     }
     Ok((outv, outi))
 }

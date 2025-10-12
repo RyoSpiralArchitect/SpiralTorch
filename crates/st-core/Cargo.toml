@@ -1,6 +1,6 @@
 [package]
 name = "st-core"
-version = "1.3.72"
+version = "1.3.90"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 description = "SpiralTorch core (Rust)"
@@ -15,6 +15,7 @@ default = []
 wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:once_cell"]
 mps  = ["dep:metal", "dep:bytemuck"]
 cuda = ["dep:cudarc", "dep:bytemuck"]
+kdsl = ["dep:st-kdsl"]
 
 [dependencies]
 once_cell = { version = "1.18", optional = true }
@@ -23,5 +24,6 @@ pollster  = { version = "0.3", optional = true }
 wgpu      = { version = "0.18", optional = true }
 metal     = { version = "0.27", optional = true }
 cudarc    = { version = "0.11", features = ["std", "nvrtc"], optional = true }
+st-kdsl   = { path = "../st-kdsl", optional = true }
 
 thiserror = "1.0"

@@ -41,10 +41,8 @@ fn bitonic_desc(total:u32, tid:u32) {
           let vi = cand_vals[i];
           let vj = cand_vals[j];
           if ((up && vi < vj) || (!up && vi > vj)) {
-            cand_vals[i] = vj;  cand_vals[j] = vi;
-            let ii = cand_idxs[i];
-            let ij = cand_idxs[j];
-            cand_idxs[i] = ij;  cand_idxs[j] = ii;
+            let t = cand_vals[i]; cand_vals[i] = cand_vals[j]; cand_vals[j] = t;
+            let ti = cand_idxs[i]; cand_idxs[i] = cand_idxs[j]; cand_idxs[j] = ti;
           }
         }
         i = i + 256u;
@@ -97,13 +95,11 @@ fn topk_impl_1ce(wg_size:u32, row:u32, tid:u32) {
 fn topk_kway_1ce_128(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
   topk_impl_1ce(128u, wid.x, lid.x);
 }
-
 @compute @workgroup_size(256)
 fn topk_kway_1ce_256(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
   topk_impl_1ce(256u, wid.x, lid.x);
 }
 
-// 2CE: candidates then final
 fn topk_impl_pass1(wg_size:u32, row:u32, tid:u32) {
   if (row >= meta.rows) { return; }
   let stride = wg_size;
@@ -132,7 +128,6 @@ fn topk_impl_pass1(wg_size:u32, row:u32, tid:u32) {
     CANDI[base_cand + offset + i] = local_idxs[i];
   }
 }
-
 fn topk_impl_pass2(_wg_size:u32, row:u32, tid:u32) {
   if (row >= meta.rows) { return; }
   let k_lane = meta.k_lane;
@@ -150,7 +145,6 @@ fn topk_impl_pass2(_wg_size:u32, row:u32, tid:u32) {
     OUTI[row*meta.k + tid] = cand_idxs[tid];
   }
 }
-
 @compute @workgroup_size(128)
 fn topk_kway_pass1_128(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
   topk_impl_pass1(128u, wid.x, lid.x);

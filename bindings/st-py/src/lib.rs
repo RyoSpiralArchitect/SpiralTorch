@@ -116,6 +116,6 @@ fn where_nd_py<'py>(py: Python<'py>, cond: &'py PyArrayDyn<bool>, x: &'py PyArra
 fn spiraltorch(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(topk2d_py, m)?)?;
     m.add_function(wrap_pyfunction!(where_nd_py, m)?)?;
-    m.add("__version__", "1.3.72")?;
+    m.add("__version__", "1.3.90")?;
     Ok(())
 }

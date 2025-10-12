@@ -1,7 +1,7 @@
 use once_cell::sync::OnceCell;
 use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
-use crate::error::{Result, device as dev_err};
+use crate::error::{Result};
 
 #[repr(C)] #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct RC { pub nd:u32, pub n:u32 }

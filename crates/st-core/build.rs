@@ -17,12 +17,22 @@ fn main() {
     println!("cargo:warning=");
     println!("cargo:warning=~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 
-    // Ensure subgroup-aware heuristics stub exists (can be overwritten by WASM tuner output)
     let heur = Path::new("src/backend/wgpu_heuristics.rs");
     if !heur.exists() {
         fs::write(heur, r#"
-pub fn choose(_rows:u32, _cols:u32, _k:u32, _subgroup: bool) -> Option<(bool, u32, u32, u32)> {
-    // (use_2ce, wg_size, k_lane, chunk_cols)
+#[cfg(feature=\"kdsl\")]
+fn kdsl_choose(rows:u32, cols:u32, k:u32, subgroup: bool) -> Option<(bool,u32,u32,u32)> {
+    use std::env;
+    let prog = env::var(\"SPIRAL_HEUR_K\").ok()?;
+    st_kdsl::choose_from_program(&prog, rows, cols, k, subgroup)
+}
+#[cfg(not(feature=\"kdsl\"))]
+fn kdsl_choose(_rows:u32, _cols:u32, _k:u32, _subgroup: bool) -> Option<(bool,u32,u32,u32)> { None }
+
+pub fn choose(rows:u32, cols:u32, k:u32, subgroup: bool) -> Option<(bool,u32,u32,u32)> {
+    // 1) if SPIRAL_HEUR_K is provided (and feature=kdsl), use SpiralK program at runtime
+    if let Some(v) = kdsl_choose(rows, cols, k, subgroup) { return Some(v); }
+    // 2) else None → fallback heuristic in code
     None
 }
 "#).expect("write wgpu_heuristics.rs");
