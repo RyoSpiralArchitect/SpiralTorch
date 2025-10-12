@@ -18,7 +18,10 @@ pub fn topk_lastdim_host_select(x:&[f32], rows:usize, cols:usize, k:usize, _want
 pub fn topk_lastdim_wgpu_2d_autotuned(x:&[f32], rows:usize, cols:usize, k:usize) -> Result<(Vec<f32>, Vec<i32>)> {
     crate::backend::wgpu_topk_kway::topk_kway_2d_autotuned(x, rows as u32, cols as u32, k as u32)
 }
-
+#[cfg(feature="mps")]
+pub fn topk_lastdim_mps_2d_autotuned(x:&[f32], rows:usize, cols:usize, k:usize) -> Result<(Vec<f32>, Vec<i32>)> {
+    crate::backend::mps_topk_kway::topk_kway_2d_autotuned(x, rows as u32, cols as u32, k as u32)
+}
 #[cfg(feature="cuda")]
 pub fn topk_lastdim_cuda_2d(x:&[f32], rows:usize, cols:usize, k:usize) -> Result<(Vec<f32>, Vec<i32>)> {
     crate::backend::cuda_topk_kway::topk_lastdim_cuda_2d(x, rows, cols, k)

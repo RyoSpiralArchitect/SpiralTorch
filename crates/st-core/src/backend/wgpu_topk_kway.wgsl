@@ -58,7 +58,7 @@ fn topk_impl_1ce(wg_size:u32, row:u32, tid:u32) {
   if (row >= meta.rows) { return; }
   let stride = wg_size;
   let k_lane = meta.k_lane;
-  let base = row_base(row, meta.cols);
+  let base = row * meta.cols;
 
   var local_vals: array<f32, 32>;
   var local_idxs: array<i32, 32>;
@@ -104,7 +104,7 @@ fn topk_impl_pass1(wg_size:u32, row:u32, tid:u32) {
   if (row >= meta.rows) { return; }
   let stride = wg_size;
   let k_lane = meta.k_lane;
-  let base = row_base(row, meta.cols);
+  let base = row * meta.cols;
 
   var local_vals: array<f32, 32>;
   var local_idxs: array<i32, 32>;

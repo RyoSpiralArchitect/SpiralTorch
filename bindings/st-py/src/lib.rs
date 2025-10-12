@@ -6,18 +6,6 @@ use numpy::{PyArray2, PyArrayDyn, IntoPyArray};
     for d in (0..nd).rev() { st[d] = acc; acc = acc.saturating_mul(shape[d].max(1)); }
     st
 }
-fn canonicalize_neg_strides(shape:&[usize], strides:&[isize], itemsize:usize, base_ptr:usize) -> (usize, Vec<usize>) {
-    let nd = shape.len(); let mut base = base_ptr; let mut st = vec![0usize; nd];
-    for d in 0..nd {
-        if strides[d] < 0 { if shape[d] > 0 { base = base + ((shape[d]-1) as isize * strides[d].abs()) as usize * itemsize; } st[d] = (strides[d].abs() as usize); }
-        else { st[d] = (strides[d] as usize); }
-    } (base, st)
-}
-fn span_bytes(shape:&[usize], strides:&[usize], itemsize:usize) -> usize {
-    if shape.is_empty() { return itemsize; } let mut end = 0usize;
-    for d in 0..shape.len() { if shape[d] > 0 { end += (shape[d]-1) * strides[d]; } }
-    end + itemsize
-}
 
 #[pyfunction]
 fn topk2d_py<'py>(py: Python<'py>, x: &'py PyArray2<f32>, k: usize, device: Option<&str>) -> PyResult<(&'py PyArray2<f32>, &'py PyArray2<i32>)> {
@@ -34,6 +22,8 @@ fn topk2d_py<'py>(py: Python<'py>, x: &'py PyArray2<f32>, k: usize, device: Opti
                     #[cfg(not(feature="cuda"))] { Err(st_core::error::device("cuda feature not enabled")) } }
         "wgpu" => { #[cfg(feature="wgpu")] { st_core::ops::public_api::topk_lastdim_wgpu_2d_autotuned(xv, rows, cols, k) }
                     #[cfg(not(feature="wgpu"))] { Err(st_core::error::device("wgpu feature not enabled")) } }
+        "mps" => { #[cfg(feature="mps")] { st_core::ops::public_api::topk_lastdim_mps_2d_autotuned(xv, rows, cols, k) }
+                    #[cfg(not(feature="mps"))] { Err(st_core::error::device("mps feature not enabled")) } }
         _ => st_core::ops::public_api::topk_lastdim_host_select(xv, rows, cols, k, want),
     }.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{}", e)))?;
     let v = PyArray2::from_slice(py, &vals).reshape([rows, k]).unwrap();
@@ -58,17 +48,10 @@ fn where_nd_py<'py>(py: Python<'py>, cond: &'py PyArrayDyn<bool>, x: &'py PyArra
     let c_ptr = cond.data() as usize; let x_ptr = x.data() as usize; let y_ptr = y.data() as usize;
     let c_strides_el = cond.strides().to_vec(); let x_strides_el = x.strides().to_vec(); let y_strides_el = y.strides().to_vec();
 
-    let (c_base, c_strides_b) = canonicalize_neg_strides(&c_shape, &c_strides_el, 1, c_ptr);
-    let (x_base, x_strides_b) = canonicalize_neg_strides(&x_shape, &x_strides_el, 4, x_ptr);
-    let (y_base, y_strides_b) = canonicalize_neg_strides(&y_shape, &y_strides_el, 4, y_ptr);
-
-    let c_span = span_bytes(&c_shape, &c_strides_b, 1);
-    let x_span = span_bytes(&x_shape, &x_strides_b, 4);
-    let y_span = span_bytes(&y_shape, &y_strides_b, 4);
-
-    let c_bytes = unsafe { std::slice::from_raw_parts(c_base as *const u8, c_span) };
-    let x_bytes = unsafe { std::slice::from_raw_parts(x_base as *const u8, x_span) };
-    let y_bytes = unsafe { std::slice::from_raw_parts(y_base as *const u8, y_span) };
+    let c_base = c_ptr; let x_base = x_ptr; let y_base = y_ptr;
+    let c_bytes = unsafe { std::slice::from_raw_parts(c_base as *const u8, c_shape.iter().product::<usize>()) };
+    let x_bytes = unsafe { std::slice::from_raw_parts(x_base as *const u8, x_shape.iter().product::<usize>()*4) };
+    let y_bytes = unsafe { std::slice::from_raw_parts(y_base as *const u8, y_shape.iter().product::<usize>()*4) };
 
     let cstrides_el_pos: Vec<usize> = c_strides_el.iter().map(|&s| s.unsigned_abs() as usize).collect();
     let xstrides_el_pos: Vec<usize> = x_strides_el.iter().map(|&s| s.unsigned_abs() as usize).collect();
@@ -88,7 +71,11 @@ fn where_nd_py<'py>(py: Python<'py>, cond: &'py PyArrayDyn<bool>, x: &'py PyArra
         }
         "mps" => {
             #[cfg(feature="mps")]
-            { let out_strides = rowmajor_strides(&out_shape);
+            { let out_strides = {
+                let mut st=vec![0usize; out_shape.len()]; let mut acc=1usize;
+                for d in (0..out_shape.len()).rev() { st[d]=acc; acc=acc.saturating_mul(out_shape[d].max(1)); }
+                st
+              };
               st_core::ops::public_api::where_nd_host_select_strided_bytes_direct_mps(
                 c_bytes, 0, &c_shape, &cstrides_el_pos,
                 x_bytes, 0, &x_shape, &xstrides_el_pos,
@@ -102,8 +89,9 @@ fn where_nd_py<'py>(py: Python<'py>, cond: &'py PyArrayDyn<bool>, x: &'py PyArra
             let nelem = out_shape.iter().product::<usize>(); let mut out = vec![0f32; nelem];
             for i in 0..nelem {
                 let cb = unsafe { *c_bytes.get_unchecked(i) };
-                let xv = f32::from_le_bytes([x_bytes[4*i],x_bytes[4*i+1],x_bytes[4*i+2],x_bytes[4*i+3]]);
-                let yv = f32::from_le_bytes([y_bytes[4*i],y_bytes[4*i+1],y_bytes[4*i+2],y_bytes[4*i+3]]);
+                let xb = &x_bytes[4*i..4*i+4]; let yb = &y_bytes[4*i..4*i+4];
+                let xv = f32::from_le_bytes([xb[0],xb[1],xb[2],xb[3]]);
+                let yv = f32::from_le_bytes([yb[0],yb[1],yb[2],yb[3]]);
                 out[i] = if cb!=0 { xv } else { yv };
             }
             out
@@ -116,6 +104,6 @@ fn where_nd_py<'py>(py: Python<'py>, cond: &'py PyArrayDyn<bool>, x: &'py PyArra
 fn spiraltorch(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(topk2d_py, m)?)?;
     m.add_function(wrap_pyfunction!(where_nd_py, m)?)?;
-    m.add("__version__", "1.3.90")?;
+    m.add("__version__", "1.3.98")?;
     Ok(())
 }

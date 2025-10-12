@@ -4,6 +4,7 @@ async function initDevice() {
   const device = await adapter.requestDevice();
   return {adapter, device};
 }
+// WGSL portable kernel (1CE); tuner still valid
 const WGSL_TOPK_1CE = `
 struct Meta { rows:u32, cols:u32, k:u32, k_lane:u32, chunk_cols:u32, cand_cols:u32 };
 @group(0) @binding(0) var<storage, read>  X: array<f32>;
@@ -117,8 +118,6 @@ async function runOnce(device, rows, cols, k, k_lane, chunk_cols){
 function parseCsvInts(id){ return document.getElementById(id).value.split(',').map(s=>parseInt(s.trim(),10)); }
 
 function kmeans(points, k, iters=25){
-  // points: [{x:log2(cols), y:log2(k), z:log2(rows), ms, kl, wg, ch}]
-  // init: pick k random
   const n = points.length; if (n==0) return [];
   let centers = [];
   for (let i=0;i<k;i++) centers.push({...points[Math.floor(Math.random()*n)]});

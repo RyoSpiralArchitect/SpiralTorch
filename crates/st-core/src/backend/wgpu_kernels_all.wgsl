@@ -1,1 +1,1 @@
-// WGSL common
+// WGSL common base

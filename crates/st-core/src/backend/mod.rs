@@ -7,12 +7,18 @@ pub mod wgpu_where_direct;
 #[cfg(feature="wgpu")]
 pub mod wgpu_topk_kway;
 #[cfg(feature="wgpu")]
-pub mod wgpu_heuristics;
+pub mod wgpu_topk_subgroup;
+
+pub mod wgpu_heuristics; // always compiled (doesn't depend on wgpu crate)
 
 #[cfg(feature="mps")]
 pub const MSL_WHERE: &str = include_str!("mps_where_nd_strided_u8.metal");
 #[cfg(feature="mps")]
+pub const MSL_TOPK: &str = include_str!("mps_topk_kway.metal");
+#[cfg(feature="mps")]
 pub mod mps_where_direct;
+#[cfg(feature="mps")]
+pub mod mps_topk_kway;
 
 #[cfg(feature="cuda")]
 pub mod cuda_topk_kway;

@@ -1,6 +1,6 @@
 [package]
 name = "spiraltorch"
-version = "1.3.90"
+version = "1.3.98"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 description = "SpiralTorch Python bindings"
@@ -22,3 +22,4 @@ pyo3 = { version = "0.21", features = ["extension-module"] }
 numpy = "0.20"
 st-core = { path = "../../crates/st-core" }
 bytemuck = { version = "1.14", features = ["derive"] }
+half = "2.4"

@@ -30,9 +30,7 @@ fn kdsl_choose(rows:u32, cols:u32, k:u32, subgroup: bool) -> Option<(bool,u32,u3
 fn kdsl_choose(_rows:u32, _cols:u32, _k:u32, _subgroup: bool) -> Option<(bool,u32,u32,u32)> { None }
 
 pub fn choose(rows:u32, cols:u32, k:u32, subgroup: bool) -> Option<(bool,u32,u32,u32)> {
-    // 1) if SPIRAL_HEUR_K is provided (and feature=kdsl), use SpiralK program at runtime
     if let Some(v) = kdsl_choose(rows, cols, k, subgroup) { return Some(v); }
-    // 2) else None → fallback heuristic in code
     None
 }
 "#).expect("write wgpu_heuristics.rs");

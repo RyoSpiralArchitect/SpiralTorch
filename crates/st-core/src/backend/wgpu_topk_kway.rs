@@ -91,12 +91,10 @@ fn readback_i32(buf:&wgpu::Buffer, len:usize)->Vec<i32>{
 }
 
 fn heuristic_choose(rows:u32, cols:u32, k:u32) -> (bool, u32, u32, u32) {
-    // subgroup detection left as bool hook for tuner or kdsl
     let subgroup = false;
     if let Some((u2, wg, kl, ch)) = crate::backend::wgpu_heuristics::choose(rows, cols, k, subgroup) {
         return (u2, wg, kl, ch);
     }
-    // fallback heuristic
     let use_2ce = cols > 32768 || k > 128;
     let wg = if cols < 4096 { 128 } else { 256 };
     let k_lane = if k >= 32 { 32 } else if k >= 16 { 16 } else { 8 };

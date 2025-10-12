@@ -1,11 +1,3 @@
-// SpiralK: ultra-small K-like expression DSL for heuristics.
-// Supported:
-//   - variables: r (rows), c (cols), k (k), sg (subgroup: 0/1)
-//   - ops: + - * / ^, < > <= >= == !=, && ||
-//   - functions: log2(x), clamp(x,a,b), sel(cond,a,b)
-//   - returns a 4-tuple as "u2,wg,kl,ch" (bool,use_2ce; u32 wg_size,k_lane,chunk_cols)
-// Example program (string):
-//   "u2:(c>32768)||(k>128); wg:sel(c<4096,128,256); kl:sel(k>=32,32,sel(k>=16,16,8)); ch:sel(c>16384,8192,0)"
 use std::str::Chars;
 
 #[derive(Clone, Debug)]
@@ -60,7 +52,6 @@ impl Parser{
     pub fn new(toks:Vec<Tok>)->Self{ Self{toks, i:0} }
     fn peek(&self)->Option<&Tok>{ self.toks.get(self.i) }
     fn bump(&mut self)->Option<Tok>{ if self.i<self.toks.len(){ self.i+=1; Some(self.toks[self.i-1].clone()) } else { None } }
-    fn eat(&mut self, tk:&Tok)->bool{ if let Some(p)=self.peek(){ std::mem::discriminant(p)==std::mem::discriminant(tk) } else { false } }
 
     fn parse_expr(&mut self)->f64{ self.parse_or() }
     fn parse_or(&mut self)->f64{
@@ -125,23 +116,15 @@ impl Parser{
         match self.bump().unwrap() {
             Tok::Num(n) => n,
             Tok::Id(id) => {
-                if id=="log2" {
-                    assert!(matches!(self.bump(), Some(Tok::LParen))); let v = self.parse_expr();
-                    assert!(matches!(self.bump(), Some(Tok::RParen))); v.log2()
-                } else if id=="clamp" {
-                    assert!(matches!(self.bump(), Some(Tok::LParen))); let a=self.parse_expr();
-                    assert!(matches!(self.bump(), Some(Tok::Comma))); let b=self.parse_expr();
-                    assert!(matches!(self.bump(), Some(Tok::Comma))); let c=self.parse_expr();
-                    assert!(matches!(self.bump(), Some(Tok::RParen))); a.max(b).min(c)
-                } else if id=="sel" {
-                    assert!(matches!(self.bump(), Some(Tok::LParen))); let cond=self.parse_expr();
-                    assert!(matches!(self.bump(), Some(Tok::Comma))); let tv=self.parse_expr();
-                    assert!(matches!(self.bump(), Some(Tok::Comma))); let fv=self.parse_expr();
-                    assert!(matches!(self.bump(), Some(Tok::RParen))); if cond!=0.0 { tv } else { fv }
-                } else if id=="r" || id=="c" || id=="k" || id=="sg" {
-                    // sentinel: put back as variable read
-                    self.i-=1; f64::NAN
-                } else { panic!("unknown id {id}") }
+                match id.as_str() {
+                    "log2" => { assert!(matches!(self.bump(), Some(Tok::LParen))); let v=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::RParen))); v.log2() }
+                    "clamp"=> { assert!(matches!(self.bump(), Some(Tok::LParen))); let a=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::Comma))); let b=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::Comma))); let c=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::RParen))); a.max(b).min(c) }
+                    "sel"  => { assert!(matches!(self.bump(), Some(Tok::LParen))); let cond=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::Comma))); let tv=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::Comma))); let fv=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::RParen))); if cond!=0.0 { tv } else { fv } }
+                    "min"  => { assert!(matches!(self.bump(), Some(Tok::LParen))); let a=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::Comma))); let b=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::RParen))); a.min(b) }
+                    "max"  => { assert!(matches!(self.bump(), Some(Tok::LParen))); let a=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::Comma))); let b=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::RParen))); a.max(b) }
+                    "r" | "c" | "k" | "sg" => { panic!("variables must be substituted before parse_primary"); }
+                    _ => panic!("unknown id {id}")
+                }
             }
             Tok::LParen => { let v=self.parse_expr(); assert!(matches!(self.bump(), Some(Tok::RParen))); v }
             _ => panic!("syntax")
@@ -149,30 +132,25 @@ impl Parser{
     }
 }
 
+fn subst_vars(expr:&str, r:f64, c:f64, k:f64, sg:f64)->String{
+    expr.replace("r","(R)").replace("c","(C)").replace("k","(K)").replace("sg","(S)")
+        .replace("R", &format!("{r}"))
+        .replace("C", &format!("{c}"))
+        .replace("K", &format!("{k}"))
+        .replace("S", &format!("{sg}"))
+}
+
 pub fn eval(expr:&str, r:f64, c:f64, k:f64, sg:f64)->f64{
-    // A simplistic variable substitution pass for ids r,c,k,sg
-    let replaced = expr.replace("r","(R)").replace("c","(C)").replace("k","(K)").replace("sg","(S)");
-    let mut code = replaced.replace("R", &format!("{r}"))
-                           .replace("C", &format!("{c}"))
-                           .replace("K", &format!("{k}"))
-                           .replace("S", &format!("{sg}"));
+    let code = subst_vars(expr, r,c,k,sg);
     let toks = lex(&code);
     let mut p = Parser::new(toks);
     p.parse_expr()
 }
 
 pub fn choose_from_program(prog:&str, rows:u32, cols:u32, k:u32, subgroup: bool) -> Option<(bool,u32,u32,u32)> {
-    // Program format: "u2:<expr>; wg:<expr>; kl:<expr>; ch:<expr>"
     let r = rows as f64; let c = cols as f64; let kk = k as f64; let sg = if subgroup {1.0} else {0.0};
-    fn find_block<'a>(s:&'a str, key:&str)->Option<&'a str>{
-        let pat = format!("{key}:");
-        s.find(&pat).map(|i| {
-            let rest=&s[i+pat.len()..];
-            let end=rest.find(';').unwrap_or(rest.len());
-            &rest[..end]
-        })
-    }
-    let u2s = find_block(prog,"u2")?; let wgs = find_block(prog,"wg")?; let kls = find_block(prog,"kl")?; let chs = find_block(prog,"ch")?;
+    fn block<'a>(s:&'a str, key:&str)->Option<&'a str>{ let pat=format!("{key}:"); s.find(&pat).map(|i|{ let rest=&s[i+pat.len()..]; let end=rest.find(';').unwrap_or(rest.len()); &rest[..end] }) }
+    let u2s = block(prog,"u2")?; let wgs = block(prog,"wg")?; let kls = block(prog,"kl")?; let chs = block(prog,"ch")?;
     let u2v = eval(u2s, r,c,kk,sg) != 0.0;
     let wgv = eval(wgs, r,c,kk,sg).max(1.0).round() as u32;
     let klv = eval(kls, r,c,kk,sg).max(1.0).round() as u32;
