@@ -1,8 +1,10 @@
+
 [workspace]
 members = [
+  "crates/st-backend-hip",
   "crates/st-core",
   "crates/st-kdsl",
   "crates/st-logic",
-  "crates/st-kv"
+  "crates/st-kv",
+  "tools",
 ]
-resolver = "2"

@@ -1,0 +1,2 @@
+recursive-include bindings/st-py *
+include README.md

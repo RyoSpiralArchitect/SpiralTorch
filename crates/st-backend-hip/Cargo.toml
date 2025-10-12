@@ -1,0 +1,14 @@
+[package]
+name = "st-backend-hip"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[features]
+# hip-real: link to real HIP/RCCL (user provides libs/includes); default is stub.
+default = []
+hip-real = []
+
+[dependencies]
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }

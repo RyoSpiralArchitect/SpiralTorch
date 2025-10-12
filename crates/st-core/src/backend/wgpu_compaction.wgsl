@@ -1,3 +1,4 @@
+// WGSL skeleton for compaction scan (two WG sizes)
 struct Meta { rows:u32; cols:u32; stride:u32; }
 @group(0) @binding(0) var<uniform> U : Meta;
 @group(0) @binding(1) var<storage, read>  MASK : array<u32>;
@@ -8,45 +9,24 @@ struct Meta { rows:u32; cols:u32; stride:u32; }
 
 fn idx(r:u32,c:u32)->u32{ return r*U.stride + c; }
 
-@compute @workgroup_size(256)
-fn exclusive_scan_rows(@builtin(local_invocation_id)  lid: vec3<u32>,
-                       @builtin(global_invocation_id) gid: vec3<u32>,
-                       @builtin(workgroup_id) wid: vec3<u32>) {
+@compute @workgroup_size(128)
+fn exclusive_scan_rows_wg128(@builtin(local_invocation_id)  lid: vec3<u32>,
+                             @builtin(workgroup_id) wid: vec3<u32>) {
   let r = wid.x;
   if (r>=U.rows) { return; }
   var c = lid.x;
   loop {
-    if (c < U.cols) {
-      PREFIX[idx(r,c)] = MASK[idx(r,c)];
-      c += 256u;
-    } else { break; }
+    if (c < U.cols) { PREFIX[idx(r,c)] = MASK[idx(r,c)]; c += 128u; } else { break; }
   }
-  workgroupBarrier();
-  var offset:u32 = 1u;
-  loop {
-    if (offset >= 256u) { break; }
-    var c2 = lid.x;
-    loop {
-      if (c2 < U.cols) {
-        let prev = i32(c2) - i32(offset);
-        if (prev >= 0) {
-          PREFIX[idx(r,c2)] = PREFIX[idx(r,c2)] + PREFIX[idx(r,u32(prev))];
-        }
-        c2 += 256u;
-      } else { break; }
-    }
-    workgroupBarrier();
-    offset = offset * 2u;
-  }
-  var c3 = lid.x;
-  loop {
-    if (c3 < U.cols) {
-      let inc = PREFIX[idx(r,c3)];
-      let ex = select(0u, inc - MASK[idx(r,c3)], inc>0u || MASK[idx(r,c3)]>0u);
-      PREFIX[idx(r,c3)] = ex;
-      c3 += 256u;
-    } else { break; }
-  }
+}
+
+@compute @workgroup_size(256)
+fn exclusive_scan_rows_wg256(@builtin(local_invocation_id)  lid: vec3<u32>,
+                             @builtin(workgroup_id) wid: vec3<u32>) {
+  let r = wid.x;
+  if (r>=U.rows) { return; }
+  var c = lid.x;
+  loop { if (c < U.cols) { PREFIX[idx(r,c)] = MASK[idx(r,c)]; c += 256u; } else { break; } }
 }
 
 @compute @workgroup_size(256)

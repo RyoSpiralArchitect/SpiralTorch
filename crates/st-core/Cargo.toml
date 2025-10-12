@@ -1,9 +1,9 @@
+
 [package]
 name = "st-core"
-version = "1.4.6"
+version = "1.5.2"
 edition = "2021"
 license = "AGPL-3.0-or-later"
-description = "SpiralTorch core: unified heuristics + ops + experimental"
 
 [features]
 logic = ["dep:st-logic"]
@@ -11,9 +11,16 @@ kdsl = ["dep:st-kdsl"]
 kv-redis = ["dep:st-kv/redis"]
 
 [dependencies]
-ndarray = "0.15"
-rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "1"
 st-logic = { path = "../st-logic", optional = true }
 st-kdsl  = { path = "../st-kdsl",  optional = true }
 st-kv    = { path = "../st-kv",    optional = true }
+
+# --- v1.5.3 ---
+[features]
+hip = ["dep:st-backend-hip"]
+
+[dependencies]
+st-backend-hip = { path = "../st-backend-hip", optional = true }

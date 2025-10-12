@@ -1,23 +1,29 @@
+
+use super::wgpu_heuristics::Choice;
+use super::self_rewrite::load_local_kdsl;
 #[cfg(feature="logic")]
 pub use st_logic::{SoftRule, Field, Value};
 
-use super::heuristics::Choice;
-
 pub fn parse_env_dsl(rows:u32, cols:u32, k:u32, subgroup:bool) -> (Option<Choice>, Vec<SoftRule>) {
-    let src = match std::env::var("SPIRAL_HEUR_K"){ Ok(s)=>s, Err(_)=>return (None, vec![]) };
+    let src = std::env::var("SPIRAL_HEUR_K_LAB")
+        .or_else(|_| std::env::var("SPIRAL_HEUR_K"))
+        .unwrap_or_else(|_| load_local_kdsl().unwrap_or_default());
     if src.trim().is_empty(){ return (None, vec![]) }
     #[cfg(feature="kdsl")]
     {
         let ctx = st_kdsl::Ctx{ r:rows, c:cols, k, sg:subgroup };
-        let out = match st_kdsl::eval_program(&src, &ctx){ Ok(o)=>o, Err(_)=> return (None, vec![]) };
-        let hard = if out.hard.use_2ce.is_some() || out.hard.wg.is_some() || out.hard.kl.is_some() || out.hard.ch.is_some() {
-            Some(Choice{
-                use_2ce: out.hard.use_2ce.unwrap_or(false),
-                wg: out.hard.wg.unwrap_or(if subgroup{256}else{128}),
-                kl: out.hard.kl.unwrap_or(if k>=64{32}else if k>=16{16}else{8}),
-                ch: out.hard.ch.unwrap_or(if cols>16_384{8192}else{0}),
-            })
-        } else { None };
+        let out = match st_kdsl::eval_program(&src, &ctx){
+            Ok(o)=>o, Err(_)=> return (None, vec![]) };
+        let hard = {
+            if out.hard.use_2ce.is_some() || out.hard.wg.is_some() || out.hard.kl.is_some() || out.hard.ch.is_some() {
+                Some(Choice{
+                    use_2ce: out.hard.use_2ce.unwrap_or(false),
+                    wg: out.hard.wg.unwrap_or(if subgroup{256}else{128}),
+                    kl: out.hard.kl.unwrap_or(if k>=64{32}else if k>=16{16}else{8}),
+                    ch: out.hard.ch.unwrap_or(if cols>16_384{8192}else{0}),
+                })
+            } else { None }
+        };
         let mut soft = Vec::<SoftRule>::new();
         for r in out.soft {
             match r {
@@ -33,7 +39,7 @@ pub fn parse_env_dsl(rows:u32, cols:u32, k:u32, subgroup:bool) -> (Option<Choice
     (None, vec![])
 }
 
-pub fn choose_from_kv(rows:u32, cols:u32, k:u32, subgroup:bool)->Option<Choice>{
+pub fn choose_from_kv(rows:u32, cols:u32, k:u32, subgroup:bool) -> Option<Choice> {
     #[cfg(feature="kv-redis")]
     {
         let url = std::env::var("REDIS_URL").ok()?;
