@@ -1,24 +1,23 @@
 [package]
 name = "spiraltorch"
-version = "1.3.30"
+version = "1.3.56"
 edition = "2021"
 license = "AGPL-3.0-or-later"
-description = "SpiralTorch Python bindings (PyO3)"
-authors = ["Ryo SpiralArchitect"]
+description = "SpiralTorch Python bindings"
 repository = "https://github.com/RyoSpiralArchitect/spiraltorch"
 
 [lib]
 name = "spiraltorch"
 crate-type = ["cdylib"]
 
+[features]
+default = []
+wgpu = ["st-core/wgpu"]
+mps  = ["st-core/mps"]
+cuda = ["st-core/cuda"]
+
 [dependencies]
 pyo3 = { version = "0.21", features = ["extension-module"] }
 numpy = "0.20"
-ndarray = "0.15"
 st-core = { path = "../../crates/st-core" }
-
-[features]
-default = []
-cuda = ["st-core/cuda"]
-wgpu = ["st-core/wgpu"]
-mps  = ["st-core/mps"]
+bytemuck = { version = "1.14", features = ["derive"] }

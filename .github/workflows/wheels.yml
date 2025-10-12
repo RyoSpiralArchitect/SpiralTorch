@@ -1,11 +1,9 @@
-
 name: Wheels
-
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+    tags: ["v*"]
+    branches: ["main"]
+  pull_request:
 
 jobs:
   build-wheels:
@@ -13,65 +11,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            manylinux: auto
-            features: ""
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            manylinux: manylinux_2_28
-            features: "--features wgpu"
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            manylinux: musllinux_1_2
-            features: "--features wgpu"
-          - os: macos-13
-            target: x86_64-apple-darwin
-            features: ""
-          - os: macos-14
-            target: aarch64-apple-darwin
-            features: ""
-          - os: macos-14
-            target: universal2-apple-darwin
-            features: "--features wgpu"
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            features: ""
-
+        os: [ubuntu-latest, macos-latest]
+        feature: [cpu, wgpu, mps]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: PyO3/maturin-action@v1
         with:
-          python-version: '3.12'
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Build wheels
-        uses: messense/maturin-action@v1
+          working-directory: bindings/st-py
+          args: >
+            --release
+            --locked
+            ${{ matrix.feature == 'wgpu' && '--features wgpu' || '' }}
+            ${{ matrix.feature == 'mps' && '--features mps' || '' }}
+      - uses: actions/upload-artifact@v4
         with:
-          manylinux: ${{ matrix.manylinux }}
-          target: ${{ matrix.target }}
-          args: --release --manifest-path bindings/st-py/Cargo.toml ${{ matrix.features }}
-          sdist: false
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-${{ matrix.target }}
-          path: target/wheels/*.whl
-
-  release:
-    needs: build-wheels
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-      - name: Gather wheels
-        run: |
-          mkdir -p upload
-          find dist -name "*.whl" -exec cp {} upload/ \;
-      - name: Create GitHub Release & Upload Assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: upload/*.whl
+          name: wheels-${{ matrix.os }}-${{ matrix.feature }}
+          path: bindings/st-py/target/wheels/*.whl

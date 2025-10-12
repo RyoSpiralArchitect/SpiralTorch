@@ -1,4 +1,7 @@
-/target
-**/__pycache__/
-*.pyc
 .DS_Store
+target/
+.venv/
+.buildenv/
+node_modules/
+*.zip
+patch-v*/
