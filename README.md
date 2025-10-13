@@ -1,29 +1,37 @@
 
 # 🌀🕯️SpiralTorch🕯️🌀
 
-**SpiralK + SoftLogic + (optional) WASM tuner** collaborate to pick the fastest **merge kind** and **tile width** for your hardware—then **Self-Rewrite** locks the win back into your heuristics.  
+**SpiralK + SoftLogic + (optional) WASM tuner** collaborate to pick the fastest **merge kind** and **tile width** for your hardware—then **Self-Rewrite** locks the win back into your heuristics.
 **WGPU** is the default path; **HIP/CUDA** absorb the **same unified choices**. Python wheels target **3.11–3.14**.
+
+Beyond kernels, the project now incubates an ever-expanding pure Rust learning
+stack: language stays raw, gradients stay hyperbolic, and meaning is sculpted
+directly in Z-space without ever touching NumPy or PyTorch.
 
 > **Why it’s different**
 > - **Two-layer consensus:** SpiralK (runtime rules) + WASM table (offline measurements)  
 > - **Unified heuristics:** One `Choice { mk, mkd, tile, ctile, … }` across WGPU / HIP / CUDA  
 > - **1-CE Subgroup Top-K (WGPU):** candidates → final in a single compute pass  
 > - **MidK/BottomK compaction:** 1-CE / 2-CE, tile-aware, same API  
-> - **Ameba Hypergrad:** unrolled / implicit (Neumann / CG) hyper-gradients
+> - **Amega Hypergrad:** unrolled / implicit (Neumann / CG) hyper-gradients that now sync with the pure tensor tape
 
 ---
 
 ## What you get
 
-- **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**  
+- **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**
   Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, everyone uses the same plan.
-- **SpiralK DSL** (K×Lisp-inspired)  
+- **SpiralK DSL** (K×Lisp-inspired)
   Hard assigns (`mk:`, `tile:`) and soft rules (`soft(mk, …)`, `soft(tile, …)`) that blend with measurements.
-- **SoftLogic (finite-domain solver)**  
+- **SoftLogic (finite-domain solver)**
   Explores a tiny discrete space (merge kinds, tiles) and scores candidates with your soft rules.
-- **Optional WASM tuner table**  
+- **Pure Rust training core**
+  `st-tensor::pure` ships dependency-free tensors, hyperbolic Z-space encoders,
+  and the new `AmegaHypergrad` tape so you can iterate on learning logic without
+  PyTorch/Numpy while staying inside non-Euclidean geometry.
+- **Optional WASM tuner table**
   Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
-- **Self-Rewrite**  
+- **Self-Rewrite**
   A/B outcomes (Wilson CI) append `soft(...)` into `~/.spiraltorch/heur.kdsl` when the advantage is statistically significant.
   
 ---
@@ -135,6 +143,82 @@ vals, idx = st.topk2d(x, k=1024, device="auto")   # "wgpu > cuda > mps > cpu"
 
 ---
 
+## Pure Rust training (zero PyTorch/Numpy deps)
+
+Need a bootstrap-friendly learning loop without pulling in heavyweight
+dependencies?  `st-tensor::pure` now ships with zero-panic tensors,
+hyperbolic distance helpers, and complex-spectrum encoders so the stack keeps
+accelerating without ever leaning on NumPy or PyTorch.
+
+```rust
+use st_tensor::pure::{LinearModel, PureResult, Tensor, mean_squared_error};
+
+fn main() -> PureResult<()> {
+    // Build a dataset for y = 2x + 1 using plain Rust vectors.
+    let inputs = Tensor::from_vec(4, 1, vec![0.0, 1.0, 2.0, 3.0])?;
+    let targets = Tensor::from_vec(4, 1, vec![1.0, 3.0, 5.0, 7.0])?;
+
+    let mut model = LinearModel::new(1, 1)?;
+    for _ in 0..200 {
+        model.train_batch(&inputs, &targets, 0.1)?;
+    }
+
+    let predictions = model.forward(&inputs)?;
+    let mse = mean_squared_error(&predictions, &targets)?;
+    println!("Final MSE: {mse:.6}");
+    Ok(())
+}
+```
+
+Everything runs with `cargo run -p st-tensor --example ...` or inside your own
+binary crate—no Python wheels required. When you want to leave Euclidean space,
+hand text straight to the Z-space encoder and stay in browser-friendly memory
+limits without ever tokenizing:
+
+```rust
+use st_tensor::pure::{LanguageWaveEncoder, PureResult};
+
+fn main() -> PureResult<()> {
+    let encoder = LanguageWaveEncoder::new(-1.0, 0.75)?;
+    let z_space = encoder.encode_z_space("SpiralTorch stays homotopy-free")?;
+    println!("{} hyperbolic components", z_space.shape().1);
+    Ok(())
+}
+```
+
+Take it further by coupling the Z-space encoder with the brand-new `AmegaHypergrad`
+tape: gradients stay conformal, curvature never drifts, and the entire pipeline
+continues to run without touching NumPy or PyTorch.
+
+```rust
+use st_tensor::pure::{AmegaHypergrad, LanguageWaveEncoder, PureResult, Tensor};
+
+fn main() -> PureResult<()> {
+    let encoder = LanguageWaveEncoder::new(-1.0, 0.8)?;
+    let wave = encoder.encode_z_space("hyperbolic language without tokens")?;
+    let (rows, cols) = wave.shape();
+
+    let mut hypergrad = AmegaHypergrad::new(encoder.curvature(), 0.03, rows, cols)?;
+    hypergrad.accumulate_wave(&wave)?;
+
+    let targets = Tensor::zeros(rows, cols)?;
+    hypergrad.accumulate_pair(&wave, &targets)?;
+
+    let mut weights = Tensor::zeros(rows, cols)?;
+    hypergrad.apply(&mut weights)?;
+
+    println!("updated weight energy = {:.6}", weights.squared_l2_norm());
+    Ok(())
+}
+```
+
+Because the optimiser keeps its own curvature-aware buffer, you can stream
+text → wave → hypergrad endlessly without ever seeing a traceback. Non-Euclidean
+geometry, imaginary spectra, and category-inspired language flows all feed the
+same tape, letting SpiralTorch chase meaning directly in Z-space.
+
+---
+
 ## Heuristics (SpiralK) — optional & powerful
 
 SpiralK is a tiny runtime DSL for device-aware choices. Flip it on, then shape the policy per device.
@@ -182,27 +266,53 @@ python3 tools/tuner/gen_generated_rs.py tools/tuner/tuner_results.json \
   > crates/st-core/src/backend/wgpu_heuristics_generated.rs
 ```
 
+### Fractional FFT / SpiralK roadmap
+
+- **Radix-2 → Radix-4 pipeline**: The new `st-frac::fft` module mirrors the GPU
+  butterfly structure so SpiralK can auto-emit subgroup-aware WGSL.
+- **Wilson-aware automation**: `st-kdsl::auto` turns latency deltas into
+  high-confidence `soft(...)` rewrites, wiring tuned `radix`, `tile_cols`, and
+  `segments` into `heur.kdsl` without manual editing.
+- **ND GPU indexer**: A dedicated WGSL kernel materialises strided indices and
+  per-segment IDs, unlocking fast fractional/FFT dispatches from WASM → Canvas.
+- **WASM tuner baking**: The generator now bakes `tile_cols`/`radix`/`segments`
+  into the Rust table, ensuring the browser path stays in sync with native
+  runners when driving SpiralK graphs.
+
 **Example JSON**
 ```json
 [
-  {"rows": 1024, "cols_min": 4096,  "cols_max": 8191,   "k_max": 128,  "sg": true,  "mk": 2, "tile": 512},
-  {"rows": 1024, "cols_min": 8192,  "cols_max": 65535,  "k_max": 2048, "sg": true,  "mk": 1, "tile": 1024},
-  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": true,  "mk": 1, "tile": 2048},
-  {"rows": 1024, "cols_min": 4096,  "cols_max": 65535,  "k_max": 2048, "sg": false, "mk": 1, "tile": 1024},
-  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": false, "mk": 0, "tile": 2048}
+  {"rows": 1024, "cols_min": 4096,  "cols_max": 8191,   "k_max": 128,  "sg": true,  "mk": 2, "tile": 512,
+   "tile_cols": 1024, "radix": 2, "segments": 1, "use_2ce": false},
+  {"rows": 1024, "cols_min": 8192,  "cols_max": 65535,  "k_max": 2048, "sg": true,  "mk": 1, "tile": 1024,
+   "tile_cols": 2048, "radix": 4, "segments": 2},
+  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": true,  "mk": 1, "tile": 2048,
+   "tile_cols": 4096, "radix": 4, "segments": 4, "use_2ce": true},
+  {"rows": 1024, "cols_min": 4096,  "cols_max": 65535,  "k_max": 2048, "sg": false, "mk": 1, "tile": 1024,
+   "tile_cols": 1024, "radix": 2, "segments": 1},
+  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": false, "mk": 0, "tile": 2048,
+   "tile_cols": 2048, "radix": 4, "segments": 2, "use_2ce": true}
 ]
 ```
 
+The generator now bakes FFT-oriented hints (`tile_cols`, `radix`) and the ND GPU
+segment count directly into the Rust table, so `st-core` can immediately expose
+them to the SpiralK Wilson self-rewrite logic.
+
 ---
 
-## Ameba Hypergrad (unrolled / implicit)
+## Amega Hypergrad (unrolled / implicit)
 
 Rust utilities for hyper-parameter gradients (continuous relaxation):
 - **Unrolled**: expand T updates and backprop
 - **Implicit**: Neumann or **CG** to solve `(I − J) v ≈ g` efficiently
 
-> See `crates/st-core/src/autograd/hypergrad*.rs`.  
+> See `crates/st-core/src/autograd/hypergrad*.rs`.
 > Python glue is kept minimal; wheels can expose helpers.
+
+The pure `st-tensor::pure::AmegaHypergrad` tape mirrors the same mindset in a
+dependency-free package, letting you stage language diffusion experiments in
+Rust and then feed the resulting curvature-aligned hints back into SpiralK.
 
 ---
 

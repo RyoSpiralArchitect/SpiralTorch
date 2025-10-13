@@ -28,7 +28,7 @@ impl WgpuCtx {
 }
 
 #[repr(C)] #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Params { rows:u32, cols:u32, k:u32, row_stride:u32, k_lane:u32, tile_cols:u32, _pad:u32, _pad2:u32 }
+struct Params { rows:u32, cols:u32, k:u32, row_stride:u32, k_lane:u32, tile_cols:u32, radix:u32, segments:u32 }
 
 static CTX: OnceCell<Arc<WgpuCtx>> = OnceCell::new();
 pub fn install_ctx(ctx: Arc<WgpuCtx>) { let _ = CTX.set(ctx); }
@@ -84,16 +84,22 @@ pub fn dispatch_topk_1ce(rows:u32, cols:u32, k:u32, row_stride:u32, k_lane:u32, 
     use wgpu::util::DeviceExt; use wgpu::Features;
     let ctx = ctx()?;
     let mut tile_cols = cols;
+    let mut radix_hint: u32 = if k.is_power_of_two() { 4 } else { 2 };
+    let mut segments_hint: u32 = if cols > 131_072 { 4 } else if cols > 32_768 { 2 } else { 1 };
     // SpiralK/Tuner choice for TopK
     let has_sub = ctx.device.features().contains(Features::SUBGROUPS);
     let mut algo_hint: u8 = 0;
     let mut ctile_hint: u32 = 0;
     if let Some(ch) = crate::backend::wgpu_heuristics::choose_topk(rows, cols, k, has_sub) {
-        algo_hint = ch.algo_topk; ctile_hint = ch.ctile;
+        algo_hint = ch.algo_topk;
+        ctile_hint = ch.ctile;
+        if ch.tile_cols != 0 { tile_cols = ch.tile_cols; }
+        radix_hint = ch.radix.max(1);
+        segments_hint = ch.segments.max(1);
     }
     if ctile_hint != 0 { tile_cols = ctile_hint; }
 
-    let params = Params{ rows, cols, k, row_stride, k_lane, tile_cols, _pad:0, _pad2:0 };
+    let params = Params{ rows, cols, k, row_stride, k_lane, tile_cols, radix: radix_hint, segments: segments_hint };
     let ub = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{ label: Some("st.rankk.params"), contents: bytemuck::bytes_of(&params), usage: wgpu::BufferUsages::UNIFORM });
     let layout = ensure_layout_topk(&ctx);
     let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor{ label: Some("st.rankk.bg.topk"), layout, entries: &[
