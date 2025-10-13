@@ -59,7 +59,7 @@ impl P{ fn peek(&self)->Option<&Tok>{ self.t.get(self.i) } fn eat(&mut self)->Op
 fn expect_lp(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Lp) } fn expect_rp(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Rp) } fn expect_comma(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Comma) }
 
 fn parse_prog(p:&mut P)->Result<Vec<Stmt>,Err>{ let mut out=Vec::new(); while p.peek().is_some(){ out.push(parse_stmt(p)?); if matches!(p.peek(),Some(Tok::Semi)){p.eat();}} Ok(out) }
-#[derive(Clone)] enum Stmt{ Assign(Field, Box<dyn Fn(&Ctx)->E>), Soft(Field, Box<dyn Fn(&Ctx)->u32>, Box<dyn Fn(&Ctx)->f64>, Box<dyn Fn(&Ctx)->bool>) }
+enum Stmt{ Assign(Field, Box<dyn Fn(&Ctx)->E>), Soft(Field, Box<dyn Fn(&Ctx)->u32>, Box<dyn Fn(&Ctx)->f64>, Box<dyn Fn(&Ctx)->bool>) }
 #[derive(Clone,Copy,PartialEq,Eq)] enum Field{ U2,Wg,Kl,Ch, Algo, Midk, Bottomk, Ctile }
 fn parse_field(p:&mut P)->Result<Field,Err>{
     match p.eat().ok_or(Err::Tok)?{
