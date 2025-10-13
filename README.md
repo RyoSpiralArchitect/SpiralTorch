@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # 🌀🕯️SpiralTorch🕯️🌀 — WGPU-first, Self-Tuning GPU Top-K (Rank-K) for Rust & Python
+=======
+# 🌀🕯️SpiralTorch🕯️🌀
+>>>>>>> origin/main
 
 **SpiralK + SoftLogic + (optional) WASM tuner** collaborate to pick the fastest **merge kind** and **tile width** for your hardware—then **Self-Rewrite** locks the win back into your heuristics.  
 **WGPU** is the default path; **HIP/CUDA** absorb the **same unified choices**. Python wheels target **3.11–3.14**.
