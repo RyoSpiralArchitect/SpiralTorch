@@ -38,7 +38,6 @@ pub fn cg_solve_device<L:DeviceLinearOp, O:DeviceOps>(
         let rs_new = ops.dot(n, r, r)?;
         if rs_new <= tol2 { break; }
         let beta = if rs_old != 0.0 { rs_new / rs_old } else { 0.0 };
-        // p = r + beta p
         ops.copy(n, r, p)?;
         ops.axpy(n, beta, p, p, p)?;
         rs_old = rs_new;

@@ -1,4 +1,4 @@
-//! WGPU runtime (v1.8.2): TopK 1CE (heap/bitonic), Mid/Bottom optimized apply
+//! WGPU runtime (v1.8.3): TopK 1CE (heap/bitonic w/ heuristic), Mid/Bottom apply_sg2
 #![allow(unused)]
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
@@ -9,12 +9,13 @@ pub struct WgpuCtx {
     pub queue:  wgpu::Queue,
     // Rank-K pipelines
     topk_heap_pl:   OnceCell<wgpu::ComputePipeline>,
+    topk_heap_sgintrin_pl: OnceCell<wgpu::ComputePipeline>,
     topk_bit_pl:    OnceCell<wgpu::ComputePipeline>,
     topk_wg_pl:     OnceCell<wgpu::ComputePipeline>,
     scan_tiles_pl:  OnceCell<wgpu::ComputePipeline>,
     row_prefix_pl:  OnceCell<wgpu::ComputePipeline>,
     apply_pl:       OnceCell<wgpu::ComputePipeline>,
-    apply_sg_pl:    OnceCell<wgpu::ComputePipeline>,
+    apply_sg2_pl:   OnceCell<wgpu::ComputePipeline>,
     layout_topk: OnceCell<wgpu::BindGroupLayout>,
     layout_cmp:  OnceCell<wgpu::BindGroupLayout>,
 }
@@ -24,12 +25,13 @@ impl WgpuCtx {
         Self{
             device, queue,
             topk_heap_pl: OnceCell::new(),
+            topk_heap_sgintrin_pl: OnceCell::new(),
             topk_bit_pl:  OnceCell::new(),
             topk_wg_pl:   OnceCell::new(),
             scan_tiles_pl: OnceCell::new(),
             row_prefix_pl: OnceCell::new(),
             apply_pl: OnceCell::new(),
-            apply_sg_pl: OnceCell::new(),
+            apply_sg2_pl: OnceCell::new(),
             layout_topk: OnceCell::new(),
             layout_cmp: OnceCell::new(),
         }
@@ -78,12 +80,7 @@ fn ensure_layout_topk(ctx:&WgpuCtx) -> &wgpu::BindGroupLayout {
     ctx.layout_topk.get_or_init(|| {
         ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
             label: Some("st.rankk.layout.topk"),
-            entries: &[
-                bge_storage(0, true),
-                bge_storage(1, false),
-                bge_storage(2, false),
-                bge_uniform(3),
-            ],
+            entries: &[ bge_storage(0, true), bge_storage(1, false), bge_storage(2, false), bge_uniform(3) ],
         })
     })
 }
@@ -128,6 +125,10 @@ fn ensure_topk_heap_pl(ctx:&WgpuCtx)->&wgpu::ComputePipeline {
     ctx.topk_heap_pl.get_or_init(|| pl(ctx, "topk_subgroups_heap_1ce", ensure_layout_topk(ctx)))
 }
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_topk_heap_sgintrin_pl(ctx:&WgpuCtx)->&wgpu::ComputePipeline {
+    ctx.topk_heap_sgintrin_pl.get_or_init(|| pl(ctx, "topk_subgroups_heap_sgintrin_1ce", ensure_layout_topk(ctx)))
+}
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
 fn ensure_topk_bit_pl(ctx:&WgpuCtx)->&wgpu::ComputePipeline {
     ctx.topk_bit_pl.get_or_init(|| pl(ctx, "topk_subgroups_bitonic_1ce", ensure_layout_topk(ctx)))
 }
@@ -148,8 +149,8 @@ fn ensure_apply_pl(ctx:&WgpuCtx)->&wgpu::ComputePipeline {
     ctx.apply_pl.get_or_init(|| pl(ctx, "midk_compact_apply", ensure_layout_cmp(ctx)))
 }
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
-fn ensure_apply_sg_pl(ctx:&WgpuCtx)->&wgpu::ComputePipeline {
-    ctx.apply_sg_pl.get_or_init(|| pl(ctx, "midk_compact_apply_sg", ensure_layout_cmp(ctx)))
+fn ensure_apply_sg2_pl(ctx:&WgpuCtx)->&wgpu::ComputePipeline {
+    ctx.apply_sg2_pl.get_or_init(|| pl(ctx, "midk_compact_apply_sg2", ensure_layout_cmp(ctx)))
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
@@ -170,9 +171,20 @@ pub fn dispatch_topk_1ce(plan:&crate::ops::rank_entry::RankPlan)->Result<(),Stri
         ]
     });
     let has_sub = ctx.device.features().contains(Features::SUBGROUPS);
-    let pl = if has_sub {
-        if io.k <= 32 { ensure_topk_heap_pl(&ctx) } else { ensure_topk_bit_pl(&ctx) }
-    } else { ensure_topk_wg_pl(&ctx) };
+    let sgc_hint = if has_sub { 8 } else { 1 }; // heuristic: 256/32
+    let force = std::env::var("ST_TOPK_FORCE").ok();
+    let prefer_heap = match force.as_deref() {
+        Some("heap") => true,
+        Some("bitonic") => false,
+        _ => (io.k <= 32 && io.cols >= 2048) || (io.k <= 16 && sgc_hint >= 8),
+    };
+    let prefer_intrin = std::env::var("ST_USE_SG_INTRIN").ok().as_deref()==Some("1");
+    let pl =
+        if has_sub {
+            if prefer_heap {
+                if prefer_intrin { ensure_topk_heap_sgintrin_pl(&ctx) } else { ensure_topk_heap_pl(&ctx) }
+            } else { ensure_topk_bit_pl(&ctx) }
+        } else { ensure_topk_wg_pl(&ctx) };
     let mut enc = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("st.rankk.enc.topk") });
     { let mut c = enc.begin_compute_pass(&wgpu::ComputePassDescriptor{ label: Some("st.rankk.pass.topk") });
       c.set_pipeline(pl); c.set_bind_group(0, &bg, &[]);
@@ -220,7 +232,7 @@ pub fn dispatch_compaction_2ce(plan:&crate::ops::rank_entry::RankPlan, kind:u32)
     }
     { let mut p = enc.begin_compute_pass(&wgpu::ComputePassDescriptor{ label: Some("apply") });
       let has_sub = ctx.device.features().contains(Features::SUBGROUPS);
-      let pl = if has_sub { ensure_apply_sg_pl(&ctx) } else { ensure_apply_pl(&ctx) };
+      let pl = if has_sub { ensure_apply_sg2_pl(&ctx) } else { ensure_apply_pl(&ctx) };
       p.set_pipeline(pl); p.set_bind_group(0, &bg, &[]);
       p.dispatch_workgroups(tiles_x.max(1), io.rows.max(1), 1);
     }
