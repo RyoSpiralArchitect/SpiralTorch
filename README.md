@@ -107,6 +107,16 @@ let exec = WgpuExecutor::default();
 execute_rank(&exec, &plan)?;
 ```
 
+`DeviceCaps` now ships backend-specific constructors (`wgpu`, `cuda`, `hip`, `cpu`) and
+builder-style setters (`with_subgroup`, `with_max_workgroup`, `with_shared_mem`) so you
+can describe GPUs with realistic limits while still feeding the unified heuristic
+chooser a compact struct. The chooser normalizes the plans produced by the DSL, the
+generated tables, and the fallback rules, aligning workgroup sizes to hardware warp
+widths, honouring shared-memory budgets, and scoring each candidate before execution.
+When the reported shared memory is too small for the shared-heap paths or two-stage
+compaction, the planner now automatically falls back to bitonic variants so that the
+plan always honours device limits.
+
 **Python**
 ```python
 import numpy as np, spiraltorch as st
