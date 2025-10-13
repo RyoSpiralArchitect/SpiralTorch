@@ -1,8 +1,5 @@
-<<<<<<< HEAD
-# 🌀🕯️SpiralTorch🕯️🌀 — WGPU-first, Self-Tuning GPU Top-K (Rank-K) for Rust & Python
-=======
+
 # 🌀🕯️SpiralTorch🕯️🌀
->>>>>>> origin/main
 
 **SpiralK + SoftLogic + (optional) WASM tuner** collaborate to pick the fastest **merge kind** and **tile width** for your hardware—then **Self-Rewrite** locks the win back into your heuristics.  
 **WGPU** is the default path; **HIP/CUDA** absorb the **same unified choices**. Python wheels target **3.11–3.14**.
@@ -28,6 +25,18 @@
   Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
 - **Self-Rewrite**  
   A/B outcomes (Wilson CI) append `soft(...)` into `~/.spiraltorch/heur.kdsl` when the advantage is statistically significant.
+  
+---
+
+### Features (opt-in)
+
+- `wgpu` / `wgpu-rt`: WebGPU backends + runtime wiring
+- `mps`: macOS Metal (MPS)
+- `cuda`: CUDA (NVRTC/PTX loader expected)
+- `hip`: ROCm HIP (stub-safe)
+- **`hip-real`**: ROCm HIP + RCCL “real” path (requires ROCm toolchain & linker; gated on top of `hip`)
+- **`kv-redis`**: enable Redis-backed consensus (soft hints); absent = **safe no-op**
+- `logic` / `kdsl`: SoftLogic solver / SpiralK DSL
 
 ---
 
@@ -201,6 +210,22 @@ Run tests/benches on your device and share logs (latency / shapes / adapter caps
 
 Upload a social preview PNG via **Repo → Settings → Social preview** (1200×630).  
 Suggested caption: **“SpiralTorch — WGPU-first, Self-Tuning GPU Top-K (Rank-K)”**.
+
+---
+
+### Troubleshooting
+
+- **No Redis?**  
+  Build without `kv-redis` or leave `REDIS_URL` unset. The consensus chooser
+  skips network calls and falls back to SpiralK / Generated-table safely.
+
+- **ROCm not installed but `hip` enabled?**  
+  Use `--features hip` only (stub path). The **real** path needs `hip-real`
+  and a working ROCm + RCCL toolchain.
+
+- **Wheels red?**  
+  First build CPU+WGPU only: `maturin build -m bindings/st-py/Cargo.toml --release --features wgpu`
+  to decouple GPU toolchain issues.
 
 ---
 
