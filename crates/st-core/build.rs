@@ -1,9 +1,15 @@
-fn main(){
-println!("cargo:warning=SpiralTorch: build stub for wgpu_heuristics_generated.rs");
 use std::{fs, path::Path};
-let g = Path::new("crates/st-core/src/backend/wgpu_heuristics_generated.rs");
-if !g.exists() {
-    fs::write(g, "pub fn choose(_:u32,_:u32,_:u32,_:bool)->Option<super::heuristics::Choice>{None}\n").ok();
+fn main(){
+    let gen = Path::new("src/backend/wgpu_heuristics_generated.rs");
+    if !gen.exists(){
+        let stub = r#"
+#[allow(unused)]
+pub fn choose(_rows: usize, _cols: usize, _k: usize, _subgroup: bool) -> Option<super::Choice> {
+    None
 }
-
+"#;
+        fs::create_dir_all("src/backend").ok();
+        fs::write(gen, stub).expect("write stub heuristics_generated");
+        println!("cargo:warning=st-core: wrote stub backend/wgpu_heuristics_generated.rs");
+    }
 }

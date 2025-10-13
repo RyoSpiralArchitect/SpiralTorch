@@ -1,49 +1,41 @@
 [package]
 name = "st-core"
-version = "1.6.5"
+version = "1.9.2"
 edition = "2021"
 license = "AGPL-3.0-or-later"
-description = "SpiralTorch core (distributed orchestrators, config, heuristics hooks)"
+description = "SpiralTorch core (distributed orchestrators, heuristics, runtime)"
+
+[lib]
+name = "st_core"
+path = "src/lib.rs"
 
 [features]
-default = []
-
-# passthrough for HIP real impl
 hip-real = ["hip", "st-backend-hip/hip-real"]
-
-# existing
+default = []
 hip      = ["dep:st-backend-hip"]
-
-# GPU backends
 wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:once_cell"]
-wgpu-rt  = ["wgpu"]        # runtime wiring (wgpu_rt.rs / wgpu_exec.rs)
+wgpu-rt  = ["wgpu"]
 mps      = ["dep:metal"]
-cuda     = []              # 実体はランタイムロード前提（空でOK）
-
-# Heuristics / DSL / KV
+cuda     = []
 logic    = ["dep:st-logic"]
 kdsl     = ["dep:st-kdsl"]
-kv-redis = ["dep:st-kv", "st-kv/redis"]  # 依存を有効 + 依存側の 'redis' feature をON
+kv-redis = ["st-kv/redis"]
 
 [dependencies]
-thiserror = "1"
-rand = "0.8"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+thiserror   = "1"
+rand        = "0.8"
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+dirs        = "5"
+statrs      = "0.16"
 
-# backends（オプション）
+once_cell   = { version = "1.19", optional = true }
+bytemuck    = { version = "1.16", optional = true, features = ["derive"] }
+pollster    = { version = "0.3",  optional = true }
+wgpu        = { version = "0.19", optional = true, default-features = false, features = ["wgsl"] }
+metal       = { version = "0.28", optional = true }
+
 st-backend-hip = { path = "../st-backend-hip", optional = true }
-
-# heuristics / dsl / kv（オプション）
-st-logic = { path = "../st-logic", optional = true }
-st-kdsl  = { path = "../st-kdsl",  optional = true }
-st-kv    = { path = "../st-kv",    optional = true, features = ["redis"] }
-
-# WGPU runtime wiring（オプション）
-wgpu      = { version = "0.19", optional = true, default-features = false, features = ["wgsl"] }
-bytemuck  = { version = "1.16", optional = true, features = ["derive"] }
-pollster  = { version = "0.3",  optional = true }
-once_cell = { version = "1.19", optional = true }
-
-# MPS (macOS; Xcode が無くても mps feature を付けなければビルドされない)
-metal     = { version = "0.28", optional = true }
+st-logic       = { path = "../st-logic",       optional = true }
+st-kdsl        = { path = "../st-kdsl",        optional = true }
+st-kv          = { path = "../st-kv",          optional = true }
