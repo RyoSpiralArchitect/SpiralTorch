@@ -14,7 +14,7 @@ pub fn sample_lane_params(seed:u64, lane_set:&[i32], kl_set:&[i32], ch_set:&[i32
 fn median_i32(v:&mut [i32])->i32{ v.sort_unstable(); let n=v.len(); if n==0 {0} else { v[n/2] } }
 
 pub fn consensus_lane_params(mut p:LaneParams) -> LaneParams {
-    let _agg = std::env::var("SPIRAL_UNISON_AGG").unwrap_or_else(|_| "mean".into());
+    let agg = std::env::var("SPIRAL_UNISON_AGG").unwrap_or_else(|_| "mean".into());
     #[cfg(feature="hip")]
     {
         #[cfg(all(feature="hip", feature="hip-real"))] use st_backend_hip::rccl_comm::init_rccl_from_env;
