@@ -8,7 +8,7 @@
 struct Params {
   rows: u32, cols: u32, k: u32,
   row_stride: u32, k_lane: u32, tile_cols: u32,
-  _pad: u32, _pad2: u32,
+  radix: u32, segments: u32,
 };
 @group(0) @binding(0) var<storage, read> X: array<f32>;
 @group(0) @binding(1) var<storage, read_write> OUTV: array<f32>;
