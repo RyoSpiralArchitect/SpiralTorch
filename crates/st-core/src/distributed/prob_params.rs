@@ -1,5 +1,5 @@
-#[cfg(feature="hip-real")] fn maybe_sync(){ let _ = st_backend_hip::real::device_synchronize(); }
-#[cfg(not(feature="hip-real"))] fn maybe_sync(){}
+#[cfg(all(feature="hip", feature="hip-real"))] fn maybe_sync(){ let _ = st_backend_hip::real::device_synchronize(); }
+#[cfg(not(all(feature="hip", feature="hip-real")))] fn maybe_sync(){}
 
 use rand::{Rng, SeedableRng}; use rand::rngs::StdRng;
 
@@ -48,7 +48,7 @@ free(d_send); free(d_recv);
     #[cfg(feature="kv-redis")]
     {
         if let Ok(url) = std::env::var("REDIS_URL") {
-            if let Ok(samples) = st_kv::redis_lrange(redis_lrange(&url, "spiral:heur:lparams", 16)url, "spiral:heur:lparams", -16, -1) {
+            if let Ok(samples) = st_kv::redis_lrange(            if let Ok(samples) = st_kv::redis_lrange(redis_lrange(&url, "spiral:heur:lparams", 16)url, "spiral:heur:lparams", -16, -1) {url, "spiral:heur:lparams", -16, -1) {
                 let mut lanes=Vec::new(); let mut kls=Vec::new(); let mut chs=Vec::new();
                 for s in samples { if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s){
                     lanes.push(v["lane"].as_i64().unwrap_or(0) as i32);
