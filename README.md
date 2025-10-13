@@ -214,16 +214,38 @@ python3 tools/tuner/gen_generated_rs.py tools/tuner/tuner_results.json \
   > crates/st-core/src/backend/wgpu_heuristics_generated.rs
 ```
 
+### Fractional FFT / SpiralK roadmap
+
+- **Radix-2 → Radix-4 pipeline**: The new `st-frac::fft` module mirrors the GPU
+  butterfly structure so SpiralK can auto-emit subgroup-aware WGSL.
+- **Wilson-aware automation**: `st-kdsl::auto` turns latency deltas into
+  high-confidence `soft(...)` rewrites, wiring tuned `radix`, `tile_cols`, and
+  `segments` into `heur.kdsl` without manual editing.
+- **ND GPU indexer**: A dedicated WGSL kernel materialises strided indices and
+  per-segment IDs, unlocking fast fractional/FFT dispatches from WASM → Canvas.
+- **WASM tuner baking**: The generator now bakes `tile_cols`/`radix`/`segments`
+  into the Rust table, ensuring the browser path stays in sync with native
+  runners when driving SpiralK graphs.
+
 **Example JSON**
 ```json
 [
-  {"rows": 1024, "cols_min": 4096,  "cols_max": 8191,   "k_max": 128,  "sg": true,  "mk": 2, "tile": 512},
-  {"rows": 1024, "cols_min": 8192,  "cols_max": 65535,  "k_max": 2048, "sg": true,  "mk": 1, "tile": 1024},
-  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": true,  "mk": 1, "tile": 2048},
-  {"rows": 1024, "cols_min": 4096,  "cols_max": 65535,  "k_max": 2048, "sg": false, "mk": 1, "tile": 1024},
-  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": false, "mk": 0, "tile": 2048}
+  {"rows": 1024, "cols_min": 4096,  "cols_max": 8191,   "k_max": 128,  "sg": true,  "mk": 2, "tile": 512,
+   "tile_cols": 1024, "radix": 2, "segments": 1, "use_2ce": false},
+  {"rows": 1024, "cols_min": 8192,  "cols_max": 65535,  "k_max": 2048, "sg": true,  "mk": 1, "tile": 1024,
+   "tile_cols": 2048, "radix": 4, "segments": 2},
+  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": true,  "mk": 1, "tile": 2048,
+   "tile_cols": 4096, "radix": 4, "segments": 4, "use_2ce": true},
+  {"rows": 1024, "cols_min": 4096,  "cols_max": 65535,  "k_max": 2048, "sg": false, "mk": 1, "tile": 1024,
+   "tile_cols": 1024, "radix": 2, "segments": 1},
+  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": false, "mk": 0, "tile": 2048,
+   "tile_cols": 2048, "radix": 4, "segments": 2, "use_2ce": true}
 ]
 ```
+
+The generator now bakes FFT-oriented hints (`tile_cols`, `radix`) and the ND GPU
+segment count directly into the Rust table, so `st-core` can immediately expose
+them to the SpiralK Wilson self-rewrite logic.
 
 ---
 

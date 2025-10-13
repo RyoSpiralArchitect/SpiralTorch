@@ -661,6 +661,15 @@ pub fn choose_unified_rank(
                         ctile: 0,
                         mode_midk: 0,
                         mode_bottomk: 0,
+                        tile_cols: ((cols.max(1) + 1023) / 1024) as u32 * 1024,
+                        radix: if k.is_power_of_two() { 4 } else { 2 },
+                        segments: if cols > 131_072 {
+                            4
+                        } else if cols > 32_768 {
+                            2
+                        } else {
+                            1
+                        },
                     });
             let mut c = fallback(rows, cols, k, &caps, kind);
             let mut c = baseline;
