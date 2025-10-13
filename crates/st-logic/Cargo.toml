@@ -1,0 +1,12 @@
+[package]
+name = "st-logic"
+version = "0.2.0"
+edition = "2021"
+
+[features]
+default = ["soft"]
+soft = []
+
+[dependencies]
+thiserror = "1"
+rand = "0.8"
