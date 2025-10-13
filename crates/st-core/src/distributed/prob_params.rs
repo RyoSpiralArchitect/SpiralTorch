@@ -1,3 +1,6 @@
+#[cfg(feature="hip-real")] fn maybe_sync(){ let _ = st_backend_hip::real::device_synchronize(); }
+#[cfg(not(feature="hip-real"))] fn maybe_sync(){}
+
 use rand::{Rng, SeedableRng}; use rand::rngs::StdRng;
 
 #[derive(Clone, Copy, Debug)] pub struct LaneParams { pub lane:i32, pub kl:i32, pub ch:i32, pub prob:f32 }
@@ -14,7 +17,7 @@ pub fn consensus_lane_params(mut p:LaneParams) -> LaneParams {
     let agg = std::env::var("SPIRAL_UNISON_AGG").unwrap_or_else(|_| "mean".into());
     #[cfg(feature="hip")]
     {
-        #[cfg(feature="hip")] use st_backend_hip::rccl_comm::init_rccl_from_env;
+        #[cfg(feature="hip-real")] use st_backend_hip::rccl_comm::init_rccl_from_env;
 #[cfg(feature="hip")] use st_backend_hip::real::{HipStream, HipPtr, malloc, free, memcpy_h2d_async, memcpy_d2h_async, allgather_i32_dev};
         if let Ok(comm) = init_rccl_from_env() {
             let world = comm.world as usize;
@@ -27,8 +30,7 @@ pub fn consensus_lane_params(mut p:LaneParams) -> LaneParams {
             allgather_i32_dev(comm.comm, &stream, d_send, d_recv, 3).ok();
             let mut all = vec![0i32; 3*world];
             unsafe{ memcpy_d2h_async(all.as_mut_ptr() as *mut u8, d_recv, bytes*world, &stream).ok(); }
-            let _ = st_backend_hip::real::device_synchronize();
-            free(d_send); free(d_recv);
+free(d_send); free(d_recv);
             if agg=="median" {
                 let mut lanes: Vec<i32> = all.iter().step_by(3).cloned().collect();
                 let mut kls  : Vec<i32> = all.iter().skip(1).step_by(3).cloned().collect();
@@ -43,7 +45,7 @@ pub fn consensus_lane_params(mut p:LaneParams) -> LaneParams {
             }
         }
     }
-    #[cfg(feature="st-kv")]
+    #[cfg(feature="kv-redis")]
     {
         if let Ok(url) = std::env::var("REDIS_URL") {
             if let Ok(samples) = st_kv::redis_lrange(&url, "spiral:heur:lparams", 16) {

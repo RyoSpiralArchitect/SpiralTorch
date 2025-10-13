@@ -85,7 +85,7 @@ struct P{ t:Vec<Tok>, i:usize }
 impl P{
     fn peek(&self)->Option<&Tok>{ self.t.get(self.i) }
     fn eat(&mut self)->Option<Tok>{ let x=self.t.get(self.i).cloned(); if x.is_some(){self.i+=1;} x }
-    fn expect(&mut self, want:&Tok)->Result<(),Err>{ let x=self.eat().ok_or(Err::Tok)?; if &x==want {Ok(())} else {Err::Tok} }
+    fn expect(&mut self, want:&Tok)->Result<(),Err>{ let x=self.eat().ok_or(Err::Tok)?; if &x==want {Ok(())} else {Err(Err::Tok)} }
 }
 
 #[derive(Clone,Copy)]
@@ -94,8 +94,6 @@ impl E{ fn as_f(self)->f64{ match self{E::F(x)=>x,E::B(b)=> if b{1.0}else{0.0}} 
 
 #[derive(Clone,Copy,PartialEq,Eq)]
 enum Field{ U2,Wg,Kl,Ch,Mk,Mkd,Tl,Ct }
-
-#[derive(Clone)]
 enum Stmt{
     Assign(Field, Box<dyn Fn(&Ctx)->E>),
     Soft(Field, Box<dyn Fn(&Ctx)->u32>, Box<dyn Fn(&Ctx)->f64>, Box<dyn Fn(&Ctx)->bool>),

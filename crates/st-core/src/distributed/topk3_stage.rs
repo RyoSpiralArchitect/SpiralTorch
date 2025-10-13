@@ -15,8 +15,8 @@ pub fn run_topk3_stage(ctx:&DistCtx, local:TopKShard<f32>, k:usize)->TopKShard<f
     }
     #[cfg(feature="hip")]
     {
-        use st_backend_hip::rccl_comm::init_rccl_from_env;
-        use st_backend_hip::real::{HipStream, HipPtr, malloc, free, memcpy_h2d_async, memcpy_d2h_async,
+#[cfg(feature="hip-real")]         use st_backend_hip::rccl_comm::init_rccl_from_env;
+#[cfg(feature="hip-real")]         use st_backend_hip::real::{HipStream, HipPtr, malloc, free, memcpy_h2d_async, memcpy_d2h_async,
             allgather_u64_dev, pack_vals_idx_u64,
             kway_merge_bitonic_u64, kway_merge_shared_heap_keepk_u64, kway_merge_warp_heap_keepk_u64,
             kway_merge_shared_heap_real_keepk_u64, kway_merge_warp_coop_keepk_u64,
