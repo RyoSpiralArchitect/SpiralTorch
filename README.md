@@ -113,6 +113,12 @@ can describe GPUs with realistic limits while still feeding the unified heuristi
 chooser a compact struct.  It also exposes derived helpers such as
 `recommended_workgroup`, `recommended_sweep_tile`, and `recommended_compaction_tile`
 so you can introspect the policy or plug device-aware hints into custom tooling.
+chooser a compact struct. The chooser normalizes the plans produced by the DSL, the
+generated tables, and the fallback rules, aligning workgroup sizes to hardware warp
+widths, honouring shared-memory budgets, and scoring each candidate before execution.
+When the reported shared memory is too small for the shared-heap paths or two-stage
+compaction, the planner now automatically falls back to bitonic variants so that the
+plan always honours device limits.
 
 **Python**
 ```python

@@ -47,6 +47,18 @@ impl fmt::Debug for DeviceCaps {
 }
 
 impl DeviceCaps {
+    /// Default per-lane quota used by the heuristics when picking merge kernels.
+    #[inline]
+    pub fn default_lane_quota(k: u32) -> u32 {
+        if k >= 64 {
+            32
+        } else if k >= 16 {
+            16
+        } else {
+            8
+        }
+    }
+
     /// Creates a new capability descriptor for the requested backend.
     fn new(backend: BackendKind, lane_width: u32) -> Self {
         Self {
@@ -311,6 +323,24 @@ fn quantize_tile(target: u32, limit: u32) -> u32 {
         }
     }
     best
+    /// Whether two‑stage compaction should be enabled for the given problem.
+    pub fn prefers_two_stage(&self, cols: u32, k: u32) -> bool {
+        if !(cols > 32_768 || k > 128) {
+            return false;
+        }
+        if let Some(limit) = self.shared_mem_per_workgroup {
+            let lane_width = self.lane_width.max(1);
+            let default_wg = if self.subgroup { 256 } else { 128 };
+            let wg = self.max_workgroup.min(default_wg).max(lane_width);
+            let lane_groups = (wg + lane_width - 1) / lane_width;
+            let lanes_total = lane_groups * lane_width;
+            let lane_quota = Self::default_lane_quota(k);
+            let required = lanes_total.saturating_mul(lane_quota).saturating_mul(8);
+            (required as u64) <= (limit as u64)
+        } else {
+            true
+        }
+    }
 }
 
 impl Default for DeviceCaps {
@@ -407,5 +437,11 @@ mod tests {
         let high = caps.occupancy_hint(1024, Some(48 * 1024));
         let low = caps.occupancy_hint(256, Some(48 * 1024));
         assert!(high > low);
+    fn two_stage_respects_shared_memory_budget() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(32 * 1024));
+        assert!(!caps.prefers_two_stage(100_000, 256));
+
+        let generous = DeviceCaps::cuda(32, 1024, Some(128 * 1024));
+        assert!(generous.prefers_two_stage(100_000, 256));
     }
 }

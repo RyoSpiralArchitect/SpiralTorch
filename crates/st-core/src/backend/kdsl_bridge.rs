@@ -76,6 +76,7 @@ pub fn parse_env_dsl_plus_kind(
         Err(_) => String::new(),
     };
     #[allow(unused_mut)]
+    let kc = sweet_kc(kind, k);
     let mut ov = DslOverrides::default();
     if src.trim().is_empty() {
         return (None, vec![], ov);
