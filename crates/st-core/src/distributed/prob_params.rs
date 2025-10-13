@@ -17,7 +17,7 @@ pub fn consensus_lane_params(mut p:LaneParams) -> LaneParams {
     let agg = std::env::var("SPIRAL_UNISON_AGG").unwrap_or_else(|_| "mean".into());
     #[cfg(feature="hip")]
     {
-        #[cfg(feature="hip-real")] use st_backend_hip::rccl_comm::init_rccl_from_env;
+        #[cfg(all(feature="hip", feature="hip-real"))] use st_backend_hip::rccl_comm::init_rccl_from_env;
 #[cfg(feature="hip")] use st_backend_hip::real::{HipStream, HipPtr, malloc, free, memcpy_h2d_async, memcpy_d2h_async, allgather_i32_dev};
         if let Ok(comm) = init_rccl_from_env() {
             let world = comm.world as usize;
@@ -48,7 +48,7 @@ free(d_send); free(d_recv);
     #[cfg(feature="kv-redis")]
     {
         if let Ok(url) = std::env::var("REDIS_URL") {
-            if let Ok(samples) = st_kv::redis_lrange(            if let Ok(samples) = st_kv::redis_lrange(redis_lrange(&url, "spiral:heur:lparams", 16)url, "spiral:heur:lparams", -16, -1) {url, "spiral:heur:lparams", -16, -1) {
+            if let Ok(samples) = st_kv::redis_lrange(            if let Ok(samples) = st_kv::redis_lrange(            if let Ok(samples) = st_kv::redis_lrange(redis_lrange(&url, "spiral:heur:lparams", 16)url, "spiral:heur:lparams", -16, -1) {url, "spiral:heur:lparams", -16, -1) {url, "spiral:heur:lparams", -16, -1) {
                 let mut lanes=Vec::new(); let mut kls=Vec::new(); let mut chs=Vec::new();
                 for s in samples { if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s){
                     lanes.push(v["lane"].as_i64().unwrap_or(0) as i32);
