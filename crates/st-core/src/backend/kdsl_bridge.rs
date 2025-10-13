@@ -10,14 +10,17 @@ pub enum Field {}
 #[cfg(not(feature = "logic"))]
 #[derive(Clone, Debug)]
 pub enum Value {}
+#[cfg(feature = "kdsl")]
 use serde::Deserialize;
 
+#[cfg(feature = "kdsl")]
 #[derive(Deserialize)]
 struct SweetBands {
     small: u32,
     mid: u32,
     large: u32,
 }
+#[cfg(feature = "kdsl")]
 #[derive(Deserialize)]
 struct SweetFile {
     topk: Option<SweetBands>,
@@ -25,6 +28,7 @@ struct SweetFile {
     bottomk: Option<SweetBands>,
 }
 
+#[cfg(feature = "kdsl")]
 fn sweet_kc(kind: &str, k: u32) -> u32 {
     let path = if let Some(h) = dirs::home_dir() {
         h.join(".spiraltorch").join("sweet.json")
@@ -59,6 +63,7 @@ fn sweet_kc(kind: &str, k: u32) -> u32 {
     }
 }
 
+#[allow(unused_variables)]
 pub fn parse_env_dsl_plus_kind(
     rows: u32,
     cols: u32,
@@ -70,6 +75,7 @@ pub fn parse_env_dsl_plus_kind(
         Ok(s) => s,
         Err(_) => String::new(),
     };
+    #[allow(unused_mut)]
     let kc = sweet_kc(kind, k);
     let mut ov = DslOverrides::default();
     if src.trim().is_empty() {
@@ -77,6 +83,7 @@ pub fn parse_env_dsl_plus_kind(
     }
     #[cfg(feature = "kdsl")]
     {
+        let kc = sweet_kc(kind, k);
         let ctx = st_kdsl::Ctx {
             r: rows,
             c: cols,
@@ -170,6 +177,10 @@ pub fn parse_env_dsl(
 }
 
 pub fn choose_from_kv(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<Choice> {
+    #[cfg(not(feature = "kv-redis"))]
+    {
+        let _ = (rows, cols, k, subgroup);
+    }
     #[cfg(feature = "kv-redis")]
     {
         let url = std::env::var("REDIS_URL").ok()?;
