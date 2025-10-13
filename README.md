@@ -107,6 +107,13 @@ let exec = WgpuExecutor::default();
 execute_rank(&exec, &plan)?;
 ```
 
+`DeviceCaps` now ships backend-specific constructors (`wgpu`, `cuda`, `hip`, `cpu`) and
+builder-style setters (`with_subgroup`, `with_max_workgroup`, `with_shared_mem`) so you
+can describe GPUs with realistic limits while still feeding the unified heuristic
+chooser a compact struct.  It also exposes derived helpers such as
+`recommended_workgroup`, `recommended_sweep_tile`, and `recommended_compaction_tile`
+so you can introspect the policy or plug device-aware hints into custom tooling.
+
 **Python**
 ```python
 import numpy as np, spiraltorch as st
@@ -149,7 +156,9 @@ export SPIRAL_HEUR_K='
 - **B** = DSL **hard** assignment (if you set `mk:`/`tile:` explicitly, B wins)
 - **C** = **Generated table** (tuner output)
 
-Default policy: if **B** exists use it; else compare **A vs C** by SoftLogic score and favor **C** with a small prior (`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`).  
+Default policy: if **B** exists use it; else score **A** and **C** with backend-aware
+occupancy/tile metrics derived from `DeviceCaps`, then add a small prior to **C**
+(`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`).
 If the adopted choice wins locally (Wilson CI lower bound > 0.5 with min trials), **Self-Rewrite** appends matching `soft(...)` to `~/.spiraltorch/heur.kdsl`.
 
 ---
