@@ -1,15 +1,19 @@
 
 # 🌀🕯️SpiralTorch🕯️🌀
 
-**SpiralK + SoftLogic + (optional) WASM tuner** collaborate to pick the fastest **merge kind** and **tile width** for your hardware—then **Self-Rewrite** locks the win back into your heuristics.  
+**SpiralK + SoftLogic + (optional) WASM tuner** collaborate to pick the fastest **merge kind** and **tile width** for your hardware—then **Self-Rewrite** locks the win back into your heuristics.
 **WGPU** is the default path; **HIP/CUDA** absorb the **same unified choices**. Python wheels target **3.11–3.14**.
+
+Beyond kernels, the project now incubates an ever-expanding pure Rust learning
+stack: language stays raw, gradients stay hyperbolic, and meaning is sculpted
+directly in Z-space without ever touching NumPy or PyTorch.
 
 > **Why it’s different**
 > - **Two-layer consensus:** SpiralK (runtime rules) + WASM table (offline measurements)  
 > - **Unified heuristics:** One `Choice { mk, mkd, tile, ctile, … }` across WGPU / HIP / CUDA  
 > - **1-CE Subgroup Top-K (WGPU):** candidates → final in a single compute pass  
 > - **MidK/BottomK compaction:** 1-CE / 2-CE, tile-aware, same API  
-> - **Ameba Hypergrad:** unrolled / implicit (Neumann / CG) hyper-gradients
+> - **Amega Hypergrad:** unrolled / implicit (Neumann / CG) hyper-gradients that now sync with the pure tensor tape
 
 ---
 
@@ -22,7 +26,9 @@
 - **SoftLogic (finite-domain solver)**
   Explores a tiny discrete space (merge kinds, tiles) and scores candidates with your soft rules.
 - **Pure Rust training core**
-  `st-tensor::pure` ships a dependency-free tensor + linear model trainer so you can iterate on learning logic without PyTorch/Numpy.
+  `st-tensor::pure` ships dependency-free tensors, hyperbolic Z-space encoders,
+  and the new `AmegaHypergrad` tape so you can iterate on learning logic without
+  PyTorch/Numpy while staying inside non-Euclidean geometry.
 - **Optional WASM tuner table**
   Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
 - **Self-Rewrite**
@@ -140,30 +146,76 @@ vals, idx = st.topk2d(x, k=1024, device="auto")   # "wgpu > cuda > mps > cpu"
 ## Pure Rust training (zero PyTorch/Numpy deps)
 
 Need a bootstrap-friendly learning loop without pulling in heavyweight
-dependencies?  `st-tensor::pure` gives you a tiny tensor type plus a linear
-model trainer written entirely in Rust.
+dependencies?  `st-tensor::pure` now ships with zero-panic tensors,
+hyperbolic distance helpers, and complex-spectrum encoders so the stack keeps
+accelerating without ever leaning on NumPy or PyTorch.
 
 ```rust
-use st_tensor::pure::{LinearModel, Tensor, mean_squared_error};
+use st_tensor::pure::{LinearModel, PureResult, Tensor, mean_squared_error};
 
-fn main() {
+fn main() -> PureResult<()> {
     // Build a dataset for y = 2x + 1 using plain Rust vectors.
-    let inputs = Tensor::from_vec(4, 1, vec![0.0, 1.0, 2.0, 3.0]);
-    let targets = Tensor::from_vec(4, 1, vec![1.0, 3.0, 5.0, 7.0]);
+    let inputs = Tensor::from_vec(4, 1, vec![0.0, 1.0, 2.0, 3.0])?;
+    let targets = Tensor::from_vec(4, 1, vec![1.0, 3.0, 5.0, 7.0])?;
 
-    let mut model = LinearModel::new(1, 1);
+    let mut model = LinearModel::new(1, 1)?;
     for _ in 0..200 {
-        model.train_batch(&inputs, &targets, 0.1);
+        model.train_batch(&inputs, &targets, 0.1)?;
     }
 
-    let predictions = model.forward(&inputs);
-    let mse = mean_squared_error(&predictions, &targets);
+    let predictions = model.forward(&inputs)?;
+    let mse = mean_squared_error(&predictions, &targets)?;
     println!("Final MSE: {mse:.6}");
+    Ok(())
 }
 ```
 
 Everything runs with `cargo run -p st-tensor --example ...` or inside your own
-binary crate—no Python wheels required.
+binary crate—no Python wheels required. When you want to leave Euclidean space,
+hand text straight to the Z-space encoder and stay in browser-friendly memory
+limits without ever tokenizing:
+
+```rust
+use st_tensor::pure::{LanguageWaveEncoder, PureResult};
+
+fn main() -> PureResult<()> {
+    let encoder = LanguageWaveEncoder::new(-1.0, 0.75)?;
+    let z_space = encoder.encode_z_space("SpiralTorch stays homotopy-free")?;
+    println!("{} hyperbolic components", z_space.shape().1);
+    Ok(())
+}
+```
+
+Take it further by coupling the Z-space encoder with the brand-new `AmegaHypergrad`
+tape: gradients stay conformal, curvature never drifts, and the entire pipeline
+continues to run without touching NumPy or PyTorch.
+
+```rust
+use st_tensor::pure::{AmegaHypergrad, LanguageWaveEncoder, PureResult, Tensor};
+
+fn main() -> PureResult<()> {
+    let encoder = LanguageWaveEncoder::new(-1.0, 0.8)?;
+    let wave = encoder.encode_z_space("hyperbolic language without tokens")?;
+    let (rows, cols) = wave.shape();
+
+    let mut hypergrad = AmegaHypergrad::new(encoder.curvature(), 0.03, rows, cols)?;
+    hypergrad.accumulate_wave(&wave)?;
+
+    let targets = Tensor::zeros(rows, cols)?;
+    hypergrad.accumulate_pair(&wave, &targets)?;
+
+    let mut weights = Tensor::zeros(rows, cols)?;
+    hypergrad.apply(&mut weights)?;
+
+    println!("updated weight energy = {:.6}", weights.squared_l2_norm());
+    Ok(())
+}
+```
+
+Because the optimiser keeps its own curvature-aware buffer, you can stream
+text → wave → hypergrad endlessly without ever seeing a traceback. Non-Euclidean
+geometry, imaginary spectra, and category-inspired language flows all feed the
+same tape, letting SpiralTorch chase meaning directly in Z-space.
 
 ---
 
@@ -249,14 +301,18 @@ them to the SpiralK Wilson self-rewrite logic.
 
 ---
 
-## Ameba Hypergrad (unrolled / implicit)
+## Amega Hypergrad (unrolled / implicit)
 
 Rust utilities for hyper-parameter gradients (continuous relaxation):
 - **Unrolled**: expand T updates and backprop
 - **Implicit**: Neumann or **CG** to solve `(I − J) v ≈ g` efficiently
 
-> See `crates/st-core/src/autograd/hypergrad*.rs`.  
+> See `crates/st-core/src/autograd/hypergrad*.rs`.
 > Python glue is kept minimal; wheels can expose helpers.
+
+The pure `st-tensor::pure::AmegaHypergrad` tape mirrors the same mindset in a
+dependency-free package, letting you stage language diffusion experiments in
+Rust and then feed the resulting curvature-aligned hints back into SpiralK.
 
 ---
 

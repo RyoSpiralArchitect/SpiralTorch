@@ -30,8 +30,12 @@ pub enum TensorError {
     NonHyperbolicCurvature { curvature: f32 },
     /// Temperature must stay positive for wave encoders.
     NonPositiveTemperature { temperature: f32 },
+    /// Learning rate must be positive for hypergrad optimizers.
+    NonPositiveLearningRate { rate: f32 },
     /// Computation received an empty input which would otherwise trigger a panic.
     EmptyInput(&'static str),
+    /// A helper expected matching curvature parameters but received different values.
+    CurvatureMismatch { expected: f32, got: f32 },
 }
 
 impl fmt::Display for TensorError {
@@ -65,8 +69,17 @@ impl fmt::Display for TensorError {
                     "language wave encoder temperature must be positive, got {temperature}"
                 )
             }
+            TensorError::NonPositiveLearningRate { rate } => {
+                write!(f, "learning rate must be positive, got {rate}")
+            }
             TensorError::EmptyInput(label) => {
                 write!(f, "{label} must not be empty for this computation")
+            }
+            TensorError::CurvatureMismatch { expected, got } => {
+                write!(
+                    f,
+                    "curvature mismatch: expected {expected} but pipeline reports {got}"
+                )
             }
         }
     }
@@ -540,6 +553,16 @@ impl ComplexTensor {
         &self.data
     }
 
+    /// Converts the complex tensor into a real tensor by splitting real/imag parts.
+    pub fn to_tensor(&self) -> PureResult<Tensor> {
+        let mut data = Vec::with_capacity(self.data.len() * 2);
+        for value in &self.data {
+            data.push(value.re);
+            data.push(value.im);
+        }
+        Tensor::from_vec(self.rows, self.cols * 2, data)
+    }
+
     pub fn matmul(&self, other: &ComplexTensor) -> PureResult<Self> {
         if self.cols != other.rows {
             return Err(TensorError::ShapeMismatch {
@@ -581,6 +604,7 @@ fn discrete_fourier_transform(signal: &[f32]) -> Vec<Complex32> {
 }
 
 /// Encodes language streams into complex Z-space waves without tokenization.
+#[derive(Clone, Debug)]
 pub struct LanguageWaveEncoder {
     curvature: f32,
     temperature: f32,
@@ -598,6 +622,16 @@ impl LanguageWaveEncoder {
             curvature,
             temperature,
         })
+    }
+
+    /// Returns the curvature used for Z-space encodings.
+    pub fn curvature(&self) -> f32 {
+        self.curvature
+    }
+
+    /// Returns the thermal scaling applied to the wavefront.
+    pub fn temperature(&self) -> f32 {
+        self.temperature
     }
 
     /// Convert a sentence directly into a complex wave on the Z-space manifold.
@@ -634,6 +668,149 @@ impl LanguageWaveEncoder {
         }
         let euclid = Tensor::from_vec(1, coords.len(), coords)?;
         euclid.project_to_poincare(self.curvature)
+    }
+}
+
+/// Hyperbolic gradient accumulator for zero-traceback learning loops.
+///
+/// The optimiser keeps its own curvature-aligned gradient buffer and can
+/// integrate Euclidean tensors, complex waves, or direct text streams emitted
+/// by [`LanguageWaveEncoder`]. Every update is projected back onto the
+/// Poincaré ball so state never escapes the non-Euclidean manifold.
+pub struct AmegaHypergrad {
+    curvature: f32,
+    learning_rate: f32,
+    rows: usize,
+    cols: usize,
+    gradient: Vec<f32>,
+}
+
+impl AmegaHypergrad {
+    /// Create a new hypergradient tape with the provided curvature and step size.
+    pub fn new(curvature: f32, learning_rate: f32, rows: usize, cols: usize) -> PureResult<Self> {
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        if curvature >= 0.0 {
+            return Err(TensorError::NonHyperbolicCurvature { curvature });
+        }
+        if learning_rate <= 0.0 {
+            return Err(TensorError::NonPositiveLearningRate {
+                rate: learning_rate,
+            });
+        }
+        Ok(Self {
+            curvature,
+            learning_rate,
+            rows,
+            cols,
+            gradient: vec![0.0; rows * cols],
+        })
+    }
+
+    /// Returns the hyperbolic curvature the tape is operating under.
+    pub fn curvature(&self) -> f32 {
+        self.curvature
+    }
+
+    /// Returns the geometric learning rate used for each Riemannian step.
+    pub fn learning_rate(&self) -> f32 {
+        self.learning_rate
+    }
+
+    /// Returns the `(rows, cols)` dimensions captured by the tape.
+    pub fn shape(&self) -> (usize, usize) {
+        (self.rows, self.cols)
+    }
+
+    /// Provides read-only access to the accumulated gradient buffer.
+    pub fn gradient(&self) -> &[f32] {
+        &self.gradient
+    }
+
+    fn assert_tensor_shape(&self, tensor: &Tensor) -> PureResult<()> {
+        if tensor.shape() != (self.rows, self.cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: tensor.shape(),
+                right: (self.rows, self.cols),
+            });
+        }
+        Ok(())
+    }
+
+    /// Clears the accumulated gradient back to zero.
+    pub fn reset(&mut self) {
+        for g in self.gradient.iter_mut() {
+            *g = 0.0;
+        }
+    }
+
+    /// Accumulates a Euclidean tensor inside the hyperbolic tape using
+    /// the standard conformal factor for the Poincaré ball.
+    pub fn accumulate_wave(&mut self, tensor: &Tensor) -> PureResult<()> {
+        self.assert_tensor_shape(tensor)?;
+        for (grad, value) in self.gradient.iter_mut().zip(tensor.data().iter()) {
+            let denom = 1.0 - self.curvature * value * value;
+            *grad += *value / denom.max(1e-6);
+        }
+        Ok(())
+    }
+
+    /// Accumulates a complex wave by unfolding it into real and imaginary lanes.
+    pub fn accumulate_complex_wave(&mut self, wave: &ComplexTensor) -> PureResult<()> {
+        let tensor = wave.to_tensor()?;
+        self.accumulate_wave(&tensor)
+    }
+
+    /// Absorbs text directly by encoding it into Z-space using the provided encoder.
+    pub fn absorb_text(&mut self, encoder: &LanguageWaveEncoder, text: &str) -> PureResult<()> {
+        if (encoder.curvature() - self.curvature).abs() > 1e-6 {
+            return Err(TensorError::CurvatureMismatch {
+                expected: self.curvature,
+                got: encoder.curvature(),
+            });
+        }
+        let tensor = encoder.encode_z_space(text)?;
+        self.accumulate_wave(&tensor)
+    }
+
+    /// Integrates a prediction/target pair to build a hyperbolic residual.
+    pub fn accumulate_pair(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<()> {
+        self.assert_tensor_shape(prediction)?;
+        if prediction.shape() != target.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: prediction.shape(),
+                right: target.shape(),
+            });
+        }
+        for ((grad, pred), tgt) in self
+            .gradient
+            .iter_mut()
+            .zip(prediction.data().iter())
+            .zip(target.data().iter())
+        {
+            *grad += pred - tgt;
+        }
+        Ok(())
+    }
+
+    /// Applies the accumulated gradient to the provided tensor and reprojects it
+    /// into the Poincaré ball. The gradient buffer is cleared afterwards so the
+    /// tape can keep streaming samples without triggering a traceback.
+    pub fn apply(&mut self, weights: &mut Tensor) -> PureResult<()> {
+        self.assert_tensor_shape(weights)?;
+        {
+            let data = weights.data_mut();
+            for (value, grad) in data.iter_mut().zip(self.gradient.iter()) {
+                let denom = 1.0 - self.curvature * (*value) * (*value);
+                let step = self.learning_rate / denom.max(1e-6);
+                *value -= step * *grad;
+            }
+        }
+        let projected = weights.project_to_poincare(self.curvature)?;
+        *weights = projected;
+        self.reset();
+        Ok(())
     }
 }
 
@@ -686,5 +863,41 @@ mod tests {
         let z = encoder.encode_z_space("spiral").unwrap();
         assert_eq!(z.shape().0, 1);
         assert_eq!(z.shape().1, 12);
+    }
+
+    #[test]
+    fn amega_hypergrad_tracks_z_space_updates() {
+        let encoder = LanguageWaveEncoder::new(-1.25, 0.9).unwrap();
+        let z = encoder
+            .encode_z_space("non-euclidean waves stay token free")
+            .unwrap();
+        let shape = z.shape();
+        let mut hypergrad =
+            AmegaHypergrad::new(encoder.curvature(), 0.05, shape.0, shape.1).unwrap();
+        hypergrad.accumulate_wave(&z).unwrap();
+        let mut weights = Tensor::zeros(shape.0, shape.1).unwrap();
+        let targets = Tensor::zeros(shape.0, shape.1).unwrap();
+        hypergrad.accumulate_pair(&z, &targets).unwrap();
+        hypergrad.apply(&mut weights).unwrap();
+        assert_eq!(weights.shape(), shape);
+        assert!(weights.squared_l2_norm() > 0.0);
+    }
+
+    #[test]
+    fn amega_hypergrad_absorbs_text_directly() {
+        let encoder = LanguageWaveEncoder::new(-0.8, 0.7).unwrap();
+        let z = encoder
+            .encode_z_space("SpiralTorch dances in Z-space")
+            .unwrap();
+        let shape = z.shape();
+        let mut hypergrad =
+            AmegaHypergrad::new(encoder.curvature(), 0.02, shape.0, shape.1).unwrap();
+        hypergrad
+            .absorb_text(&encoder, "SpiralTorch dances in Z-space")
+            .unwrap();
+        assert!(hypergrad
+            .gradient()
+            .iter()
+            .any(|value| value.abs() > f32::EPSILON));
     }
 }
