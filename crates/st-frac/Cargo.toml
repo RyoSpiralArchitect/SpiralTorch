@@ -1,7 +1,10 @@
 [package]
 name = "st-frac"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Fractional operators (GL coefficients, 1D conv) — CPU reference; WGPU hooks live in st-core."
 
 [dependencies]
+ndarray    = "0.15"
 num-traits = "0.2"
