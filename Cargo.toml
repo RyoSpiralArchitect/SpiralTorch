@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/st-frac",
   "crates/st-core",
   "crates/st-backend-hip",
   "crates/st-kdsl",

@@ -39,8 +39,10 @@ st-backend-hip = { path = "../st-backend-hip", optional = true }
 st-logic       = { path = "../st-logic",       optional = true }
 st-kdsl        = { path = "../st-kdsl",        optional = true }
 st-kv          = { path = "../st-kv",          optional = true }
+bytemuck = { version = "1", features=["derive"] }
 futures-intrusive = { version = "0.5", optional = true }
 futures-lite = { version = "2", optional = true }
+wgpu = { version = "0.19", optional = true }
 num-complex = "0.4"
 rustfft = "6"
 st-frac = { path = "../st-frac" }
