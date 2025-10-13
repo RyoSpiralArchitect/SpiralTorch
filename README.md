@@ -115,6 +115,15 @@ chooser a compact struct.  The helpers also expose higher level tuning hints suc
 query consistent defaults without duplicating the heuristic math.  Pair them with the
 extended `prefers_two_stage(rows, cols, k)` signature when you want to peek at whether
 the planner will promote the 2-pass compaction path for huge matrices.
+chooser a compact struct.  It also exposes derived helpers such as
+`recommended_workgroup`, `recommended_sweep_tile`, and `recommended_compaction_tile`
+so you can introspect the policy or plug device-aware hints into custom tooling.
+chooser a compact struct. The chooser normalizes the plans produced by the DSL, the
+generated tables, and the fallback rules, aligning workgroup sizes to hardware warp
+widths, honouring shared-memory budgets, and scoring each candidate before execution.
+When the reported shared memory is too small for the shared-heap paths or two-stage
+compaction, the planner now automatically falls back to bitonic variants so that the
+plan always honours device limits.
 
 **Python**
 ```python
@@ -158,7 +167,9 @@ export SPIRAL_HEUR_K='
 - **B** = DSL **hard** assignment (if you set `mk:`/`tile:` explicitly, B wins)
 - **C** = **Generated table** (tuner output)
 
-Default policy: if **B** exists use it; else compare **A vs C** by SoftLogic score and favor **C** with a small prior (`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`).  
+Default policy: if **B** exists use it; else score **A** and **C** with backend-aware
+occupancy/tile metrics derived from `DeviceCaps`, then add a small prior to **C**
+(`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`).
 If the adopted choice wins locally (Wilson CI lower bound > 0.5 with min trials), **Self-Rewrite** appends matching `soft(...)` to `~/.spiraltorch/heur.kdsl`.
 
 ---
