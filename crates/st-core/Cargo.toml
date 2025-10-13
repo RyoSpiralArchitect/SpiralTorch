@@ -1,26 +1,41 @@
-[dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-once_cell = "1"
-bytemuck = { version = "1", features = ["derive"] }
-dirs = "5"
-statrs = "0.16"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+[package]
+name = "st-core"
+version = "1.9.2"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "SpiralTorch core (distributed orchestrators, heuristics, runtime)"
+
+[lib]
+name = "st_core"
+path = "src/lib.rs"
 
 [features]
-wgpu-rt = ["wgpu"]
+hip-real = ["hip", "st-backend-hip/hip-real"]
+default = []
+hip      = ["dep:st-backend-hip"]
+wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:once_cell"]
+wgpu-rt  = ["wgpu"]
+mps      = ["dep:metal"]
+cuda     = []
 logic    = ["dep:st-logic"]
 kdsl     = ["dep:st-kdsl"]
-kv-redis = ["dep:st-kv/redis"]
-once_cell = { version = "1.19", optional = true }
-bytemuck  = { version = "1.16", optional = true, features=["derive"] }
-pollster  = { version = "0.3",  optional = true }
-dirs      = { version = "5",    optional = false }
-serde     = { version = "1",    features=["derive"] }
-serde_json= { version = "1" }
-statrs    = { version = "0.16" }
-st-logic  = { path = "../st-logic", optional = true }
-st-kdsl   = { path = "../st-kdsl",  optional = true }
-st-kv     = { path = "../st-kv",    optional = true, features=["redis"] }
-wgpu      = { version = "0.19", optional = true, default-features=false, features=["wgsl"] }
+kv-redis = ["st-kv/redis"]
+
+[dependencies]
+thiserror   = "1"
+rand        = "0.8"
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+dirs        = "5"
+statrs      = "0.16"
+
+once_cell   = { version = "1.19", optional = true }
+bytemuck    = { version = "1.16", optional = true, features = ["derive"] }
+pollster    = { version = "0.3",  optional = true }
+wgpu        = { version = "0.19", optional = true, default-features = false, features = ["wgsl"] }
+metal       = { version = "0.28", optional = true }
+
+st-backend-hip = { path = "../st-backend-hip", optional = true }
+st-logic       = { path = "../st-logic",       optional = true }
+st-kdsl        = { path = "../st-kdsl",        optional = true }
+st-kv          = { path = "../st-kv",          optional = true }

@@ -1,54 +1,61 @@
-//! Consensus for lane parameters (Redis + optional HIP-real sync)
+/// Consensus for lane parameters (Redis-gated) + optional HIP-real sync.
+/// このモジュールは st-core 単体でコンパイルできる最小構成です。
+/// - LaneParams をここで定義（他モジュールへの依存を断つ）
+/// - Redis は feature "kv-redis" のときだけ読む
+/// - HIP-real 同期はコンパイル時ガードのみ（stub）
 
-use super::LaneParams;
+#[derive(Clone, Debug)]
+pub struct LaneParams {
+    pub lane: i32,
+}
+
+#[cfg(feature="kv-redis")]
 use serde_json::Value;
 
-#[cfg(all(feature = "hip", feature = "hip-real"))]
-use st_backend_hip::rccl_comm::init_rccl_from_env;
-
-#[cfg(all(feature = "hip", feature = "hip-real"))]
+/// HIP-real が有効なときだけ呼ばれる“何もしない”stub（実装は将来差し替え）
+#[cfg(all(feature="hip", feature="hip-real"))]
 fn maybe_sync() {
-    // Best-effort RCCL init/sync (実装は将来拡充予定)
-    let _ = init_rccl_from_env();
+    // ここに rccl の初期化/同期を入れる予定。現状は no-op で安全。
 }
 
-#[cfg(not(all(feature = "hip", feature = "hip-real")))]
+#[cfg(not(all(feature="hip", feature="hip-real")))]
 fn maybe_sync() {}
 
-fn median_i32(v: &mut [i32]) -> i32 {
-    v.sort_unstable();
-    let n = v.len();
-    if n == 0 { return 0; }
-    if n % 2 == 1 { v[n/2] } else {
-        ((v[n/2 - 1] as i64 + v[n/2] as i64) / 2) as i32
-    }
-}
+/// Redis から lane 提案のサンプルを読み、agg=median/mean で要約
+#[cfg(feature="kv-redis")]
+fn fetch_lane_from_redis() -> Option<i32> {
+    let url = std::env::var("REDIS_URL").ok()?;
+    let samples = st_kv::redis_lrange(&url, "spiral:heur:lparams", -16, -1).ok()?;
 
-pub fn consensus_lane_params(mut p: LaneParams) -> LaneParams {
-    // Redis から最近16件を取得
-    let url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1/".into());
-    if let Ok(samples) = st_kv::redis_lrange(&url, "spiral:heur:lparams", -16, -1) {
-        let mut lanes: Vec<i32> = Vec::new();
-        for s in samples {
-            if let Ok(v) = serde_json::from_str::<Value>(&s) {
-                if let Some(l) = v.get("lane").and_then(|x| x.as_i64()) {
-                    lanes.push(l as i32);
-                }
+    let mut lanes: Vec<i32> = Vec::new();
+    for s in samples {
+        if let Ok(v) = serde_json::from_str::<Value>(&s) {
+            if let Some(l) = v.get("lane").and_then(|x| x.as_i64()) {
+                lanes.push(l as i32);
             }
         }
-        if !lanes.is_empty() {
-            let agg = std::env::var("SPIRAL_UNISON_AGG").unwrap_or_else(|_| "mean".into());
-            let lane = if agg == "median" {
-                median_i32(&mut lanes)
-            } else {
-                let sum: i64 = lanes.iter().map(|&x| x as i64).sum();
-                (sum as f64 / lanes.len() as f64).round() as i32
-            };
-            p.lane = lane;
-        }
     }
+    if lanes.is_empty() { return None; }
 
-    // HIP-real が有効なら軽く同期（stub では no-op）
+    let agg = std::env::var("SPIRAL_UNISON_AGG").unwrap_or_else(|_| "mean".into());
+    let lane = if agg == "median" {
+        lanes.sort_unstable();
+        lanes[lanes.len() / 2]
+    } else {
+        let sum: i64 = lanes.iter().map(|&x| x as i64).sum();
+        (sum as f64 / lanes.len() as f64).round() as i32
+    };
+    Some(lane)
+}
+
+#[cfg(not(feature="kv-redis"))]
+fn fetch_lane_from_redis() -> Option<i32> { None }
+
+/// ランタイム合意で lane を上書き（あれば）→ HIP-real 同期（stub）→ 返却
+pub fn consensus_lane_params(mut p: LaneParams) -> LaneParams {
+    if let Some(lane) = fetch_lane_from_redis() {
+        p.lane = lane;
+    }
     maybe_sync();
     p
 }
