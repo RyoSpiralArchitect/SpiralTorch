@@ -15,15 +15,17 @@
 
 ## What you get
 
-- **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**  
+- **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**
   Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, everyone uses the same plan.
-- **SpiralK DSL** (K×Lisp-inspired)  
+- **SpiralK DSL** (K×Lisp-inspired)
   Hard assigns (`mk:`, `tile:`) and soft rules (`soft(mk, …)`, `soft(tile, …)`) that blend with measurements.
-- **SoftLogic (finite-domain solver)**  
+- **SoftLogic (finite-domain solver)**
   Explores a tiny discrete space (merge kinds, tiles) and scores candidates with your soft rules.
-- **Optional WASM tuner table**  
+- **Pure Rust training core**
+  `st-tensor::pure` ships a dependency-free tensor + linear model trainer so you can iterate on learning logic without PyTorch/Numpy.
+- **Optional WASM tuner table**
   Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
-- **Self-Rewrite**  
+- **Self-Rewrite**
   A/B outcomes (Wilson CI) append `soft(...)` into `~/.spiraltorch/heur.kdsl` when the advantage is statistically significant.
   
 ---
@@ -132,6 +134,36 @@ import numpy as np, spiraltorch as st
 x = np.random.randn(8, 65536).astype(np.float32)
 vals, idx = st.topk2d(x, k=1024, device="auto")   # "wgpu > cuda > mps > cpu"
 ```
+
+---
+
+## Pure Rust training (zero PyTorch/Numpy deps)
+
+Need a bootstrap-friendly learning loop without pulling in heavyweight
+dependencies?  `st-tensor::pure` gives you a tiny tensor type plus a linear
+model trainer written entirely in Rust.
+
+```rust
+use st_tensor::pure::{LinearModel, Tensor, mean_squared_error};
+
+fn main() {
+    // Build a dataset for y = 2x + 1 using plain Rust vectors.
+    let inputs = Tensor::from_vec(4, 1, vec![0.0, 1.0, 2.0, 3.0]);
+    let targets = Tensor::from_vec(4, 1, vec![1.0, 3.0, 5.0, 7.0]);
+
+    let mut model = LinearModel::new(1, 1);
+    for _ in 0..200 {
+        model.train_batch(&inputs, &targets, 0.1);
+    }
+
+    let predictions = model.forward(&inputs);
+    let mse = mean_squared_error(&predictions, &targets);
+    println!("Final MSE: {mse:.6}");
+}
+```
+
+Everything runs with `cargo run -p st-tensor --example ...` or inside your own
+binary crate—no Python wheels required.
 
 ---
 

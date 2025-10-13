@@ -4,6 +4,7 @@ members = [
   "crates/st-backend-hip",
   "crates/st-kdsl",
   "crates/st-logic",
-  "crates/st-kv"
+  "crates/st-kv",
+  "crates/st-tensor"
 ]
 resolver = "2"
