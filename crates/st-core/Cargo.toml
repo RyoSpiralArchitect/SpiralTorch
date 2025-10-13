@@ -7,12 +7,43 @@ description = "SpiralTorch core (distributed orchestrators, config, heuristics h
 
 [features]
 default = []
-hip = ["st-backend-hip"]
+
+# passthrough for HIP real impl
+hip-real = ["hip", "st-backend-hip/hip-real"]
+
+# existing
+hip      = ["dep:st-backend-hip"]
+
+# GPU backends
+wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:once_cell"]
+wgpu-rt  = ["wgpu"]        # runtime wiring (wgpu_rt.rs / wgpu_exec.rs)
+mps      = ["dep:metal"]
+cuda     = []              # 実体はランタイムロード前提（空でOK）
+
+# Heuristics / DSL / KV
+logic    = ["dep:st-logic"]
+kdsl     = ["dep:st-kdsl"]
+kv-redis = ["dep:st-kv", "st-kv/redis"]  # 依存を有効 + 依存側の 'redis' feature をON
 
 [dependencies]
 thiserror = "1"
 rand = "0.8"
-st-backend-hip = { path = "../st-backend-hip", optional = true }
-st-kv = { path = "../st-kv", optional = true, features = ["redis"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# backends（オプション）
+st-backend-hip = { path = "../st-backend-hip", optional = true }
+
+# heuristics / dsl / kv（オプション）
+st-logic = { path = "../st-logic", optional = true }
+st-kdsl  = { path = "../st-kdsl",  optional = true }
+st-kv    = { path = "../st-kv",    optional = true, features = ["redis"] }
+
+# WGPU runtime wiring（オプション）
+wgpu      = { version = "0.19", optional = true, default-features = false, features = ["wgsl"] }
+bytemuck  = { version = "1.16", optional = true, features = ["derive"] }
+pollster  = { version = "0.3",  optional = true }
+once_cell = { version = "1.19", optional = true }
+
+# MPS (macOS; Xcode が無くても mps feature を付けなければビルドされない)
+metal     = { version = "0.28", optional = true }
