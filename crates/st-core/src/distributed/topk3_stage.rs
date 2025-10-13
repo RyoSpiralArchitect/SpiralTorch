@@ -1,3 +1,5 @@
+#![cfg(all(feature="hip", feature="hip-real"))]
+
 // NOTE: This file replaces the previous overlay version with real keep‑k selection.
 // It preserves u64 gather and the tile→final path.
 
