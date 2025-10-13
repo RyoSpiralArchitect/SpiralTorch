@@ -48,7 +48,7 @@ free(d_send); free(d_recv);
     #[cfg(feature="kv-redis")]
     {
         if let Ok(url) = std::env::var("REDIS_URL") {
-            if let Ok(samples) = st_kv::redis_lrange(&url, "spiral:heur:lparams", 16) {
+            if let Ok(samples) = st_kv::redis_lrange(redis_lrange(&url, "spiral:heur:lparams", 16)url, "spiral:heur:lparams", -16, -1) {
                 let mut lanes=Vec::new(); let mut kls=Vec::new(); let mut chs=Vec::new();
                 for s in samples { if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s){
                     lanes.push(v["lane"].as_i64().unwrap_or(0) as i32);
