@@ -10,41 +10,48 @@ impl RankKExecutor for WgpuExecutor {
     fn launch_bottomk(&self, plan:&RankPlan) -> Result<(), Self::Error> { dispatch_bottomk(plan) }
 }
 
-fn is_two_ce(plan:&RankPlan) -> bool {
+fn two_ce_decision(plan:&RankPlan) -> bool {
     let c = &plan.choice;
-    // Future: if generated has two_ce_hint, weigh it here.
-    c.use_2ce || (plan.cols as u64 >= (c.ctile.max(256) as u64)*64)
+    if c.two_ce_hint { return true; }
+    if c.use_2ce { return true; }
+    // ctile-based expansion; larger than ~64 tiles => 2CE
+    let tiles = (plan.cols as u64 + c.ctile.max(256) as u64 - 1) / c.ctile.max(256) as u64;
+    tiles >= 64
 }
 
 fn dispatch_topk(plan:&RankPlan) -> Result<(), String> {
-    let c = &plan.choice;
-    match (c.mk, c.mkd) {
-        (2, 4) => topk_warp_heap(plan),
-        (2, 5) => topk_warp_bitonic(plan),
-        (1, 1) => topk_shared_heap(plan),
-        (1, 2) => topk_shared_kway(plan),
-        (0, 3) => topk_bitonic(plan),
-        _      => topk_default(plan),
-    }
+    topk_subgroups_1ce(plan) // single CE by default; mk/mkd are for CUDA/HIP path specialization
 }
 
 fn dispatch_midk(plan:&RankPlan) -> Result<(), String> {
-    if is_two_ce(plan) { midk_two_ce(plan) } else { midk_one_ce(plan) }
+    if two_ce_decision(plan) { midk_two_ce(plan) } else { midk_one_ce(plan) }
 }
 fn dispatch_bottomk(plan:&RankPlan) -> Result<(), String> {
-    if is_two_ce(plan) { bottomk_two_ce(plan) } else { bottomk_one_ce(plan) }
+    if two_ce_decision(plan) { bottomk_two_ce(plan) } else { bottomk_one_ce(plan) }
 }
 
-// ---- WGSL kernels are in wgpu_kernels_rankk.wgsl ----
-// Below stub calls are ready to be replaced with real WGPU runtime dispatches.
-fn topk_warp_heap(_p:&RankPlan)->Result<(),String>{ Ok(()) }
-fn topk_warp_bitonic(_p:&RankPlan)->Result<(),String>{ Ok(()) }
-fn topk_shared_heap(_p:&RankPlan)->Result<(),String>{ Ok(()) }
-fn topk_shared_kway(_p:&RankPlan)->Result<(),String>{ Ok(()) }
-fn topk_bitonic(_p:&RankPlan)->Result<(),String>{ Ok(()) }
-fn topk_default(_p:&RankPlan)->Result<(),String>{ Ok(()) }
+// ---- Calls into the WGPU runtime if feature is enabled ----
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn topk_subgroups_1ce(p:&RankPlan)->Result<(),String>{ crate::backend::wgpu_rt::dispatch_topk_1ce(p) }
+#[cfg(not(all(feature="wgpu", feature="wgpu-rt")))]
+fn topk_subgroups_1ce(_p:&RankPlan)->Result<(),String>{ Err("wgpu-rt not enabled".into()) }
 
-fn midk_one_ce(_p:&RankPlan)->Result<(),String>{ Ok(()) }
-fn midk_two_ce(_p:&RankPlan)->Result<(),String>{ Ok(()) }
-fn bottomk_one_ce(_p:&RankPlan)->Result<(),String>{ Ok(()) }
-fn bottomk_two_ce(_p:&RankPlan)->Result<(),String>{ Ok(()) }
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn midk_one_ce(p:&RankPlan)->Result<(),String>{ crate::backend::wgpu_rt::dispatch_compaction_1ce(p, 0) }
+#[cfg(not(all(feature="wgpu", feature="wgpu-rt")))]
+fn midk_one_ce(_:&RankPlan)->Result<(),String>{ Err("wgpu-rt not enabled".into()) }
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn midk_two_ce(p:&RankPlan)->Result<(),String>{ crate::backend::wgpu_rt::dispatch_compaction_2ce(p, 0) }
+#[cfg(not(all(feature="wgpu", feature="wgpu-rt")))]
+fn midk_two_ce(_:&RankPlan)->Result<(),String>{ Err("wgpu-rt not enabled".into()) }
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn bottomk_one_ce(p:&RankPlan)->Result<(),String>{ crate::backend::wgpu_rt::dispatch_compaction_1ce(p, 1) }
+#[cfg(not(all(feature="wgpu", feature="wgpu-rt")))]
+fn bottomk_one_ce(_:&RankPlan)->Result<(),String>{ Err("wgpu-rt not enabled".into()) }
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn bottomk_two_ce(p:&RankPlan)->Result<(),String>{ crate::backend::wgpu_rt::dispatch_compaction_2ce(p, 1) }
+#[cfg(not(all(feature="wgpu", feature="wgpu-rt")))]
+fn bottomk_two_ce(_:&RankPlan)->Result<(),String>{ Err("wgpu-rt not enabled".into()) }
