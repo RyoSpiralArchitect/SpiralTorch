@@ -14,3 +14,13 @@ rustup-home/
 *.dylib
 *.zip
 spiraltorch-overlay-*/
+
+# macOS のアプリやローカル環境物を絶対拾わない
+Applications/
+*.app/
+.buildenv/
+rustup-home/
+.toolchain/
+*.dylib
+*.zip
+spiraltorch-overlay-*/
