@@ -1,129 +1,73 @@
-// crates/st-core/src/heur/self_rewrite.rs  (v1.8.7)
-use std::{collections::HashMap, fs, io::Write, path::PathBuf, time::{Duration, Instant}};
+use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
+use statrs::distribution::{ContinuousCDF, Normal};
 
-#[derive(Clone, Debug)]
-pub struct ABKey { pub kind: &'static str, pub rows: u32, pub cols: u32, pub k: u32, pub variant: &'static str }
-
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
-struct Stat { n:u32, wins:u32 }
-
-fn wilson_lower(p:f64, n:f64, z:f64) -> f64 {
-    let denom = 1.0 + z*z/n;
-    let center = p + z*z/(2.0*n);
-    let margin = z * ((p*(1.0-p)/n) + (z*z)/(4.0*n*n)).sqrt();
-    (center - margin) / denom
-}
-
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Deserialize, Serialize, Default)]
 struct SweetBands { small:u32, mid:u32, large:u32 }
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Deserialize, Serialize, Default)]
 struct SweetFile { topk:Option<SweetBands>, midk:Option<SweetBands>, bottomk:Option<SweetBands> }
 
-pub struct SR {
-    map: HashMap<String, Stat>,
-    // per-kind histograms of K (win-weighted)
-    hist_small: HashMap<&'static str, u64>,
-    hist_mid:   HashMap<&'static str, u64>,
-    hist_large: HashMap<&'static str, u64>,
-    last_emit: Instant, cooldown: Duration, min_n: u32, z: f64,
+fn home_dir() -> std::path::PathBuf {
+    if let Some(h)=dirs::home_dir(){ h } else { std::path::PathBuf::from(".") }
 }
-impl Default for SR {
-    fn default()->Self{ Self{
-        map:HashMap::new(),
-        hist_small:HashMap::new(), hist_mid:HashMap::new(), hist_large:HashMap::new(),
-        last_emit:Instant::now(), cooldown:Duration::from_secs(60), min_n:50, z:1.96
-    } }
+fn heur_path()->std::path::PathBuf { home_dir().join(".spiraltorch").join("heur.kdsl") }
+fn sweet_path()->std::path::PathBuf { home_dir().join(".spiraltorch").join("sweet.json") }
+fn ablog_path()->std::path::PathBuf { home_dir().join(".spiraltorch").join("ablog.ndjson") }
+
+fn wilson_lower_bound(wins:u32, total:u32, alpha:f64)->f64{
+    if total==0 { return 0.0 }
+    let p = wins as f64 / total as f64;
+    let z = Normal::new(0.0,1.0).unwrap().inverse_cdf(1.0 - alpha/2.0);
+    let n = total as f64;
+    let denom = 1.0 + z*z/n;
+    let centre = p + z*z/(2.0*n);
+    let adj = z * ((p*(1.0-p) + z*z/(4.0*n))/n).sqrt();
+    (centre - adj) / denom
 }
-impl SR {
-    pub fn from_env()->Self{
-        let mut sr = SR::default();
-        if let Ok(s) = std::env::var("ST_SR_COOLDOWN_S") { if let Ok(v) = s.parse::<u64>(){ sr.cooldown = Duration::from_secs(v); } }
-        if let Ok(s) = std::env::var("ST_SR_MIN_N") { if let Ok(v) = s.parse::<u32>(){ sr.min_n = v; } }
-        if let Ok(s) = std::env::var("ST_SR_ALPHA") { if let Ok(alpha) = s.parse::<f64>(){
-            let z = statrs::distribution::Normal::new(0.0,1.0).unwrap().inverse_cdf(1.0-alpha/2.0).abs();
-            sr.z = z;
-        } }
-        sr
-    }
-    fn key(&self, k:&ABKey)->String { format!("{}:c{}:k{}", k.kind, ilog2(k.cols), ilog2(k.k)) }
 
-    pub fn log(&mut self, k:&ABKey, win:bool){
-        if std::env::var("ST_SR_ENABLED").ok().as_deref()!=Some("1") { return; }
-        // A/B stat
-        let bucket = self.key(k);
-        let st = self.map.entry(bucket).or_default();
-        st.n += 1; if win { st.wins += 1; }
+pub fn maybe_self_rewrite() {
+    let enabled = std::env::var("ST_SR_ENABLED").ok().map(|v| v=="1").unwrap_or(false);
+    if !enabled { return; }
+    let min_n = std::env::var("ST_SR_MIN_N").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(50);
+    let cooldown_s = std::env::var("ST_SR_COOLDOWN_S").ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(120);
+    let alpha = std::env::var("ST_SR_ALPHA").ok().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.05);
 
-        // SweetSpot hist (K bands by thirds: <2^10, <2^14, else) as a starting heuristic
-        let band = if k.k <= 1024 { "small" } else if k.k <= 16384 { "mid" } else { "large" };
-        let dst = match band { "small"=>&mut self.hist_small, "mid"=>&mut self.hist_mid, _=>&mut self.hist_large };
-        let e = dst.entry(k.kind).or_insert(0);
-        if win { *e += 2 } else { *e += 1 } // win-weighted bump
-        self.maybe_emit(k.kind);
-    }
-
-    fn maybe_emit(&mut self, kind:&str){
-        if self.last_emit.elapsed() < self.cooldown { return; }
-        self.last_emit = Instant::now();
-        // A/B → Wilson
-        let mut best_key = String::new(); let mut best_lb = 0.0; let mut best:Stat = Stat::default();
-        for (k, st) in self.map.iter() {
-            if !k.starts_with(kind) { continue; }
-            if st.n < self.min_n { continue; }
-            let p = st.wins as f64 / st.n as f64;
-            let lb = wilson_lower(p, st.n as f64, self.z);
-            if lb > best_lb { best_lb = lb; best_key = k.clone(); best = st.clone(); }
+    let path = ablog_path();
+    let data = match std::fs::read_to_string(&path){ Ok(s)=>s, Err(_)=>return };
+    // aggregate last window
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let mut buckets: std::collections::HashMap<(String,String), (u32,u32)> = std::collections::HashMap::new();
+    for line in data.lines().rev().take(5000) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+            let ts = v.get("ts").and_then(|x|x.as_u64()).unwrap_or(0);
+            if now.saturating_sub(ts) > cooldown_s { break; }
+            let kind = v.get("kind").and_then(|x|x.as_str()).unwrap_or("");
+            let choice = v.get("choice").and_then(|x|x.as_str()).unwrap_or("");
+            let win = v.get("win").and_then(|x|x.as_bool()).unwrap_or(false);
+            let key=(kind.to_string(), choice.to_string());
+            let e = buckets.entry(key).or_insert((0,0));
+            e.1 += 1; if win { e.0 += 1; }
         }
-        if best_lb > 0.60 {
-            let rule = format!("// SR {}\nsoft(wg,256,0.08, sg && k<=32 && c>2048)\n", kind);
-            let mut path = heur_path();
-            if let Some(dir) = path.parent(){ let _=fs::create_dir_all(dir); }
-            let mut f = fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
-            let _ = f.write_all(rule.as_bytes());
-        }
-        // SweetSpot bands → JSON
-        self.emit_sweet(kind);
     }
-
-    fn emit_sweet(&self, kind:&str){
-        let mut sweet = read_sweet();
-        let bands = SweetBands{
-            small: 1024, mid: 16384, large: 1_000_000_000, // defaults
+    let mut adds=Vec::<String>::new();
+    for ((kind, choice),(wins,total)) in buckets.into_iter() {
+        if total < min_n { continue; }
+        let lb = wilson_lower_bound(wins,total,alpha);
+        if lb < 0.6 { continue; } // guard
+        // append soft rule
+        let line = match (kind.as_str(), choice.as_str()) {
+            ("topk","heap")    => r#"soft(algo,1,0.12,true)"#.to_string(),
+            ("topk","bitonic") => r#"soft(algo,2,0.12,true)"#.to_string(),
+            ("midk","1ce")     => r#"soft(midk,1,0.10,true)"#.to_string(),
+            ("midk","2ce")     => r#"soft(midk,2,0.10,true)"#.to_string(),
+            ("bottomk","1ce")  => r#"soft(bottomk,1,0.08,true)"#.to_string(),
+            ("bottomk","2ce")  => r#"soft(bottomk,2,0.08,true)"#.to_string(),
+            _=>continue
         };
-        let sel = match kind {
-            "topk"    => sweet.topk.get_or_insert(bands),
-            "midk"    => sweet.midk.get_or_insert(bands),
-            "bottomk" => sweet.bottomk.get_or_insert(bands),
-            _ => return,
-        };
-        // For now we keep thresholds; a future tuner can optimize them using hist_*.
-        // Persist
-        write_sweet(&sweet);
+        adds.push(line);
     }
+    if adds.is_empty(){ return; }
+    let _ = std::fs::create_dir_all(heur_path().parent().unwrap());
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(heur_path()).unwrap();
+    for s in adds { use std::io::Write; let _ = writeln!(f, "{}", s); }
 }
-
-fn heur_path()->PathBuf{
-    if let Some(h) = dirs::home_dir() { return h.join(".spiraltorch").join("heur.kdsl"); }
-    PathBuf::from("heur.kdsl")
-}
-
-fn sweet_path()->PathBuf{
-    if let Some(h) = dirs::home_dir() { return h.join(".spiraltorch").join("sweet.json"); }
-    PathBuf::from("sweet.json")
-}
-
-fn read_sweet()->SweetFile{
-    let p = sweet_path();
-    if let Ok(s)=fs::read_to_string(&p){
-        if let Ok(v)=serde_json::from_str::<SweetFile>(&s){ return v; }
-    }
-    SweetFile::default()
-}
-fn write_sweet(v:&SweetFile){
-    let p = sweet_path();
-    if let Some(dir)=p.parent(){ let _=fs::create_dir_all(dir); }
-    let _ = fs::write(p, serde_json::to_string_pretty(v).unwrap());
-}
-
-fn ilog2(x:u32)->u32{ if x<=1 { 0 } else { 31 - (x-1).leading_zeros() } }

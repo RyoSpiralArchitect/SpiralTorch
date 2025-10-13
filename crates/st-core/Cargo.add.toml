@@ -1,5 +1,4 @@
-# Merge the following into your st-core Cargo.toml:
-
+# Merge into st-core Cargo.toml
 [dependencies]
 once_cell = "1"
 bytemuck = { version = "1", features = ["derive"] }

@@ -7,3 +7,20 @@ dirs = "5"
 statrs = "0.16"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+[features]
+wgpu-rt = ["wgpu"]
+logic    = ["dep:st-logic"]
+kdsl     = ["dep:st-kdsl"]
+kv-redis = ["dep:st-kv/redis"]
+once_cell = { version = "1.19", optional = true }
+bytemuck  = { version = "1.16", optional = true, features=["derive"] }
+pollster  = { version = "0.3",  optional = true }
+dirs      = { version = "5",    optional = false }
+serde     = { version = "1",    features=["derive"] }
+serde_json= { version = "1" }
+statrs    = { version = "0.16" }
+st-logic  = { path = "../st-logic", optional = true }
+st-kdsl   = { path = "../st-kdsl",  optional = true }
+st-kv     = { path = "../st-kv",    optional = true, features=["redis"] }
+wgpu      = { version = "0.19", optional = true, default-features=false, features=["wgsl"] }

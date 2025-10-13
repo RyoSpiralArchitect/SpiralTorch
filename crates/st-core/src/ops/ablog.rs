@@ -1,22 +1,23 @@
-// crates/st-core/src/ops/ablog.rs  (v1.8.7)
-use once_cell::sync::OnceCell;
-use crate::heur::self_rewrite::{SR, ABKey};
+use std::io::Write;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-static SR_G: OnceCell<std::sync::Mutex<SR>> = OnceCell::new();
-
-fn sr() -> &'static std::sync::Mutex<SR> {
-    SR_G.get_or_init(|| std::sync::Mutex::new(SR::from_env()))
+fn log_path() -> std::path::PathBuf {
+    if let Some(home) = dirs::home_dir() {
+        home.join(".spiraltorch").join("ablog.ndjson")
+    } else {
+        std::path::PathBuf::from("ablog.ndjson")
+    }
 }
 
-pub fn ab_log_topk(cols:u32, k:u32, variant:&'static str, win:bool){
-    let mut sr = sr().lock().unwrap();
-    sr.log(&ABKey{ kind:"topk", rows:1, cols, k, variant }, win);
+pub fn ab_log(kind:&str, cols:u32, k:u32, choice:&str, win:bool) {
+    let _ = std::fs::create_dir_all(log_path().parent().unwrap());
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log_path()) {
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let _ = writeln!(f, r#"{{"ts":{},"kind":"{}","cols":{},"k":{},"choice":"{}","win":{}}}"#, ts, kind, cols, k, choice, if win {"true"} else {"false"});
+    }
 }
-pub fn ab_log_midk(cols:u32, k:u32, variant:&'static str, win:bool){
-    let mut sr = sr().lock().unwrap();
-    sr.log(&ABKey{ kind:"midk", rows:1, cols, k, variant }, win);
-}
-pub fn ab_log_bottomk(cols:u32, k:u32, variant:&'static str, win:bool){
-    let mut sr = sr().lock().unwrap();
-    sr.log(&ABKey{ kind:"bottomk", rows:1, cols, k, variant }, win);
-}
+
+// helpers
+pub fn ab_log_topk(cols:u32,k:u32,algo:&str,win:bool){ ab_log("topk",cols,k,algo,win) }
+pub fn ab_log_midk(cols:u32,k:u32,mode:&str,win:bool){ ab_log("midk",cols,k,mode,win) }
+pub fn ab_log_bottomk(cols:u32,k:u32,mode:&str,win:bool){ ab_log("bottomk",cols,k,mode,win) }
