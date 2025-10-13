@@ -107,6 +107,13 @@ let exec = WgpuExecutor::default();
 execute_rank(&exec, &plan)?;
 ```
 
+`DeviceCaps` now ships backend-specific constructors (`wgpu`, `cuda`, `hip`, `cpu`) and
+builder-style setters (`with_subgroup`, `with_max_workgroup`, `with_shared_mem`) so you
+can describe GPUs with realistic limits while still feeding the unified heuristic chooser
+a compact struct. Extra helpers (`align_workgroup`, `preferred_tile`, `occupancy_score`)
+let downstream tooling snap requested launches to warp-friendly shapes, reason about
+effective occupancy, and auto-derive sweep/compaction tiles from the device limits.
+
 **Python**
 ```python
 import numpy as np, spiraltorch as st
@@ -149,7 +156,12 @@ export SPIRAL_HEUR_K='
 - **B** = DSL **hard** assignment (if you set `mk:`/`tile:` explicitly, B wins)
 - **C** = **Generated table** (tuner output)
 
-Default policy: if **B** exists use it; else compare **A vs C** by SoftLogic score and favor **C** with a small prior (`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`).  
+Default policy: if **B** exists use it; else compare **A vs C** by SoftLogic score and
+favor **C** with a small prior (`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`). The runtime now
+refines every candidate by snapping workgroup/tile sizes to the device lane width,
+injects backend-specific merge-kind defaults when unset, and finally scores each
+candidate with a tiny occupancy + alignment model before adopting the highest-scoring
+plan (with the generated path inheriting the configured bias).
 If the adopted choice wins locally (Wilson CI lower bound > 0.5 with min trials), **Self-Rewrite** appends matching `soft(...)` to `~/.spiraltorch/heur.kdsl`.
 
 ---
