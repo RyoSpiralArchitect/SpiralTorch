@@ -31,6 +31,29 @@ use crate::ability::unison_mediator;
 
 use super::kdsl_bridge;
 
+fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> Choice {
+    let wg = caps.recommended_workgroup(rows);
+    let kl = caps.preferred_k_loop(k);
+    let ch = caps.preferred_channel(cols);
+    let (tile, mut ctile) = caps.recommended_tiles(cols);
+
+    // BottomK relies heavily on compaction; bias toward smaller ctile to match
+    // the streaming nature of the kernel.
+    if matches!(kind, RankKind::BottomK) {
+        ctile = ctile.min(tile / 2).max(128);
+        let align = caps.lane_width.max(1);
+        if align > 1 {
+            let remainder = ctile % align;
+            if remainder != 0 {
+                ctile += align - remainder;
+            }
+        }
+        ctile = ctile.min(tile);
+    }
+
+    let mk = caps.preferred_merge_kind(k);
+    let mkd = caps.preferred_substrategy(mk, k);
+    let use_2ce = caps.prefers_two_stage(rows, cols, k);
 fn fallback(_rows: u32, cols: u32, k: u32, caps: &DeviceCaps, _kind: RankKind) -> Choice {
     let wg = caps.recommended_workgroup();
     let kl = caps.recommended_kl(k);
@@ -249,6 +272,24 @@ fn backend_soft_injections(
             weight: 0.10,
         });
     }
+    // wg / kl / tile preferences from the hardware descriptor
+    let preferred_wg = caps.recommended_workgroup(rows);
+    v.push(SoftRule {
+        field: Field::Wg,
+        value: Value::U(preferred_wg),
+        weight: 0.16,
+    });
+    let preferred_kl = caps.preferred_k_loop(k);
+    v.push(SoftRule {
+        field: Field::Kl,
+        value: Value::U(preferred_kl),
+        weight: 0.14,
+    });
+    let (preferred_tile, preferred_ctile) = caps.recommended_tiles(cols);
+    v.push(SoftRule {
+        field: Field::Tile,
+        value: Value::U(preferred_tile),
+    }
     // wg / kl / tile hints follow DeviceCaps helpers.
     v.push(SoftRule {
         field: Field::Wg,
@@ -285,6 +326,7 @@ fn backend_soft_injections(
     if matches!(kind, RankKind::MidK | RankKind::BottomK) {
         v.push(SoftRule {
             field: Field::Ctile,
+            value: Value::U(preferred_ctile),
             value: Value::U(caps.recommended_compaction_tile(cols)),
         let ct = if cols > 65_536 {
             1024
@@ -542,6 +584,7 @@ pub fn choose_unified_rank(
         #[cfg(feature = "logic")]
         let mut sr = soft_dsl;
         #[cfg(not(feature = "logic"))]
+        let mut sr: Vec<kdsl_bridge::SoftRule> = Vec::new();
         #[allow(unused_mut)]
         let mut sr: Vec<kdsl_bridge::SoftRule> = Vec::new();
         let sr: Vec<kdsl_bridge::SoftRule> = Vec::new();
@@ -665,6 +708,15 @@ pub fn choose_unified_rank(
 
     // 5) Consensus: score both candidates & bias generated table via env weight.
     let gen_bias = gen_weight_for_backend(caps.backend);
+    let pick = |x: Choice, y: Choice| -> Choice {
+        let prefer_y =
+            (caps.backend == BackendKind::Wgpu && caps.subgroup && y.mk == 2 && k <= 128)
+                || (caps.backend == BackendKind::Cuda && y.mk >= 1)
+                || (caps.backend == BackendKind::Hip && y.mk >= 1);
+        if prefer_y && gen_bias > 0.0 {
+            y
+        } else {
+            x
     let score_b = score_choice(&cand_b, &caps, rows, cols, k, kind);
     let mut score_c = score_choice(&cand_c, &caps, rows, cols, k, kind);
     score_c += gen_bias;

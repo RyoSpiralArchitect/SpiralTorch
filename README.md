@@ -110,6 +110,11 @@ execute_rank(&exec, &plan)?;
 `DeviceCaps` now ships backend-specific constructors (`wgpu`, `cuda`, `hip`, `cpu`) and
 builder-style setters (`with_subgroup`, `with_max_workgroup`, `with_shared_mem`) so you
 can describe GPUs with realistic limits while still feeding the unified heuristic
+chooser a compact struct.  The helpers also expose higher level tuning hints such as
+`recommended_workgroup`, `recommended_tiles`, and `preferred_k_loop` so backends can
+query consistent defaults without duplicating the heuristic math.  Pair them with the
+extended `prefers_two_stage(rows, cols, k)` signature when you want to peek at whether
+the planner will promote the 2-pass compaction path for huge matrices.
 chooser a compact struct.  It also exposes derived helpers such as
 `recommended_workgroup`, `recommended_sweep_tile`, and `recommended_compaction_tile`
 so you can introspect the policy or plug device-aware hints into custom tooling.
