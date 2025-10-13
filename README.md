@@ -140,45 +140,30 @@ vals, idx = st.topk2d(x, k=1024, device="auto")   # "wgpu > cuda > mps > cpu"
 ## Pure Rust training (zero PyTorch/Numpy deps)
 
 Need a bootstrap-friendly learning loop without pulling in heavyweight
-dependencies?  `st-tensor::pure` now ships with zero-panic tensors,
-hyperbolic distance helpers, and complex-spectrum encoders so the stack keeps
-accelerating without ever leaning on NumPy or PyTorch.
+dependencies?  `st-tensor::pure` gives you a tiny tensor type plus a linear
+model trainer written entirely in Rust.
 
 ```rust
-use st_tensor::pure::{LinearModel, PureResult, Tensor, mean_squared_error};
+use st_tensor::pure::{LinearModel, Tensor, mean_squared_error};
 
-fn main() -> PureResult<()> {
+fn main() {
     // Build a dataset for y = 2x + 1 using plain Rust vectors.
-    let inputs = Tensor::from_vec(4, 1, vec![0.0, 1.0, 2.0, 3.0])?;
-    let targets = Tensor::from_vec(4, 1, vec![1.0, 3.0, 5.0, 7.0])?;
+    let inputs = Tensor::from_vec(4, 1, vec![0.0, 1.0, 2.0, 3.0]);
+    let targets = Tensor::from_vec(4, 1, vec![1.0, 3.0, 5.0, 7.0]);
 
-    let mut model = LinearModel::new(1, 1)?;
+    let mut model = LinearModel::new(1, 1);
     for _ in 0..200 {
-        model.train_batch(&inputs, &targets, 0.1)?;
+        model.train_batch(&inputs, &targets, 0.1);
     }
 
-    let predictions = model.forward(&inputs)?;
-    let mse = mean_squared_error(&predictions, &targets)?;
+    let predictions = model.forward(&inputs);
+    let mse = mean_squared_error(&predictions, &targets);
     println!("Final MSE: {mse:.6}");
-    Ok(())
 }
 ```
 
 Everything runs with `cargo run -p st-tensor --example ...` or inside your own
-binary crate—no Python wheels required. When you want to leave Euclidean space,
-hand text straight to the Z-space encoder and stay in browser-friendly memory
-limits without ever tokenizing:
-
-```rust
-use st_tensor::pure::{LanguageWaveEncoder, PureResult};
-
-fn main() -> PureResult<()> {
-    let encoder = LanguageWaveEncoder::new(-1.0, 0.75)?;
-    let z_space = encoder.encode_z_space("SpiralTorch stays homotopy-free")?;
-    println!("{} hyperbolic components", z_space.shape().1);
-    Ok(())
-}
-```
+binary crate—no Python wheels required.
 
 ---
 
