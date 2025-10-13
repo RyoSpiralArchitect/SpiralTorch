@@ -14,7 +14,7 @@ pub fn sample_lane_params(seed:u64, lane_set:&[i32], kl_set:&[i32], ch_set:&[i32
 fn median_i32(v:&mut [i32])->i32{ v.sort_unstable(); let n=v.len(); if n==0 {0} else { v[n/2] } }
 
 pub fn consensus_lane_params(mut p:LaneParams) -> LaneParams {
-    let agg = std::env::var("SPIRAL_UNISON_AGG").unwrap_or_else(|_| "mean".into());
+    let _agg = std::env::var("SPIRAL_UNISON_AGG").unwrap_or_else(|_| "mean".into());
     #[cfg(feature="hip")]
     {
         #[cfg(all(feature="hip", feature="hip-real"))] use st_backend_hip::rccl_comm::init_rccl_from_env;
@@ -48,7 +48,7 @@ free(d_send); free(d_recv);
     #[cfg(feature="kv-redis")]
     {
         if let Ok(url) = std::env::var("REDIS_URL") {
-        if let Ok(samples) = st_kv::redis_lrange(            if let Ok(samples) = st_kv::redis_lrange(            if let Ok(samples) = st_kv::redis_lrange(            if let Ok(samples) = st_kv::redis_lrange(redis_lrange(&url, "spiral:heur:lparams", 16)url, "spiral:heur:lparams", -16, -1) {url, "spiral:heur:lparams", -16, -1) {url, "spiral:heur:lparams", -16, -1) {url, "spiral:heur:lparams", -16, -1) {
+            if let Ok(samples) = st_kv::redis_lrange(&url, "spiral:heur:lparams", -16, -1) {
                 let mut lanes=Vec::new(); let mut kls=Vec::new(); let mut chs=Vec::new();
                 for s in samples { if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s){
                     lanes.push(v["lane"].as_i64().unwrap_or(0) as i32);
