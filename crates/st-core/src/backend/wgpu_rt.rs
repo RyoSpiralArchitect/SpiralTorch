@@ -1,4 +1,4 @@
-//! wgpu_rt.rs (v1.8.5): consult heuristics Choice for algo_topk
+// crates/st-core/src/backend/wgpu_rt.rs  (v1.8.7) — excerpted TopK dispatch
 #![allow(unused)]
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
@@ -11,7 +11,6 @@ pub struct WgpuCtx {
     topk_heap_sgintrin_pl: OnceCell<wgpu::ComputePipeline>,
     topk_bit_pl:    OnceCell<wgpu::ComputePipeline>,
     topk_wg_pl:     OnceCell<wgpu::ComputePipeline>,
-    // compaction pipelines omitted...
     layout_topk: OnceCell<wgpu::BindGroupLayout>,
 }
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
@@ -84,7 +83,17 @@ fn ensure_topk_wg_pl(ctx:&WgpuCtx)->&wgpu::ComputePipeline { ctx.topk_wg_pl.get_
 pub fn dispatch_topk_1ce(rows:u32, cols:u32, k:u32, row_stride:u32, k_lane:u32, x:&wgpu::Buffer, out_vals:&wgpu::Buffer, out_idx:&wgpu::Buffer)->Result<(),String>{
     use wgpu::util::DeviceExt; use wgpu::Features;
     let ctx = ctx()?;
-    let params = Params{ rows, cols, k, row_stride, k_lane, tile_cols:cols, _pad:0, _pad2:0 };
+    let mut tile_cols = cols;
+    // SpiralK/Tuner choice for TopK
+    let has_sub = ctx.device.features().contains(Features::SUBGROUPS);
+    let mut algo_hint: u8 = 0;
+    let mut ctile_hint: u32 = 0;
+    if let Some(ch) = crate::backend::wgpu_heuristics::choose_topk(rows, cols, k, has_sub) {
+        algo_hint = ch.algo_topk; ctile_hint = ch.ctile;
+    }
+    if ctile_hint != 0 { tile_cols = ctile_hint; }
+
+    let params = Params{ rows, cols, k, row_stride, k_lane, tile_cols, _pad:0, _pad2:0 };
     let ub = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{ label: Some("st.rankk.params"), contents: bytemuck::bytes_of(&params), usage: wgpu::BufferUsages::UNIFORM });
     let layout = ensure_layout_topk(&ctx);
     let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor{ label: Some("st.rankk.bg.topk"), layout, entries: &[
@@ -93,19 +102,12 @@ pub fn dispatch_topk_1ce(rows:u32, cols:u32, k:u32, row_stride:u32, k_lane:u32, 
         wgpu::BindGroupEntry{ binding:2, resource: out_idx.as_entire_binding()  },
         wgpu::BindGroupEntry{ binding:3, resource: ub.as_entire_binding() },
     ]});
-    let has_sub = ctx.device.features().contains(Features::SUBGROUPS);
-
-    // SpiralK/Tuner choice → algo_topk
-    let mut algo_hint: u8 = 0;
-    if let Some(ch) = crate::backend::wgpu_heuristics::choose(rows, cols, k, has_sub) { algo_hint = ch.algo_topk; }
-
     let sgc_hint = if has_sub { 8 } else { 1 };
     let prefer_intrin = std::env::var("ST_USE_SG_INTRIN").ok().as_deref()==Some("1");
     let prefer_heap_default = (k <= 32 && cols >= 2048) || (k <= 16 && sgc_hint >= 8);
     let prefer_heap = match algo_hint {
         1 => true, 2 => false, _ => prefer_heap_default
     };
-
     let pl =
         if has_sub {
             if prefer_heap {
