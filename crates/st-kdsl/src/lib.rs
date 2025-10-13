@@ -1,59 +1,50 @@
-// crates/st-kdsl/src/lib.rs  (v1.9.0)
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Ctx { pub r:u32, pub c:u32, pub k:u32, pub sg: bool, pub sgc: u32, pub kc: u32 }
+pub struct Ctx { pub r:u32, pub c:u32, pub k:u32, pub sg:bool, pub sgc:u32, pub kc:u32 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Choice {
+pub struct Hard {
     pub use_2ce: Option<bool>, pub wg: Option<u32>, pub kl: Option<u32>, pub ch: Option<u32>,
-    pub algo: Option<u8>,      // 1=heap, 2=bitonic
-    pub midk: Option<u8>,      // 1=1CE,  2=2CE
-    pub bottomk: Option<u8>,   // 1=1CE,  2=2CE
-    pub ctile: Option<u32>,    // 0=auto or tile size
+    pub algo: Option<u8>, pub midk: Option<u8>, pub bottomk: Option<u8>, pub ctile: Option<u32>,
 }
-
 #[derive(Clone, Copy, Debug)]
 pub enum SoftRule {
-    U2{ val: bool,  w:f32 },
-    Wg{ val: u32,   w:f32 },
-    Kl{ val: u32,   w:f32 },
-    Ch{ val: u32,   w:f32 },
-    Algo{ val: u8,  w:f32 },   // reserved (not scored yet)
+    U2{ val:bool, w:f32 }, Wg{ val:u32, w:f32 }, Kl{ val:u32, w:f32 }, Ch{ val:u32, w:f32 },
+    Algo{ val:u8, w:f32 }, Midk{ val:u8, w:f32 }, Bottomk{ val:u8, w:f32 }, Ctile{ val:u32, w:f32 },
 }
+pub struct Out { pub hard: Hard, pub soft: Vec<SoftRule> }
 
 #[derive(Error, Debug)]
-pub enum Err { #[error("parse error at pos {0}")] Parse(usize), #[error("invalid token")] Tok }
+pub enum Err { #[error("parse error at pos {0}")] Parse(usize), #[error("token")] Tok }
 
+// lexer
 #[derive(Clone, Debug, PartialEq)]
-enum Tok { Id(String), Num(f64), True, False, Lp, Rp, Comma, Semi, Colon, Op(String) }
-
-fn lex(src:&str)->Result<Vec<Tok>,Err>{
-    let mut v=Vec::new(); let s=src.as_bytes(); let mut i=0;
-    macro_rules! push {($x:expr)=>{v.push($x);}}
-    while i<s.len(){
-        let c=s[i] as char;
+enum Tok{ Id(String), Num(f64), True, False, Lp, Rp, Comma, Semi, Colon, Op(String) }
+fn lex(s:&str)->Result<Vec<Tok>,Err>{
+    let b=s.as_bytes(); let mut i=0; let mut v=Vec::new();
+    while i<b.len(){
+        let c=b[i] as char;
         if c.is_whitespace(){ i+=1; continue; }
-        match c {
-            '('=>{push!(Tok::Lp); i+=1;} ')'=>{push!(Tok::Rp); i+=1;}
-            ','=>{push!(Tok::Comma); i+=1;} ';'=>{push!(Tok::Semi); i+=1;} ':'=>{push!(Tok::Colon); i+=1;}
-            '0'..='9'|'.'=>{
-                let st=i; i+=1;
-                while i<s.len() && (((s[i] as char).is_ascii_digit()) || (s[i]==b'.')) { i+=1; }
-                let n=std::str::from_utf8(&s[st..i]).unwrap().parse::<f64>().map_err(|_|Err::Parse(st))?; push!(Tok::Num(n));
-            }
-            'a'..='z'|'A'..='Z'|'_'=>{ let st=i; i+=1;
-                while i<s.len(){
-                    let ch=s[i] as char; if ch.is_ascii_alphanumeric()||ch=='_' {i+=1;} else {break;}
-                }
-                let id=std::str::from_utf8(&s[st..i]).unwrap().to_string();
-                push!(match id.as_str(){ "true"=>Tok::True,"false"=>Tok::False,_=>Tok::Id(id) });
+        match c{
+            '('=>{v.push(Tok::Lp); i+=1;}
+            ')'=>{v.push(Tok::Rp); i+=1;}
+            ','=>{v.push(Tok::Comma); i+=1;}
+            ';'=>{v.push(Tok::Semi); i+=1;}
+            ':'=>{v.push(Tok::Colon); i+=1;}
+            '0'..='9'|'.'=>{ let st=i; i+=1; while i<b.len()&&((b[i]as char).is_ascii_digit()||b[i]==b'.'){i+=1;}
+                let n=std::str::from_utf8(&b[st..i]).unwrap().parse::<f64>().map_err(|_|Err::Parse(st))?; v.push(Tok::Num(n)); }
+            'a'..='z'|'A'..='Z'|'_'=>{
+                let st=i; i+=1; while i<b.len(){ let ch=b[i] as char; if ch.is_ascii_alphanumeric()||ch=='_' {i+=1;} else {break;} }
+                let id=std::str::from_utf8(&b[st..i]).unwrap().to_string();
+                v.push(match id.as_str(){ "true"=>Tok::True,"false"=>Tok::False,_=>Tok::Id(id)});
             }
             _=>{
-                let two = if i+1<s.len(){Some(((s[i]as char).to_string()+&(s[i+1]as char).to_string()))} else {None};
-                if let Some(op)=two.as_deref(){ if ["<=",">=","==","!=","&&","||"].contains(&op){ push!(Tok::Op(op.to_string())); i+=2; continue; } }
-                let sc = c.to_string();
-                if ["+","-","*","/","<",">"].contains(&sc.as_str()){ push!(Tok::Op(sc)); i+=1; continue; }
+                let two = if i+1<b.len(){Some(((b[i]as char).to_string()+&(b[i+1]as char).to_string()))} else {None};
+                if let Some(op)=two.as_ref().map(|x|x.as_str()){
+                    if ["<=",">=","==","!=","&&","||"].contains(&op){ v.push(Tok::Op(op.to_string())); i+=2; continue; }
+                }
+                if ["+","-","*","/","<",">"].contains(&&*c.to_string()){ v.push(Tok::Op(c.to_string())); i+=1; continue; }
                 return Err(Err::Parse(i));
             }
         }
@@ -61,116 +52,116 @@ fn lex(src:&str)->Result<Vec<Tok>,Err>{
     Ok(v)
 }
 
+// parser
 #[derive(Clone)] struct P{ t:Vec<Tok>, i:usize }
-impl P{
-    fn peek(&self)->Option<&Tok>{ self.t.get(self.i) }
-    fn eat(&mut self)->Option<Tok>{ let x=self.t.get(self.i).cloned(); if x.is_some(){self.i+=1;} x }
-    fn expect(&mut self, want:&Tok)->Result<(),Err>{ let x=self.eat().ok_or(Err::Tok)?; if &x==want {Ok(())} else {Err(Err::Tok)} }
+impl P{ fn peek(&self)->Option<&Tok>{ self.t.get(self.i) } fn eat(&mut self)->Option<Tok>{ let x=self.t.get(self.i).cloned(); if x.is_some(){self.i+=1;} x } fn expect(&mut self, want:&Tok)->Result<(),Err>{ let x=self.eat().ok_or(Err::Tok)?; if &x==want{Ok(())} else {Err(Err::Tok)} } }
+#[derive(Clone,Copy)] enum E{ F(f64), B(bool) } impl E{ fn as_f(self)->f64{ match self{E::F(x)=>x,E::B(b)=> if b{1.0}else{0.0}} } fn as_b(self)->bool{ match self{E::B(b)=>b,E::F(x)=>x!=0.0} } }
+fn expect_lp(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Lp) } fn expect_rp(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Rp) } fn expect_comma(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Comma) }
+
+fn parse_prog(p:&mut P)->Result<Vec<Stmt>,Err>{ let mut out=Vec::new(); while p.peek().is_some(){ out.push(parse_stmt(p)?); if matches!(p.peek(),Some(Tok::Semi)){p.eat();}} Ok(out) }
+#[derive(Clone)] enum Stmt{ Assign(Field, Box<dyn Fn(&Ctx)->E>), Soft(Field, Box<dyn Fn(&Ctx)->u32>, Box<dyn Fn(&Ctx)->f64>, Box<dyn Fn(&Ctx)->bool>) }
+#[derive(Clone,Copy,PartialEq,Eq)] enum Field{ U2,Wg,Kl,Ch, Algo, Midk, Bottomk, Ctile }
+fn parse_field(p:&mut P)->Result<Field,Err>{
+    match p.eat().ok_or(Err::Tok)?{
+        Tok::Id(s) if s=="u2"=>Ok(Field::U2),
+        Tok::Id(s) if s=="wg"=>Ok(Field::Wg),
+        Tok::Id(s) if s=="kl"=>Ok(Field::Kl),
+        Tok::Id(s) if s=="ch"=>Ok(Field::Ch),
+        Tok::Id(s) if s=="algo"=>Ok(Field::Algo),
+        Tok::Id(s) if s=="midk"=>Ok(Field::Midk),
+        Tok::Id(s) if s=="bottomk"=>Ok(Field::Bottomk),
+        Tok::Id(s) if s=="ctile"=>Ok(Field::Ctile),
+        _=>Err(Err::Tok)
+    }
 }
-
-#[derive(Clone,Copy)] enum E{ F(f64), B(bool) }
-impl E{ fn as_f(self)->f64{ match self{E::F(x)=>x,E::B(b)=> if b{1.0}else{0.0}} } fn as_b(self)->bool{ match self{E::B(b)=>b,E::F(x)=> x!=0.0 } } }
-
-#[derive(Clone)] enum Stmt{
-    Assign(Field, Box<dyn Fn(&Ctx)->E>),
-    Soft(Field, Box<dyn Fn(&Ctx)->u32>, Box<dyn Fn(&Ctx)->f64>, Box<dyn Fn(&Ctx)->bool>),
-}
-#[derive(Clone,Copy,PartialEq,Eq,Debug)] enum Field{ U2,Wg,Kl,Ch,Algo,MidK,BottomK,Ctile }
-
-fn parse_prog(p:&mut P)->Result<Vec<Stmt>,Err>{ let mut out=Vec::new(); while p.peek().is_some(){ out.push(parse_stmt(p)?); if matches!(p.peek(),Some(Tok::Semi)){p.eat();} } Ok(out) }
-fn parse_field(p:&mut P)->Result<Field,Err>{ match p.eat().ok_or(Err::Tok)?{
-    Tok::Id(s) if s=="u2"=>Ok(Field::U2),
-    Tok::Id(s) if s=="wg"=>Ok(Field::Wg),
-    Tok::Id(s) if s=="kl"=>Ok(Field::Kl),
-    Tok::Id(s) if s=="ch"=>Ok(Field::Ch),
-    Tok::Id(s) if s=="algo"=>Ok(Field::Algo),
-    Tok::Id(s) if s=="midk"=>Ok(Field::MidK),
-    Tok::Id(s) if s=="bottomk"=>Ok(Field::BottomK),
-    Tok::Id(s) if s=="ctile"=>Ok(Field::Ctile),
-    _=>Err(Err::Tok) } }
 fn parse_stmt(p:&mut P)->Result<Stmt,Err>{
-    if let Some(Tok::Id(id))=p.peek(){ if id=="soft" {
-        p.eat(); p.expect(&Tok::Lp)?; let f=parse_field(p)?; p.expect(&Tok::Comma)?;
-        let vf=parse_expr_u32(p)?; p.expect(&Tok::Comma)?; let wf=parse_expr_f64(p)?; p.expect(&Tok::Comma)?; let cf=parse_expr_bool(p)?; p.expect(&Tok::Rp)?;
+    if let Some(Tok::Id(id))=p.peek(){ if id=="soft"{
+        p.eat(); expect_lp(p)?;
+        let f=parse_field(p)?; expect_comma(p)?;
+        let vf=parse_expr_u32(p)?; expect_comma(p)?;
+        let wf=parse_expr_f64(p)?; expect_comma(p)?;
+        let cf=parse_expr_bool(p)?; expect_rp(p)?;
         return Ok(Stmt::Soft(f, vf, wf, cf));
     }}
-    let f=parse_field(p)?; p.expect(&Tok::Colon)?; let ef=parse_expr(p)?; Ok(Stmt::Assign(f, ef))
+    let f=parse_field(p)?; p.expect(&Tok::Colon)?; let ef=parse_expr(p)?; Ok(Stmt::Assign(f,ef))
 }
 fn parse_expr(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ parse_or(p) }
-fn parse_or(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ let mut lhs=parse_and(p)?; while let Some(Tok::Op(op))=p.peek(){ if op=="||" { p.eat(); let rhs=parse_and(p)?; let l=lhs; lhs=Box::new(move |c| E::B(l(c).as_b()||rhs(c).as_b())); } else { break; } } Ok(lhs) }
-fn parse_and(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ let mut lhs=parse_cmp(p)?; while let Some(Tok::Op(op))=p.peek(){ if op=="&&" { p.eat(); let rhs=parse_cmp(p)?; let l=lhs; lhs=Box::new(move |c| E::B(l(c).as_b()&&rhs(c).as_b())); } else { break; } } Ok(lhs) }
+fn parse_or(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ let mut lhs=parse_and(p)?; while let Some(Tok::Op(op))=p.peek(){ if op=="||"{ p.eat(); let rhs=parse_and(p)?; let l=lhs; lhs=Box::new(move |c| E::B(l(c).as_b()||rhs(c).as_b())); } else {break;} } Ok(lhs) }
+fn parse_and(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ let mut lhs=parse_cmp(p)?; while let Some(Tok::Op(op))=p.peek(){ if op=="&&"{ p.eat(); let rhs=parse_cmp(p)?; let l=lhs; lhs=Box::new(move |c| E::B(l(c).as_b()&&rhs(c).as_b())); } else {break;} } Ok(lhs) }
 fn parse_cmp(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{
     let lhs=parse_add(p)?;
     if let Some(Tok::Op(op))=p.peek().cloned(){
         if ["<","<=",">",">=","==","!="].contains(&op.as_str()){
             p.eat(); let rhs=parse_add(p)?;
-            return Ok(Box::new(move |c| { let a=lhs(c).as_f(); let b=rhs(c).as_f();
+            return Ok(Box::new(move |c|{
+                let a=lhs(c).as_f(); let b=rhs(c).as_f();
                 let r=match op.as_str(){ "<"=>(a<b), "<="=>(a<=b), ">"=>(a>b), ">="=>(a>=b), "=="=>(a==b), "!="=>(a!=b), _=>false };
-                E::B(r) }));
+                E::B(r)
+            }));
         }
     }
     Ok(lhs)
 }
-fn parse_add(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ let mut lhs=parse_mul(p)?; loop { match p.peek(){
-    Some(Tok::Op(op)) if op=="+" || op=="-" => { let op=op.clone(); p.eat(); let rhs=parse_mul(p)?; let l=lhs; lhs=Box::new(move |c|{ let a=l(c).as_f(); let b=rhs(c).as_f(); E::F(if op=="+"{a+b}else{a-b}) }); }
+fn parse_add(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ let mut lhs=parse_mul(p)?; loop{ match p.peek(){
+    Some(Tok::Op(op)) if op=="+"||op=="-" => { let op=op.clone(); p.eat(); let rhs=parse_mul(p)?; let l=lhs; lhs=Box::new(move |c|{ let a=l(c).as_f(); let b=rhs(c).as_f(); E::F(if op=="+"{a+b}else{a-b})}); }
     _=>break } } Ok(lhs) }
-fn parse_mul(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ let mut lhs=parse_unary(p)?; loop { match p.peek(){
-    Some(Tok::Op(op)) if op=="*" || op=="/" => { let op=op.clone(); p.eat(); let rhs=parse_unary(p)?; let l=lhs; lhs=Box::new(move |c|{ let a=l(c).as_f(); let b=rhs(c).as_f(); E::F(if op=="*"{a*b}else{a/b}) }); }
+fn parse_mul(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ let mut lhs=parse_unary(p)?; loop{ match p.peek(){
+    Some(Tok::Op(op)) if op=="*"||op=="/" => { let op=op.clone(); p.eat(); let rhs=parse_unary(p)?; let l=lhs; lhs=Box::new(move |c|{ let a=l(c).as_f(); let b=rhs(c).as_f(); E::F(if op=="*"{a*b}else{a/b})}); }
     _=>break } } Ok(lhs) }
-fn parse_unary(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ match p.peek(){
-    Some(Tok::Op(op)) if op=="-" => { p.eat(); let x=parse_unary(p)?; Ok(Box::new(move |c| E::F(-x(c).as_f()))) }
-    _=>parse_atom(p) } }
+fn parse_unary(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{ match p.peek(){ Some(Tok::Op(op)) if op=="-" => { p.eat(); let x=parse_unary(p)?; Ok(Box::new(move |c|E::F(-x(c).as_f()))) }, _=>parse_atom(p) } }
 fn parse_atom(p:&mut P)->Result<Box<dyn Fn(&Ctx)->E>,Err>{
     match p.eat().ok_or(Err::Tok)?{
-        Tok::Num(n)=>Ok(Box::new(move |_| E::F(n))),
-        Tok::True =>Ok(Box::new(move |_| E::B(true))), Tok::False=>Ok(Box::new(move |_| E::B(false))),
-        Tok::Id(id) if id=="r" => Ok(Box::new(move |c| E::F(c.r as f64))),
-        Tok::Id(id) if id=="c" => Ok(Box::new(move |c| E::F(c.c as f64))),
-        Tok::Id(id) if id=="k" => Ok(Box::new(move |c| E::F(c.k as f64))),
-        Tok::Id(id) if id=="sg"=> Ok(Box::new(move |c| E::B(c.sg))),
-        Tok::Id(id) if id=="sgc"=>Ok(Box::new(move |c| E::F(c.sgc as f64))),
-        Tok::Id(id) if id=="kc"=> Ok(Box::new(move |c| E::F(c.kc as f64))),
-        Tok::Id(id) if id=="heap"=>Ok(Box::new(move |_| E::F(1.0))),
-        Tok::Id(id) if id=="bitonic"=>Ok(Box::new(move |_| E::F(2.0))),
-        Tok::Id(id) if id=="one"=>Ok(Box::new(move |_| E::F(1.0))),
-        Tok::Id(id) if id=="two"=>Ok(Box::new(move |_| E::F(2.0))),
-        Tok::Id(id) if id=="onece"=>Ok(Box::new(move |_| E::F(1.0))),
-        Tok::Id(id) if id=="twoce"=>Ok(Box::new(move |_| E::F(2.0))),
-        Tok::Id(id) if id=="sel" => { expect_lp(p)?; let cb=parse_expr_bool(p)?; expect_comma(p)?; let a=parse_expr(p)?; expect_comma(p)?; let b=parse_expr(p)?; expect_rp(p)?; Ok(Box::new(move |c| if cb(c){a(c)} else {b(c)})) }
-        Tok::Id(id) if id=="clamp" => { expect_lp(p)?; let x=parse_expr_f64(p)?; expect_comma(p)?; let lo=parse_expr_f64(p)?; expect_comma(p)?; let hi=parse_expr_f64(p)?; expect_rp(p)?; Ok(Box::new(move |c| E::F(x(c).max(lo(c)).min(hi(c))))) }
-        Tok::Lp => { let e=parse_expr(p)?; expect_rp(p)?; Ok(e) }
-        _=> Err(Err::Tok)
+        Tok::Num(n)=>Ok(Box::new(move |_|E::F(n))),
+        Tok::True =>Ok(Box::new(move |_|E::B(true))),
+        Tok::False=>Ok(Box::new(move |_|E::B(false))),
+        Tok::Id(id) if id=="r"=>Ok(Box::new(move |c|E::F(c.r as f64))),
+        Tok::Id(id) if id=="c"=>Ok(Box::new(move |c|E::F(c.c as f64))),
+        Tok::Id(id) if id=="k"=>Ok(Box::new(move |c|E::F(c.k as f64))),
+        Tok::Id(id) if id=="sg"=>Ok(Box::new(move |c|E::B(c.sg))),
+        Tok::Id(id) if id=="sgc"=>Ok(Box::new(move |c|E::F(c.sgc as f64))),
+        Tok::Id(id) if id=="kc"=>Ok(Box::new(move |c|E::F(c.kc as f64))),
+        Tok::Id(id) if id=="log2" => { super_lp(p)?; let x=parse_expr_f64(p)?; super_rp(p)?; Ok(Box::new(move |c|E::F((x(c)).log2()))) },
+        Tok::Id(id) if id=="sel" => { super_lp(p)?; let cb=parse_expr_bool(p)?; super_comma(p)?; let a=parse_expr(p)?; super_comma(p)?; let b=parse_expr(p)?; super_rp(p)?; Ok(Box::new(move |c| if cb(c){a(c)} else {b(c)})) },
+        Tok::Id(id) if id=="clamp" => { super_lp(p)?; let x=parse_expr_f64(p)?; super_comma(p)?; let lo=parse_expr_f64(p)?; super_comma(p)?; let hi=parse_expr_f64(p)?; super_rp(p)?; Ok(Box::new(move |c|{ let v=x(c); E::F(v.max(lo(c)).min(hi(c))) })) },
+        Tok::Lp => { let e=parse_expr(p)?; super_rp(p)?; Ok(e) }
+        _=>Err(Err::Tok)
     }
 }
-fn expect_lp(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Lp) } fn expect_rp(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Rp) } fn expect_comma(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Comma) }
+fn super_lp(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Lp) } fn super_rp(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Rp) } fn super_comma(p:&mut P)->Result<(),Err>{ p.expect(&Tok::Comma) }
 fn parse_expr_f64(p:&mut P)->Result<Box<dyn Fn(&Ctx)->f64>,Err>{ let e=parse_expr(p)?; Ok(Box::new(move |c| e(c).as_f())) }
 fn parse_expr_u32(p:&mut P)->Result<Box<dyn Fn(&Ctx)->u32>,Err>{ let e=parse_expr(p)?; Ok(Box::new(move |c| e(c).as_f().round() as u32)) }
 fn parse_expr_bool(p:&mut P)->Result<Box<dyn Fn(&Ctx)->bool>,Err>{ let e=parse_expr(p)?; Ok(Box::new(move |c| e(c).as_b())) }
 
-pub struct Out { pub hard: Choice, pub soft: Vec<SoftRule> }
-pub fn eval_program(src:&str, ctx:&Ctx) -> Result<Out, Err> {
+pub fn eval_program(src:&str, ctx:&Ctx)->Result<Out,Err>{
     let toks=lex(src)?; let mut p=P{t:toks,i:0}; let prog=parse_prog(&mut p)?;
-    let mut hard=Choice::default(); let mut soft=Vec::<SoftRule>::new();
+    let mut hard=Hard::default(); let mut soft=Vec::<SoftRule>::new();
     for s in prog {
         match s {
-            Stmt::Assign(f, ef) => match f {
-                Field::U2 => { hard.use_2ce = Some( ef(ctx).as_b() ); }
-                Field::Wg => { hard.wg      = Some( ef(ctx).as_f().round() as u32 ); }
-                Field::Kl => { hard.kl      = Some( ef(ctx).as_f().round() as u32 ); }
-                Field::Ch => { hard.ch      = Some( ef(ctx).as_f().round() as u32 ); }
-                Field::Algo => { hard.algo  = Some( ef(ctx).as_f().round() as u8 ); }
-                Field::MidK => { hard.midk  = Some( ef(ctx).as_f().round() as u8 ); }
-                Field::BottomK => { hard.bottomk = Some( ef(ctx).as_f().round() as u8 ); }
-                Field::Ctile => { hard.ctile= Some( ef(ctx).as_f().round() as u32 ); }
-            }
-            Stmt::Soft(f, vf, wf, cf) => if cf(ctx){
-                let w = wf(ctx) as f32;
+            Stmt::Assign(f, ef) => {
                 match f {
-                    Field::U2 => soft.push(SoftRule::U2{ val: vf(ctx)!=0, w }),
-                    Field::Wg => soft.push(SoftRule::Wg{ val: vf(ctx), w }),
-                    Field::Kl => soft.push(SoftRule::Kl{ val: vf(ctx), w }),
-                    Field::Ch => soft.push(SoftRule::Ch{ val: vf(ctx), w }),
-                    Field::Algo => soft.push(SoftRule::Algo{ val: vf(ctx) as u8, w }),
+                    Field::U2 => { hard.use_2ce = Some(ef(ctx).as_b()); }
+                    Field::Wg => { hard.wg = Some(ef(ctx).as_f().round() as u32); }
+                    Field::Kl => { hard.kl = Some(ef(ctx).as_f().round() as u32); }
+                    Field::Ch => { hard.ch = Some(ef(ctx).as_f().round() as u32); }
+                    Field::Algo => { hard.algo = Some(ef(ctx).as_f().round() as u8); }
+                    Field::Midk => { hard.midk = Some(ef(ctx).as_f().round() as u8); }
+                    Field::Bottomk => { hard.bottomk = Some(ef(ctx).as_f().round() as u8); }
+                    Field::Ctile => { hard.ctile = Some(ef(ctx).as_f().round() as u32); }
+                }
+            }
+            Stmt::Soft(f, vf, wf, cf) => {
+                if cf(ctx){
+                    let w=wf(ctx) as f32;
+                    match f {
+                        Field::U2 => soft.push(SoftRule::U2{val: vf(ctx)!=0, w}),
+                        Field::Wg => soft.push(SoftRule::Wg{val: vf(ctx), w}),
+                        Field::Kl => soft.push(SoftRule::Kl{val: vf(ctx), w}),
+                        Field::Ch => soft.push(SoftRule::Ch{val: vf(ctx), w}),
+                        Field::Algo => soft.push(SoftRule::Algo{val: vf(ctx) as u8, w}),
+                        Field::Midk => soft.push(SoftRule::Midk{val: vf(ctx) as u8, w}),
+                        Field::Bottomk => soft.push(SoftRule::Bottomk{val: vf(ctx) as u8, w}),
+                        Field::Ctile => soft.push(SoftRule::Ctile{val: vf(ctx), w}),
+                    }
                 }
             }
         }
