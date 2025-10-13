@@ -1,3 +1,4 @@
+// crates/st-kv/src/lib.rs  (v1.9.0)
 #[cfg(feature="redis")]
 use redis::Commands;
 use thiserror::Error;
@@ -9,17 +10,9 @@ pub enum KvErr {
 }
 
 #[cfg(feature="redis")]
-pub fn redis_get_choice(url:&str, key:&str) -> Result<Option<String>, KvErr> {
+pub fn redis_get_raw(url:&str, key:&str) -> Result<Option<String>, KvErr> {
     let client = redis::Client::open(url).map_err(|e|KvErr::Redis(e.to_string()))?;
     let mut conn = client.get_connection().map_err(|e|KvErr::Redis(e.to_string()))?;
     let s: Option<String> = conn.get(key).map_err(|e|KvErr::Redis(e.to_string()))?;
     Ok(s)
-}
-
-#[cfg(feature="redis")]
-pub fn redis_lrange(url:&str, key:&str, n:usize) -> Result<Vec<String>, KvErr> {
-    let client = redis::Client::open(url).map_err(|e|KvErr::Redis(e.to_string()))?;
-    let mut conn = client.get_connection().map_err(|e|KvErr::Redis(e.to_string()))?;
-    let res: Vec<String> = conn.lrange(key, 0, (n as isize)-1).map_err(|e|KvErr::Redis(e.to_string()))?;
-    Ok(res)
 }

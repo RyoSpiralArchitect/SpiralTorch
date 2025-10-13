@@ -1,4 +1,4 @@
-// crates/st-kdsl/src/lib.rs  (v1.8.7)
+// crates/st-kdsl/src/lib.rs  (v1.9.0)
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -37,11 +37,15 @@ fn lex(src:&str)->Result<Vec<Tok>,Err>{
         match c {
             '('=>{push!(Tok::Lp); i+=1;} ')'=>{push!(Tok::Rp); i+=1;}
             ','=>{push!(Tok::Comma); i+=1;} ';'=>{push!(Tok::Semi); i+=1;} ':'=>{push!(Tok::Colon); i+=1;}
-            '0'..='9'|'.'=>{ let st=i; i+=1; while i<s.len() and (((s[i] as char).is_ascii_digit()) or (s[i]==b'.')) { i+=1; }
+            '0'..='9'|'.'=>{
+                let st=i; i+=1;
+                while i<s.len() && (((s[i] as char).is_ascii_digit()) || (s[i]==b'.')) { i+=1; }
                 let n=std::str::from_utf8(&s[st..i]).unwrap().parse::<f64>().map_err(|_|Err::Parse(st))?; push!(Tok::Num(n));
             }
             'a'..='z'|'A'..='Z'|'_'=>{ let st=i; i+=1;
-                while i<s.len(){ let ch=s[i] as char; if ch.is_ascii_alphanumeric()||ch=='_' {i+=1;} else {break;} }
+                while i<s.len(){
+                    let ch=s[i] as char; if ch.is_ascii_alphanumeric()||ch=='_' {i+=1;} else {break;}
+                }
                 let id=std::str::from_utf8(&s[st..i]).unwrap().to_string();
                 push!(match id.as_str(){ "true"=>Tok::True,"false"=>Tok::False,_=>Tok::Id(id) });
             }

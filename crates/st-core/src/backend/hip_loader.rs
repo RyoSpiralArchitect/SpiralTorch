@@ -1,9 +1,5 @@
-// crates/st-core/src/backend/hip_loader.rs  (v1.8.7 skeleton)
+// crates/st-core/src/backend/hip_loader.rs (skeleton)
 #[cfg(feature="hip")]
-pub struct HipModule { /* hip-sys / rccl, etc. */ }
-
+pub struct HipModule {}
 #[cfg(feature="hip")]
-pub fn load_hsaco_module(_hsaco:&[u8]) -> Result<HipModule,String> {
-    // TODO: wire ROCm loader; placeholder for now
-    Ok(HipModule{})
-}
+pub fn load_hsaco_module(_hsaco:&[u8]) -> Result<HipModule,String> { Ok(HipModule{}) }

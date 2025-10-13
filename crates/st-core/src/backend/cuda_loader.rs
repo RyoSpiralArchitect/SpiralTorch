@@ -1,9 +1,5 @@
-// crates/st-core/src/backend/cuda_loader.rs  (v1.8.7 skeleton)
+// crates/st-core/src/backend/cuda_loader.rs (skeleton)
 #[cfg(feature="cuda")]
-pub struct CudaModule { /* cust::Module, etc. */ }
-
+pub struct CudaModule {}
 #[cfg(feature="cuda")]
-pub fn load_ptx_module(_ptx:&[u8]) -> Result<CudaModule,String> {
-    // TODO: wire cust/cudarc; placeholder for now
-    Ok(CudaModule{})
-}
+pub fn load_ptx_module(_ptx:&[u8]) -> Result<CudaModule,String> { Ok(CudaModule{}) }
