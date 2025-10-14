@@ -1,0 +1,14 @@
+[package]
+name = "st-nn"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "High-level nn.Module-style API for SpiralTorch"
+
+[lib]
+name = "st_nn"
+path = "src/lib.rs"
+
+[dependencies]
+st-tensor = { path = "../st-tensor" }
+st-core = { path = "../st-core" }
