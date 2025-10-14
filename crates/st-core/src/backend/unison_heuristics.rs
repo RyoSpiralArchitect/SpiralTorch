@@ -14,6 +14,16 @@ pub enum RankKind {
     BottomK,
 }
 
+impl RankKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RankKind::TopK => "topk",
+            RankKind::MidK => "midk",
+            RankKind::BottomK => "bottomk",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Choice {
     pub use_2ce: bool,
@@ -24,6 +34,54 @@ pub struct Choice {
     pub mkd: u32,   // 0=auto,1=heap,2=kway,3=bitonic,4=warp_heap,5=warp_bitonic
     pub tile: u32,  // TopK sweep tile
     pub ctile: u32, // MidK/BottomK compaction tile
+}
+
+impl Choice {
+    fn merge_kind_name(&self) -> &'static str {
+        match self.mk {
+            1 => "shared",
+            2 => "warp",
+            _ => "bitonic",
+        }
+    }
+
+    fn merge_detail_name(&self) -> &'static str {
+        match self.mkd {
+            1 => "heap",
+            2 => "kway",
+            3 => "bitonic",
+            4 => "warp_heap",
+            5 => "warp_bitonic",
+            _ => "auto",
+        }
+    }
+
+    /// Formats the choice into a SpiralK unison snippet that mirrors the runtime decision.
+    pub fn to_unison_script(&self, kind: RankKind) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        let _ = writeln!(&mut out, "unison {} {{", kind.as_str());
+        let _ = writeln!(&mut out, "  workgroup {}", self.wg);
+        let _ = writeln!(&mut out, "  lanes {}", self.kl);
+        if self.ch != 0 {
+            let _ = writeln!(&mut out, "  channel_stride {}", self.ch);
+        }
+        let _ = writeln!(
+            &mut out,
+            "  merge {} {}",
+            self.merge_kind_name(),
+            self.merge_detail_name()
+        );
+        if self.tile != 0 {
+            let _ = writeln!(&mut out, "  tile {}", self.tile);
+        }
+        if self.ctile != 0 {
+            let _ = writeln!(&mut out, "  compaction_tile {}", self.ctile);
+        }
+        let _ = writeln!(&mut out, "  two_stage {}", self.use_2ce);
+        let _ = writeln!(&mut out, "}}");
+        out
+    }
 }
 
 fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> Choice {
@@ -282,5 +340,15 @@ mod tests {
         let out = choose_unified_rank(512, 16_384, 256, caps, RankKind::TopK);
         assert!(out.wg >= 128);
         assert!(out.tile >= 512);
+    }
+
+    #[test]
+    fn choice_to_unison_script_includes_core_fields() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let choice = choose_unified_rank(256, 32_768, 64, caps, RankKind::MidK);
+        let script = choice.to_unison_script(RankKind::MidK);
+        assert!(script.contains("unison midk"));
+        assert!(script.contains("workgroup"));
+        assert!(script.contains("merge"));
     }
 }

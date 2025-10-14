@@ -1,6 +1,7 @@
 use crate::plan::RankPlanner;
 use crate::{PureResult, Tensor};
 use st_core::ops::rank_entry::RankPlan;
+use st_core::ops::zspace_round::{self, RoundtableBand, RoundtableError};
 use st_tensor::pure::TensorError;
 
 /// Configuration used to derive the A/B/C roundtable schedule.
@@ -61,12 +62,7 @@ pub struct RoundtableSchedule {
 
 impl RoundtableSchedule {
     /// Builds a schedule for the provided output shape.
-    pub fn new(
-        planner: &RankPlanner,
-        rows: u32,
-        cols: u32,
-        config: RoundtableConfig,
-    ) -> Self {
+    pub fn new(planner: &RankPlanner, rows: u32, cols: u32, config: RoundtableConfig) -> Self {
         let above = planner.topk(rows, cols, config.top_k);
         let here = planner.midk(rows, cols, config.mid_k);
         let beneath = planner.bottomk(rows, cols, config.bottom_k);
@@ -96,72 +92,31 @@ impl RoundtableSchedule {
     /// Splits a gradient tensor into Above/Here/Beneath bands.
     pub fn split(&self, gradient: &Tensor) -> PureResult<GradientBands> {
         let len = gradient.data().len();
-        if len == 0 {
-            return Err(TensorError::DataLength {
-                expected: 1,
-                got: 0,
-            });
-        }
-        let mut indexed: Vec<(usize, f32)> = gradient
-            .data()
-            .iter()
-            .enumerate()
-            .map(|(idx, value)| (idx, value.abs()))
-            .collect();
-        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        let top = usize::min(self.above.k as usize, len);
-        let bottom = usize::min(self.beneath.k as usize, len.saturating_sub(top));
-        let leftover = len.saturating_sub(top + bottom);
-        let mid = usize::min(self.here.k as usize, leftover);
-
-        // Prepare assignment vector defaulting to Here.
-        #[derive(Clone, Copy, PartialEq)]
-        enum Band {
-            Above,
-            Here,
-            Beneath,
-        }
-        let mut assignment = vec![Band::Here; len];
-
-        for &(idx, _) in indexed.iter().take(top) {
-            assignment[idx] = Band::Above;
-        }
-
-        for &(idx, _) in indexed.iter().rev().take(bottom) {
-            assignment[idx] = Band::Beneath;
-        }
-
-        // Assign middle slice explicitly to Here respecting `mid`.
-        if mid > 0 {
-            let start = top;
-            let end = len.saturating_sub(bottom);
-            let mut assigned = 0usize;
-            for &(idx, _) in indexed[start..end].iter() {
-                assignment[idx] = Band::Here;
-                assigned += 1;
-                if assigned >= mid {
-                    break;
-                }
+        let assignment = match zspace_round::classify_roundtable(
+            gradient.data(),
+            &self.above,
+            &self.here,
+            &self.beneath,
+            self.here_tolerance,
+        ) {
+            Ok(assign) => assign,
+            Err(RoundtableError::EmptyGradient) => {
+                return Err(TensorError::DataLength {
+                    expected: 1,
+                    got: 0,
+                })
             }
-        }
-
-        // Apply tolerance: very small magnitudes stay in the Here band.
-        for (idx, magnitude) in indexed.iter() {
-            if *magnitude <= self.here_tolerance {
-                assignment[*idx] = Band::Here;
-            }
-        }
+        };
 
         let (rows, cols) = gradient.shape();
         let mut above_data = vec![0.0f32; len];
         let mut here_data = vec![0.0f32; len];
         let mut beneath_data = vec![0.0f32; len];
         for (idx, value) in gradient.data().iter().enumerate() {
-            match assignment[idx] {
-                Band::Above => above_data[idx] = *value,
-                Band::Here => here_data[idx] = *value,
-                Band::Beneath => beneath_data[idx] = *value,
+            match assignment.band(idx) {
+                RoundtableBand::Above => above_data[idx] = *value,
+                RoundtableBand::Here => here_data[idx] = *value,
+                RoundtableBand::Beneath => beneath_data[idx] = *value,
             }
         }
 
@@ -169,6 +124,29 @@ impl RoundtableSchedule {
             above: Tensor::from_vec(rows, cols, above_data)?,
             here: Tensor::from_vec(rows, cols, here_data)?,
             beneath: Tensor::from_vec(rows, cols, beneath_data)?,
+        })
+    }
+
+    /// Returns the absolute sum of each band without allocating tensors.
+    pub fn band_energy(&self, gradient: &Tensor) -> PureResult<BandEnergy> {
+        let assignment = zspace_round::classify_roundtable(
+            gradient.data(),
+            &self.above,
+            &self.here,
+            &self.beneath,
+            self.here_tolerance,
+        )
+        .map_err(|err| match err {
+            RoundtableError::EmptyGradient => TensorError::DataLength {
+                expected: 1,
+                got: 0,
+            },
+        })?;
+        let (above, here, beneath) = assignment.energy(gradient.data());
+        Ok(BandEnergy {
+            above,
+            here,
+            beneath,
         })
     }
 }
@@ -214,18 +192,26 @@ impl GradientBands {
     }
 }
 
+/// Aggregate magnitude per roundtable band.
+#[derive(Debug, Clone, Copy)]
+pub struct BandEnergy {
+    pub above: f32,
+    pub here: f32,
+    pub beneath: f32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn schedule_splits_gradients() {
-        let planner = RankPlanner::new(st_core::backend::device_caps::DeviceCaps::wgpu(32, true, 256));
+        let planner = RankPlanner::new(st_core::backend::device_caps::DeviceCaps::wgpu(
+            32, true, 256,
+        ));
         let schedule = RoundtableSchedule::new(&planner, 1, 8, RoundtableConfig::default());
-        let gradient = Tensor::from_vec(1, 8, vec![
-            -0.1, 0.2, -0.05, 0.9, -1.2, 0.0, 0.3, -0.4,
-        ])
-        .unwrap();
+        let gradient =
+            Tensor::from_vec(1, 8, vec![-0.1, 0.2, -0.05, 0.9, -1.2, 0.0, 0.3, -0.4]).unwrap();
         let bands = schedule.split(&gradient).unwrap();
         let recombined = bands.combine().unwrap();
         assert_eq!(gradient, recombined);
@@ -233,5 +219,24 @@ mod tests {
             + bands.here().squared_l2_norm()
             + bands.beneath().squared_l2_norm();
         assert!(energy > 0.0);
+    }
+
+    #[test]
+    fn band_energy_matches_split() {
+        let planner = RankPlanner::new(st_core::backend::device_caps::DeviceCaps::wgpu(
+            32, true, 256,
+        ));
+        let schedule = RoundtableSchedule::new(&planner, 1, 6, RoundtableConfig::default());
+        let gradient = Tensor::from_vec(1, 6, vec![0.5, -0.2, 0.1, -0.4, 0.9, 0.0]).unwrap();
+        let energy = schedule.band_energy(&gradient).unwrap();
+        let bands = schedule.split(&gradient).unwrap();
+        let recon = bands.combine().unwrap();
+        assert_eq!(gradient, recon);
+        let above = bands.above().data().iter().map(|v| v.abs()).sum::<f32>();
+        let here = bands.here().data().iter().map(|v| v.abs()).sum::<f32>();
+        let beneath = bands.beneath().data().iter().map(|v| v.abs()).sum::<f32>();
+        assert!((energy.above - above).abs() < 1e-6);
+        assert!((energy.here - here).abs() < 1e-6);
+        assert!((energy.beneath - beneath).abs() < 1e-6);
     }
 }

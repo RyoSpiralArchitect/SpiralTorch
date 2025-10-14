@@ -13,13 +13,13 @@ pub mod trainer;
 
 pub use layers::linear::Linear;
 pub use layers::sequential::Sequential;
-pub use layers::Relu;
 pub use layers::wave_gate::WaveGate;
 pub use layers::zspace_projector::ZSpaceProjector;
+pub use layers::{Relu, ToposResonator};
 pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
 pub use plan::RankPlanner;
-pub use schedule::{GradientBands, RoundtableConfig, RoundtableSchedule};
+pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use trainer::{EpochStats, ModuleTrainer};
 
 pub use st_tensor::pure::{

@@ -1,5 +1,29 @@
 
 # 🌀🕯️SpiralTorch🕯️🌀
+
+**SpiralTorch is a Rust-first AI training framework** that keeps language,
+geometry, and device heuristics in the same conversation. SpiralK orchestrates
+the kernels, the hypergrad tape streams Z-space meaning, and the high-level
+`st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.
+
+The stack is comfortable living entirely in Rust—yet the Python wheel remains a
+thin veneer that reuses the same planners, losses, and Z-space resonators. No
+tensor shims, no translation layers, and no tracebacks.
+
+> **Why it’s different**
+> - **Training comes first:** Modules such as `Linear`, `Sequential`,
+>   `WaveGate`, the new `ToposResonator`, and `ZSpaceProjector` stream gradients
+>   into the hypergrad tape and expose a `train_epoch` loop that mirrors
+>   familiar `nn.Module` patterns.
+> - **Open Z-space:** Gradient splits honour the A/B/C roundtable through the
+>   new `zspace_round` ops module so Above/Here/Beneath bands stay in sync with
+>   SpiralK plans without auxiliary buffers.
+> - **Three-voice consensus:** SpiralK heuristics, DSL directives, and the
+>   generated WASM tuner table discuss every launch decision and keep the
+>   transcript in the roundtable log.
+> - **Rust by default, Python ready:** Every feature—from WASM tuning to
+>   hypergrad curvature—is implemented in Rust and exposed unchanged through the
+>   Python bindings when needed.
 > **SpiralTorch** — Pure Rust AI core for Z-space exploration.  
 > © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 > Contact: [GitHub Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
@@ -30,10 +54,10 @@ executor you choose.
 
 ---
 
-## What you get
+## What you get for training
 
 - **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**
-  Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, everyone uses the same plan.
+  Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, and every plan can now be rendered back into a SpiralK snippet via `choice.to_unison_script(kind)`.
 - **SpiralK DSL** (K×Lisp-inspired)
   Hard assigns (`mk:`, `tile:`) and soft rules (`soft(mk, …)`, `soft(tile, …)`) that blend with measurements.
 - **SoftLogic (finite-domain solver)**
@@ -49,7 +73,7 @@ executor you choose.
   fallbacks or NumPy buffers.
 - **Rust-first modules & losses**
   `st-nn` now ships `Linear`, `Sequential`, the lightweight `Relu`, the
-  hyperbolic `WaveGate`, and the `ZSpaceProjector` alongside
+  hyperbolic `WaveGate`, `ToposResonator`, and the `ZSpaceProjector` alongside
   `MeanSquaredError` / `HyperbolicCrossEntropy` losses. They stream gradients
   through the hypergrad tape, apply open-topos rewrites, and keep SpiralK
   planners one call away with roundtable-aware scheduling helpers.
@@ -183,7 +207,7 @@ println!("roundtable avg loss: {:.6}", stats.average_loss);
 **Rust (Z-space gating + projector)**
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
-use st_nn::{ModuleTrainer, Tensor, WaveGate, ZSpaceProjector};
+use st_nn::{ModuleTrainer, RoundtableConfig, Tensor, ToposResonator, WaveGate, ZSpaceProjector};
 use st_tensor::pure::{topos::OpenCartesianTopos, LanguageWaveEncoder};
 
 let encoder = LanguageWaveEncoder::new(-0.9, 0.7)?;
@@ -199,6 +223,17 @@ let forward = gate.forward(&text)?;
 let grad = forward.hadamard(&text)?.scale(1.0 / forward.shape().0 as f32)?;
 let _ = gate.backward(&text, &grad)?;
 trainer.step(&mut gate)?;
+
+let (rows, cols) = forward.shape();
+let mut resonator = ToposResonator::new("res", rows, cols)?;
+resonator.parameter_mut().attach_hypergrad(-0.9, 0.02)?;
+let activated = resonator.forward(&forward)?;
+let (act_rows, act_cols) = activated.shape();
+let schedule = trainer.roundtable(act_rows as u32, act_cols as u32, RoundtableConfig::default());
+let bands = schedule.split(&activated)?;
+let _ = bands.combine()?; // band-aware recomposition stays lossless
+let energy = schedule.band_energy(&activated)?;
+println!("above energy {:.3}, here {:.3}, beneath {:.3}", energy.above, energy.here, energy.beneath);
 ```
 
 `DeviceCaps` now ships backend-specific constructors (`wgpu`, `cuda`, `hip`, `cpu`) and
