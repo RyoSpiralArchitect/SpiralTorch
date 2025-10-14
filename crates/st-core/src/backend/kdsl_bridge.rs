@@ -92,8 +92,10 @@ pub fn parse_env_dsl_plus_kind(
             }
         }
     };
-    #[allow(unused_mut)]
+    #[cfg(feature = "kdsl")]
     let mut ov = DslOverrides::default();
+    #[cfg(not(feature = "kdsl"))]
+    let ov = DslOverrides::default();
     if src.trim().is_empty() {
         return (None, vec![], ov);
     }
