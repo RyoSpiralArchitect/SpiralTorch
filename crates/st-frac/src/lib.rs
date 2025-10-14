@@ -2,6 +2,8 @@
 use ndarray::{ArrayD, Axis};
 use thiserror::Error;
 
+pub mod fft;
+
 #[derive(Debug, Error)]
 pub enum FracErr {
     #[error("axis out of range")]
