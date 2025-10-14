@@ -193,8 +193,8 @@ impl CausalGraph {
             } else {
                 node.parents
                     .iter()
-                    .map(|p| active_effect.get(p).copied().unwrap_or(1.0))
-                    .fold(1.0, |acc, e| acc * if e == 0.0 { 1.0 } else { e })
+                    .map(|p| active_effect.get(p).copied().unwrap_or(0.0))
+                    .fold(1.0, |acc, e| acc * e)
             };
             let aggregate = parent_effect.abs() * node.effect.abs();
             let decision = if aggregate < skip_threshold {

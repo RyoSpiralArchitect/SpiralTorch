@@ -10,10 +10,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use super::{
-    topos::{OpenCartesianTopos, RewriteMonad},
-    PureResult, Tensor, TensorError,
-};
+use super::{PureResult, Tensor, TensorError};
 
 /// Describes a coherent relation patch sampled from a fractal walk.
 #[derive(Clone, Debug)]
@@ -77,76 +74,8 @@ impl FractalPatch {
     pub fn weight(&self) -> f32 {
         self.coherence / (1.0 + self.tension)
     }
-
-    /// Normalise the relation into the provided tensor without allocating.
-    pub fn normalized_relation_into(&self, target: &mut Tensor) -> PureResult<()> {
-        let expected = self.relation.shape();
-        if target.shape() != expected {
-            return Err(TensorError::ShapeMismatch {
-                left: target.shape(),
-                right: expected,
-            });
-        }
-        let norm = self.relation.squared_l2_norm().sqrt();
-        let dst = target.data_mut();
-        if norm == 0.0 {
-            dst.fill(0.0);
-        } else {
-            for (d, s) in dst.iter_mut().zip(self.relation.data()) {
-                *d = *s / norm;
-            }
-        }
-        Ok(())
-    }
 }
 
-/// Safety harness that keeps fractal folds numerically bounded and loop-free.
-#[derive(Clone, Debug)]
-pub struct FractalSafetyEnvelope {
-    topos: OpenCartesianTopos,
-    chunk: usize,
-}
-
-impl FractalSafetyEnvelope {
-    /// Creates a new envelope with the provided topos and chunk size.
-    pub fn new(topos: OpenCartesianTopos, chunk: usize) -> PureResult<Self> {
-        if chunk == 0 {
-            return Err(TensorError::EmptyInput("fractal safety chunk"));
-        }
-        Ok(Self { topos, chunk })
-    }
-
-    /// Returns the underlying open-cartesian guard.
-    pub fn topos(&self) -> &OpenCartesianTopos {
-        &self.topos
-    }
-
-    /// Applies the safety envelope to a patch while folding it into the buffer.
-    pub fn fold_patch_into(&self, patch: &FractalPatch, buffer: &mut Tensor) -> PureResult<()> {
-        self.topos.ensure_loop_free(patch.depth() as usize)?;
-        if buffer.shape() != patch.relation().shape() {
-            return Err(TensorError::ShapeMismatch {
-                left: buffer.shape(),
-                right: patch.relation().shape(),
-            });
-        }
-        self.topos.guard_tensor("fractal_buffer", buffer)?;
-        self.topos.guard_tensor("fractal_patch", patch.relation())?;
-        patch.normalized_relation_into(buffer)?;
-        let rewrite = RewriteMonad::new(&self.topos);
-        rewrite.rewrite_tensor("fractal_normalized", buffer)?;
-        let weight = patch.weight();
-        let data = buffer.data_mut();
-        for chunk in data.chunks_mut(self.chunk) {
-            for value in chunk {
-                *value = rewrite.rewrite_scalar(*value * weight);
-            }
-        }
-        rewrite.rewrite_tensor("fractal_weighted", buffer)
-    }
-}
-
-#[derive(Debug)]
 struct Inner {
     queue: VecDeque<FractalPatch>,
     capacity: usize,
@@ -257,45 +186,6 @@ impl UringFractalScheduler {
         }
         Ok(acc)
     }
-
-    /// Fold into an existing tensor allocation, avoiding new buffers each pass.
-    pub fn fold_coherence_into(&self, target: &mut Tensor) -> PureResult<()> {
-        let inner = self.inner.lock().expect("scheduler mutex poisoned");
-        if inner.queue.is_empty() {
-            return Err(TensorError::EmptyInput("fractal scheduler queue"));
-        }
-
-        let (rows, cols) = target.shape();
-        if let Some(first) = inner.queue.front() {
-            let expected = first.relation().shape();
-            if expected != (rows, cols) {
-                return Err(TensorError::ShapeMismatch {
-                    left: (rows, cols),
-                    right: expected,
-                });
-            }
-        }
-
-        target.data_mut().fill(0.0);
-        let mut scratch = Tensor::zeros(rows, cols)?;
-        let mut total_weight = 0.0f32;
-        for patch in inner.queue.iter() {
-            let weight = patch.weight();
-            if weight <= 0.0 {
-                continue;
-            }
-            patch.normalized_relation_into(&mut scratch)?;
-            target.add_scaled(&scratch, weight)?;
-            total_weight += weight;
-        }
-
-        if total_weight > 0.0 {
-            for value in target.data_mut().iter_mut() {
-                *value /= total_weight;
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -351,63 +241,5 @@ mod tests {
         let sum: f32 = values.iter().sum();
         assert!((sum - 1.0).abs() < 1e-3);
         assert!(values[1] > values[0]);
-    }
-
-    #[test]
-    fn normalized_into_matches_allocated_variant() {
-        let relation = tensor(&[3.0, 4.0]);
-        let patch = FractalPatch::new(relation, 1.0, 1.0, 0).unwrap();
-        let mut target = Tensor::zeros(1, 2).unwrap();
-        patch.normalized_relation_into(&mut target).unwrap();
-
-        let allocated = patch.normalized_relation().unwrap();
-        assert_eq!(allocated.data(), target.data());
-    }
-
-    #[test]
-    fn fold_into_reuses_buffer_without_shape_mismatch() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(tensor(&[1.0, 2.0]), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        scheduler
-            .push(FractalPatch::new(tensor(&[2.0, 1.0]), 1.0, 1.0, 1).unwrap())
-            .unwrap();
-
-        let allocated = scheduler.fold_coherence().unwrap();
-        let mut target = Tensor::zeros(1, 2).unwrap();
-        scheduler.fold_coherence_into(&mut target).unwrap();
-        assert_eq!(allocated.data(), target.data());
-
-        let mut wrong = Tensor::zeros(1, 3).unwrap();
-        assert!(matches!(
-            scheduler.fold_coherence_into(&mut wrong),
-            Err(TensorError::ShapeMismatch { .. })
-        ));
-    }
-
-    #[test]
-    fn safety_envelope_bounds_values() {
-        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 5.0, 64, 4096).unwrap();
-        let envelope = FractalSafetyEnvelope::new(topos.clone(), 2).unwrap();
-        let relation = tensor(&[10.0, -10.0, 5.0, -5.0]);
-        let patch = FractalPatch::new(relation, 3.0, 1.0, 1).unwrap();
-        let mut buffer = Tensor::zeros(1, 4).unwrap();
-        envelope.fold_patch_into(&patch, &mut buffer).unwrap();
-        assert!(buffer
-            .data()
-            .iter()
-            .all(|value| value.abs() <= envelope.topos().saturation()));
-    }
-
-    #[test]
-    fn safety_envelope_detects_loop_overflow() {
-        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 5.0, 2, 16).unwrap();
-        let envelope = FractalSafetyEnvelope::new(topos, 1).unwrap();
-        let relation = tensor(&[1.0]);
-        let patch = FractalPatch::new(relation, 1.0, 1.0, 5).unwrap();
-        let mut buffer = Tensor::zeros(1, 1).unwrap();
-        let err = envelope.fold_patch_into(&patch, &mut buffer).unwrap_err();
-        assert!(matches!(err, TensorError::LoopDetected { .. }));
     }
 }

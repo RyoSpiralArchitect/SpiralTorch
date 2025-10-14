@@ -20,10 +20,10 @@ pub struct Choice {
     pub segments: u32,    // ND segment count for GPU kernels
 }
 
-fn fallback(rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
+fn fallback(_rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
     let max_wg = if subgroup { 256 } else { 128 };
     let caps = DeviceCaps::wgpu(32, subgroup, max_wg);
-    let use_2ce = caps.prefers_two_stage(rows, cols, k);
+    let use_2ce = caps.prefers_two_stage(cols, k);
     let wg = caps.recommended_workgroup();
     let kl = caps.recommended_kl(k);
     let ch = caps.recommended_channel_stride(cols);
@@ -39,13 +39,7 @@ fn fallback(rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
         mode_bottomk: 0,
         tile_cols: ((cols.max(1) + 1023) / 1024) as u32 * 1024,
         radix: if k.is_power_of_two() { 4 } else { 2 },
-        segments: if cols > 131_072 {
-            4
-        } else if cols > 32_768 {
-            2
-        } else {
-            1
-        },
+        segments: if cols > 131_072 { 4 } else if cols > 32_768 { 2 } else { 1 },
     }
 }
 
