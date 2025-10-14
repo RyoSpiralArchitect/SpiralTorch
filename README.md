@@ -1,9 +1,10 @@
 
 # 🌀🕯️SpiralTorch🕯️🌀
 > **SpiralTorch** — Pure Rust AI core for Z-space exploration.  
-> © 2025 Ryo SpiralArchitect — Licensed under AGPL-3.0-or-later.  
+> © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 > Contact: [GitHub Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
 > Unauthorized derivations = non-compliant with AGPL §13.
+
 **SpiralK + SoftLogic + (optional) WASM tuner** now power a language-native,
 hardware-aware learning stack. They pick the right **merge kind** and
 **tile width**, sure—but the same pipeline also keeps meaning flowing in Z-space
