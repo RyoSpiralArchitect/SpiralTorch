@@ -5,6 +5,7 @@
 //! tape and SpiralK planners.
 
 pub mod dataset;
+pub mod injector;
 pub mod io;
 pub mod layers;
 pub mod loss;
@@ -14,6 +15,7 @@ pub mod schedule;
 pub mod trainer;
 
 pub use dataset::{BatchIter, Dataset};
+pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
 pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, MaxPool2d};
 pub use layers::linear::Linear;

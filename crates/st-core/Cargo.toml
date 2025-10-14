@@ -39,3 +39,4 @@ st-backend-hip = { path = "../st-backend-hip", optional = true }
 st-logic       = { path = "../st-logic",       optional = true }
 st-kdsl        = { path = "../st-kdsl",        optional = true }
 st-kv          = { path = "../st-kv",          optional = true }
+st-frac        = { path = "../st-frac" }

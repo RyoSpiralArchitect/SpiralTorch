@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use bandit::{SoftBandit, SoftBanditMode};
 use rewrite::HeurStore;
+use st_frac::FracBackend;
 use wilson::wilson_lower;
 use zmeta::{ZMetaES, ZMetaParams};
 
@@ -167,6 +168,15 @@ impl BlackCatRuntime {
             reward_current,
             reward_current - (proposed_penalty - curr_penalty),
         );
+        let grad_norm = metrics.extra.get("grad_norm").copied().unwrap_or(0.0);
+        let loss_var = metrics
+            .extra
+            .get("loss_var")
+            .or_else(|| metrics.extra.get("loss_variance"))
+            .copied()
+            .unwrap_or(1.0);
+        self.z
+            .temp_schedule(metrics.retry_rate, grad_norm, loss_var);
         self.bandits.update_all(&self.last_context, reward_current);
         reward_current
     }
@@ -174,6 +184,16 @@ impl BlackCatRuntime {
     /// Returns the current fractional regularisation penalty tracked by ZMeta.
     pub fn frac_penalty(&self) -> f64 {
         self.z.frac_penalty()
+    }
+
+    /// Overrides the fractional regulariser backend.
+    pub fn set_frac_backend(&mut self, backend: FracBackend) {
+        self.z.set_frac_backend(backend);
+    }
+
+    /// Returns the current exploration temperature tracked by the runtime.
+    pub fn temperature(&self) -> f64 {
+        self.z.temperature()
     }
 
     /// Try to adopt a new soft heuristic guarded by the Wilson lower bound.
@@ -214,6 +234,7 @@ impl BlackCatRuntime {
 
 // =================== zmeta.rs ===================
 pub mod zmeta {
+    use super::FracBackend;
     use randless::{Rng, StdRng};
 
     #[derive(Clone, Debug)]
@@ -244,6 +265,10 @@ pub mod zmeta {
         dir: Vec<f64>,
         params: ZMetaParams,
         rng: StdRng,
+        frac_backend: FracBackend,
+        temp: f64,
+        temp_min: f64,
+        temp_max: f64,
     }
 
     impl ZMetaES {
@@ -259,6 +284,10 @@ pub mod zmeta {
                 dir,
                 params,
                 rng,
+                frac_backend: FracBackend::CpuRadix2,
+                temp: 1.0,
+                temp_min: 0.1,
+                temp_max: 4.0,
             }
         }
 
@@ -266,8 +295,44 @@ pub mod zmeta {
             &self.z
         }
 
+        /// Returns the current exploration temperature.
+        pub fn temperature(&self) -> f64 {
+            self.temp
+        }
+
+        /// Overrides the exploration temperature bounds.
+        pub fn set_temp_bounds(&mut self, t_min: f64, t_max: f64) {
+            let mut lower = t_min.max(0.0);
+            let mut upper = t_max.max(lower + f64::EPSILON);
+            if lower > upper {
+                std::mem::swap(&mut lower, &mut upper);
+            }
+            self.temp_min = lower;
+            self.temp_max = upper;
+            self.temp = self.temp.clamp(self.temp_min, self.temp_max);
+        }
+
+        /// Adjusts the exploration temperature using retry/gradient signals.
+        pub fn temp_schedule(&mut self, retry: f64, grad_norm: f64, loss_var: f64) {
+            let stagnation = (1.0 - (loss_var / (1.0 + loss_var))).clamp(0.0, 1.0);
+            let grad_term = (grad_norm / (1.0 + grad_norm)).clamp(0.0, 1.0);
+            let instability = retry + 0.5 * grad_term;
+            let delta = 0.2 * stagnation - 0.3 * instability;
+            self.temp = (self.temp + delta).clamp(self.temp_min, self.temp_max);
+        }
+
+        /// Sets the backend used for fractional regularisation.
+        pub fn set_frac_backend(&mut self, backend: FracBackend) {
+            self.frac_backend = backend;
+        }
+
         pub fn frac_penalty(&self) -> f64 {
-            frac_penalty(&self.z, self.params.alpha_frac, self.params.lam_frac)
+            frac_penalty_backend(
+                &self.z,
+                self.params.alpha_frac,
+                self.params.lam_frac,
+                &self.frac_backend,
+            )
         }
 
         pub fn frac_penalty_proposed(&self) -> f64 {
@@ -277,7 +342,12 @@ pub mod zmeta {
                 .zip(self.dir.iter())
                 .map(|(z, d)| z + self.params.sigma * d)
                 .collect();
-            frac_penalty(&proposed, self.params.alpha_frac, self.params.lam_frac)
+            frac_penalty_backend(
+                &proposed,
+                self.params.alpha_frac,
+                self.params.lam_frac,
+                &self.frac_backend,
+            )
         }
 
         pub fn update(&mut self, reward_current: f64, reward_proposed: f64) {
@@ -327,6 +397,17 @@ pub mod zmeta {
             acc += d2.abs().powf(1.0 + alpha);
         }
         lam * acc
+    }
+
+    fn frac_penalty_backend(z: &[f64], alpha: f64, lam: f64, backend: &FracBackend) -> f64 {
+        let base = frac_penalty(z, alpha, lam);
+        match backend {
+            FracBackend::CpuRadix2 => base,
+            FracBackend::Wgpu { radix } => {
+                let radix_factor = (*radix as f64).max(2.0) / 2.0;
+                base * (1.0 + 0.15 * (radix_factor - 1.0))
+            }
+        }
     }
 
     mod randless {

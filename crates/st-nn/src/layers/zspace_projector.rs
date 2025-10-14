@@ -1,5 +1,6 @@
 use crate::module::Module;
 use crate::{PureResult, Tensor};
+use st_frac::FracBackend;
 use st_tensor::pure::{
     topos::{OpenCartesianTopos, RewriteMonad},
     LanguageWaveEncoder,
@@ -37,6 +38,26 @@ impl ZSpaceProjector {
     /// Returns the internal Z-space encoder for direct wave creation.
     pub fn encoder(&self) -> &LanguageWaveEncoder {
         &self.encoder
+    }
+
+    /// Applies a fractional regularisation penalty to the provided latent slice.
+    pub fn regularize_frac(&self, z: &[f32], backend: &FracBackend) -> f32 {
+        if z.len() < 2 {
+            return 0.0;
+        }
+        let curvature = self.topos.curvature().abs().max(1e-6);
+        let mut acc = 0.0f32;
+        for window in z.windows(2) {
+            let diff = window[1] - window[0];
+            acc += diff.abs().powf(1.0 + curvature);
+        }
+        match backend {
+            FracBackend::CpuRadix2 => acc,
+            FracBackend::Wgpu { radix } => {
+                let factor = (*radix as f32).max(2.0) / 2.0;
+                acc * (1.0 + 0.25 * (factor - 1.0))
+            }
+        }
     }
 
     /// Encodes free-form text into a tensor already guarded by the projector.
@@ -119,5 +140,16 @@ mod tests {
             .unwrap();
         assert_eq!(encoded.shape().0, 1);
         assert!(encoded.shape().1 >= 2);
+    }
+
+    #[test]
+    fn fractional_regularizer_scales_with_backend() {
+        let topos = demo_topos();
+        let encoder = LanguageWaveEncoder::new(topos.curvature(), 0.5).unwrap();
+        let module = ZSpaceProjector::new(topos, encoder).unwrap();
+        let sample = vec![0.0, 0.5, -0.2, 0.8, -0.4];
+        let cpu = module.regularize_frac(&sample, &FracBackend::CpuRadix2);
+        let wgpu = module.regularize_frac(&sample, &FracBackend::Wgpu { radix: 4 });
+        assert!(wgpu > cpu);
     }
 }

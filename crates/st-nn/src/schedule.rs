@@ -191,6 +191,19 @@ impl GradientBands {
         }
         Tensor::from_vec(rows, cols, data)
     }
+
+    /// Applies per-band scaling factors in-place.
+    pub fn scale_inplace(&mut self, above: f32, here: f32, beneath: f32) {
+        for value in self.above.data_mut() {
+            *value *= above;
+        }
+        for value in self.here.data_mut() {
+            *value *= here;
+        }
+        for value in self.beneath.data_mut() {
+            *value *= beneath;
+        }
+    }
 }
 
 /// Aggregate magnitude per roundtable band.
@@ -200,6 +213,32 @@ pub struct BandEnergy {
     pub here: f32,
     pub beneath: f32,
     pub drift: f32,
+}
+
+impl BandEnergy {
+    /// Returns the L1 norm of the band magnitudes.
+    pub fn l1(&self) -> f32 {
+        self.above.abs() + self.here.abs() + self.beneath.abs()
+    }
+
+    /// Normalises the energy so the Above/Here/Beneath components sum to one.
+    pub fn norm(self) -> Self {
+        let sum = self.l1();
+        if sum <= f32::EPSILON {
+            return Self {
+                above: 1.0 / 3.0,
+                here: 1.0 / 3.0,
+                beneath: 1.0 / 3.0,
+                drift: self.drift,
+            };
+        }
+        Self {
+            above: (self.above / sum).clamp(0.0, 1.0),
+            here: (self.here / sum).clamp(0.0, 1.0),
+            beneath: (self.beneath / sum).clamp(0.0, 1.0),
+            drift: self.drift,
+        }
+    }
 }
 
 #[cfg(test)]
