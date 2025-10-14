@@ -4,6 +4,8 @@
 //! stack entirely in Rust while remaining fully compatible with the hypergrad
 //! tape and SpiralK planners.
 
+pub mod dataset;
+pub mod io;
 pub mod layers;
 pub mod loss;
 pub mod module;
@@ -11,9 +13,13 @@ pub mod plan;
 pub mod schedule;
 pub mod trainer;
 
+pub use dataset::{BatchIter, Dataset};
+pub use io::{load_bincode, load_json, save_bincode, save_json};
+pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, MaxPool2d};
 pub use layers::linear::Linear;
 pub use layers::sequential::Sequential;
 pub use layers::wave_gate::WaveGate;
+pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
 pub use layers::{Relu, ToposResonator, ZSpaceMixer};
 pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};

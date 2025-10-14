@@ -9,8 +9,24 @@ license = "AGPL-3.0-or-later"
 crate-type = ["rlib", "cdylib"]
 
 [features]
-default = []
+default = ["cpu"]
+
+# CPU execution is always available, but expose a feature so that downstream
+# crates can opt into a uniform interface when selecting backends.
+cpu = []
+
+# Keep the granular feature name for the fractional WGPU kernels while also
+# providing the alias expected by the Python bindings (and end users invoking
+# `--features wgpu`).
 wgpu_frac = ["dep:wgpu", "dep:bytemuck"]
+wgpu = ["wgpu_frac"]
+
+# Placeholder features for other accelerators.  These currently do not pull in
+# additional dependencies but allow higher level crates to enable them without
+# Cargo feature resolution failures.
+mps = []
+cuda = []
+hip = []
 
 [dependencies]
 # Optional; only needed if building WGPU kernel
