@@ -4,11 +4,12 @@
 <p align="center">
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="AGPL-3.0">
 </p>
-**SpiralTorch** — Pure Rust AI core for Z-space exploration.**
+
+> **SpiralTorch — Pure Rust AI core for Z-space exploration.**
 > © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
-> Contact: [GitHub Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
+> Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
 > Unauthorized derivations = non-compliant with AGPL §13.
-**SpiralTorch is a Rust-first AI training framework** that keeps language,
+> **SpiralTorch is a Rust-first AI training framework that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
 the kernels, the hypergrad tape streams Z-space meaning, and the high-level
 `st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.**
