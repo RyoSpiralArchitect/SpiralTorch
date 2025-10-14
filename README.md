@@ -27,7 +27,8 @@ directly in Z-space without ever touching NumPy or PyTorch.
   Explores a tiny discrete space (merge kinds, tiles) and scores candidates with your soft rules.
 - **Pure Rust training core**
   `st-tensor::pure` ships dependency-free tensors, hyperbolic Z-space encoders,
-  and the new `AmegaHypergrad` tape so you can iterate on learning logic without
+  the new `UringFractalScheduler` for Tokio-uring style streaming, and the
+  `AmegaHypergrad` tape so you can iterate on learning logic without
   PyTorch/Numpy while staying inside non-Euclidean geometry.
 - **Optional WASM tuner table**
   Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
@@ -216,6 +217,98 @@ Because the optimiser keeps its own curvature-aware buffer, you can stream
 text → wave → hypergrad endlessly without ever seeing a traceback. Non-Euclidean
 geometry, imaginary spectra, and category-inspired language flows all feed the
 same tape, letting SpiralTorch chase meaning directly in Z-space.
+
+### Fractal uring scheduler + WASM canvas loop
+
+Feed those spectra directly into an async-friendly fractal loop without ever
+allocating more than a small ring buffer. The `UringFractalScheduler` keeps the
+latest relation patches in a Tokio-uring style queue, blends them by coherence,
+and now offers both `fold_coherence` and the zero-allocation
+`fold_coherence_into` so browser/GPU front-ends can reuse their frame buffers.
+
+```rust
+use st_tensor::pure::{Tensor, PureResult};
+use st_tensor::pure::fractal::{FractalPatch, UringFractalScheduler};
+
+async fn stream_waveforms(samples: Vec<Tensor>) -> PureResult<Tensor> {
+    let scheduler = UringFractalScheduler::new(32)?;
+    for (depth, relation) in samples.into_iter().enumerate() {
+        let patch = FractalPatch::new(relation, 0.9, 0.7, depth as u32)?;
+        // Works on any executor; tokio-uring, tokio, or synchronous loops.
+        scheduler.push_async(patch).await?;
+    }
+    scheduler.fold_coherence()
+}
+```
+
+For browser builds, wire the folded relation into the dedicated WASM canvas
+projector so we never allocate more than a single RGBA surface:
+
+```rust
+use js_sys::Uint8ClampedArray;
+use st_tensor::pure::fractal::UringFractalScheduler;
+use st_tensor::pure::wasm_canvas::CanvasProjector;
+use std::cell::RefCell;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::{JsCast, JsValue};
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
+
+#[wasm_bindgen]
+pub struct FractalCanvas {
+    projector: RefCell<CanvasProjector>,
+}
+
+#[wasm_bindgen]
+impl FractalCanvas {
+    #[wasm_bindgen(constructor)]
+    pub fn new(capacity: usize, width: usize, height: usize) -> Result<FractalCanvas, JsValue> {
+        let scheduler = UringFractalScheduler::new(capacity)
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        let projector = CanvasProjector::new(scheduler, width, height)
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        Ok(Self {
+            projector: RefCell::new(projector),
+        })
+    }
+
+    pub fn render(&self, canvas: HtmlCanvasElement) -> Result<(), JsValue> {
+        let ctx: CanvasRenderingContext2d = canvas
+            .get_context("2d")?
+            .ok_or("missing 2d context")?
+            .dyn_into()?;
+        let mut projector = self.projector.borrow_mut();
+        let rgba = projector
+            .refresh()
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        let clamped = Uint8ClampedArray::from(rgba);
+        let image = ImageData::new_with_u8_clamped_array_and_sh(
+            clamped,
+            projector.surface().width() as u32,
+            projector.surface().height() as u32,
+        )?;
+        ctx.put_image_data(&image, 0.0, 0.0)?;
+        Ok(())
+    }
+}
+```
+
+And keep the JavaScript glue feather-light:
+
+```html
+<canvas id="zspace" width="512" height="32"></canvas>
+<script type="module">
+import init, { FractalCanvas } from "./pkg/spiraltorch_wasm.js";
+const wasm = await init();
+const canvas = document.getElementById("zspace");
+const fractal = new FractalCanvas(64, canvas.width, canvas.height);
+await fractal.render(canvas);
+</script>
+```
+
+Pixels become Z-space relations, the scheduler keeps memory bounded, and the
+entire loop stays panic-free even under aggressive streaming. The RGBA buffer
+that powers the `<canvas>` upload can also be shared with WGPU textures for a
+fully unified compute + render stack when you want GPU-native presentation.
 
 ---
 

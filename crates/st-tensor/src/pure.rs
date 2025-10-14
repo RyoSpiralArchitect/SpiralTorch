@@ -7,6 +7,9 @@
 //! can serve as a foundation for a fully independent learning stack that stays
 //! responsive even when the surrounding platform is sandboxed.
 
+pub mod fractal;
+pub mod wasm_canvas;
+
 use core::fmt;
 use std::error::Error;
 use std::f32::consts::PI;
@@ -32,6 +35,10 @@ pub enum TensorError {
     NonPositiveTemperature { temperature: f32 },
     /// Learning rate must be positive for hypergrad optimizers.
     NonPositiveLearningRate { rate: f32 },
+    /// Coherence weights that scale fractal relations must stay positive.
+    NonPositiveCoherence { coherence: f32 },
+    /// Tension weights that soften relations must stay positive.
+    NonPositiveTension { tension: f32 },
     /// Computation received an empty input which would otherwise trigger a panic.
     EmptyInput(&'static str),
     /// A helper expected matching curvature parameters but received different values.
@@ -71,6 +78,12 @@ impl fmt::Display for TensorError {
             }
             TensorError::NonPositiveLearningRate { rate } => {
                 write!(f, "learning rate must be positive, got {rate}")
+            }
+            TensorError::NonPositiveCoherence { coherence } => {
+                write!(f, "coherence must be positive, got {coherence}")
+            }
+            TensorError::NonPositiveTension { tension } => {
+                write!(f, "tension must be positive, got {tension}")
             }
             TensorError::EmptyInput(label) => {
                 write!(f, "{label} must not be empty for this computation")
