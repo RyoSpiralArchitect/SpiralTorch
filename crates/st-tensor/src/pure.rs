@@ -8,7 +8,10 @@
 //! responsive even when the surrounding platform is sandboxed.
 
 pub mod fractal;
+pub mod topos;
 pub mod wasm_canvas;
+
+pub use topos::{ConjugateGradientSolver, OpenCartesianTopos, RewriteMonad};
 
 use core::fmt;
 use std::error::Error;
@@ -39,10 +42,22 @@ pub enum TensorError {
     NonPositiveCoherence { coherence: f32 },
     /// Tension weights that soften relations must stay positive.
     NonPositiveTension { tension: f32 },
+    /// Numeric solvers require a strictly positive tolerance.
+    NonPositiveTolerance { tolerance: f32 },
+    /// Saturation windows used by open-cartesian topoi must be positive.
+    NonPositiveSaturation { saturation: f32 },
     /// Computation received an empty input which would otherwise trigger a panic.
     EmptyInput(&'static str),
     /// A helper expected matching curvature parameters but received different values.
     CurvatureMismatch { expected: f32, got: f32 },
+    /// Numeric guard detected a non-finite value that would otherwise propagate NaNs.
+    NonFiniteValue { label: &'static str, value: f32 },
+    /// The requested tensor volume exceeds the configured open-cartesian topos boundary.
+    TensorVolumeExceeded { volume: usize, max_volume: usize },
+    /// Loop detection tripped for an open-cartesian topos traversal.
+    LoopDetected { depth: usize, max_depth: usize },
+    /// Conjugate gradient solver could not reach the requested tolerance.
+    ConjugateGradientDiverged { residual: f32, tolerance: f32 },
 }
 
 impl fmt::Display for TensorError {
@@ -85,6 +100,12 @@ impl fmt::Display for TensorError {
             TensorError::NonPositiveTension { tension } => {
                 write!(f, "tension must be positive, got {tension}")
             }
+            TensorError::NonPositiveTolerance { tolerance } => {
+                write!(f, "tolerance must be positive, got {tolerance}")
+            }
+            TensorError::NonPositiveSaturation { saturation } => {
+                write!(f, "saturation must be positive, got {saturation}")
+            }
             TensorError::EmptyInput(label) => {
                 write!(f, "{label} must not be empty for this computation")
             }
@@ -92,6 +113,33 @@ impl fmt::Display for TensorError {
                 write!(
                     f,
                     "curvature mismatch: expected {expected} but pipeline reports {got}"
+                )
+            }
+            TensorError::NonFiniteValue { label, value } => {
+                write!(
+                    f,
+                    "non-finite value detected for {label}; rewrite monad absorbed {value}"
+                )
+            }
+            TensorError::TensorVolumeExceeded { volume, max_volume } => {
+                write!(
+                    f,
+                    "tensor volume {volume} exceeds open-cartesian capacity {max_volume}"
+                )
+            }
+            TensorError::LoopDetected { depth, max_depth } => {
+                write!(
+                    f,
+                    "topos traversal depth {depth} exceeded loop-free ceiling {max_depth}"
+                )
+            }
+            TensorError::ConjugateGradientDiverged {
+                residual,
+                tolerance,
+            } => {
+                write!(
+                    f,
+                    "conjugate gradient residual {residual} failed to reach tolerance {tolerance}"
                 )
             }
         }
@@ -696,6 +744,7 @@ pub struct AmegaHypergrad {
     rows: usize,
     cols: usize,
     gradient: Vec<f32>,
+    topos: OpenCartesianTopos,
 }
 
 impl AmegaHypergrad {
@@ -712,12 +761,56 @@ impl AmegaHypergrad {
                 rate: learning_rate,
             });
         }
+        let topos = OpenCartesianTopos::new(
+            curvature,
+            1e-6,
+            1e6,
+            rows.saturating_mul(cols).saturating_mul(4).max(8),
+            rows.saturating_mul(cols),
+        )?;
         Ok(Self {
             curvature,
             learning_rate,
             rows,
             cols,
             gradient: vec![0.0; rows * cols],
+            topos,
+        })
+    }
+
+    /// Builds a hypergradient tape with a caller supplied open-cartesian topos.
+    pub fn with_topos(
+        curvature: f32,
+        learning_rate: f32,
+        rows: usize,
+        cols: usize,
+        topos: OpenCartesianTopos,
+    ) -> PureResult<Self> {
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        if curvature >= 0.0 {
+            return Err(TensorError::NonHyperbolicCurvature { curvature });
+        }
+        if learning_rate <= 0.0 {
+            return Err(TensorError::NonPositiveLearningRate {
+                rate: learning_rate,
+            });
+        }
+        let capacity = rows.saturating_mul(cols);
+        if capacity > topos.max_volume() {
+            return Err(TensorError::TensorVolumeExceeded {
+                volume: capacity,
+                max_volume: topos.max_volume(),
+            });
+        }
+        Ok(Self {
+            curvature,
+            learning_rate,
+            rows,
+            cols,
+            gradient: vec![0.0; capacity],
+            topos,
         })
     }
 
@@ -741,6 +834,11 @@ impl AmegaHypergrad {
         &self.gradient
     }
 
+    /// Returns the guard topos enforcing open-cartesian safety constraints.
+    pub fn topos(&self) -> &OpenCartesianTopos {
+        &self.topos
+    }
+
     fn assert_tensor_shape(&self, tensor: &Tensor) -> PureResult<()> {
         if tensor.shape() != (self.rows, self.cols) {
             return Err(TensorError::ShapeMismatch {
@@ -762,9 +860,12 @@ impl AmegaHypergrad {
     /// the standard conformal factor for the Poincaré ball.
     pub fn accumulate_wave(&mut self, tensor: &Tensor) -> PureResult<()> {
         self.assert_tensor_shape(tensor)?;
+        self.topos.guard_tensor("hypergrad_wave", tensor)?;
+        let tolerance = self.topos.tolerance();
         for (grad, value) in self.gradient.iter_mut().zip(tensor.data().iter()) {
             let denom = 1.0 - self.curvature * value * value;
-            *grad += *value / denom.max(1e-6);
+            let update = *value / denom.abs().max(tolerance);
+            *grad = self.topos.saturate(*grad + update);
         }
         Ok(())
     }
@@ -783,6 +884,7 @@ impl AmegaHypergrad {
                 got: encoder.curvature(),
             });
         }
+        self.topos.ensure_loop_free(text.chars().count())?;
         let tensor = encoder.encode_z_space(text)?;
         self.accumulate_wave(&tensor)
     }
@@ -796,13 +898,17 @@ impl AmegaHypergrad {
                 right: target.shape(),
             });
         }
+        self.topos
+            .guard_tensor("hypergrad_prediction", prediction)?;
+        self.topos.guard_tensor("hypergrad_target", target)?;
         for ((grad, pred), tgt) in self
             .gradient
             .iter_mut()
             .zip(prediction.data().iter())
             .zip(target.data().iter())
         {
-            *grad += pred - tgt;
+            let delta = pred - tgt;
+            *grad = self.topos.saturate(*grad + delta);
         }
         Ok(())
     }
@@ -812,16 +918,21 @@ impl AmegaHypergrad {
     /// tape can keep streaming samples without triggering a traceback.
     pub fn apply(&mut self, weights: &mut Tensor) -> PureResult<()> {
         self.assert_tensor_shape(weights)?;
+        self.topos.guard_tensor("hypergrad_weights", weights)?;
+        let tolerance = self.topos.tolerance();
         {
             let data = weights.data_mut();
             for (value, grad) in data.iter_mut().zip(self.gradient.iter()) {
                 let denom = 1.0 - self.curvature * (*value) * (*value);
-                let step = self.learning_rate / denom.max(1e-6);
-                *value -= step * *grad;
+                let step = self.learning_rate / denom.abs().max(tolerance);
+                let updated = *value - step * *grad;
+                *value = self.topos.saturate(updated);
             }
         }
         let projected = weights.project_to_poincare(self.curvature)?;
         *weights = projected;
+        self.topos
+            .guard_tensor("hypergrad_weights_post_projection", weights)?;
         self.reset();
         Ok(())
     }

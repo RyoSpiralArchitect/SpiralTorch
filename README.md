@@ -27,9 +27,12 @@ directly in Z-space without ever touching NumPy or PyTorch.
   Explores a tiny discrete space (merge kinds, tiles) and scores candidates with your soft rules.
 - **Pure Rust training core**
   `st-tensor::pure` ships dependency-free tensors, hyperbolic Z-space encoders,
-  the new `UringFractalScheduler` for Tokio-uring style streaming, and the
-  `AmegaHypergrad` tape so you can iterate on learning logic without
-  PyTorch/Numpy while staying inside non-Euclidean geometry.
+  an open-cartesian topos guard (`OpenCartesianTopos`) with rewrite monads that
+  swallow NaNs before they propagate, a deterministic `ConjugateGradientSolver`
+  with explicit tolerances, the Tokio-uring inspired `UringFractalScheduler`
+  plus `FractalSafetyEnvelope`, and the `AmegaHypergrad` tape so you can
+  iterate on learning logic without PyTorch/Numpy while staying inside
+  non-Euclidean geometry.
 - **Optional WASM tuner table**
   Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
 - **Self-Rewrite**
@@ -217,6 +220,51 @@ Because the optimiser keeps its own curvature-aware buffer, you can stream
 text → wave → hypergrad endlessly without ever seeing a traceback. Non-Euclidean
 geometry, imaginary spectra, and category-inspired language flows all feed the
 same tape, letting SpiralTorch chase meaning directly in Z-space.
+
+#### Open-cartesian safety nets (no NaNs, no runaway loops)
+
+Hyperbolic Jacobians now flow through an explicit `OpenCartesianTopos`. The
+guard rewrites every scalar through a bounded saturation window, ensures tensor
+volumes stay inside memory-friendly envelopes, and exposes loop ceilings so
+fractal traversals cannot self-intersect. Couple it with the deterministic
+`ConjugateGradientSolver` whenever you need implicit solves:
+
+```rust
+use st_tensor::pure::{topos::{OpenCartesianTopos, RewriteMonad}, ConjugateGradientSolver, PureResult};
+
+fn main() -> PureResult<()> {
+    let topos = OpenCartesianTopos::new(-1.0, 1e-6, 8.0, 256, 4096)?;
+    let monad = RewriteMonad::new(&topos);
+
+    // Rewrite overflowing values before they enter the optimiser.
+    let mut weights = st_tensor::pure::Tensor::from_vec(1, 4, vec![f32::INFINITY, 2.0, -9.0, 0.5])?;
+    monad.rewrite_tensor("weights", &mut weights)?;
+
+    // Solve Ax = b with explicit tolerances (no hidden divergence).
+    let solver = ConjugateGradientSolver::new(&topos, 1e-6, 32)?;
+    let matrix = [
+        4.0f32, 1.0, 0.0,
+        1.0, 3.0, 0.0,
+        0.0, 0.0, 2.0,
+    ];
+    let mut matvec = |src: &[f32], dst: &mut [f32]| {
+        dst.fill(0.0);
+        for row in 0..3 {
+            for col in 0..3 {
+                dst[row] += matrix[row * 3 + col] * src[col];
+            }
+        }
+    };
+    let mut x = [0.0f32; 3];
+    solver.solve(&mut matvec, &[1.0, 2.0, 3.0], &mut x)?;
+    println!("solution {:?}", x);
+    Ok(())
+}
+```
+
+The same topos feeds the `FractalSafetyEnvelope`, which blends relation patches
+in streaming mode without allocating new buffers and refuses to cross the
+configured depth horizon.
 
 ### Fractal uring scheduler + WASM canvas loop
 

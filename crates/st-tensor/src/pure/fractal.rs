@@ -10,7 +10,10 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use super::{PureResult, Tensor, TensorError};
+use super::{
+    topos::{OpenCartesianTopos, RewriteMonad},
+    PureResult, Tensor, TensorError,
+};
 
 /// Describes a coherent relation patch sampled from a fractal walk.
 #[derive(Clone, Debug)]
@@ -97,6 +100,53 @@ impl FractalPatch {
     }
 }
 
+/// Safety harness that keeps fractal folds numerically bounded and loop-free.
+#[derive(Clone, Debug)]
+pub struct FractalSafetyEnvelope {
+    topos: OpenCartesianTopos,
+    chunk: usize,
+}
+
+impl FractalSafetyEnvelope {
+    /// Creates a new envelope with the provided topos and chunk size.
+    pub fn new(topos: OpenCartesianTopos, chunk: usize) -> PureResult<Self> {
+        if chunk == 0 {
+            return Err(TensorError::EmptyInput("fractal safety chunk"));
+        }
+        Ok(Self { topos, chunk })
+    }
+
+    /// Returns the underlying open-cartesian guard.
+    pub fn topos(&self) -> &OpenCartesianTopos {
+        &self.topos
+    }
+
+    /// Applies the safety envelope to a patch while folding it into the buffer.
+    pub fn fold_patch_into(&self, patch: &FractalPatch, buffer: &mut Tensor) -> PureResult<()> {
+        self.topos.ensure_loop_free(patch.depth() as usize)?;
+        if buffer.shape() != patch.relation().shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: buffer.shape(),
+                right: patch.relation().shape(),
+            });
+        }
+        self.topos.guard_tensor("fractal_buffer", buffer)?;
+        self.topos.guard_tensor("fractal_patch", patch.relation())?;
+        patch.normalized_relation_into(buffer)?;
+        let rewrite = RewriteMonad::new(&self.topos);
+        rewrite.rewrite_tensor("fractal_normalized", buffer)?;
+        let weight = patch.weight();
+        let data = buffer.data_mut();
+        for chunk in data.chunks_mut(self.chunk) {
+            for value in chunk {
+                *value = rewrite.rewrite_scalar(*value * weight);
+            }
+        }
+        rewrite.rewrite_tensor("fractal_weighted", buffer)
+    }
+}
+
+#[derive(Debug)]
 struct Inner {
     queue: VecDeque<FractalPatch>,
     capacity: usize,
@@ -334,5 +384,30 @@ mod tests {
             scheduler.fold_coherence_into(&mut wrong),
             Err(TensorError::ShapeMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn safety_envelope_bounds_values() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 5.0, 64, 4096).unwrap();
+        let envelope = FractalSafetyEnvelope::new(topos.clone(), 2).unwrap();
+        let relation = tensor(&[10.0, -10.0, 5.0, -5.0]);
+        let patch = FractalPatch::new(relation, 3.0, 1.0, 1).unwrap();
+        let mut buffer = Tensor::zeros(1, 4).unwrap();
+        envelope.fold_patch_into(&patch, &mut buffer).unwrap();
+        assert!(buffer
+            .data()
+            .iter()
+            .all(|value| value.abs() <= envelope.topos().saturation()));
+    }
+
+    #[test]
+    fn safety_envelope_detects_loop_overflow() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 5.0, 2, 16).unwrap();
+        let envelope = FractalSafetyEnvelope::new(topos, 1).unwrap();
+        let relation = tensor(&[1.0]);
+        let patch = FractalPatch::new(relation, 1.0, 1.0, 5).unwrap();
+        let mut buffer = Tensor::zeros(1, 1).unwrap();
+        let err = envelope.fold_patch_into(&patch, &mut buffer).unwrap_err();
+        assert!(matches!(err, TensorError::LoopDetected { .. }));
     }
 }
