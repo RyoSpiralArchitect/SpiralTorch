@@ -22,10 +22,12 @@ hip = ["st-core/hip"]
 logic = ["st-core/logic"]
 kdsl = ["st-core/kdsl"]
 "kv-redis" = ["st-core/kv-redis"]
+"wgpu-frac" = ["st-tensor/wgpu_frac"]
 
 [dependencies]
 pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38"] }
 st-core = { path = "../../crates/st-core", default-features = false }
+st-tensor = { path = "../../crates/st-tensor", default-features = false }
 
 [package.metadata.maturin]
 name = "spiraltorch"

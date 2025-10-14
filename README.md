@@ -73,10 +73,12 @@ executor you choose.
   fallbacks or NumPy buffers.
 - **Rust-first modules & losses**
   `st-nn` now ships `Linear`, `Sequential`, the lightweight `Relu`, the
-  hyperbolic `WaveGate`, `ToposResonator`, and the `ZSpaceProjector` alongside
-  `MeanSquaredError` / `HyperbolicCrossEntropy` losses. They stream gradients
-  through the hypergrad tape, apply open-topos rewrites, and keep SpiralK
-  planners one call away with roundtable-aware scheduling helpers.
+  hyperbolic `WaveGate`, `ToposResonator`, the new `ZSpaceMixer`, and the
+  `ZSpaceProjector` alongside `MeanSquaredError` / `HyperbolicCrossEntropy`
+  losses. They stream gradients through the hypergrad tape, apply open-topos
+  rewrites, and keep SpiralK planners one call away with roundtable-aware
+  scheduling helpers. Every primitive is exported through the Python wheel so
+  you can stay NumPy-free while scripting experiments.
 - **Optional WASM tuner table**
   Bake the JSON dataset offline and ship it to browsers/WASM. The runtime loads the table lazily, blends it with SpiralK, and keeps the optimiser in sync with the generated WGSL kernels.
 - **Self-Rewrite**
@@ -138,9 +140,33 @@ cargo build -p st-core --features hip,st-backend-hip/hip-real --release
 ### 3) Python wheels (optional)
 ```bash
 pip install maturin==1.*
-# CPU + WGPU wheel
+
+# CPU + WebGPU (default)
 maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
-# Add other backends via features (mps / cuda / hip)
+
+# Metal (macOS GPU)
+maturin build -m bindings/st-py/Cargo.toml --release --features mps
+
+# CUDA (toolchain on PATH)
+maturin build -m bindings/st-py/Cargo.toml --release --features cuda
+
+# HIP / ROCm (add hip-real for RCCL)
+maturin build -m bindings/st-py/Cargo.toml --release --features "hip hip-real"
+```
+
+### 4) Python tensors & hypergrads
+
+```python
+from spiraltorch import Tensor, Hypergrad, LanguageWaveEncoder
+
+encoder = LanguageWaveEncoder(-1.0, 0.6)
+target = encoder.encode_z_space("SpiralTorch dances in Z-space")
+
+weights = Tensor(*target.shape())
+tape = Hypergrad(-1.0, 0.05, *target.shape())
+tape.accumulate_pair(weights, target)
+tape.apply(weights)
+print("updated weights", weights.tolist())
 ```
 
 The binding crate mirrors the Rust feature flags. For example, to bake Metal
