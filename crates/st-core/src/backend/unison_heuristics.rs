@@ -31,6 +31,19 @@ use crate::ability::unison_mediator;
 
 use super::kdsl_bridge;
 
+fn fallback(_rows: u32, cols: u32, k: u32, caps: &DeviceCaps, _kind: RankKind) -> Choice {
+    let default_wg = if caps.subgroup { 256 } else { 128 };
+    let wg = caps.align_workgroup(default_wg.max(64));
+    let kl = if k >= 64 {
+        32
+    } else if k >= 16 {
+        16
+    } else {
+        8
+    };
+    let ch = if cols > 16_384 { 8192 } else { 0 };
+    let tile = caps.preferred_tile(cols, 0);
+    let ctile = caps.preferred_compaction_tile(cols, 0);
 fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> Choice {
     let wg = caps.recommended_workgroup(rows);
     let kl = caps.preferred_k_loop(k);
@@ -114,6 +127,85 @@ fn fallback(_rows: u32, cols: u32, k: u32, caps: &DeviceCaps, _kind: RankKind) -
     }
 }
 
+fn refine_choice(
+    mut choice: Choice,
+    fallback: Choice,
+    caps: &DeviceCaps,
+    cols: u32,
+    k: u32,
+    kind: RankKind,
+) -> Choice {
+    if choice.wg == 0 {
+        choice.wg = fallback.wg;
+    }
+    choice.wg = caps.align_workgroup(choice.wg);
+
+    if choice.kl == 0 {
+        choice.kl = fallback.kl;
+    }
+    if choice.ch == 0 {
+        choice.ch = fallback.ch;
+    }
+    if choice.mk == 0 {
+        choice.mk = caps.preferred_merge_kind(k);
+    }
+    if choice.mkd == 0 {
+        choice.mkd = caps.preferred_substrategy(choice.mk, k);
+    }
+    if choice.tile == 0 {
+        choice.tile = fallback.tile;
+    }
+    choice.tile = caps.preferred_tile(cols, choice.tile);
+
+    if matches!(kind, RankKind::MidK | RankKind::BottomK) {
+        if choice.ctile == 0 {
+            choice.ctile = fallback.ctile;
+        }
+        choice.ctile = caps.preferred_compaction_tile(cols, choice.ctile);
+    } else if choice.ctile == 0 {
+        choice.ctile = fallback.ctile;
+    }
+
+    if !choice.use_2ce && fallback.use_2ce && caps.prefers_two_stage(cols, k) {
+        choice.use_2ce = true;
+    }
+
+    choice
+}
+
+fn score_choice(choice: &Choice, caps: &DeviceCaps, cols: u32, k: u32, kind: RankKind) -> f32 {
+    let occ = caps.occupancy_score(choice.wg).min(1.0);
+    let mk_pref = if choice.mk == caps.preferred_merge_kind(k) {
+        1.0
+    } else {
+        0.55
+    };
+    let mkd_pref = if choice.mkd == caps.preferred_substrategy(choice.mk, k) {
+        1.0
+    } else {
+        0.7
+    };
+    let tile_target = caps.preferred_tile(cols, 0);
+    let tile_score =
+        1.0 - (tile_target.abs_diff(choice.tile) as f32 / tile_target.max(1) as f32).min(1.0);
+    let ctile_score = if matches!(kind, RankKind::MidK | RankKind::BottomK) {
+        let ct_target = caps.preferred_compaction_tile(cols, 0);
+        1.0 - (ct_target.abs_diff(choice.ctile) as f32 / ct_target.max(1) as f32).min(1.0)
+    } else {
+        1.0
+    };
+    let two_stage = if caps.prefers_two_stage(cols, k) == choice.use_2ce {
+        1.0
+    } else {
+        0.75
+    };
+
+    (occ * 0.35)
+        + (mk_pref * 0.2)
+        + (mkd_pref * 0.15)
+        + (tile_score * 0.15)
+        + (ctile_score * 0.08)
+        + (two_stage * 0.07)
 fn closeness(actual: u32, target: u32) -> f32 {
     if actual == 0 || target == 0 {
         return 0.0;
@@ -564,6 +656,12 @@ pub fn choose_unified_rank(
     caps: DeviceCaps,
     kind: RankKind,
 ) -> Choice {
+    let fallback_base = fallback(rows, cols, k, &caps, kind);
+    // 1) Gather DSL hard + soft
+    #[cfg_attr(not(feature = "logic"), allow(unused_variables))]
+    let (dsl_hard, soft_rules_logic) = {
+        #[allow(unused_variables)]
+        let (hard_opt, soft_dsl) = kdsl_bridge::parse_env_dsl(rows, cols, k, caps.subgroup);
     let baseline = fallback(rows, cols, k, &caps, kind);
     // 1) Gather DSL hard + soft
     #[allow(unused_mut)]
@@ -584,6 +682,8 @@ pub fn choose_unified_rank(
         #[cfg(feature = "logic")]
         let mut sr = soft_dsl;
         #[cfg(not(feature = "logic"))]
+        #[allow(unused_mut)]
+        let mut sr: Vec<kdsl_bridge::SoftRule> = Vec::new();
         let mut sr: Vec<kdsl_bridge::SoftRule> = Vec::new();
         #[allow(unused_mut)]
         let mut sr: Vec<kdsl_bridge::SoftRule> = Vec::new();
@@ -608,6 +708,11 @@ pub fn choose_unified_rank(
 
     #[cfg(not(feature = "logic"))]
     let _ = &soft_rules;
+
+    #[cfg(feature = "logic")]
+    let mut soft_rules = soft_rules_logic;
+    #[cfg(not(feature = "logic"))]
+    let _soft_rules = soft_rules_logic;
 
     // 2) Candidate A: SoftLogic solve
     #[cfg(feature = "logic")]
@@ -638,6 +743,7 @@ pub fn choose_unified_rank(
         }
     };
     #[cfg(not(feature = "logic"))]
+    let cand_a = fallback_base;
     let cand_a = fallback(rows, cols, k, &caps, kind);
     let cand_a = baseline;
 
@@ -661,6 +767,8 @@ pub fn choose_unified_rank(
                         ctile: 0,
                         mode_midk: 0,
                         mode_bottomk: 0,
+                    });
+            let mut c = fallback_base;
                         tile_cols: ((cols.max(1) + 1023) / 1024) as u32 * 1024,
                         radix: if k.is_power_of_two() { 4 } else { 2 },
                         segments: if cols > 131_072 {
@@ -679,6 +787,7 @@ pub fn choose_unified_rank(
             c.ch = base.ch;
             c
         }
+        _ => fallback_base,
         _ => fallback(rows, cols, k, &caps, kind),
         _ => baseline,
     };
@@ -715,6 +824,35 @@ pub fn choose_unified_rank(
         cand_a
     };
 
+    // 5) Consensus: slight bias to generated (per backend)
+    let cand_a = refine_choice(cand_a, fallback_base, &caps, cols, k, kind);
+    let cand_b = refine_choice(cand_b, fallback_base, &caps, cols, k, kind);
+    let cand_c = refine_choice(cand_c, fallback_base, &caps, cols, k, kind);
+
+    let score_a = score_choice(&cand_a, &caps, cols, k, kind);
+    let score_b = score_choice(&cand_b, &caps, cols, k, kind);
+    let mut score_c = score_choice(&cand_c, &caps, cols, k, kind);
+    let gen_bias = gen_weight_for_backend(caps.backend);
+    if gen_bias > 0.0 {
+        score_c += gen_bias;
+    }
+    if caps.backend == BackendKind::Wgpu && caps.subgroup && cand_c.mk == 2 && k <= 128 {
+        score_c += 0.08;
+    }
+    if caps.backend == BackendKind::Cuda && cand_c.mk >= 1 {
+        score_c += 0.05;
+    }
+    if caps.backend == BackendKind::Hip && cand_c.mk >= 1 {
+        score_c += 0.04;
+    }
+
+    let mut best = (cand_b, score_b);
+    for (choice, score) in [(cand_a, score_a), (cand_c, score_c)] {
+        if score > best.1 + 0.02 {
+            best = (choice, score);
+        }
+    }
+    best.0
     // 5) Consensus: score both candidates & bias generated table via env weight.
     let gen_bias = gen_weight_for_backend(caps.backend);
     let pick = |x: Choice, y: Choice| -> Choice {

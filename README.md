@@ -118,21 +118,10 @@ execute_rank(&exec, &plan)?;
 
 `DeviceCaps` now ships backend-specific constructors (`wgpu`, `cuda`, `hip`, `cpu`) and
 builder-style setters (`with_subgroup`, `with_max_workgroup`, `with_shared_mem`) so you
-can describe GPUs with realistic limits while still feeding the unified heuristic
-chooser a compact struct.  The helpers also expose higher level tuning hints such as
-`recommended_workgroup`, `recommended_tiles`, and `preferred_k_loop` so backends can
-query consistent defaults without duplicating the heuristic math.  Pair them with the
-extended `prefers_two_stage(rows, cols, k)` signature when you want to peek at whether
-the planner will promote the 2-pass compaction path for huge matrices.
-chooser a compact struct.  It also exposes derived helpers such as
-`recommended_workgroup`, `recommended_sweep_tile`, and `recommended_compaction_tile`
-so you can introspect the policy or plug device-aware hints into custom tooling.
-chooser a compact struct. The chooser normalizes the plans produced by the DSL, the
-generated tables, and the fallback rules, aligning workgroup sizes to hardware warp
-widths, honouring shared-memory budgets, and scoring each candidate before execution.
-When the reported shared memory is too small for the shared-heap paths or two-stage
-compaction, the planner now automatically falls back to bitonic variants so that the
-plan always honours device limits.
+can describe GPUs with realistic limits while still feeding the unified heuristic chooser
+a compact struct. Extra helpers (`align_workgroup`, `preferred_tile`, `occupancy_score`)
+let downstream tooling snap requested launches to warp-friendly shapes, reason about
+effective occupancy, and auto-derive sweep/compaction tiles from the device limits.
 
 **Python**
 ```python
@@ -333,6 +322,12 @@ export SPIRAL_HEUR_K='
 - **B** = DSL **hard** assignment (if you set `mk:`/`tile:` explicitly, B wins)
 - **C** = **Generated table** (tuner output)
 
+Default policy: if **B** exists use it; else compare **A vs C** by SoftLogic score and
+favor **C** with a small prior (`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`). The runtime now
+refines every candidate by snapping workgroup/tile sizes to the device lane width,
+injects backend-specific merge-kind defaults when unset, and finally scores each
+candidate with a tiny occupancy + alignment model before adopting the highest-scoring
+plan (with the generated path inheriting the configured bias).
 Default policy: if **B** exists use it; else score **A** and **C** with backend-aware
 occupancy/tile metrics derived from `DeviceCaps`, then add a small prior to **C**
 (`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`).

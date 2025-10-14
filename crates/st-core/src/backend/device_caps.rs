@@ -95,6 +95,121 @@ impl DeviceCaps {
         }
     }
 
+    /// Clamp and align a requested workgroup size to something the backend can
+    /// launch efficiently while respecting the native lane width.
+    pub fn align_workgroup(&self, requested: u32) -> u32 {
+        let lanes = self.lane_width.max(1);
+        let max = self.max_workgroup.max(lanes);
+        let base = requested.clamp(lanes, max);
+        let mut aligned = ((base + lanes - 1) / lanes) * lanes;
+        if aligned > max {
+            let rem = max % lanes;
+            aligned = if rem == 0 { max } else { max - rem };
+        }
+        aligned.max(lanes)
+    }
+
+    /// Rough occupancy score for a requested workgroup size (0.0–1.25).
+    pub fn occupancy_score(&self, requested: u32) -> f32 {
+        if requested == 0 {
+            return 0.0;
+        }
+        let lanes = self.lane_width.max(1);
+        let max = self.max_workgroup.max(lanes);
+        let aligned = self.align_workgroup(requested);
+        let occ = aligned.min(max) as f32 / max as f32;
+        let penalty = 1.0 - (aligned.abs_diff(requested) as f32 / aligned.max(1) as f32).min(0.6);
+        let mut score = (occ * 0.6) + (penalty * 0.4);
+        if self.subgroup {
+            let warp_count = (aligned / lanes).max(1) as f32;
+            let boost = (warp_count / 4.0).min(1.25);
+            score *= boost;
+        }
+        score.clamp(0.0, 1.25)
+    }
+
+    fn tile_hint(&self, cols: u32) -> u32 {
+        if cols > 131_072 {
+            4096
+        } else if cols > 65_536 {
+            2048
+        } else if cols > 8_192 {
+            1024
+        } else if cols > 4_096 {
+            512
+        } else {
+            256
+        }
+    }
+
+    fn ctile_hint(&self, cols: u32) -> u32 {
+        if cols > 65_536 {
+            1024
+        } else if cols > 8_192 {
+            512
+        } else {
+            256
+        }
+    }
+
+    fn align_tile(&self, tile: u32, ceiling: u32) -> u32 {
+        let lanes = self.lane_width.max(1);
+        let max_tile = ceiling.max(lanes);
+        let base = tile.clamp(lanes, max_tile);
+        let mut aligned = ((base + lanes - 1) / lanes) * lanes;
+        if aligned > max_tile {
+            let rem = max_tile % lanes;
+            aligned = if rem == 0 { max_tile } else { max_tile - rem };
+        }
+        aligned.max(lanes)
+    }
+
+    /// Backend-aware preference for sweep tiles (TopK).
+    pub fn preferred_tile(&self, cols: u32, hint: u32) -> u32 {
+        let seed = if hint == 0 {
+            self.tile_hint(cols)
+        } else {
+            hint
+        };
+        let ceiling = if matches!(self.backend, BackendKind::Cpu) {
+            1024
+        } else {
+            8192
+        };
+        self.align_tile(seed, ceiling)
+    }
+
+    /// Backend-aware preference for compaction tiles (MidK/BottomK).
+    pub fn preferred_compaction_tile(&self, cols: u32, hint: u32) -> u32 {
+        let seed = if hint == 0 {
+            self.ctile_hint(cols)
+        } else {
+            hint
+        };
+        let ceiling = if matches!(self.backend, BackendKind::Cpu) {
+            1024
+        } else {
+            4096
+        };
+        self.align_tile(seed, ceiling)
+    }
+
+    /// Builder style helper to override the subgroup flag.
+    pub fn with_subgroup(mut self, subgroup: bool) -> Self {
+        self.subgroup = subgroup;
+        self
+    }
+
+    /// Builder style helper to override the maximum workgroup size.
+    pub fn with_max_workgroup(mut self, max_workgroup: u32) -> Self {
+        self.max_workgroup = max_workgroup.max(1);
+        self
+    }
+
+    /// Builder style helper to override the shared memory budget.
+    pub fn with_shared_mem(mut self, shared_mem: Option<u32>) -> Self {
+        self.shared_mem_per_workgroup = shared_mem;
+        self
     /// Builder style helper to override the subgroup flag.
     pub fn with_subgroup(mut self, subgroup: bool) -> Self {
         self.subgroup = subgroup;
@@ -276,6 +391,8 @@ impl DeviceCaps {
     }
 
     /// Whether two‑stage compaction should be enabled for the given problem.
+    pub fn prefers_two_stage(&self, cols: u32, k: u32) -> bool {
+        cols > 32_768 || k > 128
     pub fn prefers_two_stage(&self, rows: u32, cols: u32, k: u32) -> bool {
         let col_heavy = cols > 32_768;
         let k_heavy = k > self.lane_width.max(1) * 4;
@@ -334,6 +451,26 @@ mod tests {
     }
 
     #[test]
+    fn workgroup_alignment_tracks_lane_width() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        assert_eq!(caps.align_workgroup(513), 544);
+        assert_eq!(caps.align_workgroup(1024), 1024);
+        assert_eq!(caps.align_workgroup(16), 32);
+        let cpu = DeviceCaps::cpu().with_max_workgroup(96);
+        assert_eq!(cpu.align_workgroup(40), 40);
+        assert_eq!(cpu.align_workgroup(128), 96);
+    }
+
+    #[test]
+    fn occupancy_score_rewards_alignment() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let aligned = caps.occupancy_score(256);
+        let misaligned = caps.occupancy_score(250);
+        assert!(aligned > misaligned);
+        assert!(aligned <= 1.25);
+    }
+
+    #[test]
     fn merge_preferences_track_existing_logic() {
         let caps = DeviceCaps::wgpu(32, true, 256);
         assert_eq!(caps.preferred_merge_kind(64), 2);
@@ -364,6 +501,20 @@ mod tests {
     #[test]
     fn two_stage_matches_reference_logic() {
         let caps = DeviceCaps::wgpu(32, true, 256);
+        assert!(caps.prefers_two_stage(40_000, 64));
+        assert!(caps.prefers_two_stage(2_000, 256));
+        assert!(!caps.prefers_two_stage(10_000, 64));
+    }
+
+    #[test]
+    fn tile_helpers_follow_monotonicity() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let small = caps.preferred_tile(1024, 0);
+        let large = caps.preferred_tile(200_000, 0);
+        assert!(large >= small);
+        let comp_small = caps.preferred_compaction_tile(1024, 0);
+        let comp_large = caps.preferred_compaction_tile(200_000, 0);
+        assert!(comp_large >= comp_small);
         assert!(caps.prefers_two_stage(1_024, 40_000, 64));
         assert!(caps.prefers_two_stage(4_096, 2_000, 256));
         assert!(!caps.prefers_two_stage(128, 10_000, 64));
