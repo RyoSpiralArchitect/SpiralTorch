@@ -221,6 +221,36 @@ text → wave → hypergrad endlessly without ever seeing a traceback. Non-Eucli
 geometry, imaginary spectra, and category-inspired language flows all feed the
 same tape, letting SpiralTorch chase meaning directly in Z-space.
 
+#### Pure Python interop (no NumPy, no Torch)
+
+The new `st_tensor::pure::python` module exposes a C ABI that any Python 3
+interpreter can reach with nothing more than `ctypes`. Build the cdylib and use
+the helper wrapper that ships in `tools/python/pure_bridge.py`:
+
+```bash
+cargo build --release -p st-tensor
+python - <<'PY'
+from tools.python.pure_bridge import PurePythonBridge
+
+bridge = PurePythonBridge()
+encoder = bridge.encoder(curvature=-1.0, temperature=0.55)
+hypergrad = bridge.hypergrad(curvature=-1.0, learning_rate=0.03, rows=1, cols=8)
+
+hypergrad.absorb_text(encoder, "SpiralTorch weaves Z-space without tokens")
+weights = hypergrad.apply([0.0] * 8)
+gradient = hypergrad.gradient()
+
+print("updated weights", weights)
+print("gradient norm", sum(g * g for g in gradient) ** 0.5)
+PY
+```
+
+Under the hood the bridge calls into `st_pure_hypergrad_new`,
+`st_pure_hypergrad_apply`, and friends, while forwarding any errors via the
+`st_pure_last_error` sentinel so Python never has to chase NaNs or undefined
+behaviour. No wheels, no third-party modules—just CPython lists that round-trip
+through the same open-cartesian safety net as the Rust stack.
+
 #### Open-cartesian safety nets (no NaNs, no runaway loops)
 
 Hyperbolic Jacobians now flow through an explicit `OpenCartesianTopos`. The

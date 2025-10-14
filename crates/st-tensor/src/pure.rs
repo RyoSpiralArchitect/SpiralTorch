@@ -10,6 +10,7 @@
 pub mod fractal;
 pub mod topos;
 pub mod wasm_canvas;
+pub mod python;
 
 pub use topos::{ConjugateGradientSolver, OpenCartesianTopos, RewriteMonad};
 
