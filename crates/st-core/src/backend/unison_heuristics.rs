@@ -195,7 +195,6 @@ fn gen_weight_for_backend(bk: BackendKind) -> f32 {
 }
 
 #[cfg(feature = "logic")]
-#[cfg(feature = "logic")]
 fn backend_soft_injections(
     rows: u32,
     cols: u32,
@@ -204,41 +203,147 @@ fn backend_soft_injections(
     kind: RankKind,
 ) -> Vec<SoftRule> {
     let mut v = Vec::<SoftRule>::new();
-
-    // Conservative device-driven hints (keeps compile-time small & safe)
+    // mk by backend
+    match caps.backend {
+        BackendKind::Wgpu => {
+            if caps.subgroup && k <= 128 {
+                v.push(SoftRule {
+                    field: Field::Mk,
+                    value: Value::U(2),
+                    weight: 0.30,
+                });
+            } else if k <= 2048 {
+                v.push(SoftRule {
+                    field: Field::Mk,
+                    value: Value::U(1),
+                    weight: 0.20,
+                });
+            }
+        }
+        BackendKind::Cuda => {
+            if k <= caps.lane_width * 4 {
+                v.push(SoftRule {
+                    field: Field::Mk,
+                    value: Value::U(2),
+                    weight: 0.28,
+                });
+            } else if k <= 4096 {
+                v.push(SoftRule {
+                    field: Field::Mk,
+                    value: Value::U(1),
+                    weight: 0.18,
+                });
+            }
+        }
+        BackendKind::Hip => {
+            if k <= caps.lane_width * 2 {
+                v.push(SoftRule {
+                    field: Field::Mk,
+                    value: Value::U(2),
+                    weight: 0.22,
+                });
+            } else if k <= 4096 {
+                v.push(SoftRule {
+                    field: Field::Mk,
+                    value: Value::U(1),
+                    weight: 0.22,
+                });
+            }
+        }
+        BackendKind::Cpu => {}
+    }
+    // mkd (sub-strategy) rules
+    if k <= 128 {
+        v.push(SoftRule {
+            field: Field::Mkd,
+            value: Value::U(4),
+            weight: 0.18,
+        });
+    } else if k <= 1024 {
+        v.push(SoftRule {
+            field: Field::Mkd,
+            value: Value::U(1),
+            weight: 0.12,
+        });
+    } else {
+        v.push(SoftRule {
+            field: Field::Mkd,
+            value: Value::U(2),
+            weight: 0.10,
+        });
+    }
+    // wg / kl / tile preferences from the hardware descriptor
     let preferred_wg = caps.recommended_workgroup(rows);
     v.push(SoftRule {
         field: Field::Wg,
         value: Value::U(preferred_wg),
-        weight: 0.12,
+        weight: 0.16,
     });
-
     let preferred_kl = caps.preferred_k_loop(k);
     v.push(SoftRule {
         field: Field::Kl,
         value: Value::U(preferred_kl),
+        weight: 0.14,
+    });
+    let (preferred_tile, preferred_ctile) = caps.recommended_tiles(cols);
+    v.push(SoftRule {
+        field: Field::Tile,
+        value: Value::U(preferred_tile),
+    }
+    // wg / kl / tile hints follow DeviceCaps helpers.
+    v.push(SoftRule {
+        field: Field::Wg,
+        value: Value::U(caps.recommended_workgroup()),
+        weight: 0.12,
+    });
+    v.push(SoftRule {
+        field: Field::Kl,
+        value: Value::U(caps.recommended_kl(k)),
         weight: 0.10,
     });
-
-    // If MidK/BottomK, provide a compaction-tile hint
+    v.push(SoftRule {
+        field: Field::Tile,
+        value: Value::U(caps.recommended_sweep_tile(cols)),
+    }
+    // tiles
+    let candidates = [256u32, 512, 1024, 2048, 4096, 8192];
+    let base = (caps.lane_width.max(16) * 16) as u32;
+    let mut best = 256u32;
+    let mut bestd = u32::MAX;
+    for &t in &candidates {
+        let d = base.abs_diff(t);
+        if d < bestd {
+            bestd = d;
+            best = t;
+        }
+    }
+    v.push(SoftRule {
+        field: Field::Tile,
+        value: Value::U(best),
+        weight: 0.12,
+    });
+    // compaction tile for MidK/BottomK
     if matches!(kind, RankKind::MidK | RankKind::BottomK) {
-        let ct = caps.recommended_compaction_tile(cols);
+        v.push(SoftRule {
+            field: Field::Ctile,
+            value: Value::U(preferred_ctile),
+            value: Value::U(caps.recommended_compaction_tile(cols)),
+        let ct = if cols > 65_536 {
+            1024
+        } else if cols > 8_192 {
+            512
+        } else {
+            256
+        };
         v.push(SoftRule {
             field: Field::Ctile,
             value: Value::U(ct),
             weight: 0.10,
         });
     }
-
-    // Provide a sweep tile hint
-    v.push(SoftRule {
-        field: Field::Tile,
-        value: Value::U(caps.recommended_sweep_tile(cols)),
-        weight: 0.12,
-    });
-
     v
 }
+
 fn clamp_workgroup(wg: u32, caps: &DeviceCaps) -> u32 {
     let min = if caps.subgroup {
         caps.lane_width.max(32)
