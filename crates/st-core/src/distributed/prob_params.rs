@@ -1,8 +1,8 @@
-/// Consensus for lane parameters (Redis-gated) + optional HIP-real sync.
-/// このモジュールは st-core 単体でコンパイルできる最小構成です。
-/// - LaneParams をここで定義（他モジュールへの依存を断つ）
-/// - Redis は feature "kv-redis" のときだけ読む
-/// - HIP-real 同期はコンパイル時ガードのみ（stub）
+/// Consensus for lane parameters (Redis-gated) with optional HIP-real sync.
+/// This module is the minimal slice that lets `st-core` compile on its own:
+/// - Defines `LaneParams` locally to avoid cross-crate dependencies.
+/// - Reads Redis only when the `kv-redis` feature is enabled.
+/// - Keeps HIP-real synchronisation behind a compile-time stub.
 
 #[derive(Clone, Debug)]
 pub struct LaneParams {
@@ -12,16 +12,16 @@ pub struct LaneParams {
 #[cfg(feature="kv-redis")]
 use serde_json::Value;
 
-/// HIP-real が有効なときだけ呼ばれる“何もしない”stub（実装は将来差し替え）
+/// Stub that runs only when HIP-real is enabled (real sync can replace it later).
 #[cfg(all(feature="hip", feature="hip-real"))]
 fn maybe_sync() {
-    // ここに rccl の初期化/同期を入れる予定。現状は no-op で安全。
+    // Placeholder for RCCL init/synchronisation. Safe no-op for now.
 }
 
 #[cfg(not(all(feature="hip", feature="hip-real")))]
 fn maybe_sync() {}
 
-/// Redis から lane 提案のサンプルを読み、agg=median/mean で要約
+/// Pull lane suggestions from Redis and aggregate via median/mean.
 #[cfg(feature="kv-redis")]
 fn fetch_lane_from_redis() -> Option<i32> {
     let url = std::env::var("REDIS_URL").ok()?;
@@ -51,7 +51,7 @@ fn fetch_lane_from_redis() -> Option<i32> {
 #[cfg(not(feature="kv-redis"))]
 fn fetch_lane_from_redis() -> Option<i32> { None }
 
-/// ランタイム合意で lane を上書き（あれば）→ HIP-real 同期（stub）→ 返却
+/// Apply runtime consensus, run the HIP-real stub if needed, and return.
 pub fn consensus_lane_params(mut p: LaneParams) -> LaneParams {
     if let Some(lane) = fetch_lane_from_redis() {
         p.lane = lane;
