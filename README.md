@@ -13,15 +13,15 @@ trains where PyTorch can’t — inside the Z-space.
   Runs natively on WGPU · MPS · CUDA · CPU.</b>
 </p>
 
-**SpiralTorch — Pure Rust AI core for Z-space exploration.**
-**© 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.**  
-**Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)**  
-**Unauthorized derivations = non-compliant with AGPL §13.**
-**SpiralTorch is a Compact. Safe. Rust-native.
-~10× smaller than PyTorch, yet feature-complete in AI training that keeps language,
-geometry, and device heuristics in the same conversation. SpiralK orchestrates
-the kernels, the hypergrad tape streams Z-space meaning, and the high-level
-`st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.**
+- **SpiralTorch — Pure Rust AI core for Z-space exploration.**
+- **© 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.**  
+- **Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)**  
+- **Unauthorized derivations = non-compliant with AGPL §13.**
+> **SpiralTorch is a Compact. Safe. Rust-native.
+> ~10× smaller than PyTorch, yet feature-complete in AI training that keeps language,
+>geometry, and device heuristics in the same conversation. SpiralK orchestrates
+> the kernels, the hypergrad tape streams Z-space meaning, and the high-level
+> `st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.**
 
 The stack is comfortable living entirely in Rust—yet the Python wheel remains a
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
