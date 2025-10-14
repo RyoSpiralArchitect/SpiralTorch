@@ -1,4 +1,4 @@
-//! Lightweight A/B logger to speed up Self‑Rewrite convergence.
+//! Lightweight A/B/C dialogue logger to speed up Self‑Rewrite convergence.
 //! Writes JSON lines to ~/.spiraltorch/ablog.jsonl (configurable by SPIRAL_ABLOG_PATH).
 
 use std::{fs::{OpenOptions}, io::Write};
@@ -8,7 +8,7 @@ use serde::Serialize;
 pub struct ABEntry {
     pub rows: u32, pub cols: u32, pub k: u32,
     pub backend: &'static str,
-    pub variant: &'static str,   // "A"(SoftLogic/DSL) or "C"(Generated) or "B"(DSL-hard)
+    pub variant: &'static str,   // "A" (SoftLogic/DSL), "B" (DSL-hard), or "C" (generated table)
     pub mk: u32, pub mkd: u32, pub tile: u32, pub ctile: u32,
     pub latency_ms: f32,         // measured latency for the run
     pub ok: bool,                // kernel succeeded
