@@ -40,7 +40,7 @@ executor you choose.
   `AmegaHypergrad` tape so you can iterate on learning logic without
   PyTorch/Numpy while staying inside non-Euclidean geometry.
 - **Optional WASM tuner table**
-  Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
+  Bake the JSON dataset offline and ship it to browsers/WASM. The runtime loads the table lazily, blends it with SpiralK, and keeps the optimiser in sync with the generated WGSL kernels.
 - **Self-Rewrite**
   A/B/C conversations (Wilson CI) append `soft(...)` into
   `~/.spiraltorch/heur.kdsl` once the roundtable agrees a configuration is ahead, while transcripts land in
@@ -335,48 +335,65 @@ export SPIRAL_HEUR_K='
 
 Default policy: if **B** exists use it; otherwise the runtime invites **A** and **C** into a quick conversation. It scores both with backend-aware occupancy/tile metrics derived from `DeviceCaps`, then adds a gentle prior to **C** (`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`). When the discussion reaches a Wilson-backed agreement, **Self-Rewrite** appends the matching `soft(...)` into `~/.spiraltorch/heur.kdsl` so the next run starts from the shared insight.
 
+Want to materialise the FFT path straight from the chosen plan? Call the new helpers and feed the result to your browser/WASM runtime:
+
+```rust
+use st_core::backend::wgpu_heuristics::{auto_fft_spiralk, auto_fft_wgsl};
+
+let wgsl = auto_fft_wgsl(rows, cols, k, subgroup).expect("heuristics available");
+let spiralk = auto_fft_spiralk(rows, cols, k, subgroup).unwrap();
+// ship `wgsl` to your WebGPU runtime and persist `spiralk` if you want the DSL to learn it.
+```
+
 ---
 
 ## Regenerating the WASM table (optional)
 
-The repo includes a tiny generator that converts tuner JSON to a Rust table:
+Run the offline baker to convert your latest measurements into a `WasmTunerTable`
+that both native and browser builds can consume:
 ```bash
 python3 tools/tuner/gen_generated_rs.py tools/tuner/tuner_results.json \
   > crates/st-core/src/backend/wgpu_heuristics_generated.rs
 ```
 
+The generated module keeps the JSON embedded verbatim, parses it via
+`st-core::backend::wasm_tuner`, and exposes a `choose(...)` helper that the
+runtime queries after SpiralK/SoftLogic have spoken. Because the JSON format is
+portable, you can ship the same file to a WebWorker, bake a table offline, and
+let the browser pick overrides without re-running the tuner in production.
+
 ### Fractional FFT / SpiralK roadmap
 
-- **Radix-2 → Radix-4 pipeline**: The new `st-frac::fft` module mirrors the GPU
-  butterfly structure so SpiralK can auto-emit subgroup-aware WGSL.
+- **Radix-2 → Radix-4 pipeline**: `st-frac::fft` still mirrors the GPU
+  butterfly structure, and the new `SpiralKFftPlan` bridge turns the resulting
+  `Choice` into auto-generated WGSL kernels for WebGPU.
 - **Wilson-aware automation**: `st-kdsl::auto` turns latency deltas into
   high-confidence `soft(...)` rewrites, wiring tuned `radix`, `tile_cols`, and
   `segments` into `heur.kdsl` without manual editing.
 - **ND GPU indexer**: A dedicated WGSL kernel materialises strided indices and
   per-segment IDs, unlocking fast fractional/FFT dispatches from WASM → Canvas.
-- **WASM tuner baking**: The generator now bakes `tile_cols`/`radix`/`segments`
-  into the Rust table, ensuring the browser path stays in sync with native
-  runners when driving SpiralK graphs.
+- **WASM tuner baking**: `tools/tuner/tuner_results.json` keeps the measured
+  overrides (`tile_cols`, `radix`, `segments`, `mode_*`) in one place so the
+  generator can bake them into Rust **and** expose them to the Web via JSON.
 
 **Example JSON**
 ```json
 [
-  {"rows": 1024, "cols_min": 4096,  "cols_max": 8191,   "k_max": 128,  "sg": true,  "mk": 2, "tile": 512,
-   "tile_cols": 1024, "radix": 2, "segments": 1, "use_2ce": false},
-  {"rows": 1024, "cols_min": 8192,  "cols_max": 65535,  "k_max": 2048, "sg": true,  "mk": 1, "tile": 1024,
-   "tile_cols": 2048, "radix": 4, "segments": 2},
-  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": true,  "mk": 1, "tile": 2048,
-   "tile_cols": 4096, "radix": 4, "segments": 4, "use_2ce": true},
-  {"rows": 1024, "cols_min": 4096,  "cols_max": 65535,  "k_max": 2048, "sg": false, "mk": 1, "tile": 1024,
-   "tile_cols": 1024, "radix": 2, "segments": 1},
-  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": false, "mk": 0, "tile": 2048,
-   "tile_cols": 2048, "radix": 4, "segments": 2, "use_2ce": true}
+  {"rows": 256,  "cols_min": 0,     "cols_max": 4095,   "k_max": 128,  "sg": true,
+   "wg": 128,    "tile": 512,  "tile_cols": 512,  "radix": 2, "segments": 1},
+  {"rows": 512,  "cols_min": 4096,  "cols_max": 16383,  "k_max": 256,  "sg": true,
+   "wg": 256,    "tile": 1024, "tile_cols": 1024, "radix": 4, "segments": 2},
+  {"rows": 512,  "cols_min": 16384, "cols_max": 65535,  "k_max": 2048, "sg": false,
+   "wg": 128,    "tile": 2048, "tile_cols": 2048, "radix": 4, "segments": 4, "use_2ce": true},
+  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": false,
+   "wg": 128,    "tile": 4096, "tile_cols": 4096, "radix": 4, "segments": 4, "use_2ce": true,
+   "mode_bottomk": 2}
 ]
 ```
 
-The generator now bakes FFT-oriented hints (`tile_cols`, `radix`) and the ND GPU
-segment count directly into the Rust table, so `st-core` can immediately expose
-them to the SpiralK Wilson self-rewrite logic.
+The generator bakes FFT-oriented hints (`tile_cols`, `radix`, `segments`) and
+the ND compaction settings into the Rust table, while the same JSON remains
+available for WASM workers that want to replay the optimisation flow offline.
 
 ---
 
