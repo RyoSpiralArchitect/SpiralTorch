@@ -7,10 +7,15 @@ use pyo3::PyRefMut;
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_nn::{
+    Conv1d as NnConv1d, Linear as NnLinear, Module, Sequential as NnSequential,
+    WaveRnn as NnWaveRnn,
+};
 use st_tensor::pure::{
     topos::OpenCartesianTopos, AmegaHypergrad, Complex32, ComplexTensor, LanguageWaveEncoder,
     PureResult, Tensor, TensorError,
 };
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 fn tensor_err(err: TensorError) -> PyErr {
@@ -34,6 +39,25 @@ fn intern_label(label: &str) -> &'static str {
     let mut guard = storage.lock().expect("intern labels lock poisoned");
     guard.push(leaked);
     leaked
+}
+
+fn state_to_pydict(py: Python<'_>, state: HashMap<String, Tensor>) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    for (name, tensor) in state {
+        let py_tensor = PyTensor::from_tensor(tensor);
+        dict.set_item(name, py_tensor.into_py(py))?;
+    }
+    Ok(dict.into_py(py))
+}
+
+fn pydict_to_state(dict: &PyDict) -> PyResult<HashMap<String, Tensor>> {
+    let mut state = HashMap::new();
+    for (key, value) in dict.iter() {
+        let name: String = key.extract()?;
+        let tensor: PyTensor = value.extract()?;
+        state.insert(name, tensor.as_tensor().clone());
+    }
+    Ok(state)
 }
 
 #[pyclass(module = "spiraltorch", name = "Tensor")]
@@ -467,6 +491,338 @@ impl PyHypergrad {
     }
 }
 
+#[pyclass(module = "spiraltorch.nn", name = "Linear")]
+struct PyLinearModule {
+    inner: Option<NnLinear>,
+}
+
+impl PyLinearModule {
+    fn borrow(&self) -> PyResult<&NnLinear> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("Linear module has been moved"))
+    }
+
+    fn borrow_mut(&mut self) -> PyResult<&mut NnLinear> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("Linear module has been moved"))
+    }
+
+    fn take(&mut self) -> PyResult<NnLinear> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("Linear module has been moved"))
+    }
+}
+
+#[pymethods]
+impl PyLinearModule {
+    #[new]
+    #[pyo3(signature = (input_dim, output_dim, name=None))]
+    fn new(input_dim: usize, output_dim: usize, name: Option<&str>) -> PyResult<Self> {
+        let ident = name.unwrap_or("linear");
+        let inner = convert(NnLinear::new(ident, input_dim, output_dim))?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let layer = self.borrow()?;
+        Ok(PyTensor::from_tensor(convert(
+            layer.forward(input.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let layer = self.borrow_mut()?;
+        Ok(PyTensor::from_tensor(convert(
+            layer.backward(input.as_tensor(), grad_output.as_tensor()),
+        )?))
+    }
+
+    fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        convert(
+            self.borrow_mut()?
+                .attach_hypergrad(curvature, learning_rate),
+        )
+    }
+
+    fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        convert(self.borrow_mut()?.apply_step(fallback_lr))
+    }
+
+    fn zero_grad(&mut self) -> PyResult<()> {
+        convert(self.borrow_mut()?.zero_accumulators())
+    }
+
+    fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_to_pydict(py, self.borrow()?.state_dict()?)
+    }
+
+    fn load_state_dict(&mut self, dict: &PyDict) -> PyResult<()> {
+        let state = pydict_to_state(dict)?;
+        convert(self.borrow_mut()?.load_state_dict(&state))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "Conv1d")]
+struct PyConv1dModule {
+    inner: Option<NnConv1d>,
+}
+
+impl PyConv1dModule {
+    fn borrow(&self) -> PyResult<&NnConv1d> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("Conv1d module has been moved"))
+    }
+
+    fn borrow_mut(&mut self) -> PyResult<&mut NnConv1d> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("Conv1d module has been moved"))
+    }
+
+    fn take(&mut self) -> PyResult<NnConv1d> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("Conv1d module has been moved"))
+    }
+}
+
+#[pymethods]
+impl PyConv1dModule {
+    #[new]
+    #[pyo3(signature = (in_channels, out_channels, kernel_size, stride=1, padding=0, name=None))]
+    fn new(
+        in_channels: usize,
+        out_channels: usize,
+        kernel_size: usize,
+        stride: usize,
+        padding: usize,
+        name: Option<&str>,
+    ) -> PyResult<Self> {
+        let ident = name.unwrap_or("conv1d");
+        let inner = convert(NnConv1d::new(
+            ident,
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+        ))?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.forward(input.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow_mut()?
+                .backward(input.as_tensor(), grad_output.as_tensor()),
+        )?))
+    }
+
+    fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        convert(
+            self.borrow_mut()?
+                .attach_hypergrad(curvature, learning_rate),
+        )
+    }
+
+    fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        convert(self.borrow_mut()?.apply_step(fallback_lr))
+    }
+
+    fn zero_grad(&mut self) -> PyResult<()> {
+        convert(self.borrow_mut()?.zero_accumulators())
+    }
+
+    fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_to_pydict(py, self.borrow()?.state_dict()?)
+    }
+
+    fn load_state_dict(&mut self, dict: &PyDict) -> PyResult<()> {
+        let state = pydict_to_state(dict)?;
+        convert(self.borrow_mut()?.load_state_dict(&state))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "WaveRnn")]
+struct PyWaveRnnModule {
+    inner: Option<NnWaveRnn>,
+}
+
+impl PyWaveRnnModule {
+    fn borrow(&self) -> PyResult<&NnWaveRnn> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("WaveRnn module has been moved"))
+    }
+
+    fn borrow_mut(&mut self) -> PyResult<&mut NnWaveRnn> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("WaveRnn module has been moved"))
+    }
+
+    fn take(&mut self) -> PyResult<NnWaveRnn> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("WaveRnn module has been moved"))
+    }
+}
+
+#[pymethods]
+impl PyWaveRnnModule {
+    #[new]
+    #[pyo3(signature = (in_channels, hidden_dim, kernel_size, stride=1, padding=0, curvature=-1.0, temperature=0.5, name=None))]
+    fn new(
+        in_channels: usize,
+        hidden_dim: usize,
+        kernel_size: usize,
+        stride: usize,
+        padding: usize,
+        curvature: f32,
+        temperature: f32,
+        name: Option<&str>,
+    ) -> PyResult<Self> {
+        let ident = name.unwrap_or("wave_rnn");
+        let inner = convert(NnWaveRnn::new(
+            ident,
+            in_channels,
+            hidden_dim,
+            kernel_size,
+            stride,
+            padding,
+            curvature,
+            temperature,
+        ))?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.forward(input.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow_mut()?
+                .backward(input.as_tensor(), grad_output.as_tensor()),
+        )?))
+    }
+
+    fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        convert(
+            self.borrow_mut()?
+                .attach_hypergrad(curvature, learning_rate),
+        )
+    }
+
+    fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        convert(self.borrow_mut()?.apply_step(fallback_lr))
+    }
+
+    fn zero_grad(&mut self) -> PyResult<()> {
+        convert(self.borrow_mut()?.zero_accumulators())
+    }
+
+    fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_to_pydict(py, self.borrow()?.state_dict()?)
+    }
+
+    fn load_state_dict(&mut self, dict: &PyDict) -> PyResult<()> {
+        let state = pydict_to_state(dict)?;
+        convert(self.borrow_mut()?.load_state_dict(&state))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "Sequential")]
+struct PySequentialModule {
+    inner: Option<NnSequential>,
+}
+
+impl PySequentialModule {
+    fn borrow(&self) -> PyResult<&NnSequential> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("Sequential has been moved"))
+    }
+
+    fn borrow_mut(&mut self) -> PyResult<&mut NnSequential> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("Sequential has been moved"))
+    }
+}
+
+#[pymethods]
+impl PySequentialModule {
+    #[new]
+    fn new(py_layers: &PyAny) -> PyResult<Self> {
+        let seq_iter = py_layers.iter()?;
+        let mut seq = NnSequential::new();
+        for item in seq_iter {
+            let obj = item?;
+            if let Ok(mut linear) = obj.extract::<PyRefMut<'_, PyLinearModule>>() {
+                seq.push(linear.take()?);
+            } else if let Ok(mut conv) = obj.extract::<PyRefMut<'_, PyConv1dModule>>() {
+                seq.push(conv.take()?);
+            } else if let Ok(mut wave) = obj.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+                seq.push(wave.take()?);
+            } else {
+                return Err(PyValueError::new_err(
+                    "Sequential expects Linear, Conv1d, or WaveRnn modules",
+                ));
+            }
+        }
+        Ok(Self { inner: Some(seq) })
+    }
+
+    fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.forward(input.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow_mut()?
+                .backward(input.as_tensor(), grad_output.as_tensor()),
+        )?))
+    }
+
+    fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        convert(
+            self.borrow_mut()?
+                .attach_hypergrad(curvature, learning_rate),
+        )
+    }
+
+    fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        convert(self.borrow_mut()?.apply_step(fallback_lr))
+    }
+
+    fn zero_grad(&mut self) -> PyResult<()> {
+        convert(self.borrow_mut()?.zero_accumulators())
+    }
+
+    fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_to_pydict(py, self.borrow()?.state_dict()?)
+    }
+
+    fn load_state_dict(&mut self, dict: &PyDict) -> PyResult<()> {
+        let state = pydict_to_state(dict)?;
+        convert(self.borrow_mut()?.load_state_dict(&state))
+    }
+}
+
 fn parse_kind(kind: &str) -> PyResult<RankKind> {
     match kind.to_ascii_lowercase().as_str() {
         "topk" | "top" => Ok(RankKind::TopK),
@@ -529,6 +885,20 @@ fn plan(
     Ok(out.into_py(py))
 }
 
+#[pymodule]
+fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyLinearModule>()?;
+    m.add_class::<PyConv1dModule>()?;
+    m.add_class::<PyWaveRnnModule>()?;
+    m.add_class::<PySequentialModule>()?;
+    m.setattr("__all__", vec!["Linear", "Conv1d", "WaveRnn", "Sequential"])?;
+    m.setattr(
+        "__doc__",
+        "Rust-backed neural network modules: Linear, Conv1d, WaveRnn, Sequential.",
+    )?;
+    Ok(())
+}
+
 /// Convenience helper for the TopK family.
 #[pyfunction]
 #[pyo3(signature = (rows, cols, k, device=None))]
@@ -561,6 +931,9 @@ fn describe_device(py: Python<'_>, device: Option<&str>) -> PyResult<PyObject> {
 /// SpiralTorch Python module.
 #[pymodule]
 fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let nn_mod = PyModule::new_bound(_py, "nn")?;
+    nn(_py, &nn_mod)?;
+    m.add_submodule(nn_mod.as_ref())?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
@@ -581,6 +954,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "OpenTopos",
             "LanguageWaveEncoder",
             "Hypergrad",
+            "nn",
         ],
     )?;
     m.setattr("__version__", env!("CARGO_PKG_VERSION"))?;

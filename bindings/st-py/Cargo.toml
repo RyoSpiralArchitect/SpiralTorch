@@ -31,6 +31,7 @@ kdsl = ["st-core/kdsl"]
 pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", "gil-refs"] }
 st-core = { path = "../../crates/st-core", default-features = false }
 st-tensor = { path = "../../crates/st-tensor", default-features = false }
+st-nn = { path = "../../crates/st-nn" }
 
 [package.metadata.maturin]
 name = "spiraltorch"
