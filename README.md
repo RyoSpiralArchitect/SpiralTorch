@@ -105,6 +105,13 @@ maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
 # Add other backends via features (mps / cuda / hip)
 ```
 
+The binding crate mirrors the Rust feature flags. For example, to bake Metal
+support on macOS you can run:
+
+```bash
+maturin build -m bindings/st-py/Cargo.toml --release --features mps
+```
+
 ---
 
 ## Minimal API
@@ -136,10 +143,10 @@ effective occupancy, and auto-derive sweep/compaction tiles from the device limi
 
 **Python**
 ```python
-import numpy as np, spiraltorch as st
+import spiraltorch as st
 
-x = np.random.randn(8, 65536).astype(np.float32)
-vals, idx = st.topk2d(x, k=1024, device="auto")   # "wgpu > cuda > mps > cpu"
+plan = st.plan_topk(rows=8, cols=65_536, k=1_024, device="auto")
+print(plan["choice"])  # unified merge-kind, tiles, and workgroup sizing
 ```
 
 ---
