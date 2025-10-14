@@ -4,15 +4,20 @@ use crate::plan::RankPlanner;
 use crate::schedule::{GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
+use st_core::backend::unison_heuristics::RankKind;
+use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
 use st_tensor::pure::topos::OpenCartesianTopos;
+use std::collections::HashMap;
+use std::time::Duration;
 
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct ModuleTrainer {
     planner: RankPlanner,
     curvature: f32,
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
+    blackcat: Option<BlackCatRuntime>,
 }
 
 impl ModuleTrainer {
@@ -28,7 +33,14 @@ impl ModuleTrainer {
             curvature,
             hyper_learning_rate,
             fallback_learning_rate,
+            blackcat: None,
         }
+    }
+
+    /// Attaches the BlackCat runtime so contextual rewards update after each step.
+    pub fn with_blackcat(mut self, runtime: BlackCatRuntime) -> Self {
+        self.blackcat = Some(runtime);
+        self
     }
 
     /// Returns the underlying planner.
@@ -77,7 +89,7 @@ impl ModuleTrainer {
 
     /// Runs a full epoch over the provided iterator of `(input, target)` pairs.
     pub fn train_epoch<M, L, I>(
-        &self,
+        &mut self,
         module: &mut M,
         loss: &mut L,
         batches: I,
@@ -92,15 +104,48 @@ impl ModuleTrainer {
         let mut total_loss = 0.0f32;
         let mut steps = 0usize;
         for (input, target) in batches.into_iter() {
+            if let Some(rt) = self.blackcat.as_mut() {
+                rt.begin_step();
+            }
             let prediction = module.forward(&input)?;
             let loss_value = loss.forward(&prediction, &target)?;
-            total_loss += loss_value.data().iter().copied().sum::<f32>();
+            let step_loss = loss_value.data().iter().copied().sum::<f32>();
+            total_loss += step_loss;
             let grad_output = loss.backward(&prediction, &target)?;
+            let band_energy = schedule.band_energy(&grad_output)?;
             let bands: GradientBands = schedule.split(&grad_output)?;
             let _ = module.backward_bands(&input, &bands)?;
             self.step(module)?;
             self.zero(module)?;
             steps += 1;
+
+            if let Some(rt) = self.blackcat.as_mut() {
+                let elapsed_ms = rt
+                    .elapsed_since_begin()
+                    .unwrap_or_else(|| Duration::from_secs_f64(0.0))
+                    .as_secs_f64()
+                    * 1_000.0;
+                let mut extra = HashMap::new();
+                extra.insert("band_above".to_string(), band_energy.above as f64);
+                extra.insert("band_here".to_string(), band_energy.here as f64);
+                extra.insert("band_beneath".to_string(), band_energy.beneath as f64);
+                extra.insert("step_loss".to_string(), step_loss as f64);
+                let metrics = StepMetrics {
+                    step_time_ms: elapsed_ms,
+                    mem_peak_mb: 0.0,
+                    retry_rate: 0.0,
+                    extra,
+                };
+                let reward = rt.post_step(&metrics);
+                if reward > 0.0 {
+                    let plan = schedule.above();
+                    let script = plan
+                        .choice
+                        .to_unison_script(RankKind::TopK)
+                        .replace('\n', "; ");
+                    let _ = rt.try_adopt_soft(&script, 1, 1, 0.5);
+                }
+            }
         }
         Ok(EpochStats {
             batches: steps,
@@ -172,7 +217,7 @@ mod tests {
     #[test]
     fn trainer_runs_epoch_with_roundtable_schedule() {
         let caps = DeviceCaps::wgpu(32, true, 256);
-        let trainer = ModuleTrainer::new(caps, -1.1, 0.05, 0.01);
+        let mut trainer = ModuleTrainer::new(caps, -1.1, 0.05, 0.01);
         let mut model = Sequential::new();
         model.push(Linear::new("lin", 2, 1).unwrap());
         trainer.prepare(&mut model).unwrap();

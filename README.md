@@ -13,6 +13,15 @@ The stack is comfortable living entirely in Rust—yet the Python wheel remains 
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
+**SpiralTorch is a Rust-first AI training framework** that keeps language,
+geometry, and device heuristics in the same conversation. SpiralK orchestrates
+the kernels, the hypergrad tape streams Z-space meaning, and the high-level
+`st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.
+
+The stack is comfortable living entirely in Rust—yet the Python wheel remains a
+thin veneer that reuses the same planners, losses, and Z-space resonators. No
+tensor shims, no translation layers, and no tracebacks.
+
 > **Why it’s different**
 > - **Training comes first:** Modules such as `Linear`, `Sequential`,
 >   `WaveGate`, the new `ToposResonator`, and `ZSpaceProjector` stream gradients
@@ -27,30 +36,6 @@ tensor shims, no translation layers, and no tracebacks.
 > - **Rust by default, Python ready:** Every feature—from WASM tuning to
 >   hypergrad curvature—is implemented in Rust and exposed unchanged through the
 >   Python bindings when needed.
-
-
-**SpiralK + SoftLogic + (optional) WASM tuner** now power a language-native,
-hardware-aware learning stack. They pick the right **merge kind** and
-**tile width**, sure—but the same pipeline also keeps meaning flowing in Z-space
-with no NumPy, no PyTorch, and no tracebacks.
-Everything starts as Rust, yet Python bindings stay light so you can stitch the
-stack into existing workflows without inheriting heavy dependencies.
-
-Whether you live entirely in Rust or call in from Python, SpiralTorch treats
-language, spectra, and device selection as one flow. No tensor shims, no
-auxiliary NumPy buffers—just the same Z-space conversation plugged into the
-executor you choose.
-
-> **Why it’s different**
-> - **Three-voice consensus:** SpiralK (runtime rules), DSL directives, and the
->   generated WASM table talk it out as A/B/C peers before anything lands, and every
->   exchange lands in a timestamped roundtable log.
-> - **Unified heuristics:** One `Choice { mk, mkd, tile, ctile, … }` across WGPU / HIP / CUDA
-> - **1-CE Subgroup Top-K (WGPU):** candidates → final in a single compute pass
-> - **MidK/BottomK compaction:** 1-CE / 2-CE, tile-aware, same API
-> - **Amega Hypergrad:** unrolled / implicit (Neumann / CG) hyper-gradients that now sync with the pure tensor tape
-> - **Fractional AMG scoring:** Density-aware workgroup and tile proposals feed into SoftRule beams without
->   ever touching NumPy or PyTorch.
 
 ---
 
@@ -169,13 +154,6 @@ tape.apply(weights)
 print("updated weights", weights.tolist())
 ```
 
-The binding crate mirrors the Rust feature flags. For example, to bake Metal
-support on macOS you can run:
-
-```bash
-maturin build -m bindings/st-py/Cargo.toml --release --features mps
-```
-
 ---
 
 ## Minimal API
@@ -210,7 +188,7 @@ model.push(Linear::new("encoder", 4, 3)?);
 model.push(Relu::new());
 model.push(Linear::new("head", 3, 2)?);
 
-let trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
+let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
 trainer.prepare(&mut model)?;
 
 let schedule = trainer.roundtable(1, 2, RoundtableConfig::default());
@@ -228,6 +206,49 @@ let dataset = vec![
 
 let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
 println!("roundtable avg loss: {:.6}", stats.average_loss);
+```
+
+**BlackCat runtime tap-in**
+
+The derivative-free ZMeta ES and contextual bandits can ride alongside the
+roundtable loop. Attach the runtime once and it will ingest per-step metrics,
+log Above/Here/Beneath energy, and opportunistically promote winning
+`soft(...)` snippets behind a Wilson lower bound.
+
+```rust
+use std::collections::HashMap;
+use st_core::backend::device_caps::DeviceCaps;
+use st_core::runtime::blackcat::{bandit::SoftBanditMode, ChoiceGroups, BlackCatRuntime};
+use st_core::runtime::blackcat::zmeta::ZMetaParams;
+use st_nn::{Linear, MeanSquaredError, ModuleTrainer, RoundtableConfig, Sequential, Tensor};
+
+let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01)
+    .with_blackcat(BlackCatRuntime::new(
+        ZMetaParams::default(),
+        ChoiceGroups {
+            groups: HashMap::from([
+                ("tile".to_string(), vec!["128".into(), "256".into(), "512".into()]),
+                ("merge".to_string(), vec!["bitonic".into(), "shared".into(), "warp".into()]),
+            ]),
+        },
+        8,
+        SoftBanditMode::TS,
+        None,
+    ));
+
+let mut model = Sequential::new();
+model.push(Linear::new("encoder", 4, 4)?);
+let schedule = trainer.roundtable(1, 4, RoundtableConfig::default());
+let mut mse = MeanSquaredError::new();
+let dataset = vec![
+    (
+        Tensor::from_vec(1, 4, vec![0.4, -0.2, 0.1, 0.0])?,
+        Tensor::from_vec(1, 4, vec![0.1, 0.2, 0.3, 0.4])?,
+    ),
+];
+trainer.prepare(&mut model)?;
+let _ = trainer.train_epoch(&mut model, &mut mse, dataset, &schedule)?;
+// At this point rt.post_step() has consumed metrics and can append # blackcat heuristics.
 ```
 
 **Rust (Z-space gating + projector)**
@@ -298,7 +319,7 @@ fn main() -> st_nn::PureResult<()> {
     model.push(Relu::new());
     model.push(Linear::new("head", 4, 2)?);
 
-    let trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -0.95, 0.05, 0.01);
+    let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -0.95, 0.05, 0.01);
     trainer.prepare(&mut model)?;
 
     // Build a roundtable that splits gradients into Above/Here/Beneath bands.
