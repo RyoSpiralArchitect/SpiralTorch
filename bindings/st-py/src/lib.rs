@@ -3,6 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
+use pyo3::PyRefMut;
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
@@ -10,6 +11,7 @@ use st_tensor::pure::{
     topos::OpenCartesianTopos, AmegaHypergrad, Complex32, ComplexTensor, LanguageWaveEncoder,
     PureResult, Tensor, TensorError,
 };
+use std::sync::{Mutex, OnceLock};
 
 fn tensor_err(err: TensorError) -> PyErr {
     PyValueError::new_err(err.to_string())
@@ -17,6 +19,21 @@ fn tensor_err(err: TensorError) -> PyErr {
 
 fn convert<T>(value: PureResult<T>) -> PyResult<T> {
     value.map_err(tensor_err)
+}
+
+fn intern_label(label: &str) -> &'static str {
+    static INTERNER: OnceLock<Mutex<Vec<&'static str>>> = OnceLock::new();
+    let storage = INTERNER.get_or_init(|| Mutex::new(Vec::new()));
+    {
+        let guard = storage.lock().expect("intern labels lock poisoned");
+        if let Some(&existing) = guard.iter().find(|&&item| item == label) {
+            return existing;
+        }
+    }
+    let leaked: &'static str = Box::leak(label.to_owned().into_boxed_str());
+    let mut guard = storage.lock().expect("intern labels lock poisoned");
+    guard.push(leaked);
+    leaked
 }
 
 #[pyclass(module = "spiraltorch", name = "Tensor")]
@@ -43,7 +60,7 @@ impl PyTensor {
 impl PyTensor {
     #[new]
     #[pyo3(signature = (rows, cols, data=None))]
-    fn new(rows: usize, cols: usize, data: Option<&PyAny>) -> PyResult<Self> {
+    fn new(rows: usize, cols: usize, data: Option<Bound<'_, PyAny>>) -> PyResult<Self> {
         let tensor = match data {
             Some(obj) => {
                 let values: Vec<f32> = obj.extract()?;
@@ -175,7 +192,7 @@ impl PyComplexTensor {
 impl PyComplexTensor {
     #[new]
     #[pyo3(signature = (rows, cols, data=None))]
-    fn new(rows: usize, cols: usize, data: Option<&PyAny>) -> PyResult<Self> {
+    fn new(rows: usize, cols: usize, data: Option<Bound<'_, PyAny>>) -> PyResult<Self> {
         let tensor = match data {
             Some(obj) => {
                 let raw: Vec<(f32, f32)> = obj.extract()?;
@@ -266,16 +283,18 @@ impl PyOpenTopos {
     }
 
     fn guard_tensor(&self, label: &str, tensor: &PyTensor) -> PyResult<()> {
-        convert(self.inner.guard_tensor(label, tensor.as_tensor()))
+        convert(
+            self.inner
+                .guard_tensor(intern_label(label), tensor.as_tensor()),
+        )
     }
 
     fn saturate_scalar(&self, value: f32) -> f32 {
         self.inner.saturate(value)
     }
 
-    fn saturate_tensor(&self, tensor: &PyCell<PyTensor>) -> PyResult<()> {
-        let mut borrowed = tensor.borrow_mut();
-        let inner = borrowed.as_tensor_mut();
+    fn saturate_tensor(&self, mut tensor: PyRefMut<'_, PyTensor>) -> PyResult<()> {
+        let inner = tensor.as_tensor_mut();
         self.inner.saturate_slice(inner.data_mut());
         convert(self.inner.guard_tensor("tensor", inner))
     }
@@ -343,7 +362,6 @@ impl PyLanguageWaveEncoder {
 }
 
 #[pyclass(module = "spiraltorch", name = "Hypergrad")]
-#[derive(Debug)]
 struct PyHypergrad {
     inner: AmegaHypergrad,
 }
@@ -428,10 +446,9 @@ impl PyHypergrad {
         convert(self.inner.absorb_text(&encoder.inner, text))
     }
 
-    fn apply(&mut self, weights: &PyCell<PyTensor>) -> PyResult<()> {
-        let mut borrowed = weights.borrow_mut();
-        self.ensure_shape(&borrowed)?;
-        convert(self.inner.apply(borrowed.as_tensor_mut()))
+    fn apply(&mut self, mut weights: PyRefMut<'_, PyTensor>) -> PyResult<()> {
+        self.ensure_shape(&weights)?;
+        convert(self.inner.apply(weights.as_tensor_mut()))
     }
 
     fn topos(&self) -> PyResult<PyOpenTopos> {

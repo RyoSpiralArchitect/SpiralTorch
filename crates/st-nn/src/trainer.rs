@@ -112,7 +112,10 @@ impl ModuleTrainer {
             let step_loss = loss_value.data().iter().copied().sum::<f32>();
             total_loss += step_loss;
             let grad_output = loss.backward(&prediction, &target)?;
-            let band_energy = schedule.band_energy(&grad_output)?;
+            let mut band_energy = schedule.band_energy(&grad_output)?;
+            if let Some(rt) = self.blackcat.as_ref() {
+                band_energy.drift = rt.frac_penalty() as f32;
+            }
             let bands: GradientBands = schedule.split(&grad_output)?;
             let _ = module.backward_bands(&input, &bands)?;
             self.step(module)?;
@@ -129,6 +132,7 @@ impl ModuleTrainer {
                 extra.insert("band_above".to_string(), band_energy.above as f64);
                 extra.insert("band_here".to_string(), band_energy.here as f64);
                 extra.insert("band_beneath".to_string(), band_energy.beneath as f64);
+                extra.insert("band_drift".to_string(), band_energy.drift as f64);
                 extra.insert("step_loss".to_string(), step_loss as f64);
                 let metrics = StepMetrics {
                     step_time_ms: elapsed_ms,

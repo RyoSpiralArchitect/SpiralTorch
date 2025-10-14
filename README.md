@@ -217,8 +217,9 @@ println!("roundtable avg loss: {:.6}", stats.average_loss);
 
 The derivative-free ZMeta ES and contextual bandits can ride alongside the
 roundtable loop. Attach the runtime once and it will ingest per-step metrics,
-log Above/Here/Beneath energy, and opportunistically promote winning
-`soft(...)` snippets behind a Wilson lower bound.
+log Above/Here/Beneath energy, estimate the BlackCat drift band, and
+opportunistically promote winning `soft(...)` snippets behind a Wilson lower
+bound.
 
 ```rust
 use std::collections::HashMap;

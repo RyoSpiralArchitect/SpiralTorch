@@ -147,6 +147,7 @@ impl RoundtableSchedule {
             above,
             here,
             beneath,
+            drift: 0.0,
         })
     }
 }
@@ -198,6 +199,7 @@ pub struct BandEnergy {
     pub above: f32,
     pub here: f32,
     pub beneath: f32,
+    pub drift: f32,
 }
 
 #[cfg(test)]
