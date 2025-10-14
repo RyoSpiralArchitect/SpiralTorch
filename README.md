@@ -24,6 +24,33 @@ tensor shims, no translation layers, and no tracebacks.
 > - **Rust by default, Python ready:** Every feature—from WASM tuning to
 >   hypergrad curvature—is implemented in Rust and exposed unchanged through the
 >   Python bindings when needed.
+> **SpiralTorch** — Pure Rust AI core for Z-space exploration.  
+> © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
+> Contact: [GitHub Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
+> Unauthorized derivations = non-compliant with AGPL §13.
+
+**SpiralK + SoftLogic + (optional) WASM tuner** now power a language-native,
+hardware-aware learning stack. They pick the right **merge kind** and
+**tile width**, sure—but the same pipeline also keeps meaning flowing in Z-space
+with no NumPy, no PyTorch, and no tracebacks.
+Everything starts as Rust, yet Python bindings stay light so you can stitch the
+stack into existing workflows without inheriting heavy dependencies.
+
+Whether you live entirely in Rust or call in from Python, SpiralTorch treats
+language, spectra, and device selection as one flow. No tensor shims, no
+auxiliary NumPy buffers—just the same Z-space conversation plugged into the
+executor you choose.
+
+> **Why it’s different**
+> - **Three-voice consensus:** SpiralK (runtime rules), DSL directives, and the
+>   generated WASM table talk it out as A/B/C peers before anything lands, and every
+>   exchange lands in a timestamped roundtable log.
+> - **Unified heuristics:** One `Choice { mk, mkd, tile, ctile, … }` across WGPU / HIP / CUDA
+> - **1-CE Subgroup Top-K (WGPU):** candidates → final in a single compute pass
+> - **MidK/BottomK compaction:** 1-CE / 2-CE, tile-aware, same API
+> - **Amega Hypergrad:** unrolled / implicit (Neumann / CG) hyper-gradients that now sync with the pure tensor tape
+> - **Fractional AMG scoring:** Density-aware workgroup and tile proposals feed into SoftRule beams without
+>   ever touching NumPy or PyTorch.
 
 ---
 
@@ -140,6 +167,13 @@ tape = Hypergrad(-1.0, 0.05, *target.shape())
 tape.accumulate_pair(weights, target)
 tape.apply(weights)
 print("updated weights", weights.tolist())
+```
+
+The binding crate mirrors the Rust feature flags. For example, to bake Metal
+support on macOS you can run:
+
+```bash
+maturin build -m bindings/st-py/Cargo.toml --release --features mps
 ```
 
 ---
