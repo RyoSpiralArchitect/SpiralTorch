@@ -17,7 +17,7 @@ trains where PyTorch can’t — inside the Z-space.
 - © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 - Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
 - Unauthorized derivations = non-compliant with AGPL §13.
-> SpiralTorch is a Compact. Safe. Rust-native.
+SpiralTorch is a Compact. Safe. Rust-native.
 ~10× smaller than PyTorch, yet feature-complete in AI training that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
 the kernels, the hypergrad tape streams Z-space meaning, and the high-level
