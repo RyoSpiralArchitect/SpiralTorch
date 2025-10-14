@@ -8,6 +8,9 @@
 //! responsive even when the surrounding platform is sandboxed.
 
 pub mod fractal;
+pub mod topos;
+
+use self::topos::OpenCartesianTopos;
 
 use core::fmt;
 use std::error::Error;
@@ -38,6 +41,10 @@ pub enum TensorError {
     NonPositiveCoherence { coherence: f32 },
     /// Tension weights that soften relations must stay positive.
     NonPositiveTension { tension: f32 },
+    /// Topos tolerance must stay positive to avoid degeneracy.
+    NonPositiveTolerance { tolerance: f32 },
+    /// Topos saturation window must stay positive.
+    NonPositiveSaturation { saturation: f32 },
     /// Computation received an empty input which would otherwise trigger a panic.
     EmptyInput(&'static str),
     /// A helper expected matching curvature parameters but received different values.
@@ -91,6 +98,12 @@ impl fmt::Display for TensorError {
             }
             TensorError::NonPositiveTension { tension } => {
                 write!(f, "tension must be positive, got {tension}")
+            }
+            TensorError::NonPositiveTolerance { tolerance } => {
+                write!(f, "tolerance must be positive, got {tolerance}")
+            }
+            TensorError::NonPositiveSaturation { saturation } => {
+                write!(f, "saturation window must be positive, got {saturation}")
             }
             TensorError::EmptyInput(label) => {
                 write!(f, "{label} must not be empty for this computation")
@@ -259,6 +272,21 @@ impl Tensor {
         let mut data = Vec::with_capacity(self.data.len());
         for a in &self.data {
             data.push(a * value);
+        }
+        Tensor::from_vec(self.rows, self.cols, data)
+    }
+
+    /// Element-wise product (Hadamard) between two tensors of identical shape.
+    pub fn hadamard(&self, other: &Tensor) -> PureResult<Tensor> {
+        if self.shape() != other.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: other.shape(),
+            });
+        }
+        let mut data = Vec::with_capacity(self.data.len());
+        for (a, b) in self.data.iter().zip(other.data.iter()) {
+            data.push(a * b);
         }
         Tensor::from_vec(self.rows, self.cols, data)
     }
@@ -942,6 +970,15 @@ mod tests {
             .unwrap();
         let expected_sum = Tensor::from_vec(2, 2, vec![59.0, 65.0, 140.0, 155.0]).unwrap();
         assert_eq!(sum, expected_sum);
+    }
+
+    #[test]
+    fn tensor_hadamard_matches_manual_product() {
+        let a = Tensor::from_vec(2, 2, vec![1.5, -2.0, 0.5, 3.0]).unwrap();
+        let b = Tensor::from_vec(2, 2, vec![2.0, 4.0, -1.0, 0.5]).unwrap();
+        let product = a.hadamard(&b).unwrap();
+        let expected = Tensor::from_vec(2, 2, vec![3.0, -8.0, -0.5, 1.5]).unwrap();
+        assert_eq!(product, expected);
     }
 
     #[test]

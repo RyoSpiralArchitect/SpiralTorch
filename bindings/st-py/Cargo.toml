@@ -1,0 +1,33 @@
+[package]
+name = "spiraltorch-py"
+version = "0.1.0"
+edition = "2021"
+description = "Python bindings for SpiralTorch heuristics"
+license = "AGPL-3.0-or-later"
+authors = ["SpiralTorch Contributors"]
+
+[lib]
+name = "spiraltorch"
+crate-type = ["cdylib"]
+
+[features]
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]
+wgpu = ["st-core/wgpu"]
+"wgpu-rt" = ["st-core/wgpu-rt", "wgpu"]
+mps = ["st-core/mps"]
+cuda = ["st-core/cuda"]
+hip = ["st-core/hip"]
+"hip-real" = ["hip", "st-core/hip-real"]
+logic = ["st-core/logic"]
+kdsl = ["st-core/kdsl"]
+"kv-redis" = ["st-core/kv-redis"]
+"wgpu-frac" = ["st-tensor/wgpu_frac"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38"] }
+st-core = { path = "../../crates/st-core", default-features = false }
+st-tensor = { path = "../../crates/st-tensor", default-features = false }
+
+[package.metadata.maturin]
+name = "spiraltorch"
