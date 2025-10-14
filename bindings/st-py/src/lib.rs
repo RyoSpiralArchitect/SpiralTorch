@@ -1,8 +1,10 @@
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyModule};
+use pyo3::wrap_pyfunction;
+use pyo3::Bound;
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
-use st_core::ops::rank_entry::plan_rank;
+use st_core::ops::rank_entry::{plan_rank, RankPlan};
 
 fn parse_kind(kind: &str) -> PyResult<RankKind> {
     match kind.to_ascii_lowercase().as_str() {
@@ -29,11 +31,8 @@ fn caps_for(device: Option<&str>) -> DeviceCaps {
     }
 }
 
-fn choice_dict<'py>(
-    py: Python<'py>,
-    plan: &st_core::ops::rank_entry::RankPlan,
-) -> PyResult<&'py PyDict> {
-    let choice = PyDict::new(py);
+fn choice_dict<'py>(py: Python<'py>, plan: &RankPlan) -> PyResult<Bound<'py, PyDict>> {
+    let choice = PyDict::new_bound(py);
     choice.set_item("use_2ce", plan.choice.use_2ce)?;
     choice.set_item("workgroup", plan.choice.wg)?;
     choice.set_item("kl", plan.choice.kl)?;
@@ -60,13 +59,13 @@ fn plan(
     let caps = caps_for(device);
     let plan = plan_rank(rank_kind, rows, cols, k, caps);
 
-    let out = PyDict::new(py);
+    let out = PyDict::new_bound(py);
     out.set_item("kind", kind.to_ascii_lowercase())?;
     out.set_item("rows", rows)?;
     out.set_item("cols", cols)?;
     out.set_item("k", k)?;
-    out.set_item("choice", choice_dict(py, &plan)?)?;
-    Ok(out.into())
+    out.set_item("choice", choice_dict(py, &plan)?.into_py(py))?;
+    Ok(out.into_py(py))
 }
 
 /// Convenience helper for the TopK family.
@@ -87,7 +86,7 @@ fn plan_topk(
 #[pyo3(signature = (device=None))]
 fn describe_device(py: Python<'_>, device: Option<&str>) -> PyResult<PyObject> {
     let caps = caps_for(device);
-    let out = PyDict::new(py);
+    let out = PyDict::new_bound(py);
     out.set_item("lane_width", caps.lane_width)?;
     out.set_item("max_workgroup", caps.max_workgroup)?;
     out.set_item("subgroup", caps.subgroup)?;
@@ -95,21 +94,21 @@ fn describe_device(py: Python<'_>, device: Option<&str>) -> PyResult<PyObject> {
         "shared_mem_per_workgroup",
         caps.shared_mem_per_workgroup.map(|v| v as usize),
     )?;
-    Ok(out.into())
+    Ok(out.into_py(py))
 }
 
 /// SpiralTorch Python module.
 #[pymodule]
-fn spiraltorch(py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
 
-    m.add("__all__", vec!["plan", "plan_topk", "describe_device"])?;
-    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.setattr("__all__", vec!["plan", "plan_topk", "describe_device"])?;
+    m.setattr("__version__", env!("CARGO_PKG_VERSION"))?;
 
     // Provide a tiny doc string that highlights the zero-shim approach.
-    m.add(
+    m.setattr(
         "__doc__",
         "Rust-first heuristics interface for SpiralTorch.",
     )?;

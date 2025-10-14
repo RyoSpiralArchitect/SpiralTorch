@@ -208,7 +208,7 @@ impl WasmTunerTable {
     /// matching record.
     pub fn choose(
         &self,
-        mut base: Choice,
+        base: Choice,
         rows: usize,
         cols: usize,
         k: usize,
