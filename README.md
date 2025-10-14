@@ -37,7 +37,7 @@ The stack is comfortable living entirely in Rust—yet the Python wheel remains 
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
-## Why it’s different**
+## Why it’s different
  - **Training comes first:** Modules such as `Linear`, `Sequential`,
    `WaveGate`, the new `ToposResonator`, and `ZSpaceProjector` stream gradients
     into the hypergrad tape and expose a `train_epoch` loop that mirrors
