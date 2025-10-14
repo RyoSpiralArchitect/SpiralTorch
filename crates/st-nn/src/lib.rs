@@ -11,6 +11,8 @@ pub mod trainer;
 
 pub use layers::linear::Linear;
 pub use layers::sequential::Sequential;
+pub use layers::wave_gate::WaveGate;
+pub use layers::zspace_projector::ZSpaceProjector;
 pub use module::{Module, Parameter};
 pub use plan::RankPlanner;
 pub use trainer::ModuleTrainer;

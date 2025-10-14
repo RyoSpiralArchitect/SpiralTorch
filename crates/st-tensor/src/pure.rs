@@ -276,6 +276,21 @@ impl Tensor {
         Tensor::from_vec(self.rows, self.cols, data)
     }
 
+    /// Element-wise product (Hadamard) between two tensors of identical shape.
+    pub fn hadamard(&self, other: &Tensor) -> PureResult<Tensor> {
+        if self.shape() != other.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: other.shape(),
+            });
+        }
+        let mut data = Vec::with_capacity(self.data.len());
+        for (a, b) in self.data.iter().zip(other.data.iter()) {
+            data.push(a * b);
+        }
+        Tensor::from_vec(self.rows, self.cols, data)
+    }
+
     /// Add a scaled tensor to this tensor (`self += scale * other`).
     pub fn add_scaled(&mut self, other: &Tensor, scale: f32) -> PureResult<()> {
         if self.shape() != other.shape() {
@@ -955,6 +970,15 @@ mod tests {
             .unwrap();
         let expected_sum = Tensor::from_vec(2, 2, vec![59.0, 65.0, 140.0, 155.0]).unwrap();
         assert_eq!(sum, expected_sum);
+    }
+
+    #[test]
+    fn tensor_hadamard_matches_manual_product() {
+        let a = Tensor::from_vec(2, 2, vec![1.5, -2.0, 0.5, 3.0]).unwrap();
+        let b = Tensor::from_vec(2, 2, vec![2.0, 4.0, -1.0, 0.5]).unwrap();
+        let product = a.hadamard(&b).unwrap();
+        let expected = Tensor::from_vec(2, 2, vec![3.0, -8.0, -0.5, 1.5]).unwrap();
+        assert_eq!(product, expected);
     }
 
     #[test]

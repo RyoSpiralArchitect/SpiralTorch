@@ -1,5 +1,8 @@
 use st_core::backend::device_caps::DeviceCaps;
-use st_tensor::pure::{topos::OpenCartesianTopos, AmegaHypergrad, PureResult, Tensor, TensorError};
+use st_tensor::pure::{
+    topos::OpenCartesianTopos, AmegaHypergrad, ComplexTensor, LanguageWaveEncoder, PureResult,
+    Tensor, TensorError,
+};
 
 /// Trainable parameter that can either rely on the hypergrad tape or fall back
 /// to standard Euclidean accumulation.
@@ -108,6 +111,42 @@ impl Parameter {
         Ok(())
     }
 
+    /// Streams a complex wave through the attached hypergrad tape or caches an
+    /// Euclidean equivalent when no tape is present.
+    pub fn accumulate_complex_wave(&mut self, wave: &ComplexTensor) -> PureResult<()> {
+        let tensor = wave.to_tensor()?;
+        self.assert_shape(&tensor)?;
+        if let Some(tape) = self.hypergrad.as_mut() {
+            tape.accumulate_complex_wave(wave)
+        } else {
+            match self.gradient.as_mut() {
+                Some(existing) => existing.add_scaled(&tensor, 1.0)?,
+                None => {
+                    self.gradient = Some(tensor);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    /// Absorbs free-form text directly into the parameter's accumulator by
+    /// delegating to the hypergrad tape or caching the encoded tensor.
+    pub fn absorb_text(&mut self, encoder: &LanguageWaveEncoder, text: &str) -> PureResult<()> {
+        let tensor = encoder.encode_z_space(text)?;
+        self.assert_shape(&tensor)?;
+        if let Some(tape) = self.hypergrad.as_mut() {
+            tape.absorb_text(encoder, text)
+        } else {
+            match self.gradient.as_mut() {
+                Some(existing) => existing.add_scaled(&tensor, 1.0)?,
+                None => {
+                    self.gradient = Some(tensor);
+                }
+            }
+            Ok(())
+        }
+    }
+
     /// Clears the cached gradient or resets the hypergrad tape accumulator.
     pub fn zero_gradient(&mut self) {
         if let Some(tape) = self.hypergrad.as_mut() {
@@ -192,5 +231,35 @@ pub trait Module {
     /// implementation simply returns `None` which indicates the module is agnostic.
     fn preferred_device(&self) -> Option<DeviceCaps> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parameter_absorbs_waves_without_hypergrad() {
+        let encoder = LanguageWaveEncoder::new(-1.1, 0.6).unwrap();
+        let wave = encoder.encode_wave("flux").unwrap();
+        let tensor = wave.to_tensor().unwrap();
+        let mut param = Parameter::new("gate", Tensor::zeros(1, tensor.shape().1).unwrap());
+        param.accumulate_complex_wave(&wave).unwrap();
+        assert!(param.gradient().is_some());
+        param.absorb_text(&encoder, "flux").unwrap();
+        assert!(param.gradient().unwrap().squared_l2_norm() > 0.0);
+    }
+
+    #[test]
+    fn parameter_streams_wave_through_hypergrad() {
+        let encoder = LanguageWaveEncoder::new(-0.95, 0.8).unwrap();
+        let wave = encoder.encode_wave("spiral").unwrap();
+        let tensor = wave.to_tensor().unwrap();
+        let mut param = Parameter::new("gate", Tensor::zeros(1, tensor.shape().1).unwrap());
+        param.attach_hypergrad(encoder.curvature(), 0.05).unwrap();
+        param.accumulate_complex_wave(&wave).unwrap();
+        param.absorb_text(&encoder, "spiral").unwrap();
+        assert!(param.hypergrad().is_some());
+        param.apply_step(0.01).unwrap();
     }
 }

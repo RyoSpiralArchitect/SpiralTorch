@@ -43,10 +43,14 @@ executor you choose.
   the new `UringFractalScheduler` for Tokio-uring style streaming, and the
   `AmegaHypergrad` tape so you can iterate on learning logic without
   PyTorch/Numpy while staying inside non-Euclidean geometry.
+- **Open-topos hypergrad streaming**
+  Parameters can now absorb complex Z-space waves or raw text directly into the
+  hypergrad tape, so the roundtable can keep expanding meaning without Euclidean
+  fallbacks or NumPy buffers.
 - **Rust-first modules**
-  `st-nn` wraps the pure tensors into `nn.Module`-style building blocks,
-  streams gradients through the hypergrad tape, and keeps SpiralK planners one
-  call away.
+  `st-nn` now ships `Linear`, `Sequential`, the hyperbolic `WaveGate`, and the
+  `ZSpaceProjector`. They stream gradients through the hypergrad tape, apply
+  open-topos rewrites, and keep SpiralK planners one call away.
 - **Optional WASM tuner table**
   Bake the JSON dataset offline and ship it to browsers/WASM. The runtime loads the table lazily, blends it with SpiralK, and keeps the optimiser in sync with the generated WGSL kernels.
 - **Self-Rewrite**
@@ -157,6 +161,27 @@ let output = layer.forward(&inputs)?;
 let grad = output.sub(&targets)?.scale(1.0 / inputs.shape().0 as f32)?;
 let _ = layer.backward(&inputs, &grad)?;
 trainer.step(&mut layer)?;
+```
+
+**Rust (Z-space gating + projector)**
+```rust
+use st_core::backend::device_caps::DeviceCaps;
+use st_nn::{ModuleTrainer, Tensor, WaveGate, ZSpaceProjector};
+use st_tensor::pure::{topos::OpenCartesianTopos, LanguageWaveEncoder};
+
+let encoder = LanguageWaveEncoder::new(-0.9, 0.7)?;
+let topos = OpenCartesianTopos::new(-0.9, 1e-6, 1e4, 512, 16_384)?;
+let projector = ZSpaceProjector::new(topos.clone(), encoder.clone())?;
+let text = projector.encode_text("SpiralTorch keeps the open topos alive")?;
+
+let mut gate = WaveGate::with_topos("gate", text.shape().1, encoder, topos.clone())?;
+let trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -0.9, 0.05, 0.01);
+trainer.prepare_with_topos(&mut gate, topos)?;
+
+let forward = gate.forward(&text)?;
+let grad = forward.hadamard(&text)?.scale(1.0 / forward.shape().0 as f32)?;
+let _ = gate.backward(&text, &grad)?;
+trainer.step(&mut gate)?;
 ```
 
 `DeviceCaps` now ships backend-specific constructors (`wgpu`, `cuda`, `hip`, `cpu`) and

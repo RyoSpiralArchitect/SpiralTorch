@@ -2,6 +2,7 @@ use crate::module::Module;
 use crate::plan::RankPlanner;
 use crate::PureResult;
 use st_core::backend::device_caps::DeviceCaps;
+use st_tensor::pure::topos::OpenCartesianTopos;
 
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
 #[derive(Debug, Clone, Copy)]
@@ -38,9 +39,23 @@ impl ModuleTrainer {
         self.fallback_learning_rate
     }
 
+    /// Returns the curvature used for hypergrad preparation.
+    pub fn curvature(&self) -> f32 {
+        self.curvature
+    }
+
     /// Attaches hypergrad tapes to all parameters of the provided module.
     pub fn prepare<M: Module>(&self, module: &mut M) -> PureResult<()> {
         module.attach_hypergrad(self.curvature, self.hyper_learning_rate)
+    }
+
+    /// Attaches hypergrad tapes with an explicit topos shared across parameters.
+    pub fn prepare_with_topos<M: Module>(
+        &self,
+        module: &mut M,
+        topos: OpenCartesianTopos,
+    ) -> PureResult<()> {
+        module.attach_hypergrad_with_topos(self.curvature, self.hyper_learning_rate, topos)
     }
 
     /// Clears accumulated gradients or hypergrad buffers.
@@ -58,6 +73,8 @@ impl ModuleTrainer {
 mod tests {
     use super::*;
     use crate::layers::linear::Linear;
+    use crate::layers::wave_gate::WaveGate;
+    use st_tensor::pure::topos::OpenCartesianTopos;
 
     #[test]
     fn trainer_attaches_and_steps() {
@@ -72,5 +89,27 @@ mod tests {
         let _ = layer.backward(&input, &grad).unwrap();
         trainer.step(&mut layer).unwrap();
         assert!(trainer.planner().topk(64, 128, 32).k > 0);
+    }
+
+    #[test]
+    fn trainer_prepares_with_topos_for_wave_gate() {
+        let caps = DeviceCaps::wgpu(64, true, 512);
+        let trainer = ModuleTrainer::new(caps, -0.9, 0.06, 0.02);
+        let encoder_curvature = trainer.curvature();
+        let topos = OpenCartesianTopos::new(encoder_curvature, 1e-6, 1e4, 512, 16384).unwrap();
+        let mut gate = WaveGate::with_topos(
+            "wg",
+            8,
+            st_tensor::pure::LanguageWaveEncoder::new(encoder_curvature, 0.7).unwrap(),
+            topos.clone(),
+        )
+        .unwrap();
+        trainer.prepare_with_topos(&mut gate, topos).unwrap();
+        let input =
+            Tensor::from_vec(1, 8, vec![0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7, -0.8]).unwrap();
+        let grad_out = gate.forward(&input).unwrap();
+        let _ = gate.backward(&input, &grad_out).unwrap();
+        trainer.step(&mut gate).unwrap();
+        assert!(gate.gate().value().squared_l2_norm() > 0.0);
     }
 }
