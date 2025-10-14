@@ -76,7 +76,6 @@ pub fn parse_env_dsl_plus_kind(
         Err(_) => String::new(),
     };
     #[allow(unused_mut)]
-    let kc = sweet_kc(kind, k);
     let mut ov = DslOverrides::default();
     if src.trim().is_empty() {
         return (None, vec![], ov);
@@ -91,6 +90,15 @@ pub fn parse_env_dsl_plus_kind(
             sg: subgroup,
             sgc: if subgroup { 8 } else { 1 },
             kc,
+            tile_cols: ((cols.max(1) + 255) / 256) as u32,
+            radix: if k.is_power_of_two() { 4 } else { 2 },
+            segments: if cols > 131_072 {
+                4
+            } else if cols > 32_768 {
+                2
+            } else {
+                1
+            },
         };
         let out = match st_kdsl::eval_program(&src, &ctx) {
             Ok(o) => o,
@@ -105,6 +113,9 @@ pub fn parse_env_dsl_plus_kind(
             || out.hard.midk.is_some()
             || out.hard.bottomk.is_some()
             || out.hard.ctile.is_some()
+            || out.hard.tile_cols.is_some()
+            || out.hard.radix.is_some()
+            || out.hard.segments.is_some()
         {
             hard = Some(Choice {
                 use_2ce: out.hard.use_2ce.unwrap_or(false),
@@ -121,6 +132,21 @@ pub fn parse_env_dsl_plus_kind(
                 ctile: out.hard.ctile.unwrap_or(0),
                 mode_midk: out.hard.midk.unwrap_or(0),
                 mode_bottomk: out.hard.bottomk.unwrap_or(0),
+                tile_cols: out
+                    .hard
+                    .tile_cols
+                    .unwrap_or(((cols.max(1) + 1023) / 1024) as u32 * 1024),
+                radix: out
+                    .hard
+                    .radix
+                    .unwrap_or(if k.is_power_of_two() { 4 } else { 2 }),
+                segments: out.hard.segments.unwrap_or(if cols > 131_072 {
+                    4
+                } else if cols > 32_768 {
+                    2
+                } else {
+                    1
+                }),
             });
         }
         let mut soft = Vec::<SoftRule>::new();
@@ -146,6 +172,21 @@ pub fn parse_env_dsl_plus_kind(
                     value: Value::U(val),
                     weight: w,
                 }),
+                st_kdsl::SoftRule::TileCols { val, w } => soft.push(SoftRule {
+                    field: Field::Ctile,
+                    value: Value::U(val),
+                    weight: w,
+                }),
+                st_kdsl::SoftRule::Radix { val, w } => soft.push(SoftRule {
+                    field: Field::Algo,
+                    value: Value::U(val),
+                    weight: w,
+                }),
+                st_kdsl::SoftRule::Segments { val, w } => soft.push(SoftRule {
+                    field: Field::Kl,
+                    value: Value::U(val),
+                    weight: w,
+                }),
                 _ => {} // algo/midk/bottomk/ctile soft are currently consumed by higher-level selection (optional)
             }
         }
@@ -160,6 +201,15 @@ pub fn parse_env_dsl_plus_kind(
         }
         if let Some(t) = out.hard.ctile {
             ov.ctile = t;
+        }
+        if let Some(t) = out.hard.tile_cols {
+            ov.tile_cols = t;
+        }
+        if let Some(r) = out.hard.radix {
+            ov.radix = r;
+        }
+        if let Some(s) = out.hard.segments {
+            ov.segments = s;
         }
         return (hard, soft, ov);
     }
@@ -211,6 +261,16 @@ pub fn choose_from_kv(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<Ch
                     ctile: getu("ctile").unwrap_or(0),
                     mode_midk: getu("mode_midk").unwrap_or(0) as u8,
                     mode_bottomk: getu("mode_bottomk").unwrap_or(0) as u8,
+                    tile_cols: getu("tile_cols")
+                        .unwrap_or(((cols.max(1) + 1023) / 1024) as u32 * 1024),
+                    radix: getu("radix").unwrap_or(if k.is_power_of_two() { 4 } else { 2 }),
+                    segments: getu("segments").unwrap_or(if cols > 131_072 {
+                        4
+                    } else if cols > 32_768 {
+                        2
+                    } else {
+                        1
+                    }),
                 });
             }
         }

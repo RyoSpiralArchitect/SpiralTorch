@@ -15,12 +15,15 @@ pub struct Choice {
     pub ctile: u32,       // 0=auto
     pub mode_midk: u8,    // 0=auto, 1=1CE, 2=2CE
     pub mode_bottomk: u8, // 0=auto, 1=1CE, 2=2CE
+    pub tile_cols: u32,   // column tiles for ND FFT/fractional kernels
+    pub radix: u32,       // preferred FFT radix
+    pub segments: u32,    // ND segment count for GPU kernels
 }
 
-fn fallback(_rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
+fn fallback(rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
     let max_wg = if subgroup { 256 } else { 128 };
     let caps = DeviceCaps::wgpu(32, subgroup, max_wg);
-    let use_2ce = caps.prefers_two_stage(cols, k);
+    let use_2ce = caps.prefers_two_stage(rows, cols, k);
     let wg = caps.recommended_workgroup();
     let kl = caps.recommended_kl(k);
     let ch = caps.recommended_channel_stride(cols);
@@ -34,6 +37,15 @@ fn fallback(_rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
         ctile,
         mode_midk: 0,
         mode_bottomk: 0,
+        tile_cols: ((cols.max(1) + 1023) / 1024) as u32 * 1024,
+        radix: if k.is_power_of_two() { 4 } else { 2 },
+        segments: if cols > 131_072 {
+            4
+        } else if cols > 32_768 {
+            2
+        } else {
+            1
+        },
     }
 }
 
@@ -53,6 +65,9 @@ pub struct DslOverrides {
     pub ctile: u32,
     pub mode_midk: u8,
     pub mode_bottomk: u8,
+    pub tile_cols: u32,
+    pub radix: u32,
+    pub segments: u32,
 }
 fn overlay(c: &mut Choice, o: &DslOverrides) {
     if o.algo_topk != 0 {
@@ -66,6 +81,15 @@ fn overlay(c: &mut Choice, o: &DslOverrides) {
     }
     if o.mode_bottomk != 0 {
         c.mode_bottomk = o.mode_bottomk;
+    }
+    if o.tile_cols != 0 {
+        c.tile_cols = o.tile_cols;
+    }
+    if o.radix != 0 {
+        c.radix = o.radix;
+    }
+    if o.segments != 0 {
+        c.segments = o.segments;
     }
 }
 
