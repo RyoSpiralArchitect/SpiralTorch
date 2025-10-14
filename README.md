@@ -1,6 +1,9 @@
 
 # 🌀🕯️SpiralTorch🕯️🌀
-
+> **SpiralTorch** — Pure Rust AI core for Z-space exploration.  
+> © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
+> Contact: [GitHub Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
+> Unauthorized derivations = non-compliant with AGPL §13.
 **SpiralTorch is a Rust-first AI training framework** that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
 the kernels, the hypergrad tape streams Z-space meaning, and the high-level
@@ -24,10 +27,7 @@ tensor shims, no translation layers, and no tracebacks.
 > - **Rust by default, Python ready:** Every feature—from WASM tuning to
 >   hypergrad curvature—is implemented in Rust and exposed unchanged through the
 >   Python bindings when needed.
-> **SpiralTorch** — Pure Rust AI core for Z-space exploration.  
-> © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
-> Contact: [GitHub Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
-> Unauthorized derivations = non-compliant with AGPL §13.
+
 
 **SpiralK + SoftLogic + (optional) WASM tuner** now power a language-native,
 hardware-aware learning stack. They pick the right **merge kind** and
