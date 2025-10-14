@@ -1,9 +1,9 @@
 // crates/st-amg/src/backend/wgpu_heuristics_amg.rs
-//! AMG Heuristics overlay: SpiralK/生成表 -> SoftRuleブレンド -> base_scoreに加算
-//! 環境変数:
+//! AMG heuristics overlay: SpiralK/generated table → SoftRule blend → base score.
+//! Environment variables:
 //!   SPIRAL_SOFT_MODE = {Sum|Normalize|Softmax|Prob}
 //!   SPIRAL_BEAM_K = <usize>
-//!   SPIRAL_SOFT_BANDIT_BLEND = <0..1>  (bandit重みの混合率)
+//!   SPIRAL_SOFT_BANDIT_BLEND = <0..1>  (mixing weight for bandit feedback)
 use st_logic::{SoftMode, SolveCfg};
 
 use st_tensor::fractional::gl_coeffs;
@@ -25,7 +25,7 @@ fn fractional_energy(alpha: f32) -> f32 {
 #[cfg(feature = "learn_store")]
 use st_logic::learn::{load, weight_from_bandit};
 
-// 既存のChoice/initial_choice/base_score/soft_rules_from_spiralkは手元実装を利用してください。
+// Use your existing Choice/initial_choice/base_score/soft_rules_from_spiralk implementations.
 #[derive(Clone, Debug)]
 pub struct Choice {
     pub use_2ce: bool,
@@ -39,7 +39,7 @@ fn initial_choice(_rows: usize, _cols: usize, _nnz: usize, _subgroup: bool) -> C
     Choice { use_2ce: true, wg: 256, tile_cols: 8192, jacobi_passes: 1, score: 0.0 }
 }
 
-// ダミー：スコアのベース（現場の実装で置換）
+// Placeholder base score (replace with project-specific version).
 fn base_score_amg(c: &Choice, alpha: f32) -> f32 {
     let mut s = 0.0f32;
     if c.use_2ce { s += 0.08; } else { s -= 0.05; }
@@ -58,7 +58,7 @@ fn base_score_amg(c: &Choice, alpha: f32) -> f32 {
     s
 }
 
-// ダミー：SpiralK/生成表からのSoftRule（現場の実装で置換）
+// Placeholder SoftRule source (replace with project-specific SpiralK wiring).
 fn soft_rules_from_spiralk(_rows: usize, _cols: usize, _nnz: usize, _sg: bool) -> Vec<st_logic::SoftRule> {
     use st_logic::SoftRule;
     const WG128: &str = "wg=128";
@@ -170,7 +170,7 @@ pub fn choose(rows: usize, cols: usize, nnz: usize, subgroup: bool) -> Choice {
 
     let mut soft = soft_rules_from_spiralk(rows, cols, nnz, subgroup);
     
-    // bandit重みのブレンド（feature有効時のみ）
+    // Blend in bandit weights when the feature is enabled.
     #[cfg(feature = "learn_store")]
     {
         let sw = load();
@@ -182,7 +182,7 @@ pub fn choose(rows: usize, cols: usize, nnz: usize, subgroup: bool) -> Choice {
         }
     }
 
-    // 単発スコア（ビーム探索を使うなら beam_select を適用）
+    // Single pass scoring; enable beam search via beam_select when desired.
     let alpha = fractional_alpha(rows, cols, nnz);
     let mut choice = initial_choice(rows, cols, nnz, subgroup);
     let score = score_choice(&choice, &soft, cfg.soft_mode, alpha);
