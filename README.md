@@ -27,20 +27,9 @@ directly in Z-space without ever touching NumPy or PyTorch.
   Explores a tiny discrete space (merge kinds, tiles) and scores candidates with your soft rules.
 - **Pure Rust training core**
   `st-tensor::pure` ships dependency-free tensors, hyperbolic Z-space encoders,
-  an open-cartesian topos guard (`OpenCartesianTopos`) with rewrite monads that
-  swallow NaNs before they propagate, a deterministic `ConjugateGradientSolver`
-  with explicit tolerances, the Tokio-uring inspired `UringFractalScheduler`
-  plus `FractalSafetyEnvelope`, and the `AmegaHypergrad` tape so you can
-  iterate on learning logic without PyTorch/Numpy while staying inside
-  non-Euclidean geometry.
-- **Causal Graph Compiler**
-  Describes *why* ops matter.  Builds dependency-aware execution plans that can
-  skip low-impact stages, enforce latency ceilings, and adapt in-flight through
-  runtime feedback from the `OpenCartesianTopos` guardians.
-- **Distributed Ameba Autograd mesh**
-  A wheel-friendly, serverless gradient swarm: agents push/pull updates only to
-  their neighbors, respect damping/tolerance guardrails, and mirror the
-  zero-traceback ethos while training across an unreliable network.
+  the new `UringFractalScheduler` for Tokio-uring style streaming, and the
+  `AmegaHypergrad` tape so you can iterate on learning logic without
+  PyTorch/Numpy while staying inside non-Euclidean geometry.
 - **Optional WASM tuner table**
   Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
 - **Self-Rewrite**
@@ -229,106 +218,12 @@ text → wave → hypergrad endlessly without ever seeing a traceback. Non-Eucli
 geometry, imaginary spectra, and category-inspired language flows all feed the
 same tape, letting SpiralTorch chase meaning directly in Z-space.
 
-#### Pure Python interop (no NumPy, no Torch)
-
-The new `st_tensor::pure::python` module exposes a C ABI that any Python 3
-interpreter can reach with nothing more than `ctypes`. Build the cdylib and use
-the helper wrapper that ships in `tools/python/pure_bridge.py`:
-
-```bash
-cargo build --release -p st-tensor
-python - <<'PY'
-from tools.python.pure_bridge import PurePythonBridge
-
-bridge = PurePythonBridge()
-encoder = bridge.encoder(curvature=-1.0, temperature=0.55)
-hypergrad = bridge.hypergrad(curvature=-1.0, learning_rate=0.03, rows=1, cols=8)
-
-hypergrad.absorb_text(encoder, "SpiralTorch weaves Z-space without tokens")
-weights = hypergrad.apply([0.0] * 8)
-gradient = hypergrad.gradient()
-
-print("updated weights", weights)
-print("gradient norm", sum(g * g for g in gradient) ** 0.5)
-PY
-```
-
-Under the hood the bridge calls into `st_pure_hypergrad_new`,
-`st_pure_hypergrad_apply`, and friends, while forwarding any errors via the
-`st_pure_last_error` sentinel so Python never has to chase NaNs or undefined
-behaviour. No wheels, no third-party modules—just CPython lists that round-trip
-through the same open-cartesian safety net as the Rust stack.
-
-#### Causal Graph Compiler (`st-core::causal`)
-
-Map “why” as well as “how”.  Feed your operations into the causal graph
-compiler and receive an execution plan that honours data dependencies while it
-skips stages whose aggregated influence falls below your `skip_threshold`.
-Runtime observers can extend latency budgets and feed new measurements back via
-`CompiledPlan::adapt_with_observation`, letting you reshape the plan in the
-middle of a run without breaking determinism.
-
-#### Distributed Ameba Autograd (`st-core::distributed::autograd`)
-
-Turn the network into the optimiser.  Register agents, connect them as a mesh,
-and seed gradients locally: the Ameba swarm pushes damped updates peer-to-peer
-until the residual falls below the configured tolerance. No parameter server,
-no central barrier, and every edge obeys the same NaN-absorbing guardrails as
-the pure stack, making it perfect for zero-dependency Python experiments or
-browser-hosted WASM canvases that want to train alongside native Rust nodes.
-
-#### Open-cartesian safety nets (no NaNs, no runaway loops)
-
-Hyperbolic Jacobians now flow through an explicit `OpenCartesianTopos`. The
-guard rewrites every scalar through a bounded saturation window, ensures tensor
-volumes stay inside memory-friendly envelopes, and exposes loop ceilings so
-fractal traversals cannot self-intersect. Couple it with the deterministic
-`ConjugateGradientSolver` whenever you need implicit solves:
-
-```rust
-use st_tensor::pure::{topos::{OpenCartesianTopos, RewriteMonad}, ConjugateGradientSolver, PureResult};
-
-fn main() -> PureResult<()> {
-    let topos = OpenCartesianTopos::new(-1.0, 1e-6, 8.0, 256, 4096)?;
-    let monad = RewriteMonad::new(&topos);
-
-    // Rewrite overflowing values before they enter the optimiser.
-    let mut weights = st_tensor::pure::Tensor::from_vec(1, 4, vec![f32::INFINITY, 2.0, -9.0, 0.5])?;
-    monad.rewrite_tensor("weights", &mut weights)?;
-
-    // Solve Ax = b with explicit tolerances (no hidden divergence).
-    let solver = ConjugateGradientSolver::new(&topos, 1e-6, 32)?;
-    let matrix = [
-        4.0f32, 1.0, 0.0,
-        1.0, 3.0, 0.0,
-        0.0, 0.0, 2.0,
-    ];
-    let mut matvec = |src: &[f32], dst: &mut [f32]| {
-        dst.fill(0.0);
-        for row in 0..3 {
-            for col in 0..3 {
-                dst[row] += matrix[row * 3 + col] * src[col];
-            }
-        }
-    };
-    let mut x = [0.0f32; 3];
-    solver.solve(&mut matvec, &[1.0, 2.0, 3.0], &mut x)?;
-    println!("solution {:?}", x);
-    Ok(())
-}
-```
-
-The same topos feeds the `FractalSafetyEnvelope`, which blends relation patches
-in streaming mode without allocating new buffers and refuses to cross the
-configured depth horizon.
-
 ### Fractal uring scheduler + WASM canvas loop
 
 Feed those spectra directly into an async-friendly fractal loop without ever
 allocating more than a small ring buffer. The `UringFractalScheduler` keeps the
 latest relation patches in a Tokio-uring style queue, blends them by coherence,
-and now offers both `fold_coherence` and the zero-allocation
-`fold_coherence_into` so browser/GPU front-ends can reuse their frame buffers.
+and hands the result straight to your browser front-end.
 
 ```rust
 use st_tensor::pure::{Tensor, PureResult};
@@ -345,34 +240,27 @@ async fn stream_waveforms(samples: Vec<Tensor>) -> PureResult<Tensor> {
 }
 ```
 
-For browser builds, wire the folded relation into the dedicated WASM canvas
-projector so we never allocate more than a single RGBA surface:
+For browser builds, wire the folded relation into a WebAssembly export that
+paints onto `<canvas>` without tokenising text or duplicating buffers:
 
 ```rust
-use js_sys::Uint8ClampedArray;
 use st_tensor::pure::fractal::UringFractalScheduler;
-use st_tensor::pure::wasm_canvas::CanvasProjector;
-use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 #[wasm_bindgen]
 pub struct FractalCanvas {
-    projector: RefCell<CanvasProjector>,
+    scheduler: UringFractalScheduler,
 }
 
 #[wasm_bindgen]
 impl FractalCanvas {
     #[wasm_bindgen(constructor)]
-    pub fn new(capacity: usize, width: usize, height: usize) -> Result<FractalCanvas, JsValue> {
+    pub fn new(capacity: usize) -> Result<FractalCanvas, JsValue> {
         let scheduler = UringFractalScheduler::new(capacity)
             .map_err(|err| JsValue::from_str(&err.to_string()))?;
-        let projector = CanvasProjector::new(scheduler, width, height)
-            .map_err(|err| JsValue::from_str(&err.to_string()))?;
-        Ok(Self {
-            projector: RefCell::new(projector),
-        })
+        Ok(Self { scheduler })
     }
 
     pub fn render(&self, canvas: HtmlCanvasElement) -> Result<(), JsValue> {
@@ -380,17 +268,16 @@ impl FractalCanvas {
             .get_context("2d")?
             .ok_or("missing 2d context")?
             .dyn_into()?;
-        let mut projector = self.projector.borrow_mut();
-        let rgba = projector
-            .refresh()
+        let frame = self
+            .scheduler
+            .fold_coherence()
             .map_err(|err| JsValue::from_str(&err.to_string()))?;
-        let clamped = Uint8ClampedArray::from(rgba);
-        let image = ImageData::new_with_u8_clamped_array_and_sh(
-            clamped,
-            projector.surface().width() as u32,
-            projector.surface().height() as u32,
-        )?;
-        ctx.put_image_data(&image, 0.0, 0.0)?;
+        let spectrum = frame.data();
+        for (x, value) in spectrum.iter().enumerate() {
+            let intensity = (value.clamp(0.0, 1.0) * 255.0) as u8;
+            ctx.set_fill_style(&format!("rgb({0},{0},{0})", intensity).into());
+            ctx.fill_rect(x as f64, 0.0, 1.0, canvas.height() as f64);
+        }
         Ok(())
     }
 }
@@ -404,15 +291,13 @@ And keep the JavaScript glue feather-light:
 import init, { FractalCanvas } from "./pkg/spiraltorch_wasm.js";
 const wasm = await init();
 const canvas = document.getElementById("zspace");
-const fractal = new FractalCanvas(64, canvas.width, canvas.height);
+const fractal = new FractalCanvas(64);
 await fractal.render(canvas);
 </script>
 ```
 
 Pixels become Z-space relations, the scheduler keeps memory bounded, and the
-entire loop stays panic-free even under aggressive streaming. The RGBA buffer
-that powers the `<canvas>` upload can also be shared with WGPU textures for a
-fully unified compute + render stack when you want GPU-native presentation.
+entire loop stays panic-free even under aggressive streaming.
 
 ---
 
