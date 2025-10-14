@@ -443,4 +443,5 @@ Suggested caption: **“SpiralTorch — WGPU-first, Self-Tuning GPU Top-K (Rank-
 
 ## License
 
-**AGPL-3.0-or-later**. See `LICENSE`.
+**AGPL-3.0-or-later** for every crate and Python wheel. See `LICENSE`.
+Unauthorized derivations will be treated as non-compliant with AGPL §13
