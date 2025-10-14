@@ -32,7 +32,7 @@ fn safe_sigmoid(x: f32) -> f32 {
     if x > 20.0 { 1.0 } else if x < -20.0 { 0.0 } else { 1.0 / (1.0 + (-x).exp()) }
 }
 
-/// SoftRule の集合をモードに応じて単一スカラーに集約
+/// Collapse a collection of SoftRule entries into a scalar according to the mode.
 pub fn apply_softmode(rules: &[SoftRule], mode: SoftMode) -> f32 {
     if rules.is_empty() { return 0.0; }
     match mode {
@@ -50,7 +50,7 @@ pub fn apply_softmode(rules: &[SoftRule], mode: SoftMode) -> f32 {
             rules.iter().zip(exps.iter()).map(|(r, e)| r.weight * (e / z)).sum()
         }
         SoftMode::Prob => {
-            // p_any = 1 - Π(1 - p_i) （scoreをlogitとみなして確率合成）
+            // p_any = 1 - Π(1 - p_i) with scores interpreted as logits.
             let mut p_all_not = 1.0f32;
             for r in rules {
                 let p = safe_sigmoid(r.score);
@@ -65,7 +65,7 @@ pub fn apply_softmode(rules: &[SoftRule], mode: SoftMode) -> f32 {
     }
 }
 
-/// 汎用ビーム探索
+/// Generic beam search helper.
 pub fn beam_select<C: Clone>(
     seed: C,
     mut expand: impl FnMut(&C) -> Vec<C>,
@@ -94,6 +94,6 @@ pub fn beam_select<C: Clone>(
     beam.into_iter().max_by(|a,b| a.score.partial_cmp(&b.score).unwrap()).unwrap().cand
 }
 
-// 学習ストアは feature ゲートで任意化
+// learn_store is optional behind the feature gate.
 #[cfg(feature = "learn_store")]
 pub mod learn;

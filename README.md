@@ -1,19 +1,28 @@
 
 # 🌀🕯️SpiralTorch🕯️🌀
 
-**SpiralK + SoftLogic + (optional) WASM tuner** collaborate to pick the fastest **merge kind** and **tile width** for your hardware—then **Self-Rewrite** locks the win back into your heuristics.
-**WGPU** is the default path; **HIP/CUDA** absorb the **same unified choices**. Python wheels target **3.11–3.14**.
+**SpiralK + SoftLogic + (optional) WASM tuner** now power a language-native,
+hardware-aware learning stack. They pick the right **merge kind** and
+**tile width**, sure—but the same pipeline also keeps meaning flowing in Z-space
+with no NumPy, no PyTorch, and no tracebacks.
+Everything starts as Rust, yet Python bindings stay light so you can stitch the
+stack into existing workflows without inheriting heavy dependencies.
 
-Beyond kernels, the project now incubates an ever-expanding pure Rust learning
-stack: language stays raw, gradients stay hyperbolic, and meaning is sculpted
-directly in Z-space without ever touching NumPy or PyTorch.
+Whether you live entirely in Rust or call in from Python, SpiralTorch treats
+language, spectra, and device selection as one flow. No tensor shims, no
+auxiliary NumPy buffers—just the same Z-space conversation plugged into the
+executor you choose.
 
 > **Why it’s different**
-> - **Two-layer consensus:** SpiralK (runtime rules) + WASM table (offline measurements)  
-> - **Unified heuristics:** One `Choice { mk, mkd, tile, ctile, … }` across WGPU / HIP / CUDA  
-> - **1-CE Subgroup Top-K (WGPU):** candidates → final in a single compute pass  
-> - **MidK/BottomK compaction:** 1-CE / 2-CE, tile-aware, same API  
+> - **Three-voice consensus:** SpiralK (runtime rules), DSL directives, and the
+>   generated WASM table talk it out as A/B/C peers before anything lands, and every
+>   exchange lands in a timestamped roundtable log.
+> - **Unified heuristics:** One `Choice { mk, mkd, tile, ctile, … }` across WGPU / HIP / CUDA
+> - **1-CE Subgroup Top-K (WGPU):** candidates → final in a single compute pass
+> - **MidK/BottomK compaction:** 1-CE / 2-CE, tile-aware, same API
 > - **Amega Hypergrad:** unrolled / implicit (Neumann / CG) hyper-gradients that now sync with the pure tensor tape
+> - **Fractional AMG scoring:** Density-aware workgroup and tile proposals feed into SoftRule beams without
+>   ever touching NumPy or PyTorch.
 
 ---
 
@@ -33,7 +42,9 @@ directly in Z-space without ever touching NumPy or PyTorch.
 - **Optional WASM tuner table**
   Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
 - **Self-Rewrite**
-  A/B outcomes (Wilson CI) append `soft(...)` into `~/.spiraltorch/heur.kdsl` when the advantage is statistically significant.
+  A/B/C conversations (Wilson CI) append `soft(...)` into
+  `~/.spiraltorch/heur.kdsl` once the roundtable agrees a configuration is ahead, while transcripts land in
+  `roundtable.log` so you can replay how every choice surfaced.
   
 ---
 
@@ -316,22 +327,13 @@ export SPIRAL_HEUR_K='
 '
 ```
 
-**How the final choice is made (two-layer consensus)**
+**How the final choice is made (three-way roundtable)**
 
 - **A** = SoftLogic best (your DSL soft + optional Redis soft)
 - **B** = DSL **hard** assignment (if you set `mk:`/`tile:` explicitly, B wins)
 - **C** = **Generated table** (tuner output)
 
-Default policy: if **B** exists use it; else compare **A vs C** by SoftLogic score and
-favor **C** with a small prior (`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`). The runtime now
-refines every candidate by snapping workgroup/tile sizes to the device lane width,
-injects backend-specific merge-kind defaults when unset, and finally scores each
-candidate with a tiny occupancy + alignment model before adopting the highest-scoring
-plan (with the generated path inheriting the configured bias).
-Default policy: if **B** exists use it; else score **A** and **C** with backend-aware
-occupancy/tile metrics derived from `DeviceCaps`, then add a small prior to **C**
-(`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`).
-If the adopted choice wins locally (Wilson CI lower bound > 0.5 with min trials), **Self-Rewrite** appends matching `soft(...)` to `~/.spiraltorch/heur.kdsl`.
+Default policy: if **B** exists use it; otherwise the runtime invites **A** and **C** into a quick conversation. It scores both with backend-aware occupancy/tile metrics derived from `DeviceCaps`, then adds a gentle prior to **C** (`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`). When the discussion reaches a Wilson-backed agreement, **Self-Rewrite** appends the matching `soft(...)` into `~/.spiraltorch/heur.kdsl` so the next run starts from the shared insight.
 
 ---
 
