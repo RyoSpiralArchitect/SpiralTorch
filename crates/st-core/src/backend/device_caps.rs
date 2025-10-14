@@ -210,22 +210,6 @@ impl DeviceCaps {
     pub fn with_shared_mem(mut self, shared_mem: Option<u32>) -> Self {
         self.shared_mem_per_workgroup = shared_mem;
         self
-    /// Builder style helper to override the subgroup flag.
-    pub fn with_subgroup(mut self, subgroup: bool) -> Self {
-        self.subgroup = subgroup;
-        self
-    }
-
-    /// Builder style helper to override the maximum workgroup size.
-    pub fn with_max_workgroup(mut self, max_workgroup: u32) -> Self {
-        self.max_workgroup = max_workgroup.max(1);
-        self
-    }
-
-    /// Builder style helper to override the shared memory budget.
-    pub fn with_shared_mem(mut self, shared_mem: Option<u32>) -> Self {
-        self.shared_mem_per_workgroup = shared_mem;
-        self
     }
 
     /// Recommended workgroup size for a particular problem size.
@@ -306,6 +290,37 @@ impl DeviceCaps {
         (tile, ctile)
     }
 
+    /// Recommended sweep tile alias to keep call sites descriptive.
+    pub fn recommended_sweep_tile(&self, cols: u32) -> u32 {
+        self.recommended_tiles(cols).0
+    }
+
+    /// Recommended compaction tile alias to keep call sites descriptive.
+    pub fn recommended_compaction_tile_default(&self, cols: u32) -> u32 {
+        self.recommended_tiles(cols).1
+    }
+
+    /// Recommended channel stride for compaction passes.
+    pub fn recommended_channel_stride(&self, cols: u32) -> u32 {
+        self.preferred_channel(cols)
+    }
+
+    /// Recommended K-loop depth for the reduction.
+    pub fn recommended_kl(&self, k: u32) -> u32 {
+        self.preferred_k_loop(k)
+    }
+
+    /// Legacy helper retained for older call sites that reason about lane quotas.
+    pub fn default_lane_quota(k: u32) -> u32 {
+        if k >= 64 {
+            32
+        } else if k >= 16 {
+            16
+        } else {
+            8
+        }
+    }
+
     /// Preferred inner K loop depth for the given reduction size.
     pub fn preferred_k_loop(&self, k: u32) -> u32 {
         let lanes = self.lane_width.max(1);
@@ -339,7 +354,7 @@ impl DeviceCaps {
     pub fn preferred_merge_kind(&self, k: u32) -> u32 {
         match self.backend {
             BackendKind::Wgpu => {
-                if self.subgroup && k <= 128 {
+                if self.subgroup && k <= 256 {
                     2
                 } else if k <= 2048 {
                     1
@@ -390,17 +405,26 @@ impl DeviceCaps {
         }
     }
 
-    /// Whether two‑stage compaction should be enabled for the given problem.
+    /// Whether two-stage compaction should be enabled for the given problem.
     pub fn prefers_two_stage(&self, cols: u32, k: u32) -> bool {
-        cols > 32_768 || k > 128
-    pub fn prefers_two_stage(&self, rows: u32, cols: u32, k: u32) -> bool {
+        self.prefers_two_stage_with_rows(0, cols, k)
+    }
+
+    /// Whether two-stage compaction should be enabled with explicit row context.
+    pub fn prefers_two_stage_with_rows(&self, rows: u32, cols: u32, k: u32) -> bool {
+        let lanes = self.lane_width.max(1);
         let col_heavy = cols > 32_768;
-        let k_heavy = k > self.lane_width.max(1) * 4;
+        let k_heavy = k > lanes * 4;
+
+        if rows == 0 {
+            return col_heavy || k_heavy;
+        }
+
         let small_rows = rows < 256;
         match self.backend {
             BackendKind::Wgpu => col_heavy || (k_heavy && !small_rows),
             BackendKind::Cuda | BackendKind::Hip => {
-                col_heavy || (k_heavy && rows > self.lane_width.max(1) * 8)
+                col_heavy || (k_heavy && rows > lanes.saturating_mul(8))
             }
             BackendKind::Cpu => col_heavy && rows > 512,
         }
@@ -515,9 +539,9 @@ mod tests {
         let comp_small = caps.preferred_compaction_tile(1024, 0);
         let comp_large = caps.preferred_compaction_tile(200_000, 0);
         assert!(comp_large >= comp_small);
-        assert!(caps.prefers_two_stage(1_024, 40_000, 64));
-        assert!(caps.prefers_two_stage(4_096, 2_000, 256));
-        assert!(!caps.prefers_two_stage(128, 10_000, 64));
+        assert!(caps.prefers_two_stage_with_rows(1_024, 40_000, 64));
+        assert!(caps.prefers_two_stage_with_rows(4_096, 2_000, 256));
+        assert!(!caps.prefers_two_stage_with_rows(128, 10_000, 64));
     }
 
     #[test]

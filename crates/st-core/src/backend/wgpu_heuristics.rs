@@ -1,6 +1,7 @@
 use super::consensus;
 use super::device_caps::DeviceCaps;
 use super::kdsl_bridge;
+use super::spiralk_fft::SpiralKFftPlan;
 use crate::backend::wgpu_heuristics_generated as gen;
 #[cfg(feature = "logic")]
 use st_logic::{solve_soft, Ctx as LCtx, SoftRule, SolveCfg as LCfg};
@@ -20,14 +21,14 @@ pub struct Choice {
     pub segments: u32,    // ND segment count for GPU kernels
 }
 
-fn fallback(_rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
+fn fallback(rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
     let max_wg = if subgroup { 256 } else { 128 };
     let caps = DeviceCaps::wgpu(32, subgroup, max_wg);
-    let use_2ce = caps.prefers_two_stage(cols, k);
-    let wg = caps.recommended_workgroup();
+    let use_2ce = caps.prefers_two_stage_with_rows(rows, cols, k);
+    let wg = caps.recommended_workgroup(rows);
     let kl = caps.recommended_kl(k);
     let ch = caps.recommended_channel_stride(cols);
-    let ctile = caps.recommended_compaction_tile(cols);
+    let ctile = caps.recommended_compaction_tile_default(cols);
     Choice {
         use_2ce,
         wg,
@@ -39,7 +40,13 @@ fn fallback(_rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
         mode_bottomk: 0,
         tile_cols: ((cols.max(1) + 1023) / 1024) as u32 * 1024,
         radix: if k.is_power_of_two() { 4 } else { 2 },
-        segments: if cols > 131_072 { 4 } else if cols > 32_768 { 2 } else { 1 },
+        segments: if cols > 131_072 {
+            4
+        } else if cols > 32_768 {
+            2
+        } else {
+            1
+        },
     }
 }
 
@@ -149,6 +156,41 @@ pub fn choose_kind(
         return Some(c);
     }
     Some(fallback(rows, cols, k, subgroup))
+}
+
+/// Construct an FFT plan from the same heuristics used for TopK and emit the
+/// auto-generated WGSL shader.  Returns `None` if the heuristic pipeline could
+/// not find a suitable `Choice`.
+pub fn auto_fft_wgsl(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<String> {
+    let plan = auto_fft_plan(rows, cols, k, subgroup)?;
+    Some(plan.emit_wgsl())
+}
+
+/// Produce the SpiralK hint snippet associated with the automatically emitted
+/// WGSL kernel.
+pub fn auto_fft_spiralk(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<String> {
+    let plan = auto_fft_plan(rows, cols, k, subgroup)?;
+    Some(plan.emit_spiralk_hint())
+}
+
+/// Internal helper that assembles the [`SpiralKFftPlan`] from the heuristic
+/// `Choice`.
+fn auto_fft_plan(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<SpiralKFftPlan> {
+    let choice = choose_topk(rows, cols, k, subgroup)?;
+    Some(SpiralKFftPlan::from_choice(&choice, subgroup))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn emits_fft_kernel_and_hint() {
+        let wgsl = auto_fft_wgsl(512, 4096, 128, true).expect("kernel expected");
+        assert!(wgsl.contains("@workgroup_size"));
+        let hint = auto_fft_spiralk(512, 4096, 128, true).unwrap();
+        assert!(hint.contains("tile_cols"));
+    }
 }
 
 include!("wgpu_heuristics_generated.rs");

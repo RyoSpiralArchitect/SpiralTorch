@@ -1,48 +1,62 @@
 #!/usr/bin/env python3
-import sys, json, math
+import json
+import sys
 
 def main():
-    if len(sys.argv)<2:
-        print("usage: gen_generated_rs.py tuner_results.json", file=sys.stderr); sys.exit(1)
-    data = json.load(open(sys.argv[1], 'r'))
-    # naive piecewise stitching: bucket by sg, then by log2 cols ranges and k thresholds
-    # we generate if-else chains; collisions resolved by last-wins order.
+    if len(sys.argv) < 2:
+        print("usage: gen_generated_rs.py tuner_results.json", file=sys.stderr)
+        sys.exit(1)
+
+    with open(sys.argv[1], "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+
+    json_blob = json.dumps(data, separators=(",", ":"))
+
     print("// Auto-generated from tuner_results.json")
-    print("use super::Choice;")
-    print("pub fn choose(rows: usize, cols: usize, k: usize, subgroup: bool) -> Option<Choice> {")
-    print("    let lc = (cols as f32).log2();")
-    print("    let mut mk:u32 = if subgroup && k<=128 {2} else if k<=2048 {1} else {0};")
-    print("    let mut tile:u32 = if lc>15.0 {2048} else if lc>13.0 {1024} else if lc>12.0 {512} else {256};")
-    print("    let mut tile_cols:u32 = if cols>131_072 {4096} else if cols>65_536 {2048} else if cols>16_384 {1024} else {512};")
-    print("    let mut radix:u32 = if (k & (k-1))==0 {4} else {2};")
-    print("    let mut segments:u32 = if cols>131_072 {4} else if cols>32_768 {2} else {1};")
-    print("    let mut use_2ce = (cols>32_768) || (k>128);")
-    for e in data:
-        sg = "true" if e.get("sg", False) else "false"
-        cmin = e.get("cols_min", 0); cmax = e.get("cols_max", 1<<30); kmax=e.get("k_max", 1<<30)
-        mk = e.get("mk")
-        tl = e.get("tile")
-        tc = e.get("tile_cols")
-        rd = e.get("radix")
-        sgmt = e.get("segments")
-        u2 = e.get("use_2ce")
-        print(f"    if subgroup=={sg} && cols>={cmin} && cols<={cmax} && k<={kmax} {{")
-        if mk is not None:
-            print(f"        mk={int(mk)};")
-        if tl is not None:
-            print(f"        tile={int(tl)};")
-        if tc is not None:
-            print(f"        tile_cols={int(tc)};")
-        if rd is not None:
-            print(f"        radix={int(rd)};")
-        if sgmt is not None:
-            print(f"        segments={int(sgmt)};")
-        if u2 is not None:
-            print(f"        use_2ce={str(bool(u2)).lower()};")
-        print("    }")
-    print("    let wg = if subgroup {256} else {128};")
-    print("    let kl = if k>=64 {32} else if k>=16 {16} else {8};")
-    print("    let ch = if cols>16_384 {8192} else {0};")
-    print("    Some(Choice{ use_2ce, wg, kl, ch, algo_topk: 0, ctile: tile, mode_midk: 0, mode_bottomk: 0, tile_cols, radix, segments })")
+    print("use crate::backend::device_caps::DeviceCaps as GenDeviceCaps;")
+    print("use crate::backend::wasm_tuner::WasmTunerTable;")
+    print("use crate::backend::wgpu_heuristics::Choice as GenChoice;")
+    print("use std::sync::OnceLock;")
+    print("")
+    print("fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> GenChoice {")
+    print("    let max_wg = if subgroup { 256 } else { 128 };")
+    print("    let caps = GenDeviceCaps::wgpu(32, subgroup, max_wg);")
+    print("    let use_2ce = caps.prefers_two_stage_with_rows(rows as u32, cols as u32, k as u32);")
+    print("    let wg = caps.recommended_workgroup(rows as u32);")
+    print("    let kl = caps.recommended_kl(k as u32);")
+    print("    let ch = caps.recommended_channel_stride(cols as u32);")
+    print("    let ctile = caps.recommended_compaction_tile_default(cols as u32);")
+    print("    GenChoice {")
+    print("        use_2ce,")
+    print("        wg,")
+    print("        kl,")
+    print("        ch,")
+    print("        algo_topk: 0,")
+    print("        ctile,")
+    print("        mode_midk: 0,")
+    print("        mode_bottomk: 0,")
+    print("        tile_cols: ((cols.max(1) + 1023) / 1024) as u32 * 1024,")
+    print("        radix: if k.is_power_of_two() { 4 } else { 2 },")
+    print("        segments: if cols > 131_072 { 4 } else if cols > 32_768 { 2 } else { 1 },")
+    print("    }")
     print("}")
-if __name__=='__main__': main()
+    print("")
+    print("fn table() -> &'static WasmTunerTable {")
+    print("    static TABLE: OnceLock<WasmTunerTable> = OnceLock::new();")
+    print("    TABLE.get_or_init(|| {")
+    print("        WasmTunerTable::from_json_str(r#\"%s\"#).expect(\"invalid tuner table\")" % json_blob)
+    print("    })")
+    print("}")
+    print("")
+    print("pub fn choose(")
+    print("    rows: usize,")
+    print("    cols: usize,")
+    print("    k: usize,")
+    print("    subgroup: bool,")
+    print(") -> Option<super::wgpu_heuristics::Choice> {")
+    print("    let base = base_choice(rows, cols, k, subgroup);")
+    print("    table().choose(base, rows, cols, k, subgroup)")
+    print("}")
+
+if __name__ == "__main__":
+    main()
