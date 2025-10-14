@@ -5,17 +5,22 @@
 //! tape and SpiralK planners.
 
 pub mod layers;
+pub mod loss;
 pub mod module;
 pub mod plan;
+pub mod schedule;
 pub mod trainer;
 
 pub use layers::linear::Linear;
 pub use layers::sequential::Sequential;
+pub use layers::Relu;
 pub use layers::wave_gate::WaveGate;
 pub use layers::zspace_projector::ZSpaceProjector;
+pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
 pub use plan::RankPlanner;
-pub use trainer::ModuleTrainer;
+pub use schedule::{GradientBands, RoundtableConfig, RoundtableSchedule};
+pub use trainer::{EpochStats, ModuleTrainer};
 
 pub use st_tensor::pure::{
     fractal::LanguageWaveEncoder, topos::OpenCartesianTopos, AmegaHypergrad, ComplexTensor,

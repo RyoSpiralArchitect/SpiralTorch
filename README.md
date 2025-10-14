@@ -47,10 +47,12 @@ executor you choose.
   Parameters can now absorb complex Z-space waves or raw text directly into the
   hypergrad tape, so the roundtable can keep expanding meaning without Euclidean
   fallbacks or NumPy buffers.
-- **Rust-first modules**
-  `st-nn` now ships `Linear`, `Sequential`, the hyperbolic `WaveGate`, and the
-  `ZSpaceProjector`. They stream gradients through the hypergrad tape, apply
-  open-topos rewrites, and keep SpiralK planners one call away.
+- **Rust-first modules & losses**
+  `st-nn` now ships `Linear`, `Sequential`, the lightweight `Relu`, the
+  hyperbolic `WaveGate`, and the `ZSpaceProjector` alongside
+  `MeanSquaredError` / `HyperbolicCrossEntropy` losses. They stream gradients
+  through the hypergrad tape, apply open-topos rewrites, and keep SpiralK
+  planners one call away with roundtable-aware scheduling helpers.
 - **Optional WASM tuner table**
   Bake the JSON dataset offline and ship it to browsers/WASM. The runtime loads the table lazily, blends it with SpiralK, and keeps the optimiser in sync with the generated WGSL kernels.
 - **Self-Rewrite**
@@ -149,18 +151,33 @@ execute_rank(&exec, &plan)?;
 **Rust (nn.Module-style training)**
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
-use st_nn::{Linear, ModuleTrainer, Tensor};
+use st_nn::{
+    Linear, MeanSquaredError, ModuleTrainer, Relu, RoundtableConfig, Sequential, Tensor,
+};
 
-let mut layer = Linear::new("encoder", 4, 2)?;
+let mut model = Sequential::new();
+model.push(Linear::new("encoder", 4, 3)?);
+model.push(Relu::new());
+model.push(Linear::new("head", 3, 2)?);
+
 let trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
-trainer.prepare(&mut layer)?;
+trainer.prepare(&mut model)?;
 
-let inputs = Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4])?;
-let targets = Tensor::from_vec(1, 2, vec![0.0, 1.0])?;
-let output = layer.forward(&inputs)?;
-let grad = output.sub(&targets)?.scale(1.0 / inputs.shape().0 as f32)?;
-let _ = layer.backward(&inputs, &grad)?;
-trainer.step(&mut layer)?;
+let schedule = trainer.roundtable(1, 2, RoundtableConfig::default());
+let mut loss = MeanSquaredError::new();
+let dataset = vec![
+    (
+        Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4])?,
+        Tensor::from_vec(1, 2, vec![0.0, 1.0])?,
+    ),
+    (
+        Tensor::from_vec(1, 4, vec![0.2, 0.1, -0.3, 0.5])?,
+        Tensor::from_vec(1, 2, vec![1.0, 0.0])?,
+    ),
+];
+
+let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
+println!("roundtable avg loss: {:.6}", stats.average_loss);
 ```
 
 **Rust (Z-space gating + projector)**
@@ -203,77 +220,59 @@ print(plan["choice"])  # unified merge-kind, tiles, and workgroup sizing
 
 ## Pure Rust training (zero PyTorch/Numpy deps)
 
-Need a bootstrap-friendly learning loop without pulling in heavyweight
-dependencies?  `st-tensor::pure` now ships with zero-panic tensors,
-hyperbolic distance helpers, and complex-spectrum encoders so the stack keeps
-accelerating without ever leaning on NumPy or PyTorch.
+Need a bootstrap-friendly learning loop without heavyweight dependencies?
+`st-nn` layers sit directly on top of the `st-tensor::pure` stack so you can
+train, schedule, and log every A/B/C decision entirely in Rust.
 
 ```rust
-use st_tensor::pure::{LinearModel, PureResult, Tensor, mean_squared_error};
+use st_core::backend::device_caps::DeviceCaps;
+use st_nn::{
+    HyperbolicCrossEntropy, Linear, MeanSquaredError, ModuleTrainer, Relu,
+    RoundtableConfig, Sequential, Tensor,
+};
 
-fn main() -> PureResult<()> {
-    // Build a dataset for y = 2x + 1 using plain Rust vectors.
-    let inputs = Tensor::from_vec(4, 1, vec![0.0, 1.0, 2.0, 3.0])?;
-    let targets = Tensor::from_vec(4, 1, vec![1.0, 3.0, 5.0, 7.0])?;
+fn main() -> st_nn::PureResult<()> {
+    let mut model = Sequential::new();
+    model.push(Linear::new("encoder", 3, 4)?);
+    model.push(Relu::new());
+    model.push(Linear::new("head", 4, 2)?);
 
-    let mut model = LinearModel::new(1, 1)?;
-    for _ in 0..200 {
-        model.train_batch(&inputs, &targets, 0.1)?;
-    }
+    let trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -0.95, 0.05, 0.01);
+    trainer.prepare(&mut model)?;
 
-    let predictions = model.forward(&inputs)?;
-    let mse = mean_squared_error(&predictions, &targets)?;
-    println!("Final MSE: {mse:.6}");
+    // Build a roundtable that splits gradients into Above/Here/Beneath bands.
+    let schedule = trainer.roundtable(1, 2, RoundtableConfig::default());
+
+    let dataset = vec![
+        (
+            Tensor::from_vec(1, 3, vec![0.3, -0.7, 0.1])?,
+            Tensor::from_vec(1, 2, vec![1.0, 0.0])?,
+        ),
+        (
+            Tensor::from_vec(1, 3, vec![-0.1, 0.4, -0.6])?,
+            Tensor::from_vec(1, 2, vec![0.0, 1.0])?,
+        ),
+    ];
+
+    let mut mse = MeanSquaredError::new();
+    let epoch = trainer.train_epoch(&mut model, &mut mse, dataset.clone(), &schedule)?;
+    println!("epoch loss: {:.6}", epoch.average_loss);
+
+    // Inspect the logits with a hyperbolic cross-entropy probe.
+    let mut hce = HyperbolicCrossEntropy::new(-0.95)?;
+    let logits = model.forward(&dataset[0].0)?;
+    let ce = hce.forward(&logits, &dataset[0].1)?;
+    println!("hyperbolic CE: {:.6}", ce.data()[0]);
+
     Ok(())
 }
 ```
 
-Everything runs with `cargo run -p st-tensor --example ...` or inside your own
-binary crate—no Python wheels required. When you want to leave Euclidean space,
-hand text straight to the Z-space encoder and stay in browser-friendly memory
-limits without ever tokenizing:
-
-```rust
-use st_tensor::pure::{LanguageWaveEncoder, PureResult};
-
-fn main() -> PureResult<()> {
-    let encoder = LanguageWaveEncoder::new(-1.0, 0.75)?;
-    let z_space = encoder.encode_z_space("SpiralTorch stays homotopy-free")?;
-    println!("{} hyperbolic components", z_space.shape().1);
-    Ok(())
-}
-```
-
-Take it further by coupling the Z-space encoder with the brand-new `AmegaHypergrad`
-tape: gradients stay conformal, curvature never drifts, and the entire pipeline
-continues to run without touching NumPy or PyTorch.
-
-```rust
-use st_tensor::pure::{AmegaHypergrad, LanguageWaveEncoder, PureResult, Tensor};
-
-fn main() -> PureResult<()> {
-    let encoder = LanguageWaveEncoder::new(-1.0, 0.8)?;
-    let wave = encoder.encode_z_space("hyperbolic language without tokens")?;
-    let (rows, cols) = wave.shape();
-
-    let mut hypergrad = AmegaHypergrad::new(encoder.curvature(), 0.03, rows, cols)?;
-    hypergrad.accumulate_wave(&wave)?;
-
-    let targets = Tensor::zeros(rows, cols)?;
-    hypergrad.accumulate_pair(&wave, &targets)?;
-
-    let mut weights = Tensor::zeros(rows, cols)?;
-    hypergrad.apply(&mut weights)?;
-
-    println!("updated weight energy = {:.6}", weights.squared_l2_norm());
-    Ok(())
-}
-```
-
-Because the optimiser keeps its own curvature-aware buffer, you can stream
-text → wave → hypergrad endlessly without ever seeing a traceback. Non-Euclidean
-geometry, imaginary spectra, and category-inspired language flows all feed the
-same tape, letting SpiralTorch chase meaning directly in Z-space.
+Above/Beneath/Here gradients map directly onto TopK/MidK/BottomK roundtable
+plans, so every update records which parts of the spectrum drove the change.
+Hyperbolic losses run on the same tensors, meaning you can bounce between Z-space
+encoders, Euclidean projections, and browser-friendly WASM canvases without
+importing PyTorch or NumPy.
 
 ### Fractal uring scheduler + WASM canvas loop
 

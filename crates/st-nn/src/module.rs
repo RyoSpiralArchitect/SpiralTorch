@@ -1,3 +1,4 @@
+use crate::schedule::GradientBands;
 use st_core::backend::device_caps::DeviceCaps;
 use st_tensor::pure::{
     topos::OpenCartesianTopos, AmegaHypergrad, ComplexTensor, LanguageWaveEncoder, PureResult,
@@ -196,6 +197,20 @@ pub trait Module {
         &mut self,
         visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
     ) -> PureResult<()>;
+
+    /// Propagates an Above/Here/Beneath gradient schedule through the module.
+    fn backward_bands(&mut self, input: &Tensor, bands: &GradientBands) -> PureResult<Tensor> {
+        let (rows, cols) = input.shape();
+        let mut total = Tensor::zeros(rows, cols)?;
+        for grad in bands.iter() {
+            if grad.squared_l2_norm() == 0.0 {
+                continue;
+            }
+            let contribution = self.backward(input, grad)?;
+            total.add_scaled(&contribution, 1.0)?;
+        }
+        Ok(total)
+    }
 
     /// Attaches a hypergrad tape to every parameter.
     fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PureResult<()> {
