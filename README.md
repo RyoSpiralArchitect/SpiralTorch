@@ -33,6 +33,14 @@ directly in Z-space without ever touching NumPy or PyTorch.
   plus `FractalSafetyEnvelope`, and the `AmegaHypergrad` tape so you can
   iterate on learning logic without PyTorch/Numpy while staying inside
   non-Euclidean geometry.
+- **Causal Graph Compiler**
+  Describes *why* ops matter.  Builds dependency-aware execution plans that can
+  skip low-impact stages, enforce latency ceilings, and adapt in-flight through
+  runtime feedback from the `OpenCartesianTopos` guardians.
+- **Distributed Ameba Autograd mesh**
+  A wheel-friendly, serverless gradient swarm: agents push/pull updates only to
+  their neighbors, respect damping/tolerance guardrails, and mirror the
+  zero-traceback ethos while training across an unreliable network.
 - **Optional WASM tuner table**
   Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
 - **Self-Rewrite**
@@ -250,6 +258,24 @@ Under the hood the bridge calls into `st_pure_hypergrad_new`,
 `st_pure_last_error` sentinel so Python never has to chase NaNs or undefined
 behaviour. No wheels, no third-party modules—just CPython lists that round-trip
 through the same open-cartesian safety net as the Rust stack.
+
+#### Causal Graph Compiler (`st-core::causal`)
+
+Map “why” as well as “how”.  Feed your operations into the causal graph
+compiler and receive an execution plan that honours data dependencies while it
+skips stages whose aggregated influence falls below your `skip_threshold`.
+Runtime observers can extend latency budgets and feed new measurements back via
+`CompiledPlan::adapt_with_observation`, letting you reshape the plan in the
+middle of a run without breaking determinism.
+
+#### Distributed Ameba Autograd (`st-core::distributed::autograd`)
+
+Turn the network into the optimiser.  Register agents, connect them as a mesh,
+and seed gradients locally: the Ameba swarm pushes damped updates peer-to-peer
+until the residual falls below the configured tolerance. No parameter server,
+no central barrier, and every edge obeys the same NaN-absorbing guardrails as
+the pure stack, making it perfect for zero-dependency Python experiments or
+browser-hosted WASM canvases that want to train alongside native Rust nodes.
 
 #### Open-cartesian safety nets (no NaNs, no runaway loops)
 
@@ -532,4 +558,4 @@ Suggested caption: **“SpiralTorch — WGPU-first, Self-Tuning GPU Top-K (Rank-
 
 ## License
 
-**AGPL-3.0-or-later**. See `LICENSE`.
+**AGPL-3.0-or-later** for every crate and Python wheel. See `LICENSE`.
