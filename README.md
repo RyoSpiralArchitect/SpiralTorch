@@ -4,9 +4,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="AGPL-3.0">
 </p>
-
-<h1 align="center">Tiger Optimizer</h1>
-<p align="center"><i>Sign‑aware, trust‑ratio, LoRA‑PID with inertia — precise like a tiger.</i></p>
 **SpiralTorch** — Pure Rust AI core for Z-space exploration.**
 > © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 > Contact: [GitHub Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
