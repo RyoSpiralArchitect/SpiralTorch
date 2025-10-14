@@ -3,7 +3,7 @@ name = "st-tensor"
 version = "0.1.0"
 edition = "2021"
 description = "SpiralTorch tensor utilities: fractional calculus (GL 1D) CPU + optional WGPU kernel"
-license = "MIT OR Apache-2.0"
+license = "AGPL 3.0 or later"
 
 [lib]
 crate-type = ["rlib", "cdylib"]
