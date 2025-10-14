@@ -232,6 +232,65 @@ fn score_choice(c: &Choice, base_soft: &[st_logic::SoftRule], mode: SoftMode, al
     base_score_amg(c, alpha) + soft
 }
 
+fn instantiate_soft_rules(c: &Choice, base: &[st_logic::SoftRule]) -> Vec<st_logic::SoftRule> {
+    let mut out = Vec::with_capacity(base.len());
+    for rule in base {
+        let mut weight = rule.weight;
+        let mut score = rule.score;
+        match rule.name {
+            "wg=128" => {
+                weight *= alignment(c.wg, 128);
+                score *= focus_gain(c.wg, 128);
+            }
+            "wg=256" => {
+                weight *= alignment(c.wg, 256);
+                score *= focus_gain(c.wg, 256);
+            }
+            "wg=512" => {
+                weight *= alignment(c.wg, 512);
+                score *= focus_gain(c.wg, 512);
+            }
+            "use-2ce" => {
+                if c.use_2ce { score *= 1.4; } else { score *= -0.6; weight *= 0.35; }
+            }
+            "tile=4k" => {
+                weight *= alignment(c.tile_cols, 4_096);
+                score *= focus_gain(c.tile_cols, 4_096);
+            }
+            "tile=8k" => {
+                weight *= alignment(c.tile_cols, 8_192);
+                score *= focus_gain(c.tile_cols, 8_192);
+            }
+            "jacobi=1" => {
+                if c.jacobi_passes == 1 { score *= 1.3; } else { weight *= 0.4; score *= 0.4; }
+            }
+            "jacobi=2" => {
+                if c.jacobi_passes == 2 { score *= 1.1; } else { weight *= 0.3; score *= 0.2; }
+            }
+            _ => {}
+        }
+        out.push(st_logic::SoftRule { name: rule.name, weight, score });
+    }
+    out
+}
+
+fn alignment(actual: u32, target: u32) -> f32 {
+    let diff = (actual as i32 - target as i32).abs() as f32;
+    let scale = target.max(1) as f32;
+    (-(diff / scale).powi(2) * 4.0).exp().max(0.05)
+}
+
+fn focus_gain(actual: u32, target: u32) -> f32 {
+    let diff = (actual as i32 - target as i32).abs() as f32;
+    1.0 - (diff / target.max(1) as f32).min(0.9)
+}
+
+fn score_choice(c: &Choice, base_soft: &[st_logic::SoftRule], mode: SoftMode, alpha: f32) -> f32 {
+    let dyn_rules = instantiate_soft_rules(c, base_soft);
+    let soft = st_logic::apply_softmode(&dyn_rules, mode);
+    base_score_amg(c, alpha) + soft
+}
+
 fn neighbors_amg(c: &Choice) -> Vec<Choice> {
     let mut v = Vec::new();
     for &wg in &[128u32, 256, 512] {
