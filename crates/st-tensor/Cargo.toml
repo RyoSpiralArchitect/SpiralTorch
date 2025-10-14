@@ -1,0 +1,18 @@
+[package]
+name = "st-tensor"
+version = "0.1.0"
+edition = "2021"
+description = "SpiralTorch tensor utilities: fractional calculus (GL 1D) CPU + optional WGPU kernel"
+license = "AGPL-3.0-or-later"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+wgpu_frac = ["dep:wgpu", "dep:bytemuck"]
+
+[dependencies]
+# Optional; only needed if building WGPU kernel
+wgpu = { version = "0.19", optional = true }
+bytemuck = { version = "1.15", features = ["derive"], optional = true }
