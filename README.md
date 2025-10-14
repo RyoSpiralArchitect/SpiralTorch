@@ -1,9 +1,6 @@
 
 # 🌀🕯️SpiralTorch🕯️🌀
-> **SpiralTorch** — Pure Rust AI core for Z-space exploration.  
-> © 2025 Ryo SpiralArchitect — Licensed under AGPL-3.0-or-later.  
-> Contact: [GitHub Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
-> Unauthorized derivations = non-compliant with AGPL §13.
+
 **SpiralK + SoftLogic + (optional) WASM tuner** now power a language-native,
 hardware-aware learning stack. They pick the right **merge kind** and
 **tile width**, sure—but the same pipeline also keeps meaning flowing in Z-space
@@ -42,6 +39,10 @@ executor you choose.
   the new `UringFractalScheduler` for Tokio-uring style streaming, and the
   `AmegaHypergrad` tape so you can iterate on learning logic without
   PyTorch/Numpy while staying inside non-Euclidean geometry.
+- **Rust-first modules**
+  `st-nn` wraps the pure tensors into `nn.Module`-style building blocks,
+  streams gradients through the hypergrad tape, and keeps SpiralK planners one
+  call away.
 - **Optional WASM tuner table**
   Bake the JSON dataset offline and ship it to browsers/WASM. The runtime loads the table lazily, blends it with SpiralK, and keeps the optimiser in sync with the generated WGSL kernels.
 - **Self-Rewrite**
@@ -135,6 +136,23 @@ let exec = WgpuExecutor::default();
 
 // launch
 execute_rank(&exec, &plan)?;
+```
+
+**Rust (nn.Module-style training)**
+```rust
+use st_core::backend::device_caps::DeviceCaps;
+use st_nn::{Linear, ModuleTrainer, Tensor};
+
+let mut layer = Linear::new("encoder", 4, 2)?;
+let trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
+trainer.prepare(&mut layer)?;
+
+let inputs = Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4])?;
+let targets = Tensor::from_vec(1, 2, vec![0.0, 1.0])?;
+let output = layer.forward(&inputs)?;
+let grad = output.sub(&targets)?.scale(1.0 / inputs.shape().0 as f32)?;
+let _ = layer.backward(&inputs, &grad)?;
+trainer.step(&mut layer)?;
 ```
 
 `DeviceCaps` now ships backend-specific constructors (`wgpu`, `cuda`, `hip`, `cpu`) and
