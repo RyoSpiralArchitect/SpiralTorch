@@ -1,15 +1,24 @@
 
 # 🌀🕯️SpiralTorch🕯️🌀
-
+trains where PyTorch can’t — inside the Z-space.
 <p align="center">
+  <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
+  <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
+  <img src="https://img.shields.io/badge/MPS-ready-brightgreen.svg" alt="MPS ready">
+  <img src="https://img.shields.io/badge/CUDA-enabled-lightblue.svg" alt="CUDA enabled">
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="AGPL-3.0">
+</p>
+<p align="center">
+  <b>SpiralTorch — a Rust-first learning framework for Z-space.<br>
+  Runs natively on WGPU · MPS · CUDA · CPU.</b>
 </p>
 
 **SpiralTorch — Pure Rust AI core for Z-space exploration.**
 © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
 Unauthorized derivations = non-compliant with AGPL §13.
-**SpiralTorch is a Rust-first AI training framework that keeps language,
+**SpiralTorch is a Compact. Safe. Rust-native.
+~10× smaller than PyTorch, yet feature-complete in AI training that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
 the kernels, the hypergrad tape streams Z-space meaning, and the high-level
 `st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.**
@@ -180,8 +189,15 @@ let exec = WgpuExecutor::default();
 // launch
 execute_rank(&exec, &plan)?;
 ```
+**Modules**
+- `Linear`, `Conv1d`, `WaveRnn`, `ReLU`, `ZSpaceProjector`
+- `Sequential` composition and `ModuleTrainer`
+- Fully Rust-native, Python-accessible via wheels
 
-**Rust (nn.Module-style training)**
+**Features**
+- Dataset abstraction and serialization
+- Hypergrad integration for every parameter
+- WGPU · MPS · CUDA unified backends
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{
