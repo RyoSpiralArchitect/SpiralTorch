@@ -7,14 +7,14 @@
 
 <h1 align="center">Tiger Optimizer</h1>
 <p align="center"><i>Sign‑aware, trust‑ratio, LoRA‑PID with inertia — precise like a tiger.</i></p>
-**SpiralTorch** — Pure Rust AI core for Z-space exploration.  
+**SpiralTorch** — Pure Rust AI core for Z-space exploration.**
 > © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 > Contact: [GitHub Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
 > Unauthorized derivations = non-compliant with AGPL §13.
 **SpiralTorch is a Rust-first AI training framework** that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
 the kernels, the hypergrad tape streams Z-space meaning, and the high-level
-`st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.
+`st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.**
 
 The stack is comfortable living entirely in Rust—yet the Python wheel remains a
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
