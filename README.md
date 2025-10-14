@@ -1,19 +1,28 @@
 
 # 🌀🕯️SpiralTorch🕯️🌀
 
-**SpiralK + SoftLogic + (optional) WASM tuner** collaborate to pick the fastest **merge kind** and **tile width** for your hardware—then **Self-Rewrite** locks the win back into your heuristics.
-**WGPU** is the default path; **HIP/CUDA** absorb the **same unified choices**. Python wheels target **3.11–3.14**.
+**SpiralK + SoftLogic + (optional) WASM tuner** now power a language-native,
+hardware-aware learning stack. They pick the right **merge kind** and
+**tile width**, sure—but the same pipeline also keeps meaning flowing in Z-space
+with no NumPy, no PyTorch, and no tracebacks.
+Everything starts as Rust, yet Python bindings stay light so you can stitch the
+stack into existing workflows without inheriting heavy dependencies.
 
-Beyond kernels, the project now incubates an ever-expanding pure Rust learning
-stack: language stays raw, gradients stay hyperbolic, and meaning is sculpted
-directly in Z-space without ever touching NumPy or PyTorch.
+Whether you live entirely in Rust or call in from Python, SpiralTorch treats
+language, spectra, and device selection as one flow. No tensor shims, no
+auxiliary NumPy buffers—just the same Z-space conversation plugged into the
+executor you choose.
 
 > **Why it’s different**
-> - **Two-layer consensus:** SpiralK (runtime rules) + WASM table (offline measurements)  
-> - **Unified heuristics:** One `Choice { mk, mkd, tile, ctile, … }` across WGPU / HIP / CUDA  
-> - **1-CE Subgroup Top-K (WGPU):** candidates → final in a single compute pass  
-> - **MidK/BottomK compaction:** 1-CE / 2-CE, tile-aware, same API  
+> - **Three-voice consensus:** SpiralK (runtime rules), DSL directives, and the
+>   generated WASM table talk it out as A/B/C peers before anything lands, and every
+>   exchange lands in a timestamped roundtable log.
+> - **Unified heuristics:** One `Choice { mk, mkd, tile, ctile, … }` across WGPU / HIP / CUDA
+> - **1-CE Subgroup Top-K (WGPU):** candidates → final in a single compute pass
+> - **MidK/BottomK compaction:** 1-CE / 2-CE, tile-aware, same API
 > - **Amega Hypergrad:** unrolled / implicit (Neumann / CG) hyper-gradients that now sync with the pure tensor tape
+> - **Fractional AMG scoring:** Density-aware workgroup and tile proposals feed into SoftRule beams without
+>   ever touching NumPy or PyTorch.
 
 ---
 
@@ -30,10 +39,22 @@ directly in Z-space without ever touching NumPy or PyTorch.
   the new `UringFractalScheduler` for Tokio-uring style streaming, and the
   `AmegaHypergrad` tape so you can iterate on learning logic without
   PyTorch/Numpy while staying inside non-Euclidean geometry.
+- **Open-topos hypergrad streaming**
+  Parameters can now absorb complex Z-space waves or raw text directly into the
+  hypergrad tape, so the roundtable can keep expanding meaning without Euclidean
+  fallbacks or NumPy buffers.
+- **Rust-first modules & losses**
+  `st-nn` now ships `Linear`, `Sequential`, the lightweight `Relu`, the
+  hyperbolic `WaveGate`, and the `ZSpaceProjector` alongside
+  `MeanSquaredError` / `HyperbolicCrossEntropy` losses. They stream gradients
+  through the hypergrad tape, apply open-topos rewrites, and keep SpiralK
+  planners one call away with roundtable-aware scheduling helpers.
 - **Optional WASM tuner table**
-  Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
+  Bake the JSON dataset offline and ship it to browsers/WASM. The runtime loads the table lazily, blends it with SpiralK, and keeps the optimiser in sync with the generated WGSL kernels.
 - **Self-Rewrite**
-  A/B outcomes (Wilson CI) append `soft(...)` into `~/.spiraltorch/heur.kdsl` when the advantage is statistically significant.
+  A/B/C conversations (Wilson CI) append `soft(...)` into
+  `~/.spiraltorch/heur.kdsl` once the roundtable agrees a configuration is ahead, while transcripts land in
+  `roundtable.log` so you can replay how every choice surfaced.
   
 ---
 
@@ -94,6 +115,13 @@ maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
 # Add other backends via features (mps / cuda / hip)
 ```
 
+The binding crate mirrors the Rust feature flags. For example, to bake Metal
+support on macOS you can run:
+
+```bash
+maturin build -m bindings/st-py/Cargo.toml --release --features mps
+```
+
 ---
 
 ## Minimal API
@@ -116,6 +144,59 @@ let exec = WgpuExecutor::default();
 execute_rank(&exec, &plan)?;
 ```
 
+**Rust (nn.Module-style training)**
+```rust
+use st_core::backend::device_caps::DeviceCaps;
+use st_nn::{
+    Linear, MeanSquaredError, ModuleTrainer, Relu, RoundtableConfig, Sequential, Tensor,
+};
+
+let mut model = Sequential::new();
+model.push(Linear::new("encoder", 4, 3)?);
+model.push(Relu::new());
+model.push(Linear::new("head", 3, 2)?);
+
+let trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
+trainer.prepare(&mut model)?;
+
+let schedule = trainer.roundtable(1, 2, RoundtableConfig::default());
+let mut loss = MeanSquaredError::new();
+let dataset = vec![
+    (
+        Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4])?,
+        Tensor::from_vec(1, 2, vec![0.0, 1.0])?,
+    ),
+    (
+        Tensor::from_vec(1, 4, vec![0.2, 0.1, -0.3, 0.5])?,
+        Tensor::from_vec(1, 2, vec![1.0, 0.0])?,
+    ),
+];
+
+let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
+println!("roundtable avg loss: {:.6}", stats.average_loss);
+```
+
+**Rust (Z-space gating + projector)**
+```rust
+use st_core::backend::device_caps::DeviceCaps;
+use st_nn::{ModuleTrainer, Tensor, WaveGate, ZSpaceProjector};
+use st_tensor::pure::{topos::OpenCartesianTopos, LanguageWaveEncoder};
+
+let encoder = LanguageWaveEncoder::new(-0.9, 0.7)?;
+let topos = OpenCartesianTopos::new(-0.9, 1e-6, 1e4, 512, 16_384)?;
+let projector = ZSpaceProjector::new(topos.clone(), encoder.clone())?;
+let text = projector.encode_text("SpiralTorch keeps the open topos alive")?;
+
+let mut gate = WaveGate::with_topos("gate", text.shape().1, encoder, topos.clone())?;
+let trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -0.9, 0.05, 0.01);
+trainer.prepare_with_topos(&mut gate, topos)?;
+
+let forward = gate.forward(&text)?;
+let grad = forward.hadamard(&text)?.scale(1.0 / forward.shape().0 as f32)?;
+let _ = gate.backward(&text, &grad)?;
+trainer.step(&mut gate)?;
+```
+
 `DeviceCaps` now ships backend-specific constructors (`wgpu`, `cuda`, `hip`, `cpu`) and
 builder-style setters (`with_subgroup`, `with_max_workgroup`, `with_shared_mem`) so you
 can describe GPUs with realistic limits while still feeding the unified heuristic chooser
@@ -125,87 +206,69 @@ effective occupancy, and auto-derive sweep/compaction tiles from the device limi
 
 **Python**
 ```python
-import numpy as np, spiraltorch as st
+import spiraltorch as st
 
-x = np.random.randn(8, 65536).astype(np.float32)
-vals, idx = st.topk2d(x, k=1024, device="auto")   # "wgpu > cuda > mps > cpu"
+plan = st.plan_topk(rows=8, cols=65_536, k=1_024, device="auto")
+print(plan["choice"])  # unified merge-kind, tiles, and workgroup sizing
 ```
 
 ---
 
 ## Pure Rust training (zero PyTorch/Numpy deps)
 
-Need a bootstrap-friendly learning loop without pulling in heavyweight
-dependencies?  `st-tensor::pure` now ships with zero-panic tensors,
-hyperbolic distance helpers, and complex-spectrum encoders so the stack keeps
-accelerating without ever leaning on NumPy or PyTorch.
+Need a bootstrap-friendly learning loop without heavyweight dependencies?
+`st-nn` layers sit directly on top of the `st-tensor::pure` stack so you can
+train, schedule, and log every A/B/C decision entirely in Rust.
 
 ```rust
-use st_tensor::pure::{LinearModel, PureResult, Tensor, mean_squared_error};
+use st_core::backend::device_caps::DeviceCaps;
+use st_nn::{
+    HyperbolicCrossEntropy, Linear, MeanSquaredError, ModuleTrainer, Relu,
+    RoundtableConfig, Sequential, Tensor,
+};
 
-fn main() -> PureResult<()> {
-    // Build a dataset for y = 2x + 1 using plain Rust vectors.
-    let inputs = Tensor::from_vec(4, 1, vec![0.0, 1.0, 2.0, 3.0])?;
-    let targets = Tensor::from_vec(4, 1, vec![1.0, 3.0, 5.0, 7.0])?;
+fn main() -> st_nn::PureResult<()> {
+    let mut model = Sequential::new();
+    model.push(Linear::new("encoder", 3, 4)?);
+    model.push(Relu::new());
+    model.push(Linear::new("head", 4, 2)?);
 
-    let mut model = LinearModel::new(1, 1)?;
-    for _ in 0..200 {
-        model.train_batch(&inputs, &targets, 0.1)?;
-    }
+    let trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -0.95, 0.05, 0.01);
+    trainer.prepare(&mut model)?;
 
-    let predictions = model.forward(&inputs)?;
-    let mse = mean_squared_error(&predictions, &targets)?;
-    println!("Final MSE: {mse:.6}");
+    // Build a roundtable that splits gradients into Above/Here/Beneath bands.
+    let schedule = trainer.roundtable(1, 2, RoundtableConfig::default());
+
+    let dataset = vec![
+        (
+            Tensor::from_vec(1, 3, vec![0.3, -0.7, 0.1])?,
+            Tensor::from_vec(1, 2, vec![1.0, 0.0])?,
+        ),
+        (
+            Tensor::from_vec(1, 3, vec![-0.1, 0.4, -0.6])?,
+            Tensor::from_vec(1, 2, vec![0.0, 1.0])?,
+        ),
+    ];
+
+    let mut mse = MeanSquaredError::new();
+    let epoch = trainer.train_epoch(&mut model, &mut mse, dataset.clone(), &schedule)?;
+    println!("epoch loss: {:.6}", epoch.average_loss);
+
+    // Inspect the logits with a hyperbolic cross-entropy probe.
+    let mut hce = HyperbolicCrossEntropy::new(-0.95)?;
+    let logits = model.forward(&dataset[0].0)?;
+    let ce = hce.forward(&logits, &dataset[0].1)?;
+    println!("hyperbolic CE: {:.6}", ce.data()[0]);
+
     Ok(())
 }
 ```
 
-Everything runs with `cargo run -p st-tensor --example ...` or inside your own
-binary crate—no Python wheels required. When you want to leave Euclidean space,
-hand text straight to the Z-space encoder and stay in browser-friendly memory
-limits without ever tokenizing:
-
-```rust
-use st_tensor::pure::{LanguageWaveEncoder, PureResult};
-
-fn main() -> PureResult<()> {
-    let encoder = LanguageWaveEncoder::new(-1.0, 0.75)?;
-    let z_space = encoder.encode_z_space("SpiralTorch stays homotopy-free")?;
-    println!("{} hyperbolic components", z_space.shape().1);
-    Ok(())
-}
-```
-
-Take it further by coupling the Z-space encoder with the brand-new `AmegaHypergrad`
-tape: gradients stay conformal, curvature never drifts, and the entire pipeline
-continues to run without touching NumPy or PyTorch.
-
-```rust
-use st_tensor::pure::{AmegaHypergrad, LanguageWaveEncoder, PureResult, Tensor};
-
-fn main() -> PureResult<()> {
-    let encoder = LanguageWaveEncoder::new(-1.0, 0.8)?;
-    let wave = encoder.encode_z_space("hyperbolic language without tokens")?;
-    let (rows, cols) = wave.shape();
-
-    let mut hypergrad = AmegaHypergrad::new(encoder.curvature(), 0.03, rows, cols)?;
-    hypergrad.accumulate_wave(&wave)?;
-
-    let targets = Tensor::zeros(rows, cols)?;
-    hypergrad.accumulate_pair(&wave, &targets)?;
-
-    let mut weights = Tensor::zeros(rows, cols)?;
-    hypergrad.apply(&mut weights)?;
-
-    println!("updated weight energy = {:.6}", weights.squared_l2_norm());
-    Ok(())
-}
-```
-
-Because the optimiser keeps its own curvature-aware buffer, you can stream
-text → wave → hypergrad endlessly without ever seeing a traceback. Non-Euclidean
-geometry, imaginary spectra, and category-inspired language flows all feed the
-same tape, letting SpiralTorch chase meaning directly in Z-space.
+Above/Beneath/Here gradients map directly onto TopK/MidK/BottomK roundtable
+plans, so every update records which parts of the spectrum drove the change.
+Hyperbolic losses run on the same tensors, meaning you can bounce between Z-space
+encoders, Euclidean projections, and browser-friendly WASM canvases without
+importing PyTorch or NumPy.
 
 ### Fractal uring scheduler + WASM canvas loop
 
@@ -316,65 +379,73 @@ export SPIRAL_HEUR_K='
 '
 ```
 
-**How the final choice is made (two-layer consensus)**
+**How the final choice is made (three-way roundtable)**
 
 - **A** = SoftLogic best (your DSL soft + optional Redis soft)
 - **B** = DSL **hard** assignment (if you set `mk:`/`tile:` explicitly, B wins)
 - **C** = **Generated table** (tuner output)
 
-Default policy: if **B** exists use it; else compare **A vs C** by SoftLogic score and
-favor **C** with a small prior (`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`). The runtime now
-refines every candidate by snapping workgroup/tile sizes to the device lane width,
-injects backend-specific merge-kind defaults when unset, and finally scores each
-candidate with a tiny occupancy + alignment model before adopting the highest-scoring
-plan (with the generated path inheriting the configured bias).
-Default policy: if **B** exists use it; else score **A** and **C** with backend-aware
-occupancy/tile metrics derived from `DeviceCaps`, then add a small prior to **C**
-(`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`).
-If the adopted choice wins locally (Wilson CI lower bound > 0.5 with min trials), **Self-Rewrite** appends matching `soft(...)` to `~/.spiraltorch/heur.kdsl`.
+Default policy: if **B** exists use it; otherwise the runtime invites **A** and **C** into a quick conversation. It scores both with backend-aware occupancy/tile metrics derived from `DeviceCaps`, then adds a gentle prior to **C** (`SPIRAL_HEUR_GEN_WEIGHT`, default `0.10`). When the discussion reaches a Wilson-backed agreement, **Self-Rewrite** appends the matching `soft(...)` into `~/.spiraltorch/heur.kdsl` so the next run starts from the shared insight.
+
+Want to materialise the FFT path straight from the chosen plan? Call the new helpers and feed the result to your browser/WASM runtime:
+
+```rust
+use st_core::backend::wgpu_heuristics::{auto_fft_spiralk, auto_fft_wgsl};
+
+let wgsl = auto_fft_wgsl(rows, cols, k, subgroup).expect("heuristics available");
+let spiralk = auto_fft_spiralk(rows, cols, k, subgroup).unwrap();
+// ship `wgsl` to your WebGPU runtime and persist `spiralk` if you want the DSL to learn it.
+```
 
 ---
 
 ## Regenerating the WASM table (optional)
 
-The repo includes a tiny generator that converts tuner JSON to a Rust table:
+Run the offline baker to convert your latest measurements into a `WasmTunerTable`
+that both native and browser builds can consume:
 ```bash
 python3 tools/tuner/gen_generated_rs.py tools/tuner/tuner_results.json \
   > crates/st-core/src/backend/wgpu_heuristics_generated.rs
 ```
 
+The generated module keeps the JSON embedded verbatim, parses it via
+`st-core::backend::wasm_tuner`, and exposes a `choose(...)` helper that the
+runtime queries after SpiralK/SoftLogic have spoken. Because the JSON format is
+portable, you can ship the same file to a WebWorker, bake a table offline, and
+let the browser pick overrides without re-running the tuner in production.
+
 ### Fractional FFT / SpiralK roadmap
 
-- **Radix-2 → Radix-4 pipeline**: The new `st-frac::fft` module mirrors the GPU
-  butterfly structure so SpiralK can auto-emit subgroup-aware WGSL.
+- **Radix-2 → Radix-4 pipeline**: `st-frac::fft` still mirrors the GPU
+  butterfly structure, and the new `SpiralKFftPlan` bridge turns the resulting
+  `Choice` into auto-generated WGSL kernels for WebGPU.
 - **Wilson-aware automation**: `st-kdsl::auto` turns latency deltas into
   high-confidence `soft(...)` rewrites, wiring tuned `radix`, `tile_cols`, and
   `segments` into `heur.kdsl` without manual editing.
 - **ND GPU indexer**: A dedicated WGSL kernel materialises strided indices and
   per-segment IDs, unlocking fast fractional/FFT dispatches from WASM → Canvas.
-- **WASM tuner baking**: The generator now bakes `tile_cols`/`radix`/`segments`
-  into the Rust table, ensuring the browser path stays in sync with native
-  runners when driving SpiralK graphs.
+- **WASM tuner baking**: `tools/tuner/tuner_results.json` keeps the measured
+  overrides (`tile_cols`, `radix`, `segments`, `mode_*`) in one place so the
+  generator can bake them into Rust **and** expose them to the Web via JSON.
 
 **Example JSON**
 ```json
 [
-  {"rows": 1024, "cols_min": 4096,  "cols_max": 8191,   "k_max": 128,  "sg": true,  "mk": 2, "tile": 512,
-   "tile_cols": 1024, "radix": 2, "segments": 1, "use_2ce": false},
-  {"rows": 1024, "cols_min": 8192,  "cols_max": 65535,  "k_max": 2048, "sg": true,  "mk": 1, "tile": 1024,
-   "tile_cols": 2048, "radix": 4, "segments": 2},
-  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": true,  "mk": 1, "tile": 2048,
-   "tile_cols": 4096, "radix": 4, "segments": 4, "use_2ce": true},
-  {"rows": 1024, "cols_min": 4096,  "cols_max": 65535,  "k_max": 2048, "sg": false, "mk": 1, "tile": 1024,
-   "tile_cols": 1024, "radix": 2, "segments": 1},
-  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": false, "mk": 0, "tile": 2048,
-   "tile_cols": 2048, "radix": 4, "segments": 2, "use_2ce": true}
+  {"rows": 256,  "cols_min": 0,     "cols_max": 4095,   "k_max": 128,  "sg": true,
+   "wg": 128,    "tile": 512,  "tile_cols": 512,  "radix": 2, "segments": 1},
+  {"rows": 512,  "cols_min": 4096,  "cols_max": 16383,  "k_max": 256,  "sg": true,
+   "wg": 256,    "tile": 1024, "tile_cols": 1024, "radix": 4, "segments": 2},
+  {"rows": 512,  "cols_min": 16384, "cols_max": 65535,  "k_max": 2048, "sg": false,
+   "wg": 128,    "tile": 2048, "tile_cols": 2048, "radix": 4, "segments": 4, "use_2ce": true},
+  {"rows": 1024, "cols_min": 65536, "cols_max": 262143, "k_max": 4096, "sg": false,
+   "wg": 128,    "tile": 4096, "tile_cols": 4096, "radix": 4, "segments": 4, "use_2ce": true,
+   "mode_bottomk": 2}
 ]
 ```
 
-The generator now bakes FFT-oriented hints (`tile_cols`, `radix`) and the ND GPU
-segment count directly into the Rust table, so `st-core` can immediately expose
-them to the SpiralK Wilson self-rewrite logic.
+The generator bakes FFT-oriented hints (`tile_cols`, `radix`, `segments`) and
+the ND compaction settings into the Rust table, while the same JSON remains
+available for WASM workers that want to replay the optimisation flow offline.
 
 ---
 
