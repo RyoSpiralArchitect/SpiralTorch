@@ -4,6 +4,7 @@ use st_tensor::pure::{
     topos::OpenCartesianTopos, AmegaHypergrad, ComplexTensor, LanguageWaveEncoder, PureResult,
     Tensor, TensorError,
 };
+use std::collections::HashMap;
 
 /// Trainable parameter that can either rely on the hypergrad tape or fall back
 /// to standard Euclidean accumulation.
@@ -173,6 +174,13 @@ impl Parameter {
         }
         Ok(())
     }
+
+    /// Replaces the parameter value with the provided tensor.
+    pub fn load_value(&mut self, value: &Tensor) -> PureResult<()> {
+        self.assert_shape(value)?;
+        *self.value_mut() = value.clone();
+        Ok(())
+    }
 }
 
 /// High-level module trait inspired by PyTorch's `nn.Module` but expressed in
@@ -246,6 +254,28 @@ pub trait Module {
     /// implementation simply returns `None` which indicates the module is agnostic.
     fn preferred_device(&self) -> Option<DeviceCaps> {
         None
+    }
+
+    /// Captures a copy of every parameter tensor keyed by its canonical name.
+    fn state_dict(&self) -> PureResult<HashMap<String, Tensor>> {
+        let mut state = HashMap::new();
+        self.visit_parameters(&mut |param| {
+            state.insert(param.name().to_string(), param.value().clone());
+            Ok(())
+        })?;
+        Ok(state)
+    }
+
+    /// Restores parameters from a state dictionary produced by [`Module::state_dict`].
+    fn load_state_dict(&mut self, state: &HashMap<String, Tensor>) -> PureResult<()> {
+        self.visit_parameters_mut(&mut |param| {
+            let Some(value) = state.get(param.name()) else {
+                return Err(TensorError::MissingParameter {
+                    name: param.name().to_string(),
+                });
+            };
+            param.load_value(value)
+        })
     }
 }
 

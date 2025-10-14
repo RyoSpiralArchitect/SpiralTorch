@@ -8,6 +8,7 @@
 //! responsive even when the surrounding platform is sandboxed.
 
 pub mod fractal;
+pub mod measure;
 pub mod topos;
 
 use self::topos::OpenCartesianTopos;
@@ -47,6 +48,12 @@ pub enum TensorError {
     NonPositiveSaturation { saturation: f32 },
     /// Computation received an empty input which would otherwise trigger a panic.
     EmptyInput(&'static str),
+    /// Attempted to load or update a parameter that was missing from the state dict.
+    MissingParameter { name: String },
+    /// Wrapper around I/O failures when persisting or restoring tensors.
+    IoError { message: String },
+    /// Wrapper around serde failures when deserialising tensors.
+    SerializationError { message: String },
     /// A helper expected matching curvature parameters but received different values.
     CurvatureMismatch { expected: f32, got: f32 },
     /// Numeric guard detected a non-finite value that would otherwise propagate NaNs.
@@ -118,6 +125,18 @@ impl fmt::Display for TensorError {
                 write!(
                     f,
                     "non-finite value detected for {label}; rewrite monad absorbed {value}"
+                )
+            }
+            TensorError::MissingParameter { name } => {
+                write!(f, "missing parameter '{name}' while loading module state")
+            }
+            TensorError::IoError { message } => {
+                write!(f, "i/o error while handling tensor data: {message}")
+            }
+            TensorError::SerializationError { message } => {
+                write!(
+                    f,
+                    "serialization error while handling tensor data: {message}"
                 )
             }
             TensorError::TensorVolumeExceeded { volume, max_volume } => {
@@ -337,6 +356,20 @@ impl Tensor {
         out
     }
 
+    /// Returns a reshaped copy of the tensor when the requested dimensions are compatible.
+    pub fn reshape(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        if rows * cols != self.data.len() {
+            return Err(TensorError::DataLength {
+                expected: rows * cols,
+                got: self.data.len(),
+            });
+        }
+        Tensor::from_vec(rows, cols, self.data.clone())
+    }
+
     /// Returns the sum over rows for each column.
     pub fn sum_axis0(&self) -> Vec<f32> {
         let mut sums = vec![0.0; self.cols];
@@ -347,6 +380,33 @@ impl Tensor {
             }
         }
         sums
+    }
+
+    /// Concatenates tensors row-wise producing a new tensor whose row count is the sum
+    /// of the inputs while preserving the shared column dimension.
+    pub fn cat_rows(tensors: &[Tensor]) -> PureResult<Tensor> {
+        if tensors.is_empty() {
+            return Err(TensorError::EmptyInput("Tensor::cat_rows"));
+        }
+        let cols = tensors[0].cols;
+        if cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows: 0, cols });
+        }
+        let mut total_rows = 0usize;
+        for tensor in tensors {
+            if tensor.cols != cols {
+                return Err(TensorError::ShapeMismatch {
+                    left: tensor.shape(),
+                    right: (tensor.rows, cols),
+                });
+            }
+            total_rows += tensor.rows;
+        }
+        let mut data = Vec::with_capacity(total_rows * cols);
+        for tensor in tensors {
+            data.extend_from_slice(&tensor.data);
+        }
+        Tensor::from_vec(total_rows, cols, data)
     }
 
     /// Computes the squared L2 norm of the tensor.

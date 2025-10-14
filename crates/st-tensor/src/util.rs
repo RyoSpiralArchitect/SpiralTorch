@@ -15,10 +15,10 @@ pub fn readback_f32(device: &Device, queue: &Queue, src: &Buffer, len: usize) ->
     queue.submit(Some(enc.finish()));
 
     let slice = rb.slice(..);
-    let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+    let (sender, receiver) = std::sync::mpsc::channel();
     slice.map_async(MapMode::Read, move |v| sender.send(v).unwrap());
     device.poll(Maintain::Wait);
-    let _ = futures_lite::future::block_on(receiver.receive());
+    receiver.recv().expect("map_async callback dropped").expect("buffer map failed");
 
     let data = slice.get_mapped_range();
     let mut out = vec![0.0f32; len];

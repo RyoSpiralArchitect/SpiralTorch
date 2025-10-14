@@ -13,11 +13,14 @@ crate-type = ["cdylib"]
 [features]
 default = ["extension-module"]
 extension-module = ["pyo3/extension-module"]
-wgpu = ["st-core/wgpu"]
+
+# Backend selection (mirrors the CLI surface expected by maturin builds)
+cpu = []
+wgpu = ["st-core/wgpu", "st-tensor/wgpu"]
 "wgpu-rt" = ["st-core/wgpu-rt", "wgpu"]
-mps = ["st-core/mps"]
-cuda = ["st-core/cuda"]
-hip = ["st-core/hip"]
+mps = ["st-core/mps", "st-tensor/mps"]
+cuda = ["st-core/cuda", "st-tensor/cuda"]
+hip = ["st-core/hip", "st-tensor/hip"]
 "hip-real" = ["hip", "st-core/hip-real"]
 logic = ["st-core/logic"]
 kdsl = ["st-core/kdsl"]
@@ -28,6 +31,7 @@ kdsl = ["st-core/kdsl"]
 pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", "gil-refs"] }
 st-core = { path = "../../crates/st-core", default-features = false }
 st-tensor = { path = "../../crates/st-tensor", default-features = false }
+st-nn = { path = "../../crates/st-nn" }
 
 [package.metadata.maturin]
 name = "spiraltorch"

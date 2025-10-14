@@ -1,14 +1,15 @@
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
-use crate::schedule::{GradientBands, RoundtableConfig, RoundtableSchedule};
+use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
 use st_tensor::pure::topos::OpenCartesianTopos;
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
 #[derive(Debug)]
@@ -18,7 +19,13 @@ pub struct ModuleTrainer {
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
     blackcat: Option<BlackCatRuntime>,
+    autopilot: Option<Autopilot>,
+    band_weight_fn: Option<BandWeightFn>,
+    injector_enabled: bool,
 }
+
+/// Function pointer used to convert band energy into Above/Here/Beneath weights.
+pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
 
 impl ModuleTrainer {
     /// Creates a new trainer with the provided device capabilities and learning rates.
@@ -34,6 +41,9 @@ impl ModuleTrainer {
             hyper_learning_rate,
             fallback_learning_rate,
             blackcat: None,
+            autopilot: None,
+            band_weight_fn: None,
+            injector_enabled: false,
         }
     }
 
@@ -41,6 +51,27 @@ impl ModuleTrainer {
     pub fn with_blackcat(mut self, runtime: BlackCatRuntime) -> Self {
         self.blackcat = Some(runtime);
         self
+    }
+
+    /// Attaches an Autopilot runtime for contextual kernel selection.
+    pub fn with_autopilot(mut self, autopilot: Autopilot) -> Self {
+        self.autopilot = Some(autopilot);
+        self
+    }
+
+    /// Enables per-band reweighting of the loss/gradient.
+    pub fn set_band_weights(&mut self, weight_fn: BandWeightFn) {
+        self.band_weight_fn = Some(weight_fn);
+    }
+
+    /// Clears any registered band weighting rule.
+    pub fn clear_band_weights(&mut self) {
+        self.band_weight_fn = None;
+    }
+
+    /// Enables or disables the adaptive injector heuristics.
+    pub fn enable_injector(&mut self, on: bool) {
+        self.injector_enabled = on;
     }
 
     /// Returns the underlying planner.
@@ -104,42 +135,73 @@ impl ModuleTrainer {
         let mut total_loss = 0.0f32;
         let mut steps = 0usize;
         for (input, target) in batches.into_iter() {
+            let step_start = Instant::now();
             if let Some(rt) = self.blackcat.as_mut() {
                 rt.begin_step();
+            }
+            if let Some(ap) = self.autopilot.as_mut() {
+                let (rows, cols) = input.shape();
+                let depth = schedule.above().k + schedule.here().k + schedule.beneath().k;
+                let context = ap.build_context(
+                    rows as u32,
+                    cols as u32,
+                    depth,
+                    self.estimate_device_load(),
+                    &[],
+                );
+                let _ = ap.suggest(context);
             }
             let prediction = module.forward(&input)?;
             let loss_value = loss.forward(&prediction, &target)?;
             let step_loss = loss_value.data().iter().copied().sum::<f32>();
-            total_loss += step_loss;
             let grad_output = loss.backward(&prediction, &target)?;
             let mut band_energy = schedule.band_energy(&grad_output)?;
             if let Some(rt) = self.blackcat.as_ref() {
                 band_energy.drift = rt.frac_penalty() as f32;
             }
-            let bands: GradientBands = schedule.split(&grad_output)?;
+            let mut bands: GradientBands = schedule.split(&grad_output)?;
+            let weights = self
+                .band_weight_fn
+                .map(|f| f(band_energy))
+                .unwrap_or((1.0, 1.0, 1.0));
+            bands.scale_inplace(weights.0, weights.1, weights.2);
+            let weighted_loss = if self.band_weight_fn.is_some() {
+                let effective = weights.1 + 0.5 * (weights.0 + weights.2);
+                step_loss * effective.max(0.0)
+            } else {
+                step_loss
+            };
+            total_loss += weighted_loss;
             let _ = module.backward_bands(&input, &bands)?;
             self.step(module)?;
             self.zero(module)?;
             steps += 1;
 
-            if let Some(rt) = self.blackcat.as_mut() {
-                let elapsed_ms = rt
-                    .elapsed_since_begin()
+            let elapsed_ms = if let Some(rt) = self.blackcat.as_ref() {
+                rt.elapsed_since_begin()
                     .unwrap_or_else(|| Duration::from_secs_f64(0.0))
                     .as_secs_f64()
-                    * 1_000.0;
-                let mut extra = HashMap::new();
-                extra.insert("band_above".to_string(), band_energy.above as f64);
-                extra.insert("band_here".to_string(), band_energy.here as f64);
-                extra.insert("band_beneath".to_string(), band_energy.beneath as f64);
-                extra.insert("band_drift".to_string(), band_energy.drift as f64);
-                extra.insert("step_loss".to_string(), step_loss as f64);
-                let metrics = StepMetrics {
-                    step_time_ms: elapsed_ms,
-                    mem_peak_mb: 0.0,
-                    retry_rate: 0.0,
-                    extra,
-                };
+                    * 1_000.0
+            } else {
+                step_start.elapsed().as_secs_f64() * 1_000.0
+            };
+            let mut extra = HashMap::new();
+            extra.insert("band_above".to_string(), band_energy.above as f64);
+            extra.insert("band_here".to_string(), band_energy.here as f64);
+            extra.insert("band_beneath".to_string(), band_energy.beneath as f64);
+            extra.insert("band_drift".to_string(), band_energy.drift as f64);
+            extra.insert("step_loss".to_string(), step_loss as f64);
+            extra.insert("loss_weighted".to_string(), weighted_loss as f64);
+            let metrics = StepMetrics {
+                step_time_ms: elapsed_ms,
+                mem_peak_mb: 0.0,
+                retry_rate: 0.0,
+                extra,
+            };
+            if let Some(ap) = self.autopilot.as_mut() {
+                ap.report(&metrics);
+            }
+            if let Some(rt) = self.blackcat.as_mut() {
                 let reward = rt.post_step(&metrics);
                 if reward > 0.0 {
                     let plan = schedule.above();
@@ -160,6 +222,11 @@ impl ModuleTrainer {
                 total_loss / steps as f32
             },
         })
+    }
+
+    fn estimate_device_load(&self) -> f64 {
+        let caps = self.planner.device_caps();
+        caps.occupancy_score(caps.max_workgroup) as f64
     }
 }
 
