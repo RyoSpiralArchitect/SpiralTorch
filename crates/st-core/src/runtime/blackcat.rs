@@ -1,0 +1,651 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// ============================================================================
+// st-core BlackCat v0.3 (pure Rust)
+// Runtime: ZMetaES (derivative-free), SoftBandit (LinTS/UCB), Wilson guard,
+// HeurStore bridge, AB runner, Rope LRU hook.
+// No external deps; std only. Designed to live under crates/st-core/src/runtime/.
+// ============================================================================
+
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+use bandit::{SoftBandit, SoftBanditMode};
+use rewrite::HeurStore;
+use wilson::wilson_lower;
+use zmeta::{ZMetaES, ZMetaParams};
+
+/// Metrics reported by a training loop back into the runtime.
+#[derive(Clone, Debug, Default)]
+pub struct StepMetrics {
+    pub step_time_ms: f64,
+    pub mem_peak_mb: f64,
+    pub retry_rate: f64,
+    pub extra: HashMap<String, f64>,
+}
+
+/// Reward shaping configuration that blends timing, memory, and stability.
+#[derive(Clone, Debug)]
+pub struct RewardCfg {
+    pub lam_speed: f64,
+    pub lam_mem: f64,
+    pub lam_stab: f64,
+    pub scale_speed: f64,
+    pub scale_mem: f64,
+    pub scale_stab: f64,
+}
+
+impl Default for RewardCfg {
+    fn default() -> Self {
+        Self {
+            lam_speed: 0.5,
+            lam_mem: 0.3,
+            lam_stab: 0.2,
+            scale_speed: 10.0,
+            scale_mem: 1024.0,
+            scale_stab: 1.0,
+        }
+    }
+}
+
+impl RewardCfg {
+    pub fn score(&self, metrics: &StepMetrics, frac_penalty: f64) -> f64 {
+        let mut s = 0.0;
+        s -= self.lam_speed * (metrics.step_time_ms / self.scale_speed.max(1e-9));
+        s -= self.lam_mem * (metrics.mem_peak_mb / self.scale_mem.max(1e-9));
+        s -= self.lam_stab * (metrics.retry_rate / self.scale_stab.max(1e-9));
+        s -= frac_penalty;
+        s
+    }
+}
+
+/// Named groups of candidate choices (tile, merge strategy, etc.).
+#[derive(Clone, Debug)]
+pub struct ChoiceGroups {
+    pub groups: HashMap<String, Vec<String>>,
+}
+
+/// Multi-armed contextual bandit that operates over named groups.
+pub struct MultiBandit {
+    arms: HashMap<String, SoftBandit>,
+}
+
+impl MultiBandit {
+    pub fn new(groups: &ChoiceGroups, feat_dim: usize, mode: SoftBanditMode) -> Self {
+        let mut arms = HashMap::new();
+        for (name, opts) in &groups.groups {
+            arms.insert(name.clone(), SoftBandit::new(opts.clone(), feat_dim, mode));
+        }
+        Self { arms }
+    }
+
+    pub fn select_all(&mut self, context: &[f64]) -> HashMap<String, String> {
+        let mut picks = HashMap::new();
+        for (name, bandit) in self.arms.iter_mut() {
+            let choice = bandit.select(context);
+            picks.insert(name.clone(), choice);
+        }
+        picks
+    }
+
+    pub fn update_all(&mut self, context: &[f64], reward: f64) {
+        for bandit in self.arms.values_mut() {
+            bandit.update_last(context, reward);
+        }
+    }
+}
+
+/// BlackCat orchestrator that joins ES search with contextual bandits.
+pub struct BlackCatRuntime {
+    pub z: ZMetaES,
+    pub bandits: MultiBandit,
+    pub heur: HeurStore,
+    pub reward: RewardCfg,
+    last_context: Vec<f64>,
+    last_picks: HashMap<String, String>,
+    last_step_start: Option<Instant>,
+}
+
+impl BlackCatRuntime {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        z_params: ZMetaParams,
+        groups: ChoiceGroups,
+        feat_dim: usize,
+        mode: SoftBanditMode,
+        heur_path: Option<String>,
+    ) -> Self {
+        let bandits = MultiBandit::new(&groups, feat_dim, mode);
+        let heur = HeurStore::new(heur_path);
+        Self {
+            z: ZMetaES::new(z_params),
+            bandits,
+            heur,
+            reward: RewardCfg::default(),
+            last_context: Vec::new(),
+            last_picks: HashMap::new(),
+            last_step_start: None,
+        }
+    }
+
+    /// Call at the beginning of a training step.
+    pub fn begin_step(&mut self) {
+        self.last_step_start = Some(Instant::now());
+    }
+
+    /// Build a contextual feature vector from runtime metrics.
+    pub fn make_context(
+        &self,
+        batches: u32,
+        tiles: u32,
+        depth: u32,
+        device_code: u32,
+        load: f64,
+        extras: &[(String, f64)],
+        feat_dim: usize,
+    ) -> Vec<f64> {
+        let mut ctx = vec![
+            1.0,
+            batches as f64,
+            tiles as f64,
+            depth as f64,
+            (device_code % 1024) as f64 / 1024.0,
+            load,
+        ];
+        for (_, value) in extras.iter() {
+            ctx.push(*value);
+        }
+        ctx.resize(feat_dim, 0.0);
+        ctx
+    }
+
+    /// Choose all groups at once, storing the picks and context internally.
+    pub fn choose(&mut self, context: Vec<f64>) -> HashMap<String, String> {
+        let picks = self.bandits.select_all(&context);
+        self.last_context = context;
+        self.last_picks = picks.clone();
+        picks
+    }
+
+    /// Update both the ES search and contextual bandits after a step.
+    pub fn post_step(&mut self, metrics: &StepMetrics) -> f64 {
+        let curr_penalty = self.z.frac_penalty();
+        let reward_current = self.reward.score(metrics, curr_penalty);
+        let proposed_penalty = self.z.frac_penalty_proposed();
+        self.z.update(
+            reward_current,
+            reward_current - (proposed_penalty - curr_penalty),
+        );
+        self.bandits.update_all(&self.last_context, reward_current);
+        reward_current
+    }
+
+    /// Returns the current fractional regularisation penalty tracked by ZMeta.
+    pub fn frac_penalty(&self) -> f64 {
+        self.z.frac_penalty()
+    }
+
+    /// Try to adopt a new soft heuristic guarded by the Wilson lower bound.
+    pub fn try_adopt_soft(
+        &mut self,
+        rule_text: &str,
+        wins: u32,
+        trials: u32,
+        baseline_p: f64,
+    ) -> bool {
+        let lb = wilson_lower(wins as i32, trials as i32, 1.96);
+        if lb > baseline_p {
+            let mut info = HashMap::new();
+            info.insert("wins".to_string(), wins as f64);
+            info.insert("trials".to_string(), trials as f64);
+            self.heur
+                .append(&format!("{}  # blackcat", rule_text.trim()), &info);
+            return true;
+        }
+        false
+    }
+
+    /// Returns the duration since the last [`begin_step`] call.
+    pub fn elapsed_since_begin(&self) -> Option<Duration> {
+        self.last_step_start.map(|start| start.elapsed())
+    }
+
+    /// Returns the last contextual feature vector used for bandit updates.
+    pub fn last_context(&self) -> &[f64] {
+        &self.last_context
+    }
+
+    /// Returns the picks that were selected during the last [`choose`] call.
+    pub fn last_picks(&self) -> &HashMap<String, String> {
+        &self.last_picks
+    }
+}
+
+// =================== zmeta.rs ===================
+pub mod zmeta {
+    use randless::{Rng, StdRng};
+
+    #[derive(Clone, Debug)]
+    pub struct ZMetaParams {
+        pub dim: usize,
+        pub sigma: f64,
+        pub lr: f64,
+        pub alpha_frac: f64,
+        pub lam_frac: f64,
+        pub seed: u64,
+    }
+
+    impl Default for ZMetaParams {
+        fn default() -> Self {
+            Self {
+                dim: 6,
+                sigma: 0.15,
+                lr: 0.1,
+                alpha_frac: 0.35,
+                lam_frac: 0.1,
+                seed: 42,
+            }
+        }
+    }
+
+    pub struct ZMetaES {
+        z: Vec<f64>,
+        dir: Vec<f64>,
+        params: ZMetaParams,
+        rng: StdRng,
+    }
+
+    impl ZMetaES {
+        pub fn new(params: ZMetaParams) -> Self {
+            let rng = StdRng::seed_from_u64(params.seed);
+            let mut dir = vec![0.0; params.dim];
+            for value in dir.iter_mut() {
+                *value = rng.gauss(0.0, 1.0);
+            }
+            normalize(&mut dir);
+            Self {
+                z: vec![0.0; params.dim],
+                dir,
+                params,
+                rng,
+            }
+        }
+
+        pub fn z(&self) -> &[f64] {
+            &self.z
+        }
+
+        pub fn frac_penalty(&self) -> f64 {
+            frac_penalty(&self.z, self.params.alpha_frac, self.params.lam_frac)
+        }
+
+        pub fn frac_penalty_proposed(&self) -> f64 {
+            let proposed: Vec<f64> = self
+                .z
+                .iter()
+                .zip(self.dir.iter())
+                .map(|(z, d)| z + self.params.sigma * d)
+                .collect();
+            frac_penalty(&proposed, self.params.alpha_frac, self.params.lam_frac)
+        }
+
+        pub fn update(&mut self, reward_current: f64, reward_proposed: f64) {
+            let improved = reward_proposed > reward_current;
+            if improved {
+                for (z, d) in self.z.iter_mut().zip(self.dir.iter()) {
+                    *z += self.params.lr * (self.params.sigma * d);
+                }
+                for dir in self.dir.iter_mut() {
+                    *dir = 0.7 * (*dir) + 0.3 * self.rng.gauss(0.0, 1.0);
+                }
+                normalize(&mut self.dir);
+            } else {
+                let mut kick: Vec<f64> = (0..self.params.dim)
+                    .map(|_| self.rng.gauss(0.0, 0.5))
+                    .collect();
+                let projection = dot(&kick, &self.dir);
+                for (k, d) in kick.iter_mut().zip(self.dir.iter()) {
+                    *k -= projection * d;
+                }
+                for (dir, kick) in self.dir.iter_mut().zip(kick.iter()) {
+                    *dir = 0.9 * (*dir) + 0.1 * (*kick);
+                }
+                normalize(&mut self.dir);
+            }
+        }
+    }
+
+    fn normalize(vec: &mut [f64]) {
+        let norm = (vec.iter().map(|v| v * v).sum::<f64>()).sqrt().max(1e-12);
+        for v in vec.iter_mut() {
+            *v /= norm;
+        }
+    }
+
+    fn dot(a: &[f64], b: &[f64]) -> f64 {
+        a.iter().zip(b).map(|(x, y)| x * y).sum()
+    }
+
+    fn frac_penalty(z: &[f64], alpha: f64, lam: f64) -> f64 {
+        if z.len() < 3 {
+            return 0.0;
+        }
+        let mut acc = 0.0;
+        for idx in 1..(z.len() - 1) {
+            let d2 = z[idx - 1] - 2.0 * z[idx] + z[idx + 1];
+            acc += d2.abs().powf(1.0 + alpha);
+        }
+        lam * acc
+    }
+
+    mod randless {
+        use std::cell::Cell;
+
+        pub trait Rng {
+            fn gauss(&self, mu: f64, sigma: f64) -> f64;
+        }
+
+        pub struct StdRng {
+            state: Cell<u64>,
+        }
+
+        impl StdRng {
+            pub fn seed_from_u64(seed: u64) -> Self {
+                Self {
+                    state: Cell::new(seed | 1),
+                }
+            }
+
+            fn next_u64(&self) -> u64 {
+                let mut x = self.state.get();
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                self.state.set(x);
+                x
+            }
+
+            fn uniform01(&self) -> f64 {
+                (self.next_u64() as f64) / (u64::MAX as f64)
+            }
+        }
+
+        impl Rng for StdRng {
+            fn gauss(&self, mu: f64, sigma: f64) -> f64 {
+                let u1 = self.uniform01().max(1e-12);
+                let u2 = self.uniform01();
+                let radius = (-2.0 * u1.ln()).sqrt();
+                let theta = 2.0 * std::f64::consts::PI * u2;
+                mu + sigma * radius * theta.cos()
+            }
+        }
+    }
+}
+
+// =================== bandit.rs ===================
+pub mod bandit {
+
+    #[derive(Clone, Copy, Debug)]
+    pub enum SoftBanditMode {
+        TS,
+        UCB,
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct LinTSArm {
+        dim: usize,
+        a: Vec<f64>,
+        b: Vec<f64>,
+    }
+
+    impl LinTSArm {
+        pub fn new(dim: usize, lambda: f64) -> Self {
+            Self {
+                dim,
+                a: eye_flat(dim, lambda),
+                b: vec![0.0; dim],
+            }
+        }
+
+        pub fn sample_score(&self, x: &[f64]) -> f64 {
+            let mean = solve_spd_diag(&self.a, &self.b, self.dim);
+            dot(&mean, x)
+        }
+
+        pub fn ucb_score(&self, x: &[f64], c: f64) -> f64 {
+            let ainv = inv_spd_diag(&self.a, self.dim);
+            let mean = matvec_flat(&ainv, &self.b, self.dim);
+            let variance = quad_form(&ainv, x);
+            dot(&mean, x) + c * variance.max(0.0).sqrt()
+        }
+
+        pub fn update(&mut self, x: &[f64], reward: f64) {
+            rank1_add(&mut self.a, x, self.dim);
+            for (bi, xi) in self.b.iter_mut().zip(x) {
+                *bi += reward * xi;
+            }
+        }
+    }
+
+    pub struct SoftBandit {
+        choices: Vec<String>,
+        arms: Vec<LinTSArm>,
+        last_index: usize,
+        mode: SoftBanditMode,
+    }
+
+    impl SoftBandit {
+        pub fn new(choices: Vec<String>, feat_dim: usize, mode: SoftBanditMode) -> Self {
+            let arms = (0..choices.len())
+                .map(|_| LinTSArm::new(feat_dim, 1.0))
+                .collect();
+            Self {
+                choices,
+                arms,
+                last_index: 0,
+                mode,
+            }
+        }
+
+        pub fn select(&mut self, x: &[f64]) -> String {
+            let mut best = f64::MIN;
+            let mut idx = 0usize;
+            for (i, arm) in self.arms.iter().enumerate() {
+                let score = match self.mode {
+                    SoftBanditMode::TS => arm.sample_score(x),
+                    SoftBanditMode::UCB => arm.ucb_score(x, 1.0),
+                };
+                if score > best {
+                    best = score;
+                    idx = i;
+                }
+            }
+            self.last_index = idx;
+            self.choices[idx].clone()
+        }
+
+        pub fn update_last(&mut self, x: &[f64], reward: f64) {
+            if let Some(arm) = self.arms.get_mut(self.last_index) {
+                arm.update(x, reward);
+            }
+        }
+    }
+
+    fn eye_flat(dim: usize, lambda: f64) -> Vec<f64> {
+        let mut matrix = vec![0.0; dim * dim];
+        for i in 0..dim {
+            matrix[i * dim + i] = lambda;
+        }
+        matrix
+    }
+
+    fn matvec_flat(a: &[f64], x: &[f64], dim: usize) -> Vec<f64> {
+        let mut y = vec![0.0; dim];
+        for i in 0..dim {
+            let mut sum = 0.0;
+            for j in 0..dim {
+                sum += a[i * dim + j] * x[j];
+            }
+            y[i] = sum;
+        }
+        y
+    }
+
+    fn dot(a: &[f64], b: &[f64]) -> f64 {
+        a.iter().zip(b).map(|(x, y)| x * y).sum()
+    }
+
+    fn rank1_add(a: &mut [f64], x: &[f64], dim: usize) {
+        for i in 0..dim {
+            for j in 0..dim {
+                a[i * dim + j] += x[i] * x[j];
+            }
+        }
+    }
+
+    fn inv_spd_diag(a: &[f64], dim: usize) -> Vec<f64> {
+        let mut inv = vec![0.0; dim * dim];
+        for i in 0..dim {
+            let value = a[i * dim + i];
+            inv[i * dim + i] = if value.abs() > 1e-12 {
+                1.0 / value
+            } else {
+                1.0
+            };
+        }
+        inv
+    }
+
+    fn solve_spd_diag(a: &[f64], b: &[f64], dim: usize) -> Vec<f64> {
+        let mut x = vec![0.0; dim];
+        for i in 0..dim {
+            let value = a[i * dim + i];
+            x[i] = if value.abs() > 1e-12 {
+                b[i] / value
+            } else {
+                b[i]
+            };
+        }
+        x
+    }
+
+    fn quad_form(a: &[f64], x: &[f64]) -> f64 {
+        let mut sum = 0.0;
+        for i in 0..x.len() {
+            for j in 0..x.len() {
+                sum += x[i] * a[i * x.len() + j] * x[j];
+            }
+        }
+        sum
+    }
+}
+
+// =================== wilson.rs ===================
+pub mod wilson {
+    pub fn wilson_lower(successes: i32, trials: i32, z: f64) -> f64 {
+        if trials <= 0 {
+            return 0.0;
+        }
+        let n = trials as f64;
+        let s = successes as f64;
+        let p = (s / n).clamp(0.0, 1.0);
+        let denom = 1.0 + z * z / n;
+        let center = (p + z * z / (2.0 * n)) / denom;
+        let radius = z * ((p * (1.0 - p) + z * z / (4.0 * n)) / n).max(0.0).sqrt() / denom;
+        (center - radius).max(0.0)
+    }
+}
+
+// =================== rewrite.rs ===================
+pub mod rewrite {
+    use std::collections::HashMap;
+    use std::fs::{self, OpenOptions};
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    pub struct HeurStore {
+        path: PathBuf,
+    }
+
+    impl HeurStore {
+        pub fn new(custom: Option<String>) -> Self {
+            let path = custom.map(PathBuf::from).unwrap_or(default_path());
+            if let Some(dir) = path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            Self { path }
+        }
+
+        pub fn append(&self, rule_text: &str, info: &HashMap<String, f64>) {
+            if let Ok(mut file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+            {
+                let meta = serde_like_json(info);
+                let line = format!("{}  # {}\n", rule_text.trim(), meta);
+                let _ = file.write_all(line.as_bytes());
+            }
+        }
+
+        pub fn path(&self) -> &PathBuf {
+            &self.path
+        }
+    }
+
+    fn default_path() -> PathBuf {
+        let home = std::env::var("HOME").unwrap_or_else(|_| String::from("."));
+        let mut path = PathBuf::from(home);
+        path.push(".spiraltorch/heur/heur.kdsl");
+        path
+    }
+
+    fn serde_like_json(info: &HashMap<String, f64>) -> String {
+        let mut out = String::from("{");
+        let mut first = true;
+        for (key, value) in info.iter() {
+            if !first {
+                out.push_str(", ");
+            }
+            first = false;
+            out.push_str(&format!("\"{}\":{:.6}", key, value));
+        }
+        out.push('}');
+        out
+    }
+}
+
+// =================== ab.rs ===================
+pub mod ab {
+    use super::{RewardCfg, StepMetrics};
+
+    pub struct ABRunner {
+        reward: RewardCfg,
+    }
+
+    impl ABRunner {
+        pub fn new(reward: RewardCfg) -> Self {
+            Self { reward }
+        }
+
+        pub fn run<F, G>(&self, mut a: F, mut b: G, trials: usize) -> (usize, usize)
+        where
+            F: FnMut() -> StepMetrics,
+            G: FnMut() -> StepMetrics,
+        {
+            let mut wins_a = 0usize;
+            let mut wins_b = 0usize;
+            for _ in 0..trials {
+                let ma = a();
+                let mb = b();
+                let ra = self.reward.score(&ma, 0.0);
+                let rb = self.reward.score(&mb, 0.0);
+                if ra > rb {
+                    wins_a += 1;
+                } else {
+                    wins_b += 1;
+                }
+            }
+            (wins_a, wins_b)
+        }
+    }
+}

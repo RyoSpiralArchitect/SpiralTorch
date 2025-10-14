@@ -76,8 +76,26 @@ pub fn parse_env_dsl_plus_kind(
         Err(_) => String::new(),
     };
     #[allow(unused_mut)]
-    let kc = sweet_kc(kind, k);
+    let kc = {
+        #[cfg(feature = "kdsl")]
+        {
+            sweet_kc(kind, k)
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            if k <= 1024 {
+                1
+            } else if k <= 16_384 {
+                2
+            } else {
+                3
+            }
+        }
+    };
+    #[cfg(feature = "kdsl")]
     let mut ov = DslOverrides::default();
+    #[cfg(not(feature = "kdsl"))]
+    let ov = DslOverrides::default();
     if src.trim().is_empty() {
         return (None, vec![], ov);
     }
@@ -93,7 +111,13 @@ pub fn parse_env_dsl_plus_kind(
             kc,
             tile_cols: ((cols.max(1) + 255) / 256) as u32,
             radix: if k.is_power_of_two() { 4 } else { 2 },
-            segments: if cols > 131_072 { 4 } else if cols > 32_768 { 2 } else { 1 },
+            segments: if cols > 131_072 {
+                4
+            } else if cols > 32_768 {
+                2
+            } else {
+                1
+            },
         };
         let out = match st_kdsl::eval_program(&src, &ctx) {
             Ok(o) => o,
@@ -131,7 +155,10 @@ pub fn parse_env_dsl_plus_kind(
                     .hard
                     .tile_cols
                     .unwrap_or(((cols.max(1) + 1023) / 1024) as u32 * 1024),
-                radix: out.hard.radix.unwrap_or(if k.is_power_of_two() { 4 } else { 2 }),
+                radix: out
+                    .hard
+                    .radix
+                    .unwrap_or(if k.is_power_of_two() { 4 } else { 2 }),
                 segments: out.hard.segments.unwrap_or(if cols > 131_072 {
                     4
                 } else if cols > 32_768 {
@@ -253,7 +280,8 @@ pub fn choose_from_kv(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<Ch
                     ctile: getu("ctile").unwrap_or(0),
                     mode_midk: getu("mode_midk").unwrap_or(0) as u8,
                     mode_bottomk: getu("mode_bottomk").unwrap_or(0) as u8,
-                    tile_cols: getu("tile_cols").unwrap_or(((cols.max(1) + 1023) / 1024) as u32 * 1024),
+                    tile_cols: getu("tile_cols")
+                        .unwrap_or(((cols.max(1) + 1023) / 1024) as u32 * 1024),
                     radix: getu("radix").unwrap_or(if k.is_power_of_two() { 4 } else { 2 }),
                     segments: getu("segments").unwrap_or(if cols > 131_072 {
                         4
