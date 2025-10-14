@@ -36,20 +36,20 @@ The stack is comfortable living entirely in Rust—yet the Python wheel remains 
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
-> **Why it’s different**
-> - **Training comes first:** Modules such as `Linear`, `Sequential`,
->   `WaveGate`, the new `ToposResonator`, and `ZSpaceProjector` stream gradients
->   into the hypergrad tape and expose a `train_epoch` loop that mirrors
->   familiar `nn.Module` patterns.
-> - **Open Z-space:** Gradient splits honour the A/B/C roundtable through the
->   new `zspace_round` ops module so Above/Here/Beneath bands stay in sync with
->   SpiralK plans without auxiliary buffers.
-> - **Three-voice consensus:** SpiralK heuristics, DSL directives, and the
->   generated WASM tuner table discuss every launch decision and keep the
->   transcript in the roundtable log.
-> - **Rust by default, Python ready:** Every feature—from WASM tuning to
->   hypergrad curvature—is implemented in Rust and exposed unchanged through the
->   Python bindings when needed.
+## Why it’s different**
+ - **Training comes first:** Modules such as `Linear`, `Sequential`,
+   `WaveGate`, the new `ToposResonator`, and `ZSpaceProjector` stream gradients
+    into the hypergrad tape and expose a `train_epoch` loop that mirrors
+    familiar `nn.Module` patterns.
+  - **Open Z-space:** Gradient splits honour the A/B/C roundtable through the
+    new `zspace_round` ops module so Above/Here/Beneath bands stay in sync with
+    SpiralK plans without auxiliary buffers.
+  - **Three-voice consensus:** SpiralK heuristics, DSL directives, and the
+    generated WASM tuner table discuss every launch decision and keep the
+    transcript in the roundtable log.
+  - **Rust by default, Python ready:** Every feature—from WASM tuning to
+    hypergrad curvature—is implemented in Rust and exposed unchanged through the
+    Python bindings when needed.
 
 ---
 
