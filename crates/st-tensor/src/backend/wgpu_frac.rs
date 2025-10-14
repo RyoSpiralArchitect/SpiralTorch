@@ -108,7 +108,10 @@ impl Frac1dKernel {
 
         let mut enc = device.create_command_encoder(&CommandEncoderDescriptor{ label: Some("frac_gl_1d_enc") });
         {
-            let mut pass = enc.begin_compute_pass(&ComputePassDescriptor{ label: Some("frac_gl_1d_pass") });
+            let mut pass = enc.begin_compute_pass(&ComputePassDescriptor{
+                label: Some("frac_gl_1d_pass"),
+                timestamp_writes: None,
+            });
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &bind, &[]);
             let wg = 256u32;
