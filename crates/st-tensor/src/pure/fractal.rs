@@ -76,6 +76,7 @@ impl FractalPatch {
     }
 }
 
+#[derive(Debug)]
 struct Inner {
     queue: VecDeque<FractalPatch>,
     capacity: usize,
