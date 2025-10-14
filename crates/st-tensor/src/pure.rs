@@ -8,6 +8,9 @@
 //! responsive even when the surrounding platform is sandboxed.
 
 pub mod fractal;
+pub mod topos;
+
+use self::topos::OpenCartesianTopos;
 
 use core::fmt;
 use std::error::Error;
@@ -38,6 +41,10 @@ pub enum TensorError {
     NonPositiveCoherence { coherence: f32 },
     /// Tension weights that soften relations must stay positive.
     NonPositiveTension { tension: f32 },
+    /// Topos tolerance must stay positive to avoid degeneracy.
+    NonPositiveTolerance { tolerance: f32 },
+    /// Topos saturation window must stay positive.
+    NonPositiveSaturation { saturation: f32 },
     /// Computation received an empty input which would otherwise trigger a panic.
     EmptyInput(&'static str),
     /// A helper expected matching curvature parameters but received different values.
@@ -91,6 +98,12 @@ impl fmt::Display for TensorError {
             }
             TensorError::NonPositiveTension { tension } => {
                 write!(f, "tension must be positive, got {tension}")
+            }
+            TensorError::NonPositiveTolerance { tolerance } => {
+                write!(f, "tolerance must be positive, got {tolerance}")
+            }
+            TensorError::NonPositiveSaturation { saturation } => {
+                write!(f, "saturation window must be positive, got {saturation}")
             }
             TensorError::EmptyInput(label) => {
                 write!(f, "{label} must not be empty for this computation")
