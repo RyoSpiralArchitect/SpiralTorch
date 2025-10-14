@@ -5,11 +5,20 @@
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn heur_path() -> PathBuf {
     if let Ok(p) = std::env::var("SPIRAL_HEUR_FILE") { return PathBuf::from(p); }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(format!("{home}/.spiraltorch/heur.kdsl"))
+}
+
+fn roundtable_log_path() -> PathBuf {
+    if let Ok(p) = std::env::var("SPIRAL_SR_LOG_FILE") { return PathBuf::from(p); }
+    let heur = heur_path();
+    let mut log = heur;
+    log.set_file_name("roundtable.log");
+    log
 }
 
 fn normalize_rule(rule_expr: &str) -> Option<String> {
@@ -72,6 +81,55 @@ pub fn maybe_append_soft(rule_expr: &str) {
     }
 }
 
+fn label_for(idx: usize) -> char {
+    ((b'A' + (idx as u8)) as char)
+}
+
+fn log_roundtable(
+    consensus_rules: &[&str],
+    other_proposals: &[&[&str]],
+    wins: u32,
+    trials: u32,
+    lb: f32,
+    lb_thresh: f32,
+) {
+    let path = roundtable_log_path();
+    if let Some(parent) = path.parent() {
+        if let Err(err) = fs::create_dir_all(parent) {
+            eprintln!("[sr] log dir create failed: {err}");
+            return;
+        }
+    }
+
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs()).unwrap_or_default();
+
+    let mut entry = String::new();
+    entry.push_str(&format!("[{ts}] wins={wins} trials={trials} lb={:.4} thresh={:.4}\n", lb, lb_thresh));
+    if consensus_rules.is_empty() {
+        entry.push_str("consensus: (none)\n");
+    } else {
+        entry.push_str("consensus:\n");
+        for rule in consensus_rules { entry.push_str(&format!("  - {rule}\n")); }
+    }
+    for (idx, group) in other_proposals.iter().enumerate() {
+        let label = label_for(idx);
+        entry.push_str(&format!("voice {label}:\n"));
+        if group.is_empty() {
+            entry.push_str("  (no proposals)\n");
+        } else {
+            for rule in *group { entry.push_str(&format!("  - {rule}\n")); }
+        }
+    }
+    entry.push('\n');
+
+    if let Err(err) = OpenOptions::new().create(true).append(true).open(&path)
+        .and_then(|mut f| f.write_all(entry.as_bytes()))
+    {
+        eprintln!("[sr] roundtable log append failed: {err}");
+    }
+}
+
 /// Wilson score lower bound (normal approximation, z≈1.96 → 95%).
 pub fn wilson_lower_bound(wins: u32, trials: u32, z: f32) -> f32 {
     if trials == 0 { return 0.0; }
@@ -94,6 +152,7 @@ pub fn on_abc_conversation(
     lb_thresh: f32,
 ) {
     let lb = wilson_lower_bound(wins, trials, z);
+    log_roundtable(consensus_rules, other_proposals, wins, trials, lb, lb_thresh);
     if lb >= lb_thresh && !consensus_rules.is_empty() {
         let gain = (lb - lb_thresh).max(0.0);
         let soft_weight = (0.15 + gain as f32).min(1.0);
@@ -147,5 +206,23 @@ mod tests {
         assert_eq!(lines[0], "soft(tile, 4096, 0.4);");
         let _ = std::fs::remove_file(&file);
         std::env::remove_var("SPIRAL_HEUR_FILE");
+    }
+
+    #[test]
+    fn test_log_roundtable_writes() {
+        let mut log = std::env::temp_dir();
+        log.push(format!("roundtable_{}.log", std::process::id()));
+        let _ = std::fs::remove_file(&log);
+        std::env::set_var("SPIRAL_SR_LOG_FILE", &log);
+
+        log_roundtable(&["soft(tile, 2048, 0.4)"], &[&["soft(tile, 4096, 0.2)"]], 12, 20, 0.66, 0.55);
+
+        let body = std::fs::read_to_string(&log).unwrap();
+        assert!(body.contains("wins=12"));
+        assert!(body.contains("consensus"));
+        assert!(body.contains("voice A"));
+
+        let _ = std::fs::remove_file(&log);
+        std::env::remove_var("SPIRAL_SR_LOG_FILE");
     }
 }

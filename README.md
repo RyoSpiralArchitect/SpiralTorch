@@ -15,11 +15,14 @@ executor you choose.
 
 > **Why it’s different**
 > - **Three-voice consensus:** SpiralK (runtime rules), DSL directives, and the
->   generated WASM table talk it out as A/B/C peers before anything lands.
-> - **Unified heuristics:** One `Choice { mk, mkd, tile, ctile, … }` across WGPU / HIP / CUDA  
-> - **1-CE Subgroup Top-K (WGPU):** candidates → final in a single compute pass  
-> - **MidK/BottomK compaction:** 1-CE / 2-CE, tile-aware, same API  
+>   generated WASM table talk it out as A/B/C peers before anything lands, and every
+>   exchange lands in a timestamped roundtable log.
+> - **Unified heuristics:** One `Choice { mk, mkd, tile, ctile, … }` across WGPU / HIP / CUDA
+> - **1-CE Subgroup Top-K (WGPU):** candidates → final in a single compute pass
+> - **MidK/BottomK compaction:** 1-CE / 2-CE, tile-aware, same API
 > - **Amega Hypergrad:** unrolled / implicit (Neumann / CG) hyper-gradients that now sync with the pure tensor tape
+> - **Fractional AMG scoring:** Density-aware workgroup and tile proposals feed into SoftRule beams without
+>   ever touching NumPy or PyTorch.
 
 ---
 
@@ -40,7 +43,8 @@ executor you choose.
   Autogenerates a simple piecewise `choose(rows, cols, k, sg)` for your device; the runtime gently prefers measured defaults.
 - **Self-Rewrite**
   A/B/C conversations (Wilson CI) append `soft(...)` into
-  `~/.spiraltorch/heur.kdsl` once the roundtable agrees a configuration is ahead.
+  `~/.spiraltorch/heur.kdsl` once the roundtable agrees a configuration is ahead, while transcripts land in
+  `roundtable.log` so you can replay how every choice surfaced.
   
 ---
 
