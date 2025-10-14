@@ -1,18 +1,18 @@
 // Auto-generated from tuner_results.json
-use crate::backend::device_caps::DeviceCaps;
+use crate::backend::device_caps::DeviceCaps as GenDeviceCaps;
 use crate::backend::wasm_tuner::WasmTunerTable;
-use crate::backend::wgpu_heuristics::Choice;
+use crate::backend::wgpu_heuristics::Choice as GenChoice;
 use std::sync::OnceLock;
 
-fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> Choice {
+fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> GenChoice {
     let max_wg = if subgroup { 256 } else { 128 };
-    let caps = DeviceCaps::wgpu(32, subgroup, max_wg);
-    let use_2ce = caps.prefers_two_stage(cols as u32, k as u32);
-    let wg = caps.recommended_workgroup();
+    let caps = GenDeviceCaps::wgpu(32, subgroup, max_wg);
+    let use_2ce = caps.prefers_two_stage_with_rows(rows as u32, cols as u32, k as u32);
+    let wg = caps.recommended_workgroup(rows as u32);
     let kl = caps.recommended_kl(k as u32);
     let ch = caps.recommended_channel_stride(cols as u32);
-    let ctile = caps.recommended_compaction_tile(cols as u32);
-    Choice {
+    let ctile = caps.recommended_compaction_tile_default(cols as u32);
+    GenChoice {
         use_2ce,
         wg,
         kl,
@@ -23,7 +23,13 @@ fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> Choice {
         mode_bottomk: 0,
         tile_cols: ((cols.max(1) + 1023) / 1024) as u32 * 1024,
         radix: if k.is_power_of_two() { 4 } else { 2 },
-        segments: if cols > 131_072 { 4 } else if cols > 32_768 { 2 } else { 1 },
+        segments: if cols > 131_072 {
+            4
+        } else if cols > 32_768 {
+            2
+        } else {
+            1
+        },
     }
 }
 
