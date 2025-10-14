@@ -4,7 +4,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="AGPL-3.0">
 </p>
-[MPS ready](https://img.shields.io/badge/MPS-ready-brightgreen)
+
 **SpiralTorch — Pure Rust AI core for Z-space exploration.**
 © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
