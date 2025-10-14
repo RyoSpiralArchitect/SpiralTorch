@@ -1,11 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// ============================================================================
-// st-core BlackCat v0.3 (pure Rust)
-// Runtime: ZMetaES (derivative-free), SoftBandit (LinTS/UCB), Wilson guard,
-// HeurStore bridge, AB runner, Rope LRU hook.
-// No external deps; std only. Designed to live under crates/st-core/src/runtime/.
-// ============================================================================
-
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
