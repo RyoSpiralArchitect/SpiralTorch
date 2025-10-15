@@ -11,6 +11,8 @@ NumPy, no PyTorch, and no shim layers.
   geometry experiments.
 - `LanguageWaveEncoder` + `Hypergrad` so Python callers can stream Z-space
   text, accumulate gradients, and project back into the Poincaré ball.
+- `TensorBiome` to cultivate open-topos rewrites, weight shoots, stack the
+  harvest, and guard tensors that can be re-imported into Z-space.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`) that
   reuse the same heuristics as the Rust executors.
 - ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
@@ -24,11 +26,20 @@ NumPy, no PyTorch, and no shim layers.
   callers can select devices, spawn hypergrad tapes, plan kernels, and solve
   barycentres with a few intuitive method calls. Structured results are
   returned through the new `ZSpaceBarycenter` class.
+- Streaming dataset helpers via `spiraltorch.dataset`—build a
+  shuffle/batch/prefetch pipeline entirely in Rust using the native
+  `DataLoader`.
 - Non-commutative differential traces via `SpiralSession.trace(...)` which emit
   `SpiralDifferentialTrace` builders and `DifferentialResonance` snapshots to
   blend homotopy flows, functor derivatives, recursive barycenter energies, and
   \(\infty\)-tower projections—optionally wiring the result straight into a
   `Hypergrad` tape.
+- SoT-3Dφ spiral planners (`spiraltorch.sot`) that collapse to Z-space tensors,
+  grow full TensorBiomes via `SoT3DPlan.grow_biome(...)`, and stitch directly
+  into `SpiralSession.trace(...)` for geometry-aware exploration loops.
+- Z-space projector bindings (`spiraltorch.nn.ZSpaceProjector`) so spiral
+  trajectories can be rendered onto the canvas or reused inside sequential
+  transformer stacks.
 
 ## Building wheels
 
@@ -52,6 +63,15 @@ maturin build -m bindings/st-py/Cargo.toml --release --features "hip hip-real"
 ```
 
 ## Minimal usage
+
+### Hello SpiralSession
+
+```bash
+python examples/hello_session.py
+```
+
+Aligns a barycenter with a hypergrad tape, prepares a Sequential module, and
+finishes a roundtable epoch entirely from Python.
 
 ```python
 from spiraltorch import Tensor, Hypergrad, LanguageWaveEncoder
@@ -78,6 +98,46 @@ print(bary.objective, hyper.gradient())
 ```
 
 ```python
+import spiraltorch as st
+from spiraltorch.nn import Linear, MeanSquaredError, Sequential
+
+session = st.SpiralSession(device="wgpu", curvature=-1.0)
+trainer = session.trainer()
+schedule = trainer.roundtable(
+    rows=1,
+    cols=2,
+    psychoid=True,
+    psychoid_log=True,
+    psi=True,
+    collapse=True,
+    dist=st.DistConfig(node_id="demo", mode="periodic-meta", push_interval=10.0),
+)
+trainer.install_meta_conductor(threshold=0.6, participants=1)
+model = Sequential([Linear(2, 2, name="layer")])
+loss = MeanSquaredError()
+session.prepare_module(model)
+
+loader = (
+    st.dataset.from_vec([
+        (st.Tensor(1, 2, [0.0, 1.0]), st.Tensor(1, 2, [0.0, 1.0])),
+        (st.Tensor(1, 2, [1.0, 0.0]), st.Tensor(1, 2, [1.0, 0.0])),
+    ])
+    .shuffle(0xC0FFEE)
+    .batched(2)
+    .prefetch(2)
+)
+
+stats = session.train_epoch(trainer, model, loss, loader, schedule)
+print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")
+print(st.get_psychoid_stats())
+```
+
+The `DistConfig` connects the local roundtable to a meta layer that exchanges
+`MetaSummary` snapshots with peers. `install_meta_conductor` enables the node to
+aggregate incoming summaries, emit deterministic `GlobalProposal` updates, and
+append them to the heur.kdsl op-log—all without exposing ψ readings.
+
+```python
 from spiraltorch import SpiralSession, Tensor
 
 session = SpiralSession(device="wgpu", curvature=-1.0)
@@ -96,4 +156,29 @@ trace.with_barycenter_from(weights, densities)
 trace.with_infinity([densities[0].clone()], [])
 resonance = trace.resonate()
 print(resonance.homotopy_flow().tolist())
+```
+
+```python
+from spiraltorch import SpiralSession, Tensor, TensorBiome
+from spiraltorch.nn import ZSpaceProjector, LanguageWaveEncoder
+from spiraltorch.sot import generate_plan
+
+session = SpiralSession(device="wgpu", curvature=-1.0)
+seed = Tensor(1, 8, [0.2] * 8)
+trace = session.trace(seed, sot={"steps": 64, "radial_growth": 0.08})
+plan = trace.sot_plan or generate_plan(64, radial_growth=0.08)
+
+topos = session.topos()
+encoder = LanguageWaveEncoder(session.curvature(), 0.5)
+projector = ZSpaceProjector(topos, encoder)
+
+spiral_tensor = plan.as_tensor()
+canvas = projector.project_spiral(plan)
+print(spiral_tensor.shape(), canvas.shape())
+
+biome = plan.grow_biome(topos)
+biome.absorb_weighted("canvas", canvas, weight=2.0)
+stacked = biome.stack()
+meaning = projector.reimport_biome(biome)
+print("stacked", stacked.shape(), "reimported", meaning.shape())
 ```

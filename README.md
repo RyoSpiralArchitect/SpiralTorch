@@ -28,6 +28,12 @@ The stack is comfortable living entirely in Rust—yet the Python wheel remains 
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
+```python
+import spiraltorch as st
+sess = st.SpiralSession(device="wgpu", curvature=-1.0, hyper_learning_rate=0.05)
+sess.align_hypergrad(sess.hypergrad(1, 2), sess.barycenter([st.Tensor(1, 2, [0.7, 0.3])]))
+```
+
 **SpiralTorch is a Rust-first AI training framework** that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
 the kernels, the hypergrad tape streams Z-space meaning, and the high-level
@@ -54,10 +60,58 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
+## Hello SpiralSession quickstart
+
+Kick the tires with the new end-to-end `hello_session` walkthrough. It seeds a
+session, computes a barycenter, aligns a hypergrad tape, and runs a one-epoch
+roundtable update over a toy dataset.
+
+```bash
+cargo run -p st-nn --example hello_session
+```
+
+Enable the optional ψ telemetry layer (and CollapseDrive automation) directly
+from the roundtable schedule:
+
+```bash
+cargo run -p st-nn --features "psi collapse" --example hello_session
+```
+
+The Python wheel mirrors the same flow for rapid notebooks:
+
+```bash
+python bindings/st-py/examples/hello_session.py  # enables psi+collapse by default
+```
+
+Flip on the psychoid self-metrics layer when you want the full dream-engine
+analysis (divergence, ritual rate, CTI, dream-pass/export events):
+
+```bash
+cargo run -p st-nn --features "psi psychoid collapse" --example hello_session
+```
+
+On the Python side, pass `psychoid=True` when building the roundtable and fetch
+the latest reading via `spiraltorch.get_psychoid_stats()` to log the CTI score,
+raw metrics, and z-scores emitted from the Rust meter.
+
+Both variants print the averaged roundtable loss after aligning the barycenter
+path with the hypergrad tape. On the Python side you can now spin up the
+streaming loader without touching NumPy:
+
+```python
+loader = st.dataset.from_vec(samples).shuffle(0xC0FFEE).batched(4).prefetch(2)
+stats = session.train_epoch(trainer, model, loss, loader, schedule)
+```
+
+The loader runs entirely in Rust—mini-batches stream straight into
+`train_epoch` and propagate errors as native `TensorError`s when shapes drift.
+
 ## What you get for training
 
 - **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**
   Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, and every plan can now be rendered back into a SpiralK snippet via `choice.to_unison_script(kind)`.
+- **Introspectable compute plans**
+  Unified `RankPlan`s expose their FFT stencil directly—call `plan.fft_plan()` to inspect the radix/segment shape, `plan.fft_wgsl()` to emit the ready-to-run WGSL kernel, or `plan.fft_spiralk_hint()` to log the same choice back into SpiralK.
 - **SpiralK DSL** (K×Lisp-inspired)
   Hard assigns (`mk:`, `tile:`) and soft rules (`soft(mk, …)`, `soft(tile, …)`) that blend with measurements.
 - **SoftLogic (finite-domain solver)**
@@ -71,6 +125,10 @@ tensor shims, no translation layers, and no tracebacks.
   Parameters can now absorb complex Z-space waves or raw text directly into the
   hypergrad tape, so the roundtable can keep expanding meaning without Euclidean
   fallbacks or NumPy buffers.
+- **TensorBiome canopies + spiral biomes**
+  Curate rewrites with `TensorBiome`, weight individual shoots, stack the full
+  harvest, and let SoT-3Dφ planners seed a ready-to-project biome via
+  `SoT3DPlan.grow_biome(...)` before reinjecting it with `ZSpaceProjector`.
 - **Rust-first modules & losses**
   `st-nn` now ships `Linear`, `Sequential`, the lightweight `Relu`, the
   hyperbolic `WaveGate`, `ToposResonator`, the new `ZSpaceMixer`, and the
@@ -78,7 +136,9 @@ tensor shims, no translation layers, and no tracebacks.
   losses. They stream gradients through the hypergrad tape, apply open-topos
   rewrites, and keep SpiralK planners one call away with roundtable-aware
   scheduling helpers. Every primitive is exported through the Python wheel so
-  you can stay NumPy-free while scripting experiments.
+  you can stay NumPy-free while scripting experiments—with the new
+  `spiraltorch.dataset.DataLoader` keeping shuffle/batch/prefetch entirely in
+  Rust.
 - **Optional WASM tuner table**
   Bake the JSON dataset offline and ship it to browsers/WASM. The runtime loads the table lazily, blends it with SpiralK, and keeps the optimiser in sync with the generated WGSL kernels.
 - **Self-Rewrite**
@@ -260,6 +320,62 @@ let dataset = vec![
 
 let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
 println!("roundtable avg loss: {:.6}", stats.average_loss);
+```
+
+### Distributed roundtable consensus
+
+SpiralTorch's roundtable is now three-tiered:
+
+1. **Local roundtable** — every worker runs the A/B/C negotiation locally and
+   emits compact `DecisionEvent`s containing the winning band, score, and
+   ψ-derived reliability. Enabling ψ through the schedule is purely for the
+   automation stack; the readings stay inside the trainer.
+2. **Meta consortium** — workers configured with a `DistConfig` periodically
+   flush their events to a lightweight meta layer as `MetaSummary` snapshots.
+   The `MetaConductor` combines summaries with Wilson intervals and produces
+   `GlobalProposal`s once sufficient support is observed.
+3. **heur.kdsl op-log** — proposals arrive as deterministic `HeurOp` entries
+   that append soft rules, retract stale hints, or annotate strategies. The
+   op-log is CRDT-safe so multiple nodes can merge without conflicts.
+
+```rust
+use st_core::backend::device_caps::DeviceCaps;
+use st_nn::{DistConfig, ModuleTrainer, RoundtableConfig, Sequential, Linear, MeanSquaredError};
+
+let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
+let dist = DistConfig {
+    node_id: "node-a".into(),
+    mode: st_nn::DistMode::PeriodicMeta,
+    push_interval: std::time::Duration::from_secs(15),
+    meta_endpoints: vec!["tcp://meta:5005".into()],
+    summary_window: 8,
+};
+trainer.configure_distribution(dist);
+trainer.install_meta_conductor(0.75, 2);
+
+let mut model = Sequential::new();
+model.push(Linear::new("encoder", 4, 4)?);
+trainer.prepare(&mut model)?;
+
+let mut cfg = RoundtableConfig::default();
+#[cfg(feature = "psi")]
+{
+    cfg = cfg.enable_psi();
+}
+let schedule = trainer.roundtable(1, 4, cfg);
+let mut loss = MeanSquaredError::new();
+let dataset = vec![
+    (
+        Tensor::from_vec(1, 4, vec![0.0, 0.0, 0.0, 0.0])?,
+        Tensor::from_vec(1, 4, vec![0.0, 0.0, 0.0, 0.0])?,
+    ),
+];
+trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
+
+// Inspect the deterministic op-log and previewed metrics.
+for op in trainer.heuristics_log().entries() {
+    println!("meta op {:?}", op.kind);
+}
 ```
 
 **BlackCat runtime tap-in**
