@@ -15,9 +15,10 @@ trains where PyTorch can’t — inside the Z-space.
 
 - SpiralTorch — Pure Rust AI core for Z-space exploration.**
 - © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
-- Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions)  
+- Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) or kishkavsesvit@icloud.com
 - Unauthorized derivations = non-compliant with AGPL §13.
-
+- **For research collaborations or integration inquiries, please reach out directly.**
+  
 SpiralTorch is a Compact. Safe. Rust-native.
 ~10× smaller than PyTorch, yet feature-complete in AI training that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
