@@ -12,14 +12,14 @@ use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
 use st_nn::{
-    Conv1d as NnConv1d, DifferentialTrace, Linear as NnLinear, Module,
-    Sequential as NnSequential, SpiralSession, SpiralSessionBuilder, WaveRnn as NnWaveRnn,
+    Conv1d as NnConv1d, DifferentialTrace, Linear as NnLinear, Module, Sequential as NnSequential,
+    SpiralSession, SpiralSessionBuilder, WaveRnn as NnWaveRnn,
 };
 use st_tensor::pure::{
     measure::{z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter},
     topos::OpenCartesianTopos,
-    AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder, PureResult,
-    Tensor, TensorError,
+    AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
+    PureResult, Tensor, TensorError,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -530,6 +530,30 @@ impl PySpiralDifferentialTrace {
     fn with_barycenter(&mut self, barycenter: &PyZSpaceBarycenter) -> PyResult<()> {
         let barycenter_clone = barycenter.inner.clone();
         self.map_trace(move |trace| trace.with_barycenter(&barycenter_clone))
+    }
+
+    fn with_barycenter_from(
+        &mut self,
+        weights: Vec<f32>,
+        densities: Vec<PyTensor>,
+    ) -> PyResult<()> {
+        let tensors: Vec<Tensor> = densities.into_iter().map(PyTensor::into_tensor).collect();
+        self.map_trace(move |trace| trace.with_barycenter_from(&weights, tensors.as_slice()))
+    }
+
+    #[pyo3(signature = (weights, densities, coupling=None))]
+    fn with_barycenter_with(
+        &mut self,
+        weights: Vec<f32>,
+        densities: Vec<PyTensor>,
+        coupling: Option<&PyTensor>,
+    ) -> PyResult<()> {
+        let tensors: Vec<Tensor> = densities.into_iter().map(PyTensor::into_tensor).collect();
+        let coupling_tensor = coupling.map(|tensor| tensor.as_tensor().clone());
+        self.map_trace(move |trace| {
+            let coupling_ref: Option<&Tensor> = coupling_tensor.as_ref().map(|tensor| tensor);
+            trace.with_barycenter_with(&weights, tensors.as_slice(), coupling_ref)
+        })
     }
 
     #[pyo3(signature = (levels, curvatures=None))]

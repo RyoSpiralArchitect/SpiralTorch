@@ -353,8 +353,59 @@ impl DifferentialTrace {
         Ok(self)
     }
 
+    /// Computes a barycenter using the session defaults and installs it.
+    pub fn with_barycenter_from(
+        mut self,
+        weights: &[f32],
+        densities: &[Tensor],
+    ) -> PureResult<Self> {
+        let barycenter = self.session.barycenter(weights, densities)?;
+        self.barycenter = Some(barycenter);
+        Ok(self)
+    }
+
+    /// Computes a barycenter with a custom coupling matrix and installs it.
+    pub fn with_barycenter_with(
+        mut self,
+        weights: &[f32],
+        densities: &[Tensor],
+        coupling: Option<&Tensor>,
+    ) -> PureResult<Self> {
+        let barycenter = self.session.barycenter_with(weights, densities, coupling)?;
+        self.barycenter = Some(barycenter);
+        Ok(self)
+    }
+
     /// Installs an explicit \(\infty\)-tower. Leaving `curvatures` empty reuses the session curvature.
     pub fn with_infinity(mut self, levels: Vec<Tensor>, curvatures: Vec<f32>) -> PureResult<Self> {
+        if levels.is_empty() {
+            return Err(TensorError::EmptyInput("infinity_levels"));
+        }
+        let seed_shape = self.seed.shape();
+        for level in &levels {
+            if level.shape() != seed_shape {
+                return Err(TensorError::ShapeMismatch {
+                    left: level.shape(),
+                    right: seed_shape,
+                });
+            }
+        }
+        if !curvatures.is_empty() && curvatures.len() != levels.len() {
+            return Err(TensorError::DataLength {
+                expected: levels.len(),
+                got: curvatures.len(),
+            });
+        }
+        if let Some((_, curvature)) = curvatures
+            .iter()
+            .enumerate()
+            .find(|(_, curvature)| !curvature.is_finite())
+        {
+            return Err(TensorError::NonFiniteValue {
+                label: "infinity_curvature",
+                value: *curvature,
+            });
+        }
         self.infinity_levels = levels;
         self.infinity_curvatures = curvatures;
         Ok(self)
@@ -626,6 +677,7 @@ mod tests {
     use super::*;
     use crate::layers::linear::Linear;
     use crate::loss::MeanSquaredError;
+    use st_tensor::pure::measure::BarycenterIntermediate;
 
     fn toy_tensor(a: &[f32]) -> Tensor {
         Tensor::from_vec(1, a.len(), a.to_vec()).unwrap()
@@ -664,7 +716,7 @@ mod tests {
 
     #[test]
     fn session_plans_ranks_and_trains_module() {
-        let mut session = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256))
+        let session = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256))
             .with_curvature(-1.0)
             .with_hyper_learning_rate(0.05)
             .with_fallback_learning_rate(0.02)
@@ -673,7 +725,7 @@ mod tests {
         let plan = session.plan_rank(RankKind::TopK, 128, 512, 32);
         assert_eq!(plan.rows, 128);
         assert_eq!(plan.cols, 512);
-        let mut module = Linear::new(1, 1).unwrap();
+        let mut module = Linear::new("toy", 1, 1).unwrap();
         session.prepare_module(&mut module).unwrap();
         let mut trainer = session.trainer();
         let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
@@ -682,11 +734,11 @@ mod tests {
         let stats = session
             .train_epoch(&mut trainer, &mut module, &mut loss, batches, &schedule)
             .unwrap();
-        assert!(stats.steps > 0);
+        assert_eq!(stats.batches, 4);
         let energy = session.band_energy(&toy_tensor(&[0.1]), &schedule).unwrap();
         assert!(energy.here >= 0.0);
         let bands = session.split_bands(&toy_tensor(&[0.1]), &schedule).unwrap();
-        assert_eq!(bands.here.shape(), (1, 1));
+        assert_eq!(bands.here().shape(), (1, 1));
     }
 
     #[test]
@@ -746,5 +798,61 @@ mod tests {
             resonance_with.recursive_objective.shape().1,
             barycenter.intermediates.len()
         );
+    }
+
+    #[test]
+    fn trace_builds_barycenter_via_session_defaults() {
+        let session = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256))
+            .with_curvature(-1.0)
+            .with_hyper_learning_rate(0.05)
+            .build()
+            .unwrap();
+        let seed = toy_tensor(&[0.6, 0.4]);
+        let generator = toy_tensor(&[0.12, -0.08]);
+        let direction = toy_tensor(&[0.04, 0.02]);
+        let kernel = Tensor::from_vec(2, 2, vec![1.0, -0.25, 0.5, 1.25]).unwrap();
+        let densities = vec![toy_tensor(&[0.7, 0.3]), toy_tensor(&[0.5, 0.5])];
+        let weights = vec![0.6, 0.4];
+        let trace = session
+            .trace(seed.clone())
+            .unwrap()
+            .deform(generator.clone(), direction.clone())
+            .unwrap()
+            .via(kernel.clone())
+            .unwrap()
+            .with_barycenter_from(&weights, &densities)
+            .unwrap()
+            .with_infinity(vec![densities[0].clone()], Vec::new())
+            .unwrap();
+        let resonance = trace.resonate().unwrap();
+        assert_eq!(resonance.homotopy_flow.shape(), seed.shape());
+        assert_eq!(resonance.infinity_projection.shape().0, 1);
+    }
+
+    #[test]
+    fn trace_rejects_mismatched_infinity_level() {
+        let session = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256))
+            .with_curvature(-1.0)
+            .with_hyper_learning_rate(0.05)
+            .build()
+            .unwrap();
+        let seed = toy_tensor(&[0.4, 0.6]);
+        let generator = toy_tensor(&[0.1, -0.2]);
+        let direction = toy_tensor(&[0.05, 0.07]);
+        let kernel = Tensor::from_vec(2, 2, vec![1.0, 0.5, -0.25, 1.25]).unwrap();
+        let bad_level = Tensor::from_vec(1, 3, vec![0.1, 0.2, 0.3]).unwrap();
+        let err = session
+            .trace(seed.clone())
+            .unwrap()
+            .deform(generator.clone(), direction.clone())
+            .unwrap()
+            .via(kernel.clone())
+            .unwrap()
+            .with_infinity(vec![bad_level], Vec::new())
+            .unwrap_err();
+        match err {
+            TensorError::ShapeMismatch { .. } => {}
+            other => panic!("expected shape mismatch, got {other:?}"),
+        }
     }
 }

@@ -86,13 +86,14 @@ generator = Tensor(1, 2, [0.1, -0.2])
 direction = Tensor(1, 2, [0.05, 0.07])
 kernel = Tensor(2, 2, [1.0, 0.5, -0.25, 1.25])
 
-bary = session.barycenter([Tensor(1, 2, [0.6, 0.4]), Tensor(1, 2, [0.5, 0.5])])
+weights = [0.6, 0.4]
+densities = [Tensor(1, 2, [0.6, 0.4]), Tensor(1, 2, [0.5, 0.5])]
 
 trace = session.trace(seed)
 trace.deform(generator, direction)
 trace.via(kernel)
-trace.with_barycenter(bary)
-trace.with_infinity([bary.density.clone()], [session.curvature()])
+trace.with_barycenter_from(weights, densities)
+trace.with_infinity([densities[0].clone()], [])
 resonance = trace.resonate()
 print(resonance.homotopy_flow().tolist())
 ```

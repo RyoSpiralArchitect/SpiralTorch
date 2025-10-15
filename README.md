@@ -196,6 +196,10 @@ print("updated weights", weights.tolist())
   `.resonate_with_hypergrad(hypergrad)`) to surface a
   `DifferentialResonance` snapshot that binds the four differential layers
   together.
+- Let the trace synthesise barycentres on demand via
+  `trace.with_barycenter_from(weights, densities)` or override the coupling
+  matrix with `trace.with_barycenter_with(weights, densities, Some(coupling))`
+  before resonating, keeping Z-space orchestration entirely on the session.
 
 ---
 
