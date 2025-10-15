@@ -1,6 +1,11 @@
-use std::{env, process::Command, path::PathBuf};
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-fn main(){
+use std::{env, path::PathBuf, process::Command};
+
+fn main() {
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     if env::var("CARGO_FEATURE_HIP_REAL").is_ok() {
         if let Ok(rocm) = env::var("ROCM_PATH").or_else(|_| env::var("HIP_PATH")) {
@@ -26,17 +31,37 @@ fn main(){
         ];
         let mut objs = Vec::new();
         for src in kernels {
-            let stem = std::path::Path::new(src).file_stem().unwrap().to_string_lossy();
+            let stem = std::path::Path::new(src)
+                .file_stem()
+                .unwrap()
+                .to_string_lossy();
             let obj = out.join(format!("{}.o", stem));
             let st = Command::new(&hipcc)
-                .args(["-O3","--std=c++17","-ffast-math","-fPIC","-DNDEBUG","-c",src,"-o"])
-                .arg(&obj).status().expect("failed to run hipcc");
-            if st.success(){ objs.push(obj); } else { println!("cargo:warning=hipcc failed for {}", src); }
+                .args([
+                    "-O3",
+                    "--std=c++17",
+                    "-ffast-math",
+                    "-fPIC",
+                    "-DNDEBUG",
+                    "-c",
+                    src,
+                    "-o",
+                ])
+                .arg(&obj)
+                .status()
+                .expect("failed to run hipcc");
+            if st.success() {
+                objs.push(obj);
+            } else {
+                println!("cargo:warning=hipcc failed for {}", src);
+            }
         }
-        if !objs.is_empty(){
+        if !objs.is_empty() {
             let lib = out.join("libsthipkernels.a");
-            let _ = std::process::Command::new("ar").args(["crus", lib.to_str().unwrap()])
-                .args(objs.iter().map(|p| p.to_str().unwrap())).status();
+            let _ = std::process::Command::new("ar")
+                .args(["crus", lib.to_str().unwrap()])
+                .args(objs.iter().map(|p| p.to_str().unwrap()))
+                .status();
             println!("cargo:rustc-link-lib=static=sthipkernels");
             println!("cargo:rustc-link-search=native={}", out.display());
         }

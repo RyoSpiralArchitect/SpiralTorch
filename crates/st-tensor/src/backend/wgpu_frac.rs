@@ -1,8 +1,13 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 // crates/st-tensor/src/backend/wgpu_frac.rs
 #![cfg(feature = "wgpu_frac")]
-use wgpu::*;
 use crate::fractional::gl_coeffs;
 use crate::util::readback_f32;
+use wgpu::*;
 
 pub struct Frac1dKernel {
     pipeline: ComputePipeline,
@@ -18,14 +23,46 @@ impl Frac1dKernel {
         let bind_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("frac_gl_1d_bind"),
             entries: &[
-                BindGroupLayoutEntry { binding:0, visibility:ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer { ty: BufferBindingType::Storage { read_only:true }, has_dynamic_offset:false, min_binding_size: None }, count: None },
-                BindGroupLayoutEntry { binding:1, visibility:ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer { ty: BufferBindingType::Storage { read_only:true }, has_dynamic_offset:false, min_binding_size: None }, count: None },
-                BindGroupLayoutEntry { binding:2, visibility:ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer { ty: BufferBindingType::Storage { read_only:false }, has_dynamic_offset:false, min_binding_size: None }, count: None },
-                BindGroupLayoutEntry { binding:3, visibility:ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset:false, min_binding_size: None }, count: None },
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
@@ -39,13 +76,20 @@ impl Frac1dKernel {
             module: &module,
             entry_point: "main",
         });
-        Self { pipeline, bind_layout }
+        Self {
+            pipeline,
+            bind_layout,
+        }
     }
 
     pub fn dispatch(
         &self,
-        device: &Device, queue: &Queue,
-        x: &[f32], alpha: f32, h: f32, m: usize,
+        device: &Device,
+        queue: &Queue,
+        x: &[f32],
+        alpha: f32,
+        h: f32,
+        m: usize,
         shader_src: &str,
     ) -> Vec<f32> {
         let n = x.len();
@@ -64,29 +108,52 @@ impl Frac1dKernel {
             contents: bytemuck::cast_slice(&w),
             usage: BufferUsages::STORAGE,
         });
-        let yb = device.create_buffer(&BufferDescriptor{
+        let yb = device.create_buffer(&BufferDescriptor {
             label: Some("Y"),
             size: (n * std::mem::size_of::<f32>()) as u64,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
-        #[repr(C)] #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-        struct Params { n:u32, m:u32, h_alpha:f32, _pad:f32 }
-        let params = Params{ n:n as u32, m:m as u32, h_alpha, _pad:0.0 };
+        #[repr(C)]
+        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+        struct Params {
+            n: u32,
+            m: u32,
+            h_alpha: f32,
+            _pad: f32,
+        }
+        let params = Params {
+            n: n as u32,
+            m: m as u32,
+            h_alpha,
+            _pad: 0.0,
+        };
         let pb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("P"),
             contents: bytemuck::bytes_of(&params),
             usage: BufferUsages::UNIFORM,
         });
 
-        let bind = device.create_bind_group(&BindGroupDescriptor{
+        let bind = device.create_bind_group(&BindGroupDescriptor {
             label: Some("frac_gl_1d_bg"),
             layout: &self.bind_layout,
             entries: &[
-                BindGroupEntry{ binding:0, resource: xb.as_entire_binding() },
-                BindGroupEntry{ binding:1, resource: wb.as_entire_binding() },
-                BindGroupEntry{ binding:2, resource: yb.as_entire_binding() },
-                BindGroupEntry{ binding:3, resource: pb.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: xb.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wb.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: yb.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: pb.as_entire_binding(),
+                },
             ],
         });
 
@@ -106,9 +173,11 @@ impl Frac1dKernel {
             entry_point: "main",
         });
 
-        let mut enc = device.create_command_encoder(&CommandEncoderDescriptor{ label: Some("frac_gl_1d_enc") });
+        let mut enc = device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("frac_gl_1d_enc"),
+        });
         {
-            let mut pass = enc.begin_compute_pass(&ComputePassDescriptor{
+            let mut pass = enc.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("frac_gl_1d_pass"),
                 timestamp_writes: None,
             });

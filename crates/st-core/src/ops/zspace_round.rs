@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 use super::rank_entry::RankPlan;
 
 /// Roundtable band classification used to map gradients into Above/Here/Beneath
@@ -144,7 +149,7 @@ mod tests {
     use crate::backend::unison_heuristics::RankKind;
 
     fn plan(kind: RankKind, k: u32) -> RankPlan {
-        super::rank_entry::plan_rank(kind, 1, 8, k, DeviceCaps::wgpu(32, true, 256))
+        crate::ops::rank_entry::plan_rank(kind, 1, 8, k, DeviceCaps::wgpu(32, true, 256))
     }
 
     #[test]

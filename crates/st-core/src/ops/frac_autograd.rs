@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 
 //! Autograd helper: fractional GL differintegral backward including gradient w.r.t alpha.
 //! Default method: central difference on alpha (stable), plus adjoint conv for x.

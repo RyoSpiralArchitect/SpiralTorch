@@ -1,5 +1,6 @@
 
 [package]
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 name = "st-frac"
 version = "0.1.1"
 edition = "2021"
@@ -9,3 +10,6 @@ description = "SpiralTorch fractional calculus (Grünwald–Letnikov) operators 
 [dependencies]
 ndarray = "0.15"
 thiserror = "1"
+
+[package.metadata.spiraltorch]
+copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
