@@ -186,6 +186,10 @@ print("updated weights", weights.tolist())
 - Follow the barycenter's loss-monotone intermediates and feed them straight into
   the hypergradient tape with `Hypergrad.accumulate_barycenter_path` so the
   optimiser converges along the same Z-space path as the solver.
+- Drive the entire workflow from the high-level `SpiralSession` orchestrator in
+  Rust (`st_nn::SpiralSession`) or Python (`spiraltorch.SpiralSession`) to pick
+  devices, generate rank plans, synthesise barycentres, and align hypergrads via
+  intuitive method calls.
 
 ---
 

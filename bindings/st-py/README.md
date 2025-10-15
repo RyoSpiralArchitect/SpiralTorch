@@ -20,6 +20,10 @@ NumPy, no PyTorch, and no shim layers.
 - Loss-monotone barycenter intermediates (`BarycenterIntermediate`) that plug
   into `Hypergrad.accumulate_barycenter_path` so tapes converge along the
   same Z-space corridor as the solver.
+- High-level orchestration via `SpiralSession` / `SpiralSessionBuilder` so
+  callers can select devices, spawn hypergrad tapes, plan kernels, and solve
+  barycentres with a few intuitive method calls. Structured results are
+  returned through the new `ZSpaceBarycenter` class.
 
 ## Building wheels
 
@@ -55,4 +59,15 @@ tape = Hypergrad(-1.0, 0.05, *z.shape())
 tape.accumulate_pair(z, wave)
 tape.apply(z)
 print(z.tolist())
+```
+
+```python
+from spiraltorch import SpiralSession, Tensor
+
+session = SpiralSession(device="wgpu", curvature=-1.0, hyper_learning_rate=0.05)
+densities = [Tensor(1, 2, [0.7, 0.3]), Tensor(1, 2, [0.2, 0.8])]
+bary = session.barycenter(densities)
+hyper = session.hypergrad(*bary.density.shape())
+session.align_hypergrad(hyper, bary)
+print(bary.objective, hyper.gradient())
 ```
