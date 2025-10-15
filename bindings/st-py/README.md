@@ -103,7 +103,7 @@ from spiraltorch.nn import Linear, MeanSquaredError, Sequential
 
 session = st.SpiralSession(device="wgpu", curvature=-1.0)
 trainer = session.trainer()
-schedule = session.roundtable(rows=1, cols=2)
+schedule = session.roundtable(rows=1, cols=2, psi=True, psi_log=True, collapse=True)
 model = Sequential([Linear(2, 2, name="layer")])
 loss = MeanSquaredError()
 session.prepare_module(model)

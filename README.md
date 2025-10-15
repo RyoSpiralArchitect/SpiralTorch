@@ -71,17 +71,17 @@ roundtable update over a toy dataset.
 cargo run -p st-nn --example hello_session
 ```
 
-Enable the optional ψ telemetry layer to stream semantic-energy readings during
-the run:
+Enable the optional ψ telemetry layer (and CollapseDrive automation) directly
+from the roundtable schedule:
 
 ```bash
-SPIRAL_PSI=1 SPIRAL_LOG_PSI=1 cargo run -p st-nn --features psi --example hello_session
+cargo run -p st-nn --features "psi collapse" --example hello_session
 ```
 
 The Python wheel mirrors the same flow for rapid notebooks:
 
 ```bash
-python bindings/st-py/examples/hello_session.py
+python bindings/st-py/examples/hello_session.py  # enables psi+collapse by default
 ```
 
 Both variants print the averaged roundtable loss after aligning the barycenter

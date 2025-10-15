@@ -16,8 +16,8 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
-// Run with `SPIRAL_PSI=1 SPIRAL_LOG_PSI=1 cargo run -p st-nn --example hello_session --features psi`
-// to observe ψ telemetry during each optimisation step.
+// Enable ψ telemetry and CollapseDrive automation via the roundtable schedule:
+// `cargo run -p st-nn --example hello_session --features "psi collapse"`
 
 use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{
@@ -48,7 +48,16 @@ fn main() -> PureResult<()> {
     session.prepare_module(&mut model)?;
 
     let mut trainer = session.trainer();
-    let schedule = trainer.roundtable(1, 2, RoundtableConfig::default());
+    let mut config = RoundtableConfig::default();
+    #[cfg(feature = "psi")]
+    {
+        config = config.enable_psi_with_log();
+    }
+    #[cfg(feature = "collapse")]
+    {
+        config = config.enable_collapse();
+    }
+    let schedule = trainer.roundtable(1, 2, config);
 
     let mut loss = MeanSquaredError::new();
     let dataset = dataset_from_vec(vec![

@@ -17,7 +17,7 @@ model = Sequential([Linear(2, 2, name="layer")])
 session.prepare_module(model)
 
 trainer = session.trainer()
-schedule = session.roundtable(rows=1, cols=2)
+schedule = session.roundtable(rows=1, cols=2, psi=True, psi_log=True, collapse=True)
 loss = MeanSquaredError()
 
 dataset = st.dataset.from_vec(

@@ -23,6 +23,8 @@ use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSch
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
+#[cfg(feature = "collapse")]
+use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
 #[cfg(feature = "psi")]
@@ -49,6 +51,8 @@ pub struct ModuleTrainer {
     psi: Option<PsiMeter>,
     #[cfg(feature = "psi")]
     psi_log: bool,
+    #[cfg(feature = "collapse")]
+    collapse: Option<CollapseDrive>,
 }
 
 impl core::fmt::Debug for ModuleTrainer {
@@ -84,9 +88,11 @@ impl ModuleTrainer {
             band_weight_fn: None,
             injector_enabled: false,
             #[cfg(feature = "psi")]
-            psi,
+            psi: None,
             #[cfg(feature = "psi")]
-            psi_log,
+            psi_log: false,
+            #[cfg(feature = "collapse")]
+            collapse: None,
         }
     }
 
@@ -181,6 +187,10 @@ impl ModuleTrainer {
         I::Item: IntoBatch,
     {
         self.zero(module)?;
+        #[cfg(feature = "psi")]
+        self.bootstrap_psi(schedule);
+        #[cfg(feature = "collapse")]
+        self.bootstrap_collapse(schedule);
         let mut total_loss = 0.0f32;
         let mut steps = 0usize;
         for batch in batches.into_iter() {
@@ -219,6 +229,8 @@ impl ModuleTrainer {
             total_loss += weighted_loss;
             let mut extra = HashMap::new();
             let _ = module.backward_bands(&input, &bands)?;
+            #[cfg(feature = "collapse")]
+            let mut psi_for_drive: Option<PsiReading> = None;
             #[cfg(feature = "psi")]
             {
                 if let Some(meter) = self.psi.as_mut() {
@@ -233,6 +245,10 @@ impl ModuleTrainer {
                         band_energy: band_energy.l1() + band_energy.drift.abs(),
                     };
                     let (reading, events) = meter.update(&input_snapshot);
+                    #[cfg(feature = "collapse")]
+                    {
+                        psi_for_drive = Some(reading.clone());
+                    }
                     hub::set_last_psi(&reading);
                     if self.psi_log {
                         Self::log_psi(&reading, &input_snapshot);
@@ -257,6 +273,34 @@ impl ModuleTrainer {
                         input_snapshot.band_energy as f64,
                     );
                     extra.insert("psi_events".to_string(), events.len() as f64);
+                }
+            }
+            #[cfg(feature = "collapse")]
+            if let (Some(driver), Some(reading)) = (self.collapse.as_mut(), psi_for_drive.as_ref())
+            {
+                match driver.update(reading) {
+                    DriveCmd::Collapse {
+                        grad_scale,
+                        max_norm,
+                        lr_decay,
+                    } => {
+                        if grad_scale < 0.999 {
+                            self.apply_grad_scale(module, grad_scale)?;
+                        }
+                        if let Some(limit) = max_norm {
+                            self.clip_grad_global_norm(module, limit)?;
+                        }
+                        if let Some(decay) = lr_decay {
+                            let factor = (1.0 - decay).clamp(0.1, 1.0);
+                            self.optimizer_mul_lr(module, factor)?;
+                        }
+                    }
+                    DriveCmd::Bloom { lr_mul } => {
+                        if lr_mul > 1.0 {
+                            self.optimizer_mul_lr(module, lr_mul)?;
+                        }
+                    }
+                    DriveCmd::None => {}
                 }
             }
             self.step(module)?;
@@ -315,23 +359,64 @@ impl ModuleTrainer {
     }
 
     #[cfg(feature = "psi")]
-    fn init_psi_meter() -> (Option<PsiMeter>, bool) {
-        let cfg = PsiConfig::from_env();
-        let meter = if cfg.enabled {
-            Some(PsiMeter::new(cfg))
-        } else {
-            None
-        };
-        let log = Self::env_flag("SPIRAL_LOG_PSI") || Self::env_flag("SPIRAL_PSI_LOG");
-        (meter, log)
+    fn bootstrap_psi(&mut self, schedule: &RoundtableSchedule) {
+        if self.psi.is_some() || !schedule.psi_enabled() {
+            return;
+        }
+        let cfg = PsiConfig::automated(schedule.psi_hint());
+        self.psi = Some(PsiMeter::new(cfg));
+        self.psi_log = schedule.psi_log();
     }
 
-    #[cfg(feature = "psi")]
-    fn env_flag(var: &str) -> bool {
-        env::var(var)
-            .ok()
-            .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "on"))
-            .unwrap_or(false)
+    #[cfg(feature = "collapse")]
+    fn bootstrap_collapse(&mut self, schedule: &RoundtableSchedule) {
+        if self.collapse.is_some() || !schedule.collapse_enabled() {
+            return;
+        }
+        let cfg = CollapseConfig::automated(schedule.psi_hint());
+        self.collapse = Some(CollapseDrive::new(cfg));
+    }
+
+    #[cfg(feature = "collapse")]
+    fn apply_grad_scale<M: Module>(&self, module: &mut M, scale: f32) -> PureResult<()> {
+        if (scale - 1.0).abs() <= f32::EPSILON {
+            return Ok(());
+        }
+        module.visit_parameters_mut(&mut |param| {
+            param.scale_accumulators(scale);
+            Ok(())
+        })
+    }
+
+    #[cfg(feature = "collapse")]
+    fn clip_grad_global_norm<M: Module>(&self, module: &mut M, max_norm: f32) -> PureResult<()> {
+        if max_norm <= 0.0 {
+            return Ok(());
+        }
+        let mut total = 0.0f64;
+        module.visit_parameters(&mut |param| {
+            total += param.accumulators_norm_sq();
+            Ok(())
+        })?;
+        let norm = total.sqrt() as f32;
+        if norm <= max_norm || norm <= f32::EPSILON {
+            return Ok(());
+        }
+        let scale = (max_norm / norm).clamp(0.0, 1.0);
+        self.apply_grad_scale(module, scale)
+    }
+
+    #[cfg(feature = "collapse")]
+    fn optimizer_mul_lr<M: Module>(&mut self, module: &mut M, factor: f32) -> PureResult<()> {
+        if !factor.is_finite() || factor <= 0.0 {
+            return Ok(());
+        }
+        self.fallback_learning_rate *= factor;
+        self.hyper_learning_rate *= factor;
+        module.visit_parameters_mut(&mut |param| {
+            param.scale_learning_rate(factor);
+            Ok(())
+        })
     }
 
     #[cfg(feature = "psi")]

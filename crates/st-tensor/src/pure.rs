@@ -927,9 +927,21 @@ impl AmegaHypergrad {
         &self.gradient
     }
 
+    /// Provides mutable access to the accumulated gradient buffer.
+    pub fn gradient_mut(&mut self) -> &mut [f32] {
+        &mut self.gradient
+    }
+
     /// Returns the guard topos enforcing open-cartesian safety constraints.
     pub fn topos(&self) -> &topos::OpenCartesianTopos {
         &self.topos
+    }
+
+    /// Scales the learning rate used by subsequent hyperbolic updates.
+    pub fn scale_learning_rate(&mut self, factor: f32) {
+        if factor.is_finite() && factor > 0.0 {
+            self.learning_rate *= factor;
+        }
     }
 
     fn assert_tensor_shape(&self, tensor: &Tensor) -> PureResult<()> {

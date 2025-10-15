@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [features]
 default = []
 psi = ["st-core/psi"]
+collapse = ["psi", "st-core/collapse"]
 
 [dependencies]
 st-tensor = { path = "../st-tensor" }

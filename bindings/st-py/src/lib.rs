@@ -1357,7 +1357,7 @@ impl PyModuleTrainer {
         self.inner.fallback_learning_rate()
     }
 
-    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5))]
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psi=false, psi_log=false, collapse=false))]
     fn roundtable(
         &self,
         rows: u32,
@@ -1366,13 +1366,33 @@ impl PyModuleTrainer {
         mid_k: u32,
         bottom_k: u32,
         here_tolerance: f32,
+        psi: bool,
+        psi_log: bool,
+        collapse: bool,
     ) -> PyRoundtableSchedule {
-        let config = RoundtableConfig {
+        let mut config = RoundtableConfig {
             top_k,
             mid_k,
             bottom_k,
             here_tolerance: here_tolerance.max(0.0),
+            ..RoundtableConfig::default()
         };
+        #[cfg(feature = "psi")]
+        {
+            if psi {
+                config = if psi_log {
+                    config.enable_psi_with_log()
+                } else {
+                    config.enable_psi()
+                };
+            }
+        }
+        #[cfg(feature = "collapse")]
+        {
+            if collapse {
+                config = config.enable_collapse();
+            }
+        }
         PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
     }
 
@@ -1612,7 +1632,7 @@ impl PySpiralSession {
         PyModuleTrainer::from_trainer(self.inner.trainer())
     }
 
-    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5))]
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psi=false, psi_log=false, collapse=false))]
     fn roundtable(
         &self,
         rows: u32,
@@ -1621,13 +1641,33 @@ impl PySpiralSession {
         mid_k: u32,
         bottom_k: u32,
         here_tolerance: f32,
+        psi: bool,
+        psi_log: bool,
+        collapse: bool,
     ) -> PyRoundtableSchedule {
-        let config = RoundtableConfig {
+        let mut config = RoundtableConfig {
             top_k,
             mid_k,
             bottom_k,
             here_tolerance: here_tolerance.max(0.0),
+            ..RoundtableConfig::default()
         };
+        #[cfg(feature = "psi")]
+        {
+            if psi {
+                config = if psi_log {
+                    config.enable_psi_with_log()
+                } else {
+                    config.enable_psi()
+                };
+            }
+        }
+        #[cfg(feature = "collapse")]
+        {
+            if collapse {
+                config = config.enable_collapse();
+            }
+        }
         PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
     }
 

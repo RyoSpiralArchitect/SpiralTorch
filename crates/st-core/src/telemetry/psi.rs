@@ -19,7 +19,6 @@
 use bitflags::bitflags;
 use core::fmt;
 use std::collections::HashMap;
-use std::env;
 use std::str::FromStr;
 
 bitflags! {
@@ -52,18 +51,6 @@ impl PsiComponent {
             PsiComponent::ATTN_ENTROPY => "attn_entropy",
             PsiComponent::BAND_ENERGY => "band_energy",
             _ => "unknown",
-        }
-    }
-
-    fn env_key(self) -> &'static str {
-        match self {
-            PsiComponent::LOSS => "LOSS",
-            PsiComponent::GRAD_NORM => "GRAD",
-            PsiComponent::UPDATE_RATIO => "UPDATE",
-            PsiComponent::ACT_DRIFT => "ACT",
-            PsiComponent::ATTN_ENTROPY => "ATTN",
-            PsiComponent::BAND_ENERGY => "BAND",
-            _ => "UNKNOWN",
         }
     }
 
@@ -127,48 +114,40 @@ pub struct PsiConfig {
 }
 
 impl PsiConfig {
-    pub fn from_env() -> Self {
+    /// Builds an automated configuration derived from scheduler hints.
+    pub fn automated(hint: PsiAutomationHint) -> Self {
+        let depth = hint.depth().max(1);
+        let ema_alpha = if depth <= 24 {
+            0.28
+        } else if depth <= 96 {
+            0.22
+        } else {
+            0.16
+        };
+        let sample_rate = if depth <= 48 {
+            1
+        } else if depth <= 128 {
+            2
+        } else {
+            4
+        };
         let mut cfg = PsiConfig::default();
-        cfg.enabled = parse_env_flag("SPIRAL_PSI");
-        if let Ok(spec) = env::var("SPIRAL_PSI_COMPONENTS") {
-            if let Ok(mask) = PsiComponent::parse_list(&spec) {
-                cfg.components = mask;
-            }
-        }
-        if cfg.components.is_empty() {
-            cfg.components = PsiComponent::defaults();
-        }
-        if let Ok(value) = env::var("SPIRAL_PSI_ALPHA") {
-            if let Ok(alpha) = value.parse::<f32>() {
-                cfg.ema_alpha = alpha;
-            }
-        }
-        if let Ok(value) = env::var("SPIRAL_PSI_SAMPLE_RATE") {
-            if let Ok(rate) = value.parse::<u32>() {
-                cfg.sample_rate = rate;
-            }
-        }
-        for component in [
-            PsiComponent::LOSS,
-            PsiComponent::GRAD_NORM,
+        cfg.enabled = true;
+        cfg.components = PsiComponent::defaults() | PsiComponent::BAND_ENERGY;
+        cfg.ema_alpha = ema_alpha;
+        cfg.sample_rate = sample_rate.max(1);
+        cfg.weights.insert(PsiComponent::LOSS, 1.0);
+        cfg.weights.insert(PsiComponent::GRAD_NORM, 0.35);
+        cfg.weights.insert(
             PsiComponent::UPDATE_RATIO,
-            PsiComponent::ACT_DRIFT,
-            PsiComponent::ATTN_ENTROPY,
+            (depth as f32).recip().sqrt().clamp(0.2, 0.6),
+        );
+        cfg.weights
+            .insert(PsiComponent::ACT_DRIFT, hint.drift_weight.clamp(0.1, 0.4));
+        cfg.weights.insert(
             PsiComponent::BAND_ENERGY,
-        ] {
-            let threshold_key = format!("SPIRAL_PSI_TH_{}", component.env_key());
-            if let Ok(value) = env::var(&threshold_key) {
-                if let Ok(parsed) = value.parse::<f32>() {
-                    cfg.thresholds.insert(component, parsed);
-                }
-            }
-            let weight_key = format!("SPIRAL_PSI_WEIGHT_{}", component.env_key());
-            if let Ok(value) = env::var(&weight_key) {
-                if let Ok(parsed) = value.parse::<f32>() {
-                    cfg.weights.insert(component, parsed);
-                }
-            }
-        }
+            (hint.band_focus / depth as f32).clamp(0.1, 0.5),
+        );
         cfg
     }
 }
@@ -337,11 +316,20 @@ impl PsiMeter {
     }
 }
 
-fn parse_env_flag(var: &str) -> bool {
-    env::var(var)
-        .ok()
-        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "on"))
-        .unwrap_or(false)
+/// Hint produced by the roundtable scheduler to seed ψ metering defaults.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PsiAutomationHint {
+    pub above: u32,
+    pub here: u32,
+    pub beneath: u32,
+    pub band_focus: f32,
+    pub drift_weight: f32,
+}
+
+impl PsiAutomationHint {
+    pub fn depth(&self) -> u32 {
+        self.above + self.here + self.beneath
+    }
 }
 
 #[cfg(test)]

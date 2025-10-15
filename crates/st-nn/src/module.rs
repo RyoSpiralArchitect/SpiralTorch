@@ -207,6 +207,53 @@ impl Parameter {
         Ok(())
     }
 
+    /// Scales any accumulated gradient or hypergradient buffers by the provided factor.
+    pub fn scale_accumulators(&mut self, factor: f32) {
+        if !factor.is_finite() {
+            return;
+        }
+        if let Some(tape) = self.hypergrad.as_mut() {
+            for grad in tape.gradient_mut() {
+                *grad *= factor;
+            }
+        }
+        if let Some(grad) = self.gradient.as_mut() {
+            for value in grad.data_mut() {
+                *value *= factor;
+            }
+        }
+    }
+
+    /// Returns the squared L2 norm of any accumulated gradients.
+    pub fn accumulators_norm_sq(&self) -> f64 {
+        if let Some(tape) = self.hypergrad.as_ref() {
+            tape.gradient()
+                .iter()
+                .map(|&value| {
+                    let v = value as f64;
+                    v * v
+                })
+                .sum()
+        } else if let Some(grad) = self.gradient.as_ref() {
+            grad.data()
+                .iter()
+                .map(|&value| {
+                    let v = value as f64;
+                    v * v
+                })
+                .sum()
+        } else {
+            0.0
+        }
+    }
+
+    /// Scales the learning rate inside the attached hypergrad tape, if present.
+    pub fn scale_learning_rate(&mut self, factor: f32) {
+        if let Some(tape) = self.hypergrad.as_mut() {
+            tape.scale_learning_rate(factor);
+        }
+    }
+
     /// Replaces the parameter value with the provided tensor.
     pub fn load_value(&mut self, value: &Tensor) -> PureResult<()> {
         self.assert_shape(value)?;
