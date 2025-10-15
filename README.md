@@ -325,16 +325,17 @@ println!("roundtable avg loss: {:.6}", stats.average_loss);
 
 ### Distributed roundtable consensus
 
-SpiralTorch's roundtable is now three-tiered:
+SpiralTorch's roundtable now runs with a Blackcat moderator sitting between
+local workers and the shared heuristics log:
 
 1. **Local roundtable** — every worker runs the A/B/C negotiation locally and
    emits compact `DecisionEvent`s containing the winning band, score, and
-   ψ-derived reliability. Enabling ψ through the schedule is purely for the
-   automation stack; the readings stay inside the trainer.
-2. **Meta consortium** — workers configured with a `DistConfig` periodically
-   flush their events to a lightweight meta layer as `MetaSummary` snapshots.
-   The `MetaConductor` combines summaries with Wilson intervals and produces
-   `GlobalProposal`s once sufficient support is observed.
+   ψ-derived reliability. ψ stays internal to the trainer and is only used for
+   automation.
+2. **Blackcat meta moderator** — summaries flow into the moderator, which uses
+   a dedicated Blackcat runtime to score support, publish moderator minutes,
+   and forward evidence to the embedded `MetaConductor`. Once enough support
+   accumulates a `GlobalProposal` is broadcast.
 3. **heur.kdsl op-log** — proposals arrive as deterministic `HeurOp` entries
    that append soft rules, retract stale hints, or annotate strategies. The
    op-log is CRDT-safe so multiple nodes can merge without conflicts.
@@ -352,7 +353,7 @@ let dist = DistConfig {
     summary_window: 8,
 };
 trainer.configure_distribution(dist);
-trainer.install_meta_conductor(0.75, 2);
+trainer.install_blackcat_moderator(0.75, 2);
 
 let mut model = Sequential::new();
 model.push(Linear::new("encoder", 4, 4)?);
@@ -373,9 +374,12 @@ let dataset = vec![
 ];
 trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
 
-// Inspect the deterministic op-log and previewed metrics.
+// Inspect the deterministic op-log and the moderator minutes.
 for op in trainer.heuristics_log().entries() {
     println!("meta op {:?}", op.kind);
+}
+for minute in trainer.blackcat_minutes() {
+    println!("moderator: {} -> {:?} (support {:.2})", minute.plan_signature, minute.winner, minute.support);
 }
 ```
 
@@ -385,7 +389,9 @@ The derivative-free ZMeta ES and contextual bandits can ride alongside the
 roundtable loop. Attach the runtime once and it will ingest per-step metrics,
 log Above/Here/Beneath energy, estimate the BlackCat drift band, and
 opportunistically promote winning `soft(...)` snippets behind a Wilson lower
-bound.
+bound. When you call `install_blackcat_moderator` a dedicated runtime is spun
+up for the moderator so the training loop and the distributed consensus stay
+decoupled.
 
 ```rust
 use std::collections::HashMap;

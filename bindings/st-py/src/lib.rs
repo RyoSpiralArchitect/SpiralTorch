@@ -28,8 +28,8 @@ use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
     Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
-    EpochStats, Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer,
-    RoundtableConfig, RoundtableSchedule, Sequential as NnSequential, SpiralSession,
+    EpochStats, Linear as NnLinear, Loss, MeanSquaredError, ModeratorMinutes, Module,
+    ModuleTrainer, RoundtableConfig, RoundtableSchedule, Sequential as NnSequential, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
 use st_tensor::pure::{
@@ -42,7 +42,7 @@ use st_tensor::pure::{
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 fn tensor_err(err: TensorError) -> PyErr {
     PyValueError::new_err(err.to_string())
@@ -1515,6 +1515,44 @@ impl PyModuleTrainer {
     #[pyo3(signature = (threshold, participants=2))]
     fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
         self.inner.install_meta_conductor(threshold, participants);
+    }
+
+    #[pyo3(signature = (threshold, participants=2))]
+    fn install_blackcat_moderator(&mut self, threshold: f32, participants: usize) {
+        self.inner
+            .install_blackcat_moderator(threshold, participants);
+    }
+
+    fn blackcat_minutes<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
+        let minutes = self.inner.blackcat_minutes();
+        let list = PyList::empty(py);
+        for minute in minutes {
+            let entry = PyDict::new(py);
+            entry.set_item("plan_signature", minute.plan_signature.clone())?;
+            entry.set_item("script_hint", minute.script_hint.clone())?;
+            entry.set_item("winner", format!("{:?}", minute.winner))?;
+            entry.set_item("support", minute.support)?;
+            entry.set_item("mean_score", minute.mean_score)?;
+            entry.set_item("mean_psi", minute.mean_psi)?;
+            entry.set_item("confidence", (minute.confidence.0, minute.confidence.1))?;
+            entry.set_item("reward", minute.reward)?;
+            entry.set_item("notes", minute.notes.clone())?;
+            entry.set_item(
+                "issued_at",
+                minute
+                    .issued_at
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs_f64())
+                    .unwrap_or(0.0),
+            )?;
+            let picks = PyDict::new(py);
+            for (k, v) in minute.picks.iter() {
+                picks.set_item(k.clone(), v.clone())?;
+            }
+            entry.set_item("picks", picks)?;
+            list.append(entry)?;
+        }
+        Ok(list.into())
     }
 
     #[pyo3(signature = (module, loss, batches, schedule))]

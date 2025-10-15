@@ -20,6 +20,10 @@ use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant, SystemTime};
 
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::runtime::blackcat::zmeta::ZMetaParams;
+use st_core::runtime::blackcat::{
+    bandit::SoftBanditMode, BlackCatRuntime, ChoiceGroups, StepMetrics,
+};
 
 /// Mode that dictates how a roundtable node participates in distributed consensus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -437,6 +441,171 @@ pub fn simulate_proposal_locally(
     (true, metrics)
 }
 
+/// Minutes captured by the Blackcat moderator after each summary.
+#[derive(Clone, Debug)]
+pub struct ModeratorMinutes {
+    pub plan_signature: String,
+    pub script_hint: String,
+    pub winner: OutcomeBand,
+    pub support: f32,
+    pub mean_score: f32,
+    pub mean_psi: f32,
+    pub confidence: (f32, f32),
+    pub picks: HashMap<String, String>,
+    pub reward: f64,
+    pub notes: String,
+    pub issued_at: SystemTime,
+}
+
+/// Result of the moderator ingest step.
+#[derive(Clone, Debug)]
+pub struct ModeratorOutcome {
+    pub minutes: ModeratorMinutes,
+    pub proposal: Option<GlobalProposal>,
+}
+
+/// Moderator that seats the Blackcat runtime between workers and the meta layer.
+pub struct BlackcatModerator {
+    conductor: MetaConductor,
+    runtime: BlackCatRuntime,
+    history: Vec<ModeratorMinutes>,
+    history_limit: usize,
+}
+
+impl core::fmt::Debug for BlackcatModerator {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BlackcatModerator")
+            .field("history", &self.history.len())
+            .field("history_limit", &self.history_limit)
+            .finish()
+    }
+}
+
+impl BlackcatModerator {
+    /// Builds a moderator with the supplied runtime.
+    pub fn new(runtime: BlackCatRuntime, threshold: f32, participation: usize) -> Self {
+        Self {
+            conductor: MetaConductor::new(threshold, participation),
+            runtime,
+            history: Vec::new(),
+            history_limit: 64,
+        }
+    }
+
+    /// Builds a moderator that uses a lightweight, opinionated runtime configuration.
+    pub fn with_default_runtime(threshold: f32, participation: usize) -> Self {
+        let mut groups = HashMap::new();
+        groups.insert(
+            "agenda".to_string(),
+            vec![
+                "focus".to_string(),
+                "branch".to_string(),
+                "synchronize".to_string(),
+            ],
+        );
+        groups.insert(
+            "pace".to_string(),
+            vec![
+                "steady".to_string(),
+                "accelerate".to_string(),
+                "reflect".to_string(),
+            ],
+        );
+        groups.insert(
+            "integration".to_string(),
+            vec![
+                "local".to_string(),
+                "federated".to_string(),
+                "global".to_string(),
+            ],
+        );
+        let runtime = BlackCatRuntime::new(
+            ZMetaParams::default(),
+            ChoiceGroups { groups },
+            8,
+            SoftBanditMode::TS,
+            None,
+        );
+        Self::new(runtime, threshold, participation)
+    }
+
+    /// Ingests a summary, updates the runtime, and optionally emits a global proposal.
+    pub fn ingest(&mut self, summary: MetaSummary) -> ModeratorOutcome {
+        let context = self.build_context(&summary);
+        let picks = self.runtime.choose(context);
+        let metrics = self.build_metrics(&summary);
+        let reward = self.runtime.post_step(&metrics);
+        let notes = format!(
+            "blackcat moderated {} → {:?} (score {:.3}, support {:.3})",
+            summary.plan_signature, summary.winner, summary.mean_score, summary.support
+        );
+        let minutes = ModeratorMinutes {
+            plan_signature: summary.plan_signature.clone(),
+            script_hint: summary.script_hint.clone(),
+            winner: summary.winner,
+            support: summary.support,
+            mean_score: summary.mean_score,
+            mean_psi: summary.mean_psi,
+            confidence: (summary.wilson_low, summary.wilson_high),
+            picks,
+            reward,
+            notes,
+            issued_at: summary.issued_at,
+        };
+        if self.history.len() >= self.history_limit {
+            self.history.remove(0);
+        }
+        self.history.push(minutes.clone());
+        let proposal = self.conductor.ingest(summary);
+        ModeratorOutcome { minutes, proposal }
+    }
+
+    fn build_context(&self, summary: &MetaSummary) -> Vec<f64> {
+        let mut ctx = vec![
+            1.0,
+            summary.mean_score as f64,
+            summary.support as f64,
+            summary.mean_psi as f64,
+            (summary.wilson_high - summary.wilson_low) as f64,
+            summary.events as f64,
+        ];
+        ctx.resize(self.runtime.context_dim().max(6), 0.0);
+        ctx
+    }
+
+    fn build_metrics(&self, summary: &MetaSummary) -> StepMetrics {
+        let mut extra = HashMap::new();
+        extra.insert("meta_support".to_string(), summary.support as f64);
+        extra.insert("meta_mean_score".to_string(), summary.mean_score as f64);
+        extra.insert("meta_mean_psi".to_string(), summary.mean_psi as f64);
+        extra.insert(
+            "meta_confidence_width".to_string(),
+            (summary.wilson_high - summary.wilson_low) as f64,
+        );
+        extra.insert("meta_events".to_string(), summary.events as f64);
+        StepMetrics {
+            step_time_ms: (1.0 - summary.mean_score as f64).abs() * 100.0,
+            mem_peak_mb: summary.mean_psi.abs() as f64 * 256.0,
+            retry_rate: (summary.wilson_high - summary.wilson_low).abs() as f64,
+            extra,
+        }
+    }
+
+    /// Returns the rolling minutes captured so far.
+    pub fn minutes(&self) -> &[ModeratorMinutes] {
+        &self.history
+    }
+
+    /// Overrides the maximum stored minutes.
+    pub fn set_history_limit(&mut self, limit: usize) {
+        self.history_limit = limit.max(1);
+        if self.history.len() > self.history_limit {
+            let excess = self.history.len() - self.history_limit;
+            self.history.drain(0..excess);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,5 +696,53 @@ mod tests {
         let proposal = conductor.ingest(summary_b).unwrap();
         assert_eq!(proposal.ops.len(), 1);
         assert_eq!(proposal.evidence.len(), 2);
+    }
+
+    fn demo_runtime() -> BlackCatRuntime {
+        let groups = ChoiceGroups {
+            groups: HashMap::from([
+                (
+                    "agenda".to_string(),
+                    vec!["focus".to_string(), "branch".to_string()],
+                ),
+                (
+                    "pace".to_string(),
+                    vec![
+                        "steady".to_string(),
+                        "accelerate".to_string(),
+                        "reflect".to_string(),
+                    ],
+                ),
+            ]),
+        };
+        BlackCatRuntime::new(ZMetaParams::default(), groups, 6, SoftBanditMode::TS, None)
+    }
+
+    #[test]
+    fn moderator_tracks_minutes_and_proposals() {
+        let mut moderator = BlackcatModerator::new(demo_runtime(), 0.5, 2);
+        let summary = MetaSummary {
+            node_id: "a".into(),
+            plan_signature: "plan".into(),
+            script_hint: "soft(plan)".into(),
+            rank_kind: RankKind::TopK,
+            winner: OutcomeBand::Above,
+            mean_score: 0.7,
+            wilson_low: 0.4,
+            wilson_high: 0.8,
+            mean_psi: 0.3,
+            support: 0.3,
+            events: 3,
+            issued_at: SystemTime::now(),
+        };
+        let outcome_a = moderator.ingest(summary.clone());
+        assert!(outcome_a.proposal.is_none());
+        assert_eq!(moderator.minutes().len(), 1);
+        let mut summary_b = summary;
+        summary_b.node_id = "b".into();
+        summary_b.support = 0.4;
+        let outcome_b = moderator.ingest(summary_b);
+        assert!(outcome_b.proposal.is_some());
+        assert_eq!(moderator.minutes().len(), 2);
     }
 }

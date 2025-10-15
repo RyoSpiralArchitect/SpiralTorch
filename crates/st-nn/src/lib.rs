@@ -31,8 +31,9 @@ pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
 pub use plan::RankPlanner;
 pub use roundtable::{
-    simulate_proposal_locally, DistConfig, DistMode, GlobalProposal, HeurOp, HeurOpKind, HeurOpLog,
-    MetaConductor, MetaSummary, OutcomeBand, RoundtableNode,
+    simulate_proposal_locally, BlackcatModerator, DistConfig, DistMode, GlobalProposal, HeurOp,
+    HeurOpKind, HeurOpLog, MetaConductor, MetaSummary, ModeratorMinutes, OutcomeBand,
+    RoundtableNode,
 };
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use trainer::{EpochStats, ModuleTrainer};

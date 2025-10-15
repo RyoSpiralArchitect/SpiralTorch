@@ -20,8 +20,8 @@ use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
 use crate::roundtable::{
-    simulate_proposal_locally, DistConfig, GlobalProposal, HeurOpLog, MetaConductor, OutcomeBand,
-    RoundtableNode,
+    simulate_proposal_locally, BlackcatModerator, DistConfig, GlobalProposal, HeurOpLog,
+    MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::{PureResult, Tensor};
@@ -50,6 +50,7 @@ pub struct ModuleTrainer {
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
     blackcat: Option<BlackCatRuntime>,
+    blackcat_moderator: Option<BlackcatModerator>,
     autopilot: Option<Autopilot>,
     band_weight_fn: Option<BandWeightFn>,
     injector_enabled: bool,
@@ -95,6 +96,7 @@ impl ModuleTrainer {
             hyper_learning_rate,
             fallback_learning_rate,
             blackcat: None,
+            blackcat_moderator: None,
             autopilot: None,
             band_weight_fn: None,
             injector_enabled: false,
@@ -116,6 +118,35 @@ impl ModuleTrainer {
     pub fn with_blackcat(mut self, runtime: BlackCatRuntime) -> Self {
         self.blackcat = Some(runtime);
         self
+    }
+
+    /// Installs a Blackcat moderator that seats between local and distributed consensus.
+    pub fn install_blackcat_moderator(&mut self, threshold: f32, participants: usize) {
+        self.blackcat_moderator = Some(BlackcatModerator::with_default_runtime(
+            threshold.max(0.1),
+            participants.max(1),
+        ));
+        self.meta_conductor = None;
+    }
+
+    /// Installs a moderator with a custom runtime configuration.
+    pub fn install_blackcat_moderator_with_runtime(
+        &mut self,
+        runtime: BlackCatRuntime,
+        threshold: f32,
+        participants: usize,
+    ) {
+        self.blackcat_moderator = Some(BlackcatModerator::new(
+            runtime,
+            threshold.max(0.1),
+            participants.max(1),
+        ));
+        self.meta_conductor = None;
+    }
+
+    /// Clears any configured moderator.
+    pub fn clear_blackcat_moderator(&mut self) {
+        self.blackcat_moderator = None;
     }
 
     /// Attaches an Autopilot runtime for contextual kernel selection.
@@ -144,12 +175,21 @@ impl ModuleTrainer {
 
     /// Installs a meta-layer conductor so this trainer can aggregate remote summaries.
     pub fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
+        self.blackcat_moderator = None;
         self.meta_conductor = Some(MetaConductor::new(threshold.max(0.1), participants.max(1)));
     }
 
     /// Returns the current heuristics op-log.
     pub fn heuristics_log(&self) -> &HeurOpLog {
         &self.heur_log
+    }
+
+    /// Returns the latest moderator minutes captured by Blackcat.
+    pub fn blackcat_minutes(&self) -> Vec<ModeratorMinutes> {
+        self.blackcat_moderator
+            .as_ref()
+            .map(|m| m.minutes().to_vec())
+            .unwrap_or_default()
     }
 
     /// Clears any registered band weighting rule.
@@ -396,7 +436,16 @@ impl ModuleTrainer {
                     (band_energy.above, band_energy.here, band_energy.beneath),
                     band_energy.drift,
                 ) {
-                    if let Some(conductor) = self.meta_conductor.as_mut() {
+                    if let Some(moderator) = self.blackcat_moderator.as_mut() {
+                        let outcome = moderator.ingest(summary.clone());
+                        if let Some(proposal) = outcome.proposal {
+                            let (accepted, preview) =
+                                simulate_proposal_locally(&proposal, &mut self.heur_log);
+                            if accepted {
+                                self.apply_proposal(&proposal, preview)?;
+                            }
+                        }
+                    } else if let Some(conductor) = self.meta_conductor.as_mut() {
                         if let Some(proposal) = conductor.ingest(summary.clone()) {
                             let (accepted, preview) =
                                 simulate_proposal_locally(&proposal, &mut self.heur_log);

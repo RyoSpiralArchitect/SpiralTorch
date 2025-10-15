@@ -26,7 +26,7 @@ schedule = trainer.roundtable(
     collapse=True,
     dist=st.DistConfig(node_id="demo", mode="periodic-meta", push_interval=10.0, summary_window=4),
 )
-trainer.install_meta_conductor(threshold=0.6, participants=1)
+trainer.install_blackcat_moderator(threshold=0.6, participants=1)
 loss = MeanSquaredError()
 
 dataset = st.dataset.from_vec(
@@ -39,3 +39,7 @@ dataset = st.dataset.from_vec(
 stats = session.train_epoch(trainer, model, loss, dataset, schedule)
 print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")
 print(st.get_psychoid_stats())
+for minute in trainer.blackcat_minutes():
+    print(
+        f"moderator minutes → {minute['plan_signature']} winner={minute['winner']} support={minute['support']:.2f}"
+    )

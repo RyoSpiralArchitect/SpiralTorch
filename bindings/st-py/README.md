@@ -112,7 +112,7 @@ schedule = trainer.roundtable(
     collapse=True,
     dist=st.DistConfig(node_id="demo", mode="periodic-meta", push_interval=10.0),
 )
-trainer.install_meta_conductor(threshold=0.6, participants=1)
+trainer.install_blackcat_moderator(threshold=0.6, participants=1)
 model = Sequential([Linear(2, 2, name="layer")])
 loss = MeanSquaredError()
 session.prepare_module(model)
@@ -133,9 +133,10 @@ print(st.get_psychoid_stats())
 ```
 
 The `DistConfig` connects the local roundtable to a meta layer that exchanges
-`MetaSummary` snapshots with peers. `install_meta_conductor` enables the node to
-aggregate incoming summaries, emit deterministic `GlobalProposal` updates, and
-append them to the heur.kdsl op-log—all without exposing ψ readings.
+`MetaSummary` snapshots with peers. `install_blackcat_moderator` spins up a
+moderator runtime that scores summaries, publishes Blackcat minutes, and funnels
+evidence into the embedded meta conductor—all without exposing ψ readings to the
+outside world.
 
 ```python
 from spiraltorch import SpiralSession, Tensor
