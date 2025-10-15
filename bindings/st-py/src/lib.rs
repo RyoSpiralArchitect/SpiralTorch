@@ -1,5 +1,7 @@
 mod sot;
 
+use crate::sot::{PySoT3DPlan, Sot3DParams};
+
 use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
 use pyo3::exceptions::PyValueError;
@@ -22,6 +24,7 @@ use st_frac::{
 use st_nn::{
     Conv1d as NnConv1d, DifferentialTrace, Linear as NnLinear, Module, Sequential as NnSequential,
     SpiralSession, SpiralSessionBuilder, WaveRnn as NnWaveRnn,
+    ZSpaceProjector as NnZSpaceProjector,
 };
 use st_tensor::pure::{
     measure::{
@@ -513,11 +516,15 @@ impl PyDifferentialResonance {
 #[pyclass(module = "spiraltorch", name = "SpiralDifferentialTrace")]
 struct PySpiralDifferentialTrace {
     trace: Option<DifferentialTrace>,
+    sot_plan: Option<PySoT3DPlan>,
 }
 
 impl PySpiralDifferentialTrace {
-    fn from_trace(trace: DifferentialTrace) -> Self {
-        Self { trace: Some(trace) }
+    fn from_trace_with_plan(trace: DifferentialTrace, plan: Option<PySoT3DPlan>) -> Self {
+        Self {
+            trace: Some(trace),
+            sot_plan: plan,
+        }
     }
 
     fn map_trace<F>(&mut self, f: F) -> PyResult<()>
@@ -542,6 +549,11 @@ impl PySpiralDifferentialTrace {
 
 #[pymethods]
 impl PySpiralDifferentialTrace {
+    #[getter]
+    fn sot_plan(&self) -> Option<PySoT3DPlan> {
+        self.sot_plan.clone()
+    }
+
     fn deform(&mut self, generator: &PyTensor, direction: &PyTensor) -> PyResult<()> {
         let generator = generator.as_tensor().clone();
         let direction = direction.as_tensor().clone();
@@ -800,6 +812,77 @@ impl PyLanguageWaveEncoder {
             self.curvature(),
             self.temperature()
         ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceProjector")]
+struct PyZSpaceProjector {
+    inner: Option<NnZSpaceProjector>,
+}
+
+impl PyZSpaceProjector {
+    fn borrow(&self) -> PyResult<&NnZSpaceProjector> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("ZSpaceProjector has been moved"))
+    }
+
+    fn borrow_mut(&mut self) -> PyResult<&mut NnZSpaceProjector> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("ZSpaceProjector has been moved"))
+    }
+
+    fn take(&mut self) -> PyResult<NnZSpaceProjector> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("ZSpaceProjector has been moved"))
+    }
+}
+
+#[pymethods]
+impl PyZSpaceProjector {
+    #[new]
+    fn new(topos: &PyOpenTopos, encoder: &PyLanguageWaveEncoder) -> PyResult<Self> {
+        let inner = convert(NnZSpaceProjector::new(
+            topos.inner.clone(),
+            encoder.inner.clone(),
+        ))?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.forward(input.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow_mut()?
+                .backward(input.as_tensor(), grad_output.as_tensor()),
+        )?))
+    }
+
+    fn curvature(&self) -> PyResult<f32> {
+        Ok(self.borrow()?.curvature())
+    }
+
+    fn topos(&self) -> PyResult<PyOpenTopos> {
+        Ok(PyOpenTopos::from_topos(self.borrow()?.topos().clone()))
+    }
+
+    fn encode_text(&self, text: &str) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.encode_text(text),
+        )?))
+    }
+
+    fn project_spiral(&self, plan: &PySoT3DPlan) -> PyResult<PyTensor> {
+        let base = plan.positions_tensor().map_err(tensor_err)?;
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.forward(&base),
+        )?))
     }
 }
 
@@ -1084,9 +1167,53 @@ impl PySpiralSession {
         PySpiralSessionBuilder::from_builder(self.inner.to_builder())
     }
 
-    fn trace(&self, seed: &PyTensor) -> PyResult<PySpiralDifferentialTrace> {
+    #[pyo3(signature = (seed, sot=None))]
+    fn trace(
+        &self,
+        seed: &PyTensor,
+        sot: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<PySpiralDifferentialTrace> {
+        let (rows, cols) = seed.as_tensor().shape();
+        let default_steps = match rows.checked_mul(cols) {
+            Some(0) | None => 1,
+            Some(value) => value.max(1),
+        };
+        let mut plan_steps = default_steps;
+        let mut params = Sot3DParams {
+            base_radius: 1.0,
+            radial_growth: 0.05,
+            base_height: 1.0,
+            meso_gain: 0.2,
+            micro_gain: 0.05,
+        };
+        if let Some(cfg) = sot {
+            if let Some(value) = cfg.get_item("steps")? {
+                plan_steps = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("base_radius")? {
+                params.base_radius = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("radial_growth")? {
+                params.radial_growth = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("base_height")? {
+                params.base_height = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("meso_gain")? {
+                params.meso_gain = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("micro_gain")? {
+                params.micro_gain = value.extract()?;
+            }
+        }
+
         let trace = convert(self.inner.trace(seed.as_tensor().clone()))?;
-        Ok(PySpiralDifferentialTrace::from_trace(trace))
+        let plan = if plan_steps == 0 {
+            None
+        } else {
+            Some(crate::sot::generate_plan_with_params(plan_steps, params)?)
+        };
+        Ok(PySpiralDifferentialTrace::from_trace_with_plan(trace, plan))
     }
 
     #[getter]
@@ -1495,9 +1622,11 @@ impl PySequentialModule {
                 seq.push(conv.take()?);
             } else if let Ok(mut wave) = obj.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
                 seq.push(wave.take()?);
+            } else if let Ok(mut projector) = obj.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+                seq.push(projector.take()?);
             } else {
                 return Err(PyValueError::new_err(
-                    "Sequential expects Linear, Conv1d, or WaveRnn modules",
+                    "Sequential expects Linear, Conv1d, WaveRnn, or ZSpaceProjector modules",
                 ));
             }
         }
@@ -1708,11 +1837,38 @@ fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLinearModule>()?;
     m.add_class::<PyConv1dModule>()?;
     m.add_class::<PyWaveRnnModule>()?;
+    m.add_class::<PyZSpaceProjector>()?;
     m.add_class::<PySequentialModule>()?;
-    m.setattr("__all__", vec!["Linear", "Conv1d", "WaveRnn", "Sequential"])?;
+    m.setattr(
+        "__all__",
+        vec![
+            "Linear",
+            "Conv1d",
+            "WaveRnn",
+            "ZSpaceProjector",
+            "Sequential",
+        ],
+    )?;
     m.setattr(
         "__doc__",
-        "Rust-backed neural network modules: Linear, Conv1d, WaveRnn, Sequential.",
+        "Rust-backed neural network modules: Linear, Conv1d, WaveRnn, ZSpaceProjector, Sequential.",
+    )?;
+    Ok(())
+}
+
+#[pymodule]
+fn frac(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(gl_coeffs_py, m)?)?;
+    m.add_function(wrap_pyfunction!(fracdiff_gl_py, m)?)?;
+    m.add_function(wrap_pyfunction!(fracdiff_gl_backward_py, m)?)?;
+    m.add_function(wrap_pyfunction!(frac_fft_py, m)?)?;
+    m.setattr(
+        "__all__",
+        vec!["gl_coeffs", "fracdiff_gl", "fracdiff_gl_backward", "fft"],
+    )?;
+    m.setattr(
+        "__doc__",
+        "Fractional calculus operators and FFT helpers used by SpiralTorch.",
     )?;
     Ok(())
 }

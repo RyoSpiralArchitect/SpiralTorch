@@ -1,18 +1,21 @@
+use crate::PyTensor;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
+use st_tensor::pure::Tensor;
 
 const GOLDEN_ANGLE: f64 = 2.399_963_229_728_653; // π(3 − √5)
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895; // (1 + √5) / 2
 
 #[derive(Clone, Copy)]
-struct Sot3DParams {
-    base_radius: f64,
-    radial_growth: f64,
-    base_height: f64,
-    meso_gain: f64,
-    micro_gain: f64,
+pub(crate) struct Sot3DParams {
+    pub(crate) base_radius: f64,
+    pub(crate) radial_growth: f64,
+    pub(crate) base_height: f64,
+    pub(crate) meso_gain: f64,
+    pub(crate) micro_gain: f64,
 }
 
 #[derive(Clone)]
@@ -139,7 +142,7 @@ fn pack_tetranacci(length: usize) -> Vec<usize> {
     pack_with_sequence(length, 4, &[1, 1, 2, 4])
 }
 
-fn build_plan(total_steps: usize, params: Sot3DParams) -> PyResult<PySoT3DPlan> {
+pub(crate) fn build_plan(total_steps: usize, params: Sot3DParams) -> PyResult<PySoT3DPlan> {
     if total_steps == 0 {
         return Ok(PySoT3DPlan {
             steps: Vec::new(),
@@ -534,11 +537,27 @@ impl PyMacroSummary {
 }
 
 #[pyclass(module = "spiraltorch.sot", name = "SoT3DPlan")]
+#[derive(Clone)]
 pub struct PySoT3DPlan {
     steps: Vec<Sot3DStep>,
     macros: Vec<MacroSummary>,
     params: Sot3DParams,
     total_steps: usize,
+}
+
+impl PySoT3DPlan {
+    pub(crate) fn positions_tensor(&self) -> Result<Tensor, st_tensor::pure::TensorError> {
+        if self.steps.is_empty() {
+            return Tensor::from_vec(0, 3, Vec::new());
+        }
+        let mut data = Vec::with_capacity(self.steps.len() * 3);
+        for step in &self.steps {
+            data.push(step.x as f32);
+            data.push(step.y as f32);
+            data.push(step.height as f32);
+        }
+        Tensor::from_vec(self.steps.len(), 3, data)
+    }
 }
 
 #[pymethods]
@@ -589,6 +608,13 @@ impl PySoT3DPlan {
             out.push(dict.into_py(py));
         }
         Ok(out)
+    }
+
+    fn as_tensor(&self) -> PyResult<PyTensor> {
+        let tensor = self
+            .positions_tensor()
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        Ok(PyTensor::from_tensor(tensor))
     }
 
     fn macro_summaries(&self, py: Python<'_>) -> PyResult<Vec<Py<PyMacroSummary>>> {
@@ -647,6 +673,13 @@ fn generate_plan(
         meso_gain,
         micro_gain,
     };
+    build_plan(total_steps, params)
+}
+
+pub(crate) fn generate_plan_with_params(
+    total_steps: usize,
+    params: Sot3DParams,
+) -> PyResult<PySoT3DPlan> {
     build_plan(total_steps, params)
 }
 
