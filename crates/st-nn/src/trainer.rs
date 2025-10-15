@@ -39,6 +39,8 @@ use st_core::telemetry::psi::{PsiConfig, PsiEvent, PsiInput, PsiMeter, PsiReadin
 use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter, PsychoidReading};
 use st_tensor::pure::topos::OpenCartesianTopos;
 use std::collections::HashMap;
+#[cfg(feature = "psi")]
+use std::env;
 use std::time::{Duration, Instant};
 
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
@@ -85,6 +87,8 @@ impl ModuleTrainer {
         hyper_learning_rate: f32,
         fallback_learning_rate: f32,
     ) -> Self {
+        #[cfg(feature = "psi")]
+        let (psi, psi_log) = Self::init_psi_meter();
         Self {
             planner: RankPlanner::new(caps),
             curvature,
