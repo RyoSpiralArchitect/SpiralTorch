@@ -1,3 +1,21 @@
+// ============================================================================
+//  SpiralReality Proprietary
+//  Copyright (c) 2025 SpiralReality. All Rights Reserved.
+//
+//  NOTICE: This file contains confidential and proprietary information of
+//  SpiralReality. ANY USE, COPYING, MODIFICATION, DISTRIBUTION, DISPLAY,
+//  OR DISCLOSURE OF THIS FILE, IN WHOLE OR IN PART, IS STRICTLY PROHIBITED
+//  WITHOUT THE PRIOR WRITTEN CONSENT OF SPIRALREALITY.
+//
+//  NO LICENSE IS GRANTED OR IMPLIED BY THIS FILE. THIS SOFTWARE IS PROVIDED
+//  "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+//  NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+//  PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL SPIRALREALITY OR ITS
+//  SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+//  AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+//  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// ============================================================================
+
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
@@ -5,8 +23,14 @@ use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSch
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
+#[cfg(feature = "collapse")]
+use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
+#[cfg(feature = "psi")]
+use st_core::telemetry::hub;
+#[cfg(feature = "psi")]
+use st_core::telemetry::psi::{PsiConfig, PsiEvent, PsiInput, PsiMeter, PsiReading};
 use st_tensor::pure::topos::OpenCartesianTopos;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -21,6 +45,12 @@ pub struct ModuleTrainer {
     autopilot: Option<Autopilot>,
     band_weight_fn: Option<BandWeightFn>,
     injector_enabled: bool,
+    #[cfg(feature = "psi")]
+    psi: Option<PsiMeter>,
+    #[cfg(feature = "psi")]
+    psi_log: bool,
+    #[cfg(feature = "collapse")]
+    collapse: Option<CollapseDrive>,
 }
 
 impl core::fmt::Debug for ModuleTrainer {
@@ -53,6 +83,12 @@ impl ModuleTrainer {
             autopilot: None,
             band_weight_fn: None,
             injector_enabled: false,
+            #[cfg(feature = "psi")]
+            psi: None,
+            #[cfg(feature = "psi")]
+            psi_log: false,
+            #[cfg(feature = "collapse")]
+            collapse: None,
         }
     }
 
@@ -103,6 +139,11 @@ impl ModuleTrainer {
         self.curvature
     }
 
+    /// Returns the learning rate used for hypergrad updates.
+    pub fn hyper_learning_rate(&self) -> f32 {
+        self.hyper_learning_rate
+    }
+
     /// Attaches hypergrad tapes to all parameters of the provided module.
     pub fn prepare<M: Module>(&self, module: &mut M) -> PureResult<()> {
         module.attach_hypergrad(self.curvature, self.hyper_learning_rate)
@@ -138,12 +179,18 @@ impl ModuleTrainer {
     where
         M: Module,
         L: Loss,
-        I: IntoIterator<Item = (Tensor, Tensor)>,
+        I: IntoIterator,
+        I::Item: IntoBatch,
     {
         self.zero(module)?;
+        #[cfg(feature = "psi")]
+        self.bootstrap_psi(schedule);
+        #[cfg(feature = "collapse")]
+        self.bootstrap_collapse(schedule);
         let mut total_loss = 0.0f32;
         let mut steps = 0usize;
-        for (input, target) in batches.into_iter() {
+        for batch in batches.into_iter() {
+            let (input, target) = batch.into_batch()?;
             let step_start = Instant::now();
             if let Some(rt) = self.blackcat.as_mut() {
                 rt.begin_step();
@@ -176,7 +223,82 @@ impl ModuleTrainer {
                 step_loss
             };
             total_loss += weighted_loss;
+            let mut extra = HashMap::new();
             let _ = module.backward_bands(&input, &bands)?;
+            #[cfg(feature = "collapse")]
+            let mut psi_for_drive: Option<PsiReading> = None;
+            #[cfg(feature = "psi")]
+            {
+                if let Some(meter) = self.psi.as_mut() {
+                    let grad_l2 = Self::collect_grad_l2(module)?;
+                    let act_drift = module.psi_probe().unwrap_or(0.0);
+                    let input_snapshot = PsiInput {
+                        loss: step_loss.abs(),
+                        grad_l2,
+                        update_ratio: 0.0,
+                        act_drift,
+                        attn_entropy: 0.0,
+                        band_energy: band_energy.l1() + band_energy.drift.abs(),
+                    };
+                    let (reading, events) = meter.update(&input_snapshot);
+                    #[cfg(feature = "collapse")]
+                    {
+                        psi_for_drive = Some(reading.clone());
+                    }
+                    hub::set_last_psi(&reading);
+                    if self.psi_log {
+                        Self::log_psi(&reading, &input_snapshot);
+                        if !events.is_empty() {
+                            Self::log_psi_events(&events);
+                        }
+                    }
+                    extra.insert("psi_total".to_string(), reading.total as f64);
+                    for (component, value) in reading.breakdown.iter() {
+                        let key = format!("psi_{}", component);
+                        extra.insert(key, *value as f64);
+                    }
+                    extra.insert("psi_loss".to_string(), input_snapshot.loss as f64);
+                    extra.insert("psi_grad_l2".to_string(), input_snapshot.grad_l2 as f64);
+                    extra.insert(
+                        "psi_update_ratio".to_string(),
+                        input_snapshot.update_ratio as f64,
+                    );
+                    extra.insert("psi_act_drift".to_string(), input_snapshot.act_drift as f64);
+                    extra.insert(
+                        "psi_band_energy".to_string(),
+                        input_snapshot.band_energy as f64,
+                    );
+                    extra.insert("psi_events".to_string(), events.len() as f64);
+                }
+            }
+            #[cfg(feature = "collapse")]
+            if let (Some(driver), Some(reading)) = (self.collapse.as_mut(), psi_for_drive.as_ref())
+            {
+                match driver.update(reading) {
+                    DriveCmd::Collapse {
+                        grad_scale,
+                        max_norm,
+                        lr_decay,
+                    } => {
+                        if grad_scale < 0.999 {
+                            self.apply_grad_scale(module, grad_scale)?;
+                        }
+                        if let Some(limit) = max_norm {
+                            self.clip_grad_global_norm(module, limit)?;
+                        }
+                        if let Some(decay) = lr_decay {
+                            let factor = (1.0 - decay).clamp(0.1, 1.0);
+                            self.optimizer_mul_lr(module, factor)?;
+                        }
+                    }
+                    DriveCmd::Bloom { lr_mul } => {
+                        if lr_mul > 1.0 {
+                            self.optimizer_mul_lr(module, lr_mul)?;
+                        }
+                    }
+                    DriveCmd::None => {}
+                }
+            }
             self.step(module)?;
             self.zero(module)?;
             steps += 1;
@@ -189,7 +311,6 @@ impl ModuleTrainer {
             } else {
                 step_start.elapsed().as_secs_f64() * 1_000.0
             };
-            let mut extra = HashMap::new();
             extra.insert("band_above".to_string(), band_energy.above as f64);
             extra.insert("band_here".to_string(), band_energy.here as f64);
             extra.insert("band_beneath".to_string(), band_energy.beneath as f64);
@@ -232,6 +353,122 @@ impl ModuleTrainer {
         let caps = self.planner.device_caps();
         caps.occupancy_score(caps.max_workgroup) as f64
     }
+
+    #[cfg(feature = "psi")]
+    fn bootstrap_psi(&mut self, schedule: &RoundtableSchedule) {
+        if self.psi.is_some() || !schedule.psi_enabled() {
+            return;
+        }
+        let cfg = PsiConfig::automated(schedule.psi_hint());
+        self.psi = Some(PsiMeter::new(cfg));
+        self.psi_log = schedule.psi_log();
+    }
+
+    #[cfg(feature = "collapse")]
+    fn bootstrap_collapse(&mut self, schedule: &RoundtableSchedule) {
+        if self.collapse.is_some() || !schedule.collapse_enabled() {
+            return;
+        }
+        let cfg = CollapseConfig::automated(schedule.psi_hint());
+        self.collapse = Some(CollapseDrive::new(cfg));
+    }
+
+    #[cfg(feature = "collapse")]
+    fn apply_grad_scale<M: Module>(&self, module: &mut M, scale: f32) -> PureResult<()> {
+        if (scale - 1.0).abs() <= f32::EPSILON {
+            return Ok(());
+        }
+        module.visit_parameters_mut(&mut |param| {
+            param.scale_accumulators(scale);
+            Ok(())
+        })
+    }
+
+    #[cfg(feature = "collapse")]
+    fn clip_grad_global_norm<M: Module>(&self, module: &mut M, max_norm: f32) -> PureResult<()> {
+        if max_norm <= 0.0 {
+            return Ok(());
+        }
+        let mut total = 0.0f64;
+        module.visit_parameters(&mut |param| {
+            total += param.accumulators_norm_sq();
+            Ok(())
+        })?;
+        let norm = total.sqrt() as f32;
+        if norm <= max_norm || norm <= f32::EPSILON {
+            return Ok(());
+        }
+        let scale = (max_norm / norm).clamp(0.0, 1.0);
+        self.apply_grad_scale(module, scale)
+    }
+
+    #[cfg(feature = "collapse")]
+    fn optimizer_mul_lr<M: Module>(&mut self, module: &mut M, factor: f32) -> PureResult<()> {
+        if !factor.is_finite() || factor <= 0.0 {
+            return Ok(());
+        }
+        self.fallback_learning_rate *= factor;
+        self.hyper_learning_rate *= factor;
+        module.visit_parameters_mut(&mut |param| {
+            param.scale_learning_rate(factor);
+            Ok(())
+        })
+    }
+
+    #[cfg(feature = "psi")]
+    fn collect_grad_l2<M: Module>(module: &M) -> PureResult<f32> {
+        let mut sum = 0.0f64;
+        module.visit_parameters(&mut |param| {
+            if let Some(tape) = param.hypergrad() {
+                for &value in tape.gradient().iter() {
+                    let v = value as f64;
+                    sum += v * v;
+                }
+            } else if let Some(grad) = param.gradient() {
+                for &value in grad.data().iter() {
+                    let v = value as f64;
+                    sum += v * v;
+                }
+            }
+            Ok(())
+        })?;
+        Ok((sum).sqrt() as f32)
+    }
+
+    #[cfg(feature = "psi")]
+    fn log_psi(reading: &PsiReading, input: &PsiInput) {
+        println!(
+            "[psi] step={} total={:.4} loss={:.4} grad_l2={:.4} update={:.4} act={:.4} band={:.4}",
+            reading.step,
+            reading.total,
+            input.loss,
+            input.grad_l2,
+            input.update_ratio,
+            input.act_drift,
+            input.band_energy
+        );
+    }
+
+    #[cfg(feature = "psi")]
+    fn log_psi_events(events: &[PsiEvent]) {
+        for event in events {
+            match event {
+                PsiEvent::ThresholdCross {
+                    component,
+                    value,
+                    threshold,
+                    up,
+                    step,
+                } => {
+                    let direction = if *up { "up" } else { "down" };
+                    println!(
+                        "[psi-event] step={} component={} direction={} value={:.4} threshold={:.4}",
+                        step, component, direction, value, threshold
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Metrics captured while running [`ModuleTrainer::train_epoch`].
@@ -240,6 +477,25 @@ pub struct EpochStats {
     pub batches: usize,
     pub total_loss: f32,
     pub average_loss: f32,
+}
+
+/// Helper trait that allows [`ModuleTrainer::train_epoch`] to accept both raw
+/// `(Tensor, Tensor)` batches and fallible [`PureResult`] batches produced by
+/// the [`dataset::DataLoader`] surface.
+pub trait IntoBatch {
+    fn into_batch(self) -> PureResult<(Tensor, Tensor)>;
+}
+
+impl IntoBatch for (Tensor, Tensor) {
+    fn into_batch(self) -> PureResult<(Tensor, Tensor)> {
+        Ok(self)
+    }
+}
+
+impl IntoBatch for PureResult<(Tensor, Tensor)> {
+    fn into_batch(self) -> PureResult<(Tensor, Tensor)> {
+        self
+    }
 }
 
 #[cfg(test)]

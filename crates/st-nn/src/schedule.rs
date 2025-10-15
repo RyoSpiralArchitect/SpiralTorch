@@ -11,6 +11,12 @@ pub struct RoundtableConfig {
     pub mid_k: u32,
     pub bottom_k: u32,
     pub here_tolerance: f32,
+    #[cfg(feature = "psi")]
+    pub psi_enabled: bool,
+    #[cfg(feature = "psi")]
+    pub psi_log: bool,
+    #[cfg(feature = "collapse")]
+    pub collapse_enabled: bool,
 }
 
 impl Default for RoundtableConfig {
@@ -20,6 +26,12 @@ impl Default for RoundtableConfig {
             mid_k: 8,
             bottom_k: 8,
             here_tolerance: 1e-5,
+            #[cfg(feature = "psi")]
+            psi_enabled: false,
+            #[cfg(feature = "psi")]
+            psi_log: false,
+            #[cfg(feature = "collapse")]
+            collapse_enabled: false,
         }
     }
 }
@@ -48,6 +60,31 @@ impl RoundtableConfig {
         self.here_tolerance = tol.max(0.0);
         self
     }
+
+    #[cfg(feature = "psi")]
+    pub fn enable_psi(mut self) -> Self {
+        self.psi_enabled = true;
+        self
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn enable_psi_with_log(mut self) -> Self {
+        self.psi_enabled = true;
+        self.psi_log = true;
+        self
+    }
+
+    #[cfg(feature = "collapse")]
+    pub fn enable_collapse(mut self) -> Self {
+        self.collapse_enabled = true;
+        #[cfg(feature = "psi")]
+        {
+            if !self.psi_enabled {
+                self.psi_enabled = true;
+            }
+        }
+        self
+    }
 }
 
 /// Roundtable schedule that binds TopK (Above), MidK (Here), and BottomK
@@ -58,6 +95,12 @@ pub struct RoundtableSchedule {
     here: RankPlan,
     beneath: RankPlan,
     here_tolerance: f32,
+    #[cfg(feature = "psi")]
+    psi_enabled: bool,
+    #[cfg(feature = "psi")]
+    psi_log: bool,
+    #[cfg(feature = "collapse")]
+    collapse_enabled: bool,
 }
 
 impl RoundtableSchedule {
@@ -71,6 +114,12 @@ impl RoundtableSchedule {
             here,
             beneath,
             here_tolerance: config.here_tolerance,
+            #[cfg(feature = "psi")]
+            psi_enabled: config.psi_enabled,
+            #[cfg(feature = "psi")]
+            psi_log: config.psi_log,
+            #[cfg(feature = "collapse")]
+            collapse_enabled: config.collapse_enabled && config.psi_enabled,
         }
     }
 
@@ -149,6 +198,41 @@ impl RoundtableSchedule {
             beneath,
             drift: 0.0,
         })
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn psi_enabled(&self) -> bool {
+        self.psi_enabled
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn psi_log(&self) -> bool {
+        self.psi_log
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn psi_hint(&self) -> st_core::telemetry::psi::PsiAutomationHint {
+        use st_core::telemetry::psi::PsiAutomationHint;
+        let depth = self.above.k + self.here.k + self.beneath.k;
+        let band_focus =
+            self.above.k as f32 * 1.4 + self.here.k as f32 + self.beneath.k as f32 * 0.6;
+        let drift_weight = if depth == 0 {
+            0.2
+        } else {
+            (self.here.k as f32 / depth as f32 * 0.35 + 0.12).clamp(0.1, 0.45)
+        };
+        PsiAutomationHint {
+            above: self.above.k,
+            here: self.here.k,
+            beneath: self.beneath.k,
+            band_focus,
+            drift_weight,
+        }
+    }
+
+    #[cfg(feature = "collapse")]
+    pub fn collapse_enabled(&self) -> bool {
+        self.collapse_enabled
     }
 }
 
@@ -279,5 +363,31 @@ mod tests {
         assert!((energy.above - above).abs() < 1e-6);
         assert!((energy.here - here).abs() < 1e-6);
         assert!((energy.beneath - beneath).abs() < 1e-6);
+    }
+
+    #[cfg(feature = "psi")]
+    #[test]
+    fn psi_flags_follow_config() {
+        let planner = RankPlanner::new(st_core::backend::device_caps::DeviceCaps::wgpu(
+            32, true, 256,
+        ));
+        let cfg = RoundtableConfig::default().enable_psi_with_log();
+        let schedule = RoundtableSchedule::new(&planner, 1, 4, cfg);
+        assert!(schedule.psi_enabled());
+        assert!(schedule.psi_log());
+        let hint = schedule.psi_hint();
+        assert!(hint.depth() > 0);
+    }
+
+    #[cfg(feature = "collapse")]
+    #[test]
+    fn collapse_requires_psi() {
+        let planner = RankPlanner::new(st_core::backend::device_caps::DeviceCaps::wgpu(
+            32, true, 256,
+        ));
+        let cfg = RoundtableConfig::default().enable_collapse();
+        let schedule = RoundtableSchedule::new(&planner, 1, 4, cfg);
+        assert!(schedule.psi_enabled());
+        assert!(schedule.collapse_enabled());
     }
 }
