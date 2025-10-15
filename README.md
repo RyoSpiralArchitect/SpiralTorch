@@ -66,18 +66,31 @@ Kick the tires with the new end-to-end `hello_session` walkthrough. It seeds a
 session, computes a barycenter, aligns a hypergrad tape, and runs a one-epoch
 roundtable update over a toy dataset.
 
+### Rust
 ```bash
 cargo run -p st-nn --example hello_session
 ```
 
-The Python wheel mirrors the same flow for rapid notebooks:
+### Python
+```python
+from spiraltorch import SpiralSession, Tensor
 
-```bash
-python bindings/st-py/examples/hello_session.py
-```
+# hello session: barycenter + hypergrad alignment + one training epoch
+session = SpiralSession(device="auto", curvature=-0.95)
+print(session)  # SpiralSession(device=wgpu, curvature=-0.95, ...)
 
+# prepare tensors
+input = Tensor(1, 4, [0.1, -0.2, 0.3, -0.4])
+target = Tensor(1, 2, [0.0, 1.0])
+
+# run a single training round
+stats = session.train_epoch(input, target)
+print(f"loss={stats.average_loss:.6f}, steps={stats.steps}")
 Both variants print the averaged roundtable loss after aligning the barycenter
 path with the hypergrad tape.
+```
+
+---
 
 ## What you get for training
 
