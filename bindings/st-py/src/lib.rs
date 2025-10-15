@@ -22,7 +22,8 @@ use st_frac::{
     fracdiff_gl_nd, fracdiff_gl_nd_backward, gl_coeffs as frac_gl_coeffs, FracErr, Pad as FracPad,
 };
 use st_nn::{
-    Conv1d as NnConv1d, DifferentialTrace, Linear as NnLinear, Module, Sequential as NnSequential,
+    Conv1d as NnConv1d, DifferentialTrace, EpochStats, Linear as NnLinear, Loss, MeanSquaredError,
+    Module, ModuleTrainer, RoundtableConfig, RoundtableSchedule, Sequential as NnSequential,
     SpiralSession, SpiralSessionBuilder, WaveRnn as NnWaveRnn,
     ZSpaceProjector as NnZSpaceProjector,
 };
@@ -1122,6 +1123,202 @@ impl PyHypergrad {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "RoundtableSchedule", unsendable)]
+struct PyRoundtableSchedule {
+    inner: RoundtableSchedule,
+}
+
+impl PyRoundtableSchedule {
+    fn from_schedule(inner: RoundtableSchedule) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyRoundtableSchedule {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn top_k(&self) -> u32 {
+        self.inner.above().k
+    }
+
+    #[getter]
+    fn mid_k(&self) -> u32 {
+        self.inner.here().k
+    }
+
+    #[getter]
+    fn bottom_k(&self) -> u32 {
+        self.inner.beneath().k
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "RoundtableSchedule(top={}, mid={}, bottom={})",
+            self.top_k(),
+            self.mid_k(),
+            self.bottom_k()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "EpochStats")]
+#[derive(Clone, Copy)]
+struct PyEpochStats {
+    inner: EpochStats,
+}
+
+impl PyEpochStats {
+    fn from_stats(inner: EpochStats) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyEpochStats {
+    #[getter]
+    fn batches(&self) -> usize {
+        self.inner.batches
+    }
+
+    #[getter]
+    fn total_loss(&self) -> f32 {
+        self.inner.total_loss
+    }
+
+    #[getter]
+    fn average_loss(&self) -> f32 {
+        self.inner.average_loss
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "EpochStats(batches={}, total_loss={:.6}, average_loss={:.6})",
+            self.batches(),
+            self.total_loss(),
+            self.average_loss()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
+struct PyModuleTrainer {
+    inner: ModuleTrainer,
+}
+
+impl PyModuleTrainer {
+    fn from_trainer(inner: ModuleTrainer) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyModuleTrainer {
+    #[new]
+    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01))]
+    fn new(
+        device: Option<&str>,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Self {
+        let caps = caps_for(device);
+        let inner =
+            ModuleTrainer::new(caps, curvature, hyper_learning_rate, fallback_learning_rate);
+        Self { inner }
+    }
+
+    #[getter]
+    fn curvature(&self) -> f32 {
+        self.inner.curvature()
+    }
+
+    #[getter]
+    fn hyper_learning_rate(&self) -> f32 {
+        self.inner.hyper_learning_rate()
+    }
+
+    #[getter]
+    fn fallback_learning_rate(&self) -> f32 {
+        self.inner.fallback_learning_rate()
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5))]
+    fn roundtable(
+        &self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+    ) -> PyRoundtableSchedule {
+        let config = RoundtableConfig {
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance: here_tolerance.max(0.0),
+        };
+        PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
+    }
+
+    #[pyo3(signature = (module, loss, batches, schedule))]
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: Vec<(PyTensor, PyTensor)>,
+        schedule: &PyRoundtableSchedule,
+    ) -> PyResult<PyEpochStats> {
+        let dataset: Vec<(Tensor, Tensor)> = batches
+            .into_iter()
+            .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+            .collect();
+
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(self.inner.train_epoch(
+                    seq.borrow_mut()?,
+                    mse.inner_mut(),
+                    dataset,
+                    &schedule.inner,
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(self.inner.train_epoch(
+                    linear.borrow_mut()?,
+                    mse.inner_mut(),
+                    dataset,
+                    &schedule.inner,
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
+        }
+
+        Err(PyValueError::new_err(
+            "ModuleTrainer.train_epoch expects a Sequential or Linear module and a supported loss",
+        ))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ModuleTrainer(curvature={}, hyper_lr={:.4}, fallback_lr={:.4})",
+            self.curvature(),
+            self.hyper_learning_rate(),
+            self.fallback_learning_rate()
+        ))
+    }
+}
+
 #[pyclass(module = "spiraltorch", name = "SpiralSessionBuilder")]
 struct PySpiralSessionBuilder {
     builder: Option<SpiralSessionBuilder>,
@@ -1272,6 +1469,64 @@ impl PySpiralSession {
 
     fn builder(&self) -> PySpiralSessionBuilder {
         PySpiralSessionBuilder::from_builder(self.inner.to_builder())
+    }
+
+    fn trainer(&self) -> PyModuleTrainer {
+        PyModuleTrainer::from_trainer(self.inner.trainer())
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5))]
+    fn roundtable(
+        &self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+    ) -> PyRoundtableSchedule {
+        let config = RoundtableConfig {
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance: here_tolerance.max(0.0),
+        };
+        PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
+    }
+
+    #[pyo3(signature = (module))]
+    fn prepare_module(&self, module: &Bound<'_, PyAny>) -> PyResult<()> {
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            return convert(self.inner.prepare_module(seq.borrow_mut()?));
+        }
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            return convert(self.inner.prepare_module(linear.borrow_mut()?));
+        }
+        if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+            return convert(self.inner.prepare_module(conv.borrow_mut()?));
+        }
+        if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+            return convert(self.inner.prepare_module(wave.borrow_mut()?));
+        }
+        if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+            return convert(self.inner.prepare_module(projector.borrow_mut()?));
+        }
+
+        Err(PyValueError::new_err(
+            "prepare_module expects Linear, Conv1d, WaveRnn, ZSpaceProjector, or Sequential modules",
+        ))
+    }
+
+    #[pyo3(signature = (trainer, module, loss, batches, schedule))]
+    fn train_epoch(
+        &self,
+        trainer: &mut PyModuleTrainer,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: Vec<(PyTensor, PyTensor)>,
+        schedule: &PyRoundtableSchedule,
+    ) -> PyResult<PyEpochStats> {
+        trainer.train_epoch(module, loss, batches, schedule)
     }
 
     #[pyo3(signature = (seed, sot=None))]
@@ -1438,6 +1693,45 @@ impl PySpiralSession {
             self.inner.hyper_learning_rate(),
             self.inner.fallback_learning_rate()
         ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "MeanSquaredError")]
+struct PyMeanSquaredError {
+    inner: MeanSquaredError,
+}
+
+impl PyMeanSquaredError {
+    fn inner_mut(&mut self) -> &mut MeanSquaredError {
+        &mut self.inner
+    }
+}
+
+#[pymethods]
+impl PyMeanSquaredError {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: MeanSquaredError::new(),
+        }
+    }
+
+    fn forward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.inner
+                .forward(prediction.as_tensor(), target.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.inner
+                .backward(prediction.as_tensor(), target.as_tensor()),
+        )?))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok("MeanSquaredError()".to_string())
     }
 }
 
@@ -1941,6 +2235,7 @@ fn frac_fft_py(signal: Vec<Complex64>, inverse: bool) -> PyResult<Vec<Complex64>
 
 #[pymodule]
 fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyMeanSquaredError>()?;
     m.add_class::<PyLinearModule>()?;
     m.add_class::<PyConv1dModule>()?;
     m.add_class::<PyWaveRnnModule>()?;
@@ -1949,6 +2244,7 @@ fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.setattr(
         "__all__",
         vec![
+            "MeanSquaredError",
             "Linear",
             "Conv1d",
             "WaveRnn",
@@ -2043,6 +2339,9 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTensorBiome>()?;
     m.add_class::<PyLanguageWaveEncoder>()?;
     m.add_class::<PyHypergrad>()?;
+    m.add_class::<PyRoundtableSchedule>()?;
+    m.add_class::<PyEpochStats>()?;
+    m.add_class::<PyModuleTrainer>()?;
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
 
@@ -2064,6 +2363,9 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "TensorBiome",
             "LanguageWaveEncoder",
             "Hypergrad",
+            "RoundtableSchedule",
+            "EpochStats",
+            "ModuleTrainer",
             "SpiralSessionBuilder",
             "SpiralSession",
             "nn",

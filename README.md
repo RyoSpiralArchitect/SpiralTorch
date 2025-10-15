@@ -28,6 +28,12 @@ The stack is comfortable living entirely in Rust—yet the Python wheel remains 
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
+```python
+import spiraltorch as st
+sess = st.SpiralSession(device="wgpu", curvature=-1.0, hyper_learning_rate=0.05)
+sess.align_hypergrad(sess.hypergrad(1, 2), sess.barycenter([st.Tensor(1, 2, [0.7, 0.3])]))
+```
+
 **SpiralTorch is a Rust-first AI training framework** that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
 the kernels, the hypergrad tape streams Z-space meaning, and the high-level
@@ -53,6 +59,25 @@ tensor shims, no translation layers, and no tracebacks.
     Python bindings when needed.
 
 ---
+
+## Hello SpiralSession quickstart
+
+Kick the tires with the new end-to-end `hello_session` walkthrough. It seeds a
+session, computes a barycenter, aligns a hypergrad tape, and runs a one-epoch
+roundtable update over a toy dataset.
+
+```bash
+cargo run -p st-nn --example hello_session
+```
+
+The Python wheel mirrors the same flow for rapid notebooks:
+
+```bash
+python bindings/st-py/examples/hello_session.py
+```
+
+Both variants print the averaged roundtable loss after aligning the barycenter
+path with the hypergrad tape.
 
 ## What you get for training
 

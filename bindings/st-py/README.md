@@ -61,6 +61,15 @@ maturin build -m bindings/st-py/Cargo.toml --release --features "hip hip-real"
 
 ## Minimal usage
 
+### Hello SpiralSession
+
+```bash
+python examples/hello_session.py
+```
+
+Aligns a barycenter with a hypergrad tape, prepares a Sequential module, and
+finishes a roundtable epoch entirely from Python.
+
 ```python
 from spiraltorch import Tensor, Hypergrad, LanguageWaveEncoder
 
