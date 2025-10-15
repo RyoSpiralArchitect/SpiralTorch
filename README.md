@@ -67,31 +67,27 @@ Kick the tires with the new end-to-end `hello_session` walkthrough. It seeds a
 session, computes a barycenter, aligns a hypergrad tape, and runs a one-epoch
 roundtable update over a toy dataset.
 
-### Rust
 ```bash
 cargo run -p st-nn --example hello_session
 ```
 
-### Python
-```python
-from spiraltorch import SpiralSession, Tensor
+The Python wheel mirrors the same flow for rapid notebooks:
 
-# hello session: barycenter + hypergrad alignment + one training epoch
-session = SpiralSession(device="auto", curvature=-0.95)
-print(session)  # SpiralSession(device=wgpu, curvature=-0.95, ...)
-
-# prepare tensors
-input = Tensor(1, 4, [0.1, -0.2, 0.3, -0.4])
-target = Tensor(1, 2, [0.0, 1.0])
-
-# run a single training round
-stats = session.train_epoch(input, target)
-print(f"loss={stats.average_loss:.6f}, steps={stats.steps}")
-Both variants print the averaged roundtable loss after aligning the barycenter
-path with the hypergrad tape.
+```bash
+python bindings/st-py/examples/hello_session.py
 ```
 
----
+Both variants print the averaged roundtable loss after aligning the barycenter
+path with the hypergrad tape. On the Python side you can now spin up the
+streaming loader without touching NumPy:
+
+```python
+loader = st.dataset.from_vec(samples).shuffle(0xC0FFEE).batched(4).prefetch(2)
+stats = session.train_epoch(trainer, model, loss, loader, schedule)
+```
+
+The loader runs entirely in Rust—mini-batches stream straight into
+`train_epoch` and propagate errors as native `TensorError`s when shapes drift.
 
 ## What you get for training
 
@@ -123,7 +119,9 @@ path with the hypergrad tape.
   losses. They stream gradients through the hypergrad tape, apply open-topos
   rewrites, and keep SpiralK planners one call away with roundtable-aware
   scheduling helpers. Every primitive is exported through the Python wheel so
-  you can stay NumPy-free while scripting experiments.
+  you can stay NumPy-free while scripting experiments—with the new
+  `spiraltorch.dataset.DataLoader` keeping shuffle/batch/prefetch entirely in
+  Rust.
 - **Optional WASM tuner table**
   Bake the JSON dataset offline and ship it to browsers/WASM. The runtime loads the table lazily, blends it with SpiralK, and keeps the optimiser in sync with the generated WGSL kernels.
 - **Self-Rewrite**

@@ -20,10 +20,12 @@ trainer = session.trainer()
 schedule = session.roundtable(rows=1, cols=2)
 loss = MeanSquaredError()
 
-dataset = [
-    (st.Tensor(1, 2, [0.0, 1.0]), st.Tensor(1, 2, [0.0, 1.0])),
-    (st.Tensor(1, 2, [1.0, 0.0]), st.Tensor(1, 2, [1.0, 0.0])),
-]
+dataset = st.dataset.from_vec(
+    [
+        (st.Tensor(1, 2, [0.0, 1.0]), st.Tensor(1, 2, [0.0, 1.0])),
+        (st.Tensor(1, 2, [1.0, 0.0]), st.Tensor(1, 2, [1.0, 0.0])),
+    ]
+).shuffle(0xC0FFEE).batched(2).prefetch(2)
 
 stats = session.train_epoch(trainer, model, loss, dataset, schedule)
 print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")

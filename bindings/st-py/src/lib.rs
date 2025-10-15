@@ -9,6 +9,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
+use pyo3::PyRef;
 use pyo3::PyRefMut;
 use st_backend_hip::{
     device_info as hip_device_info, hip_available as hip_runtime_available,
@@ -21,11 +22,13 @@ use st_frac::fft::{fft_inplace as frac_fft_inplace, Complex32 as FracComplex32, 
 use st_frac::{
     fracdiff_gl_nd, fracdiff_gl_nd_backward, gl_coeffs as frac_gl_coeffs, FracErr, Pad as FracPad,
 };
+use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
+use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
-    Conv1d as NnConv1d, DifferentialTrace, EpochStats, Linear as NnLinear, Loss, MeanSquaredError,
-    Module, ModuleTrainer, RoundtableConfig, RoundtableSchedule, Sequential as NnSequential,
-    SpiralSession, SpiralSessionBuilder, WaveRnn as NnWaveRnn,
-    ZSpaceProjector as NnZSpaceProjector,
+    Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, EpochStats,
+    Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer, RoundtableConfig,
+    RoundtableSchedule, Sequential as NnSequential, SpiralSession, SpiralSessionBuilder,
+    WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
 use st_tensor::pure::{
     measure::{
@@ -285,6 +288,112 @@ impl PyTensor {
         let (rows, cols) = self.inner.shape();
         Ok(format!("Tensor(rows={rows}, cols={cols})"))
     }
+}
+
+#[pyclass(module = "spiraltorch.dataset", name = "DataLoader", unsendable)]
+#[derive(Clone)]
+struct PyDataLoader {
+    inner: NnDataLoader,
+}
+
+impl PyDataLoader {
+    fn from_loader(inner: NnDataLoader) -> Self {
+        Self { inner }
+    }
+
+    fn clone_inner(&self) -> NnDataLoader {
+        self.inner.clone()
+    }
+}
+
+#[pymethods]
+impl PyDataLoader {
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    #[getter]
+    fn batch_size(&self) -> usize {
+        self.inner.batch_size()
+    }
+
+    #[getter]
+    fn prefetch_depth(&self) -> usize {
+        self.inner.prefetch_depth()
+    }
+
+    fn shuffle(&self, seed: u64) -> Self {
+        Self::from_loader(self.inner.clone().shuffle(seed))
+    }
+
+    fn batched(&self, batch_size: usize) -> Self {
+        Self::from_loader(self.inner.clone().batched(batch_size))
+    }
+
+    fn prefetch(&self, depth: usize) -> Self {
+        Self::from_loader(self.inner.clone().prefetch(depth))
+    }
+
+    fn __iter__(slf: PyRef<'_, Self>) -> PyResult<Py<PyDataLoaderIter>> {
+        Py::new(
+            slf.py(),
+            PyDataLoaderIter {
+                inner: Some(slf.clone_inner().into_iter()),
+            },
+        )
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "DataLoader(len={}, batch_size={})",
+            self.inner.len(),
+            self.inner.batch_size()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.dataset", name = "DataLoaderIter", unsendable)]
+struct PyDataLoaderIter {
+    inner: Option<NnDataLoaderBatches>,
+}
+
+#[pymethods]
+impl PyDataLoaderIter {
+    fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        slf
+    }
+
+    fn __next__(&mut self) -> PyResult<Option<(PyTensor, PyTensor)>> {
+        if let Some(iter) = self.inner.as_mut() {
+            match iter.next() {
+                Some(Ok((input, target))) => {
+                    return Ok(Some((
+                        PyTensor::from_tensor(input),
+                        PyTensor::from_tensor(target),
+                    )));
+                }
+                Some(Err(err)) => return Err(tensor_err(err)),
+                None => {
+                    self.inner = None;
+                    return Ok(None);
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
+#[pyfunction(name = "from_vec")]
+fn dataset_from_vec_py(samples: Vec<(PyTensor, PyTensor)>) -> PyResult<PyDataLoader> {
+    let owned: Vec<(Tensor, Tensor)> = samples
+        .into_iter()
+        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+        .collect();
+    Ok(PyDataLoader::from_loader(nn_dataset_from_vec(owned)))
 }
 
 #[pyclass(module = "spiraltorch", name = "ComplexTensor")]
@@ -1272,10 +1381,38 @@ impl PyModuleTrainer {
         &mut self,
         module: &Bound<'_, PyAny>,
         loss: &Bound<'_, PyAny>,
-        batches: Vec<(PyTensor, PyTensor)>,
+        batches: &Bound<'_, PyAny>,
         schedule: &PyRoundtableSchedule,
     ) -> PyResult<PyEpochStats> {
+        let as_loader = batches.extract::<PyRef<PyDataLoader>>();
+        if let Ok(loader) = as_loader {
+            if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                    let stats = convert(self.inner.train_epoch(
+                        seq.borrow_mut()?,
+                        mse.inner_mut(),
+                        loader.clone_inner(),
+                        &schedule.inner,
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
+            }
+
+            if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                    let stats = convert(self.inner.train_epoch(
+                        linear.borrow_mut()?,
+                        mse.inner_mut(),
+                        loader.clone_inner(),
+                        &schedule.inner,
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
+            }
+        }
+
         let dataset: Vec<(Tensor, Tensor)> = batches
+            .extract::<Vec<(PyTensor, PyTensor)>>()?
             .into_iter()
             .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
             .collect();
@@ -1285,7 +1422,7 @@ impl PyModuleTrainer {
                 let stats = convert(self.inner.train_epoch(
                     seq.borrow_mut()?,
                     mse.inner_mut(),
-                    dataset,
+                    dataset.clone(),
                     &schedule.inner,
                 ))?;
                 return Ok(PyEpochStats::from_stats(stats));
@@ -1523,7 +1660,7 @@ impl PySpiralSession {
         trainer: &mut PyModuleTrainer,
         module: &Bound<'_, PyAny>,
         loss: &Bound<'_, PyAny>,
-        batches: Vec<(PyTensor, PyTensor)>,
+        batches: &Bound<'_, PyAny>,
         schedule: &PyRoundtableSchedule,
     ) -> PyResult<PyEpochStats> {
         trainer.train_epoch(module, loss, batches, schedule)
@@ -2276,6 +2413,19 @@ fn frac(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
+#[pymodule]
+fn dataset(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(dataset_from_vec_py, m)?)?;
+    m.add_class::<PyDataLoader>()?;
+    m.add_class::<PyDataLoaderIter>()?;
+    m.setattr("__all__", vec!["from_vec", "DataLoader"])?;
+    m.setattr(
+        "__doc__",
+        "Dataset helpers for SpiralTorch sessions: shuffle, batch, and prefetch in Rust.",
+    )?;
+    Ok(())
+}
+
 /// Convenience helper for the TopK family.
 #[pyfunction]
 #[pyo3(signature = (rows, cols, k, device=None))]
@@ -2321,6 +2471,9 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let frac_mod = PyModule::new_bound(_py, "frac")?;
     frac(_py, &frac_mod)?;
     m.add_submodule(&frac_mod)?;
+    let dataset_mod = PyModule::new_bound(_py, "dataset")?;
+    dataset(_py, &dataset_mod)?;
+    m.add_submodule(&dataset_mod)?;
     let sot_mod = PyModule::new_bound(_py, "sot")?;
     sot::module(_py, &sot_mod)?;
     m.add_submodule(&sot_mod)?;
@@ -2370,6 +2523,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "SpiralSession",
             "nn",
             "frac",
+            "dataset",
             "sot",
         ],
     )?;

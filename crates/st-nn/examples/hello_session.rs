@@ -1,5 +1,7 @@
 use st_core::backend::device_caps::DeviceCaps;
-use st_nn::{Linear, MeanSquaredError, RoundtableConfig, Sequential, SpiralSession, Tensor};
+use st_nn::{
+    dataset_from_vec, Linear, MeanSquaredError, RoundtableConfig, Sequential, SpiralSession, Tensor,
+};
 use st_tensor::pure::PureResult;
 
 fn main() -> PureResult<()> {
@@ -27,18 +29,21 @@ fn main() -> PureResult<()> {
     let mut trainer = session.trainer();
     let schedule = trainer.roundtable(1, 2, RoundtableConfig::default());
 
-    let dataset = vec![
-        (
-            Tensor::from_vec(1, 2, vec![0.0, 1.0])?,
-            Tensor::from_vec(1, 2, vec![0.0, 1.0])?,
-        ),
-        (
-            Tensor::from_vec(1, 2, vec![1.0, 0.0])?,
-            Tensor::from_vec(1, 2, vec![1.0, 0.0])?,
-        ),
-    ];
-
     let mut loss = MeanSquaredError::new();
+    let dataset = dataset_from_vec(vec![
+        (
+            Tensor::from_vec(1, 2, vec![0.0, 1.0])?,
+            Tensor::from_vec(1, 2, vec![0.0, 1.0])?,
+        ),
+        (
+            Tensor::from_vec(1, 2, vec![1.0, 0.0])?,
+            Tensor::from_vec(1, 2, vec![1.0, 0.0])?,
+        ),
+    ])
+    .shuffle(0xC0FFEE)
+    .batched(2)
+    .prefetch(2);
+
     let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
     println!(
         "roundtable avg loss {:.6} over {} batches",

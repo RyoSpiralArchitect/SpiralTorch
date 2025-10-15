@@ -26,6 +26,9 @@ NumPy, no PyTorch, and no shim layers.
   callers can select devices, spawn hypergrad tapes, plan kernels, and solve
   barycentres with a few intuitive method calls. Structured results are
   returned through the new `ZSpaceBarycenter` class.
+- Streaming dataset helpers via `spiraltorch.dataset`—build a
+  shuffle/batch/prefetch pipeline entirely in Rust using the native
+  `DataLoader`.
 - Non-commutative differential traces via `SpiralSession.trace(...)` which emit
   `SpiralDifferentialTrace` builders and `DifferentialResonance` snapshots to
   blend homotopy flows, functor derivatives, recursive barycenter energies, and
@@ -92,6 +95,31 @@ bary = session.barycenter(densities)
 hyper = session.hypergrad(*bary.density.shape())
 session.align_hypergrad(hyper, bary)
 print(bary.objective, hyper.gradient())
+```
+
+```python
+import spiraltorch as st
+from spiraltorch.nn import Linear, MeanSquaredError, Sequential
+
+session = st.SpiralSession(device="wgpu", curvature=-1.0)
+trainer = session.trainer()
+schedule = session.roundtable(rows=1, cols=2)
+model = Sequential([Linear(2, 2, name="layer")])
+loss = MeanSquaredError()
+session.prepare_module(model)
+
+loader = (
+    st.dataset.from_vec([
+        (st.Tensor(1, 2, [0.0, 1.0]), st.Tensor(1, 2, [0.0, 1.0])),
+        (st.Tensor(1, 2, [1.0, 0.0]), st.Tensor(1, 2, [1.0, 0.0])),
+    ])
+    .shuffle(0xC0FFEE)
+    .batched(2)
+    .prefetch(2)
+)
+
+stats = session.train_epoch(trainer, model, loss, loader, schedule)
+print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")
 ```
 
 ```python
