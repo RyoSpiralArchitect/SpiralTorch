@@ -34,7 +34,7 @@ use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::telemetry::hub;
 #[cfg(feature = "psi")]
-use st_core::telemetry::psi::{PsiConfig, PsiEvent, PsiInput, PsiMeter, PsiReading};
+use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter, PsychoidReading};
 use st_tensor::pure::topos::OpenCartesianTopos;
@@ -104,7 +104,7 @@ impl ModuleTrainer {
             meta_conductor: None,
             heur_log: HeurOpLog::default(),
             #[cfg(feature = "psi")]
-            psi: None,
+            psi: Self::init_psi_meter(),
             #[cfg(feature = "psychoid")]
             psychoid: None,
             #[cfg(feature = "psychoid")]
@@ -112,6 +112,77 @@ impl ModuleTrainer {
             #[cfg(feature = "collapse")]
             collapse: None,
         }
+    }
+
+    #[cfg(feature = "psi")]
+    fn init_psi_meter() -> Option<PsiMeter> {
+        use std::env;
+
+        let enabled = env::var("SPIRAL_PSI")
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "on"
+                )
+            })
+            .unwrap_or(false);
+        if !enabled {
+            return None;
+        }
+
+        let mut cfg = PsiConfig::default();
+        cfg.enabled = true;
+        cfg.components = PsiComponent::defaults();
+
+        if let Ok(spec) = env::var("SPIRAL_PSI_COMPONENTS") {
+            if let Ok(mask) = PsiComponent::parse_list(&spec) {
+                cfg.components = mask;
+            }
+        }
+
+        if let Ok(alpha_str) = env::var("SPIRAL_PSI_ALPHA") {
+            if let Ok(alpha) = alpha_str.parse::<f32>() {
+                cfg.ema_alpha = alpha.clamp(1.0e-3, 0.999);
+            }
+        }
+
+        if let Ok(rate_str) = env::var("SPIRAL_PSI_SAMPLE_RATE") {
+            if let Ok(rate) = rate_str.parse::<u32>() {
+                cfg.sample_rate = rate.max(1);
+            }
+        }
+
+        for (var, component) in [
+            ("SPIRAL_PSI_WEIGHT_LOSS", PsiComponent::LOSS),
+            ("SPIRAL_PSI_WEIGHT_GRAD", PsiComponent::GRAD_NORM),
+            ("SPIRAL_PSI_WEIGHT_UPDATE", PsiComponent::UPDATE_RATIO),
+            ("SPIRAL_PSI_WEIGHT_ACT", PsiComponent::ACT_DRIFT),
+            ("SPIRAL_PSI_WEIGHT_ATTN", PsiComponent::ATTN_ENTROPY),
+            ("SPIRAL_PSI_WEIGHT_BAND", PsiComponent::BAND_ENERGY),
+        ] {
+            if let Ok(weight_str) = env::var(var) {
+                if let Ok(weight) = weight_str.parse::<f32>() {
+                    cfg.weights.insert(component, weight);
+                }
+            }
+        }
+
+        for (var, component) in [
+            ("SPIRAL_PSI_TH_LOSS", PsiComponent::LOSS),
+            ("SPIRAL_PSI_TH_GRAD", PsiComponent::GRAD_NORM),
+            ("SPIRAL_PSI_TH_UPDATE", PsiComponent::UPDATE_RATIO),
+            ("SPIRAL_PSI_TH_ACT", PsiComponent::ACT_DRIFT),
+            ("SPIRAL_PSI_TH_ATTN", PsiComponent::ATTN_ENTROPY),
+            ("SPIRAL_PSI_TH_BAND", PsiComponent::BAND_ENERGY),
+        ] {
+            if let Ok(threshold_str) = env::var(var) {
+                if let Ok(threshold) = threshold_str.parse::<f32>() {
+                    cfg.thresholds.insert(component, threshold);
+                }
+            }
+        }
+
+        Some(PsiMeter::new(cfg))
     }
 
     /// Attaches the BlackCat runtime so contextual rewards update after each step.
