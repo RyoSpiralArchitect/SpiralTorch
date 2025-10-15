@@ -1,3 +1,21 @@
+// ============================================================================
+//  SpiralReality Proprietary
+//  Copyright (c) 2025 SpiralReality. All Rights Reserved.
+//
+//  NOTICE: This file contains confidential and proprietary information of
+//  SpiralReality. ANY USE, COPYING, MODIFICATION, DISTRIBUTION, DISPLAY,
+//  OR DISCLOSURE OF THIS FILE, IN WHOLE OR IN PART, IS STRICTLY PROHIBITED
+//  WITHOUT THE PRIOR WRITTEN CONSENT OF SPIRALREALITY.
+//
+//  NO LICENSE IS GRANTED OR IMPLIED BY THIS FILE. THIS SOFTWARE IS PROVIDED
+//  "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+//  NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+//  PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL SPIRALREALITY OR ITS
+//  SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+//  AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+//  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// ============================================================================
+
 use crate::schedule::GradientBands;
 use st_core::backend::device_caps::DeviceCaps;
 use st_tensor::pure::{
@@ -262,6 +280,16 @@ pub trait Module {
             param.zero_gradient();
             Ok(())
         })
+    }
+
+    /// Optional hook that surfaces activation drift telemetry for ψ metering.
+    ///
+    /// Implementations may override this to provide a smoothed scalar that
+    /// captures how far their activations drifted during the most recent step.
+    /// Returning `None` indicates that the module does not contribute drift
+    /// telemetry, allowing the ψ meter to fall back to zero for that component.
+    fn psi_probe(&self) -> Option<f32> {
+        None
     }
 
     /// Allows modules to describe the device they expect to run on. The default

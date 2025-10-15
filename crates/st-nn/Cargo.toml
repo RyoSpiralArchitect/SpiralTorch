@@ -9,6 +9,10 @@ description = "High-level nn.Module-style API for SpiralTorch"
 name = "st_nn"
 path = "src/lib.rs"
 
+[features]
+default = []
+psi = ["st-core/psi"]
+
 [dependencies]
 st-tensor = { path = "../st-tensor" }
 st-core = { path = "../st-core" }

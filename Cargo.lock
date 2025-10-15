@@ -1475,6 +1475,7 @@ dependencies = [
 name = "st-core"
 version = "1.9.2"
 dependencies = [
+ "bitflags 2.9.4",
  "bytemuck",
  "dirs",
  "once_cell",

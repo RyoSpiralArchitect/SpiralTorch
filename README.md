@@ -71,6 +71,13 @@ roundtable update over a toy dataset.
 cargo run -p st-nn --example hello_session
 ```
 
+Enable the optional ψ telemetry layer to stream semantic-energy readings during
+the run:
+
+```bash
+SPIRAL_PSI=1 SPIRAL_LOG_PSI=1 cargo run -p st-nn --features psi --example hello_session
+```
+
 The Python wheel mirrors the same flow for rapid notebooks:
 
 ```bash
