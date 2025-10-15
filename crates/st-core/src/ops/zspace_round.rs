@@ -144,7 +144,7 @@ mod tests {
     use crate::backend::unison_heuristics::RankKind;
 
     fn plan(kind: RankKind, k: u32) -> RankPlan {
-        super::rank_entry::plan_rank(kind, 1, 8, k, DeviceCaps::wgpu(32, true, 256))
+        crate::ops::rank_entry::plan_rank(kind, 1, 8, k, DeviceCaps::wgpu(32, true, 256))
     }
 
     #[test]
