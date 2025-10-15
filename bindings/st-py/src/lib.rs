@@ -1873,6 +1873,23 @@ fn frac(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
+#[pymodule]
+fn frac(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(gl_coeffs_py, m)?)?;
+    m.add_function(wrap_pyfunction!(fracdiff_gl_py, m)?)?;
+    m.add_function(wrap_pyfunction!(fracdiff_gl_backward_py, m)?)?;
+    m.add_function(wrap_pyfunction!(frac_fft_py, m)?)?;
+    m.setattr(
+        "__all__",
+        vec!["gl_coeffs", "fracdiff_gl", "fracdiff_gl_backward", "fft"],
+    )?;
+    m.setattr(
+        "__doc__",
+        "Fractional calculus operators and FFT helpers used by SpiralTorch.",
+    )?;
+    Ok(())
+}
+
 /// Convenience helper for the TopK family.
 #[pyfunction]
 #[pyo3(signature = (rows, cols, k, device=None))]
