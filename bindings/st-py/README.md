@@ -11,6 +11,8 @@ NumPy, no PyTorch, and no shim layers.
   geometry experiments.
 - `LanguageWaveEncoder` + `Hypergrad` so Python callers can stream Z-space
   text, accumulate gradients, and project back into the Poincaré ball.
+- `TensorBiome` to cultivate open-topos rewrites and harvest guarded tensors
+  that can be re-imported into Z-space.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`) that
   reuse the same heuristics as the Rust executors.
 - ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
@@ -29,6 +31,12 @@ NumPy, no PyTorch, and no shim layers.
   blend homotopy flows, functor derivatives, recursive barycenter energies, and
   \(\infty\)-tower projections—optionally wiring the result straight into a
   `Hypergrad` tape.
+- SoT-3Dφ spiral planners (`spiraltorch.sot`) that collapse to Z-space tensors
+  and are stitched directly into `SpiralSession.trace(...)` for geometry-aware
+  exploration loops.
+- Z-space projector bindings (`spiraltorch.nn.ZSpaceProjector`) so spiral
+  trajectories can be rendered onto the canvas or reused inside sequential
+  transformer stacks.
 
 ## Building wheels
 
@@ -96,4 +104,31 @@ trace.with_barycenter_from(weights, densities)
 trace.with_infinity([densities[0].clone()], [])
 resonance = trace.resonate()
 print(resonance.homotopy_flow().tolist())
+```
+
+```python
+from spiraltorch import SpiralSession, Tensor, TensorBiome
+from spiraltorch.nn import ZSpaceProjector, LanguageWaveEncoder
+
+session = SpiralSession(device="wgpu", curvature=-1.0)
+seed = Tensor(1, 8, [0.2] * 8)
+trace = session.trace(seed, sot={"steps": 64, "radial_growth": 0.08})
+plan = trace.sot_plan
+
+if plan is None:
+    raise RuntimeError("SoT planner was disabled")
+
+topos = session.topos()
+encoder = LanguageWaveEncoder(session.curvature(), 0.5)
+projector = ZSpaceProjector(topos, encoder)
+
+spiral_tensor = plan.as_tensor()
+canvas = projector.project_spiral(plan)
+print(spiral_tensor.shape(), canvas.shape())
+
+biome = TensorBiome(topos)
+biome.absorb("spiral", spiral_tensor)
+biome.absorb("canvas", canvas)
+meaning = projector.reimport_biome(biome)
+print("reimported", meaning.shape())
 ```

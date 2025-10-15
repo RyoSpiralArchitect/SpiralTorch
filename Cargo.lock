@@ -1125,6 +1125,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
+ "num-complex",
  "once_cell",
  "portable-atomic",
  "pyo3-build-config",
@@ -1441,9 +1442,12 @@ dependencies = [
 name = "spiraltorch-py"
 version = "0.1.0"
 dependencies = [
+ "ndarray",
+ "num-complex",
  "pyo3",
  "st-backend-hip",
  "st-core",
+ "st-frac",
  "st-nn",
  "st-tensor",
 ]

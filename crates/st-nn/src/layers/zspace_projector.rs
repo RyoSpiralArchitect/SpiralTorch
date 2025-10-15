@@ -1,10 +1,7 @@
 use crate::module::Module;
 use crate::{PureResult, Tensor};
 use st_frac::FracBackend;
-use st_tensor::pure::{
-    topos::{OpenCartesianTopos, RewriteMonad},
-    LanguageWaveEncoder,
-};
+use st_tensor::pure::{LanguageWaveEncoder, OpenCartesianTopos, RewriteMonad, TensorBiome};
 
 /// Projects Euclidean activations back into the open-cartesian Z-space manifold.
 #[derive(Clone, Debug)]
@@ -66,6 +63,21 @@ impl ZSpaceProjector {
         self.topos
             .guard_tensor("zspace_projector_encode", &tensor)?;
         Ok(tensor)
+    }
+
+    /// Collapses a tensor biome and projects the resulting canopy back into Z-space.
+    pub fn reimport_biome(&self, biome: &TensorBiome) -> PureResult<Tensor> {
+        if biome.is_empty() {
+            return Err(crate::TensorError::EmptyInput("tensor_biome"));
+        }
+        if (biome.topos().curvature() - self.curvature()).abs() > 1e-6 {
+            return Err(crate::TensorError::CurvatureMismatch {
+                expected: self.curvature(),
+                got: biome.topos().curvature(),
+            });
+        }
+        let canopy = biome.canopy()?;
+        self.forward(&canopy)
     }
 }
 
@@ -151,5 +163,28 @@ mod tests {
         let cpu = module.regularize_frac(&sample, &FracBackend::CpuRadix2);
         let wgpu = module.regularize_frac(&sample, &FracBackend::Wgpu { radix: 4 });
         assert!(wgpu > cpu);
+    }
+
+    #[test]
+    fn projector_reimports_biome() {
+        let topos = demo_topos();
+        let encoder = LanguageWaveEncoder::new(topos.curvature(), 0.5).unwrap();
+        let biome_topos = topos.clone();
+        let mut biome = TensorBiome::new(biome_topos);
+        biome
+            .absorb(
+                "projector_biome_a",
+                Tensor::from_vec(1, 4, vec![0.2, -0.4, 0.6, -0.8]).unwrap(),
+            )
+            .unwrap();
+        biome
+            .absorb(
+                "projector_biome_b",
+                Tensor::from_vec(1, 4, vec![0.4, -0.2, 0.8, -0.6]).unwrap(),
+            )
+            .unwrap();
+        let projector = ZSpaceProjector::new(topos, encoder).unwrap();
+        let projected = projector.reimport_biome(&biome).unwrap();
+        assert_eq!(projected.shape(), (1, 4));
     }
 }

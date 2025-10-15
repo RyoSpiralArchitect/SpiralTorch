@@ -1,3 +1,9 @@
+mod sot;
+
+use crate::sot::{PySoT3DPlan, Sot3DParams};
+
+use ndarray::{Array2, ArrayD, Ix2};
+use num_complex::Complex64;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyModule};
@@ -11,15 +17,22 @@ use st_backend_hip::{
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_frac::fft::{fft_inplace as frac_fft_inplace, Complex32 as FracComplex32, FftError};
+use st_frac::{
+    fracdiff_gl_nd, fracdiff_gl_nd_backward, gl_coeffs as frac_gl_coeffs, FracErr, Pad as FracPad,
+};
 use st_nn::{
     Conv1d as NnConv1d, DifferentialTrace, Linear as NnLinear, Module, Sequential as NnSequential,
     SpiralSession, SpiralSessionBuilder, WaveRnn as NnWaveRnn,
+    ZSpaceProjector as NnZSpaceProjector,
 };
 use st_tensor::pure::{
-    measure::{z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter},
+    measure::{
+        z_space_barycenter as rust_z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter,
+    },
     topos::OpenCartesianTopos,
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
-    PureResult, Tensor, TensorError,
+    PureResult, Tensor, TensorBiome, TensorError,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -30,6 +43,21 @@ fn tensor_err(err: TensorError) -> PyErr {
 
 fn convert<T>(value: PureResult<T>) -> PyResult<T> {
     value.map_err(tensor_err)
+}
+
+fn convert_frac<T>(value: Result<T, FracErr>) -> PyResult<T> {
+    value.map_err(|err| PyValueError::new_err(err.to_string()))
+}
+
+fn convert_fft<T>(value: Result<T, FftError>) -> PyResult<T> {
+    value.map_err(|err| {
+        PyValueError::new_err(match err {
+            FftError::Empty => "signal must not be empty".to_string(),
+            FftError::NonPowerOfTwo => {
+                "signal length must be a power of two for the radix FFT".to_string()
+            }
+        })
+    })
 }
 
 fn intern_label(label: &str) -> &'static str {
@@ -81,6 +109,24 @@ fn backend_name(kind: BackendKind) -> &'static str {
         BackendKind::Hip => "hip",
         BackendKind::Cpu => "cpu",
     }
+}
+
+fn tensor_to_array(tensor: &Tensor) -> PyResult<ArrayD<f32>> {
+    let (rows, cols) = tensor.shape();
+    Array2::from_shape_vec((rows, cols), tensor.data().to_vec())
+        .map(|array| array.into_dyn())
+        .map_err(|_| PyValueError::new_err("failed to view tensor as ndarray"))
+}
+
+fn array_to_tensor(array: ArrayD<f32>) -> PyResult<PyTensor> {
+    let matrix: Array2<f32> = array
+        .into_dimensionality::<Ix2>()
+        .map_err(|_| PyValueError::new_err("fractional operators require 2D tensors"))?;
+    let (rows, cols) = matrix.dim();
+    let data = matrix.into_raw_vec();
+    Ok(PyTensor::from_tensor(convert(Tensor::from_vec(
+        rows, cols, data,
+    ))?))
 }
 
 fn device_caps_dict<'py>(py: Python<'py>, caps: DeviceCaps) -> PyResult<Bound<'py, PyDict>> {
@@ -470,11 +516,15 @@ impl PyDifferentialResonance {
 #[pyclass(module = "spiraltorch", name = "SpiralDifferentialTrace")]
 struct PySpiralDifferentialTrace {
     trace: Option<DifferentialTrace>,
+    sot_plan: Option<PySoT3DPlan>,
 }
 
 impl PySpiralDifferentialTrace {
-    fn from_trace(trace: DifferentialTrace) -> Self {
-        Self { trace: Some(trace) }
+    fn from_trace_with_plan(trace: DifferentialTrace, plan: Option<PySoT3DPlan>) -> Self {
+        Self {
+            trace: Some(trace),
+            sot_plan: plan,
+        }
     }
 
     fn map_trace<F>(&mut self, f: F) -> PyResult<()>
@@ -499,6 +549,11 @@ impl PySpiralDifferentialTrace {
 
 #[pymethods]
 impl PySpiralDifferentialTrace {
+    #[getter]
+    fn sot_plan(&self) -> Option<PySoT3DPlan> {
+        self.sot_plan.clone()
+    }
+
     fn deform(&mut self, generator: &PyTensor, direction: &PyTensor) -> PyResult<()> {
         let generator = generator.as_tensor().clone();
         let direction = direction.as_tensor().clone();
@@ -710,6 +765,77 @@ impl PyOpenTopos {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "TensorBiome")]
+#[derive(Clone, Debug)]
+struct PyTensorBiome {
+    inner: TensorBiome,
+}
+
+#[pymethods]
+impl PyTensorBiome {
+    #[new]
+    fn new(topos: &PyOpenTopos) -> Self {
+        Self {
+            inner: TensorBiome::new(topos.inner.clone()),
+        }
+    }
+
+    fn topos(&self) -> PyOpenTopos {
+        PyOpenTopos::from_topos(self.inner.topos().clone())
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn absorb(&mut self, label: &str, tensor: &PyTensor) -> PyResult<()> {
+        convert(
+            self.inner
+                .absorb(intern_label(label), tensor.as_tensor().clone()),
+        )
+    }
+
+    fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    fn canopy(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(self.inner.canopy())?))
+    }
+
+    fn shoots(&self, py: Python<'_>) -> PyResult<Vec<Py<PyTensor>>> {
+        self.inner
+            .shoots()
+            .iter()
+            .cloned()
+            .map(|tensor| Py::new(py, PyTensor::from_tensor(tensor)))
+            .collect()
+    }
+
+    fn __len__(&self) -> PyResult<usize> {
+        Ok(self.len())
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let (rows, cols) = self
+            .inner
+            .shoots()
+            .first()
+            .map(|tensor| tensor.shape())
+            .unwrap_or((0, 0));
+        Ok(format!(
+            "TensorBiome(len={}, shape=({}, {}))",
+            self.len(),
+            rows,
+            cols
+        ))
+    }
+}
+
 #[pyclass(module = "spiraltorch", name = "LanguageWaveEncoder")]
 #[derive(Clone, Debug)]
 struct PyLanguageWaveEncoder {
@@ -757,6 +883,83 @@ impl PyLanguageWaveEncoder {
             self.curvature(),
             self.temperature()
         ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceProjector")]
+struct PyZSpaceProjector {
+    inner: Option<NnZSpaceProjector>,
+}
+
+impl PyZSpaceProjector {
+    fn borrow(&self) -> PyResult<&NnZSpaceProjector> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("ZSpaceProjector has been moved"))
+    }
+
+    fn borrow_mut(&mut self) -> PyResult<&mut NnZSpaceProjector> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("ZSpaceProjector has been moved"))
+    }
+
+    fn take(&mut self) -> PyResult<NnZSpaceProjector> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("ZSpaceProjector has been moved"))
+    }
+}
+
+#[pymethods]
+impl PyZSpaceProjector {
+    #[new]
+    fn new(topos: &PyOpenTopos, encoder: &PyLanguageWaveEncoder) -> PyResult<Self> {
+        let inner = convert(NnZSpaceProjector::new(
+            topos.inner.clone(),
+            encoder.inner.clone(),
+        ))?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.forward(input.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow_mut()?
+                .backward(input.as_tensor(), grad_output.as_tensor()),
+        )?))
+    }
+
+    fn curvature(&self) -> PyResult<f32> {
+        Ok(self.borrow()?.curvature())
+    }
+
+    fn topos(&self) -> PyResult<PyOpenTopos> {
+        Ok(PyOpenTopos::from_topos(self.borrow()?.topos().clone()))
+    }
+
+    fn encode_text(&self, text: &str) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.encode_text(text),
+        )?))
+    }
+
+    fn project_spiral(&self, plan: &PySoT3DPlan) -> PyResult<PyTensor> {
+        let base = plan.positions_tensor().map_err(tensor_err)?;
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.forward(&base),
+        )?))
+    }
+
+    fn reimport_biome(&self, biome: &PyTensorBiome) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.reimport_biome(&biome.inner),
+        )?))
     }
 }
 
@@ -1041,9 +1244,53 @@ impl PySpiralSession {
         PySpiralSessionBuilder::from_builder(self.inner.to_builder())
     }
 
-    fn trace(&self, seed: &PyTensor) -> PyResult<PySpiralDifferentialTrace> {
+    #[pyo3(signature = (seed, sot=None))]
+    fn trace(
+        &self,
+        seed: &PyTensor,
+        sot: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<PySpiralDifferentialTrace> {
+        let (rows, cols) = seed.as_tensor().shape();
+        let default_steps = match rows.checked_mul(cols) {
+            Some(0) | None => 1,
+            Some(value) => value.max(1),
+        };
+        let mut plan_steps = default_steps;
+        let mut params = Sot3DParams {
+            base_radius: 1.0,
+            radial_growth: 0.05,
+            base_height: 1.0,
+            meso_gain: 0.2,
+            micro_gain: 0.05,
+        };
+        if let Some(cfg) = sot {
+            if let Some(value) = cfg.get_item("steps")? {
+                plan_steps = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("base_radius")? {
+                params.base_radius = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("radial_growth")? {
+                params.radial_growth = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("base_height")? {
+                params.base_height = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("meso_gain")? {
+                params.meso_gain = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("micro_gain")? {
+                params.micro_gain = value.extract()?;
+            }
+        }
+
         let trace = convert(self.inner.trace(seed.as_tensor().clone()))?;
-        Ok(PySpiralDifferentialTrace::from_trace(trace))
+        let plan = if plan_steps == 0 {
+            None
+        } else {
+            Some(crate::sot::generate_plan_with_params(plan_steps, params)?)
+        };
+        Ok(PySpiralDifferentialTrace::from_trace_with_plan(trace, plan))
     }
 
     #[getter]
@@ -1452,9 +1699,11 @@ impl PySequentialModule {
                 seq.push(conv.take()?);
             } else if let Ok(mut wave) = obj.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
                 seq.push(wave.take()?);
+            } else if let Ok(mut projector) = obj.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+                seq.push(projector.take()?);
             } else {
                 return Err(PyValueError::new_err(
-                    "Sequential expects Linear, Conv1d, or WaveRnn modules",
+                    "Sequential expects Linear, Conv1d, WaveRnn, or ZSpaceProjector modules",
                 ));
             }
         }
@@ -1563,7 +1812,7 @@ fn plan(
 }
 
 /// Compute the Z-space barycenter described by the weighted KL objective.
-#[pyfunction]
+#[pyfunction(name = "z_space_barycenter")]
 #[pyo3(signature = (densities, weights=None, entropy_weight=0.0, beta_j=0.0, coupling=None))]
 fn z_space_barycenter_py(
     py: Python<'_>,
@@ -1587,7 +1836,7 @@ fn z_space_barycenter_py(
     }
     let coupling_tensor = coupling.map(PyTensor::into_tensor);
     let coupling_ref = coupling_tensor.as_ref();
-    let barycenter = convert(z_space_barycenter(
+    let barycenter = convert(rust_z_space_barycenter(
         &weight_vec,
         &tensors,
         entropy_weight,
@@ -1597,16 +1846,106 @@ fn z_space_barycenter_py(
     PyZSpaceBarycenter::from_result(barycenter).as_dict(py)
 }
 
+fn parse_frac_pad(pad: &str) -> PyResult<FracPad> {
+    match pad.to_ascii_lowercase().as_str() {
+        "zero" => Ok(FracPad::Zero),
+        "reflect" => Ok(FracPad::Reflect),
+        other => Err(PyValueError::new_err(format!(
+            "unsupported padding kind: {other}; expected 'zero' or 'reflect'"
+        ))),
+    }
+}
+
+#[pyfunction(name = "gl_coeffs")]
+fn gl_coeffs_py(alpha: f32, len: usize) -> Vec<f32> {
+    frac_gl_coeffs(alpha, len)
+}
+
+#[pyfunction(name = "fracdiff_gl")]
+#[pyo3(signature = (tensor, alpha, axis, kernel_len, pad="zero", scale=None))]
+fn fracdiff_gl_py(
+    tensor: &PyTensor,
+    alpha: f32,
+    axis: usize,
+    kernel_len: usize,
+    pad: &str,
+    scale: Option<f32>,
+) -> PyResult<PyTensor> {
+    let array = tensor_to_array(tensor.as_tensor())?;
+    let pad = parse_frac_pad(pad)?;
+    let result = convert_frac(fracdiff_gl_nd(&array, alpha, axis, kernel_len, pad, scale))?;
+    array_to_tensor(result)
+}
+
+#[pyfunction(name = "fracdiff_gl_backward")]
+#[pyo3(signature = (tensor, alpha, axis, kernel_len, pad="zero", scale=None))]
+fn fracdiff_gl_backward_py(
+    tensor: &PyTensor,
+    alpha: f32,
+    axis: usize,
+    kernel_len: usize,
+    pad: &str,
+    scale: Option<f32>,
+) -> PyResult<PyTensor> {
+    let array = tensor_to_array(tensor.as_tensor())?;
+    let pad = parse_frac_pad(pad)?;
+    let result = convert_frac(fracdiff_gl_nd_backward(
+        &array, alpha, axis, kernel_len, pad, scale,
+    ))?;
+    array_to_tensor(result)
+}
+
+#[pyfunction(name = "fft")]
+#[pyo3(signature = (signal, inverse=false))]
+fn frac_fft_py(signal: Vec<Complex64>, inverse: bool) -> PyResult<Vec<Complex64>> {
+    let mut buffer: Vec<FracComplex32> = signal
+        .into_iter()
+        .map(|c| FracComplex32::new(c.re as f32, c.im as f32))
+        .collect();
+    convert_fft(frac_fft_inplace(&mut buffer, inverse))?;
+    Ok(buffer
+        .into_iter()
+        .map(|c| Complex64::new(c.re as f64, c.im as f64))
+        .collect())
+}
+
 #[pymodule]
 fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLinearModule>()?;
     m.add_class::<PyConv1dModule>()?;
     m.add_class::<PyWaveRnnModule>()?;
+    m.add_class::<PyZSpaceProjector>()?;
     m.add_class::<PySequentialModule>()?;
-    m.setattr("__all__", vec!["Linear", "Conv1d", "WaveRnn", "Sequential"])?;
+    m.setattr(
+        "__all__",
+        vec![
+            "Linear",
+            "Conv1d",
+            "WaveRnn",
+            "ZSpaceProjector",
+            "Sequential",
+        ],
+    )?;
     m.setattr(
         "__doc__",
-        "Rust-backed neural network modules: Linear, Conv1d, WaveRnn, Sequential.",
+        "Rust-backed neural network modules: Linear, Conv1d, WaveRnn, ZSpaceProjector, Sequential.",
+    )?;
+    Ok(())
+}
+
+#[pymodule]
+fn frac(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(gl_coeffs_py, m)?)?;
+    m.add_function(wrap_pyfunction!(fracdiff_gl_py, m)?)?;
+    m.add_function(wrap_pyfunction!(fracdiff_gl_backward_py, m)?)?;
+    m.add_function(wrap_pyfunction!(frac_fft_py, m)?)?;
+    m.setattr(
+        "__all__",
+        vec!["gl_coeffs", "fracdiff_gl", "fracdiff_gl_backward", "fft"],
+    )?;
+    m.setattr(
+        "__doc__",
+        "Fractional calculus operators and FFT helpers used by SpiralTorch.",
     )?;
     Ok(())
 }
@@ -1653,6 +1992,12 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let nn_mod = PyModule::new_bound(_py, "nn")?;
     nn(_py, &nn_mod)?;
     m.add_submodule(&nn_mod)?;
+    let frac_mod = PyModule::new_bound(_py, "frac")?;
+    frac(_py, &frac_mod)?;
+    m.add_submodule(&frac_mod)?;
+    let sot_mod = PyModule::new_bound(_py, "sot")?;
+    sot::module(_py, &sot_mod)?;
+    m.add_submodule(&sot_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
@@ -1665,6 +2010,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDifferentialResonance>()?;
     m.add_class::<PySpiralDifferentialTrace>()?;
     m.add_class::<PyOpenTopos>()?;
+    m.add_class::<PyTensorBiome>()?;
     m.add_class::<PyLanguageWaveEncoder>()?;
     m.add_class::<PyHypergrad>()?;
     m.add_class::<PySpiralSessionBuilder>()?;
@@ -1685,11 +2031,14 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "DifferentialResonance",
             "SpiralDifferentialTrace",
             "OpenTopos",
+            "TensorBiome",
             "LanguageWaveEncoder",
             "Hypergrad",
             "SpiralSessionBuilder",
             "SpiralSession",
             "nn",
+            "frac",
+            "sot",
         ],
     )?;
     m.setattr("__version__", env!("CARGO_PKG_VERSION"))?;
