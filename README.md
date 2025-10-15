@@ -71,6 +71,10 @@ tensor shims, no translation layers, and no tracebacks.
   Parameters can now absorb complex Z-space waves or raw text directly into the
   hypergrad tape, so the roundtable can keep expanding meaning without Euclidean
   fallbacks or NumPy buffers.
+- **TensorBiome canopies + spiral biomes**
+  Curate rewrites with `TensorBiome`, weight individual shoots, stack the full
+  harvest, and let SoT-3Dφ planners seed a ready-to-project biome via
+  `SoT3DPlan.grow_biome(...)` before reinjecting it with `ZSpaceProjector`.
 - **Rust-first modules & losses**
   `st-nn` now ships `Linear`, `Sequential`, the lightweight `Relu`, the
   hyperbolic `WaveGate`, `ToposResonator`, the new `ZSpaceMixer`, and the
