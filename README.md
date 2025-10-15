@@ -661,4 +661,4 @@ Unauthorized derivations will be treated as non-compliant with AGPL §13
 
 ---
 
-- **For research collaborations or integration discussions, feel free to reach out directly.**
+**For research collaborations or integration discussions, feel free to reach out directly.**
