@@ -103,6 +103,11 @@ impl ModuleTrainer {
         self.curvature
     }
 
+    /// Returns the learning rate used for hypergrad updates.
+    pub fn hyper_learning_rate(&self) -> f32 {
+        self.hyper_learning_rate
+    }
+
     /// Attaches hypergrad tapes to all parameters of the provided module.
     pub fn prepare<M: Module>(&self, module: &mut M) -> PureResult<()> {
         module.attach_hypergrad(self.curvature, self.hyper_learning_rate)
@@ -138,12 +143,14 @@ impl ModuleTrainer {
     where
         M: Module,
         L: Loss,
-        I: IntoIterator<Item = (Tensor, Tensor)>,
+        I: IntoIterator,
+        I::Item: IntoBatch,
     {
         self.zero(module)?;
         let mut total_loss = 0.0f32;
         let mut steps = 0usize;
-        for (input, target) in batches.into_iter() {
+        for batch in batches.into_iter() {
+            let (input, target) = batch.into_batch()?;
             let step_start = Instant::now();
             if let Some(rt) = self.blackcat.as_mut() {
                 rt.begin_step();
@@ -240,6 +247,25 @@ pub struct EpochStats {
     pub batches: usize,
     pub total_loss: f32,
     pub average_loss: f32,
+}
+
+/// Helper trait that allows [`ModuleTrainer::train_epoch`] to accept both raw
+/// `(Tensor, Tensor)` batches and fallible [`PureResult`] batches produced by
+/// the [`dataset::DataLoader`] surface.
+pub trait IntoBatch {
+    fn into_batch(self) -> PureResult<(Tensor, Tensor)>;
+}
+
+impl IntoBatch for (Tensor, Tensor) {
+    fn into_batch(self) -> PureResult<(Tensor, Tensor)> {
+        Ok(self)
+    }
+}
+
+impl IntoBatch for PureResult<(Tensor, Tensor)> {
+    fn into_batch(self) -> PureResult<(Tensor, Tensor)> {
+        self
+    }
 }
 
 #[cfg(test)]
