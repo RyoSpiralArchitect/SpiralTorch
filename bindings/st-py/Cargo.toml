@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Python bindings for SpiralTorch heuristics"
 license = "AGPL-3.0-or-later"
-authors = ["SpiralTorch Contributors"]
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 
 [lib]
 name = "spiraltorch"
