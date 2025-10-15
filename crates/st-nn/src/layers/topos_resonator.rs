@@ -1,6 +1,7 @@
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor};
-use st_tensor::pure::{LanguageWaveEncoder, OpenCartesianTopos, TensorError};
+use st_tensor::pure::topos::OpenCartesianTopos;
+use st_tensor::pure::{LanguageWaveEncoder, TensorError};
 
 /// Element-wise gate that keeps a persistent Z-space resonance attached to the
 /// hypergrad tape. The resonator can ingest text or complex waves and amplify
@@ -105,9 +106,9 @@ mod tests {
         let grad_output = Tensor::from_vec(2, 2, vec![0.5, 0.25, 0.1, 0.0]).unwrap();
         let grad_input = resonator.backward(&input, &grad_output).unwrap();
         assert_eq!(grad_input.data(), grad_output.data());
-        let mut captured = None;
+        let mut captured: Option<Tensor> = None;
         resonator
-            .visit_parameters(|param| {
+            .visit_parameters(&mut |param: &Parameter| {
                 captured = param.gradient().cloned();
                 Ok(())
             })

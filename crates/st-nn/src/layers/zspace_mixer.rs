@@ -58,7 +58,7 @@ impl Module for ZSpaceMixer {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         self.assert_input(input)?;
         let (rows, cols) = input.shape();
-        let gate = self.gate_row();
+        let gate: Vec<f32> = self.gate_row().to_vec();
         let mut data = Vec::with_capacity(rows * cols);
         for r in 0..rows {
             let offset = r * cols;
@@ -79,7 +79,7 @@ impl Module for ZSpaceMixer {
         }
 
         let (rows, cols) = input.shape();
-        let gate = self.gate_row();
+        let gate: Vec<f32> = self.gate_row().to_vec();
 
         let mut grad_gate = vec![0.0f32; cols];
         for r in 0..rows {

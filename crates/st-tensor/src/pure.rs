@@ -7,11 +7,17 @@
 //! can serve as a foundation for a fully independent learning stack that stays
 //! responsive even when the surrounding platform is sandboxed.
 
+pub mod differential;
 pub mod fractal;
 pub mod measure;
 pub mod topos;
 
-use self::topos::OpenCartesianTopos;
+pub use self::differential::{
+    DifferentialResonance, FunctorDifferential, HomotopyDifferential, InfinityDifferential,
+    RecursiveDifferential, SpiralDifferential,
+};
+use self::measure::BarycenterIntermediate;
+pub use self::topos::OpenCartesianTopos;
 
 use core::fmt;
 use std::error::Error;
@@ -48,6 +54,8 @@ pub enum TensorError {
     NonPositiveSaturation { saturation: f32 },
     /// Computation received an empty input which would otherwise trigger a panic.
     EmptyInput(&'static str),
+    /// Weighted Z-space barycenter collapsed because the entropy weight cancelled the KL pull.
+    DegenerateBarycenter { effective_weight: f32 },
     /// Attempted to load or update a parameter that was missing from the state dict.
     MissingParameter { name: String },
     /// Wrapper around I/O failures when persisting or restoring tensors.
@@ -114,6 +122,12 @@ impl fmt::Display for TensorError {
             }
             TensorError::EmptyInput(label) => {
                 write!(f, "{label} must not be empty for this computation")
+            }
+            TensorError::DegenerateBarycenter { effective_weight } => {
+                write!(
+                    f,
+                    "z-space barycenter degenerates when the effective weight {effective_weight} vanishes"
+                )
             }
             TensorError::CurvatureMismatch { expected, got } => {
                 write!(
@@ -818,7 +832,7 @@ pub struct AmegaHypergrad {
     rows: usize,
     cols: usize,
     gradient: Vec<f32>,
-    topos: OpenCartesianTopos,
+    topos: topos::OpenCartesianTopos,
 }
 
 impl AmegaHypergrad {
@@ -835,7 +849,7 @@ impl AmegaHypergrad {
                 rate: learning_rate,
             });
         }
-        let topos = OpenCartesianTopos::new(
+        let topos = topos::OpenCartesianTopos::new(
             curvature,
             1e-6,
             1e6,
@@ -858,7 +872,7 @@ impl AmegaHypergrad {
         learning_rate: f32,
         rows: usize,
         cols: usize,
-        topos: OpenCartesianTopos,
+        topos: topos::OpenCartesianTopos,
     ) -> PureResult<Self> {
         if rows == 0 || cols == 0 {
             return Err(TensorError::InvalidDimensions { rows, cols });
@@ -909,7 +923,7 @@ impl AmegaHypergrad {
     }
 
     /// Returns the guard topos enforcing open-cartesian safety constraints.
-    pub fn topos(&self) -> &OpenCartesianTopos {
+    pub fn topos(&self) -> &topos::OpenCartesianTopos {
         &self.topos
     }
 
@@ -1010,6 +1024,29 @@ impl AmegaHypergrad {
         self.reset();
         Ok(())
     }
+
+    /// Integrates the barycenter intermediate curve so the tape converges towards
+    /// the Z-space minimiser through a loss-monotone path.
+    pub fn accumulate_barycenter_path(
+        &mut self,
+        intermediates: &[BarycenterIntermediate],
+    ) -> PureResult<()> {
+        if intermediates.is_empty() {
+            return Err(TensorError::EmptyInput("barycenter_intermediates"));
+        }
+        for stage in intermediates {
+            self.assert_tensor_shape(&stage.density)?;
+        }
+        let mut stages = intermediates.iter();
+        let first = stages.next().unwrap();
+        self.accumulate_wave(&first.density)?;
+        let mut previous = &first.density;
+        for stage in stages {
+            self.accumulate_pair(&stage.density, previous)?;
+            previous = &stage.density;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1106,5 +1143,22 @@ mod tests {
             .gradient()
             .iter()
             .any(|value| value.abs() > f32::EPSILON));
+    }
+
+    #[test]
+    fn amega_hypergrad_tracks_barycenter_curve() {
+        use crate::pure::measure::z_space_barycenter;
+
+        let densities = vec![
+            Tensor::from_vec(1, 2, vec![0.8, 0.2]).unwrap(),
+            Tensor::from_vec(1, 2, vec![0.3, 0.7]).unwrap(),
+        ];
+        let weights = vec![1.0, 2.0];
+        let result = z_space_barycenter(&weights, &densities, 0.1, 0.0, None).unwrap();
+        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 1, 2).unwrap();
+        tape.accumulate_barycenter_path(&result.intermediates)
+            .unwrap();
+        let gradient = tape.gradient();
+        assert!(gradient.iter().any(|value| value.abs() > 0.0));
     }
 }

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ $# -lt 1 ]]; then
+  echo "usage: maturin <subcommand> [options...]" >&2
+  exit 1
+fi
+subcommand="$1"
+shift
+case "$subcommand" in
+  build)
+    release=0
+    features=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --release)
+          release=1
+          shift
+          ;;
+        --features)
+          if [[ $# -lt 2 ]]; then
+            echo "maturin shim: --features requires an argument" >&2
+            exit 1
+          fi
+          features+=("$2")
+          shift 2
+          ;;
+        -m|--manifest-path)
+          if [[ $# -lt 2 ]]; then
+            echo "maturin shim: $1 requires a path" >&2
+            exit 1
+          fi
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    cmd=(cargo build -p spiraltorch-py)
+    if [[ $release -eq 1 ]]; then
+      cmd+=(--release)
+    fi
+    if [[ ${#features[@]} -gt 0 ]]; then
+      combined="$(IFS=,; echo "${features[*]}")"
+      cmd+=(--features "$combined")
+    fi
+    "${cmd[@]}"
+    ;;
+  *)
+    echo "maturin shim only supports the 'build' subcommand in this environment" >&2
+    exit 1
+    ;;
+ esac
+

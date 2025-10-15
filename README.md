@@ -95,6 +95,9 @@ tensor shims, no translation layers, and no tracebacks.
 - `cuda`: CUDA (NVRTC/PTX loader expected)
 - `hip`: ROCm HIP (stub-safe)
 - **`hip-real`**: ROCm HIP + RCCL “real” path (requires ROCm toolchain & linker; gated on top of `hip`)
+- HIP stub now probes `ROCM_PATH`/`HIP_PATH` and honours the
+  `SPIRALTORCH_FORCE_HIP` override so simulated devices keep Z-space heuristics
+  alive during CPU-only dev loops.
 - **`kv-redis`**: enable Redis-backed consensus (soft hints); absent = **safe no-op**
 - `logic` / `kdsl`: SoftLogic solver / SpiralK DSL
 
@@ -168,6 +171,35 @@ tape.accumulate_pair(weights, target)
 tape.apply(weights)
 print("updated weights", weights.tolist())
 ```
+
+### Canvas Pixel Transformer → Z-space feedback
+
+- `CanvasProjector::refresh_with_vectors` now returns both the RGBA buffer and
+  a colour vector field that carries normalised energy and chroma as
+  Z-space-friendly coordinates.
+- Use `CanvasProjector::emit_zspace_patch` to fold the canvas state back into
+  the fractal scheduler without leaving Rust or allocating intermediate
+  buffers.
+- Blend chart priors with the new `z_space_barycenter` solver—available in
+  Rust (`st_tensor::pure::measure`) and Python (`spiraltorch.z_space_barycenter`)—to
+  wire colour energy directly into the Z-space roundtable.
+- Follow the barycenter's loss-monotone intermediates and feed them straight into
+  the hypergradient tape with `Hypergrad.accumulate_barycenter_path` so the
+  optimiser converges along the same Z-space path as the solver.
+- Drive the entire workflow from the high-level `SpiralSession` orchestrator in
+  Rust (`st_nn::SpiralSession`) or Python (`spiraltorch.SpiralSession`) to pick
+  devices, generate rank plans, synthesise barycentres, and align hypergrads via
+  intuitive method calls.
+- Launch `session.trace(tensor)` to compose non-commutative homotopy flows,
+  functor linearisations, recursive barycenter gradients, and \(\infty\)-tower
+  projections before calling `.resonate()` (or
+  `.resonate_with_hypergrad(hypergrad)`) to surface a
+  `DifferentialResonance` snapshot that binds the four differential layers
+  together.
+- Let the trace synthesise barycentres on demand via
+  `trace.with_barycenter_from(weights, densities)` or override the coupling
+  matrix with `trace.with_barycenter_with(weights, densities, Some(coupling))`
+  before resonating, keeping Z-space orchestration entirely on the session.
 
 ---
 
