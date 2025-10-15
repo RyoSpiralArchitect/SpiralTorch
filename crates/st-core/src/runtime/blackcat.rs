@@ -93,6 +93,7 @@ pub struct BlackCatRuntime {
     pub bandits: MultiBandit,
     pub heur: HeurStore,
     pub reward: RewardCfg,
+    context_dim: usize,
     last_context: Vec<f64>,
     last_picks: HashMap<String, String>,
     last_step_start: Option<Instant>,
@@ -114,7 +115,8 @@ impl BlackCatRuntime {
             bandits,
             heur,
             reward: RewardCfg::default(),
-            last_context: Vec::new(),
+            context_dim: feat_dim.max(1),
+            last_context: vec![0.0; feat_dim.max(1)],
             last_picks: HashMap::new(),
             last_step_start: None,
         }
@@ -136,6 +138,11 @@ impl BlackCatRuntime {
         extras: &[(String, f64)],
         feat_dim: usize,
     ) -> Vec<f64> {
+        let target_dim = if feat_dim == 0 {
+            self.context_dim
+        } else {
+            feat_dim
+        };
         let mut ctx = vec![
             1.0,
             batches as f64,
@@ -147,13 +154,14 @@ impl BlackCatRuntime {
         for (_, value) in extras.iter() {
             ctx.push(*value);
         }
-        ctx.resize(feat_dim, 0.0);
+        ctx.resize(target_dim, 0.0);
         ctx
     }
 
     /// Choose all groups at once, storing the picks and context internally.
     pub fn choose(&mut self, context: Vec<f64>) -> HashMap<String, String> {
         let picks = self.bandits.select_all(&context);
+        self.context_dim = context.len().max(1);
         self.last_context = context;
         self.last_picks = picks.clone();
         picks
@@ -179,6 +187,11 @@ impl BlackCatRuntime {
             .temp_schedule(metrics.retry_rate, grad_norm, loss_var);
         self.bandits.update_all(&self.last_context, reward_current);
         reward_current
+    }
+
+    /// Returns the dimensionality expected by the contextual bandits.
+    pub fn context_dim(&self) -> usize {
+        self.context_dim
     }
 
     /// Returns the current fractional regularisation penalty tracked by ZMeta.

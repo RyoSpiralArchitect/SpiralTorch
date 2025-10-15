@@ -20,6 +20,9 @@ cuda     = []
 logic    = ["dep:st-logic"]
 kdsl     = ["dep:st-kdsl"]
 kv-redis = ["st-kv/redis"]
+psi      = ["dep:bitflags", "dep:once_cell"]
+psychoid = ["dep:once_cell"]
+collapse = ["psi"]
 
 [dependencies]
 thiserror   = "1"
@@ -33,6 +36,7 @@ once_cell   = { version = "1.19", optional = true }
 bytemuck    = { version = "1.16", optional = true, features = ["derive"] }
 pollster    = { version = "0.3",  optional = true }
 wgpu        = { version = "0.19", optional = true, default-features = false, features = ["wgsl"] }
+bitflags    = { version = "2.4", optional = true }
 
 st-backend-hip = { path = "../st-backend-hip", optional = true }
 st-logic       = { path = "../st-logic",       optional = true }
