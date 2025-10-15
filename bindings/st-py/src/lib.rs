@@ -1,3 +1,7 @@
+mod sot;
+
+use ndarray::{Array2, ArrayD, Ix2};
+use num_complex::Complex64;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyModule};
@@ -11,12 +15,18 @@ use st_backend_hip::{
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_frac::fft::{fft_inplace as frac_fft_inplace, Complex32 as FracComplex32, FftError};
+use st_frac::{
+    fracdiff_gl_nd, fracdiff_gl_nd_backward, gl_coeffs as frac_gl_coeffs, FracErr, Pad as FracPad,
+};
 use st_nn::{
     Conv1d as NnConv1d, DifferentialTrace, Linear as NnLinear, Module, Sequential as NnSequential,
     SpiralSession, SpiralSessionBuilder, WaveRnn as NnWaveRnn,
 };
 use st_tensor::pure::{
-    measure::{z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter},
+    measure::{
+        z_space_barycenter as rust_z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter,
+    },
     topos::OpenCartesianTopos,
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
     PureResult, Tensor, TensorError,
@@ -30,6 +40,21 @@ fn tensor_err(err: TensorError) -> PyErr {
 
 fn convert<T>(value: PureResult<T>) -> PyResult<T> {
     value.map_err(tensor_err)
+}
+
+fn convert_frac<T>(value: Result<T, FracErr>) -> PyResult<T> {
+    value.map_err(|err| PyValueError::new_err(err.to_string()))
+}
+
+fn convert_fft<T>(value: Result<T, FftError>) -> PyResult<T> {
+    value.map_err(|err| {
+        PyValueError::new_err(match err {
+            FftError::Empty => "signal must not be empty".to_string(),
+            FftError::NonPowerOfTwo => {
+                "signal length must be a power of two for the radix FFT".to_string()
+            }
+        })
+    })
 }
 
 fn intern_label(label: &str) -> &'static str {
@@ -81,6 +106,24 @@ fn backend_name(kind: BackendKind) -> &'static str {
         BackendKind::Hip => "hip",
         BackendKind::Cpu => "cpu",
     }
+}
+
+fn tensor_to_array(tensor: &Tensor) -> PyResult<ArrayD<f32>> {
+    let (rows, cols) = tensor.shape();
+    Array2::from_shape_vec((rows, cols), tensor.data().to_vec())
+        .map(|array| array.into_dyn())
+        .map_err(|_| PyValueError::new_err("failed to view tensor as ndarray"))
+}
+
+fn array_to_tensor(array: ArrayD<f32>) -> PyResult<PyTensor> {
+    let matrix: Array2<f32> = array
+        .into_dimensionality::<Ix2>()
+        .map_err(|_| PyValueError::new_err("fractional operators require 2D tensors"))?;
+    let (rows, cols) = matrix.dim();
+    let data = matrix.into_raw_vec();
+    Ok(PyTensor::from_tensor(convert(Tensor::from_vec(
+        rows, cols, data,
+    ))?))
 }
 
 fn device_caps_dict<'py>(py: Python<'py>, caps: DeviceCaps) -> PyResult<Bound<'py, PyDict>> {
@@ -1563,7 +1606,7 @@ fn plan(
 }
 
 /// Compute the Z-space barycenter described by the weighted KL objective.
-#[pyfunction]
+#[pyfunction(name = "z_space_barycenter")]
 #[pyo3(signature = (densities, weights=None, entropy_weight=0.0, beta_j=0.0, coupling=None))]
 fn z_space_barycenter_py(
     py: Python<'_>,
@@ -1587,7 +1630,7 @@ fn z_space_barycenter_py(
     }
     let coupling_tensor = coupling.map(PyTensor::into_tensor);
     let coupling_ref = coupling_tensor.as_ref();
-    let barycenter = convert(z_space_barycenter(
+    let barycenter = convert(rust_z_space_barycenter(
         &weight_vec,
         &tensors,
         entropy_weight,
@@ -1595,6 +1638,69 @@ fn z_space_barycenter_py(
         coupling_ref,
     ))?;
     PyZSpaceBarycenter::from_result(barycenter).as_dict(py)
+}
+
+fn parse_frac_pad(pad: &str) -> PyResult<FracPad> {
+    match pad.to_ascii_lowercase().as_str() {
+        "zero" => Ok(FracPad::Zero),
+        "reflect" => Ok(FracPad::Reflect),
+        other => Err(PyValueError::new_err(format!(
+            "unsupported padding kind: {other}; expected 'zero' or 'reflect'"
+        ))),
+    }
+}
+
+#[pyfunction(name = "gl_coeffs")]
+fn gl_coeffs_py(alpha: f32, len: usize) -> Vec<f32> {
+    frac_gl_coeffs(alpha, len)
+}
+
+#[pyfunction(name = "fracdiff_gl")]
+#[pyo3(signature = (tensor, alpha, axis, kernel_len, pad="zero", scale=None))]
+fn fracdiff_gl_py(
+    tensor: &PyTensor,
+    alpha: f32,
+    axis: usize,
+    kernel_len: usize,
+    pad: &str,
+    scale: Option<f32>,
+) -> PyResult<PyTensor> {
+    let array = tensor_to_array(tensor.as_tensor())?;
+    let pad = parse_frac_pad(pad)?;
+    let result = convert_frac(fracdiff_gl_nd(&array, alpha, axis, kernel_len, pad, scale))?;
+    array_to_tensor(result)
+}
+
+#[pyfunction(name = "fracdiff_gl_backward")]
+#[pyo3(signature = (tensor, alpha, axis, kernel_len, pad="zero", scale=None))]
+fn fracdiff_gl_backward_py(
+    tensor: &PyTensor,
+    alpha: f32,
+    axis: usize,
+    kernel_len: usize,
+    pad: &str,
+    scale: Option<f32>,
+) -> PyResult<PyTensor> {
+    let array = tensor_to_array(tensor.as_tensor())?;
+    let pad = parse_frac_pad(pad)?;
+    let result = convert_frac(fracdiff_gl_nd_backward(
+        &array, alpha, axis, kernel_len, pad, scale,
+    ))?;
+    array_to_tensor(result)
+}
+
+#[pyfunction(name = "fft")]
+#[pyo3(signature = (signal, inverse=false))]
+fn frac_fft_py(signal: Vec<Complex64>, inverse: bool) -> PyResult<Vec<Complex64>> {
+    let mut buffer: Vec<FracComplex32> = signal
+        .into_iter()
+        .map(|c| FracComplex32::new(c.re as f32, c.im as f32))
+        .collect();
+    convert_fft(frac_fft_inplace(&mut buffer, inverse))?;
+    Ok(buffer
+        .into_iter()
+        .map(|c| Complex64::new(c.re as f64, c.im as f64))
+        .collect())
 }
 
 #[pymodule]
@@ -1607,6 +1713,23 @@ fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.setattr(
         "__doc__",
         "Rust-backed neural network modules: Linear, Conv1d, WaveRnn, Sequential.",
+    )?;
+    Ok(())
+}
+
+#[pymodule]
+fn frac(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(gl_coeffs_py, m)?)?;
+    m.add_function(wrap_pyfunction!(fracdiff_gl_py, m)?)?;
+    m.add_function(wrap_pyfunction!(fracdiff_gl_backward_py, m)?)?;
+    m.add_function(wrap_pyfunction!(frac_fft_py, m)?)?;
+    m.setattr(
+        "__all__",
+        vec!["gl_coeffs", "fracdiff_gl", "fracdiff_gl_backward", "fft"],
+    )?;
+    m.setattr(
+        "__doc__",
+        "Fractional calculus operators and FFT helpers used by SpiralTorch.",
     )?;
     Ok(())
 }
@@ -1653,6 +1776,12 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let nn_mod = PyModule::new_bound(_py, "nn")?;
     nn(_py, &nn_mod)?;
     m.add_submodule(&nn_mod)?;
+    let frac_mod = PyModule::new_bound(_py, "frac")?;
+    frac(_py, &frac_mod)?;
+    m.add_submodule(&frac_mod)?;
+    let sot_mod = PyModule::new_bound(_py, "sot")?;
+    sot::module(_py, &sot_mod)?;
+    m.add_submodule(&sot_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
@@ -1690,6 +1819,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "SpiralSessionBuilder",
             "SpiralSession",
             "nn",
+            "frac",
+            "sot",
         ],
     )?;
     m.setattr("__version__", env!("CARGO_PKG_VERSION"))?;
