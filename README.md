@@ -28,6 +28,12 @@ The stack is comfortable living entirely in Rust—yet the Python wheel remains 
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
+```python
+import spiraltorch as st
+sess = st.SpiralSession(device="wgpu", curvature=-1.0, hyper_learning_rate=0.05)
+sess.align_hypergrad(sess.hypergrad(1, 2), sess.barycenter([st.Tensor(1, 2, [0.7, 0.3])]))
+```
+
 **SpiralTorch is a Rust-first AI training framework** that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
 the kernels, the hypergrad tape streams Z-space meaning, and the high-level
@@ -54,10 +60,47 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
+## Hello SpiralSession quickstart
+
+Kick the tires with the new end-to-end `hello_session` walkthrough. It seeds a
+session, computes a barycenter, aligns a hypergrad tape, and runs a one-epoch
+roundtable update over a toy dataset.
+
+```bash
+cargo run -p st-nn --example hello_session
+```
+
+Enable the optional ψ telemetry layer to stream semantic-energy readings during
+the run:
+
+```bash
+SPIRAL_PSI=1 SPIRAL_LOG_PSI=1 cargo run -p st-nn --features psi --example hello_session
+```
+
+The Python wheel mirrors the same flow for rapid notebooks:
+
+```bash
+python bindings/st-py/examples/hello_session.py
+```
+
+Both variants print the averaged roundtable loss after aligning the barycenter
+path with the hypergrad tape. On the Python side you can now spin up the
+streaming loader without touching NumPy:
+
+```python
+loader = st.dataset.from_vec(samples).shuffle(0xC0FFEE).batched(4).prefetch(2)
+stats = session.train_epoch(trainer, model, loss, loader, schedule)
+```
+
+The loader runs entirely in Rust—mini-batches stream straight into
+`train_epoch` and propagate errors as native `TensorError`s when shapes drift.
+
 ## What you get for training
 
 - **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**
   Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, and every plan can now be rendered back into a SpiralK snippet via `choice.to_unison_script(kind)`.
+- **Introspectable compute plans**
+  Unified `RankPlan`s expose their FFT stencil directly—call `plan.fft_plan()` to inspect the radix/segment shape, `plan.fft_wgsl()` to emit the ready-to-run WGSL kernel, or `plan.fft_spiralk_hint()` to log the same choice back into SpiralK.
 - **SpiralK DSL** (K×Lisp-inspired)
   Hard assigns (`mk:`, `tile:`) and soft rules (`soft(mk, …)`, `soft(tile, …)`) that blend with measurements.
 - **SoftLogic (finite-domain solver)**
@@ -71,6 +114,10 @@ tensor shims, no translation layers, and no tracebacks.
   Parameters can now absorb complex Z-space waves or raw text directly into the
   hypergrad tape, so the roundtable can keep expanding meaning without Euclidean
   fallbacks or NumPy buffers.
+- **TensorBiome canopies + spiral biomes**
+  Curate rewrites with `TensorBiome`, weight individual shoots, stack the full
+  harvest, and let SoT-3Dφ planners seed a ready-to-project biome via
+  `SoT3DPlan.grow_biome(...)` before reinjecting it with `ZSpaceProjector`.
 - **Rust-first modules & losses**
   `st-nn` now ships `Linear`, `Sequential`, the lightweight `Relu`, the
   hyperbolic `WaveGate`, `ToposResonator`, the new `ZSpaceMixer`, and the
@@ -78,7 +125,9 @@ tensor shims, no translation layers, and no tracebacks.
   losses. They stream gradients through the hypergrad tape, apply open-topos
   rewrites, and keep SpiralK planners one call away with roundtable-aware
   scheduling helpers. Every primitive is exported through the Python wheel so
-  you can stay NumPy-free while scripting experiments.
+  you can stay NumPy-free while scripting experiments—with the new
+  `spiraltorch.dataset.DataLoader` keeping shuffle/batch/prefetch entirely in
+  Rust.
 - **Optional WASM tuner table**
   Bake the JSON dataset offline and ship it to browsers/WASM. The runtime loads the table lazily, blends it with SpiralK, and keeps the optimiser in sync with the generated WGSL kernels.
 - **Self-Rewrite**

@@ -15,10 +15,8 @@ pub mod plan;
 pub mod schedule;
 pub mod trainer;
 
-pub use dataset::{BatchIter, Dataset};
-pub use highlevel::{
-    BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder,
-};
+pub use dataset::{from_vec as dataset_from_vec, BatchIter, DataLoader, Dataset};
+pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
 pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, MaxPool2d};
