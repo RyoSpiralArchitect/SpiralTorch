@@ -7,10 +7,15 @@
 //! can serve as a foundation for a fully independent learning stack that stays
 //! responsive even when the surrounding platform is sandboxed.
 
+pub mod differential;
 pub mod fractal;
 pub mod measure;
 pub mod topos;
 
+pub use self::differential::{
+    DifferentialResonance, FunctorDifferential, HomotopyDifferential, InfinityDifferential,
+    RecursiveDifferential, SpiralDifferential,
+};
 use self::measure::BarycenterIntermediate;
 pub use self::topos::OpenCartesianTopos;
 

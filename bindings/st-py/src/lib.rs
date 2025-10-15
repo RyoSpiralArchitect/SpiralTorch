@@ -12,13 +12,14 @@ use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
 use st_nn::{
-    Conv1d as NnConv1d, Linear as NnLinear, Module, Sequential as NnSequential, SpiralSession,
-    SpiralSessionBuilder, WaveRnn as NnWaveRnn,
+    Conv1d as NnConv1d, DifferentialTrace, Linear as NnLinear, Module,
+    Sequential as NnSequential, SpiralSession, SpiralSessionBuilder, WaveRnn as NnWaveRnn,
 };
 use st_tensor::pure::{
     measure::{z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter},
     topos::OpenCartesianTopos,
-    AmegaHypergrad, Complex32, ComplexTensor, LanguageWaveEncoder, PureResult, Tensor, TensorError,
+    AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder, PureResult,
+    Tensor, TensorError,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -388,6 +389,177 @@ impl PyBarycenterIntermediate {
             "BarycenterIntermediate(interpolation={:.2}, objective={:.6})",
             self.inner.interpolation, self.inner.objective
         ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DifferentialResonance")]
+#[derive(Clone)]
+struct PyDifferentialResonance {
+    inner: DifferentialResonance,
+}
+
+impl PyDifferentialResonance {
+    fn from_resonance(inner: DifferentialResonance) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyDifferentialResonance {
+    #[getter]
+    fn homotopy_flow(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(self.inner.homotopy_flow.clone()))
+    }
+
+    #[getter]
+    fn functor_linearisation(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(
+            self.inner.functor_linearisation.clone(),
+        ))
+    }
+
+    #[getter]
+    fn recursive_objective(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(
+            self.inner.recursive_objective.clone(),
+        ))
+    }
+
+    #[getter]
+    fn infinity_projection(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(
+            self.inner.infinity_projection.clone(),
+        ))
+    }
+
+    #[getter]
+    fn infinity_energy(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(self.inner.infinity_energy.clone()))
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item(
+            "homotopy_flow",
+            PyTensor::from_tensor(self.inner.homotopy_flow.clone()).into_py(py),
+        )?;
+        dict.set_item(
+            "functor_linearisation",
+            PyTensor::from_tensor(self.inner.functor_linearisation.clone()).into_py(py),
+        )?;
+        dict.set_item(
+            "recursive_objective",
+            PyTensor::from_tensor(self.inner.recursive_objective.clone()).into_py(py),
+        )?;
+        dict.set_item(
+            "infinity_projection",
+            PyTensor::from_tensor(self.inner.infinity_projection.clone()).into_py(py),
+        )?;
+        dict.set_item(
+            "infinity_energy",
+            PyTensor::from_tensor(self.inner.infinity_energy.clone()).into_py(py),
+        )?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok("DifferentialResonance(...)".to_string())
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SpiralDifferentialTrace")]
+struct PySpiralDifferentialTrace {
+    trace: Option<DifferentialTrace>,
+}
+
+impl PySpiralDifferentialTrace {
+    fn from_trace(trace: DifferentialTrace) -> Self {
+        Self { trace: Some(trace) }
+    }
+
+    fn map_trace<F>(&mut self, f: F) -> PyResult<()>
+    where
+        F: FnOnce(DifferentialTrace) -> PureResult<DifferentialTrace>,
+    {
+        let trace = self
+            .trace
+            .take()
+            .ok_or_else(|| PyValueError::new_err("trace has already been consumed"))?;
+        let trace = convert(f(trace))?;
+        self.trace = Some(trace);
+        Ok(())
+    }
+
+    fn take_trace(&mut self) -> PyResult<DifferentialTrace> {
+        self.trace
+            .take()
+            .ok_or_else(|| PyValueError::new_err("trace has already been consumed"))
+    }
+}
+
+#[pymethods]
+impl PySpiralDifferentialTrace {
+    fn deform(&mut self, generator: &PyTensor, direction: &PyTensor) -> PyResult<()> {
+        let generator = generator.as_tensor().clone();
+        let direction = direction.as_tensor().clone();
+        self.map_trace(move |trace| trace.deform(generator.clone(), direction.clone()))
+    }
+
+    fn across(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
+        let guard = topos.inner.clone();
+        self.map_trace(move |trace| trace.across(guard.clone()))
+    }
+
+    #[pyo3(signature = (kernel, source=None))]
+    fn via(&mut self, kernel: &PyTensor, source: Option<&PyTensor>) -> PyResult<()> {
+        let kernel_tensor = kernel.as_tensor().clone();
+        let source_tensor = source.map(|s| s.as_tensor().clone());
+        self.map_trace(move |trace| {
+            if let Some(ref src) = source_tensor {
+                trace.via_with(kernel_tensor.clone(), src.clone())
+            } else {
+                trace.via(kernel_tensor.clone())
+            }
+        })
+    }
+
+    fn functor_step(&mut self, epsilon: f32) -> PyResult<()> {
+        self.map_trace(move |trace| trace.functor_step(epsilon))
+    }
+
+    fn with_barycenter(&mut self, barycenter: &PyZSpaceBarycenter) -> PyResult<()> {
+        let barycenter_clone = barycenter.inner.clone();
+        self.map_trace(move |trace| trace.with_barycenter(&barycenter_clone))
+    }
+
+    #[pyo3(signature = (levels, curvatures=None))]
+    fn with_infinity(
+        &mut self,
+        levels: Vec<PyTensor>,
+        curvatures: Option<Vec<f32>>,
+    ) -> PyResult<()> {
+        let tensors: Vec<Tensor> = levels.into_iter().map(PyTensor::into_tensor).collect();
+        let curvatures = curvatures.unwrap_or_default();
+        self.map_trace(move |trace| trace.with_infinity(tensors.clone(), curvatures.clone()))
+    }
+
+    fn resonate(&mut self) -> PyResult<PyDifferentialResonance> {
+        let trace = self.take_trace()?;
+        let resonance = convert(trace.resonate())?;
+        Ok(PyDifferentialResonance::from_resonance(resonance))
+    }
+
+    fn resonate_with_hypergrad(
+        &mut self,
+        hypergrad: &mut PyHypergrad,
+    ) -> PyResult<PyDifferentialResonance> {
+        let trace = self.take_trace()?;
+        let resonance = convert(trace.resonate_with_hypergrad(&mut hypergrad.inner))?;
+        Ok(PyDifferentialResonance::from_resonance(resonance))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok("SpiralDifferentialTrace(...)".to_string())
     }
 }
 
@@ -843,6 +1015,11 @@ impl PySpiralSession {
 
     fn builder(&self) -> PySpiralSessionBuilder {
         PySpiralSessionBuilder::from_builder(self.inner.to_builder())
+    }
+
+    fn trace(&self, seed: &PyTensor) -> PyResult<PySpiralDifferentialTrace> {
+        let trace = convert(self.inner.trace(seed.as_tensor().clone()))?;
+        Ok(PySpiralDifferentialTrace::from_trace(trace))
     }
 
     #[getter]
@@ -1461,6 +1638,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyComplexTensor>()?;
     m.add_class::<PyBarycenterIntermediate>()?;
     m.add_class::<PyZSpaceBarycenter>()?;
+    m.add_class::<PyDifferentialResonance>()?;
+    m.add_class::<PySpiralDifferentialTrace>()?;
     m.add_class::<PyOpenTopos>()?;
     m.add_class::<PyLanguageWaveEncoder>()?;
     m.add_class::<PyHypergrad>()?;
@@ -1479,6 +1658,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "ComplexTensor",
             "BarycenterIntermediate",
             "ZSpaceBarycenter",
+            "DifferentialResonance",
+            "SpiralDifferentialTrace",
             "OpenTopos",
             "LanguageWaveEncoder",
             "Hypergrad",

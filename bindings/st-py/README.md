@@ -24,6 +24,11 @@ NumPy, no PyTorch, and no shim layers.
   callers can select devices, spawn hypergrad tapes, plan kernels, and solve
   barycentres with a few intuitive method calls. Structured results are
   returned through the new `ZSpaceBarycenter` class.
+- Non-commutative differential traces via `SpiralSession.trace(...)` which emit
+  `SpiralDifferentialTrace` builders and `DifferentialResonance` snapshots to
+  blend homotopy flows, functor derivatives, recursive barycenter energies, and
+  \(\infty\)-tower projections—optionally wiring the result straight into a
+  `Hypergrad` tape.
 
 ## Building wheels
 
@@ -70,4 +75,24 @@ bary = session.barycenter(densities)
 hyper = session.hypergrad(*bary.density.shape())
 session.align_hypergrad(hyper, bary)
 print(bary.objective, hyper.gradient())
+```
+
+```python
+from spiraltorch import SpiralSession, Tensor
+
+session = SpiralSession(device="wgpu", curvature=-1.0)
+seed = Tensor(1, 2, [0.4, 0.6])
+generator = Tensor(1, 2, [0.1, -0.2])
+direction = Tensor(1, 2, [0.05, 0.07])
+kernel = Tensor(2, 2, [1.0, 0.5, -0.25, 1.25])
+
+bary = session.barycenter([Tensor(1, 2, [0.6, 0.4]), Tensor(1, 2, [0.5, 0.5])])
+
+trace = session.trace(seed)
+trace.deform(generator, direction)
+trace.via(kernel)
+trace.with_barycenter(bary)
+trace.with_infinity([bary.density.clone()], [session.curvature()])
+resonance = trace.resonate()
+print(resonance.homotopy_flow().tolist())
 ```

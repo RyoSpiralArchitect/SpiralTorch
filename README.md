@@ -190,6 +190,12 @@ print("updated weights", weights.tolist())
   Rust (`st_nn::SpiralSession`) or Python (`spiraltorch.SpiralSession`) to pick
   devices, generate rank plans, synthesise barycentres, and align hypergrads via
   intuitive method calls.
+- Launch `session.trace(tensor)` to compose non-commutative homotopy flows,
+  functor linearisations, recursive barycenter gradients, and \(\infty\)-tower
+  projections before calling `.resonate()` (or
+  `.resonate_with_hypergrad(hypergrad)`) to surface a
+  `DifferentialResonance` snapshot that binds the four differential layers
+  together.
 
 ---
 
