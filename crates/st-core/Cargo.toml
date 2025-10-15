@@ -23,6 +23,7 @@ kv-redis = ["st-kv/redis"]
 psi      = ["dep:bitflags", "dep:once_cell"]
 psychoid = ["dep:once_cell"]
 collapse = ["psi"]
+golden   = []
 
 [dependencies]
 thiserror   = "1"

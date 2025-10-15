@@ -107,6 +107,37 @@ stats = session.train_epoch(trainer, model, loss, loader, schedule)
 The loader runs entirely in Rust—mini-batches stream straight into
 `train_epoch` and propagate errors as native `TensorError`s when shapes drift.
 
+### GoldenRetriever Training (distributed, data-race free)
+
+Need to fan training across multiple local workers without sprinkling raw
+`Arc<Mutex<...>>` or bespoke runtimes through your code? Enable the new `golden`
+feature flag to pull in SpiralTorch’s Tokio/Rayon-style runtime and let the
+**GoldenRetriever** orchestrator coordinate the fleet:
+
+```bash
+cargo test -p st-nn --features "golden" golden::tests::golden_retriever_trains_in_parallel -- --exact
+```
+
+The runtime exposes SpiralTorch-flavoured wrappers (`SpiralArc`, `SpiralMutex`,
+`GoldenRuntime`) so modules, losses, and trainers stay inside the guard rails
+while the scheduler spawns blocking steps and performs deterministic
+Rayon-style reductions. A minimal Rust loop looks like:
+
+```rust
+use st_nn::{GoldenRetriever, GoldenRetrieverConfig, Linear, MeanSquaredError, ModuleTrainer};
+
+let mut trainer_a = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+let mut trainer_b = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+let retriever = GoldenRetriever::new(GoldenRetrieverConfig::default(), vec![trainer_a, trainer_b])?;
+let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
+println!("workers={} avg_loss={}", report.workers, report.average_loss);
+```
+
+GoldenRetriever keeps each trainer behind a poison-resistant mutex, launches the
+epoch bodies on the shared runtime, and reduces the per-worker metrics using the
+built-in parallel reducer so the roundtable stays deterministic. No additional
+locking or thread book-keeping required.
+
 ## What you get for training
 
 - **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**

@@ -5,6 +5,8 @@
 //! tape and SpiralK planners.
 
 pub mod dataset;
+#[cfg(feature = "golden")]
+pub mod golden;
 pub mod highlevel;
 pub mod injector;
 pub mod io;
@@ -17,6 +19,8 @@ pub mod schedule;
 pub mod trainer;
 
 pub use dataset::{from_vec as dataset_from_vec, BatchIter, DataLoader, Dataset};
+#[cfg(feature = "golden")]
+pub use golden::{GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig};
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
