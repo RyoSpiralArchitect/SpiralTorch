@@ -17,7 +17,7 @@ pub use self::differential::{
     RecursiveDifferential, SpiralDifferential,
 };
 use self::measure::BarycenterIntermediate;
-pub use self::topos::OpenCartesianTopos;
+pub use self::topos::{OpenCartesianTopos, RewriteMonad, TensorBiome};
 
 use core::fmt;
 use std::error::Error;
@@ -52,6 +52,8 @@ pub enum TensorError {
     NonPositiveTolerance { tolerance: f32 },
     /// Topos saturation window must stay positive.
     NonPositiveSaturation { saturation: f32 },
+    /// Tensor biome weights must stay positive when accumulating shoots.
+    NonPositiveWeight { weight: f32 },
     /// Computation received an empty input which would otherwise trigger a panic.
     EmptyInput(&'static str),
     /// Weighted Z-space barycenter collapsed because the entropy weight cancelled the KL pull.
@@ -119,6 +121,9 @@ impl fmt::Display for TensorError {
             }
             TensorError::NonPositiveSaturation { saturation } => {
                 write!(f, "saturation window must be positive, got {saturation}")
+            }
+            TensorError::NonPositiveWeight { weight } => {
+                write!(f, "tensor biome weight must be positive, got {weight}")
             }
             TensorError::EmptyInput(label) => {
                 write!(f, "{label} must not be empty for this computation")

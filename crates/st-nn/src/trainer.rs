@@ -103,6 +103,11 @@ impl ModuleTrainer {
         self.curvature
     }
 
+    /// Returns the learning rate used for hypergrad updates.
+    pub fn hyper_learning_rate(&self) -> f32 {
+        self.hyper_learning_rate
+    }
+
     /// Attaches hypergrad tapes to all parameters of the provided module.
     pub fn prepare<M: Module>(&self, module: &mut M) -> PureResult<()> {
         module.attach_hypergrad(self.curvature, self.hyper_learning_rate)
