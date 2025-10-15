@@ -1,10 +1,10 @@
-use crate::PyTensor;
+use super::{convert, intern_label, PyOpenTopos, PyTensor, PyTensorBiome};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
-use st_tensor::pure::Tensor;
+use st_tensor::pure::{Tensor, TensorBiome};
 
 const GOLDEN_ANGLE: f64 = 2.399_963_229_728_653; // π(3 − √5)
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895; // (1 + √5) / 2
@@ -646,6 +646,82 @@ impl PySoT3DPlan {
             }
         }
         points
+    }
+
+    #[pyo3(signature = (topos, label_prefix=None, include_reflections=true))]
+    fn grow_biome(
+        &self,
+        topos: &PyOpenTopos,
+        label_prefix: Option<&str>,
+        include_reflections: bool,
+    ) -> PyResult<PyTensorBiome> {
+        let prefix = label_prefix.unwrap_or("sot");
+        let mut biome = TensorBiome::new(topos.inner.clone());
+        if self.steps.is_empty() {
+            return Ok(PyTensorBiome::from_biome(biome));
+        }
+        let positions = convert(self.positions_tensor())?;
+        convert(biome.absorb(intern_label(&format!("{}_positions", prefix)), positions))?;
+
+        let mut feature_data = Vec::with_capacity(self.steps.len() * 9);
+        for step in &self.steps {
+            feature_data.push(step.radius as f32);
+            feature_data.push(step.angle as f32);
+            feature_data.push(step.height as f32);
+            feature_data.push(step.curvature as f32);
+            feature_data.push(step.macro_phase as f32);
+            feature_data.push(step.meso_phase as f32);
+            feature_data.push(step.micro_phase as f32);
+            feature_data.push(self.params.meso_gain as f32);
+            feature_data.push(self.params.micro_gain as f32);
+        }
+        let features = convert(Tensor::from_vec(self.steps.len(), 9, feature_data))?;
+        let feature_weight = (1.0 + self.params.meso_gain + self.params.micro_gain) as f32;
+        convert(biome.absorb_weighted(
+            intern_label(&format!("{}_features", prefix)),
+            features,
+            feature_weight,
+        ))?;
+
+        if include_reflections {
+            let mut reflection_data = Vec::with_capacity(self.steps.len() * 3);
+            for step in &self.steps {
+                reflection_data.push(if step.macro_reflection { 1.0 } else { 0.0 });
+                reflection_data.push(if step.meso_reflection { 1.0 } else { 0.0 });
+                reflection_data.push(if step.micro_reflection { 1.0 } else { 0.0 });
+            }
+            let reflections = convert(Tensor::from_vec(self.steps.len(), 3, reflection_data))?;
+            convert(biome.absorb(
+                intern_label(&format!("{}_reflections", prefix)),
+                reflections,
+            ))?;
+        }
+
+        if !self.macros.is_empty() {
+            let mut macro_data = Vec::with_capacity(self.macros.len() * 6);
+            for summary in &self.macros {
+                macro_data.push(summary.index as f32);
+                macro_data.push(summary.length as f32);
+                macro_data.push(summary.ideal_length as f32);
+                macro_data.push(summary.height_gain as f32);
+                macro_data.push(summary.mean_curvature as f32);
+                macro_data.push(
+                    summary
+                        .reflection_step
+                        .map(|idx| idx as f32)
+                        .unwrap_or(-1.0),
+                );
+            }
+            let macros_tensor = convert(Tensor::from_vec(self.macros.len(), 6, macro_data))?;
+            let macro_weight = (self.macros.len() as f32).max(1.0);
+            convert(biome.absorb_weighted(
+                intern_label(&format!("{}_macro_summary", prefix)),
+                macros_tensor,
+                macro_weight,
+            ))?;
+        }
+
+        Ok(PyTensorBiome::from_biome(biome))
     }
 
     fn __repr__(&self) -> PyResult<String> {

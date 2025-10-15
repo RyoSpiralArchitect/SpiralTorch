@@ -771,6 +771,16 @@ struct PyTensorBiome {
     inner: TensorBiome,
 }
 
+impl PyTensorBiome {
+    fn from_biome(biome: TensorBiome) -> Self {
+        Self { inner: biome }
+    }
+
+    fn total_weight_value(&self) -> f32 {
+        self.inner.total_weight()
+    }
+}
+
 #[pymethods]
 impl PyTensorBiome {
     #[new]
@@ -792,10 +802,25 @@ impl PyTensorBiome {
         self.inner.is_empty()
     }
 
+    fn total_weight(&self) -> f32 {
+        self.total_weight_value()
+    }
+
+    fn weights(&self) -> Vec<f32> {
+        self.inner.weights().to_vec()
+    }
+
     fn absorb(&mut self, label: &str, tensor: &PyTensor) -> PyResult<()> {
         convert(
             self.inner
                 .absorb(intern_label(label), tensor.as_tensor().clone()),
+        )
+    }
+
+    fn absorb_weighted(&mut self, label: &str, tensor: &PyTensor, weight: f32) -> PyResult<()> {
+        convert(
+            self.inner
+                .absorb_weighted(intern_label(label), tensor.as_tensor().clone(), weight),
         )
     }
 
@@ -805,6 +830,10 @@ impl PyTensorBiome {
 
     fn canopy(&self) -> PyResult<PyTensor> {
         Ok(PyTensor::from_tensor(convert(self.inner.canopy())?))
+    }
+
+    fn stack(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(self.inner.stack())?))
     }
 
     fn shoots(&self, py: Python<'_>) -> PyResult<Vec<Py<PyTensor>>> {
@@ -828,10 +857,11 @@ impl PyTensorBiome {
             .map(|tensor| tensor.shape())
             .unwrap_or((0, 0));
         Ok(format!(
-            "TensorBiome(len={}, shape=({}, {}))",
+            "TensorBiome(len={}, shape=({}, {}), total_weight={:.3})",
             self.len(),
             rows,
-            cols
+            cols,
+            self.total_weight_value()
         ))
     }
 }
