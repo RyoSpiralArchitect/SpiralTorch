@@ -16,8 +16,9 @@ use st_nn::{
     WaveRnn as NnWaveRnn,
 };
 use st_tensor::pure::{
-    measure::z_space_barycenter, topos::OpenCartesianTopos, AmegaHypergrad, Complex32,
-    ComplexTensor, LanguageWaveEncoder, PureResult, Tensor, TensorError,
+    measure::{z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter},
+    topos::OpenCartesianTopos,
+    AmegaHypergrad, Complex32, ComplexTensor, LanguageWaveEncoder, PureResult, Tensor, TensorError,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -225,6 +226,63 @@ struct PyComplexTensor {
 impl PyComplexTensor {
     fn from_complex(inner: ComplexTensor) -> Self {
         Self { inner }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "BarycenterIntermediate")]
+#[derive(Clone, Debug)]
+struct PyBarycenterIntermediate {
+    inner: BarycenterIntermediate,
+}
+
+impl PyBarycenterIntermediate {
+    fn from_stage(stage: BarycenterIntermediate) -> Self {
+        Self { inner: stage }
+    }
+}
+
+#[pymethods]
+impl PyBarycenterIntermediate {
+    #[getter]
+    fn interpolation(&self) -> f32 {
+        self.inner.interpolation
+    }
+
+    #[getter]
+    fn density(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(self.inner.density.clone()))
+    }
+
+    #[getter]
+    fn kl_energy(&self) -> f32 {
+        self.inner.kl_energy
+    }
+
+    #[getter]
+    fn entropy(&self) -> f32 {
+        self.inner.entropy
+    }
+
+    #[getter]
+    fn objective(&self) -> f32 {
+        self.inner.objective
+    }
+
+    fn as_tuple(&self) -> PyResult<(f32, PyTensor, f32, f32, f32)> {
+        Ok((
+            self.inner.interpolation,
+            PyTensor::from_tensor(self.inner.density.clone()),
+            self.inner.kl_energy,
+            self.inner.entropy,
+            self.inner.objective,
+        ))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "BarycenterIntermediate(interpolation={:.2}, objective={:.6})",
+            self.inner.interpolation, self.inner.objective
+        ))
     }
 }
 
@@ -484,6 +542,25 @@ impl PyHypergrad {
 
     fn absorb_text(&mut self, encoder: &PyLanguageWaveEncoder, text: &str) -> PyResult<()> {
         convert(self.inner.absorb_text(&encoder.inner, text))
+    }
+
+    #[pyo3(signature = (intermediates))]
+    fn accumulate_barycenter_path(
+        &mut self,
+        py: Python<'_>,
+        intermediates: Vec<Py<PyBarycenterIntermediate>>,
+    ) -> PyResult<()> {
+        if intermediates.is_empty() {
+            return Err(PyValueError::new_err(
+                "barycenter intermediates must not be empty",
+            ));
+        }
+        let mut stages = Vec::with_capacity(intermediates.len());
+        for stage in intermediates {
+            let guard = stage.borrow(py);
+            stages.push(guard.inner.clone());
+        }
+        convert(self.inner.accumulate_barycenter_path(&stages))
     }
 
     fn apply(&mut self, mut weights: PyRefMut<'_, PyTensor>) -> PyResult<()> {
@@ -926,15 +1003,28 @@ fn z_space_barycenter_py(
     }
     let coupling_tensor = coupling.map(PyTensor::into_tensor);
     let coupling_ref = coupling_tensor.as_ref();
-    let result = z_space_barycenter(&weight_vec, &tensors, entropy_weight, beta_j, coupling_ref)?;
+    let ZSpaceBarycenter {
+        density,
+        kl_energy,
+        entropy,
+        coupling_energy,
+        objective,
+        effective_weight,
+        intermediates,
+    } = z_space_barycenter(&weight_vec, &tensors, entropy_weight, beta_j, coupling_ref)?;
 
     let out = PyDict::new_bound(py);
-    out.set_item("density", PyTensor::from_tensor(result.density).into_py(py))?;
-    out.set_item("kl_energy", result.kl_energy)?;
-    out.set_item("entropy", result.entropy)?;
-    out.set_item("coupling_energy", result.coupling_energy)?;
-    out.set_item("objective", result.objective)?;
-    out.set_item("effective_weight", result.effective_weight)?;
+    out.set_item("density", PyTensor::from_tensor(density).into_py(py))?;
+    out.set_item("kl_energy", kl_energy)?;
+    out.set_item("entropy", entropy)?;
+    out.set_item("coupling_energy", coupling_energy)?;
+    out.set_item("objective", objective)?;
+    out.set_item("effective_weight", effective_weight)?;
+    let py_intermediates = PyList::empty_bound(py);
+    for stage in intermediates {
+        py_intermediates.append(PyBarycenterIntermediate::from_stage(stage).into_py(py))?;
+    }
+    out.set_item("intermediates", py_intermediates.into_py(py))?;
     Ok(out.into_py(py))
 }
 
@@ -1009,6 +1099,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_class::<PyTensor>()?;
     m.add_class::<PyComplexTensor>()?;
+    m.add_class::<PyBarycenterIntermediate>()?;
     m.add_class::<PyOpenTopos>()?;
     m.add_class::<PyLanguageWaveEncoder>()?;
     m.add_class::<PyHypergrad>()?;
@@ -1023,6 +1114,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "describe_device",
             "Tensor",
             "ComplexTensor",
+            "BarycenterIntermediate",
             "OpenTopos",
             "LanguageWaveEncoder",
             "Hypergrad",

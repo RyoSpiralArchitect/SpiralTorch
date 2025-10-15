@@ -183,6 +183,9 @@ print("updated weights", weights.tolist())
 - Blend chart priors with the new `z_space_barycenter` solver—available in
   Rust (`st_tensor::pure::measure`) and Python (`spiraltorch.z_space_barycenter`)—to
   wire colour energy directly into the Z-space roundtable.
+- Follow the barycenter's loss-monotone intermediates and feed them straight into
+  the hypergradient tape with `Hypergrad.accumulate_barycenter_path` so the
+  optimiser converges along the same Z-space path as the solver.
 
 ---
 

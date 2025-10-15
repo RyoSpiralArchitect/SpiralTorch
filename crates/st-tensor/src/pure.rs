@@ -11,6 +11,7 @@ pub mod fractal;
 pub mod measure;
 pub mod topos;
 
+use self::measure::BarycenterIntermediate;
 use self::topos::OpenCartesianTopos;
 
 use core::fmt;
@@ -1018,6 +1019,29 @@ impl AmegaHypergrad {
         self.reset();
         Ok(())
     }
+
+    /// Integrates the barycenter intermediate curve so the tape converges towards
+    /// the Z-space minimiser through a loss-monotone path.
+    pub fn accumulate_barycenter_path(
+        &mut self,
+        intermediates: &[BarycenterIntermediate],
+    ) -> PureResult<()> {
+        if intermediates.is_empty() {
+            return Err(TensorError::EmptyInput("barycenter_intermediates"));
+        }
+        for stage in intermediates {
+            self.assert_tensor_shape(&stage.density)?;
+        }
+        let mut stages = intermediates.iter();
+        let first = stages.next().unwrap();
+        self.accumulate_wave(&first.density)?;
+        let mut previous = &first.density;
+        for stage in stages {
+            self.accumulate_pair(&stage.density, previous)?;
+            previous = &stage.density;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1114,5 +1138,22 @@ mod tests {
             .gradient()
             .iter()
             .any(|value| value.abs() > f32::EPSILON));
+    }
+
+    #[test]
+    fn amega_hypergrad_tracks_barycenter_curve() {
+        use crate::pure::measure::z_space_barycenter;
+
+        let densities = vec![
+            Tensor::from_vec(1, 2, vec![0.8, 0.2]).unwrap(),
+            Tensor::from_vec(1, 2, vec![0.3, 0.7]).unwrap(),
+        ];
+        let weights = vec![1.0, 2.0];
+        let result = z_space_barycenter(&weights, &densities, 0.1, 0.0, None).unwrap();
+        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 1, 2).unwrap();
+        tape.accumulate_barycenter_path(&result.intermediates)
+            .unwrap();
+        let gradient = tape.gradient();
+        assert!(gradient.iter().any(|value| value.abs() > 0.0));
     }
 }

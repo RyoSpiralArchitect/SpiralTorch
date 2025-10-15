@@ -17,6 +17,9 @@ NumPy, no PyTorch, and no shim layers.
   device hints shared with the Rust runtime.
 - Z-space barycentre solver (`z_space_barycenter`) to mix colour-field
   priors and chart couplings directly from Python.
+- Loss-monotone barycenter intermediates (`BarycenterIntermediate`) that plug
+  into `Hypergrad.accumulate_barycenter_path` so tapes converge along the
+  same Z-space corridor as the solver.
 
 ## Building wheels
 
