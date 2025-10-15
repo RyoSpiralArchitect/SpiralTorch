@@ -1,19 +1,24 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyModule};
+use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use pyo3::PyRefMut;
-use st_core::backend::device_caps::DeviceCaps;
+use st_backend_hip::{
+    device_info as hip_device_info, hip_available as hip_runtime_available,
+    DeviceInfo as HipDeviceInfo,
+};
+use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
 use st_nn::{
-    Conv1d as NnConv1d, Linear as NnLinear, Module, Sequential as NnSequential,
-    WaveRnn as NnWaveRnn,
+    Conv1d as NnConv1d, Linear as NnLinear, Module, Sequential as NnSequential, SpiralSession,
+    SpiralSessionBuilder, WaveRnn as NnWaveRnn,
 };
 use st_tensor::pure::{
-    topos::OpenCartesianTopos, AmegaHypergrad, Complex32, ComplexTensor, LanguageWaveEncoder,
-    PureResult, Tensor, TensorError,
+    measure::{z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter},
+    topos::OpenCartesianTopos,
+    AmegaHypergrad, Complex32, ComplexTensor, LanguageWaveEncoder, PureResult, Tensor, TensorError,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -60,6 +65,36 @@ fn pydict_to_state(dict: &PyDict) -> PyResult<HashMap<String, Tensor>> {
     Ok(state)
 }
 
+fn py_device_info<'py>(py: Python<'py>, info: HipDeviceInfo) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("id", info.id)?;
+    dict.set_item("name", info.name.as_ref())?;
+    dict.set_item("multi_node", info.multi_node)?;
+    Ok(dict)
+}
+
+fn backend_name(kind: BackendKind) -> &'static str {
+    match kind {
+        BackendKind::Wgpu => "wgpu",
+        BackendKind::Cuda => "cuda",
+        BackendKind::Hip => "hip",
+        BackendKind::Cpu => "cpu",
+    }
+}
+
+fn device_caps_dict<'py>(py: Python<'py>, caps: DeviceCaps) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("backend", backend_name(caps.backend))?;
+    dict.set_item("lane_width", caps.lane_width)?;
+    dict.set_item("max_workgroup", caps.max_workgroup)?;
+    dict.set_item("subgroup", caps.subgroup)?;
+    match caps.shared_mem_per_workgroup {
+        Some(value) => dict.set_item("shared_mem_per_workgroup", value)?,
+        None => dict.set_item("shared_mem_per_workgroup", py.None())?,
+    }
+    Ok(dict)
+}
+
 #[pyclass(module = "spiraltorch", name = "Tensor")]
 #[derive(Clone, Debug)]
 struct PyTensor {
@@ -77,6 +112,10 @@ impl PyTensor {
 
     fn as_tensor_mut(&mut self) -> &mut Tensor {
         &mut self.inner
+    }
+
+    fn into_tensor(self) -> Tensor {
+        self.inner
     }
 }
 
@@ -209,6 +248,146 @@ struct PyComplexTensor {
 impl PyComplexTensor {
     fn from_complex(inner: ComplexTensor) -> Self {
         Self { inner }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "BarycenterIntermediate")]
+#[derive(Clone, Debug)]
+struct PyBarycenterIntermediate {
+    inner: BarycenterIntermediate,
+}
+
+impl PyBarycenterIntermediate {
+    fn from_stage(stage: BarycenterIntermediate) -> Self {
+        Self { inner: stage }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ZSpaceBarycenter")]
+#[derive(Clone, Debug)]
+struct PyZSpaceBarycenter {
+    inner: ZSpaceBarycenter,
+}
+
+impl PyZSpaceBarycenter {
+    fn from_result(result: ZSpaceBarycenter) -> Self {
+        Self { inner: result }
+    }
+}
+
+#[pymethods]
+impl PyZSpaceBarycenter {
+    #[getter]
+    fn density(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(self.inner.density.clone()))
+    }
+
+    #[getter]
+    fn kl_energy(&self) -> f32 {
+        self.inner.kl_energy
+    }
+
+    #[getter]
+    fn entropy(&self) -> f32 {
+        self.inner.entropy
+    }
+
+    #[getter]
+    fn coupling_energy(&self) -> f32 {
+        self.inner.coupling_energy
+    }
+
+    #[getter]
+    fn objective(&self) -> f32 {
+        self.inner.objective
+    }
+
+    #[getter]
+    fn effective_weight(&self) -> f32 {
+        self.inner.effective_weight
+    }
+
+    fn intermediates(&self, py: Python<'_>) -> PyResult<Vec<Py<PyBarycenterIntermediate>>> {
+        let mut out = Vec::with_capacity(self.inner.intermediates.len());
+        for stage in &self.inner.intermediates {
+            out.push(Py::new(
+                py,
+                PyBarycenterIntermediate::from_stage(stage.clone()),
+            )?);
+        }
+        Ok(out)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item(
+            "density",
+            PyTensor::from_tensor(self.inner.density.clone()).into_py(py),
+        )?;
+        dict.set_item("kl_energy", self.inner.kl_energy)?;
+        dict.set_item("entropy", self.inner.entropy)?;
+        dict.set_item("coupling_energy", self.inner.coupling_energy)?;
+        dict.set_item("objective", self.inner.objective)?;
+        dict.set_item("effective_weight", self.inner.effective_weight)?;
+        let py_intermediates = PyList::empty_bound(py);
+        for stage in &self.inner.intermediates {
+            py_intermediates
+                .append(PyBarycenterIntermediate::from_stage(stage.clone()).into_py(py))?;
+        }
+        dict.set_item("intermediates", py_intermediates.into_py(py))?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ZSpaceBarycenter(objective={:.6}, entropy={:.6})",
+            self.inner.objective, self.inner.entropy
+        ))
+    }
+}
+
+#[pymethods]
+impl PyBarycenterIntermediate {
+    #[getter]
+    fn interpolation(&self) -> f32 {
+        self.inner.interpolation
+    }
+
+    #[getter]
+    fn density(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(self.inner.density.clone()))
+    }
+
+    #[getter]
+    fn kl_energy(&self) -> f32 {
+        self.inner.kl_energy
+    }
+
+    #[getter]
+    fn entropy(&self) -> f32 {
+        self.inner.entropy
+    }
+
+    #[getter]
+    fn objective(&self) -> f32 {
+        self.inner.objective
+    }
+
+    fn as_tuple(&self) -> PyResult<(f32, PyTensor, f32, f32, f32)> {
+        Ok((
+            self.inner.interpolation,
+            PyTensor::from_tensor(self.inner.density.clone()),
+            self.inner.kl_energy,
+            self.inner.entropy,
+            self.inner.objective,
+        ))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "BarycenterIntermediate(interpolation={:.2}, objective={:.6})",
+            self.inner.interpolation, self.inner.objective
+        ))
     }
 }
 
@@ -391,6 +570,10 @@ struct PyHypergrad {
 }
 
 impl PyHypergrad {
+    fn from_hypergrad(inner: AmegaHypergrad) -> Self {
+        Self { inner }
+    }
+
     fn ensure_shape(&self, tensor: &PyTensor) -> PyResult<()> {
         let shape = tensor.shape();
         if shape != self.inner.shape() {
@@ -470,6 +653,25 @@ impl PyHypergrad {
         convert(self.inner.absorb_text(&encoder.inner, text))
     }
 
+    #[pyo3(signature = (intermediates))]
+    fn accumulate_barycenter_path(
+        &mut self,
+        py: Python<'_>,
+        intermediates: Vec<Py<PyBarycenterIntermediate>>,
+    ) -> PyResult<()> {
+        if intermediates.is_empty() {
+            return Err(PyValueError::new_err(
+                "barycenter intermediates must not be empty",
+            ));
+        }
+        let mut stages = Vec::with_capacity(intermediates.len());
+        for stage in intermediates {
+            let guard = stage.borrow(py);
+            stages.push(guard.inner.clone());
+        }
+        convert(self.inner.accumulate_barycenter_path(&stages))
+    }
+
     fn apply(&mut self, mut weights: PyRefMut<'_, PyTensor>) -> PyResult<()> {
         self.ensure_shape(&weights)?;
         convert(self.inner.apply(weights.as_tensor_mut()))
@@ -487,6 +689,276 @@ impl PyHypergrad {
             self.learning_rate(),
             rows,
             cols
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SpiralSessionBuilder")]
+struct PySpiralSessionBuilder {
+    builder: Option<SpiralSessionBuilder>,
+}
+
+impl PySpiralSessionBuilder {
+    fn from_builder(builder: SpiralSessionBuilder) -> Self {
+        Self {
+            builder: Some(builder),
+        }
+    }
+
+    fn ensure_builder(&mut self) -> PyResult<&mut SpiralSessionBuilder> {
+        self.builder
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("builder has already been consumed"))
+    }
+}
+
+#[pymethods]
+impl PySpiralSessionBuilder {
+    #[new]
+    #[pyo3(signature = (device=None))]
+    fn new(device: Option<&str>) -> Self {
+        let caps = caps_for(device);
+        Self {
+            builder: Some(SpiralSession::builder(caps)),
+        }
+    }
+
+    fn curvature(&mut self, curvature: f32) -> PyResult<()> {
+        self.ensure_builder()?.set_curvature(curvature);
+        Ok(())
+    }
+
+    fn hyper_learning_rate(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.ensure_builder()?
+            .set_hyper_learning_rate(learning_rate);
+        Ok(())
+    }
+
+    fn fallback_learning_rate(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.ensure_builder()?
+            .set_fallback_learning_rate(learning_rate);
+        Ok(())
+    }
+
+    fn entropy_weight(&mut self, entropy_weight: f32) -> PyResult<()> {
+        self.ensure_builder()?
+            .set_barycenter_entropy(entropy_weight);
+        Ok(())
+    }
+
+    fn beta_j(&mut self, beta_j: f32) -> PyResult<()> {
+        self.ensure_builder()?.set_barycenter_beta_j(beta_j);
+        Ok(())
+    }
+
+    #[pyo3(signature = (coupling=None))]
+    fn coupling(&mut self, coupling: Option<PyTensor>) -> PyResult<()> {
+        let tensor = coupling.map(PyTensor::into_tensor);
+        self.ensure_builder()?.set_barycenter_coupling(tensor);
+        Ok(())
+    }
+
+    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
+        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
+        Ok(())
+    }
+
+    #[pyo3(signature = (curvature, tolerance, saturation, max_depth, max_volume))]
+    fn topos(
+        &mut self,
+        curvature: f32,
+        tolerance: f32,
+        saturation: f32,
+        max_depth: usize,
+        max_volume: usize,
+    ) -> PyResult<()> {
+        self.ensure_builder()?
+            .set_topos_from_params(curvature, tolerance, saturation, max_depth, max_volume)
+            .map_err(tensor_err)?;
+        Ok(())
+    }
+
+    fn clear_topos(&mut self) {
+        if let Some(builder) = self.builder.as_mut() {
+            builder.set_topos(None);
+        }
+    }
+
+    fn build(&mut self) -> PyResult<PySpiralSession> {
+        let builder = self
+            .builder
+            .take()
+            .ok_or_else(|| PyValueError::new_err("builder has already been consumed"))?;
+        let session = convert(builder.build())?;
+        Ok(PySpiralSession::from_session(session))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok("SpiralSessionBuilder(...)".to_string())
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SpiralSession")]
+#[derive(Clone)]
+struct PySpiralSession {
+    inner: SpiralSession,
+}
+
+impl PySpiralSession {
+    fn from_session(inner: SpiralSession) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PySpiralSession {
+    #[new]
+    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01, entropy_weight=0.1, beta_j=0.0, topos=None, coupling=None))]
+    fn new(
+        device: Option<&str>,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+        entropy_weight: f32,
+        beta_j: f32,
+        topos: Option<&PyOpenTopos>,
+        coupling: Option<&PyTensor>,
+    ) -> PyResult<Self> {
+        let caps = caps_for(device);
+        let mut builder = SpiralSession::builder(caps);
+        builder.set_curvature(curvature);
+        builder.set_hyper_learning_rate(hyper_learning_rate);
+        builder.set_fallback_learning_rate(fallback_learning_rate);
+        builder.set_barycenter_entropy(entropy_weight);
+        builder.set_barycenter_beta_j(beta_j);
+        if let Some(topos) = topos {
+            builder.set_topos(Some(topos.inner.clone()));
+        }
+        if let Some(coupling) = coupling {
+            builder.set_barycenter_coupling(Some(coupling.as_tensor().clone()));
+        }
+        let session = convert(builder.build())?;
+        Ok(Self { inner: session })
+    }
+
+    fn builder(&self) -> PySpiralSessionBuilder {
+        PySpiralSessionBuilder::from_builder(self.inner.to_builder())
+    }
+
+    #[getter]
+    fn curvature(&self) -> f32 {
+        self.inner.curvature()
+    }
+
+    #[getter]
+    fn hyper_learning_rate(&self) -> f32 {
+        self.inner.hyper_learning_rate()
+    }
+
+    #[getter]
+    fn fallback_learning_rate(&self) -> f32 {
+        self.inner.fallback_learning_rate()
+    }
+
+    #[getter]
+    fn entropy_weight(&self) -> f32 {
+        self.inner.barycenter_entropy_weight()
+    }
+
+    #[getter]
+    fn beta_j(&self) -> f32 {
+        self.inner.barycenter_beta_j()
+    }
+
+    #[getter]
+    fn coupling(&self) -> Option<PyTensor> {
+        self.inner
+            .barycenter_coupling()
+            .cloned()
+            .map(PyTensor::from_tensor)
+    }
+
+    fn device_caps(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(device_caps_dict(py, self.inner.device_caps())?.into_py(py))
+    }
+
+    #[pyo3(signature = (kind, rows, cols, k))]
+    fn plan(&self, py: Python<'_>, kind: &str, rows: u32, cols: u32, k: u32) -> PyResult<PyObject> {
+        let rank_kind = parse_kind(kind)?;
+        let plan = self.inner.plan_rank(rank_kind, rows, cols, k);
+        let out = PyDict::new_bound(py);
+        out.set_item("kind", kind.to_ascii_lowercase())?;
+        out.set_item("rows", rows)?;
+        out.set_item("cols", cols)?;
+        out.set_item("k", k)?;
+        out.set_item("choice", choice_dict(py, &plan)?.into_py(py))?;
+        Ok(out.into_py(py))
+    }
+
+    fn hypergrad(&self, rows: usize, cols: usize) -> PyResult<PyHypergrad> {
+        Ok(PyHypergrad::from_hypergrad(convert(
+            self.inner.hypergrad(rows, cols),
+        )?))
+    }
+
+    #[pyo3(signature = (densities, weights=None, entropy_weight=None, beta_j=None, coupling=None))]
+    fn barycenter(
+        &self,
+        densities: Vec<PyTensor>,
+        weights: Option<Vec<f32>>,
+        entropy_weight: Option<f32>,
+        beta_j: Option<f32>,
+        coupling: Option<PyTensor>,
+    ) -> PyResult<PyZSpaceBarycenter> {
+        if densities.is_empty() {
+            return Err(PyValueError::new_err("densities must not be empty"));
+        }
+        let tensors: Vec<Tensor> = densities.into_iter().map(PyTensor::into_tensor).collect();
+        let mut weight_vec = weights.unwrap_or_else(|| vec![1.0; tensors.len()]);
+        if weight_vec.len() != tensors.len() {
+            return Err(PyValueError::new_err(format!(
+                "expected {} weights, received {}",
+                tensors.len(),
+                weight_vec.len()
+            )));
+        }
+        let coupling_tensor = coupling.map(PyTensor::into_tensor);
+        let coupling_ref = coupling_tensor.as_ref();
+        let entropy = entropy_weight.unwrap_or_else(|| self.inner.barycenter_entropy_weight());
+        let beta = beta_j.unwrap_or_else(|| self.inner.barycenter_beta_j());
+        let result = self.inner.barycenter_with_parameters(
+            &weight_vec,
+            &tensors,
+            entropy,
+            beta,
+            coupling_ref,
+        );
+        Ok(PyZSpaceBarycenter::from_result(convert(result)?))
+    }
+
+    fn align_hypergrad(
+        &self,
+        hypergrad: &mut PyHypergrad,
+        barycenter: &PyZSpaceBarycenter,
+    ) -> PyResult<()> {
+        convert(
+            self.inner
+                .align_hypergrad(&mut hypergrad.inner, &barycenter.inner),
+        )
+    }
+
+    #[getter]
+    fn topos(&self) -> Option<PyOpenTopos> {
+        self.inner.topos().cloned().map(PyOpenTopos::from_topos)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "SpiralSession(device={}, curvature={}, hyper_lr={}, fallback_lr={})",
+            backend_name(self.inner.device_caps().backend),
+            self.inner.curvature(),
+            self.inner.hyper_learning_rate(),
+            self.inner.fallback_learning_rate()
         ))
     }
 }
@@ -885,6 +1357,36 @@ fn plan(
     Ok(out.into_py(py))
 }
 
+/// Compute the Z-space barycenter described by the weighted KL objective.
+#[pyfunction]
+#[pyo3(signature = (densities, weights=None, entropy_weight=0.0, beta_j=0.0, coupling=None))]
+fn z_space_barycenter_py(
+    py: Python<'_>,
+    densities: Vec<PyTensor>,
+    weights: Option<Vec<f32>>,
+    entropy_weight: f32,
+    beta_j: f32,
+    coupling: Option<PyTensor>,
+) -> PyResult<PyObject> {
+    if densities.is_empty() {
+        return Err(PyValueError::new_err("densities must not be empty"));
+    }
+    let tensors: Vec<Tensor> = densities.into_iter().map(PyTensor::into_tensor).collect();
+    let mut weight_vec = weights.unwrap_or_else(|| vec![1.0; tensors.len()]);
+    if weight_vec.len() != tensors.len() {
+        return Err(PyValueError::new_err(format!(
+            "expected {} weights, received {}",
+            tensors.len(),
+            weight_vec.len()
+        )));
+    }
+    let coupling_tensor = coupling.map(PyTensor::into_tensor);
+    let coupling_ref = coupling_tensor.as_ref();
+    let barycenter =
+        z_space_barycenter(&weight_vec, &tensors, entropy_weight, beta_j, coupling_ref)?;
+    PyZSpaceBarycenter::from_result(barycenter).as_dict(py)
+}
+
 #[pymodule]
 fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLinearModule>()?;
@@ -912,20 +1414,27 @@ fn plan_topk(
     plan(py, "topk", rows, cols, k, device)
 }
 
+/// Surface ROCm probing hints for Python callers.
+#[pyfunction]
+fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
+    let out = PyDict::new_bound(py);
+    out.set_item("available", hip_runtime_available())?;
+
+    let devices = PyList::empty_bound(py);
+    for info in hip_device_info() {
+        devices.append(py_device_info(py, info)?.into_py(py))?;
+    }
+    out.set_item("devices", devices.into_py(py))?;
+
+    Ok(out.into_py(py))
+}
+
 /// Return a basic capability template for the given device string.
 #[pyfunction]
 #[pyo3(signature = (device=None))]
 fn describe_device(py: Python<'_>, device: Option<&str>) -> PyResult<PyObject> {
     let caps = caps_for(device);
-    let out = PyDict::new_bound(py);
-    out.set_item("lane_width", caps.lane_width)?;
-    out.set_item("max_workgroup", caps.max_workgroup)?;
-    out.set_item("subgroup", caps.subgroup)?;
-    out.set_item(
-        "shared_mem_per_workgroup",
-        caps.shared_mem_per_workgroup.map(|v| v as usize),
-    )?;
-    Ok(out.into_py(py))
+    Ok(device_caps_dict(py, caps)?.into_py(py))
 }
 
 /// SpiralTorch Python module.
@@ -936,24 +1445,36 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_submodule(nn_mod.as_ref())?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
+    m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
+    m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_class::<PyTensor>()?;
     m.add_class::<PyComplexTensor>()?;
+    m.add_class::<PyBarycenterIntermediate>()?;
+    m.add_class::<PyZSpaceBarycenter>()?;
     m.add_class::<PyOpenTopos>()?;
     m.add_class::<PyLanguageWaveEncoder>()?;
     m.add_class::<PyHypergrad>()?;
+    m.add_class::<PySpiralSessionBuilder>()?;
+    m.add_class::<PySpiralSession>()?;
 
     m.setattr(
         "__all__",
         vec![
             "plan",
             "plan_topk",
+            "z_space_barycenter",
+            "hip_probe",
             "describe_device",
             "Tensor",
             "ComplexTensor",
+            "BarycenterIntermediate",
+            "ZSpaceBarycenter",
             "OpenTopos",
             "LanguageWaveEncoder",
             "Hypergrad",
+            "SpiralSessionBuilder",
+            "SpiralSession",
             "nn",
         ],
     )?;
