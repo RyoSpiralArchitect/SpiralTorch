@@ -32,7 +32,7 @@ pub use plan::RankPlanner;
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use trainer::{EpochStats, ModuleTrainer};
 
+pub use st_tensor::pure::topos::OpenCartesianTopos;
 pub use st_tensor::pure::{
-    fractal::LanguageWaveEncoder, topos::OpenCartesianTopos, AmegaHypergrad, ComplexTensor,
-    PureResult, Tensor, TensorError,
+    AmegaHypergrad, ComplexTensor, LanguageWaveEncoder, PureResult, Tensor, TensorError,
 };

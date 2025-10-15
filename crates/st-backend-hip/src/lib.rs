@@ -35,7 +35,7 @@ pub mod real;
 
 #[cfg(not(feature = "hip-real"))]
 pub mod stub {
-    use super::{collect_env_devices, hip_env_available, DeviceInfo};
+    use super::{hip_env_available, DeviceInfo};
 
     /// Returns `true` when the process appears to have access to a ROCm runtime.
     ///

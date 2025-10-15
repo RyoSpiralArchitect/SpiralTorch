@@ -55,7 +55,7 @@ fn state_to_pydict(py: Python<'_>, state: HashMap<String, Tensor>) -> PyResult<P
     Ok(dict.into_py(py))
 }
 
-fn pydict_to_state(dict: &PyDict) -> PyResult<HashMap<String, Tensor>> {
+fn pydict_to_state(dict: &Bound<'_, PyDict>) -> PyResult<HashMap<String, Tensor>> {
     let mut state = HashMap::new();
     for (key, value) in dict.iter() {
         let name: String = key.extract()?;
@@ -914,7 +914,7 @@ impl PySpiralSession {
             return Err(PyValueError::new_err("densities must not be empty"));
         }
         let tensors: Vec<Tensor> = densities.into_iter().map(PyTensor::into_tensor).collect();
-        let mut weight_vec = weights.unwrap_or_else(|| vec![1.0; tensors.len()]);
+        let weight_vec = weights.unwrap_or_else(|| vec![1.0; tensors.len()]);
         if weight_vec.len() != tensors.len() {
             return Err(PyValueError::new_err(format!(
                 "expected {} weights, received {}",
@@ -1028,10 +1028,11 @@ impl PyLinearModule {
     }
 
     fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        state_to_pydict(py, self.borrow()?.state_dict()?)
+        let state = convert(self.borrow()?.state_dict())?;
+        state_to_pydict(py, state)
     }
 
-    fn load_state_dict(&mut self, dict: &PyDict) -> PyResult<()> {
+    fn load_state_dict(&mut self, dict: &Bound<'_, PyDict>) -> PyResult<()> {
         let state = pydict_to_state(dict)?;
         convert(self.borrow_mut()?.load_state_dict(&state))
     }
@@ -1115,10 +1116,11 @@ impl PyConv1dModule {
     }
 
     fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        state_to_pydict(py, self.borrow()?.state_dict()?)
+        let state = convert(self.borrow()?.state_dict())?;
+        state_to_pydict(py, state)
     }
 
-    fn load_state_dict(&mut self, dict: &PyDict) -> PyResult<()> {
+    fn load_state_dict(&mut self, dict: &Bound<'_, PyDict>) -> PyResult<()> {
         let state = pydict_to_state(dict)?;
         convert(self.borrow_mut()?.load_state_dict(&state))
     }
@@ -1206,16 +1208,17 @@ impl PyWaveRnnModule {
     }
 
     fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        state_to_pydict(py, self.borrow()?.state_dict()?)
+        let state = convert(self.borrow()?.state_dict())?;
+        state_to_pydict(py, state)
     }
 
-    fn load_state_dict(&mut self, dict: &PyDict) -> PyResult<()> {
+    fn load_state_dict(&mut self, dict: &Bound<'_, PyDict>) -> PyResult<()> {
         let state = pydict_to_state(dict)?;
         convert(self.borrow_mut()?.load_state_dict(&state))
     }
 }
 
-#[pyclass(module = "spiraltorch.nn", name = "Sequential")]
+#[pyclass(module = "spiraltorch.nn", name = "Sequential", unsendable)]
 struct PySequentialModule {
     inner: Option<NnSequential>,
 }
@@ -1237,7 +1240,7 @@ impl PySequentialModule {
 #[pymethods]
 impl PySequentialModule {
     #[new]
-    fn new(py_layers: &PyAny) -> PyResult<Self> {
+    fn new(py_layers: &Bound<'_, PyAny>) -> PyResult<Self> {
         let seq_iter = py_layers.iter()?;
         let mut seq = NnSequential::new();
         for item in seq_iter {
@@ -1286,10 +1289,11 @@ impl PySequentialModule {
     }
 
     fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        state_to_pydict(py, self.borrow()?.state_dict()?)
+        let state = convert(self.borrow()?.state_dict())?;
+        state_to_pydict(py, state)
     }
 
-    fn load_state_dict(&mut self, dict: &PyDict) -> PyResult<()> {
+    fn load_state_dict(&mut self, dict: &Bound<'_, PyDict>) -> PyResult<()> {
         let state = pydict_to_state(dict)?;
         convert(self.borrow_mut()?.load_state_dict(&state))
     }
@@ -1372,7 +1376,7 @@ fn z_space_barycenter_py(
         return Err(PyValueError::new_err("densities must not be empty"));
     }
     let tensors: Vec<Tensor> = densities.into_iter().map(PyTensor::into_tensor).collect();
-    let mut weight_vec = weights.unwrap_or_else(|| vec![1.0; tensors.len()]);
+    let weight_vec = weights.unwrap_or_else(|| vec![1.0; tensors.len()]);
     if weight_vec.len() != tensors.len() {
         return Err(PyValueError::new_err(format!(
             "expected {} weights, received {}",
@@ -1382,8 +1386,13 @@ fn z_space_barycenter_py(
     }
     let coupling_tensor = coupling.map(PyTensor::into_tensor);
     let coupling_ref = coupling_tensor.as_ref();
-    let barycenter =
-        z_space_barycenter(&weight_vec, &tensors, entropy_weight, beta_j, coupling_ref)?;
+    let barycenter = convert(z_space_barycenter(
+        &weight_vec,
+        &tensors,
+        entropy_weight,
+        beta_j,
+        coupling_ref,
+    ))?;
     PyZSpaceBarycenter::from_result(barycenter).as_dict(py)
 }
 
@@ -1442,7 +1451,7 @@ fn describe_device(py: Python<'_>, device: Option<&str>) -> PyResult<PyObject> {
 fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let nn_mod = PyModule::new_bound(_py, "nn")?;
     nn(_py, &nn_mod)?;
-    m.add_submodule(nn_mod.as_ref())?;
+    m.add_submodule(&nn_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;

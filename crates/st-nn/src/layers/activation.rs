@@ -33,7 +33,7 @@ impl Module for Relu {
         }
         let (rows, cols) = input.shape();
         let mut data = Vec::with_capacity(rows * cols);
-        for ((input_value, grad_value)) in input.data().iter().zip(grad_output.data().iter()) {
+        for (input_value, grad_value) in input.data().iter().zip(grad_output.data().iter()) {
             if *input_value > 0.0 {
                 data.push(*grad_value);
             } else {

@@ -12,7 +12,7 @@ pub mod measure;
 pub mod topos;
 
 use self::measure::BarycenterIntermediate;
-use self::topos::OpenCartesianTopos;
+pub use self::topos::OpenCartesianTopos;
 
 use core::fmt;
 use std::error::Error;
@@ -827,7 +827,7 @@ pub struct AmegaHypergrad {
     rows: usize,
     cols: usize,
     gradient: Vec<f32>,
-    topos: OpenCartesianTopos,
+    topos: topos::OpenCartesianTopos,
 }
 
 impl AmegaHypergrad {
@@ -844,7 +844,7 @@ impl AmegaHypergrad {
                 rate: learning_rate,
             });
         }
-        let topos = OpenCartesianTopos::new(
+        let topos = topos::OpenCartesianTopos::new(
             curvature,
             1e-6,
             1e6,
@@ -867,7 +867,7 @@ impl AmegaHypergrad {
         learning_rate: f32,
         rows: usize,
         cols: usize,
-        topos: OpenCartesianTopos,
+        topos: topos::OpenCartesianTopos,
     ) -> PureResult<Self> {
         if rows == 0 || cols == 0 {
             return Err(TensorError::InvalidDimensions { rows, cols });
@@ -918,7 +918,7 @@ impl AmegaHypergrad {
     }
 
     /// Returns the guard topos enforcing open-cartesian safety constraints.
-    pub fn topos(&self) -> &OpenCartesianTopos {
+    pub fn topos(&self) -> &topos::OpenCartesianTopos {
         &self.topos
     }
 
