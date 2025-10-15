@@ -648,10 +648,6 @@ Suggested caption: **“SpiralTorch — WGPU-first, Self-Tuning GPU Top-K (Rank-
 
 ---
 
-[![Buy Me a Coffee](https://img.buymeacoffee.com/button-api/?text=Support SpiralTorch&emoji=🌀&slug=ryospiralarchitect&button_colour=5F7FFF&font_colour=ffffff)](https://www.buymeacoffee.com/ryospiralarchitect)
-
----
-
 ## License
 
 **AGPL-3.0-or-later** for every crate and Python wheel. See `LICENSE`.
