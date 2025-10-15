@@ -21,9 +21,11 @@
 //! The constructions in this module follow the category-theoretic view of
 //! observation trees as the final coalgebra of the endofunctor
 //! `F(X) = R × Orb_{G_Λ}(X^b)`, where `R` is the observable root alphabet and
-//! `Orb_{G_Λ}(X^b)` denotes G-acted child-slot orbits.  They provide a compact
-//! description of the Pólya upper bound that SpiralTorch uses when benchmarking
-//! observation compression experiments.
+//! `Orb_{G_Λ}(X^b)` denotes G-acted child-slot orbits.  Colour actions are
+//! modelled explicitly so you can assess whether singleton colours remain
+//! observable once a symmetry (e.g. `S_q`, `C_q`, `D_q`) is imposed.  The module
+//! provides a compact description of the Pólya upper bound that SpiralTorch
+//! uses when benchmarking observation compression experiments.
 
 use core::fmt;
 
@@ -58,6 +60,109 @@ impl SlotSymmetry {
     }
 }
 
+/// Symmetry acting on an auxiliary colour palette.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorSymmetry {
+    /// No identification between colours.
+    Trivial,
+    /// Full symmetric group `S_q`.
+    Symmetric,
+    /// Cyclic group `C_q` (rotations on a colour ring).
+    Cyclic,
+    /// Dihedral group `D_q` (rotations + reflections on the colour ring).
+    Dihedral,
+    /// Custom partition provided by the caller.
+    Custom {
+        /// Number of observable orbits supplied directly by the user.
+        orbits: u32,
+        /// Whether a singleton orbit ("pure" colour) survives the symmetry.
+        has_singleton: bool,
+    },
+}
+
+impl ColorSymmetry {
+    /// Returns the number of observable colour classes after quotienting by the symmetry.
+    pub fn orbit_cardinality(self, palette_size: u32) -> u128 {
+        match self {
+            ColorSymmetry::Trivial => u128::from(palette_size),
+            ColorSymmetry::Symmetric | ColorSymmetry::Cyclic | ColorSymmetry::Dihedral => {
+                if palette_size == 0 {
+                    0
+                } else {
+                    1
+                }
+            }
+            ColorSymmetry::Custom { orbits, .. } => {
+                if palette_size == 0 {
+                    0
+                } else {
+                    u128::from(orbits.max(1))
+                }
+            }
+        }
+    }
+
+    /// Returns `true` when the symmetry preserves singleton colours as measurable sets.
+    pub fn preserves_singletons(self, palette_size: u32) -> bool {
+        match self {
+            ColorSymmetry::Trivial => palette_size > 0,
+            ColorSymmetry::Symmetric | ColorSymmetry::Cyclic | ColorSymmetry::Dihedral => {
+                palette_size <= 1
+            }
+            ColorSymmetry::Custom { has_singleton, .. } => has_singleton,
+        }
+    }
+}
+
+/// Reason explaining why a singleton colour becomes invisible to the observation σ-algebra.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorInvisibility {
+    /// There are no colours to observe.
+    EmptyPalette,
+    /// The symmetry identifies the colours, preventing singleton observation.
+    IdentifiedBySymmetry,
+}
+
+/// Describes how colour information participates in the observable root alphabet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColorAction {
+    palette_size: u32,
+    symmetry: ColorSymmetry,
+}
+
+impl ColorAction {
+    /// Constructs a new colour action.
+    pub fn new(palette_size: u32, symmetry: ColorSymmetry) -> Self {
+        Self {
+            palette_size,
+            symmetry,
+        }
+    }
+
+    /// Returns the size of the palette prior to quotienting.
+    pub fn palette_size(&self) -> u32 {
+        self.palette_size
+    }
+
+    /// Returns the acting symmetry.
+    pub fn symmetry(&self) -> ColorSymmetry {
+        self.symmetry
+    }
+
+    /// Returns the number of observable colour classes after quotienting by the symmetry.
+    pub fn observable_classes(&self) -> u128 {
+        self.symmetry.orbit_cardinality(self.palette_size)
+    }
+
+    /// Determines whether a singleton colour ("pure a") is observable.
+    pub fn singleton_observable(&self) -> Result<bool, ColorInvisibility> {
+        if self.palette_size == 0 {
+            return Err(ColorInvisibility::EmptyPalette);
+        }
+        Ok(self.symmetry.preserves_singletons(self.palette_size))
+    }
+}
+
 /// Configuration describing a freely branching observation generator.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObservabilityConfig {
@@ -67,6 +172,8 @@ pub struct ObservabilityConfig {
     pub branching_factor: u32,
     /// Symmetry acting on the child slots.
     pub slot_symmetry: SlotSymmetry,
+    /// Optional colour action bundled with each root label.
+    pub color_action: Option<ColorAction>,
 }
 
 impl ObservabilityConfig {
@@ -77,16 +184,38 @@ impl ObservabilityConfig {
             root_cardinality,
             branching_factor,
             slot_symmetry,
+            color_action: None,
         }
+    }
+
+    /// Adds a colour action to the configuration.
+    pub fn with_color_action(mut self, action: ColorAction) -> Self {
+        self.color_action = Some(action);
+        self
     }
 
     /// Computes the free-branching successor cardinality given the current
     /// unique signature count.
     fn advance(&self, current_signatures: u128) -> u128 {
-        self.root_cardinality.saturating_mul(
+        self.observable_root_cardinality().saturating_mul(
             self.slot_symmetry
                 .polya(current_signatures, self.branching_factor),
         )
+    }
+
+    /// Effective number of observable root labels after quotienting by colour symmetry.
+    fn observable_root_cardinality(&self) -> u128 {
+        match &self.color_action {
+            Some(action) => {
+                let classes = action.observable_classes();
+                if classes == 0 {
+                    self.root_cardinality
+                } else {
+                    self.root_cardinality.saturating_mul(classes)
+                }
+            }
+            None => self.root_cardinality,
+        }
     }
 }
 
@@ -113,7 +242,7 @@ impl ObservationalCoalgebra {
     /// Creates a coalgebra seeded with depth-zero unique signatures.
     pub fn new(config: ObservabilityConfig) -> Self {
         Self {
-            cache: vec![config.root_cardinality],
+            cache: vec![config.observable_root_cardinality()],
             config,
         }
     }
@@ -282,5 +411,29 @@ mod tests {
         assert!(assessment.efficiency[0] - 1.0 < f64::EPSILON);
         assert!(assessment.efficiency[1] < 1.0);
         assert!(assessment.efficiency[2] < 1.0);
+    }
+
+    #[test]
+    fn color_action_limits_singletons_under_symmetry() {
+        let action = ColorAction::new(2, ColorSymmetry::Symmetric);
+        let verdict = action.singleton_observable().unwrap();
+        assert!(!verdict);
+
+        let trivial = ColorAction::new(2, ColorSymmetry::Trivial);
+        assert!(trivial.singleton_observable().unwrap());
+    }
+
+    #[test]
+    fn color_action_adjusts_root_cardinality() {
+        let config = ObservabilityConfig::new(3, 2, SlotSymmetry::Symmetric)
+            .with_color_action(ColorAction::new(2, ColorSymmetry::Symmetric));
+        let mut coalgebra = ObservationalCoalgebra::new(config);
+        // Symmetric colour action collapses the palette to a single observable class.
+        assert_eq!(coalgebra.unique_signatures(0), 3);
+
+        let config_distinguishing = ObservabilityConfig::new(3, 2, SlotSymmetry::Symmetric)
+            .with_color_action(ColorAction::new(2, ColorSymmetry::Trivial));
+        let mut coalgebra_distinguishing = ObservationalCoalgebra::new(config_distinguishing);
+        assert_eq!(coalgebra_distinguishing.unique_signatures(0), 6);
     }
 }
