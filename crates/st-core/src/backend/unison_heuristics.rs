@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 //! Backend-aware unified chooser (TopK/MidK/BottomK).
 //! The goal is to stitch together the generated WGPU tables, environment DSL,
 //! Redis/KV hints, and the pure Rust fallback so that every backend has a sane
@@ -30,13 +35,13 @@ pub struct Choice {
     pub wg: u32,
     pub kl: u32,
     pub ch: u32,
-    pub mk: u32,        // 0=bitonic,1=shared,2=warp
-    pub mkd: u32,       // 0=auto,1=heap,2=kway,3=bitonic,4=warp_heap,5=warp_bitonic
-    pub tile: u32,      // TopK sweep tile
-    pub ctile: u32,     // MidK/BottomK compaction tile
-    pub subgroup: bool, // Whether the planner assumed subgroup execution
-    pub fft_tile: u32,  // Column tile for FFT/fractional kernels
-    pub fft_radix: u32, // Preferred radix for the FFT planner
+    pub mk: u32,           // 0=bitonic,1=shared,2=warp
+    pub mkd: u32,          // 0=auto,1=heap,2=kway,3=bitonic,4=warp_heap,5=warp_bitonic
+    pub tile: u32,         // TopK sweep tile
+    pub ctile: u32,        // MidK/BottomK compaction tile
+    pub subgroup: bool,    // Whether the planner assumed subgroup execution
+    pub fft_tile: u32,     // Column tile for FFT/fractional kernels
+    pub fft_radix: u32,    // Preferred radix for the FFT planner
     pub fft_segments: u32, // Number of ND segments folded by the kernel
 }
 

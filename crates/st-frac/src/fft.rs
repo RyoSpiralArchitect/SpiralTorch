@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 //! Lightweight FFT helpers tailored for fractional calculus experiments.
 //!
 //! The design favours clarity over absolute peak performance so the routines can
@@ -28,7 +33,10 @@ impl Complex32 {
 
     #[inline]
     pub fn mul(self, rhs: Self) -> Self {
-        Self::new(self.re * rhs.re - self.im * rhs.im, self.re * rhs.im + self.im * rhs.re)
+        Self::new(
+            self.re * rhs.re - self.im * rhs.im,
+            self.re * rhs.im + self.im * rhs.re,
+        )
     }
 
     #[inline]

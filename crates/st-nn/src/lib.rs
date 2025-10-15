@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 //! High-level neural module API built on top of SpiralTorch primitives.
 //!
 //! This crate offers a lightweight `nn.Module` style surface that keeps the

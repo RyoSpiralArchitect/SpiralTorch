@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+# Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+# Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 """Minimal ctypes helpers for driving the pure SpiralTorch stack from Python.
 
 This module purposefully avoids NumPy and PyTorch so pure CPython environments can

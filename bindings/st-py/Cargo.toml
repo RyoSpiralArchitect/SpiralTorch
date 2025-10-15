@@ -42,3 +42,6 @@ num-complex = { version = "0.4" }
 
 [package.metadata.maturin]
 name = "spiraltorch"
+
+[package.metadata.spiraltorch]
+copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

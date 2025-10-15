@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 //! Helpers for generating SpiralK heuristic snippets automatically.
 //!
 //! The routines here glue tuner output with the runtime Wilson score based
