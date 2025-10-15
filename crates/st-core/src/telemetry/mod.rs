@@ -16,8 +16,11 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
-#[cfg(feature = "psi")]
+#[cfg(any(feature = "psi", feature = "psychoid"))]
 pub mod hub;
 
 #[cfg(feature = "psi")]
 pub mod psi;
+
+#[cfg(feature = "psychoid")]
+pub mod psychoid;

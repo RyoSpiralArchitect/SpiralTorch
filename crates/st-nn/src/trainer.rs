@@ -27,10 +27,12 @@ use st_core::backend::unison_heuristics::RankKind;
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
-#[cfg(feature = "psi")]
+#[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::telemetry::hub;
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::{PsiConfig, PsiEvent, PsiInput, PsiMeter, PsiReading};
+#[cfg(feature = "psychoid")]
+use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter, PsychoidReading};
 use st_tensor::pure::topos::OpenCartesianTopos;
 use std::collections::HashMap;
 #[cfg(feature = "psi")]
@@ -51,6 +53,10 @@ pub struct ModuleTrainer {
     psi: Option<PsiMeter>,
     #[cfg(feature = "psi")]
     psi_log: bool,
+    #[cfg(feature = "psychoid")]
+    psychoid: Option<PsychoidMeter>,
+    #[cfg(feature = "psychoid")]
+    psychoid_log: bool,
     #[cfg(feature = "collapse")]
     collapse: Option<CollapseDrive>,
 }
@@ -91,6 +97,10 @@ impl ModuleTrainer {
             psi: None,
             #[cfg(feature = "psi")]
             psi_log: false,
+            #[cfg(feature = "psychoid")]
+            psychoid: None,
+            #[cfg(feature = "psychoid")]
+            psychoid_log: false,
             #[cfg(feature = "collapse")]
             collapse: None,
         }
@@ -189,6 +199,8 @@ impl ModuleTrainer {
         self.zero(module)?;
         #[cfg(feature = "psi")]
         self.bootstrap_psi(schedule);
+        #[cfg(feature = "psychoid")]
+        self.bootstrap_psychoid(schedule);
         #[cfg(feature = "collapse")]
         self.bootstrap_collapse(schedule);
         let mut total_loss = 0.0f32;
@@ -229,6 +241,8 @@ impl ModuleTrainer {
             total_loss += weighted_loss;
             let mut extra = HashMap::new();
             let _ = module.backward_bands(&input, &bands)?;
+            #[cfg(feature = "psychoid")]
+            let mut psychoid_events = 0usize;
             #[cfg(feature = "collapse")]
             let mut psi_for_drive: Option<PsiReading> = None;
             #[cfg(feature = "psi")]
@@ -273,6 +287,33 @@ impl ModuleTrainer {
                         input_snapshot.band_energy as f64,
                     );
                     extra.insert("psi_events".to_string(), events.len() as f64);
+                }
+            }
+            #[cfg(feature = "psychoid")]
+            {
+                if let Some(meter) = self.psychoid.as_mut() {
+                    if let Some(sample) = module.psychoid_sample(&input, &prediction) {
+                        if let Some((reading, events)) = meter.observe(sample) {
+                            hub::set_last_psychoid(&reading);
+                            if self.psychoid_log {
+                                Self::log_psychoid(&reading, &events);
+                            }
+                            extra.insert("psychoid_cti".to_string(), reading.cti as f64);
+                            for (metric, value) in reading.raw.iter() {
+                                extra.insert(
+                                    format!("psychoid_raw_{}", metric.to_lowercase()),
+                                    *value as f64,
+                                );
+                            }
+                            for (metric, value) in reading.z_scores.iter() {
+                                extra.insert(
+                                    format!("psychoid_z_{}", metric.to_lowercase()),
+                                    *value as f64,
+                                );
+                            }
+                            psychoid_events = events.len();
+                        }
+                    }
                 }
             }
             #[cfg(feature = "collapse")]
@@ -321,6 +362,10 @@ impl ModuleTrainer {
             extra.insert("band_drift".to_string(), band_energy.drift as f64);
             extra.insert("step_loss".to_string(), step_loss as f64);
             extra.insert("loss_weighted".to_string(), weighted_loss as f64);
+            #[cfg(feature = "psychoid")]
+            {
+                extra.insert("psychoid_events".to_string(), psychoid_events as f64);
+            }
             let metrics = StepMetrics {
                 step_time_ms: elapsed_ms,
                 mem_peak_mb: 0.0,
@@ -366,6 +411,16 @@ impl ModuleTrainer {
         let cfg = PsiConfig::automated(schedule.psi_hint());
         self.psi = Some(PsiMeter::new(cfg));
         self.psi_log = schedule.psi_log();
+    }
+
+    #[cfg(feature = "psychoid")]
+    fn bootstrap_psychoid(&mut self, schedule: &RoundtableSchedule) {
+        if self.psychoid.is_some() || !schedule.psychoid_enabled() {
+            return;
+        }
+        let cfg = PsychoidConfig::default();
+        self.psychoid = Some(PsychoidMeter::new(cfg));
+        self.psychoid_log = schedule.psychoid_log();
     }
 
     #[cfg(feature = "collapse")]
@@ -468,6 +523,37 @@ impl ModuleTrainer {
                     println!(
                         "[psi-event] step={} component={} direction={} value={:.4} threshold={:.4}",
                         step, component, direction, value, threshold
+                    );
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "psychoid")]
+    fn log_psychoid(reading: &PsychoidReading, events: &[PsychoidEvent]) {
+        println!(
+            "[psychoid] step={} cti={:.4} raw={{D:{:.3} S:{:.3} C:{:.3} K:{:.3} H:{:.3}}}",
+            reading.step,
+            reading.cti,
+            reading.raw.get("D").copied().unwrap_or(0.0),
+            reading.raw.get("S").copied().unwrap_or(0.0),
+            reading.raw.get("C").copied().unwrap_or(0.0),
+            reading.raw.get("K").copied().unwrap_or(0.0),
+            reading.raw.get("H").copied().unwrap_or(0.0)
+        );
+        for event in events {
+            match event {
+                PsychoidEvent::DreamPass { step, cti } => {
+                    println!("[psychoid-event] step={} dream-pass cti={:.4}", step, cti);
+                }
+                PsychoidEvent::DreamExport {
+                    step,
+                    diary,
+                    symbols,
+                } => {
+                    println!(
+                        "[psychoid-event] step={} dream-export symbols={:?} diary=\"{}\"",
+                        step, symbols, diary
                     );
                 }
             }

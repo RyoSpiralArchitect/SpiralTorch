@@ -21,6 +21,7 @@ logic    = ["dep:st-logic"]
 kdsl     = ["dep:st-kdsl"]
 kv-redis = ["st-kv/redis"]
 psi      = ["dep:bitflags", "dep:once_cell"]
+psychoid = ["dep:once_cell"]
 collapse = ["psi"]
 
 [dependencies]

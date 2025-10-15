@@ -18,6 +18,8 @@
 
 use crate::schedule::GradientBands;
 use st_core::backend::device_caps::DeviceCaps;
+#[cfg(feature = "psychoid")]
+use st_core::telemetry::psychoid::PsychoidSample;
 use st_tensor::pure::{
     topos::OpenCartesianTopos, AmegaHypergrad, ComplexTensor, LanguageWaveEncoder, PureResult,
     Tensor, TensorError,
@@ -336,6 +338,11 @@ pub trait Module {
     /// Returning `None` indicates that the module does not contribute drift
     /// telemetry, allowing the ψ meter to fall back to zero for that component.
     fn psi_probe(&self) -> Option<f32> {
+        None
+    }
+
+    #[cfg(feature = "psychoid")]
+    fn psychoid_sample(&self, _input: &Tensor, _output: &Tensor) -> Option<PsychoidSample> {
         None
     }
 

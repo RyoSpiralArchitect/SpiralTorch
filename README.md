@@ -84,6 +84,17 @@ The Python wheel mirrors the same flow for rapid notebooks:
 python bindings/st-py/examples/hello_session.py  # enables psi+collapse by default
 ```
 
+Flip on the psychoid self-metrics layer when you want the full dream-engine
+analysis (divergence, ritual rate, CTI, dream-pass/export events):
+
+```bash
+cargo run -p st-nn --features "psi psychoid collapse" --example hello_session
+```
+
+On the Python side, pass `psychoid=True` when building the roundtable and fetch
+the latest reading via `spiraltorch.get_psychoid_stats()` to log the CTI score,
+raw metrics, and z-scores emitted from the Rust meter.
+
 Both variants print the averaged roundtable loss after aligning the barycenter
 path with the hypergrad tape. On the Python side you can now spin up the
 streaming loader without touching NumPy:

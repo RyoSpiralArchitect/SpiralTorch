@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [features]
 default = []
 psi = ["st-core/psi"]
+psychoid = ["st-core/psychoid"]
 collapse = ["psi", "st-core/collapse"]
 
 [dependencies]

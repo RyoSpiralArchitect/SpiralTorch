@@ -11,6 +11,10 @@ pub struct RoundtableConfig {
     pub mid_k: u32,
     pub bottom_k: u32,
     pub here_tolerance: f32,
+    #[cfg(feature = "psychoid")]
+    pub psychoid_enabled: bool,
+    #[cfg(feature = "psychoid")]
+    pub psychoid_log: bool,
     #[cfg(feature = "psi")]
     pub psi_enabled: bool,
     #[cfg(feature = "psi")]
@@ -26,6 +30,10 @@ impl Default for RoundtableConfig {
             mid_k: 8,
             bottom_k: 8,
             here_tolerance: 1e-5,
+            #[cfg(feature = "psychoid")]
+            psychoid_enabled: false,
+            #[cfg(feature = "psychoid")]
+            psychoid_log: false,
             #[cfg(feature = "psi")]
             psi_enabled: false,
             #[cfg(feature = "psi")]
@@ -58,6 +66,19 @@ impl RoundtableConfig {
     /// Overrides the tolerance that decides which entries stay in-place.
     pub fn with_here_tolerance(mut self, tol: f32) -> Self {
         self.here_tolerance = tol.max(0.0);
+        self
+    }
+
+    #[cfg(feature = "psychoid")]
+    pub fn enable_psychoid(mut self) -> Self {
+        self.psychoid_enabled = true;
+        self
+    }
+
+    #[cfg(feature = "psychoid")]
+    pub fn enable_psychoid_with_log(mut self) -> Self {
+        self.psychoid_enabled = true;
+        self.psychoid_log = true;
         self
     }
 
@@ -95,6 +116,10 @@ pub struct RoundtableSchedule {
     here: RankPlan,
     beneath: RankPlan,
     here_tolerance: f32,
+    #[cfg(feature = "psychoid")]
+    psychoid_enabled: bool,
+    #[cfg(feature = "psychoid")]
+    psychoid_log: bool,
     #[cfg(feature = "psi")]
     psi_enabled: bool,
     #[cfg(feature = "psi")]
@@ -114,6 +139,10 @@ impl RoundtableSchedule {
             here,
             beneath,
             here_tolerance: config.here_tolerance,
+            #[cfg(feature = "psychoid")]
+            psychoid_enabled: config.psychoid_enabled,
+            #[cfg(feature = "psychoid")]
+            psychoid_log: config.psychoid_log,
             #[cfg(feature = "psi")]
             psi_enabled: config.psi_enabled,
             #[cfg(feature = "psi")]
@@ -198,6 +227,16 @@ impl RoundtableSchedule {
             beneath,
             drift: 0.0,
         })
+    }
+
+    #[cfg(feature = "psychoid")]
+    pub fn psychoid_enabled(&self) -> bool {
+        self.psychoid_enabled
+    }
+
+    #[cfg(feature = "psychoid")]
+    pub fn psychoid_log(&self) -> bool {
+        self.psychoid_log
     }
 
     #[cfg(feature = "psi")]
@@ -377,6 +416,18 @@ mod tests {
         assert!(schedule.psi_log());
         let hint = schedule.psi_hint();
         assert!(hint.depth() > 0);
+    }
+
+    #[cfg(feature = "psychoid")]
+    #[test]
+    fn psychoid_flags_follow_config() {
+        let planner = RankPlanner::new(st_core::backend::device_caps::DeviceCaps::wgpu(
+            32, true, 256,
+        ));
+        let cfg = RoundtableConfig::default().enable_psychoid_with_log();
+        let schedule = RoundtableSchedule::new(&planner, 1, 4, cfg);
+        assert!(schedule.psychoid_enabled());
+        assert!(schedule.psychoid_log());
     }
 
     #[cfg(feature = "collapse")]

@@ -18,6 +18,8 @@ use st_backend_hip::{
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
+#[cfg(any(feature = "psi", feature = "psychoid"))]
+use st_core::telemetry::hub;
 use st_frac::fft::{fft_inplace as frac_fft_inplace, Complex32 as FracComplex32, FftError};
 use st_frac::{
     fracdiff_gl_nd, fracdiff_gl_nd_backward, gl_coeffs as frac_gl_coeffs, FracErr, Pad as FracPad,
@@ -1357,7 +1359,7 @@ impl PyModuleTrainer {
         self.inner.fallback_learning_rate()
     }
 
-    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psi=false, psi_log=false, collapse=false))]
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, psi_log=false, collapse=false))]
     fn roundtable(
         &self,
         rows: u32,
@@ -1366,6 +1368,8 @@ impl PyModuleTrainer {
         mid_k: u32,
         bottom_k: u32,
         here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
         psi: bool,
         psi_log: bool,
         collapse: bool,
@@ -1377,6 +1381,16 @@ impl PyModuleTrainer {
             here_tolerance: here_tolerance.max(0.0),
             ..RoundtableConfig::default()
         };
+        #[cfg(feature = "psychoid")]
+        {
+            if psychoid {
+                config = if psychoid_log {
+                    config.enable_psychoid_with_log()
+                } else {
+                    config.enable_psychoid()
+                };
+            }
+        }
         #[cfg(feature = "psi")]
         {
             if psi {
@@ -1632,7 +1646,7 @@ impl PySpiralSession {
         PyModuleTrainer::from_trainer(self.inner.trainer())
     }
 
-    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psi=false, psi_log=false, collapse=false))]
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, psi_log=false, collapse=false))]
     fn roundtable(
         &self,
         rows: u32,
@@ -1641,6 +1655,8 @@ impl PySpiralSession {
         mid_k: u32,
         bottom_k: u32,
         here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
         psi: bool,
         psi_log: bool,
         collapse: bool,
@@ -1652,6 +1668,16 @@ impl PySpiralSession {
             here_tolerance: here_tolerance.max(0.0),
             ..RoundtableConfig::default()
         };
+        #[cfg(feature = "psychoid")]
+        {
+            if psychoid {
+                config = if psychoid_log {
+                    config.enable_psychoid_with_log()
+                } else {
+                    config.enable_psychoid()
+                };
+            }
+        }
         #[cfg(feature = "psi")]
         {
             if psi {
@@ -2494,6 +2520,35 @@ fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
     Ok(out.into_py(py))
 }
 
+#[pyfunction]
+fn get_psychoid_stats(py: Python<'_>) -> PyResult<Option<PyObject>> {
+    #[cfg(feature = "psychoid")]
+    {
+        if let Some(reading) = hub::get_last_psychoid() {
+            let dict = PyDict::new_bound(py);
+            dict.set_item("step", reading.step)?;
+            dict.set_item("cti", reading.cti)?;
+            let raw = PyDict::new_bound(py);
+            for (key, value) in reading.raw.iter() {
+                raw.set_item(*key, value)?;
+            }
+            let z = PyDict::new_bound(py);
+            for (key, value) in reading.z_scores.iter() {
+                z.set_item(*key, value)?;
+            }
+            dict.set_item("raw", raw)?;
+            dict.set_item("z", z)?;
+            return Ok(Some(dict.into_py(py)));
+        }
+        Ok(None)
+    }
+    #[cfg(not(feature = "psychoid"))]
+    {
+        let _ = py;
+        Ok(None)
+    }
+}
+
 /// Return a basic capability template for the given device string.
 #[pyfunction]
 #[pyo3(signature = (device=None))]
@@ -2522,6 +2577,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
+    m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
     m.add_class::<PyTensor>()?;
     m.add_class::<PyComplexTensor>()?;
     m.add_class::<PyBarycenterIntermediate>()?;
@@ -2546,6 +2602,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "z_space_barycenter",
             "hip_probe",
             "describe_device",
+            "get_psychoid_stats",
             "Tensor",
             "ComplexTensor",
             "BarycenterIntermediate",
