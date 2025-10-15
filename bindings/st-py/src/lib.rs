@@ -1,3 +1,5 @@
+mod sot;
+
 use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
 use pyo3::exceptions::PyValueError;
@@ -1777,6 +1779,9 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let frac_mod = PyModule::new_bound(_py, "frac")?;
     frac(_py, &frac_mod)?;
     m.add_submodule(&frac_mod)?;
+    let sot_mod = PyModule::new_bound(_py, "sot")?;
+    sot::module(_py, &sot_mod)?;
+    m.add_submodule(&sot_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
@@ -1815,6 +1820,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "SpiralSession",
             "nn",
             "frac",
+            "sot",
         ],
     )?;
     m.setattr("__version__", env!("CARGO_PKG_VERSION"))?;
