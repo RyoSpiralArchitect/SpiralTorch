@@ -323,6 +323,62 @@ let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
 println!("roundtable avg loss: {:.6}", stats.average_loss);
 ```
 
+### Distributed roundtable consensus
+
+SpiralTorch's roundtable is now three-tiered:
+
+1. **Local roundtable** — every worker runs the A/B/C negotiation locally and
+   emits compact `DecisionEvent`s containing the winning band, score, and
+   ψ-derived reliability. Enabling ψ through the schedule is purely for the
+   automation stack; the readings stay inside the trainer.
+2. **Meta consortium** — workers configured with a `DistConfig` periodically
+   flush their events to a lightweight meta layer as `MetaSummary` snapshots.
+   The `MetaConductor` combines summaries with Wilson intervals and produces
+   `GlobalProposal`s once sufficient support is observed.
+3. **heur.kdsl op-log** — proposals arrive as deterministic `HeurOp` entries
+   that append soft rules, retract stale hints, or annotate strategies. The
+   op-log is CRDT-safe so multiple nodes can merge without conflicts.
+
+```rust
+use st_core::backend::device_caps::DeviceCaps;
+use st_nn::{DistConfig, ModuleTrainer, RoundtableConfig, Sequential, Linear, MeanSquaredError};
+
+let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
+let dist = DistConfig {
+    node_id: "node-a".into(),
+    mode: st_nn::DistMode::PeriodicMeta,
+    push_interval: std::time::Duration::from_secs(15),
+    meta_endpoints: vec!["tcp://meta:5005".into()],
+    summary_window: 8,
+};
+trainer.configure_distribution(dist);
+trainer.install_meta_conductor(0.75, 2);
+
+let mut model = Sequential::new();
+model.push(Linear::new("encoder", 4, 4)?);
+trainer.prepare(&mut model)?;
+
+let mut cfg = RoundtableConfig::default();
+#[cfg(feature = "psi")]
+{
+    cfg = cfg.enable_psi();
+}
+let schedule = trainer.roundtable(1, 4, cfg);
+let mut loss = MeanSquaredError::new();
+let dataset = vec![
+    (
+        Tensor::from_vec(1, 4, vec![0.0, 0.0, 0.0, 0.0])?,
+        Tensor::from_vec(1, 4, vec![0.0, 0.0, 0.0, 0.0])?,
+    ),
+];
+trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
+
+// Inspect the deterministic op-log and previewed metrics.
+for op in trainer.heuristics_log().entries() {
+    println!("meta op {:?}", op.kind);
+}
+```
+
 **BlackCat runtime tap-in**
 
 The derivative-free ZMeta ES and contextual bandits can ride alongside the

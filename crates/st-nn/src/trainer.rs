@@ -19,6 +19,10 @@
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
+use crate::roundtable::{
+    simulate_proposal_locally, DistConfig, GlobalProposal, HeurOpLog, MetaConductor, OutcomeBand,
+    RoundtableNode,
+};
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
@@ -49,10 +53,11 @@ pub struct ModuleTrainer {
     autopilot: Option<Autopilot>,
     band_weight_fn: Option<BandWeightFn>,
     injector_enabled: bool,
+    distribution: Option<RoundtableNode>,
+    meta_conductor: Option<MetaConductor>,
+    heur_log: HeurOpLog,
     #[cfg(feature = "psi")]
     psi: Option<PsiMeter>,
-    #[cfg(feature = "psi")]
-    psi_log: bool,
     #[cfg(feature = "psychoid")]
     psychoid: Option<PsychoidMeter>,
     #[cfg(feature = "psychoid")]
@@ -93,10 +98,11 @@ impl ModuleTrainer {
             autopilot: None,
             band_weight_fn: None,
             injector_enabled: false,
+            distribution: None,
+            meta_conductor: None,
+            heur_log: HeurOpLog::default(),
             #[cfg(feature = "psi")]
             psi: None,
-            #[cfg(feature = "psi")]
-            psi_log: false,
             #[cfg(feature = "psychoid")]
             psychoid: None,
             #[cfg(feature = "psychoid")]
@@ -121,6 +127,29 @@ impl ModuleTrainer {
     /// Enables per-band reweighting of the loss/gradient.
     pub fn set_band_weights(&mut self, weight_fn: BandWeightFn) {
         self.band_weight_fn = Some(weight_fn);
+    }
+
+    /// Connects the trainer to a distributed roundtable node.
+    pub fn configure_distribution(&mut self, config: DistConfig) {
+        self.distribution = Some(RoundtableNode::new(config));
+    }
+
+    /// Removes any configured distribution node.
+    pub fn clear_distribution(&mut self) {
+        if let Some(node) = self.distribution.as_mut() {
+            node.drain();
+        }
+        self.distribution = None;
+    }
+
+    /// Installs a meta-layer conductor so this trainer can aggregate remote summaries.
+    pub fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
+        self.meta_conductor = Some(MetaConductor::new(threshold.max(0.1), participants.max(1)));
+    }
+
+    /// Returns the current heuristics op-log.
+    pub fn heuristics_log(&self) -> &HeurOpLog {
+        &self.heur_log
     }
 
     /// Clears any registered band weighting rule.
@@ -243,8 +272,8 @@ impl ModuleTrainer {
             let _ = module.backward_bands(&input, &bands)?;
             #[cfg(feature = "psychoid")]
             let mut psychoid_events = 0usize;
-            #[cfg(feature = "collapse")]
-            let mut psi_for_drive: Option<PsiReading> = None;
+            #[cfg(feature = "psi")]
+            let mut psi_snapshot: Option<PsiReading> = None;
             #[cfg(feature = "psi")]
             {
                 if let Some(meter) = self.psi.as_mut() {
@@ -259,17 +288,8 @@ impl ModuleTrainer {
                         band_energy: band_energy.l1() + band_energy.drift.abs(),
                     };
                     let (reading, events) = meter.update(&input_snapshot);
-                    #[cfg(feature = "collapse")]
-                    {
-                        psi_for_drive = Some(reading.clone());
-                    }
+                    psi_snapshot = Some(reading.clone());
                     hub::set_last_psi(&reading);
-                    if self.psi_log {
-                        Self::log_psi(&reading, &input_snapshot);
-                        if !events.is_empty() {
-                            Self::log_psi_events(&events);
-                        }
-                    }
                     extra.insert("psi_total".to_string(), reading.total as f64);
                     for (component, value) in reading.breakdown.iter() {
                         let key = format!("psi_{}", component);
@@ -317,8 +337,7 @@ impl ModuleTrainer {
                 }
             }
             #[cfg(feature = "collapse")]
-            if let (Some(driver), Some(reading)) = (self.collapse.as_mut(), psi_for_drive.as_ref())
-            {
+            if let (Some(driver), Some(reading)) = (self.collapse.as_mut(), psi_snapshot.as_ref()) {
                 match driver.update(reading) {
                     DriveCmd::Collapse {
                         grad_scale,
@@ -342,6 +361,50 @@ impl ModuleTrainer {
                         }
                     }
                     DriveCmd::None => {}
+                }
+            }
+            if let Some(node) = self.distribution.as_mut() {
+                let outcome = OutcomeBand::from_weights(
+                    band_energy.above,
+                    band_energy.here,
+                    band_energy.beneath,
+                );
+                let plan = match outcome {
+                    OutcomeBand::Above => schedule.above(),
+                    OutcomeBand::Here => schedule.here(),
+                    OutcomeBand::Beneath => schedule.beneath(),
+                };
+                let signature = plan_signature(plan, outcome);
+                let script_hint = plan.choice.to_unison_script(plan.kind).replace('\n', "; ");
+                let psi_total = {
+                    #[cfg(feature = "psi")]
+                    {
+                        psi_snapshot.as_ref().map(|reading| reading.total.max(0.0))
+                    }
+                    #[cfg(not(feature = "psi"))]
+                    {
+                        None
+                    }
+                };
+                if let Some(summary) = node.record_decision(
+                    signature,
+                    script_hint,
+                    plan.kind,
+                    outcome,
+                    (1.0 / (1.0 + weighted_loss.abs())).clamp(0.0, 1.0),
+                    psi_total,
+                    (band_energy.above, band_energy.here, band_energy.beneath),
+                    band_energy.drift,
+                ) {
+                    if let Some(conductor) = self.meta_conductor.as_mut() {
+                        if let Some(proposal) = conductor.ingest(summary.clone()) {
+                            let (accepted, preview) =
+                                simulate_proposal_locally(&proposal, &mut self.heur_log);
+                            if accepted {
+                                self.apply_proposal(&proposal, preview)?;
+                            }
+                        }
+                    }
                 }
             }
             self.step(module)?;
@@ -410,7 +473,6 @@ impl ModuleTrainer {
         }
         let cfg = PsiConfig::automated(schedule.psi_hint());
         self.psi = Some(PsiMeter::new(cfg));
-        self.psi_log = schedule.psi_log();
     }
 
     #[cfg(feature = "psychoid")]
@@ -494,39 +556,16 @@ impl ModuleTrainer {
         Ok((sum).sqrt() as f32)
     }
 
-    #[cfg(feature = "psi")]
-    fn log_psi(reading: &PsiReading, input: &PsiInput) {
-        println!(
-            "[psi] step={} total={:.4} loss={:.4} grad_l2={:.4} update={:.4} act={:.4} band={:.4}",
-            reading.step,
-            reading.total,
-            input.loss,
-            input.grad_l2,
-            input.update_ratio,
-            input.act_drift,
-            input.band_energy
-        );
-    }
-
-    #[cfg(feature = "psi")]
-    fn log_psi_events(events: &[PsiEvent]) {
-        for event in events {
-            match event {
-                PsiEvent::ThresholdCross {
-                    component,
-                    value,
-                    threshold,
-                    up,
-                    step,
-                } => {
-                    let direction = if *up { "up" } else { "down" };
-                    println!(
-                        "[psi-event] step={} component={} direction={} value={:.4} threshold={:.4}",
-                        step, component, direction, value, threshold
-                    );
-                }
-            }
+    fn apply_proposal(
+        &mut self,
+        proposal: &GlobalProposal,
+        preview_metrics: HashMap<String, f32>,
+    ) -> PureResult<()> {
+        let _ = preview_metrics;
+        for op in &proposal.ops {
+            self.heur_log.append(op.clone());
         }
+        Ok(())
     }
 
     #[cfg(feature = "psychoid")]
@@ -559,6 +598,25 @@ impl ModuleTrainer {
             }
         }
     }
+}
+
+fn outcome_label(outcome: OutcomeBand) -> &'static str {
+    match outcome {
+        OutcomeBand::Above => "above",
+        OutcomeBand::Here => "here",
+        OutcomeBand::Beneath => "beneath",
+    }
+}
+
+fn plan_signature(plan: &st_core::ops::rank_entry::RankPlan, outcome: OutcomeBand) -> String {
+    format!(
+        "{:?}:{}x{}:k{}:{}",
+        plan.kind,
+        plan.rows,
+        plan.cols,
+        plan.k,
+        outcome_label(outcome)
+    )
 }
 
 /// Metrics captured while running [`ModuleTrainer::train_epoch`].

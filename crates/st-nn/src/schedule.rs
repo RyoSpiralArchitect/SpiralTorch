@@ -17,8 +17,6 @@ pub struct RoundtableConfig {
     pub psychoid_log: bool,
     #[cfg(feature = "psi")]
     pub psi_enabled: bool,
-    #[cfg(feature = "psi")]
-    pub psi_log: bool,
     #[cfg(feature = "collapse")]
     pub collapse_enabled: bool,
 }
@@ -36,8 +34,6 @@ impl Default for RoundtableConfig {
             psychoid_log: false,
             #[cfg(feature = "psi")]
             psi_enabled: false,
-            #[cfg(feature = "psi")]
-            psi_log: false,
             #[cfg(feature = "collapse")]
             collapse_enabled: false,
         }
@@ -88,13 +84,6 @@ impl RoundtableConfig {
         self
     }
 
-    #[cfg(feature = "psi")]
-    pub fn enable_psi_with_log(mut self) -> Self {
-        self.psi_enabled = true;
-        self.psi_log = true;
-        self
-    }
-
     #[cfg(feature = "collapse")]
     pub fn enable_collapse(mut self) -> Self {
         self.collapse_enabled = true;
@@ -122,8 +111,6 @@ pub struct RoundtableSchedule {
     psychoid_log: bool,
     #[cfg(feature = "psi")]
     psi_enabled: bool,
-    #[cfg(feature = "psi")]
-    psi_log: bool,
     #[cfg(feature = "collapse")]
     collapse_enabled: bool,
 }
@@ -145,8 +132,6 @@ impl RoundtableSchedule {
             psychoid_log: config.psychoid_log,
             #[cfg(feature = "psi")]
             psi_enabled: config.psi_enabled,
-            #[cfg(feature = "psi")]
-            psi_log: config.psi_log,
             #[cfg(feature = "collapse")]
             collapse_enabled: config.collapse_enabled && config.psi_enabled,
         }
@@ -242,11 +227,6 @@ impl RoundtableSchedule {
     #[cfg(feature = "psi")]
     pub fn psi_enabled(&self) -> bool {
         self.psi_enabled
-    }
-
-    #[cfg(feature = "psi")]
-    pub fn psi_log(&self) -> bool {
-        self.psi_log
     }
 
     #[cfg(feature = "psi")]
@@ -410,10 +390,9 @@ mod tests {
         let planner = RankPlanner::new(st_core::backend::device_caps::DeviceCaps::wgpu(
             32, true, 256,
         ));
-        let cfg = RoundtableConfig::default().enable_psi_with_log();
+        let cfg = RoundtableConfig::default().enable_psi();
         let schedule = RoundtableSchedule::new(&planner, 1, 4, cfg);
         assert!(schedule.psi_enabled());
-        assert!(schedule.psi_log());
         let hint = schedule.psi_hint();
         assert!(hint.depth() > 0);
     }

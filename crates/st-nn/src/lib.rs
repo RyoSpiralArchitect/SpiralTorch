@@ -12,6 +12,7 @@ pub mod layers;
 pub mod loss;
 pub mod module;
 pub mod plan;
+pub mod roundtable;
 pub mod schedule;
 pub mod trainer;
 
@@ -29,6 +30,10 @@ pub use layers::{Relu, ToposResonator, ZSpaceMixer};
 pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
 pub use plan::RankPlanner;
+pub use roundtable::{
+    simulate_proposal_locally, DistConfig, DistMode, GlobalProposal, HeurOp, HeurOpKind, HeurOpLog,
+    MetaConductor, MetaSummary, OutcomeBand, RoundtableNode,
+};
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use trainer::{EpochStats, ModuleTrainer};
 

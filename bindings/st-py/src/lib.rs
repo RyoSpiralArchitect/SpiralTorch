@@ -27,10 +27,10 @@ use st_frac::{
 use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
-    Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, EpochStats,
-    Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer, RoundtableConfig,
-    RoundtableSchedule, Sequential as NnSequential, SpiralSession, SpiralSessionBuilder,
-    WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
+    Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
+    EpochStats, Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer,
+    RoundtableConfig, RoundtableSchedule, Sequential as NnSequential, SpiralSession,
+    SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
 use st_tensor::pure::{
     measure::{
@@ -42,6 +42,7 @@ use st_tensor::pure::{
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 fn tensor_err(err: TensorError) -> PyErr {
     PyValueError::new_err(err.to_string())
@@ -1234,6 +1235,104 @@ impl PyHypergrad {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "DistConfig")]
+#[derive(Clone)]
+struct PyDistConfig {
+    inner: DistConfig,
+}
+
+impl PyDistConfig {
+    fn from_config(inner: DistConfig) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyDistConfig {
+    #[new]
+    #[pyo3(signature = (node_id=None, mode=None, push_interval=None, summary_window=None, meta_endpoints=None))]
+    fn new(
+        node_id: Option<String>,
+        mode: Option<&str>,
+        push_interval: Option<f32>,
+        summary_window: Option<usize>,
+        meta_endpoints: Option<Vec<String>>,
+    ) -> PyResult<Self> {
+        let mut config = DistConfig::default();
+        if let Some(id) = node_id {
+            config.node_id = id;
+        }
+        if let Some(mode_str) = mode {
+            config.mode = match mode_str {
+                "local" | "local-only" => DistMode::LocalOnly,
+                "periodic" | "periodic-meta" => DistMode::PeriodicMeta,
+                "global" | "fully-global" => DistMode::FullyGlobal,
+                other => {
+                    return Err(PyValueError::new_err(format!(
+                    "unknown dist mode '{}': expected local-only, periodic-meta, or fully-global",
+                    other
+                )))
+                }
+            };
+        }
+        if let Some(interval) = push_interval {
+            if interval <= 0.0 {
+                return Err(PyValueError::new_err(
+                    "push_interval must be positive seconds",
+                ));
+            }
+            config.push_interval = Duration::from_secs_f32(interval);
+        }
+        if let Some(window) = summary_window {
+            config.summary_window = window.max(1);
+        }
+        if let Some(endpoints) = meta_endpoints {
+            config.meta_endpoints = endpoints;
+        }
+        Ok(Self { inner: config })
+    }
+
+    #[getter]
+    fn node_id(&self) -> &str {
+        &self.inner.node_id
+    }
+
+    #[getter]
+    fn mode(&self) -> &'static str {
+        match self.inner.mode {
+            DistMode::LocalOnly => "local-only",
+            DistMode::PeriodicMeta => "periodic-meta",
+            DistMode::FullyGlobal => "fully-global",
+        }
+    }
+
+    #[getter]
+    fn push_interval(&self) -> f32 {
+        self.inner.push_interval.as_secs_f32()
+    }
+
+    #[getter]
+    fn summary_window(&self) -> usize {
+        self.inner.summary_window
+    }
+
+    #[getter]
+    fn meta_endpoints(&self) -> Vec<String> {
+        self.inner.meta_endpoints.clone()
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "DistConfig(node_id='{}', mode='{}', push_interval={:.1}, summary_window={}, endpoints={:?})",
+            self.node_id(),
+            self.mode(),
+            self.push_interval(),
+            self.summary_window(),
+            self.meta_endpoints(),
+        ))
+    }
+}
+
 #[pyclass(module = "spiraltorch", name = "RoundtableSchedule", unsendable)]
 struct PyRoundtableSchedule {
     inner: RoundtableSchedule,
@@ -1359,9 +1458,9 @@ impl PyModuleTrainer {
         self.inner.fallback_learning_rate()
     }
 
-    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, psi_log=false, collapse=false))]
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
     fn roundtable(
-        &self,
+        &mut self,
         rows: u32,
         cols: u32,
         top_k: u32,
@@ -1371,9 +1470,9 @@ impl PyModuleTrainer {
         psychoid: bool,
         psychoid_log: bool,
         psi: bool,
-        psi_log: bool,
         collapse: bool,
-    ) -> PyRoundtableSchedule {
+        dist: Option<PyDistConfig>,
+    ) -> PyResult<PyRoundtableSchedule> {
         let mut config = RoundtableConfig {
             top_k,
             mid_k,
@@ -1394,11 +1493,7 @@ impl PyModuleTrainer {
         #[cfg(feature = "psi")]
         {
             if psi {
-                config = if psi_log {
-                    config.enable_psi_with_log()
-                } else {
-                    config.enable_psi()
-                };
+                config = config.enable_psi();
             }
         }
         #[cfg(feature = "collapse")]
@@ -1407,7 +1502,19 @@ impl PyModuleTrainer {
                 config = config.enable_collapse();
             }
         }
-        PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
+        if let Some(dist_cfg) = dist {
+            self.inner.configure_distribution(dist_cfg.inner.clone());
+        } else {
+            self.inner.clear_distribution();
+        }
+        Ok(PyRoundtableSchedule::from_schedule(
+            self.inner.roundtable(rows, cols, config),
+        ))
+    }
+
+    #[pyo3(signature = (threshold, participants=2))]
+    fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
+        self.inner.install_meta_conductor(threshold, participants);
     }
 
     #[pyo3(signature = (module, loss, batches, schedule))]
@@ -1646,7 +1753,7 @@ impl PySpiralSession {
         PyModuleTrainer::from_trainer(self.inner.trainer())
     }
 
-    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, psi_log=false, collapse=false))]
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
     fn roundtable(
         &self,
         rows: u32,
@@ -1658,7 +1765,6 @@ impl PySpiralSession {
         psychoid: bool,
         psychoid_log: bool,
         psi: bool,
-        psi_log: bool,
         collapse: bool,
     ) -> PyRoundtableSchedule {
         let mut config = RoundtableConfig {
@@ -1681,11 +1787,7 @@ impl PySpiralSession {
         #[cfg(feature = "psi")]
         {
             if psi {
-                config = if psi_log {
-                    config.enable_psi_with_log()
-                } else {
-                    config.enable_psi()
-                };
+                config = config.enable_psi();
             }
         }
         #[cfg(feature = "collapse")]
@@ -2588,6 +2690,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTensorBiome>()?;
     m.add_class::<PyLanguageWaveEncoder>()?;
     m.add_class::<PyHypergrad>()?;
+    m.add_class::<PyDistConfig>()?;
     m.add_class::<PyRoundtableSchedule>()?;
     m.add_class::<PyEpochStats>()?;
     m.add_class::<PyModuleTrainer>()?;
@@ -2613,6 +2716,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "TensorBiome",
             "LanguageWaveEncoder",
             "Hypergrad",
+            "DistConfig",
             "RoundtableSchedule",
             "EpochStats",
             "ModuleTrainer",

@@ -103,15 +103,16 @@ from spiraltorch.nn import Linear, MeanSquaredError, Sequential
 
 session = st.SpiralSession(device="wgpu", curvature=-1.0)
 trainer = session.trainer()
-schedule = session.roundtable(
+schedule = trainer.roundtable(
     rows=1,
     cols=2,
     psychoid=True,
     psychoid_log=True,
     psi=True,
-    psi_log=True,
     collapse=True,
+    dist=st.DistConfig(node_id="demo", mode="periodic-meta", push_interval=10.0),
 )
+trainer.install_meta_conductor(threshold=0.6, participants=1)
 model = Sequential([Linear(2, 2, name="layer")])
 loss = MeanSquaredError()
 session.prepare_module(model)
@@ -130,6 +131,11 @@ stats = session.train_epoch(trainer, model, loss, loader, schedule)
 print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")
 print(st.get_psychoid_stats())
 ```
+
+The `DistConfig` connects the local roundtable to a meta layer that exchanges
+`MetaSummary` snapshots with peers. `install_meta_conductor` enables the node to
+aggregate incoming summaries, emit deterministic `GlobalProposal` updates, and
+append them to the heur.kdsl op-log—all without exposing ψ readings.
 
 ```python
 from spiraltorch import SpiralSession, Tensor

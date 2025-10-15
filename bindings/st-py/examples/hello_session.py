@@ -17,15 +17,16 @@ model = Sequential([Linear(2, 2, name="layer")])
 session.prepare_module(model)
 
 trainer = session.trainer()
-schedule = session.roundtable(
+schedule = trainer.roundtable(
     rows=1,
     cols=2,
     psychoid=True,
     psychoid_log=True,
     psi=True,
-    psi_log=True,
     collapse=True,
+    dist=st.DistConfig(node_id="demo", mode="periodic-meta", push_interval=10.0, summary_window=4),
 )
+trainer.install_meta_conductor(threshold=0.6, participants=1)
 loss = MeanSquaredError()
 
 dataset = st.dataset.from_vec(

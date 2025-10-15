@@ -48,10 +48,11 @@ fn main() -> PureResult<()> {
     session.prepare_module(&mut model)?;
 
     let mut trainer = session.trainer();
+    #[allow(unused_mut)]
     let mut config = RoundtableConfig::default();
     #[cfg(feature = "psi")]
     {
-        config = config.enable_psi_with_log();
+        config = config.enable_psi();
     }
     #[cfg(feature = "collapse")]
     {
