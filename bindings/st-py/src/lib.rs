@@ -32,7 +32,7 @@ use st_tensor::pure::{
     },
     topos::OpenCartesianTopos,
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
-    PureResult, Tensor, TensorError,
+    PureResult, Tensor, TensorBiome, TensorError,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -765,6 +765,77 @@ impl PyOpenTopos {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "TensorBiome")]
+#[derive(Clone, Debug)]
+struct PyTensorBiome {
+    inner: TensorBiome,
+}
+
+#[pymethods]
+impl PyTensorBiome {
+    #[new]
+    fn new(topos: &PyOpenTopos) -> Self {
+        Self {
+            inner: TensorBiome::new(topos.inner.clone()),
+        }
+    }
+
+    fn topos(&self) -> PyOpenTopos {
+        PyOpenTopos::from_topos(self.inner.topos().clone())
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn absorb(&mut self, label: &str, tensor: &PyTensor) -> PyResult<()> {
+        convert(
+            self.inner
+                .absorb(intern_label(label), tensor.as_tensor().clone()),
+        )
+    }
+
+    fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    fn canopy(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(self.inner.canopy())?))
+    }
+
+    fn shoots(&self, py: Python<'_>) -> PyResult<Vec<Py<PyTensor>>> {
+        self.inner
+            .shoots()
+            .iter()
+            .cloned()
+            .map(|tensor| Py::new(py, PyTensor::from_tensor(tensor)))
+            .collect()
+    }
+
+    fn __len__(&self) -> PyResult<usize> {
+        Ok(self.len())
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let (rows, cols) = self
+            .inner
+            .shoots()
+            .first()
+            .map(|tensor| tensor.shape())
+            .unwrap_or((0, 0));
+        Ok(format!(
+            "TensorBiome(len={}, shape=({}, {}))",
+            self.len(),
+            rows,
+            cols
+        ))
+    }
+}
+
 #[pyclass(module = "spiraltorch", name = "LanguageWaveEncoder")]
 #[derive(Clone, Debug)]
 struct PyLanguageWaveEncoder {
@@ -882,6 +953,12 @@ impl PyZSpaceProjector {
         let base = plan.positions_tensor().map_err(tensor_err)?;
         Ok(PyTensor::from_tensor(convert(
             self.borrow()?.forward(&base),
+        )?))
+    }
+
+    fn reimport_biome(&self, biome: &PyTensorBiome) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.reimport_biome(&biome.inner),
         )?))
     }
 }
@@ -1873,23 +1950,6 @@ fn frac(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-#[pymodule]
-fn frac(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(gl_coeffs_py, m)?)?;
-    m.add_function(wrap_pyfunction!(fracdiff_gl_py, m)?)?;
-    m.add_function(wrap_pyfunction!(fracdiff_gl_backward_py, m)?)?;
-    m.add_function(wrap_pyfunction!(frac_fft_py, m)?)?;
-    m.setattr(
-        "__all__",
-        vec!["gl_coeffs", "fracdiff_gl", "fracdiff_gl_backward", "fft"],
-    )?;
-    m.setattr(
-        "__doc__",
-        "Fractional calculus operators and FFT helpers used by SpiralTorch.",
-    )?;
-    Ok(())
-}
-
 /// Convenience helper for the TopK family.
 #[pyfunction]
 #[pyo3(signature = (rows, cols, k, device=None))]
@@ -1950,6 +2010,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDifferentialResonance>()?;
     m.add_class::<PySpiralDifferentialTrace>()?;
     m.add_class::<PyOpenTopos>()?;
+    m.add_class::<PyTensorBiome>()?;
     m.add_class::<PyLanguageWaveEncoder>()?;
     m.add_class::<PyHypergrad>()?;
     m.add_class::<PySpiralSessionBuilder>()?;
@@ -1970,6 +2031,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "DifferentialResonance",
             "SpiralDifferentialTrace",
             "OpenTopos",
+            "TensorBiome",
             "LanguageWaveEncoder",
             "Hypergrad",
             "SpiralSessionBuilder",

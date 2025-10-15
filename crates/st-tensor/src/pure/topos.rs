@@ -171,6 +171,93 @@ impl<'a> RewriteMonad<'a> {
     }
 }
 
+/// Organises tensors rewritten through an open topos into a living "biome".
+///
+/// The biome behaves like a minimal monad: every tensor absorbed into it is
+/// rewritten through the enclosing `OpenCartesianTopos`, saturated into the
+/// safety window, and retained as a new shoot.  When the caller is ready to
+/// harvest the emergent meaning, the biome collapses all shoots into a guarded
+/// canopy tensor that stays within the same topos envelope.
+#[derive(Clone, Debug)]
+pub struct TensorBiome {
+    topos: OpenCartesianTopos,
+    shoots: Vec<Tensor>,
+    shape: Option<(usize, usize)>,
+}
+
+impl TensorBiome {
+    /// Wraps a biome around an open-cartesian topos.
+    pub fn new(topos: OpenCartesianTopos) -> Self {
+        Self {
+            topos,
+            shoots: Vec::new(),
+            shape: None,
+        }
+    }
+
+    /// Returns the guard topos.
+    pub fn topos(&self) -> &OpenCartesianTopos {
+        &self.topos
+    }
+
+    /// Number of shoots currently living inside the biome.
+    pub fn len(&self) -> usize {
+        self.shoots.len()
+    }
+
+    /// Whether the biome is empty.
+    pub fn is_empty(&self) -> bool {
+        self.shoots.is_empty()
+    }
+
+    /// Absorbs a tensor into the biome, rewriting it through the guard topos.
+    pub fn absorb(&mut self, label: &'static str, mut tensor: Tensor) -> PureResult<()> {
+        let monad = RewriteMonad::new(&self.topos);
+        monad.rewrite_tensor(label, &mut tensor)?;
+        let shape = tensor.shape();
+        if let Some(expected) = self.shape {
+            if expected != shape {
+                return Err(TensorError::ShapeMismatch {
+                    left: expected,
+                    right: shape,
+                });
+            }
+        } else {
+            self.shape = Some(shape);
+        }
+        self.shoots.push(tensor);
+        Ok(())
+    }
+
+    /// Clears all shoots from the biome while preserving the topos.
+    pub fn clear(&mut self) {
+        self.shoots.clear();
+        self.shape = None;
+    }
+
+    /// Harvests the biome by averaging all shoots into a guarded canopy tensor.
+    pub fn canopy(&self) -> PureResult<Tensor> {
+        let (rows, cols) = self.shape.ok_or(TensorError::EmptyInput("tensor_biome"))?;
+        let count = self.len();
+        if count == 0 {
+            return Err(TensorError::EmptyInput("tensor_biome"));
+        }
+        let mut acc = Tensor::zeros(rows, cols)?;
+        for shoot in &self.shoots {
+            acc.add_scaled(shoot, 1.0)?;
+        }
+        let mut canopy = acc.scale(1.0 / count as f32)?;
+        let monad = RewriteMonad::new(&self.topos);
+        monad.rewrite_tensor("tensor_biome_canopy", &mut canopy)?;
+        Ok(canopy)
+    }
+
+    /// Returns a snapshot of the current shoots.
+    pub fn shoots(&self) -> &[Tensor] {
+        &self.shoots
+    }
+}
+
 /// Deterministic conjugate gradient solver that respects the open-cartesian guard.
 pub struct ConjugateGradientSolver<'a> {
     topos: &'a OpenCartesianTopos,
@@ -290,6 +377,49 @@ mod tests {
         let tensor = Tensor::from_vec(1, 2, vec![1.0, f32::INFINITY]).unwrap();
         let err = topos.guard_tensor("nonfinite", &tensor).unwrap_err();
         matches!(err, TensorError::NonFiniteValue { .. });
+    }
+
+    #[test]
+    fn biome_absorbs_and_harvests() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos.clone());
+        let big = topos.saturation() * 2.0;
+        biome
+            .absorb(
+                "biome_shoot_a",
+                Tensor::from_vec(1, 2, vec![big, 0.5]).unwrap(),
+            )
+            .unwrap();
+        biome
+            .absorb(
+                "biome_shoot_b",
+                Tensor::from_vec(1, 2, vec![-big, 1.0]).unwrap(),
+            )
+            .unwrap();
+        let canopy = biome.canopy().unwrap();
+        assert_eq!(canopy.shape(), (1, 2));
+        let data = canopy.data();
+        assert!((data[0] - 0.0).abs() < 1e-6);
+        assert!((data[1] - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn biome_detects_shape_mismatch() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos);
+        biome
+            .absorb(
+                "biome_shape_a",
+                Tensor::from_vec(2, 1, vec![0.1, 0.2]).unwrap(),
+            )
+            .unwrap();
+        let err = biome
+            .absorb(
+                "biome_shape_b",
+                Tensor::from_vec(1, 2, vec![0.1, 0.2]).unwrap(),
+            )
+            .unwrap_err();
+        assert!(matches!(err, TensorError::ShapeMismatch { .. }));
     }
 
     #[test]

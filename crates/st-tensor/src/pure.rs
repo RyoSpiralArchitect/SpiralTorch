@@ -17,7 +17,7 @@ pub use self::differential::{
     RecursiveDifferential, SpiralDifferential,
 };
 use self::measure::BarycenterIntermediate;
-pub use self::topos::OpenCartesianTopos;
+pub use self::topos::{OpenCartesianTopos, RewriteMonad, TensorBiome};
 
 use core::fmt;
 use std::error::Error;

@@ -11,6 +11,8 @@ NumPy, no PyTorch, and no shim layers.
   geometry experiments.
 - `LanguageWaveEncoder` + `Hypergrad` so Python callers can stream Z-space
   text, accumulate gradients, and project back into the Poincaré ball.
+- `TensorBiome` to cultivate open-topos rewrites and harvest guarded tensors
+  that can be re-imported into Z-space.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`) that
   reuse the same heuristics as the Rust executors.
 - ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
@@ -105,7 +107,7 @@ print(resonance.homotopy_flow().tolist())
 ```
 
 ```python
-from spiraltorch import SpiralSession, Tensor
+from spiraltorch import SpiralSession, Tensor, TensorBiome
 from spiraltorch.nn import ZSpaceProjector, LanguageWaveEncoder
 
 session = SpiralSession(device="wgpu", curvature=-1.0)
@@ -123,4 +125,10 @@ projector = ZSpaceProjector(topos, encoder)
 spiral_tensor = plan.as_tensor()
 canvas = projector.project_spiral(plan)
 print(spiral_tensor.shape(), canvas.shape())
+
+biome = TensorBiome(topos)
+biome.absorb("spiral", spiral_tensor)
+biome.absorb("canvas", canvas)
+meaning = projector.reimport_biome(biome)
+print("reimported", meaning.shape())
 ```
