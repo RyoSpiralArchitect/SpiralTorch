@@ -2,7 +2,7 @@ use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 use std::cell::RefCell;
 
-fn validate_positive(value: usize, label: &str) -> PureResult<()> {
+fn validate_positive(value: usize, _label: &str) -> PureResult<()> {
     if value == 0 {
         return Err(TensorError::InvalidDimensions {
             rows: 1,
@@ -94,31 +94,36 @@ impl Module for Conv1d {
         let weight_data = weight.data();
         let bias_data = bias.data();
         let span = kernel_span(self.in_channels, self.kernel_size);
-        for b in 0..batch {
-            let row = &input.data()[b * cols..(b + 1) * cols];
-            let out_row = &mut out.data_mut()[b * out.shape().1..(b + 1) * out.shape().1];
-            for oc in 0..self.out_channels {
-                let weight_row = &weight_data[oc * span..(oc + 1) * span];
-                let bias = bias_data[oc];
-                for ow in 0..out_width {
-                    let mut acc = bias;
-                    for ic in 0..self.in_channels {
-                        let channel_offset = ic * width;
-                        for k in 0..self.kernel_size {
-                            let pos = ow * self.stride + k;
-                            if pos < self.padding {
-                                continue;
+        let out_cols = out.shape().1;
+        {
+            let out_data = out.data_mut();
+            for b in 0..batch {
+                let row = &input.data()[b * cols..(b + 1) * cols];
+                let (start, end) = (b * out_cols, (b + 1) * out_cols);
+                let out_row = &mut out_data[start..end];
+                for oc in 0..self.out_channels {
+                    let weight_row = &weight_data[oc * span..(oc + 1) * span];
+                    let bias = bias_data[oc];
+                    for ow in 0..out_width {
+                        let mut acc = bias;
+                        for ic in 0..self.in_channels {
+                            let channel_offset = ic * width;
+                            for k in 0..self.kernel_size {
+                                let pos = ow * self.stride + k;
+                                if pos < self.padding {
+                                    continue;
+                                }
+                                let idx = pos - self.padding;
+                                if idx >= width {
+                                    continue;
+                                }
+                                let input_val = row[channel_offset + idx];
+                                let weight_idx = ic * self.kernel_size + k;
+                                acc += input_val * weight_row[weight_idx];
                             }
-                            let idx = pos - self.padding;
-                            if idx >= width {
-                                continue;
-                            }
-                            let input_val = row[channel_offset + idx];
-                            let weight_idx = ic * self.kernel_size + k;
-                            acc += input_val * weight_row[weight_idx];
                         }
+                        out_row[oc * out_width + ow] = acc;
                     }
-                    out_row[oc * out_width + ow] = acc;
                 }
             }
         }
@@ -141,31 +146,37 @@ impl Module for Conv1d {
         let mut grad_input = Tensor::zeros(batch, cols)?;
         let weight = self.weight.value();
         let weight_data = weight.data();
-        for b in 0..batch {
-            let row = &input.data()[b * cols..(b + 1) * cols];
-            let grad_row =
-                &grad_output.data()[b * grad_output.shape().1..(b + 1) * grad_output.shape().1];
-            for oc in 0..self.out_channels {
-                let weight_row = &weight_data[oc * span..(oc + 1) * span];
-                for ow in 0..out_width {
-                    let go = grad_row[oc * out_width + ow];
-                    grad_bias[oc] += go;
-                    for ic in 0..self.in_channels {
-                        let channel_offset = ic * width;
-                        for k in 0..self.kernel_size {
-                            let pos = ow * self.stride + k;
-                            if pos < self.padding {
-                                continue;
+        let grad_out_cols = grad_output.shape().1;
+        let grad_input_cols = grad_input.shape().1;
+        {
+            let grad_weight_data = grad_weight.data_mut();
+            let grad_input_data = grad_input.data_mut();
+            for b in 0..batch {
+                let row = &input.data()[b * cols..(b + 1) * cols];
+                let grad_row = &grad_output.data()[b * grad_out_cols..(b + 1) * grad_out_cols];
+                let (start_in, end_in) = (b * grad_input_cols, (b + 1) * grad_input_cols);
+                let grad_in_row = &mut grad_input_data[start_in..end_in];
+                for oc in 0..self.out_channels {
+                    let weight_row = &weight_data[oc * span..(oc + 1) * span];
+                    for ow in 0..out_width {
+                        let go = grad_row[oc * out_width + ow];
+                        grad_bias[oc] += go;
+                        for ic in 0..self.in_channels {
+                            let channel_offset = ic * width;
+                            for k in 0..self.kernel_size {
+                                let pos = ow * self.stride + k;
+                                if pos < self.padding {
+                                    continue;
+                                }
+                                let idx = pos - self.padding;
+                                if idx >= width {
+                                    continue;
+                                }
+                                let input_val = row[channel_offset + idx];
+                                let weight_idx = ic * self.kernel_size + k;
+                                grad_weight_data[oc * span + weight_idx] += go * input_val;
+                                grad_in_row[channel_offset + idx] += go * weight_row[weight_idx];
                             }
-                            let idx = pos - self.padding;
-                            if idx >= width {
-                                continue;
-                            }
-                            let input_val = row[channel_offset + idx];
-                            let weight_idx = ic * self.kernel_size + k;
-                            grad_weight.data_mut()[oc * span + weight_idx] += go * input_val;
-                            grad_input.data_mut()[b * cols + channel_offset + idx] +=
-                                go * weight_row[weight_idx];
                         }
                     }
                 }
@@ -289,38 +300,43 @@ impl Module for Conv2d {
         let bias_data = bias.data();
         let span = self.in_channels * self.kernel.0 * self.kernel.1;
         let (h, w) = self.input_hw;
-        for b in 0..batch {
-            let row = &input.data()[b * cols..(b + 1) * cols];
-            let out_row = &mut out.data_mut()[b * out.shape().1..(b + 1) * out.shape().1];
-            for oc in 0..self.out_channels {
-                let weight_row = &weight_data[oc * span..(oc + 1) * span];
-                let bias = bias_data[oc];
-                for oh_idx in 0..oh {
-                    for ow_idx in 0..ow {
-                        let mut acc = bias;
-                        for ic in 0..self.in_channels {
-                            let channel_offset = ic * h * w;
-                            for kh in 0..self.kernel.0 {
-                                for kw in 0..self.kernel.1 {
-                                    let pos_h = oh_idx * self.stride.0 + kh;
-                                    let pos_w = ow_idx * self.stride.1 + kw;
-                                    if pos_h < self.padding.0 || pos_w < self.padding.1 {
-                                        continue;
+        let out_cols = out.shape().1;
+        {
+            let out_data = out.data_mut();
+            for b in 0..batch {
+                let row = &input.data()[b * cols..(b + 1) * cols];
+                let (start, end) = (b * out_cols, (b + 1) * out_cols);
+                let out_row = &mut out_data[start..end];
+                for oc in 0..self.out_channels {
+                    let weight_row = &weight_data[oc * span..(oc + 1) * span];
+                    let bias = bias_data[oc];
+                    for oh_idx in 0..oh {
+                        for ow_idx in 0..ow {
+                            let mut acc = bias;
+                            for ic in 0..self.in_channels {
+                                let channel_offset = ic * h * w;
+                                for kh in 0..self.kernel.0 {
+                                    for kw in 0..self.kernel.1 {
+                                        let pos_h = oh_idx * self.stride.0 + kh;
+                                        let pos_w = ow_idx * self.stride.1 + kw;
+                                        if pos_h < self.padding.0 || pos_w < self.padding.1 {
+                                            continue;
+                                        }
+                                        let idx_h = pos_h - self.padding.0;
+                                        let idx_w = pos_w - self.padding.1;
+                                        if idx_h >= h || idx_w >= w {
+                                            continue;
+                                        }
+                                        let input_idx = channel_offset + idx_h * w + idx_w;
+                                        let weight_idx = ic * self.kernel.0 * self.kernel.1
+                                            + kh * self.kernel.1
+                                            + kw;
+                                        acc += row[input_idx] * weight_row[weight_idx];
                                     }
-                                    let idx_h = pos_h - self.padding.0;
-                                    let idx_w = pos_w - self.padding.1;
-                                    if idx_h >= h || idx_w >= w {
-                                        continue;
-                                    }
-                                    let input_idx = channel_offset + idx_h * w + idx_w;
-                                    let weight_idx = ic * self.kernel.0 * self.kernel.1
-                                        + kh * self.kernel.1
-                                        + kw;
-                                    acc += row[input_idx] * weight_row[weight_idx];
                                 }
                             }
+                            out_row[oc * (oh * ow) + oh_idx * ow + ow_idx] = acc;
                         }
-                        out_row[oc * (oh * ow) + oh_idx * ow + ow_idx] = acc;
                     }
                 }
             }
@@ -351,38 +367,44 @@ impl Module for Conv2d {
         let weight = self.weight.value();
         let weight_data = weight.data();
         let (h, w) = self.input_hw;
-        for b in 0..batch {
-            let row = &input.data()[b * cols..(b + 1) * cols];
-            let grad_row =
-                &grad_output.data()[b * grad_output.shape().1..(b + 1) * grad_output.shape().1];
-            for oc in 0..self.out_channels {
-                let weight_row = &weight_data[oc * span..(oc + 1) * span];
-                for oh_idx in 0..oh {
-                    for ow_idx in 0..ow {
-                        let go = grad_row[oc * (oh * ow) + oh_idx * ow + ow_idx];
-                        grad_bias[oc] += go;
-                        for ic in 0..self.in_channels {
-                            let channel_offset = ic * h * w;
-                            for kh in 0..self.kernel.0 {
-                                for kw in 0..self.kernel.1 {
-                                    let pos_h = oh_idx * self.stride.0 + kh;
-                                    let pos_w = ow_idx * self.stride.1 + kw;
-                                    if pos_h < self.padding.0 || pos_w < self.padding.1 {
-                                        continue;
+        let grad_out_cols = grad_output.shape().1;
+        let grad_input_cols = grad_input.shape().1;
+        {
+            let grad_weight_data = grad_weight.data_mut();
+            let grad_input_data = grad_input.data_mut();
+            for b in 0..batch {
+                let row = &input.data()[b * cols..(b + 1) * cols];
+                let grad_row = &grad_output.data()[b * grad_out_cols..(b + 1) * grad_out_cols];
+                let (start_in, end_in) = (b * grad_input_cols, (b + 1) * grad_input_cols);
+                let grad_in_row = &mut grad_input_data[start_in..end_in];
+                for oc in 0..self.out_channels {
+                    let weight_row = &weight_data[oc * span..(oc + 1) * span];
+                    for oh_idx in 0..oh {
+                        for ow_idx in 0..ow {
+                            let go = grad_row[oc * (oh * ow) + oh_idx * ow + ow_idx];
+                            grad_bias[oc] += go;
+                            for ic in 0..self.in_channels {
+                                let channel_offset = ic * h * w;
+                                for kh in 0..self.kernel.0 {
+                                    for kw in 0..self.kernel.1 {
+                                        let pos_h = oh_idx * self.stride.0 + kh;
+                                        let pos_w = ow_idx * self.stride.1 + kw;
+                                        if pos_h < self.padding.0 || pos_w < self.padding.1 {
+                                            continue;
+                                        }
+                                        let idx_h = pos_h - self.padding.0;
+                                        let idx_w = pos_w - self.padding.1;
+                                        if idx_h >= h || idx_w >= w {
+                                            continue;
+                                        }
+                                        let input_idx = channel_offset + idx_h * w + idx_w;
+                                        let weight_idx = ic * self.kernel.0 * self.kernel.1
+                                            + kh * self.kernel.1
+                                            + kw;
+                                        grad_weight_data[oc * span + weight_idx] +=
+                                            go * row[input_idx];
+                                        grad_in_row[input_idx] += go * weight_row[weight_idx];
                                     }
-                                    let idx_h = pos_h - self.padding.0;
-                                    let idx_w = pos_w - self.padding.1;
-                                    if idx_h >= h || idx_w >= w {
-                                        continue;
-                                    }
-                                    let input_idx = channel_offset + idx_h * w + idx_w;
-                                    let weight_idx = ic * self.kernel.0 * self.kernel.1
-                                        + kh * self.kernel.1
-                                        + kw;
-                                    grad_weight.data_mut()[oc * span + weight_idx] +=
-                                        go * row[input_idx];
-                                    grad_input.data_mut()[b * cols + input_idx] +=
-                                        go * weight_row[weight_idx];
                                 }
                             }
                         }
@@ -488,38 +510,43 @@ impl Module for MaxPool2d {
         indices.clear();
         indices.resize(batch * self.channels * oh * ow, 0);
         let (h, w) = self.input_hw;
-        for b in 0..batch {
-            let row = &input.data()[b * cols..(b + 1) * cols];
-            let out_row = &mut out.data_mut()[b * out.shape().1..(b + 1) * out.shape().1];
-            for c in 0..self.channels {
-                let channel_offset = c * h * w;
-                for oh_idx in 0..oh {
-                    for ow_idx in 0..ow {
-                        let mut best = f32::MIN;
-                        let mut best_idx = channel_offset;
-                        for kh in 0..self.kernel.0 {
-                            for kw in 0..self.kernel.1 {
-                                let pos_h = oh_idx * self.stride.0 + kh;
-                                let pos_w = ow_idx * self.stride.1 + kw;
-                                if pos_h < self.padding.0 || pos_w < self.padding.1 {
-                                    continue;
-                                }
-                                let idx_h = pos_h - self.padding.0;
-                                let idx_w = pos_w - self.padding.1;
-                                if idx_h >= h || idx_w >= w {
-                                    continue;
-                                }
-                                let index = channel_offset + idx_h * w + idx_w;
-                                let value = row[index];
-                                if value > best {
-                                    best = value;
-                                    best_idx = index;
+        let out_cols = out.shape().1;
+        {
+            let out_data = out.data_mut();
+            for b in 0..batch {
+                let row = &input.data()[b * cols..(b + 1) * cols];
+                let (start, end) = (b * out_cols, (b + 1) * out_cols);
+                let out_row = &mut out_data[start..end];
+                for c in 0..self.channels {
+                    let channel_offset = c * h * w;
+                    for oh_idx in 0..oh {
+                        for ow_idx in 0..ow {
+                            let mut best = f32::MIN;
+                            let mut best_idx = channel_offset;
+                            for kh in 0..self.kernel.0 {
+                                for kw in 0..self.kernel.1 {
+                                    let pos_h = oh_idx * self.stride.0 + kh;
+                                    let pos_w = ow_idx * self.stride.1 + kw;
+                                    if pos_h < self.padding.0 || pos_w < self.padding.1 {
+                                        continue;
+                                    }
+                                    let idx_h = pos_h - self.padding.0;
+                                    let idx_w = pos_w - self.padding.1;
+                                    if idx_h >= h || idx_w >= w {
+                                        continue;
+                                    }
+                                    let index = channel_offset + idx_h * w + idx_w;
+                                    let value = row[index];
+                                    if value > best {
+                                        best = value;
+                                        best_idx = index;
+                                    }
                                 }
                             }
+                            let out_index = c * (oh * ow) + oh_idx * ow + ow_idx;
+                            out_row[out_index] = best;
+                            indices[b * self.channels * oh * ow + out_index] = best_idx;
                         }
-                        let out_index = c * (oh * ow) + oh_idx * ow + ow_idx;
-                        out_row[out_index] = best;
-                        indices[b * self.channels * oh * ow + out_index] = best_idx;
                     }
                 }
             }
@@ -539,13 +566,17 @@ impl Module for MaxPool2d {
         let mut grad_input =
             Tensor::zeros(batch, self.channels * self.input_hw.0 * self.input_hw.1)?;
         let indices = self.last_indices.borrow();
-        for b in 0..batch {
-            let grad_row = &grad_output.data()[b * cols..(b + 1) * cols];
-            let grad_in_row = &mut grad_input.data_mut()
-                [b * grad_input.shape().1..(b + 1) * grad_input.shape().1];
-            for idx in 0..cols {
-                let input_index = indices[b * cols + idx];
-                grad_in_row[input_index] += grad_row[idx];
+        let grad_input_cols = grad_input.shape().1;
+        {
+            let grad_input_data = grad_input.data_mut();
+            for b in 0..batch {
+                let grad_row = &grad_output.data()[b * cols..(b + 1) * cols];
+                let (start, end) = (b * grad_input_cols, (b + 1) * grad_input_cols);
+                let grad_in_row = &mut grad_input_data[start..end];
+                for idx in 0..cols {
+                    let input_index = indices[b * cols + idx];
+                    grad_in_row[input_index] += grad_row[idx];
+                }
             }
         }
         Ok(grad_input)
@@ -630,31 +661,36 @@ impl Module for AvgPool2d {
         let mut out = Tensor::zeros(batch, self.channels * oh * ow)?;
         let (h, w) = self.input_hw;
         let area = (self.kernel.0 * self.kernel.1) as f32;
-        for b in 0..batch {
-            let row = &input.data()[b * cols..(b + 1) * cols];
-            let out_row = &mut out.data_mut()[b * out.shape().1..(b + 1) * out.shape().1];
-            for c in 0..self.channels {
-                let channel_offset = c * h * w;
-                for oh_idx in 0..oh {
-                    for ow_idx in 0..ow {
-                        let mut acc = 0.0f32;
-                        for kh in 0..self.kernel.0 {
-                            for kw in 0..self.kernel.1 {
-                                let pos_h = oh_idx * self.stride.0 + kh;
-                                let pos_w = ow_idx * self.stride.1 + kw;
-                                if pos_h < self.padding.0 || pos_w < self.padding.1 {
-                                    continue;
+        let out_cols = out.shape().1;
+        {
+            let out_data = out.data_mut();
+            for b in 0..batch {
+                let row = &input.data()[b * cols..(b + 1) * cols];
+                let (start, end) = (b * out_cols, (b + 1) * out_cols);
+                let out_row = &mut out_data[start..end];
+                for c in 0..self.channels {
+                    let channel_offset = c * h * w;
+                    for oh_idx in 0..oh {
+                        for ow_idx in 0..ow {
+                            let mut acc = 0.0f32;
+                            for kh in 0..self.kernel.0 {
+                                for kw in 0..self.kernel.1 {
+                                    let pos_h = oh_idx * self.stride.0 + kh;
+                                    let pos_w = ow_idx * self.stride.1 + kw;
+                                    if pos_h < self.padding.0 || pos_w < self.padding.1 {
+                                        continue;
+                                    }
+                                    let idx_h = pos_h - self.padding.0;
+                                    let idx_w = pos_w - self.padding.1;
+                                    if idx_h >= h || idx_w >= w {
+                                        continue;
+                                    }
+                                    let index = channel_offset + idx_h * w + idx_w;
+                                    acc += row[index];
                                 }
-                                let idx_h = pos_h - self.padding.0;
-                                let idx_w = pos_w - self.padding.1;
-                                if idx_h >= h || idx_w >= w {
-                                    continue;
-                                }
-                                let index = channel_offset + idx_h * w + idx_w;
-                                acc += row[index];
                             }
+                            out_row[c * (oh * ow) + oh_idx * ow + ow_idx] = acc / area;
                         }
-                        out_row[c * (oh * ow) + oh_idx * ow + ow_idx] = acc / area;
                     }
                 }
             }
@@ -675,29 +711,33 @@ impl Module for AvgPool2d {
             Tensor::zeros(batch, self.channels * self.input_hw.0 * self.input_hw.1)?;
         let (h, w) = self.input_hw;
         let area = (self.kernel.0 * self.kernel.1) as f32;
-        for b in 0..batch {
-            let grad_row = &grad_output.data()[b * cols..(b + 1) * cols];
-            let grad_in_row = &mut grad_input.data_mut()
-                [b * grad_input.shape().1..(b + 1) * grad_input.shape().1];
-            for c in 0..self.channels {
-                let channel_offset = c * h * w;
-                for oh_idx in 0..oh {
-                    for ow_idx in 0..ow {
-                        let go = grad_row[c * (oh * ow) + oh_idx * ow + ow_idx] / area;
-                        for kh in 0..self.kernel.0 {
-                            for kw in 0..self.kernel.1 {
-                                let pos_h = oh_idx * self.stride.0 + kh;
-                                let pos_w = ow_idx * self.stride.1 + kw;
-                                if pos_h < self.padding.0 || pos_w < self.padding.1 {
-                                    continue;
+        let grad_input_cols = grad_input.shape().1;
+        {
+            let grad_input_data = grad_input.data_mut();
+            for b in 0..batch {
+                let grad_row = &grad_output.data()[b * cols..(b + 1) * cols];
+                let (start, end) = (b * grad_input_cols, (b + 1) * grad_input_cols);
+                let grad_in_row = &mut grad_input_data[start..end];
+                for c in 0..self.channels {
+                    let channel_offset = c * h * w;
+                    for oh_idx in 0..oh {
+                        for ow_idx in 0..ow {
+                            let go = grad_row[c * (oh * ow) + oh_idx * ow + ow_idx] / area;
+                            for kh in 0..self.kernel.0 {
+                                for kw in 0..self.kernel.1 {
+                                    let pos_h = oh_idx * self.stride.0 + kh;
+                                    let pos_w = ow_idx * self.stride.1 + kw;
+                                    if pos_h < self.padding.0 || pos_w < self.padding.1 {
+                                        continue;
+                                    }
+                                    let idx_h = pos_h - self.padding.0;
+                                    let idx_w = pos_w - self.padding.1;
+                                    if idx_h >= h || idx_w >= w {
+                                        continue;
+                                    }
+                                    let index = channel_offset + idx_h * w + idx_w;
+                                    grad_in_row[index] += go;
                                 }
-                                let idx_h = pos_h - self.padding.0;
-                                let idx_w = pos_w - self.padding.1;
-                                if idx_h >= h || idx_w >= w {
-                                    continue;
-                                }
-                                let index = channel_offset + idx_h * w + idx_w;
-                                grad_in_row[index] += go;
                             }
                         }
                     }

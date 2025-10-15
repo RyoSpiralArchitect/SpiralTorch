@@ -8,12 +8,26 @@ use std::collections::HashMap;
 
 /// Trainable parameter that can either rely on the hypergrad tape or fall back
 /// to standard Euclidean accumulation.
-#[derive(Debug)]
 pub struct Parameter {
     name: String,
     value: Tensor,
     gradient: Option<Tensor>,
     hypergrad: Option<AmegaHypergrad>,
+}
+
+impl core::fmt::Debug for Parameter {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let (rows, cols) = self.value.shape();
+        write!(
+            f,
+            "Parameter(name={},shape=({},{}),has_grad={},has_hypergrad={})",
+            self.name,
+            rows,
+            cols,
+            self.gradient.is_some(),
+            self.hypergrad.is_some()
+        )
+    }
 }
 
 impl Parameter {

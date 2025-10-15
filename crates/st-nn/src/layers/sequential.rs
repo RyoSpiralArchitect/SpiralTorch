@@ -2,9 +2,15 @@ use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor};
 
 /// Sequential container that mirrors `nn.Sequential`.
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct Sequential {
     layers: Vec<Box<dyn Module>>,
+}
+
+impl core::fmt::Debug for Sequential {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Sequential(num_layers={})", self.layers.len())
+    }
 }
 
 impl Sequential {

@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
-#[derive(Debug)]
 pub struct ModuleTrainer {
     planner: RankPlanner,
     curvature: f32,
@@ -22,6 +21,16 @@ pub struct ModuleTrainer {
     autopilot: Option<Autopilot>,
     band_weight_fn: Option<BandWeightFn>,
     injector_enabled: bool,
+}
+
+impl core::fmt::Debug for ModuleTrainer {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "ModuleTrainer(curv={},lr_h={},lr_f={})",
+            self.curvature, self.hyper_learning_rate, self.fallback_learning_rate
+        )
+    }
 }
 
 /// Function pointer used to convert band energy into Above/Here/Beneath weights.
@@ -139,16 +148,11 @@ impl ModuleTrainer {
             if let Some(rt) = self.blackcat.as_mut() {
                 rt.begin_step();
             }
+            let device_load = self.estimate_device_load();
             if let Some(ap) = self.autopilot.as_mut() {
                 let (rows, cols) = input.shape();
                 let depth = schedule.above().k + schedule.here().k + schedule.beneath().k;
-                let context = ap.build_context(
-                    rows as u32,
-                    cols as u32,
-                    depth,
-                    self.estimate_device_load(),
-                    &[],
-                );
+                let context = ap.build_context(rows as u32, cols as u32, depth, device_load, &[]);
                 let _ = ap.suggest(context);
             }
             let prediction = module.forward(&input)?;
