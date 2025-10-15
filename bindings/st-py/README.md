@@ -13,6 +13,13 @@ NumPy, no PyTorch, and no shim layers.
   text, accumulate gradients, and project back into the Poincaré ball.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`) that
   reuse the same heuristics as the Rust executors.
+- ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
+  device hints shared with the Rust runtime.
+- Z-space barycentre solver (`z_space_barycenter`) to mix colour-field
+  priors and chart couplings directly from Python.
+- Loss-monotone barycenter intermediates (`BarycenterIntermediate`) that plug
+  into `Hypergrad.accumulate_barycenter_path` so tapes converge along the
+  same Z-space corridor as the solver.
 
 ## Building wheels
 

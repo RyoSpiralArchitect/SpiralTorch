@@ -7,7 +7,10 @@
 //! stays in safe Rust so it can compile to WASM as-is, while HTML/JS glue code
 //! can simply forward the produced byte slice into `ImageData`.
 
-use super::{fractal::UringFractalScheduler, PureResult, Tensor, TensorError};
+use super::{
+    fractal::{FractalPatch, UringFractalScheduler},
+    PureResult, Tensor, TensorError,
+};
 
 /// Streaming Z-space normaliser that keeps canvas updates stable even when the
 /// underlying tensor swings across vastly different value ranges.
@@ -140,11 +143,99 @@ impl CanvasPalette {
             }
         }
     }
+
+    fn map_vectorised(self, t: f32) -> ([u8; 4], [f32; 3]) {
+        let rgba = self.map(t);
+        let chroma = [
+            rgba[0] as f32 / 255.0 * 2.0 - 1.0,
+            rgba[1] as f32 / 255.0 * 2.0 - 1.0,
+            rgba[2] as f32 / 255.0 * 2.0 - 1.0,
+        ];
+        (rgba, chroma)
+    }
 }
 
 impl Default for CanvasPalette {
     fn default() -> Self {
         CanvasPalette::BlueMagenta
+    }
+}
+
+/// Vector field that captures both the normalised tensor energy and the
+/// palette-projected chroma in Z-space friendly coordinates.
+#[derive(Clone, Debug)]
+pub struct ColorVectorField {
+    width: usize,
+    height: usize,
+    vectors: Vec<[f32; 4]>,
+}
+
+impl ColorVectorField {
+    pub fn new(width: usize, height: usize) -> Self {
+        let mut field = Self {
+            width,
+            height,
+            vectors: Vec::with_capacity(width * height),
+        };
+        field.ensure_shape(width, height);
+        field
+    }
+
+    fn ensure_shape(&mut self, width: usize, height: usize) {
+        if self.width != width || self.height != height {
+            self.width = width;
+            self.height = height;
+        }
+        let expected = width * height;
+        if self.vectors.len() != expected {
+            self.vectors.resize(expected, [0.0; 4]);
+        }
+    }
+
+    fn set(&mut self, idx: usize, energy: f32, chroma: [f32; 3]) {
+        self.vectors[idx] = [energy, chroma[0], chroma[1], chroma[2]];
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn vectors(&self) -> &[[f32; 4]] {
+        &self.vectors
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = [f32; 4]> + '_ {
+        self.vectors.iter().copied()
+    }
+
+    pub fn as_tensor(&self) -> PureResult<Tensor> {
+        let mut flat = Vec::with_capacity(self.vectors.len() * 4);
+        for vector in &self.vectors {
+            flat.extend_from_slice(vector);
+        }
+        Tensor::from_vec(self.height, self.width * 4, flat)
+    }
+
+    pub fn energy_tensor(&self) -> PureResult<Tensor> {
+        let mut energy = Vec::with_capacity(self.vectors.len());
+        for vector in &self.vectors {
+            energy.push(vector[0]);
+        }
+        Tensor::from_vec(self.height, self.width, energy)
+    }
+
+    pub fn to_zspace_patch(
+        &self,
+        coherence: f32,
+        tension: f32,
+        depth: u32,
+    ) -> PureResult<FractalPatch> {
+        let relation = self.energy_tensor()?;
+        FractalPatch::new(relation, coherence, tension, depth)
     }
 }
 
@@ -226,6 +317,39 @@ impl CanvasSurface {
         Ok(())
     }
 
+    /// Paint the tensor while simultaneously vectorising the chroma so that the
+    /// caller can feed the result straight back into Z-space monads.
+    pub fn paint_tensor_with_palette_into_vectors(
+        &mut self,
+        tensor: &Tensor,
+        normalizer: &mut CanvasNormalizer,
+        palette: CanvasPalette,
+        vectors: &mut ColorVectorField,
+    ) -> PureResult<()> {
+        let expected = (self.height, self.width);
+        if tensor.shape() != expected {
+            return Err(TensorError::ShapeMismatch {
+                left: tensor.shape(),
+                right: expected,
+            });
+        }
+
+        vectors.ensure_shape(self.width, self.height);
+        let data = tensor.data();
+        normalizer.update(data);
+        for (idx, &value) in data.iter().enumerate() {
+            let normalized = normalizer.normalize(value);
+            let (rgba, chroma) = palette.map_vectorised(normalized);
+            let offset = idx * 4;
+            self.pixels[offset] = rgba[0];
+            self.pixels[offset + 1] = rgba[1];
+            self.pixels[offset + 2] = rgba[2];
+            self.pixels[offset + 3] = rgba[3];
+            vectors.set(idx, normalized, chroma);
+        }
+        Ok(())
+    }
+
     /// Consume the surface returning the owned pixel vector.
     pub fn into_pixels(self) -> Vec<u8> {
         self.pixels
@@ -250,6 +374,7 @@ pub struct CanvasProjector {
     workspace: Tensor,
     normalizer: CanvasNormalizer,
     palette: CanvasPalette,
+    vectors: ColorVectorField,
 }
 
 impl CanvasProjector {
@@ -268,12 +393,14 @@ impl CanvasProjector {
     ) -> PureResult<Self> {
         let surface = CanvasSurface::new(width, height)?;
         let workspace = Tensor::zeros(height, width)?;
+        let vectors = ColorVectorField::new(width, height);
         Ok(Self {
             scheduler,
             surface,
             workspace,
             normalizer: config.normalizer,
             palette: config.palette,
+            vectors,
         })
     }
 
@@ -316,13 +443,48 @@ impl CanvasProjector {
     /// workspace tensor and painting the result. Callers can ship the returned
     /// slice to JavaScript without cloning.
     pub fn refresh(&mut self) -> PureResult<&[u8]> {
+        self.render()?;
+        Ok(self.surface.as_rgba())
+    }
+
+    fn render(&mut self) -> PureResult<()> {
         self.scheduler.fold_coherence_into(&mut self.workspace)?;
-        self.surface.paint_tensor_with_palette(
+        self.surface.paint_tensor_with_palette_into_vectors(
             &self.workspace,
             &mut self.normalizer,
             self.palette,
-        )?;
-        Ok(self.surface.as_rgba())
+            &mut self.vectors,
+        )
+    }
+
+    /// Refresh the canvas returning both the RGBA buffer and the vector field
+    /// used to bind colours back into Z-space dynamics.
+    pub fn refresh_with_vectors(&mut self) -> PureResult<(&[u8], &ColorVectorField)> {
+        self.render()?;
+        Ok((self.surface.as_rgba(), &self.vectors))
+    }
+
+    /// Ensure the projector is up to date and expose the vector field.
+    pub fn refresh_vector_field(&mut self) -> PureResult<&ColorVectorField> {
+        self.render()?;
+        Ok(&self.vectors)
+    }
+
+    /// Last computed vector field without forcing a refresh.
+    pub fn vector_field(&self) -> &ColorVectorField {
+        &self.vectors
+    }
+
+    /// Emit a Z-space fractal patch built from the colour energy field so
+    /// higher-level schedulers can feed the canvas feedback loop.
+    pub fn emit_zspace_patch(
+        &mut self,
+        coherence: f32,
+        tension: f32,
+        depth: u32,
+    ) -> PureResult<FractalPatch> {
+        self.render()?;
+        self.vectors.to_zspace_patch(coherence, tension, depth)
     }
 }
 
@@ -373,6 +535,17 @@ mod tests {
     }
 
     #[test]
+    fn refresh_with_vectors_surfaces_color_field() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let (_bytes, field) = projector.refresh_with_vectors().unwrap();
+        assert_eq!(field.vectors().len(), 4);
+        for vector in field.iter() {
+            assert!(vector[0] >= 0.0 && vector[0] <= 1.0);
+        }
+    }
+
+    #[test]
     fn canvas_rejects_invalid_dimensions() {
         assert!(matches!(
             CanvasSurface::new(0, 1),
@@ -395,5 +568,22 @@ mod tests {
         let second = projector.refresh().unwrap().as_ptr();
         assert_eq!(first, second);
         assert_eq!(projector.surface().as_rgba().len(), 4 * 4);
+    }
+
+    #[test]
+    fn emit_zspace_patch_respects_canvas_shape() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(
+                FractalPatch::new(tensor(&[1.0, 0.5, 0.25, 0.75]), 1.0, 1.0, 0)
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let patch = projector.emit_zspace_patch(1.0, 1.0, 2).unwrap();
+        assert_eq!(patch.relation().shape(), (2, 2));
+        let data = patch.relation().data();
+        assert_eq!(data.len(), 4);
     }
 }
