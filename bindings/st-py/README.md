@@ -15,6 +15,8 @@ NumPy, no PyTorch, and no shim layers.
   reuse the same heuristics as the Rust executors.
 - ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
   device hints shared with the Rust runtime.
+- Z-space barycentre solver (`z_space_barycenter`) to mix colour-field
+  priors and chart couplings directly from Python.
 
 ## Building wheels
 

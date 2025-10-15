@@ -180,6 +180,9 @@ print("updated weights", weights.tolist())
 - Use `CanvasProjector::emit_zspace_patch` to fold the canvas state back into
   the fractal scheduler without leaving Rust or allocating intermediate
   buffers.
+- Blend chart priors with the new `z_space_barycenter` solver—available in
+  Rust (`st_tensor::pure::measure`) and Python (`spiraltorch.z_space_barycenter`)—to
+  wire colour energy directly into the Z-space roundtable.
 
 ---
 

@@ -16,8 +16,8 @@ use st_nn::{
     WaveRnn as NnWaveRnn,
 };
 use st_tensor::pure::{
-    topos::OpenCartesianTopos, AmegaHypergrad, Complex32, ComplexTensor, LanguageWaveEncoder,
-    PureResult, Tensor, TensorError,
+    measure::z_space_barycenter, topos::OpenCartesianTopos, AmegaHypergrad, Complex32,
+    ComplexTensor, LanguageWaveEncoder, PureResult, Tensor, TensorError,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -89,6 +89,10 @@ impl PyTensor {
 
     fn as_tensor_mut(&mut self) -> &mut Tensor {
         &mut self.inner
+    }
+
+    fn into_tensor(self) -> Tensor {
+        self.inner
     }
 }
 
@@ -897,6 +901,43 @@ fn plan(
     Ok(out.into_py(py))
 }
 
+/// Compute the Z-space barycenter described by the weighted KL objective.
+#[pyfunction]
+#[pyo3(signature = (densities, weights=None, entropy_weight=0.0, beta_j=0.0, coupling=None))]
+fn z_space_barycenter_py(
+    py: Python<'_>,
+    densities: Vec<PyTensor>,
+    weights: Option<Vec<f32>>,
+    entropy_weight: f32,
+    beta_j: f32,
+    coupling: Option<PyTensor>,
+) -> PyResult<PyObject> {
+    if densities.is_empty() {
+        return Err(PyValueError::new_err("densities must not be empty"));
+    }
+    let tensors: Vec<Tensor> = densities.into_iter().map(PyTensor::into_tensor).collect();
+    let mut weight_vec = weights.unwrap_or_else(|| vec![1.0; tensors.len()]);
+    if weight_vec.len() != tensors.len() {
+        return Err(PyValueError::new_err(format!(
+            "expected {} weights, received {}",
+            tensors.len(),
+            weight_vec.len()
+        )));
+    }
+    let coupling_tensor = coupling.map(PyTensor::into_tensor);
+    let coupling_ref = coupling_tensor.as_ref();
+    let result = z_space_barycenter(&weight_vec, &tensors, entropy_weight, beta_j, coupling_ref)?;
+
+    let out = PyDict::new_bound(py);
+    out.set_item("density", PyTensor::from_tensor(result.density).into_py(py))?;
+    out.set_item("kl_energy", result.kl_energy)?;
+    out.set_item("entropy", result.entropy)?;
+    out.set_item("coupling_energy", result.coupling_energy)?;
+    out.set_item("objective", result.objective)?;
+    out.set_item("effective_weight", result.effective_weight)?;
+    Ok(out.into_py(py))
+}
+
 #[pymodule]
 fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLinearModule>()?;
@@ -963,6 +1004,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_submodule(nn_mod.as_ref())?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
+    m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_class::<PyTensor>()?;
@@ -976,6 +1018,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         vec![
             "plan",
             "plan_topk",
+            "z_space_barycenter",
             "hip_probe",
             "describe_device",
             "Tensor",
