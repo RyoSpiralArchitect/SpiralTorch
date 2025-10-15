@@ -58,6 +58,8 @@ tensor shims, no translation layers, and no tracebacks.
 
 - **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**
   Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, and every plan can now be rendered back into a SpiralK snippet via `choice.to_unison_script(kind)`.
+- **Introspectable compute plans**
+  Unified `RankPlan`s expose their FFT stencil directly—call `plan.fft_plan()` to inspect the radix/segment shape, `plan.fft_wgsl()` to emit the ready-to-run WGSL kernel, or `plan.fft_spiralk_hint()` to log the same choice back into SpiralK.
 - **SpiralK DSL** (K×Lisp-inspired)
   Hard assigns (`mk:`, `tile:`) and soft rules (`soft(mk, …)`, `soft(tile, …)`) that blend with measurements.
 - **SoftLogic (finite-domain solver)**
@@ -71,6 +73,10 @@ tensor shims, no translation layers, and no tracebacks.
   Parameters can now absorb complex Z-space waves or raw text directly into the
   hypergrad tape, so the roundtable can keep expanding meaning without Euclidean
   fallbacks or NumPy buffers.
+- **TensorBiome canopies + spiral biomes**
+  Curate rewrites with `TensorBiome`, weight individual shoots, stack the full
+  harvest, and let SoT-3Dφ planners seed a ready-to-project biome via
+  `SoT3DPlan.grow_biome(...)` before reinjecting it with `ZSpaceProjector`.
 - **Rust-first modules & losses**
   `st-nn` now ships `Linear`, `Sequential`, the lightweight `Relu`, the
   hyperbolic `WaveGate`, `ToposResonator`, the new `ZSpaceMixer`, and the
