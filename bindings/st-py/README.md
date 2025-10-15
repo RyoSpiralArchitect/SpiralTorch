@@ -13,6 +13,17 @@ NumPy, no PyTorch, and no shim layers.
   text, accumulate gradients, and project back into the Poincaré ball.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`) that
   reuse the same heuristics as the Rust executors.
+- ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
+  device hints shared with the Rust runtime.
+- Z-space barycentre solver (`z_space_barycenter`) to mix colour-field
+  priors and chart couplings directly from Python.
+- Loss-monotone barycenter intermediates (`BarycenterIntermediate`) that plug
+  into `Hypergrad.accumulate_barycenter_path` so tapes converge along the
+  same Z-space corridor as the solver.
+- High-level orchestration via `SpiralSession` / `SpiralSessionBuilder` so
+  callers can select devices, spawn hypergrad tapes, plan kernels, and solve
+  barycentres with a few intuitive method calls. Structured results are
+  returned through the new `ZSpaceBarycenter` class.
 
 ## Building wheels
 
@@ -48,4 +59,15 @@ tape = Hypergrad(-1.0, 0.05, *z.shape())
 tape.accumulate_pair(z, wave)
 tape.apply(z)
 print(z.tolist())
+```
+
+```python
+from spiraltorch import SpiralSession, Tensor
+
+session = SpiralSession(device="wgpu", curvature=-1.0, hyper_learning_rate=0.05)
+densities = [Tensor(1, 2, [0.7, 0.3]), Tensor(1, 2, [0.2, 0.8])]
+bary = session.barycenter(densities)
+hyper = session.hypergrad(*bary.density.shape())
+session.align_hypergrad(hyper, bary)
+print(bary.objective, hyper.gradient())
 ```

@@ -15,7 +15,7 @@ default = []
 hip      = ["dep:st-backend-hip"]
 wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:once_cell"]
 wgpu-rt  = ["wgpu"]
-mps      = ["dep:metal"]
+mps      = []
 cuda     = []
 logic    = ["dep:st-logic"]
 kdsl     = ["dep:st-kdsl"]
@@ -33,10 +33,10 @@ once_cell   = { version = "1.19", optional = true }
 bytemuck    = { version = "1.16", optional = true, features = ["derive"] }
 pollster    = { version = "0.3",  optional = true }
 wgpu        = { version = "0.19", optional = true, default-features = false, features = ["wgsl"] }
-metal       = { version = "0.28", optional = true }
 
 st-backend-hip = { path = "../st-backend-hip", optional = true }
 st-logic       = { path = "../st-logic",       optional = true }
 st-kdsl        = { path = "../st-kdsl",        optional = true }
 st-kv          = { path = "../st-kv",          optional = true }
 st-frac        = { path = "../st-frac" }
+
