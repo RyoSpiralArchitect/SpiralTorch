@@ -5,6 +5,8 @@
 //! tape and SpiralK planners.
 
 pub mod dataset;
+#[cfg(feature = "golden")]
+pub mod golden;
 pub mod highlevel;
 pub mod injector;
 pub mod io;
@@ -12,13 +14,14 @@ pub mod layers;
 pub mod loss;
 pub mod module;
 pub mod plan;
+pub mod roundtable;
 pub mod schedule;
 pub mod trainer;
 
-pub use dataset::{BatchIter, Dataset};
-pub use highlevel::{
-    BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder,
-};
+pub use dataset::{from_vec as dataset_from_vec, BatchIter, DataLoader, Dataset};
+#[cfg(feature = "golden")]
+pub use golden::{GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig};
+pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
 pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, MaxPool2d};
@@ -31,6 +34,11 @@ pub use layers::{Relu, ToposResonator, ZSpaceMixer};
 pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
 pub use plan::RankPlanner;
+pub use roundtable::{
+    simulate_proposal_locally, BlackcatModerator, DistConfig, DistMode, GlobalProposal, HeurOp,
+    HeurOpKind, HeurOpLog, MetaConductor, MetaSummary, ModeratorMinutes, OutcomeBand,
+    RoundtableNode,
+};
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use trainer::{EpochStats, ModuleTrainer};
 
