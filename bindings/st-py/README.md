@@ -13,6 +13,8 @@ NumPy, no PyTorch, and no shim layers.
   text, accumulate gradients, and project back into the Poincaré ball.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`) that
   reuse the same heuristics as the Rust executors.
+- ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
+  device hints shared with the Rust runtime.
 
 ## Building wheels
 
