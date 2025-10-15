@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 use st_tensor::pure::{
@@ -210,8 +215,7 @@ mod tests {
         gate.attach_hypergrad_with_topos(-0.75, 0.04, topos)
             .unwrap();
         let encoder = gate.encoder().clone();
-        gate
-            .visit_parameters_mut(&mut |param| param.absorb_text(&encoder, "wave"))
+        gate.visit_parameters_mut(&mut |param| param.absorb_text(&encoder, "wave"))
             .unwrap();
         gate.apply_step(0.01).unwrap();
         assert!(gate.gate().value().squared_l2_norm() > 0.0);

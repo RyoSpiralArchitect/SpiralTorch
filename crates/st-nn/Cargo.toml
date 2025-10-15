@@ -1,4 +1,5 @@
 [package]
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 name = "st-nn"
 version = "0.1.0"
 edition = "2021"
@@ -9,14 +10,25 @@ description = "High-level nn.Module-style API for SpiralTorch"
 name = "st_nn"
 path = "src/lib.rs"
 
+[features]
+default = []
+psi = ["st-core/psi"]
+psychoid = ["st-core/psychoid"]
+collapse = ["psi", "st-core/collapse"]
+golden = ["st-core/golden"]
+
 [dependencies]
 st-tensor = { path = "../st-tensor" }
 st-core = { path = "../st-core" }
 st-frac = { path = "../st-frac" }
 futures = "0.3"
+rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bincode = "1"
 
 [dev-dependencies]
 tempfile = "3"
+
+[package.metadata.spiraltorch]
+copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
