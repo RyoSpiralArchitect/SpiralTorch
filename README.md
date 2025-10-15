@@ -95,6 +95,11 @@ On the Python side, pass `psychoid=True` when building the roundtable and fetch
 the latest reading via `spiraltorch.get_psychoid_stats()` to log the CTI score,
 raw metrics, and z-scores emitted from the Rust meter.
 
+ψ readings stay inside the automation loop—CollapseDrive, the psychoid dream
+engine, and the distributed roundtable all consume them directly. The examples
+only surface the totals so you can verify wiring; regular runs keep the meter
+off unless the schedule or trainer explicitly enables it.
+
 Both variants print the averaged roundtable loss after aligning the barycenter
 path with the hypergrad tape. On the Python side you can now spin up the
 streaming loader without touching NumPy:
@@ -137,6 +142,48 @@ GoldenRetriever keeps each trainer behind a poison-resistant mutex, launches the
 epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
 locking or thread book-keeping required.
+
+### Observation DAG calculus (Pólya-calibrated final coalgebra)
+
+The new `st_core::theory::observability` module formalises the experimental
+setup behind our DAG compression runs. Observation trees are treated as the
+final coalgebra of the endofunctor `F(X) = R × Orb_{G_Λ}(X^b)` where `R` is the
+root alphabet and the child slots are quotiented by a symmetry group (S₍b₎,
+C₍b₎, or D₍b₎). The helper exposes both the Pólya upper bound and the efficiency
+`η = observed / expected` so you can tell exactly how much structure survives a
+given symmetry choice.
+
+```rust
+use st_core::theory::observability::{
+    ColorAction, ColorSymmetry, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
+};
+
+let config = ObservabilityConfig::new(
+    1,                // structural root variants (without colour)
+    3,                // b: ternary branching
+    SlotSymmetry::Dihedral,
+)
+.with_color_action(ColorAction::new(2, ColorSymmetry::Symmetric));
+let mut coalgebra = ObservationalCoalgebra::new(config);
+let theoretical = coalgebra.unfold(3);          // free-branching upper bound
+let measured = vec![1, 4, 52, 1_368];
+let assessment = coalgebra.assess(&measured);
+println!("theoretical counts: {:?}", theoretical);
+println!("η per depth: {:?}", assessment.efficiency);
+
+// Symmetric colour action identifies {a,b}, so "pure a" is invisible until symmetry is broken.
+let colour_gate = ColorAction::new(2, ColorSymmetry::Symmetric);
+assert_eq!(colour_gate.singleton_observable().unwrap(), false);
+```
+
+Pair the output with your `roundtable.log` counts to see exactly which depth or
+symmetry regime causes drops in observability. Lowering the symmetry (e.g.
+S₍b₎→C₍b₎→Exact) or enriching the alphabet instantly changes the theoretical
+sequence, making it trivial to reason about how much “pure a” signal can ever be
+observed before symmetry breaking. Likewise, switching the colour action to
+`ColorSymmetry::Trivial` raises the observable root count and restores singleton
+visibility—the exact manoeuvre the theoretical note predicts when constructing
+`c′`.
 
 ## What you get for training
 
