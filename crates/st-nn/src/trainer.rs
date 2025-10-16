@@ -376,6 +376,11 @@ impl ModuleTrainer {
         self.distribution = None;
     }
 
+    /// Returns the currently configured distribution node, if any.
+    pub fn distribution_config(&self) -> Option<&DistConfig> {
+        self.distribution.as_ref().map(|node| node.config())
+    }
+
     /// Installs a meta-layer conductor so this trainer can aggregate remote summaries.
     pub fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
         self.blackcat_moderator = None;
