@@ -1,6 +1,6 @@
 
 # 🌀🕯️SpiralTorch🕯️🌀
-trains where PyTorch can’t — inside the Z-space.(Still under active repair — API changes daily.)
+trains where PyTorch can’t — inside the Z-space.(Still under active repair — API changes hourly.)
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
   <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
