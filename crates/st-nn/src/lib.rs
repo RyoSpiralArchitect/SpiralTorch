@@ -35,20 +35,25 @@ pub use gnn::{
 };
 #[cfg(feature = "golden")]
 pub use golden::{
-    GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenEpochReport, GoldenRetriever,
-    GoldenRetrieverConfig,
+    CouncilDigest, CouncilEvidence, GoldenBlackcatPulse, GoldenCooperativeDirective,
+    GoldenCouncilSnapshot, GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig,
+    GoldenSelfRewriteConfig,
 };
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
+pub use language::pipeline::{
+    LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
+};
 pub use language::entropy as desire_entropy;
 pub use language::{
     constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
     DesireChannelSink, DesireLagrangian, DesireLogRecord, DesireLogReplay, DesireLogbook,
     DesirePhase, DesirePipeline, DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink,
-    DesireRewriteTrigger, DesireSchedule, DesireSolution, DesireTriggerBuffer, DesireTriggerEvent,
-    DesireWeights, DistanceMatrix, EntropicGwSolver, RepressionField, SemanticBridge, SparseKernel,
-    SymbolGeometry, TemperatureController,
+    DesireRewriteTrigger, DesireSchedule, DesireSolution, DesireTrainerBridge, DesireTrainerEvent,
+    DesireTrainerSummary, DesireTriggerBuffer, DesireTriggerEvent, DesireWeights, DistanceMatrix,
+    EntropicGwSolver, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
+    TemperatureController,
 };
 pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, MaxPool2d};
 pub use layers::linear::Linear;

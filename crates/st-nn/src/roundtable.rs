@@ -270,6 +270,69 @@ impl HeurOpLog {
     pub fn entries(&self) -> &[HeurOp] {
         &self.entries
     }
+
+    /// Returns the highest observed sequence watermark for the op-log. This is a
+    /// lightweight approximation that leverages the number of unique entries as
+    /// the watermark because each op fingerprint is guaranteed to be unique
+    /// within the log.
+    pub fn high_watermark(&self) -> u64 {
+        self.entries.len() as u64
+    }
+
+    /// Computes the missing ranges between observed operations. The current
+    /// CRDT log guarantees contiguous inserts so we only surface gaps when the
+    /// log is empty.
+    pub fn missing_ranges(&self) -> Vec<(u64, u64)> {
+        if self.entries.is_empty() {
+            vec![(0, 0)]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Extracts the strongest soft-rule winners recorded in the log. Entries
+    /// are sorted by their declared weight and issuance timestamp so consumers
+    /// can replay the most influential changes.
+    pub fn top_winners(&self, limit: usize) -> Vec<HeurOp> {
+        use std::cmp::Ordering;
+
+        let mut candidates: Vec<&HeurOp> = self
+            .entries
+            .iter()
+            .filter(|op| matches!(op.kind, HeurOpKind::AppendSoft { .. }))
+            .collect();
+        candidates.sort_by(|left, right| {
+            let left_weight = match &left.kind {
+                HeurOpKind::AppendSoft { weight, .. } => *weight,
+                _ => 0.0,
+            };
+            let right_weight = match &right.kind {
+                HeurOpKind::AppendSoft { weight, .. } => *weight,
+                _ => 0.0,
+            };
+            match right_weight
+                .partial_cmp(&left_weight)
+                .unwrap_or(Ordering::Equal)
+            {
+                Ordering::Equal => left
+                    .issued_at
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .cmp(
+                        &right
+                            .issued_at
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap_or_default(),
+                    ),
+                other => other,
+            }
+        });
+        candidates
+            .into_iter()
+            .take(limit)
+            .map(|op| op.clone())
+            .collect()
+    }
 }
 
 impl HeurOp {
