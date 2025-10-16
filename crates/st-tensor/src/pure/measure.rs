@@ -194,6 +194,19 @@ fn barycenter_intermediates(
             let value = (1.0 - alpha) * start + alpha * target;
             mix.push(guard_probability_mass("barycenter intermediate", value)?);
         }
+        let mut total = 0.0f32;
+        for value in mix.iter_mut() {
+            total += *value;
+        }
+        if total <= 0.0 {
+            return Err(TensorError::NonFiniteValue {
+                label: "barycenter intermediate mass",
+                value: total,
+            });
+        }
+        for value in mix.iter_mut() {
+            *value /= total;
+        }
         guard_probability_slice_with(guard, "barycenter intermediate", &mut mix)?;
         let (kl_energy, entropy_value, objective) = barycenter_objective(
             &mix,
@@ -331,8 +344,8 @@ fn z_space_barycenter_inner(
         normalised.push(normalise_distribution(guard, density)?);
     }
 
-    let baseline = weighted_baseline(guard, weights, &normalised, weight_sum)?;
-    let bary = barycenter_mode(guard, weights, &normalised, effective_weight)?;
+    let baseline = weighted_baseline(weights, &normalised, weight_sum)?;
+    let bary = barycenter_mode(weights, &normalised, effective_weight)?;
     let bary_tensor = Tensor::from_vec(rows, cols, bary.clone())?;
     let kl_min = {
         let mut acc = 0.0f32;

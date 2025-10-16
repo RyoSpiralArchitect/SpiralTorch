@@ -53,6 +53,11 @@ impl GraphConsensusBridge {
     /// `Ok(None)` if the tracer has not recorded any layers since the previous
     /// call.
     pub fn digest(&self, baseline: &BandEnergy) -> PureResult<Option<GraphConsensusDigest>> {
+        let mut tracer = self
+            .tracer
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let reports = tracer.drain();
         let mut tracer = self.tracer.lock().map_err(|_| TensorError::InvalidValue {
             label: "graph flow tracer poisoned",
         })?;

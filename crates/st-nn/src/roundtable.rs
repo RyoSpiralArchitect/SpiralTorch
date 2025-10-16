@@ -21,6 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+use core::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -558,6 +559,84 @@ pub struct ModeratorMinutes {
     pub issued_at: SystemTime,
 }
 
+/// Aggregated rewards, support, and stability captured by the Blackcat moderator for a
+/// particular plan signature. This keeps downstream tooling aware of how each plan has
+/// performed over time without needing to replay the raw minutes stream.
+#[derive(Clone, Debug)]
+pub struct BlackcatScore {
+    pub plan_signature: String,
+    pub script_hint: String,
+    pub observations: usize,
+    pub mean_support: f32,
+    pub mean_reward: f64,
+    pub mean_psi: f32,
+    pub mean_z: f32,
+    pub mean_confidence: f32,
+    pub last_issued_at: SystemTime,
+}
+
+#[derive(Clone, Debug)]
+struct BlackcatScoreEntry {
+    plan_signature: String,
+    script_hint: String,
+    observations: usize,
+    support_sum: f32,
+    reward_sum: f64,
+    psi_sum: f32,
+    z_sum: f32,
+    confidence_sum: f32,
+    last_issued_at: SystemTime,
+}
+
+impl BlackcatScoreEntry {
+    fn new(minute: &ModeratorMinutes) -> Self {
+        Self {
+            plan_signature: minute.plan_signature.clone(),
+            script_hint: minute.script_hint.clone(),
+            observations: 0,
+            support_sum: 0.0,
+            reward_sum: 0.0,
+            psi_sum: 0.0,
+            z_sum: 0.0,
+            confidence_sum: 0.0,
+            last_issued_at: minute.issued_at,
+        }
+    }
+
+    fn observe(&mut self, minute: &ModeratorMinutes) {
+        self.observations += 1;
+        self.support_sum += minute.support.max(0.0);
+        self.reward_sum += minute.reward.max(0.0);
+        self.psi_sum += minute.mean_psi;
+        self.z_sum += minute.mean_z;
+        self.confidence_sum += minute.confidence.0 + minute.confidence.1;
+        self.last_issued_at = self.last_issued_at.max(minute.issued_at);
+    }
+
+    fn to_score(&self) -> BlackcatScore {
+        let observations = self.observations.max(1);
+        BlackcatScore {
+            plan_signature: self.plan_signature.clone(),
+            script_hint: self.script_hint.clone(),
+            observations,
+            mean_support: self.support_sum / observations as f32,
+            mean_reward: self.reward_sum / observations as f64,
+            mean_psi: self.psi_sum / observations as f32,
+            mean_z: self.z_sum / observations as f32,
+            mean_confidence: self.confidence_sum / observations as f32,
+            last_issued_at: self.last_issued_at,
+        }
+    }
+
+    fn mean_reward(&self) -> f64 {
+        if self.observations == 0 {
+            0.0
+        } else {
+            self.reward_sum / self.observations as f64
+        }
+    }
+}
+
 /// Result of the moderator ingest step.
 #[derive(Clone, Debug)]
 pub struct ModeratorOutcome {
@@ -571,6 +650,8 @@ pub struct BlackcatModerator {
     runtime: BlackCatRuntime,
     history: Vec<ModeratorMinutes>,
     history_limit: usize,
+    scoreboard: HashMap<String, BlackcatScoreEntry>,
+    scoreboard_limit: usize,
 }
 
 impl core::fmt::Debug for BlackcatModerator {
@@ -578,6 +659,8 @@ impl core::fmt::Debug for BlackcatModerator {
         f.debug_struct("BlackcatModerator")
             .field("history", &self.history.len())
             .field("history_limit", &self.history_limit)
+            .field("scoreboard", &self.scoreboard.len())
+            .field("scoreboard_limit", &self.scoreboard_limit)
             .finish()
     }
 }
@@ -590,6 +673,8 @@ impl BlackcatModerator {
             runtime,
             history: Vec::new(),
             history_limit: 64,
+            scoreboard: HashMap::new(),
+            scoreboard_limit: 32,
         }
     }
 
@@ -662,6 +747,8 @@ impl BlackcatModerator {
             self.history.remove(0);
         }
         self.history.push(minutes.clone());
+        self.record_minute(&minutes);
+        self.prune_scoreboard();
         let proposal = self.conductor.ingest(summary);
         ModeratorOutcome { minutes, proposal }
     }
@@ -704,10 +791,34 @@ impl BlackcatModerator {
         &self.history
     }
 
+    /// Returns the aggregated scoreboard derived from the moderator minutes.
+    pub fn scoreboard(&self) -> Vec<BlackcatScore> {
+        let mut entries: Vec<_> = self
+            .scoreboard
+            .values()
+            .cloned()
+            .map(|entry| entry.to_score())
+            .collect();
+        entries.sort_by(|a, b| {
+            b.mean_reward
+                .partial_cmp(&a.mean_reward)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| b.observations.cmp(&a.observations))
+                .then_with(|| b.last_issued_at.cmp(&a.last_issued_at))
+        });
+        entries
+    }
+
     /// Overrides the maximum stored minutes.
     pub fn set_history_limit(&mut self, limit: usize) {
         self.history_limit = limit.max(1);
         self.trim_history();
+    }
+
+    /// Overrides how many aggregated entries are retained in the scoreboard.
+    pub fn set_scoreboard_limit(&mut self, limit: usize) {
+        self.scoreboard_limit = limit.max(1);
+        self.prune_scoreboard();
     }
 
     /// Absorbs externally captured minutes, keeping the rolling window consistent.
@@ -720,14 +831,60 @@ impl BlackcatModerator {
                 continue;
             }
             self.history.push(minute.clone());
+            self.record_minute(minute);
         }
         self.trim_history();
+        self.prune_scoreboard();
     }
 
     fn trim_history(&mut self) {
         if self.history.len() > self.history_limit {
             let excess = self.history.len() - self.history_limit;
             self.history.drain(0..excess);
+            self.rebuild_scoreboard();
+        }
+    }
+
+    fn record_minute(&mut self, minute: &ModeratorMinutes) {
+        let entry = self
+            .scoreboard
+            .entry(minute.plan_signature.clone())
+            .or_insert_with(|| BlackcatScoreEntry::new(minute));
+        entry.script_hint = minute.script_hint.clone();
+        entry.observe(minute);
+    }
+
+    fn rebuild_scoreboard(&mut self) {
+        let mut rebuilt = HashMap::new();
+        for minute in &self.history {
+            let entry = rebuilt
+                .entry(minute.plan_signature.clone())
+                .or_insert_with(|| BlackcatScoreEntry::new(minute));
+            entry.script_hint = minute.script_hint.clone();
+            entry.observe(minute);
+        }
+        self.scoreboard = rebuilt;
+        self.prune_scoreboard();
+    }
+
+    fn prune_scoreboard(&mut self) {
+        if self.scoreboard.len() <= self.scoreboard_limit {
+            return;
+        }
+        let mut entries: Vec<_> = self
+            .scoreboard
+            .values()
+            .cloned()
+            .collect();
+        entries.sort_by(|a, b| {
+            a.mean_reward()
+                .partial_cmp(&b.mean_reward())
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.last_issued_at.cmp(&b.last_issued_at))
+        });
+        let excess = entries.len() - self.scoreboard_limit;
+        for entry in entries.into_iter().take(excess) {
+            self.scoreboard.remove(&entry.plan_signature);
         }
     }
 }
@@ -928,5 +1085,74 @@ mod tests {
 
         moderator.absorb_minutes(&[later_minute]);
         assert_eq!(moderator.minutes().len(), 1);
+    }
+
+    #[test]
+    fn moderator_builds_scoreboard() {
+        let mut moderator = BlackcatModerator::with_default_runtime(0.5, 2);
+        let base_time = SystemTime::now();
+        let minute_a = ModeratorMinutes {
+            plan_signature: "plan-a".into(),
+            script_hint: "soft(plan-a)".into(),
+            winner: OutcomeBand::Above,
+            support: 0.6,
+            mean_score: 0.7,
+            mean_psi: 0.4,
+            mean_z: 0.1,
+            confidence: (0.45, 0.85),
+            picks: HashMap::new(),
+            reward: 0.5,
+            notes: "first".into(),
+            issued_at: base_time,
+        };
+        let mut minute_b = minute_a.clone();
+        minute_b.support = 0.3;
+        minute_b.reward = 0.25;
+        minute_b.mean_psi = 0.2;
+        minute_b.mean_z = 0.05;
+        minute_b.confidence = (0.35, 0.65);
+        minute_b.issued_at = base_time + Duration::from_secs(4);
+        let mut minute_c = minute_a.clone();
+        minute_c.plan_signature = "plan-b".into();
+        minute_c.script_hint = "soft(plan-b)".into();
+        minute_c.support = 0.55;
+        minute_c.reward = 0.7;
+        minute_c.mean_psi = 0.5;
+        minute_c.mean_z = 0.2;
+        minute_c.confidence = (0.5, 0.9);
+        minute_c.issued_at = base_time + Duration::from_secs(8);
+
+        moderator.absorb_minutes(&[minute_a, minute_b.clone(), minute_c.clone()]);
+        let mut scoreboard = moderator.scoreboard();
+        assert_eq!(scoreboard.len(), 2);
+        scoreboard.sort_by(|a, b| a.plan_signature.cmp(&b.plan_signature));
+        let entry_a = scoreboard
+            .iter()
+            .find(|entry| entry.plan_signature == "plan-a")
+            .unwrap();
+        assert_eq!(entry_a.observations, 2);
+        assert!((entry_a.mean_support - 0.45).abs() < 1e-6);
+        assert!((entry_a.mean_reward - 0.375).abs() < 1e-6);
+        assert!((entry_a.mean_psi - 0.3).abs() < 1e-6);
+        assert!((entry_a.mean_confidence - 1.15).abs() < 1e-6);
+        let entry_b = scoreboard
+            .iter()
+            .find(|entry| entry.plan_signature == "plan-b")
+            .unwrap();
+        assert_eq!(entry_b.observations, 1);
+        assert!((entry_b.mean_reward - 0.7).abs() < 1e-6);
+        assert!((entry_b.mean_confidence - 1.4).abs() < 1e-6);
+
+        moderator.set_scoreboard_limit(1);
+        let scoreboard_limited = moderator.scoreboard();
+        assert_eq!(scoreboard_limited.len(), 1);
+        assert_eq!(scoreboard_limited[0].plan_signature, "plan-b");
+
+        moderator.set_history_limit(1);
+        let scoreboard_trimmed = moderator.scoreboard();
+        assert_eq!(scoreboard_trimmed.len(), 1);
+        assert_eq!(scoreboard_trimmed[0].plan_signature, "plan-b");
+        assert_eq!(scoreboard_trimmed[0].observations, 1);
+        assert!((scoreboard_trimmed[0].mean_reward - 0.7).abs() < 1e-6);
     }
 }
