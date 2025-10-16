@@ -70,15 +70,17 @@ impl ZSpaceGraphConvolution {
 
     fn record_forward_flows(&self, flows: Vec<NodeFlowSample>) {
         if let Some(tracer) = &self.tracer {
-            let mut guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
-            guard.begin_layer(self.name.clone(), self.curvature, flows);
+            if let Ok(mut guard) = tracer.lock() {
+                guard.begin_layer(self.name.clone(), self.curvature, flows);
+            }
         }
     }
 
     fn record_backward_updates(&self, weight: f32, bias: f32) {
         if let Some(tracer) = &self.tracer {
-            let mut guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
-            guard.record_weight_update(weight, Some(bias));
+            if let Ok(mut guard) = tracer.lock() {
+                guard.record_weight_update(weight, Some(bias));
+            }
         }
     }
 }

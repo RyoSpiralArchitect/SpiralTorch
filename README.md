@@ -312,6 +312,26 @@ for event in receiver.try_iter() {
 }
 ```
 
+Global telemetry consumers can subscribe without owning the pipeline by adding
+`with_telemetry()`. The `DesireTelemetrySink` records every step’s phase,
+temperature, avoidance energy, and schedule weights into the shared telemetry
+hub so trainers, notebooks, or external services can poll the latest state via
+`get_last_desire_step`.【F:crates/st-nn/src/language/pipeline.rs†L101-L239】【F:crates/st-core/src/telemetry/hub.rs†L61-L126】
+
+```rust
+use st_core::telemetry::hub;
+use st_nn::language::DesirePipeline;
+
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_telemetry()
+    .build();
+
+let _ = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(sample) = hub::get_last_desire_step() {
+    println!("phase {:?} at T={:.3}", sample.phase, sample.temperature);
+}
+```
+
 Training loops can now subscribe directly. Clone a `DesireTrainerBridge`, attach
 it with `with_trainer_bridge`, and hand the same bridge to `ModuleTrainer` via
 `enable_desire_pipeline`. Each step drains into a shared summary so the trainer
@@ -487,6 +507,12 @@ cargo run -p st-nn --features "psi psychoid collapse" --example hello_session
 On the Python side, pass `psychoid=True` when building the roundtable and fetch
 the latest reading via `spiraltorch.get_psychoid_stats()` to log the CTI score,
 raw metrics, and z-scores emitted from the Rust meter.
+
+Need the language desire pulse from Python as well? Call
+`spiraltorch.get_desire_telemetry()` to retrieve the same sample that the
+Rust-side `DesireTelemetrySink` recorded—phase, temperature, avoidance energy,
+logit norms, and the current α/β/γ/λ weights are all surfaced as a dictionary
+ready for notebooks or dashboards.【F:bindings/st-py/src/lib.rs†L227-L243】【F:crates/st-nn/src/language/pipeline.rs†L101-L239】
 
 ψ readings stay inside the automation loop—CollapseDrive, the psychoid dream
 engine, and the distributed roundtable all consume them directly. The examples
