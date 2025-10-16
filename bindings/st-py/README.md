@@ -171,6 +171,10 @@ dataset = [
 reports = lightning.fit(model, loss, [dataset])
 for epoch, stats in enumerate(reports, start=1):
     print(f"epoch {epoch}: avg loss={stats.average_loss:.6f}")
+
+# Switch back to manual preparation mid-run if you need custom tape control
+lightning.set_auto_prepare(False)
+session.prepare_module(model)
 ```
 
 The `DistConfig` connects the local roundtable to a meta layer that exchanges

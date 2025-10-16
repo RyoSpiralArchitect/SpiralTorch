@@ -115,6 +115,11 @@ The loader runs entirely in Rust—mini-batches stream straight into
 Prefer a notebook-friendly wrapper? Instantiate `SpiralLightning` from Python
 to bundle the session, trainer, and schedule into a single object that
 auto-prepares modules and returns per-epoch reports with `lightning.fit(...)`.
+On the Rust side you can reach for `SpiralLightning::builder(...)` or the
+companion `LightningConfig::builder(...)` helper to customise the output shape,
+roundtable parameters, or disable automatic module preparation before
+construction. Once created, call `set_auto_prepare(false)` to opt back into
+manual tape management without rebuilding the harness.
 
 ### GoldenRetriever Training (distributed, data-race free)
 

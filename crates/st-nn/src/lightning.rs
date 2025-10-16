@@ -9,6 +9,47 @@ use crate::trainer::{EpochStats, ModuleTrainer};
 use crate::{Loss, Module, PureResult, Tensor};
 use std::collections::HashSet;
 
+/// Stable key used to track which modules were prepared for hypergrad tapes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ModuleKey(usize);
+
+impl ModuleKey {
+    fn new<M: Module>(module: &mut M) -> Self {
+        Self(module as *mut M as usize)
+    }
+}
+
+fn roundtable_changed(left: &RoundtableConfig, right: &RoundtableConfig) -> bool {
+    if left.top_k != right.top_k
+        || left.mid_k != right.mid_k
+        || left.bottom_k != right.bottom_k
+        || left.here_tolerance != right.here_tolerance
+    {
+        return true;
+    }
+    #[cfg(feature = "psychoid")]
+    {
+        if left.psychoid_enabled != right.psychoid_enabled
+            || left.psychoid_log != right.psychoid_log
+        {
+            return true;
+        }
+    }
+    #[cfg(feature = "psi")]
+    {
+        if left.psi_enabled != right.psi_enabled {
+            return true;
+        }
+    }
+    #[cfg(feature = "collapse")]
+    {
+        if left.collapse_enabled != right.collapse_enabled {
+            return true;
+        }
+    }
+    false
+}
+
 /// Configuration bundle used by [`SpiralLightning`].
 #[derive(Debug, Clone)]
 pub struct LightningConfig {
@@ -21,17 +62,24 @@ pub struct LightningConfig {
 impl LightningConfig {
     /// Creates a new configuration using the provided output shape.
     pub fn new(rows: u32, cols: u32) -> Self {
-        Self {
-            rows: rows.max(1),
-            cols: cols.max(1),
-            roundtable: RoundtableConfig::default(),
-            auto_prepare: true,
-        }
+        Self::builder(rows, cols).build()
+    }
+
+    /// Creates a builder that can be used to refine the configuration.
+    pub fn builder(rows: u32, cols: u32) -> LightningConfigBuilder {
+        LightningConfigBuilder::new(rows, cols)
     }
 
     /// Overrides the roundtable configuration.
     pub fn with_roundtable(mut self, roundtable: RoundtableConfig) -> Self {
         self.roundtable = roundtable;
+        self
+    }
+
+    /// Updates the output shape stored by the configuration.
+    pub fn with_output_shape(mut self, rows: u32, cols: u32) -> Self {
+        self.rows = rows.max(1);
+        self.cols = cols.max(1);
         self
     }
 
@@ -56,13 +104,88 @@ impl LightningConfig {
         self.roundtable
     }
 
+    /// Returns an immutable reference to the roundtable configuration.
+    pub fn roundtable_config(&self) -> &RoundtableConfig {
+        &self.roundtable
+    }
+
     /// Returns whether automatic module preparation is enabled.
     pub fn auto_prepare(&self) -> bool {
         self.auto_prepare
     }
+
+    /// Returns a builder seeded with the current configuration values.
+    pub fn to_builder(&self) -> LightningConfigBuilder {
+        LightningConfigBuilder {
+            rows: self.rows,
+            cols: self.cols,
+            roundtable: self.roundtable,
+            auto_prepare: self.auto_prepare,
+        }
+    }
 }
 
 impl Default for LightningConfig {
+    fn default() -> Self {
+        Self::new(1, 1)
+    }
+}
+
+/// Builder used to progressively construct [`LightningConfig`] instances.
+#[derive(Debug, Clone)]
+pub struct LightningConfigBuilder {
+    rows: u32,
+    cols: u32,
+    roundtable: RoundtableConfig,
+    auto_prepare: bool,
+}
+
+impl LightningConfigBuilder {
+    fn new(rows: u32, cols: u32) -> Self {
+        Self {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            roundtable: RoundtableConfig::default(),
+            auto_prepare: true,
+        }
+    }
+
+    /// Overrides the output shape tracked by the builder.
+    pub fn output_shape(mut self, rows: u32, cols: u32) -> Self {
+        self.rows = rows.max(1);
+        self.cols = cols.max(1);
+        self
+    }
+
+    /// Overrides the roundtable configuration used when building the final config.
+    pub fn roundtable(mut self, roundtable: RoundtableConfig) -> Self {
+        self.roundtable = roundtable;
+        self
+    }
+
+    /// Enables or disables automatic module preparation.
+    pub fn auto_prepare(mut self, auto_prepare: bool) -> Self {
+        self.auto_prepare = auto_prepare;
+        self
+    }
+
+    /// Applies an arbitrary transformation before finishing the builder.
+    pub fn configure_with(self, f: impl FnOnce(Self) -> Self) -> Self {
+        f(self)
+    }
+
+    /// Finalises the builder into a [`LightningConfig`].
+    pub fn build(self) -> LightningConfig {
+        LightningConfig {
+            rows: self.rows,
+            cols: self.cols,
+            roundtable: self.roundtable,
+            auto_prepare: self.auto_prepare,
+        }
+    }
+}
+
+impl Default for LightningConfigBuilder {
     fn default() -> Self {
         Self::new(1, 1)
     }
@@ -80,7 +203,7 @@ pub struct SpiralLightning {
     trainer: ModuleTrainer,
     schedule: RoundtableSchedule,
     config: LightningConfig,
-    prepared_modules: HashSet<usize>,
+    prepared_modules: HashSet<ModuleKey>,
 }
 
 impl SpiralLightning {
@@ -88,6 +211,11 @@ impl SpiralLightning {
     pub fn new(session: SpiralSession, rows: u32, cols: u32) -> Self {
         let config = LightningConfig::new(rows, cols);
         Self::with_config(session, config)
+    }
+
+    /// Creates a builder that can be used to customise the harness before construction.
+    pub fn builder(session: SpiralSession) -> LightningBuilder {
+        LightningBuilder::new(session)
     }
 
     /// Builds a new harness for the provided configuration.
@@ -128,22 +256,38 @@ impl SpiralLightning {
         &self.config
     }
 
+    /// Enables or disables automatic module preparation.
+    pub fn set_auto_prepare(&mut self, auto_prepare: bool) {
+        if self.config.auto_prepare == auto_prepare {
+            return;
+        }
+        self.config.auto_prepare = auto_prepare;
+        self.prepared_modules.clear();
+    }
+
     /// Rebuilds the internal schedule using a new configuration.
     pub fn reconfigure(&mut self, mut config: LightningConfig) {
         // Ensure we reuse the latest trainer state when refreshing the schedule.
         config.rows = config.rows.max(1);
         config.cols = config.cols.max(1);
-        self.schedule = self
+        let schedule = self
             .trainer
             .roundtable(config.rows, config.cols, config.roundtable);
+        let schedule_changed = self.config.rows != config.rows
+            || self.config.cols != config.cols
+            || roundtable_changed(&self.config.roundtable, &config.roundtable);
+        let auto_changed = self.config.auto_prepare != config.auto_prepare;
+        self.schedule = schedule;
         self.config = config;
-        self.prepared_modules.clear();
+        if schedule_changed || auto_changed {
+            self.prepared_modules.clear();
+        }
     }
 
     /// Explicitly prepares the provided module using the session guard.
     pub fn prepare_module<M: Module>(&mut self, module: &mut M) -> PureResult<()> {
         self.session.prepare_module(module)?;
-        let key = module as *mut M as usize;
+        let key = ModuleKey::new(module);
         self.prepared_modules.insert(key);
         Ok(())
     }
@@ -152,7 +296,7 @@ impl SpiralLightning {
         if !self.config.auto_prepare {
             return Ok(());
         }
-        let key = module as *mut M as usize;
+        let key = ModuleKey::new(module);
         if self.prepared_modules.contains(&key) {
             return Ok(());
         }
@@ -200,6 +344,59 @@ impl SpiralLightning {
     /// Resets the prepared module registry so the next call reattaches tapes.
     pub fn reset_prepared_modules(&mut self) {
         self.prepared_modules.clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prepared_module_count(&self) -> usize {
+        self.prepared_modules.len()
+    }
+}
+
+/// Builder used to create [`SpiralLightning`] harnesses with customised settings.
+#[derive(Debug)]
+pub struct LightningBuilder {
+    session: SpiralSession,
+    config: LightningConfigBuilder,
+}
+
+impl LightningBuilder {
+    fn new(session: SpiralSession) -> Self {
+        Self {
+            session,
+            config: LightningConfigBuilder::default(),
+        }
+    }
+
+    /// Overrides the output shape used for the internal roundtable.
+    pub fn output_shape(mut self, rows: u32, cols: u32) -> Self {
+        self.config = self.config.output_shape(rows, cols);
+        self
+    }
+
+    /// Overrides the roundtable configuration applied to the harness.
+    pub fn roundtable(mut self, config: RoundtableConfig) -> Self {
+        self.config = self.config.roundtable(config);
+        self
+    }
+
+    /// Enables or disables automatic module preparation.
+    pub fn auto_prepare(mut self, enabled: bool) -> Self {
+        self.config = self.config.auto_prepare(enabled);
+        self
+    }
+
+    /// Applies an arbitrary transformation over the builder prior to construction.
+    pub fn configure_with(
+        mut self,
+        f: impl FnOnce(LightningConfigBuilder) -> LightningConfigBuilder,
+    ) -> Self {
+        self.config = f(self.config);
+        self
+    }
+
+    /// Consumes the builder and returns the constructed [`SpiralLightning`].
+    pub fn build(self) -> SpiralLightning {
+        SpiralLightning::with_config(self.session, self.config.build())
     }
 }
 
@@ -253,5 +450,70 @@ mod tests {
             .fit_epochs(&mut model, &mut loss, vec![epoch_a, epoch_b])
             .unwrap();
         assert_eq!(reports.len(), 2);
+    }
+
+    #[test]
+    fn lightning_builder_configures_harness() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-0.5)
+            .build()
+            .unwrap();
+        let roundtable = RoundtableConfig::default().with_top_k(4).with_mid_k(3);
+        let lightning = SpiralLightning::builder(session.clone())
+            .output_shape(3, 5)
+            .roundtable(roundtable)
+            .auto_prepare(false)
+            .build();
+        assert_eq!(lightning.config().rows(), 3);
+        assert_eq!(lightning.config().cols(), 5);
+        assert_eq!(lightning.config().roundtable().top_k, 4);
+        assert_eq!(lightning.config().roundtable().mid_k, 3);
+        assert!(!lightning.config().auto_prepare());
+        // Builder should not consume the session clone allowing further usage.
+        let mut from_config = SpiralLightning::with_config(session, lightning.config().clone());
+        let mut model = Linear::new("demo", 1, 1).unwrap();
+        let mut loss = MeanSquaredError::new();
+        from_config
+            .train_epoch(
+                &mut model,
+                &mut loss,
+                vec![(tensor(&[0.0]), tensor(&[0.0]))],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn reconfigure_clears_prepared_registry_when_schedule_changes() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .build()
+            .unwrap();
+        let mut lightning = SpiralLightning::new(session, 1, 1);
+        let mut model = Linear::new("demo", 1, 1).unwrap();
+        lightning.prepare_module(&mut model).unwrap();
+        assert_eq!(lightning.prepared_module_count(), 1);
+        let new_config = lightning
+            .config()
+            .to_builder()
+            .roundtable(RoundtableConfig::default().with_top_k(2))
+            .build();
+        lightning.reconfigure(new_config);
+        assert_eq!(lightning.prepared_module_count(), 0);
+    }
+
+    #[test]
+    fn toggling_auto_prepare_resets_registry() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .build()
+            .unwrap();
+        let mut lightning = SpiralLightning::new(session, 1, 1);
+        let mut model = Linear::new("demo", 1, 1).unwrap();
+        lightning.prepare_module(&mut model).unwrap();
+        assert_eq!(lightning.prepared_module_count(), 1);
+        lightning.set_auto_prepare(false);
+        assert_eq!(lightning.prepared_module_count(), 0);
+        lightning.set_auto_prepare(true);
+        assert_eq!(lightning.config().auto_prepare(), true);
     }
 }

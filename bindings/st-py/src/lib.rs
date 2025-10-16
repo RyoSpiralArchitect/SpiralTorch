@@ -1764,6 +1764,153 @@ impl PyModuleTrainer {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "SpiralLightning", unsendable)]
+struct PySpiralLightning {
+    inner: NnSpiralLightning,
+}
+
+impl PySpiralLightning {
+    fn from_inner(inner: NnSpiralLightning) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PySpiralLightning {
+    #[new]
+    #[pyo3(signature = (session, rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn new(
+        session: PySpiralSession,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> Self {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        let inner = NnSpiralLightning::with_config(session.inner.clone(), config);
+        Self { inner }
+    }
+
+    #[getter]
+    fn rows(&self) -> u32 {
+        self.inner.config().rows()
+    }
+
+    #[getter]
+    fn cols(&self) -> u32 {
+        self.inner.config().cols()
+    }
+
+    #[getter]
+    fn auto_prepare(&self) -> bool {
+        self.inner.config().auto_prepare()
+    }
+
+    fn set_auto_prepare(&mut self, enabled: bool) {
+        self.inner.set_auto_prepare(enabled);
+    }
+
+    fn schedule(&self) -> PyRoundtableSchedule {
+        PyRoundtableSchedule::from_schedule(self.inner.schedule().clone())
+    }
+
+    #[pyo3(signature = (rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn reconfigure(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        self.inner.reconfigure(config);
+    }
+
+    fn prepare_module(&mut self, module: &Bound<'_, PyAny>) -> PyResult<()> {
+        prepare_module_for_lightning(&mut self.inner, module)
+    }
+
+    fn reset_prepared(&mut self) {
+        self.inner.reset_prepared_modules();
+    }
+
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<PyEpochStats> {
+        let stats = run_epoch_with_lightning(&mut self.inner, module, loss, batches)?;
+        Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        epochs: &Bound<'_, PyAny>,
+    ) -> PyResult<Vec<PyEpochStats>> {
+        let epoch_objects: Vec<PyObject> = epochs.extract()?;
+        let mut reports = Vec::with_capacity(epoch_objects.len());
+        for epoch in epoch_objects {
+            let bound = epoch.bind(py);
+            let stats = run_epoch_with_lightning(&mut self.inner, module, loss, &bound)?;
+            reports.push(PyEpochStats::from_stats(stats));
+        }
+        Ok(reports)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "SpiralLightning(rows={}, cols={}, auto_prepare={})",
+            self.rows(),
+            self.cols(),
+            self.auto_prepare()
+        ))
+    }
+}
+
 #[pyclass(module = "spiraltorch", name = "SpiralSessionBuilder")]
 struct PySpiralSessionBuilder {
     builder: Option<SpiralSessionBuilder>,
@@ -2004,6 +2151,37 @@ impl PySpiralSession {
                 "SpiralSession.train_epoch expects either (trainer, module, loss, batches, schedule) or (module, loss, batches, schedule)",
             )),
         }
+    }
+
+    #[pyo3(signature = (rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn lightning(
+        &self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> PySpiralLightning {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::new(rows, cols)
+            .with_roundtable(roundtable)
+            .with_auto_prepare(auto_prepare);
+        PySpiralLightning::from_inner(NnSpiralLightning::with_config(self.inner.clone(), config))
     }
 
     #[pyo3(signature = (seed, sot=None))]
@@ -2301,6 +2479,121 @@ fn run_epoch_with_trainer(
 
     Err(PyValueError::new_err(
         "ModuleTrainer.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
+    ))
+}
+
+fn prepare_module_for_lightning(
+    lightning: &mut NnSpiralLightning,
+    module: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        convert(lightning.prepare_module(seq.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        convert(lightning.prepare_module(linear.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        convert(lightning.prepare_module(relu.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        convert(lightning.prepare_module(conv.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        convert(lightning.prepare_module(wave.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        convert(lightning.prepare_module(projector.borrow_mut()?))?;
+        return Ok(());
+    }
+    Err(PyValueError::new_err(
+        "SpiralLightning.prepare_module expects Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, or Sequential modules",
+    ))
+}
+
+fn run_epoch_with_lightning(
+    lightning: &mut NnSpiralLightning,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
+    batches: &Bound<'_, PyAny>,
+) -> PyResult<EpochStats> {
+    if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(lightning.train_epoch(
+                    seq.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                ))?;
+                return Ok(stats);
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(lightning.train_epoch(
+                    linear.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                ))?;
+                return Ok(stats);
+            }
+        }
+
+        if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(lightning.train_epoch(
+                    relu.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                ))?;
+                return Ok(stats);
+            }
+        }
+    }
+
+    let dataset: Vec<(Tensor, Tensor)> = batches
+        .extract::<Vec<(PyTensor, PyTensor)>>()?
+        .into_iter()
+        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+        .collect();
+
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                seq.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.clone(),
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                linear.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.clone(),
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats =
+                convert(lightning.train_epoch(relu.borrow_mut()?, mse.inner_mut(), dataset))?;
+            return Ok(stats);
+        }
+    }
+
+    Err(PyValueError::new_err(
+        "SpiralLightning.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
     ))
 }
 

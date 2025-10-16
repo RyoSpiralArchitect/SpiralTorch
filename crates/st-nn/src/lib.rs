@@ -37,7 +37,7 @@ pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
 pub use layers::{Relu, ToposResonator, ZSpaceMixer};
-pub use lightning::{LightningConfig, SpiralLightning};
+pub use lightning::{LightningBuilder, LightningConfig, LightningConfigBuilder, SpiralLightning};
 pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
 pub use plan::RankPlanner;
