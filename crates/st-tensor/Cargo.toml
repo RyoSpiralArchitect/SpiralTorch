@@ -20,8 +20,8 @@ cpu = []
 # Keep the granular feature name for the fractional WGPU kernels while also
 # providing the alias expected by the Python bindings (and end users invoking
 # `--features wgpu`).
-wgpu_frac = ["dep:wgpu", "dep:bytemuck"]
-wgpu = ["wgpu_frac", "dep:pollster"]
+wgpu_frac = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
+wgpu = ["wgpu_frac"]
 
 # Placeholder features for other accelerators.  These currently do not pull in
 # additional dependencies but allow higher level crates to enable them without

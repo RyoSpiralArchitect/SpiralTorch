@@ -3208,7 +3208,6 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_submodule(&sot_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
-    m.add_function(wrap_pyfunction!(topk2d_py, m)?)?;
     m.add_function(wrap_pyfunction!(topk2d_tensor_py, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
@@ -3237,7 +3236,6 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         vec![
             "plan",
             "plan_topk",
-            "topk2d",
             "topk2d_tensor",
             "z_space_barycenter",
             "hip_probe",

@@ -31,6 +31,9 @@ use core::fmt;
 use std::error::Error;
 use std::f32::consts::PI;
 
+#[cfg(feature = "wgpu")]
+use crate::backend::wgpu_dense;
+
 /// Result alias used throughout the pure module.
 pub type PureResult<T> = Result<T, TensorError>;
 
@@ -82,7 +85,7 @@ pub enum TensorError {
     LoopDetected { depth: usize, max_depth: usize },
     /// Conjugate gradient solver could not reach the requested tolerance.
     ConjugateGradientDiverged { residual: f32, tolerance: f32 },
-    /// External backend failed while executing an accelerated path.
+    /// Execution failed on an accelerator backend.
     BackendFailure {
         backend: &'static str,
         message: String,
@@ -193,7 +196,7 @@ impl fmt::Display for TensorError {
                 )
             }
             TensorError::BackendFailure { backend, message } => {
-                write!(f, "backend {backend} failed: {message}")
+                write!(f, "{backend} backend failure: {message}")
             }
         }
     }
@@ -354,6 +357,23 @@ impl Tensor {
         }
 
         Ok(matmul_naive(self.data(), other.data(), rows, inner, cols))
+    }
+
+    /// Matrix multiply using the WGPU backend when available.
+    #[cfg(feature = "wgpu")]
+    pub fn matmul_wgpu(&self, other: &Tensor) -> PureResult<Tensor> {
+        if self.cols != other.rows {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: other.shape(),
+            });
+        }
+        let data = wgpu_dense::matmul(self.data(), other.data(), self.rows, other.cols, self.cols)
+            .map_err(|message| TensorError::BackendFailure {
+                backend: "wgpu",
+                message,
+            })?;
+        Tensor::from_vec(self.rows, other.cols, data)
     }
 
     /// Element-wise addition.
