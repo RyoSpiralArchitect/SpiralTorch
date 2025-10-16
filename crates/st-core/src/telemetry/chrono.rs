@@ -30,7 +30,233 @@
 //! memory growth.
 
 use core::f32;
+use core::f32::consts::TAU;
 use std::collections::VecDeque;
+
+#[cfg(feature = "kdsl")]
+use st_kdsl::auto::{synthesize_program, HeuristicHint};
+
+/// Dominant harmonic extracted from a chrono spectrum.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChronoPeak {
+    /// Frequency of the harmonic in Hertz (or 1 / caller units).
+    pub frequency: f32,
+    /// Magnitude of the harmonic after normalisation.
+    pub magnitude: f32,
+    /// Phase offset of the harmonic in radians.
+    pub phase: f32,
+}
+
+/// Spectral analysis describing how curvature drift and energy oscillate over time.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChronoHarmonics {
+    /// Number of frames that participated in the spectrum.
+    pub frames: usize,
+    /// Duration covered by the analysed frames.
+    pub duration: f32,
+    /// Sample rate reconstructed from the average frame spacing.
+    pub sample_rate: f32,
+    /// Nyquist frequency associated with the sample rate.
+    pub nyquist: f32,
+    /// Power spectrum of curvature drift, ordered by increasing frequency bin.
+    pub drift_power: Vec<f32>,
+    /// Power spectrum of total energy, ordered by increasing frequency bin.
+    pub energy_power: Vec<f32>,
+    /// Dominant curvature drift harmonic, if any.
+    pub dominant_drift: Option<ChronoPeak>,
+    /// Dominant energy harmonic, if any.
+    pub dominant_energy: Option<ChronoPeak>,
+}
+
+impl ChronoHarmonics {
+    /// Computes the harmonic spectrum for the supplied frames.
+    pub fn from_frames(frames: &[ChronoFrame], bins: usize) -> Option<Self> {
+        if frames.is_empty() || bins == 0 {
+            return None;
+        }
+        let count = frames.len();
+        if count < 2 {
+            return None;
+        }
+        let duration: f32 = frames.iter().map(|frame| frame.dt.max(f32::EPSILON)).sum();
+        if !duration.is_finite() || duration <= f32::EPSILON {
+            return None;
+        }
+        let sample_rate = (count as f32) / duration;
+        let nyquist = 0.5 * sample_rate;
+        let usable_bins = (count / 2 + 1).max(1);
+        let bins = bins.min(usable_bins);
+        let mut drift_series = Vec::with_capacity(count);
+        let mut energy_series = Vec::with_capacity(count);
+        for frame in frames {
+            drift_series.push(frame.curvature_drift);
+            energy_series.push(frame.total_energy);
+        }
+
+        let drift_power = discrete_power_spectrum(&drift_series, bins);
+        let energy_power = discrete_power_spectrum(&energy_series, bins);
+        let dominant_drift = dominant_peak(&drift_power, sample_rate, count);
+        let dominant_energy = dominant_peak(&energy_power, sample_rate, count);
+        Some(Self {
+            frames: count,
+            duration,
+            sample_rate,
+            nyquist,
+            drift_power,
+            energy_power,
+            dominant_drift,
+            dominant_energy,
+        })
+    }
+}
+
+/// Bundled temporal signal that can be routed back into SpiralK and collapse automation.
+#[derive(Clone, Debug)]
+pub struct ChronoLoopSignal {
+    /// Aggregated statistics computed over the recent timeline window.
+    pub summary: ChronoSummary,
+    /// Optional harmonic spectrum describing oscillatory behaviour.
+    pub harmonics: Option<ChronoHarmonics>,
+    /// SpiralK script synthesized from the temporal diagnostics.
+    #[cfg(feature = "kdsl")]
+    pub spiralk_script: Option<String>,
+    /// Raw SpiralK heuristic hints derived from the timeline.
+    #[cfg(feature = "kdsl")]
+    pub spiralk_hints: Vec<HeuristicHint>,
+}
+
+impl ChronoLoopSignal {
+    /// Creates a new loop signal from the supplied summary and harmonics.
+    pub fn new(summary: ChronoSummary, harmonics: Option<ChronoHarmonics>) -> Self {
+        #[cfg(feature = "kdsl")]
+        let (spiralk_hints, spiralk_script) = {
+            let heuristics = ChronoSpiralHeuristics::from(&summary, harmonics.as_ref());
+            let script = if heuristics.hints.is_empty() {
+                None
+            } else {
+                Some(synthesize_program("", &heuristics.hints))
+            };
+            (heuristics.hints, script)
+        };
+
+        Self {
+            summary,
+            harmonics,
+            #[cfg(feature = "kdsl")]
+            spiralk_script,
+            #[cfg(feature = "kdsl")]
+            spiralk_hints,
+        }
+    }
+}
+
+#[cfg(feature = "kdsl")]
+#[derive(Clone, Debug, Default)]
+struct ChronoSpiralHeuristics {
+    hints: Vec<HeuristicHint>,
+}
+
+#[cfg(feature = "kdsl")]
+impl ChronoSpiralHeuristics {
+    fn from(summary: &ChronoSummary, harmonics: Option<&ChronoHarmonics>) -> Self {
+        let mut hints = Vec::new();
+        let drift_intensity = summary.mean_abs_drift.clamp(0.0, 4.0);
+        let energy_band = (summary.max_energy - summary.min_energy).max(0.0);
+        let drift_weight = (0.25 + drift_intensity).clamp(0.25, 0.9);
+        let energy_weight = (0.3 + energy_band.sqrt() * 0.1).clamp(0.3, 1.1);
+
+        let radix = (2.0 + drift_intensity * 4.0).clamp(2.0, 16.0);
+        hints.push(HeuristicHint::new(
+            "radix",
+            format!("{radix:.3}"),
+            drift_weight,
+            "true",
+        ));
+
+        let segments = (1.0 + energy_band.powf(0.25) * 2.0).clamp(1.0, 8.0);
+        hints.push(HeuristicHint::new(
+            "segments",
+            format!("{segments:.3}"),
+            0.3 + drift_intensity.min(1.0) * 0.2,
+            "true",
+        ));
+
+        let tile_cols = (64.0 + summary.mean_energy * 8.0).clamp(32.0, 512.0);
+        hints.push(HeuristicHint::new(
+            "tile_cols",
+            format!("{tile_cols:.3}"),
+            energy_weight,
+            "true",
+        ));
+
+        if let Some(spec) = harmonics {
+            if let Some(peak) = &spec.dominant_drift {
+                let magnitude = peak.magnitude.clamp(0.05, 1.2);
+                let freq_hint = (1.0 + peak.frequency * spec.duration.max(1e-3)).clamp(1.0, 9.0);
+                hints.push(HeuristicHint::new(
+                    "kl",
+                    format!("{freq_hint:.3}"),
+                    magnitude,
+                    "true",
+                ));
+            }
+            if let Some(peak) = &spec.dominant_energy {
+                let magnitude = peak.magnitude.clamp(0.05, 1.5);
+                let wg_hint = (128.0 + peak.frequency * 48.0).clamp(64.0, 2048.0);
+                hints.push(HeuristicHint::new(
+                    "wg",
+                    format!("{wg_hint:.3}"),
+                    magnitude,
+                    "true",
+                ));
+            }
+        }
+
+        Self { hints }
+    }
+}
+
+fn discrete_power_spectrum(series: &[f32], bins: usize) -> Vec<f32> {
+    let n = series.len();
+    let norm = n as f32;
+    (0..bins)
+        .map(|k| {
+            let mut re = 0.0f32;
+            let mut im = 0.0f32;
+            for (i, sample) in series.iter().enumerate() {
+                let angle = -TAU * k as f32 * i as f32 / norm;
+                re += sample * angle.cos();
+                im += sample * angle.sin();
+            }
+            (re * re + im * im).sqrt() / norm
+        })
+        .collect()
+}
+
+fn dominant_peak(power: &[f32], sample_rate: f32, samples: usize) -> Option<ChronoPeak> {
+    if power.is_empty() || samples == 0 {
+        return None;
+    }
+    let mut max_index = None;
+    let mut max_value = 0.0f32;
+    for (idx, magnitude) in power.iter().enumerate() {
+        if idx == 0 {
+            continue;
+        }
+        if magnitude.is_finite() && *magnitude > max_value {
+            max_value = *magnitude;
+            max_index = Some(idx);
+        }
+    }
+    max_index.map(|idx| {
+        let frequency = sample_rate * idx as f32 / samples as f32;
+        ChronoPeak {
+            frequency,
+            magnitude: max_value,
+            phase: 0.0,
+        }
+    })
+}
 
 /// Aggregated summary computed over a slice of chrono frames.
 #[derive(Clone, Debug)]
@@ -316,6 +542,33 @@ impl ChronoTimeline {
         let skip = self.frames.len() - window;
         ChronoSummary::from_iter(self.frames.iter().skip(skip))
     }
+
+    /// Computes harmonic statistics over the most recent `window` frames.
+    pub fn harmonics(&self, window: usize, bins: usize) -> Option<ChronoHarmonics> {
+        if self.frames.is_empty() {
+            return None;
+        }
+        let window = window.max(1).min(self.frames.len());
+        let start = self.frames.len() - window;
+        let slice: Vec<_> = self.frames.iter().skip(start).cloned().collect();
+        ChronoHarmonics::from_frames(&slice, bins)
+    }
+
+    /// Builds a loop signal by combining a rolling summary with optional harmonics.
+    pub fn loop_signal(&self, window: usize, bins: usize) -> Option<ChronoLoopSignal> {
+        if self.frames.is_empty() {
+            return None;
+        }
+        let window = window.max(1).min(self.frames.len());
+        let summary = self.summarise(window)?;
+        let harmonics = if window < 2 {
+            None
+        } else {
+            let bins = bins.max(1);
+            self.harmonics(window, bins)
+        };
+        Some(ChronoLoopSignal::new(summary, harmonics))
+    }
 }
 
 impl Default for ChronoTimeline {
@@ -377,6 +630,7 @@ impl ResonanceTemporalMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::f32::consts::TAU;
 
     #[test]
     fn timeline_records_and_limits_capacity() {
@@ -504,5 +758,56 @@ mod tests {
         assert_eq!(summary.frames, 2);
         assert!((summary.duration - 0.2).abs() < 1e-6);
         assert!(summary.latest_timestamp > 0.0);
+    }
+
+    #[test]
+    fn harmonics_detects_sine_energy() {
+        let mut timeline = ChronoTimeline::with_capacity(64);
+        let mut timestamp = 0.0f32;
+        let dt = 0.1f32;
+        let frequency = 2.0f32; // Hz equivalent (with dt=0.1 -> sample_rate=10)
+        for step in 0..32 {
+            let phase = TAU * frequency * (step as f32) * dt;
+            let energy = phase.sin();
+            let metrics = ResonanceTemporalMetrics {
+                observed_curvature: 0.0,
+                total_energy: energy,
+                homotopy_energy: 0.0,
+                functor_energy: 0.0,
+                recursive_energy: 0.0,
+                projection_energy: 0.0,
+                infinity_energy: 0.0,
+            };
+            timestamp += dt;
+            let frame = timeline.record(dt, metrics);
+            assert!(frame.timestamp <= timestamp + f32::EPSILON);
+        }
+
+        let harmonics = timeline.harmonics(32, 16).expect("harmonics");
+        assert_eq!(harmonics.frames, 32);
+        assert!(harmonics.sample_rate > 0.0);
+        let peak = harmonics.dominant_energy.unwrap_or_default();
+        assert!((peak.frequency - frequency).abs() < 0.5);
+        assert!(peak.magnitude > 0.1);
+    }
+
+    #[test]
+    fn loop_signal_collects_recent_summary() {
+        let mut timeline = ChronoTimeline::with_capacity(8);
+        for idx in 0..4 {
+            let metrics = ResonanceTemporalMetrics {
+                observed_curvature: -1.0 + idx as f32 * 0.05,
+                total_energy: 1.0 + idx as f32 * 0.2,
+                homotopy_energy: 0.4,
+                functor_energy: 0.2,
+                recursive_energy: 0.2,
+                projection_energy: 0.1,
+                infinity_energy: 0.1,
+            };
+            timeline.record(0.1, metrics);
+        }
+        let signal = timeline.loop_signal(4, 8).expect("loop signal");
+        assert_eq!(signal.summary.frames, 4);
+        assert!(signal.summary.mean_energy > 0.0);
     }
 }

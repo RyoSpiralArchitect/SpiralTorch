@@ -39,6 +39,8 @@ use st_core::backend::unison_heuristics::RankKind;
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
+#[cfg(feature = "collapse")]
+use st_core::telemetry::hub::CollapsePulse;
 use st_core::telemetry::hub::{self, SoftlogicZFeedback};
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
@@ -667,7 +669,8 @@ impl ModuleTrainer {
             }
             #[cfg(feature = "collapse")]
             if let (Some(driver), Some(reading)) = (self.collapse.as_mut(), psi_snapshot.as_ref()) {
-                match driver.update(reading) {
+                let command = driver.update(reading);
+                match command {
                     DriveCmd::Collapse {
                         grad_scale,
                         max_norm,
@@ -690,6 +693,15 @@ impl ModuleTrainer {
                         }
                     }
                     DriveCmd::None => {}
+                }
+                if !matches!(command, DriveCmd::None) {
+                    let loop_signal = hub::get_chrono_loop();
+                    hub::set_collapse_pulse(CollapsePulse {
+                        step: reading.step,
+                        total: reading.total,
+                        command,
+                        loop_signal,
+                    });
                 }
             }
             let psi_total_opt: Option<f32> = {

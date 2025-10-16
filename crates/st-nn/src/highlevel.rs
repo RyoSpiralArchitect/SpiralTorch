@@ -10,8 +10,10 @@ use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
 use st_core::telemetry::chrono::{
-    ChronoFrame, ChronoSummary, ChronoTimeline, ResonanceTemporalMetrics,
+    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoSummary, ChronoTimeline,
+    ResonanceTemporalMetrics,
 };
+use st_core::telemetry::hub;
 use st_core::telemetry::maintainer::{Maintainer, MaintainerConfig, MaintainerReport};
 use st_tensor::pure::measure::{z_space_barycenter, ZSpaceBarycenter};
 use st_tensor::pure::{
@@ -603,6 +605,45 @@ impl SpiralSession {
         })
     }
 
+    /// Returns harmonic statistics for the recent temporal history.
+    pub fn timeline_harmonics(
+        &self,
+        window: Option<usize>,
+        bins: usize,
+    ) -> Option<ChronoHarmonics> {
+        let requested = window.unwrap_or(usize::MAX);
+        let bins = bins.max(1);
+        self.chrono.lock().ok().and_then(|timeline| {
+            let available = timeline.len();
+            if available < 2 {
+                None
+            } else {
+                let window = requested.min(available).max(2);
+                timeline.harmonics(window, bins)
+            }
+        })
+    }
+
+    /// Returns a combined summary and SpiralK-ready loop signal.
+    pub fn loop_signal(
+        &self,
+        window: Option<usize>,
+        bins: Option<usize>,
+    ) -> Option<ChronoLoopSignal> {
+        let requested = window.unwrap_or(self.maintainer.window);
+        let bins = bins.unwrap_or(16).max(1);
+        self.chrono.lock().ok().and_then(|timeline| {
+            if timeline.is_empty() {
+                None
+            } else {
+                let available = timeline.len();
+                let window = requested.max(1).min(available);
+                let harmonic_bins = bins.min(window.max(2));
+                timeline.loop_signal(window, harmonic_bins)
+            }
+        })
+    }
+
     /// Clears the temporal telemetry stream.
     pub fn reset_chrono(&self) {
         if let Ok(mut timeline) = self.chrono.lock() {
@@ -657,7 +698,14 @@ impl SpiralSession {
         let mut timeline = self.chrono.lock().map_err(|_| TensorError::IoError {
             message: "chrono timeline poisoned".to_string(),
         })?;
-        Ok(timeline.record(dt, metrics))
+        let frame = timeline.record(dt, metrics);
+        let bin_hint = self.maintainer.window.max(4).min(64);
+        let signal = timeline.loop_signal(self.maintainer.window, bin_hint);
+        drop(timeline);
+        if let Some(signal) = signal {
+            hub::set_chrono_loop(signal);
+        }
+        Ok(frame)
     }
 
     /// Evaluates the temporal telemetry and returns a maintenance recommendation.
@@ -678,15 +726,7 @@ impl SpiralSession {
         if let Some(resonance) = resonance {
             Ok(resonator.describe_resonance(resonance))
         } else {
-            let frames = self.chrono_frames();
-            if let Some(frame) = frames.last() {
-                Ok(resonator.describe_frame(frame))
-            } else {
-                Ok(ResonanceNarrative {
-                    summary: "No resonance history recorded.".to_string(),
-                    highlights: Vec::new(),
-                })
-            }
+            self.timeline_narrative(None, temperature)
         }
     }
 
@@ -698,6 +738,26 @@ impl SpiralSession {
     ) -> PureResult<String> {
         self.narrative(resonance, temperature)
             .map(|narrative| narrative.summary)
+    }
+
+    /// Generates a narrative describing the timeline, optionally restricting to the latest frames.
+    pub fn timeline_narrative(
+        &self,
+        window: Option<usize>,
+        temperature: f32,
+    ) -> PureResult<ResonanceNarrative> {
+        let frames = self.chrono_frames();
+        if frames.is_empty() {
+            return Ok(ResonanceNarrative {
+                summary: "No resonance history recorded.".to_string(),
+                highlights: Vec::new(),
+            });
+        }
+        let limit = window.unwrap_or(frames.len()).min(frames.len());
+        let start = frames.len().saturating_sub(limit);
+        let temp = temperature.max(f32::EPSILON);
+        let resonator = TextResonator::new(self.curvature, temp)?;
+        Ok(resonator.describe_timeline(&frames[start..]))
     }
 
     /// Encodes the recent temporal trace into an amplitude envelope.
@@ -890,6 +950,7 @@ mod tests {
     use super::*;
     use crate::layers::linear::Linear;
     use crate::loss::MeanSquaredError;
+    use st_core::telemetry::hub;
     use st_core::telemetry::maintainer::MaintainerStatus;
     use st_tensor::pure::measure::BarycenterIntermediate;
 
@@ -1169,5 +1230,51 @@ mod tests {
         assert!(!waveform.is_empty());
         let narrative = session.describe(None, 0.6).unwrap();
         assert!(!narrative.is_empty());
+    }
+
+    #[test]
+    fn loop_signal_publishes_and_reads() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(8)
+            .build()
+            .unwrap();
+        let resonance = DifferentialResonance {
+            homotopy_flow: toy_tensor(&[0.2, -0.1]),
+            functor_linearisation: toy_tensor(&[0.1, 0.05]),
+            recursive_objective: toy_tensor(&[0.05, 0.02]),
+            infinity_projection: toy_tensor(&[0.03, 0.01]),
+            infinity_energy: toy_tensor(&[0.02, 0.01]),
+        };
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        let signal = session.loop_signal(None, None).unwrap();
+        assert!(signal.summary.frames >= 2);
+        let hub_signal = hub::get_chrono_loop();
+        assert!(hub_signal.is_some());
+    }
+
+    #[test]
+    fn timeline_harmonics_reports_frequency() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(64)
+            .build()
+            .unwrap();
+        for step in 0..48 {
+            let energy = (step as f32 / 6.0).sin() + 1.2;
+            let resonance = DifferentialResonance {
+                homotopy_flow: toy_tensor(&[energy, -energy]),
+                functor_linearisation: toy_tensor(&[0.1, 0.05]),
+                recursive_objective: toy_tensor(&[0.05, 0.02]),
+                infinity_projection: toy_tensor(&[0.03, 0.01]),
+                infinity_energy: toy_tensor(&[0.02, 0.01]),
+            };
+            session.resonate_over_time(&resonance, 0.1).unwrap();
+        }
+        let harmonics = session.timeline_harmonics(Some(48), 16).unwrap();
+        assert!(harmonics.dominant_energy.is_some());
+        let story = session.timeline_narrative(Some(48), 0.6).unwrap();
+        assert!(story.summary.contains("Timeline span"));
     }
 }
