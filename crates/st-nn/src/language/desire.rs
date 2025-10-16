@@ -7,6 +7,7 @@ use super::geometry::{ConceptHint, RepressionField, SemanticBridge, SymbolGeomet
 use super::schrodinger::schrodinger_boost;
 use super::temperature::{entropy, TemperatureController};
 use crate::PureResult;
+use serde::{Deserialize, Serialize};
 use st_tensor::pure::TensorError;
 
 const REPORT_SIZE: usize = 8;
@@ -14,7 +15,7 @@ const BIAS_UPDATE_INJECTION: f32 = 0.05;
 const BIAS_UPDATE_INTEGRATION: f32 = 0.02;
 const PHASE_EPS: f32 = 1e-4;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DesireWeights {
     pub alpha: f32,
     pub beta: f32,
@@ -33,14 +34,14 @@ impl DesireWeights {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DesirePhase {
     Observation,
     Injection,
     Integration,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct DesireAvoidanceReport {
     pub tokens: Vec<usize>,
     pub scores: Vec<f32>,
@@ -92,7 +93,7 @@ pub fn warmup(start: f32, end: f32, steps: u64) -> DesireSchedule {
     DesireSchedule::new(ScheduleShape::Warmup { start, end, steps })
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DesireSolution {
     pub indices: Vec<usize>,
     pub probabilities: Vec<f32>,

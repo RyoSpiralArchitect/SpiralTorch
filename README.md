@@ -204,6 +204,22 @@ if let Some(event) = trigger {
 }
 ```
 
+Persist the stream to disk with `DesireLogbook` so the observation/injection/
+integration cadence can be replayed later or shared with SpiralK rewrite
+automation. The logbook writes line-delimited JSON records that contain the
+entire `DesireSolution` payload plus any emitted triggers, keeping telemetry and
+avoidance vectors together for offline inspection.【F:crates/st-nn/src/language/logbook.rs†L1-L214】
+
+```rust
+use st_nn::language::{DesireAutomatedStep, DesireAutomation, DesireLogbook};
+use std::time::{Instant, SystemTime};
+
+let mut logbook = DesireLogbook::new("desire.ndjson")?;
+let DesireAutomatedStep { solution, trigger } = automation
+    .step(&logits, previous_token, &concept_hint, Instant::now())?;
+logbook.record(&DesireAutomatedStep { solution, trigger }, SystemTime::now())?;
+```
+
 The result is a single Rust-native control surface that marries KL control,
 Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
 language modules, rewrite monads, or SpiralK trainers without bespoke Python

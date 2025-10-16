@@ -8,6 +8,7 @@ use super::desire::{
 };
 use super::geometry::ConceptHint;
 use crate::PureResult;
+use serde::{Deserialize, Serialize};
 use st_core::config::self_rewrite::SelfRewriteCfg;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -19,13 +20,13 @@ const EPSILON: f32 = 1e-6;
 const HISTORY_LIMIT: usize = 256;
 const TRIGGER_EXPORT: usize = 12;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DesireAutomatedStep {
     pub solution: DesireSolution,
     pub trigger: Option<DesireRewriteTrigger>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DesireRewriteTrigger {
     pub report: DesireAvoidanceReport,
     pub mean_penalty: f32,
