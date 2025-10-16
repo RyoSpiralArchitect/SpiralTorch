@@ -8,10 +8,6 @@ use super::desire::{DesirePhase, DesireSolution, DesireWeights};
 use super::geometry::ConceptHint;
 use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
-use crate::schedule::BandEnergy;
-use crate::PureResult;
-use st_tensor::pure::TensorError;
-use std::cmp::Ordering;
 use crate::roundtable::RoundtableNode;
 use crate::schedule::BandEnergy;
 use crate::{PureResult, RoundtableConfig, RoundtableSchedule};
@@ -1110,7 +1106,6 @@ impl DesirePsiSummary {
         }
     }
 }
-
 #[derive(Debug)]
 pub enum PipelineError {
     EncoderMissing { pipeline: String },
