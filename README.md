@@ -132,6 +132,11 @@ and only reconstructs oriented normals when an external label `c′` is supplied
 This lets SpiralTorch stabilise interface detection, switch on co-orientations
 precisely when downstream pipelines inject a label, and keep curvature-ready
 statistics without violating the gauge symmetry of the unlabeled limit.【F:crates/st-core/src/theory/microlocal.rs†L1-L256】
+Once those signatures exist, `InterfaceZLift` pushes them straight into
+Z-space: it projects the perimeter mass onto a preferred Z-axis, splits the
+energy into Above/Here/Beneath bands, enriches the drift with the Leech
+projector, and emits a ready-to-store `SoftlogicZFeedback` pulse so runtimes can
+bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L386】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
