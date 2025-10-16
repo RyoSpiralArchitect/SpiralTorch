@@ -11,7 +11,7 @@ use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule, PyTuple};
+use pyo3::types::{PyAny, PyDict, PyList, PyModule, PySequence, PyTuple};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use pyo3::PyRef;
@@ -33,8 +33,10 @@ use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
     Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
-    EpochStats, Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer, Relu as NnRelu,
-    RoundtableConfig, RoundtableSchedule, Sequential as NnSequential, SpiralSession,
+    EpochStats, LightningConfig as NnLightningConfig, LightningReport as NnLightningReport,
+    LightningStageReport as NnLightningStageReport, Linear as NnLinear, Loss, MeanSquaredError,
+    Module, ModuleTrainer, Relu as NnRelu, RoundtableConfig, RoundtableSchedule,
+    Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
 use st_tensor::pure::{
@@ -175,6 +177,67 @@ fn convert_fft<T>(value: Result<T, FftError>) -> PyResult<T> {
             }
         })
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_roundtable_config(
+    top_k: u32,
+    mid_k: u32,
+    bottom_k: u32,
+    here_tolerance: f32,
+    psychoid: bool,
+    psychoid_log: bool,
+    psi: bool,
+    collapse: bool,
+) -> RoundtableConfig {
+    #[cfg(not(feature = "psychoid"))]
+    {
+        let _ = psychoid;
+        let _ = psychoid_log;
+    }
+    #[cfg(not(feature = "psi"))]
+    {
+        let _ = psi;
+    }
+    #[cfg(not(feature = "collapse"))]
+    {
+        let _ = collapse;
+    }
+
+    let mut config = RoundtableConfig {
+        top_k,
+        mid_k,
+        bottom_k,
+        here_tolerance: here_tolerance.max(0.0),
+        ..RoundtableConfig::default()
+    };
+
+    #[cfg(feature = "psychoid")]
+    {
+        if psychoid {
+            config = if psychoid_log {
+                config.enable_psychoid_with_log()
+            } else {
+                config.enable_psychoid()
+            };
+        }
+    }
+
+    #[cfg(feature = "psi")]
+    {
+        if psi {
+            config = config.enable_psi();
+        }
+    }
+
+    #[cfg(feature = "collapse")]
+    {
+        if collapse {
+            config = config.enable_collapse();
+        }
+    }
+
+    config
 }
 
 fn intern_label(label: &str) -> &'static str {
@@ -1526,6 +1589,182 @@ impl PyEpochStats {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "LightningStageReport")]
+#[derive(Clone)]
+struct PyLightningStageReport {
+    inner: NnLightningStageReport,
+    epochs: Vec<PyEpochStats>,
+}
+
+impl PyLightningStageReport {
+    fn from_report(inner: NnLightningStageReport) -> Self {
+        let epochs = inner
+            .epochs()
+            .iter()
+            .copied()
+            .map(PyEpochStats::from_stats)
+            .collect();
+        Self { inner, epochs }
+    }
+}
+
+#[pymethods]
+impl PyLightningStageReport {
+    #[getter]
+    fn label(&self) -> Option<String> {
+        self.inner.label().map(|label| label.to_string())
+    }
+
+    #[getter]
+    fn rows(&self) -> u32 {
+        self.inner.config().rows()
+    }
+
+    #[getter]
+    fn cols(&self) -> u32 {
+        self.inner.config().cols()
+    }
+
+    #[getter]
+    fn auto_prepare(&self) -> bool {
+        self.inner.config().auto_prepare()
+    }
+
+    #[getter]
+    fn top_k(&self) -> u32 {
+        self.inner.config().roundtable().top_k
+    }
+
+    #[getter]
+    fn mid_k(&self) -> u32 {
+        self.inner.config().roundtable().mid_k
+    }
+
+    #[getter]
+    fn bottom_k(&self) -> u32 {
+        self.inner.config().roundtable().bottom_k
+    }
+
+    #[getter]
+    fn here_tolerance(&self) -> f32 {
+        self.inner.config().roundtable().here_tolerance
+    }
+
+    #[cfg(feature = "psychoid")]
+    #[getter]
+    fn psychoid(&self) -> bool {
+        self.inner.config().roundtable().psychoid_enabled
+    }
+
+    #[cfg(feature = "psychoid")]
+    #[getter]
+    fn psychoid_log(&self) -> bool {
+        self.inner.config().roundtable().psychoid_log
+    }
+
+    #[cfg(feature = "psi")]
+    #[getter]
+    fn psi(&self) -> bool {
+        self.inner.config().roundtable().psi_enabled
+    }
+
+    #[cfg(feature = "collapse")]
+    #[getter]
+    fn collapse(&self) -> bool {
+        self.inner.config().roundtable().collapse_enabled
+    }
+
+    #[getter]
+    fn epochs(&self) -> Vec<PyEpochStats> {
+        self.epochs.clone()
+    }
+
+    #[getter]
+    fn total_batches(&self) -> usize {
+        self.inner.total_batches()
+    }
+
+    fn best_epoch(&self) -> Option<PyEpochStats> {
+        self.inner.best_epoch().map(PyEpochStats::from_stats)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "LightningStageReport(label={:?}, epochs={}, total_batches={})",
+            self.label(),
+            self.epochs.len(),
+            self.total_batches()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "LightningReport")]
+#[derive(Clone)]
+struct PyLightningReport {
+    inner: NnLightningReport,
+    stages: Vec<PyLightningStageReport>,
+}
+
+impl PyLightningReport {
+    fn from_report(inner: NnLightningReport) -> Self {
+        let stages = inner
+            .stages()
+            .iter()
+            .cloned()
+            .map(PyLightningStageReport::from_report)
+            .collect();
+        Self { inner, stages }
+    }
+}
+
+#[pymethods]
+impl PyLightningReport {
+    #[getter]
+    fn stages(&self) -> Vec<PyLightningStageReport> {
+        self.stages.clone()
+    }
+
+    #[getter]
+    fn total_epochs(&self) -> usize {
+        self.inner.total_epochs()
+    }
+
+    #[getter]
+    fn total_batches(&self) -> usize {
+        self.inner.total_batches()
+    }
+
+    fn best_epoch(&self) -> Option<PyEpochStats> {
+        self.inner.best_epoch().map(PyEpochStats::from_stats)
+    }
+
+    fn best_stage_index(&self) -> Option<usize> {
+        self.inner.best_stage_index()
+    }
+
+    fn best_stage_label(&self) -> Option<String> {
+        self.best_stage_index()
+            .and_then(|idx| self.stages.get(idx))
+            .and_then(|stage| stage.label())
+    }
+
+    fn flatten_epochs(&self) -> Vec<PyEpochStats> {
+        self.inner
+            .epochs()
+            .map(|stats| PyEpochStats::from_stats(*stats))
+            .collect()
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "LightningReport(stages={}, total_epochs={}, total_batches={})",
+            self.stages.len(),
+            self.total_epochs(),
+            self.total_batches()
+        ))
+    }
+}
+
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
 struct PyModuleTrainer {
     inner: ModuleTrainer,
@@ -1583,35 +1822,16 @@ impl PyModuleTrainer {
         collapse: bool,
         dist: Option<PyDistConfig>,
     ) -> PyResult<PyRoundtableSchedule> {
-        let mut config = RoundtableConfig {
+        let config = build_roundtable_config(
             top_k,
             mid_k,
             bottom_k,
-            here_tolerance: here_tolerance.max(0.0),
-            ..RoundtableConfig::default()
-        };
-        #[cfg(feature = "psychoid")]
-        {
-            if psychoid {
-                config = if psychoid_log {
-                    config.enable_psychoid_with_log()
-                } else {
-                    config.enable_psychoid()
-                };
-            }
-        }
-        #[cfg(feature = "psi")]
-        {
-            if psi {
-                config = config.enable_psi();
-            }
-        }
-        #[cfg(feature = "collapse")]
-        {
-            if collapse {
-                config = config.enable_collapse();
-            }
-        }
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
         if let Some(dist_cfg) = dist {
             self.inner.configure_distribution(dist_cfg.inner.clone());
         } else {
@@ -1684,6 +1904,197 @@ impl PyModuleTrainer {
             self.curvature(),
             self.hyper_learning_rate(),
             self.fallback_learning_rate()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SpiralLightning", unsendable)]
+struct PySpiralLightning {
+    inner: NnSpiralLightning,
+}
+
+impl PySpiralLightning {
+    fn from_inner(inner: NnSpiralLightning) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PySpiralLightning {
+    #[new]
+    #[pyo3(signature = (session, rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn new(
+        session: PySpiralSession,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> Self {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        let inner = NnSpiralLightning::with_config(session.inner.clone(), config);
+        Self { inner }
+    }
+
+    #[getter]
+    fn rows(&self) -> u32 {
+        self.inner.config().rows()
+    }
+
+    #[getter]
+    fn cols(&self) -> u32 {
+        self.inner.config().cols()
+    }
+
+    #[getter]
+    fn auto_prepare(&self) -> bool {
+        self.inner.config().auto_prepare()
+    }
+
+    fn set_auto_prepare(&mut self, enabled: bool) {
+        self.inner.set_auto_prepare(enabled);
+    }
+
+    fn schedule(&self) -> PyRoundtableSchedule {
+        PyRoundtableSchedule::from_schedule(self.inner.schedule().clone())
+    }
+
+    #[pyo3(signature = (rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn reconfigure(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        self.inner.reconfigure(config);
+    }
+
+    fn prepare_module(&mut self, module: &Bound<'_, PyAny>) -> PyResult<()> {
+        prepare_module_for_lightning(&mut self.inner, module)
+    }
+
+    fn reset_prepared(&mut self) {
+        self.inner.reset_prepared_modules();
+    }
+
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<PyEpochStats> {
+        let stats = run_epoch_with_lightning(&mut self.inner, module, loss, batches)?;
+        Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        epochs: &Bound<'_, PyAny>,
+    ) -> PyResult<Vec<PyEpochStats>> {
+        let epoch_objects: Vec<PyObject> = epochs.extract()?;
+        let mut reports = Vec::with_capacity(epoch_objects.len());
+        for epoch in epoch_objects {
+            let bound = epoch.bind(py);
+            let stats = run_epoch_with_lightning(&mut self.inner, module, loss, &bound)?;
+            reports.push(PyEpochStats::from_stats(stats));
+        }
+        Ok(reports)
+    }
+
+    #[pyo3(signature = (module, loss, stages))]
+    fn fit_plan(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        stages: &Bound<'_, PyAny>,
+    ) -> PyResult<PyLightningReport> {
+        let stage_objects: Vec<PyObject> = stages.extract()?;
+        if stage_objects.is_empty() {
+            return Err(PyValueError::new_err(
+                "SpiralLightning.fit_plan expects at least one stage",
+            ));
+        }
+
+        let mut inherited = self.inner.config().clone();
+        let mut specs = Vec::with_capacity(stage_objects.len());
+        for stage in stage_objects {
+            let bound = stage.bind(py);
+            let spec = parse_lightning_stage_spec(&bound, &inherited)?;
+            inherited = spec.config.clone();
+            specs.push(spec);
+        }
+
+        let mut stage_reports = Vec::with_capacity(specs.len());
+        for spec in specs {
+            self.inner.reconfigure(spec.config.clone());
+            let mut epoch_stats = Vec::with_capacity(spec.epochs.len());
+            for epoch in spec.epochs {
+                let bound = epoch.bind(py);
+                let stats = run_epoch_with_lightning(&mut self.inner, module, loss, &bound)?;
+                epoch_stats.push(stats);
+            }
+            stage_reports.push(NnLightningStageReport::new(
+                spec.config,
+                spec.label,
+                epoch_stats,
+            ));
+        }
+
+        let report = NnLightningReport::new(stage_reports);
+        Ok(PyLightningReport::from_report(report))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "SpiralLightning(rows={}, cols={}, auto_prepare={})",
+            self.rows(),
+            self.cols(),
+            self.auto_prepare()
         ))
     }
 }
@@ -1858,35 +2269,16 @@ impl PySpiralSession {
         psi: bool,
         collapse: bool,
     ) -> PyRoundtableSchedule {
-        let mut config = RoundtableConfig {
+        let config = build_roundtable_config(
             top_k,
             mid_k,
             bottom_k,
-            here_tolerance: here_tolerance.max(0.0),
-            ..RoundtableConfig::default()
-        };
-        #[cfg(feature = "psychoid")]
-        {
-            if psychoid {
-                config = if psychoid_log {
-                    config.enable_psychoid_with_log()
-                } else {
-                    config.enable_psychoid()
-                };
-            }
-        }
-        #[cfg(feature = "psi")]
-        {
-            if psi {
-                config = config.enable_psi();
-            }
-        }
-        #[cfg(feature = "collapse")]
-        {
-            if collapse {
-                config = config.enable_collapse();
-            }
-        }
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
         PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
     }
 
@@ -1947,6 +2339,37 @@ impl PySpiralSession {
                 "SpiralSession.train_epoch expects either (trainer, module, loss, batches, schedule) or (module, loss, batches, schedule)",
             )),
         }
+    }
+
+    #[pyo3(signature = (rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn lightning(
+        &self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> PySpiralLightning {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::new(rows, cols)
+            .with_roundtable(roundtable)
+            .with_auto_prepare(auto_prepare);
+        PySpiralLightning::from_inner(NnSpiralLightning::with_config(self.inner.clone(), config))
     }
 
     #[pyo3(signature = (seed, sot=None))]
@@ -2245,6 +2668,217 @@ fn run_epoch_with_trainer(
     Err(PyValueError::new_err(
         "ModuleTrainer.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
     ))
+}
+
+fn prepare_module_for_lightning(
+    lightning: &mut NnSpiralLightning,
+    module: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        convert(lightning.prepare_module(seq.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        convert(lightning.prepare_module(linear.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        convert(lightning.prepare_module(relu.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        convert(lightning.prepare_module(conv.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        convert(lightning.prepare_module(wave.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        convert(lightning.prepare_module(projector.borrow_mut()?))?;
+        return Ok(());
+    }
+    Err(PyValueError::new_err(
+        "SpiralLightning.prepare_module expects Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, or Sequential modules",
+    ))
+}
+
+fn run_epoch_with_lightning(
+    lightning: &mut NnSpiralLightning,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
+    batches: &Bound<'_, PyAny>,
+) -> PyResult<EpochStats> {
+    if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(lightning.train_epoch(
+                    seq.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                ))?;
+                return Ok(stats);
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(lightning.train_epoch(
+                    linear.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                ))?;
+                return Ok(stats);
+            }
+        }
+
+        if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(lightning.train_epoch(
+                    relu.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                ))?;
+                return Ok(stats);
+            }
+        }
+    }
+
+    let dataset: Vec<(Tensor, Tensor)> = batches
+        .extract::<Vec<(PyTensor, PyTensor)>>()?
+        .into_iter()
+        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+        .collect();
+
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                seq.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.clone(),
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                linear.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.clone(),
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats =
+                convert(lightning.train_epoch(relu.borrow_mut()?, mse.inner_mut(), dataset))?;
+            return Ok(stats);
+        }
+    }
+
+    Err(PyValueError::new_err(
+        "SpiralLightning.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
+    ))
+}
+
+struct LightningStageSpec {
+    config: NnLightningConfig,
+    epochs: Vec<PyObject>,
+    label: Option<String>,
+}
+
+fn parse_lightning_stage_spec(
+    stage: &Bound<'_, PyAny>,
+    base: &NnLightningConfig,
+) -> PyResult<LightningStageSpec> {
+    let dict = stage.downcast::<PyDict>().map_err(|_| {
+        PyValueError::new_err("Lightning stage must be a mapping with 'config' and 'epochs' keys")
+    })?;
+
+    let epochs_any = dict
+        .get_item("epochs")
+        .ok_or_else(|| PyValueError::new_err("Lightning stage requires an 'epochs' sequence"))?;
+    let epoch_objects: Vec<PyObject> = epochs_any.extract()?;
+    if epoch_objects.is_empty() {
+        return Err(PyValueError::new_err(
+            "Lightning stage requires at least one epoch",
+        ));
+    }
+
+    let mut config = base.clone();
+    if let Some(config_any) = dict.get_item("config") {
+        let config_dict = config_any
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("Lightning stage 'config' must be a mapping"))?;
+
+        let mut rows = config.rows();
+        let mut cols = config.cols();
+        if let Some(value) = config_dict.get_item("rows") {
+            rows = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("cols") {
+            cols = value.extract()?;
+        }
+        if rows != config.rows() || cols != config.cols() {
+            config = config.with_output_shape(rows, cols);
+        }
+
+        let mut roundtable = config.roundtable();
+        if let Some(value) = config_dict.get_item("top_k") {
+            roundtable.top_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("mid_k") {
+            roundtable.mid_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("bottom_k") {
+            roundtable.bottom_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("here_tolerance") {
+            roundtable.here_tolerance = value.extract()?;
+        }
+        #[cfg(feature = "psychoid")]
+        if let Some(value) = config_dict.get_item("psychoid") {
+            roundtable.psychoid_enabled = value.extract()?;
+        }
+        #[cfg(feature = "psychoid")]
+        if let Some(value) = config_dict.get_item("psychoid_log") {
+            roundtable.psychoid_log = value.extract()?;
+        }
+        #[cfg(feature = "psi")]
+        if let Some(value) = config_dict.get_item("psi") {
+            roundtable.psi_enabled = value.extract()?;
+        }
+        #[cfg(feature = "collapse")]
+        if let Some(value) = config_dict.get_item("collapse") {
+            roundtable.collapse_enabled = value.extract()?;
+        }
+        config = config.with_roundtable(roundtable);
+
+        if let Some(value) = config_dict.get_item("auto_prepare") {
+            config = config.with_auto_prepare(value.extract()?);
+        }
+    }
+
+    let label = dict
+        .get_item("label")
+        .and_then(|value| {
+            if value.is_none() {
+                None
+            } else {
+                Some(value.extract::<String>())
+            }
+        })
+        .transpose()?;
+
+    Ok(LightningStageSpec {
+        config,
+        epochs: epoch_objects,
+        label,
+    })
 }
 
 #[pyclass(module = "spiraltorch.nn", name = "Relu")]
@@ -3059,7 +3693,10 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDistConfig>()?;
     m.add_class::<PyRoundtableSchedule>()?;
     m.add_class::<PyEpochStats>()?;
+    m.add_class::<PyLightningStageReport>()?;
+    m.add_class::<PyLightningReport>()?;
     m.add_class::<PyModuleTrainer>()?;
+    m.add_class::<PySpiralLightning>()?;
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
 
@@ -3087,6 +3724,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "RoundtableSchedule",
             "EpochStats",
             "ModuleTrainer",
+            "SpiralLightning",
             "SpiralSessionBuilder",
             "SpiralSession",
             "nn",

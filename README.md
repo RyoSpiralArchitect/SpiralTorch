@@ -112,6 +112,22 @@ stats = session.train_epoch(trainer, model, loss, loader, schedule)
 The loader runs entirely in Rust—mini-batches stream straight into
 `train_epoch` and propagate errors as native `TensorError`s when shapes drift.
 
+Prefer a notebook-friendly wrapper? Instantiate `SpiralLightning` from Python
+to bundle the session, trainer, and schedule into a single object that
+auto-prepares modules and returns per-epoch reports with `lightning.fit(...)`.
+On the Rust side you can reach for `SpiralLightning::builder(...)` or the
+companion `LightningConfig::builder(...)` helper to customise the output shape,
+roundtable parameters, or disable automatic module preparation before
+construction. Once created, call `set_auto_prepare(false)` to opt back into
+manual tape management without rebuilding the harness.
+
+Need curriculum-style hand-offs? Compose `LightningStage` entries and feed them
+into `SpiralLightning::fit_plan(...)`. Each stage can tweak the output shape,
+roundtable, or auto-prepare flag before running one or more epochs. The helper
+returns a structured `LightningReport` so you can inspect per-stage summaries,
+query the best epoch, or plot aggregate loss curves without stitching vectors
+manually.
+
 ### GoldenRetriever Training (distributed, data-race free)
 
 Need to fan training across multiple local workers without sprinkling raw
