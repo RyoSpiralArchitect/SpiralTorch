@@ -35,8 +35,7 @@
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::util::math::LeechProjector;
-use ndarray::{indices, ArrayD, IxDyn};
-use ndarray::Dimension;
+use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use statrs::function::gamma::gamma;
 use std::f64::consts::PI;
 
@@ -182,7 +181,8 @@ impl InterfaceGauge {
         }
     }
 
-    fn radius_in_steps(&self) -> isize {
+    /// Returns the discretised sampling radius expressed in lattice steps.
+    pub fn radius_in_steps(&self) -> isize {
         let steps = (self.physical_radius / self.grid_spacing).ceil() as isize;
         steps.max(1)
     }

@@ -29,4 +29,6 @@
 //! fixing an external label.
 
 pub mod observability;
+
+#[path = "microlocal.rs"]
 pub mod microlocal;
