@@ -204,6 +204,18 @@ impl DesireLagrangian {
         self
     }
 
+    pub fn vocab_size(&self) -> usize {
+        self.geometry.vocab_size()
+    }
+
+    pub fn avoidance_heat(&self) -> &[f32] {
+        &self.avoidance_accumulator
+    }
+
+    pub fn desire_bias(&self) -> &[f32] {
+        &self.desire_bias
+    }
+
     pub fn phase(&self) -> DesirePhase {
         self.phase
     }
