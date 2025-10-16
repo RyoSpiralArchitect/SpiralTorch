@@ -5,11 +5,14 @@
 
 use std::fmt;
 
+use st_core::telemetry::hub;
 use st_tensor::pure::{AmegaHypergrad, DifferentialResonance, Tensor, TensorError};
 
 mod geometry;
 
-pub use geometry::{GeometryFeedback, GeometryFeedbackConfig, GeometryFeedbackSignal};
+pub use geometry::{
+    GeometryFeedback, GeometryFeedbackConfig, GeometryFeedbackSignal, GeometryTelemetry,
+};
 
 /// Reinforcement learning specific error wrapper so callers can surface
 /// meaningful diagnostics without inspecting tensor internals.
@@ -90,6 +93,15 @@ pub struct EpisodeReport {
     pub steps: usize,
     /// Flag describing whether a hypergrad tape applied the update.
     pub hypergrad_applied: bool,
+}
+
+/// Snapshot of trainer diagnostics for external telemetry collectors.
+#[derive(Clone, Debug)]
+pub struct PolicyTelemetry {
+    /// Number of transitions currently buffered for the active episode.
+    pub buffered_steps: usize,
+    /// Geometry feedback telemetry, if the controller is attached.
+    pub geometry: Option<GeometryTelemetry>,
 }
 
 /// Lightweight policy gradient learner that keeps every primitive inside
@@ -178,6 +190,18 @@ impl SpiralPolicyGradient {
         self.geometry_feedback
             .as_ref()
             .and_then(|feedback| feedback.last_signal())
+    }
+
+    /// Returns rolling telemetry so trainers can monitor rank/pressure drift.
+    pub fn telemetry(&self) -> PolicyTelemetry {
+        let geometry = self
+            .geometry_feedback
+            .as_ref()
+            .map(|feedback| feedback.telemetry().clone());
+        PolicyTelemetry {
+            buffered_steps: self.episode.len(),
+            geometry,
+        }
     }
 
     fn ensure_state_shape(&self, state: &Tensor) -> RlResult<()> {
@@ -275,6 +299,28 @@ impl SpiralPolicyGradient {
         resonance: &DifferentialResonance,
     ) -> RlResult<(EpisodeReport, Option<GeometryFeedbackSignal>)> {
         let (scale, signal) = if let Some(controller) = self.geometry_feedback.as_mut() {
+            #[allow(unused_mut)]
+            let mut loop_injected = false;
+            let envelopes = hub::drain_loopback_envelopes(8);
+            if !envelopes.is_empty() {
+                controller.absorb_loopback(&envelopes);
+                loop_injected = true;
+            }
+            #[cfg(feature = "collapse")]
+            {
+                if let Some(pulse) = hub::get_collapse_pulse() {
+                    controller.inject_collapse_bias(pulse.total);
+                    if let Some(signal) = pulse.loop_signal {
+                        controller.integrate_loop_signal(&signal);
+                        loop_injected = true;
+                    }
+                }
+            }
+            if !loop_injected {
+                if let Some(signal) = hub::get_chrono_loop() {
+                    controller.integrate_loop_signal(&signal);
+                }
+            }
             let signal = controller.process_resonance(resonance);
             (signal.learning_rate_scale.max(f32::EPSILON), Some(signal))
         } else {
@@ -352,5 +398,52 @@ impl SpiralPolicyGradient {
     /// Returns a copy of the current bias vector.
     pub fn bias(&self) -> &[f32] {
         &self.bias
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use st_core::theory::observability::{ObservabilityConfig, SlotSymmetry};
+
+    fn resonance_from(values: &[f32]) -> DifferentialResonance {
+        let tensor = Tensor::from_vec(1, values.len(), values.to_vec()).unwrap();
+        DifferentialResonance {
+            homotopy_flow: tensor.clone(),
+            functor_linearisation: tensor.clone(),
+            recursive_objective: tensor.clone(),
+            infinity_projection: tensor.clone(),
+            infinity_energy: tensor,
+        }
+    }
+
+    #[test]
+    fn telemetry_surfaces_geometry_feedback() -> Result<(), SpiralRlError> {
+        let mut policy = SpiralPolicyGradient::new(2, 2, 0.01, 0.9)?;
+        let snapshot = policy.telemetry();
+        assert_eq!(snapshot.buffered_steps, 0);
+        assert!(snapshot.geometry.is_none());
+
+        let feedback = GeometryFeedback::new(GeometryFeedbackConfig {
+            observability: ObservabilityConfig::new(1, 5, SlotSymmetry::Symmetric),
+            ..GeometryFeedbackConfig::default_policy()
+        });
+        policy.attach_geometry_feedback(feedback);
+
+        let state = Tensor::from_vec(1, 2, vec![0.4, -0.2]).unwrap();
+        policy.record_transition(state.clone(), 0, 1.0)?;
+        policy.record_transition(state.clone(), 1, 0.5)?;
+        let resonance = resonance_from(&[0.6, -0.4, 0.2, -0.1, 0.3]);
+        let (_report, signal) = policy.finish_episode_with_geometry(&resonance)?;
+        assert!(signal.is_some());
+
+        let telemetry = policy.telemetry();
+        assert!(telemetry.geometry.is_some());
+        let geo = telemetry.geometry.unwrap();
+        assert!(geo.rolling_scale >= 0.0);
+        assert!(geo.max_scale <= 3.0);
+        assert!(geo.loop_gain >= 0.0);
+        assert!(geo.softening_beta >= 0.3);
+        Ok(())
     }
 }
