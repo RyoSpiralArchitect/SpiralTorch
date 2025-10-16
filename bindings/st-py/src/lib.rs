@@ -11,9 +11,10 @@ use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
 use pyo3::exceptions::{PyImportError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule, PyTuple};
+use pyo3::types::{PyAny, PyDict, PyList, PyModule, PySequence, PyTuple};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
+use pyo3::Py;
 use pyo3::PyRef;
 use pyo3::PyRefMut;
 use st_backend_hip::{
@@ -22,8 +23,53 @@ use st_backend_hip::{
 };
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
+#[cfg(feature = "collapse")]
+use st_core::engine::collapse_drive::DriveCmd;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary};
+use st_core::telemetry::atlas::{
+    AtlasDistrict, AtlasDistrictSummary, AtlasFrame, AtlasMetric, AtlasRoute, AtlasRouteSummary,
+};
+use st_core::telemetry::chrono::{
+    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary,
+};
+use st_core::telemetry::hub;
+use st_core::telemetry::maintainer::MaintainerReport;
+use st_core::ecosystem::{
+    ConnectorEvent as CoreConnectorEvent, DistributionSummary as CoreDistributionSummary,
+    EcosystemCapacity, EcosystemRegistry, EcosystemReport as CoreEcosystemReport,
+    HeuristicChoiceSummary as CoreHeuristicChoiceSummary,
+    HeuristicDecision as CoreHeuristicDecision, MetricDigest as CoreMetricDigest,
+    MetricSample as CoreMetricSample, RankPlanSummary as CoreRankPlanSummary,
+    RoundtableConfigSummary as CoreRoundtableConfigSummary,
+    RoundtableSummary as CoreRoundtableSummary,
+};
+#[cfg(feature = "collapse")]
+use st_core::engine::collapse_drive::DriveCmd;
+use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_core::telemetry::atlas::{AtlasDistrict, AtlasFrame, AtlasMetric, AtlasRoute};
+use st_core::telemetry::chrono::{
+    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary,
+};
+use st_core::telemetry::hub;
+use st_core::telemetry::maintainer::MaintainerReport;
+use st_core::ecosystem::{
+    ConnectorEvent as CoreConnectorEvent, DistributionSummary as CoreDistributionSummary,
+    EcosystemRegistry, EcosystemReport as CoreEcosystemReport,
+    HeuristicChoiceSummary as CoreHeuristicChoiceSummary,
+    HeuristicDecision as CoreHeuristicDecision, RankPlanSummary as CoreRankPlanSummary,
+    RoundtableConfigSummary as CoreRoundtableConfigSummary,
+    RoundtableSummary as CoreRoundtableSummary,
+};
+use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_core::telemetry::atlas::{AtlasFrame, AtlasMetric};
+use st_core::telemetry::chrono::{
+    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary,
+};
+use st_core::telemetry::hub;
+use st_core::telemetry::maintainer::{MaintainerConfig, MaintainerReport, MaintainerStatus};
+use st_core::telemetry::chrono::{
+    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary,
+};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::telemetry::hub;
 use st_core::telemetry::maintainer::{MaintainerConfig, MaintainerReport};
@@ -35,7 +81,8 @@ use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
     Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
-    EpochStats, LightningConfig as NnLightningConfig, Linear as NnLinear, Loss, MeanSquaredError,
+    EpochStats, LightningConfig as NnLightningConfig, LightningReport as NnLightningReport,
+    LightningStageReport as NnLightningStageReport, Linear as NnLinear, Loss, MeanSquaredError,
     Module, ModuleTrainer, Relu as NnRelu, RoundtableConfig, RoundtableSchedule,
     Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
@@ -56,14 +103,13 @@ use st_tensor::pure::{
     MatmulBackend, PureResult, Tensor, TensorBiome, TensorError,
 };
 use st_text::{
-    describe_frame as text_describe_frame, describe_resonance as text_describe_resonance,
+    describe_atlas as text_describe_atlas, describe_frame as text_describe_frame,
+    describe_resonance as text_describe_resonance, describe_timeline as text_describe_timeline,
     TextResonator,
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::io::ErrorKind;
-use std::path::Path;
-use std::process::Command;
+use std::fmt::Write as _;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
@@ -252,6 +298,201 @@ fn describe_resonance(resonance: &PyDifferentialResonance) -> PyResult<String> {
 #[pyfunction]
 fn describe_frame(frame: &PyChronoFrame) -> String {
     text_describe_frame(frame.as_frame())
+}
+
+#[pyfunction]
+fn describe_timeline(frames: Vec<PyChronoFrame>) -> PyResult<String> {
+    let inner: Vec<ChronoFrame> = frames.into_iter().map(PyChronoFrame::into_frame).collect();
+    convert(text_describe_timeline(&inner))
+}
+
+#[pyfunction]
+fn describe_atlas(atlas: &PyAtlasFrame) -> PyResult<String> {
+    convert(text_describe_atlas(&atlas.frame))
+fn heuristic_choice_to_py(
+    py: Python<'_>,
+    choice: &CoreHeuristicChoiceSummary,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("use_two_stage", choice.use_two_stage)?;
+    dict.set_item("workgroup", choice.workgroup)?;
+    dict.set_item("lanes", choice.lanes)?;
+    dict.set_item("channel_stride", choice.channel_stride)?;
+    dict.set_item("algo_hint", choice.algo_hint.clone())?;
+    dict.set_item("compaction_tile", choice.compaction_tile)?;
+    dict.set_item("fft_tile_cols", choice.fft_tile_cols)?;
+    dict.set_item("fft_radix", choice.fft_radix)?;
+    dict.set_item("fft_segments", choice.fft_segments)?;
+    Ok(dict.into())
+}
+
+fn heuristic_to_py(py: Python<'_>, decision: &CoreHeuristicDecision) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("subsystem", decision.subsystem.clone())?;
+    dict.set_item("kind", decision.kind.clone())?;
+    dict.set_item("rows", decision.rows)?;
+    dict.set_item("cols", decision.cols)?;
+    dict.set_item("k", decision.k)?;
+    dict.set_item("choice", heuristic_choice_to_py(py, &decision.choice)?)?;
+    dict.set_item("score_hint", decision.score_hint)?;
+    dict.set_item("source", decision.source.as_str())?;
+    dict.set_item("issued_at", decision.issued_at_secs())?;
+    Ok(dict.into())
+}
+
+fn roundtable_config_to_py(
+    py: Python<'_>,
+    config: &CoreRoundtableConfigSummary,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("top_k", config.top_k)?;
+    dict.set_item("mid_k", config.mid_k)?;
+    dict.set_item("bottom_k", config.bottom_k)?;
+    dict.set_item("here_tolerance", config.here_tolerance)?;
+    let extras = PyDict::new_bound(py);
+    for (key, value) in &config.extras {
+        extras.set_item(key, *value)?;
+    }
+    dict.set_item("extras", extras)?;
+    Ok(dict.into())
+}
+
+fn rank_plan_to_py(py: Python<'_>, summary: &CoreRankPlanSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("kind", summary.kind.as_str())?;
+    dict.set_item("rows", summary.rows)?;
+    dict.set_item("cols", summary.cols)?;
+    dict.set_item("k", summary.k)?;
+    dict.set_item("workgroup", summary.workgroup)?;
+    dict.set_item("lanes", summary.lanes)?;
+    dict.set_item("channel_stride", summary.channel_stride)?;
+    dict.set_item("tile", summary.tile)?;
+    dict.set_item("compaction_tile", summary.compaction_tile)?;
+    dict.set_item("subgroup", summary.subgroup)?;
+    dict.set_item("fft_tile", summary.fft_tile)?;
+    dict.set_item("fft_radix", summary.fft_radix)?;
+    dict.set_item("fft_segments", summary.fft_segments)?;
+    Ok(dict.into())
+}
+
+fn distribution_to_py(py: Python<'_>, summary: &CoreDistributionSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("node_id", summary.node_id.clone())?;
+    dict.set_item("mode", summary.mode.clone())?;
+    dict.set_item("summary_window", summary.summary_window)?;
+    dict.set_item("push_interval_ms", summary.push_interval_ms)?;
+    dict.set_item("meta_endpoints", summary.meta_endpoints.clone())?;
+    Ok(dict.into())
+}
+
+fn roundtable_to_py(py: Python<'_>, summary: &CoreRoundtableSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("rows", summary.rows)?;
+    dict.set_item("cols", summary.cols)?;
+    dict.set_item("config", roundtable_config_to_py(py, &summary.config)?)?;
+    let plans = PyList::empty_bound(py);
+    for plan in &summary.plans {
+        plans.append(rank_plan_to_py(py, plan)?)?;
+    }
+    dict.set_item("plans", plans)?;
+    dict.set_item("autopilot_enabled", summary.autopilot_enabled)?;
+    if let Some(dist) = &summary.distribution {
+        dict.set_item("distribution", distribution_to_py(py, dist)?)?;
+    } else {
+        dict.set_item("distribution", py.None())?;
+    }
+    dict.set_item("issued_at", summary.issued_at_secs())?;
+    Ok(dict.into())
+}
+
+fn connector_to_py(py: Python<'_>, event: &CoreConnectorEvent) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("name", event.name.clone())?;
+    dict.set_item("stage", event.stage.clone())?;
+    dict.set_item("issued_at", event.issued_at_secs())?;
+    let meta = PyDict::new_bound(py);
+    for (key, value) in &event.metadata {
+        meta.set_item(key, value)?;
+    }
+    dict.set_item("metadata", meta)?;
+    Ok(dict.into())
+}
+
+fn metric_sample_to_py(py: Python<'_>, sample: &CoreMetricSample) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("name", sample.name.clone())?;
+    dict.set_item("value", sample.value)?;
+    dict.set_item("issued_at", sample.issued_at_secs())?;
+    if let Some(unit) = &sample.unit {
+        dict.set_item("unit", unit.clone())?;
+    }
+    let tags = PyDict::new_bound(py);
+    for (key, value) in &sample.tags {
+        tags.set_item(key, value)?;
+    }
+    dict.set_item("tags", tags)?;
+    Ok(dict.into())
+}
+
+fn metric_digest_to_py(py: Python<'_>, digest: &CoreMetricDigest) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("name", digest.name.clone())?;
+    dict.set_item("count", digest.count)?;
+    dict.set_item("sum", digest.sum)?;
+    dict.set_item("min", digest.min)?;
+    dict.set_item("max", digest.max)?;
+    dict.set_item("average", digest.average)?;
+    dict.set_item("first_at", digest.first_at_secs())?;
+    dict.set_item("last_value", digest.last_value)?;
+    dict.set_item("last_at", digest.last_at_secs())?;
+    if let Some(unit) = &digest.unit {
+        dict.set_item("unit", unit.clone())?;
+    }
+    let tags = PyDict::new_bound(py);
+    for (key, value) in &digest.tags {
+        tags.set_item(key, value)?;
+    }
+    dict.set_item("tags", tags)?;
+    Ok(dict.into())
+}
+
+fn ecosystem_capacity_to_py(py: Python<'_>, cap: EcosystemCapacity) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("heuristics", cap.heuristics)?;
+    dict.set_item("roundtables", cap.roundtables)?;
+    dict.set_item("connectors", cap.connectors)?;
+    dict.set_item("metrics", cap.metrics)?;
+    Ok(dict.into())
+}
+
+fn ecosystem_report_to_py(py: Python<'_>, report: &CoreEcosystemReport) -> PyResult<PyObject> {
+    let heuristics = PyList::empty_bound(py);
+    for decision in report.heuristics() {
+        heuristics.append(heuristic_to_py(py, decision)?)?;
+    }
+    let roundtables = PyList::empty_bound(py);
+    for summary in report.roundtables() {
+        roundtables.append(roundtable_to_py(py, summary)?)?;
+    }
+    let connectors = PyList::empty_bound(py);
+    for event in report.connectors() {
+        connectors.append(connector_to_py(py, event)?)?;
+    }
+    let metrics = PyList::empty_bound(py);
+    for sample in report.metrics() {
+        metrics.append(metric_sample_to_py(py, sample)?)?;
+    }
+    let metric_digests = PyList::empty_bound(py);
+    for digest in report.metric_digests() {
+        metric_digests.append(metric_digest_to_py(py, digest)?)?;
+    }
+    let dict = PyDict::new_bound(py);
+    dict.set_item("heuristics", heuristics)?;
+    dict.set_item("roundtables", roundtables)?;
+    dict.set_item("connectors", connectors)?;
+    dict.set_item("metrics", metrics)?;
+    dict.set_item("metric_digests", metric_digests)?;
+    Ok(dict.into())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -677,6 +918,21 @@ fn dataset_from_vec_py(samples: Vec<(PyTensor, PyTensor)>) -> PyResult<PyDataLoa
     Ok(PyDataLoader::from_loader(nn_dataset_from_vec(owned)))
 }
 
+#[pyfunction(name = "shuffle")]
+fn dataset_shuffle_py(loader: &PyDataLoader, seed: u64) -> PyDataLoader {
+    loader.shuffle(seed)
+}
+
+#[pyfunction(name = "batched")]
+fn dataset_batched_py(loader: &PyDataLoader, batch_size: usize) -> PyDataLoader {
+    loader.batched(batch_size)
+}
+
+#[pyfunction(name = "prefetch")]
+fn dataset_prefetch_py(loader: &PyDataLoader, depth: usize) -> PyDataLoader {
+    loader.prefetch(depth)
+}
+
 #[pyclass(module = "spiraltorch", name = "ComplexTensor")]
 #[derive(Clone, Debug)]
 struct PyComplexTensor {
@@ -935,6 +1191,646 @@ impl PyChronoSummary {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "AtlasMetric")]
+#[derive(Clone)]
+struct PyAtlasMetric {
+    metric: AtlasMetric,
+}
+
+impl PyAtlasMetric {
+    fn from_metric(metric: AtlasMetric) -> Self {
+        Self { metric }
+    }
+}
+
+#[pymethods]
+impl PyAtlasMetric {
+    #[getter]
+    fn name(&self) -> &str {
+        &self.metric.name
+    }
+
+    #[getter]
+    fn value(&self) -> f32 {
+        self.metric.value
+    }
+
+    #[getter]
+    fn district(&self) -> Option<String> {
+        self.metric.district().map(|name| name.to_string())
+    }
+
+    fn as_tuple(&self) -> (String, f32) {
+        (self.metric.name.clone(), self.metric.value)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        if let Some(district) = self.metric.district() {
+            Ok(format!(
+                "AtlasMetric(name={}, value={:.3}, district={})",
+                self.metric.name, self.metric.value, district
+            ))
+        } else {
+            Ok(format!(
+                "AtlasMetric(name={}, value={:.3})",
+                self.metric.name, self.metric.value
+            ))
+        }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasDistrict")]
+#[derive(Clone)]
+struct PyAtlasDistrict {
+    district: AtlasDistrict,
+}
+
+impl PyAtlasDistrict {
+    fn from_district(district: AtlasDistrict) -> Self {
+        Self { district }
+    }
+}
+
+#[pymethods]
+impl PyAtlasDistrict {
+    #[getter]
+    fn name(&self) -> &str {
+        &self.district.name
+    }
+
+    #[getter]
+    fn mean(&self) -> f32 {
+        self.district.mean
+    }
+
+    #[getter]
+    fn span(&self) -> f32 {
+        self.district.span
+    }
+
+    fn metrics(&self) -> Vec<PyAtlasMetric> {
+        self.district
+            .metrics
+            .iter()
+            .cloned()
+            .map(PyAtlasMetric::from_metric)
+            .collect()
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasDistrict(name={}, mean={:.3}, span={:.3}, metrics={})",
+            self.district.name,
+            self.district.mean,
+            self.district.span,
+            self.district.metrics.len()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasFrame")]
+#[derive(Clone)]
+struct PyAtlasFrame {
+    frame: AtlasFrame,
+}
+
+impl PyAtlasFrame {
+    fn from_frame(frame: AtlasFrame) -> Self {
+        Self { frame }
+    }
+}
+
+#[pymethods]
+impl PyAtlasFrame {
+    #[getter]
+    fn timestamp(&self) -> f32 {
+        self.frame.timestamp
+    }
+
+    #[getter]
+    fn loop_support(&self) -> f32 {
+        self.frame.loop_support
+    }
+
+    #[getter]
+    fn collapse_total(&self) -> Option<f32> {
+        self.frame.collapse_total
+    }
+
+    #[getter]
+    fn z_signal(&self) -> Option<f32> {
+        self.frame.z_signal
+    }
+
+    #[getter]
+    fn script_hint(&self) -> Option<String> {
+        self.frame.script_hint.clone()
+    }
+
+    #[getter]
+    fn maintainer_status(&self) -> Option<String> {
+        self.frame
+            .maintainer_status
+            .map(|status| status.as_str().to_string())
+    }
+
+    #[getter]
+    fn maintainer_diagnostic(&self) -> Option<String> {
+        self.frame.maintainer_diagnostic.clone()
+    }
+
+    #[getter]
+    fn suggested_max_scale(&self) -> Option<f32> {
+        self.frame.suggested_max_scale
+    }
+
+    #[getter]
+    fn suggested_pressure(&self) -> Option<f32> {
+        self.frame.suggested_pressure
+    }
+
+    fn metrics(&self) -> Vec<PyAtlasMetric> {
+        self.frame
+            .metrics
+            .iter()
+            .cloned()
+            .map(PyAtlasMetric::from_metric)
+            .collect()
+    }
+
+    fn districts(&self) -> Vec<PyAtlasDistrict> {
+        self.frame
+            .districts()
+            .into_iter()
+            .map(PyAtlasDistrict::from_district)
+            .collect()
+    }
+
+    fn notes(&self) -> Vec<String> {
+        self.frame.notes.clone()
+    }
+
+    fn summary(&self) -> Option<PyChronoSummary> {
+        self.frame
+            .chrono_summary
+            .clone()
+            .map(PyChronoSummary::from_summary)
+    }
+
+    fn harmonics(&self) -> Option<PyChronoHarmonics> {
+        self.frame
+            .harmonics
+            .clone()
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("timestamp", self.frame.timestamp)?;
+        dict.set_item("loop_support", self.frame.loop_support)?;
+        dict.set_item("collapse_total", self.frame.collapse_total)?;
+        dict.set_item("z_signal", self.frame.z_signal)?;
+        dict.set_item("script_hint", self.frame.script_hint.clone())?;
+        if let Some(status) = self.frame.maintainer_status {
+            dict.set_item("maintainer_status", status.as_str())?;
+        }
+        dict.set_item(
+            "maintainer_diagnostic",
+            self.frame.maintainer_diagnostic.clone(),
+        )?;
+        dict.set_item("suggested_max_scale", self.frame.suggested_max_scale)?;
+        dict.set_item("suggested_pressure", self.frame.suggested_pressure)?;
+        if let Some(summary) = &self.frame.chrono_summary {
+            dict.set_item(
+                "summary",
+                PyChronoSummary::from_summary(summary.clone()).into_py(py),
+            )?;
+        }
+        if let Some(harmonics) = &self.frame.harmonics {
+            dict.set_item(
+                "harmonics",
+                PyChronoHarmonics::from_harmonics(harmonics.clone()).into_py(py),
+            )?;
+        }
+        let metrics: Vec<(String, f32)> = self
+            .frame
+            .metrics
+            .iter()
+            .map(|metric| (metric.name.clone(), metric.value))
+            .collect();
+        dict.set_item("metrics", metrics)?;
+        dict.set_item("notes", self.frame.notes.clone())?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasFrame(t={:.3}, metrics={})",
+            self.frame.timestamp,
+            self.frame.metrics.len()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasRoute")]
+#[derive(Clone)]
+struct PyAtlasRoute {
+    route: AtlasRoute,
+}
+
+impl PyAtlasRoute {
+    fn from_route(route: AtlasRoute) -> Self {
+        Self { route }
+    }
+}
+
+#[pymethods]
+impl PyAtlasRoute {
+    #[getter]
+    fn frames(&self) -> Vec<PyAtlasFrame> {
+        self.route
+            .frames
+            .iter()
+            .cloned()
+            .map(PyAtlasFrame::from_frame)
+            .collect()
+    }
+
+    #[getter]
+    fn length(&self) -> usize {
+        self.route.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.route.is_empty()
+    }
+
+    fn latest(&self) -> Option<PyAtlasFrame> {
+        self.route.latest().cloned().map(PyAtlasFrame::from_frame)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasRoute(length={}, latest_ts={:.3})",
+            self.route.len(),
+            self.route
+                .latest()
+                .map(|frame| frame.timestamp)
+                .unwrap_or(0.0)
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasDistrictSummary")]
+#[derive(Clone)]
+struct PyAtlasDistrictSummary {
+    summary: AtlasDistrictSummary,
+}
+
+impl PyAtlasDistrictSummary {
+    fn from_summary(summary: AtlasDistrictSummary) -> Self {
+        Self { summary }
+    }
+}
+
+#[pymethods]
+impl PyAtlasDistrictSummary {
+    #[getter]
+    fn name(&self) -> &str {
+        &self.summary.name
+    }
+
+    #[getter]
+    fn coverage(&self) -> usize {
+        self.summary.coverage
+    }
+
+    #[getter]
+    fn mean(&self) -> f32 {
+        self.summary.mean
+    }
+
+    #[getter]
+    fn latest(&self) -> f32 {
+        self.summary.latest
+    }
+
+    #[getter]
+    fn min(&self) -> f32 {
+        self.summary.min
+    }
+
+    #[getter]
+    fn max(&self) -> f32 {
+        self.summary.max
+    }
+
+    #[getter]
+    fn delta(&self) -> f32 {
+        self.summary.delta
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasRouteSummary")]
+#[derive(Clone)]
+struct PyAtlasRouteSummary {
+    summary: AtlasRouteSummary,
+}
+
+impl PyAtlasRouteSummary {
+    fn from_summary(summary: AtlasRouteSummary) -> Self {
+        Self { summary }
+    }
+}
+
+#[pymethods]
+impl PyAtlasRouteSummary {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.summary.frames
+    }
+
+    #[getter]
+    fn latest_timestamp(&self) -> f32 {
+        self.summary.latest_timestamp
+    }
+
+    #[getter]
+    fn mean_loop_support(&self) -> f32 {
+        self.summary.mean_loop_support
+    }
+
+    #[getter]
+    fn latest_collapse_total(&self) -> Option<f32> {
+        self.summary.latest_collapse_total
+    }
+
+    #[getter]
+    fn latest_z_signal(&self) -> Option<f32> {
+        self.summary.latest_z_signal
+    }
+
+    #[getter]
+    fn maintainer_status(&self) -> Option<&'static str> {
+        self.summary
+            .maintainer_status
+            .map(|status| status.as_str())
+    }
+
+    #[getter]
+    fn maintainer_diagnostic(&self) -> Option<&str> {
+        self.summary.maintainer_diagnostic.as_deref()
+    }
+
+    #[getter]
+    fn suggested_max_scale(&self) -> Option<f32> {
+        self.summary.suggested_max_scale
+    }
+
+    #[getter]
+    fn suggested_pressure(&self) -> Option<f32> {
+        self.summary.suggested_pressure
+    }
+
+    #[getter]
+    fn script_hint(&self) -> Option<&str> {
+        self.summary.script_hint.as_deref()
+    }
+
+    #[getter]
+    fn districts(&self) -> Vec<PyAtlasDistrictSummary> {
+        self.summary
+            .districts
+            .clone()
+            .into_iter()
+            .map(PyAtlasDistrictSummary::from_summary)
+            .collect()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoPeak")]
+#[derive(Clone)]
+struct PyChronoPeak {
+    peak: ChronoPeak,
+}
+
+impl PyChronoPeak {
+    fn from_peak(peak: ChronoPeak) -> Self {
+        Self { peak }
+    }
+}
+
+#[pymethods]
+impl PyChronoPeak {
+    #[getter]
+    fn frequency(&self) -> f32 {
+        self.peak.frequency
+    }
+
+    #[getter]
+    fn magnitude(&self) -> f32 {
+        self.peak.magnitude
+    }
+
+    #[getter]
+    fn phase(&self) -> f32 {
+        self.peak.phase
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frequency", self.peak.frequency)?;
+        dict.set_item("magnitude", self.peak.magnitude)?;
+        dict.set_item("phase", self.peak.phase)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoPeak(freq={:.3}, magnitude={:.3})",
+            self.peak.frequency, self.peak.magnitude
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoHarmonics")]
+struct PyChronoHarmonics {
+    harmonics: ChronoHarmonics,
+}
+
+impl PyChronoHarmonics {
+    fn from_harmonics(harmonics: ChronoHarmonics) -> Self {
+        Self { harmonics }
+    }
+}
+
+#[pymethods]
+impl PyChronoHarmonics {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.harmonics.frames
+    }
+
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.harmonics.duration
+    }
+
+    #[getter]
+    fn sample_rate(&self) -> f32 {
+        self.harmonics.sample_rate
+    }
+
+    #[getter]
+    fn nyquist(&self) -> f32 {
+        self.harmonics.nyquist
+    }
+
+    #[getter]
+    fn drift_power(&self) -> Vec<f32> {
+        self.harmonics.drift_power.clone()
+    }
+
+    #[getter]
+    fn energy_power(&self) -> Vec<f32> {
+        self.harmonics.energy_power.clone()
+    }
+
+    #[getter]
+    fn dominant_drift(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_drift
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn dominant_energy(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_energy
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frames", self.harmonics.frames)?;
+        dict.set_item("duration", self.harmonics.duration)?;
+        dict.set_item("sample_rate", self.harmonics.sample_rate)?;
+        dict.set_item("nyquist", self.harmonics.nyquist)?;
+        dict.set_item("drift_power", self.harmonics.drift_power.clone())?;
+        dict.set_item("energy_power", self.harmonics.energy_power.clone())?;
+        let drift = if let Some(peak) = self.harmonics.dominant_drift.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_drift", drift)?;
+        let energy = if let Some(peak) = self.harmonics.dominant_energy.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_energy", energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoHarmonics(frames={}, sample_rate={:.3})",
+            self.harmonics.frames, self.harmonics.sample_rate
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoLoopSignal")]
+#[derive(Clone)]
+struct PyChronoLoopSignal {
+    signal: ChronoLoopSignal,
+}
+
+impl PyChronoLoopSignal {
+    fn from_signal(signal: ChronoLoopSignal) -> Self {
+        Self { signal }
+    }
+}
+
+#[pymethods]
+impl PyChronoLoopSignal {
+    #[getter]
+    fn summary(&self) -> PyChronoSummary {
+        PyChronoSummary::from_summary(self.signal.summary.clone())
+    }
+
+    #[getter]
+    fn harmonics(&self) -> Option<PyChronoHarmonics> {
+        self.signal
+            .harmonics
+            .clone()
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.signal.spiralk_script.clone()
+    }
+
+    #[cfg(not(feature = "kdsl"))]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        None
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_hints(&self) -> Vec<String> {
+        self.signal
+            .spiralk_hints
+            .iter()
+            .map(|hint| {
+                format!(
+                    "soft({},{},{},{})",
+                    hint.field, hint.value_expr, hint.weight_expr, hint.condition_expr
+                )
+            })
+            .collect()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item(
+            "summary",
+            PyChronoSummary::from_summary(self.signal.summary.clone()).into_py(py),
+        )?;
+        if let Some(harmonics) = self.signal.harmonics.clone() {
+            dict.set_item(
+                "harmonics",
+                PyChronoHarmonics::from_harmonics(harmonics).into_py(py),
+            )?;
+        } else {
+            dict.set_item("harmonics", py.None())?;
+        }
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.signal.spiralk_script.clone())?;
+            dict.set_item("spiralk_hints", self.spiralk_hints())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoLoopSignal(frames={}, energy_mean={:.3})",
+            self.signal.summary.frames, self.signal.summary.mean_energy
+        ))
+    }
+}
+
 #[pymethods]
 impl PyChronoSummary {
     #[getter]
@@ -1125,6 +2021,16 @@ impl PyMaintainerReport {
     }
 
     #[getter]
+    fn drift_peak(&self) -> Option<PyChronoPeak> {
+        self.report.drift_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn energy_peak(&self) -> Option<PyChronoPeak> {
+        self.report.energy_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
     fn suggested_max_scale(&self) -> Option<f32> {
         self.report.suggested_max_scale
     }
@@ -1139,6 +2045,12 @@ impl PyMaintainerReport {
         &self.report.diagnostic
     }
 
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.report.spiralk_script.clone()
+    }
+
     fn should_rewrite(&self) -> bool {
         self.report.should_rewrite()
     }
@@ -1149,19 +2061,5718 @@ impl PyMaintainerReport {
         dict.set_item("average_drift", self.report.average_drift)?;
         dict.set_item("mean_energy", self.report.mean_energy)?;
         dict.set_item("mean_decay", self.report.mean_decay)?;
+        let drift_peak = if let Some(peak) = self.report.drift_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        let energy_peak = if let Some(peak) = self.report.energy_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("drift_peak", drift_peak)?;
+        dict.set_item("energy_peak", energy_peak)?;
         dict.set_item("suggested_max_scale", self.report.suggested_max_scale)?;
         dict.set_item("suggested_pressure", self.report.suggested_pressure)?;
         dict.set_item("diagnostic", &self.report.diagnostic)?;
         dict.set_item("should_rewrite", self.report.should_rewrite())?;
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.report.spiralk_script.clone())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let peak = self
+            .report
+            .drift_peak
+            .as_ref()
+            .map(|p| format!(" {:.2}Hz", p.frequency))
+            .unwrap_or_default();
+        Ok(format!(
+            "MaintainerReport(status={}, drift={:.3}{peak}, energy={:.3})",
+            self.report.status.as_str(),
+            self.report.average_drift,
+            self.report.mean_energy
+        ))
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pyclass(module = "spiraltorch", name = "CollapsePulse")]
+#[derive(Clone)]
+struct PyCollapsePulse {
+    pulse: hub::CollapsePulse,
+}
+
+#[cfg(feature = "collapse")]
+impl PyCollapsePulse {
+    fn from_pulse(pulse: hub::CollapsePulse) -> Self {
+        Self { pulse }
+    }
+
+    fn command_kind(&self) -> &'static str {
+        match self.pulse.command {
+            DriveCmd::Collapse { .. } => "collapse",
+            DriveCmd::Bloom { .. } => "bloom",
+            DriveCmd::None => "none",
+        }
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pymethods]
+impl PyCollapsePulse {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.pulse.step
+    }
+
+    #[getter]
+    fn total(&self) -> f32 {
+        self.pulse.total
+    }
+
+    #[getter]
+    fn command(&self) -> &'static str {
+        self.command_kind()
+    }
+
+    #[getter]
+    fn loop_signal(&self) -> Option<PyChronoLoopSignal> {
+        self.pulse
+            .loop_signal
+            .clone()
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    fn command_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        match self.pulse.command {
+            DriveCmd::Collapse {
+                grad_scale,
+                max_norm,
+                lr_decay,
+            } => {
+                dict.set_item("grad_scale", grad_scale)?;
+                dict.set_item("max_norm", max_norm)?;
+                dict.set_item("lr_decay", lr_decay)?;
+            }
+            DriveCmd::Bloom { lr_mul } => {
+                dict.set_item("lr_mul", lr_mul)?;
+            }
+            DriveCmd::None => {}
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.pulse.step)?;
+        dict.set_item("total", self.pulse.total)?;
+        dict.set_item("command", self.command_kind())?;
+        dict.set_item("params", self.command_params(py)?)?;
+        if let Some(signal) = self.pulse.loop_signal.clone() {
+            dict.set_item(
+                "loop_signal",
+                PyChronoLoopSignal::from_signal(signal).as_dict(py)?,
+            )?;
+        } else {
+            dict.set_item("loop_signal", py.None())?;
+        }
         Ok(dict.into_py(py))
     }
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "MaintainerReport(status={}, drift={:.3}, energy={:.3})",
+            "CollapsePulse(step={}, total={:.3}, command={})",
+            self.pulse.step,
+            self.pulse.total,
+            self.command_kind()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoFrame")]
+#[derive(Clone)]
+struct PyChronoFrame {
+    frame: ChronoFrame,
+}
+
+impl PyChronoFrame {
+    fn from_frame(frame: ChronoFrame) -> Self {
+        Self { frame }
+    }
+
+    fn as_frame(&self) -> &ChronoFrame {
+        &self.frame
+    }
+
+    fn into_frame(self) -> ChronoFrame {
+        self.frame
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoSummary")]
+struct PyChronoSummary {
+    summary: ChronoSummary,
+}
+
+impl PyChronoSummary {
+    fn from_summary(summary: ChronoSummary) -> Self {
+        Self { summary }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasMetric")]
+#[derive(Clone)]
+struct PyAtlasMetric {
+    metric: AtlasMetric,
+}
+
+impl PyAtlasMetric {
+    fn from_metric(metric: AtlasMetric) -> Self {
+        Self { metric }
+    }
+}
+
+#[pymethods]
+impl PyAtlasMetric {
+    #[getter]
+    fn name(&self) -> &str {
+        &self.metric.name
+    }
+
+    #[getter]
+    fn value(&self) -> f32 {
+        self.metric.value
+    }
+
+    #[getter]
+    fn district(&self) -> Option<String> {
+        self.metric.district().map(|name| name.to_string())
+    }
+
+    fn as_tuple(&self) -> (String, f32) {
+        (self.metric.name.clone(), self.metric.value)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        if let Some(district) = self.metric.district() {
+            Ok(format!(
+                "AtlasMetric(name={}, value={:.3}, district={})",
+                self.metric.name, self.metric.value, district
+            ))
+        } else {
+            Ok(format!(
+                "AtlasMetric(name={}, value={:.3})",
+                self.metric.name, self.metric.value
+            ))
+        }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasDistrict")]
+#[derive(Clone)]
+struct PyAtlasDistrict {
+    district: AtlasDistrict,
+}
+
+impl PyAtlasDistrict {
+    fn from_district(district: AtlasDistrict) -> Self {
+        Self { district }
+    }
+}
+
+#[pymethods]
+impl PyAtlasDistrict {
+    #[getter]
+    fn name(&self) -> &str {
+        &self.district.name
+    }
+
+    #[getter]
+    fn mean(&self) -> f32 {
+        self.district.mean
+    }
+
+    #[getter]
+    fn span(&self) -> f32 {
+        self.district.span
+    }
+
+    fn metrics(&self) -> Vec<PyAtlasMetric> {
+        self.district
+            .metrics
+            .iter()
+            .cloned()
+            .map(PyAtlasMetric::from_metric)
+            .collect()
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasDistrict(name={}, mean={:.3}, span={:.3}, metrics={})",
+            self.district.name,
+            self.district.mean,
+            self.district.span,
+            self.district.metrics.len()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasFrame")]
+#[derive(Clone)]
+struct PyAtlasFrame {
+    frame: AtlasFrame,
+}
+
+impl PyAtlasFrame {
+    fn from_frame(frame: AtlasFrame) -> Self {
+        Self { frame }
+    }
+}
+
+#[pymethods]
+impl PyAtlasFrame {
+    #[getter]
+    fn timestamp(&self) -> f32 {
+        self.frame.timestamp
+    }
+
+    #[getter]
+    fn loop_support(&self) -> f32 {
+        self.frame.loop_support
+    }
+
+    #[getter]
+    fn collapse_total(&self) -> Option<f32> {
+        self.frame.collapse_total
+    }
+
+    #[getter]
+    fn z_signal(&self) -> Option<f32> {
+        self.frame.z_signal
+    }
+
+    #[getter]
+    fn script_hint(&self) -> Option<String> {
+        self.frame.script_hint.clone()
+    }
+
+    #[getter]
+    fn maintainer_status(&self) -> Option<String> {
+        self.frame
+            .maintainer_status
+            .map(|status| status.as_str().to_string())
+    }
+
+    #[getter]
+    fn maintainer_diagnostic(&self) -> Option<String> {
+        self.frame.maintainer_diagnostic.clone()
+    }
+
+    #[getter]
+    fn suggested_max_scale(&self) -> Option<f32> {
+        self.frame.suggested_max_scale
+    }
+
+    #[getter]
+    fn suggested_pressure(&self) -> Option<f32> {
+        self.frame.suggested_pressure
+    }
+
+    fn metrics(&self) -> Vec<PyAtlasMetric> {
+        self.frame
+            .metrics
+            .iter()
+            .cloned()
+            .map(PyAtlasMetric::from_metric)
+            .collect()
+    }
+
+    fn districts(&self) -> Vec<PyAtlasDistrict> {
+        self.frame
+            .districts()
+            .into_iter()
+            .map(PyAtlasDistrict::from_district)
+            .collect()
+    }
+
+    fn notes(&self) -> Vec<String> {
+        self.frame.notes.clone()
+    }
+
+    fn summary(&self) -> Option<PyChronoSummary> {
+        self.frame
+            .chrono_summary
+            .clone()
+            .map(PyChronoSummary::from_summary)
+    }
+
+    fn harmonics(&self) -> Option<PyChronoHarmonics> {
+        self.frame
+            .harmonics
+            .clone()
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("timestamp", self.frame.timestamp)?;
+        dict.set_item("loop_support", self.frame.loop_support)?;
+        dict.set_item("collapse_total", self.frame.collapse_total)?;
+        dict.set_item("z_signal", self.frame.z_signal)?;
+        dict.set_item("script_hint", self.frame.script_hint.clone())?;
+        if let Some(status) = self.frame.maintainer_status {
+            dict.set_item("maintainer_status", status.as_str())?;
+        }
+        dict.set_item(
+            "maintainer_diagnostic",
+            self.frame.maintainer_diagnostic.clone(),
+        )?;
+        dict.set_item("suggested_max_scale", self.frame.suggested_max_scale)?;
+        dict.set_item("suggested_pressure", self.frame.suggested_pressure)?;
+        if let Some(summary) = &self.frame.chrono_summary {
+            dict.set_item(
+                "summary",
+                PyChronoSummary::from_summary(summary.clone()).into_py(py),
+            )?;
+        }
+        if let Some(harmonics) = &self.frame.harmonics {
+            dict.set_item(
+                "harmonics",
+                PyChronoHarmonics::from_harmonics(harmonics.clone()).into_py(py),
+            )?;
+        }
+        let metrics: Vec<(String, f32)> = self
+            .frame
+            .metrics
+            .iter()
+            .map(|metric| (metric.name.clone(), metric.value))
+            .collect();
+        dict.set_item("metrics", metrics)?;
+        dict.set_item("notes", self.frame.notes.clone())?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasFrame(t={:.3}, metrics={})",
+            self.frame.timestamp,
+            self.frame.metrics.len()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasRoute")]
+#[derive(Clone)]
+struct PyAtlasRoute {
+    route: AtlasRoute,
+}
+
+impl PyAtlasRoute {
+    fn from_route(route: AtlasRoute) -> Self {
+        Self { route }
+    }
+}
+
+#[pymethods]
+impl PyAtlasRoute {
+    #[getter]
+    fn frames(&self) -> Vec<PyAtlasFrame> {
+        self.route
+            .frames
+            .iter()
+            .cloned()
+            .map(PyAtlasFrame::from_frame)
+            .collect()
+    }
+
+    #[getter]
+    fn length(&self) -> usize {
+        self.route.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.route.is_empty()
+    }
+
+    fn latest(&self) -> Option<PyAtlasFrame> {
+        self.route.latest().cloned().map(PyAtlasFrame::from_frame)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasRoute(length={}, latest_ts={:.3})",
+            self.route.len(),
+            self.route
+                .latest()
+                .map(|frame| frame.timestamp)
+                .unwrap_or(0.0)
+        ))
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenCooperativeDirective")]
+#[derive(Clone)]
+struct PyGoldenCooperativeDirective {
+    inner: GoldenCooperativeDirective,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenCooperativeDirective {
+    fn from_inner(inner: GoldenCooperativeDirective) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenCooperativeDirective {
+    #[getter]
+    fn push_interval(&self) -> f32 {
+        self.inner.push_interval.as_secs_f32()
+    }
+
+    #[getter]
+    fn summary_window(&self) -> usize {
+        self.inner.summary_window
+    }
+
+    #[getter]
+    fn exploration_priority(&self) -> f32 {
+        self.inner.exploration_priority
+    }
+
+    #[getter]
+    fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "GoldenCooperativeDirective(push_interval={:.3}, summary_window={}, exploration_priority={:.3}, reinforcement_weight={:.3})",
+            self.push_interval(),
+            self.summary_window(),
+            self.exploration_priority(),
+            self.reinforcement_weight()
+        ))
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenBlackcatPulse")]
+#[derive(Clone)]
+struct PyGoldenBlackcatPulse {
+    inner: GoldenBlackcatPulse,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenBlackcatPulse {
+    fn from_inner(inner: GoldenBlackcatPulse) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenBlackcatPulse {
+    #[getter]
+    fn exploration_drive(&self) -> f32 {
+        self.inner.exploration_drive
+    }
+
+    #[getter]
+    fn optimization_gain(&self) -> f32 {
+        self.inner.optimization_gain
+    }
+
+    #[getter]
+    fn synergy_score(&self) -> f32 {
+        self.inner.synergy_score
+    }
+
+    #[getter]
+    fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
+    }
+
+    #[getter]
+    fn mean_support(&self) -> f32 {
+        self.inner.mean_support
+    }
+
+    #[getter]
+    fn mean_reward(&self) -> f64 {
+        self.inner.mean_reward
+    }
+
+    #[getter]
+    fn mean_psi(&self) -> f32 {
+        self.inner.mean_psi
+    }
+
+    #[getter]
+    fn mean_confidence(&self) -> f32 {
+        self.inner.mean_confidence
+    }
+
+    #[getter]
+    fn coverage(&self) -> usize {
+        self.inner.coverage
+    }
+
+    #[getter]
+    fn heuristics_contributions(&self) -> usize {
+        self.inner.heuristics_contributions
+    }
+
+    #[getter]
+    fn append_weight(&self) -> f32 {
+        self.inner.append_weight
+    }
+
+    #[getter]
+    fn retract_count(&self) -> usize {
+        self.inner.retract_count
+    }
+
+    #[getter]
+    fn annotate_count(&self) -> usize {
+        self.inner.annotate_count
+    }
+
+    #[getter]
+    fn dominant_plan(&self) -> Option<String> {
+        self.inner.dominant_plan.clone()
+    }
+
+    fn is_idle(&self) -> bool {
+        self.inner.is_idle()
+    }
+
+    #[pyo3(signature = (baseline_interval, baseline_window))]
+    fn directive(
+        &self,
+        baseline_interval: f32,
+        baseline_window: usize,
+    ) -> PyResult<PyGoldenCooperativeDirective> {
+        if baseline_interval <= 0.0 {
+            return Err(PyValueError::new_err(
+                "baseline_interval must be positive seconds",
+            ));
+        }
+        let directive = self.inner.directive(
+            Duration::from_secs_f32(baseline_interval),
+            baseline_window.max(1),
+        );
+        Ok(PyGoldenCooperativeDirective::from_inner(directive))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "GoldenBlackcatPulse(exploration={:.3}, optimization={:.3}, synergy={:.3}, reinforcement={:.3}, coverage={}, heuristics={})",
+            self.exploration_drive(),
+            self.optimization_gain(),
+            self.synergy_score(),
+            self.reinforcement_weight(),
+            self.coverage(),
+            self.heuristics_contributions()
+        ))
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenCouncilSnapshot")]
+#[derive(Clone)]
+struct PyGoldenCouncilSnapshot {
+    inner: GoldenCouncilSnapshot,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenCouncilSnapshot {
+    fn from_inner(inner: GoldenCouncilSnapshot) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenCouncilSnapshot {
+    #[getter]
+    fn exploration_bias(&self) -> f32 {
+        self.inner.exploration_bias
+    }
+
+    #[getter]
+    fn optimization_bias(&self) -> f32 {
+        self.inner.optimization_bias
+    }
+
+    #[getter]
+    fn synergy_bias(&self) -> f32 {
+        self.inner.synergy_bias
+    }
+
+    #[getter]
+    fn reinforcement_bias(&self) -> f32 {
+        self.inner.reinforcement_bias
+    }
+
+    #[getter]
+    fn resonance(&self) -> f32 {
+        self.inner.resonance
+    }
+
+    #[getter]
+    fn stability(&self) -> f32 {
+        self.inner.stability
+    }
+
+    #[getter]
+    fn momentum(&self) -> f32 {
+        self.inner.momentum
+    }
+
+    #[getter]
+    fn divergence(&self) -> f32 {
+        self.inner.divergence
+    }
+
+    #[getter]
+    fn schedule_hint(&self) -> (f32, f32, f32, f32) {
+        self.inner.schedule_hint
+    }
+
+    #[getter]
+    fn pulse(&self) -> PyGoldenBlackcatPulse {
+        PyGoldenBlackcatPulse::from_inner(self.inner.pulse_recap.clone())
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "GoldenCouncilSnapshot(exploration_bias={:.3}, optimization_bias={:.3}, synergy_bias={:.3}, reinforcement_bias={:.3}, stability={:.3})",
+            self.exploration_bias(),
+            self.optimization_bias(),
+            self.synergy_bias(),
+            self.reinforcement_bias(),
+            self.stability()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
+struct PyModuleTrainer {
+    inner: ModuleTrainer,
+#[pyclass(module = "spiraltorch", name = "ChronoPeak")]
+#[derive(Clone)]
+struct PyChronoPeak {
+    peak: ChronoPeak,
+}
+
+impl PyChronoPeak {
+    fn from_peak(peak: ChronoPeak) -> Self {
+        Self { peak }
+    }
+}
+
+#[pymethods]
+impl PyChronoPeak {
+    #[getter]
+    fn frequency(&self) -> f32 {
+        self.peak.frequency
+    }
+
+    #[getter]
+    fn magnitude(&self) -> f32 {
+        self.peak.magnitude
+    }
+
+    #[getter]
+    fn phase(&self) -> f32 {
+        self.peak.phase
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frequency", self.peak.frequency)?;
+        dict.set_item("magnitude", self.peak.magnitude)?;
+        dict.set_item("phase", self.peak.phase)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn describe_resonance(&self, resonance: &PyDifferentialResonance) -> PyResult<String> {
+        let resonator = TextResonator::with_encoder(self.inner.clone());
+        Ok(resonator.describe_resonance(&resonance.inner).summary)
+    }
+
+    fn speak(&self, frames: Vec<PyChronoFrame>) -> PyResult<Vec<f32>> {
+        let resonator = TextResonator::with_encoder(self.inner.clone());
+        let frames: Vec<ChronoFrame> = frames.into_iter().map(|frame| frame.into_frame()).collect();
+        convert(resonator.speak(&frames))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoPeak(freq={:.3}, magnitude={:.3})",
+            self.peak.frequency, self.peak.magnitude
+        ))
+    }
+}
+
+    #[pyo3(signature = (per_epoch, cooldown))]
+    fn set_rewrite_budget(&mut self, per_epoch: u32, cooldown: u32) {
+        self.inner.set_rewrite_budget(per_epoch, cooldown);
+    }
+
+    fn blackcat_minutes<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
+        let minutes = self.inner.blackcat_minutes();
+        let list = PyList::empty_bound(py);
+        for minute in minutes {
+            let entry = PyDict::new_bound(py);
+            entry.set_item("plan_signature", minute.plan_signature.clone())?;
+            entry.set_item("script_hint", minute.script_hint.clone())?;
+            entry.set_item("winner", format!("{:?}", minute.winner))?;
+            entry.set_item("support", minute.support)?;
+            entry.set_item("mean_score", minute.mean_score)?;
+            entry.set_item("mean_psi", minute.mean_psi)?;
+            entry.set_item("confidence", (minute.confidence.0, minute.confidence.1))?;
+            entry.set_item("reward", minute.reward)?;
+            entry.set_item("notes", minute.notes.clone())?;
+            entry.set_item(
+                "issued_at",
+                minute
+                    .issued_at
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs_f64())
+                    .unwrap_or(0.0),
+            )?;
+            let picks = PyDict::new_bound(py);
+            for (k, v) in minute.picks.iter() {
+                picks.set_item(k.clone(), v.clone())?;
+            }
+            entry.set_item("picks", picks.into_py(py))?;
+            list.append(entry.into_py(py))?;
+        }
+        Ok(list.into_py(py))
+#[pyclass(module = "spiraltorch", name = "TextResonator")]
+#[derive(Clone)]
+struct PyTextResonator {
+    inner: TextResonator,
+}
+
+impl PyTextResonator {
+    fn from_inner(inner: TextResonator) -> Self {
+        Self { inner }
+    }
+}
+
+    #[cfg(feature = "golden")]
+    fn last_blackcat_pulse(&self) -> Option<PyGoldenBlackcatPulse> {
+        self.inner
+            .last_blackcat_pulse()
+            .cloned()
+            .map(PyGoldenBlackcatPulse::from_inner)
+    }
+
+    #[cfg(feature = "golden")]
+    fn last_blackcat_directive(&self) -> Option<PyGoldenCooperativeDirective> {
+        self.inner
+            .last_blackcat_directive()
+            .cloned()
+            .map(PyGoldenCooperativeDirective::from_inner)
+    }
+
+    #[cfg(feature = "golden")]
+    fn last_golden_council_snapshot(&self) -> Option<PyGoldenCouncilSnapshot> {
+        self.inner
+            .last_golden_council_snapshot()
+            .cloned()
+            .map(PyGoldenCouncilSnapshot::from_inner)
+    }
+
+    #[pyo3(signature = (module, loss, batches, schedule))]
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+    ) -> PyResult<PyEpochStats> {
+        let stats =
+            run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
+        Ok(PyEpochStats::from_stats(stats))
+#[pymethods]
+impl PyTextResonator {
+    #[new]
+    fn new(curvature: f32, temperature: f32) -> PyResult<Self> {
+        Ok(Self::from_inner(convert(TextResonator::new(
+            curvature,
+            temperature,
+        ))?))
+    }
+
+    fn curvature(&self) -> f32 {
+        self.inner.encoder().curvature()
+    }
+
+    fn temperature(&self) -> f32 {
+        self.inner.encoder().temperature()
+    }
+
+    fn describe_resonance(&self, resonance: &PyDifferentialResonance) -> PyResult<String> {
+        Ok(self.inner.describe_resonance(&resonance.inner).summary)
+    }
+
+    fn describe_frame(&self, frame: &PyChronoFrame) -> PyResult<String> {
+        Ok(self.inner.describe_frame(frame.as_frame()).summary)
+    }
+
+    fn speak(&self, frames: Vec<PyChronoFrame>) -> PyResult<Vec<f32>> {
+        let frames: Vec<ChronoFrame> = frames.into_iter().map(|frame| frame.into_frame()).collect();
+        convert(self.inner.speak(&frames))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "TextResonator(curvature={}, temperature={})",
+            self.curvature(),
+            self.temperature()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceProjector")]
+struct PyZSpaceProjector {
+    inner: Option<NnZSpaceProjector>,
+#[pyclass(module = "spiraltorch", name = "ChronoHarmonics")]
+struct PyChronoHarmonics {
+    harmonics: ChronoHarmonics,
+}
+
+impl PyChronoHarmonics {
+    fn from_harmonics(harmonics: ChronoHarmonics) -> Self {
+        Self { harmonics }
+    }
+}
+
+#[pymethods]
+impl PyChronoHarmonics {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.harmonics.frames
+    }
+
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.harmonics.duration
+    }
+
+    #[getter]
+    fn sample_rate(&self) -> f32 {
+        self.harmonics.sample_rate
+    }
+
+    #[getter]
+    fn nyquist(&self) -> f32 {
+        self.harmonics.nyquist
+    }
+
+    #[getter]
+    fn drift_power(&self) -> Vec<f32> {
+        self.harmonics.drift_power.clone()
+    }
+
+    #[getter]
+    fn energy_power(&self) -> Vec<f32> {
+        self.harmonics.energy_power.clone()
+    }
+
+    #[getter]
+    fn dominant_drift(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_drift
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn dominant_energy(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_energy
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frames", self.harmonics.frames)?;
+        dict.set_item("duration", self.harmonics.duration)?;
+        dict.set_item("sample_rate", self.harmonics.sample_rate)?;
+        dict.set_item("nyquist", self.harmonics.nyquist)?;
+        dict.set_item("drift_power", self.harmonics.drift_power.clone())?;
+        dict.set_item("energy_power", self.harmonics.energy_power.clone())?;
+        let drift = if let Some(peak) = self.harmonics.dominant_drift.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_drift", drift)?;
+        let energy = if let Some(peak) = self.harmonics.dominant_energy.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_energy", energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoHarmonics(frames={}, sample_rate={:.3})",
+            self.harmonics.frames, self.harmonics.sample_rate
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoLoopSignal")]
+#[derive(Clone)]
+struct PyChronoLoopSignal {
+    signal: ChronoLoopSignal,
+}
+
+impl PyChronoLoopSignal {
+    fn from_signal(signal: ChronoLoopSignal) -> Self {
+        Self { signal }
+    }
+}
+
+#[pymethods]
+impl PyChronoLoopSignal {
+    #[getter]
+    fn summary(&self) -> PyChronoSummary {
+        PyChronoSummary::from_summary(self.signal.summary.clone())
+    }
+
+    #[getter]
+    fn harmonics(&self) -> Option<PyChronoHarmonics> {
+        self.signal
+            .harmonics
+            .clone()
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.signal.spiralk_script.clone()
+    }
+
+    #[cfg(not(feature = "kdsl"))]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        None
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_hints(&self) -> Vec<String> {
+        self.signal
+            .spiralk_hints
+            .iter()
+            .map(|hint| {
+                format!(
+                    "soft({},{},{},{})",
+                    hint.field, hint.value_expr, hint.weight_expr, hint.condition_expr
+                )
+            })
+            .collect()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item(
+            "summary",
+            PyChronoSummary::from_summary(self.signal.summary.clone()).into_py(py),
+        )?;
+        if let Some(harmonics) = self.signal.harmonics.clone() {
+            dict.set_item(
+                "harmonics",
+                PyChronoHarmonics::from_harmonics(harmonics).into_py(py),
+            )?;
+        } else {
+            dict.set_item("harmonics", py.None())?;
+        }
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.signal.spiralk_script.clone())?;
+            dict.set_item("spiralk_hints", self.spiralk_hints())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoLoopSignal(frames={}, energy_mean={:.3})",
+            self.signal.summary.frames, self.signal.summary.mean_energy
+        ))
+    }
+}
+
+#[pymethods]
+impl PyChronoSummary {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.summary.frames
+    }
+
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.summary.duration
+    }
+
+    #[getter]
+    fn latest_timestamp(&self) -> f32 {
+        self.summary.latest_timestamp
+    }
+
+    #[getter]
+    fn mean_drift(&self) -> f32 {
+        self.summary.mean_drift
+    }
+
+    #[getter]
+    fn mean_abs_drift(&self) -> f32 {
+        self.summary.mean_abs_drift
+    }
+
+    #[getter]
+    fn drift_std(&self) -> f32 {
+        self.summary.drift_std
+    }
+
+    #[getter]
+    fn mean_energy(&self) -> f32 {
+        self.summary.mean_energy
+    }
+
+    #[getter]
+    fn energy_std(&self) -> f32 {
+        self.summary.energy_std
+    }
+
+    #[getter]
+    fn mean_decay(&self) -> f32 {
+        self.summary.mean_decay
+    }
+
+    #[getter]
+    fn min_energy(&self) -> f32 {
+        self.summary.min_energy
+    }
+
+    #[getter]
+    fn max_energy(&self) -> f32 {
+        self.summary.max_energy
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoSummary(frames={}, duration={:.3}, energy={:.3}±{:.3})",
+            self.summary.frames,
+            self.summary.duration,
+            self.summary.mean_energy,
+            self.summary.energy_std
+        ))
+    }
+}
+
+#[pymethods]
+impl PyChronoFrame {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.frame.step
+    }
+
+    #[getter]
+    fn timestamp(&self) -> f32 {
+        self.frame.timestamp
+    }
+
+    #[getter]
+    fn dt(&self) -> f32 {
+        self.frame.dt
+    }
+
+    #[getter]
+    fn observed_curvature(&self) -> f32 {
+        self.frame.observed_curvature
+    }
+
+    #[getter]
+    fn curvature_drift(&self) -> f32 {
+        self.frame.curvature_drift
+    }
+
+    #[getter]
+    fn total_energy(&self) -> f32 {
+        self.frame.total_energy
+    }
+
+    #[getter]
+    fn energy_decay(&self) -> f32 {
+        self.frame.energy_decay
+    }
+
+    #[getter]
+    fn homotopy_energy(&self) -> f32 {
+        self.frame.homotopy_energy
+    }
+
+    #[getter]
+    fn functor_energy(&self) -> f32 {
+        self.frame.functor_energy
+    }
+
+    #[getter]
+    fn recursive_energy(&self) -> f32 {
+        self.frame.recursive_energy
+    }
+
+    #[getter]
+    fn projection_energy(&self) -> f32 {
+        self.frame.projection_energy
+    }
+
+    #[getter]
+    fn infinity_energy(&self) -> f32 {
+        self.frame.infinity_energy
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.frame.step)?;
+        dict.set_item("timestamp", self.frame.timestamp)?;
+        dict.set_item("dt", self.frame.dt)?;
+        dict.set_item("observed_curvature", self.frame.observed_curvature)?;
+        dict.set_item("curvature_drift", self.frame.curvature_drift)?;
+        dict.set_item("total_energy", self.frame.total_energy)?;
+        dict.set_item("energy_decay", self.frame.energy_decay)?;
+        dict.set_item("homotopy_energy", self.frame.homotopy_energy)?;
+        dict.set_item("functor_energy", self.frame.functor_energy)?;
+        dict.set_item("recursive_energy", self.frame.recursive_energy)?;
+        dict.set_item("projection_energy", self.frame.projection_energy)?;
+        dict.set_item("infinity_energy", self.frame.infinity_energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoFrame(step={}, t={:.3}, energy={:.3})",
+            self.frame.step, self.frame.timestamp, self.frame.total_energy
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "MaintainerReport")]
+#[derive(Clone)]
+struct PyMaintainerReport {
+    report: MaintainerReport,
+}
+
+impl PyMaintainerReport {
+    fn from_report(report: MaintainerReport) -> Self {
+        Self { report }
+    }
+}
+
+#[pymethods]
+impl PyMaintainerReport {
+    #[getter]
+    fn status(&self) -> &'static str {
+        self.report.status.as_str()
+    }
+
+    #[getter]
+    fn average_drift(&self) -> f32 {
+        self.report.average_drift
+    }
+
+    #[getter]
+    fn mean_energy(&self) -> f32 {
+        self.report.mean_energy
+    }
+
+    #[getter]
+    fn mean_decay(&self) -> f32 {
+        self.report.mean_decay
+    }
+
+    #[getter]
+    fn drift_peak(&self) -> Option<PyChronoPeak> {
+        self.report.drift_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn energy_peak(&self) -> Option<PyChronoPeak> {
+        self.report.energy_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn suggested_max_scale(&self) -> Option<f32> {
+        self.report.suggested_max_scale
+    }
+
+    #[getter]
+    fn suggested_pressure(&self) -> Option<f32> {
+        self.report.suggested_pressure
+    }
+
+    #[getter]
+    fn diagnostic(&self) -> &str {
+        &self.report.diagnostic
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.report.spiralk_script.clone()
+    }
+
+    fn should_rewrite(&self) -> bool {
+        self.report.should_rewrite()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("status", self.report.status.as_str())?;
+        dict.set_item("average_drift", self.report.average_drift)?;
+        dict.set_item("mean_energy", self.report.mean_energy)?;
+        dict.set_item("mean_decay", self.report.mean_decay)?;
+        let drift_peak = if let Some(peak) = self.report.drift_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        let energy_peak = if let Some(peak) = self.report.energy_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("drift_peak", drift_peak)?;
+        dict.set_item("energy_peak", energy_peak)?;
+        dict.set_item("suggested_max_scale", self.report.suggested_max_scale)?;
+        dict.set_item("suggested_pressure", self.report.suggested_pressure)?;
+        dict.set_item("diagnostic", &self.report.diagnostic)?;
+        dict.set_item("should_rewrite", self.report.should_rewrite())?;
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.report.spiralk_script.clone())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let peak = self
+            .report
+            .drift_peak
+            .as_ref()
+            .map(|p| format!(" {:.2}Hz", p.frequency))
+            .unwrap_or_default();
+        Ok(format!(
+            "MaintainerReport(status={}, drift={:.3}{peak}, energy={:.3})",
             self.report.status.as_str(),
             self.report.average_drift,
             self.report.mean_energy
+        ))
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pyclass(module = "spiraltorch", name = "CollapsePulse")]
+#[derive(Clone)]
+struct PyCollapsePulse {
+    pulse: hub::CollapsePulse,
+}
+
+#[cfg(feature = "collapse")]
+impl PyCollapsePulse {
+    fn from_pulse(pulse: hub::CollapsePulse) -> Self {
+        Self { pulse }
+    }
+
+    fn command_kind(&self) -> &'static str {
+        match self.pulse.command {
+            DriveCmd::Collapse { .. } => "collapse",
+            DriveCmd::Bloom { .. } => "bloom",
+            DriveCmd::None => "none",
+        }
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pymethods]
+impl PyCollapsePulse {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.pulse.step
+    }
+
+    #[getter]
+    fn total(&self) -> f32 {
+        self.pulse.total
+    }
+
+    #[getter]
+    fn command(&self) -> &'static str {
+        self.command_kind()
+    }
+
+    #[getter]
+    fn loop_signal(&self) -> Option<PyChronoLoopSignal> {
+        self.pulse
+            .loop_signal
+            .clone()
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    #[getter]
+    fn distribution(&self) -> Option<PyDistConfig> {
+        self.inner
+            .distribution_config()
+            .map(|config| PyDistConfig::from_config(config.clone()))
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
+    fn roundtable(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+        dist: Option<PyDistConfig>,
+    ) -> PyResult<PyRoundtableSchedule> {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        if let Some(dist_cfg) = dist {
+            self.inner.configure_distribution(dist_cfg.inner.clone());
+    fn command_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        match self.pulse.command {
+            DriveCmd::Collapse {
+                grad_scale,
+                max_norm,
+                lr_decay,
+            } => {
+                dict.set_item("grad_scale", grad_scale)?;
+                dict.set_item("max_norm", max_norm)?;
+                dict.set_item("lr_decay", lr_decay)?;
+            }
+            DriveCmd::Bloom { lr_mul } => {
+                dict.set_item("lr_mul", lr_mul)?;
+            }
+            DriveCmd::None => {}
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.pulse.step)?;
+        dict.set_item("total", self.pulse.total)?;
+        dict.set_item("command", self.command_kind())?;
+        dict.set_item("params", self.command_params(py)?)?;
+        if let Some(signal) = self.pulse.loop_signal.clone() {
+            dict.set_item(
+                "loop_signal",
+                PyChronoLoopSignal::from_signal(signal).as_dict(py)?,
+            )?;
+        } else {
+            dict.set_item("loop_signal", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "CollapsePulse(step={}, total={:.3}, command={})",
+            self.pulse.step,
+            self.pulse.total,
+            self.command_kind()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoFrame")]
+#[derive(Clone)]
+struct PyChronoFrame {
+    frame: ChronoFrame,
+}
+
+impl PyChronoFrame {
+    fn from_frame(frame: ChronoFrame) -> Self {
+        Self { frame }
+    }
+
+    fn as_frame(&self) -> &ChronoFrame {
+        &self.frame
+    }
+
+    fn into_frame(self) -> ChronoFrame {
+        self.frame
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoSummary")]
+struct PyChronoSummary {
+    summary: ChronoSummary,
+}
+
+impl PyChronoSummary {
+    fn from_summary(summary: ChronoSummary) -> Self {
+        Self { summary }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasMetric")]
+#[derive(Clone)]
+struct PyAtlasMetric {
+    metric: AtlasMetric,
+}
+
+impl PyAtlasMetric {
+    fn from_metric(metric: AtlasMetric) -> Self {
+        Self { metric }
+    }
+}
+
+#[pymethods]
+impl PyAtlasMetric {
+    #[getter]
+    fn name(&self) -> &str {
+        &self.metric.name
+    }
+
+    #[getter]
+    fn value(&self) -> f32 {
+        self.metric.value
+    }
+
+    fn as_tuple(&self) -> (String, f32) {
+        (self.metric.name.clone(), self.metric.value)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasMetric(name={}, value={:.3})",
+            self.metric.name, self.metric.value
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasFrame")]
+#[derive(Clone)]
+struct PyAtlasFrame {
+    frame: AtlasFrame,
+}
+
+impl PyAtlasFrame {
+    fn from_frame(frame: AtlasFrame) -> Self {
+        Self { frame }
+    }
+}
+
+#[pymethods]
+impl PyAtlasFrame {
+    #[getter]
+    fn timestamp(&self) -> f32 {
+        self.frame.timestamp
+    }
+
+    #[getter]
+    fn loop_support(&self) -> f32 {
+        self.frame.loop_support
+    }
+
+    #[getter]
+    fn collapse_total(&self) -> Option<f32> {
+        self.frame.collapse_total
+    }
+
+    #[getter]
+    fn z_signal(&self) -> Option<f32> {
+        self.frame.z_signal
+    }
+
+    #[getter]
+    fn script_hint(&self) -> Option<String> {
+        self.frame.script_hint.clone()
+    }
+
+    #[getter]
+    fn maintainer_status(&self) -> Option<String> {
+        self.frame
+            .maintainer_status
+            .map(|status| status.as_str().to_string())
+    }
+
+    #[getter]
+    fn maintainer_diagnostic(&self) -> Option<String> {
+        self.frame.maintainer_diagnostic.clone()
+    }
+
+    #[getter]
+    fn suggested_max_scale(&self) -> Option<f32> {
+        self.frame.suggested_max_scale
+    }
+
+    #[getter]
+    fn suggested_pressure(&self) -> Option<f32> {
+        self.frame.suggested_pressure
+    }
+
+    fn metrics(&self) -> Vec<PyAtlasMetric> {
+        self.frame
+            .metrics
+            .iter()
+            .cloned()
+            .map(PyAtlasMetric::from_metric)
+            .collect()
+    }
+
+    fn notes(&self) -> Vec<String> {
+        self.frame.notes.clone()
+    }
+
+    fn summary(&self) -> Option<PyChronoSummary> {
+        self.frame
+            .chrono_summary
+            .clone()
+            .map(PyChronoSummary::from_summary)
+    }
+
+    fn harmonics(&self) -> Option<PyChronoHarmonics> {
+        self.frame
+            .harmonics
+            .clone()
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("timestamp", self.frame.timestamp)?;
+        dict.set_item("loop_support", self.frame.loop_support)?;
+        dict.set_item("collapse_total", self.frame.collapse_total)?;
+        dict.set_item("z_signal", self.frame.z_signal)?;
+        dict.set_item("script_hint", self.frame.script_hint.clone())?;
+        if let Some(status) = self.frame.maintainer_status {
+            dict.set_item("maintainer_status", status.as_str())?;
+        }
+        dict.set_item(
+            "maintainer_diagnostic",
+            self.frame.maintainer_diagnostic.clone(),
+        )?;
+        dict.set_item("suggested_max_scale", self.frame.suggested_max_scale)?;
+        dict.set_item("suggested_pressure", self.frame.suggested_pressure)?;
+        if let Some(summary) = &self.frame.chrono_summary {
+            dict.set_item(
+                "summary",
+                PyChronoSummary::from_summary(summary.clone()).into_py(py),
+            )?;
+        }
+        if let Some(harmonics) = &self.frame.harmonics {
+            dict.set_item(
+                "harmonics",
+                PyChronoHarmonics::from_harmonics(harmonics.clone()).into_py(py),
+            )?;
+        }
+        let metrics: Vec<(String, f32)> = self
+            .frame
+            .metrics
+            .iter()
+            .map(|metric| (metric.name.clone(), metric.value))
+            .collect();
+        dict.set_item("metrics", metrics)?;
+        dict.set_item("notes", self.frame.notes.clone())?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasFrame(t={:.3}, metrics={})",
+            self.frame.timestamp,
+            self.frame.metrics.len()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoPeak")]
+#[derive(Clone)]
+struct PyChronoPeak {
+    peak: ChronoPeak,
+}
+
+impl PyChronoPeak {
+    fn from_peak(peak: ChronoPeak) -> Self {
+        Self { peak }
+    }
+}
+
+#[pymethods]
+impl PyChronoPeak {
+    #[getter]
+    fn frequency(&self) -> f32 {
+        self.peak.frequency
+    }
+
+    #[getter]
+    fn magnitude(&self) -> f32 {
+        self.peak.magnitude
+    }
+
+    #[getter]
+    fn phase(&self) -> f32 {
+        self.peak.phase
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frequency", self.peak.frequency)?;
+        dict.set_item("magnitude", self.peak.magnitude)?;
+        dict.set_item("phase", self.peak.phase)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoPeak(freq={:.3}, magnitude={:.3})",
+            self.peak.frequency, self.peak.magnitude
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoHarmonics")]
+struct PyChronoHarmonics {
+    harmonics: ChronoHarmonics,
+}
+
+impl PyChronoHarmonics {
+    fn from_harmonics(harmonics: ChronoHarmonics) -> Self {
+        Self { harmonics }
+    }
+}
+
+#[pymethods]
+impl PyChronoHarmonics {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.harmonics.frames
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let builder = self.ensure_builder()?;
+        let mut config = builder.maintainer_config().clone();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        builder.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
+        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
+        Ok(())
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.harmonics.duration
+    }
+
+    #[getter]
+    fn sample_rate(&self) -> f32 {
+        self.harmonics.sample_rate
+    }
+
+    #[getter]
+    fn nyquist(&self) -> f32 {
+        self.harmonics.nyquist
+    }
+
+    #[getter]
+    fn drift_power(&self) -> Vec<f32> {
+        self.harmonics.drift_power.clone()
+    }
+
+    #[getter]
+    fn energy_power(&self) -> Vec<f32> {
+        self.harmonics.energy_power.clone()
+    }
+
+    #[getter]
+    fn dominant_drift(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_drift
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn dominant_energy(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_energy
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frames", self.harmonics.frames)?;
+        dict.set_item("duration", self.harmonics.duration)?;
+        dict.set_item("sample_rate", self.harmonics.sample_rate)?;
+        dict.set_item("nyquist", self.harmonics.nyquist)?;
+        dict.set_item("drift_power", self.harmonics.drift_power.clone())?;
+        dict.set_item("energy_power", self.harmonics.energy_power.clone())?;
+        let drift = if let Some(peak) = self.harmonics.dominant_drift.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_drift", drift)?;
+        let energy = if let Some(peak) = self.harmonics.dominant_energy.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_energy", energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoHarmonics(frames={}, sample_rate={:.3})",
+            self.harmonics.frames, self.harmonics.sample_rate
+        ))
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenCooperativeDirective")]
+#[derive(Clone)]
+struct PyGoldenCooperativeDirective {
+    inner: GoldenCooperativeDirective,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenCooperativeDirective {
+    fn from_inner(inner: GoldenCooperativeDirective) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenCooperativeDirective {
+    #[getter]
+    fn push_interval(&self) -> f32 {
+        self.inner.push_interval.as_secs_f32()
+    }
+
+    #[getter]
+    fn summary_window(&self) -> usize {
+        self.inner.summary_window
+    }
+
+    #[getter]
+    fn exploration_priority(&self) -> f32 {
+        self.inner.exploration_priority
+    }
+
+    fn resonate_over_time(
+        &self,
+        resonance: &PyDifferentialResonance,
+        dt: f32,
+    ) -> PyResult<PyChronoFrame> {
+        let frame = convert(self.inner.resonate_over_time(&resonance.inner, dt))?;
+        Ok(PyChronoFrame::from_frame(frame))
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn timeline(&self, timesteps: Option<usize>) -> PyResult<Vec<PyChronoFrame>> {
+        let frames = self.inner.chrono_frames();
+        let limit = timesteps.unwrap_or(frames.len());
+        let start = frames.len().saturating_sub(limit);
+        Ok(frames[start..]
+            .iter()
+            .cloned()
+            .map(PyChronoFrame::from_frame)
+            .collect())
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn animate_resonance(
+        &self,
+        timesteps: Option<usize>,
+    ) -> PyResult<(Vec<f32>, Vec<f32>, Vec<f32>)> {
+        let frames = self.timeline(timesteps)?;
+        let mut times = Vec::with_capacity(frames.len());
+        let mut energies = Vec::with_capacity(frames.len());
+        let mut drifts = Vec::with_capacity(frames.len());
+        for frame in &frames {
+            let inner = frame.as_frame();
+            times.push(inner.timestamp);
+            energies.push(inner.total_energy);
+            drifts.push(inner.curvature_drift);
+        }
+        Ok((times, energies, drifts))
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn timeline_summary(&self, timesteps: Option<usize>) -> Option<PyChronoSummary> {
+        self.inner
+            .timeline_summary(timesteps)
+            .map(PyChronoSummary::from_summary)
+    }
+
+    fn atlas(&self) -> Option<PyAtlasFrame> {
+        self.inner.atlas().map(PyAtlasFrame::from_frame)
+    }
+
+    #[pyo3(signature = (limit=None))]
+    fn atlas_route(&self, limit: Option<usize>) -> PyAtlasRoute {
+        PyAtlasRoute::from_route(self.inner.atlas_route(limit))
+    }
+
+    #[pyo3(signature = (limit=None))]
+    fn atlas_route_summary(&self, limit: Option<usize>) -> PyAtlasRouteSummary {
+        PyAtlasRouteSummary::from_summary(self.inner.atlas_route_summary(limit))
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=16))]
+    fn timeline_harmonics(
+        &self,
+        timesteps: Option<usize>,
+        bins: usize,
+    ) -> Option<PyChronoHarmonics> {
+        self.inner
+            .timeline_harmonics(timesteps, bins)
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=None))]
+    fn loop_signal(
+        &self,
+        timesteps: Option<usize>,
+        bins: Option<usize>,
+    ) -> Option<PyChronoLoopSignal> {
+        self.inner
+            .loop_signal(timesteps, bins)
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn timeline_story(
+        &self,
+        timesteps: Option<usize>,
+        temperature: f32,
+    ) -> PyResult<(String, Vec<String>)> {
+        let narrative = self
+            .inner
+            .timeline_narrative(timesteps, temperature)
+            .map_err(tensor_err)?;
+        Ok((narrative.summary, narrative.highlights))
+    }
+
+    #[pyo3(signature = (temperature=0.6))]
+    fn atlas_story(&self, temperature: f32) -> PyResult<Option<(String, Vec<String>)>> {
+        let narrative = self
+            .inner
+            .atlas_narrative(temperature)
+            .map_err(tensor_err)?;
+        Ok(narrative.map(|story| (story.summary, story.highlights)))
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn speak(&self, timesteps: Option<usize>, temperature: f32) -> PyResult<Vec<f32>> {
+        convert(self.inner.speak(timesteps, temperature))
+    }
+
+    fn maintainer_config(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let cfg = self.inner.maintainer_config();
+        let dict = PyDict::new_bound(py);
+        dict.set_item("jitter_threshold", cfg.jitter_threshold)?;
+        dict.set_item("growth_threshold", cfg.growth_threshold)?;
+        dict.set_item("energy_floor", cfg.energy_floor)?;
+        dict.set_item("clamp_min", cfg.clamp_min)?;
+        dict.set_item("clamp_max", cfg.clamp_max)?;
+        dict.set_item("pressure_step", cfg.pressure_step)?;
+        dict.set_item("window", cfg.window)?;
+        Ok(dict.into_py(py))
+    }
+
+    #[cfg(feature = "collapse")]
+    fn collapse_pulse(&self) -> Option<PyCollapsePulse> {
+        hub::get_collapse_pulse().map(PyCollapsePulse::from_pulse)
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn configure_maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let mut config = self.inner.maintainer_config();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        self.inner.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn self_maintain(&self) -> PyMaintainerReport {
+        PyMaintainerReport::from_report(self.inner.maintain())
+    }
+
+    #[pyo3(signature = (resonance=None, temperature=0.6))]
+    fn describe(
+        &self,
+        resonance: Option<&PyDifferentialResonance>,
+        temperature: f32,
+    ) -> PyResult<String> {
+        let resonance = resonance.map(|res| &res.inner);
+        convert(self.inner.describe(resonance, temperature))
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn roundtable(
+        &self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> PyRoundtableSchedule {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
+    #[getter]
+    fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "GoldenCooperativeDirective(push_interval={:.3}, summary_window={}, exploration_priority={:.3}, reinforcement_weight={:.3})",
+            self.push_interval(),
+            self.summary_window(),
+            self.exploration_priority(),
+            self.reinforcement_weight()
+        ))
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenBlackcatPulse")]
+#[derive(Clone)]
+struct PyGoldenBlackcatPulse {
+    inner: GoldenBlackcatPulse,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenBlackcatPulse {
+    fn from_inner(inner: GoldenBlackcatPulse) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenBlackcatPulse {
+    #[getter]
+    fn exploration_drive(&self) -> f32 {
+        self.inner.exploration_drive
+    }
+
+    #[getter]
+    fn optimization_gain(&self) -> f32 {
+        self.inner.optimization_gain
+    }
+
+    #[getter]
+    fn synergy_score(&self) -> f32 {
+        self.inner.synergy_score
+    }
+
+    #[getter]
+    fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
+    }
+
+    #[getter]
+    fn mean_support(&self) -> f32 {
+        self.inner.mean_support
+    }
+
+    #[getter]
+    fn mean_reward(&self) -> f64 {
+        self.inner.mean_reward
+    }
+
+    #[getter]
+    fn mean_psi(&self) -> f32 {
+        self.inner.mean_psi
+    }
+
+    #[getter]
+    fn mean_confidence(&self) -> f32 {
+        self.inner.mean_confidence
+    }
+
+    #[getter]
+    fn coverage(&self) -> usize {
+        self.inner.coverage
+    }
+
+    #[getter]
+    fn heuristics_contributions(&self) -> usize {
+        self.inner.heuristics_contributions
+    }
+
+    #[getter]
+    fn append_weight(&self) -> f32 {
+        self.inner.append_weight
+    }
+
+    #[getter]
+    fn retract_count(&self) -> usize {
+        self.inner.retract_count
+    }
+
+    #[getter]
+    fn annotate_count(&self) -> usize {
+        self.inner.annotate_count
+    }
+
+    #[getter]
+    fn dominant_plan(&self) -> Option<String> {
+        self.inner.dominant_plan.clone()
+    }
+
+    fn is_idle(&self) -> bool {
+        self.inner.is_idle()
+    }
+
+    #[pyo3(signature = (baseline_interval, baseline_window))]
+    fn directive(
+        &self,
+        baseline_interval: f32,
+        baseline_window: usize,
+    ) -> PyResult<PyGoldenCooperativeDirective> {
+        if baseline_interval <= 0.0 {
+            return Err(PyValueError::new_err(
+                "baseline_interval must be positive seconds",
+            ));
+        }
+        let directive = self.inner.directive(
+            Duration::from_secs_f32(baseline_interval),
+            baseline_window.max(1),
+        );
+        Ok(PyGoldenCooperativeDirective::from_inner(directive))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "GoldenBlackcatPulse(exploration={:.3}, optimization={:.3}, synergy={:.3}, reinforcement={:.3}, coverage={}, heuristics={})",
+            self.exploration_drive(),
+            self.optimization_gain(),
+            self.synergy_score(),
+            self.reinforcement_weight(),
+            self.coverage(),
+            self.heuristics_contributions()
+        ))
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenCouncilSnapshot")]
+#[derive(Clone)]
+struct PyGoldenCouncilSnapshot {
+    inner: GoldenCouncilSnapshot,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenCouncilSnapshot {
+    fn from_inner(inner: GoldenCouncilSnapshot) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenCouncilSnapshot {
+    #[getter]
+    fn exploration_bias(&self) -> f32 {
+        self.inner.exploration_bias
+    }
+
+    #[getter]
+    fn optimization_bias(&self) -> f32 {
+        self.inner.optimization_bias
+    }
+
+    #[getter]
+    fn synergy_bias(&self) -> f32 {
+        self.inner.synergy_bias
+    }
+
+    #[getter]
+    fn reinforcement_bias(&self) -> f32 {
+        self.inner.reinforcement_bias
+    }
+
+    #[getter]
+    fn resonance(&self) -> f32 {
+        self.inner.resonance
+    }
+
+    #[getter]
+    fn stability(&self) -> f32 {
+        self.inner.stability
+    }
+
+    #[getter]
+    fn momentum(&self) -> f32 {
+        self.inner.momentum
+    }
+
+    #[getter]
+    fn divergence(&self) -> f32 {
+        self.inner.divergence
+    }
+
+    #[getter]
+    fn schedule_hint(&self) -> (f32, f32, f32, f32) {
+        self.inner.schedule_hint
+    }
+
+    #[getter]
+    fn pulse(&self) -> PyGoldenBlackcatPulse {
+        PyGoldenBlackcatPulse::from_inner(self.inner.pulse_recap.clone())
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "GoldenCouncilSnapshot(exploration_bias={:.3}, optimization_bias={:.3}, synergy_bias={:.3}, reinforcement_bias={:.3}, stability={:.3})",
+            self.exploration_bias(),
+            self.optimization_bias(),
+            self.synergy_bias(),
+            self.reinforcement_bias(),
+            self.stability()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
+struct PyModuleTrainer {
+    inner: ModuleTrainer,
+#[pyclass(module = "spiraltorch", name = "ChronoLoopSignal")]
+#[derive(Clone)]
+struct PyChronoLoopSignal {
+    signal: ChronoLoopSignal,
+}
+
+impl PyChronoLoopSignal {
+    fn from_signal(signal: ChronoLoopSignal) -> Self {
+        Self { signal }
+    }
+}
+
+#[pymethods]
+impl PyChronoLoopSignal {
+    #[getter]
+    fn summary(&self) -> PyChronoSummary {
+        PyChronoSummary::from_summary(self.signal.summary.clone())
+    }
+
+    #[getter]
+    fn harmonics(&self) -> Option<PyChronoHarmonics> {
+        self.signal
+            .harmonics
+            .clone()
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.signal.spiralk_script.clone()
+    }
+
+    #[cfg(not(feature = "kdsl"))]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        None
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_hints(&self) -> Vec<String> {
+        self.signal
+            .spiralk_hints
+            .iter()
+            .map(|hint| {
+                format!(
+                    "soft({},{},{},{})",
+                    hint.field, hint.value_expr, hint.weight_expr, hint.condition_expr
+                )
+            })
+            .collect()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item(
+            "summary",
+            PyChronoSummary::from_summary(self.signal.summary.clone()),
+        )?;
+        if let Some(harmonics) = self.signal.harmonics.clone() {
+            dict.set_item("harmonics", PyChronoHarmonics::from_harmonics(harmonics))?;
+        } else {
+            dict.set_item("harmonics", py.None())?;
+        }
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.signal.spiralk_script.clone())?;
+            dict.set_item("spiralk_hints", self.spiralk_hints())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoLoopSignal(frames={}, energy_mean={:.3})",
+            self.signal.summary.frames, self.signal.summary.mean_energy
+        ))
+    }
+}
+
+#[pymethods]
+impl PyChronoSummary {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.summary.frames
+    }
+
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.summary.duration
+    }
+
+    #[getter]
+    fn latest_timestamp(&self) -> f32 {
+        self.summary.latest_timestamp
+    }
+
+    #[cfg(feature = "golden")]
+    fn last_blackcat_pulse(&self) -> Option<PyGoldenBlackcatPulse> {
+        self.inner
+            .last_blackcat_pulse()
+            .cloned()
+            .map(PyGoldenBlackcatPulse::from_inner)
+    }
+
+    #[cfg(feature = "golden")]
+    fn last_blackcat_directive(&self) -> Option<PyGoldenCooperativeDirective> {
+        self.inner
+            .last_blackcat_directive()
+            .cloned()
+            .map(PyGoldenCooperativeDirective::from_inner)
+    }
+
+    #[cfg(feature = "golden")]
+    fn last_golden_council_snapshot(&self) -> Option<PyGoldenCouncilSnapshot> {
+        self.inner
+            .last_golden_council_snapshot()
+            .cloned()
+            .map(PyGoldenCouncilSnapshot::from_inner)
+    }
+
+    #[pyo3(signature = (module, loss, batches, schedule))]
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+    ) -> PyResult<PyEpochStats> {
+        let stats =
+            run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
+        Ok(PyEpochStats::from_stats(stats))
+    #[getter]
+    fn mean_drift(&self) -> f32 {
+        self.summary.mean_drift
+    }
+
+    #[getter]
+    fn mean_abs_drift(&self) -> f32 {
+        self.summary.mean_abs_drift
+    }
+
+    #[getter]
+    fn drift_std(&self) -> f32 {
+        self.summary.drift_std
+    }
+
+    #[getter]
+    fn mean_energy(&self) -> f32 {
+        self.summary.mean_energy
+    }
+
+    #[getter]
+    fn energy_std(&self) -> f32 {
+        self.summary.energy_std
+    }
+
+    #[getter]
+    fn mean_decay(&self) -> f32 {
+        self.summary.mean_decay
+    }
+
+    #[getter]
+    fn min_energy(&self) -> f32 {
+        self.summary.min_energy
+    }
+
+    #[getter]
+    fn max_energy(&self) -> f32 {
+        self.summary.max_energy
+    }
+
+    fn describe_resonance(&self, resonance: &PyDifferentialResonance) -> PyResult<String> {
+        let resonator = TextResonator::with_encoder(self.inner.clone());
+        Ok(resonator.describe_resonance(&resonance.inner).summary)
+    }
+
+    fn speak(&self, frames: Vec<PyChronoFrame>) -> PyResult<Vec<f32>> {
+        let resonator = TextResonator::with_encoder(self.inner.clone());
+        let frames: Vec<ChronoFrame> = frames.into_iter().map(|frame| frame.into_frame()).collect();
+        convert(resonator.speak(&frames))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoSummary(frames={}, duration={:.3}, energy={:.3}±{:.3})",
+            self.summary.frames,
+            self.summary.duration,
+            self.summary.mean_energy,
+            self.summary.energy_std
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "TextResonator")]
+#[derive(Clone)]
+struct PyTextResonator {
+    inner: TextResonator,
+}
+
+impl PyTextResonator {
+    fn from_inner(inner: TextResonator) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyTextResonator {
+    #[new]
+    fn new(curvature: f32, temperature: f32) -> PyResult<Self> {
+        Ok(Self::from_inner(convert(TextResonator::new(
+            curvature,
+            temperature,
+        ))?))
+    }
+
+    fn curvature(&self) -> f32 {
+        self.inner.encoder().curvature()
+    }
+
+    fn temperature(&self) -> f32 {
+        self.inner.encoder().temperature()
+    }
+
+    fn describe_resonance(&self, resonance: &PyDifferentialResonance) -> PyResult<String> {
+        Ok(self.inner.describe_resonance(&resonance.inner).summary)
+    }
+
+    fn describe_frame(&self, frame: &PyChronoFrame) -> PyResult<String> {
+        Ok(self.inner.describe_frame(frame.as_frame()).summary)
+    }
+
+    fn speak(&self, frames: Vec<PyChronoFrame>) -> PyResult<Vec<f32>> {
+        let frames: Vec<ChronoFrame> = frames.into_iter().map(|frame| frame.into_frame()).collect();
+        convert(self.inner.speak(&frames))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "TextResonator(curvature={}, temperature={})",
+            self.curvature(),
+            self.temperature()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceProjector")]
+struct PyZSpaceProjector {
+    inner: Option<NnZSpaceProjector>,
+}
+
+impl PyZSpaceProjector {
+    fn borrow(&self) -> PyResult<&NnZSpaceProjector> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("ZSpaceProjector has been moved"))
+#[pymethods]
+impl PyChronoFrame {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.frame.step
+    }
+
+    #[getter]
+    fn timestamp(&self) -> f32 {
+        self.frame.timestamp
+    }
+
+    #[getter]
+    fn dt(&self) -> f32 {
+        self.frame.dt
+    }
+
+    #[getter]
+    fn observed_curvature(&self) -> f32 {
+        self.frame.observed_curvature
+    }
+
+    #[getter]
+    fn curvature_drift(&self) -> f32 {
+        self.frame.curvature_drift
+    }
+
+    #[getter]
+    fn total_energy(&self) -> f32 {
+        self.frame.total_energy
+    }
+
+    #[getter]
+    fn energy_decay(&self) -> f32 {
+        self.frame.energy_decay
+    }
+
+    #[getter]
+    fn homotopy_energy(&self) -> f32 {
+        self.frame.homotopy_energy
+    }
+
+    #[getter]
+    fn functor_energy(&self) -> f32 {
+        self.frame.functor_energy
+    }
+
+    #[getter]
+    fn recursive_energy(&self) -> f32 {
+        self.frame.recursive_energy
+    }
+
+    #[getter]
+    fn projection_energy(&self) -> f32 {
+        self.frame.projection_energy
+    }
+
+    #[getter]
+    fn infinity_energy(&self) -> f32 {
+        self.frame.infinity_energy
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.frame.step)?;
+        dict.set_item("timestamp", self.frame.timestamp)?;
+        dict.set_item("dt", self.frame.dt)?;
+        dict.set_item("observed_curvature", self.frame.observed_curvature)?;
+        dict.set_item("curvature_drift", self.frame.curvature_drift)?;
+        dict.set_item("total_energy", self.frame.total_energy)?;
+        dict.set_item("energy_decay", self.frame.energy_decay)?;
+        dict.set_item("homotopy_energy", self.frame.homotopy_energy)?;
+        dict.set_item("functor_energy", self.frame.functor_energy)?;
+        dict.set_item("recursive_energy", self.frame.recursive_energy)?;
+        dict.set_item("projection_energy", self.frame.projection_energy)?;
+        dict.set_item("infinity_energy", self.frame.infinity_energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoFrame(step={}, t={:.3}, energy={:.3})",
+            self.frame.step, self.frame.timestamp, self.frame.total_energy
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "MaintainerReport")]
+#[derive(Clone)]
+struct PyMaintainerReport {
+    report: MaintainerReport,
+}
+
+impl PyMaintainerReport {
+    fn from_report(report: MaintainerReport) -> Self {
+        Self { report }
+    }
+}
+
+#[pymethods]
+impl PyMaintainerReport {
+    #[getter]
+    fn status(&self) -> &'static str {
+        self.report.status.as_str()
+    }
+
+    #[getter]
+    fn average_drift(&self) -> f32 {
+        self.report.average_drift
+    }
+
+    #[getter]
+    fn mean_energy(&self) -> f32 {
+        self.report.mean_energy
+    }
+
+    #[getter]
+    fn mean_decay(&self) -> f32 {
+        self.report.mean_decay
+    }
+
+    #[getter]
+    fn drift_peak(&self) -> Option<PyChronoPeak> {
+        self.report.drift_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn energy_peak(&self) -> Option<PyChronoPeak> {
+        self.report.energy_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn suggested_max_scale(&self) -> Option<f32> {
+        self.report.suggested_max_scale
+    }
+
+    #[getter]
+    fn suggested_pressure(&self) -> Option<f32> {
+        self.report.suggested_pressure
+    }
+
+    #[getter]
+    fn diagnostic(&self) -> &str {
+        &self.report.diagnostic
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.report.spiralk_script.clone()
+    }
+
+    fn should_rewrite(&self) -> bool {
+        self.report.should_rewrite()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("status", self.report.status.as_str())?;
+        dict.set_item("average_drift", self.report.average_drift)?;
+        dict.set_item("mean_energy", self.report.mean_energy)?;
+        dict.set_item("mean_decay", self.report.mean_decay)?;
+        let drift_peak = if let Some(peak) = self.report.drift_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        let energy_peak = if let Some(peak) = self.report.energy_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("drift_peak", drift_peak)?;
+        dict.set_item("energy_peak", energy_peak)?;
+        dict.set_item("suggested_max_scale", self.report.suggested_max_scale)?;
+        dict.set_item("suggested_pressure", self.report.suggested_pressure)?;
+        dict.set_item("diagnostic", &self.report.diagnostic)?;
+        dict.set_item("should_rewrite", self.report.should_rewrite())?;
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.report.spiralk_script.clone())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let peak = self
+            .report
+            .drift_peak
+            .as_ref()
+            .map(|p| format!(" {:.2}Hz", p.frequency))
+            .unwrap_or_default();
+        Ok(format!(
+            "MaintainerReport(status={}, drift={:.3}{peak}, energy={:.3})",
+            self.report.status.as_str(),
+            self.report.average_drift,
+            self.report.mean_energy
+        ))
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pyclass(module = "spiraltorch", name = "CollapsePulse")]
+#[derive(Clone)]
+struct PyCollapsePulse {
+    pulse: hub::CollapsePulse,
+}
+
+#[cfg(feature = "collapse")]
+impl PyCollapsePulse {
+    fn from_pulse(pulse: hub::CollapsePulse) -> Self {
+        Self { pulse }
+    }
+
+    fn command_kind(&self) -> &'static str {
+        match self.pulse.command {
+            DriveCmd::Collapse { .. } => "collapse",
+            DriveCmd::Bloom { .. } => "bloom",
+            DriveCmd::None => "none",
+        }
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pymethods]
+impl PyCollapsePulse {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.pulse.step
+    }
+
+    #[getter]
+    fn total(&self) -> f32 {
+        self.pulse.total
+    }
+
+    #[getter]
+    fn command(&self) -> &'static str {
+        self.command_kind()
+    }
+
+    #[getter]
+    fn loop_signal(&self) -> Option<PyChronoLoopSignal> {
+        self.pulse
+            .loop_signal
+            .clone()
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    fn command_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        match self.pulse.command {
+            DriveCmd::Collapse {
+                grad_scale,
+                max_norm,
+                lr_decay,
+            } => {
+                dict.set_item("grad_scale", grad_scale)?;
+                dict.set_item("max_norm", max_norm)?;
+                dict.set_item("lr_decay", lr_decay)?;
+            }
+            DriveCmd::Bloom { lr_mul } => {
+                dict.set_item("lr_mul", lr_mul)?;
+            }
+            DriveCmd::None => {}
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.pulse.step)?;
+        dict.set_item("total", self.pulse.total)?;
+        dict.set_item("command", self.command_kind())?;
+        dict.set_item("params", self.command_params(py)?)?;
+        if let Some(signal) = self.pulse.loop_signal.clone() {
+            dict.set_item(
+                "loop_signal",
+                PyChronoLoopSignal::from_signal(signal).as_dict(py)?,
+            )?;
+        } else {
+            dict.set_item("loop_signal", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "CollapsePulse(step={}, total={:.3}, command={})",
+            self.pulse.step,
+            self.pulse.total,
+            self.command_kind()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoFrame")]
+#[derive(Clone)]
+struct PyChronoFrame {
+    frame: ChronoFrame,
+}
+
+impl PyChronoFrame {
+    fn from_frame(frame: ChronoFrame) -> Self {
+        Self { frame }
+    }
+
+    fn as_frame(&self) -> &ChronoFrame {
+        &self.frame
+    }
+
+    fn into_frame(self) -> ChronoFrame {
+        self.frame
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoSummary")]
+struct PyChronoSummary {
+    summary: ChronoSummary,
+}
+
+impl PyChronoSummary {
+    fn from_summary(summary: ChronoSummary) -> Self {
+        Self { summary }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoPeak")]
+#[derive(Clone)]
+struct PyChronoPeak {
+    peak: ChronoPeak,
+}
+
+impl PyChronoPeak {
+    fn from_peak(peak: ChronoPeak) -> Self {
+        Self { peak }
+    }
+}
+
+#[pymethods]
+impl PyChronoPeak {
+    #[getter]
+    fn frequency(&self) -> f32 {
+        self.peak.frequency
+    }
+
+    #[getter]
+    fn magnitude(&self) -> f32 {
+        self.peak.magnitude
+    }
+
+    #[getter]
+    fn phase(&self) -> f32 {
+        self.peak.phase
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frequency", self.peak.frequency)?;
+        dict.set_item("magnitude", self.peak.magnitude)?;
+        dict.set_item("phase", self.peak.phase)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoPeak(freq={:.3}, magnitude={:.3})",
+            self.peak.frequency, self.peak.magnitude
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoHarmonics")]
+struct PyChronoHarmonics {
+    harmonics: ChronoHarmonics,
+}
+
+impl PyChronoHarmonics {
+    fn from_harmonics(harmonics: ChronoHarmonics) -> Self {
+        Self { harmonics }
+    }
+}
+
+#[pymethods]
+impl PyChronoHarmonics {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.harmonics.frames
+    }
+
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.harmonics.duration
+    }
+
+    #[getter]
+    fn sample_rate(&self) -> f32 {
+        self.harmonics.sample_rate
+    }
+
+    #[getter]
+    fn nyquist(&self) -> f32 {
+        self.harmonics.nyquist
+    }
+
+    #[getter]
+    fn drift_power(&self) -> Vec<f32> {
+        self.harmonics.drift_power.clone()
+    }
+
+    #[getter]
+    fn energy_power(&self) -> Vec<f32> {
+        self.harmonics.energy_power.clone()
+    }
+
+    #[getter]
+    fn dominant_drift(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_drift
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn dominant_energy(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_energy
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frames", self.harmonics.frames)?;
+        dict.set_item("duration", self.harmonics.duration)?;
+        dict.set_item("sample_rate", self.harmonics.sample_rate)?;
+        dict.set_item("nyquist", self.harmonics.nyquist)?;
+        dict.set_item("drift_power", self.harmonics.drift_power.clone())?;
+        dict.set_item("energy_power", self.harmonics.energy_power.clone())?;
+        let drift = if let Some(peak) = self.harmonics.dominant_drift.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_drift", drift)?;
+        let energy = if let Some(peak) = self.harmonics.dominant_energy.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_energy", energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoHarmonics(frames={}, sample_rate={:.3})",
+            self.harmonics.frames, self.harmonics.sample_rate
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoLoopSignal")]
+#[derive(Clone)]
+struct PyChronoLoopSignal {
+    signal: ChronoLoopSignal,
+}
+
+impl PyChronoLoopSignal {
+    fn from_signal(signal: ChronoLoopSignal) -> Self {
+        Self { signal }
+    }
+}
+
+#[pymethods]
+impl PyChronoLoopSignal {
+    #[getter]
+    fn summary(&self) -> PyChronoSummary {
+        PyChronoSummary::from_summary(self.signal.summary.clone())
+    }
+
+    #[getter]
+    fn distribution(&self) -> Option<PyDistConfig> {
+        self.inner
+            .distribution_config()
+            .map(|config| PyDistConfig::from_config(config.clone()))
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
+    fn roundtable(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+        dist: Option<PyDistConfig>,
+    ) -> PyResult<PyRoundtableSchedule> {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        if let Some(dist_cfg) = dist {
+            self.inner.configure_distribution(dist_cfg.inner.clone());
+        } else {
+            self.inner.clear_distribution();
+        }
+        Ok(PyRoundtableSchedule::from_schedule(
+            self.inner.roundtable(rows, cols, config),
+        ))
+    fn harmonics(&self) -> Option<PyChronoHarmonics> {
+        self.signal
+            .harmonics
+            .clone()
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.signal.spiralk_script.clone()
+    }
+
+    #[cfg(not(feature = "kdsl"))]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        None
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_hints(&self) -> Vec<String> {
+        self.signal
+            .spiralk_hints
+            .iter()
+            .map(|hint| {
+                format!(
+                    "soft({},{},{},{})",
+                    hint.field, hint.value_expr, hint.weight_expr, hint.condition_expr
+                )
+            })
+            .collect()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item(
+            "summary",
+            PyChronoSummary::from_summary(self.signal.summary.clone()),
+        )?;
+        if let Some(harmonics) = self.signal.harmonics.clone() {
+            dict.set_item("harmonics", PyChronoHarmonics::from_harmonics(harmonics))?;
+        } else {
+            dict.set_item("harmonics", py.None())?;
+        }
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.signal.spiralk_script.clone())?;
+            dict.set_item("spiralk_hints", self.spiralk_hints())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoLoopSignal(frames={}, energy_mean={:.3})",
+            self.signal.summary.frames, self.signal.summary.mean_energy
+        ))
+    }
+}
+
+#[pymethods]
+impl PyChronoSummary {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.summary.frames
+    }
+
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.summary.duration
+    }
+
+    #[getter]
+    fn latest_timestamp(&self) -> f32 {
+        self.summary.latest_timestamp
+    }
+
+    #[getter]
+    fn mean_drift(&self) -> f32 {
+        self.summary.mean_drift
+    }
+
+    #[getter]
+    fn mean_abs_drift(&self) -> f32 {
+        self.summary.mean_abs_drift
+    }
+
+    #[getter]
+    fn drift_std(&self) -> f32 {
+        self.summary.drift_std
+    }
+
+    #[getter]
+    fn mean_energy(&self) -> f32 {
+        self.summary.mean_energy
+    }
+
+    #[getter]
+    fn energy_std(&self) -> f32 {
+        self.summary.energy_std
+    }
+
+    #[getter]
+    fn mean_decay(&self) -> f32 {
+        self.summary.mean_decay
+    }
+
+    #[getter]
+    fn min_energy(&self) -> f32 {
+        self.summary.min_energy
+    }
+
+    #[getter]
+    fn max_energy(&self) -> f32 {
+        self.summary.max_energy
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoSummary(frames={}, duration={:.3}, energy={:.3}±{:.3})",
+            self.summary.frames,
+            self.summary.duration,
+            self.summary.mean_energy,
+            self.summary.energy_std
+        ))
+    }
+}
+
+#[pymethods]
+impl PyChronoFrame {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.frame.step
+    }
+
+    #[getter]
+    fn timestamp(&self) -> f32 {
+        self.frame.timestamp
+    }
+
+    #[getter]
+    fn dt(&self) -> f32 {
+        self.frame.dt
+    }
+
+    #[getter]
+    fn observed_curvature(&self) -> f32 {
+        self.frame.observed_curvature
+    }
+
+    #[getter]
+    fn curvature_drift(&self) -> f32 {
+        self.frame.curvature_drift
+    }
+
+    #[getter]
+    fn total_energy(&self) -> f32 {
+        self.frame.total_energy
+    }
+
+    #[getter]
+    fn energy_decay(&self) -> f32 {
+        self.frame.energy_decay
+    }
+
+    #[getter]
+    fn homotopy_energy(&self) -> f32 {
+        self.frame.homotopy_energy
+    }
+
+    #[getter]
+    fn functor_energy(&self) -> f32 {
+        self.frame.functor_energy
+    }
+
+    #[getter]
+    fn recursive_energy(&self) -> f32 {
+        self.frame.recursive_energy
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let builder = self.ensure_builder()?;
+        let mut config = builder.maintainer_config().clone();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        builder.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
+        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
+        Ok(())
+    #[getter]
+    fn projection_energy(&self) -> f32 {
+        self.frame.projection_energy
+    }
+
+    #[getter]
+    fn infinity_energy(&self) -> f32 {
+        self.frame.infinity_energy
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.frame.step)?;
+        dict.set_item("timestamp", self.frame.timestamp)?;
+        dict.set_item("dt", self.frame.dt)?;
+        dict.set_item("observed_curvature", self.frame.observed_curvature)?;
+        dict.set_item("curvature_drift", self.frame.curvature_drift)?;
+        dict.set_item("total_energy", self.frame.total_energy)?;
+        dict.set_item("energy_decay", self.frame.energy_decay)?;
+        dict.set_item("homotopy_energy", self.frame.homotopy_energy)?;
+        dict.set_item("functor_energy", self.frame.functor_energy)?;
+        dict.set_item("recursive_energy", self.frame.recursive_energy)?;
+        dict.set_item("projection_energy", self.frame.projection_energy)?;
+        dict.set_item("infinity_energy", self.frame.infinity_energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn describe_resonance(&self, resonance: &PyDifferentialResonance) -> PyResult<String> {
+        let resonator = TextResonator::with_encoder(self.inner.clone());
+        Ok(resonator.describe_resonance(&resonance.inner).summary)
+    }
+
+    fn speak(&self, frames: Vec<PyChronoFrame>) -> PyResult<Vec<f32>> {
+        let resonator = TextResonator::with_encoder(self.inner.clone());
+        let frames: Vec<ChronoFrame> = frames.into_iter().map(|frame| frame.into_frame()).collect();
+        convert(resonator.speak(&frames))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoFrame(step={}, t={:.3}, energy={:.3})",
+            self.frame.step, self.frame.timestamp, self.frame.total_energy
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "TextResonator")]
+#[derive(Clone)]
+struct PyTextResonator {
+    inner: TextResonator,
+}
+
+impl PyTextResonator {
+    fn from_inner(inner: TextResonator) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyTextResonator {
+    #[new]
+    fn new(curvature: f32, temperature: f32) -> PyResult<Self> {
+        Ok(Self::from_inner(convert(TextResonator::new(
+            curvature,
+            temperature,
+        ))?))
+    }
+
+    fn curvature(&self) -> f32 {
+        self.inner.encoder().curvature()
+    }
+
+    fn temperature(&self) -> f32 {
+        self.inner.encoder().temperature()
+    }
+
+    fn resonate_over_time(
+        &self,
+        resonance: &PyDifferentialResonance,
+        dt: f32,
+    ) -> PyResult<PyChronoFrame> {
+        let frame = convert(self.inner.resonate_over_time(&resonance.inner, dt))?;
+        Ok(PyChronoFrame::from_frame(frame))
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn timeline(&self, timesteps: Option<usize>) -> PyResult<Vec<PyChronoFrame>> {
+        let frames = self.inner.chrono_frames();
+        let limit = timesteps.unwrap_or(frames.len());
+        let start = frames.len().saturating_sub(limit);
+        Ok(frames[start..]
+            .iter()
+            .cloned()
+            .map(PyChronoFrame::from_frame)
+            .collect())
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn animate_resonance(
+        &self,
+        timesteps: Option<usize>,
+    ) -> PyResult<(Vec<f32>, Vec<f32>, Vec<f32>)> {
+        let frames = self.timeline(timesteps)?;
+        let mut times = Vec::with_capacity(frames.len());
+        let mut energies = Vec::with_capacity(frames.len());
+        let mut drifts = Vec::with_capacity(frames.len());
+        for frame in &frames {
+            let inner = frame.as_frame();
+            times.push(inner.timestamp);
+            energies.push(inner.total_energy);
+            drifts.push(inner.curvature_drift);
+        }
+        Ok((times, energies, drifts))
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn timeline_summary(&self, timesteps: Option<usize>) -> Option<PyChronoSummary> {
+        self.inner
+            .timeline_summary(timesteps)
+            .map(PyChronoSummary::from_summary)
+    }
+
+    fn atlas(&self) -> Option<PyAtlasFrame> {
+        self.inner.atlas().map(PyAtlasFrame::from_frame)
+    }
+
+    #[pyo3(signature = (limit=None))]
+    fn atlas_route(&self, limit: Option<usize>) -> PyAtlasRoute {
+        PyAtlasRoute::from_route(self.inner.atlas_route(limit))
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=16))]
+    fn timeline_harmonics(
+        &self,
+        timesteps: Option<usize>,
+        bins: usize,
+    ) -> Option<PyChronoHarmonics> {
+        self.inner
+            .timeline_harmonics(timesteps, bins)
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=None))]
+    fn loop_signal(
+        &self,
+        timesteps: Option<usize>,
+        bins: Option<usize>,
+    ) -> Option<PyChronoLoopSignal> {
+        self.inner
+            .loop_signal(timesteps, bins)
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn timeline_story(
+        &self,
+        timesteps: Option<usize>,
+        temperature: f32,
+    ) -> PyResult<(String, Vec<String>)> {
+        let narrative = self
+            .inner
+            .timeline_narrative(timesteps, temperature)
+            .map_err(tensor_err)?;
+        Ok((narrative.summary, narrative.highlights))
+    }
+
+    #[pyo3(signature = (temperature=0.6))]
+    fn atlas_story(&self, temperature: f32) -> PyResult<Option<(String, Vec<String>)>> {
+        let narrative = self
+            .inner
+            .atlas_narrative(temperature)
+            .map_err(tensor_err)?;
+        Ok(narrative.map(|story| (story.summary, story.highlights)))
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn speak(&self, timesteps: Option<usize>, temperature: f32) -> PyResult<Vec<f32>> {
+        convert(self.inner.speak(timesteps, temperature))
+    }
+
+    fn maintainer_config(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let cfg = self.inner.maintainer_config();
+        let dict = PyDict::new_bound(py);
+        dict.set_item("jitter_threshold", cfg.jitter_threshold)?;
+        dict.set_item("growth_threshold", cfg.growth_threshold)?;
+        dict.set_item("energy_floor", cfg.energy_floor)?;
+        dict.set_item("clamp_min", cfg.clamp_min)?;
+        dict.set_item("clamp_max", cfg.clamp_max)?;
+        dict.set_item("pressure_step", cfg.pressure_step)?;
+        dict.set_item("window", cfg.window)?;
+        Ok(dict.into_py(py))
+    }
+
+    #[cfg(feature = "collapse")]
+    fn collapse_pulse(&self) -> Option<PyCollapsePulse> {
+        hub::get_collapse_pulse().map(PyCollapsePulse::from_pulse)
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn configure_maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let mut config = self.inner.maintainer_config();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        self.inner.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn self_maintain(&self) -> PyMaintainerReport {
+        PyMaintainerReport::from_report(self.inner.maintain())
+    }
+
+    #[pyo3(signature = (resonance=None, temperature=0.6))]
+    fn describe(
+        &self,
+        resonance: Option<&PyDifferentialResonance>,
+        temperature: f32,
+    ) -> PyResult<String> {
+        let resonance = resonance.map(|res| &res.inner);
+        convert(self.inner.describe(resonance, temperature))
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn roundtable(
+        &self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> PyRoundtableSchedule {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
+    fn describe_resonance(&self, resonance: &PyDifferentialResonance) -> PyResult<String> {
+        Ok(self.inner.describe_resonance(&resonance.inner).summary)
+    }
+
+    fn describe_frame(&self, frame: &PyChronoFrame) -> PyResult<String> {
+        Ok(self.inner.describe_frame(frame.as_frame()).summary)
+    }
+
+    fn speak(&self, frames: Vec<PyChronoFrame>) -> PyResult<Vec<f32>> {
+        let frames: Vec<ChronoFrame> = frames.into_iter().map(|frame| frame.into_frame()).collect();
+        convert(self.inner.speak(&frames))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "TextResonator(curvature={}, temperature={})",
+            self.curvature(),
+            self.temperature()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceProjector")]
+struct PyZSpaceProjector {
+    inner: Option<NnZSpaceProjector>,
+#[pyclass(module = "spiraltorch", name = "MaintainerReport")]
+#[derive(Clone)]
+struct PyMaintainerReport {
+    report: MaintainerReport,
+}
+
+impl PyMaintainerReport {
+    fn from_report(report: MaintainerReport) -> Self {
+        Self { report }
+    }
+}
+
+#[pymethods]
+impl PyMaintainerReport {
+    #[getter]
+    fn status(&self) -> &'static str {
+        self.report.status.as_str()
+    }
+
+    #[getter]
+    fn average_drift(&self) -> f32 {
+        self.report.average_drift
+    }
+
+    #[getter]
+    fn mean_energy(&self) -> f32 {
+        self.report.mean_energy
+    }
+
+    #[getter]
+    fn mean_decay(&self) -> f32 {
+        self.report.mean_decay
+    }
+
+    #[getter]
+    fn drift_peak(&self) -> Option<PyChronoPeak> {
+        self.report.drift_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn energy_peak(&self) -> Option<PyChronoPeak> {
+        self.report.energy_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn suggested_max_scale(&self) -> Option<f32> {
+        self.report.suggested_max_scale
+    }
+
+    #[getter]
+    fn suggested_pressure(&self) -> Option<f32> {
+        self.report.suggested_pressure
+    }
+
+    #[getter]
+    fn diagnostic(&self) -> &str {
+        &self.report.diagnostic
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.report.spiralk_script.clone()
+    }
+
+    fn should_rewrite(&self) -> bool {
+        self.report.should_rewrite()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("status", self.report.status.as_str())?;
+        dict.set_item("average_drift", self.report.average_drift)?;
+        dict.set_item("mean_energy", self.report.mean_energy)?;
+        dict.set_item("mean_decay", self.report.mean_decay)?;
+        let drift_peak = if let Some(peak) = self.report.drift_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        let energy_peak = if let Some(peak) = self.report.energy_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("drift_peak", drift_peak)?;
+        dict.set_item("energy_peak", energy_peak)?;
+        dict.set_item("suggested_max_scale", self.report.suggested_max_scale)?;
+        dict.set_item("suggested_pressure", self.report.suggested_pressure)?;
+        dict.set_item("diagnostic", &self.report.diagnostic)?;
+        dict.set_item("should_rewrite", self.report.should_rewrite())?;
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.report.spiralk_script.clone())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let peak = self
+            .report
+            .drift_peak
+            .as_ref()
+            .map(|p| format!(" {:.2}Hz", p.frequency))
+            .unwrap_or_default();
+        Ok(format!(
+            "MaintainerReport(status={}, drift={:.3}{peak}, energy={:.3})",
+            self.report.status.as_str(),
+            self.report.average_drift,
+            self.report.mean_energy
+        ))
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pyclass(module = "spiraltorch", name = "CollapsePulse")]
+#[derive(Clone)]
+struct PyCollapsePulse {
+    pulse: hub::CollapsePulse,
+}
+
+#[cfg(feature = "collapse")]
+impl PyCollapsePulse {
+    fn from_pulse(pulse: hub::CollapsePulse) -> Self {
+        Self { pulse }
+    }
+
+    fn command_kind(&self) -> &'static str {
+        match self.pulse.command {
+            DriveCmd::Collapse { .. } => "collapse",
+            DriveCmd::Bloom { .. } => "bloom",
+            DriveCmd::None => "none",
+        }
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pymethods]
+impl PyCollapsePulse {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.pulse.step
+    }
+
+    #[getter]
+    fn total(&self) -> f32 {
+        self.pulse.total
+    }
+
+    #[getter]
+    fn command(&self) -> &'static str {
+        self.command_kind()
+    }
+
+    #[getter]
+    fn loop_signal(&self) -> Option<PyChronoLoopSignal> {
+        self.pulse
+            .loop_signal
+            .clone()
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    fn command_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        match self.pulse.command {
+            DriveCmd::Collapse {
+                grad_scale,
+                max_norm,
+                lr_decay,
+            } => {
+                dict.set_item("grad_scale", grad_scale)?;
+                dict.set_item("max_norm", max_norm)?;
+                dict.set_item("lr_decay", lr_decay)?;
+            }
+            DriveCmd::Bloom { lr_mul } => {
+                dict.set_item("lr_mul", lr_mul)?;
+            }
+            DriveCmd::None => {}
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.pulse.step)?;
+        dict.set_item("total", self.pulse.total)?;
+        dict.set_item("command", self.command_kind())?;
+        dict.set_item("params", self.command_params(py)?)?;
+        if let Some(signal) = self.pulse.loop_signal.clone() {
+            dict.set_item(
+                "loop_signal",
+                PyChronoLoopSignal::from_signal(signal).as_dict(py)?,
+            )?;
+        } else {
+            dict.set_item("loop_signal", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "CollapsePulse(step={}, total={:.3}, command={})",
+            self.pulse.step,
+            self.pulse.total,
+            self.command_kind()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SpiralDifferentialTrace")]
+struct PySpiralDifferentialTrace {
+    trace: Option<DifferentialTrace>,
+    sot_plan: Option<PySoT3DPlan>,
+}
+
+impl PyChronoFrame {
+    fn from_frame(frame: ChronoFrame) -> Self {
+        Self { frame }
+    }
+
+    fn as_frame(&self) -> &ChronoFrame {
+        &self.frame
+    }
+
+    fn into_frame(self) -> ChronoFrame {
+        self.frame
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoSummary")]
+struct PyChronoSummary {
+    summary: ChronoSummary,
+}
+
+impl PyChronoSummary {
+    fn from_summary(summary: ChronoSummary) -> Self {
+        Self { summary }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoPeak")]
+#[derive(Clone)]
+struct PyChronoPeak {
+    peak: ChronoPeak,
+}
+
+impl PyChronoPeak {
+    fn from_peak(peak: ChronoPeak) -> Self {
+        Self { peak }
+    }
+}
+
+#[pymethods]
+impl PyChronoPeak {
+    #[getter]
+    fn frequency(&self) -> f32 {
+        self.peak.frequency
+    }
+
+    #[getter]
+    fn magnitude(&self) -> f32 {
+        self.peak.magnitude
+    }
+
+    #[getter]
+    fn phase(&self) -> f32 {
+        self.peak.phase
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frequency", self.peak.frequency)?;
+        dict.set_item("magnitude", self.peak.magnitude)?;
+        dict.set_item("phase", self.peak.phase)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoPeak(freq={:.3}, magnitude={:.3})",
+            self.peak.frequency, self.peak.magnitude
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoHarmonics")]
+struct PyChronoHarmonics {
+    harmonics: ChronoHarmonics,
+}
+
+impl PyChronoHarmonics {
+    fn from_harmonics(harmonics: ChronoHarmonics) -> Self {
+        Self { harmonics }
+    }
+}
+
+#[pymethods]
+impl PyChronoHarmonics {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.harmonics.frames
+    }
+
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.harmonics.duration
+    }
+
+    #[getter]
+    fn sample_rate(&self) -> f32 {
+        self.harmonics.sample_rate
+    }
+
+    #[getter]
+    fn nyquist(&self) -> f32 {
+        self.harmonics.nyquist
+    }
+
+    #[getter]
+    fn drift_power(&self) -> Vec<f32> {
+        self.harmonics.drift_power.clone()
+    }
+}
+
+fn outcome_band_label(band: OutcomeBand) -> &'static str {
+    match band {
+        OutcomeBand::Above => "above",
+        OutcomeBand::Here => "here",
+        OutcomeBand::Beneath => "beneath",
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "MaintainerConfig")]
+#[derive(Clone, Copy, Debug)]
+struct PyMaintainerConfig {
+    threshold: f32,
+    participants: usize,
+}
+
+#[pymethods]
+impl PyMaintainerConfig {
+    #[new]
+    #[pyo3(signature = (threshold=0.6, participants=4))]
+    fn new(threshold: f32, participants: usize) -> PyResult<Self> {
+        if !(0.0..=1.0).contains(&threshold) {
+            return Err(PyValueError::new_err(
+                "maintainer threshold must be within [0.0, 1.0]",
+            ));
+        }
+        Ok(Self {
+            threshold,
+            participants: participants.max(1),
+        })
+    }
+
+    #[getter]
+    fn threshold(&self) -> f32 {
+        self.threshold
+    }
+
+    #[getter]
+    fn participants(&self) -> usize {
+        self.participants
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "MaintainerConfig(threshold={:.3}, participants={})",
+            self.threshold, self.participants
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "LightningStageReport")]
+#[derive(Clone)]
+struct PyLightningStageReport {
+    inner: NnLightningStageReport,
+    epochs: Vec<PyEpochStats>,
+}
+
+impl PyLightningStageReport {
+    fn from_report(inner: NnLightningStageReport) -> Self {
+        let epochs = inner
+            .epochs()
+            .iter()
+            .copied()
+            .map(PyEpochStats::from_stats)
+            .collect();
+        Self { inner, epochs }
+    }
+}
+
+#[pymethods]
+impl PyLightningStageReport {
+    #[getter]
+    fn label(&self) -> Option<String> {
+        self.inner.label().map(|label| label.to_string())
+    }
+
+    #[getter]
+    fn rows(&self) -> u32 {
+        self.inner.config().rows()
+    }
+
+    #[getter]
+    fn cols(&self) -> u32 {
+        self.inner.config().cols()
+    }
+
+    #[getter]
+    fn auto_prepare(&self) -> bool {
+        self.inner.config().auto_prepare()
+    }
+
+    #[getter]
+    fn top_k(&self) -> u32 {
+        self.inner.config().roundtable().top_k
+    }
+
+    #[getter]
+    fn mid_k(&self) -> u32 {
+        self.inner.config().roundtable().mid_k
+    }
+
+    #[getter]
+    fn bottom_k(&self) -> u32 {
+        self.inner.config().roundtable().bottom_k
+    }
+
+    #[getter]
+    fn here_tolerance(&self) -> f32 {
+        self.inner.config().roundtable().here_tolerance
+    }
+
+    #[cfg(feature = "psychoid")]
+    #[getter]
+    fn psychoid(&self) -> bool {
+        self.inner.config().roundtable().psychoid_enabled
+    }
+
+    #[cfg(feature = "psychoid")]
+    #[getter]
+    fn psychoid_log(&self) -> bool {
+        self.inner.config().roundtable().psychoid_log
+    }
+
+    #[cfg(feature = "psi")]
+    #[getter]
+    fn psi(&self) -> bool {
+        self.inner.config().roundtable().psi_enabled
+    }
+
+    #[cfg(feature = "collapse")]
+    #[getter]
+    fn collapse(&self) -> bool {
+        self.inner.config().roundtable().collapse_enabled
+    }
+
+    #[getter]
+    fn epochs(&self) -> Vec<PyEpochStats> {
+        self.epochs.clone()
+    }
+
+    #[getter]
+    fn total_batches(&self) -> usize {
+        self.inner.total_batches()
+    }
+
+    fn best_epoch(&self) -> Option<PyEpochStats> {
+        self.inner.best_epoch().map(PyEpochStats::from_stats)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "LightningStageReport(label={:?}, epochs={}, total_batches={})",
+            self.label(),
+            self.epochs.len(),
+            self.total_batches()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "LightningReport")]
+#[derive(Clone)]
+struct PyLightningReport {
+    inner: NnLightningReport,
+    stages: Vec<PyLightningStageReport>,
+}
+
+impl PyLightningReport {
+    fn from_report(inner: NnLightningReport) -> Self {
+        let stages = inner
+            .stages()
+            .iter()
+            .cloned()
+            .map(PyLightningStageReport::from_report)
+            .collect();
+        Self { inner, stages }
+    }
+}
+
+#[pymethods]
+impl PyLightningReport {
+    #[getter]
+    fn stages(&self) -> Vec<PyLightningStageReport> {
+        self.stages.clone()
+    }
+
+    #[getter]
+    fn total_epochs(&self) -> usize {
+        self.inner.total_epochs()
+    }
+
+    #[getter]
+    fn total_batches(&self) -> usize {
+        self.inner.total_batches()
+    }
+
+    fn best_epoch(&self) -> Option<PyEpochStats> {
+        self.inner.best_epoch().map(PyEpochStats::from_stats)
+    }
+
+    fn best_stage_index(&self) -> Option<usize> {
+        self.inner.best_stage_index()
+    }
+
+    fn best_stage_label(&self) -> Option<String> {
+        self.best_stage_index()
+            .and_then(|idx| self.stages.get(idx))
+            .and_then(|stage| stage.label())
+    }
+
+    fn flatten_epochs(&self) -> Vec<PyEpochStats> {
+        self.inner
+            .epochs()
+            .map(|stats| PyEpochStats::from_stats(*stats))
+            .collect()
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "LightningReport(stages={}, total_epochs={}, total_batches={})",
+            self.stages.len(),
+            self.total_epochs(),
+            self.total_batches()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
+struct PyModuleTrainer {
+    inner: ModuleTrainer,
+#[pyclass(module = "spiraltorch", name = "MaintainerReport")]
+#[derive(Clone, Debug)]
+struct PyMaintainerReport {
+    minutes: ModeratorMinutes,
+}
+
+impl PyMaintainerReport {
+    fn from_minutes(minutes: ModeratorMinutes) -> Self {
+        Self { minutes }
+    }
+
+    fn minutes(&self) -> &ModeratorMinutes {
+        &self.minutes
+    }
+}
+
+#[pymethods]
+impl PyMaintainerReport {
+    #[getter]
+    fn plan_signature(&self) -> &str {
+        &self.minutes.plan_signature
+    }
+
+    #[getter]
+    fn script_hint(&self) -> &str {
+        &self.minutes.script_hint
+    }
+
+    #[getter]
+    fn winner(&self) -> &'static str {
+        outcome_band_label(self.minutes.winner)
+    }
+
+    #[getter]
+    fn support(&self) -> f32 {
+        self.minutes.support
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
+    fn roundtable(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+        dist: Option<PyDistConfig>,
+    ) -> PyResult<PyRoundtableSchedule> {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        if let Some(dist_cfg) = dist {
+            self.inner.configure_distribution(dist_cfg.inner.clone());
+        } else {
+            self.inner.clear_distribution();
+        }
+        Ok(PyRoundtableSchedule::from_schedule(
+            self.inner.roundtable(rows, cols, config),
+        ))
+    #[getter]
+    fn mean_score(&self) -> f32 {
+        self.minutes.mean_score
+    }
+
+    #[getter]
+    fn mean_psi(&self) -> f32 {
+        self.minutes.mean_psi
+    }
+
+    #[getter]
+    fn mean_z(&self) -> f32 {
+        self.minutes.mean_z
+    }
+
+    #[getter]
+    fn confidence(&self) -> (f32, f32) {
+        self.minutes.confidence
+    }
+
+    #[getter]
+    fn reward(&self) -> f64 {
+        self.minutes.reward
+    }
+
+    #[getter]
+    fn issued_at(&self) -> f64 {
+        self.minutes
+            .issued_at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    fn picks<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let picks = PyDict::new_bound(py);
+        for (plan, choice) in &self.minutes.picks {
+            picks.set_item(plan, choice)?;
+        }
+        Ok(picks)
+    }
+
+    fn notes(&self) -> &str {
+        &self.minutes.notes
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "MaintainerReport(plan='{}', winner={}, support={:.3}, score={:.3})",
+            self.plan_signature(),
+            self.winner(),
+            self.support(),
+            self.mean_score()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SpiralLightning", unsendable)]
+struct PySpiralLightning {
+    inner: NnSpiralLightning,
+}
+
+impl PySpiralLightning {
+    fn from_inner(inner: NnSpiralLightning) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PySpiralLightning {
+    #[new]
+    #[pyo3(signature = (session, rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn new(
+        session: PySpiralSession,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> Self {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        let inner = NnSpiralLightning::with_config(session.inner.clone(), config);
+        Self { inner }
+    }
+
+    #[getter]
+    fn rows(&self) -> u32 {
+        self.inner.config().rows()
+    }
+
+    #[getter]
+    fn cols(&self) -> u32 {
+        self.inner.config().cols()
+    }
+
+    #[getter]
+    fn auto_prepare(&self) -> bool {
+        self.inner.config().auto_prepare()
+    }
+
+    fn set_auto_prepare(&mut self, enabled: bool) {
+        self.inner.set_auto_prepare(enabled);
+    }
+
+    fn schedule(&self) -> PyRoundtableSchedule {
+        PyRoundtableSchedule::from_schedule(self.inner.schedule().clone())
+    }
+
+    #[pyo3(signature = (rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn reconfigure(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        self.inner.reconfigure(config);
+    }
+
+    fn prepare_module(&mut self, module: &Bound<'_, PyAny>) -> PyResult<()> {
+        prepare_module_for_lightning(&mut self.inner, module)
+    }
+
+    fn reset_prepared(&mut self) {
+        self.inner.reset_prepared_modules();
+    }
+
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<PyEpochStats> {
+        let stats = run_epoch_with_lightning(&mut self.inner, module, loss, batches)?;
+        Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        epochs: &Bound<'_, PyAny>,
+    ) -> PyResult<Vec<PyEpochStats>> {
+        let epoch_objects: Vec<PyObject> = epochs.extract()?;
+        let mut reports = Vec::with_capacity(epoch_objects.len());
+        for epoch in epoch_objects {
+            let bound = epoch.bind(py);
+            let stats = run_epoch_with_lightning(&mut self.inner, module, loss, &bound)?;
+            reports.push(PyEpochStats::from_stats(stats));
+        }
+        Ok(reports)
+    }
+
+    #[pyo3(signature = (module, loss, stages))]
+    fn fit_plan(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        stages: &Bound<'_, PyAny>,
+    ) -> PyResult<PyLightningReport> {
+        let stage_objects: Vec<PyObject> = stages.extract()?;
+        if stage_objects.is_empty() {
+            return Err(PyValueError::new_err(
+                "SpiralLightning.fit_plan expects at least one stage",
+            ));
+        }
+
+        let mut inherited = self.inner.config().clone();
+        let mut specs = Vec::with_capacity(stage_objects.len());
+        for stage in stage_objects {
+            let bound = stage.bind(py);
+            let spec = parse_lightning_stage_spec(&bound, &inherited)?;
+            inherited = spec.config.clone();
+            specs.push(spec);
+        }
+
+        let mut stage_reports = Vec::with_capacity(specs.len());
+        for spec in specs {
+            self.inner.reconfigure(spec.config.clone());
+            let mut epoch_stats = Vec::with_capacity(spec.epochs.len());
+            for epoch in spec.epochs {
+                let bound = epoch.bind(py);
+                let stats = run_epoch_with_lightning(&mut self.inner, module, loss, &bound)?;
+                epoch_stats.push(stats);
+            }
+            stage_reports.push(NnLightningStageReport::new(
+                spec.config,
+                spec.label,
+                epoch_stats,
+            ));
+        }
+
+        let report = NnLightningReport::new(stage_reports);
+        Ok(PyLightningReport::from_report(report))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "SpiralLightning(rows={}, cols={}, auto_prepare={})",
+            self.rows(),
+            self.cols(),
+            self.auto_prepare()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SpiralSessionBuilder")]
+struct PySpiralSessionBuilder {
+    builder: Option<SpiralSessionBuilder>,
+#[pyclass(module = "spiraltorch", name = "ChronoSummary")]
+#[derive(Clone, Debug)]
+struct PyChronoSummary {
+    plan: String,
+    script: String,
+    winner: OutcomeBand,
+    support: f32,
+    score: f32,
+    psi: f32,
+    z: f32,
+    count: usize,
+    earliest: SystemTime,
+    latest: SystemTime,
+}
+
+#[pymethods]
+impl PyChronoSummary {
+    #[getter]
+    fn plan_signature(&self) -> &str {
+        &self.plan
+    }
+
+    #[getter]
+    fn script_hint(&self) -> &str {
+        &self.script
+    }
+
+    #[getter]
+    fn winner(&self) -> &'static str {
+        outcome_band_label(self.winner)
+    }
+
+    #[getter]
+    fn support(&self) -> f32 {
+        self.support
+    }
+
+    #[getter]
+    fn mean_score(&self) -> f32 {
+        self.score
+    }
+
+    #[getter]
+    fn mean_psi(&self) -> f32 {
+        self.psi
+    }
+
+    #[getter]
+    fn mean_z(&self) -> f32 {
+        self.z
+    }
+
+    #[getter]
+    fn samples(&self) -> usize {
+        self.count
+    }
+
+    #[getter]
+    fn window_seconds(&self) -> f64 {
+        self.latest
+            .duration_since(self.earliest)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let builder = self.ensure_builder()?;
+        let mut config = builder.maintainer_config().clone();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        builder.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
+        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
+        Ok(())
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoSummary(plan='{}', winner={}, support={:.3}, score={:.3}, samples={})",
+            self.plan_signature(),
+            self.winner(),
+            self.support(),
+            self.mean_score(),
+            self.samples()
+        ))
+    }
+}
+
+fn aggregate_reports(reports: &[PyMaintainerReport]) -> Option<PyChronoSummary> {
+    if reports.is_empty() {
+        return None;
+    }
+
+    let mut support = 0.0f32;
+    let mut score = 0.0f32;
+    let mut psi = 0.0f32;
+    let mut z = 0.0f32;
+    let mut winners: HashMap<OutcomeBand, usize> = HashMap::new();
+    let mut earliest = SystemTime::UNIX_EPOCH;
+    let mut latest = SystemTime::UNIX_EPOCH;
+
+    for report in reports {
+        let minutes = report.minutes();
+        support += minutes.support;
+        score += minutes.mean_score;
+        psi += minutes.mean_psi;
+        z += minutes.mean_z;
+        *winners.entry(minutes.winner).or_insert(0) += 1;
+        if minutes.issued_at < earliest || earliest == SystemTime::UNIX_EPOCH {
+            earliest = minutes.issued_at;
+        }
+        if minutes.issued_at > latest {
+            latest = minutes.issued_at;
+        }
+    }
+
+    let count = reports.len();
+    let dominant = winners
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(band, _)| band)
+        .unwrap_or(OutcomeBand::Here);
+
+    let first = reports.first().unwrap().minutes();
+    Some(PyChronoSummary {
+        plan: first.plan_signature.clone(),
+        script: first.script_hint.clone(),
+        winner: dominant,
+        support: support / count as f32,
+        score: score / count as f32,
+        psi: psi / count as f32,
+        z: z / count as f32,
+        count,
+        earliest,
+        latest,
+    })
+}
+
+#[pyfunction(name = "chrono_summary")]
+fn chrono_summary_py(reports: Vec<PyMaintainerReport>) -> PyResult<PyChronoSummary> {
+    aggregate_reports(&reports).ok_or_else(|| {
+        PyValueError::new_err("expected at least one MaintainerReport for chrono_summary")
+    })
+}
+
+#[pyfunction(name = "summarize_timeline")]
+fn summarize_timeline_py(mut reports: Vec<PyMaintainerReport>) -> PyResult<PyChronoSummary> {
+    reports.sort_by_key(|report| report.minutes().issued_at);
+    chrono_summary_py(reports)
+}
+
+#[pyfunction(name = "speak_timeline")]
+fn speak_timeline_py(reports: Vec<PyMaintainerReport>) -> PyResult<String> {
+    let summary = chrono_summary_py(reports.clone())?;
+    let mut line = String::new();
+    write!(
+        &mut line,
+        "Plan '{}' settled on {} with support {:.2} across {} rounds.",
+        summary.plan_signature(),
+        summary.winner(),
+        summary.support(),
+        summary.samples()
+    )
+    .expect("formatting to string");
+    if summary.mean_z().abs() > 0.0 {
+        write!(
+            &mut line,
+            " Language resonance {:.2} and psi {:.2} guided the decision.",
+            summary.mean_z(),
+            summary.mean_psi()
+        )
+        .expect("formatting to string");
+    }
+    if let Some(report) = reports.last() {
+        if !report.minutes().notes.is_empty() {
+            write!(&mut line, " Notes: {}", report.notes()).expect("formatting to string");
+        }
+    }
+    Ok(line)
+}
+
+#[pyfunction(name = "language_wave_amplitude")]
+fn language_wave_amplitude_py(reports: Vec<PyMaintainerReport>) -> PyResult<f32> {
+    if reports.is_empty() {
+        return Err(PyValueError::new_err(
+            "expected at least one MaintainerReport for language_wave_amplitude",
+        ));
+    }
+    let amplitude = reports
+        .iter()
+        .map(|report| report.minutes().mean_z.abs())
+        .sum::<f32>()
+        / reports.len() as f32;
+    Ok(amplitude)
+}
+
+#[pyclass(module = "spiraltorch", name = "EpochStats")]
+#[derive(Clone, Copy)]
+struct PyEpochStats {
+    inner: EpochStats,
+}
+
+    #[getter]
+    fn energy_power(&self) -> Vec<f32> {
+        self.harmonics.energy_power.clone()
+    }
+
+    #[getter]
+    fn dominant_drift(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_drift
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn dominant_energy(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_energy
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frames", self.harmonics.frames)?;
+        dict.set_item("duration", self.harmonics.duration)?;
+        dict.set_item("sample_rate", self.harmonics.sample_rate)?;
+        dict.set_item("nyquist", self.harmonics.nyquist)?;
+        dict.set_item("drift_power", self.harmonics.drift_power.clone())?;
+        dict.set_item("energy_power", self.harmonics.energy_power.clone())?;
+        let drift = if let Some(peak) = self.harmonics.dominant_drift.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_drift", drift)?;
+        let energy = if let Some(peak) = self.harmonics.dominant_energy.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_energy", energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn resonate_over_time(
+        &self,
+        resonance: &PyDifferentialResonance,
+        dt: f32,
+    ) -> PyResult<PyChronoFrame> {
+        let frame = convert(self.inner.resonate_over_time(&resonance.inner, dt))?;
+        Ok(PyChronoFrame::from_frame(frame))
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn timeline(&self, timesteps: Option<usize>) -> PyResult<Vec<PyChronoFrame>> {
+        let frames = self.inner.chrono_frames();
+        let limit = timesteps.unwrap_or(frames.len());
+        let start = frames.len().saturating_sub(limit);
+        Ok(frames[start..]
+            .iter()
+            .cloned()
+            .map(PyChronoFrame::from_frame)
+            .collect())
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn animate_resonance(
+        &self,
+        timesteps: Option<usize>,
+    ) -> PyResult<(Vec<f32>, Vec<f32>, Vec<f32>)> {
+        let frames = self.timeline(timesteps)?;
+        let mut times = Vec::with_capacity(frames.len());
+        let mut energies = Vec::with_capacity(frames.len());
+        let mut drifts = Vec::with_capacity(frames.len());
+        for frame in &frames {
+            let inner = frame.as_frame();
+            times.push(inner.timestamp);
+            energies.push(inner.total_energy);
+            drifts.push(inner.curvature_drift);
+        }
+        Ok((times, energies, drifts))
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn timeline_summary(&self, timesteps: Option<usize>) -> Option<PyChronoSummary> {
+        self.inner
+            .timeline_summary(timesteps)
+            .map(PyChronoSummary::from_summary)
+    }
+
+    fn atlas(&self) -> Option<PyAtlasFrame> {
+        self.inner.atlas().map(PyAtlasFrame::from_frame)
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=16))]
+    fn timeline_harmonics(
+        &self,
+        timesteps: Option<usize>,
+        bins: usize,
+    ) -> Option<PyChronoHarmonics> {
+        self.inner
+            .timeline_harmonics(timesteps, bins)
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=None))]
+    fn loop_signal(
+        &self,
+        timesteps: Option<usize>,
+        bins: Option<usize>,
+    ) -> Option<PyChronoLoopSignal> {
+        self.inner
+            .loop_signal(timesteps, bins)
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn timeline_story(
+        &self,
+        timesteps: Option<usize>,
+        temperature: f32,
+    ) -> PyResult<(String, Vec<String>)> {
+        let narrative = self
+            .inner
+            .timeline_narrative(timesteps, temperature)
+            .map_err(tensor_err)?;
+        Ok((narrative.summary, narrative.highlights))
+    }
+
+    #[pyo3(signature = (temperature=0.6))]
+    fn atlas_story(&self, temperature: f32) -> PyResult<Option<(String, Vec<String>)>> {
+        let narrative = self
+            .inner
+            .atlas_narrative(temperature)
+            .map_err(tensor_err)?;
+        Ok(narrative.map(|story| (story.summary, story.highlights)))
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn speak(&self, timesteps: Option<usize>, temperature: f32) -> PyResult<Vec<f32>> {
+        convert(self.inner.speak(timesteps, temperature))
+    }
+
+    fn maintainer_config(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let cfg = self.inner.maintainer_config();
+        let dict = PyDict::new_bound(py);
+        dict.set_item("jitter_threshold", cfg.jitter_threshold)?;
+        dict.set_item("growth_threshold", cfg.growth_threshold)?;
+        dict.set_item("energy_floor", cfg.energy_floor)?;
+        dict.set_item("clamp_min", cfg.clamp_min)?;
+        dict.set_item("clamp_max", cfg.clamp_max)?;
+        dict.set_item("pressure_step", cfg.pressure_step)?;
+        dict.set_item("window", cfg.window)?;
+        Ok(dict.into_py(py))
+    }
+
+    #[cfg(feature = "collapse")]
+    fn collapse_pulse(&self) -> Option<PyCollapsePulse> {
+        hub::get_collapse_pulse().map(PyCollapsePulse::from_pulse)
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn configure_maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let mut config = self.inner.maintainer_config();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        self.inner.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn self_maintain(&self) -> PyMaintainerReport {
+        PyMaintainerReport::from_report(self.inner.maintain())
+    }
+
+    #[pyo3(signature = (resonance=None, temperature=0.6))]
+    fn describe(
+        &self,
+        resonance: Option<&PyDifferentialResonance>,
+        temperature: f32,
+    ) -> PyResult<String> {
+        let resonance = resonance.map(|res| &res.inner);
+        convert(self.inner.describe(resonance, temperature))
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn roundtable(
+        &self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> PyRoundtableSchedule {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoHarmonics(frames={}, sample_rate={:.3})",
+            self.harmonics.frames, self.harmonics.sample_rate
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoLoopSignal")]
+#[derive(Clone)]
+struct PyChronoLoopSignal {
+    signal: ChronoLoopSignal,
+}
+
+impl PyChronoLoopSignal {
+    fn from_signal(signal: ChronoLoopSignal) -> Self {
+        Self { signal }
+    }
+}
+
+#[pymethods]
+impl PyChronoLoopSignal {
+    #[getter]
+    fn summary(&self) -> PyChronoSummary {
+        PyChronoSummary::from_summary(self.signal.summary.clone())
+    }
+
+    #[getter]
+    fn harmonics(&self) -> Option<PyChronoHarmonics> {
+        self.signal
+            .harmonics
+            .clone()
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.signal.spiralk_script.clone()
+    }
+
+    #[cfg(not(feature = "kdsl"))]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        None
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_hints(&self) -> Vec<String> {
+        self.signal
+            .spiralk_hints
+            .iter()
+            .map(|hint| {
+                format!(
+                    "soft({},{},{},{})",
+                    hint.field, hint.value_expr, hint.weight_expr, hint.condition_expr
+                )
+            })
+            .collect()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item(
+            "summary",
+            PyChronoSummary::from_summary(self.signal.summary.clone()),
+        )?;
+        if let Some(harmonics) = self.signal.harmonics.clone() {
+            dict.set_item("harmonics", PyChronoHarmonics::from_harmonics(harmonics))?;
+        } else {
+            dict.set_item("harmonics", py.None())?;
+        }
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.signal.spiralk_script.clone())?;
+            dict.set_item("spiralk_hints", self.spiralk_hints())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoLoopSignal(frames={}, energy_mean={:.3})",
+            self.signal.summary.frames, self.signal.summary.mean_energy
+        ))
+    }
+}
+
+#[pymethods]
+impl PyChronoSummary {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.summary.frames
+    }
+
+    #[pyo3(signature = (rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn lightning(
+        &self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> PySpiralLightning {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::new(rows, cols)
+            .with_roundtable(roundtable)
+            .with_auto_prepare(auto_prepare);
+        PySpiralLightning::from_inner(NnSpiralLightning::with_config(self.inner.clone(), config))
+    }
+
+    #[pyo3(signature = (seed, sot=None))]
+    fn trace(
+        &self,
+        seed: &PyTensor,
+        sot: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<PySpiralDifferentialTrace> {
+        let (rows, cols) = seed.as_tensor().shape();
+        let default_steps = match rows.checked_mul(cols) {
+            Some(0) | None => 1,
+            Some(value) => value.max(1),
+        };
+        let mut plan_steps = default_steps;
+        let mut params = Sot3DParams {
+            base_radius: 1.0,
+            radial_growth: 0.05,
+            base_height: 1.0,
+            meso_gain: 0.2,
+            micro_gain: 0.05,
+        };
+        if let Some(cfg) = sot {
+            if let Some(value) = cfg.get_item("steps")? {
+                plan_steps = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("base_radius")? {
+                params.base_radius = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("radial_growth")? {
+                params.radial_growth = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("base_height")? {
+                params.base_height = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("meso_gain")? {
+                params.meso_gain = value.extract()?;
+            }
+            if let Some(value) = cfg.get_item("micro_gain")? {
+                params.micro_gain = value.extract()?;
+            }
+        }
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.summary.duration
+    }
+
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.inner
+            .install_blackcat_moderator(config.threshold, config.participants);
+    }
+
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.inner
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
+    }
+
+    #[getter]
+    fn mean_drift(&self) -> f32 {
+        self.summary.mean_drift
+    }
+
+    #[getter]
+    fn mean_abs_drift(&self) -> f32 {
+        self.summary.mean_abs_drift
+    }
+
+    #[getter]
+    fn drift_std(&self) -> f32 {
+        self.summary.drift_std
+    }
+
+    #[getter]
+    fn mean_energy(&self) -> f32 {
+        self.summary.mean_energy
+    }
+
+    #[getter]
+    fn energy_std(&self) -> f32 {
+        self.summary.energy_std
+    }
+
+    #[getter]
+    fn mean_decay(&self) -> f32 {
+        self.summary.mean_decay
+    }
+
+    #[getter]
+    fn min_energy(&self) -> f32 {
+        self.summary.min_energy
+    }
+
+    #[getter]
+    fn max_energy(&self) -> f32 {
+        self.summary.max_energy
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ModuleTrainer(curvature={:.4}, hyper_lr={:.4}, fallback_lr={:.4})",
+            self.curvature(),
+            self.hyper_learning_rate(),
+            self.fallback_learning_rate()
+        ))
+    }
+}
+
+#[pymethods]
+impl PyChronoFrame {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.frame.step
+    }
+
+    #[getter]
+    fn timestamp(&self) -> f32 {
+        self.frame.timestamp
+    }
+
+    #[getter]
+    fn dt(&self) -> f32 {
+        self.frame.dt
+    }
+
+    #[getter]
+    fn observed_curvature(&self) -> f32 {
+        self.frame.observed_curvature
+    }
+
+    #[getter]
+    fn curvature_drift(&self) -> f32 {
+        self.frame.curvature_drift
+    }
+
+    #[getter]
+    fn total_energy(&self) -> f32 {
+        self.frame.total_energy
+    }
+
+    #[getter]
+    fn energy_decay(&self) -> f32 {
+        self.frame.energy_decay
+    }
+
+    #[getter]
+    fn homotopy_energy(&self) -> f32 {
+        self.frame.homotopy_energy
+    }
+
+    #[getter]
+    fn functor_energy(&self) -> f32 {
+        self.frame.functor_energy
+    }
+
+    #[getter]
+    fn recursive_energy(&self) -> f32 {
+        self.frame.recursive_energy
+    }
+
+    #[getter]
+    fn projection_energy(&self) -> f32 {
+        self.frame.projection_energy
+    }
+
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.inner
+            .trainer_mut()
+            .install_blackcat_moderator(config.threshold, config.participants);
+    }
+
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.inner
+            .trainer()
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
+    }
+
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<PyEpochStats> {
+        let stats = run_epoch_with_lightning(&mut self.inner, module, loss, batches)?;
+        Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.frame.step)?;
+        dict.set_item("timestamp", self.frame.timestamp)?;
+        dict.set_item("dt", self.frame.dt)?;
+        dict.set_item("observed_curvature", self.frame.observed_curvature)?;
+        dict.set_item("curvature_drift", self.frame.curvature_drift)?;
+        dict.set_item("total_energy", self.frame.total_energy)?;
+        dict.set_item("energy_decay", self.frame.energy_decay)?;
+        dict.set_item("homotopy_energy", self.frame.homotopy_energy)?;
+        dict.set_item("functor_energy", self.frame.functor_energy)?;
+        dict.set_item("recursive_energy", self.frame.recursive_energy)?;
+        dict.set_item("projection_energy", self.frame.projection_energy)?;
+        dict.set_item("infinity_energy", self.frame.infinity_energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn describe_resonance(&self, resonance: &PyDifferentialResonance) -> PyResult<String> {
+        let resonator = TextResonator::with_encoder(self.inner.clone());
+        Ok(resonator.describe_resonance(&resonance.inner).summary)
+    }
+
+    fn speak(&self, frames: Vec<PyChronoFrame>) -> PyResult<Vec<f32>> {
+        let resonator = TextResonator::with_encoder(self.inner.clone());
+        let frames: Vec<ChronoFrame> = frames.into_iter().map(|frame| frame.into_frame()).collect();
+        convert(resonator.speak(&frames))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoFrame(step={}, t={:.3}, energy={:.3})",
+            self.frame.step, self.frame.timestamp, self.frame.total_energy
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.rec", name = "Recommender", unsendable)]
+struct PyRecommender {
+    lightning: NnSpiralLightning,
+}
+
+#[pymethods]
+impl PyRecommender {
+    #[new]
+    #[pyo3(signature = (session, rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn new(
+        session: PySpiralSession,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> Self {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        let lightning = NnSpiralLightning::with_config(session.inner.clone(), config);
+        Self { lightning }
+    }
+
+    #[getter]
+    fn rows(&self) -> u32 {
+        self.lightning.config().rows()
+    }
+
+    #[getter]
+    fn cols(&self) -> u32 {
+        self.lightning.config().cols()
+    }
+
+    #[getter]
+    fn auto_prepare(&self) -> bool {
+        self.lightning.config().auto_prepare()
+    }
+
+    fn set_auto_prepare(&mut self, enabled: bool) {
+        self.lightning.set_auto_prepare(enabled);
+    }
+
+    fn schedule(&self) -> PyRoundtableSchedule {
+        PyRoundtableSchedule::from_schedule(self.lightning.schedule().clone())
+    }
+
+    #[pyo3(signature = (rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn reconfigure(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        self.lightning.reconfigure(config);
+    }
+
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.lightning
+            .trainer_mut()
+            .install_blackcat_moderator(config.threshold, config.participants);
+    }
+
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.lightning
+            .trainer()
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
+    }
+
+    fn prepare_module(&mut self, module: &Bound<'_, PyAny>) -> PyResult<()> {
+        prepare_module_for_lightning(&mut self.lightning, module)
+    }
+
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<PyEpochStats> {
+        let stats = run_epoch_with_lightning(&mut self.lightning, module, loss, batches)?;
+        Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn recommend(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        input: &PyTensor,
+    ) -> PyResult<PyTensor> {
+        let input_obj = Py::new(py, input.clone_py())?;
+        let output = module.call_method1("forward", (input_obj,))?;
+        output.extract::<PyTensor>()
+    }
+
+    fn recommend_topk(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        input: &PyTensor,
+        k: usize,
+        largest: bool,
+    ) -> PyResult<(PyTensor, PyTensor)> {
+        let output = self.recommend(py, module, input)?;
+        topk2d_tensor_py(py, &output, k, None, largest)
+    }
+
+    fn maintainer_support(&self) -> f32 {
+        let reports = self.maintainer_reports();
+        if reports.is_empty() {
+            0.0
+        } else {
+            reports.iter().map(|r| r.support()).sum::<f32>() / reports.len() as f32
+        }
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "Recommender(rows={}, cols={}, auto_prepare={})",
+            self.rows(),
+            self.cols(),
+            self.auto_prepare()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SpiralSessionBuilder")]
+struct PySpiralSessionBuilder {
+    builder: Option<SpiralSessionBuilder>,
+}
+
+impl PySpiralSessionBuilder {
+    fn from_builder(builder: SpiralSessionBuilder) -> Self {
+        Self {
+            builder: Some(builder),
+        }
+    }
+
+    fn ensure_builder(&mut self) -> PyResult<&mut SpiralSessionBuilder> {
+        self.builder
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("builder has already been consumed"))
+    }
+}
+
+#[pymethods]
+impl PySpiralSessionBuilder {
+    #[new]
+    #[pyo3(signature = (device=None))]
+    fn new(device: Option<&str>) -> Self {
+        let caps = caps_for(device);
+        Self {
+            builder: Some(SpiralSession::builder(caps)),
+        }
+    }
+
+    fn curvature(&mut self, curvature: f32) -> PyResult<()> {
+        self.ensure_builder()?.set_curvature(curvature);
+        Ok(())
+    }
+
+    fn hyper_learning_rate(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.ensure_builder()?
+            .set_hyper_learning_rate(learning_rate);
+        Ok(())
+    }
+
+    fn fallback_learning_rate(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.ensure_builder()?
+            .set_fallback_learning_rate(learning_rate);
+        Ok(())
+    }
+
+    fn entropy_weight(&mut self, entropy_weight: f32) -> PyResult<()> {
+        self.ensure_builder()?
+            .set_barycenter_entropy(entropy_weight);
+        Ok(())
+    }
+
+    fn beta_j(&mut self, beta_j: f32) -> PyResult<()> {
+        self.ensure_builder()?.set_barycenter_beta_j(beta_j);
+        Ok(())
+    }
+
+    #[pyo3(signature = (coupling=None))]
+    fn coupling(&mut self, coupling: Option<PyTensor>) -> PyResult<()> {
+        let tensor = coupling.map(PyTensor::into_tensor);
+        self.ensure_builder()?.set_barycenter_coupling(tensor);
+        Ok(())
+    }
+
+    #[getter]
+    fn suggested_pressure(&self) -> Option<f32> {
+        self.report.suggested_pressure
+    }
+
+    #[getter]
+    fn diagnostic(&self) -> &str {
+        &self.report.diagnostic
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.report.spiralk_script.clone()
+    }
+
+    fn should_rewrite(&self) -> bool {
+        self.report.should_rewrite()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("status", self.report.status.as_str())?;
+        dict.set_item("average_drift", self.report.average_drift)?;
+        dict.set_item("mean_energy", self.report.mean_energy)?;
+        dict.set_item("mean_decay", self.report.mean_decay)?;
+        let drift_peak = if let Some(peak) = self.report.drift_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        let energy_peak = if let Some(peak) = self.report.energy_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("drift_peak", drift_peak)?;
+        dict.set_item("energy_peak", energy_peak)?;
+        dict.set_item("suggested_max_scale", self.report.suggested_max_scale)?;
+        dict.set_item("suggested_pressure", self.report.suggested_pressure)?;
+        dict.set_item("diagnostic", &self.report.diagnostic)?;
+        dict.set_item("should_rewrite", self.report.should_rewrite())?;
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.report.spiralk_script.clone())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let peak = self
+            .report
+            .drift_peak
+            .as_ref()
+            .map(|p| format!(" {:.2}Hz", p.frequency))
+            .unwrap_or_default();
+        Ok(format!(
+            "MaintainerReport(status={}, drift={:.3}{peak}, energy={:.3})",
+            self.report.status.as_str(),
+            self.report.average_drift,
+            self.report.mean_energy
+        ))
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pyclass(module = "spiraltorch", name = "CollapsePulse")]
+#[derive(Clone)]
+struct PyCollapsePulse {
+    pulse: hub::CollapsePulse,
+}
+
+#[cfg(feature = "collapse")]
+impl PyCollapsePulse {
+    fn from_pulse(pulse: hub::CollapsePulse) -> Self {
+        Self { pulse }
+    }
+
+    fn command_kind(&self) -> &'static str {
+        match self.pulse.command {
+            DriveCmd::Collapse { .. } => "collapse",
+            DriveCmd::Bloom { .. } => "bloom",
+            DriveCmd::None => "none",
+        }
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pymethods]
+impl PyCollapsePulse {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.pulse.step
+    }
+
+    #[getter]
+    fn total(&self) -> f32 {
+        self.pulse.total
+    }
+
+    #[getter]
+    fn command(&self) -> &'static str {
+        self.command_kind()
+    }
+
+    #[getter]
+    fn loop_signal(&self) -> Option<PyChronoLoopSignal> {
+        self.pulse
+            .loop_signal
+            .clone()
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    fn command_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        match self.pulse.command {
+            DriveCmd::Collapse {
+                grad_scale,
+                max_norm,
+                lr_decay,
+            } => {
+                dict.set_item("grad_scale", grad_scale)?;
+                dict.set_item("max_norm", max_norm)?;
+                dict.set_item("lr_decay", lr_decay)?;
+            }
+            DriveCmd::Bloom { lr_mul } => {
+                dict.set_item("lr_mul", lr_mul)?;
+            }
+            DriveCmd::None => {}
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.pulse.step)?;
+        dict.set_item("total", self.pulse.total)?;
+        dict.set_item("command", self.command_kind())?;
+        dict.set_item("params", self.command_params(py)?)?;
+        if let Some(signal) = self.pulse.loop_signal.clone() {
+            dict.set_item(
+                "loop_signal",
+                PyChronoLoopSignal::from_signal(signal).as_dict(py)?,
+            )?;
+        } else {
+            dict.set_item("loop_signal", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "CollapsePulse(step={}, total={:.3}, command={})",
+            self.pulse.step,
+            self.pulse.total,
+            self.command_kind()
         ))
     }
 }
@@ -1571,12 +8182,47 @@ impl PyLanguageWaveEncoder {
         convert(resonator.speak(&frames))
     }
 
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!(
-            "LanguageWaveEncoder(curvature={}, temperature={})",
-            self.curvature(),
-            self.temperature()
-        ))
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let builder = self.ensure_builder()?;
+        let mut config = builder.maintainer_config().clone();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        builder.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
+        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
+        Ok(())
     }
 }
 
@@ -1765,8 +8411,186 @@ impl PyHypergrad {
         self.inner.learning_rate()
     }
 
-    fn shape(&self) -> (usize, usize) {
-        self.inner.shape()
+    fn resonate_over_time(
+        &self,
+        resonance: &PyDifferentialResonance,
+        dt: f32,
+    ) -> PyResult<PyChronoFrame> {
+        let frame = convert(self.inner.resonate_over_time(&resonance.inner, dt))?;
+        Ok(PyChronoFrame::from_frame(frame))
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn timeline(&self, timesteps: Option<usize>) -> PyResult<Vec<PyChronoFrame>> {
+        let frames = self.inner.chrono_frames();
+        let limit = timesteps.unwrap_or(frames.len());
+        let start = frames.len().saturating_sub(limit);
+        Ok(frames[start..]
+            .iter()
+            .cloned()
+            .map(PyChronoFrame::from_frame)
+            .collect())
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn animate_resonance(
+        &self,
+        timesteps: Option<usize>,
+    ) -> PyResult<(Vec<f32>, Vec<f32>, Vec<f32>)> {
+        let frames = self.timeline(timesteps)?;
+        let mut times = Vec::with_capacity(frames.len());
+        let mut energies = Vec::with_capacity(frames.len());
+        let mut drifts = Vec::with_capacity(frames.len());
+        for frame in &frames {
+            let inner = frame.as_frame();
+            times.push(inner.timestamp);
+            energies.push(inner.total_energy);
+            drifts.push(inner.curvature_drift);
+        }
+        Ok((times, energies, drifts))
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn timeline_summary(&self, timesteps: Option<usize>) -> Option<PyChronoSummary> {
+        self.inner
+            .timeline_summary(timesteps)
+            .map(PyChronoSummary::from_summary)
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=16))]
+    fn timeline_harmonics(
+        &self,
+        timesteps: Option<usize>,
+        bins: usize,
+    ) -> Option<PyChronoHarmonics> {
+        self.inner
+            .timeline_harmonics(timesteps, bins)
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=None))]
+    fn loop_signal(
+        &self,
+        timesteps: Option<usize>,
+        bins: Option<usize>,
+    ) -> Option<PyChronoLoopSignal> {
+        self.inner
+            .loop_signal(timesteps, bins)
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn timeline_story(
+        &self,
+        timesteps: Option<usize>,
+        temperature: f32,
+    ) -> PyResult<(String, Vec<String>)> {
+        let narrative = self
+            .inner
+            .timeline_narrative(timesteps, temperature)
+            .map_err(tensor_err)?;
+        Ok((narrative.summary, narrative.highlights))
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn speak(&self, timesteps: Option<usize>, temperature: f32) -> PyResult<Vec<f32>> {
+        convert(self.inner.speak(timesteps, temperature))
+    }
+
+    fn maintainer_config(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let cfg = self.inner.maintainer_config();
+        let dict = PyDict::new_bound(py);
+        dict.set_item("jitter_threshold", cfg.jitter_threshold)?;
+        dict.set_item("growth_threshold", cfg.growth_threshold)?;
+        dict.set_item("energy_floor", cfg.energy_floor)?;
+        dict.set_item("clamp_min", cfg.clamp_min)?;
+        dict.set_item("clamp_max", cfg.clamp_max)?;
+        dict.set_item("pressure_step", cfg.pressure_step)?;
+        dict.set_item("window", cfg.window)?;
+        Ok(dict.into_py(py))
+    }
+
+    #[cfg(feature = "collapse")]
+    fn collapse_pulse(&self) -> Option<PyCollapsePulse> {
+        hub::get_collapse_pulse().map(PyCollapsePulse::from_pulse)
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn configure_maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let mut config = self.inner.maintainer_config();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        self.inner.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn self_maintain(&self) -> PyMaintainerReport {
+        PyMaintainerReport::from_report(self.inner.maintain())
+    }
+
+    #[pyo3(signature = (resonance=None, temperature=0.6))]
+    fn describe(
+        &self,
+        resonance: Option<&PyDifferentialResonance>,
+        temperature: f32,
+    ) -> PyResult<String> {
+        let resonance = resonance.map(|res| &res.inner);
+        convert(self.inner.describe(resonance, temperature))
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn roundtable(
+        &self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> PyRoundtableSchedule {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
     }
 
     fn gradient(&self) -> Vec<f32> {
@@ -1980,6 +8804,335 @@ impl PyRoundtableSchedule {
     }
 }
 
+fn outcome_band_label(band: OutcomeBand) -> &'static str {
+    match band {
+        OutcomeBand::Above => "above",
+        OutcomeBand::Here => "here",
+        OutcomeBand::Beneath => "beneath",
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "MaintainerConfig")]
+#[derive(Clone, Copy, Debug)]
+struct PyMaintainerConfig {
+    threshold: f32,
+    participants: usize,
+}
+
+#[pymethods]
+impl PyMaintainerConfig {
+    #[new]
+    #[pyo3(signature = (threshold=0.6, participants=4))]
+    fn new(threshold: f32, participants: usize) -> PyResult<Self> {
+        if !(0.0..=1.0).contains(&threshold) {
+            return Err(PyValueError::new_err(
+                "maintainer threshold must be within [0.0, 1.0]",
+            ));
+        }
+        Ok(Self {
+            threshold,
+            participants: participants.max(1),
+        })
+    }
+
+    #[getter]
+    fn threshold(&self) -> f32 {
+        self.threshold
+    }
+
+    #[getter]
+    fn participants(&self) -> usize {
+        self.participants
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "MaintainerConfig(threshold={:.3}, participants={})",
+            self.threshold, self.participants
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "MaintainerReport")]
+#[derive(Clone, Debug)]
+struct PyMaintainerReport {
+    minutes: ModeratorMinutes,
+}
+
+impl PyMaintainerReport {
+    fn from_minutes(minutes: ModeratorMinutes) -> Self {
+        Self { minutes }
+    }
+
+    fn minutes(&self) -> &ModeratorMinutes {
+        &self.minutes
+    }
+}
+
+#[pymethods]
+impl PyMaintainerReport {
+    #[getter]
+    fn plan_signature(&self) -> &str {
+        &self.minutes.plan_signature
+    }
+
+    #[getter]
+    fn script_hint(&self) -> &str {
+        &self.minutes.script_hint
+    }
+
+    #[getter]
+    fn winner(&self) -> &'static str {
+        outcome_band_label(self.minutes.winner)
+    }
+
+    #[getter]
+    fn support(&self) -> f32 {
+        self.minutes.support
+    }
+
+    #[getter]
+    fn mean_score(&self) -> f32 {
+        self.minutes.mean_score
+    }
+
+    #[getter]
+    fn mean_psi(&self) -> f32 {
+        self.minutes.mean_psi
+    }
+
+    #[getter]
+    fn mean_z(&self) -> f32 {
+        self.minutes.mean_z
+    }
+
+    #[getter]
+    fn confidence(&self) -> (f32, f32) {
+        self.minutes.confidence
+    }
+
+    #[getter]
+    fn reward(&self) -> f64 {
+        self.minutes.reward
+    }
+
+    #[getter]
+    fn issued_at(&self) -> f64 {
+        self.minutes
+            .issued_at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    fn picks<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let picks = PyDict::new_bound(py);
+        for (plan, choice) in &self.minutes.picks {
+            picks.set_item(plan, choice)?;
+        }
+        Ok(picks)
+    }
+
+    fn notes(&self) -> &str {
+        &self.minutes.notes
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "MaintainerReport(plan='{}', winner={}, support={:.3}, score={:.3})",
+            self.plan_signature(),
+            self.winner(),
+            self.support(),
+            self.mean_score()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoSummary")]
+#[derive(Clone, Debug)]
+struct PyChronoSummary {
+    plan: String,
+    script: String,
+    winner: OutcomeBand,
+    support: f32,
+    score: f32,
+    psi: f32,
+    z: f32,
+    count: usize,
+    earliest: SystemTime,
+    latest: SystemTime,
+}
+
+#[pymethods]
+impl PyChronoSummary {
+    #[getter]
+    fn plan_signature(&self) -> &str {
+        &self.plan
+    }
+
+    #[getter]
+    fn script_hint(&self) -> &str {
+        &self.script
+    }
+
+    #[getter]
+    fn winner(&self) -> &'static str {
+        outcome_band_label(self.winner)
+    }
+
+    #[getter]
+    fn support(&self) -> f32 {
+        self.support
+    }
+
+    #[getter]
+    fn mean_score(&self) -> f32 {
+        self.score
+    }
+
+    #[getter]
+    fn mean_psi(&self) -> f32 {
+        self.psi
+    }
+
+    #[getter]
+    fn mean_z(&self) -> f32 {
+        self.z
+    }
+
+    #[getter]
+    fn samples(&self) -> usize {
+        self.count
+    }
+
+    #[getter]
+    fn window_seconds(&self) -> f64 {
+        self.latest
+            .duration_since(self.earliest)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoSummary(plan='{}', winner={}, support={:.3}, score={:.3}, samples={})",
+            self.plan_signature(),
+            self.winner(),
+            self.support(),
+            self.mean_score(),
+            self.samples()
+        ))
+    }
+}
+
+fn aggregate_reports(reports: &[PyMaintainerReport]) -> Option<PyChronoSummary> {
+    if reports.is_empty() {
+        return None;
+    }
+
+    let mut support = 0.0f32;
+    let mut score = 0.0f32;
+    let mut psi = 0.0f32;
+    let mut z = 0.0f32;
+    let mut winners: HashMap<OutcomeBand, usize> = HashMap::new();
+    let mut earliest = SystemTime::UNIX_EPOCH;
+    let mut latest = SystemTime::UNIX_EPOCH;
+
+    for report in reports {
+        let minutes = report.minutes();
+        support += minutes.support;
+        score += minutes.mean_score;
+        psi += minutes.mean_psi;
+        z += minutes.mean_z;
+        *winners.entry(minutes.winner).or_insert(0) += 1;
+        if minutes.issued_at < earliest || earliest == SystemTime::UNIX_EPOCH {
+            earliest = minutes.issued_at;
+        }
+        if minutes.issued_at > latest {
+            latest = minutes.issued_at;
+        }
+    }
+
+    let count = reports.len();
+    let dominant = winners
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(band, _)| band)
+        .unwrap_or(OutcomeBand::Here);
+
+    let first = reports.first().unwrap().minutes();
+    Some(PyChronoSummary {
+        plan: first.plan_signature.clone(),
+        script: first.script_hint.clone(),
+        winner: dominant,
+        support: support / count as f32,
+        score: score / count as f32,
+        psi: psi / count as f32,
+        z: z / count as f32,
+        count,
+        earliest,
+        latest,
+    })
+}
+
+#[pyfunction(name = "chrono_summary")]
+fn chrono_summary_py(reports: Vec<PyMaintainerReport>) -> PyResult<PyChronoSummary> {
+    aggregate_reports(&reports).ok_or_else(|| {
+        PyValueError::new_err("expected at least one MaintainerReport for chrono_summary")
+    })
+}
+
+#[pyfunction(name = "summarize_timeline")]
+fn summarize_timeline_py(mut reports: Vec<PyMaintainerReport>) -> PyResult<PyChronoSummary> {
+    reports.sort_by_key(|report| report.minutes().issued_at);
+    chrono_summary_py(reports)
+}
+
+#[pyfunction(name = "speak_timeline")]
+fn speak_timeline_py(reports: Vec<PyMaintainerReport>) -> PyResult<String> {
+    let summary = chrono_summary_py(reports.clone())?;
+    let mut line = String::new();
+    write!(
+        &mut line,
+        "Plan '{}' settled on {} with support {:.2} across {} rounds.",
+        summary.plan_signature(),
+        summary.winner(),
+        summary.support(),
+        summary.samples()
+    )
+    .expect("formatting to string");
+    if summary.mean_z().abs() > 0.0 {
+        write!(
+            &mut line,
+            " Language resonance {:.2} and psi {:.2} guided the decision.",
+            summary.mean_z(),
+            summary.mean_psi()
+        )
+        .expect("formatting to string");
+    }
+    if let Some(report) = reports.last() {
+        if !report.minutes().notes.is_empty() {
+            write!(&mut line, " Notes: {}", report.notes()).expect("formatting to string");
+        }
+    }
+    Ok(line)
+}
+
+#[pyfunction(name = "language_wave_amplitude")]
+fn language_wave_amplitude_py(reports: Vec<PyMaintainerReport>) -> PyResult<f32> {
+    if reports.is_empty() {
+        return Err(PyValueError::new_err(
+            "expected at least one MaintainerReport for language_wave_amplitude",
+        ));
+    }
+    let amplitude = reports
+        .iter()
+        .map(|report| report.minutes().mean_z.abs())
+        .sum::<f32>()
+        / reports.len() as f32;
+    Ok(amplitude)
+}
+
 #[pyclass(module = "spiraltorch", name = "EpochStats")]
 #[derive(Clone, Copy)]
 struct PyEpochStats {
@@ -2189,85 +9342,6 @@ impl PyGoldenBlackcatPulse {
     }
 }
 
-#[cfg(feature = "golden")]
-#[pyclass(module = "spiraltorch", name = "GoldenCouncilSnapshot")]
-#[derive(Clone)]
-struct PyGoldenCouncilSnapshot {
-    inner: GoldenCouncilSnapshot,
-}
-
-#[cfg(feature = "golden")]
-impl PyGoldenCouncilSnapshot {
-    fn from_inner(inner: GoldenCouncilSnapshot) -> Self {
-        Self { inner }
-    }
-}
-
-#[cfg(feature = "golden")]
-#[pymethods]
-impl PyGoldenCouncilSnapshot {
-    #[getter]
-    fn exploration_bias(&self) -> f32 {
-        self.inner.exploration_bias
-    }
-
-    #[getter]
-    fn optimization_bias(&self) -> f32 {
-        self.inner.optimization_bias
-    }
-
-    #[getter]
-    fn synergy_bias(&self) -> f32 {
-        self.inner.synergy_bias
-    }
-
-    #[getter]
-    fn reinforcement_bias(&self) -> f32 {
-        self.inner.reinforcement_bias
-    }
-
-    #[getter]
-    fn resonance(&self) -> f32 {
-        self.inner.resonance
-    }
-
-    #[getter]
-    fn stability(&self) -> f32 {
-        self.inner.stability
-    }
-
-    #[getter]
-    fn momentum(&self) -> f32 {
-        self.inner.momentum
-    }
-
-    #[getter]
-    fn divergence(&self) -> f32 {
-        self.inner.divergence
-    }
-
-    #[getter]
-    fn schedule_hint(&self) -> (f32, f32, f32, f32) {
-        self.inner.schedule_hint
-    }
-
-    #[getter]
-    fn pulse(&self) -> PyGoldenBlackcatPulse {
-        PyGoldenBlackcatPulse::from_inner(self.inner.pulse_recap.clone())
-    }
-
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!(
-            "GoldenCouncilSnapshot(exploration_bias={:.3}, optimization_bias={:.3}, synergy_bias={:.3}, reinforcement_bias={:.3}, stability={:.3})",
-            self.exploration_bias(),
-            self.optimization_bias(),
-            self.synergy_bias(),
-            self.reinforcement_bias(),
-            self.stability()
-        ))
-    }
-}
-
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
 struct PyModuleTrainer {
     inner: ModuleTrainer,
@@ -2308,6 +9382,13 @@ impl PyModuleTrainer {
     #[getter]
     fn fallback_learning_rate(&self) -> f32 {
         self.inner.fallback_learning_rate()
+    }
+
+    #[getter]
+    fn distribution(&self) -> Option<PyDistConfig> {
+        self.inner
+            .distribution_config()
+            .map(|config| PyDistConfig::from_config(config.clone()))
     }
 
     #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
@@ -2356,11 +9437,17 @@ impl PyModuleTrainer {
             .install_blackcat_moderator(threshold, participants);
     }
 
-    #[pyo3(signature = (per_epoch, cooldown))]
-    fn set_rewrite_budget(&mut self, per_epoch: u32, cooldown: u32) {
-        self.inner.set_rewrite_budget(per_epoch, cooldown);
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.inner
+            .install_blackcat_moderator(config.threshold, config.participants);
     }
 
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.inner
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
     fn blackcat_minutes<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
         let minutes = self.inner.blackcat_minutes();
         let list = PyList::empty_bound(py);
@@ -2409,25 +9496,32 @@ impl PyModuleTrainer {
             .map(PyGoldenCooperativeDirective::from_inner)
     }
 
-    #[cfg(feature = "golden")]
-    fn last_golden_council_snapshot(&self) -> Option<PyGoldenCouncilSnapshot> {
-        self.inner
-            .last_golden_council_snapshot()
-            .cloned()
-            .map(PyGoldenCouncilSnapshot::from_inner)
-    }
-
     #[pyo3(signature = (module, loss, batches, schedule))]
     fn train_epoch(
         &mut self,
         module: &Bound<'_, PyAny>,
         loss: &Bound<'_, PyAny>,
         batches: &Bound<'_, PyAny>,
-        schedule: &PyRoundtableSchedule,
     ) -> PyResult<PyEpochStats> {
-        let stats =
-            run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
+        let stats = run_epoch_with_lightning(&mut self.inner, module, loss, batches)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        epochs: &Bound<'_, PyAny>,
+    ) -> PyResult<Vec<PyEpochStats>> {
+        let epoch_objects: Vec<PyObject> = epochs.extract()?;
+        let mut reports = Vec::with_capacity(epoch_objects.len());
+        for epoch in epoch_objects {
+            let bound = epoch.bind(py);
+            let stats = run_epoch_with_lightning(&mut self.inner, module, loss, &bound)?;
+            reports.push(PyEpochStats::from_stats(stats));
+        }
+        Ok(reports)
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -2550,6 +9644,21 @@ impl PySpiralLightning {
         self.inner.reset_prepared_modules();
     }
 
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.inner
+            .trainer_mut()
+            .install_blackcat_moderator(config.threshold, config.participants);
+    }
+
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.inner
+            .trainer()
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
+    }
+
     fn train_epoch(
         &mut self,
         module: &Bound<'_, PyAny>,
@@ -2577,9 +9686,220 @@ impl PySpiralLightning {
         Ok(reports)
     }
 
+    #[pyo3(signature = (module, loss, stages))]
+    fn fit_plan(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        stages: &Bound<'_, PyAny>,
+    ) -> PyResult<PyLightningReport> {
+        let stage_objects: Vec<PyObject> = stages.extract()?;
+        if stage_objects.is_empty() {
+            return Err(PyValueError::new_err(
+                "SpiralLightning.fit_plan expects at least one stage",
+            ));
+        }
+
+        let mut inherited = self.inner.config().clone();
+        let mut specs = Vec::with_capacity(stage_objects.len());
+        for stage in stage_objects {
+            let bound = stage.bind(py);
+            let spec = parse_lightning_stage_spec(&bound, &inherited)?;
+            inherited = spec.config.clone();
+            specs.push(spec);
+        }
+
+        let mut stage_reports = Vec::with_capacity(specs.len());
+        for spec in specs {
+            self.inner.reconfigure(spec.config.clone());
+            let mut epoch_stats = Vec::with_capacity(spec.epochs.len());
+            for epoch in spec.epochs {
+                let bound = epoch.bind(py);
+                let stats = run_epoch_with_lightning(&mut self.inner, module, loss, &bound)?;
+                epoch_stats.push(stats);
+            }
+            stage_reports.push(NnLightningStageReport::new(
+                spec.config,
+                spec.label,
+                epoch_stats,
+            ));
+        }
+
+        let report = NnLightningReport::new(stage_reports);
+        Ok(PyLightningReport::from_report(report))
+    }
+
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
             "SpiralLightning(rows={}, cols={}, auto_prepare={})",
+            self.rows(),
+            self.cols(),
+            self.auto_prepare()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.rec", name = "Recommender", unsendable)]
+struct PyRecommender {
+    lightning: NnSpiralLightning,
+}
+
+#[pymethods]
+impl PyRecommender {
+    #[new]
+    #[pyo3(signature = (session, rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn new(
+        session: PySpiralSession,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> Self {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        let lightning = NnSpiralLightning::with_config(session.inner.clone(), config);
+        Self { lightning }
+    }
+
+    #[getter]
+    fn rows(&self) -> u32 {
+        self.lightning.config().rows()
+    }
+
+    #[getter]
+    fn cols(&self) -> u32 {
+        self.lightning.config().cols()
+    }
+
+    #[getter]
+    fn auto_prepare(&self) -> bool {
+        self.lightning.config().auto_prepare()
+    }
+
+    fn set_auto_prepare(&mut self, enabled: bool) {
+        self.lightning.set_auto_prepare(enabled);
+    }
+
+    fn schedule(&self) -> PyRoundtableSchedule {
+        PyRoundtableSchedule::from_schedule(self.lightning.schedule().clone())
+    }
+
+    #[pyo3(signature = (rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn reconfigure(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        self.lightning.reconfigure(config);
+    }
+
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.lightning
+            .trainer_mut()
+            .install_blackcat_moderator(config.threshold, config.participants);
+    }
+
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.lightning
+            .trainer()
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
+    }
+
+    fn prepare_module(&mut self, module: &Bound<'_, PyAny>) -> PyResult<()> {
+        prepare_module_for_lightning(&mut self.lightning, module)
+    }
+
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<PyEpochStats> {
+        let stats = run_epoch_with_lightning(&mut self.lightning, module, loss, batches)?;
+        Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn recommend(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        input: &PyTensor,
+    ) -> PyResult<PyTensor> {
+        let input_obj = Py::new(py, input.clone_py())?;
+        let output = module.call_method1("forward", (input_obj,))?;
+        output.extract::<PyTensor>()
+    }
+
+    fn recommend_topk(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        input: &PyTensor,
+        k: usize,
+        largest: bool,
+    ) -> PyResult<(PyTensor, PyTensor)> {
+        let output = self.recommend(py, module, input)?;
+        topk2d_tensor_py(py, &output, k, None, largest)
+    }
+
+    fn maintainer_support(&self) -> f32 {
+        let reports = self.maintainer_reports();
+        if reports.is_empty() {
+            0.0
+        } else {
+            reports.iter().map(|r| r.support()).sum::<f32>() / reports.len() as f32
+        }
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "Recommender(rows={}, cols={}, auto_prepare={})",
             self.rows(),
             self.cols(),
             self.auto_prepare()
@@ -2649,9 +9969,6 @@ impl PySpiralSessionBuilder {
     fn coupling(&mut self, coupling: Option<PyTensor>) -> PyResult<()> {
         let tensor = coupling.map(PyTensor::into_tensor);
         self.ensure_builder()?.set_barycenter_coupling(tensor);
-        Ok(())
-    }
-
     #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
     fn maintainer(
         &mut self,
@@ -2827,6 +10144,41 @@ impl PySpiralSession {
             .map(PyChronoSummary::from_summary)
     }
 
+    #[pyo3(signature = (timesteps=None, bins=16))]
+    fn timeline_harmonics(
+        &self,
+        timesteps: Option<usize>,
+        bins: usize,
+    ) -> Option<PyChronoHarmonics> {
+        self.inner
+            .timeline_harmonics(timesteps, bins)
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=None))]
+    fn loop_signal(
+        &self,
+        timesteps: Option<usize>,
+        bins: Option<usize>,
+    ) -> Option<PyChronoLoopSignal> {
+        self.inner
+            .loop_signal(timesteps, bins)
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn timeline_story(
+        &self,
+        timesteps: Option<usize>,
+        temperature: f32,
+    ) -> PyResult<(String, Vec<String>)> {
+        let narrative = self
+            .inner
+            .timeline_narrative(timesteps, temperature)
+            .map_err(tensor_err)?;
+        Ok((narrative.summary, narrative.highlights))
+    }
+
     #[pyo3(signature = (timesteps=None, temperature=0.6))]
     fn speak(&self, timesteps: Option<usize>, temperature: f32) -> PyResult<Vec<f32>> {
         convert(self.inner.speak(timesteps, temperature))
@@ -2843,6 +10195,11 @@ impl PySpiralSession {
         dict.set_item("pressure_step", cfg.pressure_step)?;
         dict.set_item("window", cfg.window)?;
         Ok(dict.into_py(py))
+    }
+
+    #[cfg(feature = "collapse")]
+    fn collapse_pulse(&self) -> Option<PyCollapsePulse> {
+        hub::get_collapse_pulse().map(PyCollapsePulse::from_pulse)
     }
 
     #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
@@ -3180,6 +10537,118 @@ impl PySpiralSession {
     }
 }
 
+#[pyclass(module = "spiraltorch.rl", name = "PolicyGradient", unsendable)]
+struct PyPolicyGradient {
+    trainer: ModuleTrainer,
+}
+
+#[pymethods]
+impl PyPolicyGradient {
+    #[new]
+    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01))]
+    fn new(
+        device: Option<&str>,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Self {
+        let caps = caps_for(device);
+        Self {
+            trainer: ModuleTrainer::new(
+                caps,
+                curvature,
+                hyper_learning_rate,
+                fallback_learning_rate,
+            ),
+        }
+    }
+
+    #[getter]
+    fn curvature(&self) -> f32 {
+        self.trainer.curvature()
+    }
+
+    #[getter]
+    fn hyper_learning_rate(&self) -> f32 {
+        self.trainer.hyper_learning_rate()
+    }
+
+    #[getter]
+    fn fallback_learning_rate(&self) -> f32 {
+        self.trainer.fallback_learning_rate()
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
+    fn roundtable(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+        dist: Option<PyDistConfig>,
+    ) -> PyResult<PyRoundtableSchedule> {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        if let Some(dist_cfg) = dist {
+            self.trainer.configure_distribution(dist_cfg.inner.clone());
+        } else {
+            self.trainer.clear_distribution();
+        }
+        Ok(PyRoundtableSchedule::from_schedule(
+            self.trainer.roundtable(rows, cols, config),
+        ))
+    }
+
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.trainer
+            .install_blackcat_moderator(config.threshold, config.participants);
+    }
+
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.trainer
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
+    }
+
+    #[pyo3(signature = (module, loss, batches, schedule))]
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+    ) -> PyResult<PyEpochStats> {
+        let stats =
+            run_epoch_with_trainer(&mut self.trainer, module, loss, batches, &schedule.inner)?;
+        Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "PolicyGradient(curvature={:.3}, hyper_lr={:.3}, fallback_lr={:.3})",
+            self.curvature(),
+            self.hyper_learning_rate(),
+            self.fallback_learning_rate()
+        ))
+    }
+}
+
 #[pyclass(module = "spiraltorch.nn", name = "MeanSquaredError")]
 struct PyMeanSquaredError {
     inner: MeanSquaredError,
@@ -3219,6 +10688,382 @@ impl PyMeanSquaredError {
     }
 }
 
+#[pyclass(module = "spiraltorch.nn", name = "HyperbolicCrossEntropy")]
+struct PyHyperbolicCrossEntropy {
+    inner: NnHyperbolicCrossEntropy,
+}
+
+impl PyHyperbolicCrossEntropy {
+    fn inner_mut(&mut self) -> &mut NnHyperbolicCrossEntropy {
+        &mut self.inner
+    }
+}
+
+#[pymethods]
+impl PyHyperbolicCrossEntropy {
+    #[new]
+    #[pyo3(signature = (curvature=-1.0, epsilon=None))]
+    fn new(curvature: f32, epsilon: Option<f32>) -> PyResult<Self> {
+        let inner = match epsilon {
+            Some(eps) => convert(NnHyperbolicCrossEntropy::with_epsilon(curvature, eps))?,
+            None => convert(NnHyperbolicCrossEntropy::new(curvature))?,
+        };
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn curvature(&self) -> f32 {
+        self.inner.curvature()
+    }
+
+    #[getter]
+    fn epsilon(&self) -> f32 {
+        self.inner.epsilon()
+    }
+
+    fn forward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.inner_mut()
+                .forward(prediction.as_tensor(), target.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.inner_mut()
+                .backward(prediction.as_tensor(), target.as_tensor()),
+        )?))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "HyperbolicCrossEntropy(curvature={:.3}, epsilon={:.3})",
+            self.curvature(),
+            self.epsilon()
+        ))
+    }
+}
+
+fn train_trainer_with_dataset(
+    trainer: &mut ModuleTrainer,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
+    dataset: &[(Tensor, Tensor)],
+    schedule: &RoundtableSchedule,
+) -> PyResult<Option<EpochStats>> {
+    // Sequential
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                seq.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                seq.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // Linear
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                linear.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                linear.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // Relu
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                relu.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                relu.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // Conv1d
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                conv.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                conv.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // WaveRnn
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                wave.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                wave.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // ZSpace projector
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                projector.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                projector.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // Topos resonator
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                resonator.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                resonator.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // ZSpace mixer
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                mixer.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                mixer.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+}
+
+#[pyclass(module = "spiraltorch.rl", name = "PolicyGradient", unsendable)]
+struct PyPolicyGradient {
+    trainer: ModuleTrainer,
+}
+
+#[pymethods]
+impl PyPolicyGradient {
+    #[new]
+    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01))]
+    fn new(
+        device: Option<&str>,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Self {
+        let caps = caps_for(device);
+        Self {
+            trainer: ModuleTrainer::new(
+                caps,
+                curvature,
+                hyper_learning_rate,
+                fallback_learning_rate,
+            ),
+        }
+    }
+
+    #[getter]
+    fn curvature(&self) -> f32 {
+        self.trainer.curvature()
+    }
+
+    #[getter]
+    fn hyper_learning_rate(&self) -> f32 {
+        self.trainer.hyper_learning_rate()
+    }
+
+    #[getter]
+    fn fallback_learning_rate(&self) -> f32 {
+        self.trainer.fallback_learning_rate()
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
+    fn roundtable(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+        dist: Option<PyDistConfig>,
+    ) -> PyResult<PyRoundtableSchedule> {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        if let Some(dist_cfg) = dist {
+            self.trainer.configure_distribution(dist_cfg.inner.clone());
+        } else {
+            self.trainer.clear_distribution();
+        }
+        Ok(PyRoundtableSchedule::from_schedule(
+            self.trainer.roundtable(rows, cols, config),
+        ))
+    }
+
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.trainer
+            .install_blackcat_moderator(config.threshold, config.participants);
+    }
+
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.trainer
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
+    }
+
+    #[pyo3(signature = (module, loss, batches, schedule))]
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+    ) -> PyResult<PyEpochStats> {
+        let stats =
+            run_epoch_with_trainer(&mut self.trainer, module, loss, batches, &schedule.inner)?;
+        Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "PolicyGradient(curvature={:.3}, hyper_lr={:.3}, fallback_lr={:.3})",
+            self.curvature(),
+            self.hyper_learning_rate(),
+            self.fallback_learning_rate()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "MeanSquaredError")]
+struct PyMeanSquaredError {
+    inner: MeanSquaredError,
+}
+
+    Ok(None)
+}
+
 fn run_epoch_with_trainer(
     trainer: &mut ModuleTrainer,
     module: &Bound<'_, PyAny>,
@@ -3227,41 +11072,18 @@ fn run_epoch_with_trainer(
     schedule: &RoundtableSchedule,
 ) -> PyResult<EpochStats> {
     if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
-        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(trainer.train_epoch(
-                    seq.borrow_mut()?,
-                    mse.inner_mut(),
-                    loader.clone_inner(),
-                    schedule,
-                ))?;
-                return Ok(stats);
-            }
+        let dataset: Vec<(Tensor, Tensor)> = loader
+            .clone_inner()
+            .into_iter()
+            .map(|batch| convert(batch))
+            .collect::<PyResult<_>>()?;
+        if let Some(stats) = train_trainer_with_dataset(trainer, module, loss, &dataset, schedule)?
+        {
+            return Ok(stats);
         }
-
-        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(trainer.train_epoch(
-                    linear.borrow_mut()?,
-                    mse.inner_mut(),
-                    loader.clone_inner(),
-                    schedule,
-                ))?;
-                return Ok(stats);
-            }
-        }
-
-        if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(trainer.train_epoch(
-                    relu.borrow_mut()?,
-                    mse.inner_mut(),
-                    loader.clone_inner(),
-                    schedule,
-                ))?;
-                return Ok(stats);
-            }
-        }
+        return Err(PyValueError::new_err(
+            "ModuleTrainer.train_epoch expects a supported module/loss pairing",
+        ));
     }
 
     let dataset: Vec<(Tensor, Tensor)> = batches
@@ -3270,44 +11092,754 @@ fn run_epoch_with_trainer(
         .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
         .collect();
 
+    if let Some(stats) = train_trainer_with_dataset(trainer, module, loss, &dataset, schedule)? {
+        return Ok(stats);
+    }
+
+    Err(PyValueError::new_err(
+        "ModuleTrainer.train_epoch expects a supported module/loss pairing",
+    ))
+}
+
+fn prepare_module_for_lightning(
+    lightning: &mut NnSpiralLightning,
+    module: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        convert(lightning.prepare_module(seq.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        convert(lightning.prepare_module(linear.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        convert(lightning.prepare_module(relu.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        convert(lightning.prepare_module(conv.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        convert(lightning.prepare_module(wave.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        convert(lightning.prepare_module(projector.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        convert(lightning.prepare_module(resonator.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        convert(lightning.prepare_module(mixer.borrow_mut()?))?;
+        return Ok(());
+    }
+    Err(PyValueError::new_err(
+        "SpiralLightning.prepare_module expects Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, ToposResonator, ZSpaceMixer, or Sequential modules",
+    ))
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "HyperbolicCrossEntropy")]
+struct PyHyperbolicCrossEntropy {
+    inner: NnHyperbolicCrossEntropy,
+}
+
+impl PyHyperbolicCrossEntropy {
+    fn inner_mut(&mut self) -> &mut NnHyperbolicCrossEntropy {
+        &mut self.inner
+    }
+}
+
+#[pymethods]
+impl PyHyperbolicCrossEntropy {
+    #[new]
+    #[pyo3(signature = (curvature=-1.0, epsilon=None))]
+    fn new(curvature: f32, epsilon: Option<f32>) -> PyResult<Self> {
+        let inner = match epsilon {
+            Some(eps) => convert(NnHyperbolicCrossEntropy::with_epsilon(curvature, eps))?,
+            None => convert(NnHyperbolicCrossEntropy::new(curvature))?,
+        };
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn curvature(&self) -> f32 {
+        self.inner.curvature()
+    }
+
+    #[getter]
+    fn epsilon(&self) -> f32 {
+        self.inner.epsilon()
+    }
+
+    fn forward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.inner_mut()
+                .forward(prediction.as_tensor(), target.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.inner_mut()
+                .backward(prediction.as_tensor(), target.as_tensor()),
+        )?))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "HyperbolicCrossEntropy(curvature={:.3}, epsilon={:.3})",
+            self.curvature(),
+            self.epsilon()
+        ))
+    }
+}
+
+fn train_trainer_with_dataset(
+    trainer: &mut ModuleTrainer,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
+    dataset: &[(Tensor, Tensor)],
+    schedule: &RoundtableSchedule,
+) -> PyResult<Option<EpochStats>> {
+    // Sequential
     if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
             let stats = convert(trainer.train_epoch(
                 seq.borrow_mut()?,
                 mse.inner_mut(),
-                dataset.clone(),
+                dataset.to_vec(),
                 schedule,
             ))?;
-            return Ok(stats);
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                seq.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
         }
     }
 
+    // Linear
     if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
             let stats = convert(trainer.train_epoch(
                 linear.borrow_mut()?,
                 mse.inner_mut(),
-                dataset.clone(),
+                dataset.to_vec(),
                 schedule,
             ))?;
-            return Ok(stats);
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                linear.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
         }
     }
 
+    // Relu
     if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
             let stats = convert(trainer.train_epoch(
                 relu.borrow_mut()?,
                 mse.inner_mut(),
-                dataset,
+                dataset.to_vec(),
                 schedule,
             ))?;
-            return Ok(stats);
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                relu.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
         }
     }
 
+    // Conv1d
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                conv.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                conv.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // WaveRnn
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                wave.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                wave.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // ZSpace projector
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                projector.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            let stats = convert(lightning.train_epoch(
+                linear.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                linear.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+                dataset.clone(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                projector.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // Topos resonator
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                resonator.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                resonator.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // ZSpace mixer
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                mixer.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                mixer.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    Ok(None)
+}
+
+fn run_epoch_with_trainer(
+    trainer: &mut ModuleTrainer,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
+    batches: &Bound<'_, PyAny>,
+    schedule: &RoundtableSchedule,
+) -> PyResult<EpochStats> {
+    if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
+        let dataset: Vec<(Tensor, Tensor)> = loader
+            .clone_inner()
+            .into_iter()
+            .map(|batch| convert(batch))
+            .collect::<PyResult<_>>()?;
+        if let Some(stats) = train_trainer_with_dataset(trainer, module, loss, &dataset, schedule)?
+        {
+            return Ok(stats);
+        }
+        return Err(PyValueError::new_err(
+            "ModuleTrainer.train_epoch expects a supported module/loss pairing",
+        ));
+    }
+
+    let dataset: Vec<(Tensor, Tensor)> = batches
+        .extract::<Vec<(PyTensor, PyTensor)>>()?
+        .into_iter()
+        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+        .collect();
+
+    if let Some(stats) = train_trainer_with_dataset(trainer, module, loss, &dataset, schedule)? {
+        return Ok(stats);
+    }
+
     Err(PyValueError::new_err(
-        "ModuleTrainer.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
+        "ModuleTrainer.train_epoch expects a supported module/loss pairing",
+        "SpiralLightning.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
+    ))
+}
+
+fn prepare_module_for_lightning(
+    lightning: &mut NnSpiralLightning,
+    module: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        convert(lightning.prepare_module(seq.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        convert(lightning.prepare_module(linear.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        convert(lightning.prepare_module(relu.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        convert(lightning.prepare_module(conv.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        convert(lightning.prepare_module(wave.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        convert(lightning.prepare_module(projector.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        convert(lightning.prepare_module(resonator.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        convert(lightning.prepare_module(mixer.borrow_mut()?))?;
+        return Ok(());
+    }
+    Err(PyValueError::new_err(
+        "SpiralLightning.prepare_module expects Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, ToposResonator, ZSpaceMixer, or Sequential modules",
+    ))
+}
+
+fn train_lightning_with_dataset(
+    lightning: &mut NnSpiralLightning,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
+    dataset: &[(Tensor, Tensor)],
+) -> PyResult<Option<EpochStats>> {
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                seq.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                seq.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                linear.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                linear.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                relu.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                relu.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                conv.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                conv.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                wave.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                wave.borrow_mut()?,
+        }
+    }
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                wave.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                projector.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                projector.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                resonator.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                resonator.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+        return Err(PyValueError::new_err(
+            "SpiralLightning.train_epoch expects a supported module/loss pairing",
+        ));
+    }
+
+    let dataset: Vec<(Tensor, Tensor)> = batches
+        .extract::<Vec<(PyTensor, PyTensor)>>()?
+        .into_iter()
+        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+        .collect();
+
+    if let Some(stats) = train_lightning_with_dataset(lightning, module, loss, &dataset)? {
+        return Ok(stats);
+    }
+
+    Err(PyValueError::new_err(
+        "SpiralLightning.train_epoch expects a supported module/loss pairing",
+    ))
+}
+
+struct LightningStageSpec {
+    config: NnLightningConfig,
+    epochs: Vec<PyObject>,
+    label: Option<String>,
+}
+
+fn parse_lightning_stage_spec(
+    stage: &Bound<'_, PyAny>,
+    base: &NnLightningConfig,
+) -> PyResult<LightningStageSpec> {
+    let dict = stage.downcast::<PyDict>().map_err(|_| {
+        PyValueError::new_err("Lightning stage must be a mapping with 'config' and 'epochs' keys")
+    })?;
+
+    let epochs_any = dict
+        .get_item("epochs")
+        .ok_or_else(|| PyValueError::new_err("Lightning stage requires an 'epochs' sequence"))?;
+    let epoch_objects: Vec<PyObject> = epochs_any.extract()?;
+    if epoch_objects.is_empty() {
+        return Err(PyValueError::new_err(
+            "Lightning stage requires at least one epoch",
+        ));
+    }
+
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                projector.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                projector.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+    let mut config = base.clone();
+    if let Some(config_any) = dict.get_item("config") {
+        let config_dict = config_any
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("Lightning stage 'config' must be a mapping"))?;
+
+        let mut rows = config.rows();
+        let mut cols = config.cols();
+        if let Some(value) = config_dict.get_item("rows") {
+            rows = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("cols") {
+            cols = value.extract()?;
+        }
+        if rows != config.rows() || cols != config.cols() {
+            config = config.with_output_shape(rows, cols);
+        }
+
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                resonator.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                resonator.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        let mut roundtable = config.roundtable();
+        if let Some(value) = config_dict.get_item("top_k") {
+            roundtable.top_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("mid_k") {
+            roundtable.mid_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("bottom_k") {
+            roundtable.bottom_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("here_tolerance") {
+            roundtable.here_tolerance = value.extract()?;
+        }
+        #[cfg(feature = "psychoid")]
+        if let Some(value) = config_dict.get_item("psychoid") {
+            roundtable.psychoid_enabled = value.extract()?;
+        }
+        #[cfg(feature = "psychoid")]
+        if let Some(value) = config_dict.get_item("psychoid_log") {
+            roundtable.psychoid_log = value.extract()?;
+        }
+        #[cfg(feature = "psi")]
+        if let Some(value) = config_dict.get_item("psi") {
+            roundtable.psi_enabled = value.extract()?;
+        }
+        #[cfg(feature = "collapse")]
+        if let Some(value) = config_dict.get_item("collapse") {
+            roundtable.collapse_enabled = value.extract()?;
+        }
+        config = config.with_roundtable(roundtable);
+
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                mixer.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                mixer.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    Ok(None)
+}
+
+fn run_epoch_with_lightning(
+    lightning: &mut NnSpiralLightning,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
+    batches: &Bound<'_, PyAny>,
+) -> PyResult<EpochStats> {
+    if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
+        let dataset: Vec<(Tensor, Tensor)> = loader
+            .clone_inner()
+            .into_iter()
+            .map(|batch| convert(batch))
+            .collect::<PyResult<_>>()?;
+        if let Some(stats) = train_lightning_with_dataset(lightning, module, loss, &dataset)? {
+            return Ok(stats);
+        if let Some(value) = config_dict.get_item("auto_prepare") {
+            config = config.with_auto_prepare(value.extract()?);
+        }
+        return Err(PyValueError::new_err(
+            "SpiralLightning.train_epoch expects a supported module/loss pairing",
+        ));
+    }
+
+    let dataset: Vec<(Tensor, Tensor)> = batches
+        .extract::<Vec<(PyTensor, PyTensor)>>()?
+        .into_iter()
+        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+        .collect();
+
+    if let Some(stats) = train_lightning_with_dataset(lightning, module, loss, &dataset)? {
+        return Ok(stats);
+    }
+
+    Err(PyValueError::new_err(
+        "SpiralLightning.train_epoch expects a supported module/loss pairing",
     ))
 }
 
@@ -3351,18 +11883,12 @@ fn run_epoch_with_lightning(
     batches: &Bound<'_, PyAny>,
 ) -> PyResult<EpochStats> {
     if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
-        let dataset: Vec<(Tensor, Tensor)> = loader
-            .clone_inner()
-            .into_iter()
-            .map(|batch| convert(batch))
-            .collect::<PyResult<_>>()?;
-
         if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
             if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
                 let stats = convert(lightning.train_epoch(
                     seq.borrow_mut()?,
                     mse.inner_mut(),
-                    dataset.clone(),
+                    loader.clone_inner(),
                 ))?;
                 return Ok(stats);
             }
@@ -3373,7 +11899,7 @@ fn run_epoch_with_lightning(
                 let stats = convert(lightning.train_epoch(
                     linear.borrow_mut()?,
                     mse.inner_mut(),
-                    dataset.clone(),
+                    loader.clone_inner(),
                 ))?;
                 return Ok(stats);
             }
@@ -3381,8 +11907,11 @@ fn run_epoch_with_lightning(
 
         if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
             if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats =
-                    convert(lightning.train_epoch(relu.borrow_mut()?, mse.inner_mut(), dataset))?;
+                let stats = convert(lightning.train_epoch(
+                    relu.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                ))?;
                 return Ok(stats);
             }
         }
@@ -3427,6 +11956,102 @@ fn run_epoch_with_lightning(
     Err(PyValueError::new_err(
         "SpiralLightning.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
     ))
+}
+
+struct LightningStageSpec {
+    config: NnLightningConfig,
+    epochs: Vec<PyObject>,
+    label: Option<String>,
+}
+
+fn parse_lightning_stage_spec(
+    stage: &Bound<'_, PyAny>,
+    base: &NnLightningConfig,
+) -> PyResult<LightningStageSpec> {
+    let dict = stage.downcast::<PyDict>().map_err(|_| {
+        PyValueError::new_err("Lightning stage must be a mapping with 'config' and 'epochs' keys")
+    })?;
+
+    let epochs_any = dict
+        .get_item("epochs")
+        .ok_or_else(|| PyValueError::new_err("Lightning stage requires an 'epochs' sequence"))?;
+    let epoch_objects: Vec<PyObject> = epochs_any.extract()?;
+    if epoch_objects.is_empty() {
+        return Err(PyValueError::new_err(
+            "Lightning stage requires at least one epoch",
+        ));
+    }
+
+    let mut config = base.clone();
+    if let Some(config_any) = dict.get_item("config") {
+        let config_dict = config_any
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("Lightning stage 'config' must be a mapping"))?;
+
+        let mut rows = config.rows();
+        let mut cols = config.cols();
+        if let Some(value) = config_dict.get_item("rows") {
+            rows = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("cols") {
+            cols = value.extract()?;
+        }
+        if rows != config.rows() || cols != config.cols() {
+            config = config.with_output_shape(rows, cols);
+        }
+
+        let mut roundtable = config.roundtable();
+        if let Some(value) = config_dict.get_item("top_k") {
+            roundtable.top_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("mid_k") {
+            roundtable.mid_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("bottom_k") {
+            roundtable.bottom_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("here_tolerance") {
+            roundtable.here_tolerance = value.extract()?;
+        }
+        #[cfg(feature = "psychoid")]
+        if let Some(value) = config_dict.get_item("psychoid") {
+            roundtable.psychoid_enabled = value.extract()?;
+        }
+        #[cfg(feature = "psychoid")]
+        if let Some(value) = config_dict.get_item("psychoid_log") {
+            roundtable.psychoid_log = value.extract()?;
+        }
+        #[cfg(feature = "psi")]
+        if let Some(value) = config_dict.get_item("psi") {
+            roundtable.psi_enabled = value.extract()?;
+        }
+        #[cfg(feature = "collapse")]
+        if let Some(value) = config_dict.get_item("collapse") {
+            roundtable.collapse_enabled = value.extract()?;
+        }
+        config = config.with_roundtable(roundtable);
+
+        if let Some(value) = config_dict.get_item("auto_prepare") {
+            config = config.with_auto_prepare(value.extract()?);
+        }
+    }
+
+    let label = dict
+        .get_item("label")
+        .and_then(|value| {
+            if value.is_none() {
+                None
+            } else {
+                Some(value.extract::<String>())
+            }
+        })
+        .transpose()?;
+
+    Ok(LightningStageSpec {
+        config,
+        epochs: epoch_objects,
+        label,
+    })
 }
 
 #[pyclass(module = "spiraltorch.nn", name = "Relu")]
@@ -3766,6 +12391,162 @@ impl PyWaveRnnModule {
     }
 }
 
+#[pyclass(module = "spiraltorch.nn", name = "ToposResonator", unsendable)]
+struct PyToposResonator {
+    inner: Option<NnToposResonator>,
+}
+
+impl PyToposResonator {
+    fn borrow(&self) -> PyResult<&NnToposResonator> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("ToposResonator has been moved"))
+    }
+
+    fn borrow_mut(&mut self) -> PyResult<&mut NnToposResonator> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("ToposResonator has been moved"))
+    }
+}
+
+#[pymethods]
+impl PyToposResonator {
+    #[new]
+    #[pyo3(signature = (rows, cols, name=None))]
+    fn new(rows: usize, cols: usize, name: Option<&str>) -> PyResult<Self> {
+        let ident = name.unwrap_or("topos_resonator");
+        let inner = convert(NnToposResonator::new(ident, rows, cols))?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.forward(input.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow_mut()?
+                .backward(input.as_tensor(), grad_output.as_tensor()),
+        )?))
+    }
+
+    fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        convert(
+            self.borrow_mut()?
+                .attach_hypergrad(curvature, learning_rate),
+        )
+    }
+
+    fn attach_open_topos(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: &PyOpenTopos,
+    ) -> PyResult<()> {
+        convert(
+            self.borrow_mut()?
+                .attach_open_topos(curvature, learning_rate, topos.inner.clone()),
+        )
+    }
+
+    fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        convert(self.borrow_mut()?.apply_step(fallback_lr))
+    }
+
+    fn zero_grad(&mut self) -> PyResult<()> {
+        convert(self.borrow_mut()?.zero_accumulators())
+    }
+
+    fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let state = convert(self.borrow()?.state_dict())?;
+        state_to_pydict(py, state)
+    }
+
+    fn load_state_dict(&mut self, dict: &Bound<'_, PyDict>) -> PyResult<()> {
+        let state = pydict_to_state(dict)?;
+        convert(self.borrow_mut()?.load_state_dict(&state))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok("ToposResonator(...)".to_string())
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceMixer", unsendable)]
+struct PyZSpaceMixer {
+    inner: Option<NnZSpaceMixer>,
+}
+
+impl PyZSpaceMixer {
+    fn borrow(&self) -> PyResult<&NnZSpaceMixer> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("ZSpaceMixer has been moved"))
+    }
+
+    fn borrow_mut(&mut self) -> PyResult<&mut NnZSpaceMixer> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("ZSpaceMixer has been moved"))
+    }
+}
+
+#[pymethods]
+impl PyZSpaceMixer {
+    #[new]
+    #[pyo3(signature = (features, name=None))]
+    fn new(features: usize, name: Option<&str>) -> PyResult<Self> {
+        let ident = name.unwrap_or("zspace_mixer");
+        let inner = convert(NnZSpaceMixer::new(ident, features))?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.forward(input.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow_mut()?
+                .backward(input.as_tensor(), grad_output.as_tensor()),
+        )?))
+    }
+
+    fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        convert(
+            self.borrow_mut()?
+                .attach_hypergrad(curvature, learning_rate),
+        )
+    }
+
+    fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        convert(self.borrow_mut()?.apply_step(fallback_lr))
+    }
+
+    fn zero_grad(&mut self) -> PyResult<()> {
+        convert(self.borrow_mut()?.zero_accumulators())
+    }
+
+    fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let state = convert(self.borrow()?.state_dict())?;
+        state_to_pydict(py, state)
+    }
+
+    fn load_state_dict(&mut self, dict: &Bound<'_, PyDict>) -> PyResult<()> {
+        let state = pydict_to_state(dict)?;
+        convert(self.borrow_mut()?.load_state_dict(&state))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok("ZSpaceMixer(...)".to_string())
+    }
+}
+
 #[pyclass(module = "spiraltorch.nn", name = "Sequential", unsendable)]
 struct PySequentialModule {
     inner: Option<NnSequential>,
@@ -3887,6 +12668,88 @@ fn choice_dict<'py>(py: Python<'py>, plan: &RankPlan) -> PyResult<Bound<'py, PyD
     choice.set_item("tile", plan.choice.tile)?;
     choice.set_item("compaction_tile", plan.choice.ctile)?;
     Ok(choice)
+}
+
+#[pyfunction]
+fn ecosystem_snapshot(py: Python<'_>) -> PyResult<PyObject> {
+    let report = EcosystemRegistry::global().snapshot();
+    ecosystem_report_to_py(py, &report)
+}
+
+#[pyfunction]
+fn ecosystem_drain(py: Python<'_>) -> PyResult<PyObject> {
+    let report = EcosystemRegistry::global().drain();
+    ecosystem_report_to_py(py, &report)
+}
+
+#[pyfunction]
+#[pyo3(signature = (name, stage, metadata=None))]
+fn ecosystem_record_connector(
+    name: &str,
+    stage: &str,
+    metadata: Option<HashMap<String, String>>,
+) -> PyResult<()> {
+    let event = CoreConnectorEvent {
+        name: name.to_string(),
+        stage: stage.to_string(),
+        metadata: metadata.unwrap_or_default(),
+        issued_at: SystemTime::now(),
+    };
+    EcosystemRegistry::global().record_connector(event);
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (name, value, *, tags=None, unit=None))]
+fn ecosystem_record_metric(
+    name: &str,
+    value: f64,
+    tags: Option<HashMap<String, String>>,
+    unit: Option<&str>,
+) -> PyResult<()> {
+    let mut sample = CoreMetricSample::new(name, value);
+    if let Some(tag_map) = tags {
+        for (key, value) in tag_map {
+            sample = sample.with_tag(key, value);
+        }
+    }
+    if let Some(unit) = unit {
+        sample = sample.with_unit(unit);
+    }
+    EcosystemRegistry::global().record_metric(sample);
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (*, heuristics=None, roundtables=None, connectors=None, metrics=None))]
+fn ecosystem_configure(
+    py: Python<'_>,
+    heuristics: Option<usize>,
+    roundtables: Option<usize>,
+    connectors: Option<usize>,
+    metrics: Option<usize>,
+) -> PyResult<PyObject> {
+    EcosystemRegistry::global().configure(|cap| {
+        if let Some(value) = heuristics {
+            cap.heuristics = value;
+        }
+        if let Some(value) = roundtables {
+            cap.roundtables = value;
+        }
+        if let Some(value) = connectors {
+            cap.connectors = value;
+        }
+        if let Some(value) = metrics {
+            cap.metrics = value;
+        }
+    });
+    ecosystem_capacity(py)
+}
+
+#[pyfunction]
+fn ecosystem_capacity(py: Python<'_>) -> PyResult<PyObject> {
+    let cap = EcosystemRegistry::global().capacity();
+    ecosystem_capacity_to_py(py, cap)
 }
 
 /// Inspect the unified heuristics for the requested rank family.
@@ -4295,19 +13158,33 @@ impl PyRecommender {
 #[pymodule]
 fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMeanSquaredError>()?;
+    m.add_class::<PyHyperbolicCrossEntropy>()?;
     m.add_class::<PyLinearModule>()?;
     m.add_class::<PyReluModule>()?;
     m.add_class::<PyConv1dModule>()?;
     m.add_class::<PyWaveRnnModule>()?;
+    m.add_class::<PyToposResonator>()?;
+    m.add_class::<PyZSpaceMixer>()?;
     m.add_class::<PyZSpaceProjector>()?;
     m.add_class::<PySequentialModule>()?;
     m.setattr(
         "__all__",
-        vec!["Linear", "Conv1d", "WaveRnn", "Sequential", "Relu"],
+        vec![
+            "MeanSquaredError",
+            "HyperbolicCrossEntropy",
+            "Linear",
+            "Relu",
+            "Conv1d",
+            "WaveRnn",
+            "ToposResonator",
+            "ZSpaceMixer",
+            "ZSpaceProjector",
+            "Sequential",
+        ],
     )?;
     m.setattr(
         "__doc__",
-        "Rust-backed neural network modules: Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, Sequential.",
+        "Rust-backed neural network modules and losses: MeanSquaredError, HyperbolicCrossEntropy, Linear, Relu, Conv1d, WaveRnn, ToposResonator, ZSpaceMixer, ZSpaceProjector, Sequential.",
     )?;
     Ok(())
 }
@@ -4332,12 +13209,25 @@ fn frac(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pymodule]
 fn dataset(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dataset_from_vec_py, m)?)?;
+    m.add_function(wrap_pyfunction!(dataset_shuffle_py, m)?)?;
+    m.add_function(wrap_pyfunction!(dataset_batched_py, m)?)?;
+    m.add_function(wrap_pyfunction!(dataset_prefetch_py, m)?)?;
     m.add_class::<PyDataLoader>()?;
     m.add_class::<PyDataLoaderIter>()?;
-    m.setattr("__all__", vec!["from_vec", "DataLoader"])?;
+    m.setattr(
+        "__all__",
+        vec![
+            "from_vec",
+            "shuffle",
+            "batched",
+            "prefetch",
+            "DataLoader",
+            "DataLoaderIter",
+        ],
+    )?;
     m.setattr(
         "__doc__",
-        "Dataset helpers for SpiralTorch sessions: shuffle, batch, and prefetch in Rust.",
+        "Dataset helpers for SpiralTorch sessions: build loaders from vectors, shuffle, batch, and prefetch in Rust.",
     )?;
     Ok(())
 }
@@ -4367,11 +13257,10 @@ fn linalg(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pymodule]
 fn rl(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPolicyGradient>()?;
-    m.add_class::<PyRlEpisodeReport>()?;
-    m.setattr("__all__", vec!["PolicyGradient", "EpisodeReport"])?;
+    m.setattr("__all__", vec!["PolicyGradient"])?;
     m.setattr(
         "__doc__",
-        "Policy gradient helpers that keep trajectories and hypergrad updates inside SpiralTorch Z-space.",
+        "Reinforcement learning helpers built on top of SpiralTorch's module trainer.",
     )?;
     Ok(())
 }
@@ -4379,11 +13268,10 @@ fn rl(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pymodule]
 fn rec(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRecommender>()?;
-    m.add_class::<PyRecEpochReport>()?;
-    m.setattr("__all__", vec!["Recommender", "EpochReport"])?;
+    m.setattr("__all__", vec!["Recommender"])?;
     m.setattr(
         "__doc__",
-        "Recommender systems driven by SpiralTorch open-cartesian topos guards and factor models.",
+        "Recommendation harness that wraps SpiralLightning for inference and ranking.",
     )?;
     Ok(())
 }
@@ -4401,7 +13289,34 @@ fn plan_topk(
     plan(py, "topk", rows, cols, k, device)
 }
 
+/// Convenience helper for the MidK family.
 #[pyfunction]
+#[pyo3(signature = (rows, cols, k, device=None))]
+fn plan_midk(
+    py: Python<'_>,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    device: Option<&str>,
+) -> PyResult<PyObject> {
+    plan(py, "midk", rows, cols, k, device)
+}
+
+/// Convenience helper for the BottomK family.
+#[pyfunction]
+#[pyo3(signature = (rows, cols, k, device=None))]
+fn plan_bottomk(
+    py: Python<'_>,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    device: Option<&str>,
+) -> PyResult<PyObject> {
+    plan(py, "bottomk", rows, cols, k, device)
+}
+
+/// Extract row-wise top-k values and column indices on the host for quick inspection.
+#[pyfunction(name = "topk2d")]
 #[pyo3(signature = (tensor, k, *, largest=true))]
 fn topk2d_py(tensor: &PyTensor, k: usize, largest: bool) -> PyResult<(PyTensor, Vec<Vec<usize>>)> {
     let (rows, cols) = tensor.as_tensor().shape();
@@ -4799,21 +13714,50 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_submodule(&integrations_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_midk, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_bottomk, m)?)?;
     m.add_function(wrap_pyfunction!(topk2d_tensor_py, m)?)?;
+    m.add_function(wrap_pyfunction!(topk2d_py, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_snapshot, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_drain, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_record_connector, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_record_metric, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_capacity, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_configure, m)?)?;
     m.add_function(wrap_pyfunction!(describe_resonance, m)?)?;
     m.add_function(wrap_pyfunction!(describe_frame, m)?)?;
+    m.add_function(wrap_pyfunction!(describe_timeline, m)?)?;
+    m.add_function(wrap_pyfunction!(describe_atlas, m)?)?;
+    m.add_function(wrap_pyfunction!(chrono_summary_py, m)?)?;
+    m.add_function(wrap_pyfunction!(summarize_timeline_py, m)?)?;
+    m.add_function(wrap_pyfunction!(speak_timeline_py, m)?)?;
+    m.add_function(wrap_pyfunction!(language_wave_amplitude_py, m)?)?;
+    m.add_function(wrap_pyfunction!(describe_resonance, m)?)?;
+    m.add_function(wrap_pyfunction!(describe_frame, m)?)?;
+    m.add_function(wrap_pyfunction!(describe_timeline, m)?)?;
     m.add_class::<PyTensor>()?;
     m.add_class::<PyComplexTensor>()?;
     m.add_class::<PyBarycenterIntermediate>()?;
     m.add_class::<PyZSpaceBarycenter>()?;
     m.add_class::<PyDifferentialResonance>()?;
+    m.add_class::<PyAtlasMetric>()?;
+    m.add_class::<PyAtlasDistrict>()?;
+    m.add_class::<PyAtlasFrame>()?;
+    m.add_class::<PyAtlasRoute>()?;
+    m.add_class::<PyAtlasDistrictSummary>()?;
+    m.add_class::<PyAtlasRouteSummary>()?;
     m.add_class::<PyChronoFrame>()?;
     m.add_class::<PyChronoSummary>()?;
+    m.add_class::<PyChronoPeak>()?;
+    m.add_class::<PyChronoHarmonics>()?;
+    m.add_class::<PyChronoLoopSignal>()?;
     m.add_class::<PyMaintainerReport>()?;
+    #[cfg(feature = "collapse")]
+    m.add_class::<PyCollapsePulse>()?;
     m.add_class::<PySpiralDifferentialTrace>()?;
     m.add_class::<PyOpenTopos>()?;
     m.add_class::<PyTensorBiome>()?;
@@ -4822,7 +13766,12 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHypergrad>()?;
     m.add_class::<PyDistConfig>()?;
     m.add_class::<PyRoundtableSchedule>()?;
+    m.add_class::<PyMaintainerConfig>()?;
+    m.add_class::<PyMaintainerReport>()?;
+    m.add_class::<PyChronoSummary>()?;
     m.add_class::<PyEpochStats>()?;
+    m.add_class::<PyLightningStageReport>()?;
+    m.add_class::<PyLightningReport>()?;
     m.add_class::<PyModuleTrainer>()?;
     #[cfg(feature = "golden")]
     {

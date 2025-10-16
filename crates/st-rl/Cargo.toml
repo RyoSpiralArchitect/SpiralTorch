@@ -9,3 +9,7 @@ authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 [dependencies]
 st-tensor = { path = "../st-tensor" }
 st-core   = { path = "../st-core" }
+
+[features]
+collapse = []
+kdsl = ["st-core/kdsl"]

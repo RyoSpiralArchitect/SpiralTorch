@@ -22,7 +22,7 @@
 //! The module intentionally stays allocation-light so the new guards can be used
 //! from both CPU-only and WASM environments without fighting the borrow checker.
 
-use super::{PureResult, Tensor, TensorError};
+use super::{fractal::FractalPatch, PureResult, Tensor, TensorError};
 
 /// Maintains safety envelopes for tensors travelling through the pure stack.
 #[derive(Clone, Debug)]
@@ -119,6 +119,44 @@ impl OpenCartesianTopos {
         Ok(())
     }
 
+    /// Normalises a probability slice while keeping it within the topos saturation window.
+    pub fn guard_probability_slice(
+        &self,
+        label: &'static str,
+        slice: &mut [f32],
+    ) -> PureResult<()> {
+        self.saturate_slice(slice);
+        let mut sum = 0.0f32;
+        for value in slice.iter_mut() {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label,
+                    value: *value,
+                });
+            }
+            if *value < 0.0 {
+                *value = 0.0;
+            }
+            sum += *value;
+        }
+        if sum <= 0.0 {
+            return Err(TensorError::NonFiniteValue { label, value: sum });
+        }
+        for value in slice.iter_mut() {
+            *value /= sum;
+        }
+        Ok(())
+    }
+
+    /// Normalises a probability tensor in-place.
+    pub fn guard_probability_tensor(
+        &self,
+        label: &'static str,
+        tensor: &mut Tensor,
+    ) -> PureResult<()> {
+        self.guard_probability_slice(label, tensor.data_mut())
+    }
+
     /// Catches runaway recursion depth before it can trigger a feedback loop.
     pub fn ensure_loop_free(&self, depth: usize) -> PureResult<()> {
         if depth >= self.max_depth {
@@ -128,6 +166,12 @@ impl OpenCartesianTopos {
             });
         }
         Ok(())
+    }
+
+    /// Validates a fractal patch before it is ingested by other pure modules.
+    pub fn guard_fractal_patch(&self, label: &'static str, patch: &FractalPatch) -> PureResult<()> {
+        self.ensure_loop_free(patch.depth() as usize)?;
+        self.guard_tensor(label, patch.relation())
     }
 
     /// Saturates a scalar into the finite window enforced by the topos.
@@ -146,6 +190,132 @@ impl OpenCartesianTopos {
     }
 }
 
+/// Tracks shared topos state across tensor rewrites, fractal traversals, and measure updates.
+#[derive(Debug, Clone)]
+pub struct ToposAtlas<'a> {
+    topos: &'a OpenCartesianTopos,
+    monad: RewriteMonad<'a>,
+    visited_volume: usize,
+    depth: usize,
+}
+
+impl<'a> ToposAtlas<'a> {
+    /// Creates a new atlas anchored to a shared open-cartesian topos.
+    pub fn new(topos: &'a OpenCartesianTopos) -> Self {
+        Self {
+            topos,
+            monad: RewriteMonad::new(topos),
+            visited_volume: 0,
+            depth: 0,
+        }
+    }
+
+    /// Returns the underlying guard.
+    pub fn topos(&self) -> &'a OpenCartesianTopos {
+        self.topos
+    }
+
+    /// Returns the rewrite monad anchored to this atlas.
+    pub fn monad(&self) -> RewriteMonad<'a> {
+        self.monad
+    }
+
+    fn observe_volume(&mut self, volume: usize) -> PureResult<()> {
+        let projected = self.visited_volume.saturating_add(volume);
+        if projected > self.topos.max_volume() {
+            return Err(TensorError::TensorVolumeExceeded {
+                volume: projected,
+                max_volume: self.topos.max_volume(),
+            });
+        }
+        self.visited_volume = projected;
+        Ok(())
+    }
+
+    /// Guards a tensor and records the total traversed volume.
+    pub fn guard_tensor(&mut self, label: &'static str, tensor: &Tensor) -> PureResult<()> {
+        let (rows, cols) = tensor.shape();
+        self.observe_volume(rows.saturating_mul(cols))?;
+        self.monad.guard_tensor(label, tensor)
+    }
+
+    /// Rewrites a tensor in-place while tracking the traversed volume.
+    pub fn guard_tensor_mut(&mut self, label: &'static str, tensor: &mut Tensor) -> PureResult<()> {
+        let (rows, cols) = tensor.shape();
+        self.observe_volume(rows.saturating_mul(cols))?;
+        self.monad.rewrite_tensor(label, tensor)
+    }
+
+    /// Lifts an owned tensor into the atlas, returning the rewritten value.
+    pub fn lift_tensor(&mut self, label: &'static str, tensor: Tensor) -> PureResult<Tensor> {
+        let (rows, cols) = tensor.shape();
+        self.observe_volume(rows.saturating_mul(cols))?;
+        self.monad.lift_tensor(label, tensor)
+    }
+
+    /// Guards a slice without affecting the tracked volume.
+    pub fn guard_slice(&self, label: &'static str, slice: &[f32]) -> PureResult<()> {
+        self.monad.guard_slice(label, slice)
+    }
+
+    /// Rewrites a mutable slice while keeping volume untouched.
+    pub fn guard_slice_mut(&self, label: &'static str, slice: &mut [f32]) -> PureResult<()> {
+        self.monad.rewrite_slice(label, slice)
+    }
+
+    /// Normalises a probability slice within the atlas.
+    pub fn guard_probability_slice(
+        &self,
+        label: &'static str,
+        slice: &mut [f32],
+    ) -> PureResult<()> {
+        self.monad.guard_probability_slice(label, slice)
+    }
+
+    /// Normalises a probability tensor within the atlas.
+    pub fn guard_probability_tensor(
+        &self,
+        label: &'static str,
+        tensor: &mut Tensor,
+    ) -> PureResult<()> {
+        self.monad.guard_probability_tensor(label, tensor)
+    }
+
+    /// Registers the observed depth and guards the underlying relation tensor.
+    pub fn guard_fractal_patch(
+        &mut self,
+        label: &'static str,
+        patch: &FractalPatch,
+    ) -> PureResult<()> {
+        self.observe_depth(patch.depth() as usize)?;
+        self.guard_tensor(label, patch.relation())
+    }
+
+    /// Updates the maximum visited depth.
+    pub fn observe_depth(&mut self, depth: usize) -> PureResult<()> {
+        self.topos.ensure_loop_free(depth)?;
+        if depth > self.depth {
+            self.depth = depth;
+        }
+        Ok(())
+    }
+
+    /// Returns the deepest stratum observed by the atlas.
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
+    /// Returns the accumulated volume guarded by the atlas.
+    pub fn visited_volume(&self) -> usize {
+        self.visited_volume
+    }
+
+    /// Remaining admissible tensor volume before the atlas saturates.
+    pub fn remaining_volume(&self) -> usize {
+        self.topos.max_volume().saturating_sub(self.visited_volume)
+    }
+}
+
 /// Minimal monadic helper that rewrites values through the enclosing topos.
 #[derive(Clone, Copy, Debug)]
 pub struct RewriteMonad<'a> {
@@ -156,6 +326,11 @@ impl<'a> RewriteMonad<'a> {
     /// Wraps a guard for repeated rewrites.
     pub fn new(topos: &'a OpenCartesianTopos) -> Self {
         Self { topos }
+    }
+
+    /// Returns the underlying topos guard.
+    pub fn topos(&self) -> &'a OpenCartesianTopos {
+        self.topos
     }
 
     /// Rewrites a scalar by saturating it into the open-cartesian window.
@@ -169,10 +344,68 @@ impl<'a> RewriteMonad<'a> {
         self.topos.guard_slice(label, slice)
     }
 
+    /// Guards a read-only slice without saturation.
+    pub fn guard_slice(&self, label: &'static str, slice: &[f32]) -> PureResult<()> {
+        self.topos.guard_slice(label, slice)
+    }
+
     /// Rewrites a tensor and re-validates its envelope.
     pub fn rewrite_tensor(&self, label: &'static str, tensor: &mut Tensor) -> PureResult<()> {
         self.topos.saturate_slice(tensor.data_mut());
         self.topos.guard_tensor(label, tensor)
+    }
+
+    /// Guards an immutable tensor reference.
+    pub fn guard_tensor(&self, label: &'static str, tensor: &Tensor) -> PureResult<()> {
+        self.topos.guard_tensor(label, tensor)
+    }
+
+    /// Normalises a probability slice through the topos window.
+    pub fn guard_probability_slice(
+        &self,
+        label: &'static str,
+        slice: &mut [f32],
+    ) -> PureResult<()> {
+        self.topos.guard_probability_slice(label, slice)
+    }
+
+    /// Normalises a probability tensor through the topos window.
+    pub fn guard_probability_tensor(
+        &self,
+        label: &'static str,
+        tensor: &mut Tensor,
+    ) -> PureResult<()> {
+        self.topos.guard_probability_tensor(label, tensor)
+    }
+
+    /// Lifts an owned tensor into the monadic context and returns the guarded value.
+    pub fn lift_tensor(&self, label: &'static str, mut tensor: Tensor) -> PureResult<Tensor> {
+        self.rewrite_tensor(label, &mut tensor)?;
+        Ok(tensor)
+    }
+
+    /// Applies a closure to a tensor before rewriting it through the guard.
+    pub fn bind_tensor<F>(
+        &self,
+        label: &'static str,
+        mut tensor: Tensor,
+        f: F,
+    ) -> PureResult<Tensor>
+    where
+        F: FnOnce(&mut Tensor) -> PureResult<()>,
+    {
+        f(&mut tensor)?;
+        self.rewrite_tensor(label, &mut tensor)?;
+        Ok(tensor)
+    }
+
+    /// Applies a closure to a mutable slice before rewriting it through the guard.
+    pub fn bind_slice<F>(&self, label: &'static str, slice: &mut [f32], f: F) -> PureResult<()>
+    where
+        F: FnOnce(&mut [f32]) -> PureResult<()>,
+    {
+        f(slice)?;
+        self.rewrite_slice(label, slice)
     }
 }
 
@@ -207,6 +440,16 @@ impl TensorBiome {
     /// Returns the guard topos.
     pub fn topos(&self) -> &OpenCartesianTopos {
         &self.topos
+    }
+
+    /// Returns a rewrite monad anchored to the biome's guard.
+    pub fn monad(&self) -> RewriteMonad<'_> {
+        RewriteMonad::new(&self.topos)
+    }
+
+    /// Returns an atlas anchored to the biome's guard.
+    pub fn atlas(&self) -> ToposAtlas<'_> {
+        ToposAtlas::new(&self.topos)
     }
 
     /// Number of shoots currently living inside the biome.
@@ -261,6 +504,40 @@ impl TensorBiome {
         self.weights.push(weight);
         self.total_weight += weight;
         Ok(())
+    }
+
+    /// Absorbs a tensor produced by a monadic builder.
+    pub fn absorb_with<F>(&mut self, label: &'static str, build: F) -> PureResult<()>
+    where
+        F: FnOnce(RewriteMonad<'_>) -> PureResult<Tensor>,
+    {
+        let tensor = build(self.monad())?;
+        self.absorb(label, tensor)
+    }
+
+    /// Absorbs a weighted tensor produced by a monadic builder.
+    pub fn absorb_weighted_with<F>(
+        &mut self,
+        label: &'static str,
+        weight: f32,
+        build: F,
+    ) -> PureResult<()>
+    where
+        F: FnOnce(RewriteMonad<'_>) -> PureResult<Tensor>,
+    {
+        let tensor = build(self.monad())?;
+        self.absorb_weighted(label, tensor, weight)
+    }
+
+    /// Absorbs a fractal relation patch directly into the biome canopy.
+    pub fn absorb_fractal_patch(&mut self, patch: &FractalPatch) -> PureResult<()> {
+        let mut atlas = self.atlas();
+        atlas.guard_fractal_patch("tensor_biome_fractal_patch", patch)?;
+        let relation = atlas.lift_tensor(
+            "tensor_biome_fractal_patch_relation",
+            patch.relation().clone(),
+        )?;
+        self.absorb_weighted("tensor_biome_fractal_patch", relation, patch.weight())
     }
 
     /// Clears all shoots from the biome while preserving the topos.
@@ -419,6 +696,7 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pure::fractal::FractalPatch;
 
     fn demo_topos() -> OpenCartesianTopos {
         OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096).unwrap()
@@ -522,6 +800,123 @@ mod tests {
         let mut tensor = Tensor::from_vec(1, 2, vec![20.0, -20.0]).unwrap();
         monad.rewrite_tensor("rewrite", &mut tensor).unwrap();
         assert!(tensor.data().iter().all(|v| v.abs() <= topos.saturation()));
+    }
+
+    #[test]
+    fn rewrite_monad_lift_and_bind_tensor() {
+        let topos = demo_topos();
+        let monad = RewriteMonad::new(&topos);
+        let lifted = monad
+            .lift_tensor(
+                "lift",
+                Tensor::from_vec(1, 2, vec![topos.saturation() * 4.0, 0.25]).unwrap(),
+            )
+            .unwrap();
+        assert!(lifted
+            .data()
+            .iter()
+            .all(|v| v.is_finite() && v.abs() <= topos.saturation()));
+
+        let bound = monad
+            .bind_tensor(
+                "bind",
+                Tensor::from_vec(1, 2, vec![0.1, 0.2]).unwrap(),
+                |tensor| {
+                    let update = Tensor::from_vec(1, 2, vec![0.3, 0.4]).unwrap();
+                    tensor.add_scaled(&update, 1.0)
+                },
+            )
+            .unwrap();
+        assert_eq!(bound.shape(), (1, 2));
+        assert!(bound.data().iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn topos_normalises_probability_slices() {
+        let topos = demo_topos();
+        let mut slice = vec![2.0, -1.0, 0.5];
+        topos
+            .guard_probability_slice("probability_guard", &mut slice)
+            .unwrap();
+        assert!(slice.iter().all(|v| *v >= 0.0));
+        let sum: f32 = slice.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn atlas_tracks_volume_and_depth() {
+        let topos = demo_topos();
+        let mut atlas = ToposAtlas::new(&topos);
+        let tensor = Tensor::from_vec(1, 2, vec![0.1, 0.2]).unwrap();
+        atlas.guard_tensor("atlas_tensor", &tensor).unwrap();
+        assert_eq!(atlas.visited_volume(), 2);
+        assert_eq!(atlas.remaining_volume(), topos.max_volume() - 2);
+        let patch = FractalPatch::new(Tensor::from_vec(1, 2, vec![0.3, 0.4]).unwrap(), 1.0, 1.0, 1)
+            .unwrap();
+        atlas.guard_fractal_patch("atlas_patch", &patch).unwrap();
+        assert_eq!(atlas.depth(), 1);
+        assert_eq!(atlas.visited_volume(), 4);
+    }
+
+    #[test]
+    fn atlas_lifts_tensor_through_monad() {
+        let topos = demo_topos();
+        let mut atlas = ToposAtlas::new(&topos);
+        let lifted = atlas
+            .lift_tensor(
+                "atlas_lift",
+                Tensor::from_vec(1, 2, vec![topos.saturation() * 5.0, 0.5]).unwrap(),
+            )
+            .unwrap();
+        assert!(lifted.data().iter().all(|v| v.abs() <= topos.saturation()));
+        assert_eq!(atlas.visited_volume(), 2);
+    }
+
+    #[test]
+    fn biome_absorbs_fractal_patches() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos.clone());
+        let patch =
+            FractalPatch::new(Tensor::from_vec(1, 1, vec![2.0]).unwrap(), 2.0, 1.0, 0).unwrap();
+        biome.absorb_fractal_patch(&patch).unwrap();
+        assert_eq!(biome.len(), 1);
+        let canopy = biome.canopy().unwrap();
+        assert_eq!(canopy.data(), &[2.0]);
+    }
+
+    #[test]
+    fn biome_absorb_with_monadic_builder() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos.clone());
+        biome
+            .absorb_with("monadic", |monad| {
+                monad.lift_tensor(
+                    "monadic_build",
+                    Tensor::from_vec(1, 2, vec![topos.saturation() * 3.0, 0.5]).unwrap(),
+                )
+            })
+            .unwrap();
+        assert_eq!(biome.len(), 1);
+        let canopy = biome.canopy().unwrap();
+        assert_eq!(canopy.shape(), (1, 2));
+    }
+
+    #[test]
+    fn biome_absorb_weighted_with_monadic_builder() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos.clone());
+        biome
+            .absorb_weighted_with("weighted_monadic", 2.0, |monad| {
+                monad.bind_tensor(
+                    "weighted_monadic_build",
+                    Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+                    |tensor| tensor.add_scaled(&Tensor::from_vec(1, 1, vec![1.0]).unwrap(), 1.0),
+                )
+            })
+            .unwrap();
+        let canopy = biome.canopy().unwrap();
+        assert_eq!(canopy.data(), &[2.0]);
+        assert!((biome.total_weight() - 2.0).abs() < 1e-6);
     }
 
     #[test]
