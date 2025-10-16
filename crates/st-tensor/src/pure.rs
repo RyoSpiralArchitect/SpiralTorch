@@ -16,6 +16,7 @@ pub mod differential;
 pub mod fractal;
 pub mod measure;
 pub mod topos;
+pub mod wasm_canvas;
 
 pub use self::differential::{
     DifferentialResonance, FunctorDifferential, HomotopyDifferential, InfinityDifferential,

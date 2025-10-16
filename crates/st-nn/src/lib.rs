@@ -43,9 +43,6 @@ pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSe
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
 pub use language::entropy as desire_entropy;
-pub use language::pipeline::{
-    LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
-};
 pub use language::{
     constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesireLagrangian,
@@ -54,7 +51,8 @@ pub use language::{
     DesireRoundtableBridge, DesireRoundtableEvent, DesireRoundtableImpulse,
     DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireTelemetrySink,
     DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
-    DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, RepressionField,
+    DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, LanguagePipeline,
+    LanguagePipelineBuilder, MaxwellDesireBridge, PipelineError, PipelineResult, RepressionField,
     SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
 };
 #[cfg(feature = "psi")]

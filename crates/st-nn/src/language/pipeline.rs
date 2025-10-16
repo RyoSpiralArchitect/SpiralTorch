@@ -8,10 +8,6 @@ use super::desire::{DesirePhase, DesireSolution, DesireWeights};
 use super::geometry::ConceptHint;
 use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
-use crate::schedule::BandEnergy;
-use crate::PureResult;
-use st_tensor::pure::TensorError;
-use std::cmp::Ordering;
 use crate::roundtable::RoundtableNode;
 use crate::schedule::BandEnergy;
 use crate::{PureResult, RoundtableConfig, RoundtableSchedule};
@@ -1172,8 +1168,6 @@ impl DesirePsiSummary {
     }
 }
 
-#[cfg(test)]
-mod tests {
 #[derive(Debug)]
 pub enum PipelineError {
     EncoderMissing { pipeline: String },
@@ -1753,48 +1747,27 @@ impl LanguagePipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan::RankPlanner;
-    use st_core::backend::device_caps::DeviceCaps;
-    use std::sync::{Mutex, OnceLock};
     use super::super::automation::DesireAutomation;
     use super::super::desire::{constant, warmup, DesireLagrangian};
     use super::super::geometry::{
         ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
     };
     use super::super::temperature::TemperatureController;
-    use super::*;
     use crate::gnn::spiralk::GraphConsensusBridge;
+    use crate::plan::RankPlanner;
     use crate::schedule::BandEnergy;
+    use st_core::backend::device_caps::DeviceCaps;
     use st_core::config::self_rewrite::SelfRewriteCfg;
     use st_core::telemetry::hub::{self, DesirePhaseTelemetry};
-    use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
-    #[cfg(feature = "psi")]
-    use std::collections::HashMap;
-    use std::collections::HashSet;
-    use std::sync::{mpsc::channel, Arc, Mutex};
-    use std::time::{Duration, Instant, SystemTime};
-    use tempfile::tempdir;
-
     #[cfg(feature = "psi")]
     use st_core::telemetry::hub::SoftlogicZFeedback;
     #[cfg(feature = "psi")]
     use st_core::telemetry::psi::{PsiComponent, PsiEvent, PsiReading};
-    use st_core::telemetry::hub::{self, SoftlogicZFeedback};
+    use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
     #[cfg(feature = "psi")]
-    use st_core::telemetry::psi::{PsiComponent, PsiEvent, PsiReading};
-    use super::super::automation::DesireAutomation;
-    use super::super::desire::{constant, warmup, DesireLagrangian};
-    use super::super::geometry::{
-        ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
-    };
-    use super::super::temperature::TemperatureController;
-    use crate::plan::RankPlanner;
-    use st_core::config::self_rewrite::SelfRewriteCfg;
-    use st_core::backend::device_caps::DeviceCaps;
-    use st_core::config::self_rewrite::SelfRewriteCfg;
+    use std::collections::HashMap;
     use std::collections::HashSet;
-    use std::sync::mpsc::channel;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{mpsc::channel, Arc, Mutex, OnceLock};
     use std::time::{Duration, Instant, SystemTime};
     use tempfile::tempdir;
 
