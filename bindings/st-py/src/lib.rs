@@ -1766,9 +1766,9 @@ impl PyModuleTrainer {
 
     fn blackcat_minutes<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
         let minutes = self.inner.blackcat_minutes();
-        let list = PyList::empty(py);
+        let list = PyList::empty_bound(py);
         for minute in minutes {
-            let entry = PyDict::new(py);
+            let entry = PyDict::new_bound(py);
             entry.set_item("plan_signature", minute.plan_signature.clone())?;
             entry.set_item("script_hint", minute.script_hint.clone())?;
             entry.set_item("winner", format!("{:?}", minute.winner))?;
@@ -1786,14 +1786,14 @@ impl PyModuleTrainer {
                     .map(|d| d.as_secs_f64())
                     .unwrap_or(0.0),
             )?;
-            let picks = PyDict::new(py);
+            let picks = PyDict::new_bound(py);
             for (k, v) in minute.picks.iter() {
                 picks.set_item(k.clone(), v.clone())?;
             }
-            entry.set_item("picks", picks)?;
-            list.append(entry)?;
+            entry.set_item("picks", picks.into_py(py))?;
+            list.append(entry.into_py(py))?;
         }
-        Ok(list.into())
+        Ok(list.into_py(py))
     }
 
     #[pyo3(signature = (module, loss, batches, schedule))]
@@ -3295,8 +3295,7 @@ fn gemm_py(lhs: &PyTensor, rhs: &PyTensor, backend: Option<&str>) -> PyResult<Py
 #[pyfunction(name = "available_backends")]
 fn available_backends_py() -> Vec<&'static str> {
     let mut options = vec!["auto", "faer", "naive"];
-    #[cfg(feature = "wgpu")]
-    {
+    if cfg!(feature = "wgpu") {
         options.push("wgpu");
     }
     options
@@ -3789,14 +3788,14 @@ fn bentoml_save_model(
     py: Python<'_>,
     model: PyObject,
     name: &str,
-    signatures: Option<&PyDict>,
-    labels: Option<&PyDict>,
-    metadata: Option<&PyDict>,
-    custom_objects: Option<&PyDict>,
-    context: Option<&PyDict>,
+    signatures: Option<&Bound<'_, PyDict>>,
+    labels: Option<&Bound<'_, PyDict>>,
+    metadata: Option<&Bound<'_, PyDict>>,
+    custom_objects: Option<&Bound<'_, PyDict>>,
+    context: Option<&Bound<'_, PyDict>>,
     api_version: Option<&str>,
 ) -> PyResult<PyObject> {
-    let bentoml = py.import("bentoml").map_err(|err| {
+    let bentoml = PyModule::import_bound(py, "bentoml").map_err(|err| {
         PyImportError::new_err(format!(
             "bentoml is required for BentoML integration but could not be imported: {err}"
         ))
@@ -3842,7 +3841,7 @@ fn optuna_optimize(
     sampler: Option<PyObject>,
     pruner: Option<PyObject>,
 ) -> PyResult<PyObject> {
-    let optuna = py.import("optuna").map_err(|err| {
+    let optuna = PyModule::import_bound(py, "optuna").map_err(|err| {
         PyImportError::new_err(format!(
             "optuna is required for hyperparameter search but could not be imported: {err}"
         ))
@@ -3883,16 +3882,16 @@ fn optuna_optimize(
 fn ray_tune_run(
     py: Python<'_>,
     trainable: PyObject,
-    config: Option<&PyDict>,
+    config: Option<&Bound<'_, PyDict>>,
     num_samples: Option<usize>,
-    resources_per_trial: Option<&PyDict>,
+    resources_per_trial: Option<&Bound<'_, PyDict>>,
     metric: Option<&str>,
     mode: Option<&str>,
     name: Option<&str>,
     local_dir: Option<&str>,
     init: bool,
 ) -> PyResult<PyObject> {
-    let ray = py.import("ray").map_err(|err| {
+    let ray = PyModule::import_bound(py, "ray").map_err(|err| {
         PyImportError::new_err(format!(
             "ray is required for Ray Tune integration but could not be imported: {err}"
         ))
@@ -3944,12 +3943,12 @@ fn export_onnx(
     example_input: PyObject,
     export_path: &str,
     opset_version: i32,
-    dynamic_axes: Option<&PyDict>,
+    dynamic_axes: Option<&Bound<'_, PyDict>>,
     input_names: Option<Vec<String>>,
     output_names: Option<Vec<String>>,
     do_constant_folding: bool,
 ) -> PyResult<()> {
-    let torch = py.import("torch").map_err(|err| {
+    let torch = PyModule::import_bound(py, "torch").map_err(|err| {
         PyImportError::new_err(format!(
             "torch is required to export ONNX models but could not be imported: {err}"
         ))
@@ -3971,12 +3970,16 @@ fn export_onnx(
         kwargs.set_item("output_names", output_names)?;
     }
 
-    onnx.call_method("export", (model, example_input, export_path), Some(&kwargs))?;
+    onnx.call_method(
+        "export",
+        (model, example_input, export_path),
+        Some(&kwargs),
+    )?;
 
     Ok(())
 }
 
-fn integrations(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn integrations(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(torchserve_archive, m)?)?;
     m.add_function(wrap_pyfunction!(bentoml_save_model, m)?)?;
     m.add_function(wrap_pyfunction!(optuna_optimize, m)?)?;
