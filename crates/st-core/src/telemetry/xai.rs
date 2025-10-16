@@ -72,6 +72,14 @@ impl GraphFlowTracer {
         &self.reports
     }
 
+    /// Returns the cumulative energy transported across all recorded layers.
+    pub fn total_energy(&self) -> f32 {
+        self.reports
+            .iter()
+            .map(GraphLayerReport::total_flow_energy)
+            .sum()
+    }
+
     /// Consumes all accumulated reports, returning them in insertion order.
     pub fn drain(&mut self) -> Vec<GraphLayerReport> {
         core::mem::take(&mut self.reports)
@@ -93,6 +101,13 @@ pub struct GraphLayerReport {
     pub bias_update_magnitude: Option<f32>,
 }
 
+impl GraphLayerReport {
+    /// Total energy transported by all node flows in this layer.
+    pub fn total_flow_energy(&self) -> f32 {
+        self.node_flows.iter().map(NodeFlowSample::energy).sum()
+    }
+}
+
 /// Aggregated contribution for a single node inside a graph layer.
 #[derive(Debug, Clone)]
 pub struct NodeFlowSample {
@@ -102,6 +117,13 @@ pub struct NodeFlowSample {
     pub incoming_weight: f32,
     /// Absolute sum of the aggregated feature vector.
     pub aggregated_norm: f32,
+}
+
+impl NodeFlowSample {
+    /// Energy carried by this node during propagation.
+    pub fn energy(&self) -> f32 {
+        self.aggregated_norm.abs() * self.incoming_weight.abs()
+    }
 }
 
 #[cfg(test)]
@@ -139,5 +161,32 @@ mod tests {
         let drained = tracer.drain();
         assert_eq!(drained.len(), 1);
         assert!(tracer.layers().is_empty());
+    }
+
+    #[test]
+    fn node_flow_energy_is_product_of_weight_and_norm() {
+        let sample = NodeFlowSample {
+            node_index: 0,
+            incoming_weight: 2.0,
+            aggregated_norm: -0.5,
+        };
+        assert!((sample.energy() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn tracer_tracks_total_energy() {
+        let mut tracer = GraphFlowTracer::new();
+        tracer.begin_layer(
+            "layer",
+            -1.0,
+            vec![NodeFlowSample {
+                node_index: 0,
+                incoming_weight: 0.5,
+                aggregated_norm: 0.4,
+            }],
+        );
+        assert!(tracer.total_energy() > 0.0);
+        let report = tracer.layers()[0].clone();
+        assert!((report.total_flow_energy() - tracer.total_energy()).abs() < 1e-6);
     }
 }

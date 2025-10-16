@@ -26,7 +26,12 @@ pub mod schedule;
 pub mod trainer;
 
 pub use dataset::{from_vec as dataset_from_vec, BatchIter, DataLoader, Dataset};
-pub use gnn::{GraphContext, ZSpaceGraphConvolution};
+pub use gnn::{
+    embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,
+    fold_into_roundtable, fold_with_band_energy, GraphConsensusBridge, GraphConsensusDigest,
+    GraphContext, GraphContextBuilder, GraphMonadExport, GraphNormalization, QuadBandEnergy,
+    ZSpaceGraphConvolution,
+};
 #[cfg(feature = "golden")]
 pub use golden::{GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig};
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
