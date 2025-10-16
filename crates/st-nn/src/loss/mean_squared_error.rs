@@ -5,7 +5,7 @@
 
 use super::Loss;
 use crate::{PureResult, Tensor};
-use st_tensor::pure::TensorError;
+use st_tensor::TensorError;
 
 /// Classic mean squared error loss with mean reduction.
 #[derive(Debug, Default, Clone, Copy)]

@@ -6,7 +6,7 @@
 use crate::module::Module;
 use crate::{PureResult, Tensor};
 use st_frac::FracBackend;
-use st_tensor::pure::{LanguageWaveEncoder, OpenCartesianTopos, RewriteMonad, TensorBiome};
+use st_tensor::{LanguageWaveEncoder, OpenCartesianTopos, RewriteMonad, TensorBiome};
 
 /// Projects Euclidean activations back into the open-cartesian Z-space manifold.
 #[derive(Clone, Debug)]
@@ -126,7 +126,7 @@ impl Module for ZSpaceProjector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use st_tensor::pure::topos::OpenCartesianTopos;
+    use st_tensor::topos::OpenCartesianTopos;
 
     fn demo_topos() -> OpenCartesianTopos {
         OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap()

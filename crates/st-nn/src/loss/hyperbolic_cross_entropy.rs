@@ -5,7 +5,7 @@
 
 use super::Loss;
 use crate::{PureResult, Tensor};
-use st_tensor::pure::TensorError;
+use st_tensor::TensorError;
 
 /// Cross entropy defined on a hyperbolic Poincaré ball.
 #[derive(Debug, Clone, Copy)]
