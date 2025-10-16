@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 // crates/st-tensor/src/util.rs
-#![cfg(feature = "wgpu_frac")]
+#![cfg(any(feature = "wgpu", feature = "wgpu_frac"))]
 use wgpu::*;
 
 pub fn readback_f32(device: &Device, queue: &Queue, src: &Buffer, len: usize) -> Vec<f32> {
