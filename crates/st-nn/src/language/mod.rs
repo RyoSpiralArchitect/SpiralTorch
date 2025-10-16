@@ -22,6 +22,7 @@ pub use gw::{DistanceMatrix, EntropicGwSolver};
 pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
 pub use pipeline::{
     DesireChannelSink, DesirePipeline, DesirePipelineBuilder, DesirePipelineEvent,
-    DesirePipelineSink, DesireTriggerBuffer, DesireTriggerEvent,
+    DesirePipelineSink, DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary,
+    DesireTriggerBuffer, DesireTriggerEvent,
 };
 pub use temperature::{entropy, TemperatureController};

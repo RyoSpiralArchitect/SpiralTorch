@@ -9,7 +9,7 @@ use super::kdsl_bridge;
 use super::spiralk_fft::SpiralKFftPlan;
 use crate::backend::wgpu_heuristics_generated as gen;
 use crate::ecosystem::{
-    EcosystemRegistry, HeuristicChoiceSummary, HeuristicDecision, HeuristicSource,
+    EcosystemRegistry, HeuristicChoiceSummary, HeuristicDecision, HeuristicSource, MetricSample,
 };
 #[cfg(feature = "logic-learn")]
 use st_logic::learn;
@@ -251,7 +251,80 @@ fn finalize_choice(
         source,
         issued_at: SystemTime::now(),
     };
-    EcosystemRegistry::global().record_heuristic(decision);
+    let registry = EcosystemRegistry::global();
+    let tag_sample = |sample: MetricSample| -> MetricSample {
+        sample
+            .with_tag("subsystem", "wgpu")
+            .with_tag("kind", kind)
+            .with_tag("source", source.as_str())
+    };
+
+    registry.record_metric(tag_sample(
+        MetricSample::new("heuristic.rows", rows as f64).with_unit("rows"),
+    ));
+    registry.record_metric(tag_sample(
+        MetricSample::new("heuristic.cols", cols as f64).with_unit("cols"),
+    ));
+    registry.record_metric(tag_sample(
+        MetricSample::new("heuristic.k", k as f64).with_unit("items"),
+    ));
+    registry.record_metric(tag_sample(
+        MetricSample::new(
+            "heuristic.use_two_stage",
+            if decision.choice.use_two_stage {
+                1.0
+            } else {
+                0.0
+            },
+        )
+        .with_unit("flag"),
+    ));
+    registry.record_metric(tag_sample(
+        MetricSample::new("heuristic.workgroup", decision.choice.workgroup as f64)
+            .with_unit("threads"),
+    ));
+    registry.record_metric(tag_sample(
+        MetricSample::new("heuristic.lanes", decision.choice.lanes as f64).with_unit("lanes"),
+    ));
+    registry.record_metric(tag_sample(
+        MetricSample::new(
+            "heuristic.channel_stride",
+            decision.choice.channel_stride as f64,
+        )
+        .with_unit("stride"),
+    ));
+    registry.record_metric(tag_sample(
+        MetricSample::new(
+            "heuristic.compaction_tile",
+            decision.choice.compaction_tile as f64,
+        )
+        .with_unit("tile"),
+    ));
+    registry.record_metric(tag_sample(
+        MetricSample::new(
+            "heuristic.fft_tile_cols",
+            decision.choice.fft_tile_cols as f64,
+        )
+        .with_unit("cols"),
+    ));
+    registry.record_metric(tag_sample(
+        MetricSample::new("heuristic.fft_radix", decision.choice.fft_radix as f64)
+            .with_unit("radix"),
+    ));
+    registry.record_metric(tag_sample(
+        MetricSample::new(
+            "heuristic.fft_segments",
+            decision.choice.fft_segments as f64,
+        )
+        .with_unit("segments"),
+    ));
+    if let Some(score) = score_hint {
+        registry.record_metric(tag_sample(
+            MetricSample::new("heuristic.score_hint", score as f64).with_unit("score"),
+        ));
+    }
+
+    registry.record_heuristic(decision);
     Some(choice)
 }
 

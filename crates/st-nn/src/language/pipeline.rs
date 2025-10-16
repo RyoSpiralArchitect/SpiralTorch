@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::automation::{DesireAutomatedStep, DesireAutomation, DesireRewriteTrigger};
-use super::desire::DesireWeights;
+use super::desire::{DesirePhase, DesireWeights};
 use super::geometry::ConceptHint;
 use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::PureResult;
@@ -147,6 +147,11 @@ impl DesirePipelineBuilder {
         self
     }
 
+    pub fn with_trainer_bridge(mut self, bridge: &DesireTrainerBridge) -> Self {
+        self.sinks.push(Box::new(bridge.clone()));
+        self
+    }
+
     pub fn build(self) -> DesirePipeline {
         DesirePipeline {
             automation: self.automation,
@@ -195,6 +200,10 @@ impl DesirePipeline {
 
     pub fn attach_channel(&mut self, sender: Sender<DesirePipelineEvent>) {
         self.sinks.push(Box::new(DesireChannelSink::new(sender)));
+    }
+
+    pub fn attach_trainer_bridge(&mut self, bridge: &DesireTrainerBridge) {
+        self.sinks.push(Box::new(bridge.clone()));
     }
 
     pub fn sink_count(&self) -> usize {
@@ -368,6 +377,160 @@ impl DesirePipelineSink for DesireTriggerBuffer {
         guard.push(DesireTriggerEvent {
             trigger: trigger.clone(),
             timestamp,
+        });
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DesireTrainerEvent {
+    pub timestamp: SystemTime,
+    pub phase: DesirePhase,
+    pub temperature: f32,
+    pub entropy: f32,
+    pub hypergrad_penalty: f32,
+    pub weights: DesireWeights,
+    pub trigger: Option<DesireRewriteTrigger>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DesireTrainerSummary {
+    pub total: usize,
+    pub observation: usize,
+    pub injection: usize,
+    pub integration: usize,
+    pub triggers: usize,
+    pub mean_entropy: f32,
+    pub mean_temperature: f32,
+    pub mean_penalty: f32,
+    pub mean_alpha: f32,
+    pub mean_beta: f32,
+    pub mean_gamma: f32,
+    pub mean_lambda: f32,
+    pub trigger_mean_penalty: f32,
+    pub trigger_mean_entropy: f32,
+    pub trigger_mean_temperature: f32,
+    pub trigger_mean_samples: f32,
+}
+
+impl DesireTrainerSummary {
+    fn from_events(events: &[DesireTrainerEvent]) -> Self {
+        if events.is_empty() {
+            return Self::default();
+        }
+        let mut summary = DesireTrainerSummary {
+            total: events.len(),
+            ..Default::default()
+        };
+        let mut sum_entropy = 0.0f32;
+        let mut sum_temperature = 0.0f32;
+        let mut sum_penalty = 0.0f32;
+        let mut sum_alpha = 0.0f32;
+        let mut sum_beta = 0.0f32;
+        let mut sum_gamma = 0.0f32;
+        let mut sum_lambda = 0.0f32;
+        let mut trig_penalty = 0.0f32;
+        let mut trig_entropy = 0.0f32;
+        let mut trig_temperature = 0.0f32;
+        let mut trig_samples = 0.0f32;
+
+        for event in events {
+            match event.phase {
+                DesirePhase::Observation => summary.observation += 1,
+                DesirePhase::Injection => summary.injection += 1,
+                DesirePhase::Integration => summary.integration += 1,
+            }
+            sum_entropy += event.entropy;
+            sum_temperature += event.temperature;
+            sum_penalty += event.hypergrad_penalty;
+            sum_alpha += event.weights.alpha;
+            sum_beta += event.weights.beta;
+            sum_gamma += event.weights.gamma;
+            sum_lambda += event.weights.lambda;
+            if let Some(trigger) = &event.trigger {
+                summary.triggers += 1;
+                trig_penalty += trigger.mean_penalty;
+                trig_entropy += trigger.mean_entropy;
+                trig_temperature += trigger.temperature;
+                trig_samples += trigger.samples as f32;
+            }
+        }
+
+        let total = summary.total as f32;
+        if total > 0.0 {
+            summary.mean_entropy = sum_entropy / total;
+            summary.mean_temperature = sum_temperature / total;
+            summary.mean_penalty = sum_penalty / total;
+            summary.mean_alpha = sum_alpha / total;
+            summary.mean_beta = sum_beta / total;
+            summary.mean_gamma = sum_gamma / total;
+            summary.mean_lambda = sum_lambda / total;
+        }
+
+        if summary.triggers > 0 {
+            let count = summary.triggers as f32;
+            summary.trigger_mean_penalty = trig_penalty / count;
+            summary.trigger_mean_entropy = trig_entropy / count;
+            summary.trigger_mean_temperature = trig_temperature / count;
+            summary.trigger_mean_samples = trig_samples / count;
+        }
+
+        summary
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct DesireTrainerBridge {
+    shared: Arc<Mutex<Vec<DesireTrainerEvent>>>,
+}
+
+impl DesireTrainerBridge {
+    pub fn new() -> Self {
+        Self {
+            shared: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self.shared.lock() {
+            Ok(guard) => guard.len(),
+            Err(_) => 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn drain(&self) -> PureResult<Vec<DesireTrainerEvent>> {
+        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire trainer bridge poisoned",
+        })?;
+        Ok(std::mem::take(&mut *guard))
+    }
+
+    pub fn drain_summary(&self) -> PureResult<Option<DesireTrainerSummary>> {
+        let events = self.drain()?;
+        if events.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(DesireTrainerSummary::from_events(&events)))
+    }
+}
+
+impl DesirePipelineSink for DesireTrainerBridge {
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
+        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire trainer bridge poisoned",
+        })?;
+        guard.push(DesireTrainerEvent {
+            timestamp,
+            phase: step.solution.phase,
+            temperature: step.solution.temperature,
+            entropy: step.solution.entropy,
+            hypergrad_penalty: step.solution.hypergrad_penalty,
+            weights: step.solution.weights.clone(),
+            trigger: step.trigger.clone(),
         });
         Ok(())
     }
@@ -562,5 +725,38 @@ mod tests {
                 .unwrap_or_else(|_| Duration::from_secs(0));
             assert!(b >= a);
         }
+    }
+
+    #[test]
+    fn trainer_bridge_collects_summaries() {
+        let automation = build_automation();
+        let bridge = DesireTrainerBridge::new();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_trainer_bridge(&bridge)
+            .build();
+
+        let logits = vec![2.1, 0.5];
+        let concept = ConceptHint::Distribution(vec![0.55, 0.45]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..6 {
+            let now = start + Duration::from_secs(step as u64);
+            let timestamp = anchor + Duration::from_secs(step as u64);
+            pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+        }
+
+        assert!(bridge.len() >= 6);
+        let summary = bridge.drain_summary().unwrap().unwrap();
+        assert_eq!(summary.total, 6);
+        assert!(summary.observation >= 1);
+        assert!(summary.integration >= 1);
+        assert!(summary.mean_entropy.is_finite());
+        assert!(summary.mean_temperature.is_finite());
+        assert!(summary.mean_alpha >= 0.0);
+        assert!(summary.triggers >= 1);
+        assert!(bridge.is_empty());
+        assert!(bridge.drain_summary().unwrap().is_none());
     }
 }

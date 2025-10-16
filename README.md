@@ -296,6 +296,31 @@ for event in receiver.try_iter() {
 }
 ```
 
+Training loops can now subscribe directly. Clone a `DesireTrainerBridge`, attach
+it with `with_trainer_bridge`, and hand the same bridge to `ModuleTrainer` via
+`enable_desire_pipeline`. Each step drains into a shared summary so the trainer
+records phase counts, mean desire weights, and trigger temperatures alongside
+band energy telemetry without custom glue.【F:crates/st-nn/src/language/pipeline.rs†L118-L239】【F:crates/st-nn/src/language/pipeline.rs†L242-L357】【F:crates/st-nn/src/trainer.rs†L214-L365】
+
+```rust
+use st_nn::language::{
+    ConceptHint, DesirePipeline, DesireTrainerBridge, DesireTriggerBuffer,
+};
+use st_nn::trainer::ModuleTrainer;
+
+let bridge = DesireTrainerBridge::new();
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_trainer_bridge(&bridge)
+    .with_sink(DesireTriggerBuffer::new())
+    .build();
+
+trainer.enable_desire_pipeline(bridge.clone());
+let step = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(trigger) = &step.trigger {
+    println!("trigger mean penalty: {:.3}", trigger.mean_penalty);
+}
+```
+
 The result is a single Rust-native control surface that marries KL control,
 Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
 language modules, rewrite monads, or SpiralK trainers without bespoke Python
@@ -434,8 +459,22 @@ for district in atlas.districts():
 
 If you want more than a snapshot, call `session.atlas_route(limit=12)` to pull a
 bounded history of frames. It’s perfect for feeding notebooks with sliding
-windows of atlas metrics or piping the loop into other SpiralTorch nodes.
-route the atlas straight into dashboards or back into SpiralK planners.
+windows of atlas metrics or piping the loop into other SpiralTorch nodes. When
+you just need a quick **district-level synopsis**, `session.atlas_route_summary`
+condenses the same window into aggregate trends and maintainer hints:
+
+```python
+summary = session.atlas_route_summary(limit=12)
+print(summary.frames, summary.mean_loop_support)
+for district in summary.districts():
+    print(district.name, district.coverage, district.delta)
+if summary.maintainer_status:
+    print("Maintainer", summary.maintainer_status, summary.maintainer_diagnostic)
+```
+
+The summary keeps track of recent clamp/pressure recommendations, script hints,
+and average loop support so dashboards can surface the “city heartbeat” without
+iterating over each frame.
 
 ### Self-maintaining feedback loops
 
@@ -521,7 +560,7 @@ use st_nn::{GoldenRetriever, GoldenRetrieverConfig, Linear, MeanSquaredError, Mo
 
 let mut trainer_a = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
 let mut trainer_b = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
-let retriever = GoldenRetriever::new(GoldenRetrieverConfig::default(), vec![trainer_a, trainer_b])?;
+let mut retriever = GoldenRetriever::new(GoldenRetrieverConfig::default(), vec![trainer_a, trainer_b])?;
 let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
 println!("workers={} avg_loss={}", report.workers, report.average_loss);
 ```
@@ -545,7 +584,7 @@ let config = GoldenRetrieverConfig {
     reinforcement_bias: 1.1,
     ..GoldenRetrieverConfig::default()
 };
-let retriever = GoldenRetriever::new(config, vec![trainer_a, trainer_b])?;
+let mut retriever = GoldenRetriever::new(config, vec![trainer_a, trainer_b])?;
 let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
 assert!(!report.moderator_minutes.is_empty());
 if let Some(pulse) = &report.cooperative_pulse {
@@ -585,14 +624,61 @@ can inspect exactly how the synergy evolved during the run.
 to tilt how aggressively the aggregated metrics should respond to support vs.
 heuristic weight. Bumping `synergy_bias` favours exploration-heavy, confidence
 driven pulses while `reinforcement_bias` amplifies heuristics and reward
-signals when tightening distributed synchronization.
+signals when tightening distributed synchronization. When you want Golden to
+renegotiate those biases automatically, hand it a
+`GoldenSelfRewriteConfig`. The retriever stages a four-party council (explorer,
+optimizer, harmoniser, reinforcer) that blends the latest cooperative pulse
+with scheduler depth to rewrite the coordination biases in-place:
+
+```rust
+use st_nn::{GoldenRetriever, GoldenRetrieverConfig, GoldenSelfRewriteConfig};
+
+let mut retriever = GoldenRetriever::new(
+    GoldenRetrieverConfig::default().with_self_rewrite(
+        GoldenSelfRewriteConfig::default()
+            .with_schedule_weight(0.8)
+            .with_negotiation_rate(0.45)
+            .with_inertia(0.5),
+    ),
+    vec![trainer_a, trainer_b],
+)?;
+let before = retriever.coordination_biases();
+// modules/losses/loaders/schedules prepared as shown above
+let report = retriever.run_epoch(mods.clone(), losses.clone(), loaders.clone(), schedules.clone())?;
+let after = retriever.coordination_biases();
+println!("biases before={before:?} after={after:?}");
+if let Some(pulse) = &report.cooperative_pulse {
+    let mut persisted = GoldenRetrieverConfig::default().with_self_rewrite(
+        GoldenSelfRewriteConfig::default().with_schedule_weight(0.8),
+    );
+    persisted.rewrite_with_scheduler(&schedules, Some(pulse));
+}
+```
+
+`GoldenRetriever::coordination_biases()` exposes the live negotiation result so
+Dashboards can visualise the four delegates converging. The
+`rewrite_with_scheduler` helper mirrors the runtime logic in case you need to
+persist the negotiated configuration or replay it in another process.
+
+For longer runs the self-rewrite council now keeps a rolling transcript. The
+`GoldenSelfRewriteConfig` gained `with_council_memory`,
+`with_schedule_resonance`, and `with_synergy_pressure` knobs so you can tune how
+aggressively schedule depth and Blackcat energy bend the delegates. Every epoch
+emits a `GoldenCouncilSnapshot` that summarises the negotiated biases,
+resonance, and stability alongside the pulse that triggered it. Inspect it via
+`GoldenEpochReport::council_snapshot()` or `GoldenRetriever::last_council_snapshot()`
+to plot convergence, detect oscillations, or persist the negotiated state for a
+follow-up run.
 
 Python callers can read the same signals via
 `spiraltorch.ModuleTrainer.last_blackcat_pulse()` and
 `last_blackcat_directive()`, which yield rich `GoldenBlackcatPulse` and
 `GoldenCooperativeDirective` wrappers. The bindings surface getters for every
 metric alongside a `pulse.directive(baseline_interval, baseline_window)` helper
-so notebooks can mirror the Rust-side retuning logic.
+so notebooks can mirror the Rust-side retuning logic. The new
+`ModuleTrainer.last_golden_council_snapshot()` hook returns a
+`GoldenCouncilSnapshot` wrapper, giving notebooks the same council stability and
+resonance metrics that the Rust runtime observes.
 
 ### SpiralTorchRL (hypergrad policy gradients)
 

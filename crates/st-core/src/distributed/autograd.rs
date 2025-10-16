@@ -170,6 +170,10 @@ impl AmebaAutograd {
                 });
             }
 
+            for (w, g) in agent.weights.iter_mut().zip(message.payload.iter()) {
+                *w -= agent.learning_rate * g;
+            }
+
             let signal = message.payload.iter().map(|v| v.abs()).sum::<f32>();
             if signal < self.tolerance && message.hops > 0 {
                 return Ok(());

@@ -21,7 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
-use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute};
+use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 use std::sync::{OnceLock, RwLock};
@@ -164,6 +164,11 @@ pub fn get_atlas_route(limit: Option<usize>) -> AtlasRoute {
         route.frames = frames;
     }
     route
+}
+
+/// Summarises the chronological atlas route up to the requested limit.
+pub fn get_atlas_route_summary(limit: Option<usize>) -> AtlasRouteSummary {
+    get_atlas_route(limit).summary()
 }
 
 /// Merges an atlas fragment into the stored frame, creating it if absent.
@@ -497,5 +502,37 @@ mod tests {
         assert_eq!(route.len(), 4);
         assert_eq!(route.frames.first().unwrap().timestamp, 3.0);
         assert_eq!(route.latest().unwrap().loop_support, 5.0);
+    }
+
+    #[test]
+    fn atlas_route_summary_exposes_recent_activity() {
+        clear_atlas();
+        clear_atlas_route();
+        for idx in 0..3 {
+            let mut fragment = AtlasFragment::new();
+            fragment.timestamp = Some((idx + 1) as f32);
+            fragment.push_metric_with_district(
+                format!("session.surface.latency.{}", idx),
+                idx as f32,
+                "Surface",
+            );
+            fragment.push_metric_with_district(
+                format!("trainer.loop.energy.{}", idx),
+                1.0 + idx as f32,
+                "Concourse",
+            );
+            merge_atlas_fragment(fragment);
+        }
+        let summary = get_atlas_route_summary(Some(3));
+        assert_eq!(summary.frames, 3);
+        assert!(summary.latest_timestamp >= 3.0 - f32::EPSILON);
+        assert!(!summary.districts.is_empty());
+        let concourse = summary
+            .districts
+            .iter()
+            .find(|district| district.name == "Concourse")
+            .expect("concourse summary");
+        assert_eq!(concourse.coverage, 3);
+        assert!(concourse.delta > 0.0);
     }
 }

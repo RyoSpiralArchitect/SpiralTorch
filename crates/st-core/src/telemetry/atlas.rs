@@ -345,6 +345,184 @@ impl AtlasRoute {
             self.frames.drain(0..overflow);
         }
     }
+
+    /// Summarises the stored frames into district-level statistics and loopback hints.
+    pub fn summary(&self) -> AtlasRouteSummary {
+        let mut summary = AtlasRouteSummary::default();
+        summary.frames = self.frames.len();
+        if self.frames.is_empty() {
+            return summary;
+        }
+        summary.latest_timestamp = self
+            .frames
+            .last()
+            .map(|frame| frame.timestamp)
+            .unwrap_or(0.0);
+        let mut loop_total = 0.0;
+        let mut district_map: BTreeMap<String, DistrictAccumulator> = BTreeMap::new();
+        for frame in &self.frames {
+            loop_total += frame.loop_support.max(0.0);
+            if let Some(total) = frame.collapse_total {
+                if total.is_finite() {
+                    summary.latest_collapse_total = Some(total);
+                }
+            }
+            if let Some(z) = frame.z_signal {
+                if z.is_finite() {
+                    summary.latest_z_signal = Some(z);
+                }
+            }
+            if let Some(status) = frame.maintainer_status {
+                summary.maintainer_status = Some(status);
+            }
+            if let Some(diagnostic) = frame.maintainer_diagnostic.as_ref() {
+                if !diagnostic.is_empty() {
+                    summary.maintainer_diagnostic = Some(diagnostic.clone());
+                }
+            }
+            if let Some(clamp) = frame.suggested_max_scale {
+                if clamp.is_finite() {
+                    summary.suggested_max_scale = Some(clamp);
+                }
+            }
+            if let Some(pressure) = frame.suggested_pressure {
+                if pressure.is_finite() {
+                    summary.suggested_pressure = Some(pressure);
+                }
+            }
+            if let Some(script) = frame.script_hint.as_ref() {
+                if !script.is_empty() {
+                    summary.script_hint = Some(script.clone());
+                }
+            }
+            for district in frame.districts() {
+                let entry = district_map
+                    .entry(district.name.clone())
+                    .or_insert_with(DistrictAccumulator::new);
+                entry.push(district.mean);
+            }
+        }
+        if summary.frames > 0 {
+            summary.mean_loop_support = loop_total / summary.frames as f32;
+        }
+        summary.districts = district_map
+            .into_iter()
+            .map(|(name, accumulator)| accumulator.into_summary(name))
+            .filter(|district| district.coverage > 0)
+            .collect();
+        summary
+            .districts
+            .sort_by(|a, b| b.coverage.cmp(&a.coverage).then_with(|| a.name.cmp(&b.name)));
+        summary
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AtlasRouteSummary {
+    /// Number of frames retained in the route at the time of the summary.
+    pub frames: usize,
+    /// Timestamp of the latest frame contributing to the summary.
+    pub latest_timestamp: f32,
+    /// Mean loop support accumulated across the route.
+    pub mean_loop_support: f32,
+    /// Latest collapse total observed within the route.
+    pub latest_collapse_total: Option<f32>,
+    /// Latest Z-space control signal observed within the route.
+    pub latest_z_signal: Option<f32>,
+    /// Last maintainer status routed through the atlas route.
+    pub maintainer_status: Option<MaintainerStatus>,
+    /// Last maintainer diagnostic routed through the atlas route.
+    pub maintainer_diagnostic: Option<String>,
+    /// Most recent clamp recommendation encountered in the route.
+    pub suggested_max_scale: Option<f32>,
+    /// Most recent Leech pressure recommendation encountered in the route.
+    pub suggested_pressure: Option<f32>,
+    /// Latest SpiralK script hint emitted by the route.
+    pub script_hint: Option<String>,
+    /// District activity summaries accumulated across the route.
+    pub districts: Vec<AtlasDistrictSummary>,
+}
+
+impl AtlasRouteSummary {
+    /// Returns true when the summary did not gather any frames.
+    pub fn is_empty(&self) -> bool {
+        self.frames == 0
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AtlasDistrictSummary {
+    /// Human readable name of the district.
+    pub name: String,
+    /// Number of frames contributing to the district statistics.
+    pub coverage: usize,
+    /// Average district activity across the covered frames.
+    pub mean: f32,
+    /// Latest district activity value encountered in the route.
+    pub latest: f32,
+    /// Minimum district activity observed in the route.
+    pub min: f32,
+    /// Maximum district activity observed in the route.
+    pub max: f32,
+    /// Signed change between the latest and first observation.
+    pub delta: f32,
+}
+
+#[derive(Clone, Debug, Default)]
+struct DistrictAccumulator {
+    sum: f32,
+    min: f32,
+    max: f32,
+    first: Option<f32>,
+    last: f32,
+    count: usize,
+}
+
+impl DistrictAccumulator {
+    fn new() -> Self {
+        Self {
+            sum: 0.0,
+            min: f32::INFINITY,
+            max: f32::NEG_INFINITY,
+            first: None,
+            last: 0.0,
+            count: 0,
+        }
+    }
+
+    fn push(&mut self, value: f32) {
+        if !value.is_finite() {
+            return;
+        }
+        self.sum += value;
+        self.count += 1;
+        self.min = self.min.min(value);
+        self.max = self.max.max(value);
+        if self.first.is_none() {
+            self.first = Some(value);
+        }
+        self.last = value;
+    }
+
+    fn into_summary(self, name: String) -> AtlasDistrictSummary {
+        if self.count == 0 {
+            return AtlasDistrictSummary {
+                name,
+                ..Default::default()
+            };
+        }
+        let mean = self.sum / self.count as f32;
+        let first = self.first.unwrap_or(self.last);
+        AtlasDistrictSummary {
+            name,
+            coverage: self.count,
+            mean,
+            latest: self.last,
+            min: if self.min.is_finite() { self.min } else { mean },
+            max: if self.max.is_finite() { self.max } else { mean },
+            delta: self.last - first,
+        }
+    }
 }
 
 /// Atlas district representing a logical SpiralTorch layer.
@@ -444,5 +622,34 @@ mod tests {
         assert_eq!(route.len(), 3);
         assert_eq!(route.frames[0].timestamp, 3.0);
         assert_eq!(route.latest().unwrap().timestamp, 5.0);
+    }
+
+    #[test]
+    fn atlas_route_summary_tracks_district_trends() {
+        let mut route = AtlasRoute::new();
+        for idx in 0..4 {
+            let mut fragment = AtlasFragment::new();
+            fragment.timestamp = Some((idx + 1) as f32);
+            fragment.push_metric_with_district("session.surface.latency", idx as f32, "Surface");
+            fragment.push_metric_with_district("trainer.loop.energy", idx as f32 + 1.0, "Concourse");
+            fragment.push_metric_with_district("tensor.backend.util", 0.5 + idx as f32 * 0.1, "Substrate");
+            let mut frame = AtlasFrame::new((idx + 1) as f32);
+            frame.loop_support = (idx as f32) * 0.5;
+            frame.merge_fragment(fragment);
+            route.push_bounded(frame, usize::MAX);
+        }
+        let summary = route.summary();
+        assert_eq!(summary.frames, 4);
+        assert!(summary.latest_timestamp >= 4.0 - f32::EPSILON);
+        assert!(summary.mean_loop_support > 0.0);
+        assert!(!summary.districts.is_empty());
+        let surface = summary
+            .districts
+            .iter()
+            .find(|district| district.name == "Surface")
+            .expect("surface summary");
+        assert_eq!(surface.coverage, 4);
+        assert!((surface.latest - 3.0).abs() <= f32::EPSILON);
+        assert!((surface.delta - 3.0).abs() <= f32::EPSILON);
     }
 }
