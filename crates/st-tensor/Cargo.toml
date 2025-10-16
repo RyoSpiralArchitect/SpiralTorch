@@ -11,6 +11,7 @@ crate-type = ["rlib", "cdylib"]
 
 [features]
 default = ["cpu"]
+faer = ["dep:faer"]
 
 # CPU execution is always available, but expose a feature so that downstream
 # crates can opt into a uniform interface when selecting backends.
@@ -30,6 +31,8 @@ cuda = []
 hip = []
 
 [dependencies]
+# High-performance SIMD dense linear algebra for CPU matmul acceleration.
+faer = { version = "0.18", default-features = false, features = ["std"], optional = true }
 # Optional; only needed if building WGPU kernel
 wgpu = { version = "0.19", optional = true }
 bytemuck = { version = "1.15", features = ["derive"], optional = true }
