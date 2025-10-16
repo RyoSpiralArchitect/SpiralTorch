@@ -725,8 +725,8 @@ impl SpiralSession {
         let signal = timeline.loop_signal(self.maintainer.window, bin_hint);
         drop(timeline);
         let atlas_signal = signal.clone();
-        if let Some(signal) = signal {
-            hub::set_chrono_loop(signal);
+        if let Some(ref signal) = signal {
+            hub::set_chrono_loop(signal.clone());
         }
         if let Some(signal) = atlas_signal {
             let summary = signal.summary.clone();

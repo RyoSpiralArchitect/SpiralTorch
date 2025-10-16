@@ -35,8 +35,8 @@ pub use gnn::{
 };
 #[cfg(feature = "golden")]
 pub use golden::{
-    GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenEpochReport, GoldenRetriever,
-    GoldenRetrieverConfig,
+    GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot, GoldenEpochReport,
+    GoldenRetriever, GoldenRetrieverConfig, GoldenSelfRewriteConfig,
 };
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;

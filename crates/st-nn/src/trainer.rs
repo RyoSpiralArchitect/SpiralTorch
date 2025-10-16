@@ -22,6 +22,8 @@
 // ============================================================================
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+#[cfg(feature = "golden")]
+use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
@@ -72,6 +74,12 @@ pub struct ModuleTrainer {
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
+    #[cfg(feature = "golden")]
+    golden_pulse: Option<GoldenBlackcatPulse>,
+    #[cfg(feature = "golden")]
+    golden_directive: Option<GoldenCooperativeDirective>,
+    #[cfg(feature = "golden")]
+    golden_council: Option<GoldenCouncilSnapshot>,
     #[cfg(feature = "psi")]
     psi: Option<PsiMeter>,
     #[cfg(feature = "psychoid")]
@@ -231,6 +239,12 @@ impl ModuleTrainer {
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
+            #[cfg(feature = "golden")]
+            golden_pulse: None,
+            #[cfg(feature = "golden")]
+            golden_directive: None,
+            #[cfg(feature = "golden")]
+            golden_council: None,
             #[cfg(feature = "psi")]
             psi,
             #[cfg(feature = "psychoid")]
@@ -464,6 +478,11 @@ impl ModuleTrainer {
     }
 
     #[cfg(feature = "golden")]
+    pub(crate) fn record_golden_council(&mut self, snapshot: &GoldenCouncilSnapshot) {
+        self.golden_council = Some(snapshot.clone());
+    }
+
+    #[cfg(feature = "golden")]
     /// Returns the most recent cooperative pulse applied to this trainer.
     pub fn last_blackcat_pulse(&self) -> Option<&GoldenBlackcatPulse> {
         self.golden_pulse.as_ref()
@@ -473,6 +492,12 @@ impl ModuleTrainer {
     /// Returns the latest cooperative directive derived from the Golden pulse.
     pub fn last_blackcat_directive(&self) -> Option<&GoldenCooperativeDirective> {
         self.golden_directive.as_ref()
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the latest self-rewrite council snapshot received from GoldenRetriever.
+    pub fn last_golden_council_snapshot(&self) -> Option<&GoldenCouncilSnapshot> {
+        self.golden_council.as_ref()
     }
 
     /// Clears any registered band weighting rule.
@@ -1238,5 +1263,33 @@ mod tests {
             .unwrap();
         let after = model.forward(&input).unwrap();
         assert_ne!(before.data(), after.data());
+    }
+
+    #[cfg(feature = "golden")]
+    #[test]
+    fn trainer_records_golden_council_snapshot() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut pulse = GoldenBlackcatPulse::idle();
+        pulse.exploration_drive = 0.7;
+        let snapshot = GoldenCouncilSnapshot {
+            exploration_bias: 1.2,
+            optimization_bias: 0.95,
+            synergy_bias: 1.1,
+            reinforcement_bias: 1.05,
+            resonance: 0.4,
+            stability: 0.86,
+            momentum: 0.3,
+            divergence: 0.2,
+            schedule_hint: (1.0, 0.8, 1.1, 0.9),
+            pulse_recap: pulse,
+        };
+        trainer.record_golden_council(&snapshot);
+        let stored = trainer
+            .last_golden_council_snapshot()
+            .expect("snapshot stored");
+        assert!((stored.exploration_bias - 1.2).abs() < 1e-4);
+        assert_eq!(stored.schedule_hint.2, 1.1);
+        assert_eq!(stored.pulse_recap.exploration_drive, 0.7);
     }
 }
