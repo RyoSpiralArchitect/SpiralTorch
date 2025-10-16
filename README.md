@@ -667,6 +667,16 @@ without guessing at scaling factors. Trainers expose both
 `last_blackcat_pulse()` and `last_blackcat_directive()` so downstream tooling
 can inspect exactly how the synergy evolved during the run.
 
+Blackcat now keeps a running scoreboard for every plan signature it moderates.
+Each entry tracks observation counts, mean support, reward, ψ, and confidence so
+dashboards can highlight sustained winners instead of relying on a single
+minute. Access the aggregated view with `ModuleTrainer::blackcat_scoreboard()`
+from Rust or call `trainer.blackcat_scoreboard()` in Python to retrieve a list
+of dictionaries (plan signature, script hint, averages, and timestamps). The
+scoreboard honours the moderator history window and can be capped via
+`BlackcatModerator::set_scoreboard_limit()` when you only care about the top-N
+plans.
+
 `GoldenRetrieverConfig` picked up `synergy_bias` and `reinforcement_bias` knobs
 to tilt how aggressively the aggregated metrics should respond to support vs.
 heuristic weight. Bumping `synergy_bias` favours exploration-heavy, confidence
@@ -1153,6 +1163,14 @@ for op in trainer.heuristics_log().entries() {
 }
 for minute in trainer.blackcat_minutes() {
     println!("moderator: {} -> {:?} (support {:.2})", minute.plan_signature, minute.winner, minute.support);
+}
+for entry in trainer.blackcat_scoreboard() {
+    println!(
+        "scoreboard: {} obs={} reward={:.3}",
+        entry.plan_signature,
+        entry.observations,
+        entry.mean_reward
+    );
 }
 ```
 

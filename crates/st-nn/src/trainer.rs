@@ -29,8 +29,8 @@ use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
 use crate::roundtable::{
-    simulate_proposal_locally, BlackcatModerator, DistConfig, GlobalProposal, HeurOpKind,
-    HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
+    simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, GlobalProposal,
+    HeurOpKind, HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::{PureResult, Tensor};
@@ -506,6 +506,14 @@ impl ModuleTrainer {
         self.blackcat_moderator
             .as_ref()
             .map(|m| m.minutes().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Returns the aggregated scoreboard derived from the local Blackcat moderator.
+    pub fn blackcat_scoreboard(&self) -> Vec<BlackcatScore> {
+        self.blackcat_moderator
+            .as_ref()
+            .map(|m| m.scoreboard())
             .unwrap_or_default()
     }
 
@@ -1457,6 +1465,8 @@ mod tests {
     use crate::schedule::RoundtableConfig;
     use crate::CouncilEvidence;
     use st_tensor::pure::topos::OpenCartesianTopos;
+    use std::collections::HashMap;
+    use std::time::SystemTime;
     use std::collections::{HashMap, HashSet};
     use std::time::{Duration, Instant, SystemTime};
 
