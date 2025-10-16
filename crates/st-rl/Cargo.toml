@@ -12,3 +12,4 @@ st-core   = { path = "../st-core" }
 
 [features]
 collapse = []
+kdsl = ["st-core/kdsl"]

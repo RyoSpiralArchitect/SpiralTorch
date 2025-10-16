@@ -570,6 +570,17 @@ drive pulses flare, and publish the live loop gain/softening factor through
 heuristics, and collapse drive pressure now close a tidy feedback loop without
 additional plumbing.
 
+The loop no longer stops at a single node: every roundtable summary and collapse
+intervention now broadcasts a bounded `LoopbackEnvelope` through the telemetry
+hub. SpiralK meta-summaries attach their script hints, the softlogic observer
+threads its live Z-space bias, and PSI collapse totals hitch a ride so other
+policies can replay the same temporal context. `GeometryFeedback::absorb_loopback`
+blends the envelopes into a synthetic chrono signal, boosts clamp tightening
+according to peer support, and preserves the strongest SpiralK script so the
+controller can keep rewriting its own limits. Callers don’t need extra wiring—
+the policy gradient automatically drains the envelope queue before every
+resonance measurement and folds the distributed telemetry back into Z-space.
+
 ### SpiralTorchRec (open-topos recommendation lattice)
 
 SpiralTorchRec factors implicit-feedback matrices under open-cartesian topos

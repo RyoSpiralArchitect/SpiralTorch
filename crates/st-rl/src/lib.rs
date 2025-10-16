@@ -301,6 +301,11 @@ impl SpiralPolicyGradient {
         let (scale, signal) = if let Some(controller) = self.geometry_feedback.as_mut() {
             #[allow(unused_mut)]
             let mut loop_injected = false;
+            let envelopes = hub::drain_loopback_envelopes(8);
+            if !envelopes.is_empty() {
+                controller.absorb_loopback(&envelopes);
+                loop_injected = true;
+            }
             #[cfg(feature = "collapse")]
             {
                 if let Some(pulse) = hub::get_collapse_pulse() {

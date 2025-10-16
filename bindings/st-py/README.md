@@ -241,6 +241,14 @@ from Python to keep the hub warm; the Rust learner will tighten its clamps,
 adjust Λ₂₄ pressure, and publish loop gain/softening diagnostics the next time
 you finish an episode with geometry enabled.
 
+Each roundtable summary now contributes to a distributed `LoopbackEnvelope`
+queue. The Python side doesn’t need to manage it directly—whenever a summary
+or collapse pulse fires, the bindings push the latest SpiralK script hint,
+softlogic Z-bias, and PSI total into the hub. `SpiralPolicyGradient` drains the
+queue before processing resonance snapshots, blends the envelopes into a single
+chrono signal, and keeps the strongest script around so the controller can
+rewrite its own clamps on the next pass.
+
 ## SpiralTorchRec quickstart
 
 `spiraltorch.rec` brings the SpiralTorchRec factorisation stack to notebooks and
