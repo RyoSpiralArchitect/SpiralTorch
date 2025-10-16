@@ -7,7 +7,6 @@ use super::handoff::{fold_with_band_energy, QuadBandEnergy};
 use crate::schedule::BandEnergy;
 use crate::PureResult;
 use st_core::telemetry::xai::GraphFlowTracer;
-use st_tensor::pure::TensorError;
 use std::sync::{Arc, Mutex};
 
 /// Bridge that translates graph flow telemetry into SpiralK-friendly hints and

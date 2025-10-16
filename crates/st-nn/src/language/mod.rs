@@ -4,13 +4,13 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 pub use pipeline::{LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult};
+mod pipeline;
 mod automation;
 mod desire;
 mod geometry;
 mod gw;
 mod maxwell;
 mod logbook;
-mod pipeline;
 mod schrodinger;
 mod temperature;
 

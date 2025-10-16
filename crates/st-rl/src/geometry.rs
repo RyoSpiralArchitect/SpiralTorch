@@ -580,8 +580,6 @@ impl GeometryFeedback {
     }
 }
 
-const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
-
 #[cfg(test)]
 mod tests {
     use super::*;
