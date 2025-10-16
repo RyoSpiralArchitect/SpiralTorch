@@ -79,6 +79,10 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
+## Technical notes
+
+- [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
+
 ## Emerging toolkits unique to SpiralTorch
 
 ### Z-space-native graph neural networks
@@ -136,7 +140,15 @@ Once those signatures exist, `InterfaceZLift` pushes them straight into
 Z-space: it projects the perimeter mass onto a preferred Z-axis, splits the
 energy into Above/Here/Beneath bands, enriches the drift with the Leech
 projector, and emits a ready-to-store `SoftlogicZFeedback` pulse so runtimes can
-bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L386】
+bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L471】
+
+To make those bridges operational inside collapse loops the gauge now supports
+multi-radius sweeps and a conductor that fuses their Z pulses with exponential
+smoothing. `InterfaceGauge::analyze_multiradius` probes the same mask at
+different blow-up scales (and reuses an optional `c′` label when supplied),
+while `InterfaceZConductor` drives any number of gauges, aggregates the
+resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
+ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
@@ -309,6 +321,26 @@ for event in receiver.try_iter() {
         DesirePipelineEvent::Trigger { trigger, .. } =>
             spiralk_scheduler.queue_desire(trigger.report.clone(), trigger.mean_penalty),
     }
+}
+```
+
+Global telemetry consumers can subscribe without owning the pipeline by adding
+`with_telemetry()`. The `DesireTelemetrySink` records every step’s phase,
+temperature, avoidance energy, and schedule weights into the shared telemetry
+hub so trainers, notebooks, or external services can poll the latest state via
+`get_last_desire_step`.【F:crates/st-nn/src/language/pipeline.rs†L101-L239】【F:crates/st-core/src/telemetry/hub.rs†L61-L126】
+
+```rust
+use st_core::telemetry::hub;
+use st_nn::language::DesirePipeline;
+
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_telemetry()
+    .build();
+
+let _ = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(sample) = hub::get_last_desire_step() {
+    println!("phase {:?} at T={:.3}", sample.phase, sample.temperature);
 }
 ```
 
@@ -487,6 +519,12 @@ cargo run -p st-nn --features "psi psychoid collapse" --example hello_session
 On the Python side, pass `psychoid=True` when building the roundtable and fetch
 the latest reading via `spiraltorch.get_psychoid_stats()` to log the CTI score,
 raw metrics, and z-scores emitted from the Rust meter.
+
+Need the language desire pulse from Python as well? Call
+`spiraltorch.get_desire_telemetry()` to retrieve the same sample that the
+Rust-side `DesireTelemetrySink` recorded—phase, temperature, avoidance energy,
+logit norms, and the current α/β/γ/λ weights are all surfaced as a dictionary
+ready for notebooks or dashboards.【F:bindings/st-py/src/lib.rs†L227-L243】【F:crates/st-nn/src/language/pipeline.rs†L101-L239】
 
 ψ readings stay inside the automation loop—CollapseDrive, the psychoid dream
 engine, and the distributed roundtable all consume them directly. The examples
