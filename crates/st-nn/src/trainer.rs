@@ -36,6 +36,7 @@ use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSch
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::ecosystem::{ConnectorEvent, EcosystemRegistry};
 use st_core::ecosystem::{
     ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample, RankPlanSummary,
     RoundtableConfigSummary, RoundtableSummary,
@@ -599,6 +600,17 @@ impl ModuleTrainer {
         config: RoundtableConfig,
         schedule: &RoundtableSchedule,
     ) {
+        let pipeline = crate::language::pipeline::LanguagePipeline::builder("module_trainer")
+            .with_tag("component", "module_trainer")
+            .build();
+        pipeline.record_roundtable(
+            rows,
+            cols,
+            config,
+            schedule,
+            self.autopilot.is_some(),
+            self.distribution.as_ref(),
+        );
         let cfg_summary = {
             #[allow(unused_mut)]
             let mut summary = RoundtableConfigSummary::new(

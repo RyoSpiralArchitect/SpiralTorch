@@ -236,6 +236,10 @@ impl CausalGraph {
                     aggregated_effect: aggregate,
                 }
             };
+            if matches!(decision, ExecutionDecision::Execute { .. }) {
+                active_effect.insert(id, aggregate.max(1e-6));
+            } else {
+                active_effect.remove(&id);
             match decision {
                 ExecutionDecision::Execute { .. } => {
                     active_effect.insert(id, aggregate.max(1e-6));
