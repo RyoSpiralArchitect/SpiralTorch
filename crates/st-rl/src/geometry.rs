@@ -10,7 +10,7 @@ use st_core::telemetry::hub::LoopbackEnvelope;
 use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
-use st_core::util::math::{ramanujan_pi, LeechProjector};
+use st_core::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
 use st_tensor::pure::{DifferentialResonance, Tensor};
 
 /// Configuration describing how geometric observability is converted into
@@ -111,6 +111,8 @@ pub struct GeometryFeedback {
     window: usize,
     min_scale: f32,
     max_scale: f32,
+    z_rank: usize,
+    leech_weight: f64,
     leech_projector: LeechProjector,
     ramanujan_pi: f64,
     softening_beta: f32,
@@ -151,25 +153,23 @@ impl GeometryFeedback {
             clamped_max = (min_scale + 2.0).clamp(2.0, 3.0);
         }
         min_scale = min_scale.min(clamped_max - f32::EPSILON).max(f32::EPSILON);
+        let z_rank = config.z_space_rank.max(1);
+        let leech_weight = config.leech_density_weight.max(0.0);
+        let ramanujan_pi = Self::ramanujan_pi(config.ramanujan_iterations.max(1));
+        let softening_beta = config.softening_beta.max(0.0);
         Self {
             coalgebra: ObservationalCoalgebra::new(config.observability),
             threshold: config.activation_threshold.abs().max(f32::EPSILON),
             history: VecDeque::with_capacity(window),
             window,
-            min_scale: min_scale.max(f32::EPSILON),
-            max_scale: max_scale.max(f32::EPSILON),
-            leech_projector: LeechProjector::new(
-                config.z_space_rank.max(1),
-                config.leech_density_weight,
-            ),
-            ramanujan_pi: ramanujan_pi(config.ramanujan_iterations.max(1)),
             min_scale,
             max_scale: clamped_max,
-            z_rank: config.z_space_rank.max(1),
-            leech_weight: config.leech_density_weight.max(0.0),
-            ramanujan_pi: Self::ramanujan_pi(config.ramanujan_iterations.max(1)),
-            softening_beta: config.softening_beta.max(0.0),
-            base_softening_beta: config.softening_beta.max(0.0),
+            z_rank,
+            leech_weight,
+            leech_projector: LeechProjector::new(z_rank, leech_weight),
+            ramanujan_pi,
+            softening_beta,
+            base_softening_beta: softening_beta,
             rank_history: VecDeque::with_capacity(window),
             pressure_history: VecDeque::with_capacity(window),
             scale_history: VecDeque::with_capacity(window),
@@ -556,6 +556,8 @@ impl GeometryFeedback {
         if self.min_scale >= self.max_scale {
             self.min_scale = (self.max_scale * 0.5).max(f32::EPSILON);
         }
+
+        self.leech_projector = LeechProjector::new(self.z_rank, self.leech_weight);
     }
 
     fn ramanujan_pi(iterations: usize) -> f64 {
