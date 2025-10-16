@@ -4,7 +4,6 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 pub mod pipeline;
-
 pub use pipeline::{LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult};
 mod automation;
 mod desire;
