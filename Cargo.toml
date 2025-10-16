@@ -7,6 +7,9 @@ members = [
   "crates/st-kv",
   "crates/st-tensor",
   "crates/st-nn",
+  "crates/st-text",
+  "crates/st-rl",
+  "crates/st-rec",
   "bindings/st-py"
 ]
 resolver = "2"
