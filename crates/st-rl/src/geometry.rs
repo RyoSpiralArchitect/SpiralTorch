@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
+use st_core::util::math::{ramanujan_pi, LeechProjector};
 use st_tensor::pure::{DifferentialResonance, Tensor};
 
 /// Configuration describing how geometric observability is converted into
@@ -73,8 +74,7 @@ pub struct GeometryFeedback {
     window: usize,
     min_scale: f32,
     max_scale: f32,
-    z_rank: usize,
-    leech_weight: f64,
+    leech_projector: LeechProjector,
     ramanujan_pi: f64,
     softening_beta: f32,
     last_signal: Option<GeometryFeedbackSignal>,
@@ -103,9 +103,11 @@ impl GeometryFeedback {
             window,
             min_scale: min_scale.max(f32::EPSILON),
             max_scale: max_scale.max(f32::EPSILON),
-            z_rank: config.z_space_rank.max(1),
-            leech_weight: config.leech_density_weight.max(0.0),
-            ramanujan_pi: Self::ramanujan_pi(config.ramanujan_iterations.max(1)),
+            leech_projector: LeechProjector::new(
+                config.z_space_rank.max(1),
+                config.leech_density_weight,
+            ),
+            ramanujan_pi: ramanujan_pi(config.ramanujan_iterations.max(1)),
             softening_beta: config.softening_beta.max(0.0),
             last_signal: None,
         }
@@ -136,8 +138,7 @@ impl GeometryFeedback {
         }
         let averaged = self.history.iter().copied().sum::<f64>() / self.history.len() as f64;
         let geodesic = self.geodesic_projection(resonance);
-        let densified =
-            self.leech_weight * LEECH_PACKING_DENSITY * geodesic * (self.z_rank as f64).sqrt();
+        let densified = self.leech_projector.enrich(geodesic);
         let normalized = ((averaged + densified) / self.ramanujan_pi).clamp(0.0, 1.0);
         let softened = self.soft_project(normalized as f32);
         let scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
@@ -192,25 +193,7 @@ impl GeometryFeedback {
         let beta = (1.0 + self.softening_beta).max(f32::EPSILON);
         value.clamp(0.0, 1.0).powf(1.0 / beta)
     }
-
-    fn ramanujan_pi(iterations: usize) -> f64 {
-        let mut sum = 0.0;
-        let mut factor = 1.0;
-        let base = 396_f64.powi(4);
-        for k in 0..iterations {
-            sum += factor * (1103.0 + 26390.0 * k as f64);
-            let k1 = k + 1;
-            let numerator =
-                (4 * k1 - 3) as f64 * (4 * k1 - 2) as f64 * (4 * k1 - 1) as f64 * (4 * k1) as f64;
-            let denominator = (k1 as f64).powi(4) * base;
-            factor *= numerator / denominator;
-        }
-        let prefactor = (2.0 * 2.0_f64.sqrt()) / 9801.0;
-        (prefactor * sum).recip()
-    }
 }
-
-const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
 
 #[cfg(test)]
 mod tests {
