@@ -9,16 +9,9 @@ use super::geometry::ConceptHint;
 use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::schedule::BandEnergy;
-use crate::{PureResult, RoundtableConfig, RoundtableSchedule};
-use st_core::ecosystem::{
-    ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
-    HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
-    RoundtableSummary,
-};
-use st_core::ops::rank_entry::RankPlan;
-use st_core::util::math::{ramanujan_pi, LeechProjector};
-use st_tensor::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
+use crate::PureResult;
 use std::cmp::Ordering;
+use st_tensor::TensorError;
 use std::collections::HashMap;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
