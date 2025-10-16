@@ -32,6 +32,108 @@
 use core::f32;
 use std::collections::VecDeque;
 
+/// Aggregated summary computed over a slice of chrono frames.
+#[derive(Clone, Debug)]
+pub struct ChronoSummary {
+    /// Number of frames that participated in the summary.
+    pub frames: usize,
+    /// Total duration covered by the analysed frames.
+    pub duration: f32,
+    /// Timestamp of the most recent frame.
+    pub latest_timestamp: f32,
+    /// Mean signed curvature drift across the window.
+    pub mean_drift: f32,
+    /// Mean absolute curvature drift across the window.
+    pub mean_abs_drift: f32,
+    /// Standard deviation of the signed curvature drift.
+    pub drift_std: f32,
+    /// Mean total resonance energy across the window.
+    pub mean_energy: f32,
+    /// Standard deviation of the resonance energy.
+    pub energy_std: f32,
+    /// Mean energy decay rate (positive = decaying, negative = growing).
+    pub mean_decay: f32,
+    /// Minimum total energy observed within the window.
+    pub min_energy: f32,
+    /// Maximum total energy observed within the window.
+    pub max_energy: f32,
+}
+
+impl ChronoSummary {
+    /// Computes a summary from the provided frames, returning `None` when empty.
+    pub fn from_frames(frames: &[ChronoFrame]) -> Option<Self> {
+        Self::from_iter(frames.iter())
+    }
+
+    /// Computes a summary from the provided iterator of frames.
+    pub fn from_iter<'a, I>(frames: I) -> Option<Self>
+    where
+        I: IntoIterator<Item = &'a ChronoFrame>,
+    {
+        let mut duration = 0.0f32;
+        let mut sum_abs_drift = 0.0f32;
+        let mut sum_drift = 0.0f32;
+        let mut sum_drift_sq = 0.0f32;
+        let mut sum_energy = 0.0f32;
+        let mut sum_energy_sq = 0.0f32;
+        let mut sum_decay = 0.0f32;
+        let mut min_energy = f32::INFINITY;
+        let mut max_energy = f32::NEG_INFINITY;
+        let mut count = 0usize;
+        let mut latest_timestamp = 0.0f32;
+        for frame in frames.into_iter() {
+            let dt = if frame.dt.is_finite() && frame.dt > 0.0 {
+                frame.dt
+            } else {
+                f32::EPSILON
+            };
+            duration += dt;
+            let energy = frame.total_energy.max(0.0);
+            min_energy = min_energy.min(energy);
+            max_energy = max_energy.max(energy);
+            sum_energy += energy;
+            sum_energy_sq += energy * energy;
+            let drift = frame.curvature_drift;
+            sum_abs_drift += drift.abs();
+            sum_drift += drift;
+            sum_drift_sq += drift * drift;
+            sum_decay += frame.energy_decay;
+            latest_timestamp = frame.timestamp;
+            count += 1;
+        }
+        if count == 0 {
+            return None;
+        }
+        let count_f32 = count as f32;
+        let mean_energy = sum_energy / count_f32;
+        let mean_drift = sum_drift / count_f32;
+        let mean_abs_drift = sum_abs_drift / count_f32;
+        let energy_var = (sum_energy_sq / count_f32) - mean_energy.powi(2);
+        let drift_var = (sum_drift_sq / count_f32) - mean_drift.powi(2);
+        Some(Self {
+            frames: count,
+            duration,
+            latest_timestamp,
+            mean_drift,
+            mean_abs_drift,
+            drift_std: drift_var.max(0.0).sqrt(),
+            mean_energy,
+            energy_std: energy_var.max(0.0).sqrt(),
+            mean_decay: sum_decay / count_f32,
+            min_energy: if min_energy.is_finite() {
+                min_energy
+            } else {
+                0.0
+            },
+            max_energy: if max_energy.is_finite() {
+                max_energy
+            } else {
+                0.0
+            },
+        })
+    }
+}
+
 /// Snapshot capturing temporal diagnostics for a single time step.
 #[derive(Clone, Debug)]
 pub struct ChronoFrame {
@@ -204,6 +306,16 @@ impl ChronoTimeline {
         self.step = step.saturating_add(1);
         frame
     }
+
+    /// Returns a rolling summary computed over the most recent `window` frames.
+    pub fn summarise(&self, window: usize) -> Option<ChronoSummary> {
+        if self.frames.is_empty() {
+            return None;
+        }
+        let window = window.max(1).min(self.frames.len());
+        let skip = self.frames.len() - window;
+        ChronoSummary::from_iter(self.frames.iter().skip(skip))
+    }
 }
 
 impl Default for ChronoTimeline {
@@ -312,5 +424,85 @@ mod tests {
         assert_eq!(frame.recursive_ratio(), 0.0);
         assert_eq!(frame.projection_ratio(), 0.0);
         assert_eq!(frame.infinity_ratio(), 0.0);
+    }
+
+    #[test]
+    fn summary_computes_expected_statistics() {
+        let frames = vec![
+            ChronoFrame {
+                step: 0,
+                timestamp: 0.1,
+                dt: 0.1,
+                observed_curvature: -1.0,
+                curvature_drift: 0.2,
+                total_energy: 1.0,
+                energy_decay: -0.05,
+                homotopy_energy: 0.4,
+                functor_energy: 0.2,
+                recursive_energy: 0.2,
+                projection_energy: 0.1,
+                infinity_energy: 0.1,
+            },
+            ChronoFrame {
+                step: 1,
+                timestamp: 0.2,
+                dt: 0.1,
+                observed_curvature: -1.05,
+                curvature_drift: -0.1,
+                total_energy: 1.2,
+                energy_decay: -0.02,
+                homotopy_energy: 0.48,
+                functor_energy: 0.24,
+                recursive_energy: 0.24,
+                projection_energy: 0.12,
+                infinity_energy: 0.12,
+            },
+            ChronoFrame {
+                step: 2,
+                timestamp: 0.3,
+                dt: 0.1,
+                observed_curvature: -1.1,
+                curvature_drift: 0.05,
+                total_energy: 0.9,
+                energy_decay: 0.04,
+                homotopy_energy: 0.36,
+                functor_energy: 0.18,
+                recursive_energy: 0.18,
+                projection_energy: 0.09,
+                infinity_energy: 0.09,
+            },
+        ];
+        let summary = ChronoSummary::from_frames(&frames).unwrap();
+        assert_eq!(summary.frames, 3);
+        assert!((summary.duration - 0.3).abs() < 1e-6);
+        assert_eq!(summary.latest_timestamp, 0.3);
+        assert!(summary.mean_energy > 0.0);
+        assert!(summary.energy_std >= 0.0);
+        assert!(summary.mean_abs_drift > 0.0);
+        assert!(summary.drift_std >= 0.0);
+        assert!(summary.min_energy <= summary.max_energy);
+    }
+
+    #[test]
+    fn timeline_summarise_limits_window() {
+        let mut timeline = ChronoTimeline::with_capacity(8);
+        let metrics = ResonanceTemporalMetrics {
+            observed_curvature: -1.0,
+            total_energy: 1.0,
+            homotopy_energy: 0.4,
+            functor_energy: 0.2,
+            recursive_energy: 0.2,
+            projection_energy: 0.1,
+            infinity_energy: 0.1,
+        };
+        for step in 0..5 {
+            let mut metrics = metrics.clone();
+            metrics.total_energy += step as f32 * 0.1;
+            timeline.record(0.1, metrics);
+        }
+        let summary = timeline.summarise(2).unwrap();
+        assert_eq!(summary.frames, 2);
+        assert!((summary.duration - 0.2).abs() < 1e-6);
+        assert!(summary.latest_timestamp > 0.0);
     }
 }

@@ -1832,6 +1832,7 @@ dependencies = [
  "st-core",
  "st-frac",
  "st-tensor",
+ "st-text",
  "tempfile",
 ]
 

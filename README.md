@@ -220,13 +220,17 @@ print(frame.timestamp, frame.total_energy)
 
 # Sample the most recent frames for plotting.
 frames = session.timeline(timesteps=128)
+summary = session.timeline_summary(timesteps=128)
 times, energy, drift = session.animate_resonance(timesteps=128)
+wave = session.speak(timesteps=128, temperature=0.7)
 ```
 
 `ChronoFrame` surfaces per-band energy, curvature drift, and decay estimates so
-you can chart living topology directly in notebooks. For instant context, call
-`session.describe()` to synthesise a short narrative about the latest state or
-pass an explicit `resonance` snapshot:
+you can chart living topology directly in notebooks. Reach for
+`session.timeline_summary()` when you want windowed drift/energy statistics or
+`session.speak(...)` to generate a playback-ready amplitude trace. For instant
+context, call `session.describe()` to synthesise a short narrative about the
+latest state or pass an explicit `resonance` snapshot:
 
 ```python
 print(session.describe())

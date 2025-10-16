@@ -23,7 +23,7 @@ use st_backend_hip::{
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::chrono::ChronoFrame;
+use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::telemetry::hub;
 use st_core::telemetry::maintainer::{MaintainerConfig, MaintainerReport};
@@ -919,6 +919,85 @@ impl PyChronoFrame {
 
     fn into_frame(self) -> ChronoFrame {
         self.frame
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoSummary")]
+struct PyChronoSummary {
+    summary: ChronoSummary,
+}
+
+impl PyChronoSummary {
+    fn from_summary(summary: ChronoSummary) -> Self {
+        Self { summary }
+    }
+}
+
+#[pymethods]
+impl PyChronoSummary {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.summary.frames
+    }
+
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.summary.duration
+    }
+
+    #[getter]
+    fn latest_timestamp(&self) -> f32 {
+        self.summary.latest_timestamp
+    }
+
+    #[getter]
+    fn mean_drift(&self) -> f32 {
+        self.summary.mean_drift
+    }
+
+    #[getter]
+    fn mean_abs_drift(&self) -> f32 {
+        self.summary.mean_abs_drift
+    }
+
+    #[getter]
+    fn drift_std(&self) -> f32 {
+        self.summary.drift_std
+    }
+
+    #[getter]
+    fn mean_energy(&self) -> f32 {
+        self.summary.mean_energy
+    }
+
+    #[getter]
+    fn energy_std(&self) -> f32 {
+        self.summary.energy_std
+    }
+
+    #[getter]
+    fn mean_decay(&self) -> f32 {
+        self.summary.mean_decay
+    }
+
+    #[getter]
+    fn min_energy(&self) -> f32 {
+        self.summary.min_energy
+    }
+
+    #[getter]
+    fn max_energy(&self) -> f32 {
+        self.summary.max_energy
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoSummary(frames={}, duration={:.3}, energy={:.3}±{:.3})",
+            self.summary.frames,
+            self.summary.duration,
+            self.summary.mean_energy,
+            self.summary.energy_std
+        ))
     }
 }
 
@@ -2461,6 +2540,18 @@ impl PySpiralSession {
         Ok((times, energies, drifts))
     }
 
+    #[pyo3(signature = (timesteps=None))]
+    fn timeline_summary(&self, timesteps: Option<usize>) -> Option<PyChronoSummary> {
+        self.inner
+            .timeline_summary(timesteps)
+            .map(PyChronoSummary::from_summary)
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn speak(&self, timesteps: Option<usize>, temperature: f32) -> PyResult<Vec<f32>> {
+        convert(self.inner.speak(timesteps, temperature))
+    }
+
     fn maintainer_config(&self, py: Python<'_>) -> PyResult<PyObject> {
         let cfg = self.inner.maintainer_config();
         let dict = PyDict::new_bound(py);
@@ -2521,19 +2612,8 @@ impl PySpiralSession {
         resonance: Option<&PyDifferentialResonance>,
         temperature: f32,
     ) -> PyResult<String> {
-        let temp = temperature.max(f32::EPSILON);
-        let encoder = convert(LanguageWaveEncoder::new(self.inner.curvature(), temp))?;
-        let resonator = TextResonator::with_encoder(encoder);
-        if let Some(res) = resonance {
-            Ok(resonator.describe_resonance(&res.inner).summary)
-        } else {
-            let frames = self.inner.chrono_frames();
-            if let Some(frame) = frames.last() {
-                Ok(resonator.describe_frame(frame).summary)
-            } else {
-                Ok("No resonance history recorded.".to_string())
-            }
-        }
+        let resonance = resonance.map(|res| &res.inner);
+        convert(self.inner.describe(resonance, temperature))
     }
 
     #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
@@ -4456,6 +4536,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyZSpaceBarycenter>()?;
     m.add_class::<PyDifferentialResonance>()?;
     m.add_class::<PyChronoFrame>()?;
+    m.add_class::<PyChronoSummary>()?;
     m.add_class::<PyMaintainerReport>()?;
     m.add_class::<PySpiralDifferentialTrace>()?;
     m.add_class::<PyOpenTopos>()?;
@@ -4489,6 +4570,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "ZSpaceBarycenter",
             "DifferentialResonance",
             "ChronoFrame",
+            "ChronoSummary",
             "SpiralDifferentialTrace",
             "OpenTopos",
             "TensorBiome",

@@ -27,7 +27,7 @@
 //! curvature jitter, energy trends, and dormancy so higher level tooling can decide when to
 //! tighten geometry clamps or escalate into a full self-rewrite cycle.
 
-use super::chrono::ChronoFrame;
+use super::chrono::{ChronoFrame, ChronoSummary};
 
 /// Indicates the level of maintenance required to stabilise the session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,18 +177,10 @@ impl Maintainer {
         let start = frames.len() - window;
         let slice = &frames[start..];
 
-        let mut sum_drift = 0.0f32;
-        let mut sum_energy = 0.0f32;
-        let mut sum_decay = 0.0f32;
-        for frame in slice {
-            sum_drift += frame.curvature_drift.abs();
-            sum_energy += frame.total_energy.max(0.0);
-            sum_decay += frame.energy_decay;
-        }
-        let denom = window as f32;
-        let average_drift = sum_drift / denom;
-        let mean_energy = sum_energy / denom;
-        let mean_decay = sum_decay / denom;
+        let summary = ChronoSummary::from_frames(slice).unwrap();
+        let average_drift = summary.mean_abs_drift;
+        let mean_energy = summary.mean_energy;
+        let mean_decay = summary.mean_decay;
 
         let growth = (-mean_decay).max(0.0);
         let mut status = if mean_energy <= self.config.energy_floor {
@@ -231,9 +223,15 @@ impl Maintainer {
 
         if reasons.is_empty() {
             if matches!(status, MaintainerStatus::Dormant) {
-                reasons.push("timeline energy below floor; monitoring only".to_string());
+                reasons.push(format!(
+                    "timeline energy below floor; drift {:.3}±{:.3}",
+                    summary.mean_abs_drift, summary.drift_std
+                ));
             } else {
-                reasons.push("temporal dynamics within expected range".to_string());
+                reasons.push(format!(
+                    "temporal dynamics within expected range (drift {:.3}±{:.3}, energy {:.3}±{:.3})",
+                    summary.mean_abs_drift, summary.drift_std, summary.mean_energy, summary.energy_std
+                ));
             }
         }
 

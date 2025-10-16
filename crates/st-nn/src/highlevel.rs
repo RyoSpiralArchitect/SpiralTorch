@@ -9,7 +9,9 @@ use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedul
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::chrono::{ChronoFrame, ChronoTimeline, ResonanceTemporalMetrics};
+use st_core::telemetry::chrono::{
+    ChronoFrame, ChronoSummary, ChronoTimeline, ResonanceTemporalMetrics,
+};
 use st_core::telemetry::maintainer::{Maintainer, MaintainerConfig, MaintainerReport};
 use st_tensor::pure::measure::{z_space_barycenter, ZSpaceBarycenter};
 use st_tensor::pure::{
@@ -17,6 +19,7 @@ use st_tensor::pure::{
     InfinityDifferential, OpenCartesianTopos, PureResult, RecursiveDifferential,
     SpiralDifferential, Tensor, TensorError,
 };
+use st_text::{ResonanceNarrative, TextResonator};
 use std::sync::{Arc, Mutex};
 
 /// Configuration describing how the session evaluates the Z-space barycenter objective.
@@ -586,6 +589,20 @@ impl SpiralSession {
             .unwrap_or_default()
     }
 
+    /// Returns a rolling summary of the temporal resonance history.
+    pub fn timeline_summary(&self, window: Option<usize>) -> Option<ChronoSummary> {
+        let requested = window.unwrap_or(usize::MAX);
+        self.chrono.lock().ok().and_then(|timeline| {
+            let available = timeline.len();
+            if available == 0 {
+                None
+            } else {
+                let window = requested.min(available).max(1);
+                timeline.summarise(window)
+            }
+        })
+    }
+
     /// Clears the temporal telemetry stream.
     pub fn reset_chrono(&self) {
         if let Ok(mut timeline) = self.chrono.lock() {
@@ -648,6 +665,52 @@ impl SpiralSession {
         let frames = self.chrono_frames();
         let maintainer = Maintainer::new(self.maintainer.clone());
         maintainer.assess(&frames)
+    }
+
+    /// Generates a natural language narrative describing the resonance.
+    pub fn narrative(
+        &self,
+        resonance: Option<&DifferentialResonance>,
+        temperature: f32,
+    ) -> PureResult<ResonanceNarrative> {
+        let temp = temperature.max(f32::EPSILON);
+        let resonator = TextResonator::new(self.curvature, temp)?;
+        if let Some(resonance) = resonance {
+            Ok(resonator.describe_resonance(resonance))
+        } else {
+            let frames = self.chrono_frames();
+            if let Some(frame) = frames.last() {
+                Ok(resonator.describe_frame(frame))
+            } else {
+                Ok(ResonanceNarrative {
+                    summary: "No resonance history recorded.".to_string(),
+                    highlights: Vec::new(),
+                })
+            }
+        }
+    }
+
+    /// Returns a short textual description of the resonance snapshot or latest frame.
+    pub fn describe(
+        &self,
+        resonance: Option<&DifferentialResonance>,
+        temperature: f32,
+    ) -> PureResult<String> {
+        self.narrative(resonance, temperature)
+            .map(|narrative| narrative.summary)
+    }
+
+    /// Encodes the recent temporal trace into an amplitude envelope.
+    pub fn speak(&self, timesteps: Option<usize>, temperature: f32) -> PureResult<Vec<f32>> {
+        let frames = self.chrono_frames();
+        if frames.is_empty() {
+            return Ok(Vec::new());
+        }
+        let limit = timesteps.unwrap_or(frames.len());
+        let start = frames.len().saturating_sub(limit);
+        let temp = temperature.max(f32::EPSILON);
+        let resonator = TextResonator::new(self.curvature, temp)?;
+        resonator.speak(&frames[start..])
     }
 
     /// Euclidean fallback learning rate.
@@ -1040,6 +1103,9 @@ mod tests {
         let frames = session.chrono_frames();
         assert_eq!(frames.len(), 2);
         assert!(frames[1].timestamp > frames[0].timestamp);
+        let summary = session.timeline_summary(Some(2)).unwrap();
+        assert_eq!(summary.frames, 2);
+        assert!(summary.mean_energy > 0.0);
     }
 
     #[test]
@@ -1071,5 +1137,37 @@ mod tests {
         assert!(report.should_rewrite());
         assert_eq!(report.status, MaintainerStatus::Rewrite);
         assert!(report.diagnostic.contains("energy growth"));
+    }
+
+    #[test]
+    fn describe_returns_default_when_no_frames() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .build()
+            .unwrap();
+        let summary = session.describe(None, 0.6).unwrap();
+        assert!(summary.contains("No resonance"));
+    }
+
+    #[test]
+    fn speak_generates_waveform() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(8)
+            .build()
+            .unwrap();
+        let resonance = DifferentialResonance {
+            homotopy_flow: toy_tensor(&[0.2, -0.1]),
+            functor_linearisation: toy_tensor(&[0.1, 0.05]),
+            recursive_objective: toy_tensor(&[0.05, 0.02]),
+            infinity_projection: toy_tensor(&[0.03, 0.01]),
+            infinity_energy: toy_tensor(&[0.02, 0.01]),
+        };
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        let waveform = session.speak(Some(2), 0.6).unwrap();
+        assert!(!waveform.is_empty());
+        let narrative = session.describe(None, 0.6).unwrap();
+        assert!(!narrative.is_empty());
     }
 }

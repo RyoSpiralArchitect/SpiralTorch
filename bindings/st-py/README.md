@@ -325,14 +325,17 @@ print(resonance.homotopy_flow().tolist())
 
 Temporal telemetry is available directly from Python. Record frames with
 `session.resonate_over_time(resonance, dt)` and animate the geometry through the
-new helpers:
+new helpers. Use `timeline_summary` when you want rolling drift/energy stats and
+`session.speak(...)` for a ready-to-plot amplitude trace:
 
 ```python
 frame = session.resonate_over_time(resonance, dt=0.1)
 print(frame.timestamp, frame.total_energy, frame.curvature_drift)
 
 frames = session.timeline(timesteps=64)
+summary = session.timeline_summary(timesteps=64)
 times, energy, drift = session.animate_resonance(timesteps=64)
+wave = session.speak(timesteps=64, temperature=0.6)
 print(session.describe())
 
 encoder = LanguageWaveEncoder(session.curvature(), 0.55)
