@@ -36,8 +36,6 @@ rand = { version = "0.8", default-features = false, features = ["std"] }
 rand_distr = { version = "0.4", default-features = false, features = ["std"] }
 # High-performance SIMD dense linear algebra for CPU matmul acceleration.
 faer = { version = "0.18", default-features = false, features = ["std"], optional = true }
-# Deterministic RNGs for pure tensor initialisers.
-rand = { version = "0.8", features = ["std"] }
 # Optional; only needed if building WGPU kernel
 wgpu = { version = "0.19", optional = true }
 bytemuck = { version = "1.15", features = ["derive"], optional = true }
