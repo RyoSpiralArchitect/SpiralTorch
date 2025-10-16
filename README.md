@@ -82,7 +82,11 @@ scaling to social, molecular, or citation graphs. By composing the existing
 SpiralK planners, Z-space resonators, and curvature-aware tensors, new
 `st-gnn` layers can stream hypergrad updates through tree-like manifolds as a
 first-class citizen in the framework—becoming a third pillar alongside
-SpiralTorchRec and SpiralTorchRL.
+SpiralTorchRec and SpiralTorchRL. The new `st-nn::gnn` module ships a
+`GraphContext` normaliser plus a `ZSpaceGraphConvolution` layer that attaches
+hypergrad tapes by default and surfaces per-node flow traces via the telemetry
+`GraphFlowTracer`, so graph reasoning can be trained and inspected without
+leaving Z-space.
 
 ### Explainability through hypergrad telemetry
 
