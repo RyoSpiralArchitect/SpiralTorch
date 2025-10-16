@@ -278,6 +278,11 @@ pub fn set_last_desire_step(step: DesireStepTelemetry) {
 
 pub fn get_last_desire_step() -> Option<DesireStepTelemetry> {
     desire_step_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
 static LAST_CHRONO_LOOP: OnceLock<RwLock<Option<ChronoLoopSignal>>> = OnceLock::new();
 
 fn chrono_loop_cell() -> &'static RwLock<Option<ChronoLoopSignal>> {

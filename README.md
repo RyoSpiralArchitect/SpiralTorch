@@ -79,6 +79,10 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
+## Technical notes
+
+- [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
+
 ## Emerging toolkits unique to SpiralTorch
 
 ### Z-space-native graph neural networks
@@ -137,6 +141,19 @@ Z-space: it projects the perimeter mass onto a preferred Z-axis, splits the
 energy into Above/Here/Beneath bands, enriches the drift with the Leech
 projector, and emits a ready-to-store `SoftlogicZFeedback` pulse so runtimes can
 bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L386】
+
+### Maxwell-coded envelopes meet SpiralK
+
+The coded-envelope utilities now ship with a `MaxwellSpiralKBridge` that turns
+sequential Z pulses into KDSl snippets ready for the runtime. Every channel
+name is sanitised for SpiralK, weights adapt to the observed Z magnitude, and
+existing programs can be prepended so the hints extend a live policy rather than
+replace it.【F:crates/st-core/src/theory/maxwell.rs†L306-L412】 Call
+`push_pulse(channel, &pulse)` for each stream, then `script()` to emit the
+combined `soft(maxwell.bias, …)` rules that SpiralK can ingest without custom
+glue code.【F:crates/st-core/src/theory/maxwell.rs†L333-L378】 The workflow is
+documented in the refreshed Maxwell technical note, which now includes a
+section on streaming detections back into SpiralK orchestration.【F:docs/coded_envelope_maxwell_model.md†L128-L141】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
