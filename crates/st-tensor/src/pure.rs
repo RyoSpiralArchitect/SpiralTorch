@@ -87,6 +87,8 @@ pub enum TensorError {
         backend: &'static str,
         message: String,
     },
+    /// Generic configuration violation for pure-language helpers.
+    InvalidValue { label: &'static str },
 }
 
 impl fmt::Display for TensorError {
@@ -195,6 +197,9 @@ impl fmt::Display for TensorError {
             TensorError::BackendFailure { backend, message } => {
                 write!(f, "{backend} backend failure: {message}")
             }
+            TensorError::InvalidValue { label } => {
+                write!(f, "invalid value: {label}")
+            }
         }
     }
 }
@@ -225,6 +230,12 @@ impl MatmulBackend {
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => "wgpu",
         }
+    }
+}
+
+impl fmt::Display for MatmulBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str((*self).label())
     }
 }
 

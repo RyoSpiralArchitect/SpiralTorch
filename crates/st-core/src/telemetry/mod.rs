@@ -21,10 +21,14 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+pub mod chrono;
 pub mod hub;
+pub mod maintainer;
 
 #[cfg(feature = "psi")]
 pub mod psi;
 
 #[cfg(feature = "psychoid")]
 pub mod psychoid;
+
+pub mod xai;

@@ -25,10 +25,13 @@
 use once_cell::sync::Lazy;
 use std::sync::{OnceLock, RwLock};
 
+use super::chrono::ChronoLoopSignal;
 #[cfg(feature = "psi")]
 use super::psi::PsiReading;
 #[cfg(feature = "psychoid")]
 use super::psychoid::PsychoidReading;
+#[cfg(feature = "collapse")]
+use crate::engine::collapse_drive::DriveCmd;
 
 #[cfg(feature = "psi")]
 static LAST_PSI: Lazy<RwLock<Option<PsiReading>>> = Lazy::new(|| RwLock::new(None));
@@ -100,4 +103,63 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
         .read()
         .ok()
         .and_then(|guard| guard.as_ref().copied())
+}
+
+static LAST_CHRONO_LOOP: OnceLock<RwLock<Option<ChronoLoopSignal>>> = OnceLock::new();
+
+fn chrono_loop_cell() -> &'static RwLock<Option<ChronoLoopSignal>> {
+    LAST_CHRONO_LOOP.get_or_init(|| RwLock::new(None))
+}
+
+/// Stores the most recent chrono loop signal so other nodes can consume it.
+pub fn set_chrono_loop(signal: ChronoLoopSignal) {
+    if let Ok(mut guard) = chrono_loop_cell().write() {
+        *guard = Some(signal);
+    }
+}
+
+/// Returns the latest chrono loop signal, if any has been recorded.
+pub fn get_chrono_loop() -> Option<ChronoLoopSignal> {
+    chrono_loop_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
+#[cfg(feature = "collapse")]
+#[derive(Clone, Debug)]
+pub struct CollapsePulse {
+    /// Step of the PSI reading that triggered the command.
+    pub step: u64,
+    /// Aggregate PSI total associated with the command.
+    pub total: f32,
+    /// Command emitted by the collapse drive.
+    pub command: DriveCmd,
+    /// Latest chrono loop signal observed when the command was issued.
+    pub loop_signal: Option<ChronoLoopSignal>,
+}
+
+#[cfg(feature = "collapse")]
+static LAST_COLLAPSE: OnceLock<RwLock<Option<CollapsePulse>>> = OnceLock::new();
+
+#[cfg(feature = "collapse")]
+fn collapse_cell() -> &'static RwLock<Option<CollapsePulse>> {
+    LAST_COLLAPSE.get_or_init(|| RwLock::new(None))
+}
+
+#[cfg(feature = "collapse")]
+/// Stores the most recent collapse command pulse.
+pub fn set_collapse_pulse(pulse: CollapsePulse) {
+    if let Ok(mut guard) = collapse_cell().write() {
+        *guard = Some(pulse);
+    }
+}
+
+#[cfg(feature = "collapse")]
+/// Returns the most recent collapse pulse, if any.
+pub fn get_collapse_pulse() -> Option<CollapsePulse> {
+    collapse_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
 }

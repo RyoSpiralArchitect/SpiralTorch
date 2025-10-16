@@ -26,6 +26,7 @@ cuda = ["st-core/cuda", "st-tensor/cuda"]
 hip = ["st-core/hip", "st-tensor/hip"]
 "hip-real" = ["hip", "st-core/hip-real"]
 logic = ["st-core/logic"]
+"logic-learn" = ["st-core/logic-learn"]
 kdsl = ["st-core/kdsl"]
 "kv-redis" = ["st-core/kv-redis"]
 "wgpu-frac" = ["st-tensor/wgpu_frac"]
@@ -35,6 +36,9 @@ pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", 
 st-core = { path = "../../crates/st-core", default-features = false, features = ["psi", "psychoid", "collapse"] }
 st-tensor = { path = "../../crates/st-tensor", default-features = false }
 st-nn = { path = "../../crates/st-nn", features = ["psychoid", "collapse"] }
+st-rl = { path = "../../crates/st-rl" }
+st-rec = { path = "../../crates/st-rec" }
+st-text = { path = "../../crates/st-text" }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }
 ndarray = { version = "0.15", default-features = false, features = ["std"] }
