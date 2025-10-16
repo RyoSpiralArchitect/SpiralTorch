@@ -32,6 +32,8 @@
 
 use core::f64::consts::PI;
 
+use crate::{telemetry::hub::SoftlogicZFeedback, util::math::LeechProjector};
+
 /// Consolidated Maxwell gain for a single coded envelope channel.
 ///
 /// The gain aggregates all physical dependencies described in the technical
@@ -215,6 +217,113 @@ impl SequentialZ {
     }
 }
 
+/// Projects sequential Maxwell evidence into a Z-space control pulse.
+#[derive(Clone, Debug)]
+pub struct MaxwellZProjector {
+    projector: LeechProjector,
+    bias_gain: f32,
+    min_blocks: u64,
+    min_z_magnitude: f64,
+}
+
+impl MaxwellZProjector {
+    /// Creates a projector with the provided Leech rank and weighting factor.
+    pub fn new(rank: usize, weight: f64) -> Self {
+        Self {
+            projector: LeechProjector::new(rank, weight),
+            bias_gain: 1.0,
+            min_blocks: 2,
+            min_z_magnitude: 0.0,
+        }
+    }
+
+    /// Scales the Z bias emitted once the matched filter shows a clear drift.
+    pub fn with_bias_gain(mut self, bias_gain: f32) -> Self {
+        self.bias_gain = bias_gain;
+        self
+    }
+
+    /// Requires a minimum block count before emitting a Z-space pulse.
+    pub fn with_min_blocks(mut self, min_blocks: u64) -> Self {
+        self.min_blocks = min_blocks.max(1);
+        self
+    }
+
+    /// Requires a minimum |Z| magnitude before emitting a Z-space pulse.
+    pub fn with_min_z(mut self, min_z_magnitude: f64) -> Self {
+        self.min_z_magnitude = min_z_magnitude.max(0.0);
+        self
+    }
+
+    /// Projects the accumulated sequential statistic into a control pulse.
+    pub fn project(&self, tracker: &SequentialZ) -> Option<MaxwellZPulse> {
+        if tracker.len() < self.min_blocks {
+            return None;
+        }
+        let z_score = tracker.z_stat()?;
+        if z_score.abs() < self.min_z_magnitude {
+            return None;
+        }
+        let stderr = tracker.standard_error()?;
+        let mean = tracker.mean();
+
+        let enriched = self.projector.enrich(z_score.abs()) as f32;
+        let z_bias = if enriched > f32::EPSILON && self.bias_gain.abs() > f32::EPSILON {
+            z_score.signum() as f32 * enriched * self.bias_gain
+        } else {
+            0.0
+        };
+
+        let above = mean.max(0.0) as f32;
+        let beneath = (-mean).max(0.0) as f32;
+        let here = stderr.max(0.0) as f32;
+
+        Some(MaxwellZPulse {
+            blocks: tracker.len(),
+            mean,
+            standard_error: stderr,
+            z_score,
+            band_energy: (above, here, beneath),
+            z_bias,
+        })
+    }
+}
+
+/// Z-space pulse generated from a sequential Maxwell tracker.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaxwellZPulse {
+    /// Number of matched-filter blocks accumulated so far.
+    pub blocks: u64,
+    /// Sample mean of the matched-filter statistic.
+    pub mean: f64,
+    /// Estimated standard error of the mean.
+    pub standard_error: f64,
+    /// Z score produced by the sequential tracker.
+    pub z_score: f64,
+    /// Above/Here/Beneath energy tuple summarising the drift direction.
+    pub band_energy: (f32, f32, f32),
+    /// Signed Z-space bias emitted after enrichment.
+    pub z_bias: f32,
+}
+
+impl MaxwellZPulse {
+    /// Returns the absolute Z score driving the projection.
+    pub fn magnitude(&self) -> f64 {
+        self.z_score.abs()
+    }
+
+    /// Converts the pulse into a [`SoftlogicZFeedback`] packet with the provided context.
+    pub fn into_softlogic_feedback(self, psi_total: f32, weighted_loss: f32) -> SoftlogicZFeedback {
+        SoftlogicZFeedback {
+            psi_total,
+            weighted_loss,
+            band_energy: self.band_energy,
+            drift: self.mean as f32,
+            z_signal: self.z_bias,
+        }
+    }
+}
+
 /// Computes the block count required to hit the target Z threshold under the
 /// Gaussian approximation described in the memo.
 ///
@@ -302,5 +411,29 @@ mod tests {
         let slope = polarisation_slope(&fingerprint, 8);
         assert!(slope > 0.0);
         assert_relative_eq!(slope, fingerprint.lambda(), epsilon = 1e-6);
+    }
+
+    #[test]
+    fn maxwell_projector_emits_pulse() {
+        let mut tracker = SequentialZ::new();
+        for sample in [1.1, 0.9, 1.3, 0.8, 1.4, 1.2] {
+            tracker.push(sample);
+        }
+
+        let projector = MaxwellZProjector::new(24, 0.5)
+            .with_bias_gain(2.0)
+            .with_min_blocks(3)
+            .with_min_z(0.5);
+
+        let pulse = projector
+            .project(&tracker)
+            .expect("pulse should be emitted");
+        assert!(pulse.magnitude() >= 0.5);
+        assert!(pulse.z_bias.abs() > 0.0);
+
+        let feedback = pulse.into_softlogic_feedback(12.0, 4.0);
+        assert_eq!(feedback.psi_total, 12.0);
+        assert_eq!(feedback.weighted_loss, 4.0);
+        assert!(feedback.z_signal.abs() > 0.0);
     }
 }

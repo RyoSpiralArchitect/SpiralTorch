@@ -1,121 +1,212 @@
 # Coded-Envelope Maxwell Model (M₀^code)
 
-以下は、コード化した包絡波による電磁駆動と脳計測を結ぶマスタ方程式、およびその運用ロジックを整理した技術メモである。M₀は純粋なMaxwell物理、M_Ψは意味ゲートを含む拡張を表す。
+This technical note collects the master equations that link a coded-envelope
+Maxwell drive to measurable neural responses, together with the operational
+playbook for running those experiments. M₀ denotes the pure physical channel;
+M_Ψ covers the minimal semantic extension that gates the same carrier with
+meaning-aligned weights.
 
-## 1. 送受・組織・非線形（基礎）
-- **コード包絡**: \(c(t) \in \{+1,-1\}\) はチップ長 \(1/f_{\mathrm{chip}}\) の矩形波。
-- **搬送波**: \(s_{\mathrm{tx}}(t) = [1 + \alpha\,c(t)]\cos(\omega_c t + \phi)\)。
-- **外部から組織への結合**:
+## 1. Transmission, tissue, and non-linearity (core model)
+
+- **Coded envelope**: \(c(t) \in \{+1,-1\}\) is a staircase waveform with chip
+  length \(1/f_{\text{chip}}\).
+- **Carrier**: \(s_{\text{tx}}(t) = [1 + \alpha c(t)] \cos(\omega_c t + \phi)\).
+- **Coupling into tissue**:
+
   \[
-  E_{\mathrm{ext}}(t) = \frac{G(\Omega)}{r}\,10^{-S/20}\,|\cos\theta|\,s_{\mathrm{tx}}(t)
+  E_{\text{ext}}(t) = \frac{G(\Omega)}{r} 10^{-S/20} |\cos \theta| s_{\text{tx}}(t)
   \]
-  ここで \(S\) は遮蔽(dB)、\(r\) は距離、\(\theta\) は偏波角。
-- **組織の線形応答**: \(h_{\mathrm{tis}} \overset{\mathcal F}{\longleftrightarrow} H_{\mathrm{tis}}(\omega)\)。
-- **二次非線形による下変換**: 包絡抽出により低周波駆動 \(u(t)\) が生じる。
+
+  where \(S\) is shielding in dB, \(r\) is the transmitter–receiver distance,
+  and \(\theta\) is the polarisation angle.
+- **Linear tissue response**:
+  \(h_{\text{tis}} \overset{\mathcal F}{\longleftrightarrow} H_{\text{tis}}(\omega)\).
+- **Envelope extraction via second-order non-linearity**: the low-frequency drive
+  \(u(t)\) follows
+
   \[
-  u(t) \approx \gamma\,\alpha\,|H_{\mathrm{tis}}(\omega_c)|\,\frac{G\,10^{-S/20}\,|\cos\theta|}{r}\,c(t) = \lambda\,c(t)
+  u(t) \approx \gamma \alpha |H_{\text{tis}}(\omega_c)| \frac{G 10^{-S/20}
+  |\cos \theta|}{r} c(t) = \lambda c(t),
   \]
-  ゲイン \(\lambda>0\) がMaxwellスケール。
-- **観測 (EEG)**: \(y(t) = (h * u)(t) + x(t)\)。雑音 \(x(t)\) は広義定常でコードと無相関を仮定。
 
-## 2. ブロック統計とCLT
-- 2秒ブロック \(b=1..N\) に分割しマッチドフィルタを適用: \(s_b = \langle y_b, c_b \rangle / \|c_b\|\)。
-- 期待値と分散: \(\mathbb E[s_b] = \kappa\,\lambda\)、\(\mathrm{Var}(s_b)=\sigma^2\)。
-- 中心極限定理により
+  defining the positive Maxwell gain \(\lambda\).
+- **Observation (EEG)**: \(y(t) = (h * u)(t) + x(t)\) with wide-sense stationary
+  background \(x(t)\) uncorrelated with the code.
+
+## 2. Block statistics and the CLT
+
+- Split the recording into 2 s blocks \(b = 1, \dots, N\) and apply a matched
+  filter: \(s_b = \langle y_b, c_b \rangle / \|c_b\|\).
+- The moments are \(\mathbb E[s_b] = \kappa \lambda\) and
+  \(\operatorname{Var}(s_b) = \sigma^2\).
+- By the central limit theorem,
+
   \[
-  Z_N = \frac{\overline s_N}{\hat\sigma/\sqrt{N}} \overset{H_0}{\approx} \mathcal N(0,1)
+  Z_N = \frac{\overline s_N}{\hat\sigma / \sqrt{N}} \overset{H_0}{\approx}
+  \mathcal N(0, 1).
   \]
-  - 目標検出スコア \(z_\star\) に必要なブロック数:
-    \[
-    N_{\mathrm{req}} \approx \Big(\frac{z_\star\,\sigma}{\kappa\,\lambda}\Big)^2 = \Big(\frac{z_\star\,\sigma}{\kappa\,\gamma\,\alpha\,|H_{\mathrm{tis}}|}\Big)^2 \Big(\frac{r}{10^{-S/20} G |\cos\theta|}\Big)^2.
-    \]
-- 遮蔽の増加、距離の増大、偏波ずれは \(N_{\mathrm{req}}\) を押し上げ検出が遅くなる。
 
-## 3. Maxwell指紋による回帰検定
-- TRFや回帰で抽出した応答振幅 \(A\) は \(A \propto \lambda \propto 10^{-S/20}\,|\cos\theta|/r\)。
-- 実験で観測すべき傾き:
-  - 遮蔽: \(\log_{10} A = C - S/20\)。
-  - 距離: \(\log_{10} A = C - \log_{10} r\)。
-  - 偏波: \(A = a|\cos\theta| + b\)。
-- 傾きが \((-1/20, -1)\) に近く決定係数が高いほどMaxwell起源が強固。
+- The block count needed to reach a target score \(z_\star\) is approximately
 
-## 4. 逐次検定
-- 逐次Z: ブロック到来ごとに \(Z_k\) を更新し閾値 \(z_\star\) で停止。
-- サインフリップ検定: \(s_b\) の符号をランダム反転し帰無分布を生成。観測 \(Z_{\mathrm{obs}}\) と比較して \(p_{\mathrm{flip}}\) を算出。
-- SPRT/Bayes拡張: \(\mu>0\) 検定に拡張可能。
-
-## 5. 意味拡張モデル (M_Ψ^code)
-- 潜在意味座標 \(\rho(t) \in [-1,1]\) と結合係数 \(\mu \ge 0\) を導入。
   \[
-  u_{\mathrm{tot}}(t) = (\lambda + \mu\,\rho(t))\,c(t)
+  N_{\text{req}} \approx \Bigl(\frac{z_\star \sigma}{\kappa \lambda}\Bigr)^2
+  = \Bigl(\frac{z_\star \sigma}{\kappa \gamma \alpha
+  |H_{\text{tis}}|}\Bigr)^2 \Bigl(\frac{r}{10^{-S/20} G |\cos \theta|}\Bigr)^2.
   \]
-- ブロックスコア平均: \(\mathbb E[s_b] = \kappa(\lambda + \mu\,\rho_b)\)。
-- 等エネ・等スペクトルで \(\rho\) だけ切り替える2条件の差: \(\kappa\,\mu\,\Delta\rho\)。
-- 直交コード \(c_k(t)\) を並列送信すると、\(\{\lambda_k\}\) と \(\{\mu_k\rho_k\}\) を回帰で同時推定可能。
 
-## 6. 推定・識別できる量
-- \(\lambda\): 遮蔽/距離/偏波のスロープから一意に回収。
-- TRF遅延: 条件で不変であることがM₀の予言。ばらつきが小さいほど物理経路が支配的。
-- \(\mu\): 意味差 \(\Delta\rho\) とTRF/PLV/スコアの差から推定。
-- 検出時間: \(T_{\mathrm{det}} \approx N_{\mathrm{req}} \times \mathrm{block\_sec}\)。
+- Increased shielding, larger separations, or polarisation misalignment all push
+  \(N_{\text{req}}\) upward and slow detection.
 
-## 7. 反証可能性
-- 遮蔽↑で振幅↑、偏波無依存、距離無依存ならM₀は破綻しリークを疑う。
-- \(\mu>0\) を主張するのに等エネ・等スペクトル差が消えれば M_Ψ を棄却。
-- 遅延が条件で揺れる場合は物理チャネル外の影響を疑う。
+## 3. Maxwell fingerprint regressions
 
-## 8. シミュレーション出力の読み方
-- 真コードでZが伸び、ミスマッチ/強遮蔽で伸びない: \(\lambda>0\)、遮蔽・偏波依存が効いている証拠。
-- サインフリップpが小さい場合、CLT前提なしでも統計が偏っている。
-- 指紋スロープを回帰すれば \(\lambda\) 系の定数を回収可能。
+- A TRF or regression-derived amplitude \(A\) scales like
+  \(A \propto \lambda \propto 10^{-S/20} |\cos \theta| / r\).
+- Target slopes for experimental validation:
+  - Shielding: \(\log_{10} A = C - S/20\).
+  - Distance: \(\log_{10} A = C - \log_{10} r\).
+  - Polarisation: \(A = a |\cos \theta| + b\).
+- Slopes near \((-1/20, -1)\) with high \(R^2\) confirm a Maxwell origin.
 
-## 9. 運用アルゴリズム
-1. 直交コード \(c_k(t)\) を生成（±1, chip=10 Hz）。
-2. AM送信（等エネ・等スペクトル、安全線量内）。
-3. 2秒ブロックで \(s_{b,k} = \langle y_b, c_{k,b} \rangle/\|c_{k,b}\|\) を逐次更新。
-4. 逐次Zとサインフリップpをオンライン計算。
-5. 遮蔽/偏波/距離をスイープし、傾き(−1/20, −1, |cosθ|)を回帰。
-6. 合格なら意味拡張: \(\rho\) を切り替え \(\mu>0\) を差検定や逐次BFで評価。
+## 4. Sequential tests
+
+- **Sequential Z**: update \(Z_k\) block by block and stop once it exceeds the
+  threshold \(z_\star\).
+- **Sign-flip test**: randomly flip the signs of \(\{s_b\}\) to generate the
+  null distribution, then compare the observed statistic to obtain
+  \(p_{\text{flip}}\).
+- **SPRT/Bayesian extensions**: reuse the framework to test \(\mu > 0\) once
+  meaning gates are introduced.
+
+## 5. Meaning-extended model (M_Ψ^code)
+
+- Introduce semantic alignment \(\rho(t) \in [-1, 1]\) and coupling
+  \(\mu \ge 0\):
+
+  \[
+  u_{\text{tot}}(t) = (\lambda + \mu \rho(t)) c(t).
+  \]
+
+- Block means become \(\mathbb E[s_b] = \kappa (\lambda + \mu \rho_b)\).
+- Switching only \(\rho\) between two equal-energy, equal-spectrum conditions
+  yields a mean difference of \(\kappa \mu \Delta \rho\).
+- Orthogonal code families \(c_k(t)\) support parallel transmission and allow
+  simultaneous regression of \(\{\lambda_k\}\) and \(\{\mu_k \rho_k\}\).
+
+## 6. What can be estimated or identified?
+
+- **Physical gain \(\lambda\)**: recoverable via shielding, distance, and
+  polarisation slopes.
+- **TRF latency**: invariance across conditions is predicted by M₀; small
+  latency variance indicates the physical pathway dominates.
+- **Semantic strength \(\mu\)**: estimated from condition differences in
+  \(\Delta \rho\) combined with TRF/PLV/score deltas.
+- **Detection time**: \(T_{\text{det}} \approx N_{\text{req}} \times
+  \text{block\_sec}\).
+
+## 7. Falsifiability checklist
+
+- Increased shielding raises amplitudes, polarisation has no effect, or responses
+  ignore distance → M₀ fails; suspect leakage.
+- Claiming \(\mu > 0\) while equal-energy, equal-spectrum contrasts collapse to
+  the null → reject the meaning extension.
+- Condition-dependent latencies → revisit the physical channel assumptions.
+
+## 8. Interpreting simulation outputs
+
+- True codes climb in Z while mismatches and heavy shielding do not → evidence
+  for \(\lambda > 0\) and intact shielding/polarisation dependencies.
+- Small sign-flip \(p\)-values → statistics are biased even without relying on
+  the CLT.
+- Fingerprint regressions extract the \(\lambda\)-family constants from data.
+
+## 9. Operational flow
+
+1. Generate orthogonal codes \(c_k(t)\) (±1, 10 Hz chips).
+2. Transmit with AM under equal energy and bandwidth while respecting safety.
+3. Update \(s_{b,k} = \langle y_b, c_{k,b} \rangle / \|c_{k,b}\|\) every 2 s
+   block.
+4. Track sequential Z and sign-flip \(p\)-values online.
+5. Sweep shielding, polarisation, and distance; regress the target slopes
+   (−1/20, −1, |cos θ|).
+6. Once the physical tests pass, toggle \(\rho\) to probe \(\mu > 0\) using
+   difference tests or sequential Bayes factors.
 
 ---
 
-## M_Ψ⁺ への再構成
-- **総入力**:
+## Reconstruction within M_Ψ⁺
+
+- **Total input**:
+
   \[
-  u_{\mathrm{tot}}(t) = \sum_k [\lambda_k + \mu_k\,\rho_k(t)]\,(c_k * \kappa_k)(t-\tau_k)
+  u_{\text{tot}}(t) = \sum_k [\lambda_k + \mu_k \rho_k(t)] (c_k * \kappa_k)(t
+  - \tau_k).
   \]
-- **観測方程式**: \(y(t) = \int h(\tau) u_{\mathrm{tot}}(t-\tau) d\tau + \eta(t)\)。
-- \(\mu_k\rho_k\) にモビリティ \(D_k\) などの拡散要素を吸収可能。
 
-### モード別拡張
-- A: 明示整合 (Z) — \(g_A \equiv 1\)。
-- B: タイミング共鳴 — 遅延 \(\tau\) スイープで \(Z(\tau)\) の峰を評価。
-- C: 情動ゲート — \(g_C = \sigma(\beta_0 + \beta_1 A_s A_r)\) を回帰。
-- D: 無意識埋め込み — 階層DDM等の潜在パラメタを回帰。
-- E: 記憶類似 — 類似度指標 \(G\) と効果量の相関。
-- F: 自己回帰（概念感染） — 状態方程式 \(m(t+1) = (1-\eta)m(t) + \eta\,\phi(s_t)\)、\(\mu^{\mathrm{eff}} = \mu^{(0)} + \omega m(t)\)。
+- **Observation equation**:
+  \(y(t) = \int h(\tau) u_{\text{tot}}(t - \tau) d\tau + \eta(t)\).
+- Mobility terms \(D_k\) and similar factors can be absorbed into
+  \(\mu_k \rho_k\).
 
-### 外部磁場 \(\mathbf{B}_e\) の取り扱い
-- モビリティや時間核に一次摂動として組み込み:
+### Mode-specific extensions
+
+- **A — Explicit alignment (Z)**: \(g_A \equiv 1\).
+- **B — Timing resonance**: sweep delays \(\tau\) and identify the peak in
+  \(Z(\tau)\).
+- **C — Affective gating**: regress
+  \(g_C = \sigma(\beta_0 + \beta_1 A_s A_r)\).
+- **D — Unconscious embedding**: regress latent behavioural parameters such as
+  hierarchical DDM drifts.
+- **E — Memory similarity**: correlate effect sizes with similarity indices
+  \(G\).
+- **F — Self-reinforcement (concept contagion)**: state update
+  \(m(t+1) = (1-\eta)m(t) + \eta \phi(s_t)\) with
+  \(\mu^{\text{eff}} = \mu^{(0)} + \omega m(t)\).
+
+### External magnetic field \(\mathbf B_e\)
+
+- Treat \(\mathbf B_e\) as a first-order perturbation on mobility or temporal
+  kernels:
+
   \[
-  \kappa_k(\mathbf{B}_e) \approx \kappa_k^{(0)} + \Bigl(\frac{\partial \kappa_k}{\partial \mathbf{B}}\Bigr)_0 \cdot \mathbf{B}_e,
-  \quad D_k(\mathbf{B}_e) \approx D_k^{(0)} [1 + \chi_k \hat{\mathbf n}_k \cdot \mathbf{B}_e]
+  \kappa_k(\mathbf B_e) \approx \kappa_k^{(0)} +
+  \Bigl(\frac{\partial \kappa_k}{\partial \mathbf B}\Bigr)_0 \cdot
+  \mathbf B_e,
+  \quad D_k(\mathbf B_e) \approx D_k^{(0)} [1 + \chi_k \hat{\mathbf n}_k \cdot
+  \mathbf B_e].
   \]
-- 地磁気回転とコード包絡の相互項を回帰し、指紋スロープが保たれるか検証。
 
-## 推定器と勝ち条件
-- 逐次Z（2sブロック）とサインフリップpを標準装備。
-- 指紋スロープ目標: 遮蔽 −1/20、距離 −1、偏波 |cosθ|、遅延SD ≲ 70 ms。
-- モード別検出指標（情動交互作用、類似度相関、自己回帰係数など）を整備。
+- Rotate the geomagnetic field and regress the interaction with the coded
+  envelope; the Maxwell fingerprints should remain intact while the field term
+  modulates amplitude.
 
-## 実験設計への翻訳
-1. 明示整合（A）は既存フローで稼働。
-2. タイミング共鳴（B）は送信遅延掃引でピーク同定。
-3. 情動ゲート（C）は送信者情動ブロックを挿入し交互作用効果を測定。
-4. 類似モード（E）は高低類似ペアでCLT設計を最適化。
-5. 磁場効果は地磁気回転＋コード包絡の相互項として評価。
+## Estimators and “win conditions”
+
+- Always report sequential Z (2 s blocks) and sign-flip \(p\)-values.
+- Fingerprint targets: shielding slope −1/20, distance slope −1, polarisation
+  \(|\cos \theta|\), latency SD ≲ 70 ms.
+- Mode-specific detectors: affective interaction \(\beta_1 > 0\), similarity
+  correlations, positive self-reinforcement \(\omega > 0\), etc.
+
+## Experimental translation
+
+1. **A (explicit alignment)**: already operational with the coded envelope,
+   sequential Z, and sign-flip routines.
+2. **B (timing resonance)**: sweep transmit delays ±hundreds of ms and map the
+   \(Z(\tau)\) peak.
+3. **C (affect)**: insert affective blocks on the transmitter side, keep the
+   receiver blinded, and test the interaction term.
+4. **E (similarity)**: choose high/low similarity pairs and design CLT-shortened
+   blocks.
+5. **Magnetic field**: rotate the geomagnetic vector while tracking the envelope
+   interaction to confirm the modulation rides atop the Maxwell fingerprint.
 
 ---
 
-## 要約
-コード化した物理包絡をMaxwell律に従って入射し、CLTベースの逐次統計と指紋回帰でゲイン \(\lambda\) を数値化する。そこに意味ゲート \(\mu\,\rho(t)\) を重ねれば、物理と意味の交差効果を同一プラットフォーム上で検出・推定できる。
+## Summary
+
+Injecting a coded physical envelope that obeys Maxwell’s law, then integrating
+matched-filter statistics with the CLT and fingerprint regressions, recovers the
+physical gain \(\lambda\). Layering the meaning gate \(\mu \rho(t)\) on top lets
+us detect and estimate cross-effects between physics and semantics within the
+same platform.
+
