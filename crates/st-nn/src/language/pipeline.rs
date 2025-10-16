@@ -581,5 +581,225 @@ mod tests {
         let connector = &report.connectors[0];
         assert_eq!(connector.stage, "roundtable");
         assert_eq!(connector.metadata.get("rows"), Some(&"16".to_string()));
+    use super::super::automation::DesireAutomation;
+    use super::super::desire::{constant, warmup, DesireLagrangian};
+    use super::super::geometry::{
+        ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
+    };
+    use super::super::temperature::TemperatureController;
+    use super::*;
+    use st_core::config::self_rewrite::SelfRewriteCfg;
+    use std::collections::HashSet;
+    use std::sync::mpsc::channel;
+    use std::time::{Duration, Instant, SystemTime};
+    use tempfile::tempdir;
+
+    fn build_geometry() -> SymbolGeometry {
+        let syn = SparseKernel::from_rows(
+            vec![vec![(0, 0.6), (1, 0.4)], vec![(0, 0.5), (1, 0.5)]],
+            1e-6,
+        )
+        .unwrap();
+        let par = SparseKernel::from_rows(
+            vec![vec![(0, 0.7), (1, 0.3)], vec![(0, 0.2), (1, 0.8)]],
+            1e-6,
+        )
+        .unwrap();
+        SymbolGeometry::new(syn, par).unwrap()
+    }
+
+    fn build_semantics() -> SemanticBridge {
+        let log_pi = vec![
+            vec![(0, (0.7f32).ln()), (1, (0.3f32).ln())],
+            vec![(0, (0.4f32).ln()), (1, (0.6f32).ln())],
+        ];
+        let row = vec![1.0, 1.0];
+        let col = vec![1.0, 1.0];
+        let anchors = HashSet::new();
+        let concept_kernel =
+            SparseKernel::from_rows(vec![vec![(0, 1.0)], vec![(1, 1.0)]], 1e-6).unwrap();
+        SemanticBridge::new(log_pi, row, col, anchors, 1e-6, concept_kernel).unwrap()
+    }
+
+    fn build_automation() -> DesireAutomation {
+        let geometry = build_geometry();
+        let repression = RepressionField::new(vec![0.05, 0.15]).unwrap();
+        let semantics = build_semantics();
+        let controller = TemperatureController::new(1.0, 0.8, 0.4, 0.4, 1.6);
+        let desire = DesireLagrangian::new(geometry, repression, semantics, controller)
+            .unwrap()
+            .with_alpha_schedule(warmup(0.0, 0.2, 1))
+            .with_beta_schedule(warmup(0.0, 0.1, 1))
+            .with_gamma_schedule(constant(0.04))
+            .with_lambda_schedule(constant(0.02))
+            .with_observation_horizon(Some(1))
+            .with_integration_horizon(Some(2));
+        let cfg = SelfRewriteCfg {
+            score_thresh: 0.0,
+            min_samples: 2,
+            cooldown_sec: 0,
+        };
+        DesireAutomation::new(desire, cfg)
+    }
+
+    #[test]
+    fn pipeline_threads_logbook_and_triggers() {
+        let automation = build_automation();
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("desire.ndjson");
+        let logbook = DesireLogbook::with_flush_every(&path, 1).unwrap();
+        let trigger_buffer = DesireTriggerBuffer::new();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_logbook(logbook)
+            .with_sink(trigger_buffer.clone())
+            .build();
+
+        let logits = vec![2.2, 0.4];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..5 {
+            let now = start + Duration::from_secs(step as u64 * 5);
+            let timestamp = anchor + Duration::from_secs(step as u64 * 5);
+            let result = pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+            assert_eq!(result.solution.indices.len(), 2);
+        }
+        pipeline.flush().unwrap();
+        assert_eq!(pipeline.sink_count(), 2);
+
+        let replay = DesireLogReplay::open(&path).unwrap();
+        let mut records = 0usize;
+        for entry in replay {
+            let record = entry.unwrap();
+            if record.trigger.is_some() {
+                assert!(!trigger_buffer.is_empty());
+            }
+            records += 1;
+        }
+        assert_eq!(records, 5);
+        let drained = trigger_buffer.drain().unwrap();
+        assert!(!drained.is_empty());
+    }
+
+    #[test]
+    fn pipeline_replays_into_new_sinks() {
+        let automation = build_automation();
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("desire.ndjson");
+        let logbook = DesireLogbook::with_flush_every(&path, 1).unwrap();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_logbook(logbook)
+            .build();
+        let logits = vec![1.8, 0.9];
+        let concept = ConceptHint::Distribution(vec![0.5, 0.5]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..4 {
+            let now = start + Duration::from_secs(step as u64 * 7);
+            let timestamp = anchor + Duration::from_secs(step as u64 * 7);
+            pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+        }
+        pipeline.flush().unwrap();
+
+        let replay = DesireLogReplay::open(&path).unwrap();
+        let collector = DesireTriggerBuffer::new();
+        let automation_two = build_automation();
+        let mut replay_pipeline = DesirePipeline::builder(automation_two)
+            .with_sink(collector.clone())
+            .build();
+        let count = replay_pipeline.replay(replay).unwrap();
+        assert_eq!(count, 4);
+        assert_eq!(replay_pipeline.sink_count(), 1);
+        assert!(collector.len() >= 1);
+    }
+
+    #[test]
+    fn channel_sink_broadcasts_events() {
+        let automation = build_automation();
+        let (sender, receiver) = channel();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_channel(sender)
+            .build();
+
+        let logits = vec![2.2, 0.4];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..6 {
+            let now = start + Duration::from_secs(step as u64);
+            let timestamp = anchor + Duration::from_secs(step as u64);
+            let result = pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+            assert_eq!(result.solution.indices.len(), 2);
+        }
+
+        let mut step_events = 0usize;
+        let mut trigger_events = 0usize;
+        let mut timestamps = Vec::new();
+        while let Ok(event) = receiver.try_recv() {
+            match event {
+                DesirePipelineEvent::Step { step, timestamp } => {
+                    step_events += 1;
+                    assert!(step.solution.indices.len() >= 2);
+                    timestamps.push(timestamp);
+                }
+                DesirePipelineEvent::Trigger { trigger, timestamp } => {
+                    trigger_events += 1;
+                    assert!(trigger.samples >= 1);
+                    timestamps.push(timestamp);
+                }
+            }
+        }
+
+        assert_eq!(step_events, 6);
+        assert!(trigger_events >= 1);
+        assert!(!timestamps.is_empty());
+        for pair in timestamps.windows(2) {
+            let a = pair[0]
+                .duration_since(anchor)
+                .unwrap_or_else(|_| Duration::from_secs(0));
+            let b = pair[1]
+                .duration_since(anchor)
+                .unwrap_or_else(|_| Duration::from_secs(0));
+            assert!(b >= a);
+        }
+    }
+
+    #[test]
+    fn trainer_bridge_collects_summaries() {
+        let automation = build_automation();
+        let bridge = DesireTrainerBridge::new();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_trainer_bridge(&bridge)
+            .build();
+
+        let logits = vec![2.1, 0.5];
+        let concept = ConceptHint::Distribution(vec![0.55, 0.45]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..6 {
+            let now = start + Duration::from_secs(step as u64);
+            let timestamp = anchor + Duration::from_secs(step as u64);
+            pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+        }
+
+        assert!(bridge.len() >= 6);
+        let summary = bridge.drain_summary().unwrap().unwrap();
+        assert_eq!(summary.total, 6);
+        assert!(summary.observation >= 1);
+        assert!(summary.integration >= 1);
+        assert!(summary.mean_entropy.is_finite());
+        assert!(summary.mean_temperature.is_finite());
+        assert!(summary.mean_alpha >= 0.0);
+        assert!(summary.triggers >= 1);
+        assert!(bridge.is_empty());
+        assert!(bridge.drain_summary().unwrap().is_none());
     }
 }
