@@ -1718,6 +1718,13 @@ impl PyModuleTrainer {
         self.inner.fallback_learning_rate()
     }
 
+    #[getter]
+    fn distribution(&self) -> Option<PyDistConfig> {
+        self.inner
+            .distribution_config()
+            .map(|config| PyDistConfig::from_config(config.clone()))
+    }
+
     #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
     fn roundtable(
         &mut self,
@@ -3295,8 +3302,7 @@ fn gemm_py(lhs: &PyTensor, rhs: &PyTensor, backend: Option<&str>) -> PyResult<Py
 #[pyfunction(name = "available_backends")]
 fn available_backends_py() -> Vec<&'static str> {
     let mut options = vec!["auto", "faer", "naive"];
-    #[cfg(feature = "wgpu")]
-    {
+    if cfg!(feature = "wgpu") {
         options.push("wgpu");
     }
     options
@@ -3628,7 +3634,34 @@ fn plan_topk(
     plan(py, "topk", rows, cols, k, device)
 }
 
+/// Convenience helper for the MidK family.
 #[pyfunction]
+#[pyo3(signature = (rows, cols, k, device=None))]
+fn plan_midk(
+    py: Python<'_>,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    device: Option<&str>,
+) -> PyResult<PyObject> {
+    plan(py, "midk", rows, cols, k, device)
+}
+
+/// Convenience helper for the BottomK family.
+#[pyfunction]
+#[pyo3(signature = (rows, cols, k, device=None))]
+fn plan_bottomk(
+    py: Python<'_>,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    device: Option<&str>,
+) -> PyResult<PyObject> {
+    plan(py, "bottomk", rows, cols, k, device)
+}
+
+/// Extract row-wise top-k values and column indices on the host for quick inspection.
+#[pyfunction(name = "topk2d")]
 #[pyo3(signature = (tensor, k, *, largest=true))]
 fn topk2d_py(tensor: &PyTensor, k: usize, largest: bool) -> PyResult<(PyTensor, Vec<Vec<usize>>)> {
     let (rows, cols) = tensor.as_tensor().shape();
@@ -3789,14 +3822,14 @@ fn bentoml_save_model(
     py: Python<'_>,
     model: PyObject,
     name: &str,
-    signatures: Option<&PyDict>,
-    labels: Option<&PyDict>,
-    metadata: Option<&PyDict>,
-    custom_objects: Option<&PyDict>,
-    context: Option<&PyDict>,
+    signatures: Option<&Bound<'_, PyDict>>,
+    labels: Option<&Bound<'_, PyDict>>,
+    metadata: Option<&Bound<'_, PyDict>>,
+    custom_objects: Option<&Bound<'_, PyDict>>,
+    context: Option<&Bound<'_, PyDict>>,
     api_version: Option<&str>,
 ) -> PyResult<PyObject> {
-    let bentoml = py.import("bentoml").map_err(|err| {
+    let bentoml = PyModule::import_bound(py, "bentoml").map_err(|err| {
         PyImportError::new_err(format!(
             "bentoml is required for BentoML integration but could not be imported: {err}"
         ))
@@ -3842,7 +3875,7 @@ fn optuna_optimize(
     sampler: Option<PyObject>,
     pruner: Option<PyObject>,
 ) -> PyResult<PyObject> {
-    let optuna = py.import("optuna").map_err(|err| {
+    let optuna = PyModule::import_bound(py, "optuna").map_err(|err| {
         PyImportError::new_err(format!(
             "optuna is required for hyperparameter search but could not be imported: {err}"
         ))
@@ -3883,16 +3916,16 @@ fn optuna_optimize(
 fn ray_tune_run(
     py: Python<'_>,
     trainable: PyObject,
-    config: Option<&PyDict>,
+    config: Option<&Bound<'_, PyDict>>,
     num_samples: Option<usize>,
-    resources_per_trial: Option<&PyDict>,
+    resources_per_trial: Option<&Bound<'_, PyDict>>,
     metric: Option<&str>,
     mode: Option<&str>,
     name: Option<&str>,
     local_dir: Option<&str>,
     init: bool,
 ) -> PyResult<PyObject> {
-    let ray = py.import("ray").map_err(|err| {
+    let ray = PyModule::import_bound(py, "ray").map_err(|err| {
         PyImportError::new_err(format!(
             "ray is required for Ray Tune integration but could not be imported: {err}"
         ))
@@ -3944,12 +3977,12 @@ fn export_onnx(
     example_input: PyObject,
     export_path: &str,
     opset_version: i32,
-    dynamic_axes: Option<&PyDict>,
+    dynamic_axes: Option<&Bound<'_, PyDict>>,
     input_names: Option<Vec<String>>,
     output_names: Option<Vec<String>>,
     do_constant_folding: bool,
 ) -> PyResult<()> {
-    let torch = py.import("torch").map_err(|err| {
+    let torch = PyModule::import_bound(py, "torch").map_err(|err| {
         PyImportError::new_err(format!(
             "torch is required to export ONNX models but could not be imported: {err}"
         ))
@@ -3976,7 +4009,7 @@ fn export_onnx(
     Ok(())
 }
 
-fn integrations(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn integrations(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(torchserve_archive, m)?)?;
     m.add_function(wrap_pyfunction!(bentoml_save_model, m)?)?;
     m.add_function(wrap_pyfunction!(optuna_optimize, m)?)?;
@@ -4026,7 +4059,10 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_submodule(&integrations_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_midk, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_bottomk, m)?)?;
     m.add_function(wrap_pyfunction!(topk2d_tensor_py, m)?)?;
+    m.add_function(wrap_pyfunction!(topk2d_py, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
@@ -4054,7 +4090,10 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         vec![
             "plan",
             "plan_topk",
+            "plan_midk",
+            "plan_bottomk",
             "topk2d_tensor",
+            "topk2d",
             "z_space_barycenter",
             "hip_probe",
             "describe_device",
