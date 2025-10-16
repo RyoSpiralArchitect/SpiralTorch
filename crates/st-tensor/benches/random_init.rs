@@ -3,7 +3,7 @@ use criterion::{
     black_box, criterion_group, criterion_main, BatchSize, Criterion, PlotConfiguration,
 };
 use plotters::prelude::*;
-use st_tensor::pure::Tensor;
+use st_tensor::Tensor;
 
 fn render_histogram(samples: &[f32]) {
     let root = BitMapBackend::new("target/criterion/random_init/histogram.png", (640, 480))
