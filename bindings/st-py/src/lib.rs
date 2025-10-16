@@ -2587,6 +2587,13 @@ impl PyModuleTrainer {
         self.inner.fallback_learning_rate()
     }
 
+    #[getter]
+    fn distribution(&self) -> Option<PyDistConfig> {
+        self.inner
+            .distribution_config()
+            .map(|config| PyDistConfig::from_config(config.clone()))
+    }
+
     #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
     fn roundtable(
         &mut self,
@@ -5099,7 +5106,34 @@ fn plan_topk(
     plan(py, "topk", rows, cols, k, device)
 }
 
+/// Convenience helper for the MidK family.
 #[pyfunction]
+#[pyo3(signature = (rows, cols, k, device=None))]
+fn plan_midk(
+    py: Python<'_>,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    device: Option<&str>,
+) -> PyResult<PyObject> {
+    plan(py, "midk", rows, cols, k, device)
+}
+
+/// Convenience helper for the BottomK family.
+#[pyfunction]
+#[pyo3(signature = (rows, cols, k, device=None))]
+fn plan_bottomk(
+    py: Python<'_>,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    device: Option<&str>,
+) -> PyResult<PyObject> {
+    plan(py, "bottomk", rows, cols, k, device)
+}
+
+/// Extract row-wise top-k values and column indices on the host for quick inspection.
+#[pyfunction(name = "topk2d")]
 #[pyo3(signature = (tensor, k, *, largest=true))]
 fn topk2d_py(tensor: &PyTensor, k: usize, largest: bool) -> PyResult<(PyTensor, Vec<Vec<usize>>)> {
     let (rows, cols) = tensor.as_tensor().shape();
@@ -5497,7 +5531,10 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_submodule(&integrations_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_midk, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_bottomk, m)?)?;
     m.add_function(wrap_pyfunction!(topk2d_tensor_py, m)?)?;
+    m.add_function(wrap_pyfunction!(topk2d_py, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
@@ -5539,7 +5576,10 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         vec![
             "plan",
             "plan_topk",
+            "plan_midk",
+            "plan_bottomk",
             "topk2d_tensor",
+            "topk2d",
             "z_space_barycenter",
             "hip_probe",
             "describe_device",
