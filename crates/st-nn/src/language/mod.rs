@@ -21,7 +21,7 @@ pub use geometry::{ConceptHint, RepressionField, SemanticBridge, SparseKernel, S
 pub use gw::{DistanceMatrix, EntropicGwSolver};
 pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
 pub use pipeline::{
-    DesirePipeline, DesirePipelineBuilder, DesirePipelineSink, DesireTriggerBuffer,
-    DesireTriggerEvent,
+    DesireChannelSink, DesirePipeline, DesirePipelineBuilder, DesirePipelineEvent,
+    DesirePipelineSink, DesireTriggerBuffer, DesireTriggerEvent,
 };
 pub use temperature::{entropy, TemperatureController};

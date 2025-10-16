@@ -44,11 +44,11 @@ pub use io::{load_bincode, load_json, save_bincode, save_json};
 pub use language::entropy as desire_entropy;
 pub use language::{
     constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
-    DesireLagrangian, DesireLogRecord, DesireLogReplay, DesireLogbook, DesirePhase, DesirePipeline,
-    DesirePipelineBuilder, DesirePipelineSink, DesireRewriteTrigger, DesireSchedule,
-    DesireSolution, DesireTriggerBuffer, DesireTriggerEvent, DesireWeights, DistanceMatrix,
-    EntropicGwSolver, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
-    TemperatureController,
+    DesireChannelSink, DesireLagrangian, DesireLogRecord, DesireLogReplay, DesireLogbook,
+    DesirePhase, DesirePipeline, DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink,
+    DesireRewriteTrigger, DesireSchedule, DesireSolution, DesireTriggerBuffer, DesireTriggerEvent,
+    DesireWeights, DistanceMatrix, EntropicGwSolver, RepressionField, SemanticBridge, SparseKernel,
+    SymbolGeometry, TemperatureController,
 };
 pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, MaxPool2d};
 pub use layers::linear::Linear;

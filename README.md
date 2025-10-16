@@ -266,6 +266,36 @@ let replayed = pipeline.replay(DesireLogReplay::open("desire.ndjson")?)?;
 let drained = trigger_buffer.drain()?; // forward to analytics or trainers
 ```
 
+When you need to splice the stream into other runtimes, attach a
+`DesireChannelSink` via `with_channel`. It emits `DesirePipelineEvent`s over a standard channel so
+rewriters, trainers, or async dashboards can subscribe without bespoke glue—each
+step arrives before any trigger for the same timestamp, preserving ordering for
+downstream automata.【F:crates/st-nn/src/language/pipeline.rs†L52-L239】【F:crates/st-nn/src/language/pipeline.rs†L360-L472】
+
+```rust
+use std::sync::mpsc::channel;
+use st_nn::language::{
+    DesirePipeline, DesirePipelineEvent, DesireTriggerBuffer,
+};
+
+let (sender, receiver) = channel();
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_channel(sender)
+    .with_sink(DesireTriggerBuffer::new())
+    .build();
+
+let step = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+for event in receiver.try_iter() {
+    match event {
+        DesirePipelineEvent::Step { step, timestamp } => {
+            audit(step.solution.phase, timestamp)
+        }
+        DesirePipelineEvent::Trigger { trigger, .. } =>
+            spiralk_scheduler.queue_desire(trigger.report.clone(), trigger.mean_penalty),
+    }
+}
+```
+
 The result is a single Rust-native control surface that marries KL control,
 Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
 language modules, rewrite monads, or SpiralK trainers without bespoke Python

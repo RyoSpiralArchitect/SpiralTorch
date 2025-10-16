@@ -9,7 +9,7 @@ use super::geometry::ConceptHint;
 use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::PureResult;
 use st_tensor::pure::TensorError;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Sink interface used by [`DesirePipeline`] to braid automation steps into
@@ -47,6 +47,73 @@ impl DesirePipelineSink for DesireLogbook {
     }
 }
 
+/// Event broadcast by [`DesirePipeline`] when a step is evaluated or a rewrite
+/// trigger fires.
+#[derive(Clone, Debug)]
+pub enum DesirePipelineEvent {
+    Step {
+        step: DesireAutomatedStep,
+        timestamp: SystemTime,
+    },
+    Trigger {
+        trigger: DesireRewriteTrigger,
+        timestamp: SystemTime,
+    },
+}
+
+impl DesirePipelineEvent {
+    pub fn timestamp(&self) -> SystemTime {
+        match self {
+            DesirePipelineEvent::Step { timestamp, .. }
+            | DesirePipelineEvent::Trigger { timestamp, .. } => *timestamp,
+        }
+    }
+}
+
+/// Simple sink that forwards every pipeline event into a channel so trainers,
+/// schedulers, or external observers can subscribe without manual glue.
+pub struct DesireChannelSink {
+    sender: Sender<DesirePipelineEvent>,
+}
+
+impl DesireChannelSink {
+    pub fn new(sender: Sender<DesirePipelineEvent>) -> Self {
+        Self { sender }
+    }
+
+    pub fn sender(&self) -> Sender<DesirePipelineEvent> {
+        self.sender.clone()
+    }
+}
+
+impl DesirePipelineSink for DesireChannelSink {
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
+        self.sender
+            .send(DesirePipelineEvent::Step {
+                step: step.clone(),
+                timestamp,
+            })
+            .map_err(|_| TensorError::InvalidValue {
+                label: "desire channel receiver dropped",
+            })
+    }
+
+    fn on_trigger(
+        &mut self,
+        trigger: &DesireRewriteTrigger,
+        timestamp: SystemTime,
+    ) -> PureResult<()> {
+        self.sender
+            .send(DesirePipelineEvent::Trigger {
+                trigger: trigger.clone(),
+                timestamp,
+            })
+            .map_err(|_| TensorError::InvalidValue {
+                label: "desire channel receiver dropped",
+            })
+    }
+}
+
 /// Builder used to configure the braid of sinks attached to a
 /// [`DesirePipeline`].
 pub struct DesirePipelineBuilder {
@@ -72,6 +139,11 @@ impl DesirePipelineBuilder {
 
     pub fn with_logbook(mut self, logbook: DesireLogbook) -> Self {
         self.sinks.push(Box::new(logbook));
+        self
+    }
+
+    pub fn with_channel(mut self, sender: Sender<DesirePipelineEvent>) -> Self {
+        self.sinks.push(Box::new(DesireChannelSink::new(sender)));
         self
     }
 
@@ -119,6 +191,10 @@ impl DesirePipeline {
 
     pub fn attach_logbook(&mut self, logbook: DesireLogbook) {
         self.sinks.push(Box::new(logbook));
+    }
+
+    pub fn attach_channel(&mut self, sender: Sender<DesirePipelineEvent>) {
+        self.sinks.push(Box::new(DesireChannelSink::new(sender)));
     }
 
     pub fn sink_count(&self) -> usize {
@@ -308,6 +384,7 @@ mod tests {
     use super::*;
     use st_core::config::self_rewrite::SelfRewriteCfg;
     use std::collections::HashSet;
+    use std::sync::mpsc::channel;
     use std::time::{Duration, Instant, SystemTime};
     use tempfile::tempdir;
 
@@ -432,5 +509,58 @@ mod tests {
         assert_eq!(count, 4);
         assert_eq!(replay_pipeline.sink_count(), 1);
         assert!(collector.len() >= 1);
+    }
+
+    #[test]
+    fn channel_sink_broadcasts_events() {
+        let automation = build_automation();
+        let (sender, receiver) = channel();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_channel(sender)
+            .build();
+
+        let logits = vec![2.2, 0.4];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..6 {
+            let now = start + Duration::from_secs(step as u64);
+            let timestamp = anchor + Duration::from_secs(step as u64);
+            let result = pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+            assert_eq!(result.solution.indices.len(), 2);
+        }
+
+        let mut step_events = 0usize;
+        let mut trigger_events = 0usize;
+        let mut timestamps = Vec::new();
+        while let Ok(event) = receiver.try_recv() {
+            match event {
+                DesirePipelineEvent::Step { step, timestamp } => {
+                    step_events += 1;
+                    assert!(step.solution.indices.len() >= 2);
+                    timestamps.push(timestamp);
+                }
+                DesirePipelineEvent::Trigger { trigger, timestamp } => {
+                    trigger_events += 1;
+                    assert!(trigger.samples >= 1);
+                    timestamps.push(timestamp);
+                }
+            }
+        }
+
+        assert_eq!(step_events, 6);
+        assert!(trigger_events >= 1);
+        assert!(!timestamps.is_empty());
+        for pair in timestamps.windows(2) {
+            let a = pair[0]
+                .duration_since(anchor)
+                .unwrap_or_else(|_| Duration::from_secs(0));
+            let b = pair[1]
+                .duration_since(anchor)
+                .unwrap_or_else(|_| Duration::from_secs(0));
+            assert!(b >= a);
+        }
     }
 }
