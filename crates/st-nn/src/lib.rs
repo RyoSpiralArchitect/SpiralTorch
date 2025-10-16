@@ -52,10 +52,10 @@ pub use language::{
     DesireLogRecord, DesireLogReplay, DesireLogbook, DesirePhase, DesirePipeline,
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRewriteTrigger,
     DesireRoundtableBridge, DesireRoundtableEvent, DesireRoundtableImpulse,
-    DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireTrainerBridge,
-    DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer, DesireTriggerEvent,
-    DesireWeights, DistanceMatrix, EntropicGwSolver, RepressionField, SemanticBridge, SparseKernel,
-    SymbolGeometry, TemperatureController,
+    DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireTelemetrySink,
+    DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
+    DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, RepressionField,
+    SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
 };
 #[cfg(feature = "psi")]
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};

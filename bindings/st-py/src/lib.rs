@@ -91,6 +91,7 @@ use st_core::ecosystem::{
     RoundtableSummary as CoreRoundtableSummary,
 };
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_core::telemetry::hub::{self, DesirePhaseTelemetry, DesireStepTelemetry};
 use st_core::telemetry::atlas::{AtlasFrame, AtlasMetric};
 use st_core::telemetry::chrono::{
     ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary,
@@ -146,7 +147,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DeviceRoute {
@@ -302,6 +303,43 @@ fn roundtable_summary_to_py<'py>(
             .unwrap_or(0.0),
     )?;
     Ok(dict.into())
+}
+
+fn desire_phase_to_str(phase: DesirePhaseTelemetry) -> &'static str {
+    match phase {
+        DesirePhaseTelemetry::Observation => "observation",
+        DesirePhaseTelemetry::Injection => "injection",
+        DesirePhaseTelemetry::Integration => "integration",
+    }
+}
+
+fn desire_telemetry_to_py<'py>(
+    py: Python<'py>,
+    sample: &DesireStepTelemetry,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    let timestamp_ms = sample
+        .timestamp
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as f64;
+    dict.set_item("timestamp_ms", timestamp_ms)?;
+    dict.set_item("phase", desire_phase_to_str(sample.phase))?;
+    dict.set_item("temperature", sample.temperature)?;
+    dict.set_item("entropy", sample.entropy)?;
+    dict.set_item("hypergrad_penalty", sample.hypergrad_penalty)?;
+    dict.set_item("avoidance_energy", sample.avoidance_energy)?;
+    dict.set_item("logit_energy", sample.logit_energy)?;
+    dict.set_item("trigger_emitted", sample.trigger_emitted)?;
+
+    let weights = PyDict::new_bound(py);
+    weights.set_item("alpha", sample.alpha)?;
+    weights.set_item("beta", sample.beta)?;
+    weights.set_item("gamma", sample.gamma)?;
+    weights.set_item("lambda", sample.lambda)?;
+    dict.set_item("weights", weights)?;
+
+    Ok(dict.into_py(py))
 }
 
 fn rl_err(err: SpiralRlError) -> PyErr {
@@ -1993,6 +2031,79 @@ impl PyChronoHarmonics {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "DesireRoundtableBridge")]
+#[derive(Clone)]
+struct PyDesireRoundtableBridge {
+    inner: DesireRoundtableBridge,
+}
+
+#[pymethods]
+impl PyDesireRoundtableBridge {
+    #[new]
+    #[pyo3(signature = (blend=0.35, drift_gain=0.35))]
+    fn new(blend: f32, drift_gain: f32) -> Self {
+        let inner = DesireRoundtableBridge::new()
+            .with_blend(blend)
+            .with_drift_gain(drift_gain);
+        Self { inner }
+    }
+
+    fn clone_bridge(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn impulse(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let impulse = convert(self.inner.impulse())?;
+        impulse
+            .map(|imp| {
+                let dict = PyDict::new(py);
+                dict.set_item(
+                    "multipliers",
+                    (imp.multipliers.0, imp.multipliers.1, imp.multipliers.2),
+                )?;
+                dict.set_item("drift", imp.drift)?;
+                dict.set_item(
+                    "timestamp",
+                    imp.timestamp
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0),
+                )?;
+                Ok(dict.into())
+            })
+            .transpose()
+    }
+
+    fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let summary = convert(self.inner.drain_summary())?;
+        summary
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
+struct PyModuleTrainer {
+    inner: ModuleTrainer,
+    roundtable_bridge: Option<DesireRoundtableBridge>,
+}
+
+impl PyModuleTrainer {
+    fn from_trainer(inner: ModuleTrainer) -> Self {
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
 #[pyclass(module = "spiraltorch", name = "ChronoLoopSignal")]
 #[derive(Clone)]
 struct PyChronoLoopSignal {
@@ -2006,6 +2117,24 @@ impl PyChronoLoopSignal {
 }
 
 #[pymethods]
+impl PyModuleTrainer {
+    #[new]
+    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01))]
+    fn new(
+        device: Option<&str>,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Self {
+        let caps = caps_for(device);
+        let inner =
+            ModuleTrainer::new(caps, curvature, hyper_learning_rate, fallback_learning_rate);
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
+    }
+
 impl PyChronoLoopSignal {
     #[getter]
     fn summary(&self) -> PyChronoSummary {
@@ -2026,6 +2155,47 @@ impl PyChronoLoopSignal {
         self.signal.spiralk_script.clone()
     }
 
+    #[pyo3(signature = (bridge=None, blend=0.35, drift_gain=0.35))]
+    fn enable_desire_roundtable_bridge(
+        &mut self,
+        bridge: Option<PyRef<PyDesireRoundtableBridge>>,
+        blend: f32,
+        drift_gain: f32,
+    ) {
+        let selected = if let Some(handle) = bridge {
+            handle.inner.clone()
+        } else {
+            DesireRoundtableBridge::new()
+                .with_blend(blend)
+                .with_drift_gain(drift_gain)
+        };
+        self.inner.enable_desire_roundtable_bridge(selected.clone());
+        self.roundtable_bridge = Some(selected);
+    }
+
+    fn disable_desire_roundtable_bridge(&mut self) {
+        self.inner.disable_desire_roundtable_bridge();
+        self.roundtable_bridge = None;
+    }
+
+    fn desire_roundtable_bridge(&self) -> Option<PyDesireRoundtableBridge> {
+        self.roundtable_bridge
+            .as_ref()
+            .map(|bridge| PyDesireRoundtableBridge {
+                inner: bridge.clone(),
+            })
+    }
+
+    fn desire_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        self.inner
+            .desire_roundtable_summary()
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
+    }
+
+    #[pyo3(signature = (threshold, participants=2))]
+    fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
+        self.inner.install_meta_conductor(threshold, participants);
     #[cfg(not(feature = "kdsl"))]
     #[getter]
     fn spiralk_script(&self) -> Option<String> {
@@ -18122,6 +18292,13 @@ fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
 }
 
 #[pyfunction]
+fn get_desire_telemetry(py: Python<'_>) -> PyResult<Option<PyObject>> {
+    Ok(hub::get_last_desire_step()
+        .map(|sample| desire_telemetry_to_py(py, &sample))
+        .transpose()?)
+}
+
+#[pyfunction]
 fn get_psychoid_stats(py: Python<'_>) -> PyResult<Option<PyObject>> {
     #[cfg(feature = "psychoid")]
     {
@@ -18475,6 +18652,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
+    m.add_function(wrap_pyfunction!(get_desire_telemetry, m)?)?;
     m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
     m.add_function(wrap_pyfunction!(ecosystem_snapshot, m)?)?;
     m.add_function(wrap_pyfunction!(ecosystem_drain, m)?)?;
@@ -18556,6 +18734,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "z_space_barycenter",
             "hip_probe",
             "describe_device",
+            "get_desire_telemetry",
             "get_psychoid_stats",
             "describe_resonance",
             "describe_frame",
