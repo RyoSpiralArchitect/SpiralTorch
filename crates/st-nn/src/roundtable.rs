@@ -102,6 +102,7 @@ pub struct DecisionEvent {
     pub psi_total: Option<f32>,
     pub band_energy: (f32, f32, f32),
     pub drift: f32,
+    pub z_signal: f32,
     pub timestamp: SystemTime,
     pub sequence: u64,
 }
@@ -110,7 +111,8 @@ impl DecisionEvent {
     fn reliability(&self) -> f32 {
         let window = (self.wilson_high - self.wilson_low).abs().max(1e-4);
         let psi_scale = self.psi_total.unwrap_or(1.0).max(0.1);
-        (self.score / psi_scale).clamp(0.0, 1.0) * (1.0 - window.min(1.0))
+        let z_factor = (1.0 + self.z_signal * 0.5).clamp(0.25, 1.75);
+        (self.score / psi_scale).clamp(0.0, 1.0) * (1.0 - window.min(1.0)) * z_factor
     }
 }
 
@@ -126,6 +128,7 @@ pub struct MetaSummary {
     pub wilson_low: f32,
     pub wilson_high: f32,
     pub mean_psi: f32,
+    pub mean_z: f32,
     pub support: f32,
     pub events: usize,
     pub issued_at: SystemTime,
@@ -141,6 +144,7 @@ impl MetaSummary {
         let mut support = 0.0f32;
         let mut winner_counts: HashMap<OutcomeBand, usize> = HashMap::new();
         let mut latest = SystemTime::UNIX_EPOCH;
+        let mut sum_z = 0.0f32;
         for event in events {
             sum_score += event.score;
             if let Some(psi) = event.psi_total {
@@ -151,6 +155,7 @@ impl MetaSummary {
             if event.timestamp > latest {
                 latest = event.timestamp;
             }
+            sum_z += event.z_signal;
         }
         let dominant = winner_counts
             .into_iter()
@@ -164,6 +169,7 @@ impl MetaSummary {
         } else {
             0.0
         };
+        let mean_z = sum_z / events.len() as f32;
         let (wilson_low, wilson_high) = aggregate_wilson(events);
         Some(Self {
             node_id: node_id.to_string(),
@@ -175,6 +181,7 @@ impl MetaSummary {
             wilson_low,
             wilson_high,
             mean_psi,
+            mean_z,
             support: support.max(0.0),
             events: events.len(),
             issued_at: latest,
@@ -315,6 +322,7 @@ impl RoundtableNode {
         psi_total: Option<f32>,
         band_energy: (f32, f32, f32),
         drift: f32,
+        z_signal: f32,
     ) -> Option<MetaSummary> {
         if matches!(self.config.mode, DistMode::LocalOnly) {
             return None;
@@ -332,6 +340,7 @@ impl RoundtableNode {
             psi_total,
             band_energy,
             drift,
+            z_signal,
             timestamp: SystemTime::now(),
             sequence: self.next_sequence,
         };
@@ -390,7 +399,11 @@ impl MetaConductor {
         entry
             .evidence
             .insert(summary.node_id.clone(), summary.clone());
-        let support: f32 = entry.evidence.values().map(|s| s.support.max(0.0)).sum();
+        let support: f32 = entry
+            .evidence
+            .values()
+            .map(|s| s.support.max(0.0) * (1.0 + s.mean_z * 0.4).clamp(0.3, 1.7))
+            .sum();
         if entry.evidence.len() >= self.participation && support >= self.threshold {
             let ops = vec![HeurOp {
                 origin: "meta".to_string(),
@@ -455,6 +468,7 @@ pub struct ModeratorMinutes {
     pub support: f32,
     pub mean_score: f32,
     pub mean_psi: f32,
+    pub mean_z: f32,
     pub confidence: (f32, f32),
     pub picks: HashMap<String, String>,
     pub reward: f64,
@@ -541,8 +555,12 @@ impl BlackcatModerator {
         let metrics = self.build_metrics(&summary);
         let reward = self.runtime.post_step(&metrics);
         let notes = format!(
-            "blackcat moderated {} → {:?} (score {:.3}, support {:.3})",
-            summary.plan_signature, summary.winner, summary.mean_score, summary.support
+            "blackcat moderated {} → {:?} (score {:.3}, support {:.3}, z {:.3})",
+            summary.plan_signature,
+            summary.winner,
+            summary.mean_score,
+            summary.support,
+            summary.mean_z
         );
         let minutes = ModeratorMinutes {
             plan_signature: summary.plan_signature.clone(),
@@ -551,6 +569,7 @@ impl BlackcatModerator {
             support: summary.support,
             mean_score: summary.mean_score,
             mean_psi: summary.mean_psi,
+            mean_z: summary.mean_z,
             confidence: (summary.wilson_low, summary.wilson_high),
             picks,
             reward,
@@ -571,10 +590,11 @@ impl BlackcatModerator {
             summary.mean_score as f64,
             summary.support as f64,
             summary.mean_psi as f64,
+            summary.mean_z as f64,
             (summary.wilson_high - summary.wilson_low) as f64,
             summary.events as f64,
         ];
-        ctx.resize(self.runtime.context_dim().max(6), 0.0);
+        ctx.resize(self.runtime.context_dim().max(7), 0.0);
         ctx
     }
 
@@ -583,6 +603,7 @@ impl BlackcatModerator {
         extra.insert("meta_support".to_string(), summary.support as f64);
         extra.insert("meta_mean_score".to_string(), summary.mean_score as f64);
         extra.insert("meta_mean_psi".to_string(), summary.mean_psi as f64);
+        extra.insert("meta_mean_z".to_string(), summary.mean_z as f64);
         extra.insert(
             "meta_confidence_width".to_string(),
             (summary.wilson_high - summary.wilson_low) as f64,
@@ -627,6 +648,7 @@ mod tests {
             psi_total: psi,
             band_energy: (0.4, 0.3, 0.2),
             drift: 0.01,
+            z_signal: 0.0,
             timestamp: SystemTime::now(),
             sequence: 0,
         }
@@ -661,6 +683,7 @@ mod tests {
                 Some(0.4),
                 (0.2, 0.3, 0.1),
                 0.01,
+                0.0,
             )
             .is_none());
         assert!(node
@@ -673,6 +696,7 @@ mod tests {
                 None,
                 (0.3, 0.2, 0.1),
                 0.02,
+                0.4,
             )
             .is_some());
     }
@@ -690,6 +714,7 @@ mod tests {
             wilson_low: 0.4,
             wilson_high: 0.9,
             mean_psi: 0.3,
+            mean_z: 0.1,
             support: 0.4,
             events: 4,
             issued_at: SystemTime::now(),
@@ -720,7 +745,7 @@ mod tests {
                 ),
             ]),
         };
-        BlackCatRuntime::new(ZMetaParams::default(), groups, 6, SoftBanditMode::TS, None)
+        BlackCatRuntime::new(ZMetaParams::default(), groups, 7, SoftBanditMode::TS, None)
     }
 
     #[test]
@@ -736,6 +761,7 @@ mod tests {
             wilson_low: 0.4,
             wilson_high: 0.8,
             mean_psi: 0.3,
+            mean_z: 0.2,
             support: 0.3,
             events: 3,
             issued_at: SystemTime::now(),
@@ -746,6 +772,7 @@ mod tests {
         let mut summary_b = summary;
         summary_b.node_id = "b".into();
         summary_b.support = 0.4;
+        summary_b.mean_z = 0.25;
         let outcome_b = moderator.ingest(summary_b);
         assert!(outcome_b.proposal.is_some());
         assert_eq!(moderator.minutes().len(), 2);

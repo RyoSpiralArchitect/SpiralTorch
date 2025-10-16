@@ -6,13 +6,13 @@
 // crates/st-tensor/src/lib.rs
 pub mod fractional;
 
-#[cfg(feature = "wgpu_frac")]
+#[cfg(any(feature = "wgpu_frac", feature = "faer"))]
 pub mod backend;
 
 #[cfg(feature = "wgpu_frac")]
 mod util;
 
-#[cfg(feature = "wgpu_frac")]
+#[cfg(any(feature = "wgpu_frac", feature = "faer"))]
 pub use backend::*;
 
 pub mod pure;
