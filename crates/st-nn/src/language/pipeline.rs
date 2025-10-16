@@ -11,7 +11,6 @@ use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::roundtable::RoundtableNode;
 use crate::schedule::BandEnergy;
 use crate::{PureResult, RoundtableConfig, RoundtableSchedule};
-use std::cmp::Ordering;
 use st_core::ecosystem::{
     ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
     HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
@@ -20,13 +19,20 @@ use st_core::ecosystem::{
 use st_core::ops::rank_entry::RankPlan;
 use st_core::util::math::{ramanujan_pi, LeechProjector};
 use st_tensor::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub use self::language_pipeline::{
+    LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
+};
+
 #[cfg(feature = "psi")]
-use st_core::telemetry::hub::SoftlogicZFeedback;
-use st_core::telemetry::hub::{self, DesirePhaseTelemetry, DesireStepTelemetry};
+use st_core::telemetry::hub::{
+    self, DesireAvoidanceTelemetry, DesirePhaseTelemetry, DesireStepTelemetry,
+    DesireTriggerTelemetry, DesireWeightsTelemetry, SoftlogicZFeedback,
+};
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::{PsiComponent, PsiEvent, PsiReading};
 
@@ -139,7 +145,10 @@ impl DesireTelemetrySink {
     pub fn new() -> Self {
         Self
     }
+}
 
+#[cfg(feature = "psi")]
+impl DesireTelemetrySink {
     fn phase_to_telemetry(phase: DesirePhase) -> DesirePhaseTelemetry {
         match phase {
             DesirePhase::Observation => DesirePhaseTelemetry::Observation,
@@ -161,6 +170,7 @@ impl DesireTelemetrySink {
     }
 }
 
+#[cfg(feature = "psi")]
 impl DesirePipelineSink for DesireTelemetrySink {
     fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
         let weights = &step.solution.weights;
@@ -179,6 +189,13 @@ impl DesirePipelineSink for DesireTelemetrySink {
             trigger_emitted: step.trigger.is_some(),
         };
         hub::set_last_desire_step(sample);
+        Ok(())
+    }
+}
+
+#[cfg(not(feature = "psi"))]
+impl DesirePipelineSink for DesireTelemetrySink {
+    fn on_step(&mut self, _step: &DesireAutomatedStep, _timestamp: SystemTime) -> PureResult<()> {
         Ok(())
     }
 }
@@ -1036,6 +1053,49 @@ impl DesirePipelineSink for DesirePsiBridge {
         let reading = hub::get_last_psi();
         let events = hub::get_last_psi_events();
         let z_feedback = hub::get_softlogic_z();
+        let phase = match step.solution.phase {
+            DesirePhase::Observation => DesirePhaseTelemetry::Observation,
+            DesirePhase::Injection => DesirePhaseTelemetry::Injection,
+            DesirePhase::Integration => DesirePhaseTelemetry::Integration,
+        };
+        let weights = DesireWeightsTelemetry {
+            alpha: step.solution.weights.alpha,
+            beta: step.solution.weights.beta,
+            gamma: step.solution.weights.gamma,
+            lambda: step.solution.weights.lambda,
+        };
+        let avoidance = step
+            .solution
+            .avoidance
+            .clone()
+            .map(|report| DesireAvoidanceTelemetry {
+                tokens: report.tokens,
+                scores: report.scores,
+            });
+        let trigger_snapshot = step.trigger.as_ref().map(|trigger| DesireTriggerTelemetry {
+            mean_penalty: trigger.mean_penalty,
+            mean_entropy: trigger.mean_entropy,
+            temperature: trigger.temperature,
+            samples: trigger.samples,
+        });
+        let psi_breakdown = reading
+            .as_ref()
+            .map(|value| value.breakdown.clone())
+            .unwrap_or_default();
+        hub::set_last_desire_step(DesireStepTelemetry {
+            timestamp,
+            entropy: step.solution.entropy,
+            temperature: step.solution.temperature,
+            hypergrad_penalty: step.solution.hypergrad_penalty,
+            phase,
+            weights,
+            avoidance,
+            trigger: trigger_snapshot,
+            psi_total: reading.as_ref().map(|value| value.total),
+            psi_breakdown,
+            psi_events: events.clone(),
+            z_feedback,
+        });
         let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
             label: "desire psi bridge poisoned",
         })?;
@@ -1167,6 +1227,20 @@ impl DesirePsiSummary {
         }
     }
 }
+
+mod language_pipeline {
+    use crate::{RoundtableConfig, RoundtableSchedule};
+    use crate::roundtable::RoundtableNode;
+    use st_core::ecosystem::{
+        ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
+        HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
+        RoundtableSummary,
+    };
+    use st_core::ops::rank_entry::RankPlan;
+    use st_core::util::math::{ramanujan_pi, LeechProjector};
+    use st_tensor::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
+    use std::collections::HashMap;
+    use std::time::{Instant, SystemTime};
 
 #[derive(Debug)]
 pub enum PipelineError {
@@ -1759,6 +1833,15 @@ mod tests {
     use st_core::backend::device_caps::DeviceCaps;
     use st_core::config::self_rewrite::SelfRewriteCfg;
     use st_core::telemetry::hub::{self, DesirePhaseTelemetry};
+    use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
+    #[cfg(feature = "psi")]
+    use std::collections::HashMap;
+    use std::collections::HashSet;
+    use std::sync::mpsc::channel;
+    use std::sync::{Arc, Mutex, OnceLock};
+    use std::time::{Duration, Instant, SystemTime};
+    use tempfile::tempdir;
+
     #[cfg(feature = "psi")]
     use st_core::telemetry::hub::SoftlogicZFeedback;
     #[cfg(feature = "psi")]
@@ -2242,6 +2325,7 @@ mod tests {
         let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
         let start = Instant::now();
         let anchor = SystemTime::now();
+        hub::clear_last_desire_step();
         for step in 0..4 {
             let mut breakdown = HashMap::new();
             breakdown.insert(PsiComponent::LOSS, 0.8 + step as f32 * 0.1);
@@ -2276,6 +2360,10 @@ mod tests {
         }
 
         assert_eq!(bridge.len(), 4);
+        let snapshot = hub::get_last_desire_step().expect("desire telemetry");
+        assert!(snapshot.psi_total.unwrap_or(0.0) > 0.0);
+        assert!(!snapshot.psi_breakdown.is_empty());
+        assert!(snapshot.psi_events.len() >= 1);
         let summary = bridge.drain_summary().unwrap().unwrap();
         assert_eq!(summary.steps, 4);
         assert!(summary.psi_samples >= 4);
@@ -2289,4 +2377,5 @@ mod tests {
             .contains_key(&PsiComponent::LOSS));
         assert!(bridge.drain_summary().unwrap().is_none());
     }
+}
 }

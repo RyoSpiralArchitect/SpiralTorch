@@ -140,7 +140,43 @@ Once those signatures exist, `InterfaceZLift` pushes them straight into
 Z-space: it projects the perimeter mass onto a preferred Z-axis, splits the
 energy into Above/Here/Beneath bands, enriches the drift with the Leech
 projector, and emits a ready-to-store `SoftlogicZFeedback` pulse so runtimes can
-bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L386】
+bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L471】
+
+Beyond the perimeter statistics the gauge now reports a gauge-invariant
+mean-curvature magnitude and, whenever `c′` fixes an orientation, the signed
+mean curvature that restores the co-oriented BV picture. Collapse loops can
+therefore gate on curvature without labels, and only light up the signed
+variant once a label or co-orientation becomes available.【F:crates/st-core/src/theory/microlocal.rs†L42-L259】
+
+To make those bridges operational inside collapse loops the gauge now supports
+multi-radius sweeps and a conductor that fuses their Z pulses with exponential
+smoothing. `InterfaceGauge::analyze_multiradius` probes the same mask at
+different blow-up scales (and reuses an optional `c′` label when supplied),
+while `InterfaceZConductor` drives any number of gauges, aggregates the
+resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
+ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
+
+### Maxwell-coded envelopes meet SpiralK
+
+The coded-envelope utilities now ship with a `MaxwellSpiralKBridge` that turns
+sequential Z pulses into KDSl snippets ready for the runtime. Every channel name
+is sanitised for SpiralK, weights adapt to the observed Z magnitude, and
+existing programs can be prepended so the hints extend a live policy rather than
+replace it.【F:crates/st-core/src/theory/maxwell.rs†L335-L441】 Call
+`push_pulse(channel, &pulse)` for each stream, then `script()` to emit the
+combined `soft(maxwell.bias, …)` rules that SpiralK can ingest without custom
+glue code.【F:crates/st-core/src/theory/maxwell.rs†L362-L408】 The workflow is
+documented in the refreshed Maxwell technical note, which now includes a
+section on streaming detections back into SpiralK orchestration.【F:docs/coded_envelope_maxwell_model.md†L144-L157】
+
+Want the language desire loops to see the same detections? Enable the PSI
+feature and run the new `MaxwellPsiTelemetryBridge`. It converts each pulse into
+a PSI reading, optional band-energy threshold events, and a `SoftlogicZFeedback`
+sample so `DesirePsiBridge` captures the Z drift alongside ψ totals without
+hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:crates/st-core/src/theory/maxwell.rs†L666-L714】
+Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
+concept window that the `DesireLagrangian` can consume, aligning coded-envelope
+channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L132】
 
 ### Maxwell-coded envelopes meet SpiralK
 
@@ -306,6 +342,55 @@ if let Some(trigger) = &step.trigger {
 pipeline.flush()?;
 let replayed = pipeline.replay(DesireLogReplay::open("desire.ndjson")?)?;
 let drained = trigger_buffer.drain()?; // forward to analytics or trainers
+```
+
+Python bindings mirror the same geometry builders and automation braid. The
+`SparseKernel::from_dense` and `SemanticBridge::from_dense` helpers collapse
+token/concept matrices directly, so notebooks can assemble desire pipelines
+from dense observations without juggling sparse tuples. Once the components are
+assembled, the pipeline builder attaches sinks and steps logits exactly like the
+Rust API:
+
+```python
+from spiraltorch import (
+    SparseKernel,
+    SymbolGeometry,
+    RepressionField,
+    SemanticBridge,
+    TemperatureController,
+    DesireSchedule,
+    DesireLagrangian,
+    SelfRewriteConfig,
+    DesireAutomation,
+    DesirePipelineBuilder,
+    ConceptHint,
+)
+
+syn = SparseKernel.from_dense([[0.6, 0.4], [0.3, 0.7]])
+par = SparseKernel.from_dense([[0.55, 0.45], [0.2, 0.8]])
+geometry = SymbolGeometry(syn, par)
+repression = RepressionField([0.1, 0.05])
+concept_kernel = SparseKernel.from_dense([[0.8, 0.2], [0.2, 0.8]])
+bridge = SemanticBridge(
+    [[0.7, 0.3], [0.25, 0.75]],
+    concept_kernel,
+)
+controller = TemperatureController(1.0, 0.9, 0.4, 0.4, 1.6)
+desire = DesireLagrangian(geometry, repression, bridge, controller)
+desire.set_alpha_schedule(DesireSchedule.warmup(0.0, 0.2, 400))
+automation = DesireAutomation(desire, SelfRewriteConfig())
+pipeline = (
+    DesirePipelineBuilder(automation)
+    .with_logbook("desire.ndjson", flush_every=16)
+    .with_telemetry()
+    .build()
+)
+step = pipeline.step(
+    [1.2, -0.4],
+    previous_token=0,
+    concept_hint=ConceptHint.distribution([0.6, 0.4]),
+)
+print(step["solution"]["phase"], step["solution"]["entropy"])
 ```
 
 When you need to splice the stream into other runtimes, attach a

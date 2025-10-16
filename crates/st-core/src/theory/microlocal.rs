@@ -30,13 +30,13 @@
 //! oriented data such as co-normals requires an external label `c′` to fix a
 //! sign.  `InterfaceGauge` provides a practical discretisation that measures
 //! the local total-variation density inside shrinking metric balls, emits the
-//! stable boundary indicator, and optionally reconstructs the oriented normal
-//! field when a signed phase label is supplied.
+//! stable boundary indicator, estimates the mean-curvature magnitude that
+//! survives the gauge quotient, and optionally reconstructs the oriented normal
+//! field together with signed curvature when a phase label is supplied.
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::util::math::LeechProjector;
-use ndarray::{indices, ArrayD, IxDyn};
-use ndarray::Dimension;
+use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use statrs::function::gamma::gamma;
 use std::f64::consts::PI;
 
@@ -50,12 +50,18 @@ pub struct InterfaceSignature {
     /// Perimeter density normalised by \(|D\chi_E|(B_\varepsilon)/\varepsilon^{d-1}|\),
     /// mapped to \{0, \kappa_d\} to match the finite perimeter blow-up.
     pub perimeter_density: ArrayD<f32>,
+    /// Gauge invariant mean curvature magnitude estimated from the unlabeled mask.
+    pub mean_curvature: ArrayD<f32>,
+    /// Signed mean curvature reconstructed only when an oriented label `c′` is supplied.
+    pub signed_mean_curvature: Option<ArrayD<f32>>,
     /// Optional unit normal field (only populated when `c_prime` was provided).
     pub orientation: Option<ArrayD<f32>>,
     /// Surface measure of the unit \((d-1)\)-sphere used for the normalisation.
     pub kappa_d: f32,
     /// Radius in lattice steps used to accumulate the blow-up statistics.
     pub radius: isize,
+    /// Physical radius (same units as the lattice spacing) backing `radius`.
+    pub physical_radius: f32,
 }
 
 impl InterfaceSignature {
@@ -95,7 +101,7 @@ impl InterfaceGauge {
 
     /// Evaluates the gauge on a binary mask, returning the interface signature.
     pub fn analyze(&self, mask: &ArrayD<f32>) -> InterfaceSignature {
-        self.analyze_with_label(mask, None)
+        self.analyze_with_radius(mask, None, self.physical_radius)
     }
 
     /// Evaluates the gauge on a binary mask using an optional signed label `c′`
@@ -105,19 +111,59 @@ impl InterfaceGauge {
         mask: &ArrayD<f32>,
         c_prime: Option<&ArrayD<f32>>,
     ) -> InterfaceSignature {
+        self.analyze_with_radius(mask, c_prime, self.physical_radius)
+    }
+
+    /// Evaluates the gauge at a custom physical radius, returning the interface
+    /// signature extracted at that scale.
+    pub fn analyze_with_radius(
+        &self,
+        mask: &ArrayD<f32>,
+        c_prime: Option<&ArrayD<f32>>,
+        physical_radius: f32,
+    ) -> InterfaceSignature {
         let dim = mask.ndim();
         assert!(dim > 0, "mask must have positive dimension");
         if let Some(label) = c_prime {
             assert_eq!(label.shape(), mask.shape(), "c′ must match mask shape");
         }
 
-        let radius = self.radius_in_steps();
-        let offsets = generate_offsets(dim, radius);
+        let radius = radius_in_steps(physical_radius, self.grid_spacing);
+        self.analyze_with_steps(mask, c_prime, radius, physical_radius.max(f32::EPSILON))
+    }
+
+    /// Evaluates the gauge across multiple radii and returns the resulting
+    /// signatures ordered according to the supplied radii slice.
+    pub fn analyze_multiradius(
+        &self,
+        mask: &ArrayD<f32>,
+        c_prime: Option<&ArrayD<f32>>,
+        radii: &[f32],
+    ) -> Vec<InterfaceSignature> {
+        assert!(!radii.is_empty(), "at least one radius must be provided");
+        radii
+            .iter()
+            .map(|&radius| self.analyze_with_radius(mask, c_prime, radius))
+            .collect()
+    }
+
+    fn analyze_with_steps(
+        &self,
+        mask: &ArrayD<f32>,
+        c_prime: Option<&ArrayD<f32>>,
+        radius_steps: isize,
+        physical_radius: f32,
+    ) -> InterfaceSignature {
+        let dim = mask.ndim();
+        let radius_steps = radius_steps.max(1);
+        let offsets = generate_offsets(dim, radius_steps);
         let shape = mask.shape().to_vec();
         let raw_dim = mask.raw_dim();
         let mut r_machine = ArrayD::<f32>::zeros(raw_dim.clone());
         let mut raw_density = ArrayD::<f32>::zeros(raw_dim.clone());
         let mut perimeter_density = ArrayD::<f32>::zeros(raw_dim.clone());
+        let mut mean_curvature = ArrayD::<f32>::zeros(raw_dim.clone());
+        let mut signed_mean_curvature = c_prime.map(|_| ArrayD::<f32>::zeros(raw_dim.clone()));
         let mut orientation = c_prime.map(|_| {
             let mut full_shape = Vec::with_capacity(dim + 1);
             full_shape.push(dim);
@@ -151,6 +197,27 @@ impl InterfaceGauge {
             raw_density[&idx_dyn] = raw_val;
             perimeter_density[&idx_dyn] = if discrete_jump { kappa_d } else { 0.0 };
 
+            if has_interface {
+                if let Some((abs_curv, _)) =
+                    mean_curvature_from_field(mask, idx_slice, &shape, self.grid_spacing, threshold)
+                {
+                    mean_curvature[&idx_dyn] = abs_curv;
+                }
+                if let (Some(label_field), Some(curv_field)) =
+                    (c_prime, signed_mean_curvature.as_mut())
+                {
+                    if let Some((_, signed_curv)) = mean_curvature_from_field(
+                        label_field,
+                        idx_slice,
+                        &shape,
+                        self.grid_spacing,
+                        threshold,
+                    ) {
+                        curv_field[&idx_dyn] = signed_curv;
+                    }
+                }
+            }
+
             if let (Some(label_field), Some(ref mut orient)) = (c_prime, orientation.as_mut()) {
                 if has_interface {
                     let normal = oriented_normal(
@@ -176,13 +243,17 @@ impl InterfaceGauge {
             r_machine,
             raw_density,
             perimeter_density,
+            mean_curvature,
+            signed_mean_curvature,
             orientation,
             kappa_d,
-            radius,
+            radius: radius_steps,
+            physical_radius,
         }
     }
 
-    fn radius_in_steps(&self) -> isize {
+    /// Returns the discretised sampling radius expressed in lattice steps.
+    pub fn radius_in_steps(&self) -> isize {
         let steps = (self.physical_radius / self.grid_spacing).ceil() as isize;
         steps.max(1)
     }
@@ -346,6 +417,78 @@ impl InterfaceZPulse {
         above + here + beneath
     }
 
+    /// Returns `true` when the pulse carries no support and therefore no
+    /// actionable Z-bias signal.
+    pub fn is_empty(&self) -> bool {
+        self.support <= f32::EPSILON && self.total_energy() <= f32::EPSILON
+    }
+
+    /// Aggregates a batch of pulses into a single pulse whose band energies are
+    /// the sum of the individual contributions while the Z bias is support
+    /// weighted.
+    pub fn aggregate(pulses: &[InterfaceZPulse]) -> InterfaceZPulse {
+        if pulses.is_empty() {
+            return InterfaceZPulse::default();
+        }
+
+        let mut support = 0.0f32;
+        let mut interface_cells = 0.0f32;
+        let mut above = 0.0f32;
+        let mut here = 0.0f32;
+        let mut beneath = 0.0f32;
+        let mut weighted_bias = 0.0f32;
+
+        for pulse in pulses {
+            let (p_above, p_here, p_beneath) = pulse.band_energy;
+            above += p_above;
+            here += p_here;
+            beneath += p_beneath;
+            interface_cells += pulse.interface_cells;
+            support += pulse.support;
+            weighted_bias += pulse.z_bias * pulse.support;
+        }
+
+        let drift = above - beneath;
+        let z_bias = if support > f32::EPSILON {
+            weighted_bias / support
+        } else {
+            0.0
+        };
+
+        InterfaceZPulse {
+            support,
+            interface_cells,
+            band_energy: (above, here, beneath),
+            drift,
+            z_bias,
+        }
+    }
+
+    /// Blends two pulses using the weight `alpha` for the `next` pulse.
+    pub fn lerp(current: &InterfaceZPulse, next: &InterfaceZPulse, alpha: f32) -> InterfaceZPulse {
+        let alpha = alpha.clamp(0.0, 1.0);
+        if alpha <= f32::EPSILON {
+            return *current;
+        }
+        if (1.0 - alpha) <= f32::EPSILON {
+            return *next;
+        }
+        let beta = 1.0 - alpha;
+        let (cur_above, cur_here, cur_beneath) = current.band_energy;
+        let (next_above, next_here, next_beneath) = next.band_energy;
+        InterfaceZPulse {
+            support: current.support * beta + next.support * alpha,
+            interface_cells: current.interface_cells * beta + next.interface_cells * alpha,
+            band_energy: (
+                cur_above * beta + next_above * alpha,
+                cur_here * beta + next_here * alpha,
+                cur_beneath * beta + next_beneath * alpha,
+            ),
+            drift: current.drift * beta + next.drift * alpha,
+            z_bias: current.z_bias * beta + next.z_bias * alpha,
+        }
+    }
+
     /// Converts the pulse into a [`SoftlogicZFeedback`] record using explicit
     /// ψ and weighted loss totals supplied by the caller.
     pub fn into_softlogic_feedback_with(
@@ -369,10 +512,142 @@ impl InterfaceZPulse {
     }
 }
 
+impl Default for InterfaceZPulse {
+    fn default() -> Self {
+        InterfaceZPulse {
+            support: 0.0,
+            interface_cells: 0.0,
+            band_energy: (0.0, 0.0, 0.0),
+            drift: 0.0,
+            z_bias: 0.0,
+        }
+    }
+}
+
+/// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
+/// smoothed control signal suitable for Softlogic feedback.
+#[derive(Debug, Clone)]
+pub struct InterfaceZConductor {
+    gauges: Vec<InterfaceGauge>,
+    lift: InterfaceZLift,
+    smoothing: f32,
+    carry: Option<InterfaceZPulse>,
+}
+
+impl InterfaceZConductor {
+    /// Creates a new conductor from the provided gauges and lift. The
+    /// `smoothing` factor defaults to `1.0`, meaning the fused pulse mirrors the
+    /// latest measurement unless [`with_smoothing`] is invoked.
+    pub fn new(gauges: Vec<InterfaceGauge>, lift: InterfaceZLift) -> Self {
+        assert!(!gauges.is_empty(), "at least one gauge must be supplied");
+        InterfaceZConductor {
+            gauges,
+            lift,
+            smoothing: 1.0,
+            carry: None,
+        }
+    }
+
+    /// Configures the exponential smoothing factor `alpha` applied when fusing
+    /// subsequent pulses. Values in `[0,1]` blend the previous fused pulse with
+    /// the latest measurement; `1` disables smoothing while `0` keeps the
+    /// previous fused pulse unchanged.
+    pub fn with_smoothing(mut self, alpha: f32) -> Self {
+        self.smoothing = alpha.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Returns the gauges driven by the conductor.
+    pub fn gauges(&self) -> &[InterfaceGauge] {
+        &self.gauges
+    }
+
+    /// Processes a binary mask through each gauge, lifts the resulting
+    /// signatures into Z pulses, and fuses them into a Softlogic feedback
+    /// record. When `psi_total` or `weighted_loss` are omitted they default to
+    /// the fused support and total energy respectively.
+    pub fn step(
+        &mut self,
+        mask: &ArrayD<f32>,
+        c_prime: Option<&ArrayD<f32>>,
+        psi_total: Option<f32>,
+        weighted_loss: Option<f32>,
+    ) -> InterfaceZReport {
+        let mut signatures = Vec::with_capacity(self.gauges.len());
+        let mut pulses = Vec::with_capacity(self.gauges.len());
+
+        for gauge in &self.gauges {
+            let signature = gauge.analyze_with_label(mask, c_prime);
+            let pulse = self.lift.project(&signature);
+            signatures.push(signature);
+            pulses.push(pulse);
+        }
+
+        let fused_raw = InterfaceZPulse::aggregate(&pulses);
+        let mut fused = if let Some(prev) = &self.carry {
+            InterfaceZPulse::lerp(prev, &fused_raw, self.smoothing)
+        } else {
+            fused_raw
+        };
+        if fused_raw.z_bias.abs() > f32::EPSILON
+            && fused.z_bias.signum() != fused_raw.z_bias.signum()
+        {
+            fused.z_bias = fused_raw.z_bias * self.smoothing;
+        }
+        if fused_raw.drift.abs() > f32::EPSILON && fused.drift.signum() != fused_raw.drift.signum()
+        {
+            fused.drift = fused_raw.drift * self.smoothing;
+        }
+
+        self.carry = Some(fused);
+
+        let psi = psi_total.unwrap_or(fused.support);
+        let loss = weighted_loss.unwrap_or(fused.total_energy());
+        let feedback = fused.into_softlogic_feedback_with(psi, loss);
+
+        InterfaceZReport {
+            signatures,
+            pulses,
+            fused_pulse: fused,
+            feedback,
+        }
+    }
+}
+
+/// Result of a single [`InterfaceZConductor::step`] call, containing both the
+/// per-gauge signatures and the fused Z-space feedback.
+#[derive(Debug, Clone)]
+pub struct InterfaceZReport {
+    /// Signatures returned by each gauge, ordered as supplied to the conductor.
+    pub signatures: Vec<InterfaceSignature>,
+    /// Pulses generated from each signature prior to fusion.
+    pub pulses: Vec<InterfaceZPulse>,
+    /// Smoothed aggregate pulse after applying fusion and smoothing.
+    pub fused_pulse: InterfaceZPulse,
+    /// Ready-to-store Softlogic feedback record.
+    pub feedback: SoftlogicZFeedback,
+}
+
+impl InterfaceZReport {
+    /// Returns `true` when any gauge detected an interface.
+    pub fn has_interface(&self) -> bool {
+        self.signatures
+            .iter()
+            .any(InterfaceSignature::has_interface)
+    }
+}
+
 fn unit_sphere_area(dim: usize) -> f32 {
     let d = dim as f64;
     let area = 2.0 * PI.powf(d / 2.0) / gamma(d / 2.0);
     area as f32
+}
+
+fn radius_in_steps(physical_radius: f32, grid_spacing: f32) -> isize {
+    let radius = physical_radius.max(f32::EPSILON);
+    let spacing = grid_spacing.max(f32::EPSILON);
+    let steps = (radius / spacing).ceil() as isize;
+    steps.max(1)
 }
 
 fn generate_offsets(dim: usize, radius: isize) -> Vec<Vec<isize>> {
@@ -430,6 +705,15 @@ fn local_raw_density(
                 diff_count += 1.0;
             }
         }
+        if idx[axis] > 0 {
+            neighbor_total += 1.0;
+            let mut coord = idx.to_vec();
+            coord[axis] -= 1;
+            let neigh = mask[IxDyn(&coord)];
+            if (neigh - center).abs() >= threshold {
+                diff_count += 1.0;
+            }
+        }
     }
     if neighbor_total > 0.0 {
         let raw = diff_count / neighbor_total;
@@ -448,6 +732,7 @@ fn oriented_normal(
 ) -> Option<Vec<f32>> {
     let dim = idx.len();
     let mut grad = vec![0.0f32; dim];
+    let mut magnitudes = vec![0.0f32; dim];
     let center = label[IxDyn(idx)];
     for axis in 0..dim {
         let forward = if idx[axis] + 1 < shape[axis] {
@@ -464,7 +749,33 @@ fn oriented_normal(
         } else {
             center
         };
-        grad[axis] = (forward - backward) / (2.0 * h);
+        let forward_delta = forward - center;
+        let backward_delta = center - backward;
+        if forward_delta.abs() >= backward_delta.abs() {
+            grad[axis] = forward_delta / h;
+            magnitudes[axis] = forward_delta.abs();
+        } else {
+            grad[axis] = backward_delta / h;
+            magnitudes[axis] = backward_delta.abs();
+        }
+    }
+    let max_mag = magnitudes.iter().copied().fold(0.0f32, f32::max);
+    if max_mag < threshold {
+        return None;
+    }
+    let mut first_axis = None;
+    for axis in 0..dim {
+        if magnitudes[axis] + f32::EPSILON < max_mag {
+            grad[axis] = 0.0;
+        } else if (magnitudes[axis] - max_mag).abs() <= f32::EPSILON {
+            if let Some(primary) = first_axis {
+                if axis != primary {
+                    grad[axis] = 0.0;
+                }
+            } else {
+                first_axis = Some(axis);
+            }
+        }
     }
     let norm_sq = grad.iter().map(|g| (*g as f64).powi(2)).sum::<f64>() as f32;
     if norm_sq.sqrt() < threshold {
@@ -475,6 +786,92 @@ fn oriented_normal(
         *g /= norm;
     }
     Some(grad)
+}
+
+fn mean_curvature_from_field(
+    field: &ArrayD<f32>,
+    idx: &[usize],
+    shape: &[usize],
+    h: f32,
+    threshold: f32,
+) -> Option<(f32, f32)> {
+    let dim = idx.len();
+    let center_normal = normalized_gradient(field, idx, shape, h, threshold)?;
+    let mut divergence = 0.0f32;
+    for axis in 0..dim {
+        let forward = normalized_gradient_offset(field, idx, shape, axis, 1, h, threshold)
+            .unwrap_or_else(|| center_normal.clone());
+        let backward = normalized_gradient_offset(field, idx, shape, axis, -1, h, threshold)
+            .unwrap_or_else(|| center_normal.clone());
+        let derivative = (forward[axis] - backward[axis]) / (2.0 * h);
+        if derivative.is_finite() {
+            divergence += derivative;
+        }
+    }
+    let signed = divergence;
+    let magnitude = divergence.abs();
+    Some((magnitude, signed))
+}
+
+fn normalized_gradient(
+    field: &ArrayD<f32>,
+    idx: &[usize],
+    shape: &[usize],
+    h: f32,
+    threshold: f32,
+) -> Option<Vec<f32>> {
+    let dim = idx.len();
+    let mut grad = vec![0.0f32; dim];
+    let center = field[IxDyn(idx)];
+    for axis in 0..dim {
+        let forward = if idx[axis] + 1 < shape[axis] {
+            let mut coord = idx.to_vec();
+            coord[axis] += 1;
+            field[IxDyn(&coord)]
+        } else {
+            center
+        };
+        let backward = if idx[axis] > 0 {
+            let mut coord = idx.to_vec();
+            coord[axis] -= 1;
+            field[IxDyn(&coord)]
+        } else {
+            center
+        };
+        grad[axis] = match (idx[axis] > 0, idx[axis] + 1 < shape[axis]) {
+            (true, true) => (forward - backward) / (2.0 * h),
+            (false, true) => (forward - center) / h,
+            (true, false) => (center - backward) / h,
+            (false, false) => 0.0,
+        };
+    }
+    let norm_sq = grad.iter().map(|g| (*g as f64).powi(2)).sum::<f64>() as f32;
+    if norm_sq.sqrt() < threshold {
+        return None;
+    }
+    let norm = norm_sq.sqrt().max(f32::EPSILON);
+    for g in &mut grad {
+        *g /= norm;
+    }
+    Some(grad)
+}
+
+fn normalized_gradient_offset(
+    field: &ArrayD<f32>,
+    idx: &[usize],
+    shape: &[usize],
+    axis: usize,
+    delta: isize,
+    h: f32,
+    threshold: f32,
+) -> Option<Vec<f32>> {
+    let pos = idx[axis] as isize + delta;
+    if pos < 0 || pos >= shape[axis] as isize {
+        return None;
+    }
+    let mut coord = idx.to_vec();
+    coord[axis] = pos as usize;
+    normalized_gradient(field, &coord, shape, h, threshold)
 }
 
 #[cfg(test)]
@@ -491,6 +888,7 @@ mod tests {
         assert_eq!(sig.kappa_d, 2.0 * std::f32::consts::PI);
         assert!((sig.perimeter_density[IxDyn(&[1, 1])] - sig.kappa_d).abs() < 1e-5);
         assert_eq!(sig.perimeter_density[IxDyn(&[0, 0])], 0.0);
+        assert!((sig.physical_radius - 1.0).abs() < 1e-6);
     }
 
     #[test]
@@ -537,5 +935,89 @@ mod tests {
         assert!(beneath <= f32::EPSILON);
         assert!(here > 0.0);
         assert_eq!(pulse.z_bias, 0.0);
+    }
+
+    #[test]
+    fn curvature_detects_flat_and_curved_interfaces() {
+        let flat = array![[0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]].into_dyn();
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let flat_sig = gauge.analyze(&flat);
+        let flat_curvature = flat_sig.mean_curvature[IxDyn(&[1, 1])];
+        assert!(
+            flat_curvature.abs() < 1e-3,
+            "flat interface should be near-zero curvature"
+        );
+
+        let curved = array![
+            [0.0, 0.0, 1.0, 0.0, 0.0],
+            [0.0, 1.0, 1.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0, 0.0],
+        ]
+        .mapv(|v| v as f32)
+        .into_dyn();
+        let curved_sig = gauge.analyze(&curved);
+        let max_curvature = curved_sig
+            .mean_curvature
+            .iter()
+            .fold(0.0f32, |acc, v| acc.max(*v));
+        assert!(
+            max_curvature > 0.05,
+            "curved interface should register positive curvature"
+        );
+    }
+
+    #[test]
+    fn multiradius_analysis_returns_distinct_signatures() {
+        let mask = array![
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0, 1.0],
+        ]
+        .into_dyn();
+        let gauge = InterfaceGauge::new(1.0, 1.5);
+        let c_prime = mask.mapv(|v| if v > 0.5 { 1.0 } else { -1.0 });
+        let signatures = gauge.analyze_multiradius(&mask, Some(&c_prime), &[0.75, 1.5, 2.5]);
+        assert_eq!(signatures.len(), 3);
+        assert!(signatures[0].radius <= signatures[1].radius);
+        assert!(signatures[1].radius <= signatures[2].radius);
+        assert!((signatures[1].physical_radius - 1.5).abs() < 1e-6);
+        assert!(signatures.iter().all(|sig| sig.orientation.is_some()));
+    }
+
+    #[test]
+    fn conductor_fuses_multiscale_pulses_with_smoothing() {
+        let mask = array![
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0, 1.0],
+        ]
+        .into_dyn();
+        let mut flipped = mask.clone();
+        flipped[[1, 2]] = 0.0;
+        flipped[[2, 2]] = 0.0;
+        let c_prime = mask.mapv(|v| if v > 0.5 { 1.0 } else { -1.0 });
+        let c_prime_neg = c_prime.mapv(|v| -v);
+
+        let gauge_fine = InterfaceGauge::new(1.0, 1.0);
+        let gauge_coarse = InterfaceGauge::new(1.0, 2.5);
+        let projector = LeechProjector::new(24, 0.5);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], projector).with_bias_gain(0.5);
+        let mut conductor =
+            InterfaceZConductor::new(vec![gauge_fine, gauge_coarse], lift).with_smoothing(0.5);
+
+        let first = conductor.step(&mask, Some(&c_prime), None, None);
+        assert!(first.has_interface());
+        assert!(first.fused_pulse.z_bias > 0.0);
+
+        let second = conductor.step(&flipped, Some(&c_prime_neg), None, None);
+        let raw_second = InterfaceZPulse::aggregate(&second.pulses);
+        assert!(raw_second.z_bias < 0.0);
+        assert!(second.fused_pulse.z_bias < 0.0);
+        assert!(second.fused_pulse.z_bias > raw_second.z_bias);
+        assert_eq!(second.feedback.band_energy, second.fused_pulse.band_energy);
     }
 }
