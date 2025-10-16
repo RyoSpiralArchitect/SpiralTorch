@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 //! Pure Rust tensor, complex wave, and non-Euclidean learning primitives with
-//! zero external dependencies.
+//! only lightweight external dependencies.
 //!
 //! The goal of this module is to offer a pragmatic starting point for
 //! high-dimensional experimentation that **does not rely on PyTorch, NumPy, or
@@ -30,6 +30,9 @@ use crate::backend::faer_dense;
 #[cfg(feature = "wgpu")]
 use crate::backend::wgpu_dense;
 use core::fmt;
+use rand::distributions::{Distribution, StandardNormal, Uniform};
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 use std::error::Error;
 use std::f32::consts::PI;
 
@@ -250,6 +253,13 @@ pub struct Tensor {
 }
 
 impl Tensor {
+    fn seedable_rng(seed: Option<u64>) -> StdRng {
+        match seed {
+            Some(value) => StdRng::seed_from_u64(value),
+            None => StdRng::from_entropy(),
+        }
+    }
+
     /// Create a tensor filled with zeros.
     pub fn zeros(rows: usize, cols: usize) -> PureResult<Self> {
         if rows == 0 || cols == 0 {
@@ -276,6 +286,61 @@ impl Tensor {
             });
         }
         Ok(Self { data, rows, cols })
+    }
+
+    /// Construct a tensor by sampling a uniform distribution in `[min, max)`.
+    ///
+    /// When `seed` is provided the RNG becomes deterministic which makes tests
+    /// and benchmarks reproducible. Otherwise entropy from the host is used.
+    pub fn random_uniform(
+        rows: usize,
+        cols: usize,
+        min: f32,
+        max: f32,
+        seed: Option<u64>,
+    ) -> PureResult<Self> {
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        if !(min < max) {
+            return Err(TensorError::InvalidValue {
+                label: "random_uniform_bounds",
+            });
+        }
+        let mut rng = Self::seedable_rng(seed);
+        let distribution = Uniform::new(min, max);
+        let mut data = Vec::with_capacity(rows * cols);
+        for _ in 0..rows * cols {
+            data.push(distribution.sample(&mut rng));
+        }
+        Self::from_vec(rows, cols, data)
+    }
+
+    /// Construct a tensor by sampling a normal distribution with the provided
+    /// mean and standard deviation.
+    pub fn random_normal(
+        rows: usize,
+        cols: usize,
+        mean: f32,
+        std: f32,
+        seed: Option<u64>,
+    ) -> PureResult<Self> {
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        if std <= 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "random_normal_std",
+            });
+        }
+        let mut rng = Self::seedable_rng(seed);
+        let gaussian = StandardNormal;
+        let mut data = Vec::with_capacity(rows * cols);
+        for _ in 0..rows * cols {
+            let sample: f64 = gaussian.sample(&mut rng);
+            data.push(mean + std * sample as f32);
+        }
+        Self::from_vec(rows, cols, data)
     }
 
     /// Construct a tensor by applying a generator function to each coordinate.
@@ -1221,6 +1286,7 @@ fn matmul_wgpu(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ndarray::Array2;
 
     #[test]
     fn tensor_matmul_and_add_work_without_panicking() {
@@ -1329,5 +1395,31 @@ mod tests {
             .unwrap();
         let gradient = tape.gradient();
         assert!(gradient.iter().any(|value| value.abs() > 0.0));
+    }
+
+    #[test]
+    fn random_uniform_respects_bounds_and_is_convertible_to_ndarray() {
+        let tensor = Tensor::random_uniform(4, 3, -0.25, 0.75, Some(7)).unwrap();
+        assert_eq!(tensor.shape(), (4, 3));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| (-0.25..0.75).contains(value)));
+        let array = Array2::from_shape_vec((4, 3), tensor.data().to_vec()).unwrap();
+        assert_eq!(array.dim(), (4, 3));
+        assert_eq!(array[[0, 0]], tensor.data()[0]);
+    }
+
+    #[test]
+    fn random_initialisers_are_deterministic_with_seed() {
+        let left = Tensor::random_normal(2, 2, 0.0, 1.0, Some(42)).unwrap();
+        let right = Tensor::random_normal(2, 2, 0.0, 1.0, Some(42)).unwrap();
+        assert_eq!(left.data(), right.data());
+    }
+
+    #[test]
+    fn random_uniform_rejects_invalid_bounds() {
+        let err = Tensor::random_uniform(2, 2, 1.0, 1.0, None).unwrap_err();
+        assert!(matches!(err, TensorError::InvalidValue { .. }));
     }
 }

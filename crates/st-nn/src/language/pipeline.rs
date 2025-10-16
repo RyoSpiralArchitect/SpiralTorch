@@ -169,6 +169,11 @@ impl DesirePipelineBuilder {
         self
     }
 
+    pub fn with_roundtable_bridge(mut self, bridge: &DesireRoundtableBridge) -> Self {
+        self.sinks.push(Box::new(bridge.clone()));
+        self
+    }
+
     pub fn with_graph_bridge(mut self, bridge: &DesireGraphBridge) -> Self {
         self.sinks.push(Box::new(bridge.clone()));
         self
@@ -231,6 +236,10 @@ impl DesirePipeline {
     }
 
     pub fn attach_trainer_bridge(&mut self, bridge: &DesireTrainerBridge) {
+        self.sinks.push(Box::new(bridge.clone()));
+    }
+
+    pub fn attach_roundtable_bridge(&mut self, bridge: &DesireRoundtableBridge) {
         self.sinks.push(Box::new(bridge.clone()));
     }
 
@@ -570,6 +579,206 @@ impl DesirePipelineSink for DesireTrainerBridge {
             trigger: step.trigger.clone(),
         });
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DesireRoundtableEvent {
+    pub timestamp: SystemTime,
+    pub solution: DesireSolution,
+    pub trigger: Option<DesireRewriteTrigger>,
+    pub multipliers: (f32, f32, f32),
+    pub drift: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct DesireRoundtableImpulse {
+    pub multipliers: (f32, f32, f32),
+    pub drift: f32,
+    pub timestamp: SystemTime,
+}
+
+#[derive(Clone, Default)]
+pub struct DesireRoundtableBridge {
+    blend: f32,
+    drift_gain: f32,
+    shared: Arc<Mutex<Vec<DesireRoundtableEvent>>>,
+    latest: Arc<Mutex<Option<DesireRoundtableImpulse>>>,
+}
+
+impl DesireRoundtableBridge {
+    pub fn new() -> Self {
+        Self {
+            blend: 0.35,
+            drift_gain: 0.35,
+            shared: Arc::new(Mutex::new(Vec::new())),
+            latest: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn with_blend(mut self, blend: f32) -> Self {
+        self.blend = blend.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_drift_gain(mut self, gain: f32) -> Self {
+        self.drift_gain = gain.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn len(&self) -> usize {
+        match self.shared.lock() {
+            Ok(guard) => guard.len(),
+            Err(_) => 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn impulse(&self) -> PureResult<Option<DesireRoundtableImpulse>> {
+        let guard = self.latest.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire roundtable bridge poisoned",
+        })?;
+        Ok(guard.clone())
+    }
+
+    pub fn drain(&self) -> PureResult<Vec<DesireRoundtableEvent>> {
+        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire roundtable bridge poisoned",
+        })?;
+        Ok(std::mem::take(&mut *guard))
+    }
+
+    pub fn drain_summary(&self) -> PureResult<Option<DesireRoundtableSummary>> {
+        let events = self.drain()?;
+        if events.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(DesireRoundtableSummary::from_events(&events)))
+    }
+
+    fn project(&self, weights: &DesireWeights) -> DesireRoundtableImpulse {
+        const EPS: f32 = 1e-6;
+        let above = weights.alpha.max(0.0);
+        let here = weights.gamma.max(0.0);
+        let beneath = weights.beta.max(0.0);
+        let total = (above + here + beneath).max(EPS);
+        let bary = [above / total, here / total, beneath / total];
+        const ONE_THIRD: f32 = 1.0 / 3.0;
+        let mut multipliers = (
+            1.0 + self.blend * (bary[0] - ONE_THIRD),
+            1.0 + self.blend * (bary[1] - ONE_THIRD),
+            1.0 + self.blend * (bary[2] - ONE_THIRD),
+        );
+        multipliers.0 = multipliers.0.clamp(0.35, 1.65);
+        multipliers.1 = multipliers.1.clamp(0.35, 1.65);
+        multipliers.2 = multipliers.2.clamp(0.35, 1.65);
+        let drift = (weights.lambda.tanh() * self.drift_gain).clamp(-1.0, 1.0);
+        DesireRoundtableImpulse {
+            multipliers,
+            drift,
+            timestamp: SystemTime::now(),
+        }
+    }
+}
+
+impl DesirePipelineSink for DesireRoundtableBridge {
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
+        let impulse = self.project(&step.solution.weights);
+        {
+            let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+                label: "desire roundtable bridge poisoned",
+            })?;
+            guard.push(DesireRoundtableEvent {
+                timestamp,
+                solution: step.solution.clone(),
+                trigger: step.trigger.clone(),
+                multipliers: impulse.multipliers,
+                drift: impulse.drift,
+            });
+        }
+        let mut latest = self.latest.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire roundtable bridge poisoned",
+        })?;
+        *latest = Some(DesireRoundtableImpulse {
+            timestamp,
+            ..impulse
+        });
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DesireRoundtableSummary {
+    pub steps: usize,
+    pub triggers: usize,
+    pub mean_entropy: f32,
+    pub mean_temperature: f32,
+    pub mean_alpha: f32,
+    pub mean_beta: f32,
+    pub mean_gamma: f32,
+    pub mean_lambda: f32,
+    pub mean_above: f32,
+    pub mean_here: f32,
+    pub mean_beneath: f32,
+    pub mean_drift: f32,
+    pub last_timestamp: SystemTime,
+}
+
+impl DesireRoundtableSummary {
+    pub fn from_events(events: &[DesireRoundtableEvent]) -> Self {
+        let mut steps = 0usize;
+        let mut triggers = 0usize;
+        let mut sum_entropy = 0.0f32;
+        let mut sum_temperature = 0.0f32;
+        let mut sum_alpha = 0.0f32;
+        let mut sum_beta = 0.0f32;
+        let mut sum_gamma = 0.0f32;
+        let mut sum_lambda = 0.0f32;
+        let mut sum_above = 0.0f32;
+        let mut sum_here = 0.0f32;
+        let mut sum_beneath = 0.0f32;
+        let mut sum_drift = 0.0f32;
+        let mut last_timestamp = UNIX_EPOCH;
+
+        for event in events {
+            steps += 1;
+            if event.trigger.is_some() {
+                triggers += 1;
+            }
+            sum_entropy += event.solution.entropy;
+            sum_temperature += event.solution.temperature;
+            sum_alpha += event.solution.weights.alpha;
+            sum_beta += event.solution.weights.beta;
+            sum_gamma += event.solution.weights.gamma;
+            sum_lambda += event.solution.weights.lambda;
+            sum_above += event.multipliers.0;
+            sum_here += event.multipliers.1;
+            sum_beneath += event.multipliers.2;
+            sum_drift += event.drift;
+            if event.timestamp > last_timestamp {
+                last_timestamp = event.timestamp;
+            }
+        }
+
+        let denom = steps.max(1) as f32;
+        Self {
+            steps,
+            triggers,
+            mean_entropy: sum_entropy / denom,
+            mean_temperature: sum_temperature / denom,
+            mean_alpha: sum_alpha / denom,
+            mean_beta: sum_beta / denom,
+            mean_gamma: sum_gamma / denom,
+            mean_lambda: sum_lambda / denom,
+            mean_above: sum_above / denom,
+            mean_here: sum_here / denom,
+            mean_beneath: sum_beneath / denom,
+            mean_drift: sum_drift / denom,
+            last_timestamp,
+        }
     }
 }
 
@@ -1822,6 +2031,42 @@ mod tests {
         assert!(summary.mean_alpha >= 0.0);
         assert!(summary.triggers >= 1);
         assert!(bridge.is_empty());
+        assert!(bridge.drain_summary().unwrap().is_none());
+    }
+
+    #[test]
+    fn roundtable_bridge_collects_impulses() {
+        let automation = build_automation();
+        let bridge = DesireRoundtableBridge::new()
+            .with_blend(0.4)
+            .with_drift_gain(0.5);
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_roundtable_bridge(&bridge)
+            .build();
+
+        let logits = vec![2.0, 0.6];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..5 {
+            let now = start + Duration::from_millis((step * 75) as u64);
+            let timestamp = anchor + Duration::from_millis((step * 75) as u64);
+            pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+        }
+
+        assert!(bridge.len() >= 5);
+        let impulse = bridge.impulse().unwrap().unwrap();
+        assert!(impulse.multipliers.0.is_finite());
+        assert!(impulse.multipliers.1.is_finite());
+        assert!(impulse.drift.abs() <= 1.0);
+        let summary = bridge.drain_summary().unwrap().unwrap();
+        assert_eq!(summary.steps, 5);
+        assert!(summary.mean_above.is_finite());
+        assert!(summary.mean_here.is_finite());
+        assert!(summary.mean_beneath.is_finite());
+        assert!(summary.mean_drift.is_finite());
         assert!(bridge.drain_summary().unwrap().is_none());
     }
 

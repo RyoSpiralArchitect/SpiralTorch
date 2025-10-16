@@ -3,8 +3,6 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-pub mod pipeline;
-
 pub use pipeline::{LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult};
 mod automation;
 mod desire;
@@ -24,7 +22,8 @@ pub use gw::{DistanceMatrix, EntropicGwSolver};
 pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
 pub use pipeline::{
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesirePipeline,
-    DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireTrainerBridge,
+    DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRoundtableBridge,
+    DesireRoundtableEvent, DesireRoundtableImpulse, DesireRoundtableSummary, DesireTrainerBridge,
     DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer, DesireTriggerEvent,
 };
 #[cfg(feature = "psi")]
