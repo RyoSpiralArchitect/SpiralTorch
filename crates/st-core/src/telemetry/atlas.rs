@@ -25,6 +25,7 @@
 
 use super::chrono::{ChronoHarmonics, ChronoSummary};
 use super::maintainer::MaintainerStatus;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 /// Named scalar surfaced through the atlas projection.
@@ -511,6 +512,37 @@ impl AtlasRouteSummary {
         perspective.apply_focus_filter(focus_prefixes);
         Some(perspective)
     }
+
+    /// Highlights the most dynamic metrics across districts as atlas beacons.
+    pub fn beacons(&self, limit: usize) -> Vec<AtlasBeacon> {
+        let mut beacons: Vec<AtlasBeacon> = self
+            .districts
+            .iter()
+            .flat_map(|district| {
+                district
+                    .focus
+                    .iter()
+                    .filter_map(|focus| AtlasBeacon::from_focus(&district.name, focus))
+            })
+            .collect();
+        beacons.sort_by(|a, b| {
+            b.intensity
+                .partial_cmp(&a.intensity)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.metric.cmp(&b.metric))
+        });
+        if limit > 0 && beacons.len() > limit {
+            beacons.truncate(limit);
+        }
+        beacons
+    }
+
+    /// Fetches the beacon associated with a specific metric identifier.
+    pub fn beacon_for(&self, metric: &str) -> Option<AtlasBeacon> {
+        self.beacons(0)
+            .into_iter()
+            .find(|beacon| beacon.metric == metric)
+    }
 }
 
 /// Perspective describing how a particular district can act on the atlas map.
@@ -639,6 +671,120 @@ pub struct AtlasMetricFocus {
 impl AtlasMetricFocus {
     fn is_relevant(&self) -> bool {
         self.coverage > 0
+    }
+}
+
+/// Direction describing how an atlas beacon is trending.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AtlasBeaconTrend {
+    /// Metric activity is rising across the retained frames.
+    Rising,
+    /// Metric activity is declining across the retained frames.
+    Falling,
+    /// Metric activity is effectively unchanged.
+    Steady,
+}
+
+/// Highlighted metric that other nodes can treat as a navigational beacon.
+#[derive(Clone, Debug)]
+pub struct AtlasBeacon {
+    /// District that produced the beacon metric.
+    pub district: String,
+    /// Metric identifier flagged as a beacon.
+    pub metric: String,
+    /// Number of frames that contributed to the beacon statistics.
+    pub coverage: usize,
+    /// Average value recorded for the beacon metric.
+    pub mean: f32,
+    /// Latest recorded value for the beacon metric.
+    pub latest: f32,
+    /// Signed change between the latest and first observation.
+    pub delta: f32,
+    /// Per-frame momentum computed from the accumulated delta.
+    pub momentum: f32,
+    /// Standard deviation recorded for the beacon metric.
+    pub volatility: f32,
+    /// Strength used to rank beacons (higher means more dynamic).
+    pub intensity: f32,
+    /// Direction describing how the beacon is trending.
+    pub trend: AtlasBeaconTrend,
+    /// Narrative describing how the beacon should be interpreted.
+    pub narrative: String,
+}
+
+impl AtlasBeacon {
+    fn from_focus(district: &str, focus: &AtlasMetricFocus) -> Option<Self> {
+        if focus.coverage == 0 {
+            return None;
+        }
+        let delta = if focus.delta.is_finite() {
+            focus.delta
+        } else {
+            0.0
+        };
+        let momentum = if focus.momentum.is_finite() {
+            focus.momentum
+        } else {
+            0.0
+        };
+        let volatility = if focus.std_dev.is_finite() {
+            focus.std_dev.max(0.0)
+        } else {
+            0.0
+        };
+        let intensity = delta.abs().max(momentum.abs());
+        if intensity <= 1e-6 {
+            return None;
+        }
+        let trend = if delta.abs() <= 1e-6 {
+            AtlasBeaconTrend::Steady
+        } else if delta.is_sign_positive() {
+            AtlasBeaconTrend::Rising
+        } else {
+            AtlasBeaconTrend::Falling
+        };
+        let volatility_note = if volatility <= 1e-6 {
+            "with calm variance"
+        } else if volatility < 0.25 {
+            "with mild variance"
+        } else if volatility < 0.75 {
+            "with adaptive variance"
+        } else {
+            "with turbulent variance"
+        };
+        let tempo_note = if momentum.abs() <= 1e-6 {
+            "flat momentum"
+        } else {
+            "momentum"
+        };
+        let narrative = format!(
+            "{district}::{metric} {orientation} (Δ {:+.3}, {tempo} {:+.3}, σ {:.3}) {variance}.",
+            delta,
+            momentum,
+            volatility,
+            district = district,
+            metric = focus.name,
+            orientation = match trend {
+                AtlasBeaconTrend::Rising => "is surging",
+                AtlasBeaconTrend::Falling => "is easing",
+                AtlasBeaconTrend::Steady => "holds steady",
+            },
+            tempo = tempo_note,
+            variance = volatility_note,
+        );
+        Some(Self {
+            district: district.to_string(),
+            metric: focus.name.clone(),
+            coverage: focus.coverage,
+            mean: focus.mean,
+            latest: focus.latest,
+            delta,
+            momentum,
+            volatility,
+            intensity,
+            trend,
+            narrative,
+        })
     }
 }
 
@@ -996,5 +1142,42 @@ mod tests {
             .iter()
             .all(|metric| metric.name.starts_with("session.surface")));
         assert!(surface.focus.len() <= 2);
+    }
+
+    #[test]
+    fn atlas_route_summary_emits_beacons() {
+        let mut route = AtlasRoute::new();
+        for idx in 0..4 {
+            let mut fragment = AtlasFragment::new();
+            fragment.timestamp = Some((idx + 1) as f32);
+            fragment.push_metric_with_district(
+                "session.surface.latency",
+                0.4 + idx as f32 * 0.3,
+                "Surface",
+            );
+            fragment.push_metric_with_district(
+                "trainer.loop.energy",
+                0.2 + idx as f32 * 0.1,
+                "Concourse",
+            );
+            let mut frame = AtlasFrame::new((idx + 1) as f32);
+            frame.loop_support = 0.2 + idx as f32 * 0.05;
+            frame.merge_fragment(fragment);
+            route.push_bounded(frame, usize::MAX);
+        }
+        let summary = route.summary();
+        let beacons = summary.beacons(4);
+        assert!(beacons.len() >= 2);
+        assert!(beacons[0].intensity >= beacons[1].intensity);
+        assert_eq!(beacons[0].district, "Surface");
+        assert!(matches!(beacons[0].trend, AtlasBeaconTrend::Rising));
+        assert!(beacons[0]
+            .narrative
+            .contains("Surface::session.surface.latency"));
+        let latency_beacon = summary
+            .beacon_for("session.surface.latency")
+            .expect("latency beacon");
+        assert_eq!(latency_beacon.metric, "session.surface.latency");
+        assert!(latency_beacon.intensity >= beacons[0].intensity - 1e-6);
     }
 }

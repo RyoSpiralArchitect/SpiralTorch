@@ -159,6 +159,7 @@ loader = (
 stats = session.train_epoch(trainer, model, loss, loader, schedule)
 print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")
 print(st.get_psychoid_stats())
+print(st.get_desire_telemetry())  # phase/temperature/energies recorded by DesireTelemetrySink
 
 summary = trainer.desire_roundtable_summary()
 if summary:
