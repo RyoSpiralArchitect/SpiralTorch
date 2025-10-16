@@ -245,6 +245,7 @@ let feedback = GeometryFeedback::new(GeometryFeedbackConfig {
     leech_density_weight: 0.5,        // densify η with Λ24 packing pressure
     ramanujan_iterations: 4,          // refine π via Ramanujan's fast series
     softening_beta: 0.6,              // keep the projection memory-light
+    max_learning_rate_scale: 2.8,     // pre-clamped to stay in the 2..3 stable band
     ..GeometryFeedbackConfig::default_policy()
 });
 policy.attach_geometry_feedback(feedback);
@@ -256,13 +257,20 @@ let (report, signal) = policy.finish_episode_with_geometry(&resonance)?;
 if let Some(signal) = signal {
     println!("η̄={:.3}, scale={:.2}", signal.averaged_efficiency, signal.learning_rate_scale);
 }
+let telemetry = policy.telemetry();
+if let Some(geo) = telemetry.geometry {
+    println!("rank~{:.1} pressure~{:.4} scalē~{:.2}", geo.rolling_rank, geo.rolling_pressure, geo.rolling_scale);
+}
 ```
 
 The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
-into its smoothing loop. This keeps the Z-space slice expansive without bloating
-memory: `z_space_rank` picks the dimensional stratum, the Leech density weight
-injects Viazovska's optimal sphere packing pressure, and the softening beta
-maintains latency by compressing the soft power projection back into `[0, 1]`.
+into its smoothing loop while auto-rewriting its own clamps. Rank, packing
+pressure, and scale histories sit on rolling windows so noisy small-batch runs
+settle quickly, and the `trainer.telemetry()` surface mirrors the same values to
+spot drift. `GeometryFeedback` keeps `max_scale` inside the recommended `[2, 3]`
+band, raises the floor when rank collapses, and eases the Leech density weight
+if pressure over-saturates—giving you a self-tuning geometric metronome instead
+of a static multiplier.
 
 ### SpiralTorchRec (open-topos recommendation lattice)
 
