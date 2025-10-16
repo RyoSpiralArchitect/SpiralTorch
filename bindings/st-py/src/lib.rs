@@ -1766,9 +1766,9 @@ impl PyModuleTrainer {
 
     fn blackcat_minutes<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
         let minutes = self.inner.blackcat_minutes();
-        let list = PyList::empty(py);
+        let list = PyList::empty_bound(py);
         for minute in minutes {
-            let entry = PyDict::new(py);
+            let entry = PyDict::new_bound(py);
             entry.set_item("plan_signature", minute.plan_signature.clone())?;
             entry.set_item("script_hint", minute.script_hint.clone())?;
             entry.set_item("winner", format!("{:?}", minute.winner))?;
@@ -1786,14 +1786,14 @@ impl PyModuleTrainer {
                     .map(|d| d.as_secs_f64())
                     .unwrap_or(0.0),
             )?;
-            let picks = PyDict::new(py);
+            let picks = PyDict::new_bound(py);
             for (k, v) in minute.picks.iter() {
                 picks.set_item(k.clone(), v.clone())?;
             }
-            entry.set_item("picks", picks)?;
-            list.append(entry)?;
+            entry.set_item("picks", picks.into_py(py))?;
+            list.append(entry.into_py(py))?;
         }
-        Ok(list.into())
+        Ok(list.into_py(py))
     }
 
     #[pyo3(signature = (module, loss, batches, schedule))]
