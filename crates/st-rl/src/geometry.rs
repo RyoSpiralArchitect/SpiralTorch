@@ -24,6 +24,14 @@ pub struct GeometryFeedbackConfig {
     pub min_learning_rate_scale: f32,
     /// Maximum multiplicative factor applied to the learning rate.
     pub max_learning_rate_scale: f32,
+    /// Target rank of the Z-space slice we are probing (defaults to the Leech shell).
+    pub z_space_rank: usize,
+    /// Weight applied to the Leech lattice density correction when scaling η.
+    pub leech_density_weight: f64,
+    /// Number of terms used in the Ramanujan π estimator.
+    pub ramanujan_iterations: usize,
+    /// Softening factor controlling how aggressively η is pushed into [0, 1].
+    pub softening_beta: f32,
 }
 
 impl GeometryFeedbackConfig {
@@ -36,6 +44,10 @@ impl GeometryFeedbackConfig {
             smoothing_window: 4,
             min_learning_rate_scale: 0.5,
             max_learning_rate_scale: 1.5,
+            z_space_rank: 24,
+            leech_density_weight: 0.35,
+            ramanujan_iterations: 3,
+            softening_beta: 0.75,
         }
     }
 }
@@ -61,6 +73,10 @@ pub struct GeometryFeedback {
     window: usize,
     min_scale: f32,
     max_scale: f32,
+    z_rank: usize,
+    leech_weight: f64,
+    ramanujan_pi: f64,
+    softening_beta: f32,
     last_signal: Option<GeometryFeedbackSignal>,
 }
 
@@ -87,6 +103,10 @@ impl GeometryFeedback {
             window,
             min_scale: min_scale.max(f32::EPSILON),
             max_scale: max_scale.max(f32::EPSILON),
+            z_rank: config.z_space_rank.max(1),
+            leech_weight: config.leech_density_weight.max(0.0),
+            ramanujan_pi: Self::ramanujan_pi(config.ramanujan_iterations.max(1)),
+            softening_beta: config.softening_beta.max(0.0),
             last_signal: None,
         }
     }
@@ -115,8 +135,12 @@ impl GeometryFeedback {
             self.history.pop_front();
         }
         let averaged = self.history.iter().copied().sum::<f64>() / self.history.len() as f64;
-        let clamped = averaged.clamp(0.0, 1.0) as f32;
-        let scale = self.min_scale + (self.max_scale - self.min_scale) * clamped;
+        let geodesic = self.geodesic_projection(resonance);
+        let densified =
+            self.leech_weight * LEECH_PACKING_DENSITY * geodesic * (self.z_rank as f64).sqrt();
+        let normalized = ((averaged + densified) / self.ramanujan_pi).clamp(0.0, 1.0);
+        let softened = self.soft_project(normalized as f32);
+        let scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
         let signal = GeometryFeedbackSignal {
             assessment,
             averaged_efficiency: averaged,
@@ -143,7 +167,50 @@ impl GeometryFeedback {
             .filter(|value| value.abs() >= threshold)
             .count() as u128
     }
+
+    fn geodesic_projection(&self, resonance: &DifferentialResonance) -> f64 {
+        let norms = [
+            Self::l2_norm(&resonance.homotopy_flow),
+            Self::l2_norm(&resonance.functor_linearisation),
+            Self::l2_norm(&resonance.recursive_objective),
+            Self::l2_norm(&resonance.infinity_projection),
+            Self::l2_norm(&resonance.infinity_energy),
+        ];
+        norms.iter().sum::<f64>() / norms.len() as f64
+    }
+
+    fn l2_norm(tensor: &Tensor) -> f64 {
+        tensor
+            .data()
+            .iter()
+            .map(|value| (*value as f64).powi(2))
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    fn soft_project(&self, value: f32) -> f32 {
+        let beta = (1.0 + self.softening_beta).max(f32::EPSILON);
+        value.clamp(0.0, 1.0).powf(1.0 / beta)
+    }
+
+    fn ramanujan_pi(iterations: usize) -> f64 {
+        let mut sum = 0.0;
+        let mut factor = 1.0;
+        let base = 396_f64.powi(4);
+        for k in 0..iterations {
+            sum += factor * (1103.0 + 26390.0 * k as f64);
+            let k1 = k + 1;
+            let numerator =
+                (4 * k1 - 3) as f64 * (4 * k1 - 2) as f64 * (4 * k1 - 1) as f64 * (4 * k1) as f64;
+            let denominator = (k1 as f64).powi(4) * base;
+            factor *= numerator / denominator;
+        }
+        let prefactor = (2.0 * 2.0_f64.sqrt()) / 9801.0;
+        (prefactor * sum).recip()
+    }
 }
+
+const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
 
 #[cfg(test)]
 mod tests {
@@ -173,16 +240,45 @@ mod tests {
             smoothing_window: 2,
             min_learning_rate_scale: 0.5,
             max_learning_rate_scale: 1.0,
+            z_space_rank: 24,
+            leech_density_weight: 0.4,
+            ramanujan_iterations: 3,
+            softening_beta: 0.5,
         };
-        let mut feedback = GeometryFeedback::new(config);
+        let mut feedback = GeometryFeedback::new(config.clone());
         let resonance_high = resonance_from(&[0.5, 0.4, -0.3, 0.2, 0.1]);
         let resonance_low = resonance_from(&[0.01, 0.02, -0.01, 0.0, 0.03]);
 
         let first = feedback.process_resonance(&resonance_high);
-        assert!(first.learning_rate_scale > 0.75);
+        assert!(first.learning_rate_scale > config.min_learning_rate_scale);
 
         let second = feedback.process_resonance(&resonance_low);
         assert!(second.learning_rate_scale <= first.learning_rate_scale);
         assert!(feedback.last_signal().is_some());
+    }
+
+    #[test]
+    fn leech_density_enriches_scaling() {
+        let resonance = resonance_from(&[0.2, -0.4, 0.6, -0.8, 1.0]);
+        let base_config = GeometryFeedbackConfig {
+            observability: ObservabilityConfig::new(1, 5, SlotSymmetry::Symmetric),
+            activation_threshold: 0.05,
+            smoothing_window: 2,
+            min_learning_rate_scale: 0.5,
+            max_learning_rate_scale: 1.5,
+            z_space_rank: 4,
+            leech_density_weight: 0.0,
+            ramanujan_iterations: 3,
+            softening_beta: 0.5,
+        };
+        let mut base = GeometryFeedback::new(base_config.clone());
+        let mut enriched_config = base_config;
+        enriched_config.z_space_rank = 24;
+        enriched_config.leech_density_weight = 2.0;
+        let mut enriched = GeometryFeedback::new(enriched_config);
+
+        let base_scale = base.process_resonance(&resonance).learning_rate_scale;
+        let enriched_scale = enriched.process_resonance(&resonance).learning_rate_scale;
+        assert!(enriched_scale >= base_scale);
     }
 }

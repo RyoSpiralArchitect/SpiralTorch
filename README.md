@@ -228,6 +228,10 @@ use st_rl::{GeometryFeedback, GeometryFeedbackConfig, SpiralPolicyGradient};
 let mut policy = SpiralPolicyGradient::new(6, 3, 0.01, 0.99)?;
 let feedback = GeometryFeedback::new(GeometryFeedbackConfig {
     observability: ObservabilityConfig::new(1, 5, SlotSymmetry::Symmetric),
+    z_space_rank: 24,                 // Maryna Viazovska's Leech shell as default
+    leech_density_weight: 0.5,        // densify η with Λ24 packing pressure
+    ramanujan_iterations: 4,          // refine π via Ramanujan's fast series
+    softening_beta: 0.6,              // keep the projection memory-light
     ..GeometryFeedbackConfig::default_policy()
 });
 policy.attach_geometry_feedback(feedback);
@@ -240,6 +244,12 @@ if let Some(signal) = signal {
     println!("η̄={:.3}, scale={:.2}", signal.averaged_efficiency, signal.learning_rate_scale);
 }
 ```
+
+The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
+into its smoothing loop. This keeps the Z-space slice expansive without bloating
+memory: `z_space_rank` picks the dimensional stratum, the Leech density weight
+injects Viazovska's optimal sphere packing pressure, and the softening beta
+maintains latency by compressing the soft power projection back into `[0, 1]`.
 
 ### SpiralTorchRec (open-topos recommendation lattice)
 
