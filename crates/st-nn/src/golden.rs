@@ -26,7 +26,7 @@
 use crate::dataset::DataLoader;
 use crate::loss::Loss;
 use crate::module::Module;
-use crate::roundtable::{HeurOpKind, HeurOpLog, ModeratorMinutes};
+use crate::roundtable::{HeurOp, HeurOpKind, HeurOpLog, ModeratorMinutes};
 use crate::schedule::RoundtableSchedule;
 use crate::trainer::{EpochStats, ModuleTrainer};
 use crate::PureResult;
@@ -36,6 +36,7 @@ use st_core::runtime::golden::{
 use st_tensor::pure::TensorError;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -94,6 +95,7 @@ impl GoldenRetrieverConfig {
             ),
         );
         let idle;
+        let empty_log = HeurOpLog::default();
         let pulse_ref = match pulse {
             Some(pulse) => pulse,
             None => {
@@ -101,7 +103,8 @@ impl GoldenRetrieverConfig {
                 &idle
             }
         };
-        let GoldenCouncilResolution { biases, .. } = council.negotiate(pulse_ref, &schedule_signal);
+        let GoldenCouncilResolution { biases, .. } =
+            council.negotiate(0, pulse_ref, &schedule_signal, &empty_log);
         self.exploration_bias = biases.exploration;
         self.optimization_boost = biases.optimization;
         self.synergy_bias = biases.synergy;
@@ -297,8 +300,10 @@ impl GoldenSelfRewriteState {
 
     fn negotiate(
         &mut self,
+        epoch: u64,
         pulse: &GoldenBlackcatPulse,
         schedule_signal: &GoldenScheduleSignal,
+        heuristics: &HeurOpLog,
     ) -> GoldenCouncilResolution {
         let negotiation_rate = self.config.negotiation_rate.max(0.0);
         let schedule_weight = self.config.schedule_weight.max(0.0);
@@ -348,7 +353,27 @@ impl GoldenSelfRewriteState {
         let stability = self.history_stability();
         self.tune_inertia(stability);
         let divergence = pulse_vector.delta(schedule_vector).abs_mean();
+        let band_energy = (
+            schedule_signal.exploration,
+            schedule_signal.synergy,
+            schedule_signal.reinforcement,
+        );
+        let geometry = (
+            pulse.mean_support,
+            pulse.mean_confidence,
+            pulse.mean_reward as f32,
+        );
         let snapshot = GoldenCouncilSnapshot {
+            epoch,
+            high_watermark: heuristics.high_watermark(),
+            missing_ranges: heuristics.missing_ranges(),
+            winners: heuristics.top_winners(3),
+            evidence: CouncilEvidence {
+                band_energy,
+                graph_flow: pulse.synergy_score,
+                psi: pulse.mean_psi,
+                geometry,
+            },
             exploration_bias: target.exploration,
             optimization_bias: target.optimization,
             synergy_bias: target.synergy,
@@ -428,7 +453,20 @@ struct GoldenCouncilResolution {
 }
 
 #[derive(Debug, Clone)]
+pub struct CouncilEvidence {
+    pub band_energy: (f32, f32, f32),
+    pub graph_flow: f32,
+    pub psi: f32,
+    pub geometry: (f32, f32, f32),
+}
+
+#[derive(Debug, Clone)]
 pub struct GoldenCouncilSnapshot {
+    pub epoch: u64,
+    pub high_watermark: u64,
+    pub missing_ranges: Vec<(u64, u64)>,
+    pub winners: Vec<HeurOp>,
+    pub evidence: CouncilEvidence,
     pub exploration_bias: f32,
     pub optimization_bias: f32,
     pub synergy_bias: f32,
@@ -439,6 +477,17 @@ pub struct GoldenCouncilSnapshot {
     pub divergence: f32,
     pub schedule_hint: (f32, f32, f32, f32),
     pub pulse_recap: GoldenBlackcatPulse,
+}
+
+#[derive(Debug, Clone)]
+pub struct CouncilDigest {
+    pub snapshot: GoldenCouncilSnapshot,
+}
+
+impl CouncilDigest {
+    pub fn epoch(&self) -> u64 {
+        self.snapshot.epoch
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -517,6 +566,8 @@ pub struct GoldenRetriever {
     reinforcement_bias: f32,
     self_rewrite: Option<GoldenSelfRewriteState>,
     latest_council: Option<GoldenCouncilSnapshot>,
+    epoch: u64,
+    digest_subscribers: Arc<Mutex<Vec<mpsc::Sender<CouncilDigest>>>>,
 }
 
 impl GoldenRetriever {
@@ -586,6 +637,8 @@ impl GoldenRetriever {
             reinforcement_bias,
             self_rewrite,
             latest_council: None,
+            epoch: 0,
+            digest_subscribers: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -608,6 +661,34 @@ impl GoldenRetriever {
 
     pub fn last_council_snapshot(&self) -> Option<&GoldenCouncilSnapshot> {
         self.latest_council.as_ref()
+    }
+
+    pub fn last_council(&self) -> Option<GoldenCouncilSnapshot> {
+        self.latest_council.clone()
+    }
+
+    pub fn subscribe_digest(&self) -> mpsc::Receiver<CouncilDigest> {
+        let (sender, receiver) = mpsc::channel();
+        if let Ok(mut subscribers) = self.digest_subscribers.lock() {
+            subscribers.push(sender);
+        }
+        receiver
+    }
+
+    pub fn absorb_digest(&mut self, digest: CouncilDigest) -> PureResult<()> {
+        let should_update = self
+            .latest_council
+            .as_ref()
+            .map(|current| digest.snapshot.epoch > current.epoch)
+            .unwrap_or(true);
+        if should_update {
+            self.latest_council = Some(digest.snapshot.clone());
+            for worker in &self.workers {
+                let mut guard = worker.trainer.lock();
+                guard.record_golden_council(&digest.snapshot);
+            }
+        }
+        Ok(())
     }
 
     pub fn run_epoch<M, L>(
@@ -634,6 +715,8 @@ impl GoldenRetriever {
             });
         }
 
+        self.epoch = self.epoch.wrapping_add(1);
+        let current_epoch = self.epoch;
         let schedule_signal = self
             .self_rewrite
             .as_ref()
@@ -682,7 +765,12 @@ impl GoldenRetriever {
             self.broadcast_cooperative_state(&minutes, &heuristics, pulse.as_ref());
         }
         if self.self_rewrite.is_some() {
-            self.maybe_self_rewrite(schedule_signal.as_ref(), pulse.as_ref());
+            self.maybe_self_rewrite(
+                current_epoch,
+                schedule_signal.as_ref(),
+                pulse.as_ref(),
+                &heuristics,
+            );
         }
 
         Ok(GoldenEpochReport::from_stats(
@@ -729,8 +817,10 @@ impl GoldenRetriever {
 
     fn maybe_self_rewrite(
         &mut self,
+        epoch: u64,
         schedule_signal: Option<&GoldenScheduleSignal>,
         pulse: Option<&GoldenBlackcatPulse>,
+        heuristics: &HeurOpLog,
     ) {
         let Some(state) = self.self_rewrite.as_mut() else {
             return;
@@ -746,15 +836,37 @@ impl GoldenRetriever {
                 &idle
             }
         };
-        let GoldenCouncilResolution { biases, snapshot } = state.negotiate(pulse, signal);
+        let GoldenCouncilResolution { biases, snapshot } =
+            state.negotiate(epoch, pulse, signal, heuristics);
         self.exploration_bias = biases.exploration;
         self.optimization_boost = biases.optimization;
         self.synergy_bias = biases.synergy;
         self.reinforcement_bias = biases.reinforcement;
         self.latest_council = Some(snapshot.clone());
+        self.emit_council_digest(&snapshot);
         for worker in &self.workers {
             let mut guard = worker.trainer.lock();
             guard.record_golden_council(&snapshot);
+        }
+    }
+
+    fn emit_council_digest(&mut self, snapshot: &GoldenCouncilSnapshot) {
+        if let Ok(mut subscribers) = self.digest_subscribers.lock() {
+            if subscribers.is_empty() {
+                return;
+            }
+            let digest = CouncilDigest {
+                snapshot: snapshot.clone(),
+            };
+            let mut dropped = Vec::new();
+            for (idx, sender) in subscribers.iter().enumerate() {
+                if sender.send(digest.clone()).is_err() {
+                    dropped.push(idx);
+                }
+            }
+            for idx in dropped.into_iter().rev() {
+                subscribers.remove(idx);
+            }
         }
     }
 
@@ -1197,9 +1309,60 @@ mod tests {
         assert!(snapshot.momentum >= 0.0);
         assert!(snapshot.stability >= 0.0 && snapshot.stability <= 1.0);
         assert!(snapshot.schedule_hint.0 > 0.0);
+        assert!(snapshot.epoch >= 1);
+        assert!(snapshot.high_watermark >= snapshot.winners.len() as u64);
+        assert!(snapshot.evidence.graph_flow >= 0.0);
+        assert!(snapshot.evidence.geometry.0 >= 0.0);
         if let Some(last) = retriever.last_council_snapshot() {
             assert_eq!(last.schedule_hint.0, snapshot.schedule_hint.0);
         }
+        assert!(retriever.last_council().is_some());
+    }
+
+    #[test]
+    fn golden_retriever_broadcasts_council_digest() {
+        let caps = DeviceCaps::wgpu(32, true, 128);
+        let trainers = vec![
+            ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
+            ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
+        ];
+        let mut modules = Vec::new();
+        let mut schedules = Vec::new();
+        let mut losses = Vec::new();
+        let mut loaders = Vec::new();
+        for trainer in trainers.iter() {
+            let mut layer = Linear::new("lin", 2, 1).unwrap();
+            trainer.prepare(&mut layer).unwrap();
+            let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+            schedules.push(schedule);
+            modules.push(layer);
+            losses.push(MeanSquaredError::default());
+            let dataset = Dataset::from_vec(vec![
+                (
+                    crate::Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                    crate::Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+                ),
+                (
+                    crate::Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                    crate::Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+                ),
+            ]);
+            loaders.push(dataset.loader().batched(1));
+        }
+
+        let mut config = GoldenRetrieverConfig::default();
+        config.coordinate_blackcat = true;
+        config.self_rewrite = Some(GoldenSelfRewriteConfig::default());
+        let mut retriever = GoldenRetriever::new(config, trainers).unwrap();
+        let receiver = retriever.subscribe_digest();
+        let _ = retriever
+            .run_epoch(modules, losses, loaders, schedules)
+            .unwrap();
+        let digest = receiver
+            .recv_timeout(Duration::from_millis(250))
+            .expect("council digest delivered");
+        assert!(digest.epoch() >= 1);
+        assert!(digest.snapshot.high_watermark >= digest.snapshot.winners.len() as u64);
     }
 
     #[test]

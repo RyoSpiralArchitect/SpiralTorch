@@ -665,20 +665,25 @@ For longer runs the self-rewrite council now keeps a rolling transcript. The
 `with_schedule_resonance`, and `with_synergy_pressure` knobs so you can tune how
 aggressively schedule depth and Blackcat energy bend the delegates. Every epoch
 emits a `GoldenCouncilSnapshot` that summarises the negotiated biases,
-resonance, and stability alongside the pulse that triggered it. Inspect it via
-`GoldenEpochReport::council_snapshot()` or `GoldenRetriever::last_council_snapshot()`
-to plot convergence, detect oscillations, or persist the negotiated state for a
-follow-up run.
+resonance, and stability alongside the pulse that triggered it. The snapshot now
+tracks the epoch watermark, the heuristics log ranges that still need
+reconciliation, the top soft-rule winners, and a `CouncilEvidence` bundle that
+captures band energy, graph flow, ψ, and geometric cues used for the vote.
+Inspect it via `GoldenEpochReport::council_snapshot()` or the new
+`GoldenRetriever::last_council()` helper to plot convergence, detect
+oscillations, or persist the negotiated state for a follow-up run. Consumers who
+need streaming updates can subscribe with `GoldenRetriever::subscribe_digest()`
+and replay `CouncilDigest` events as nodes fall in and out of the cluster.
 
 Python callers can read the same signals via
 `spiraltorch.ModuleTrainer.last_blackcat_pulse()` and
 `last_blackcat_directive()`, which yield rich `GoldenBlackcatPulse` and
 `GoldenCooperativeDirective` wrappers. The bindings surface getters for every
 metric alongside a `pulse.directive(baseline_interval, baseline_window)` helper
-so notebooks can mirror the Rust-side retuning logic. The new
-`ModuleTrainer.last_golden_council_snapshot()` hook returns a
-`GoldenCouncilSnapshot` wrapper, giving notebooks the same council stability and
-resonance metrics that the Rust runtime observes.
+so notebooks can mirror the Rust-side retuning logic. The council feed is
+available through `ModuleTrainer.last_council()`, which returns a
+`GoldenCouncilSnapshot` wrapper that now exposes the epoch, high watermark,
+missing ranges, council evidence, and decoded winner `HeurOp`s for audit trails.
 
 ### SpiralTorchRL (hypergrad policy gradients)
 

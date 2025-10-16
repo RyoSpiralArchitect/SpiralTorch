@@ -561,6 +561,12 @@ impl ModuleTrainer {
         self.golden_council.as_ref()
     }
 
+    #[cfg(feature = "golden")]
+    /// Returns a clone of the latest council snapshot for downstream mutation.
+    pub fn last_council(&self) -> Option<GoldenCouncilSnapshot> {
+        self.golden_council.clone()
+    }
+
     /// Configures how many rewrite operations may be applied per epoch and the cooldown required
     /// before new rewrites are accepted.
     pub fn set_rewrite_budget(&mut self, per_epoch: u32, cooldown: u32) {
@@ -1436,7 +1442,12 @@ mod tests {
     use crate::layers::sequential::Sequential;
     use crate::layers::wave_gate::WaveGate;
     use crate::loss::MeanSquaredError;
+    use crate::roundtable::{HeurOp, HeurOpKind};
     use crate::schedule::RoundtableConfig;
+    use crate::CouncilEvidence;
+    use st_tensor::pure::topos::OpenCartesianTopos;
+    use std::collections::HashMap;
+    use std::time::SystemTime;
     use crate::language::{
         constant, warmup, ConceptHint, DesireAutomation, DesireLagrangian, DesirePipeline,
         DesireTrainerBridge, DesireTriggerBuffer, RepressionField, SemanticBridge, SparseKernel,
@@ -1669,7 +1680,25 @@ mod tests {
         let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
         let mut pulse = GoldenBlackcatPulse::idle();
         pulse.exploration_drive = 0.7;
+        let winner = HeurOp {
+            origin: "roundtable-1".to_string(),
+            kind: HeurOpKind::AppendSoft {
+                script: "k:topk(2)".to_string(),
+                weight: 1.2,
+            },
+            issued_at: SystemTime::now(),
+        };
         let snapshot = GoldenCouncilSnapshot {
+            epoch: 4,
+            high_watermark: 9,
+            missing_ranges: Vec::new(),
+            winners: vec![winner.clone()],
+            evidence: CouncilEvidence {
+                band_energy: (1.0, 0.8, 0.6),
+                graph_flow: 0.4,
+                psi: 0.2,
+                geometry: (0.5, 0.3, 0.1),
+            },
             exploration_bias: 1.2,
             optimization_bias: 0.95,
             synergy_bias: 1.1,
@@ -1688,5 +1717,11 @@ mod tests {
         assert!((stored.exploration_bias - 1.2).abs() < 1e-4);
         assert_eq!(stored.schedule_hint.2, 1.1);
         assert_eq!(stored.pulse_recap.exploration_drive, 0.7);
+        let winners = trainer.last_council().expect("cloneable snapshot").winners;
+        assert_eq!(winners.len(), 1);
+        match &winners[0].kind {
+            HeurOpKind::AppendSoft { weight, .. } => assert!((*weight - 1.2).abs() < 1e-4),
+            other => panic!("unexpected winner {:?}", other),
+        }
     }
 }
