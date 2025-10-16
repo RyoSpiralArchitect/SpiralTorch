@@ -10,6 +10,7 @@
 //! tape and SpiralK planners.
 
 pub mod dataset;
+pub mod gnn;
 #[cfg(feature = "golden")]
 pub mod golden;
 pub mod highlevel;
@@ -25,6 +26,7 @@ pub mod schedule;
 pub mod trainer;
 
 pub use dataset::{from_vec as dataset_from_vec, BatchIter, DataLoader, Dataset};
+pub use gnn::{GraphContext, ZSpaceGraphConvolution};
 #[cfg(feature = "golden")]
 pub use golden::{GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig};
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
