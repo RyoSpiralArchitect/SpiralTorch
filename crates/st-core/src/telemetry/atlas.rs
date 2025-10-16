@@ -374,11 +374,6 @@ impl AtlasRoute {
                     if first_collapse.is_none() {
                         first_collapse = Some(total);
                     }
-        let mut district_map: BTreeMap<String, DistrictAccumulator> = BTreeMap::new();
-        for frame in &self.frames {
-            loop_total += frame.loop_support.max(0.0);
-            if let Some(total) = frame.collapse_total {
-                if total.is_finite() {
                     summary.latest_collapse_total = Some(total);
                 }
             }
