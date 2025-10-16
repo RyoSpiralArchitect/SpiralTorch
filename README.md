@@ -1377,6 +1377,27 @@ await fractal.render(canvas);
 Pixels become Z-space relations, the scheduler keeps memory bounded, and the
 entire loop stays panic-free even under aggressive streaming.
 
+Need FFT heuristics alongside the canvas?  WebAssembly exports now ship auto
+planning helpers and CPU fallbacks:
+
+```javascript
+import init, { auto_plan_fft, fft_forward } from "./pkg/spiraltorch_wasm.js";
+
+await init();
+const plan = auto_plan_fft(512, 4096, 128, true);
+if (plan) {
+  console.log(`radix=${plan.radix} tile=${plan.tileCols}`);
+  const wgsl = plan.wgsl();
+  const spiralk = plan.spiralkHint();
+}
+
+// Run a radix-2/4 FFT on interleaved re/im data
+const freqDomain = fft_forward(timeDomainBuffer);
+```
+
+If you maintain a `WasmTuner`, call `planFft` to reuse your override table and
+capture WGSL/SpiralK artifacts without leaving the browser.
+
 ---
 
 ## Heuristics (SpiralK) — optional & powerful
