@@ -36,15 +36,13 @@ use st_core::backend::unison_heuristics::RankKind;
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
-#[cfg(any(feature = "psi", feature = "psychoid"))]
-use st_core::telemetry::hub;
+use st_core::telemetry::hub::{self, SoftlogicZFeedback};
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter, PsychoidReading};
 use st_tensor::pure::topos::OpenCartesianTopos;
 use std::collections::HashMap;
-#[cfg(feature = "psi")]
 use std::env;
 use std::time::{Duration, Instant};
 
@@ -62,6 +60,7 @@ pub struct ModuleTrainer {
     distribution: Option<RoundtableNode>,
     meta_conductor: Option<MetaConductor>,
     heur_log: HeurOpLog,
+    softlogic: SoftLogicFlex,
     #[cfg(feature = "psi")]
     psi: Option<PsiMeter>,
     #[cfg(feature = "psychoid")]
@@ -85,6 +84,114 @@ impl core::fmt::Debug for ModuleTrainer {
 /// Function pointer used to convert band energy into Above/Here/Beneath weights.
 pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
 
+#[derive(Debug, Clone)]
+struct SoftLogicFlex {
+    inertia: f32,
+    drift_gain: f32,
+    psi_gain: f32,
+    loss_gain: f32,
+    floor: f32,
+    last_weights: (f32, f32, f32),
+    last_z: f32,
+    last_feedback: Option<SoftlogicZFeedback>,
+}
+
+impl SoftLogicFlex {
+    fn new() -> Self {
+        let mut flex = Self {
+            inertia: env::var("SPIRAL_SOFTLOGIC_INERTIA")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|v| v.clamp(0.0, 0.95))
+                .unwrap_or(0.65),
+            drift_gain: env::var("SPIRAL_SOFTLOGIC_DRIFT_GAIN")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|v| v.clamp(0.0, 1.0))
+                .unwrap_or(0.25),
+            psi_gain: env::var("SPIRAL_SOFTLOGIC_PSI_GAIN")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|v| v.clamp(0.0, 2.0))
+                .unwrap_or(0.5),
+            loss_gain: env::var("SPIRAL_SOFTLOGIC_LOSS_GAIN")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|v| v.clamp(0.0, 1.5))
+                .unwrap_or(0.35),
+            floor: env::var("SPIRAL_SOFTLOGIC_FLOOR")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|v| v.clamp(0.05, 1.0))
+                .unwrap_or(0.25),
+            last_weights: (1.0, 1.0, 1.0),
+            last_z: 0.0,
+            last_feedback: None,
+        };
+        if flex.inertia >= 0.95 {
+            flex.inertia = 0.95;
+        }
+        flex
+    }
+
+    fn prepare_weights(&mut self, band_energy: &BandEnergy) -> (f32, f32, f32) {
+        let norm = (band_energy.above.abs() + band_energy.here.abs() + band_energy.beneath.abs())
+            .max(1e-4);
+        let asymmetry = (band_energy.above - band_energy.beneath) / norm;
+        let drift_term = band_energy.drift.tanh();
+        let z_bias = self
+            .last_feedback
+            .as_ref()
+            .map(|feedback| feedback.z_signal)
+            .unwrap_or(self.last_z);
+        let target_above = 1.0 + (asymmetry * self.drift_gain) + (z_bias * self.psi_gain);
+        let target_here =
+            1.0 + ((band_energy.here / norm) - (band_energy.drift.abs() / norm)) * self.loss_gain;
+        let target_beneath = 1.0 - (asymmetry * self.drift_gain) - (z_bias * self.psi_gain)
+            + (-drift_term * self.drift_gain * 0.5);
+
+        let target = (
+            target_above.clamp(self.floor, 3.0),
+            target_here.clamp(self.floor, 2.5),
+            target_beneath.clamp(self.floor, 3.0),
+        );
+        self.last_weights = (
+            Self::lerp(self.last_weights.0, target.0, 1.0 - self.inertia),
+            Self::lerp(self.last_weights.1, target.1, 1.0 - self.inertia),
+            Self::lerp(self.last_weights.2, target.2, 1.0 - self.inertia),
+        );
+        self.last_weights
+    }
+
+    fn observe(
+        &mut self,
+        band_energy: &BandEnergy,
+        weighted_loss: f32,
+        psi_total: Option<f32>,
+    ) -> SoftlogicZFeedback {
+        let psi_total = psi_total.unwrap_or(0.0);
+        let total = (band_energy.above + band_energy.here + band_energy.beneath).max(1e-4);
+        let asym = (band_energy.above - band_energy.beneath) / total;
+        let drift = band_energy.drift;
+        let raw_signal = 0.6 * (psi_total - weighted_loss) + 0.3 * asym + 0.1 * drift;
+        let z_signal = raw_signal.tanh();
+        self.last_z = Self::lerp(self.last_z, z_signal, 1.0 - self.inertia);
+        let feedback = SoftlogicZFeedback {
+            psi_total,
+            weighted_loss,
+            band_energy: (band_energy.above, band_energy.here, band_energy.beneath),
+            drift,
+            z_signal: self.last_z,
+        };
+        self.last_feedback = Some(feedback);
+        feedback
+    }
+
+    fn lerp(current: f32, target: f32, factor: f32) -> f32 {
+        current + (target - current) * factor
+    }
+}
+
 impl ModuleTrainer {
     /// Creates a new trainer with the provided device capabilities and learning rates.
     pub fn new(
@@ -94,7 +201,8 @@ impl ModuleTrainer {
         fallback_learning_rate: f32,
     ) -> Self {
         #[cfg(feature = "psi")]
-        let (psi, psi_log) = Self::init_psi_meter();
+        let psi = Self::init_psi_meter();
+
         Self {
             planner: RankPlanner::new(caps),
             curvature,
@@ -108,8 +216,9 @@ impl ModuleTrainer {
             distribution: None,
             meta_conductor: None,
             heur_log: HeurOpLog::default(),
+            softlogic: SoftLogicFlex::new(),
             #[cfg(feature = "psi")]
-            psi: Self::init_psi_meter(),
+            psi,
             #[cfg(feature = "psychoid")]
             psychoid: None,
             #[cfg(feature = "psychoid")]
@@ -121,8 +230,6 @@ impl ModuleTrainer {
 
     #[cfg(feature = "psi")]
     fn init_psi_meter() -> Option<PsiMeter> {
-        use std::env;
-
         let enabled = env::var("SPIRAL_PSI")
             .map(|value| {
                 matches!(
@@ -372,19 +479,21 @@ impl ModuleTrainer {
                 band_energy.drift = rt.frac_penalty() as f32;
             }
             let mut bands: GradientBands = schedule.split(&grad_output)?;
-            let weights = self
-                .band_weight_fn
-                .map(|f| f(band_energy))
-                .unwrap_or((1.0, 1.0, 1.0));
+            let mut weights = self.softlogic.prepare_weights(&band_energy);
+            if let Some(f) = self.band_weight_fn {
+                let override_weights = f(band_energy);
+                weights.0 *= override_weights.0;
+                weights.1 *= override_weights.1;
+                weights.2 *= override_weights.2;
+            }
             bands.scale_inplace(weights.0, weights.1, weights.2);
-            let weighted_loss = if self.band_weight_fn.is_some() {
-                let effective = weights.1 + 0.5 * (weights.0 + weights.2);
-                step_loss * effective.max(0.0)
-            } else {
-                step_loss
-            };
+            let weight_mean = (weights.0 + weights.1 + weights.2) / 3.0;
+            let weighted_loss = step_loss * weight_mean.max(0.0);
             total_loss += weighted_loss;
             let mut extra = HashMap::new();
+            extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
+            extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
+            extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
             let _ = module.backward_bands(&input, &bands)?;
             #[cfg(feature = "psychoid")]
             let mut psychoid_events = 0usize;
@@ -479,6 +588,21 @@ impl ModuleTrainer {
                     DriveCmd::None => {}
                 }
             }
+            let psi_total_opt: Option<f32> = {
+                #[cfg(feature = "psi")]
+                {
+                    psi_snapshot.as_ref().map(|reading| reading.total.max(0.0))
+                }
+                #[cfg(not(feature = "psi"))]
+                {
+                    None
+                }
+            };
+            let z_feedback = self
+                .softlogic
+                .observe(&band_energy, weighted_loss, psi_total_opt);
+            hub::set_softlogic_z(z_feedback);
+            extra.insert("softlogic_z".to_string(), z_feedback.z_signal as f64);
             if let Some(node) = self.distribution.as_mut() {
                 let outcome = OutcomeBand::from_weights(
                     band_energy.above,
@@ -492,25 +616,16 @@ impl ModuleTrainer {
                 };
                 let signature = plan_signature(plan, outcome);
                 let script_hint = plan.choice.to_unison_script(plan.kind).replace('\n', "; ");
-                let psi_total = {
-                    #[cfg(feature = "psi")]
-                    {
-                        psi_snapshot.as_ref().map(|reading| reading.total.max(0.0))
-                    }
-                    #[cfg(not(feature = "psi"))]
-                    {
-                        None
-                    }
-                };
                 if let Some(summary) = node.record_decision(
                     signature,
                     script_hint,
                     plan.kind,
                     outcome,
                     (1.0 / (1.0 + weighted_loss.abs())).clamp(0.0, 1.0),
-                    psi_total,
+                    psi_total_opt,
                     (band_energy.above, band_energy.here, band_energy.beneath),
                     band_energy.drift,
+                    z_feedback.z_signal,
                 ) {
                     if let Some(moderator) = self.blackcat_moderator.as_mut() {
                         let outcome = moderator.ingest(summary.clone());
