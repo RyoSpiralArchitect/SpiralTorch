@@ -21,8 +21,9 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+#[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 
 #[cfg(feature = "psi")]
 use super::psi::PsiReading;
@@ -63,4 +64,40 @@ pub fn get_last_psychoid() -> Option<PsychoidReading> {
         .read()
         .ok()
         .and_then(|guard| guard.as_ref().cloned())
+}
+
+/// Latest SoftLogic-derived telemetry that has been fed back into the "Z" control space.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SoftlogicZFeedback {
+    /// Aggregate PSI total used when the sample was recorded.
+    pub psi_total: f32,
+    /// Weighted loss that triggered the feedback pulse.
+    pub weighted_loss: f32,
+    /// Above/Here/Beneath energy tuple at the moment of sampling.
+    pub band_energy: (f32, f32, f32),
+    /// Drift term captured from the gradient bands.
+    pub drift: f32,
+    /// Normalized control signal in the Z space. Positive values bias Above, negative bias Beneath.
+    pub z_signal: f32,
+}
+
+static LAST_SOFTLOGIC_Z: OnceLock<RwLock<Option<SoftlogicZFeedback>>> = OnceLock::new();
+
+fn softlogic_z_cell() -> &'static RwLock<Option<SoftlogicZFeedback>> {
+    LAST_SOFTLOGIC_Z.get_or_init(|| RwLock::new(None))
+}
+
+/// Stores the most recent SoftLogic Z feedback sample.
+pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
+    if let Ok(mut guard) = softlogic_z_cell().write() {
+        *guard = Some(feedback);
+    }
+}
+
+/// Returns the latest SoftLogic Z feedback sample if one has been recorded.
+pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
+    softlogic_z_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().copied())
 }

@@ -13,5 +13,4 @@ pub mod runtime;
 pub mod theory;
 pub mod util;
 
-#[cfg(any(feature = "psi", feature = "psychoid"))]
 pub mod telemetry;
