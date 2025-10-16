@@ -33,8 +33,6 @@ use st_core::telemetry::hub::{
     self, DesireAvoidanceTelemetry, DesirePhaseTelemetry, DesireStepTelemetry,
     DesireTriggerTelemetry, DesireWeightsTelemetry, SoftlogicZFeedback,
 };
-use st_core::telemetry::hub::SoftlogicZFeedback;
-use st_core::telemetry::hub::{self, DesirePhaseTelemetry, DesireStepTelemetry};
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::{PsiComponent, PsiEvent, PsiReading};
 
