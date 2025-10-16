@@ -243,6 +243,7 @@ impl CausalGraph {
                 ExecutionDecision::Skip(SkipReason::LowEffect) => {
                     active_effect.insert(id, 1.0);
                 }
+                _ => {
                 ExecutionDecision::Skip(_) => {
                     active_effect.insert(id, 0.0);
                 }

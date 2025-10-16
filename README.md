@@ -501,6 +501,15 @@ condenses the same window into aggregate trends and maintainer hints:
 
 ```python
 summary = session.atlas_route_summary(limit=12)
+print(
+    summary.frames,
+    summary.mean_loop_support,
+    summary.loop_std,
+    summary.collapse_trend,
+    summary.z_signal_trend,
+)
+for district in summary.districts():
+    print(district.name, district.coverage, district.delta, district.std_dev)
 print(summary.frames, summary.mean_loop_support)
 for district in summary.districts():
     print(district.name, district.coverage, district.delta)
@@ -509,8 +518,10 @@ if summary.maintainer_status:
 ```
 
 The summary keeps track of recent clamp/pressure recommendations, script hints,
-and average loop support so dashboards can surface the “city heartbeat” without
-iterating over each frame.
+and now reports **loop volatility** (`loop_std`) alongside collapse/Z drift so
+dashboards can surface the “city heartbeat” without iterating over each frame.
+District summaries additionally carry a standard deviation so you can flag
+which neighbourhoods are swinging the hardest even when their means stay flat.
 
 ### Self-maintaining feedback loops
 
