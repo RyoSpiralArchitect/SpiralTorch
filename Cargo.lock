@@ -1874,6 +1874,8 @@ dependencies = [
  "bytemuck",
  "faer",
  "pollster",
+ "rand",
+ "rand_distr",
  "wgpu",
 ]
 

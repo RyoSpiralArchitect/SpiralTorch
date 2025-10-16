@@ -344,8 +344,8 @@ fn z_space_barycenter_inner(
         normalised.push(normalise_distribution(guard, density)?);
     }
 
-    let baseline = weighted_baseline(weights, &normalised, weight_sum)?;
-    let bary = barycenter_mode(weights, &normalised, effective_weight)?;
+    let baseline = weighted_baseline(guard, weights, &normalised, weight_sum)?;
+    let bary = barycenter_mode(guard, weights, &normalised, effective_weight)?;
     let bary_tensor = Tensor::from_vec(rows, cols, bary.clone())?;
     let kl_min = {
         let mut acc = 0.0f32;

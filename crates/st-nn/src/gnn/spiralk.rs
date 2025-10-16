@@ -7,7 +7,6 @@ use super::handoff::{fold_with_band_energy, QuadBandEnergy};
 use crate::schedule::BandEnergy;
 use crate::PureResult;
 use st_core::telemetry::xai::GraphFlowTracer;
-use st_tensor::pure::TensorError;
 use std::sync::{Arc, Mutex};
 
 /// Bridge that translates graph flow telemetry into SpiralK-friendly hints and
@@ -53,16 +52,13 @@ impl GraphConsensusBridge {
     /// `Ok(None)` if the tracer has not recorded any layers since the previous
     /// call.
     pub fn digest(&self, baseline: &BandEnergy) -> PureResult<Option<GraphConsensusDigest>> {
-        let mut tracer = self
-            .tracer
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        let reports = tracer.drain();
-        let mut tracer = self.tracer.lock().map_err(|_| TensorError::InvalidValue {
-            label: "graph flow tracer poisoned",
-        })?;
-        let reports = tracer.drain();
-        drop(tracer);
+        let reports = {
+            let mut tracer = self
+                .tracer
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            tracer.drain()
+        };
         if reports.is_empty() {
             return Ok(None);
         }
@@ -242,17 +238,17 @@ mod tests {
             .lock()
             .map(|mut guard| guard.begin_layer("gnn::conv1", -1.0, sample_flows(0.5)))
             .unwrap_or_else(|poison| {
-                poison
-                    .into_inner()
-                    .begin_layer("gnn::conv1", -1.0, sample_flows(0.5))
+                let mut guard = poison.into_inner();
+                guard.begin_layer("gnn::conv1", -1.0, sample_flows(0.5));
             });
         tracer
             .lock()
             .map(|mut guard| guard.record_weight_update(0.1, Some(0.05)))
-            .unwrap_or_else(|poison| poison.into_inner().record_weight_update(0.1, Some(0.05)));
-            .unwrap()
-            .begin_layer("gnn::conv1", -1.0, sample_flows(0.5));
-        tracer.lock().unwrap().record_weight_update(0.1, Some(0.05));
+            .unwrap_or_else(|poison| {
+                poison
+                    .into_inner()
+                    .record_weight_update(0.1, Some(0.05));
+            });
         let digest = bridge.digest(&baseline).unwrap().unwrap();
         assert!(digest.graph_energy > 0.0);
         assert_eq!(digest.layer_count(), 1);
