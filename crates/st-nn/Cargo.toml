@@ -21,6 +21,7 @@ golden = ["st-core/golden"]
 st-tensor = { path = "../st-tensor" }
 st-core = { path = "../st-core" }
 st-frac = { path = "../st-frac" }
+st-text = { path = "../st-text" }
 futures = "0.3"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }

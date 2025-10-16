@@ -109,39 +109,60 @@ fn barycenter_objective(
     normalised: &[Vec<f32>],
     entropy_weight: f32,
     coupling_energy: f32,
+    kl_min: f32,
 ) -> PureResult<(f32, f32, f32)> {
-    let mut kl_acc = 0.0f32;
+    let mut raw_kl = 0.0f32;
     for (weight, dist) in weights.iter().zip(normalised.iter()) {
-        kl_acc += *weight * kl_divergence(candidate, dist)?;
+        raw_kl += *weight * kl_divergence(candidate, dist)?;
     }
+    let kl_energy = (raw_kl - kl_min).max(0.0);
     let entropy_value = entropy(candidate);
     Ok((
-        kl_acc,
+        kl_energy,
         entropy_value,
-        kl_acc + entropy_weight * entropy_value + coupling_energy,
+        kl_energy + entropy_weight * entropy_value + coupling_energy,
     ))
 }
 
-fn barycenter_intermediates(
+fn weighted_baseline(
     weights: &[f32],
     normalised: &[Vec<f32>],
     weight_sum: f32,
-    bary: &[f32],
-    entropy_weight: f32,
-    coupling_energy: f32,
-    rows: usize,
-    cols: usize,
-) -> PureResult<Vec<BarycenterIntermediate>> {
-    let mut baseline = vec![0.0f32; bary.len()];
+) -> PureResult<Vec<f32>> {
+    let volume = normalised
+        .get(0)
+        .map(|dist| dist.len())
+        .ok_or(TensorError::EmptyInput("z_space_barycenter"))?;
+    let mut baseline = vec![0.0f32; volume];
     for (weight, dist) in weights.iter().zip(normalised.iter()) {
         for (slot, value) in baseline.iter_mut().zip(dist.iter()) {
-            *slot += *weight * *value;
+            *slot += *weight * guard_probability_mass("baseline component", *value)?;
         }
+    }
+    if weight_sum <= 0.0 {
+        return Err(TensorError::NonFiniteValue {
+            label: "weight_sum",
+            value: weight_sum,
+        });
     }
     for value in baseline.iter_mut() {
         *value /= weight_sum;
+        *value = guard_probability_mass("baseline component", *value)?;
     }
+    Ok(baseline)
+}
 
+fn barycenter_intermediates(
+    baseline: &[f32],
+    bary: &[f32],
+    weights: &[f32],
+    normalised: &[Vec<f32>],
+    entropy_weight: f32,
+    coupling_energy: f32,
+    kl_min: f32,
+    rows: usize,
+    cols: usize,
+) -> PureResult<Vec<BarycenterIntermediate>> {
     let schedule = [0.0f32, 0.25, 0.5, 0.75, 1.0];
     let mut intermediates = Vec::with_capacity(schedule.len());
     for &alpha in &schedule {
@@ -163,8 +184,14 @@ fn barycenter_intermediates(
         for value in mix.iter_mut() {
             *value /= total;
         }
-        let (kl_energy, entropy_value, objective) =
-            barycenter_objective(&mix, weights, normalised, entropy_weight, coupling_energy)?;
+        let (kl_energy, entropy_value, objective) = barycenter_objective(
+            &mix,
+            weights,
+            normalised,
+            entropy_weight,
+            coupling_energy,
+            kl_min,
+        )?;
         intermediates.push(BarycenterIntermediate {
             interpolation: alpha,
             density: Tensor::from_vec(rows, cols, mix.clone())?,
@@ -290,9 +317,10 @@ pub fn z_space_barycenter(
         normalised.push(normalise_distribution(density)?);
     }
 
+    let baseline = weighted_baseline(weights, &normalised, weight_sum)?;
     let bary = barycenter_mode(weights, &normalised, effective_weight)?;
     let bary_tensor = Tensor::from_vec(rows, cols, bary.clone())?;
-    let kl_energy = {
+    let kl_min = {
         let mut acc = 0.0f32;
         for (weight, dist) in weights.iter().zip(normalised.iter()) {
             acc += *weight * kl_divergence(&bary, dist)?;
@@ -326,20 +354,21 @@ pub fn z_space_barycenter(
     };
 
     let intermediates = barycenter_intermediates(
+        &baseline,
+        &bary,
         weights,
         &normalised,
-        weight_sum,
-        &bary,
         entropy_weight,
         coupling_energy,
+        kl_min,
         rows,
         cols,
     )?;
 
     Ok(ZSpaceBarycenter {
-        objective: kl_energy + entropy_weight * entropy_value + coupling_energy,
+        objective: entropy_weight * entropy_value + coupling_energy,
         density: bary_tensor,
-        kl_energy,
+        kl_energy: 0.0,
         entropy: entropy_value,
         coupling_energy,
         effective_weight,
@@ -426,8 +455,8 @@ mod tests {
                 let out_row = &mut out.data_mut()[r * cols..(r + 1) * cols];
                 for c in 0..channels {
                     for x in 0..width {
-                        let src = (x + element) % width;
-                        out_row[c * width + x] = row[c * width + src];
+                        let dest = (x + element) % width;
+                        out_row[c * width + dest] = row[c * width + x];
                     }
                 }
             }

@@ -34,7 +34,10 @@ pub use gnn::{
     ZSpaceGraphConvolution,
 };
 #[cfg(feature = "golden")]
-pub use golden::{GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig};
+pub use golden::{
+    GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenEpochReport, GoldenRetriever,
+    GoldenRetrieverConfig,
+};
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
@@ -53,7 +56,10 @@ pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
 pub use layers::{Relu, ToposResonator, ZSpaceMixer};
-pub use lightning::{LightningBuilder, LightningConfig, LightningConfigBuilder, SpiralLightning};
+pub use lightning::{
+    LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,
+    LightningStage, LightningStageReport, SpiralLightning,
+};
 pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
 pub use plan::RankPlanner;
@@ -65,7 +71,9 @@ pub use roundtable::{
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use trainer::{EpochStats, ModuleTrainer};
 
+pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};
 pub use st_tensor::pure::topos::OpenCartesianTopos;
 pub use st_tensor::pure::{
     AmegaHypergrad, ComplexTensor, LanguageWaveEncoder, PureResult, Tensor, TensorError,
 };
+pub use st_text::{ResonanceNarrative, TextResonator};
