@@ -5,7 +5,7 @@
 
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
-use st_tensor::pure::{
+use st_tensor::{
     topos::{OpenCartesianTopos, RewriteMonad},
     LanguageWaveEncoder,
 };

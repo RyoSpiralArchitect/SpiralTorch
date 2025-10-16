@@ -19,4 +19,10 @@ pub use backend::wgpu_frac;
 #[cfg(feature = "wgpu")]
 pub use backend::wgpu_dense;
 
-pub mod pure;
+mod pure;
+
+#[doc = "Re-exported for convenience."]
+pub use pure::*;
+
+#[doc = "Re-exported for convenience."]
+pub use pure::wasm_canvas;

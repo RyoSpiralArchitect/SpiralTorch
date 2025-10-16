@@ -245,9 +245,7 @@ mod tests {
             .lock()
             .map(|mut guard| guard.record_weight_update(0.1, Some(0.05)))
             .unwrap_or_else(|poison| {
-                poison
-                    .into_inner()
-                    .record_weight_update(0.1, Some(0.05));
+                poison.into_inner().record_weight_update(0.1, Some(0.05));
             });
         let digest = bridge.digest(&baseline).unwrap().unwrap();
         assert!(digest.graph_energy > 0.0);
