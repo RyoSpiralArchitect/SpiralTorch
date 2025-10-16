@@ -74,7 +74,7 @@ use st_rl::{EpisodeReport as RlEpisodeReport, SpiralPolicyGradient, SpiralRlErro
 use st_tensor::backend::faer_dense;
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense as tensor_wgpu_dense;
-use st_tensor::pure::{
+use st_tensor::{
     measure::{
         z_space_barycenter as rust_z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter,
     },

@@ -7,8 +7,8 @@ use super::GraphContext;
 use crate::schedule::{BandEnergy, RoundtableSchedule};
 use crate::{PureResult, Tensor, TensorError};
 use st_core::telemetry::xai::{GraphLayerReport, NodeFlowSample};
-use st_tensor::pure::topos::TensorBiome;
-use st_tensor::pure::{OpenCartesianTopos, RewriteMonad};
+use st_tensor::topos::TensorBiome;
+use st_tensor::{OpenCartesianTopos, RewriteMonad};
 
 /// Result of embedding a graph propagation step inside an open-cartesian topos biome.
 #[derive(Debug)]

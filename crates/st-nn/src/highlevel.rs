@@ -18,8 +18,8 @@ use st_core::telemetry::chrono::{
 };
 use st_core::telemetry::hub;
 use st_core::telemetry::maintainer::{Maintainer, MaintainerConfig, MaintainerReport};
-use st_tensor::pure::measure::{z_space_barycenter, z_space_barycenter_guarded, ZSpaceBarycenter};
-use st_tensor::pure::{
+use st_tensor::measure::{z_space_barycenter, z_space_barycenter_guarded, ZSpaceBarycenter};
+use st_tensor::{
     AmegaHypergrad, DifferentialResonance, FunctorDifferential, HomotopyDifferential,
     InfinityDifferential, OpenCartesianTopos, PureResult, RecursiveDifferential, RewriteMonad,
     SpiralDifferential, Tensor, TensorError,
@@ -1066,7 +1066,7 @@ mod tests {
     use crate::loss::MeanSquaredError;
     use st_core::telemetry::hub;
     use st_core::telemetry::maintainer::MaintainerStatus;
-    use st_tensor::pure::measure::BarycenterIntermediate;
+    use st_tensor::measure::BarycenterIntermediate;
 
     fn toy_tensor(a: &[f32]) -> Tensor {
         Tensor::from_vec(1, a.len(), a.to_vec()).unwrap()

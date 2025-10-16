@@ -1181,7 +1181,7 @@ print("updated weights", weights.tolist())
   the fractal scheduler without leaving Rust or allocating intermediate
   buffers.
 - Blend chart priors with the new `z_space_barycenter` solver—available in
-  Rust (`st_tensor::pure::measure`) and Python (`spiraltorch.z_space_barycenter`)—to
+  Rust (`st_tensor::z_space_barycenter`) and Python (`spiraltorch.z_space_barycenter`)—to
   wire colour energy directly into the Z-space roundtable.
 - Follow the barycenter's loss-monotone intermediates and feed them straight into
   the hypergradient tape with `Hypergrad.accumulate_barycenter_path` so the
@@ -1380,7 +1380,7 @@ let _ = trainer.train_epoch(&mut model, &mut mse, dataset, &schedule)?;
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{ModuleTrainer, RoundtableConfig, Tensor, ToposResonator, WaveGate, ZSpaceProjector};
-use st_tensor::pure::{topos::OpenCartesianTopos, LanguageWaveEncoder};
+use st_tensor::{topos::OpenCartesianTopos, LanguageWaveEncoder};
 
 let encoder = LanguageWaveEncoder::new(-0.9, 0.7)?;
 let topos = OpenCartesianTopos::new(-0.9, 1e-6, 1e4, 512, 16_384)?;
@@ -1489,8 +1489,8 @@ latest relation patches in a Tokio-uring style queue, blends them by coherence,
 and hands the result straight to your browser front-end.
 
 ```rust
-use st_tensor::pure::{Tensor, PureResult};
-use st_tensor::pure::fractal::{FractalPatch, UringFractalScheduler};
+use st_tensor::{Tensor, PureResult};
+use st_tensor::fractal::{FractalPatch, UringFractalScheduler};
 
 async fn stream_waveforms(samples: Vec<Tensor>) -> PureResult<Tensor> {
     let scheduler = UringFractalScheduler::new(32)?;
@@ -1507,7 +1507,7 @@ For browser builds, wire the folded relation into a WebAssembly export that
 paints onto `<canvas>` without tokenising text or duplicating buffers:
 
 ```rust
-use st_tensor::pure::fractal::UringFractalScheduler;
+use st_tensor::fractal::UringFractalScheduler;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};

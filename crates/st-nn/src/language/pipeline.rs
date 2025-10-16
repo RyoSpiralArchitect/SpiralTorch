@@ -23,7 +23,7 @@ use st_core::ecosystem::{
 };
 use st_core::ops::rank_entry::RankPlan;
 use st_core::util::math::{ramanujan_pi, LeechProjector};
-use st_tensor::pure::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
+use st_tensor::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
 use std::collections::HashMap;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
