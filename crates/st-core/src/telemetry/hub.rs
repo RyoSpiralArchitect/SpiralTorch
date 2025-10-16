@@ -26,12 +26,15 @@ use once_cell::sync::Lazy;
 use std::sync::{OnceLock, RwLock};
 
 #[cfg(feature = "psi")]
-use super::psi::PsiReading;
+use super::psi::{PsiEvent, PsiReading};
 #[cfg(feature = "psychoid")]
 use super::psychoid::PsychoidReading;
 
 #[cfg(feature = "psi")]
 static LAST_PSI: Lazy<RwLock<Option<PsiReading>>> = Lazy::new(|| RwLock::new(None));
+
+#[cfg(feature = "psi")]
+static LAST_PSI_EVENTS: Lazy<RwLock<Vec<PsiEvent>>> = Lazy::new(|| RwLock::new(Vec::new()));
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi(reading: &PsiReading) {
@@ -46,6 +49,22 @@ pub fn get_last_psi() -> Option<PsiReading> {
         .read()
         .ok()
         .and_then(|guard| guard.as_ref().cloned())
+}
+
+#[cfg(feature = "psi")]
+pub fn set_last_psi_events(events: &[PsiEvent]) {
+    if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
+        guard.clear();
+        guard.extend(events.iter().cloned());
+    }
+}
+
+#[cfg(feature = "psi")]
+pub fn get_last_psi_events() -> Vec<PsiEvent> {
+    LAST_PSI_EVENTS
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
 }
 
 #[cfg(feature = "psychoid")]
