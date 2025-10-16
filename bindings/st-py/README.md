@@ -326,8 +326,10 @@ print(resonance.homotopy_flow().tolist())
 Temporal telemetry is available directly from Python. Record frames with
 `session.resonate_over_time(resonance, dt)` and animate the geometry through the
 new helpers. Use `timeline_summary` for rolling drift/energy stats,
-`timeline_harmonics` to analyse spectral drift, and `session.speak(...)` for a
-ready-to-plot amplitude trace while `timeline_story` narrates the same window:
+`timeline_harmonics` to analyse spectral drift, `loop_signal` for a ready-made
+bundle (complete with SpiralK hints when `kdsl` is enabled), and `session.speak(...)`
+for a ready-to-plot amplitude trace while `timeline_story` narrates the same
+window:
 
 ```python
 frame = session.resonate_over_time(resonance, dt=0.1)
@@ -336,6 +338,7 @@ print(frame.timestamp, frame.total_energy, frame.curvature_drift)
 frames = session.timeline(timesteps=64)
 summary = session.timeline_summary(timesteps=64)
 harmonics = session.timeline_harmonics(timesteps=128, bins=20)
+loop_signal = session.loop_signal(timesteps=128)
 times, energy, drift = session.animate_resonance(timesteps=64)
 wave = session.speak(timesteps=64, temperature=0.6)
 story, highlights = session.timeline_story(timesteps=128, temperature=0.65)
@@ -343,6 +346,8 @@ print(session.describe())
 print(st.describe_timeline(frames))
 if harmonics and harmonics.dominant_energy:
     print("Energy harmonic", harmonics.dominant_energy.frequency)
+if loop_signal and loop_signal.spiralk_script:
+    print("SpiralK loop hint:\n", loop_signal.spiralk_script)
 
 encoder = LanguageWaveEncoder(session.curvature(), 0.55)
 wave = encoder.speak(frames)
@@ -366,11 +371,15 @@ session = builder.build()
 
 print(session.maintainer_config())
 report = session.self_maintain()
+print(report.spiralk_script)
 if report.should_rewrite():
     session.configure_maintainer(pressure_step=0.2)
     print("Maintainer escalated:", report.diagnostic)
 if report.drift_peak:
     print("Drift harmonic", report.drift_peak.frequency, report.drift_peak.magnitude)
+pulse = session.collapse_pulse()
+if pulse:
+    print("Collapse pulse", pulse.command, pulse.step)
 ```
 
 ```python

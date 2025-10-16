@@ -27,6 +27,8 @@
 //! curvature jitter, energy trends, and dormancy so higher level tooling can decide when to
 //! tighten geometry clamps or escalate into a full self-rewrite cycle.
 
+#[cfg(feature = "kdsl")]
+use super::chrono::ChronoLoopSignal;
 use super::chrono::{ChronoFrame, ChronoHarmonics, ChronoPeak, ChronoSummary};
 
 /// Indicates the level of maintenance required to stabilise the session.
@@ -139,6 +141,9 @@ pub struct MaintainerReport {
     pub suggested_pressure: Option<f32>,
     /// Human-readable diagnostics summarising the decision.
     pub diagnostic: String,
+    /// Synthesised SpiralK script mirroring the temporal telemetry.
+    #[cfg(feature = "kdsl")]
+    pub spiralk_script: Option<String>,
 }
 
 impl MaintainerReport {
@@ -175,6 +180,8 @@ impl Maintainer {
                 suggested_max_scale: None,
                 suggested_pressure: None,
                 diagnostic: "No temporal frames recorded; timeline is dormant.".to_string(),
+                #[cfg(feature = "kdsl")]
+                spiralk_script: None,
             };
         }
 
@@ -194,6 +201,9 @@ impl Maintainer {
         let energy_peak = harmonics
             .as_ref()
             .and_then(|spec| spec.dominant_energy.clone());
+        #[cfg(feature = "kdsl")]
+        let spiralk_script =
+            ChronoLoopSignal::new(summary.clone(), harmonics.clone()).spiralk_script;
 
         let growth = (-mean_decay).max(0.0);
         let mut status = if mean_energy <= self.config.energy_floor {
@@ -283,6 +293,8 @@ impl Maintainer {
             suggested_max_scale,
             suggested_pressure,
             diagnostic: reasons.join("; "),
+            #[cfg(feature = "kdsl")]
+            spiralk_script,
         }
     }
 }

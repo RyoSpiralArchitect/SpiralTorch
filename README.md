@@ -254,19 +254,26 @@ print(frame.timestamp, frame.total_energy)
 frames = session.timeline(timesteps=128)
 summary = session.timeline_summary(timesteps=128)
 harmonics = session.timeline_harmonics(timesteps=256, bins=24)
+loop_signal = session.loop_signal(timesteps=256)
 times, energy, drift = session.animate_resonance(timesteps=128)
 wave = session.speak(timesteps=128, temperature=0.7)
 story, highlights = session.timeline_story(timesteps=256, temperature=0.65)
+
+if loop_signal and loop_signal.spiralk_script:
+    print("SpiralK hint:")
+    print(loop_signal.spiralk_script)
 ```
 
 `ChronoFrame` surfaces per-band energy, curvature drift, and decay estimates so
 you can chart living topology directly in notebooks. Reach for
 `session.timeline_summary()` when you want windowed drift/energy statistics or
 `session.timeline_harmonics()` to expose dominant oscillations inside the
-timeline. `session.speak(...)` still generates a playback-ready amplitude trace,
-while `session.timeline_story(...)` and `session.describe()` synthesise natural
-language narratives about the latest state (or pass an explicit `resonance`
-snapshot to ground the narration in a fresh observation):
+timeline. `session.loop_signal(...)` folds both into a reusable bundle that
+includes a SpiralK script (when the `kdsl` feature is enabled) so heuristics can
+be replayed across devices. `session.speak(...)` still generates a playback-ready
+amplitude trace, while `session.timeline_story(...)` and `session.describe()`
+synthesise natural language narratives about the latest state (or pass an
+explicit `resonance` snapshot to ground the narration in a fresh observation):
 
 ```python
 print(session.describe())
@@ -302,6 +309,11 @@ peaks are now included in every report so you can see whether high-frequency
 jitter or runaway energy oscillations triggered an intervention. Override the
 defaults on-the-fly with `session.configure_maintainer(...)` to experiment with
 more aggressive rewrite policies or relaxed dormancy thresholds.
+
+Maintainer reports now ship with the same SpiralK snippet the session pushes into
+the chrono loop, and `session.collapse_pulse()` returns the latest CollapseDrive
+command (including any associated loop signal) so distributed nodes can stay in
+lockstep without bespoke plumbing.
 
 On the audio front, `LanguageWaveEncoder.speak(frames)` maps chrono timelines to
 wave amplitudes, and the higher-level `TextResonator` class lets Rust or Python

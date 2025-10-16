@@ -10,8 +10,10 @@ use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
 use st_core::telemetry::chrono::{
-    ChronoFrame, ChronoHarmonics, ChronoSummary, ChronoTimeline, ResonanceTemporalMetrics,
+    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoSummary, ChronoTimeline,
+    ResonanceTemporalMetrics,
 };
+use st_core::telemetry::hub;
 use st_core::telemetry::maintainer::{Maintainer, MaintainerConfig, MaintainerReport};
 use st_tensor::pure::measure::{z_space_barycenter, ZSpaceBarycenter};
 use st_tensor::pure::{
@@ -622,6 +624,26 @@ impl SpiralSession {
         })
     }
 
+    /// Returns a combined summary and SpiralK-ready loop signal.
+    pub fn loop_signal(
+        &self,
+        window: Option<usize>,
+        bins: Option<usize>,
+    ) -> Option<ChronoLoopSignal> {
+        let requested = window.unwrap_or(self.maintainer.window);
+        let bins = bins.unwrap_or(16).max(1);
+        self.chrono.lock().ok().and_then(|timeline| {
+            if timeline.is_empty() {
+                None
+            } else {
+                let available = timeline.len();
+                let window = requested.max(1).min(available);
+                let harmonic_bins = bins.min(window.max(2));
+                timeline.loop_signal(window, harmonic_bins)
+            }
+        })
+    }
+
     /// Clears the temporal telemetry stream.
     pub fn reset_chrono(&self) {
         if let Ok(mut timeline) = self.chrono.lock() {
@@ -676,7 +698,14 @@ impl SpiralSession {
         let mut timeline = self.chrono.lock().map_err(|_| TensorError::IoError {
             message: "chrono timeline poisoned".to_string(),
         })?;
-        Ok(timeline.record(dt, metrics))
+        let frame = timeline.record(dt, metrics);
+        let bin_hint = self.maintainer.window.max(4).min(64);
+        let signal = timeline.loop_signal(self.maintainer.window, bin_hint);
+        drop(timeline);
+        if let Some(signal) = signal {
+            hub::set_chrono_loop(signal);
+        }
+        Ok(frame)
     }
 
     /// Evaluates the temporal telemetry and returns a maintenance recommendation.
@@ -921,6 +950,7 @@ mod tests {
     use super::*;
     use crate::layers::linear::Linear;
     use crate::loss::MeanSquaredError;
+    use st_core::telemetry::hub;
     use st_core::telemetry::maintainer::MaintainerStatus;
     use st_tensor::pure::measure::BarycenterIntermediate;
 
@@ -1200,6 +1230,28 @@ mod tests {
         assert!(!waveform.is_empty());
         let narrative = session.describe(None, 0.6).unwrap();
         assert!(!narrative.is_empty());
+    }
+
+    #[test]
+    fn loop_signal_publishes_and_reads() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(8)
+            .build()
+            .unwrap();
+        let resonance = DifferentialResonance {
+            homotopy_flow: toy_tensor(&[0.2, -0.1]),
+            functor_linearisation: toy_tensor(&[0.1, 0.05]),
+            recursive_objective: toy_tensor(&[0.05, 0.02]),
+            infinity_projection: toy_tensor(&[0.03, 0.01]),
+            infinity_energy: toy_tensor(&[0.02, 0.01]),
+        };
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        let signal = session.loop_signal(None, None).unwrap();
+        assert!(signal.summary.frames >= 2);
+        let hub_signal = hub::get_chrono_loop();
+        assert!(hub_signal.is_some());
     }
 
     #[test]

@@ -22,8 +22,12 @@ use st_backend_hip::{
 };
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
+#[cfg(feature = "collapse")]
+use st_core::engine::collapse_drive::DriveCmd;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::chrono::{ChronoFrame, ChronoHarmonics, ChronoPeak, ChronoSummary};
+use st_core::telemetry::chrono::{
+    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary,
+};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::telemetry::hub;
 use st_core::telemetry::maintainer::{MaintainerConfig, MaintainerReport};
@@ -1074,6 +1078,91 @@ impl PyChronoHarmonics {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "ChronoLoopSignal")]
+#[derive(Clone)]
+struct PyChronoLoopSignal {
+    signal: ChronoLoopSignal,
+}
+
+impl PyChronoLoopSignal {
+    fn from_signal(signal: ChronoLoopSignal) -> Self {
+        Self { signal }
+    }
+}
+
+#[pymethods]
+impl PyChronoLoopSignal {
+    #[getter]
+    fn summary(&self) -> PyChronoSummary {
+        PyChronoSummary::from_summary(self.signal.summary.clone())
+    }
+
+    #[getter]
+    fn harmonics(&self) -> Option<PyChronoHarmonics> {
+        self.signal
+            .harmonics
+            .clone()
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.signal.spiralk_script.clone()
+    }
+
+    #[cfg(not(feature = "kdsl"))]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        None
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_hints(&self) -> Vec<String> {
+        self.signal
+            .spiralk_hints
+            .iter()
+            .map(|hint| {
+                format!(
+                    "soft({},{},{},{})",
+                    hint.field, hint.value_expr, hint.weight_expr, hint.condition_expr
+                )
+            })
+            .collect()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item(
+            "summary",
+            PyChronoSummary::from_summary(self.signal.summary.clone()),
+        )?;
+        if let Some(harmonics) = self.signal.harmonics.clone() {
+            dict.set_item("harmonics", PyChronoHarmonics::from_harmonics(harmonics))?;
+        } else {
+            dict.set_item("harmonics", py.None())?;
+        }
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.signal.spiralk_script.clone())?;
+            dict.set_item("spiralk_hints", self.spiralk_hints())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoLoopSignal(frames={}, energy_mean={:.3})",
+            self.signal.summary.frames, self.signal.summary.mean_energy
+        ))
+    }
+}
+
 #[pymethods]
 impl PyChronoSummary {
     #[getter]
@@ -1288,6 +1377,12 @@ impl PyMaintainerReport {
         &self.report.diagnostic
     }
 
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.report.spiralk_script.clone()
+    }
+
     fn should_rewrite(&self) -> bool {
         self.report.should_rewrite()
     }
@@ -1314,6 +1409,14 @@ impl PyMaintainerReport {
         dict.set_item("suggested_pressure", self.report.suggested_pressure)?;
         dict.set_item("diagnostic", &self.report.diagnostic)?;
         dict.set_item("should_rewrite", self.report.should_rewrite())?;
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.report.spiralk_script.clone())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
         Ok(dict.into_py(py))
     }
 
@@ -1329,6 +1432,101 @@ impl PyMaintainerReport {
             self.report.status.as_str(),
             self.report.average_drift,
             self.report.mean_energy
+        ))
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pyclass(module = "spiraltorch", name = "CollapsePulse")]
+#[derive(Clone)]
+struct PyCollapsePulse {
+    pulse: hub::CollapsePulse,
+}
+
+#[cfg(feature = "collapse")]
+impl PyCollapsePulse {
+    fn from_pulse(pulse: hub::CollapsePulse) -> Self {
+        Self { pulse }
+    }
+
+    fn command_kind(&self) -> &'static str {
+        match self.pulse.command {
+            DriveCmd::Collapse { .. } => "collapse",
+            DriveCmd::Bloom { .. } => "bloom",
+            DriveCmd::None => "none",
+        }
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pymethods]
+impl PyCollapsePulse {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.pulse.step
+    }
+
+    #[getter]
+    fn total(&self) -> f32 {
+        self.pulse.total
+    }
+
+    #[getter]
+    fn command(&self) -> &'static str {
+        self.command_kind()
+    }
+
+    #[getter]
+    fn loop_signal(&self) -> Option<PyChronoLoopSignal> {
+        self.pulse
+            .loop_signal
+            .clone()
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    fn command_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        match self.pulse.command {
+            DriveCmd::Collapse {
+                grad_scale,
+                max_norm,
+                lr_decay,
+            } => {
+                dict.set_item("grad_scale", grad_scale)?;
+                dict.set_item("max_norm", max_norm)?;
+                dict.set_item("lr_decay", lr_decay)?;
+            }
+            DriveCmd::Bloom { lr_mul } => {
+                dict.set_item("lr_mul", lr_mul)?;
+            }
+            DriveCmd::None => {}
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.pulse.step)?;
+        dict.set_item("total", self.pulse.total)?;
+        dict.set_item("command", self.command_kind())?;
+        dict.set_item("params", self.command_params(py)?)?;
+        if let Some(signal) = self.pulse.loop_signal.clone() {
+            dict.set_item(
+                "loop_signal",
+                PyChronoLoopSignal::from_signal(signal).as_dict(py)?,
+            )?;
+        } else {
+            dict.set_item("loop_signal", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "CollapsePulse(step={}, total={:.3}, command={})",
+            self.pulse.step,
+            self.pulse.total,
+            self.command_kind()
         ))
     }
 }
@@ -2727,6 +2925,17 @@ impl PySpiralSession {
             .map(PyChronoHarmonics::from_harmonics)
     }
 
+    #[pyo3(signature = (timesteps=None, bins=None))]
+    fn loop_signal(
+        &self,
+        timesteps: Option<usize>,
+        bins: Option<usize>,
+    ) -> Option<PyChronoLoopSignal> {
+        self.inner
+            .loop_signal(timesteps, bins)
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
     #[pyo3(signature = (timesteps=None, temperature=0.6))]
     fn timeline_story(
         &self,
@@ -2756,6 +2965,11 @@ impl PySpiralSession {
         dict.set_item("pressure_step", cfg.pressure_step)?;
         dict.set_item("window", cfg.window)?;
         Ok(dict.into_py(py))
+    }
+
+    #[cfg(feature = "collapse")]
+    fn collapse_pulse(&self) -> Option<PyCollapsePulse> {
+        hub::get_collapse_pulse().map(PyCollapsePulse::from_pulse)
     }
 
     #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
@@ -4741,7 +4955,10 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyChronoSummary>()?;
     m.add_class::<PyChronoPeak>()?;
     m.add_class::<PyChronoHarmonics>()?;
+    m.add_class::<PyChronoLoopSignal>()?;
     m.add_class::<PyMaintainerReport>()?;
+    #[cfg(feature = "collapse")]
+    m.add_class::<PyCollapsePulse>()?;
     m.add_class::<PySpiralDifferentialTrace>()?;
     m.add_class::<PyOpenTopos>()?;
     m.add_class::<PyTensorBiome>()?;
