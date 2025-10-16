@@ -23,6 +23,15 @@ use st_backend_hip::{
 };
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::ecosystem::{
+    ConnectorEvent as CoreConnectorEvent, DistributionSummary as CoreDistributionSummary,
+    EcosystemCapacity, EcosystemRegistry, EcosystemReport as CoreEcosystemReport,
+    HeuristicChoiceSummary as CoreHeuristicChoiceSummary,
+    HeuristicDecision as CoreHeuristicDecision, MetricDigest as CoreMetricDigest,
+    MetricSample as CoreMetricSample, RankPlanSummary as CoreRankPlanSummary,
+    RoundtableConfigSummary as CoreRoundtableConfigSummary,
+    RoundtableSummary as CoreRoundtableSummary,
+};
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::DriveCmd;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
@@ -398,6 +407,53 @@ fn connector_to_py(py: Python<'_>, event: &CoreConnectorEvent) -> PyResult<PyObj
     Ok(dict.into())
 }
 
+fn metric_sample_to_py(py: Python<'_>, sample: &CoreMetricSample) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("name", sample.name.clone())?;
+    dict.set_item("value", sample.value)?;
+    dict.set_item("issued_at", sample.issued_at_secs())?;
+    if let Some(unit) = &sample.unit {
+        dict.set_item("unit", unit.clone())?;
+    }
+    let tags = PyDict::new_bound(py);
+    for (key, value) in &sample.tags {
+        tags.set_item(key, value)?;
+    }
+    dict.set_item("tags", tags)?;
+    Ok(dict.into())
+}
+
+fn metric_digest_to_py(py: Python<'_>, digest: &CoreMetricDigest) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("name", digest.name.clone())?;
+    dict.set_item("count", digest.count)?;
+    dict.set_item("sum", digest.sum)?;
+    dict.set_item("min", digest.min)?;
+    dict.set_item("max", digest.max)?;
+    dict.set_item("average", digest.average)?;
+    dict.set_item("first_at", digest.first_at_secs())?;
+    dict.set_item("last_value", digest.last_value)?;
+    dict.set_item("last_at", digest.last_at_secs())?;
+    if let Some(unit) = &digest.unit {
+        dict.set_item("unit", unit.clone())?;
+    }
+    let tags = PyDict::new_bound(py);
+    for (key, value) in &digest.tags {
+        tags.set_item(key, value)?;
+    }
+    dict.set_item("tags", tags)?;
+    Ok(dict.into())
+}
+
+fn ecosystem_capacity_to_py(py: Python<'_>, cap: EcosystemCapacity) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("heuristics", cap.heuristics)?;
+    dict.set_item("roundtables", cap.roundtables)?;
+    dict.set_item("connectors", cap.connectors)?;
+    dict.set_item("metrics", cap.metrics)?;
+    Ok(dict.into())
+}
+
 fn ecosystem_report_to_py(py: Python<'_>, report: &CoreEcosystemReport) -> PyResult<PyObject> {
     let heuristics = PyList::empty_bound(py);
     for decision in report.heuristics() {
@@ -411,10 +467,20 @@ fn ecosystem_report_to_py(py: Python<'_>, report: &CoreEcosystemReport) -> PyRes
     for event in report.connectors() {
         connectors.append(connector_to_py(py, event)?)?;
     }
+    let metrics = PyList::empty_bound(py);
+    for sample in report.metrics() {
+        metrics.append(metric_sample_to_py(py, sample)?)?;
+    }
+    let metric_digests = PyList::empty_bound(py);
+    for digest in report.metric_digests() {
+        metric_digests.append(metric_digest_to_py(py, digest)?)?;
+    }
     let dict = PyDict::new_bound(py);
     dict.set_item("heuristics", heuristics)?;
     dict.set_item("roundtables", roundtables)?;
     dict.set_item("connectors", connectors)?;
+    dict.set_item("metrics", metrics)?;
+    dict.set_item("metric_digests", metric_digests)?;
     Ok(dict.into())
 }
 
@@ -1948,6 +2014,40 @@ impl PyCollapsePulse {
             .map(PyChronoLoopSignal::from_signal)
     }
 
+    #[getter]
+    fn distribution(&self) -> Option<PyDistConfig> {
+        self.inner
+            .distribution_config()
+            .map(|config| PyDistConfig::from_config(config.clone()))
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
+    fn roundtable(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+        dist: Option<PyDistConfig>,
+    ) -> PyResult<PyRoundtableSchedule> {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        if let Some(dist_cfg) = dist {
+            self.inner.configure_distribution(dist_cfg.inner.clone());
     fn command_params(&self, py: Python<'_>) -> PyResult<PyObject> {
         let dict = PyDict::new_bound(py);
         match self.pulse.command {
@@ -10901,6 +11001,7 @@ fn ecosystem_drain(py: Python<'_>) -> PyResult<PyObject> {
 }
 
 #[pyfunction]
+#[pyo3(signature = (name, stage, metadata=None))]
 fn ecosystem_record_connector(
     name: &str,
     stage: &str,
@@ -10914,6 +11015,59 @@ fn ecosystem_record_connector(
     };
     EcosystemRegistry::global().record_connector(event);
     Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (name, value, *, tags=None, unit=None))]
+fn ecosystem_record_metric(
+    name: &str,
+    value: f64,
+    tags: Option<HashMap<String, String>>,
+    unit: Option<&str>,
+) -> PyResult<()> {
+    let mut sample = CoreMetricSample::new(name, value);
+    if let Some(tag_map) = tags {
+        for (key, value) in tag_map {
+            sample = sample.with_tag(key, value);
+        }
+    }
+    if let Some(unit) = unit {
+        sample = sample.with_unit(unit);
+    }
+    EcosystemRegistry::global().record_metric(sample);
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (*, heuristics=None, roundtables=None, connectors=None, metrics=None))]
+fn ecosystem_configure(
+    py: Python<'_>,
+    heuristics: Option<usize>,
+    roundtables: Option<usize>,
+    connectors: Option<usize>,
+    metrics: Option<usize>,
+) -> PyResult<PyObject> {
+    EcosystemRegistry::global().configure(|cap| {
+        if let Some(value) = heuristics {
+            cap.heuristics = value;
+        }
+        if let Some(value) = roundtables {
+            cap.roundtables = value;
+        }
+        if let Some(value) = connectors {
+            cap.connectors = value;
+        }
+        if let Some(value) = metrics {
+            cap.metrics = value;
+        }
+    });
+    ecosystem_capacity(py)
+}
+
+#[pyfunction]
+fn ecosystem_capacity(py: Python<'_>) -> PyResult<PyObject> {
+    let cap = EcosystemRegistry::global().capacity();
+    ecosystem_capacity_to_py(py, cap)
 }
 
 /// Inspect the unified heuristics for the requested rank family.
@@ -11889,6 +12043,9 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ecosystem_snapshot, m)?)?;
     m.add_function(wrap_pyfunction!(ecosystem_drain, m)?)?;
     m.add_function(wrap_pyfunction!(ecosystem_record_connector, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_record_metric, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_capacity, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_configure, m)?)?;
     m.add_function(wrap_pyfunction!(describe_resonance, m)?)?;
     m.add_function(wrap_pyfunction!(describe_frame, m)?)?;
     m.add_function(wrap_pyfunction!(describe_timeline, m)?)?;
@@ -11942,52 +12099,52 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
 
-    let mut exported = vec![
-        "plan",
-        "plan_topk",
-        "topk2d_tensor",
-        "z_space_barycenter",
-        "hip_probe",
-        "describe_device",
-        "get_psychoid_stats",
-        "describe_resonance",
-        "describe_frame",
-        "Tensor",
-        "ComplexTensor",
-        "BarycenterIntermediate",
-        "ZSpaceBarycenter",
-        "DifferentialResonance",
-        "ChronoFrame",
-        "ChronoSummary",
-        "SpiralDifferentialTrace",
-        "OpenTopos",
-        "TensorBiome",
-        "LanguageWaveEncoder",
-        "TextResonator",
-        "Hypergrad",
-        "DistConfig",
-        "RoundtableSchedule",
-        "EpochStats",
-        "ModuleTrainer",
-        "SpiralLightning",
-        "SpiralSessionBuilder",
-        "SpiralSession",
-        "nn",
-        "frac",
-        "dataset",
-        "linalg",
-        "rl",
-        "rec",
-        "sot",
-        "integrations",
-    ];
-    #[cfg(feature = "golden")]
-    {
-        exported.push("GoldenBlackcatPulse");
-        exported.push("GoldenCooperativeDirective");
-        exported.push("GoldenCouncilSnapshot");
-    }
-    m.setattr("__all__", exported)?;
+    m.setattr(
+        "__all__",
+        vec![
+            "plan",
+            "plan_topk",
+            "plan_midk",
+            "plan_bottomk",
+            "topk2d_tensor",
+            "topk2d",
+            "z_space_barycenter",
+            "hip_probe",
+            "describe_device",
+            "get_psychoid_stats",
+            "ecosystem_snapshot",
+            "ecosystem_drain",
+            "ecosystem_record_connector",
+            "ecosystem_record_metric",
+            "ecosystem_capacity",
+            "ecosystem_configure",
+            "Tensor",
+            "ComplexTensor",
+            "BarycenterIntermediate",
+            "ZSpaceBarycenter",
+            "DifferentialResonance",
+            "SpiralDifferentialTrace",
+            "OpenTopos",
+            "TensorBiome",
+            "LanguageWaveEncoder",
+            "Hypergrad",
+            "DistConfig",
+            "RoundtableSchedule",
+            "EpochStats",
+            "ModuleTrainer",
+            "SpiralLightning",
+            "SpiralSessionBuilder",
+            "SpiralSession",
+            "nn",
+            "frac",
+            "dataset",
+            "linalg",
+            "rl",
+            "rec",
+            "sot",
+            "integrations",
+        ],
+    )?;
     m.setattr("__version__", env!("CARGO_PKG_VERSION"))?;
 
     // Provide a tiny doc string that highlights the zero-shim approach.

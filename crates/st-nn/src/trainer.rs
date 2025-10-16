@@ -36,7 +36,7 @@ use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ecosystem::{
-    ConnectorEvent, DistributionSummary, EcosystemRegistry, RankPlanSummary,
+    ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample, RankPlanSummary,
     RoundtableConfigSummary, RoundtableSummary,
 };
 #[cfg(feature = "collapse")]
@@ -586,7 +586,109 @@ impl ModuleTrainer {
             issued_at: SystemTime::now(),
         };
 
-        EcosystemRegistry::global().record_roundtable(summary);
+        let registry = EcosystemRegistry::global();
+        let autopilot_tag = summary.autopilot_enabled.to_string();
+        let distribution_mode = summary.distribution.as_ref().map(|d| d.mode.clone());
+        let tag_sample = |sample: MetricSample| {
+            let mut sample = sample.with_tag("autopilot", autopilot_tag.as_str());
+            if let Some(mode) = &distribution_mode {
+                sample = sample.with_tag("distribution_mode", mode.clone());
+            }
+            sample
+        };
+
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.rows", rows as f64).with_unit("rows"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.cols", cols as f64).with_unit("cols"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new(
+                "roundtable.autopilot",
+                if summary.autopilot_enabled { 1.0 } else { 0.0 },
+            )
+            .with_unit("flag"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.config.top_k", config.top_k as f64).with_unit("items"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.config.mid_k", config.mid_k as f64).with_unit("items"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.config.bottom_k", config.bottom_k as f64)
+                .with_unit("items"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new(
+                "roundtable.config.here_tolerance",
+                config.here_tolerance as f64,
+            )
+            .with_unit("ratio"),
+        ));
+
+        let plan_summaries = [
+            ("above", schedule.above()),
+            ("here", schedule.here()),
+            ("beneath", schedule.beneath()),
+        ];
+        for (band, plan) in plan_summaries {
+            let tag_band = |sample: MetricSample| tag_sample(sample.with_tag("band", band));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.rows", plan.rows as f64).with_unit("rows"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.cols", plan.cols as f64).with_unit("cols"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.k", plan.k as f64).with_unit("items"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.workgroup", plan.choice.wg as f64)
+                    .with_unit("threads"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.lanes", plan.choice.kl as f64)
+                    .with_unit("lanes"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.channel_stride", plan.choice.ch as f64)
+                    .with_unit("stride"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.tile", plan.choice.tile as f64)
+                    .with_unit("tile"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.compaction_tile", plan.choice.ctile as f64)
+                    .with_unit("tile"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new(
+                    "roundtable.band.subgroup",
+                    if plan.choice.subgroup { 1.0 } else { 0.0 },
+                )
+                .with_unit("flag"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.fft_tile", plan.choice.fft_tile as f64)
+                    .with_unit("tile"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.fft_radix", plan.choice.fft_radix as f64)
+                    .with_unit("radix"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new(
+                    "roundtable.band.fft_segments",
+                    plan.choice.fft_segments as f64,
+                )
+                .with_unit("segments"),
+            ));
+        }
+
+        registry.record_roundtable(summary);
     }
 
     fn summarize_rank_plan(plan: &RankPlan) -> RankPlanSummary {
