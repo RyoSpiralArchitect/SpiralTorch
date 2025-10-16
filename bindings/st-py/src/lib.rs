@@ -53,6 +53,110 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeviceRoute {
+    Wgpu,
+    Cuda,
+    Mps,
+    Cpu,
+}
+
+impl DeviceRoute {
+    fn as_str(self) -> &'static str {
+        match self {
+            DeviceRoute::Wgpu => "wgpu",
+            DeviceRoute::Cuda => "cuda",
+            DeviceRoute::Mps => "mps",
+            DeviceRoute::Cpu => "cpu",
+        }
+    }
+}
+
+fn device_available(route: DeviceRoute) -> bool {
+    match route {
+        DeviceRoute::Wgpu => cfg!(feature = "wgpu-rt"),
+        DeviceRoute::Cuda => cfg!(feature = "cuda"),
+        DeviceRoute::Mps => cfg!(feature = "mps"),
+        DeviceRoute::Cpu => true,
+    }
+}
+
+fn choose_route(device: Option<&str>) -> PyResult<DeviceRoute> {
+    let hint = device.unwrap_or("auto").to_ascii_lowercase();
+    match hint.as_str() {
+        "auto" => {
+            for candidate in [
+                DeviceRoute::Wgpu,
+                DeviceRoute::Cuda,
+                DeviceRoute::Mps,
+                DeviceRoute::Cpu,
+            ] {
+                if device_available(candidate) {
+                    return Ok(candidate);
+                }
+            }
+            Ok(DeviceRoute::Cpu)
+        }
+        "wgpu" => Ok(if device_available(DeviceRoute::Wgpu) {
+            DeviceRoute::Wgpu
+        } else {
+            DeviceRoute::Cpu
+        }),
+        "cuda" => Ok(if device_available(DeviceRoute::Cuda) {
+            DeviceRoute::Cuda
+        } else {
+            DeviceRoute::Cpu
+        }),
+        "mps" => Ok(if device_available(DeviceRoute::Mps) {
+            DeviceRoute::Mps
+        } else {
+            DeviceRoute::Cpu
+        }),
+        "cpu" => Ok(DeviceRoute::Cpu),
+        other => Err(PyValueError::new_err(format!(
+            "unsupported device hint: {other}"
+        ))),
+    }
+}
+
+fn topk_rows_cpu(data: &[f32], rows: usize, cols: usize, k: usize) -> (Vec<f32>, Vec<i32>) {
+    use std::cmp::Ordering;
+
+    let mut out_vals = vec![0.0f32; rows * k];
+    let mut out_idx = vec![0i32; rows * k];
+    let mut idx_buf: Vec<usize> = (0..cols).collect();
+
+    for r in 0..rows {
+        let row_offset = r * cols;
+        for (slot, value) in idx_buf.iter_mut().enumerate() {
+            *value = slot;
+        }
+
+        if k < cols {
+            idx_buf.select_nth_unstable_by(k, |&a, &b| {
+                let va = data[row_offset + a];
+                let vb = data[row_offset + b];
+                vb.partial_cmp(&va).unwrap_or(Ordering::Equal)
+            });
+        }
+
+        let mut topk = idx_buf[..k].to_vec();
+        topk.sort_unstable_by(|&a, &b| {
+            let va = data[row_offset + a];
+            let vb = data[row_offset + b];
+            vb.partial_cmp(&va).unwrap_or(Ordering::Equal)
+        });
+
+        for (j, &col) in topk.iter().enumerate() {
+            let target = r * k + j;
+            out_vals[target] = data[row_offset + col];
+            out_idx[target] = col as i32;
+        }
+    }
+
+    (out_vals, out_idx)
+}
+
 fn tensor_err(err: TensorError) -> PyErr {
     PyValueError::new_err(err.to_string())
 }
@@ -2658,6 +2762,50 @@ fn plan(
     out.set_item("k", k)?;
     out.set_item("choice", choice_dict(py, &plan)?.into_py(py))?;
     Ok(out.into_py(py))
+}
+
+#[pyfunction(name = "topk2d_tensor")]
+#[pyo3(signature = (x, k, device=None))]
+fn topk2d_tensor_py(
+    _py: Python<'_>,
+    x: &PyTensor,
+    k: usize,
+    device: Option<&str>,
+) -> PyResult<(PyTensor, PyTensor)> {
+    let (rows, cols) = x.shape();
+    if k == 0 || k > cols {
+        return Err(PyValueError::new_err("invalid k for given tensor columns"));
+    }
+
+    let route = choose_route(device)?;
+    if rows > u32::MAX as usize || cols > u32::MAX as usize {
+        return Err(PyValueError::new_err(
+            "tensor dimensions exceed planner limits (u32::MAX)",
+        ));
+    }
+    if k > u32::MAX as usize {
+        return Err(PyValueError::new_err("k exceeds planner limits (u32::MAX)"));
+    }
+    let caps = caps_for(Some(route.as_str()));
+    let plan = plan_rank(RankKind::TopK, rows as u32, cols as u32, k as u32, caps);
+    debug_assert_eq!(plan.rows as usize, rows);
+    debug_assert_eq!(plan.cols as usize, cols);
+
+    let data = x.as_tensor().data();
+    let (vals, idx) = match route {
+        DeviceRoute::Cpu | DeviceRoute::Cuda | DeviceRoute::Mps | DeviceRoute::Wgpu => {
+            topk_rows_cpu(data, rows, cols, k)
+        }
+    };
+
+    let vals_tensor = Tensor::from_vec(rows, k, vals).map_err(tensor_err)?;
+    let idx_as_f32: Vec<f32> = idx.iter().map(|&value| value as f32).collect();
+    let idx_tensor = Tensor::from_vec(rows, k, idx_as_f32).map_err(tensor_err)?;
+
+    Ok((
+        PyTensor::from_tensor(vals_tensor),
+        PyTensor::from_tensor(idx_tensor),
+    ))
 }
 
 /// Compute the Z-space barycenter described by the weighted KL objective.
