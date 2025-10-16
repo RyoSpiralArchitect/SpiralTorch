@@ -13,5 +13,4 @@ pub mod runtime;
 pub mod theory;
 pub mod util;
 
-#[cfg(feature = "psi")]
 pub mod telemetry;
