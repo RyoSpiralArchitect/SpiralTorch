@@ -11,7 +11,6 @@ mod desire;
 mod geometry;
 mod gw;
 mod logbook;
-mod pipeline;
 mod schrodinger;
 mod temperature;
 

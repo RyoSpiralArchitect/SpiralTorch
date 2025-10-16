@@ -3,8 +3,12 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use super::automation::{DesireAutomatedStep, DesireAutomation, DesireRewriteTrigger};
+use super::desire::{DesirePhase, DesireWeights};
+use super::geometry::ConceptHint;
+use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::roundtable::RoundtableNode;
-use crate::{RoundtableConfig, RoundtableSchedule};
+use crate::{PureResult, RoundtableConfig, RoundtableSchedule};
 use st_core::ecosystem::{
     ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
     HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
@@ -13,7 +17,513 @@ use st_core::ecosystem::{
 use st_core::ops::rank_entry::RankPlan;
 use st_tensor::pure::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
 use std::collections::HashMap;
-use std::time::{Instant, SystemTime};
+use std::sync::{mpsc::Sender, Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+/// Sink interface used by [`DesirePipeline`] to braid automation steps into external systems.
+pub trait DesirePipelineSink: Send {
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()>;
+
+    fn on_trigger(
+        &mut self,
+        _trigger: &DesireRewriteTrigger,
+        _timestamp: SystemTime,
+    ) -> PureResult<()> {
+        Ok(())
+    }
+
+    fn flush(&mut self) -> PureResult<()> {
+        Ok(())
+    }
+}
+
+impl DesirePipelineSink for DesireLogbook {
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
+        DesireLogbook::record(self, step, timestamp)
+    }
+
+    fn flush(&mut self) -> PureResult<()> {
+        DesireLogbook::flush(self)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum DesirePipelineEvent {
+    Step {
+        step: DesireAutomatedStep,
+        timestamp: SystemTime,
+    },
+    Trigger {
+        trigger: DesireRewriteTrigger,
+        timestamp: SystemTime,
+    },
+}
+
+impl DesirePipelineEvent {
+    pub fn timestamp(&self) -> SystemTime {
+        match self {
+            DesirePipelineEvent::Step { timestamp, .. }
+            | DesirePipelineEvent::Trigger { timestamp, .. } => *timestamp,
+        }
+    }
+}
+
+pub struct DesireChannelSink {
+    sender: Sender<DesirePipelineEvent>,
+}
+
+impl DesireChannelSink {
+    pub fn new(sender: Sender<DesirePipelineEvent>) -> Self {
+        Self { sender }
+    }
+
+    pub fn sender(&self) -> Sender<DesirePipelineEvent> {
+        self.sender.clone()
+    }
+}
+
+impl DesirePipelineSink for DesireChannelSink {
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
+        self.sender
+            .send(DesirePipelineEvent::Step {
+                step: step.clone(),
+                timestamp,
+            })
+            .map_err(|_| TensorError::InvalidValue {
+                label: "desire channel receiver dropped",
+            })
+    }
+
+    fn on_trigger(
+        &mut self,
+        trigger: &DesireRewriteTrigger,
+        timestamp: SystemTime,
+    ) -> PureResult<()> {
+        self.sender
+            .send(DesirePipelineEvent::Trigger {
+                trigger: trigger.clone(),
+                timestamp,
+            })
+            .map_err(|_| TensorError::InvalidValue {
+                label: "desire channel receiver dropped",
+            })
+    }
+}
+
+pub struct DesirePipelineBuilder {
+    automation: DesireAutomation,
+    sinks: Vec<Box<dyn DesirePipelineSink>>,
+}
+
+impl DesirePipelineBuilder {
+    pub fn new(automation: DesireAutomation) -> Self {
+        Self {
+            automation,
+            sinks: Vec::new(),
+        }
+    }
+
+    pub fn with_sink<S>(mut self, sink: S) -> Self
+    where
+        S: DesirePipelineSink + 'static,
+    {
+        self.sinks.push(Box::new(sink));
+        self
+    }
+
+    pub fn with_logbook(mut self, logbook: DesireLogbook) -> Self {
+        self.sinks.push(Box::new(logbook));
+        self
+    }
+
+    pub fn with_channel(mut self, sender: Sender<DesirePipelineEvent>) -> Self {
+        self.sinks.push(Box::new(DesireChannelSink::new(sender)));
+        self
+    }
+
+    pub fn with_trainer_bridge(mut self, bridge: &DesireTrainerBridge) -> Self {
+        self.sinks.push(Box::new(bridge.clone()));
+        self
+    }
+
+    pub fn build(self) -> DesirePipeline {
+        DesirePipeline {
+            automation: self.automation,
+            sinks: self.sinks,
+        }
+    }
+}
+
+pub struct DesirePipeline {
+    automation: DesireAutomation,
+    sinks: Vec<Box<dyn DesirePipelineSink>>,
+}
+
+impl DesirePipeline {
+    pub fn new(automation: DesireAutomation) -> Self {
+        Self {
+            automation,
+            sinks: Vec::new(),
+        }
+    }
+
+    pub fn builder(automation: DesireAutomation) -> DesirePipelineBuilder {
+        DesirePipelineBuilder::new(automation)
+    }
+
+    pub fn automation(&self) -> &DesireAutomation {
+        &self.automation
+    }
+
+    pub fn automation_mut(&mut self) -> &mut DesireAutomation {
+        &mut self.automation
+    }
+
+    pub fn attach_sink<S>(&mut self, sink: S)
+    where
+        S: DesirePipelineSink + 'static,
+    {
+        self.sinks.push(Box::new(sink));
+    }
+
+    pub fn attach_logbook(&mut self, logbook: DesireLogbook) {
+        self.sinks.push(Box::new(logbook));
+    }
+
+    pub fn attach_channel(&mut self, sender: Sender<DesirePipelineEvent>) {
+        self.sinks.push(Box::new(DesireChannelSink::new(sender)));
+    }
+
+    pub fn attach_trainer_bridge(&mut self, bridge: &DesireTrainerBridge) {
+        self.sinks.push(Box::new(bridge.clone()));
+    }
+
+    pub fn sink_count(&self) -> usize {
+        self.sinks.len()
+    }
+
+    pub fn step_at(
+        &mut self,
+        lm_logits: &[f32],
+        previous_token: usize,
+        concept_hint: &ConceptHint,
+        now: Instant,
+        timestamp: SystemTime,
+    ) -> PureResult<DesireAutomatedStep> {
+        let step = self
+            .automation
+            .step(lm_logits, previous_token, concept_hint, now)?;
+        self.dispatch(&step, timestamp)?;
+        Ok(step)
+    }
+
+    pub fn step_with_weights_at(
+        &mut self,
+        lm_logits: &[f32],
+        previous_token: usize,
+        concept_hint: &ConceptHint,
+        weights: &DesireWeights,
+        now: Instant,
+        timestamp: SystemTime,
+    ) -> PureResult<DesireAutomatedStep> {
+        let step = self.automation.step_with_weights(
+            lm_logits,
+            previous_token,
+            concept_hint,
+            weights,
+            now,
+        )?;
+        self.dispatch(&step, timestamp)?;
+        Ok(step)
+    }
+
+    pub fn step_realtime(
+        &mut self,
+        lm_logits: &[f32],
+        previous_token: usize,
+        concept_hint: &ConceptHint,
+    ) -> PureResult<DesireAutomatedStep> {
+        let now = Instant::now();
+        let timestamp = SystemTime::now();
+        self.step_at(lm_logits, previous_token, concept_hint, now, timestamp)
+    }
+
+    pub fn step_with_weights_realtime(
+        &mut self,
+        lm_logits: &[f32],
+        previous_token: usize,
+        concept_hint: &ConceptHint,
+        weights: &DesireWeights,
+    ) -> PureResult<DesireAutomatedStep> {
+        let now = Instant::now();
+        let timestamp = SystemTime::now();
+        self.step_with_weights_at(
+            lm_logits,
+            previous_token,
+            concept_hint,
+            weights,
+            now,
+            timestamp,
+        )
+    }
+
+    pub fn replay(&mut self, replay: DesireLogReplay) -> PureResult<usize> {
+        let mut count = 0usize;
+        for entry in replay {
+            let record = entry?;
+            let step = DesireAutomatedStep {
+                solution: record.solution.clone(),
+                trigger: record.trigger.clone(),
+            };
+            let timestamp = timestamp_from_millis(record.timestamp_ms);
+            self.dispatch(&step, timestamp)?;
+            count = count.saturating_add(1);
+        }
+        Ok(count)
+    }
+
+    pub fn flush(&mut self) -> PureResult<()> {
+        for sink in self.sinks.iter_mut() {
+            sink.flush()?;
+        }
+        Ok(())
+    }
+
+    fn dispatch(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
+        for sink in self.sinks.iter_mut() {
+            sink.on_step(step, timestamp)?;
+        }
+        if let Some(trigger) = &step.trigger {
+            for sink in self.sinks.iter_mut() {
+                sink.on_trigger(trigger, timestamp)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for DesirePipeline {
+    fn drop(&mut self) {
+        let _ = self.flush();
+    }
+}
+
+fn timestamp_from_millis(ms: u128) -> SystemTime {
+    let clamped = ms.min(u64::MAX as u128) as u64;
+    UNIX_EPOCH + Duration::from_millis(clamped)
+}
+
+#[derive(Clone, Debug)]
+pub struct DesireTriggerEvent {
+    pub trigger: DesireRewriteTrigger,
+    pub timestamp: SystemTime,
+}
+
+#[derive(Clone, Default)]
+pub struct DesireTriggerBuffer {
+    shared: Arc<Mutex<Vec<DesireTriggerEvent>>>,
+}
+
+impl DesireTriggerBuffer {
+    pub fn new() -> Self {
+        Self {
+            shared: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self.shared.lock() {
+            Ok(guard) => guard.len(),
+            Err(_) => 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn drain(&self) -> PureResult<Vec<DesireTriggerEvent>> {
+        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire trigger buffer poisoned",
+        })?;
+        Ok(std::mem::take(&mut *guard))
+    }
+}
+
+impl DesirePipelineSink for DesireTriggerBuffer {
+    fn on_step(&mut self, _step: &DesireAutomatedStep, _timestamp: SystemTime) -> PureResult<()> {
+        Ok(())
+    }
+
+    fn on_trigger(
+        &mut self,
+        trigger: &DesireRewriteTrigger,
+        timestamp: SystemTime,
+    ) -> PureResult<()> {
+        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire trigger buffer poisoned",
+        })?;
+        guard.push(DesireTriggerEvent {
+            trigger: trigger.clone(),
+            timestamp,
+        });
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DesireTrainerEvent {
+    pub timestamp: SystemTime,
+    pub phase: DesirePhase,
+    pub temperature: f32,
+    pub entropy: f32,
+    pub hypergrad_penalty: f32,
+    pub weights: DesireWeights,
+    pub trigger: Option<DesireRewriteTrigger>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DesireTrainerSummary {
+    pub total: usize,
+    pub observation: usize,
+    pub injection: usize,
+    pub integration: usize,
+    pub triggers: usize,
+    pub mean_entropy: f32,
+    pub mean_temperature: f32,
+    pub mean_penalty: f32,
+    pub mean_alpha: f32,
+    pub mean_beta: f32,
+    pub mean_gamma: f32,
+    pub mean_lambda: f32,
+    pub trigger_mean_penalty: f32,
+    pub trigger_mean_entropy: f32,
+    pub trigger_mean_temperature: f32,
+    pub trigger_mean_samples: f32,
+}
+
+impl DesireTrainerSummary {
+    fn from_events(events: &[DesireTrainerEvent]) -> Self {
+        if events.is_empty() {
+            return Self::default();
+        }
+        let mut summary = DesireTrainerSummary {
+            total: events.len(),
+            ..Default::default()
+        };
+        let mut sum_entropy = 0.0f32;
+        let mut sum_temperature = 0.0f32;
+        let mut sum_penalty = 0.0f32;
+        let mut sum_alpha = 0.0f32;
+        let mut sum_beta = 0.0f32;
+        let mut sum_gamma = 0.0f32;
+        let mut sum_lambda = 0.0f32;
+        let mut trig_penalty = 0.0f32;
+        let mut trig_entropy = 0.0f32;
+        let mut trig_temperature = 0.0f32;
+        let mut trig_samples = 0.0f32;
+
+        for event in events {
+            match event.phase {
+                DesirePhase::Observation => summary.observation += 1,
+                DesirePhase::Injection => summary.injection += 1,
+                DesirePhase::Integration => summary.integration += 1,
+            }
+            sum_entropy += event.entropy;
+            sum_temperature += event.temperature;
+            sum_penalty += event.hypergrad_penalty;
+            sum_alpha += event.weights.alpha;
+            sum_beta += event.weights.beta;
+            sum_gamma += event.weights.gamma;
+            sum_lambda += event.weights.lambda;
+            if let Some(trigger) = &event.trigger {
+                summary.triggers += 1;
+                trig_penalty += trigger.mean_penalty;
+                trig_entropy += trigger.mean_entropy;
+                trig_temperature += trigger.temperature;
+                trig_samples += trigger.samples as f32;
+            }
+        }
+
+        let total = summary.total as f32;
+        if total > 0.0 {
+            summary.mean_entropy = sum_entropy / total;
+            summary.mean_temperature = sum_temperature / total;
+            summary.mean_penalty = sum_penalty / total;
+            summary.mean_alpha = sum_alpha / total;
+            summary.mean_beta = sum_beta / total;
+            summary.mean_gamma = sum_gamma / total;
+            summary.mean_lambda = sum_lambda / total;
+        }
+
+        if summary.triggers > 0 {
+            let count = summary.triggers as f32;
+            summary.trigger_mean_penalty = trig_penalty / count;
+            summary.trigger_mean_entropy = trig_entropy / count;
+            summary.trigger_mean_temperature = trig_temperature / count;
+            summary.trigger_mean_samples = trig_samples / count;
+        }
+
+        summary
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct DesireTrainerBridge {
+    shared: Arc<Mutex<Vec<DesireTrainerEvent>>>,
+}
+
+impl DesireTrainerBridge {
+    pub fn new() -> Self {
+        Self {
+            shared: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self.shared.lock() {
+            Ok(guard) => guard.len(),
+            Err(_) => 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn drain(&self) -> PureResult<Vec<DesireTrainerEvent>> {
+        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire trainer bridge poisoned",
+        })?;
+        Ok(std::mem::take(&mut *guard))
+    }
+
+    pub fn drain_summary(&self) -> PureResult<Option<DesireTrainerSummary>> {
+        let events = self.drain()?;
+        if events.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(DesireTrainerSummary::from_events(&events)))
+    }
+}
+
+impl DesirePipelineSink for DesireTrainerBridge {
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
+        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire trainer bridge poisoned",
+        })?;
+        guard.push(DesireTrainerEvent {
+            timestamp,
+            phase: step.solution.phase,
+            temperature: step.solution.temperature,
+            entropy: step.solution.entropy,
+            hypergrad_penalty: step.solution.hypergrad_penalty,
+            weights: step.solution.weights.clone(),
+            trigger: step.trigger.clone(),
+        });
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub enum PipelineError {
@@ -514,10 +1024,21 @@ impl LanguagePipeline {
 
 #[cfg(test)]
 mod tests {
+    use super::super::automation::DesireAutomation;
+    use super::super::desire::{constant, warmup, DesireLagrangian};
+    use super::super::geometry::{
+        ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
+    };
+    use super::super::temperature::TemperatureController;
     use super::*;
     use crate::plan::RankPlanner;
     use st_core::backend::device_caps::DeviceCaps;
+    use st_core::config::self_rewrite::SelfRewriteCfg;
+    use std::collections::HashSet;
+    use std::sync::mpsc::channel;
     use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant, SystemTime};
+    use tempfile::tempdir;
 
     fn registry_guard() -> &'static Mutex<()> {
         static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
@@ -581,18 +1102,7 @@ mod tests {
         let connector = &report.connectors[0];
         assert_eq!(connector.stage, "roundtable");
         assert_eq!(connector.metadata.get("rows"), Some(&"16".to_string()));
-    use super::super::automation::DesireAutomation;
-    use super::super::desire::{constant, warmup, DesireLagrangian};
-    use super::super::geometry::{
-        ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
-    };
-    use super::super::temperature::TemperatureController;
-    use super::*;
-    use st_core::config::self_rewrite::SelfRewriteCfg;
-    use std::collections::HashSet;
-    use std::sync::mpsc::channel;
-    use std::time::{Duration, Instant, SystemTime};
-    use tempfile::tempdir;
+    }
 
     fn build_geometry() -> SymbolGeometry {
         let syn = SparseKernel::from_rows(

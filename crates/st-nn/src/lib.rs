@@ -42,9 +42,10 @@ pub use golden::{
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
+pub use language::entropy as desire_entropy;
 pub use language::pipeline::{
     LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
-pub use language::entropy as desire_entropy;
+};
 pub use language::{
     constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
     DesireChannelSink, DesireLagrangian, DesireLogRecord, DesireLogReplay, DesireLogbook,

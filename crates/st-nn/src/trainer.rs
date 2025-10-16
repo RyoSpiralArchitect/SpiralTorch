@@ -22,21 +22,20 @@
 // ============================================================================
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
-use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
+use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
 use crate::roundtable::{
-    simulate_proposal_locally, BlackcatModerator, DistConfig, GlobalProposal, HeurOp, HeurOpKind,
+    simulate_proposal_locally, BlackcatModerator, DistConfig, GlobalProposal, HeurOpKind,
     HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
-use st_core::ecosystem::{ConnectorEvent, EcosystemRegistry};
 use st_core::ecosystem::{
     ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample, RankPlanSummary,
     RoundtableConfigSummary, RoundtableSummary,
@@ -290,8 +289,6 @@ impl ModuleTrainer {
             softlogic: SoftLogicFlex::new(),
             desire_bridge: None,
             graph_bridge: None,
-            graph_pending: None,
-            graph_last_hint: None,
             graph_pending: None,
             graph_last_hint: None,
             #[cfg(feature = "golden")]
@@ -1205,17 +1202,26 @@ impl ModuleTrainer {
             "desire_phase_observation".to_string(),
             summary.observation as f64,
         );
-        target.insert("desire_phase_injection".to_string(), summary.injection as f64);
+        target.insert(
+            "desire_phase_injection".to_string(),
+            summary.injection as f64,
+        );
         target.insert(
             "desire_phase_integration".to_string(),
             summary.integration as f64,
         );
-        target.insert("desire_mean_entropy".to_string(), summary.mean_entropy as f64);
+        target.insert(
+            "desire_mean_entropy".to_string(),
+            summary.mean_entropy as f64,
+        );
         target.insert(
             "desire_mean_temperature".to_string(),
             summary.mean_temperature as f64,
         );
-        target.insert("desire_mean_penalty".to_string(), summary.mean_penalty as f64);
+        target.insert(
+            "desire_mean_penalty".to_string(),
+            summary.mean_penalty as f64,
+        );
         target.insert("desire_mean_alpha".to_string(), summary.mean_alpha as f64);
         target.insert("desire_mean_beta".to_string(), summary.mean_beta as f64);
         target.insert("desire_mean_gamma".to_string(), summary.mean_gamma as f64);
@@ -1438,6 +1444,11 @@ impl IntoBatch for PureResult<(Tensor, Tensor)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language::{
+        constant, warmup, ConceptHint, DesireAutomation, DesireLagrangian, DesirePipeline,
+        DesireTrainerBridge, DesireTriggerBuffer, RepressionField, SemanticBridge, SparseKernel,
+        SymbolGeometry, TemperatureController,
+    };
     use crate::layers::linear::Linear;
     use crate::layers::sequential::Sequential;
     use crate::layers::wave_gate::WaveGate;
@@ -1446,16 +1457,7 @@ mod tests {
     use crate::schedule::RoundtableConfig;
     use crate::CouncilEvidence;
     use st_tensor::pure::topos::OpenCartesianTopos;
-    use std::collections::HashMap;
-    use std::time::SystemTime;
-    use crate::language::{
-        constant, warmup, ConceptHint, DesireAutomation, DesireLagrangian, DesirePipeline,
-        DesireTrainerBridge, DesireTriggerBuffer, RepressionField, SemanticBridge, SparseKernel,
-        SymbolGeometry, TemperatureController,
-    };
-    use st_tensor::pure::topos::OpenCartesianTopos;
-    use std::collections::HashMap;
-    use std::time::SystemTime;
+    use std::collections::{HashMap, HashSet};
     use std::time::{Duration, Instant, SystemTime};
 
     fn build_language_geometry() -> SymbolGeometry {
@@ -1473,8 +1475,6 @@ mod tests {
     }
 
     fn build_language_semantics() -> SemanticBridge {
-        use std::collections::HashSet;
-
         let log_pi = vec![
             vec![(0, (0.65f32).ln()), (1, (0.35f32).ln())],
             vec![(0, (0.4f32).ln()), (1, (0.6f32).ln())],
@@ -1482,7 +1482,8 @@ mod tests {
         let row = vec![1.0, 1.0];
         let col = vec![1.0, 1.0];
         let anchors = HashSet::new();
-        let concept_kernel = SparseKernel::from_rows(vec![vec![(0, 1.0)], vec![(1, 1.0)]], 1e-6).unwrap();
+        let concept_kernel =
+            SparseKernel::from_rows(vec![vec![(0, 1.0)], vec![(1, 1.0)]], 1e-6).unwrap();
         SemanticBridge::new(log_pi, row, col, anchors, 1e-6, concept_kernel).unwrap()
     }
 
@@ -1673,6 +1674,8 @@ mod tests {
             .unwrap();
 
         assert!(bridge.is_empty());
+    }
+
     #[cfg(feature = "golden")]
     #[test]
     fn trainer_records_golden_council_snapshot() {
