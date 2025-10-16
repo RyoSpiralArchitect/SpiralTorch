@@ -9,12 +9,15 @@ use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedul
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_core::telemetry::chrono::{ChronoFrame, ChronoTimeline, ResonanceTemporalMetrics};
+use st_core::telemetry::maintainer::{Maintainer, MaintainerConfig, MaintainerReport};
 use st_tensor::pure::measure::{z_space_barycenter, ZSpaceBarycenter};
 use st_tensor::pure::{
     AmegaHypergrad, DifferentialResonance, FunctorDifferential, HomotopyDifferential,
     InfinityDifferential, OpenCartesianTopos, PureResult, RecursiveDifferential,
     SpiralDifferential, Tensor, TensorError,
 };
+use std::sync::{Arc, Mutex};
 
 /// Configuration describing how the session evaluates the Z-space barycenter objective.
 #[derive(Debug, Clone)]
@@ -68,6 +71,8 @@ pub struct SpiralSessionBuilder {
     fallback_learning_rate: f32,
     barycenter: BarycenterConfig,
     topos: Option<OpenCartesianTopos>,
+    chrono_capacity: usize,
+    maintainer: MaintainerConfig,
 }
 
 impl SpiralSessionBuilder {
@@ -80,6 +85,8 @@ impl SpiralSessionBuilder {
             fallback_learning_rate: 0.01,
             barycenter: BarycenterConfig::default(),
             topos: None,
+            chrono_capacity: 256,
+            maintainer: MaintainerConfig::default(),
         }
     }
 
@@ -155,9 +162,25 @@ impl SpiralSessionBuilder {
         self
     }
 
+    /// Overrides the maintainer configuration used for self-rewrite assessments.
+    pub fn with_maintainer_config(mut self, config: MaintainerConfig) -> Self {
+        self.maintainer = config;
+        self
+    }
+
     /// Updates the coupling matrix in-place.
     pub fn set_barycenter_coupling(&mut self, coupling: Option<Tensor>) {
         self.barycenter.coupling = coupling;
+    }
+
+    /// Returns the maintainer configuration reference.
+    pub fn maintainer_config(&self) -> &MaintainerConfig {
+        &self.maintainer
+    }
+
+    /// Updates the maintainer configuration in-place.
+    pub fn set_maintainer_config(&mut self, config: MaintainerConfig) {
+        self.maintainer = config;
     }
 
     /// Installs an open-cartesian topos guard for all hypergradient tapes.
@@ -169,6 +192,17 @@ impl SpiralSessionBuilder {
     /// Updates the topos guard in-place.
     pub fn set_topos(&mut self, topos: Option<OpenCartesianTopos>) {
         self.topos = topos;
+    }
+
+    /// Overrides the maximum number of temporal resonance frames retained in the session.
+    pub fn with_chrono_capacity(mut self, capacity: usize) -> Self {
+        self.chrono_capacity = capacity.max(1);
+        self
+    }
+
+    /// Updates the chrono capacity in-place.
+    pub fn set_chrono_capacity(&mut self, capacity: usize) {
+        self.chrono_capacity = capacity.max(1);
     }
 
     /// Convenience helper to construct a guard from raw parameters.
@@ -235,6 +269,7 @@ impl SpiralSessionBuilder {
     /// Finalises the builder and returns a [`SpiralSession`].
     pub fn build(self) -> PureResult<SpiralSession> {
         self.validate()?;
+        let maintainer = self.maintainer.clone().sanitise();
         Ok(SpiralSession {
             caps: self.caps,
             curvature: self.curvature,
@@ -242,6 +277,10 @@ impl SpiralSessionBuilder {
             fallback_learning_rate: self.fallback_learning_rate,
             barycenter: self.barycenter,
             topos: self.topos,
+            chrono: Arc::new(Mutex::new(ChronoTimeline::with_capacity(
+                self.chrono_capacity,
+            ))),
+            maintainer,
         })
     }
 }
@@ -256,6 +295,8 @@ pub struct SpiralSession {
     fallback_learning_rate: f32,
     barycenter: BarycenterConfig,
     topos: Option<OpenCartesianTopos>,
+    chrono: Arc<Mutex<ChronoTimeline>>,
+    maintainer: MaintainerConfig,
 }
 
 /// Builder-style trace that wires homotopy, functor, recursive, and \(\infty\)-tower flows.
@@ -504,12 +545,52 @@ impl SpiralSession {
         builder.set_barycenter_beta_j(self.barycenter.beta_j);
         builder.set_barycenter_coupling(self.barycenter.coupling.clone());
         builder.set_topos(self.topos.clone());
+        builder.set_chrono_capacity(self.chrono_capacity());
+        builder.set_maintainer_config(self.maintainer.clone());
         builder
     }
 
     /// Returns the backend capabilities baked into the session.
     pub fn device_caps(&self) -> DeviceCaps {
         self.caps
+    }
+
+    /// Returns the configured capacity of the temporal resonance timeline.
+    pub fn chrono_capacity(&self) -> usize {
+        self.chrono
+            .lock()
+            .map(|timeline| timeline.capacity())
+            .unwrap_or(1)
+    }
+
+    /// Returns a cloned handle to the underlying chrono timeline.
+    pub fn chrono_handle(&self) -> Arc<Mutex<ChronoTimeline>> {
+        self.chrono.clone()
+    }
+
+    /// Returns the current maintainer configuration.
+    pub fn maintainer_config(&self) -> MaintainerConfig {
+        self.maintainer.clone()
+    }
+
+    /// Updates the maintainer configuration in-place.
+    pub fn set_maintainer_config(&mut self, config: MaintainerConfig) {
+        self.maintainer = config.sanitise();
+    }
+
+    /// Clones all recorded chrono frames in chronological order.
+    pub fn chrono_frames(&self) -> Vec<ChronoFrame> {
+        self.chrono
+            .lock()
+            .map(|timeline| timeline.frames().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Clears the temporal telemetry stream.
+    pub fn reset_chrono(&self) {
+        if let Ok(mut timeline) = self.chrono.lock() {
+            timeline.reset();
+        }
     }
 
     /// Curvature used for all hypergrad tapes.
@@ -520,6 +601,53 @@ impl SpiralSession {
     /// Hypergradient learning rate.
     pub fn hyper_learning_rate(&self) -> f32 {
         self.hyper_learning_rate
+    }
+
+    /// Records the provided resonance snapshot into the temporal timeline and returns the frame.
+    pub fn resonate_over_time(
+        &self,
+        resonance: &DifferentialResonance,
+        dt: f32,
+    ) -> PureResult<ChronoFrame> {
+        if !dt.is_finite() || dt <= 0.0 {
+            return Err(TensorError::NonPositiveLearningRate { rate: dt });
+        }
+        let homotopy_energy = resonance.homotopy_flow.squared_l2_norm();
+        let functor_energy = resonance.functor_linearisation.squared_l2_norm();
+        let recursive_energy = resonance.recursive_objective.squared_l2_norm();
+        let projection_energy = resonance.infinity_projection.squared_l2_norm();
+        let infinity_energy = resonance.infinity_energy.squared_l2_norm();
+        let total_energy = homotopy_energy
+            + functor_energy
+            + recursive_energy
+            + projection_energy
+            + infinity_energy;
+        let observed_curvature = if homotopy_energy > 0.0 {
+            -homotopy_energy.sqrt()
+        } else {
+            self.curvature
+        };
+        let metrics = ResonanceTemporalMetrics {
+            observed_curvature,
+            total_energy,
+            homotopy_energy,
+            functor_energy,
+            recursive_energy,
+            projection_energy,
+            infinity_energy,
+        }
+        .sanitise();
+        let mut timeline = self.chrono.lock().map_err(|_| TensorError::IoError {
+            message: "chrono timeline poisoned".to_string(),
+        })?;
+        Ok(timeline.record(dt, metrics))
+    }
+
+    /// Evaluates the temporal telemetry and returns a maintenance recommendation.
+    pub fn maintain(&self) -> MaintainerReport {
+        let frames = self.chrono_frames();
+        let maintainer = Maintainer::new(self.maintainer.clone());
+        maintainer.assess(&frames)
     }
 
     /// Euclidean fallback learning rate.
@@ -699,6 +827,7 @@ mod tests {
     use super::*;
     use crate::layers::linear::Linear;
     use crate::loss::MeanSquaredError;
+    use st_core::telemetry::maintainer::MaintainerStatus;
     use st_tensor::pure::measure::BarycenterIntermediate;
 
     fn toy_tensor(a: &[f32]) -> Tensor {
@@ -876,5 +1005,71 @@ mod tests {
             TensorError::ShapeMismatch { .. } => {}
             other => panic!("expected shape mismatch, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn chrono_timeline_records_frames() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(2)
+            .build()
+            .unwrap();
+        let seed = toy_tensor(&[0.5, -0.2]);
+        let generator = toy_tensor(&[1.0, -1.0]);
+        let direction = toy_tensor(&[0.15, 0.05]);
+        let kernel = Tensor::from_vec(2, 2, vec![1.0, 0.2, -0.3, 1.1]).unwrap();
+        let density = toy_tensor(&[0.6, 0.4]);
+        let weights = vec![1.0];
+        let barycenter = session.barycenter(&weights, &[density.clone()]).unwrap();
+        let resonance = session
+            .trace(seed.clone())
+            .unwrap()
+            .deform(generator.clone(), direction.clone())
+            .unwrap()
+            .via(kernel.clone())
+            .unwrap()
+            .with_barycenter(&barycenter)
+            .unwrap()
+            .resonate()
+            .unwrap();
+        let first = session.resonate_over_time(&resonance, 0.1).unwrap();
+        assert_eq!(first.step, 0);
+        assert!(first.timestamp > 0.0);
+        let second = session.resonate_over_time(&resonance, 0.1).unwrap();
+        assert_eq!(second.step, 1);
+        let frames = session.chrono_frames();
+        assert_eq!(frames.len(), 2);
+        assert!(frames[1].timestamp > frames[0].timestamp);
+    }
+
+    #[test]
+    fn maintainer_flags_energy_growth() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(8)
+            .build()
+            .unwrap();
+        {
+            let handle = session.chrono_handle();
+            let mut timeline = handle.lock().unwrap();
+            let energies = [1.0, 1.3, 1.6, 1.9];
+            for energy in energies {
+                let metrics = ResonanceTemporalMetrics {
+                    observed_curvature: -1.0,
+                    total_energy: energy,
+                    homotopy_energy: energy * 0.4,
+                    functor_energy: energy * 0.2,
+                    recursive_energy: energy * 0.2,
+                    projection_energy: energy * 0.1,
+                    infinity_energy: energy * 0.1,
+                }
+                .sanitise();
+                timeline.record(0.1, metrics);
+            }
+        }
+        let report = session.maintain();
+        assert!(report.should_rewrite());
+        assert_eq!(report.status, MaintainerStatus::Rewrite);
+        assert!(report.diagnostic.contains("energy growth"));
     }
 }
