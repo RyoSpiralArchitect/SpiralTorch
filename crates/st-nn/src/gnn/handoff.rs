@@ -52,15 +52,11 @@ pub fn embed_into_biome(
         let mut node = Tensor::from_vec(1, feature_dim, row)?;
         let monad = RewriteMonad::new(biome.topos());
         monad.rewrite_tensor("graph_node", &mut node)?;
-        let weight = flow_energy(flow).max(1e-6);
+        let weight = flow.energy().max(1e-6);
         biome.absorb_weighted("graph_node", node, weight)?;
     }
 
     Ok(GraphMonadExport { biome, flows })
-}
-
-fn flow_energy(flow: &NodeFlowSample) -> f32 {
-    flow.aggregated_norm.abs() * flow.incoming_weight.abs()
 }
 
 fn flows_to_grid(flows: &[NodeFlowSample], width: usize, height: usize) -> PureResult<Tensor> {
@@ -74,7 +70,7 @@ fn flows_to_grid(flows: &[NodeFlowSample], width: usize, height: usize) -> PureR
     let len = data.len().max(1);
     for (idx, flow) in flows.iter().enumerate() {
         let slot = idx % len;
-        data[slot] += flow_energy(flow);
+        data[slot] += flow.energy();
     }
     Tensor::from_vec(height, width, data)
 }
@@ -146,8 +142,7 @@ pub fn fold_into_roundtable(
     report: &GraphLayerReport,
 ) -> PureResult<QuadBandEnergy> {
     let base = schedule.band_energy(gradient)?;
-    let graph_energy =
-        report.node_flows.iter().map(flow_energy).sum::<f32>() * (1.0 + report.curvature.abs());
+    let graph_energy = report.total_flow_energy() * (1.0 + report.curvature.abs());
     Ok(QuadBandEnergy {
         above: base.above,
         here: base.here,

@@ -86,11 +86,15 @@ SpiralTorchRec and SpiralTorchRL. The new `st-nn::gnn` module ships a
 `GraphContext` normaliser plus a `ZSpaceGraphConvolution` layer that attaches
 hypergrad tapes by default and surfaces per-node flow traces via the telemetry
 `GraphFlowTracer`, so graph reasoning can be trained and inspected without
-leaving Z-space. Those traces now plug straight into SpiralTorch’s other
-pillars: `embed_into_biome` folds propagated node states into an
-`OpenCartesianTopos`/`TensorBiome` pair for RewriteMonad consumers, the flow
-grid can be painted onto any canvas projector, and `fold_into_roundtable`
-promotes the graph manifold as a fourth participant beside the A/B/C bands.
+leaving Z-space. The `GraphContextBuilder` allows you to dial in symmetric or
+row-stochastic normalisation (and self-loop weighting) per graph before it ever
+touches the tape, while the tracer now aggregates energy so higher-level tools
+can see how much of the negotiation passed through each layer at a glance.
+Those traces plug straight into SpiralTorch’s other pillars: `embed_into_biome`
+folds propagated node states into an `OpenCartesianTopos`/`TensorBiome` pair for
+RewriteMonad consumers, the flow grid can be painted onto any canvas projector,
+and `fold_into_roundtable` promotes the graph manifold as a fourth participant
+beside the A/B/C bands.
 
 ### Explainability through hypergrad telemetry
 

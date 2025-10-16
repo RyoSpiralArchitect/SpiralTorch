@@ -7,7 +7,7 @@ pub mod context;
 pub mod handoff;
 pub mod layer;
 
-pub use context::GraphContext;
+pub use context::{GraphContext, GraphContextBuilder, GraphNormalization};
 pub use handoff::{
     embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,
     fold_into_roundtable, GraphMonadExport, QuadBandEnergy,
