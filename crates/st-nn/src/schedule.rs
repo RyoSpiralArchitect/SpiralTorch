@@ -7,7 +7,7 @@ use crate::plan::RankPlanner;
 use crate::{PureResult, Tensor};
 use st_core::ops::rank_entry::RankPlan;
 use st_core::ops::zspace_round::{self, RoundtableBand, RoundtableError};
-use st_tensor::pure::TensorError;
+use st_tensor::TensorError;
 
 /// Configuration used to derive the A/B/C roundtable schedule.
 #[derive(Debug, Clone, Copy)]

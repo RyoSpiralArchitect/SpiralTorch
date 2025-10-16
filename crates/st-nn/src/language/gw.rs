@@ -5,7 +5,7 @@
 
 use super::geometry::{SemanticBridge, SparseKernel};
 use crate::PureResult;
-use st_tensor::pure::TensorError;
+use st_tensor::TensorError;
 use std::collections::HashSet;
 
 #[derive(Clone, Debug)]

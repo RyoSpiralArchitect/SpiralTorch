@@ -1,7 +1,7 @@
 use js_sys::{Array, Float32Array, Uint8Array};
-use st_tensor::pure::fractal::{FractalPatch, UringFractalScheduler};
-use st_tensor::pure::wasm_canvas::{CanvasPalette, CanvasProjector};
-use st_tensor::pure::{Tensor, TensorError};
+use st_tensor::fractal::{FractalPatch, UringFractalScheduler};
+use st_tensor::wasm_canvas::{CanvasPalette, CanvasProjector};
+use st_tensor::{Tensor, TensorError};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};

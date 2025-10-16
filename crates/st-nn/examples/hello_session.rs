@@ -28,7 +28,7 @@ use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{
     dataset_from_vec, Linear, MeanSquaredError, RoundtableConfig, Sequential, SpiralSession, Tensor,
 };
-use st_tensor::pure::PureResult;
+use st_tensor::PureResult;
 
 fn main() -> PureResult<()> {
     let caps = DeviceCaps::wgpu(32, true, 256);

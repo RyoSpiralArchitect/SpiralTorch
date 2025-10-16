@@ -31,7 +31,7 @@ impl Module for Relu {
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         if input.shape() != grad_output.shape() {
-            return Err(st_tensor::pure::TensorError::ShapeMismatch {
+            return Err(st_tensor::TensorError::ShapeMismatch {
                 left: input.shape(),
                 right: grad_output.shape(),
             });
