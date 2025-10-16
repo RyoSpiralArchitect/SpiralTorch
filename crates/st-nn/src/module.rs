@@ -25,7 +25,7 @@ use crate::schedule::GradientBands;
 use st_core::backend::device_caps::DeviceCaps;
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::PsychoidSample;
-use st_tensor::pure::{
+use st_tensor::{
     topos::OpenCartesianTopos, AmegaHypergrad, ComplexTensor, LanguageWaveEncoder, PureResult,
     Tensor, TensorError,
 };
