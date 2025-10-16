@@ -27,7 +27,8 @@ use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(feature = "psi")]
+use std::time::SystemTime;
 
 use super::chrono::ChronoLoopSignal;
 #[cfg(feature = "psi")]

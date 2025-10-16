@@ -222,8 +222,10 @@ impl InterfaceGauge {
         }
     }
 
-    fn radius_in_steps(&self) -> isize {
-        radius_in_steps(self.physical_radius, self.grid_spacing)
+    /// Returns the discretised sampling radius expressed in lattice steps.
+    pub fn radius_in_steps(&self) -> isize {
+        let steps = (self.physical_radius / self.grid_spacing).ceil() as isize;
+        steps.max(1)
     }
 }
 

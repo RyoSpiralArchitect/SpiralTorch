@@ -1806,6 +1806,7 @@ mod tests {
     use super::super::temperature::TemperatureController;
     use super::*;
     use crate::gnn::spiralk::GraphConsensusBridge;
+    use crate::plan::RankPlanner;
     use crate::schedule::BandEnergy;
     use crate::plan::RankPlanner;
     use crate::schedule::BandEnergy;

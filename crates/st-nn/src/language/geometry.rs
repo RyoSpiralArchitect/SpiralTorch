@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use crate::PureResult;
-use st_tensor::pure::TensorError;
+use st_tensor::TensorError;
 use std::collections::HashSet;
 
 const DEFAULT_EPSILON: f32 = 1e-6;
