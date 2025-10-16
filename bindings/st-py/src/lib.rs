@@ -9,7 +9,7 @@ use crate::sot::{PySoT3DPlan, Sot3DParams};
 
 use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyImportError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyModule, PySequence, PyTuple};
 use pyo3::wrap_pyfunction;
@@ -51,6 +51,9 @@ use st_tensor::pure::{
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::io::ErrorKind;
+use std::path::Path;
+use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
@@ -3481,6 +3484,287 @@ fn describe_device(py: Python<'_>, device: Option<&str>) -> PyResult<PyObject> {
     Ok(device_caps_dict(py, caps)?.into_py(py))
 }
 
+#[pyfunction]
+#[pyo3(signature = (model_name, serialized_file, export_path, handler, extra_files=None, config=None, version=None, requirements_file=None, force=false, archive_format=None))]
+fn torchserve_archive(
+    model_name: &str,
+    serialized_file: &str,
+    export_path: &str,
+    handler: &str,
+    extra_files: Option<Vec<String>>,
+    config: Option<&str>,
+    version: Option<&str>,
+    requirements_file: Option<&str>,
+    force: bool,
+    archive_format: Option<&str>,
+) -> PyResult<String> {
+    let mut cmd = Command::new("torch-model-archiver");
+    cmd.arg("--model-name").arg(model_name);
+    cmd.arg("--serialized-file").arg(serialized_file);
+    cmd.arg("--handler").arg(handler);
+    cmd.arg("--export-path").arg(export_path);
+
+    if let Some(extra) = extra_files {
+        if !extra.is_empty() {
+            cmd.arg("--extra-files").arg(extra.join(","));
+        }
+    }
+    if let Some(config) = config {
+        cmd.arg("--config-file").arg(config);
+    }
+    if let Some(version) = version {
+        cmd.arg("--version").arg(version);
+    }
+    if let Some(req) = requirements_file {
+        cmd.arg("--requirements-file").arg(req);
+    }
+    if let Some(fmt) = archive_format {
+        cmd.arg("--archive-format").arg(fmt);
+    }
+    if force {
+        cmd.arg("--force");
+    }
+
+    let output = cmd.output().map_err(|err| match err.kind() {
+        ErrorKind::NotFound => PyRuntimeError::new_err(
+            "torch-model-archiver CLI was not found in PATH; install TorchServe tooling first",
+        ),
+        _ => PyRuntimeError::new_err(format!("failed to execute torch-model-archiver: {err}")),
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PyRuntimeError::new_err(format!(
+            "torch-model-archiver failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        )));
+    }
+
+    let base_name = format!("{model_name}.mar");
+    let default_path = Path::new(export_path).join(&base_name);
+    let archive_path = version
+        .map(|v| Path::new(export_path).join(format!("{model_name}_v{v}.mar")))
+        .filter(|candidate| candidate.exists())
+        .unwrap_or(default_path);
+
+    Ok(archive_path.to_string_lossy().into_owned())
+}
+
+#[pyfunction]
+#[pyo3(signature = (model, name, signatures=None, labels=None, metadata=None, custom_objects=None, context=None, api_version=None))]
+fn bentoml_save_model(
+    py: Python<'_>,
+    model: PyObject,
+    name: &str,
+    signatures: Option<&PyDict>,
+    labels: Option<&PyDict>,
+    metadata: Option<&PyDict>,
+    custom_objects: Option<&PyDict>,
+    context: Option<&PyDict>,
+    api_version: Option<&str>,
+) -> PyResult<PyObject> {
+    let bentoml = py.import("bentoml").map_err(|err| {
+        PyImportError::new_err(format!(
+            "bentoml is required for BentoML integration but could not be imported: {err}"
+        ))
+    })?;
+    let pytorch = bentoml.getattr("pytorch").map_err(|err| {
+        PyImportError::new_err(format!("bentoml.pytorch backend is unavailable: {err}"))
+    })?;
+
+    let kwargs = PyDict::new_bound(py);
+    if let Some(signatures) = signatures {
+        kwargs.set_item("signatures", signatures)?;
+    }
+    if let Some(labels) = labels {
+        kwargs.set_item("labels", labels)?;
+    }
+    if let Some(metadata) = metadata {
+        kwargs.set_item("metadata", metadata)?;
+    }
+    if let Some(custom_objects) = custom_objects {
+        kwargs.set_item("custom_objects", custom_objects)?;
+    }
+    if let Some(context) = context {
+        kwargs.set_item("context", context)?;
+    }
+    if let Some(api_version) = api_version {
+        kwargs.set_item("api_version", api_version)?;
+    }
+
+    let saved = pytorch.call_method("save_model", (name, model), Some(&kwargs))?;
+    Ok(saved.into_py(py))
+}
+
+#[pyfunction]
+#[pyo3(signature = (objective, n_trials=None, timeout=None, study_name=None, storage=None, direction="minimize", sampler=None, pruner=None))]
+fn optuna_optimize(
+    py: Python<'_>,
+    objective: PyObject,
+    n_trials: Option<usize>,
+    timeout: Option<f64>,
+    study_name: Option<&str>,
+    storage: Option<&str>,
+    direction: &str,
+    sampler: Option<PyObject>,
+    pruner: Option<PyObject>,
+) -> PyResult<PyObject> {
+    let optuna = py.import("optuna").map_err(|err| {
+        PyImportError::new_err(format!(
+            "optuna is required for hyperparameter search but could not be imported: {err}"
+        ))
+    })?;
+
+    let create_kwargs = PyDict::new_bound(py);
+    create_kwargs.set_item("direction", direction)?;
+    if let Some(name) = study_name {
+        create_kwargs.set_item("study_name", name)?;
+    }
+    if let Some(storage) = storage {
+        create_kwargs.set_item("storage", storage)?;
+    }
+    if let Some(sampler) = sampler {
+        create_kwargs.set_item("sampler", sampler)?;
+    }
+    if let Some(pruner) = pruner {
+        create_kwargs.set_item("pruner", pruner)?;
+    }
+
+    let study = optuna.call_method("create_study", (), Some(&create_kwargs))?;
+
+    let optimize_kwargs = PyDict::new_bound(py);
+    if let Some(n_trials) = n_trials {
+        optimize_kwargs.set_item("n_trials", n_trials)?;
+    }
+    if let Some(timeout) = timeout {
+        optimize_kwargs.set_item("timeout", timeout)?;
+    }
+
+    study.call_method("optimize", (objective,), Some(&optimize_kwargs))?;
+
+    Ok(study.into_py(py))
+}
+
+#[pyfunction]
+#[pyo3(signature = (trainable, config=None, num_samples=None, resources_per_trial=None, metric=None, mode=None, name=None, local_dir=None, init=true))]
+fn ray_tune_run(
+    py: Python<'_>,
+    trainable: PyObject,
+    config: Option<&PyDict>,
+    num_samples: Option<usize>,
+    resources_per_trial: Option<&PyDict>,
+    metric: Option<&str>,
+    mode: Option<&str>,
+    name: Option<&str>,
+    local_dir: Option<&str>,
+    init: bool,
+) -> PyResult<PyObject> {
+    let ray = py.import("ray").map_err(|err| {
+        PyImportError::new_err(format!(
+            "ray is required for Ray Tune integration but could not be imported: {err}"
+        ))
+    })?;
+
+    if init {
+        let initialized: bool = ray.getattr("is_initialized")?.call0()?.extract()?;
+        if !initialized {
+            let _ = ray.call_method0("init")?;
+        }
+    }
+
+    let tune = ray.getattr("tune").map_err(|err| {
+        PyImportError::new_err(format!("ray.tune namespace is unavailable: {err}"))
+    })?;
+
+    let kwargs = PyDict::new_bound(py);
+    if let Some(config) = config {
+        kwargs.set_item("config", config)?;
+    }
+    if let Some(num_samples) = num_samples {
+        kwargs.set_item("num_samples", num_samples)?;
+    }
+    if let Some(resources_per_trial) = resources_per_trial {
+        kwargs.set_item("resources_per_trial", resources_per_trial)?;
+    }
+    if let Some(metric) = metric {
+        kwargs.set_item("metric", metric)?;
+    }
+    if let Some(mode) = mode {
+        kwargs.set_item("mode", mode)?;
+    }
+    if let Some(name) = name {
+        kwargs.set_item("name", name)?;
+    }
+    if let Some(local_dir) = local_dir {
+        kwargs.set_item("local_dir", local_dir)?;
+    }
+
+    let result = tune.call_method("run", (trainable,), Some(&kwargs))?;
+    Ok(result.into_py(py))
+}
+
+#[pyfunction]
+#[pyo3(signature = (model, example_input, export_path, opset_version=17, dynamic_axes=None, input_names=None, output_names=None, do_constant_folding=true))]
+fn export_onnx(
+    py: Python<'_>,
+    model: PyObject,
+    example_input: PyObject,
+    export_path: &str,
+    opset_version: i32,
+    dynamic_axes: Option<&PyDict>,
+    input_names: Option<Vec<String>>,
+    output_names: Option<Vec<String>>,
+    do_constant_folding: bool,
+) -> PyResult<()> {
+    let torch = py.import("torch").map_err(|err| {
+        PyImportError::new_err(format!(
+            "torch is required to export ONNX models but could not be imported: {err}"
+        ))
+    })?;
+    let onnx = torch.getattr("onnx").map_err(|err| {
+        PyRuntimeError::new_err(format!("torch.onnx export utility unavailable: {err}"))
+    })?;
+
+    let kwargs = PyDict::new_bound(py);
+    kwargs.set_item("opset_version", opset_version)?;
+    kwargs.set_item("do_constant_folding", do_constant_folding)?;
+    if let Some(dynamic_axes) = dynamic_axes {
+        kwargs.set_item("dynamic_axes", dynamic_axes)?;
+    }
+    if let Some(input_names) = input_names {
+        kwargs.set_item("input_names", input_names)?;
+    }
+    if let Some(output_names) = output_names {
+        kwargs.set_item("output_names", output_names)?;
+    }
+
+    onnx.call_method("export", (model, example_input, export_path), Some(&kwargs))?;
+
+    Ok(())
+}
+
+fn integrations(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(torchserve_archive, m)?)?;
+    m.add_function(wrap_pyfunction!(bentoml_save_model, m)?)?;
+    m.add_function(wrap_pyfunction!(optuna_optimize, m)?)?;
+    m.add_function(wrap_pyfunction!(ray_tune_run, m)?)?;
+    m.add_function(wrap_pyfunction!(export_onnx, m)?)?;
+
+    m.setattr(
+        "__all__",
+        vec![
+            "torchserve_archive",
+            "bentoml_save_model",
+            "optuna_optimize",
+            "ray_tune_run",
+            "export_onnx",
+        ],
+    )?;
+
+    Ok(())
+}
+
 /// SpiralTorch Python module.
 #[pymodule]
 fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -3499,6 +3783,9 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let sot_mod = PyModule::new_bound(_py, "sot")?;
     sot::module(_py, &sot_mod)?;
     m.add_submodule(&sot_mod)?;
+    let integrations_mod = PyModule::new_bound(_py, "integrations")?;
+    integrations(_py, &integrations_mod)?;
+    m.add_submodule(&integrations_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(topk2d_tensor_py, m)?)?;
@@ -3556,6 +3843,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "dataset",
             "linalg",
             "sot",
+            "integrations",
         ],
     )?;
     m.setattr("__version__", env!("CARGO_PKG_VERSION"))?;

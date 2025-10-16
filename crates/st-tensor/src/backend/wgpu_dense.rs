@@ -248,3 +248,17 @@ pub fn matmul(
 
     Ok(readback_f32(device, queue, &c_buf, rows * cols))
 }
+
+pub fn is_available() -> bool {
+    dense_context().is_ok()
+}
+
+pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return false;
+    }
+
+    let volume = rows.saturating_mul(inner).saturating_mul(cols);
+
+    volume >= 32 * 32 * 32
+}
