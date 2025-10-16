@@ -148,6 +148,137 @@ stats = session.train_epoch(trainer, model, loss, loader, schedule)
 The loader runs entirely in Rust—mini-batches stream straight into
 `train_epoch` and propagate errors as native `TensorError`s when shapes drift.
 
+### Temporal resonance timelines
+
+Sessions now keep a rolling **chrono timeline** that measures how each
+`DifferentialResonance` evolves across calls. Record a frame by piping a fresh
+snapshot through `resonate_over_time(dt)` and inspect the history via
+`session.timeline()` or the underlying `ChronoFrame` handles:
+
+```python
+resonance = trace.resonate()
+frame = session.resonate_over_time(resonance, dt=0.1)
+print(frame.timestamp, frame.total_energy)
+
+# Sample the most recent frames for plotting.
+frames = session.timeline(timesteps=128)
+summary = session.timeline_summary(timesteps=128)
+harmonics = session.timeline_harmonics(timesteps=256, bins=24)
+loop_signal = session.loop_signal(timesteps=256)
+times, energy, drift = session.animate_resonance(timesteps=128)
+wave = session.speak(timesteps=128, temperature=0.7)
+story, highlights = session.timeline_story(timesteps=256, temperature=0.65)
+
+if loop_signal and loop_signal.spiralk_script:
+    print("SpiralK hint:")
+    print(loop_signal.spiralk_script)
+```
+
+`ChronoFrame` surfaces per-band energy, curvature drift, and decay estimates so
+you can chart living topology directly in notebooks. Reach for
+`session.timeline_summary()` when you want windowed drift/energy statistics or
+`session.timeline_harmonics()` to expose dominant oscillations inside the
+timeline. `session.loop_signal(...)` folds both into a reusable bundle that
+includes a SpiralK script (when the `kdsl` feature is enabled) so heuristics can
+be replayed across devices. `session.speak(...)` still generates a playback-ready
+amplitude trace, while `session.timeline_story(...)` and `session.describe()`
+synthesise natural language narratives about the latest state (or pass an
+explicit `resonance` snapshot to ground the narration in a fresh observation):
+
+```python
+print(session.describe())
+print(session.describe(resonance, temperature=0.8))
+print(st.describe_timeline(frames))
+print(harmonics.dominant_energy.frequency if harmonics else None)
+```
+
+### Atlas projections
+
+Chrono telemetry, maintainer diagnostics, and loopback envelopes now converge
+into a **SpiralTorch atlas** that captures the city-wide state of your run.
+Every `resonate_over_time` call contributes a fragment with drift, energy,
+collapse pulses, and Z-bias hints; the maintainer folds in clamp/pressure
+recommendations at the same time. Rust sessions expose the aggregated
+`AtlasFrame`, and Python mirrors it via `session.atlas()`:
+
+```python
+atlas = session.atlas()
+if atlas:
+    print(atlas.timestamp, atlas.loop_support)
+    for metric in atlas.metrics():
+        print(metric.name, metric.value)
+    story = session.atlas_story(temperature=0.65)
+    if story:
+        summary, highlights = story
+        print(summary)
+        print(highlights)
+    print(st.describe_atlas(atlas))
+```
+
+`AtlasFrame` exposes the latest `ChronoSummary`, optional harmonics, maintainer
+status, and any SpiralK hints captured along the way. Metrics from auxiliary
+nodes (collapse totals, Z-bias pushes) ride alongside free-form notes so you can
+route the atlas straight into dashboards or back into SpiralK planners. Each
+frame also clusters its metrics into **districts** — Surface, Concourse, and
+Substrate — so you can see which layer of the SpiralTorch “city” is lighting up
+at a glance:
+
+```python
+for district in atlas.districts():
+    print(district.name, district.mean, district.span)
+```
+
+If you want more than a snapshot, call `session.atlas_route(limit=12)` to pull a
+bounded history of frames. It’s perfect for feeding notebooks with sliding
+windows of atlas metrics or piping the loop into other SpiralTorch nodes.
+
+### Self-maintaining feedback loops
+
+Temporal telemetry now feeds a lightweight **maintainer** that keeps the
+geometry controller within the recommended 2–3× max-scale band and gently bumps
+Leech density pressure when energy starts to race. Both Rust and Python callers
+can inspect the maintainer report and override thresholds when experimenting:
+
+```python
+# Tune thresholds before building a session.
+session_builder.maintainer(jitter_threshold=0.25, growth_threshold=0.03)
+session = session_builder.build()
+
+# Review the live configuration and trigger an assessment.
+print(session.maintainer_config())
+report = session.self_maintain()
+print(report.status, report.suggested_max_scale)
+
+if report.should_rewrite():
+    print("Maintainer recommends a self-rewrite cycle:", report.diagnostic)
+```
+
+The maintainer computes curvature jitter, mean energy, and decay across the most
+recent frames, returning actionable clamp and pressure suggestions. Spectral
+peaks are now included in every report so you can see whether high-frequency
+jitter or runaway energy oscillations triggered an intervention. Override the
+defaults on-the-fly with `session.configure_maintainer(...)` to experiment with
+more aggressive rewrite policies or relaxed dormancy thresholds.
+
+Maintainer reports now ship with the same SpiralK snippet the session pushes into
+the chrono loop, and `session.collapse_pulse()` returns the latest CollapseDrive
+command (including any associated loop signal) so distributed nodes can stay in
+lockstep without bespoke plumbing.
+
+On the audio front, `LanguageWaveEncoder.speak(frames)` maps chrono timelines to
+wave amplitudes, and the higher-level `TextResonator` class lets Rust or Python
+callers drive the same pipeline with custom curvature/temperature settings:
+
+```python
+encoder = st.LanguageWaveEncoder(session.curvature(), 0.55)
+amplitude = encoder.speak(frames)
+
+narrator = st.TextResonator(session.curvature(), 0.55)
+print(narrator.describe_resonance(resonance))
+print(narrator.describe_timeline(frames))
+wave = narrator.speak(frames)
+```
+
 Prefer a notebook-friendly wrapper? Instantiate `SpiralLightning` from Python
 to bundle the session, trainer, and schedule into a single object that
 auto-prepares modules and returns per-epoch reports with `lightning.fit(...)`.
@@ -211,6 +342,70 @@ policy.record_transition(state, action, reward=0.8)
 report = policy.finish_episode()
 print(report.steps, report.hypergrad_applied)
 ```
+
+Rust projects can pair the policy with the new geometric feedback module to
+ground the update scale in observability measurements. Feed a
+`DifferentialResonance` snapshot into `GeometryFeedback` and the learner will
+adapt its learning rate according to the coalgebra efficiency.
+
+```rust
+use st_core::theory::observability::{ObservabilityConfig, SlotSymmetry};
+use st_rl::{GeometryFeedback, GeometryFeedbackConfig, SpiralPolicyGradient};
+
+let mut policy = SpiralPolicyGradient::new(6, 3, 0.01, 0.99)?;
+let feedback = GeometryFeedback::new(GeometryFeedbackConfig {
+    observability: ObservabilityConfig::new(1, 5, SlotSymmetry::Symmetric),
+    z_space_rank: 24,                 // Maryna Viazovska's Leech shell as default
+    leech_density_weight: 0.5,        // densify η with Λ24 packing pressure
+    ramanujan_iterations: 4,          // refine π via Ramanujan's fast series
+    softening_beta: 0.6,              // keep the projection memory-light
+    max_learning_rate_scale: 2.8,     // pre-clamped to stay in the 2..3 stable band
+    ..GeometryFeedbackConfig::default_policy()
+});
+policy.attach_geometry_feedback(feedback);
+let resonance = session.trace(state.clone())?
+    .generator(direction.clone())?
+    .barycenter(barycenter.clone())?
+    .resonate()?; // DifferentialResonance snapshot
+let (report, signal) = policy.finish_episode_with_geometry(&resonance)?;
+if let Some(signal) = signal {
+    println!("η̄={:.3}, scale={:.2}", signal.averaged_efficiency, signal.learning_rate_scale);
+}
+let telemetry = policy.telemetry();
+if let Some(geo) = telemetry.geometry {
+    println!("rank~{:.1} pressure~{:.4} scalē~{:.2}", geo.rolling_rank, geo.rolling_pressure, geo.rolling_scale);
+}
+```
+
+The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
+into its smoothing loop while auto-rewriting its own clamps. Rank, packing
+pressure, and scale histories sit on rolling windows so noisy small-batch runs
+settle quickly, and the `trainer.telemetry()` surface mirrors the same values to
+spot drift. `GeometryFeedback` keeps `max_scale` inside the recommended `[2, 3]`
+band, raises the floor when rank collapses, and eases the Leech density weight
+if pressure over-saturates—giving you a self-tuning geometric metronome instead
+of a static multiplier.
+
+Chrono loop signals now feed directly into the controller: every
+`SpiralSession::resonate_over_time` call plants a `ChronoLoopSignal` in the
+telemetry hub, and `SpiralPolicyGradient::finish_episode_with_geometry` consumes
+the latest signal before measuring a resonance snapshot. Harmonic gain and decay
+estimates tighten the learning-rate clamps, bump the Λ₂₄ pressure when collapse
+drive pulses flare, and publish the live loop gain/softening factor through
+`PolicyTelemetry.geometry`. In other words, Z-space temporal dynamics, SpiralK
+heuristics, and collapse drive pressure now close a tidy feedback loop without
+additional plumbing.
+
+The loop no longer stops at a single node: every roundtable summary and collapse
+intervention now broadcasts a bounded `LoopbackEnvelope` through the telemetry
+hub. SpiralK meta-summaries attach their script hints, the softlogic observer
+threads its live Z-space bias, and PSI collapse totals hitch a ride so other
+policies can replay the same temporal context. `GeometryFeedback::absorb_loopback`
+blends the envelopes into a synthetic chrono signal, boosts clamp tightening
+according to peer support, and preserves the strongest SpiralK script so the
+controller can keep rewriting its own limits. Callers don’t need extra wiring—
+the policy gradient automatically drains the envelope queue before every
+resonance measurement and folds the distributed telemetry back into Z-space.
 
 ### SpiralTorchRec (open-topos recommendation lattice)
 
