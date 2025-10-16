@@ -131,6 +131,21 @@ meaning-aligned weights.
 6. Once the physical tests pass, toggle \(\rho\) to probe \(\mu > 0\) using
    difference tests or sequential Bayes factors.
 
+## 10. Streaming Maxwell evidence into SpiralK
+
+- The Rust core exposes `MaxwellSpiralKBridge` to translate sequential pulses
+  into SpiralK-ready `soft(...)` hints. Each registered channel is sanitised so
+  KDSl programs can target it directly.
+- Weights are derived from the Z magnitude, keeping hints between 0.55 and 0.95
+  (tuneable) so strong detections carry proportionally stronger influence while
+  weaker drifts stay gentle.
+- Call `push_pulse(channel, &pulse)` for every matched-filter stream, then
+  `script()` to obtain a KDSl snippet. Prepend an existing program via
+  `with_base_program(...)` when the bridge needs to extend a live policy.
+- The resulting string can be injected into the existing SpiralK orchestration
+  so code-driven Z pulses bias Above/Here/Beneath steering without bespoke glue
+  code.
+
 ---
 
 ## Reconstruction within M_Ψ⁺

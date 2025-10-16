@@ -324,6 +324,154 @@ impl MaxwellZPulse {
     }
 }
 
+/// Hint that can be injected into SpiralK so coded-envelope experiments can
+/// steer the runtime once a Maxwell pulse has been detected.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaxwellSpiralKHint {
+    /// Sanitised channel label used inside the KDSl snippet.
+    pub channel: String,
+    /// Number of matched-filter blocks that produced the pulse.
+    pub blocks: u64,
+    /// Z score reported by the sequential detector.
+    pub z_score: f64,
+    /// Signed Z-space bias that should be promoted to SpiralK.
+    pub z_bias: f32,
+    /// Heuristic weight attached to the hint (0–1 range).
+    pub weight: f32,
+}
+
+impl MaxwellSpiralKHint {
+    /// Returns the SpiralK `soft(...)` line encoded by the hint.
+    pub fn script_line(&self) -> String {
+        format!(
+            "soft (maxwell.bias, {:.6}, {:.3}, channel == \"{}\" && blocks >= {});",
+            self.z_bias, self.weight, self.channel, self.blocks
+        )
+    }
+}
+
+/// Aggregates Maxwell pulses and converts them into SpiralK snippets.
+#[derive(Clone, Debug, Default)]
+pub struct MaxwellSpiralKBridge {
+    base_program: Option<String>,
+    min_weight: f32,
+    max_weight: f32,
+    hints: Vec<MaxwellSpiralKHint>,
+}
+
+impl MaxwellSpiralKBridge {
+    /// Creates a bridge that maps Maxwell pulses into SpiralK hints.
+    pub fn new() -> Self {
+        Self {
+            base_program: None,
+            min_weight: 0.55,
+            max_weight: 0.95,
+            hints: Vec::new(),
+        }
+    }
+
+    /// Sets the KDSl snippet that should be prepended to the generated hints.
+    pub fn with_base_program(mut self, program: impl Into<String>) -> Self {
+        let script = program.into();
+        self.base_program = if script.trim().is_empty() {
+            None
+        } else {
+            Some(script)
+        };
+        self
+    }
+
+    /// Overrides the weight interval assigned to SpiralK hints.
+    pub fn with_weight_bounds(mut self, min_weight: f32, max_weight: f32) -> Self {
+        let (lo, hi) = if min_weight <= max_weight {
+            (min_weight, max_weight)
+        } else {
+            (max_weight, min_weight)
+        };
+        self.min_weight = lo.clamp(0.0, 1.0);
+        self.max_weight = hi.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Returns the hints that have been accumulated so far.
+    pub fn hints(&self) -> &[MaxwellSpiralKHint] {
+        &self.hints
+    }
+
+    /// Returns `true` when no pulses have been recorded yet.
+    pub fn is_empty(&self) -> bool {
+        self.hints.is_empty()
+    }
+
+    /// Registers a Maxwell pulse for the provided channel and returns the generated hint.
+    pub fn push_pulse(
+        &mut self,
+        channel: impl AsRef<str>,
+        pulse: &MaxwellZPulse,
+    ) -> MaxwellSpiralKHint {
+        let channel = sanitize_channel(channel.as_ref());
+        let weight = self.weight_from_pulse(pulse);
+        let hint = MaxwellSpiralKHint {
+            channel,
+            blocks: pulse.blocks,
+            z_score: pulse.z_score,
+            z_bias: pulse.z_bias,
+            weight,
+        };
+        self.hints.push(hint.clone());
+        hint
+    }
+
+    /// Builds the SpiralK script snippet that encodes every recorded hint.
+    pub fn script(&self) -> Option<String> {
+        let mut lines = Vec::new();
+        if let Some(base) = &self.base_program {
+            let trimmed = base.trim();
+            if !trimmed.is_empty() {
+                let mut line = trimmed.to_string();
+                if !trimmed.ends_with(';') {
+                    line.push(';');
+                }
+                lines.push(line);
+            }
+        }
+        for hint in &self.hints {
+            lines.push(hint.script_line());
+        }
+        if lines.is_empty() {
+            None
+        } else {
+            Some(lines.join("\n"))
+        }
+    }
+
+    fn weight_from_pulse(&self, pulse: &MaxwellZPulse) -> f32 {
+        let magnitude = pulse.magnitude() as f32;
+        let spread = (magnitude / (1.0 + magnitude)).clamp(0.0, 1.0);
+        if self.max_weight <= self.min_weight {
+            self.min_weight
+        } else {
+            self.min_weight + (self.max_weight - self.min_weight) * spread
+        }
+    }
+}
+
+fn sanitize_channel(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+        } else if matches!(ch, '-' | '_' | ' ' | ':' | '/') {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        "maxwell".to_string()
+    } else {
+        out
+    }
+}
+
 /// Computes the block count required to hit the target Z threshold under the
 /// Gaussian approximation described in the memo.
 ///
@@ -435,5 +583,34 @@ mod tests {
         assert_eq!(feedback.psi_total, 12.0);
         assert_eq!(feedback.weighted_loss, 4.0);
         assert!(feedback.z_signal.abs() > 0.0);
+    }
+
+    #[test]
+    fn spiralk_bridge_emits_script() {
+        let pulse = MaxwellZPulse {
+            blocks: 12,
+            mean: 0.42,
+            standard_error: 0.08,
+            z_score: 5.25,
+            band_energy: (0.8, 0.6, 0.2),
+            z_bias: 0.73,
+        };
+
+        let mut bridge = MaxwellSpiralKBridge::new().with_base_program("z: 1;");
+        let hint = bridge.push_pulse("Ch-α/β", &pulse);
+
+        assert_eq!(hint.channel, "Ch__");
+        assert!(hint.weight >= 0.55 && hint.weight <= 0.95);
+
+        let script = bridge.script().expect("script should exist");
+        assert!(script.contains("z: 1;"));
+        assert!(script.contains("maxwell.bias"));
+        assert!(script.contains("blocks >= 12"));
+    }
+
+    #[test]
+    fn sanitize_channel_falls_back_on_default() {
+        assert_eq!(sanitize_channel(""), "maxwell");
+        assert_eq!(sanitize_channel("A:B C"), "A_B_C");
     }
 }
