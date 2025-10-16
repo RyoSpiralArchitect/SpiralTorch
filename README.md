@@ -61,8 +61,166 @@ tensor shims, no translation layers, and no tracebacks.
   - **Unified RL + Rec stacks:** SpiralTorchRL and SpiralTorchRec keep policy
     gradients, recommendation factors, and hypergrad tapes inside the same
     Z-space geometry so deployment-grade loops never leave Rust.
+  - **Z-space-native graph reasoning:** The Rust core, backend abstraction
+    layer, and Z-space operators already form the spine of a graph neural
+    network stack that embeds large-scale, hierarchical graphs with the same
+    fidelity as its tree-aligned geometry.
+  - **Semiotic suturing at the logit level:** The new `st-nn::language`
+    toolkit folds symbolic kernels, repression fields, and semantic bridges
+    into a single Lagrangian so SpiralTorch can bias logits with desire,
+    anchor S/s correspondences, and respect target entropies without leaving
+    Z-space.
+  - **Interpretability as a first-class citizen:** Hypergrad tapes, roundtable
+    transcripts, and ψ telemetry double as explainability artifacts, enabling
+    decision-path inspection without leaving the Z-space calculus.
 
 ---
+
+## Emerging toolkits unique to SpiralTorch
+
+### Z-space-native graph neural networks
+
+SpiralTorch’s hyperbolic geometry grew around hierarchical graphs. The Rust
+kernel, backend abstraction, and Z-space operator families already expose the
+building blocks for graph neural networks that keep distortion in check while
+scaling to social, molecular, or citation graphs. By composing the existing
+SpiralK planners, Z-space resonators, and curvature-aware tensors, new
+`st-gnn` layers can stream hypergrad updates through tree-like manifolds as a
+first-class citizen in the framework—becoming a third pillar alongside
+SpiralTorchRec and SpiralTorchRL. The new `st-nn::gnn` module ships a
+`GraphContext` normaliser plus a `ZSpaceGraphConvolution` layer that attaches
+hypergrad tapes by default and surfaces per-node flow traces via the telemetry
+`GraphFlowTracer`, so graph reasoning can be trained and inspected without
+leaving Z-space. The `GraphContextBuilder` allows you to dial in symmetric or
+row-stochastic normalisation (and self-loop weighting) per graph before it ever
+touches the tape, while the tracer now aggregates energy so higher-level tools
+can see how much of the negotiation passed through each layer at a glance.
+Those traces plug straight into SpiralTorch’s other pillars: `embed_into_biome`
+folds propagated node states into an `OpenCartesianTopos`/`TensorBiome` pair for
+RewriteMonad consumers, the flow grid can be painted onto any canvas projector,
+and `fold_into_roundtable` promotes the graph manifold as a fourth participant
+beside the A/B/C bands. The new `fold_with_band_energy` helper lets you blend a
+fresh telemetry report with an existing roundtable split without recomputing the
+schedule, keeping graph energy in lock-step with whatever SpiralK already
+decided for the batch. Feed those reports into `GraphConsensusBridge` to
+generate SpiralK snippets and Above/Here/Beneath multipliers—then hand the
+bridge to `ModuleTrainer::enable_graph_feedback` so every optimisation step
+absorbs graph telemetry before the SoftLogic weighting fires. The trainer keeps
+the SpiralK hint from the last applied digest available via
+`ModuleTrainer::graph_hint()`, making it trivial to stream the graph-aware
+policy back into SpiralK orchestrators or external dashboards.
+
+### Explainability through hypergrad telemetry
+
+Every hypergrad tape, roundtable consensus log, and ψ telemetry stream doubles
+as a geometric audit trail. SpiralTorch can expose these records directly to an
+interpretability toolkit that maps gradient flows, consensus splits, and
+telemetry spikes back to model behaviour. Visualising these pathways keeps
+“why” answers native to Z-space, turning SpiralTorch’s internal instrumentation
+into an Explainable AI surface without external probes.
+
+### Semiotic suturing, desire control, and EGW bridges
+
+SpiralTorch now ships a native semiotic optimiser that compresses Lacanian
+language machinery into Z-space numerics. The `st-nn::language::DesireLagrangian`
+implements the closed-form update
+
+\[
+\pi_t^*(j) \propto q_\theta(j\mid h_t)^{1/T_t}\exp\{\alpha_t\log K_{\text{syn}} + \beta_t\log K_{\text{par}} - \lambda r_j + \gamma_t g_t(j)\},
+\]
+
+so syntagmatic/ paradigmatic couplings, repression scores, and S→s drives land
+as a single additive logit injection.【F:crates/st-nn/src/language/desire.rs†L1-L214】
+The `TemperatureController` keeps desire aligned with a target entropy, while
+the lightweight Schrödinger lookahead adds one-to-two Doob iterations directly
+from the Z-space kernels to approximate the bridge in-line with training.【F:crates/st-nn/src/language/temperature.rs†L1-L41】【F:crates/st-nn/src/language/schrodinger.rs†L1-L63】
+
+Symbol/meaning suturing arrives via an entropic Gromov–Wasserstein solver that
+enforces anchors and floaty signifiers together. `EntropicGwSolver` estimates
+the coupling \(\Pi\) by minimising the EGW objective with Sinkhorn-style
+updates, boosting anchor pairs, and handing back a `SemanticBridge` ready for
+token-to-concept expectations across the tape.【F:crates/st-nn/src/language/gw.rs†L1-L245】【F:crates/st-nn/src/language/geometry.rs†L1-L325】
+Feed that bridge into the desire Lagrangian and you obtain a turn-key workflow:
+
+1. Build sparse syntagmatic/ paradigmatic kernels and repression vectors, then
+   estimate \(\Pi\) with the EGW solver (optionally seeding anchor pairs).
+2. Initialise the `DesireLagrangian` with those artefacts and wire it to a
+   SpiralK loop or roundtable injector.
+3. Stream LM logits through `step(...)` or the phase-aware `step_with_scheduler(...)`
+   to receive logit offsets, entropy telemetry, and temperature updates that
+   honour the S/s suturing and desire budget.
+
+Configure desire as a three-stage routine by combining the provided schedule
+helpers. `warmup(...)` handles the observation phase (desire starts at zero and
+logs avoidance), ramping towards the interference window where `alpha` nudges
+avoided terms while `beta/γ` remain gentle. Once the warmups complete the
+integration phase kicks in, coupling desire with the Z-space barycenter and
+surfacing a hypergrad penalty that measures drift from the barycentric anchor.
+For example:
+
+```rust
+let mut desire = DesireLagrangian::new(geometry, repression, semantics, controller)?
+    .with_alpha_schedule(warmup(0.0, 0.1, 400))
+    .with_beta_schedule(warmup(0.0, 0.05, 800))
+    .with_gamma_schedule(constant(0.02))
+    .with_lambda_schedule(constant(0.08));
+
+let report = desire.step_with_scheduler(&logits, previous_token, &concept_hint)?;
+match report.phase {
+    DesirePhase::Observation => log_observation(report.avoidance),
+    DesirePhase::Injection => reinforce_desire(report.logit_offsets),
+    DesirePhase::Integration => hypergrad.push_penalty(report.hypergrad_penalty),
+}
+```
+
+`DesireAvoidanceReport` exposes the dominant repressed tokens collected during
+observation, while the integration phase emits the barycentric drift so a
+hypergrad or self-rewrite scheduler can keep desire centred without collapse.
+The schedules default to zeroed observation and grow-only ramps, so existing
+callers can continue to provide manual `DesireWeights` without opt-in changes.【F:crates/st-nn/src/language/desire.rs†L1-L388】【F:crates/st-nn/src/language/desire.rs†L389-L487】
+
+To automate the “unconscious” loop, wrap the lagrangian with
+`DesireAutomation`. It samples the `SelfRewriteCfg` thresholds, tracks
+hypergrad drift during the integration phase, and emits
+`DesireRewriteTrigger` structures once enough evidence accumulates. Each
+trigger carries the normalised avoidance vector so a SpiralK
+`self-rewrite` or hypergrad scheduler can queue barycentric nudges without
+hand-crafted heuristics.【F:crates/st-nn/src/language/automation.rs†L1-L226】
+
+```rust
+use st_core::config::self_rewrite::read_cfg;
+use st_nn::language::{DesireAutomatedStep, DesireAutomation};
+use std::time::Instant;
+
+let cfg = read_cfg();
+let mut automation = DesireAutomation::new(desire, cfg);
+let DesireAutomatedStep { solution, trigger } = automation
+    .step(&logits, previous_token, &concept_hint, Instant::now())?;
+if let Some(event) = trigger {
+    spiralk_scheduler.queue_desire(event.report, event.mean_penalty);
+}
+```
+
+Persist the stream to disk with `DesireLogbook` so the observation/injection/
+integration cadence can be replayed later or shared with SpiralK rewrite
+automation. The logbook writes line-delimited JSON records that contain the
+entire `DesireSolution` payload plus any emitted triggers, keeping telemetry and
+avoidance vectors together for offline inspection.【F:crates/st-nn/src/language/logbook.rs†L1-L214】
+
+```rust
+use st_nn::language::{DesireAutomatedStep, DesireAutomation, DesireLogbook};
+use std::time::{Instant, SystemTime};
+
+let mut logbook = DesireLogbook::new("desire.ndjson")?;
+let DesireAutomatedStep { solution, trigger } = automation
+    .step(&logits, previous_token, &concept_hint, Instant::now())?;
+logbook.record(&DesireAutomatedStep { solution, trigger }, SystemTime::now())?;
+```
+
+The result is a single Rust-native control surface that marries KL control,
+Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
+language modules, rewrite monads, or SpiralK trainers without bespoke Python
+glue.
 
 ## Hello SpiralSession quickstart
 
