@@ -9,7 +9,7 @@ use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedul
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::atlas::{AtlasFragment, AtlasFrame, AtlasRoute};
+use st_core::telemetry::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
 use st_core::telemetry::chrono::{
     ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoSummary, ChronoTimeline,
     ResonanceTemporalMetrics,
@@ -616,6 +616,11 @@ impl SpiralSession {
         hub::get_atlas_route(limit)
     }
 
+    /// Summarises the recent atlas route into district-level statistics.
+    pub fn atlas_route_summary(&self, limit: Option<usize>) -> AtlasRouteSummary {
+        hub::get_atlas_route_summary(limit)
+    }
+
     /// Generates a narrative describing the latest atlas frame when available.
     pub fn atlas_narrative(&self, temperature: f32) -> PureResult<Option<ResonanceNarrative>> {
         if let Some(frame) = self.atlas() {
@@ -725,8 +730,8 @@ impl SpiralSession {
         let signal = timeline.loop_signal(self.maintainer.window, bin_hint);
         drop(timeline);
         let atlas_signal = signal.clone();
-        if let Some(ref signal) = signal {
-            hub::set_chrono_loop(signal.clone());
+        if let Some(signal) = signal {
+            hub::set_chrono_loop(signal);
         }
         if let Some(signal) = atlas_signal {
             let summary = signal.summary.clone();
@@ -1344,6 +1349,9 @@ mod tests {
         let route = session.atlas_route(Some(4));
         assert!(!route.is_empty());
         assert!(route.latest().is_some());
+        let summary = session.atlas_route_summary(Some(4));
+        assert!(summary.frames > 0);
+        assert!(!summary.districts.is_empty());
         let story = session.atlas_narrative(0.6).unwrap();
         assert!(story
             .as_ref()

@@ -365,6 +365,13 @@ if atlas:
 
 route = session.atlas_route(limit=6)
 print("atlas history", route.length, [frame.timestamp for frame in route.frames])
+
+summary = session.atlas_route_summary(limit=6)
+print("atlas summary", summary.frames, summary.mean_loop_support)
+for district in summary.districts():
+    print("summary", district.name, district.coverage, district.delta)
+if summary.maintainer_status:
+    print("maintainer", summary.maintainer_status, summary.maintainer_diagnostic)
 ```
 
 The `SpiralSession` maintainer surfaces clamp and density suggestions directly

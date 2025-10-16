@@ -459,8 +459,22 @@ for district in atlas.districts():
 
 If you want more than a snapshot, call `session.atlas_route(limit=12)` to pull a
 bounded history of frames. It’s perfect for feeding notebooks with sliding
-windows of atlas metrics or piping the loop into other SpiralTorch nodes.
-route the atlas straight into dashboards or back into SpiralK planners.
+windows of atlas metrics or piping the loop into other SpiralTorch nodes. When
+you just need a quick **district-level synopsis**, `session.atlas_route_summary`
+condenses the same window into aggregate trends and maintainer hints:
+
+```python
+summary = session.atlas_route_summary(limit=12)
+print(summary.frames, summary.mean_loop_support)
+for district in summary.districts():
+    print(district.name, district.coverage, district.delta)
+if summary.maintainer_status:
+    print("Maintainer", summary.maintainer_status, summary.maintainer_diagnostic)
+```
+
+The summary keeps track of recent clamp/pressure recommendations, script hints,
+and average loop support so dashboards can surface the “city heartbeat” without
+iterating over each frame.
 
 ### Self-maintaining feedback loops
 
