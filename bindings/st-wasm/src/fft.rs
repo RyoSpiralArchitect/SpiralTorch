@@ -98,27 +98,27 @@ pub fn auto_fft_spiralk(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<
 
 #[wasm_bindgen(js_name = "fft_forward")]
 pub fn fft_forward(buffer: &Float32Array) -> Result<Float32Array, JsValue> {
-    fft_transform(buffer, false)
+    fft_transform(buffer, false).map(|updated| Float32Array::from(updated.as_slice()))
 }
 
 #[wasm_bindgen(js_name = "fft_inverse")]
 pub fn fft_inverse(buffer: &Float32Array) -> Result<Float32Array, JsValue> {
-    fft_transform(buffer, true)
+    fft_transform(buffer, true).map(|updated| Float32Array::from(updated.as_slice()))
 }
 
 #[wasm_bindgen(js_name = "fft_forward_in_place")]
 pub fn fft_forward_in_place(buffer: &Float32Array) -> Result<(), JsValue> {
-    fft_transform(buffer, false).map(|updated| {
+    fft_transform(buffer, false).and_then(|updated| {
         let view = Float32Array::from(updated.as_slice());
-        buffer.set(&view, 0);
+        buffer.set(&view, 0)
     })
 }
 
 #[wasm_bindgen(js_name = "fft_inverse_in_place")]
 pub fn fft_inverse_in_place(buffer: &Float32Array) -> Result<(), JsValue> {
-    fft_transform(buffer, true).map(|updated| {
+    fft_transform(buffer, true).and_then(|updated| {
         let view = Float32Array::from(updated.as_slice());
-        buffer.set(&view, 0);
+        buffer.set(&view, 0)
     })
 }
 
