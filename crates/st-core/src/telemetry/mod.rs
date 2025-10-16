@@ -21,6 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+pub mod atlas;
 pub mod chrono;
 pub mod hub;
 pub mod maintainer;

@@ -24,6 +24,7 @@
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
+use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
@@ -35,11 +36,18 @@ use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSch
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::ecosystem::{
+    ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample, RankPlanSummary,
+    RoundtableConfigSummary, RoundtableSummary,
+};
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
+use st_core::ops::rank_entry::RankPlan;
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
-use st_core::telemetry::hub::{self, SoftlogicZFeedback};
+#[cfg(feature = "collapse")]
+use st_core::telemetry::hub::CollapsePulse;
+use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
@@ -47,7 +55,7 @@ use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter,
 use st_tensor::pure::topos::OpenCartesianTopos;
 use std::collections::HashMap;
 use std::env;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
 pub struct ModuleTrainer {
@@ -65,6 +73,7 @@ pub struct ModuleTrainer {
     heur_log: HeurOpLog,
     rewrite_budget: Option<RewriteBudget>,
     softlogic: SoftLogicFlex,
+    desire_bridge: Option<DesireTrainerBridge>,
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
@@ -278,6 +287,7 @@ impl ModuleTrainer {
             heur_log: HeurOpLog::default(),
             rewrite_budget: None,
             softlogic: SoftLogicFlex::new(),
+            desire_bridge: None,
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
@@ -303,6 +313,12 @@ impl ModuleTrainer {
     pub fn enable_graph_feedback(&mut self, bridge: GraphConsensusBridge) {
         self.graph_bridge = Some(bridge);
         self.graph_pending = None;
+    }
+
+    /// Enables desire telemetry feedback so automation and training can share
+    /// aggregated summaries without bespoke glue.
+    pub fn enable_desire_pipeline(&mut self, bridge: DesireTrainerBridge) {
+        self.desire_bridge = Some(bridge);
     }
 
     /// Returns the SpiralK hint generated from the most recently applied graph
@@ -428,6 +444,28 @@ impl ModuleTrainer {
 
     /// Connects the trainer to a distributed roundtable node.
     pub fn configure_distribution(&mut self, config: DistConfig) {
+        let mut metadata = HashMap::new();
+        metadata.insert("node_id".to_string(), config.node_id.clone());
+        metadata.insert("mode".to_string(), config.mode.as_str().to_string());
+        metadata.insert(
+            "push_interval_ms".to_string(),
+            config
+                .push_interval
+                .as_millis()
+                .min(u64::MAX as u128)
+                .to_string(),
+        );
+        metadata.insert(
+            "summary_window".to_string(),
+            config.summary_window.to_string(),
+        );
+        if !config.meta_endpoints.is_empty() {
+            metadata.insert(
+                "meta_endpoints".to_string(),
+                config.meta_endpoints.join(","),
+            );
+        }
+        self.log_connector_event("configure_distribution", metadata);
         self.distribution = Some(RoundtableNode::new(config));
     }
 
@@ -436,7 +474,15 @@ impl ModuleTrainer {
         if let Some(node) = self.distribution.as_mut() {
             node.drain();
         }
+        if self.distribution.is_some() {
+            self.log_connector_event("clear_distribution", HashMap::new());
+        }
         self.distribution = None;
+    }
+
+    /// Returns the currently configured distribution node, if any.
+    pub fn distribution_config(&self) -> Option<&DistConfig> {
+        self.distribution.as_ref().map(|node| node.config())
     }
 
     /// Installs a meta-layer conductor so this trainer can aggregate remote summaries.
@@ -553,7 +599,212 @@ impl ModuleTrainer {
 
     /// Produces a roundtable schedule for the provided output dimensions.
     pub fn roundtable(&self, rows: u32, cols: u32, config: RoundtableConfig) -> RoundtableSchedule {
-        RoundtableSchedule::new(&self.planner, rows, cols, config)
+        let schedule = RoundtableSchedule::new(&self.planner, rows, cols, config);
+        self.emit_roundtable_summary(rows, cols, config, &schedule);
+        schedule
+    }
+
+    fn emit_roundtable_summary(
+        &self,
+        rows: u32,
+        cols: u32,
+        config: RoundtableConfig,
+        schedule: &RoundtableSchedule,
+    ) {
+        let pipeline = crate::language::pipeline::LanguagePipeline::builder("module_trainer")
+            .with_tag("component", "module_trainer")
+            .build();
+        pipeline.record_roundtable(
+            rows,
+            cols,
+            config,
+            schedule,
+            self.autopilot.is_some(),
+            self.distribution.as_ref(),
+        );
+        let cfg_summary = {
+            #[allow(unused_mut)]
+            let mut summary = RoundtableConfigSummary::new(
+                config.top_k,
+                config.mid_k,
+                config.bottom_k,
+                config.here_tolerance,
+            );
+            #[cfg(feature = "psychoid")]
+            {
+                summary
+                    .extras
+                    .insert("psychoid".to_string(), config.psychoid_enabled);
+                if config.psychoid_log {
+                    summary.extras.insert("psychoid_log".to_string(), true);
+                }
+            }
+            #[cfg(feature = "psi")]
+            {
+                summary.extras.insert("psi".to_string(), config.psi_enabled);
+            }
+            #[cfg(feature = "collapse")]
+            {
+                summary
+                    .extras
+                    .insert("collapse".to_string(), config.collapse_enabled);
+            }
+            summary
+        };
+
+        let plans = vec![
+            Self::summarize_rank_plan(schedule.above()),
+            Self::summarize_rank_plan(schedule.here()),
+            Self::summarize_rank_plan(schedule.beneath()),
+        ];
+
+        let distribution = self.distribution.as_ref().map(|node| {
+            let cfg = node.config();
+            DistributionSummary {
+                node_id: cfg.node_id.clone(),
+                mode: cfg.mode.as_str().to_string(),
+                summary_window: cfg.summary_window,
+                push_interval_ms: cfg.push_interval.as_millis().min(u64::MAX as u128) as u64,
+                meta_endpoints: cfg.meta_endpoints.clone(),
+            }
+        });
+
+        let summary = RoundtableSummary {
+            rows,
+            cols,
+            config: cfg_summary,
+            plans,
+            autopilot_enabled: self.autopilot.is_some(),
+            distribution,
+            issued_at: SystemTime::now(),
+        };
+
+        let registry = EcosystemRegistry::global();
+        let autopilot_tag = summary.autopilot_enabled.to_string();
+        let distribution_mode = summary.distribution.as_ref().map(|d| d.mode.clone());
+        let tag_sample = |sample: MetricSample| {
+            let mut sample = sample.with_tag("autopilot", autopilot_tag.as_str());
+            if let Some(mode) = &distribution_mode {
+                sample = sample.with_tag("distribution_mode", mode.clone());
+            }
+            sample
+        };
+
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.rows", rows as f64).with_unit("rows"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.cols", cols as f64).with_unit("cols"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new(
+                "roundtable.autopilot",
+                if summary.autopilot_enabled { 1.0 } else { 0.0 },
+            )
+            .with_unit("flag"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.config.top_k", config.top_k as f64).with_unit("items"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.config.mid_k", config.mid_k as f64).with_unit("items"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.config.bottom_k", config.bottom_k as f64)
+                .with_unit("items"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new(
+                "roundtable.config.here_tolerance",
+                config.here_tolerance as f64,
+            )
+            .with_unit("ratio"),
+        ));
+
+        let plan_summaries = [
+            ("above", schedule.above()),
+            ("here", schedule.here()),
+            ("beneath", schedule.beneath()),
+        ];
+        for (band, plan) in plan_summaries {
+            let tag_band = |sample: MetricSample| tag_sample(sample.with_tag("band", band));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.rows", plan.rows as f64).with_unit("rows"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.cols", plan.cols as f64).with_unit("cols"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.k", plan.k as f64).with_unit("items"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.workgroup", plan.choice.wg as f64)
+                    .with_unit("threads"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.lanes", plan.choice.kl as f64)
+                    .with_unit("lanes"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.channel_stride", plan.choice.ch as f64)
+                    .with_unit("stride"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.tile", plan.choice.tile as f64)
+                    .with_unit("tile"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.compaction_tile", plan.choice.ctile as f64)
+                    .with_unit("tile"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new(
+                    "roundtable.band.subgroup",
+                    if plan.choice.subgroup { 1.0 } else { 0.0 },
+                )
+                .with_unit("flag"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.fft_tile", plan.choice.fft_tile as f64)
+                    .with_unit("tile"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.fft_radix", plan.choice.fft_radix as f64)
+                    .with_unit("radix"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new(
+                    "roundtable.band.fft_segments",
+                    plan.choice.fft_segments as f64,
+                )
+                .with_unit("segments"),
+            ));
+        }
+
+        registry.record_roundtable(summary);
+    }
+
+    fn summarize_rank_plan(plan: &RankPlan) -> RankPlanSummary {
+        let mut summary = RankPlanSummary::new(plan.kind, plan.rows, plan.cols, plan.k);
+        summary.workgroup = plan.choice.wg;
+        summary.lanes = plan.choice.kl;
+        summary.channel_stride = plan.choice.ch;
+        summary.tile = plan.choice.tile;
+        summary.compaction_tile = plan.choice.ctile;
+        summary.subgroup = plan.choice.subgroup;
+        summary.fft_tile = plan.choice.fft_tile;
+        summary.fft_radix = plan.choice.fft_radix;
+        summary.fft_segments = plan.choice.fft_segments;
+        summary
+    }
+
+    fn log_connector_event(&self, stage: &str, metadata: HashMap<String, String>) {
+        EcosystemRegistry::global().record_connector(ConnectorEvent {
+            name: "module_trainer".to_string(),
+            stage: stage.to_string(),
+            metadata,
+            issued_at: SystemTime::now(),
+        });
     }
 
     /// Returns the fallback Euclidean learning rate.
@@ -678,6 +929,11 @@ impl ModuleTrainer {
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
             extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
+            if let Some(bridge) = self.desire_bridge.as_ref() {
+                if let Some(summary) = bridge.drain_summary()? {
+                    Self::insert_desire_summary(&mut extra, &summary);
+                }
+            }
             if let Some(ref digest) = graph_adjustment {
                 extra.insert("graph_share".to_string(), digest.barycentric[3] as f64);
                 extra.insert(
@@ -766,7 +1022,8 @@ impl ModuleTrainer {
             }
             #[cfg(feature = "collapse")]
             if let (Some(driver), Some(reading)) = (self.collapse.as_mut(), psi_snapshot.as_ref()) {
-                match driver.update(reading) {
+                let command = driver.update(reading);
+                match command {
                     DriveCmd::Collapse {
                         grad_scale,
                         max_norm,
@@ -790,6 +1047,15 @@ impl ModuleTrainer {
                     }
                     DriveCmd::None => {}
                 }
+                if !matches!(command, DriveCmd::None) {
+                    let loop_signal = hub::get_chrono_loop();
+                    hub::set_collapse_pulse(CollapsePulse {
+                        step: reading.step,
+                        total: reading.total,
+                        command,
+                        loop_signal,
+                    });
+                }
             }
             let psi_total_opt: Option<f32> = {
                 #[cfg(feature = "psi")]
@@ -806,6 +1072,7 @@ impl ModuleTrainer {
                 .observe(&band_energy, weighted_loss, psi_total_opt);
             hub::set_softlogic_z(z_feedback);
             extra.insert("softlogic_z".to_string(), z_feedback.z_signal as f64);
+            let mut loop_broadcasted = false;
             if let Some(node) = self.distribution.as_mut() {
                 let outcome = OutcomeBand::from_weights(
                     band_energy.above,
@@ -848,6 +1115,34 @@ impl ModuleTrainer {
                             }
                         }
                     }
+                    if let Some(loop_signal) = hub::get_chrono_loop() {
+                        let collapse_hint =
+                            psi_total_opt.filter(|value| *value > 0.0).or_else(|| {
+                                if summary.mean_psi > 0.0 {
+                                    Some(summary.mean_psi)
+                                } else {
+                                    None
+                                }
+                            });
+                        let support = (summary.support + summary.mean_score).max(0.1);
+                        let envelope = LoopbackEnvelope::new(loop_signal)
+                            .with_source(summary.node_id.clone())
+                            .with_support(support)
+                            .with_collapse_total(collapse_hint)
+                            .with_z_signal(Some(z_feedback.z_signal))
+                            .with_script_hint(Some(summary.script_hint.clone()));
+                        hub::push_loopback_envelope(envelope);
+                        loop_broadcasted = true;
+                    }
+                }
+            }
+            if !loop_broadcasted {
+                if let Some(loop_signal) = hub::get_chrono_loop() {
+                    let envelope = LoopbackEnvelope::new(loop_signal)
+                        .with_support(1.0)
+                        .with_collapse_total(psi_total_opt.filter(|value| *value > 0.0))
+                        .with_z_signal(Some(z_feedback.z_signal));
+                    hub::push_loopback_envelope(envelope);
                 }
             }
             self.step(module)?;
@@ -907,6 +1202,55 @@ impl ModuleTrainer {
     fn estimate_device_load(&self) -> f64 {
         let caps = self.planner.device_caps();
         caps.occupancy_score(caps.max_workgroup) as f64
+    }
+
+    fn insert_desire_summary(target: &mut HashMap<String, f64>, summary: &DesireTrainerSummary) {
+        target.insert("desire_steps".to_string(), summary.total as f64);
+        target.insert(
+            "desire_phase_observation".to_string(),
+            summary.observation as f64,
+        );
+        target.insert(
+            "desire_phase_injection".to_string(),
+            summary.injection as f64,
+        );
+        target.insert(
+            "desire_phase_integration".to_string(),
+            summary.integration as f64,
+        );
+        target.insert(
+            "desire_mean_entropy".to_string(),
+            summary.mean_entropy as f64,
+        );
+        target.insert(
+            "desire_mean_temperature".to_string(),
+            summary.mean_temperature as f64,
+        );
+        target.insert(
+            "desire_mean_penalty".to_string(),
+            summary.mean_penalty as f64,
+        );
+        target.insert("desire_mean_alpha".to_string(), summary.mean_alpha as f64);
+        target.insert("desire_mean_beta".to_string(), summary.mean_beta as f64);
+        target.insert("desire_mean_gamma".to_string(), summary.mean_gamma as f64);
+        target.insert("desire_mean_lambda".to_string(), summary.mean_lambda as f64);
+        target.insert("desire_triggers".to_string(), summary.triggers as f64);
+        target.insert(
+            "desire_trigger_mean_penalty".to_string(),
+            summary.trigger_mean_penalty as f64,
+        );
+        target.insert(
+            "desire_trigger_mean_entropy".to_string(),
+            summary.trigger_mean_entropy as f64,
+        );
+        target.insert(
+            "desire_trigger_mean_temperature".to_string(),
+            summary.trigger_mean_temperature as f64,
+        );
+        target.insert(
+            "desire_trigger_mean_samples".to_string(),
+            summary.trigger_mean_samples as f64,
+        );
     }
 
     #[cfg(feature = "psi")]
@@ -1108,6 +1452,11 @@ impl IntoBatch for PureResult<(Tensor, Tensor)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language::{
+        constant, warmup, ConceptHint, DesireAutomation, DesireLagrangian, DesirePipeline,
+        DesireTrainerBridge, DesireTriggerBuffer, RepressionField, SemanticBridge, SparseKernel,
+        SymbolGeometry, TemperatureController,
+    };
     use crate::layers::linear::Linear;
     use crate::layers::sequential::Sequential;
     use crate::layers::wave_gate::WaveGate;
@@ -1118,6 +1467,58 @@ mod tests {
     use st_tensor::pure::topos::OpenCartesianTopos;
     use std::collections::HashMap;
     use std::time::SystemTime;
+    use std::collections::{HashMap, HashSet};
+    use std::time::{Duration, Instant, SystemTime};
+
+    fn build_language_geometry() -> SymbolGeometry {
+        let syn = SparseKernel::from_rows(
+            vec![vec![(0, 0.6), (1, 0.4)], vec![(0, 0.5), (1, 0.5)]],
+            1e-6,
+        )
+        .unwrap();
+        let par = SparseKernel::from_rows(
+            vec![vec![(0, 0.7), (1, 0.3)], vec![(0, 0.2), (1, 0.8)]],
+            1e-6,
+        )
+        .unwrap();
+        SymbolGeometry::new(syn, par).unwrap()
+    }
+
+    fn build_language_semantics() -> SemanticBridge {
+        use std::collections::HashSet;
+
+        let log_pi = vec![
+            vec![(0, (0.65f32).ln()), (1, (0.35f32).ln())],
+            vec![(0, (0.4f32).ln()), (1, (0.6f32).ln())],
+        ];
+        let row = vec![1.0, 1.0];
+        let col = vec![1.0, 1.0];
+        let anchors = HashSet::new();
+        let concept_kernel =
+            SparseKernel::from_rows(vec![vec![(0, 1.0)], vec![(1, 1.0)]], 1e-6).unwrap();
+        SemanticBridge::new(log_pi, row, col, anchors, 1e-6, concept_kernel).unwrap()
+    }
+
+    fn build_language_automation() -> DesireAutomation {
+        let geometry = build_language_geometry();
+        let repression = RepressionField::new(vec![0.05, 0.15]).unwrap();
+        let semantics = build_language_semantics();
+        let controller = TemperatureController::new(1.0, 0.8, 0.4, 0.4, 1.6);
+        let desire = DesireLagrangian::new(geometry, repression, semantics, controller)
+            .unwrap()
+            .with_alpha_schedule(warmup(0.0, 0.2, 1))
+            .with_beta_schedule(warmup(0.0, 0.1, 1))
+            .with_gamma_schedule(constant(0.04))
+            .with_lambda_schedule(constant(0.02))
+            .with_observation_horizon(Some(1))
+            .with_integration_horizon(Some(2));
+        let cfg = st_core::config::self_rewrite::SelfRewriteCfg {
+            score_thresh: 0.0,
+            min_samples: 2,
+            cooldown_sec: 0,
+        };
+        DesireAutomation::new(desire, cfg)
+    }
 
     #[test]
     fn trainer_attaches_and_steps() {
@@ -1237,6 +1638,54 @@ mod tests {
             .expect("rewrite allowed after cooldown");
         let after_third = trainer.heuristics_log().entries().len();
         assert_eq!(after_third, after_first + proposal.ops.len());
+    }
+
+    fn trainer_consumes_desire_bridge_summary() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = Sequential::new();
+        model.push(Linear::new("lin", 2, 1).unwrap());
+        trainer.prepare(&mut model).unwrap();
+
+        let automation = build_language_automation();
+        let bridge = DesireTrainerBridge::new();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_trainer_bridge(&bridge)
+            .with_sink(DesireTriggerBuffer::new())
+            .build();
+
+        let logits = vec![2.0, 0.4];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..6 {
+            let now = start + Duration::from_millis((step * 150) as u64);
+            let timestamp = anchor + Duration::from_millis((step * 150) as u64);
+            pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+        }
+
+        assert!(bridge.len() >= 6);
+        trainer.enable_desire_pipeline(bridge.clone());
+
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let dataset = vec![
+            (
+                Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            ),
+        ];
+        let mut loss = MeanSquaredError::new();
+        trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .unwrap();
+
+        assert!(bridge.is_empty());
     }
 
     #[cfg(feature = "golden")]

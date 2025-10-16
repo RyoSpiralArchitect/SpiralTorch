@@ -10,6 +10,7 @@ members = [
   "crates/st-text",
   "crates/st-rl",
   "crates/st-rec",
-  "bindings/st-py"
+  "bindings/st-py",
+  "bindings/st-wasm"
 ]
 resolver = "2"

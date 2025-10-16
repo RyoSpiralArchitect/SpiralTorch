@@ -7,6 +7,7 @@ use super::handoff::{fold_with_band_energy, QuadBandEnergy};
 use crate::schedule::BandEnergy;
 use crate::PureResult;
 use st_core::telemetry::xai::GraphFlowTracer;
+use st_tensor::pure::TensorError;
 use std::sync::{Arc, Mutex};
 
 /// Bridge that translates graph flow telemetry into SpiralK-friendly hints and
@@ -57,6 +58,11 @@ impl GraphConsensusBridge {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let reports = tracer.drain();
+        let mut tracer = self.tracer.lock().map_err(|_| TensorError::InvalidValue {
+            label: "graph flow tracer poisoned",
+        })?;
+        let reports = tracer.drain();
+        drop(tracer);
         if reports.is_empty() {
             return Ok(None);
         }

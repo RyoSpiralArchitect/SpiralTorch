@@ -22,7 +22,9 @@ pub use self::differential::{
     RecursiveDifferential, SpiralDifferential,
 };
 use self::measure::BarycenterIntermediate;
-pub use self::topos::{OpenCartesianTopos, RewriteMonad, TensorBiome};
+pub use self::topos::{
+    LawvereTierneyGuard, OpenCartesianTopos, RewriteMonad, TensorBiome, ToposAtlas, ZBox, ZBoxSite,
+};
 
 use crate::backend::faer_dense;
 #[cfg(feature = "wgpu")]
@@ -230,6 +232,12 @@ impl MatmulBackend {
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => "wgpu",
         }
+    }
+}
+
+impl fmt::Display for MatmulBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str((*self).label())
     }
 }
 

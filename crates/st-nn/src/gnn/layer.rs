@@ -72,6 +72,9 @@ impl ZSpaceGraphConvolution {
         if let Some(tracer) = &self.tracer {
             let mut guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
             guard.begin_layer(self.name.clone(), self.curvature, flows);
+            if let Ok(mut guard) = tracer.lock() {
+                guard.begin_layer(self.name.clone(), self.curvature, flows);
+            }
         }
     }
 
@@ -79,6 +82,9 @@ impl ZSpaceGraphConvolution {
         if let Some(tracer) = &self.tracer {
             let mut guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
             guard.record_weight_update(weight, Some(bias));
+            if let Ok(mut guard) = tracer.lock() {
+                guard.record_weight_update(weight, Some(bias));
+            }
         }
     }
 }
@@ -193,6 +199,7 @@ mod tests {
             .unwrap_or_else(|poison| poison.into_inner())
             .layers()
             .to_vec();
+        let reports = tracer.lock().unwrap().layers().to_vec();
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].layer, "gnn");
         assert!(reports[0].weight_update_magnitude.is_some());
