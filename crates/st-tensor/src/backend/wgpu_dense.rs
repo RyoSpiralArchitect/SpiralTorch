@@ -30,23 +30,30 @@ struct DenseContext {
 
 impl DenseContext {
     fn new() -> Result<Self, String> {
-        let instance = wgpu::Instance::default();
-        let adapter_opt =
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            }));
-        let adapter = adapter_opt.ok_or_else(|| "no suitable WGPU adapter".to_string())?;
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let adapter = pollster::block_on(async {
+            instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                })
+                .await
+        })
+        .ok_or_else(|| "no suitable WGPU adapter".to_string())?;
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: None,
-                required_features: wgpu::Features::empty(),
-                required_limits: adapter.limits(),
-            },
-            None,
-        ))
+        let (device, queue) = pollster::block_on(async {
+            adapter
+                .request_device(
+                    &wgpu::DeviceDescriptor {
+                        label: None,
+                        required_features: wgpu::Features::empty(),
+                        required_limits: adapter.limits(),
+                    },
+                    None,
+                )
+                .await
+        })
         .map_err(|err| err.to_string())?;
 
         let device: Arc<Device> = Arc::new(device);
