@@ -80,8 +80,9 @@ impl ZSpaceGraphConvolution {
 
     fn record_backward_updates(&self, weight: f32, bias: f32) {
         if let Some(tracer) = &self.tracer {
-            let mut guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
-            guard.record_weight_update(weight, Some(bias));
+            if let Ok(mut guard) = tracer.lock() {
+                guard.record_weight_update(weight, Some(bias));
+            }
         }
     }
 }

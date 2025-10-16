@@ -111,10 +111,10 @@ use st_frac::{
 use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
-    Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
-    EpochStats, LightningConfig as NnLightningConfig, LightningReport as NnLightningReport,
-    LightningStageReport as NnLightningStageReport, Linear as NnLinear, Loss, MeanSquaredError,
-    Module, ModuleTrainer, Relu as NnRelu, RoundtableConfig, RoundtableSchedule,
+    Conv1d as NnConv1d, DataLoader as NnDataLoader, DesireRoundtableBridge,
+    DesireRoundtableSummary, DifferentialTrace, DistConfig, DistMode, EpochStats,
+    LightningConfig as NnLightningConfig, Linear as NnLinear, Loss, MeanSquaredError, Module,
+    ModuleTrainer, Relu as NnRelu, RoundtableConfig, RoundtableSchedule,
     Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
@@ -273,6 +273,34 @@ fn tensor_err(err: TensorError) -> PyErr {
 
 fn convert<T>(value: PureResult<T>) -> PyResult<T> {
     value.map_err(tensor_err)
+}
+
+fn roundtable_summary_to_py<'py>(
+    py: Python<'py>,
+    summary: &DesireRoundtableSummary,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("steps", summary.steps)?;
+    dict.set_item("triggers", summary.triggers)?;
+    dict.set_item("mean_entropy", summary.mean_entropy)?;
+    dict.set_item("mean_temperature", summary.mean_temperature)?;
+    dict.set_item("mean_alpha", summary.mean_alpha)?;
+    dict.set_item("mean_beta", summary.mean_beta)?;
+    dict.set_item("mean_gamma", summary.mean_gamma)?;
+    dict.set_item("mean_lambda", summary.mean_lambda)?;
+    dict.set_item("mean_above", summary.mean_above)?;
+    dict.set_item("mean_here", summary.mean_here)?;
+    dict.set_item("mean_beneath", summary.mean_beneath)?;
+    dict.set_item("mean_drift", summary.mean_drift)?;
+    dict.set_item(
+        "last_timestamp",
+        summary
+            .last_timestamp
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0),
+    )?;
+    Ok(dict.into())
 }
 
 fn rl_err(err: SpiralRlError) -> PyErr {
@@ -1951,21 +1979,98 @@ impl PyChronoSummary {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "DesireRoundtableBridge")]
+#[derive(Clone)]
+struct PyDesireRoundtableBridge {
+    inner: DesireRoundtableBridge,
+}
+
 #[pymethods]
-impl PyChronoFrame {
-    #[getter]
-    fn step(&self) -> u64 {
-        self.frame.step
+impl PyDesireRoundtableBridge {
+    #[new]
+    #[pyo3(signature = (blend=0.35, drift_gain=0.35))]
+    fn new(blend: f32, drift_gain: f32) -> Self {
+        let inner = DesireRoundtableBridge::new()
+            .with_blend(blend)
+            .with_drift_gain(drift_gain);
+        Self { inner }
     }
 
-    #[getter]
-    fn timestamp(&self) -> f32 {
-        self.frame.timestamp
+    fn clone_bridge(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 
-    #[getter]
-    fn dt(&self) -> f32 {
-        self.frame.dt
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn impulse(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let impulse = convert(self.inner.impulse())?;
+        impulse
+            .map(|imp| {
+                let dict = PyDict::new(py);
+                dict.set_item(
+                    "multipliers",
+                    (imp.multipliers.0, imp.multipliers.1, imp.multipliers.2),
+                )?;
+                dict.set_item("drift", imp.drift)?;
+                dict.set_item(
+                    "timestamp",
+                    imp.timestamp
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0),
+                )?;
+                Ok(dict.into())
+            })
+            .transpose()
+    }
+
+    fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let summary = convert(self.inner.drain_summary())?;
+        summary
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
+struct PyModuleTrainer {
+    inner: ModuleTrainer,
+    roundtable_bridge: Option<DesireRoundtableBridge>,
+}
+
+impl PyModuleTrainer {
+    fn from_trainer(inner: ModuleTrainer) -> Self {
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
+    }
+
+#[pymethods]
+impl PyModuleTrainer {
+    #[new]
+    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01))]
+    fn new(
+        device: Option<&str>,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Self {
+        let caps = caps_for(device);
+        let inner =
+            ModuleTrainer::new(caps, curvature, hyper_learning_rate, fallback_learning_rate);
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
     }
 
     #[getter]
@@ -2027,9 +2132,47 @@ impl PyChronoFrame {
         self.frame.energy_decay
     }
 
-    #[getter]
-    fn homotopy_energy(&self) -> f32 {
-        self.frame.homotopy_energy
+    #[pyo3(signature = (bridge=None, blend=0.35, drift_gain=0.35))]
+    fn enable_desire_roundtable_bridge(
+        &mut self,
+        bridge: Option<PyRef<PyDesireRoundtableBridge>>,
+        blend: f32,
+        drift_gain: f32,
+    ) {
+        let selected = if let Some(handle) = bridge {
+            handle.inner.clone()
+        } else {
+            DesireRoundtableBridge::new()
+                .with_blend(blend)
+                .with_drift_gain(drift_gain)
+        };
+        self.inner.enable_desire_roundtable_bridge(selected.clone());
+        self.roundtable_bridge = Some(selected);
+    }
+
+    fn disable_desire_roundtable_bridge(&mut self) {
+        self.inner.disable_desire_roundtable_bridge();
+        self.roundtable_bridge = None;
+    }
+
+    fn desire_roundtable_bridge(&self) -> Option<PyDesireRoundtableBridge> {
+        self.roundtable_bridge
+            .as_ref()
+            .map(|bridge| PyDesireRoundtableBridge {
+                inner: bridge.clone(),
+            })
+    }
+
+    fn desire_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        self.inner
+            .desire_roundtable_summary()
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
+    }
+
+    #[pyo3(signature = (threshold, participants=2))]
+    fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
+        self.inner.install_meta_conductor(threshold, participants);
     }
 
     #[getter]
@@ -16810,6 +16953,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHypergrad>()?;
     m.add_class::<PyDistConfig>()?;
     m.add_class::<PyRoundtableSchedule>()?;
+    m.add_class::<PyDesireRoundtableBridge>()?;
     m.add_class::<PyMaintainerConfig>()?;
     m.add_class::<PyMaintainerReport>()?;
     m.add_class::<PyChronoSummary>()?;
@@ -16870,6 +17014,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "Hypergrad",
             "DistConfig",
             "RoundtableSchedule",
+            "DesireRoundtableBridge",
             "EpochStats",
             "ModuleTrainer",
             "SpiralLightning",

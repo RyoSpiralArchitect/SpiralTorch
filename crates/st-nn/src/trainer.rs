@@ -24,6 +24,9 @@
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 #[cfg(feature = "psi")]
 use crate::language::{DesirePsiBridge, DesirePsiSummary};
+use crate::language::{
+    DesireRoundtableBridge, DesireRoundtableSummary, DesireTrainerBridge, DesireTrainerSummary,
+};
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
@@ -76,6 +79,8 @@ pub struct ModuleTrainer {
     rewrite_budget: Option<RewriteBudget>,
     softlogic: SoftLogicFlex,
     desire_bridge: Option<DesireTrainerBridge>,
+    desire_roundtable_bridge: Option<DesireRoundtableBridge>,
+    last_desire_roundtable_summary: Option<DesireRoundtableSummary>,
     #[cfg(feature = "psi")]
     desire_psi_bridge: Option<DesirePsiBridge>,
     graph_bridge: Option<GraphConsensusBridge>,
@@ -292,6 +297,8 @@ impl ModuleTrainer {
             rewrite_budget: None,
             softlogic: SoftLogicFlex::new(),
             desire_bridge: None,
+            desire_roundtable_bridge: None,
+            last_desire_roundtable_summary: None,
             #[cfg(feature = "psi")]
             desire_psi_bridge: None,
             graph_bridge: None,
@@ -327,6 +334,18 @@ impl ModuleTrainer {
         self.desire_bridge = Some(bridge);
     }
 
+    /// Enables the roundtable desire braid so Z-space impulses can steer the
+    /// A/B/C consensus without bespoke glue.
+    pub fn enable_desire_roundtable_bridge(&mut self, bridge: DesireRoundtableBridge) {
+        self.desire_roundtable_bridge = Some(bridge);
+    }
+
+    /// Clears any attached roundtable desire bridge.
+    pub fn disable_desire_roundtable_bridge(&mut self) {
+        self.desire_roundtable_bridge = None;
+        self.last_desire_roundtable_summary = None;
+    }
+
     #[cfg(feature = "psi")]
     pub fn enable_desire_psi_bridge(&mut self, bridge: DesirePsiBridge) {
         self.desire_psi_bridge = Some(bridge);
@@ -336,6 +355,11 @@ impl ModuleTrainer {
     /// digest, if any.
     pub fn graph_hint(&self) -> Option<&str> {
         self.graph_last_hint.as_deref()
+    }
+
+    /// Returns the last drained roundtable desire summary, if available.
+    pub fn desire_roundtable_summary(&self) -> Option<DesireRoundtableSummary> {
+        self.last_desire_roundtable_summary.clone()
     }
 
     #[cfg(feature = "psi")]
@@ -916,6 +940,16 @@ impl ModuleTrainer {
                 beneath: band_energy.beneath,
                 drift: band_energy.drift,
             };
+            let mut desire_impulse = None;
+            if let Some(bridge) = self.desire_roundtable_bridge.as_ref() {
+                if let Some(impulse) = bridge.impulse()? {
+                    band_energy.above *= impulse.multipliers.0;
+                    band_energy.here *= impulse.multipliers.1;
+                    band_energy.beneath *= impulse.multipliers.2;
+                    band_energy.drift += impulse.drift;
+                    desire_impulse = Some(impulse);
+                }
+            }
             if let Some(ref digest) = graph_adjustment {
                 band_energy.above *= digest.multipliers.0;
                 band_energy.here *= digest.multipliers.1;
@@ -926,6 +960,11 @@ impl ModuleTrainer {
             }
             let mut bands: GradientBands = schedule.split(&grad_output)?;
             let mut weights = self.softlogic.prepare_weights(&band_energy);
+            if let Some(ref impulse) = desire_impulse {
+                weights.0 *= impulse.multipliers.0;
+                weights.1 *= impulse.multipliers.1;
+                weights.2 *= impulse.multipliers.2;
+            }
             if let Some(ref digest) = graph_adjustment {
                 weights.0 *= digest.multipliers.0;
                 weights.1 *= digest.multipliers.1;
@@ -945,9 +984,30 @@ impl ModuleTrainer {
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
             extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
+            if let Some(ref impulse) = desire_impulse {
+                extra.insert(
+                    "desire_roundtable_multiplier_above".to_string(),
+                    impulse.multipliers.0 as f64,
+                );
+                extra.insert(
+                    "desire_roundtable_multiplier_here".to_string(),
+                    impulse.multipliers.1 as f64,
+                );
+                extra.insert(
+                    "desire_roundtable_multiplier_beneath".to_string(),
+                    impulse.multipliers.2 as f64,
+                );
+                extra.insert("desire_roundtable_drift".to_string(), impulse.drift as f64);
+            }
             if let Some(bridge) = self.desire_bridge.as_ref() {
                 if let Some(summary) = bridge.drain_summary()? {
                     Self::insert_desire_summary(&mut extra, &summary);
+                }
+            }
+            if let Some(bridge) = self.desire_roundtable_bridge.as_ref() {
+                if let Some(summary) = bridge.drain_summary()? {
+                    Self::insert_desire_roundtable_summary(&mut extra, &summary);
+                    self.last_desire_roundtable_summary = Some(summary);
                 }
             }
             #[cfg(feature = "psi")]
@@ -1273,6 +1333,57 @@ impl ModuleTrainer {
         target.insert(
             "desire_trigger_mean_samples".to_string(),
             summary.trigger_mean_samples as f64,
+        );
+    }
+
+    fn insert_desire_roundtable_summary(
+        target: &mut HashMap<String, f64>,
+        summary: &DesireRoundtableSummary,
+    ) {
+        target.insert("desire_roundtable_steps".to_string(), summary.steps as f64);
+        target.insert(
+            "desire_roundtable_triggers".to_string(),
+            summary.triggers as f64,
+        );
+        target.insert(
+            "desire_roundtable_mean_entropy".to_string(),
+            summary.mean_entropy as f64,
+        );
+        target.insert(
+            "desire_roundtable_mean_temperature".to_string(),
+            summary.mean_temperature as f64,
+        );
+        target.insert(
+            "desire_roundtable_mean_alpha".to_string(),
+            summary.mean_alpha as f64,
+        );
+        target.insert(
+            "desire_roundtable_mean_beta".to_string(),
+            summary.mean_beta as f64,
+        );
+        target.insert(
+            "desire_roundtable_mean_gamma".to_string(),
+            summary.mean_gamma as f64,
+        );
+        target.insert(
+            "desire_roundtable_mean_lambda".to_string(),
+            summary.mean_lambda as f64,
+        );
+        target.insert(
+            "desire_roundtable_mean_above".to_string(),
+            summary.mean_above as f64,
+        );
+        target.insert(
+            "desire_roundtable_mean_here".to_string(),
+            summary.mean_here as f64,
+        );
+        target.insert(
+            "desire_roundtable_mean_beneath".to_string(),
+            summary.mean_beneath as f64,
+        );
+        target.insert(
+            "desire_roundtable_mean_drift".to_string(),
+            summary.mean_drift as f64,
         );
     }
 
@@ -1779,6 +1890,53 @@ mod tests {
         assert!(bridge.is_empty());
     }
 
+    #[test]
+    fn trainer_consumes_roundtable_bridge_summary() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = Sequential::new();
+        model.push(Linear::new("lin", 2, 1).unwrap());
+        trainer.prepare(&mut model).unwrap();
+
+        let automation = build_language_automation();
+        let bridge = DesireRoundtableBridge::new();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_roundtable_bridge(&bridge)
+            .build();
+
+        let logits = vec![2.0, 0.6];
+        let concept = ConceptHint::Distribution(vec![0.55, 0.45]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..6 {
+            let now = start + Duration::from_millis((step * 90) as u64);
+            let timestamp = anchor + Duration::from_millis((step * 90) as u64);
+            pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+        }
+
+        trainer.enable_desire_roundtable_bridge(bridge.clone());
+
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let dataset = vec![
+            (
+                Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            ),
+        ];
+        let mut loss = MeanSquaredError::new();
+        trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .unwrap();
+
+        assert!(bridge.drain_summary().unwrap().is_none());
+        let summary = trainer.desire_roundtable_summary();
+        assert!(summary.is_some());
     #[cfg(feature = "golden")]
     #[test]
     fn trainer_records_golden_council_snapshot() {

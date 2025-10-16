@@ -357,6 +357,54 @@ if let Some(summary) = graph_bridge.drain_summary()? {
 }
 ```
 
+Roundtable consensus can now absorb desire impulses directly. Attach a
+`DesireRoundtableBridge` and the pipeline will export Above/Here/Beneath
+multipliers plus drift adjustments every step. Drain the summary or let
+`ModuleTrainer::enable_desire_roundtable_bridge` fold it into the optimiser so
+the three-way negotiation constantly reflects the latest semiotic pressure.【F:crates/st-nn/src/language/pipeline.rs†L121-L286】【F:crates/st-nn/src/trainer.rs†L240-L392】
+
+```rust
+use st_nn::language::{DesirePipeline, DesireRoundtableBridge};
+
+let bridge = DesireRoundtableBridge::new().with_blend(0.45);
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_roundtable_bridge(&bridge)
+    .build();
+
+for (step, logits) in logits_stream.enumerate() {
+    let now = Instant::now();
+    let timestamp = SystemTime::now();
+    pipeline.step_at(&logits, step % vocab, &concept_hint, now, timestamp)?;
+}
+
+if let Some(summary) = bridge.drain_summary()? {
+    println!("desire barycentric → Above {:.3}", summary.mean_above);
+}
+```
+
+Inside the trainer simply call:
+
+```rust
+trainer.enable_desire_roundtable_bridge(bridge.clone());
+```
+
+Every optimisation step now reports `desire_roundtable_*` metrics, while
+`ModuleTrainer::desire_roundtable_summary()` returns the most recent aggregate so
+Python notebooks can watch the unconscious drift in real time.【F:crates/st-nn/src/trainer.rs†L240-L392】【F:crates/st-nn/src/trainer.rs†L780-L905】
+
+```python
+import spiraltorch
+
+trainer = spiraltorch.ModuleTrainer()
+bridge = spiraltorch.DesireRoundtableBridge(blend=0.4, drift_gain=0.5)
+trainer.enable_desire_roundtable_bridge(bridge)
+
+# ... after running a training epoch ...
+summary = trainer.desire_roundtable_summary()
+if summary:
+    print(f"roundtable drift {summary['mean_drift']:.4f}")
+```
+
 ψ telemetry can ride the same braid. Attach a `DesirePsiBridge` to fold the
 latest `PsiMeter` readings, SoftLogic Z feedback, and threshold crossings into
 the automation stream. The bridge can be drained directly or wired into
