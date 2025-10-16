@@ -34,6 +34,7 @@
 //! field when a signed phase label is supplied.
 
 use ndarray::{indices, ArrayD, IxDyn};
+use ndarray::Dimension;
 use statrs::function::gamma::gamma;
 use std::f64::consts::PI;
 
