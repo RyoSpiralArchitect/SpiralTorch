@@ -186,6 +186,14 @@ for epoch, stats in enumerate(reports, start=1):
 lightning.set_auto_prepare(False)
 session.prepare_module(model)
 
+# Stage training plans inherit the previous configuration by default
+plan = [
+    {"label": "warmup", "epochs": [dataset]},
+    {
+        "label": "refine",
+        "config": {"top_k": 4, "auto_prepare": False},
+        "epochs": [dataset],
+    },
 # Run Optuna on a SpiralTorch training loop
 def objective(trial):
     lr = trial.suggest_float("lr", 1e-4, 1e-1, log=True)

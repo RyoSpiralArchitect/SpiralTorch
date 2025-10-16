@@ -495,15 +495,24 @@ impl SpiralLightning {
     pub fn reconfigure(&mut self, mut config: LightningConfig) {
         // Ensure we reuse the latest trainer state when refreshing the schedule.
         config.clamp_shape();
-        let schedule = self
-            .trainer
-            .roundtable(config.rows, config.cols, config.roundtable);
-        let schedule_changed = self.config.rows != config.rows
-            || self.config.cols != config.cols
-            || roundtable_changed(&self.config.roundtable, &config.roundtable);
+        let shape_matches = self.config.rows == config.rows && self.config.cols == config.cols;
+        let roundtable_matches = !roundtable_changed(&self.config.roundtable, &config.roundtable);
         let auto_changed = self.config.auto_prepare != config.auto_prepare;
-        self.schedule = schedule;
+        let schedule_changed = !(shape_matches && roundtable_matches);
+
+        if !schedule_changed && !auto_changed {
+            self.config = config;
+            return;
+        }
+
+        if schedule_changed {
+            self.schedule = self
+                .trainer
+                .roundtable(config.rows, config.cols, config.roundtable);
+        }
+
         self.config = config;
+
         if schedule_changed || auto_changed {
             self.prepared_modules.clear();
         }
@@ -580,8 +589,10 @@ impl SpiralLightning {
         L: Loss,
         It: IntoIterator<Item = LightningStage>,
     {
-        let mut reports = Vec::new();
-        for stage in stages {
+        let stage_iter = stages.into_iter();
+        let (reserve, _) = stage_iter.size_hint();
+        let mut reports = Vec::with_capacity(reserve);
+        for stage in stage_iter {
             let (mut config, epochs, label) = stage.into_parts();
             config.clamp_shape();
             self.reconfigure(config.clone());
