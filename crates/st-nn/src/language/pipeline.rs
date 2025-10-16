@@ -4,28 +4,29 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::automation::{DesireAutomatedStep, DesireAutomation, DesireRewriteTrigger};
-use super::desire::{DesirePhase, DesireSolution, DesireWeights};
+use super::desire::{DesirePhase, DesireWeights};
 use super::geometry::ConceptHint;
 use super::logbook::{DesireLogReplay, DesireLogbook};
-use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
-use crate::schedule::BandEnergy;
-use crate::PureResult;
-use st_tensor::pure::TensorError;
-use std::cmp::Ordering;
+use crate::roundtable::RoundtableNode;
+use crate::{PureResult, RoundtableConfig, RoundtableSchedule};
+use st_core::ecosystem::{
+    ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
+    HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
+    RoundtableSummary,
+};
+use st_core::ops::rank_entry::RankPlan;
+use st_tensor::pure::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
 use std::collections::HashMap;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// Sink interface used by [`DesirePipeline`] to braid automation steps into
-/// external systems.
-pub trait DesirePipelineSink: Send {
-    /// Receives every automated step alongside the wall-clock timestamp that
-    /// was supplied to the pipeline.
-    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()>;
-
     /// Receives emitted rewrite triggers. Implementations can override this to
     /// react without duplicating persistence if the sink already captured the
     /// step in [`Self::on_step`].
+/// Sink interface used by [`DesirePipeline`] to braid automation steps into external systems.
+pub trait DesirePipelineSink: Send {
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()>;
+
     fn on_trigger(
         &mut self,
         _trigger: &DesireRewriteTrigger,
@@ -549,138 +550,500 @@ impl DesirePipelineSink for DesireTrainerBridge {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct DesireGraphEvent {
-    pub timestamp: SystemTime,
-    pub solution: DesireSolution,
-    pub trigger: Option<DesireRewriteTrigger>,
-    pub digest: Option<GraphConsensusDigest>,
+#[derive(Debug)]
+pub enum PipelineError {
+    EncoderMissing { pipeline: String },
+    Tensor(TensorError),
+}
+
+pub type PipelineResult<T> = Result<T, PipelineError>;
+
+#[derive(Clone)]
+pub struct LanguagePipelineBuilder {
+    name: String,
+    tags: HashMap<String, String>,
+    encoder: Option<LanguageWaveEncoder>,
 }
 
 #[derive(Clone)]
-pub struct DesireGraphBridge {
-    bridge: GraphConsensusBridge,
-    baseline: BandEnergy,
-    shared: Arc<Mutex<Vec<DesireGraphEvent>>>,
+pub struct LanguagePipeline {
+    name: String,
+    registry: &'static EcosystemRegistry,
+    tags: HashMap<String, String>,
+    encoder: Option<LanguageWaveEncoder>,
 }
 
-impl DesireGraphBridge {
-    pub fn new(bridge: GraphConsensusBridge, baseline: BandEnergy) -> Self {
+impl LanguagePipelineBuilder {
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
-            bridge,
-            baseline,
-            shared: Arc::new(Mutex::new(Vec::new())),
+            name: name.into(),
+            tags: HashMap::new(),
+            encoder: None,
         }
     }
 
-    pub fn baseline(&self) -> BandEnergy {
-        self.baseline
+    pub fn with_tag(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.tags.insert(key.into(), value.into());
+        self
     }
 
-    pub fn len(&self) -> usize {
-        match self.shared.lock() {
-            Ok(guard) => guard.len(),
-            Err(_) => 0,
+    pub fn with_encoder(mut self, encoder: LanguageWaveEncoder) -> Self {
+        self.encoder = Some(encoder);
+        self
+    }
+
+    pub fn build(self) -> LanguagePipeline {
+        LanguagePipeline {
+            name: self.name,
+            registry: EcosystemRegistry::global(),
+            tags: self.tags,
+            encoder: self.encoder,
         }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn drain(&self) -> PureResult<Vec<DesireGraphEvent>> {
-        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
-            label: "desire graph bridge poisoned",
-        })?;
-        Ok(std::mem::take(&mut *guard))
-    }
-
-    pub fn drain_summary(&self) -> PureResult<Option<DesireGraphSummary>> {
-        let events = self.drain()?;
-        if events.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(DesireGraphSummary::from_events(&events)))
     }
 }
 
-impl DesirePipelineSink for DesireGraphBridge {
-    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
-        let digest = self.bridge.digest(&self.baseline)?;
-        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
-            label: "desire graph bridge poisoned",
-        })?;
-        guard.push(DesireGraphEvent {
-            timestamp,
-            solution: step.solution.clone(),
-            trigger: step.trigger.clone(),
-            digest,
-        });
-        Ok(())
+impl LanguagePipeline {
+    pub fn builder(name: impl Into<String>) -> LanguagePipelineBuilder {
+        LanguagePipelineBuilder::new(name)
     }
-}
 
-#[derive(Clone, Debug)]
-pub struct DesireGraphSummary {
-    pub steps: usize,
-    pub triggers: usize,
-    pub total_graph_energy: f32,
-    pub mean_entropy: f32,
-    pub layer_support: Vec<(String, f32)>,
-    pub last_timestamp: SystemTime,
-}
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 
-impl DesireGraphSummary {
-    pub fn from_events(events: &[DesireGraphEvent]) -> Self {
-        let mut total_entropy = 0.0f32;
-        let mut total_graph_energy = 0.0f32;
-        let mut triggers = 0usize;
-        let mut digest_count = 0usize;
-        let mut layer_accumulator: HashMap<String, f32> = HashMap::new();
-        let mut last_timestamp = UNIX_EPOCH;
+    pub fn encoder(&self) -> Option<&LanguageWaveEncoder> {
+        self.encoder.as_ref()
+    }
 
-        for event in events {
-            total_entropy += event.solution.entropy;
-            if event.trigger.is_some() {
-                triggers += 1;
-            }
-            if event.timestamp > last_timestamp {
-                last_timestamp = event.timestamp;
-            }
-            if let Some(digest) = &event.digest {
-                digest_count = digest_count.saturating_add(1);
-                total_graph_energy += digest.graph_energy;
-                for (layer, share) in &digest.layer_shares {
-                    *layer_accumulator.entry(layer.clone()).or_insert(0.0) += *share;
-                }
-            }
-        }
+    pub fn record_metric(&self, sample: MetricSample) {
+        self.registry.record_metric(self.apply_tags(sample, &[]));
+    }
 
-        if digest_count > 0 {
-            for value in layer_accumulator.values_mut() {
-                *value /= digest_count as f32;
-            }
-        }
+    pub fn record_heuristic(
+        &self,
+        subsystem: impl Into<String>,
+        kind: impl Into<String>,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        choice: HeuristicChoiceSummary,
+        source: HeuristicSource,
+        score_hint: Option<f32>,
+    ) {
+        let decision = HeuristicDecision {
+            subsystem: subsystem.into(),
+            kind: kind.into(),
+            rows,
+            cols,
+            k,
+            choice,
+            score_hint,
+            source,
+            issued_at: SystemTime::now(),
+        };
+        self.registry.record_heuristic(decision);
+    }
 
-        let mut layer_support: Vec<(String, f32)> = layer_accumulator.into_iter().collect();
-        layer_support
-            .sort_by(|left, right| right.1.partial_cmp(&left.1).unwrap_or(Ordering::Equal));
-
-        let steps = events.len();
-        let mean_entropy = if steps == 0 {
-            0.0
-        } else {
-            total_entropy / steps as f32
+    pub fn record_roundtable(
+        &self,
+        rows: u32,
+        cols: u32,
+        config: RoundtableConfig,
+        schedule: &RoundtableSchedule,
+        autopilot_enabled: bool,
+        distribution: Option<&RoundtableNode>,
+    ) -> RoundtableSummary {
+        let cfg_summary = summarise_config(config);
+        let plans = vec![
+            summarise_rank_plan(schedule.above()),
+            summarise_rank_plan(schedule.here()),
+            summarise_rank_plan(schedule.beneath()),
+        ];
+        let distribution_summary = distribution.map(summarise_distribution);
+        let summary = RoundtableSummary {
+            rows,
+            cols,
+            config: cfg_summary,
+            plans,
+            autopilot_enabled,
+            distribution: distribution_summary.clone(),
+            issued_at: SystemTime::now(),
         };
 
-        Self {
-            steps,
-            triggers,
-            total_graph_energy,
-            mean_entropy,
-            layer_support,
-            last_timestamp,
+        let mut extra_tags = vec![("autopilot".to_string(), autopilot_enabled.to_string())];
+        if let Some(dist) = &distribution_summary {
+            extra_tags.push(("distribution_mode".to_string(), dist.mode.clone()));
         }
+
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("roundtable.rows", rows as f64).with_unit("rows"),
+            &extra_tags,
+        ));
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("roundtable.cols", cols as f64).with_unit("cols"),
+            &extra_tags,
+        ));
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new(
+                    "roundtable.autopilot",
+                    if autopilot_enabled { 1.0 } else { 0.0 },
+                )
+                .with_unit("flag"),
+                &extra_tags,
+            ),
+        );
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("roundtable.config.top_k", config.top_k as f64).with_unit("items"),
+            &extra_tags,
+        ));
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("roundtable.config.mid_k", config.mid_k as f64).with_unit("items"),
+            &extra_tags,
+        ));
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("roundtable.config.bottom_k", config.bottom_k as f64)
+                    .with_unit("items"),
+                &extra_tags,
+            ),
+        );
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new(
+                    "roundtable.config.here_tolerance",
+                    config.here_tolerance as f64,
+                )
+                .with_unit("ratio"),
+                &extra_tags,
+            ),
+        );
+
+        for (band, plan) in [
+            ("above", schedule.above()),
+            ("here", schedule.here()),
+            ("beneath", schedule.beneath()),
+        ] {
+            let mut band_tags = extra_tags.clone();
+            band_tags.push(("band".to_string(), band.to_string()));
+            self.registry.record_metric(self.apply_tags(
+                MetricSample::new("roundtable.band.rows", plan.rows as f64).with_unit("rows"),
+                &band_tags,
+            ));
+            self.registry.record_metric(self.apply_tags(
+                MetricSample::new("roundtable.band.cols", plan.cols as f64).with_unit("cols"),
+                &band_tags,
+            ));
+            self.registry.record_metric(self.apply_tags(
+                MetricSample::new("roundtable.band.k", plan.k as f64).with_unit("items"),
+                &band_tags,
+            ));
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new("roundtable.band.workgroup", plan.choice.wg as f64)
+                        .with_unit("threads"),
+                    &band_tags,
+                ),
+            );
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new("roundtable.band.lanes", plan.choice.kl as f64)
+                        .with_unit("lanes"),
+                    &band_tags,
+                ),
+            );
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new("roundtable.band.channel_stride", plan.choice.ch as f64)
+                        .with_unit("stride"),
+                    &band_tags,
+                ),
+            );
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new("roundtable.band.tile", plan.choice.tile as f64)
+                        .with_unit("tile"),
+                    &band_tags,
+                ),
+            );
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new("roundtable.band.compaction_tile", plan.choice.ctile as f64)
+                        .with_unit("tile"),
+                    &band_tags,
+                ),
+            );
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new(
+                        "roundtable.band.subgroup",
+                        if plan.choice.subgroup { 1.0 } else { 0.0 },
+                    )
+                    .with_unit("flag"),
+                    &band_tags,
+                ),
+            );
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new("roundtable.band.fft_tile", plan.choice.fft_tile as f64)
+                        .with_unit("tile"),
+                    &band_tags,
+                ),
+            );
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new("roundtable.band.fft_radix", plan.choice.fft_radix as f64)
+                        .with_unit("radix"),
+                    &band_tags,
+                ),
+            );
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new(
+                        "roundtable.band.fft_segments",
+                        plan.choice.fft_segments as f64,
+                    )
+                    .with_unit("segments"),
+                    &band_tags,
+                ),
+            );
+        }
+
+        self.registry.record_roundtable(summary.clone());
+
+        let mut connector_metadata = vec![
+            ("rows".to_string(), rows.to_string()),
+            ("cols".to_string(), cols.to_string()),
+            ("autopilot".to_string(), autopilot_enabled.to_string()),
+            (
+                "plans".to_string(),
+                summary
+                    .plans
+                    .iter()
+                    .map(|plan| plan.kind.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+        ];
+        if let Some(dist) = &distribution_summary {
+            connector_metadata.push(("distribution_mode".to_string(), dist.mode.clone()));
+            connector_metadata.push(("node_id".to_string(), dist.node_id.clone()));
+        }
+        self.record_connector("roundtable", connector_metadata);
+
+        summary
+    }
+
+    pub fn encode_wave(&self, text: &str) -> PipelineResult<ComplexTensor> {
+        let encoder = self
+            .encoder
+            .as_ref()
+            .ok_or_else(|| PipelineError::EncoderMissing {
+                pipeline: self.name.clone(),
+            })?;
+        let start = Instant::now();
+        let wave = encoder.encode_wave(text).map_err(PipelineError::from)?;
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1e3;
+        let chars = text.chars().count() as f64;
+        let (_, cols) = wave.shape();
+
+        let extras = vec![("mode".to_string(), "wave".to_string())];
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("language.encode.chars", chars).with_unit("chars"),
+            &extras,
+        ));
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("language.encode.duration_ms", elapsed_ms).with_unit("ms"),
+            &extras,
+        ));
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("language.encode.wave.cols", cols as f64).with_unit("cols"),
+            &extras,
+        ));
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("language.encode.curvature", encoder.curvature() as f64)
+                    .with_unit("curvature"),
+                &extras,
+            ),
+        );
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("language.encode.temperature", encoder.temperature() as f64)
+                    .with_unit("temperature"),
+                &extras,
+            ),
+        );
+
+        self.record_connector(
+            "encode",
+            vec![
+                ("mode".to_string(), "wave".to_string()),
+                ("chars".to_string(), chars.to_string()),
+                ("duration_ms".to_string(), format!("{elapsed_ms:.3}")),
+                ("cols".to_string(), cols.to_string()),
+            ],
+        );
+
+        Ok(wave)
+    }
+
+    pub fn encode_z_space(&self, text: &str) -> PipelineResult<Tensor> {
+        let encoder = self
+            .encoder
+            .as_ref()
+            .ok_or_else(|| PipelineError::EncoderMissing {
+                pipeline: self.name.clone(),
+            })?;
+        let start = Instant::now();
+        let tensor = encoder.encode_z_space(text).map_err(PipelineError::from)?;
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1e3;
+        let chars = text.chars().count() as f64;
+        let (_, cols) = tensor.shape();
+
+        let extras = vec![("mode".to_string(), "z_space".to_string())];
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("language.encode.chars", chars).with_unit("chars"),
+            &extras,
+        ));
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("language.encode.duration_ms", elapsed_ms).with_unit("ms"),
+            &extras,
+        ));
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("language.encode.zspace.cols", cols as f64).with_unit("cols"),
+            &extras,
+        ));
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("language.encode.curvature", encoder.curvature() as f64)
+                    .with_unit("curvature"),
+                &extras,
+            ),
+        );
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("language.encode.temperature", encoder.temperature() as f64)
+                    .with_unit("temperature"),
+                &extras,
+            ),
+        );
+
+        self.record_connector(
+            "encode",
+            vec![
+                ("mode".to_string(), "z_space".to_string()),
+                ("chars".to_string(), chars.to_string()),
+                ("duration_ms".to_string(), format!("{elapsed_ms:.3}")),
+                ("cols".to_string(), cols.to_string()),
+            ],
+        );
+
+        Ok(tensor)
+    }
+
+    pub fn record_connector(&self, stage: impl Into<String>, metadata: Vec<(String, String)>) {
+        let mut map = HashMap::new();
+        map.insert("pipeline".to_string(), self.name.clone());
+        for (key, value) in self.tags.iter() {
+            map.entry(key.clone()).or_insert(value.clone());
+        }
+        for (key, value) in metadata {
+            map.insert(key, value);
+        }
+        self.registry.record_connector(ConnectorEvent {
+            name: self.name.clone(),
+            stage: stage.into(),
+            metadata: map,
+            issued_at: SystemTime::now(),
+        });
+    }
+}
+
+impl From<TensorError> for PipelineError {
+    fn from(err: TensorError) -> Self {
+        PipelineError::Tensor(err)
+    }
+}
+
+impl core::fmt::Display for PipelineError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            PipelineError::EncoderMissing { pipeline } => {
+                write!(f, "language pipeline '{pipeline}' is missing an encoder")
+            }
+            PipelineError::Tensor(err) => err.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for PipelineError {}
+
+fn summarise_rank_plan(plan: &RankPlan) -> RankPlanSummary {
+    let mut summary = RankPlanSummary::new(plan.kind, plan.rows, plan.cols, plan.k);
+    summary.workgroup = plan.choice.wg;
+    summary.lanes = plan.choice.kl;
+    summary.channel_stride = plan.choice.ch;
+    summary.tile = plan.choice.tile;
+    summary.compaction_tile = plan.choice.ctile;
+    summary.subgroup = plan.choice.subgroup;
+    summary.fft_tile = plan.choice.fft_tile;
+    summary.fft_radix = plan.choice.fft_radix;
+    summary.fft_segments = plan.choice.fft_segments;
+    summary
+}
+
+fn summarise_distribution(node: &RoundtableNode) -> DistributionSummary {
+    let cfg = node.config();
+    DistributionSummary {
+        node_id: cfg.node_id.clone(),
+        mode: cfg.mode.as_str().to_string(),
+        summary_window: cfg.summary_window,
+        push_interval_ms: cfg.push_interval.as_millis().min(u64::MAX as u128) as u64,
+        meta_endpoints: cfg.meta_endpoints.clone(),
+    }
+}
+
+fn summarise_config(config: RoundtableConfig) -> RoundtableConfigSummary {
+    #[allow(unused_mut)]
+    let mut summary = RoundtableConfigSummary::new(
+        config.top_k,
+        config.mid_k,
+        config.bottom_k,
+        config.here_tolerance,
+    );
+    #[cfg(feature = "psychoid")]
+    {
+        summary
+            .extras
+            .insert("psychoid".to_string(), config.psychoid_enabled);
+        if config.psychoid_log {
+            summary.extras.insert("psychoid_log".to_string(), true);
+        }
+    }
+    #[cfg(feature = "psi")]
+    {
+        summary.extras.insert("psi".to_string(), config.psi_enabled);
+    }
+    #[cfg(feature = "collapse")]
+    {
+        summary
+            .extras
+            .insert("collapse".to_string(), config.collapse_enabled);
+    }
+    summary
+}
+
+impl LanguagePipeline {
+    fn apply_tags(&self, mut sample: MetricSample, extras: &[(String, String)]) -> MetricSample {
+        sample = sample.with_tag("pipeline", self.name.clone());
+        for (key, value) in &self.tags {
+            sample = sample.with_tag(key.clone(), value.clone());
+        }
+        for (key, value) in extras {
+            sample = sample.with_tag(key.clone(), value.clone());
+        }
+        sample
     }
 }
 
@@ -701,6 +1064,86 @@ mod tests {
     use std::sync::{mpsc::channel, Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime};
     use tempfile::tempdir;
+
+    use super::super::automation::DesireAutomation;
+    use super::super::desire::{constant, warmup, DesireLagrangian};
+    use super::super::geometry::{
+        ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
+    };
+    use super::super::temperature::TemperatureController;
+    use crate::plan::RankPlanner;
+    use st_core::config::self_rewrite::SelfRewriteCfg;
+    use st_core::backend::device_caps::DeviceCaps;
+    use st_core::config::self_rewrite::SelfRewriteCfg;
+    use std::collections::HashSet;
+    use std::sync::mpsc::channel;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant, SystemTime};
+    use tempfile::tempdir;
+
+    fn registry_guard() -> &'static Mutex<()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn encode_wave_records_metrics_and_connector() {
+        let _lock = registry_guard().lock().unwrap();
+        let registry = EcosystemRegistry::global();
+        registry.drain();
+        let encoder = LanguageWaveEncoder::new(-1.0, 0.7).unwrap();
+        let pipeline = LanguagePipeline::builder("language-test")
+            .with_tag("tenant", "demo")
+            .with_encoder(encoder)
+            .build();
+        let wave = pipeline.encode_wave("spiral torch").unwrap();
+        assert_eq!(wave.shape().0, 1);
+
+        let report = registry.drain();
+        assert!(!report.metrics.is_empty());
+        let mut saw_chars = false;
+        for sample in &report.metrics {
+            if sample.name == "language.encode.chars" {
+                assert_eq!(sample.tags.get("mode"), Some(&"wave".to_string()));
+                assert_eq!(
+                    sample.tags.get("pipeline"),
+                    Some(&"language-test".to_string())
+                );
+                assert_eq!(sample.tags.get("tenant"), Some(&"demo".to_string()));
+                saw_chars = true;
+            }
+        }
+        assert!(saw_chars, "missing language.encode.chars metric");
+        assert_eq!(report.connectors.len(), 1);
+        let connector = &report.connectors[0];
+        assert_eq!(connector.name, "language-test");
+        assert_eq!(connector.stage, "encode");
+        assert_eq!(
+            connector.metadata.get("pipeline"),
+            Some(&"language-test".to_string())
+        );
+    }
+
+    #[test]
+    fn roundtable_records_summary_and_metrics() {
+        let _lock = registry_guard().lock().unwrap();
+        let registry = EcosystemRegistry::global();
+        registry.drain();
+        let pipeline = LanguagePipeline::builder("trainer").build();
+        let planner = RankPlanner::new(DeviceCaps::wgpu(32, true, 256));
+        let config = RoundtableConfig::default();
+        let schedule = RoundtableSchedule::new(&planner, 16, 32, config);
+        let summary = pipeline.record_roundtable(16, 32, config, &schedule, false, None);
+        assert_eq!(summary.rows, 16);
+        assert_eq!(summary.cols, 32);
+        let report = registry.drain();
+        assert_eq!(report.roundtables.len(), 1);
+        assert!(report.metrics.iter().any(|m| m.name == "roundtable.rows"));
+        assert_eq!(report.connectors.len(), 1);
+        let connector = &report.connectors[0];
+        assert_eq!(connector.stage, "roundtable");
+        assert_eq!(connector.metadata.get("rows"), Some(&"16".to_string()));
+    }
 
     fn build_geometry() -> SymbolGeometry {
         let syn = SparseKernel::from_rows(
