@@ -1,14 +1,10 @@
-use js_sys::JSON;
 use serde::Serialize;
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::wasm_tuner::{WasmTunerRecord, WasmTunerTable};
-use st_core::backend::wgpu_heuristics::Choice;
-use wasm_bindgen::prelude::*;
-
-use crate::fft::WasmFftPlan;
 use st_core::backend::wgpu_heuristics::{self, Choice};
 use wasm_bindgen::prelude::*;
 
+use crate::fft::WasmFftPlan;
 use crate::utils::js_error;
 
 #[wasm_bindgen]
@@ -157,8 +153,7 @@ fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> Choice {
 }
 
 fn choice_to_js(choice: Choice) -> Result<JsValue, JsValue> {
-    let json = serde_json::to_string(&ChoiceSerde::from(choice)).map_err(js_error)?;
-    JSON::parse(&json).map_err(|err| js_error(js_value_to_string(&err)))
+    JsValue::from_serde(&ChoiceSerde::from(choice)).map_err(|err| js_error(err))
 }
 
 #[derive(Serialize)]
@@ -177,23 +172,13 @@ struct ChoiceSerde {
 }
 
 fn parse_record(value: JsValue) -> Result<WasmTunerRecord, JsValue> {
-    let json = stringify_js_value(&value)?;
-    serde_json::from_str(&json).map_err(js_error)
+    value
+        .into_serde::<WasmTunerRecord>()
+        .map_err(|err| js_error(err))
 }
 
 fn records_to_js(records: &[WasmTunerRecord]) -> Result<JsValue, JsValue> {
-    let json = serde_json::to_string(records).map_err(js_error)?;
-    JSON::parse(&json).map_err(|err| js_error(js_value_to_string(&err)))
-}
-
-fn stringify_js_value(value: &JsValue) -> Result<String, JsValue> {
-    let json = JSON::stringify(value).map_err(|err| js_error(js_value_to_string(&err)))?;
-    json.as_string()
-        .ok_or_else(|| js_error("expected JSON string"))
-}
-
-fn js_value_to_string(value: &JsValue) -> String {
-    value.as_string().unwrap_or_else(|| format!("{value:?}"))
+    JsValue::from_serde(records).map_err(|err| js_error(err))
 }
 
 impl From<Choice> for ChoiceSerde {
