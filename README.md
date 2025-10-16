@@ -136,7 +136,15 @@ Once those signatures exist, `InterfaceZLift` pushes them straight into
 Z-space: it projects the perimeter mass onto a preferred Z-axis, splits the
 energy into Above/Here/Beneath bands, enriches the drift with the Leech
 projector, and emits a ready-to-store `SoftlogicZFeedback` pulse so runtimes can
-bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L386】
+bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L471】
+
+To make those bridges operational inside collapse loops the gauge now supports
+multi-radius sweeps and a conductor that fuses their Z pulses with exponential
+smoothing. `InterfaceGauge::analyze_multiradius` probes the same mask at
+different blow-up scales (and reuses an optional `c′` label when supplied),
+while `InterfaceZConductor` drives any number of gauges, aggregates the
+resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
+ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
