@@ -31,12 +31,28 @@ cuda = []
 hip = []
 
 [dependencies]
+# Deterministic sampling helpers for pure tensor stochastic initialisers.
+rand = { version = "0.8", default-features = false, features = ["std"] }
+rand_distr = { version = "0.4", default-features = false, features = ["std"] }
 # High-performance SIMD dense linear algebra for CPU matmul acceleration.
 faer = { version = "0.18", default-features = false, features = ["std"], optional = true }
+# Deterministic RNGs for pure tensor initialisers.
+rand = { version = "0.8", features = ["std"] }
 # Optional; only needed if building WGPU kernel
 wgpu = { version = "0.19", optional = true }
 bytemuck = { version = "1.15", features = ["derive"], optional = true }
 pollster = { version = "0.3", optional = true }
+
+[dev-dependencies]
+# Used in tests to validate conversions against ndarray utilities.
+ndarray = { version = "0.15" }
+# Criterion + Plotters power the tensor initialisation benchmarks.
+criterion = { version = "0.5", features = ["html_reports"] }
+plotters = { version = "0.3" }
+
+[[bench]]
+name = "random_init"
+harness = false
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

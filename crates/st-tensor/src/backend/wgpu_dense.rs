@@ -253,7 +253,7 @@ pub fn matmul(
     }
     queue.submit(Some(encoder.finish()));
 
-    Ok(readback_f32(device, queue, &c_buf, rows * cols))
+    readback_f32(device, queue, &c_buf, rows * cols)
 }
 
 pub fn is_available() -> bool {

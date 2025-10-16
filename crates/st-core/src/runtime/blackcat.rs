@@ -102,6 +102,14 @@ pub struct BlackCatRuntime {
     last_context: Vec<f64>,
     last_picks: HashMap<String, String>,
     last_step_start: Option<Instant>,
+    stats_alpha: f64,
+    stats_steps: u64,
+    reward_mean: f64,
+    reward_m2: f64,
+    last_reward: f64,
+    metrics_ema: MetricsEma,
+    frac_penalty_ema: RollingEma,
+    extra_ema: HashMap<String, RollingEma>,
 }
 
 impl BlackCatRuntime {
@@ -115,6 +123,7 @@ impl BlackCatRuntime {
     ) -> Self {
         let bandits = MultiBandit::new(&groups, feat_dim, mode);
         let heur = HeurStore::new(heur_path);
+        let stats_alpha = 0.2;
         Self {
             z: ZMetaES::new(z_params),
             bandits,
@@ -124,6 +133,14 @@ impl BlackCatRuntime {
             last_context: vec![0.0; feat_dim.max(1)],
             last_picks: HashMap::new(),
             last_step_start: None,
+            stats_alpha,
+            stats_steps: 0,
+            reward_mean: 0.0,
+            reward_m2: 0.0,
+            last_reward: 0.0,
+            metrics_ema: MetricsEma::new(stats_alpha),
+            frac_penalty_ema: RollingEma::new(stats_alpha),
+            extra_ema: HashMap::new(),
         }
     }
 
@@ -191,6 +208,25 @@ impl BlackCatRuntime {
         self.z
             .temp_schedule(metrics.retry_rate, grad_norm, loss_var);
         self.bandits.update_all(&self.last_context, reward_current);
+        self.stats_steps = self.stats_steps.saturating_add(1);
+        let delta = reward_current - self.reward_mean;
+        if self.stats_steps == 1 {
+            self.reward_mean = reward_current;
+            self.reward_m2 = 0.0;
+        } else {
+            self.reward_mean += delta / self.stats_steps as f64;
+            let delta2 = reward_current - self.reward_mean;
+            self.reward_m2 += delta * delta2;
+        }
+        self.last_reward = reward_current;
+        self.metrics_ema.update(metrics);
+        self.frac_penalty_ema.update(curr_penalty);
+        for (key, value) in metrics.extra.iter() {
+            self.extra_ema
+                .entry(key.clone())
+                .or_insert_with(|| RollingEma::new(self.stats_alpha))
+                .update(*value);
+        }
         reward_current
     }
 
@@ -247,6 +283,167 @@ impl BlackCatRuntime {
     /// Returns the picks that were selected during the last [`choose`] call.
     pub fn last_picks(&self) -> &HashMap<String, String> {
         &self.last_picks
+    }
+
+    /// Returns aggregated runtime statistics derived from recent updates.
+    pub fn stats(&self) -> BlackcatRuntimeStats {
+        let reward_std = if self.stats_steps > 1 {
+            (self.reward_m2 / (self.stats_steps - 1) as f64)
+                .abs()
+                .sqrt()
+        } else {
+            0.0
+        };
+        let extras = self
+            .extra_ema
+            .iter()
+            .filter_map(|(key, ema)| ema.value().map(|value| (key.clone(), value)))
+            .collect();
+        BlackcatRuntimeStats {
+            steps: self.stats_steps,
+            reward_mean: self.reward_mean,
+            reward_std,
+            last_reward: self.last_reward,
+            step_time_ms_ema: self.metrics_ema.step_time(),
+            mem_peak_mb_ema: self.metrics_ema.mem_peak(),
+            retry_rate_ema: self.metrics_ema.retry_rate(),
+            frac_penalty_ema: self
+                .frac_penalty_ema
+                .value()
+                .unwrap_or_else(|| self.z.frac_penalty()),
+            extras,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct BlackcatRuntimeStats {
+    pub steps: u64,
+    pub reward_mean: f64,
+    pub reward_std: f64,
+    pub last_reward: f64,
+    pub step_time_ms_ema: f64,
+    pub mem_peak_mb_ema: f64,
+    pub retry_rate_ema: f64,
+    pub frac_penalty_ema: f64,
+    pub extras: HashMap<String, f64>,
+}
+
+#[derive(Clone, Debug)]
+struct MetricsEma {
+    step_time: RollingEma,
+    mem_peak: RollingEma,
+    retry_rate: RollingEma,
+}
+
+impl MetricsEma {
+    fn new(alpha: f64) -> Self {
+        Self {
+            step_time: RollingEma::new(alpha),
+            mem_peak: RollingEma::new(alpha),
+            retry_rate: RollingEma::new(alpha),
+        }
+    }
+
+    fn update(&mut self, metrics: &StepMetrics) {
+        self.step_time.update(metrics.step_time_ms);
+        self.mem_peak.update(metrics.mem_peak_mb);
+        self.retry_rate.update(metrics.retry_rate);
+    }
+
+    fn step_time(&self) -> f64 {
+        self.step_time.value().unwrap_or(0.0)
+    }
+
+    fn mem_peak(&self) -> f64 {
+        self.mem_peak.value().unwrap_or(0.0)
+    }
+
+    fn retry_rate(&self) -> f64 {
+        self.retry_rate.value().unwrap_or(0.0)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RollingEma {
+    alpha: f64,
+    value: f64,
+    initialized: bool,
+}
+
+impl RollingEma {
+    fn new(alpha: f64) -> Self {
+        Self {
+            alpha: alpha.clamp(1.0e-3, 0.999),
+            value: 0.0,
+            initialized: false,
+        }
+    }
+
+    fn update(&mut self, sample: f64) {
+        if !sample.is_finite() {
+            return;
+        }
+        if !self.initialized {
+            self.value = sample;
+            self.initialized = true;
+        } else {
+            self.value = self.alpha * sample + (1.0 - self.alpha) * self.value;
+        }
+    }
+
+    fn value(&self) -> Option<f64> {
+        if self.initialized {
+            Some(self.value)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn sample_runtime() -> BlackCatRuntime {
+        let mut groups = HashMap::new();
+        groups.insert("tile".to_string(), vec!["a".to_string(), "b".to_string()]);
+        let groups = ChoiceGroups { groups };
+        BlackCatRuntime::new(ZMetaParams::default(), groups, 4, SoftBanditMode::TS, None)
+    }
+
+    #[test]
+    fn runtime_accumulates_stats() {
+        let mut runtime = sample_runtime();
+        runtime.begin_step();
+        let mut metrics = StepMetrics::default();
+        metrics.step_time_ms = 12.5;
+        metrics.mem_peak_mb = 512.0;
+        metrics.retry_rate = 0.1;
+        metrics.extra.insert("grad_norm".into(), 0.5);
+        let reward1 = runtime.post_step(&metrics);
+        let stats1 = runtime.stats();
+        assert_eq!(stats1.steps, 1);
+        assert!((stats1.reward_mean - reward1).abs() < 1e-9);
+        assert_eq!(stats1.reward_std, 0.0);
+        assert!(stats1.step_time_ms_ema > 0.0);
+        assert!(stats1.mem_peak_mb_ema > 0.0);
+        assert_eq!(stats1.extras.get("grad_norm").cloned().unwrap(), 0.5);
+
+        runtime.begin_step();
+        let mut metrics2 = StepMetrics::default();
+        metrics2.step_time_ms = 6.0;
+        metrics2.mem_peak_mb = 256.0;
+        metrics2.retry_rate = 0.05;
+        metrics2.extra.insert("grad_norm".into(), 0.25);
+        let _ = runtime.post_step(&metrics2);
+        let stats2 = runtime.stats();
+        assert_eq!(stats2.steps, 2);
+        assert!(stats2.reward_std >= 0.0);
+        assert!(stats2.step_time_ms_ema <= stats1.step_time_ms_ema);
+        assert!(stats2.extras.get("grad_norm").cloned().unwrap() <= 0.5);
+        assert!(stats2.frac_penalty_ema >= 0.0);
     }
 }
 

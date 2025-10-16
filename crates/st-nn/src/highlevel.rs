@@ -18,10 +18,10 @@ use st_core::telemetry::chrono::{
 };
 use st_core::telemetry::hub;
 use st_core::telemetry::maintainer::{Maintainer, MaintainerConfig, MaintainerReport};
-use st_tensor::pure::measure::{z_space_barycenter, ZSpaceBarycenter};
+use st_tensor::pure::measure::{z_space_barycenter, z_space_barycenter_guarded, ZSpaceBarycenter};
 use st_tensor::pure::{
     AmegaHypergrad, DifferentialResonance, FunctorDifferential, HomotopyDifferential,
-    InfinityDifferential, OpenCartesianTopos, PureResult, RecursiveDifferential,
+    InfinityDifferential, OpenCartesianTopos, PureResult, RecursiveDifferential, RewriteMonad,
     SpiralDifferential, Tensor, TensorError,
 };
 use st_text::{ResonanceNarrative, TextResonator};
@@ -949,13 +949,24 @@ impl SpiralSession {
         densities: &[Tensor],
         coupling: Option<&Tensor>,
     ) -> PureResult<ZSpaceBarycenter> {
-        z_space_barycenter(
-            weights,
-            densities,
-            self.barycenter.entropy_weight,
-            self.barycenter.beta_j,
-            coupling,
-        )
+        if let Some(topos) = &self.topos {
+            z_space_barycenter_guarded(
+                RewriteMonad::new(topos),
+                weights,
+                densities,
+                self.barycenter.entropy_weight,
+                self.barycenter.beta_j,
+                coupling,
+            )
+        } else {
+            z_space_barycenter(
+                weights,
+                densities,
+                self.barycenter.entropy_weight,
+                self.barycenter.beta_j,
+                coupling,
+            )
+        }
     }
 
     /// Variant that accepts ad-hoc entropy and coupling parameters.
@@ -967,7 +978,18 @@ impl SpiralSession {
         beta_j: f32,
         coupling: Option<&Tensor>,
     ) -> PureResult<ZSpaceBarycenter> {
-        z_space_barycenter(weights, densities, entropy_weight, beta_j, coupling)
+        if let Some(topos) = &self.topos {
+            z_space_barycenter_guarded(
+                RewriteMonad::new(topos),
+                weights,
+                densities,
+                entropy_weight,
+                beta_j,
+                coupling,
+            )
+        } else {
+            z_space_barycenter(weights, densities, entropy_weight, beta_j, coupling)
+        }
     }
 
     /// Aligns a hypergrad tape with the loss-monotone barycenter interpolation.

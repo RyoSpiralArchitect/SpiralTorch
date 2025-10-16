@@ -12,6 +12,7 @@
 //! compatible (alloc-only) and keeps allocations outside of the hot paths.
 
 use core::f32::consts::PI;
+use core::fmt;
 
 /// Minimal complex number implementation to avoid pulling in external crates.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -90,6 +91,17 @@ pub enum FftError {
     Empty,
     /// Length was not a power of two.
     NonPowerOfTwo,
+}
+
+impl fmt::Display for FftError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FftError::Empty => f.write_str("FFT signal cannot be empty"),
+            FftError::NonPowerOfTwo => {
+                f.write_str("FFT length must be a power of two for radix-2/4 pipeline")
+            }
+        }
+    }
 }
 
 /// In-place iterative FFT using a radix-4 kernel whenever possible and falling
