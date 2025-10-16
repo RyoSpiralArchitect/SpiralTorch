@@ -6,13 +6,17 @@
 // crates/st-tensor/src/lib.rs
 pub mod fractional;
 
-#[cfg(feature = "wgpu_frac")]
 pub mod backend;
 
 #[cfg(feature = "wgpu_frac")]
 mod util;
 
+pub use backend::faer_dense;
+
 #[cfg(feature = "wgpu_frac")]
-pub use backend::*;
+pub use backend::wgpu_frac;
+
+#[cfg(feature = "wgpu")]
+pub use backend::wgpu_dense;
 
 pub mod pure;

@@ -3,68 +3,57 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#![cfg(feature = "wgpu")]
+
+use crate::util::readback_f32;
 use std::sync::{Arc, OnceLock};
-
-use bytemuck::{cast_slice, Pod, Zeroable};
-use pollster::block_on;
 use wgpu::util::DeviceExt;
+use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Queue};
 
-const WORKGROUP_SIZE: u32 = 16;
+const MATMUL_WGSL: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
 
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct MatmulParams {
     rows: u32,
-    inner: u32,
     cols: u32,
+    inner: u32,
     _pad: u32,
 }
 
 struct DenseContext {
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    layout: wgpu::BindGroupLayout,
-    pipeline: wgpu::ComputePipeline,
+    device: Arc<Device>,
+    queue: Arc<Queue>,
+    pipeline: ComputePipeline,
+    bind_layout: BindGroupLayout,
 }
 
 impl DenseContext {
     fn new() -> Result<Self, String> {
         let instance = wgpu::Instance::default();
-        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .or_else(|| {
-            block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
+        let adapter_opt =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: None,
-                force_fallback_adapter: true,
-            }))
-        })
-        .flatten()
-        .ok_or_else(|| "wgpu adapter unavailable".to_string())?;
+                force_fallback_adapter: false,
+            }));
+        let adapter = adapter_opt.ok_or_else(|| "no suitable WGPU adapter".to_string())?;
 
-        let (device, queue) = block_on(adapter.request_device(
+        let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
-                label: Some("st-tensor.linear.device"),
-                features: wgpu::Features::empty(),
-                limits: adapter.limits(),
-                memory_hints: wgpu::MemoryHints::Performance,
+                label: None,
+                required_features: wgpu::Features::empty(),
+                required_limits: adapter.limits(),
             },
             None,
         ))
         .map_err(|err| err.to_string())?;
 
-        let device = Arc::new(device);
-        let queue = Arc::new(queue);
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("st-tensor.linear.matmul"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../wgpu_shaders/matmul.wgsl").into()),
-        });
+        let device: Arc<Device> = Arc::new(device);
+        let queue: Arc<Queue> = Arc::new(queue);
 
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("st-tensor.linear.layout"),
+        let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("st.tensor.wgpu_dense.bind_layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -110,13 +99,16 @@ impl DenseContext {
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("st-tensor.linear.pipeline"),
-            bind_group_layouts: &[&layout],
+            label: Some("st.tensor.wgpu_dense.pipeline_layout"),
+            bind_group_layouts: &[&bind_layout],
             push_constant_ranges: &[],
         });
-
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("st.tensor.wgpu_dense.shader"),
+            source: wgpu::ShaderSource::Wgsl(MATMUL_WGSL.into()),
+        });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("st-tensor.linear.matmul"),
+            label: Some("st.tensor.wgpu_dense.pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: "main",
@@ -125,142 +117,134 @@ impl DenseContext {
         Ok(Self {
             device,
             queue,
-            layout,
             pipeline,
+            bind_layout,
+        })
+    }
+
+    fn device(&self) -> &Device {
+        self.device.as_ref()
+    }
+
+    fn queue(&self) -> &Queue {
+        self.queue.as_ref()
+    }
+
+    fn bind_group(&self, a: &Buffer, b: &Buffer, c: &Buffer, params: &Buffer) -> BindGroup {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.bind_group"),
+            layout: &self.bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: a.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: c.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params.as_entire_binding(),
+                },
+            ],
         })
     }
 }
 
-static CONTEXT: OnceLock<Result<DenseContext, String>> = OnceLock::new();
+static CONTEXT: OnceLock<Arc<DenseContext>> = OnceLock::new();
 
-fn context() -> Result<&'static DenseContext, String> {
-    match CONTEXT.get_or_init(DenseContext::new) {
-        Ok(ctx) => Ok(ctx),
-        Err(err) => Err(err.clone()),
+fn dense_context() -> Result<Arc<DenseContext>, String> {
+    if let Some(ctx) = CONTEXT.get() {
+        return Ok(ctx.clone());
     }
-}
-
-fn dispatch_dimensions(rows: u32, cols: u32) -> (u32, u32) {
-    let x = (cols + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-    let y = (rows + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-    (x.max(1), y.max(1))
-}
-
-pub fn is_available() -> bool {
-    context().is_ok()
-}
-
-pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {
-    rows * cols >= 1024 && inner >= 16
+    let ctx = Arc::new(DenseContext::new()?);
+    let _ = CONTEXT.set(ctx.clone());
+    Ok(ctx)
 }
 
 pub fn matmul(
-    lhs: &[f32],
-    rhs: &[f32],
+    a: &[f32],
+    b: &[f32],
     rows: usize,
-    inner: usize,
     cols: usize,
+    inner: usize,
 ) -> Result<Vec<f32>, String> {
     if rows == 0 || cols == 0 || inner == 0 {
-        return Ok(vec![0.0; rows * cols]);
+        return Err("matrix dimensions must be positive".into());
+    }
+    if a.len() != rows * inner {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            rows * inner,
+            a.len()
+        ));
+    }
+    if b.len() != inner * cols {
+        return Err(format!(
+            "rhs buffer length mismatch: expected {} elements, got {}",
+            inner * cols,
+            b.len()
+        ));
     }
 
-    let ctx = context()?;
-    let device = &*ctx.device;
-    let queue = &*ctx.queue;
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
 
-    let lhs_bytes = (lhs.len() * std::mem::size_of::<f32>()) as u64;
-    let rhs_bytes = (rhs.len() * std::mem::size_of::<f32>()) as u64;
-    let out_bytes = (rows * cols * std::mem::size_of::<f32>()) as u64;
-
-    let lhs_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("st-tensor.linear.lhs"),
-        size: lhs_bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
+    let a_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.a"),
+        contents: bytemuck::cast_slice(a),
+        usage: wgpu::BufferUsages::STORAGE,
     });
-    let rhs_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("st-tensor.linear.rhs"),
-        size: rhs_bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
+    let b_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.b"),
+        contents: bytemuck::cast_slice(b),
+        usage: wgpu::BufferUsages::STORAGE,
     });
-    let out_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("st-tensor.linear.out"),
-        size: out_bytes,
+    let result_size = (rows * cols * std::mem::size_of::<f32>()) as u64;
+    let c_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("st.tensor.wgpu_dense.c"),
+        size: result_size,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
-    let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("st-tensor.linear.stage"),
-        size: out_bytes,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-
-    queue.write_buffer(&lhs_buffer, 0, cast_slice(lhs));
-    queue.write_buffer(&rhs_buffer, 0, cast_slice(rhs));
 
     let params = MatmulParams {
         rows: rows as u32,
-        inner: inner as u32,
         cols: cols as u32,
+        inner: inner as u32,
         _pad: 0,
     };
-    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("st-tensor.linear.params"),
-        contents: cast_slice(&[params]),
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.params"),
+        contents: bytemuck::bytes_of(&params),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("st-tensor.linear.bind"),
-        layout: &ctx.layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: lhs_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: rhs_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: out_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: params_buffer.as_entire_binding(),
-            },
-        ],
-    });
+    let bind_group = ctx.bind_group(&a_buf, &b_buf, &c_buf, &params_buf);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("st-tensor.linear.encode"),
+        label: Some("st.tensor.wgpu_dense.encoder"),
     });
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("st-tensor.linear.pass"),
+            label: Some("st.tensor.wgpu_dense.pass"),
             timestamp_writes: None,
         });
         pass.set_pipeline(&ctx.pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        let (x, y) = dispatch_dimensions(params.rows, params.cols);
-        pass.dispatch_workgroups(x, y, 1);
+        let wg_x = 16u32;
+        let wg_y = 16u32;
+        let groups_x = ((cols as u32) + wg_x - 1) / wg_x;
+        let groups_y = ((rows as u32) + wg_y - 1) / wg_y;
+        pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
     }
-    encoder.copy_buffer_to_buffer(&out_buffer, 0, &staging_buffer, 0, out_bytes);
-
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
 
-    let slice = staging_buffer.slice(..);
-    block_on(slice.map_async(wgpu::MapMode::Read)).map_err(|err| err.to_string())?;
-    let data = slice.get_mapped_range();
-    let mut result = vec![0.0f32; rows * cols];
-    result.copy_from_slice(cast_slice(&data));
-    drop(data);
-    staging_buffer.unmap();
-
-    Ok(result)
+    Ok(readback_f32(device, queue, &c_buf, rows * cols))
 }
