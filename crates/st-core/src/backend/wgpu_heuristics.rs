@@ -9,7 +9,7 @@ use super::kdsl_bridge;
 use super::spiralk_fft::SpiralKFftPlan;
 use crate::backend::wgpu_heuristics_generated as gen;
 #[cfg(feature = "logic")]
-use st_logic::{solve_soft, Ctx as LCtx, SoftRule, SolveCfg as LCfg};
+use st_logic::SoftRule;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Choice {
@@ -24,6 +24,88 @@ pub struct Choice {
     pub tile_cols: u32,   // column tiles for ND FFT/fractional kernels
     pub radix: u32,       // preferred FFT radix
     pub segments: u32,    // ND segment count for GPU kernels
+}
+
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_USE2CE: &str = "use_2ce";
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_WG: &str = "wg";
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_KL: &str = "kl";
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_CH: &str = "ch";
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_ALGO: &str = "algo_topk";
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_CTILE: &str = "ctile";
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_MODE_MIDK: &str = "mode_midk";
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_MODE_BOTTOMK: &str = "mode_bottomk";
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_TILE_COLS: &str = "tile_cols";
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_RADIX: &str = "radix";
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_SEGMENTS: &str = "segments";
+
+#[cfg(feature = "logic")]
+#[derive(Default)]
+struct NumericVote {
+    sum: f32,
+    weight: f32,
+}
+
+#[cfg(feature = "logic")]
+impl NumericVote {
+    fn push(&mut self, value: f32, weight: f32) {
+        if weight > 0.0 {
+            self.sum += value * weight;
+            self.weight += weight;
+        }
+    }
+
+    fn resolve(&self) -> Option<f32> {
+        (self.weight > 0.0).then(|| self.sum / self.weight)
+    }
+
+    fn influence(&self) -> f32 {
+        self.weight
+    }
+}
+
+#[cfg(feature = "logic")]
+#[derive(Default)]
+struct BoolVote {
+    positive: f32,
+    negative: f32,
+}
+
+#[cfg(feature = "logic")]
+impl BoolVote {
+    fn push(&mut self, prefer_true: bool, weight: f32) {
+        if weight <= 0.0 {
+            return;
+        }
+        if prefer_true {
+            self.positive += weight;
+        } else {
+            self.negative += weight;
+        }
+    }
+
+    fn decide(&self) -> Option<bool> {
+        let total = self.positive + self.negative;
+        if total <= 0.0 {
+            None
+        } else {
+            Some(self.positive >= self.negative)
+        }
+    }
+
+    fn influence(&self) -> f32 {
+        self.positive + self.negative
+    }
 }
 
 fn fallback(rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
@@ -99,6 +181,98 @@ fn overlay(c: &mut Choice, o: &DslOverrides) {
     }
 }
 
+#[cfg(feature = "logic")]
+fn synthesize_soft_choice(base: Choice, rules: &[SoftRule]) -> Option<(Choice, f32)> {
+    if rules.is_empty() {
+        return None;
+    }
+
+    let mut choice = base;
+    let mut influence = 0.0f32;
+
+    let mut use2_vote = BoolVote::default();
+    let mut wg_vote = NumericVote::default();
+    let mut kl_vote = NumericVote::default();
+    let mut ch_vote = NumericVote::default();
+    let mut algo_vote = NumericVote::default();
+    let mut ctile_vote = NumericVote::default();
+    let mut midk_vote = NumericVote::default();
+    let mut bottomk_vote = NumericVote::default();
+    let mut tile_cols_vote = NumericVote::default();
+    let mut radix_vote = NumericVote::default();
+    let mut segments_vote = NumericVote::default();
+
+    for rule in rules {
+        let weight = rule.weight.max(0.0);
+        if weight <= 0.0 {
+            continue;
+        }
+        match rule.name {
+            SOFT_NAME_USE2CE => use2_vote.push(rule.score >= 0.0, weight),
+            SOFT_NAME_WG => wg_vote.push(rule.score, weight),
+            SOFT_NAME_KL => kl_vote.push(rule.score, weight),
+            SOFT_NAME_CH => ch_vote.push(rule.score, weight),
+            SOFT_NAME_ALGO => algo_vote.push(rule.score, weight),
+            SOFT_NAME_CTILE => ctile_vote.push(rule.score, weight),
+            SOFT_NAME_MODE_MIDK => midk_vote.push(rule.score, weight),
+            SOFT_NAME_MODE_BOTTOMK => bottomk_vote.push(rule.score, weight),
+            SOFT_NAME_TILE_COLS => tile_cols_vote.push(rule.score, weight),
+            SOFT_NAME_RADIX => radix_vote.push(rule.score, weight),
+            SOFT_NAME_SEGMENTS => segments_vote.push(rule.score, weight),
+            _ => {}
+        }
+    }
+
+    if let Some(decision) = use2_vote.decide() {
+        if decision != choice.use_2ce {
+            influence += use2_vote.influence();
+            choice.use_2ce = decision;
+        }
+    }
+
+    influence += apply_numeric_vote_u32(&mut choice.wg, &wg_vote, 1, u32::MAX);
+    influence += apply_numeric_vote_u32(&mut choice.kl, &kl_vote, 1, u32::MAX);
+    influence += apply_numeric_vote_u32(&mut choice.ch, &ch_vote, 1, u32::MAX);
+    influence += apply_numeric_vote_u8(&mut choice.algo_topk, &algo_vote, 0, u8::MAX);
+    influence += apply_numeric_vote_u32(&mut choice.ctile, &ctile_vote, 1, u32::MAX);
+    influence += apply_numeric_vote_u8(&mut choice.mode_midk, &midk_vote, 0, u8::MAX);
+    influence += apply_numeric_vote_u8(&mut choice.mode_bottomk, &bottomk_vote, 0, u8::MAX);
+    influence += apply_numeric_vote_u32(&mut choice.tile_cols, &tile_cols_vote, 1, u32::MAX);
+    influence += apply_numeric_vote_u32(&mut choice.radix, &radix_vote, 1, u32::MAX);
+    influence += apply_numeric_vote_u32(&mut choice.segments, &segments_vote, 1, u32::MAX);
+
+    if influence <= 0.0 {
+        return None;
+    }
+
+    let score = (influence / (1.0 + influence)).clamp(0.0, 1.0);
+    Some((choice, score))
+}
+
+#[cfg(feature = "logic")]
+fn apply_numeric_vote_u32(field: &mut u32, vote: &NumericVote, min: u32, max: u32) -> f32 {
+    if let Some(value) = vote.resolve() {
+        let clamped = value.clamp(min as f32, max as f32).round() as u32;
+        if clamped != *field {
+            *field = clamped;
+            return vote.influence();
+        }
+    }
+    0.0
+}
+
+#[cfg(feature = "logic")]
+fn apply_numeric_vote_u8(field: &mut u8, vote: &NumericVote, min: u8, max: u8) -> f32 {
+    if let Some(value) = vote.resolve() {
+        let clamped = value.clamp(min as f32, max as f32).round() as u8;
+        if clamped != *field {
+            *field = clamped;
+            return vote.influence();
+        }
+    }
+    0.0
+}
+
 pub fn choose_kind(
     rows: u32,
     cols: u32,
@@ -109,42 +283,24 @@ pub fn choose_kind(
     let (hard_dsl, soft_dsl, ov) =
         kdsl_bridge::parse_env_dsl_plus_kind(rows, cols, k, subgroup, kind);
     let soft_kv = consensus::kv_consensus_soft_rules(rows, cols, k, subgroup, kind);
+    let base = fallback(rows, cols, k, subgroup);
     #[cfg(not(feature = "logic"))]
-    let _ = (&soft_dsl, &soft_kv);
+    let _ = (&soft_dsl, &soft_kv, &base);
 
     #[cfg(feature = "logic")]
     {
         let mut all = soft_dsl.clone();
-        all.extend(soft_kv);
+        all.extend(soft_kv.clone());
         let use_soft = std::env::var("SPIRAL_HEUR_SOFT")
             .ok()
             .map(|v| v == "1")
             .unwrap_or(true);
         if use_soft {
-            let ctx = LCtx {
-                rows,
-                cols,
-                k,
-                sg: subgroup,
-            };
-            let (c, score) = solve_soft(
-                ctx,
-                LCfg {
-                    noise: 0.02,
-                    seed: 0x5p1ral,
-                },
-                &all,
-            );
-            if score > 0.1 {
-                let mut out = Choice {
-                    use_2ce: c.use_2ce,
-                    wg: c.wg,
-                    kl: c.kl,
-                    ch: c.ch,
-                    ..fallback(rows, cols, k, subgroup)
-                };
-                overlay(&mut out, &ov);
-                return Some(out);
+            if let Some((mut out, score)) = synthesize_soft_choice(base, &all) {
+                if score > 0.1 {
+                    overlay(&mut out, &ov);
+                    return Some(out);
+                }
             }
         }
     }
@@ -160,7 +316,9 @@ pub fn choose_kind(
         overlay(&mut c, &ov);
         return Some(c);
     }
-    Some(fallback(rows, cols, k, subgroup))
+    let mut fallback_choice = base;
+    overlay(&mut fallback_choice, &ov);
+    Some(fallback_choice)
 }
 
 /// Construct an FFT plan from the same heuristics used for TopK and emit the
