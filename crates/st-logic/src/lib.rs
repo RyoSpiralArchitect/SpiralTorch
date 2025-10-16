@@ -131,3 +131,5 @@ pub fn beam_select<C: Clone>(
 // learn_store is optional behind the feature gate.
 #[cfg(feature = "learn_store")]
 pub mod learn;
+
+pub mod quantum_reality;
