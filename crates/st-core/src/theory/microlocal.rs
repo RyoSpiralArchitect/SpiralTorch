@@ -251,6 +251,12 @@ impl InterfaceGauge {
             physical_radius,
         }
     }
+
+    /// Returns the discretised sampling radius expressed in lattice steps.
+    pub fn radius_in_steps(&self) -> isize {
+        let steps = (self.physical_radius / self.grid_spacing).ceil() as isize;
+        steps.max(1)
+    }
 }
 
 /// Couples microlocal interface signatures into a Z-space control pulse.
