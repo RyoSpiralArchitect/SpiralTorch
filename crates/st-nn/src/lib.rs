@@ -89,6 +89,9 @@ pub use roundtable::{
     OutcomeBand, RoundtableNode,
 };
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
+pub use st_core::runtime::blackcat::{
+    BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
+};
 pub use trainer::{EpochStats, ModuleTrainer};
 
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};

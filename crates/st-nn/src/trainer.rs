@@ -46,7 +46,8 @@ use st_core::ecosystem::{
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::ops::rank_entry::RankPlan;
 use st_core::runtime::autopilot::Autopilot;
-use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
+use st_core::runtime::blackcat::{BlackCatRuntime, BlackcatRuntimeStats, StepMetrics};
+use st_core::telemetry::hub::{self, SoftlogicZFeedback};
 #[cfg(feature = "collapse")]
 use st_core::telemetry::hub::CollapsePulse;
 use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
@@ -529,6 +530,11 @@ impl ModuleTrainer {
             .as_ref()
             .map(|m| m.scoreboard())
             .unwrap_or_default()
+    }
+
+    /// Returns aggregated stats tracked by the embedded Blackcat runtime, when available.
+    pub fn blackcat_runtime_stats(&self) -> Option<BlackcatRuntimeStats> {
+        self.blackcat.as_ref().map(|rt| rt.stats())
     }
 
     /// Replays moderator minutes so the embedded Blackcat runtime can stay aligned.
@@ -1521,6 +1527,12 @@ mod tests {
     use crate::loss::MeanSquaredError;
     use crate::roundtable::{HeurOp, HeurOpKind};
     use crate::schedule::RoundtableConfig;
+    #[cfg(feature = "golden")]
+    use crate::CouncilEvidence;
+    use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
+    use st_tensor::pure::topos::OpenCartesianTopos;
+    use std::collections::HashMap;
+    use std::time::SystemTime;
     use crate::CouncilEvidence;
     use st_tensor::pure::topos::OpenCartesianTopos;
     use std::collections::HashMap;
@@ -1698,6 +1710,34 @@ mod tests {
         assert_eq!(after_third, after_first + proposal.ops.len());
     }
 
+    #[test]
+    fn trainer_exposes_blackcat_runtime_stats() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let mut groups = HashMap::new();
+        groups.insert("tile".to_string(), vec!["a".to_string(), "b".to_string()]);
+        let runtime = BlackCatRuntime::new(
+            ZMetaParams::default(),
+            ChoiceGroups { groups },
+            4,
+            SoftBanditMode::TS,
+            None,
+        );
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_blackcat(runtime);
+        if let Some(rt) = trainer.blackcat.as_mut() {
+            rt.begin_step();
+            let mut metrics = StepMetrics::default();
+            metrics.step_time_ms = 10.0;
+            metrics.mem_peak_mb = 256.0;
+            metrics.retry_rate = 0.05;
+            metrics.extra.insert("grad_norm".into(), 0.4);
+            let _ = rt.post_step(&metrics);
+        }
+        let stats = trainer
+            .blackcat_runtime_stats()
+            .expect("runtime stats available");
+        assert_eq!(stats.steps, 1);
+        assert!(stats.step_time_ms_ema > 0.0);
+        assert_eq!(stats.extras.get("grad_norm").cloned().unwrap(), 0.4);
     fn trainer_consumes_desire_bridge_summary() {
         let caps = DeviceCaps::wgpu(32, true, 256);
         let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);

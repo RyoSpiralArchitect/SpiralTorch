@@ -871,11 +871,7 @@ impl BlackcatModerator {
         if self.scoreboard.len() <= self.scoreboard_limit {
             return;
         }
-        let mut entries: Vec<_> = self
-            .scoreboard
-            .values()
-            .cloned()
-            .collect();
+        let mut entries: Vec<_> = self.scoreboard.values().cloned().collect();
         entries.sort_by(|a, b| {
             a.mean_reward()
                 .partial_cmp(&b.mean_reward())

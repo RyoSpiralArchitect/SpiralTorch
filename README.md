@@ -705,6 +705,15 @@ scoreboard honours the moderator history window and can be capped via
 `BlackcatModerator::set_scoreboard_limit()` when you only care about the top-N
 plans.
 
+Need runtime telemetry without wiring into a dashboard? The embedded Blackcat
+runtime now keeps exponential moving averages for step time, memory pressure,
+retry rate, and the reward distribution. Call
+`ModuleTrainer::blackcat_runtime_stats()` to fetch a
+`BlackcatRuntimeStats` snapshot that includes the latest reward mean/stddev and
+all tracked extra metrics. Python callers can access the same data via
+`trainer.blackcat_runtime_stats()`, which returns a rich object with dict-like
+extras for quick printing or logging.
+
 `GoldenRetrieverConfig` picked up `synergy_bias` and `reinforcement_bias` knobs
 to tilt how aggressively the aggregated metrics should respond to support vs.
 heuristic weight. Bumping `synergy_bias` favours exploration-heavy, confidence

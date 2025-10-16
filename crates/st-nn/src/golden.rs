@@ -964,23 +964,25 @@ impl GoldenRetriever {
 
         let dominant_plan = plan_totals
             .into_iter()
-            .max_by(|(plan_a, (reward_a, count_a, seen_a)), (plan_b, (reward_b, count_b, seen_b))| {
-                let avg_a = if *count_a == 0 {
-                    0.0
-                } else {
-                    *reward_a / *count_a as f64
-                };
-                let avg_b = if *count_b == 0 {
-                    0.0
-                } else {
-                    *reward_b / *count_b as f64
-                };
-                avg_a
-                    .partial_cmp(&avg_b)
-                    .unwrap_or(Ordering::Equal)
-                    .then_with(|| seen_a.cmp(seen_b))
-                    .then_with(|| plan_a.cmp(plan_b))
-            })
+            .max_by(
+                |(plan_a, (reward_a, count_a, seen_a)), (plan_b, (reward_b, count_b, seen_b))| {
+                    let avg_a = if *count_a == 0 {
+                        0.0
+                    } else {
+                        *reward_a / *count_a as f64
+                    };
+                    let avg_b = if *count_b == 0 {
+                        0.0
+                    } else {
+                        *reward_b / *count_b as f64
+                    };
+                    avg_a
+                        .partial_cmp(&avg_b)
+                        .unwrap_or(Ordering::Equal)
+                        .then_with(|| seen_a.cmp(seen_b))
+                        .then_with(|| plan_a.cmp(plan_b))
+                },
+            )
             .map(|(plan, _)| plan.to_string());
 
         GoldenBlackcatPulse {
