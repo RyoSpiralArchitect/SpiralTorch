@@ -171,7 +171,7 @@ impl AmebaAutograd {
             }
 
             let signal = message.payload.iter().map(|v| v.abs()).sum::<f32>();
-            if signal < self.tolerance {
+            if signal < self.tolerance && message.hops > 0 {
                 return Ok(());
             }
 
