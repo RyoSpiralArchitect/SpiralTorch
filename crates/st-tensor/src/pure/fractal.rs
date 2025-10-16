@@ -192,6 +192,19 @@ impl UringFractalScheduler {
         }
         Ok(acc)
     }
+
+    /// Fold the queued relations directly into the provided tensor buffer.
+    pub fn fold_coherence_into(&self, target: &mut Tensor) -> PureResult<()> {
+        let folded = self.fold_coherence()?;
+        if target.shape() != folded.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: target.shape(),
+                right: folded.shape(),
+            });
+        }
+        target.data_mut().copy_from_slice(folded.data());
+        Ok(())
+    }
 }
 
 #[cfg(test)]
