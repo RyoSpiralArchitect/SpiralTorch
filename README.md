@@ -229,6 +229,41 @@ report = policy.finish_episode()
 print(report.steps, report.hypergrad_applied)
 ```
 
+Rust projects can pair the policy with the new geometric feedback module to
+ground the update scale in observability measurements. Feed a
+`DifferentialResonance` snapshot into `GeometryFeedback` and the learner will
+adapt its learning rate according to the coalgebra efficiency.
+
+```rust
+use st_core::theory::observability::{ObservabilityConfig, SlotSymmetry};
+use st_rl::{GeometryFeedback, GeometryFeedbackConfig, SpiralPolicyGradient};
+
+let mut policy = SpiralPolicyGradient::new(6, 3, 0.01, 0.99)?;
+let feedback = GeometryFeedback::new(GeometryFeedbackConfig {
+    observability: ObservabilityConfig::new(1, 5, SlotSymmetry::Symmetric),
+    z_space_rank: 24,                 // Maryna Viazovska's Leech shell as default
+    leech_density_weight: 0.5,        // densify η with Λ24 packing pressure
+    ramanujan_iterations: 4,          // refine π via Ramanujan's fast series
+    softening_beta: 0.6,              // keep the projection memory-light
+    ..GeometryFeedbackConfig::default_policy()
+});
+policy.attach_geometry_feedback(feedback);
+let resonance = session.trace(state.clone())?
+    .generator(direction.clone())?
+    .barycenter(barycenter.clone())?
+    .resonate()?; // DifferentialResonance snapshot
+let (report, signal) = policy.finish_episode_with_geometry(&resonance)?;
+if let Some(signal) = signal {
+    println!("η̄={:.3}, scale={:.2}", signal.averaged_efficiency, signal.learning_rate_scale);
+}
+```
+
+The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
+into its smoothing loop. This keeps the Z-space slice expansive without bloating
+memory: `z_space_rank` picks the dimensional stratum, the Leech density weight
+injects Viazovska's optimal sphere packing pressure, and the softening beta
+maintains latency by compressing the soft power projection back into `[0, 1]`.
+
 ### SpiralTorchRec (open-topos recommendation lattice)
 
 SpiralTorchRec factors implicit-feedback matrices under open-cartesian topos
