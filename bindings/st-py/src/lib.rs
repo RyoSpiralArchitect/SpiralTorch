@@ -33,8 +33,8 @@ use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
     Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
-    EpochStats, Linear as NnLinear, Loss, MeanSquaredError, ModeratorMinutes, Module,
-    ModuleTrainer, RoundtableConfig, RoundtableSchedule, Sequential as NnSequential, SpiralSession,
+    EpochStats, Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer,
+    RoundtableConfig, RoundtableSchedule, Sequential as NnSequential, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
 use st_tensor::pure::{
