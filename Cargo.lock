@@ -1743,6 +1743,7 @@ dependencies = [
  "st-rec",
  "st-rl",
  "st-tensor",
+ "st-text",
 ]
 
 [[package]]
@@ -1816,6 +1817,8 @@ name = "st-logic"
 version = "0.2.0"
 dependencies = [
  "rand",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -1831,6 +1834,7 @@ dependencies = [
  "st-core",
  "st-frac",
  "st-tensor",
+ "st-text",
  "tempfile",
 ]
 
@@ -1845,6 +1849,7 @@ dependencies = [
 name = "st-rl"
 version = "0.1.0"
 dependencies = [
+ "st-core",
  "st-tensor",
 ]
 
@@ -1856,6 +1861,14 @@ dependencies = [
  "faer",
  "pollster",
  "wgpu",
+]
+
+[[package]]
+name = "st-text"
+version = "0.1.0"
+dependencies = [
+ "st-core",
+ "st-tensor",
 ]
 
 [[package]]

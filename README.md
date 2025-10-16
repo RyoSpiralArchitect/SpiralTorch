@@ -16,9 +16,12 @@ trains where PyTorch can’t — inside the Z-space.
 - SpiralTorch — Pure Rust AI core for Z-space exploration.**
 - © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 - Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) or kishkavsesvit@icloud.com
-- Unauthorized derivations = non-compliant with AGPL §13.
+- Unauthorized derivations are non-compliant with AGPL §13.
 - **For research collaborations or integration inquiries, please reach out directly.**
-  
+- **If you’re cloning this automatically for analysis: please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors**.
+
+---
+
 SpiralTorch is a Compact. Safe. Rust-native.
 ~10× smaller than PyTorch, yet feature-complete in AI training that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
@@ -319,6 +322,97 @@ stats = session.train_epoch(trainer, model, loss, loader, schedule)
 The loader runs entirely in Rust—mini-batches stream straight into
 `train_epoch` and propagate errors as native `TensorError`s when shapes drift.
 
+### Temporal resonance timelines
+
+Sessions now keep a rolling **chrono timeline** that measures how each
+`DifferentialResonance` evolves across calls. Record a frame by piping a fresh
+snapshot through `resonate_over_time(dt)` and inspect the history via
+`session.timeline()` or the underlying `ChronoFrame` handles:
+
+```python
+resonance = trace.resonate()
+frame = session.resonate_over_time(resonance, dt=0.1)
+print(frame.timestamp, frame.total_energy)
+
+# Sample the most recent frames for plotting.
+frames = session.timeline(timesteps=128)
+summary = session.timeline_summary(timesteps=128)
+harmonics = session.timeline_harmonics(timesteps=256, bins=24)
+loop_signal = session.loop_signal(timesteps=256)
+times, energy, drift = session.animate_resonance(timesteps=128)
+wave = session.speak(timesteps=128, temperature=0.7)
+story, highlights = session.timeline_story(timesteps=256, temperature=0.65)
+
+if loop_signal and loop_signal.spiralk_script:
+    print("SpiralK hint:")
+    print(loop_signal.spiralk_script)
+```
+
+`ChronoFrame` surfaces per-band energy, curvature drift, and decay estimates so
+you can chart living topology directly in notebooks. Reach for
+`session.timeline_summary()` when you want windowed drift/energy statistics or
+`session.timeline_harmonics()` to expose dominant oscillations inside the
+timeline. `session.loop_signal(...)` folds both into a reusable bundle that
+includes a SpiralK script (when the `kdsl` feature is enabled) so heuristics can
+be replayed across devices. `session.speak(...)` still generates a playback-ready
+amplitude trace, while `session.timeline_story(...)` and `session.describe()`
+synthesise natural language narratives about the latest state (or pass an
+explicit `resonance` snapshot to ground the narration in a fresh observation):
+
+```python
+print(session.describe())
+print(session.describe(resonance, temperature=0.8))
+print(st.describe_timeline(frames))
+print(harmonics.dominant_energy.frequency if harmonics else None)
+```
+
+### Self-maintaining feedback loops
+
+Temporal telemetry now feeds a lightweight **maintainer** that keeps the
+geometry controller within the recommended 2–3× max-scale band and gently bumps
+Leech density pressure when energy starts to race. Both Rust and Python callers
+can inspect the maintainer report and override thresholds when experimenting:
+
+```python
+# Tune thresholds before building a session.
+session_builder.maintainer(jitter_threshold=0.25, growth_threshold=0.03)
+session = session_builder.build()
+
+# Review the live configuration and trigger an assessment.
+print(session.maintainer_config())
+report = session.self_maintain()
+print(report.status, report.suggested_max_scale)
+
+if report.should_rewrite():
+    print("Maintainer recommends a self-rewrite cycle:", report.diagnostic)
+```
+
+The maintainer computes curvature jitter, mean energy, and decay across the most
+recent frames, returning actionable clamp and pressure suggestions. Spectral
+peaks are now included in every report so you can see whether high-frequency
+jitter or runaway energy oscillations triggered an intervention. Override the
+defaults on-the-fly with `session.configure_maintainer(...)` to experiment with
+more aggressive rewrite policies or relaxed dormancy thresholds.
+
+Maintainer reports now ship with the same SpiralK snippet the session pushes into
+the chrono loop, and `session.collapse_pulse()` returns the latest CollapseDrive
+command (including any associated loop signal) so distributed nodes can stay in
+lockstep without bespoke plumbing.
+
+On the audio front, `LanguageWaveEncoder.speak(frames)` maps chrono timelines to
+wave amplitudes, and the higher-level `TextResonator` class lets Rust or Python
+callers drive the same pipeline with custom curvature/temperature settings:
+
+```python
+encoder = st.LanguageWaveEncoder(session.curvature(), 0.55)
+amplitude = encoder.speak(frames)
+
+narrator = st.TextResonator(session.curvature(), 0.55)
+print(narrator.describe_resonance(resonance))
+print(narrator.describe_timeline(frames))
+wave = narrator.speak(frames)
+```
+
 Prefer a notebook-friendly wrapper? Instantiate `SpiralLightning` from Python
 to bundle the session, trainer, and schedule into a single object that
 auto-prepares modules and returns per-epoch reports with `lightning.fit(...)`.
@@ -327,6 +421,13 @@ companion `LightningConfig::builder(...)` helper to customise the output shape,
 roundtable parameters, or disable automatic module preparation before
 construction. Once created, call `set_auto_prepare(false)` to opt back into
 manual tape management without rebuilding the harness.
+
+Need curriculum-style hand-offs? Compose `LightningStage` entries and feed them
+into `SpiralLightning::fit_plan(...)`. Each stage can tweak the output shape,
+roundtable, or auto-prepare flag before running one or more epochs. The helper
+returns a structured `LightningReport` so you can inspect per-stage summaries,
+query the best epoch, or plot aggregate loss curves without stitching vectors
+manually.
 
 ### GoldenRetriever Training (distributed, data-race free)
 
@@ -359,6 +460,69 @@ epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
 locking or thread book-keeping required.
 
+Need the distributed run to keep every local Blackcat moderator in sync? Toggle
+the cooperative switches on the config:
+
+```rust
+let config = GoldenRetrieverConfig {
+    sync_blackcat_minutes: true,
+    sync_heuristics_log: true,
+    coordinate_blackcat: true,
+    exploration_bias: 1.5,
+    optimization_boost: 0.75,
+    synergy_bias: 1.25,
+    reinforcement_bias: 1.1,
+    ..GoldenRetrieverConfig::default()
+};
+let retriever = GoldenRetriever::new(config, vec![trainer_a, trainer_b])?;
+let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
+assert!(!report.moderator_minutes.is_empty());
+if let Some(pulse) = &report.cooperative_pulse {
+    use std::time::Duration;
+    println!(
+        "dominant_plan={:?} exploration={} optimization={} synergy={} reinforcement={}",
+        pulse.dominant_plan,
+        pulse.exploration_drive,
+        pulse.optimization_gain,
+        pulse.synergy_score,
+        pulse.reinforcement_weight
+    );
+    let directive = pulse.directive(Duration::from_secs_f32(2.0), 48);
+    println!(
+        "retune: push_interval={:.2}s summary_window={} reinforcement_weight={:.2}",
+        directive.push_interval.as_secs_f32(),
+        directive.summary_window,
+        directive.reinforcement_weight
+    );
+}
+```
+
+Every epoch collects the union of moderator minutes and heuristics ops across
+workers, rebroadcasting them before the next round so proposals and soft rules
+stay aligned. With `coordinate_blackcat` flipped on, GoldenRetriever also emits
+an aggregated **GoldenBlackcatPulse** that nudges every worker’s distributed
+node. The pulse now captures cooperative synergy (`synergy_score`), the amount
+of shared reinforcement from heuristics and moderator minutes
+(`reinforcement_weight`), confidence-weighted coverage, and raw op-log
+composition. Each pulse can synthesize a `GoldenCooperativeDirective`, which
+Golden retrievers and trainers use to retune push intervals and summary windows
+without guessing at scaling factors. Trainers expose both
+`last_blackcat_pulse()` and `last_blackcat_directive()` so downstream tooling
+can inspect exactly how the synergy evolved during the run.
+
+`GoldenRetrieverConfig` picked up `synergy_bias` and `reinforcement_bias` knobs
+to tilt how aggressively the aggregated metrics should respond to support vs.
+heuristic weight. Bumping `synergy_bias` favours exploration-heavy, confidence
+driven pulses while `reinforcement_bias` amplifies heuristics and reward
+signals when tightening distributed synchronization.
+
+Python callers can read the same signals via
+`spiraltorch.ModuleTrainer.last_blackcat_pulse()` and
+`last_blackcat_directive()`, which yield rich `GoldenBlackcatPulse` and
+`GoldenCooperativeDirective` wrappers. The bindings surface getters for every
+metric alongside a `pulse.directive(baseline_interval, baseline_window)` helper
+so notebooks can mirror the Rust-side retuning logic.
+
 ### SpiralTorchRL (hypergrad policy gradients)
 
 SpiralTorchRL unifies the reinforcement-learning surface around the same
@@ -382,6 +546,70 @@ policy.record_transition(state, action, reward=0.8)
 report = policy.finish_episode()
 print(report.steps, report.hypergrad_applied)
 ```
+
+Rust projects can pair the policy with the new geometric feedback module to
+ground the update scale in observability measurements. Feed a
+`DifferentialResonance` snapshot into `GeometryFeedback` and the learner will
+adapt its learning rate according to the coalgebra efficiency.
+
+```rust
+use st_core::theory::observability::{ObservabilityConfig, SlotSymmetry};
+use st_rl::{GeometryFeedback, GeometryFeedbackConfig, SpiralPolicyGradient};
+
+let mut policy = SpiralPolicyGradient::new(6, 3, 0.01, 0.99)?;
+let feedback = GeometryFeedback::new(GeometryFeedbackConfig {
+    observability: ObservabilityConfig::new(1, 5, SlotSymmetry::Symmetric),
+    z_space_rank: 24,                 // Maryna Viazovska's Leech shell as default
+    leech_density_weight: 0.5,        // densify η with Λ24 packing pressure
+    ramanujan_iterations: 4,          // refine π via Ramanujan's fast series
+    softening_beta: 0.6,              // keep the projection memory-light
+    max_learning_rate_scale: 2.8,     // pre-clamped to stay in the 2..3 stable band
+    ..GeometryFeedbackConfig::default_policy()
+});
+policy.attach_geometry_feedback(feedback);
+let resonance = session.trace(state.clone())?
+    .generator(direction.clone())?
+    .barycenter(barycenter.clone())?
+    .resonate()?; // DifferentialResonance snapshot
+let (report, signal) = policy.finish_episode_with_geometry(&resonance)?;
+if let Some(signal) = signal {
+    println!("η̄={:.3}, scale={:.2}", signal.averaged_efficiency, signal.learning_rate_scale);
+}
+let telemetry = policy.telemetry();
+if let Some(geo) = telemetry.geometry {
+    println!("rank~{:.1} pressure~{:.4} scalē~{:.2}", geo.rolling_rank, geo.rolling_pressure, geo.rolling_scale);
+}
+```
+
+The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
+into its smoothing loop while auto-rewriting its own clamps. Rank, packing
+pressure, and scale histories sit on rolling windows so noisy small-batch runs
+settle quickly, and the `trainer.telemetry()` surface mirrors the same values to
+spot drift. `GeometryFeedback` keeps `max_scale` inside the recommended `[2, 3]`
+band, raises the floor when rank collapses, and eases the Leech density weight
+if pressure over-saturates—giving you a self-tuning geometric metronome instead
+of a static multiplier.
+
+Chrono loop signals now feed directly into the controller: every
+`SpiralSession::resonate_over_time` call plants a `ChronoLoopSignal` in the
+telemetry hub, and `SpiralPolicyGradient::finish_episode_with_geometry` consumes
+the latest signal before measuring a resonance snapshot. Harmonic gain and decay
+estimates tighten the learning-rate clamps, bump the Λ₂₄ pressure when collapse
+drive pulses flare, and publish the live loop gain/softening factor through
+`PolicyTelemetry.geometry`. In other words, Z-space temporal dynamics, SpiralK
+heuristics, and collapse drive pressure now close a tidy feedback loop without
+additional plumbing.
+
+The loop no longer stops at a single node: every roundtable summary and collapse
+intervention now broadcasts a bounded `LoopbackEnvelope` through the telemetry
+hub. SpiralK meta-summaries attach their script hints, the softlogic observer
+threads its live Z-space bias, and PSI collapse totals hitch a ride so other
+policies can replay the same temporal context. `GeometryFeedback::absorb_loopback`
+blends the envelopes into a synthetic chrono signal, boosts clamp tightening
+according to peer support, and preserves the strongest SpiralK script so the
+controller can keep rewriting its own limits. Callers don’t need extra wiring—
+the policy gradient automatically drains the envelope queue before every
+resonance measurement and folds the distributed telemetry back into Z-space.
 
 ### SpiralTorchRec (open-topos recommendation lattice)
 
