@@ -11,7 +11,7 @@ use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
 use st_core::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
-use st_tensor::pure::{DifferentialResonance, Tensor};
+use st_tensor::{DifferentialResonance, Tensor};
 
 /// Configuration describing how geometric observability is converted into
 /// feedback for the learning loop.

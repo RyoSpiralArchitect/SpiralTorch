@@ -24,11 +24,15 @@
 use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
+#[cfg(feature = "psi")]
+use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
+#[cfg(feature = "psi")]
+use std::time::SystemTime;
 
 use super::chrono::ChronoLoopSignal;
 #[cfg(feature = "psi")]
-use super::psi::{PsiEvent, PsiReading};
+use super::psi::{PsiComponent, PsiEvent, PsiReading};
 #[cfg(feature = "psychoid")]
 use super::psychoid::PsychoidReading;
 #[cfg(feature = "collapse")]
@@ -109,6 +113,64 @@ static LAST_SOFTLOGIC_Z: OnceLock<RwLock<Option<SoftlogicZFeedback>>> = OnceLock
 
 fn softlogic_z_cell() -> &'static RwLock<Option<SoftlogicZFeedback>> {
     LAST_SOFTLOGIC_Z.get_or_init(|| RwLock::new(None))
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct DesireWeightsTelemetry {
+    pub alpha: f32,
+    pub beta: f32,
+    pub gamma: f32,
+    pub lambda: f32,
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub enum DesirePhaseTelemetry {
+    Observation,
+    Injection,
+    Integration,
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct DesireAvoidanceTelemetry {
+    pub tokens: Vec<usize>,
+    pub scores: Vec<f32>,
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct DesireTriggerTelemetry {
+    pub mean_penalty: f32,
+    pub mean_entropy: f32,
+    pub temperature: f32,
+    pub samples: usize,
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct DesireStepTelemetry {
+    pub timestamp: SystemTime,
+    pub entropy: f32,
+    pub temperature: f32,
+    pub hypergrad_penalty: f32,
+    pub phase: DesirePhaseTelemetry,
+    pub weights: DesireWeightsTelemetry,
+    pub avoidance: Option<DesireAvoidanceTelemetry>,
+    pub trigger: Option<DesireTriggerTelemetry>,
+    pub psi_total: Option<f32>,
+    pub psi_breakdown: HashMap<PsiComponent, f32>,
+    pub psi_events: Vec<PsiEvent>,
+    pub z_feedback: Option<SoftlogicZFeedback>,
+}
+
+#[cfg(feature = "psi")]
+static LAST_DESIRE_STEP: OnceLock<RwLock<Option<DesireStepTelemetry>>> = OnceLock::new();
+
+#[cfg(feature = "psi")]
+fn desire_step_cell() -> &'static RwLock<Option<DesireStepTelemetry>> {
+    LAST_DESIRE_STEP.get_or_init(|| RwLock::new(None))
 }
 
 static ATLAS_FRAME: OnceLock<RwLock<Option<AtlasFrame>>> = OnceLock::new();
@@ -219,6 +281,31 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
         .read()
         .ok()
         .and_then(|guard| guard.as_ref().copied())
+}
+
+#[cfg(feature = "psi")]
+/// Stores the latest desire step telemetry snapshot for downstream consumers.
+pub fn set_last_desire_step(step: DesireStepTelemetry) {
+    if let Ok(mut guard) = desire_step_cell().write() {
+        *guard = Some(step);
+    }
+}
+
+#[cfg(feature = "psi")]
+/// Clears the cached desire step telemetry snapshot.
+pub fn clear_last_desire_step() {
+    if let Ok(mut guard) = desire_step_cell().write() {
+        *guard = None;
+    }
+}
+
+#[cfg(feature = "psi")]
+/// Returns the latest desire step telemetry snapshot, if one has been recorded.
+pub fn get_last_desire_step() -> Option<DesireStepTelemetry> {
+    desire_step_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
 }
 
 static LAST_CHRONO_LOOP: OnceLock<RwLock<Option<ChronoLoopSignal>>> = OnceLock::new();
