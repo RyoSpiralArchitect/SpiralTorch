@@ -132,6 +132,11 @@ and only reconstructs oriented normals when an external label `c′` is supplied
 This lets SpiralTorch stabilise interface detection, switch on co-orientations
 precisely when downstream pipelines inject a label, and keep curvature-ready
 statistics without violating the gauge symmetry of the unlabeled limit.【F:crates/st-core/src/theory/microlocal.rs†L1-L256】
+Once those signatures exist, `InterfaceZLift` pushes them straight into
+Z-space: it projects the perimeter mass onto a preferred Z-axis, splits the
+energy into Above/Here/Beneath bands, enriches the drift with the Leech
+projector, and emits a ready-to-store `SoftlogicZFeedback` pulse so runtimes can
+bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L386】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
@@ -609,6 +614,35 @@ and now reports **loop volatility** (`loop_std`) alongside collapse/Z drift so
 dashboards can surface the “city heartbeat” without iterating over each frame.
 District summaries additionally carry a standard deviation so you can flag
 which neighbourhoods are swinging the hardest even when their means stay flat.
+Each district now tracks its headline metrics via `district.focus` so nodes can
+see which signals actually drove the change:
+
+```python
+for metric in district.focus:
+    print(metric.name, metric.delta, metric.momentum, metric.std_dev)
+```
+
+When you want curated guidance for each SpiralTorch “audience”, call
+`session.atlas_perspectives()` to generate **atlas perspectives** that translate
+district trends into actionable narratives:
+
+```python
+for perspective in session.atlas_perspectives(limit=12):
+    print(perspective.district, perspective.guidance)
+    for focus in perspective.focus:
+        print("  ↳", focus.name, focus.latest)
+
+surface = session.atlas_perspective(
+    "Surface", limit=12, focus_prefixes=["timeline", "session.surface"],
+)
+if surface:
+    print(surface.guidance)
+```
+
+Perspectives compute per-frame momentum, volatility-derived stability, and a
+filtered set of focus metrics so every node — Python bindings, maintainer,
+SpiralK scripts, or collapse-drive peers — can read the same atlas route in the
+language that serves them best.
 
 ### Self-maintaining feedback loops
 
