@@ -10,6 +10,7 @@ use st_core::telemetry::hub::LoopbackEnvelope;
 use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
+use st_core::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
 use st_tensor::pure::{DifferentialResonance, Tensor};
 
 /// Configuration describing how geometric observability is converted into
@@ -112,6 +113,7 @@ pub struct GeometryFeedback {
     max_scale: f32,
     z_rank: usize,
     leech_weight: f64,
+    leech_projector: LeechProjector,
     ramanujan_pi: f64,
     softening_beta: f32,
     base_softening_beta: f32,
@@ -151,6 +153,12 @@ impl GeometryFeedback {
             clamped_max = (min_scale + 2.0).clamp(2.0, 3.0);
         }
         min_scale = min_scale.min(clamped_max - f32::EPSILON).max(f32::EPSILON);
+        let z_rank = config.z_space_rank.max(1);
+        let leech_weight = config.leech_density_weight.max(0.0);
+        let ramanujan_pi = Self::ramanujan_pi(config.ramanujan_iterations.max(1));
+        let softening_beta = config.softening_beta.max(0.0);
+        let leech_projector = LeechProjector::new(z_rank, leech_weight);
+
         Self {
             coalgebra: ObservationalCoalgebra::new(config.observability),
             threshold: config.activation_threshold.abs().max(f32::EPSILON),
@@ -550,6 +558,8 @@ impl GeometryFeedback {
         if self.min_scale >= self.max_scale {
             self.min_scale = (self.max_scale * 0.5).max(f32::EPSILON);
         }
+
+        self.leech_projector = LeechProjector::new(self.z_rank, self.leech_weight);
     }
 
     fn ramanujan_pi(iterations: usize) -> f64 {

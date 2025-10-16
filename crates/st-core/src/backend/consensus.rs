@@ -3,10 +3,12 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-#[cfg(feature = "logic")]
+#[cfg(all(feature = "logic", feature = "kv-redis"))]
+use super::wgpu_heuristics::{SOFT_NAME_CH, SOFT_NAME_KL, SOFT_NAME_USE2CE, SOFT_NAME_WG};
+#[cfg(all(feature = "logic", feature = "kv-redis"))]
 use serde_json::Value;
 #[cfg(feature = "logic")]
-use st_logic::{Field, SoftRule, Value};
+use st_logic::SoftRule;
 
 #[cfg(feature = "logic")]
 pub fn kv_consensus_soft_rules(
@@ -16,7 +18,10 @@ pub fn kv_consensus_soft_rules(
     subgroup: bool,
     _kind: &'static str,
 ) -> Vec<SoftRule> {
+    #[allow(unused_mut)]
     let mut out = Vec::<SoftRule>::new();
+    #[cfg(not(feature = "kv-redis"))]
+    let _ = (rows, cols, k, subgroup);
     #[cfg(feature = "kv-redis")]
     {
         if let Ok(url) = std::env::var("REDIS_URL") {
@@ -69,30 +74,30 @@ pub fn kv_consensus_soft_rules(
                 };
                 if let Some(b) = majority_bool(&use2) {
                     out.push(SoftRule {
-                        field: Field::Use2ce,
-                        value: Value::B(b),
+                        name: SOFT_NAME_USE2CE,
                         weight: w_med,
+                        score: if b { 1.0 } else { -1.0 },
                     });
                 }
                 if let Some(u) = median_u32(&wg) {
                     out.push(SoftRule {
-                        field: Field::Wg,
-                        value: Value::U(u),
+                        name: SOFT_NAME_WG,
                         weight: w_med,
+                        score: u as f32,
                     });
                 }
                 if let Some(u) = median_u32(&kl) {
                     out.push(SoftRule {
-                        field: Field::Kl,
-                        value: Value::U(u),
+                        name: SOFT_NAME_KL,
                         weight: w_med,
+                        score: u as f32,
                     });
                 }
                 if let Some(u) = median_u32(&ch) {
                     out.push(SoftRule {
-                        field: Field::Ch,
-                        value: Value::U(u),
+                        name: SOFT_NAME_CH,
                         weight: w_med,
+                        score: u as f32,
                     });
                 }
             }
@@ -110,7 +115,7 @@ pub fn kv_consensus_soft_rules(
 ) -> Vec<()> {
     Vec::new()
 }
-#[cfg(feature = "logic")]
+#[cfg(all(feature = "logic", feature = "kv-redis"))]
 fn median_u32(v: &[u32]) -> Option<u32> {
     if v.is_empty() {
         None
@@ -120,7 +125,7 @@ fn median_u32(v: &[u32]) -> Option<u32> {
         Some(a[a.len() / 2])
     }
 }
-#[cfg(feature = "logic")]
+#[cfg(all(feature = "logic", feature = "kv-redis"))]
 fn majority_bool(v: &[bool]) -> Option<bool> {
     if v.is_empty() {
         None
