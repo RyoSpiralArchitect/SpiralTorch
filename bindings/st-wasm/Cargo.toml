@@ -15,6 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 st-tensor = { path = "../../crates/st-tensor" }
 st-core   = { path = "../../crates/st-core" }
+st-frac   = { path = "../../crates/st-frac" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }

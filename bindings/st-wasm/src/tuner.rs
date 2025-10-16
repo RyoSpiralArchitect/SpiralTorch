@@ -2,6 +2,10 @@ use js_sys::JSON;
 use serde::Serialize;
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::wasm_tuner::{WasmTunerRecord, WasmTunerTable};
+use st_core::backend::wgpu_heuristics::Choice;
+use wasm_bindgen::prelude::*;
+
+use crate::fft::WasmFftPlan;
 use st_core::backend::wgpu_heuristics::{self, Choice};
 use wasm_bindgen::prelude::*;
 
@@ -84,6 +88,16 @@ impl WasmTuner {
             Some(choice) => choice_to_js(choice),
             None => Ok(JsValue::UNDEFINED),
         }
+    }
+
+    /// Produce a tuned FFT plan for the provided workload if an override exists.
+    #[wasm_bindgen(js_name = planFft)]
+    pub fn plan_fft(&self, rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<WasmFftPlan> {
+        let base = base_choice(rows as usize, cols as usize, k as usize, subgroup);
+        let choice = self
+            .table
+            .choose(base, rows as usize, cols as usize, k as usize, subgroup)?;
+        Some(WasmFftPlan::from_choice(choice, subgroup))
     }
 }
 
