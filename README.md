@@ -316,6 +316,24 @@ epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
 locking or thread book-keeping required.
 
+Need the distributed run to keep every local Blackcat moderator in sync? Toggle
+the cooperative switches on the config:
+
+```rust
+let config = GoldenRetrieverConfig {
+    sync_blackcat_minutes: true,
+    sync_heuristics_log: true,
+    ..GoldenRetrieverConfig::default()
+};
+let retriever = GoldenRetriever::new(config, vec![trainer_a, trainer_b])?;
+let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
+assert!(!report.moderator_minutes.is_empty());
+```
+
+Every epoch collects the union of moderator minutes and heuristics ops across
+workers, rebroadcasting them before the next round so proposals and soft rules
+stay aligned.
+
 ### SpiralTorchRL (hypergrad policy gradients)
 
 SpiralTorchRL unifies the reinforcement-learning surface around the same
