@@ -71,28 +71,32 @@ impl WasmFftPlan {
         self.plan.emit_spiralk_hint()
     }
 
-    #[wasm_bindgen(js_name = fromJson)]
-    pub fn from_json(json: &str) -> Result<WasmFftPlan, JsValue> {
-        let serde: WasmFftPlanSerde = serde_json::from_str(json).map_err(js_error)?;
-        Ok(WasmFftPlan::from_plan(serde.into()))
-    }
-
-    #[wasm_bindgen(js_name = fromObject)]
-    pub fn from_object(value: JsValue) -> Result<WasmFftPlan, JsValue> {
-        let json = stringify_js_value(&value)?;
-        Self::from_json(&json)
-    }
-
+    /// Serialise the plan into a JSON string so it can be persisted or sent over the network.
     #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> Result<String, JsValue> {
-        let serde = WasmFftPlanSerde::from(self);
-        serde_json::to_string(&serde).map_err(js_error)
+        serde_json::to_string(&self.plan).map_err(js_error)
     }
 
+    /// Convert the plan into a plain JavaScript object with the same fields as [`toJson`].
     #[wasm_bindgen(js_name = toObject)]
     pub fn to_object(&self) -> Result<JsValue, JsValue> {
-        let json = self.to_json()?;
-        json_to_js_value(&json)
+        JsValue::from_serde(&self.plan).map_err(|err| js_error(err))
+    }
+
+    /// Rebuild a plan from a JSON string produced by [`toJson`].
+    #[wasm_bindgen(js_name = fromJson)]
+    pub fn from_json(json: &str) -> Result<WasmFftPlan, JsValue> {
+        let plan = serde_json::from_str::<SpiralKFftPlan>(json).map_err(js_error)?;
+        Ok(WasmFftPlan::from_plan(plan))
+    }
+
+    /// Rebuild a plan from a plain JavaScript object with the same fields as [`toObject`].
+    #[wasm_bindgen(js_name = fromObject)]
+    pub fn from_object(value: &JsValue) -> Result<WasmFftPlan, JsValue> {
+        let plan = value
+            .into_serde::<SpiralKFftPlan>()
+            .map_err(|err| js_error(err))?;
+        Ok(WasmFftPlan::from_plan(plan))
     }
 }
 
