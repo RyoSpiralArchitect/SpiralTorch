@@ -11,7 +11,7 @@ use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule, PyTuple};
+use pyo3::types::{PyAny, PyDict, PyList, PyModule, PySequence, PyTuple};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use pyo3::PyRef;
@@ -33,8 +33,9 @@ use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
     Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
-    EpochStats, Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer, Relu as NnRelu,
-    RoundtableConfig, RoundtableSchedule, Sequential as NnSequential, SpiralSession,
+    EpochStats, LightningConfig as NnLightningConfig, Linear as NnLinear, Loss, MeanSquaredError,
+    Module, ModuleTrainer, Relu as NnRelu, RoundtableConfig, RoundtableSchedule,
+    Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
 use st_tensor::backend::faer_dense;
@@ -52,6 +53,110 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeviceRoute {
+    Wgpu,
+    Cuda,
+    Mps,
+    Cpu,
+}
+
+impl DeviceRoute {
+    fn as_str(self) -> &'static str {
+        match self {
+            DeviceRoute::Wgpu => "wgpu",
+            DeviceRoute::Cuda => "cuda",
+            DeviceRoute::Mps => "mps",
+            DeviceRoute::Cpu => "cpu",
+        }
+    }
+}
+
+fn device_available(route: DeviceRoute) -> bool {
+    match route {
+        DeviceRoute::Wgpu => cfg!(feature = "wgpu-rt"),
+        DeviceRoute::Cuda => cfg!(feature = "cuda"),
+        DeviceRoute::Mps => cfg!(feature = "mps"),
+        DeviceRoute::Cpu => true,
+    }
+}
+
+fn choose_route(device: Option<&str>) -> PyResult<DeviceRoute> {
+    let hint = device.unwrap_or("auto").to_ascii_lowercase();
+    match hint.as_str() {
+        "auto" => {
+            for candidate in [
+                DeviceRoute::Wgpu,
+                DeviceRoute::Cuda,
+                DeviceRoute::Mps,
+                DeviceRoute::Cpu,
+            ] {
+                if device_available(candidate) {
+                    return Ok(candidate);
+                }
+            }
+            Ok(DeviceRoute::Cpu)
+        }
+        "wgpu" => Ok(if device_available(DeviceRoute::Wgpu) {
+            DeviceRoute::Wgpu
+        } else {
+            DeviceRoute::Cpu
+        }),
+        "cuda" => Ok(if device_available(DeviceRoute::Cuda) {
+            DeviceRoute::Cuda
+        } else {
+            DeviceRoute::Cpu
+        }),
+        "mps" => Ok(if device_available(DeviceRoute::Mps) {
+            DeviceRoute::Mps
+        } else {
+            DeviceRoute::Cpu
+        }),
+        "cpu" => Ok(DeviceRoute::Cpu),
+        other => Err(PyValueError::new_err(format!(
+            "unsupported device hint: {other}"
+        ))),
+    }
+}
+
+fn topk_rows_cpu(data: &[f32], rows: usize, cols: usize, k: usize) -> (Vec<f32>, Vec<i32>) {
+    use std::cmp::Ordering;
+
+    let mut out_vals = vec![0.0f32; rows * k];
+    let mut out_idx = vec![0i32; rows * k];
+    let mut idx_buf: Vec<usize> = (0..cols).collect();
+
+    for r in 0..rows {
+        let row_offset = r * cols;
+        for (slot, value) in idx_buf.iter_mut().enumerate() {
+            *value = slot;
+        }
+
+        if k < cols {
+            idx_buf.select_nth_unstable_by(k, |&a, &b| {
+                let va = data[row_offset + a];
+                let vb = data[row_offset + b];
+                vb.partial_cmp(&va).unwrap_or(Ordering::Equal)
+            });
+        }
+
+        let mut topk = idx_buf[..k].to_vec();
+        topk.sort_unstable_by(|&a, &b| {
+            let va = data[row_offset + a];
+            let vb = data[row_offset + b];
+            vb.partial_cmp(&va).unwrap_or(Ordering::Equal)
+        });
+
+        for (j, &col) in topk.iter().enumerate() {
+            let target = r * k + j;
+            out_vals[target] = data[row_offset + col];
+            out_idx[target] = col as i32;
+        }
+    }
+
+    (out_vals, out_idx)
+}
 
 fn tensor_err(err: TensorError) -> PyErr {
     PyValueError::new_err(err.to_string())
@@ -74,6 +179,67 @@ fn convert_fft<T>(value: Result<T, FftError>) -> PyResult<T> {
             }
         })
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_roundtable_config(
+    top_k: u32,
+    mid_k: u32,
+    bottom_k: u32,
+    here_tolerance: f32,
+    psychoid: bool,
+    psychoid_log: bool,
+    psi: bool,
+    collapse: bool,
+) -> RoundtableConfig {
+    #[cfg(not(feature = "psychoid"))]
+    {
+        let _ = psychoid;
+        let _ = psychoid_log;
+    }
+    #[cfg(not(feature = "psi"))]
+    {
+        let _ = psi;
+    }
+    #[cfg(not(feature = "collapse"))]
+    {
+        let _ = collapse;
+    }
+
+    let mut config = RoundtableConfig {
+        top_k,
+        mid_k,
+        bottom_k,
+        here_tolerance: here_tolerance.max(0.0),
+        ..RoundtableConfig::default()
+    };
+
+    #[cfg(feature = "psychoid")]
+    {
+        if psychoid {
+            config = if psychoid_log {
+                config.enable_psychoid_with_log()
+            } else {
+                config.enable_psychoid()
+            };
+        }
+    }
+
+    #[cfg(feature = "psi")]
+    {
+        if psi {
+            config = config.enable_psi();
+        }
+    }
+
+    #[cfg(feature = "collapse")]
+    {
+        if collapse {
+            config = config.enable_collapse();
+        }
+    }
+
+    config
 }
 
 fn intern_label(label: &str) -> &'static str {
@@ -1512,35 +1678,16 @@ impl PyModuleTrainer {
         collapse: bool,
         dist: Option<PyDistConfig>,
     ) -> PyResult<PyRoundtableSchedule> {
-        let mut config = RoundtableConfig {
+        let config = build_roundtable_config(
             top_k,
             mid_k,
             bottom_k,
-            here_tolerance: here_tolerance.max(0.0),
-            ..RoundtableConfig::default()
-        };
-        #[cfg(feature = "psychoid")]
-        {
-            if psychoid {
-                config = if psychoid_log {
-                    config.enable_psychoid_with_log()
-                } else {
-                    config.enable_psychoid()
-                };
-            }
-        }
-        #[cfg(feature = "psi")]
-        {
-            if psi {
-                config = config.enable_psi();
-            }
-        }
-        #[cfg(feature = "collapse")]
-        {
-            if collapse {
-                config = config.enable_collapse();
-            }
-        }
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
         if let Some(dist_cfg) = dist {
             self.inner.configure_distribution(dist_cfg.inner.clone());
         } else {
@@ -1609,10 +1756,10 @@ impl PyModuleTrainer {
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "ModuleTrainer(curvature={}, hyper_lr={:.4}, fallback_lr={:.4})",
-            self.curvature(),
-            self.hyper_learning_rate(),
-            self.fallback_learning_rate()
+            "SpiralLightning(rows={}, cols={}, auto_prepare={})",
+            self.rows(),
+            self.cols(),
+            self.auto_prepare()
         ))
     }
 }
@@ -1787,35 +1934,16 @@ impl PySpiralSession {
         psi: bool,
         collapse: bool,
     ) -> PyRoundtableSchedule {
-        let mut config = RoundtableConfig {
+        let config = build_roundtable_config(
             top_k,
             mid_k,
             bottom_k,
-            here_tolerance: here_tolerance.max(0.0),
-            ..RoundtableConfig::default()
-        };
-        #[cfg(feature = "psychoid")]
-        {
-            if psychoid {
-                config = if psychoid_log {
-                    config.enable_psychoid_with_log()
-                } else {
-                    config.enable_psychoid()
-                };
-            }
-        }
-        #[cfg(feature = "psi")]
-        {
-            if psi {
-                config = config.enable_psi();
-            }
-        }
-        #[cfg(feature = "collapse")]
-        {
-            if collapse {
-                config = config.enable_collapse();
-            }
-        }
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
         PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
     }
 
@@ -2660,6 +2788,50 @@ fn plan(
     Ok(out.into_py(py))
 }
 
+#[pyfunction(name = "topk2d_tensor")]
+#[pyo3(signature = (x, k, device=None))]
+fn topk2d_tensor_py(
+    _py: Python<'_>,
+    x: &PyTensor,
+    k: usize,
+    device: Option<&str>,
+) -> PyResult<(PyTensor, PyTensor)> {
+    let (rows, cols) = x.shape();
+    if k == 0 || k > cols {
+        return Err(PyValueError::new_err("invalid k for given tensor columns"));
+    }
+
+    let route = choose_route(device)?;
+    if rows > u32::MAX as usize || cols > u32::MAX as usize {
+        return Err(PyValueError::new_err(
+            "tensor dimensions exceed planner limits (u32::MAX)",
+        ));
+    }
+    if k > u32::MAX as usize {
+        return Err(PyValueError::new_err("k exceeds planner limits (u32::MAX)"));
+    }
+    let caps = caps_for(Some(route.as_str()));
+    let plan = plan_rank(RankKind::TopK, rows as u32, cols as u32, k as u32, caps);
+    debug_assert_eq!(plan.rows as usize, rows);
+    debug_assert_eq!(plan.cols as usize, cols);
+
+    let data = x.as_tensor().data();
+    let (vals, idx) = match route {
+        DeviceRoute::Cpu | DeviceRoute::Cuda | DeviceRoute::Mps | DeviceRoute::Wgpu => {
+            topk_rows_cpu(data, rows, cols, k)
+        }
+    };
+
+    let vals_tensor = Tensor::from_vec(rows, k, vals).map_err(tensor_err)?;
+    let idx_as_f32: Vec<f32> = idx.iter().map(|&value| value as f32).collect();
+    let idx_tensor = Tensor::from_vec(rows, k, idx_as_f32).map_err(tensor_err)?;
+
+    Ok((
+        PyTensor::from_tensor(vals_tensor),
+        PyTensor::from_tensor(idx_tensor),
+    ))
+}
+
 /// Compute the Z-space barycenter described by the weighted KL objective.
 #[pyfunction(name = "z_space_barycenter")]
 #[pyo3(signature = (densities, weights=None, entropy_weight=0.0, beta_j=0.0, coupling=None))]
@@ -3056,6 +3228,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRoundtableSchedule>()?;
     m.add_class::<PyEpochStats>()?;
     m.add_class::<PyModuleTrainer>()?;
+    m.add_class::<PySpiralLightning>()?;
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
 
@@ -3084,6 +3257,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "RoundtableSchedule",
             "EpochStats",
             "ModuleTrainer",
+            "SpiralLightning",
             "SpiralSessionBuilder",
             "SpiralSession",
             "nn",

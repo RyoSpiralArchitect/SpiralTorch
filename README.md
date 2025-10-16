@@ -112,6 +112,10 @@ stats = session.train_epoch(trainer, model, loss, loader, schedule)
 The loader runs entirely in Rust—mini-batches stream straight into
 `train_epoch` and propagate errors as native `TensorError`s when shapes drift.
 
+Prefer a notebook-friendly wrapper? Instantiate `SpiralLightning` from Python
+to bundle the session, trainer, and schedule into a single object that
+auto-prepares modules and returns per-epoch reports with `lightning.fit(...)`.
+
 ### GoldenRetriever Training (distributed, data-race free)
 
 Need to fan training across multiple local workers without sprinkling raw
