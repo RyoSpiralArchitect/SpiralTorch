@@ -65,6 +65,11 @@ tensor shims, no translation layers, and no tracebacks.
     layer, and Z-space operators already form the spine of a graph neural
     network stack that embeds large-scale, hierarchical graphs with the same
     fidelity as its tree-aligned geometry.
+  - **Semiotic suturing at the logit level:** The new `st-nn::language`
+    toolkit folds symbolic kernels, repression fields, and semantic bridges
+    into a single Lagrangian so SpiralTorch can bias logits with desire,
+    anchor S/s correspondences, and respect target entropies without leaving
+    Z-space.
   - **Interpretability as a first-class citizen:** Hypergrad tapes, roundtable
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
@@ -113,6 +118,42 @@ interpretability toolkit that maps gradient flows, consensus splits, and
 telemetry spikes back to model behaviour. Visualising these pathways keeps
 “why” answers native to Z-space, turning SpiralTorch’s internal instrumentation
 into an Explainable AI surface without external probes.
+
+### Semiotic suturing, desire control, and EGW bridges
+
+SpiralTorch now ships a native semiotic optimiser that compresses Lacanian
+language machinery into Z-space numerics. The `st-nn::language::DesireLagrangian`
+implements the closed-form update
+
+\[
+\pi_t^*(j) \propto q_\theta(j\mid h_t)^{1/T_t}\exp\{\alpha_t\log K_{\text{syn}} + \beta_t\log K_{\text{par}} - \lambda r_j + \gamma_t g_t(j)\},
+\]
+
+so syntagmatic/ paradigmatic couplings, repression scores, and S→s drives land
+as a single additive logit injection.【F:crates/st-nn/src/language/desire.rs†L1-L214】
+The `TemperatureController` keeps desire aligned with a target entropy, while
+the lightweight Schrödinger lookahead adds one-to-two Doob iterations directly
+from the Z-space kernels to approximate the bridge in-line with training.【F:crates/st-nn/src/language/temperature.rs†L1-L41】【F:crates/st-nn/src/language/schrodinger.rs†L1-L63】
+
+Symbol/meaning suturing arrives via an entropic Gromov–Wasserstein solver that
+enforces anchors and floaty signifiers together. `EntropicGwSolver` estimates
+the coupling \(\Pi\) by minimising the EGW objective with Sinkhorn-style
+updates, boosting anchor pairs, and handing back a `SemanticBridge` ready for
+token-to-concept expectations across the tape.【F:crates/st-nn/src/language/gw.rs†L1-L245】【F:crates/st-nn/src/language/geometry.rs†L1-L325】
+Feed that bridge into the desire Lagrangian and you obtain a turn-key workflow:
+
+1. Build sparse syntagmatic/ paradigmatic kernels and repression vectors, then
+   estimate \(\Pi\) with the EGW solver (optionally seeding anchor pairs).
+2. Initialise the `DesireLagrangian` with those artefacts and wire it to a
+   SpiralK loop or roundtable injector.
+3. Stream LM logits through `step(...)` to receive logit offsets, entropy
+   telemetry, and temperature updates that honour the S/s suturing and desire
+   budget.
+
+The result is a single Rust-native control surface that marries KL control,
+Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
+language modules, rewrite monads, or SpiralK trainers without bespoke Python
+glue.
 
 ## Hello SpiralSession quickstart
 
