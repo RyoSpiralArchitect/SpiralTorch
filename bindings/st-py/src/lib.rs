@@ -22,6 +22,15 @@ use st_backend_hip::{
 };
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::ecosystem::{
+    ConnectorEvent as CoreConnectorEvent, DistributionSummary as CoreDistributionSummary,
+    EcosystemCapacity, EcosystemRegistry, EcosystemReport as CoreEcosystemReport,
+    HeuristicChoiceSummary as CoreHeuristicChoiceSummary,
+    HeuristicDecision as CoreHeuristicDecision, MetricDigest as CoreMetricDigest,
+    MetricSample as CoreMetricSample, RankPlanSummary as CoreRankPlanSummary,
+    RoundtableConfigSummary as CoreRoundtableConfigSummary,
+    RoundtableSummary as CoreRoundtableSummary,
+};
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::telemetry::hub;
@@ -234,6 +243,192 @@ fn convert_fft<T>(value: Result<T, FftError>) -> PyResult<T> {
             }
         })
     })
+}
+
+fn heuristic_choice_to_py(
+    py: Python<'_>,
+    choice: &CoreHeuristicChoiceSummary,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("use_two_stage", choice.use_two_stage)?;
+    dict.set_item("workgroup", choice.workgroup)?;
+    dict.set_item("lanes", choice.lanes)?;
+    dict.set_item("channel_stride", choice.channel_stride)?;
+    dict.set_item("algo_hint", choice.algo_hint.clone())?;
+    dict.set_item("compaction_tile", choice.compaction_tile)?;
+    dict.set_item("fft_tile_cols", choice.fft_tile_cols)?;
+    dict.set_item("fft_radix", choice.fft_radix)?;
+    dict.set_item("fft_segments", choice.fft_segments)?;
+    Ok(dict.into())
+}
+
+fn heuristic_to_py(py: Python<'_>, decision: &CoreHeuristicDecision) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("subsystem", decision.subsystem.clone())?;
+    dict.set_item("kind", decision.kind.clone())?;
+    dict.set_item("rows", decision.rows)?;
+    dict.set_item("cols", decision.cols)?;
+    dict.set_item("k", decision.k)?;
+    dict.set_item("choice", heuristic_choice_to_py(py, &decision.choice)?)?;
+    dict.set_item("score_hint", decision.score_hint)?;
+    dict.set_item("source", decision.source.as_str())?;
+    dict.set_item("issued_at", decision.issued_at_secs())?;
+    Ok(dict.into())
+}
+
+fn roundtable_config_to_py(
+    py: Python<'_>,
+    config: &CoreRoundtableConfigSummary,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("top_k", config.top_k)?;
+    dict.set_item("mid_k", config.mid_k)?;
+    dict.set_item("bottom_k", config.bottom_k)?;
+    dict.set_item("here_tolerance", config.here_tolerance)?;
+    let extras = PyDict::new_bound(py);
+    for (key, value) in &config.extras {
+        extras.set_item(key, *value)?;
+    }
+    dict.set_item("extras", extras)?;
+    Ok(dict.into())
+}
+
+fn rank_plan_to_py(py: Python<'_>, summary: &CoreRankPlanSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("kind", summary.kind.as_str())?;
+    dict.set_item("rows", summary.rows)?;
+    dict.set_item("cols", summary.cols)?;
+    dict.set_item("k", summary.k)?;
+    dict.set_item("workgroup", summary.workgroup)?;
+    dict.set_item("lanes", summary.lanes)?;
+    dict.set_item("channel_stride", summary.channel_stride)?;
+    dict.set_item("tile", summary.tile)?;
+    dict.set_item("compaction_tile", summary.compaction_tile)?;
+    dict.set_item("subgroup", summary.subgroup)?;
+    dict.set_item("fft_tile", summary.fft_tile)?;
+    dict.set_item("fft_radix", summary.fft_radix)?;
+    dict.set_item("fft_segments", summary.fft_segments)?;
+    Ok(dict.into())
+}
+
+fn distribution_to_py(py: Python<'_>, summary: &CoreDistributionSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("node_id", summary.node_id.clone())?;
+    dict.set_item("mode", summary.mode.clone())?;
+    dict.set_item("summary_window", summary.summary_window)?;
+    dict.set_item("push_interval_ms", summary.push_interval_ms)?;
+    dict.set_item("meta_endpoints", summary.meta_endpoints.clone())?;
+    Ok(dict.into())
+}
+
+fn roundtable_to_py(py: Python<'_>, summary: &CoreRoundtableSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("rows", summary.rows)?;
+    dict.set_item("cols", summary.cols)?;
+    dict.set_item("config", roundtable_config_to_py(py, &summary.config)?)?;
+    let plans = PyList::empty_bound(py);
+    for plan in &summary.plans {
+        plans.append(rank_plan_to_py(py, plan)?)?;
+    }
+    dict.set_item("plans", plans)?;
+    dict.set_item("autopilot_enabled", summary.autopilot_enabled)?;
+    if let Some(dist) = &summary.distribution {
+        dict.set_item("distribution", distribution_to_py(py, dist)?)?;
+    } else {
+        dict.set_item("distribution", py.None())?;
+    }
+    dict.set_item("issued_at", summary.issued_at_secs())?;
+    Ok(dict.into())
+}
+
+fn connector_to_py(py: Python<'_>, event: &CoreConnectorEvent) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("name", event.name.clone())?;
+    dict.set_item("stage", event.stage.clone())?;
+    dict.set_item("issued_at", event.issued_at_secs())?;
+    let meta = PyDict::new_bound(py);
+    for (key, value) in &event.metadata {
+        meta.set_item(key, value)?;
+    }
+    dict.set_item("metadata", meta)?;
+    Ok(dict.into())
+}
+
+fn metric_sample_to_py(py: Python<'_>, sample: &CoreMetricSample) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("name", sample.name.clone())?;
+    dict.set_item("value", sample.value)?;
+    dict.set_item("issued_at", sample.issued_at_secs())?;
+    if let Some(unit) = &sample.unit {
+        dict.set_item("unit", unit.clone())?;
+    }
+    let tags = PyDict::new_bound(py);
+    for (key, value) in &sample.tags {
+        tags.set_item(key, value)?;
+    }
+    dict.set_item("tags", tags)?;
+    Ok(dict.into())
+}
+
+fn metric_digest_to_py(py: Python<'_>, digest: &CoreMetricDigest) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("name", digest.name.clone())?;
+    dict.set_item("count", digest.count)?;
+    dict.set_item("sum", digest.sum)?;
+    dict.set_item("min", digest.min)?;
+    dict.set_item("max", digest.max)?;
+    dict.set_item("average", digest.average)?;
+    dict.set_item("first_at", digest.first_at_secs())?;
+    dict.set_item("last_value", digest.last_value)?;
+    dict.set_item("last_at", digest.last_at_secs())?;
+    if let Some(unit) = &digest.unit {
+        dict.set_item("unit", unit.clone())?;
+    }
+    let tags = PyDict::new_bound(py);
+    for (key, value) in &digest.tags {
+        tags.set_item(key, value)?;
+    }
+    dict.set_item("tags", tags)?;
+    Ok(dict.into())
+}
+
+fn ecosystem_capacity_to_py(py: Python<'_>, cap: EcosystemCapacity) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("heuristics", cap.heuristics)?;
+    dict.set_item("roundtables", cap.roundtables)?;
+    dict.set_item("connectors", cap.connectors)?;
+    dict.set_item("metrics", cap.metrics)?;
+    Ok(dict.into())
+}
+
+fn ecosystem_report_to_py(py: Python<'_>, report: &CoreEcosystemReport) -> PyResult<PyObject> {
+    let heuristics = PyList::empty_bound(py);
+    for decision in report.heuristics() {
+        heuristics.append(heuristic_to_py(py, decision)?)?;
+    }
+    let roundtables = PyList::empty_bound(py);
+    for summary in report.roundtables() {
+        roundtables.append(roundtable_to_py(py, summary)?)?;
+    }
+    let connectors = PyList::empty_bound(py);
+    for event in report.connectors() {
+        connectors.append(connector_to_py(py, event)?)?;
+    }
+    let metrics = PyList::empty_bound(py);
+    for sample in report.metrics() {
+        metrics.append(metric_sample_to_py(py, sample)?)?;
+    }
+    let metric_digests = PyList::empty_bound(py);
+    for digest in report.metric_digests() {
+        metric_digests.append(metric_digest_to_py(py, digest)?)?;
+    }
+    let dict = PyDict::new_bound(py);
+    dict.set_item("heuristics", heuristics)?;
+    dict.set_item("roundtables", roundtables)?;
+    dict.set_item("connectors", connectors)?;
+    dict.set_item("metrics", metrics)?;
+    dict.set_item("metric_digests", metric_digests)?;
+    Ok(dict.into())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1718,6 +1913,13 @@ impl PyModuleTrainer {
         self.inner.fallback_learning_rate()
     }
 
+    #[getter]
+    fn distribution(&self) -> Option<PyDistConfig> {
+        self.inner
+            .distribution_config()
+            .map(|config| PyDistConfig::from_config(config.clone()))
+    }
+
     #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
     fn roundtable(
         &mut self,
@@ -3115,6 +3317,88 @@ fn choice_dict<'py>(py: Python<'py>, plan: &RankPlan) -> PyResult<Bound<'py, PyD
     Ok(choice)
 }
 
+#[pyfunction]
+fn ecosystem_snapshot(py: Python<'_>) -> PyResult<PyObject> {
+    let report = EcosystemRegistry::global().snapshot();
+    ecosystem_report_to_py(py, &report)
+}
+
+#[pyfunction]
+fn ecosystem_drain(py: Python<'_>) -> PyResult<PyObject> {
+    let report = EcosystemRegistry::global().drain();
+    ecosystem_report_to_py(py, &report)
+}
+
+#[pyfunction]
+#[pyo3(signature = (name, stage, metadata=None))]
+fn ecosystem_record_connector(
+    name: &str,
+    stage: &str,
+    metadata: Option<HashMap<String, String>>,
+) -> PyResult<()> {
+    let event = CoreConnectorEvent {
+        name: name.to_string(),
+        stage: stage.to_string(),
+        metadata: metadata.unwrap_or_default(),
+        issued_at: SystemTime::now(),
+    };
+    EcosystemRegistry::global().record_connector(event);
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (name, value, *, tags=None, unit=None))]
+fn ecosystem_record_metric(
+    name: &str,
+    value: f64,
+    tags: Option<HashMap<String, String>>,
+    unit: Option<&str>,
+) -> PyResult<()> {
+    let mut sample = CoreMetricSample::new(name, value);
+    if let Some(tag_map) = tags {
+        for (key, value) in tag_map {
+            sample = sample.with_tag(key, value);
+        }
+    }
+    if let Some(unit) = unit {
+        sample = sample.with_unit(unit);
+    }
+    EcosystemRegistry::global().record_metric(sample);
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(signature = (*, heuristics=None, roundtables=None, connectors=None, metrics=None))]
+fn ecosystem_configure(
+    py: Python<'_>,
+    heuristics: Option<usize>,
+    roundtables: Option<usize>,
+    connectors: Option<usize>,
+    metrics: Option<usize>,
+) -> PyResult<PyObject> {
+    EcosystemRegistry::global().configure(|cap| {
+        if let Some(value) = heuristics {
+            cap.heuristics = value;
+        }
+        if let Some(value) = roundtables {
+            cap.roundtables = value;
+        }
+        if let Some(value) = connectors {
+            cap.connectors = value;
+        }
+        if let Some(value) = metrics {
+            cap.metrics = value;
+        }
+    });
+    ecosystem_capacity(py)
+}
+
+#[pyfunction]
+fn ecosystem_capacity(py: Python<'_>) -> PyResult<PyObject> {
+    let cap = EcosystemRegistry::global().capacity();
+    ecosystem_capacity_to_py(py, cap)
+}
+
 /// Inspect the unified heuristics for the requested rank family.
 #[pyfunction]
 #[pyo3(signature = (kind, rows, cols, k, device=None))]
@@ -3295,8 +3579,7 @@ fn gemm_py(lhs: &PyTensor, rhs: &PyTensor, backend: Option<&str>) -> PyResult<Py
 #[pyfunction(name = "available_backends")]
 fn available_backends_py() -> Vec<&'static str> {
     let mut options = vec!["auto", "faer", "naive"];
-    #[cfg(feature = "wgpu")]
-    {
+    if cfg!(feature = "wgpu") {
         options.push("wgpu");
     }
     options
@@ -3628,7 +3911,34 @@ fn plan_topk(
     plan(py, "topk", rows, cols, k, device)
 }
 
+/// Convenience helper for the MidK family.
 #[pyfunction]
+#[pyo3(signature = (rows, cols, k, device=None))]
+fn plan_midk(
+    py: Python<'_>,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    device: Option<&str>,
+) -> PyResult<PyObject> {
+    plan(py, "midk", rows, cols, k, device)
+}
+
+/// Convenience helper for the BottomK family.
+#[pyfunction]
+#[pyo3(signature = (rows, cols, k, device=None))]
+fn plan_bottomk(
+    py: Python<'_>,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    device: Option<&str>,
+) -> PyResult<PyObject> {
+    plan(py, "bottomk", rows, cols, k, device)
+}
+
+/// Extract row-wise top-k values and column indices on the host for quick inspection.
+#[pyfunction(name = "topk2d")]
 #[pyo3(signature = (tensor, k, *, largest=true))]
 fn topk2d_py(tensor: &PyTensor, k: usize, largest: bool) -> PyResult<(PyTensor, Vec<Vec<usize>>)> {
     let (rows, cols) = tensor.as_tensor().shape();
@@ -3789,14 +4099,14 @@ fn bentoml_save_model(
     py: Python<'_>,
     model: PyObject,
     name: &str,
-    signatures: Option<&PyDict>,
-    labels: Option<&PyDict>,
-    metadata: Option<&PyDict>,
-    custom_objects: Option<&PyDict>,
-    context: Option<&PyDict>,
+    signatures: Option<&Bound<'_, PyDict>>,
+    labels: Option<&Bound<'_, PyDict>>,
+    metadata: Option<&Bound<'_, PyDict>>,
+    custom_objects: Option<&Bound<'_, PyDict>>,
+    context: Option<&Bound<'_, PyDict>>,
     api_version: Option<&str>,
 ) -> PyResult<PyObject> {
-    let bentoml = py.import("bentoml").map_err(|err| {
+    let bentoml = PyModule::import_bound(py, "bentoml").map_err(|err| {
         PyImportError::new_err(format!(
             "bentoml is required for BentoML integration but could not be imported: {err}"
         ))
@@ -3842,7 +4152,7 @@ fn optuna_optimize(
     sampler: Option<PyObject>,
     pruner: Option<PyObject>,
 ) -> PyResult<PyObject> {
-    let optuna = py.import("optuna").map_err(|err| {
+    let optuna = PyModule::import_bound(py, "optuna").map_err(|err| {
         PyImportError::new_err(format!(
             "optuna is required for hyperparameter search but could not be imported: {err}"
         ))
@@ -3883,16 +4193,16 @@ fn optuna_optimize(
 fn ray_tune_run(
     py: Python<'_>,
     trainable: PyObject,
-    config: Option<&PyDict>,
+    config: Option<&Bound<'_, PyDict>>,
     num_samples: Option<usize>,
-    resources_per_trial: Option<&PyDict>,
+    resources_per_trial: Option<&Bound<'_, PyDict>>,
     metric: Option<&str>,
     mode: Option<&str>,
     name: Option<&str>,
     local_dir: Option<&str>,
     init: bool,
 ) -> PyResult<PyObject> {
-    let ray = py.import("ray").map_err(|err| {
+    let ray = PyModule::import_bound(py, "ray").map_err(|err| {
         PyImportError::new_err(format!(
             "ray is required for Ray Tune integration but could not be imported: {err}"
         ))
@@ -3944,12 +4254,12 @@ fn export_onnx(
     example_input: PyObject,
     export_path: &str,
     opset_version: i32,
-    dynamic_axes: Option<&PyDict>,
+    dynamic_axes: Option<&Bound<'_, PyDict>>,
     input_names: Option<Vec<String>>,
     output_names: Option<Vec<String>>,
     do_constant_folding: bool,
 ) -> PyResult<()> {
-    let torch = py.import("torch").map_err(|err| {
+    let torch = PyModule::import_bound(py, "torch").map_err(|err| {
         PyImportError::new_err(format!(
             "torch is required to export ONNX models but could not be imported: {err}"
         ))
@@ -3976,7 +4286,7 @@ fn export_onnx(
     Ok(())
 }
 
-fn integrations(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn integrations(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(torchserve_archive, m)?)?;
     m.add_function(wrap_pyfunction!(bentoml_save_model, m)?)?;
     m.add_function(wrap_pyfunction!(optuna_optimize, m)?)?;
@@ -4026,11 +4336,20 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_submodule(&integrations_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_midk, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_bottomk, m)?)?;
     m.add_function(wrap_pyfunction!(topk2d_tensor_py, m)?)?;
+    m.add_function(wrap_pyfunction!(topk2d_py, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_snapshot, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_drain, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_record_connector, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_record_metric, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_capacity, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_configure, m)?)?;
     m.add_class::<PyTensor>()?;
     m.add_class::<PyComplexTensor>()?;
     m.add_class::<PyBarycenterIntermediate>()?;
@@ -4054,11 +4373,20 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         vec![
             "plan",
             "plan_topk",
+            "plan_midk",
+            "plan_bottomk",
             "topk2d_tensor",
+            "topk2d",
             "z_space_barycenter",
             "hip_probe",
             "describe_device",
             "get_psychoid_stats",
+            "ecosystem_snapshot",
+            "ecosystem_drain",
+            "ecosystem_record_connector",
+            "ecosystem_record_metric",
+            "ecosystem_capacity",
+            "ecosystem_configure",
             "Tensor",
             "ComplexTensor",
             "BarycenterIntermediate",
