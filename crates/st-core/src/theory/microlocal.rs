@@ -36,6 +36,7 @@
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, IxDyn};
+use ndarray::Dimension;
 use statrs::function::gamma::gamma;
 use std::f64::consts::PI;
 
