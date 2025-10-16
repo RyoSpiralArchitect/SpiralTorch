@@ -11,6 +11,7 @@ crate-type = ["rlib", "cdylib"]
 
 [features]
 default = ["cpu"]
+faer = ["dep:faer"]
 
 # CPU execution is always available, but expose a feature so that downstream
 # crates can opt into a uniform interface when selecting backends.
@@ -19,8 +20,8 @@ cpu = []
 # Keep the granular feature name for the fractional WGPU kernels while also
 # providing the alias expected by the Python bindings (and end users invoking
 # `--features wgpu`).
-wgpu_frac = ["dep:wgpu", "dep:bytemuck"]
-wgpu = ["wgpu_frac", "dep:pollster"]
+wgpu_frac = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
+wgpu = ["wgpu_frac"]
 
 # Placeholder features for other accelerators.  These currently do not pull in
 # additional dependencies but allow higher level crates to enable them without
@@ -30,6 +31,8 @@ cuda = []
 hip = []
 
 [dependencies]
+# High-performance SIMD dense linear algebra for CPU matmul acceleration.
+faer = { version = "0.18", default-features = false, features = ["std"], optional = true }
 # Optional; only needed if building WGPU kernel
 wgpu = { version = "0.19", optional = true }
 bytemuck = { version = "1.15", features = ["derive"], optional = true }

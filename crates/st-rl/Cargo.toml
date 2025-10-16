@@ -1,0 +1,15 @@
+[package]
+name = "st-rl"
+version = "0.1.0"
+edition = "2021"
+description = "Reinforcement learning harness for SpiralTorch"
+license = "AGPL-3.0-or-later"
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
+
+[dependencies]
+st-tensor = { path = "../st-tensor" }
+st-core   = { path = "../st-core" }
+
+[features]
+collapse = []
+kdsl = ["st-core/kdsl"]
