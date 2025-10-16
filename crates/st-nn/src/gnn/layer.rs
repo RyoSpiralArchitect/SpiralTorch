@@ -7,7 +7,8 @@ use super::GraphContext;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Hyperbolic graph convolution that keeps gradient flows in the Z-space tape.
 #[derive(Debug)]
@@ -17,7 +18,7 @@ pub struct ZSpaceGraphConvolution {
     weight: Parameter,
     bias: Parameter,
     curvature: f32,
-    tracer: Option<Arc<Mutex<GraphFlowTracer>>>,
+    tracer: Option<Rc<RefCell<GraphFlowTracer>>>,
 }
 
 impl ZSpaceGraphConvolution {
@@ -59,7 +60,7 @@ impl ZSpaceGraphConvolution {
     }
 
     /// Attaches a shared flow tracer for interpretability tooling.
-    pub fn set_tracer(&mut self, tracer: Arc<Mutex<GraphFlowTracer>>) {
+    pub fn set_tracer(&mut self, tracer: Rc<RefCell<GraphFlowTracer>>) {
         self.tracer = Some(tracer);
     }
 
@@ -70,15 +71,15 @@ impl ZSpaceGraphConvolution {
 
     fn record_forward_flows(&self, flows: Vec<NodeFlowSample>) {
         if let Some(tracer) = &self.tracer {
-            let mut guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
-            guard.begin_layer(self.name.clone(), self.curvature, flows);
+            tracer
+                .borrow_mut()
+                .begin_layer(self.name.clone(), self.curvature, flows);
         }
     }
 
     fn record_backward_updates(&self, weight: f32, bias: f32) {
         if let Some(tracer) = &self.tracer {
-            let mut guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
-            guard.record_weight_update(weight, Some(bias));
+            tracer.borrow_mut().record_weight_update(weight, Some(bias));
         }
     }
 }
@@ -181,18 +182,14 @@ mod tests {
     fn graph_convolution_records_traces() {
         let adjacency = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
         let context = GraphContext::from_adjacency(adjacency).unwrap();
-        let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+        let tracer = Rc::new(RefCell::new(GraphFlowTracer::new()));
         let mut layer = ZSpaceGraphConvolution::new("gnn", context, 2, 1, -1.0, 0.05).unwrap();
         layer.set_tracer(tracer.clone());
         let input = Tensor::from_vec(2, 2, vec![1.0, 0.5, -0.5, 1.0]).unwrap();
         let grad_output = Tensor::from_vec(2, 1, vec![0.1, -0.2]).unwrap();
         let _ = layer.forward(&input).unwrap();
         let _ = layer.backward(&input, &grad_output).unwrap();
-        let reports = tracer
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .layers()
-            .to_vec();
+        let reports = tracer.borrow().layers().to_vec();
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].layer, "gnn");
         assert!(reports[0].weight_update_magnitude.is_some());

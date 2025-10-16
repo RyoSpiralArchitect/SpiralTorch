@@ -208,7 +208,9 @@ Persist the stream to disk with `DesireLogbook` so the observation/injection/
 integration cadence can be replayed later or shared with SpiralK rewrite
 automation. The logbook writes line-delimited JSON records that contain the
 entire `DesireSolution` payload plus any emitted triggers, keeping telemetry and
-avoidance vectors together for offline inspection.【F:crates/st-nn/src/language/logbook.rs†L1-L214】
+avoidance vectors together for offline inspection. Re-opening the logbook will
+resume the ordinal counter automatically, so a long-running automation loop can
+be restarted without clobbering record IDs.【F:crates/st-nn/src/language/logbook.rs†L1-L152】【F:crates/st-nn/src/language/logbook.rs†L168-L276】
 
 ```rust
 use st_nn::language::{DesireAutomatedStep, DesireAutomation, DesireLogbook};
@@ -218,6 +220,20 @@ let mut logbook = DesireLogbook::new("desire.ndjson")?;
 let DesireAutomatedStep { solution, trigger } = automation
     .step(&logits, previous_token, &concept_hint, Instant::now())?;
 logbook.record(&DesireAutomatedStep { solution, trigger }, SystemTime::now())?;
+```
+
+Stream the persisted decisions back with `DesireLogReplay` to build dashboards
+or off-line analytics. The iterator skips blank lines and surfaces every record
+as a `PureResult`, making it straightforward to plug into telemetry sinks or
+trainers that ingest JSONL traces.【F:crates/st-nn/src/language/logbook.rs†L154-L207】
+
+```rust
+use st_nn::language::DesireLogReplay;
+
+for entry in DesireLogReplay::open("desire.ndjson")? {
+    let record = entry?;
+    audit(record.ordinal, record.solution.phase);
+}
 ```
 
 The result is a single Rust-native control surface that marries KL control,

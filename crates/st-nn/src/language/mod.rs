@@ -18,5 +18,5 @@ pub use desire::{
 };
 pub use geometry::{ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry};
 pub use gw::{DistanceMatrix, EntropicGwSolver};
-pub use logbook::{DesireLogRecord, DesireLogbook};
+pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
 pub use temperature::{entropy, TemperatureController};

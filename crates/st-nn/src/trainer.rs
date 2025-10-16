@@ -22,8 +22,6 @@
 // ============================================================================
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
-#[cfg(feature = "golden")]
-use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective};
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
@@ -69,10 +67,6 @@ pub struct ModuleTrainer {
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
-    #[cfg(feature = "golden")]
-    golden_pulse: Option<GoldenBlackcatPulse>,
-    #[cfg(feature = "golden")]
-    golden_directive: Option<GoldenCooperativeDirective>,
     #[cfg(feature = "psi")]
     psi: Option<PsiMeter>,
     #[cfg(feature = "psychoid")]
@@ -232,10 +226,6 @@ impl ModuleTrainer {
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
-            #[cfg(feature = "golden")]
-            golden_pulse: None,
-            #[cfg(feature = "golden")]
-            golden_directive: None,
             #[cfg(feature = "psi")]
             psi,
             #[cfg(feature = "psychoid")]

@@ -7,13 +7,14 @@ use super::handoff::{fold_with_band_energy, QuadBandEnergy};
 use crate::schedule::BandEnergy;
 use crate::PureResult;
 use st_core::telemetry::xai::GraphFlowTracer;
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Bridge that translates graph flow telemetry into SpiralK-friendly hints and
 /// consensus multipliers that can be consumed during training.
 #[derive(Clone)]
 pub struct GraphConsensusBridge {
-    tracer: Arc<Mutex<GraphFlowTracer>>,
+    tracer: Rc<RefCell<GraphFlowTracer>>,
     blend: f32,
     base_program: Option<String>,
 }
@@ -22,7 +23,7 @@ impl GraphConsensusBridge {
     /// Builds a bridge that drains the provided tracer each time a digest is
     /// requested. The bridge is intentionally `Clone` so the same tracer can be
     /// shared across trainer instances when required.
-    pub fn new(tracer: Arc<Mutex<GraphFlowTracer>>) -> Self {
+    pub fn new(tracer: Rc<RefCell<GraphFlowTracer>>) -> Self {
         Self {
             tracer,
             blend: 0.35,
@@ -52,11 +53,7 @@ impl GraphConsensusBridge {
     /// `Ok(None)` if the tracer has not recorded any layers since the previous
     /// call.
     pub fn digest(&self, baseline: &BandEnergy) -> PureResult<Option<GraphConsensusDigest>> {
-        let mut tracer = self
-            .tracer
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        let reports = tracer.drain();
+        let reports = self.tracer.borrow_mut().drain();
         if reports.is_empty() {
             return Ok(None);
         }
@@ -224,7 +221,7 @@ mod tests {
 
     #[test]
     fn digest_builds_script_and_multipliers() {
-        let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+        let tracer = Rc::new(RefCell::new(GraphFlowTracer::new()));
         let bridge = GraphConsensusBridge::new(tracer.clone());
         let baseline = BandEnergy {
             above: 0.4,
@@ -233,17 +230,9 @@ mod tests {
             drift: 0.1,
         };
         tracer
-            .lock()
-            .map(|mut guard| guard.begin_layer("gnn::conv1", -1.0, sample_flows(0.5)))
-            .unwrap_or_else(|poison| {
-                poison
-                    .into_inner()
-                    .begin_layer("gnn::conv1", -1.0, sample_flows(0.5))
-            });
-        tracer
-            .lock()
-            .map(|mut guard| guard.record_weight_update(0.1, Some(0.05)))
-            .unwrap_or_else(|poison| poison.into_inner().record_weight_update(0.1, Some(0.05)));
+            .borrow_mut()
+            .begin_layer("gnn::conv1", -1.0, sample_flows(0.5));
+        tracer.borrow_mut().record_weight_update(0.1, Some(0.05));
         let digest = bridge.digest(&baseline).unwrap().unwrap();
         assert!(digest.graph_energy > 0.0);
         assert_eq!(digest.layer_count(), 1);

@@ -9,7 +9,7 @@ use crate::PureResult;
 use serde::{Deserialize, Serialize};
 use st_tensor::pure::TensorError;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Lines, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -43,15 +43,17 @@ impl DesireLogbook {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
+            .read(true)
             .open(path_ref)
             .map_err(io_error)?;
+        let ordinal = next_ordinal(path_ref)?;
         let writer = BufWriter::new(file);
         Ok(Self {
             path: path_ref.to_path_buf(),
             writer,
             flush_every,
             pending: 0,
-            ordinal: 0,
+            ordinal,
         })
     }
 
@@ -90,10 +92,71 @@ impl DesireLogbook {
     }
 }
 
+pub struct DesireLogReplay {
+    path: PathBuf,
+    lines: Lines<BufReader<File>>,
+}
+
+impl DesireLogReplay {
+    pub fn open<P: AsRef<Path>>(path: P) -> PureResult<Self> {
+        let path_ref = path.as_ref();
+        let file = File::open(path_ref).map_err(io_error)?;
+        let reader = BufReader::new(file);
+        Ok(Self {
+            path: path_ref.to_path_buf(),
+            lines: reader.lines(),
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Iterator for DesireLogReplay {
+    type Item = PureResult<DesireLogRecord>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(line) = self.lines.next() {
+            match line {
+                Ok(text) => {
+                    if text.trim().is_empty() {
+                        continue;
+                    }
+                    match serde_json::from_str::<DesireLogRecord>(&text) {
+                        Ok(record) => return Some(Ok(record)),
+                        Err(err) => return Some(Err(serde_error(err))),
+                    }
+                }
+                Err(err) => return Some(Err(io_error(err))),
+            }
+        }
+        None
+    }
+}
+
 fn timestamp_ms(time: SystemTime) -> u128 {
     time.duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
         .as_millis()
+}
+
+fn next_ordinal(path: &Path) -> PureResult<u64> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let file = File::open(path).map_err(io_error)?;
+    let reader = BufReader::new(file);
+    let mut last = None;
+    for line in reader.lines() {
+        let line = line.map_err(io_error)?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let record: DesireLogRecord = serde_json::from_str(&line).map_err(serde_error)?;
+        last = Some(record.ordinal);
+    }
+    Ok(last.map(|ordinal| ordinal.saturating_add(1)).unwrap_or(0))
 }
 
 fn io_error(err: std::io::Error) -> TensorError {
@@ -111,7 +174,7 @@ fn serde_error(err: serde_json::Error) -> TensorError {
 #[cfg(test)]
 mod tests {
     use super::super::automation::DesireAutomation;
-    use super::super::desire::{constant, warmup, DesireLagrangian, DesirePhase};
+    use super::super::desire::{constant, warmup, DesireLagrangian, DesirePhase, DesireWeights};
     use super::super::geometry::{
         ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
     };
@@ -222,5 +285,88 @@ mod tests {
         logbook.flush().expect("flush");
         let contents = std::fs::read_to_string(&path).expect("read log");
         assert_eq!(contents.lines().count(), 5);
+    }
+
+    #[test]
+    fn logbook_resumes_existing_file() {
+        let lagrangian = build_lagrangian();
+        let cfg = SelfRewriteCfg {
+            score_thresh: 0.0,
+            min_samples: 2,
+            cooldown_sec: 0,
+        };
+        let mut automation = DesireAutomation::new(lagrangian, cfg);
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("desire.ndjson");
+        let logits = vec![2.0, 0.5];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let base = Instant::now();
+        {
+            let mut logbook = DesireLogbook::with_flush_every(&path, 1).expect("logbook");
+            for step in 0..3 {
+                let now = base + Duration::from_secs(step as u64 + 1);
+                let event = automation
+                    .step(&logits, step % 2, &concept, now)
+                    .expect("automation step");
+                let timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(step as u64);
+                logbook.record(&event, timestamp).expect("record");
+            }
+            logbook.flush().expect("flush");
+        }
+        let mut resumed = DesireLogbook::with_flush_every(&path, 4).expect("resume");
+        assert_eq!(resumed.ordinal(), 3);
+        let event = automation
+            .step(&logits, 1, &concept, base + Duration::from_secs(8))
+            .expect("automation step");
+        resumed
+            .record(&event, SystemTime::UNIX_EPOCH + Duration::from_secs(99))
+            .expect("record");
+        resumed.flush().expect("flush");
+        let records: Vec<DesireLogRecord> = DesireLogReplay::open(&path)
+            .expect("open")
+            .map(|entry| entry.expect("record"))
+            .collect();
+        assert_eq!(records.len(), 4);
+        assert_eq!(records[3].ordinal, 3);
+    }
+
+    #[test]
+    fn log_replay_streams_records() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("desire.ndjson");
+        let mut logbook = DesireLogbook::with_flush_every(&path, 1).expect("logbook");
+        let mut solution = DesireSolution {
+            indices: vec![0, 1],
+            probabilities: vec![0.6, 0.4],
+            logit_offsets: vec![0.0, 0.0],
+            temperature: 1.0,
+            entropy: 1.0,
+            weights: DesireWeights::new(0.1, 0.0, 0.0, 0.0),
+            phase: DesirePhase::Observation,
+            avoidance: None,
+            hypergrad_penalty: 0.1,
+        };
+        for ordinal in 0..3 {
+            solution.phase = match ordinal {
+                0 => DesirePhase::Observation,
+                1 => DesirePhase::Injection,
+                _ => DesirePhase::Integration,
+            };
+            let step = DesireAutomatedStep {
+                solution: solution.clone(),
+                trigger: None,
+            };
+            logbook
+                .record(&step, SystemTime::UNIX_EPOCH + Duration::from_secs(ordinal))
+                .expect("record");
+        }
+        logbook.flush().expect("flush");
+        let mut replay = DesireLogReplay::open(&path).expect("open");
+        let mut phases = Vec::new();
+        while let Some(record) = replay.next() {
+            let record = record.expect("record");
+            phases.push(record.solution.phase);
+        }
+        assert_eq!(phases, vec![DesirePhase::Observation, DesirePhase::Injection, DesirePhase::Integration]);
     }
 }

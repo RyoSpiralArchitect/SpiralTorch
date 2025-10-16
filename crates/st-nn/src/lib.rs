@@ -44,7 +44,8 @@ pub use io::{load_bincode, load_json, save_bincode, save_json};
 pub use language::entropy as desire_entropy;
 pub use language::{
     constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
-    DesireLagrangian, DesireLogRecord, DesireLogbook, DesirePhase, DesireRewriteTrigger,
+    DesireLagrangian, DesireLogRecord, DesireLogReplay, DesireLogbook, DesirePhase,
+    DesireRewriteTrigger,
     DesireSchedule, DesireSolution, DesireWeights, DistanceMatrix, EntropicGwSolver,
     RepressionField, SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
 };
