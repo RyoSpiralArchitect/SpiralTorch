@@ -157,6 +157,8 @@ impl GeometryFeedback {
         let leech_weight = config.leech_density_weight.max(0.0);
         let ramanujan_pi = Self::ramanujan_pi(config.ramanujan_iterations.max(1));
         let softening_beta = config.softening_beta.max(0.0);
+        let leech_projector = LeechProjector::new(z_rank, leech_weight);
+
         Self {
             coalgebra: ObservationalCoalgebra::new(config.observability),
             threshold: config.activation_threshold.abs().max(f32::EPSILON),
@@ -164,11 +166,12 @@ impl GeometryFeedback {
             window,
             min_scale,
             max_scale: clamped_max,
-            z_rank: config.z_space_rank.max(1),
-            leech_weight: config.leech_density_weight.max(0.0),
-            ramanujan_pi: Self::ramanujan_pi(config.ramanujan_iterations.max(1)),
-            softening_beta: config.softening_beta.max(0.0),
-            base_softening_beta: config.softening_beta.max(0.0),
+            z_rank,
+            leech_weight,
+            leech_projector,
+            ramanujan_pi,
+            softening_beta,
+            base_softening_beta: softening_beta,
             rank_history: VecDeque::with_capacity(window),
             pressure_history: VecDeque::with_capacity(window),
             scale_history: VecDeque::with_capacity(window),
