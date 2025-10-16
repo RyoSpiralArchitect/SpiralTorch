@@ -422,6 +422,19 @@ if atlas:
 `AtlasFrame` exposes the latest `ChronoSummary`, optional harmonics, maintainer
 status, and any SpiralK hints captured along the way. Metrics from auxiliary
 nodes (collapse totals, Z-bias pushes) ride alongside free-form notes so you can
+route the atlas straight into dashboards or back into SpiralK planners. Each
+frame also clusters its metrics into **districts** — Surface, Concourse, and
+Substrate — so you can see which layer of the SpiralTorch “city” is lighting up
+at a glance:
+
+```python
+for district in atlas.districts():
+    print(district.name, district.mean, district.span)
+```
+
+If you want more than a snapshot, call `session.atlas_route(limit=12)` to pull a
+bounded history of frames. It’s perfect for feeding notebooks with sliding
+windows of atlas metrics or piping the loop into other SpiralTorch nodes.
 route the atlas straight into dashboards or back into SpiralK planners.
 
 ### Self-maintaining feedback loops

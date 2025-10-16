@@ -25,6 +25,7 @@
 
 use super::chrono::{ChronoHarmonics, ChronoSummary};
 use super::maintainer::MaintainerStatus;
+use std::collections::BTreeMap;
 
 /// Named scalar surfaced through the atlas projection.
 #[derive(Clone, Debug, PartialEq)]
@@ -33,6 +34,8 @@ pub struct AtlasMetric {
     pub name: String,
     /// Scalar value carried by the metric.
     pub value: f32,
+    /// Optional district categorisation supplied by the producer.
+    pub district: Option<String>,
 }
 
 impl AtlasMetric {
@@ -42,10 +45,33 @@ impl AtlasMetric {
             Some(Self {
                 name: name.into(),
                 value,
+                district: None,
             })
         } else {
             None
         }
+    }
+
+    /// Creates a new metric with an explicit district when the value is finite.
+    pub fn with_district(
+        name: impl Into<String>,
+        value: f32,
+        district: impl Into<String>,
+    ) -> Option<Self> {
+        if value.is_finite() {
+            Some(Self {
+                name: name.into(),
+                value,
+                district: Some(district.into()),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Returns the district when supplied by the producer.
+    pub fn district(&self) -> Option<&str> {
+        self.district.as_deref()
     }
 }
 
@@ -106,6 +132,18 @@ impl AtlasFragment {
     /// Pushes a metric onto the fragment when the value is finite.
     pub fn push_metric(&mut self, name: impl Into<String>, value: f32) {
         if let Some(metric) = AtlasMetric::new(name, value) {
+            self.metrics.push(metric);
+        }
+    }
+
+    /// Pushes a metric with an explicit district when the value is finite.
+    pub fn push_metric_with_district(
+        &mut self,
+        name: impl Into<String>,
+        value: f32,
+        district: impl Into<String>,
+    ) {
+        if let Some(metric) = AtlasMetric::with_district(name, value, district) {
             self.metrics.push(metric);
         }
     }
@@ -245,5 +283,166 @@ impl AtlasFrame {
         if !fragment.notes.is_empty() {
             self.notes.extend(fragment.notes.into_iter());
         }
+    }
+
+    /// Groups metrics into named districts following the SpiralTorch atlas map.
+    pub fn districts(&self) -> Vec<AtlasDistrict> {
+        if self.metrics.is_empty() {
+            return Vec::new();
+        }
+        let mut buckets: BTreeMap<String, Vec<AtlasMetric>> = BTreeMap::new();
+        for metric in &self.metrics {
+            let district = metric
+                .district()
+                .map(|name| name.to_string())
+                .unwrap_or_else(|| infer_district(&metric.name).to_string());
+            buckets.entry(district).or_default().push(metric.clone());
+        }
+        buckets
+            .into_iter()
+            .map(|(name, metrics)| AtlasDistrict::from_metrics(name, metrics))
+            .filter(|district| !district.metrics.is_empty())
+            .collect()
+    }
+}
+
+/// Aggregated atlas route storing chronological frames for replay.
+#[derive(Clone, Debug, Default)]
+pub struct AtlasRoute {
+    /// Chronological atlas frames retained in the route.
+    pub frames: Vec<AtlasFrame>,
+}
+
+impl AtlasRoute {
+    /// Creates a new, empty route.
+    pub fn new() -> Self {
+        Self { frames: Vec::new() }
+    }
+
+    /// Returns true when the route does not contain any frames.
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+
+    /// Returns the number of frames stored in the route.
+    pub fn len(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// Returns the latest frame when available.
+    pub fn latest(&self) -> Option<&AtlasFrame> {
+        self.frames.last()
+    }
+
+    /// Appends a frame while keeping the total number of frames bounded.
+    pub fn push_bounded(&mut self, frame: AtlasFrame, capacity: usize) {
+        if frame.timestamp <= 0.0 {
+            return;
+        }
+        self.frames.push(frame);
+        if capacity > 0 && self.frames.len() > capacity {
+            let overflow = self.frames.len() - capacity;
+            self.frames.drain(0..overflow);
+        }
+    }
+}
+
+/// Atlas district representing a logical SpiralTorch layer.
+#[derive(Clone, Debug, Default)]
+pub struct AtlasDistrict {
+    /// Human readable name of the district.
+    pub name: String,
+    /// Metrics that contributed to the district activity.
+    pub metrics: Vec<AtlasMetric>,
+    /// Mean activity value across the district metrics.
+    pub mean: f32,
+    /// Range spanned by the district metrics.
+    pub span: f32,
+}
+
+impl AtlasDistrict {
+    /// Builds a district from aggregated metrics.
+    fn from_metrics(name: String, metrics: Vec<AtlasMetric>) -> Self {
+        let mut mean = 0.0;
+        let mut min = f32::INFINITY;
+        let mut max = f32::NEG_INFINITY;
+        let len = metrics.len() as f32;
+        if len > 0.0 {
+            for metric in &metrics {
+                mean += metric.value;
+                min = min.min(metric.value);
+                max = max.max(metric.value);
+            }
+            mean /= len;
+        }
+        let span = if metrics.len() > 1 { max - min } else { 0.0 };
+        Self {
+            name,
+            metrics,
+            mean,
+            span,
+        }
+    }
+}
+
+fn infer_district(name: &str) -> &'static str {
+    let lower = name.to_ascii_lowercase();
+    let token = lower
+        .split(|c| c == '.' || c == ':' || c == '/' || c == '-')
+        .next()
+        .unwrap_or("");
+    match token {
+        "py" | "python" | "bindings" | "session" | "timeline" => "Surface",
+        "trainer" | "maintainer" | "atlas" | "loop" | "chrono" | "policy" | "resonator" => {
+            "Concourse"
+        }
+        "tensor" | "backend" | "core" | "z" | "collapse" | "geometry" | "kdsl" => "Substrate",
+        _ => "Unknown",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn atlas_frame_groups_metrics_into_districts() {
+        let mut fragment = AtlasFragment::new();
+        fragment.timestamp = Some(1.0);
+        fragment.push_metric("py.bridge.latency", 0.2);
+        fragment.push_metric_with_district("trainer.loop.energy", 0.8, "Concourse");
+        fragment.push_metric("tensor.backend.util", 0.6);
+        let mut frame = AtlasFrame::new(1.0);
+        frame.merge_fragment(fragment);
+        let districts = frame.districts();
+        assert_eq!(districts.len(), 3);
+        let surface = districts
+            .iter()
+            .find(|district| district.name == "Surface")
+            .expect("surface district");
+        assert!((surface.mean - 0.2).abs() <= f32::EPSILON);
+        let concourse = districts
+            .iter()
+            .find(|district| district.name == "Concourse")
+            .expect("concourse district");
+        assert_eq!(concourse.metrics.len(), 1);
+        let substrate = districts
+            .iter()
+            .find(|district| district.name == "Substrate")
+            .expect("substrate district");
+        assert!(substrate.span <= f32::EPSILON);
+    }
+
+    #[test]
+    fn atlas_route_trims_capacity() {
+        let mut route = AtlasRoute::new();
+        for idx in 0..5 {
+            let mut frame = AtlasFrame::new((idx + 1) as f32);
+            frame.loop_support = idx as f32;
+            route.push_bounded(frame, 3);
+        }
+        assert_eq!(route.len(), 3);
+        assert_eq!(route.frames[0].timestamp, 3.0);
+        assert_eq!(route.latest().unwrap().timestamp, 5.0);
     }
 }

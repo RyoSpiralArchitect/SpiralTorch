@@ -21,7 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
-use super::atlas::{AtlasFragment, AtlasFrame};
+use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 use std::sync::{OnceLock, RwLock};
@@ -93,22 +93,50 @@ fn softlogic_z_cell() -> &'static RwLock<Option<SoftlogicZFeedback>> {
 }
 
 static ATLAS_FRAME: OnceLock<RwLock<Option<AtlasFrame>>> = OnceLock::new();
+static ATLAS_ROUTE: OnceLock<RwLock<VecDeque<AtlasFrame>>> = OnceLock::new();
 
 fn atlas_cell() -> &'static RwLock<Option<AtlasFrame>> {
     ATLAS_FRAME.get_or_init(|| RwLock::new(None))
 }
 
-/// Replaces the stored atlas frame with the provided snapshot.
-pub fn set_atlas_frame(frame: AtlasFrame) {
-    if let Ok(mut guard) = atlas_cell().write() {
-        *guard = Some(frame);
+fn atlas_route_cell() -> &'static RwLock<VecDeque<AtlasFrame>> {
+    ATLAS_ROUTE.get_or_init(|| RwLock::new(VecDeque::new()))
+}
+
+const ATLAS_ROUTE_CAPACITY: usize = 24;
+
+fn push_atlas_route(frame: &AtlasFrame) {
+    if frame.timestamp <= 0.0 {
+        return;
+    }
+    if let Ok(mut guard) = atlas_route_cell().write() {
+        guard.push_back(frame.clone());
+        while guard.len() > ATLAS_ROUTE_CAPACITY {
+            guard.pop_front();
+        }
     }
 }
 
-/// Clears the stored atlas frame.
+/// Replaces the stored atlas frame with the provided snapshot.
+pub fn set_atlas_frame(frame: AtlasFrame) {
+    if let Ok(mut guard) = atlas_cell().write() {
+        *guard = Some(frame.clone());
+    }
+    push_atlas_route(&frame);
+}
+
+/// Clears the stored atlas frame and route history.
 pub fn clear_atlas() {
     if let Ok(mut guard) = atlas_cell().write() {
         *guard = None;
+    }
+    clear_atlas_route();
+}
+
+/// Clears the stored atlas route.
+pub fn clear_atlas_route() {
+    if let Ok(mut guard) = atlas_route_cell().write() {
+        guard.clear();
     }
 }
 
@@ -120,6 +148,24 @@ pub fn get_atlas_frame() -> Option<AtlasFrame> {
         .and_then(|guard| guard.as_ref().cloned())
 }
 
+/// Returns the chronological atlas route up to the requested limit.
+pub fn get_atlas_route(limit: Option<usize>) -> AtlasRoute {
+    let mut route = AtlasRoute::new();
+    if let Ok(guard) = atlas_route_cell().read() {
+        let limit = limit.unwrap_or(usize::MAX);
+        if limit == 0 {
+            return route;
+        }
+        let mut frames: Vec<AtlasFrame> = guard.iter().cloned().collect();
+        if frames.len() > limit {
+            let start = frames.len() - limit;
+            frames.drain(0..start);
+        }
+        route.frames = frames;
+    }
+    route
+}
+
 /// Merges an atlas fragment into the stored frame, creating it if absent.
 pub fn merge_atlas_fragment(fragment: AtlasFragment) {
     if fragment.is_empty() {
@@ -128,7 +174,9 @@ pub fn merge_atlas_fragment(fragment: AtlasFragment) {
     if let Ok(mut guard) = atlas_cell().write() {
         if let Some(frame) = guard.as_mut() {
             frame.merge_fragment(fragment);
+            push_atlas_route(frame);
         } else if let Some(frame) = AtlasFrame::from_fragment(fragment) {
+            push_atlas_route(&frame);
             *guard = Some(frame);
         }
     }
@@ -431,5 +479,23 @@ mod tests {
             .metrics
             .iter()
             .any(|metric| metric.name == "loop.energy"));
+        let route = get_atlas_route(Some(8));
+        assert!(!route.is_empty());
+        assert_eq!(route.latest().unwrap().timestamp, atlas.timestamp);
+    }
+
+    #[test]
+    fn atlas_route_retains_recent_frames() {
+        clear_atlas();
+        clear_atlas_route();
+        for idx in 0..6 {
+            let mut frame = AtlasFrame::new((idx + 1) as f32);
+            frame.loop_support = idx as f32;
+            set_atlas_frame(frame);
+        }
+        let route = get_atlas_route(Some(4));
+        assert_eq!(route.len(), 4);
+        assert_eq!(route.frames.first().unwrap().timestamp, 3.0);
+        assert_eq!(route.latest().unwrap().loop_support, 5.0);
     }
 }

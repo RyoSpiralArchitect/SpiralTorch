@@ -355,11 +355,16 @@ if atlas:
     print(atlas.timestamp, atlas.maintainer_status)
     for metric in atlas.metrics():
         print(metric.name, metric.value)
+    for district in atlas.districts():
+        print("district", district.name, district.mean, district.span)
     story = session.atlas_story(temperature=0.6)
     if story:
         print(story[0])
         print(story[1])
     print(st.describe_atlas(atlas))
+
+route = session.atlas_route(limit=6)
+print("atlas history", route.length, [frame.timestamp for frame in route.frames])
 ```
 
 The `SpiralSession` maintainer surfaces clamp and density suggestions directly

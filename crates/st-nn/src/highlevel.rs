@@ -9,7 +9,7 @@ use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedul
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::atlas::{AtlasFragment, AtlasFrame};
+use st_core::telemetry::atlas::{AtlasFragment, AtlasFrame, AtlasRoute};
 use st_core::telemetry::chrono::{
     ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoSummary, ChronoTimeline,
     ResonanceTemporalMetrics,
@@ -609,6 +609,11 @@ impl SpiralSession {
     /// Returns the latest atlas frame aggregated across telemetry subsystems.
     pub fn atlas(&self) -> Option<AtlasFrame> {
         hub::get_atlas_frame()
+    }
+
+    /// Returns the recent atlas route up to an optional limit.
+    pub fn atlas_route(&self, limit: Option<usize>) -> AtlasRoute {
+        hub::get_atlas_route(limit)
     }
 
     /// Generates a narrative describing the latest atlas frame when available.
@@ -1333,6 +1338,12 @@ mod tests {
             .metrics
             .iter()
             .any(|metric| metric.name == "timeline.energy"));
+        let districts = atlas.districts();
+        assert!(!districts.is_empty());
+        assert!(districts.iter().any(|d| d.name == "Surface"));
+        let route = session.atlas_route(Some(4));
+        assert!(!route.is_empty());
+        assert!(route.latest().is_some());
         let story = session.atlas_narrative(0.6).unwrap();
         assert!(story
             .as_ref()
