@@ -11,7 +11,7 @@ use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule};
+use pyo3::types::{PyAny, PyDict, PyList, PyModule, PySequence, PyTuple};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use pyo3::PyRef;
@@ -33,18 +33,23 @@ use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
     Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
-    EpochStats, Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer, Relu as NnRelu,
-    RoundtableConfig, RoundtableSchedule, Sequential as NnSequential, SpiralSession,
+    EpochStats, LightningConfig as NnLightningConfig, Linear as NnLinear, Loss, MeanSquaredError,
+    Module, ModuleTrainer, Relu as NnRelu, RoundtableConfig, RoundtableSchedule,
+    Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
+use st_tensor::backend::faer_dense;
+#[cfg(feature = "wgpu")]
+use st_tensor::backend::wgpu_dense as tensor_wgpu_dense;
 use st_tensor::pure::{
     measure::{
         z_space_barycenter as rust_z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter,
     },
     topos::OpenCartesianTopos,
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
-    PureResult, Tensor, TensorBiome, TensorError,
+    MatmulBackend, PureResult, Tensor, TensorBiome, TensorError,
 };
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
@@ -176,6 +181,67 @@ fn convert_fft<T>(value: Result<T, FftError>) -> PyResult<T> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+fn build_roundtable_config(
+    top_k: u32,
+    mid_k: u32,
+    bottom_k: u32,
+    here_tolerance: f32,
+    psychoid: bool,
+    psychoid_log: bool,
+    psi: bool,
+    collapse: bool,
+) -> RoundtableConfig {
+    #[cfg(not(feature = "psychoid"))]
+    {
+        let _ = psychoid;
+        let _ = psychoid_log;
+    }
+    #[cfg(not(feature = "psi"))]
+    {
+        let _ = psi;
+    }
+    #[cfg(not(feature = "collapse"))]
+    {
+        let _ = collapse;
+    }
+
+    let mut config = RoundtableConfig {
+        top_k,
+        mid_k,
+        bottom_k,
+        here_tolerance: here_tolerance.max(0.0),
+        ..RoundtableConfig::default()
+    };
+
+    #[cfg(feature = "psychoid")]
+    {
+        if psychoid {
+            config = if psychoid_log {
+                config.enable_psychoid_with_log()
+            } else {
+                config.enable_psychoid()
+            };
+        }
+    }
+
+    #[cfg(feature = "psi")]
+    {
+        if psi {
+            config = config.enable_psi();
+        }
+    }
+
+    #[cfg(feature = "collapse")]
+    {
+        if collapse {
+            config = config.enable_collapse();
+        }
+    }
+
+    config
+}
+
 fn intern_label(label: &str) -> &'static str {
     static INTERNER: OnceLock<Mutex<Vec<&'static str>>> = OnceLock::new();
     let storage = INTERNER.get_or_init(|| Mutex::new(Vec::new()));
@@ -243,6 +309,34 @@ fn array_to_tensor(array: ArrayD<f32>) -> PyResult<PyTensor> {
     Ok(PyTensor::from_tensor(convert(Tensor::from_vec(
         rows, cols, data,
     ))?))
+}
+
+fn parse_matmul_backend(label: Option<&str>) -> PyResult<MatmulBackend> {
+    match label {
+        None => Ok(MatmulBackend::Auto),
+        Some(value) => {
+            let normalized = value.to_ascii_lowercase();
+            match normalized.as_str() {
+                "auto" => Ok(MatmulBackend::Auto),
+                "faer" | "simd" => Ok(MatmulBackend::CpuFaer),
+                "cpu" | "naive" => Ok(MatmulBackend::CpuNaive),
+                #[cfg(feature = "wgpu")]
+                "wgpu" | "gpu" => Ok(MatmulBackend::GpuWgpu),
+                #[cfg(not(feature = "wgpu"))]
+                "wgpu" | "gpu" => Err(PyValueError::new_err(
+                    "WGPU backend requested but SpiralTorch was built without the `wgpu` feature",
+                )),
+                other => Err(PyValueError::new_err(format!(
+                    "unknown matmul backend `{other}`; expected auto, faer, naive{}",
+                    if cfg!(feature = "wgpu") {
+                        ", or wgpu"
+                    } else {
+                        ""
+                    }
+                ))),
+            }
+        }
+    }
 }
 
 fn device_caps_dict<'py>(py: Python<'py>, caps: DeviceCaps) -> PyResult<Bound<'py, PyDict>> {
@@ -338,9 +432,11 @@ impl PyTensor {
         out
     }
 
-    fn matmul(&self, other: &PyTensor) -> PyResult<Self> {
+    #[pyo3(signature = (other, backend=None))]
+    fn matmul(&self, other: &PyTensor, backend: Option<&str>) -> PyResult<Self> {
+        let backend = parse_matmul_backend(backend)?;
         Ok(Self::from_tensor(convert(
-            self.inner.matmul(other.as_tensor()),
+            self.inner.matmul_with_backend(other.as_tensor(), backend),
         )?))
     }
 
@@ -1582,35 +1678,16 @@ impl PyModuleTrainer {
         collapse: bool,
         dist: Option<PyDistConfig>,
     ) -> PyResult<PyRoundtableSchedule> {
-        let mut config = RoundtableConfig {
+        let config = build_roundtable_config(
             top_k,
             mid_k,
             bottom_k,
-            here_tolerance: here_tolerance.max(0.0),
-            ..RoundtableConfig::default()
-        };
-        #[cfg(feature = "psychoid")]
-        {
-            if psychoid {
-                config = if psychoid_log {
-                    config.enable_psychoid_with_log()
-                } else {
-                    config.enable_psychoid()
-                };
-            }
-        }
-        #[cfg(feature = "psi")]
-        {
-            if psi {
-                config = config.enable_psi();
-            }
-        }
-        #[cfg(feature = "collapse")]
-        {
-            if collapse {
-                config = config.enable_collapse();
-            }
-        }
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
         if let Some(dist_cfg) = dist {
             self.inner.configure_distribution(dist_cfg.inner.clone());
         } else {
@@ -1672,98 +1749,17 @@ impl PyModuleTrainer {
         batches: &Bound<'_, PyAny>,
         schedule: &PyRoundtableSchedule,
     ) -> PyResult<PyEpochStats> {
-        let as_loader = batches.extract::<PyRef<PyDataLoader>>();
-        if let Ok(loader) = as_loader {
-            if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
-                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                    let stats = convert(self.inner.train_epoch(
-                        seq.borrow_mut()?,
-                        mse.inner_mut(),
-                        loader.clone_inner(),
-                        &schedule.inner,
-                    ))?;
-                    return Ok(PyEpochStats::from_stats(stats));
-                }
-            }
-
-            if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
-                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                    let stats = convert(self.inner.train_epoch(
-                        linear.borrow_mut()?,
-                        mse.inner_mut(),
-                        loader.clone_inner(),
-                        &schedule.inner,
-                    ))?;
-                    return Ok(PyEpochStats::from_stats(stats));
-                }
-            }
-
-            if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
-                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                    let stats = convert(self.inner.train_epoch(
-                        relu.borrow_mut()?,
-                        mse.inner_mut(),
-                        loader.clone_inner(),
-                        &schedule.inner,
-                    ))?;
-                    return Ok(PyEpochStats::from_stats(stats));
-                }
-            }
-        }
-
-        let dataset: Vec<(Tensor, Tensor)> = batches
-            .extract::<Vec<(PyTensor, PyTensor)>>()?
-            .into_iter()
-            .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
-            .collect();
-
-        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(self.inner.train_epoch(
-                    seq.borrow_mut()?,
-                    mse.inner_mut(),
-                    dataset.clone(),
-                    &schedule.inner,
-                ))?;
-                return Ok(PyEpochStats::from_stats(stats));
-            }
-        }
-
-        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(self.inner.train_epoch(
-                    linear.borrow_mut()?,
-                    mse.inner_mut(),
-                    dataset,
-                    &schedule.inner,
-                ))?;
-                return Ok(PyEpochStats::from_stats(stats));
-            }
-        }
-
-        if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(self.inner.train_epoch(
-                    relu.borrow_mut()?,
-                    mse.inner_mut(),
-                    dataset,
-                    &schedule.inner,
-                ))?;
-                return Ok(PyEpochStats::from_stats(stats));
-            }
-        }
-
-        Err(PyValueError::new_err(
-            "ModuleTrainer.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
-        ))
+        let stats =
+            run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
+        Ok(PyEpochStats::from_stats(stats))
     }
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "ModuleTrainer(curvature={}, hyper_lr={:.4}, fallback_lr={:.4})",
-            self.curvature(),
-            self.hyper_learning_rate(),
-            self.fallback_learning_rate()
+            "SpiralLightning(rows={}, cols={}, auto_prepare={})",
+            self.rows(),
+            self.cols(),
+            self.auto_prepare()
         ))
     }
 }
@@ -1938,35 +1934,16 @@ impl PySpiralSession {
         psi: bool,
         collapse: bool,
     ) -> PyRoundtableSchedule {
-        let mut config = RoundtableConfig {
+        let config = build_roundtable_config(
             top_k,
             mid_k,
             bottom_k,
-            here_tolerance: here_tolerance.max(0.0),
-            ..RoundtableConfig::default()
-        };
-        #[cfg(feature = "psychoid")]
-        {
-            if psychoid {
-                config = if psychoid_log {
-                    config.enable_psychoid_with_log()
-                } else {
-                    config.enable_psychoid()
-                };
-            }
-        }
-        #[cfg(feature = "psi")]
-        {
-            if psi {
-                config = config.enable_psi();
-            }
-        }
-        #[cfg(feature = "collapse")]
-        {
-            if collapse {
-                config = config.enable_collapse();
-            }
-        }
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
         PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
     }
 
@@ -1996,16 +1973,37 @@ impl PySpiralSession {
         ))
     }
 
-    #[pyo3(signature = (trainer, module, loss, batches, schedule))]
-    fn train_epoch(
-        &self,
-        trainer: &mut PyModuleTrainer,
-        module: &Bound<'_, PyAny>,
-        loss: &Bound<'_, PyAny>,
-        batches: &Bound<'_, PyAny>,
-        schedule: &PyRoundtableSchedule,
-    ) -> PyResult<PyEpochStats> {
-        trainer.train_epoch(module, loss, batches, schedule)
+    #[pyo3(signature = (*args))]
+    fn train_epoch(&self, args: &Bound<'_, PyTuple>) -> PyResult<PyEpochStats> {
+        match args.len() {
+            5 => {
+                let trainer = args.get_item(0)?;
+                let mut trainer = trainer.extract::<PyRefMut<PyModuleTrainer>>()?;
+                let module = args.get_item(1)?;
+                let loss = args.get_item(2)?;
+                let batches = args.get_item(3)?;
+                let schedule = args.get_item(4)?.extract::<PyRef<PyRoundtableSchedule>>()?;
+                trainer.train_epoch(&module, &loss, &batches, &*schedule)
+            }
+            4 => {
+                let module = args.get_item(0)?;
+                let loss = args.get_item(1)?;
+                let batches = args.get_item(2)?;
+                let schedule = args.get_item(3)?.extract::<PyRef<PyRoundtableSchedule>>()?;
+                let mut trainer = self.inner.trainer();
+                let stats = run_epoch_with_trainer(
+                    &mut trainer,
+                    &module,
+                    &loss,
+                    &batches,
+                    &schedule.inner,
+                )?;
+                Ok(PyEpochStats::from_stats(stats))
+            }
+            _ => Err(PyValueError::new_err(
+                "SpiralSession.train_epoch expects either (trainer, module, loss, batches, schedule) or (module, loss, batches, schedule)",
+            )),
+        }
     }
 
     #[pyo3(signature = (seed, sot=None))]
@@ -2212,6 +2210,98 @@ impl PyMeanSquaredError {
     fn __repr__(&self) -> PyResult<String> {
         Ok("MeanSquaredError()".to_string())
     }
+}
+
+fn run_epoch_with_trainer(
+    trainer: &mut ModuleTrainer,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
+    batches: &Bound<'_, PyAny>,
+    schedule: &RoundtableSchedule,
+) -> PyResult<EpochStats> {
+    if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(trainer.train_epoch(
+                    seq.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    schedule,
+                ))?;
+                return Ok(stats);
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(trainer.train_epoch(
+                    linear.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    schedule,
+                ))?;
+                return Ok(stats);
+            }
+        }
+
+        if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(trainer.train_epoch(
+                    relu.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    schedule,
+                ))?;
+                return Ok(stats);
+            }
+        }
+    }
+
+    let dataset: Vec<(Tensor, Tensor)> = batches
+        .extract::<Vec<(PyTensor, PyTensor)>>()?
+        .into_iter()
+        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+        .collect();
+
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                seq.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.clone(),
+                schedule,
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                linear.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.clone(),
+                schedule,
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                relu.borrow_mut()?,
+                mse.inner_mut(),
+                dataset,
+                schedule,
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    Err(PyValueError::new_err(
+        "ModuleTrainer.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
+    ))
 }
 
 #[pyclass(module = "spiraltorch.nn", name = "Relu")]
@@ -2840,6 +2930,43 @@ fn frac_fft_py(signal: Vec<Complex64>, inverse: bool) -> PyResult<Vec<Complex64>
         .collect())
 }
 
+#[pyfunction(name = "gemm")]
+#[pyo3(signature = (lhs, rhs, backend=None))]
+fn gemm_py(lhs: &PyTensor, rhs: &PyTensor, backend: Option<&str>) -> PyResult<PyTensor> {
+    let backend = parse_matmul_backend(backend)?;
+    Ok(PyTensor::from_tensor(convert(
+        lhs.as_tensor()
+            .matmul_with_backend(rhs.as_tensor(), backend),
+    )?))
+}
+
+#[pyfunction(name = "available_backends")]
+fn available_backends_py() -> Vec<&'static str> {
+    let mut options = vec!["auto", "faer", "naive"];
+    #[cfg(feature = "wgpu")]
+    {
+        options.push("wgpu");
+    }
+    options
+}
+
+#[pyfunction(name = "is_faer_available")]
+fn is_faer_available_py() -> bool {
+    faer_dense::is_available()
+}
+
+#[pyfunction(name = "is_wgpu_available")]
+fn is_wgpu_available_py() -> bool {
+    #[cfg(feature = "wgpu")]
+    {
+        return tensor_wgpu_dense::is_available();
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        false
+    }
+}
+
 #[pymodule]
 fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMeanSquaredError>()?;
@@ -2890,6 +3017,28 @@ fn dataset(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
+#[pymodule]
+fn linalg(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(gemm_py, m)?)?;
+    m.add_function(wrap_pyfunction!(available_backends_py, m)?)?;
+    m.add_function(wrap_pyfunction!(is_faer_available_py, m)?)?;
+    m.add_function(wrap_pyfunction!(is_wgpu_available_py, m)?)?;
+    m.setattr(
+        "__all__",
+        vec![
+            "gemm",
+            "available_backends",
+            "is_faer_available",
+            "is_wgpu_available",
+        ],
+    )?;
+    m.setattr(
+        "__doc__",
+        "Dense linear algebra helpers accelerated by faer (SIMD) and WGPU compute GEMM.",
+    )?;
+    Ok(())
+}
+
 /// Convenience helper for the TopK family.
 #[pyfunction]
 #[pyo3(signature = (rows, cols, k, device=None))]
@@ -2901,6 +3050,90 @@ fn plan_topk(
     device: Option<&str>,
 ) -> PyResult<PyObject> {
     plan(py, "topk", rows, cols, k, device)
+}
+
+#[pyfunction]
+#[pyo3(signature = (tensor, k, *, largest=true))]
+fn topk2d_py(tensor: &PyTensor, k: usize, largest: bool) -> PyResult<(PyTensor, Vec<Vec<usize>>)> {
+    let (rows, cols) = tensor.as_tensor().shape();
+    if k == 0 || k > cols {
+        return Err(PyValueError::new_err(
+            "k must be between 1 and the number of columns",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(rows * k);
+    let mut indices = Vec::with_capacity(rows);
+    let data = tensor.as_tensor().data();
+    for row in 0..rows {
+        let slice = &data[row * cols..(row + 1) * cols];
+        let mut pairs: Vec<(usize, f32)> = slice.iter().copied().enumerate().collect();
+        pairs.sort_unstable_by(|a, b| {
+            let ord = a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal);
+            if largest {
+                ord.reverse()
+            } else {
+                ord
+            }
+        });
+        let mut row_indices = Vec::with_capacity(k);
+        for (idx, value) in pairs.into_iter().take(k) {
+            values.push(value);
+            row_indices.push(idx);
+        }
+        indices.push(row_indices);
+    }
+
+    let values_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, values))?);
+    Ok((values_tensor, indices))
+}
+
+#[pyfunction]
+#[pyo3(signature = (tensor, k, *, device="auto", largest=true))]
+fn topk2d_tensor_py(
+    tensor: &PyTensor,
+    k: usize,
+    device: &str,
+    largest: bool,
+) -> PyResult<(PyTensor, PyTensor)> {
+    let device = device.to_ascii_lowercase();
+    if device != "auto" && device != "cpu" {
+        return Err(PyValueError::new_err(
+            "only 'auto' or 'cpu' devices are supported for topk2d_tensor",
+        ));
+    }
+
+    let (rows, cols) = tensor.as_tensor().shape();
+    if k == 0 || k > cols {
+        return Err(PyValueError::new_err(
+            "k must be between 1 and the number of columns",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(rows * k);
+    let mut indices = Vec::with_capacity(rows * k);
+    let data = tensor.as_tensor().data();
+    for row in 0..rows {
+        let slice = &data[row * cols..(row + 1) * cols];
+        let mut pairs: Vec<(usize, f32)> = slice.iter().copied().enumerate().collect();
+        pairs.sort_unstable_by(|a, b| {
+            let ord = a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal);
+            if largest {
+                ord.reverse()
+            } else {
+                ord
+            }
+        });
+
+        for (idx, value) in pairs.into_iter().take(k) {
+            values.push(value);
+            indices.push(idx as f32);
+        }
+    }
+
+    let values_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, values))?);
+    let indices_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, indices))?);
+    Ok((values_tensor, indices_tensor))
 }
 
 /// Surface ROCm probing hints for Python callers.
@@ -2967,6 +3200,9 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let dataset_mod = PyModule::new_bound(_py, "dataset")?;
     dataset(_py, &dataset_mod)?;
     m.add_submodule(&dataset_mod)?;
+    let linalg_mod = PyModule::new_bound(_py, "linalg")?;
+    linalg(_py, &linalg_mod)?;
+    m.add_submodule(&linalg_mod)?;
     let sot_mod = PyModule::new_bound(_py, "sot")?;
     sot::module(_py, &sot_mod)?;
     m.add_submodule(&sot_mod)?;
@@ -2991,6 +3227,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRoundtableSchedule>()?;
     m.add_class::<PyEpochStats>()?;
     m.add_class::<PyModuleTrainer>()?;
+    m.add_class::<PySpiralLightning>()?;
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
 
@@ -3018,11 +3255,13 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "RoundtableSchedule",
             "EpochStats",
             "ModuleTrainer",
+            "SpiralLightning",
             "SpiralSessionBuilder",
             "SpiralSession",
             "nn",
             "frac",
             "dataset",
+            "linalg",
             "sot",
         ],
     )?;
@@ -3031,7 +3270,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Provide a tiny doc string that highlights the zero-shim approach.
     m.setattr(
         "__doc__",
-        "Rust-first training primitives for SpiralTorch: tensors, hypergrads, and unified planners.",
+        "Rust-first training primitives for SpiralTorch: tensors, hypergrads, top-k planners, and unified datasets.",
     )?;
 
     Ok(())
