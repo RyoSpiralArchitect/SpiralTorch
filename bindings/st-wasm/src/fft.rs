@@ -1,10 +1,11 @@
-use js_sys::{Float32Array, JSON};
+use js_sys::Float32Array;
+use serde::{Deserialize, Serialize};
 use st_core::backend::spiralk_fft::SpiralKFftPlan;
 use st_core::backend::wgpu_heuristics::{self, Choice};
 use st_frac::fft::{self, Complex32};
 use wasm_bindgen::prelude::*;
 
-use crate::utils::{js_error, js_value_to_string, stringify_js_value};
+use crate::utils::{js_error, json_to_js_value, stringify_js_value};
 
 #[wasm_bindgen]
 pub struct WasmFftPlan {
@@ -70,31 +71,28 @@ impl WasmFftPlan {
         self.plan.emit_spiralk_hint()
     }
 
-    /// Serialise the plan into a JSON string so it can be persisted or sent over the network.
-    #[wasm_bindgen(js_name = toJson)]
-    pub fn to_json(&self) -> Result<String, JsValue> {
-        serde_json::to_string(&self.plan).map_err(js_error)
+    #[wasm_bindgen(js_name = fromJson)]
+    pub fn from_json(json: &str) -> Result<WasmFftPlan, JsValue> {
+        let serde: WasmFftPlanSerde = serde_json::from_str(json).map_err(js_error)?;
+        Ok(WasmFftPlan::from_plan(serde.into()))
     }
 
-    /// Convert the plan into a plain JavaScript object with the same fields as [`toJson`].
+    #[wasm_bindgen(js_name = fromObject)]
+    pub fn from_object(value: JsValue) -> Result<WasmFftPlan, JsValue> {
+        let json = stringify_js_value(&value)?;
+        Self::from_json(&json)
+    }
+
+    #[wasm_bindgen(js_name = toJson)]
+    pub fn to_json(&self) -> Result<String, JsValue> {
+        let serde = WasmFftPlanSerde::from(self);
+        serde_json::to_string(&serde).map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = toObject)]
     pub fn to_object(&self) -> Result<JsValue, JsValue> {
         let json = self.to_json()?;
-        JSON::parse(&json).map_err(|err| js_error(js_value_to_string(&err)))
-    }
-
-    /// Rebuild a plan from a JSON string produced by [`toJson`].
-    #[wasm_bindgen(js_name = fromJson)]
-    pub fn from_json(json: &str) -> Result<WasmFftPlan, JsValue> {
-        let plan = serde_json::from_str::<SpiralKFftPlan>(json).map_err(js_error)?;
-        Ok(WasmFftPlan::from_plan(plan))
-    }
-
-    /// Rebuild a plan from a plain JavaScript object with the same fields as [`toObject`].
-    #[wasm_bindgen(js_name = fromObject)]
-    pub fn from_object(value: &JsValue) -> Result<WasmFftPlan, JsValue> {
-        let json = stringify_js_value(value)?;
-        Self::from_json(&json)
+        json_to_js_value(&json)
     }
 }
 
@@ -121,6 +119,32 @@ pub fn auto_fft_wgsl(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<Str
 #[wasm_bindgen(js_name = "auto_fft_spiralk")]
 pub fn auto_fft_spiralk(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<String> {
     auto_plan_internal(rows, cols, k, subgroup).map(|plan| plan.spiralk_hint())
+}
+
+#[wasm_bindgen(js_name = "auto_fft_plan_json")]
+pub fn auto_fft_plan_json(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    subgroup: bool,
+) -> Result<Option<String>, JsValue> {
+    match auto_plan_internal(rows, cols, k, subgroup) {
+        Some(plan) => Ok(Some(plan.to_json()?)),
+        None => Ok(None),
+    }
+}
+
+#[wasm_bindgen(js_name = "auto_fft_plan_object")]
+pub fn auto_fft_plan_object(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    subgroup: bool,
+) -> Result<Option<JsValue>, JsValue> {
+    match auto_plan_internal(rows, cols, k, subgroup) {
+        Some(plan) => Ok(Some(plan.to_object()?)),
+        None => Ok(None),
+    }
 }
 
 #[wasm_bindgen(js_name = "fft_forward")]
@@ -179,6 +203,49 @@ fn complex_to_interleaved(data: &[Complex32]) -> Vec<f32> {
     host
 }
 
+#[derive(Serialize, Deserialize)]
+struct WasmFftPlanSerde {
+    radix: u32,
+    #[serde(rename = "tileCols")]
+    tile_cols: u32,
+    segments: u32,
+    subgroup: bool,
+}
+
+impl From<&SpiralKFftPlan> for WasmFftPlanSerde {
+    fn from(plan: &SpiralKFftPlan) -> Self {
+        Self {
+            radix: plan.radix,
+            tile_cols: plan.tile_cols,
+            segments: plan.segments,
+            subgroup: plan.subgroup,
+        }
+    }
+}
+
+impl From<&WasmFftPlan> for WasmFftPlanSerde {
+    fn from(plan: &WasmFftPlan) -> Self {
+        Self::from(&plan.plan)
+    }
+}
+
+impl From<WasmFftPlanSerde> for SpiralKFftPlan {
+    fn from(value: WasmFftPlanSerde) -> Self {
+        SpiralKFftPlan {
+            radix: value.radix.max(2).min(4),
+            tile_cols: value.tile_cols.max(1),
+            segments: value.segments.max(1),
+            subgroup: value.subgroup,
+        }
+    }
+}
+
+impl From<WasmFftPlanSerde> for WasmFftPlan {
+    fn from(value: WasmFftPlanSerde) -> Self {
+        WasmFftPlan::from_plan(value.into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +269,28 @@ mod tests {
         fft::fft_inplace(&mut complex, true).unwrap();
         let restored = complex_to_interleaved(&complex);
         assert!(restored[0] - 1.0 < 1e-5);
+    }
+
+    #[test]
+    fn wasm_fft_plan_json_roundtrip() {
+        let plan = WasmFftPlan::new(4, 2048, 3, true);
+        let json = plan.to_json().expect("json serialisation");
+        let parsed = WasmFftPlan::from_json(&json).expect("json parse");
+        assert_eq!(parsed.radix(), 4);
+        assert_eq!(parsed.tile_cols(), 2048);
+        assert_eq!(parsed.segments(), 3);
+        assert!(parsed.subgroup());
+    }
+
+    #[test]
+    fn auto_plan_json_matches_structured_plan() {
+        let plan = auto_plan_internal(256, 8192, 128, true).expect("plan expected");
+        let json = auto_fft_plan_json(256, 8192, 128, true)
+            .expect("result")
+            .expect("json plan");
+        let parsed = WasmFftPlan::from_json(&json).expect("parse json");
+        assert_eq!(plan.radix(), parsed.radix());
+        assert_eq!(plan.tile_cols(), parsed.tile_cols());
+        assert_eq!(plan.segments(), parsed.segments());
     }
 }
