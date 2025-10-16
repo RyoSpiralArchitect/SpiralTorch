@@ -142,6 +142,10 @@ model = Sequential([Linear(2, 2, name="layer")])
 loss = MeanSquaredError()
 session.prepare_module(model)
 
+# Stream desire impulses back into the A/B/C roundtable.
+bridge = st.DesireRoundtableBridge(blend=0.4, drift_gain=0.5)
+trainer.enable_desire_roundtable_bridge(bridge)
+
 loader = (
     st.dataset.from_vec([
         (st.Tensor(1, 2, [0.0, 1.0]), st.Tensor(1, 2, [0.0, 1.0])),
@@ -155,6 +159,10 @@ loader = (
 stats = session.train_epoch(trainer, model, loss, loader, schedule)
 print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")
 print(st.get_psychoid_stats())
+
+summary = trainer.desire_roundtable_summary()
+if summary:
+    print("desire barycentric:", summary["mean_above"], summary["mean_here"], summary["mean_beneath"])
 ```
 
 ### SpiralLightning harness
@@ -367,9 +375,16 @@ route = session.atlas_route(limit=6)
 print("atlas history", route.length, [frame.timestamp for frame in route.frames])
 
 summary = session.atlas_route_summary(limit=6)
-print("atlas summary", summary.frames, summary.mean_loop_support)
+print(
+    "atlas summary",
+    summary.frames,
+    summary.mean_loop_support,
+    summary.loop_std,
+    summary.collapse_trend,
+    summary.z_signal_trend,
+)
 for district in summary.districts():
-    print("summary", district.name, district.coverage, district.delta)
+    print("summary", district.name, district.coverage, district.delta, district.std_dev)
 if summary.maintainer_status:
     print("maintainer", summary.maintainer_status, summary.maintainer_diagnostic)
 ```

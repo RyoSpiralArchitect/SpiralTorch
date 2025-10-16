@@ -10,6 +10,7 @@ use st_core::telemetry::hub::LoopbackEnvelope;
 use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
+use st_core::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
 use st_tensor::pure::{DifferentialResonance, Tensor};
 
 /// Configuration describing how geometric observability is converted into
@@ -112,6 +113,7 @@ pub struct GeometryFeedback {
     max_scale: f32,
     z_rank: usize,
     leech_weight: f64,
+    leech_projector: LeechProjector,
     ramanujan_pi: f64,
     softening_beta: f32,
     base_softening_beta: f32,
@@ -151,6 +153,10 @@ impl GeometryFeedback {
             clamped_max = (min_scale + 2.0).clamp(2.0, 3.0);
         }
         min_scale = min_scale.min(clamped_max - f32::EPSILON).max(f32::EPSILON);
+        let z_rank = config.z_space_rank.max(1);
+        let leech_weight = config.leech_density_weight.max(0.0);
+        let ramanujan_pi = Self::ramanujan_pi(config.ramanujan_iterations.max(1));
+        let softening_beta = config.softening_beta.max(0.0);
         Self {
             coalgebra: ObservationalCoalgebra::new(config.observability),
             threshold: config.activation_threshold.abs().max(f32::EPSILON),
@@ -158,11 +164,12 @@ impl GeometryFeedback {
             window,
             min_scale,
             max_scale: clamped_max,
-            z_rank: config.z_space_rank.max(1),
-            leech_weight: config.leech_density_weight.max(0.0),
-            ramanujan_pi: Self::ramanujan_pi(config.ramanujan_iterations.max(1)),
-            softening_beta: config.softening_beta.max(0.0),
-            base_softening_beta: config.softening_beta.max(0.0),
+            z_rank,
+            leech_weight,
+            leech_projector: LeechProjector::new(z_rank, leech_weight),
+            ramanujan_pi,
+            softening_beta,
+            base_softening_beta: softening_beta,
             rank_history: VecDeque::with_capacity(window),
             pressure_history: VecDeque::with_capacity(window),
             scale_history: VecDeque::with_capacity(window),
@@ -374,8 +381,7 @@ impl GeometryFeedback {
         }
         let averaged = self.history.iter().copied().sum::<f64>() / self.history.len() as f64;
         let geodesic = self.geodesic_projection(resonance);
-        let densified =
-            self.leech_weight * LEECH_PACKING_DENSITY * geodesic * (self.z_rank as f64).sqrt();
+        let densified = self.leech_projector.enrich(geodesic);
         let normalized = ((averaged + densified) / self.ramanujan_pi).clamp(0.0, 1.0);
         let softened = self.soft_project(normalized as f32);
         let mut scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
@@ -550,6 +556,8 @@ impl GeometryFeedback {
         if self.min_scale >= self.max_scale {
             self.min_scale = (self.max_scale * 0.5).max(f32::EPSILON);
         }
+
+        self.leech_projector = LeechProjector::new(self.z_rank, self.leech_weight);
     }
 
     fn ramanujan_pi(iterations: usize) -> f64 {
@@ -568,8 +576,6 @@ impl GeometryFeedback {
         (prefactor * sum).recip()
     }
 }
-
-const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
 
 #[cfg(test)]
 mod tests {

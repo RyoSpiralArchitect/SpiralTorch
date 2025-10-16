@@ -42,27 +42,23 @@ pub use golden::{
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
+pub use language::pipeline::{
+    LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
+};
 pub use language::entropy as desire_entropy;
 pub use language::{
     constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesireLagrangian,
     DesireLogRecord, DesireLogReplay, DesireLogbook, DesirePhase, DesirePipeline,
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRewriteTrigger,
-    DesireSchedule, DesireSolution, DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary,
-    DesireTriggerBuffer, DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver,
-    RepressionField, SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
-pub use language::pipeline::{
-    LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
+    DesireRoundtableBridge, DesireRoundtableEvent, DesireRoundtableImpulse,
+    DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireTrainerBridge,
+    DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer, DesireTriggerEvent,
+    DesireWeights, DistanceMatrix, EntropicGwSolver, RepressionField, SemanticBridge, SparseKernel,
+    SymbolGeometry, TemperatureController,
 };
-pub use language::{
-    constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
-    DesireChannelSink, DesireLagrangian, DesireLogRecord, DesireLogReplay, DesireLogbook,
-    DesirePhase, DesirePipeline, DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink,
-    DesireRewriteTrigger, DesireSchedule, DesireSolution, DesireTrainerBridge, DesireTrainerEvent,
-    DesireTrainerSummary, DesireTriggerBuffer, DesireTriggerEvent, DesireWeights, DistanceMatrix,
-    EntropicGwSolver, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
-    TemperatureController,
-};
+#[cfg(feature = "psi")]
+pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
 pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, MaxPool2d};
 pub use layers::linear::Linear;
 pub use layers::sequential::Sequential;
@@ -78,11 +74,14 @@ pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
 pub use plan::RankPlanner;
 pub use roundtable::{
-    simulate_proposal_locally, BlackcatModerator, DistConfig, DistMode, GlobalProposal, HeurOp,
-    HeurOpKind, HeurOpLog, MetaConductor, MetaSummary, ModeratorMinutes, OutcomeBand,
-    RoundtableNode,
+    simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, DistMode,
+    GlobalProposal, HeurOp, HeurOpKind, HeurOpLog, MetaConductor, MetaSummary, ModeratorMinutes,
+    OutcomeBand, RoundtableNode,
 };
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
+pub use st_core::runtime::blackcat::{
+    BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
+};
 pub use trainer::{EpochStats, ModuleTrainer};
 
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};

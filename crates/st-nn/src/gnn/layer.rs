@@ -70,17 +70,15 @@ impl ZSpaceGraphConvolution {
 
     fn record_forward_flows(&self, flows: Vec<NodeFlowSample>) {
         if let Some(tracer) = &self.tracer {
-            if let Ok(mut guard) = tracer.lock() {
-                guard.begin_layer(self.name.clone(), self.curvature, flows);
-            }
+            let mut guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
+            guard.begin_layer(self.name.clone(), self.curvature, flows);
         }
     }
 
     fn record_backward_updates(&self, weight: f32, bias: f32) {
         if let Some(tracer) = &self.tracer {
-            if let Ok(mut guard) = tracer.lock() {
-                guard.record_weight_update(weight, Some(bias));
-            }
+            let mut guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
+            guard.record_weight_update(weight, Some(bias));
         }
     }
 }
@@ -190,6 +188,11 @@ mod tests {
         let grad_output = Tensor::from_vec(2, 1, vec![0.1, -0.2]).unwrap();
         let _ = layer.forward(&input).unwrap();
         let _ = layer.backward(&input, &grad_output).unwrap();
+        let reports = tracer
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .layers()
+            .to_vec();
         let reports = tracer.lock().unwrap().layers().to_vec();
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].layer, "gnn");

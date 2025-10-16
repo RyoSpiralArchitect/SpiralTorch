@@ -108,6 +108,18 @@ pub fn base_choice_js(rows: u32, cols: u32, k: u32, subgroup: bool) -> Result<Js
     ))
 }
 
+/// Emit the auto-generated WGSL kernel using the native heuristics pipeline.
+#[wasm_bindgen]
+pub fn auto_fft_wgsl(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<String> {
+    wgpu_heuristics::auto_fft_wgsl(rows, cols, k, subgroup)
+}
+
+/// Emit the SpiralK hint associated with the generated WGSL kernel.
+#[wasm_bindgen]
+pub fn auto_fft_spiralk(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<String> {
+    wgpu_heuristics::auto_fft_spiralk(rows, cols, k, subgroup)
+}
+
 fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> Choice {
     let max_wg = if subgroup { 256 } else { 128 };
     let caps = DeviceCaps::wgpu(32, subgroup, max_wg);
