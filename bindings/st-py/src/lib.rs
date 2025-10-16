@@ -23,15 +23,9 @@ use st_backend_hip::{
 };
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
-use st_core::ecosystem::{
-    ConnectorEvent as CoreConnectorEvent, DistributionSummary as CoreDistributionSummary,
-    EcosystemCapacity, EcosystemRegistry, EcosystemReport as CoreEcosystemReport,
-    HeuristicChoiceSummary as CoreHeuristicChoiceSummary,
-    HeuristicDecision as CoreHeuristicDecision, MetricDigest as CoreMetricDigest,
-    MetricSample as CoreMetricSample, RankPlanSummary as CoreRankPlanSummary,
-    RoundtableConfigSummary as CoreRoundtableConfigSummary,
-    RoundtableSummary as CoreRoundtableSummary,
-};
+use st_core::config::self_rewrite::SelfRewriteCfg;
+use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_core::telemetry::hub::{self, DesirePhaseTelemetry, DesireStepTelemetry};
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::DriveCmd;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
@@ -53,52 +47,6 @@ use st_core::ecosystem::{
     RoundtableConfigSummary as CoreRoundtableConfigSummary,
     RoundtableSummary as CoreRoundtableSummary,
 };
-#[cfg(feature = "collapse")]
-use st_core::engine::collapse_drive::DriveCmd;
-use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::atlas::{
-    AtlasDistrict, AtlasDistrictSummary, AtlasFrame, AtlasMetric, AtlasRoute, AtlasRouteSummary,
-};
-use st_core::telemetry::chrono::{
-    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary,
-};
-use st_core::telemetry::hub;
-use st_core::telemetry::maintainer::MaintainerReport;
-use st_core::ecosystem::{
-    ConnectorEvent as CoreConnectorEvent, DistributionSummary as CoreDistributionSummary,
-    EcosystemCapacity, EcosystemRegistry, EcosystemReport as CoreEcosystemReport,
-    HeuristicChoiceSummary as CoreHeuristicChoiceSummary,
-    HeuristicDecision as CoreHeuristicDecision, MetricDigest as CoreMetricDigest,
-    MetricSample as CoreMetricSample, RankPlanSummary as CoreRankPlanSummary,
-    RoundtableConfigSummary as CoreRoundtableConfigSummary,
-    RoundtableSummary as CoreRoundtableSummary,
-};
-#[cfg(feature = "collapse")]
-use st_core::engine::collapse_drive::DriveCmd;
-use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::atlas::{AtlasDistrict, AtlasFrame, AtlasMetric, AtlasRoute};
-use st_core::telemetry::chrono::{
-    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary,
-};
-use st_core::telemetry::hub;
-use st_core::telemetry::maintainer::MaintainerReport;
-use st_core::ecosystem::{
-    ConnectorEvent as CoreConnectorEvent, DistributionSummary as CoreDistributionSummary,
-    EcosystemRegistry, EcosystemReport as CoreEcosystemReport,
-    HeuristicChoiceSummary as CoreHeuristicChoiceSummary,
-    HeuristicDecision as CoreHeuristicDecision, RankPlanSummary as CoreRankPlanSummary,
-    RoundtableConfigSummary as CoreRoundtableConfigSummary,
-    RoundtableSummary as CoreRoundtableSummary,
-};
-use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::atlas::{AtlasFrame, AtlasMetric};
-use st_core::telemetry::chrono::{
-    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary,
-};
-use st_core::telemetry::hub;
-use st_core::telemetry::maintainer::{MaintainerConfig, MaintainerReport, MaintainerStatus};
-use st_core::telemetry::chrono::{
-    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary,
 };
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::runtime::blackcat::BlackcatRuntimeStats;
@@ -112,12 +60,16 @@ use st_frac::{
 use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
-    Conv1d as NnConv1d, DataLoader as NnDataLoader, DesireRoundtableBridge,
-    DesireRoundtableSummary, DifferentialTrace, DistConfig, DistMode, EpochStats,
-    LightningConfig as NnLightningConfig, Linear as NnLinear, Loss, MeanSquaredError, Module,
-    ModuleTrainer, Relu as NnRelu, RoundtableConfig, RoundtableSchedule,
-    Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
-    SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
+    constant, warmup, ConceptHint, Conv1d as NnConv1d, DataLoader as NnDataLoader,
+    DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport, DesireLagrangian, DesireLogbook,
+    DesirePhase, DesirePipeline, DesirePipelineBuilder, DesireRewriteTrigger,
+    DesireRoundtableBridge, DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireWeights,
+    DifferentialTrace, DistConfig, DistMode, EpochStats, LightningConfig as NnLightningConfig,
+    Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer, Relu as NnRelu,
+    RepressionField, RoundtableConfig, RoundtableSchedule, SemanticBridge,
+    Sequential as NnSequential, SparseKernel, SpiralLightning as NnSpiralLightning, SpiralSession,
+    SpiralSessionBuilder, SymbolGeometry, TemperatureController, WaveRnn as NnWaveRnn,
+    ZSpaceProjector as NnZSpaceProjector,
 };
 #[cfg(feature = "golden")]
 use st_nn::{
@@ -137,6 +89,7 @@ use st_tensor::{
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
     MatmulBackend, PureResult, Tensor, TensorBiome, TensorError,
 };
+use std::cell::RefCell;
 use st_text::{
     describe_atlas as text_describe_atlas, describe_frame as text_describe_frame,
     describe_resonance as text_describe_resonance, describe_timeline as text_describe_timeline,
@@ -146,7 +99,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DeviceRoute {
@@ -276,6 +229,87 @@ fn convert<T>(value: PureResult<T>) -> PyResult<T> {
     value.map_err(tensor_err)
 }
 
+fn desire_phase_name(phase: DesirePhase) -> &'static str {
+    match phase {
+        DesirePhase::Observation => "observation",
+        DesirePhase::Injection => "injection",
+        DesirePhase::Integration => "integration",
+    }
+}
+
+fn avoidance_report_to_py(py: Python<'_>, report: &DesireAvoidanceReport) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("tokens", report.tokens.clone())?;
+    dict.set_item("scores", report.scores.clone())?;
+    Ok(dict.into())
+}
+
+fn desire_weights_to_py(py: Python<'_>, weights: &DesireWeights) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("alpha", weights.alpha)?;
+    dict.set_item("beta", weights.beta)?;
+    dict.set_item("gamma", weights.gamma)?;
+    dict.set_item("lambda", weights.lambda)?;
+    Ok(dict.into())
+}
+
+fn desire_solution_to_py(py: Python<'_>, solution: &DesireSolution) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("indices", solution.indices.clone())?;
+    dict.set_item("probabilities", solution.probabilities.clone())?;
+    dict.set_item("logit_offsets", solution.logit_offsets.clone())?;
+    dict.set_item("temperature", solution.temperature)?;
+    dict.set_item("entropy", solution.entropy)?;
+    dict.set_item("phase", desire_phase_name(solution.phase))?;
+    dict.set_item("weights", desire_weights_to_py(py, &solution.weights)?)?;
+    dict.set_item("hypergrad_penalty", solution.hypergrad_penalty)?;
+    if let Some(report) = &solution.avoidance {
+        dict.set_item("avoidance", avoidance_report_to_py(py, report)?)?;
+    } else {
+        dict.set_item("avoidance", py.None())?;
+    }
+    Ok(dict.into())
+}
+
+fn desire_trigger_to_py(py: Python<'_>, trigger: &DesireRewriteTrigger) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("report", avoidance_report_to_py(py, &trigger.report)?)?;
+    dict.set_item("mean_penalty", trigger.mean_penalty)?;
+    dict.set_item("mean_entropy", trigger.mean_entropy)?;
+    dict.set_item("temperature", trigger.temperature)?;
+    dict.set_item("samples", trigger.samples)?;
+    Ok(dict.into())
+}
+
+fn automated_step_to_py(py: Python<'_>, step: &DesireAutomatedStep) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("solution", desire_solution_to_py(py, &step.solution)?)?;
+    if let Some(trigger) = &step.trigger {
+        dict.set_item("trigger", desire_trigger_to_py(py, trigger)?)?;
+    } else {
+        dict.set_item("trigger", py.None())?;
+    }
+    Ok(dict.into())
+}
+
+fn concept_hint_from_py(hint: Option<&PyAny>) -> PyResult<ConceptHint> {
+    if let Some(value) = hint {
+        if value.is_none() {
+            return Ok(ConceptHint::Distribution(Vec::new()));
+        }
+        if let Ok(dist) = value.extract::<Vec<f32>>() {
+            return Ok(ConceptHint::Distribution(dist));
+        }
+        if let Ok(window) = value.extract::<Vec<(usize, f32)>>() {
+            return Ok(ConceptHint::Window(window));
+        }
+        return Err(PyValueError::new_err(
+            "concept_hint must be a sequence of floats or (index, weight) tuples",
+        ));
+    }
+    Ok(ConceptHint::Distribution(Vec::new()))
+}
+
 fn roundtable_summary_to_py<'py>(
     py: Python<'py>,
     summary: &DesireRoundtableSummary,
@@ -302,6 +336,43 @@ fn roundtable_summary_to_py<'py>(
             .unwrap_or(0.0),
     )?;
     Ok(dict.into())
+}
+
+fn desire_phase_to_str(phase: DesirePhaseTelemetry) -> &'static str {
+    match phase {
+        DesirePhaseTelemetry::Observation => "observation",
+        DesirePhaseTelemetry::Injection => "injection",
+        DesirePhaseTelemetry::Integration => "integration",
+    }
+}
+
+fn desire_telemetry_to_py<'py>(
+    py: Python<'py>,
+    sample: &DesireStepTelemetry,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    let timestamp_ms = sample
+        .timestamp
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as f64;
+    dict.set_item("timestamp_ms", timestamp_ms)?;
+    dict.set_item("phase", desire_phase_to_str(sample.phase))?;
+    dict.set_item("temperature", sample.temperature)?;
+    dict.set_item("entropy", sample.entropy)?;
+    dict.set_item("hypergrad_penalty", sample.hypergrad_penalty)?;
+    dict.set_item("avoidance_energy", sample.avoidance_energy)?;
+    dict.set_item("logit_energy", sample.logit_energy)?;
+    dict.set_item("trigger_emitted", sample.trigger_emitted)?;
+
+    let weights = PyDict::new_bound(py);
+    weights.set_item("alpha", sample.alpha)?;
+    weights.set_item("beta", sample.beta)?;
+    weights.set_item("gamma", sample.gamma)?;
+    weights.set_item("lambda", sample.lambda)?;
+    dict.set_item("weights", weights)?;
+
+    Ok(dict.into_py(py))
 }
 
 fn rl_err(err: SpiralRlError) -> PyErr {
@@ -1993,6 +2064,617 @@ impl PyChronoHarmonics {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "SparseKernel")]
+#[derive(Clone)]
+struct PySparseKernel {
+    inner: SparseKernel,
+}
+
+#[pymethods]
+impl PySparseKernel {
+    #[new]
+    #[pyo3(signature = (rows, epsilon=1e-6))]
+    fn new(rows: Vec<Vec<(usize, f32)>>, epsilon: f32) -> PyResult<Self> {
+        let inner = convert(SparseKernel::from_rows(rows, epsilon))?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (dense, epsilon=1e-6))]
+    fn from_dense(dense: Vec<Vec<f32>>, epsilon: f32) -> PyResult<Self> {
+        let inner = convert(SparseKernel::from_dense(dense, epsilon))?;
+        Ok(Self { inner })
+    }
+
+    fn clone_kernel(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn vocab_size(&self) -> usize {
+        self.inner.vocab_size()
+    }
+
+    fn to_dense(&self) -> Vec<Vec<f32>> {
+        self.inner.to_dense()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SymbolGeometry")]
+#[derive(Clone)]
+struct PySymbolGeometry {
+    inner: SymbolGeometry,
+}
+
+#[pymethods]
+impl PySymbolGeometry {
+    #[new]
+    fn new(syn: PyRef<PySparseKernel>, par: PyRef<PySparseKernel>) -> PyResult<Self> {
+        let inner = convert(SymbolGeometry::new(syn.inner.clone(), par.inner.clone()))?;
+        Ok(Self { inner })
+    }
+
+    fn clone_geometry(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn vocab_size(&self) -> usize {
+        self.inner.vocab_size()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "RepressionField")]
+#[derive(Clone)]
+struct PyRepressionField {
+    inner: RepressionField,
+}
+
+#[pymethods]
+impl PyRepressionField {
+    #[new]
+    fn new(values: Vec<f32>) -> PyResult<Self> {
+        let inner = convert(RepressionField::new(values))?;
+        Ok(Self { inner })
+    }
+
+    fn clone_field(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SemanticBridge")]
+#[derive(Clone)]
+struct PySemanticBridge {
+    inner: SemanticBridge,
+}
+
+#[pymethods]
+impl PySemanticBridge {
+    #[new]
+    #[pyo3(signature = (pi, concept_kernel, anchors=None, epsilon=1e-6))]
+    fn new(
+        pi: Vec<Vec<f32>>,
+        concept_kernel: PyRef<PySparseKernel>,
+        anchors: Option<Vec<(usize, usize)>>,
+        epsilon: f32,
+    ) -> PyResult<Self> {
+        let inner = convert(SemanticBridge::from_dense(
+            pi,
+            anchors.unwrap_or_default(),
+            epsilon,
+            concept_kernel.inner.clone(),
+        ))?;
+        Ok(Self { inner })
+    }
+
+    fn clone_bridge(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn vocab_size(&self) -> usize {
+        self.inner.vocab_size()
+    }
+
+    #[getter]
+    fn concept_count(&self) -> usize {
+        self.inner.concept_count()
+    }
+
+    fn row_marginal(&self) -> Vec<f32> {
+        self.inner.row_marginal().to_vec()
+    }
+
+    fn col_marginal(&self) -> Vec<f32> {
+        self.inner.col_marginal().to_vec()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ConceptHint")]
+#[derive(Clone)]
+struct PyConceptHint {
+    inner: ConceptHint,
+}
+
+#[pymethods]
+impl PyConceptHint {
+    #[staticmethod]
+    fn distribution(values: Vec<f32>) -> Self {
+        Self {
+            inner: ConceptHint::Distribution(values),
+        }
+    }
+
+    #[staticmethod]
+    fn window(weights: Vec<(usize, f32)>) -> Self {
+        Self {
+            inner: ConceptHint::Window(weights),
+        }
+    }
+
+    fn as_distribution(&self, bridge: PyRef<PySemanticBridge>) -> Vec<f32> {
+        self.inner.as_distribution(&bridge.inner)
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "TemperatureController")]
+#[derive(Clone)]
+struct PyTemperatureController {
+    inner: TemperatureController,
+}
+
+#[pymethods]
+impl PyTemperatureController {
+    #[new]
+    #[pyo3(signature = (value, target_entropy, eta, min, max))]
+    fn new(value: f32, target_entropy: f32, eta: f32, min: f32, max: f32) -> Self {
+        Self {
+            inner: TemperatureController::new(value, target_entropy, eta, min, max),
+        }
+    }
+
+    fn clone_controller(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn value(&self) -> f32 {
+        self.inner.value()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesireSchedule")]
+#[derive(Clone)]
+struct PyDesireSchedule {
+    inner: DesireSchedule,
+}
+
+#[pymethods]
+impl PyDesireSchedule {
+    #[staticmethod]
+    fn constant(value: f32) -> Self {
+        Self {
+            inner: constant(value),
+        }
+    }
+
+    #[staticmethod]
+    fn warmup(start: f32, end: f32, steps: u64) -> Self {
+        Self {
+            inner: warmup(start, end, steps),
+        }
+    }
+
+    fn clone_schedule(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SelfRewriteConfig")]
+#[derive(Clone, Copy)]
+struct PySelfRewriteConfig {
+    inner: SelfRewriteCfg,
+}
+
+#[pymethods]
+impl PySelfRewriteConfig {
+    #[new]
+    #[pyo3(signature = (score_thresh=0.02, min_samples=30, cooldown_sec=300))]
+    fn new(score_thresh: f32, min_samples: usize, cooldown_sec: u64) -> Self {
+        Self {
+            inner: SelfRewriteCfg {
+                score_thresh,
+                min_samples,
+                cooldown_sec,
+            },
+        }
+    }
+
+    fn clone_config(&self) -> Self {
+        Self { inner: self.inner }
+    }
+
+    #[getter]
+    fn score_thresh(&self) -> f32 {
+        self.inner.score_thresh
+    }
+
+    #[getter]
+    fn min_samples(&self) -> usize {
+        self.inner.min_samples
+    }
+
+    #[getter]
+    fn cooldown_sec(&self) -> u64 {
+        self.inner.cooldown_sec
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesireLagrangian", unsendable)]
+struct PyDesireLagrangian {
+    inner: Option<DesireLagrangian>,
+}
+
+impl PyDesireLagrangian {
+    fn take_inner(&mut self) -> PyResult<DesireLagrangian> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("DesireLagrangian has been consumed"))
+    }
+
+    fn map_inner<F>(&mut self, f: F) -> PyResult<()>
+    where
+        F: FnOnce(DesireLagrangian) -> DesireLagrangian,
+    {
+        let inner = self
+            .inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("DesireLagrangian has been consumed"))?;
+        self.inner = Some(f(inner));
+        Ok(())
+    }
+
+    fn inner(&self) -> PyResult<&DesireLagrangian> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("DesireLagrangian has been consumed"))
+    }
+}
+
+#[pymethods]
+impl PyDesireLagrangian {
+    #[new]
+    fn new(
+        geometry: PyRef<PySymbolGeometry>,
+        repression: PyRef<PyRepressionField>,
+        semantics: PyRef<PySemanticBridge>,
+        controller: PyRef<PyTemperatureController>,
+    ) -> PyResult<Self> {
+        let inner = convert(DesireLagrangian::new(
+            geometry.inner.clone(),
+            repression.inner.clone(),
+            semantics.inner.clone(),
+            controller.inner.clone(),
+        ))?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn is_consumed(&self) -> bool {
+        self.inner.is_none()
+    }
+
+    #[getter]
+    fn vocab_size(&self) -> PyResult<usize> {
+        Ok(self.inner()?.vocab_size())
+    }
+
+    fn set_lookahead(&mut self, iterations: usize) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_lookahead(iterations))
+    }
+
+    fn set_top_k(&mut self, k: Option<usize>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_top_k(k))
+    }
+
+    fn set_alpha_schedule(&mut self, schedule: PyRef<PyDesireSchedule>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_alpha_schedule(schedule.inner.clone()))
+    }
+
+    fn set_beta_schedule(&mut self, schedule: PyRef<PyDesireSchedule>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_beta_schedule(schedule.inner.clone()))
+    }
+
+    fn set_gamma_schedule(&mut self, schedule: PyRef<PyDesireSchedule>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_gamma_schedule(schedule.inner.clone()))
+    }
+
+    fn set_lambda_schedule(&mut self, schedule: PyRef<PyDesireSchedule>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_lambda_schedule(schedule.inner.clone()))
+    }
+
+    fn set_observation_horizon(&mut self, horizon: Option<u64>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_observation_horizon(horizon))
+    }
+
+    fn set_integration_horizon(&mut self, horizon: Option<u64>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_integration_horizon(horizon))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesireAutomation", unsendable)]
+struct PyDesireAutomation {
+    inner: Option<DesireAutomation>,
+}
+
+impl PyDesireAutomation {
+    fn take_inner(&mut self) -> PyResult<DesireAutomation> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("DesireAutomation has been consumed"))
+    }
+
+    fn inner(&self) -> PyResult<&DesireAutomation> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("DesireAutomation has been consumed"))
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut DesireAutomation> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("DesireAutomation has been consumed"))
+    }
+}
+
+#[pymethods]
+impl PyDesireAutomation {
+    #[new]
+    #[pyo3(signature = (desire, cfg=None))]
+    fn new(
+        mut desire: PyRefMut<PyDesireLagrangian>,
+        cfg: Option<PySelfRewriteConfig>,
+    ) -> PyResult<Self> {
+        let lagrangian = desire.take_inner()?;
+        let config = cfg
+            .map(|cfg| cfg.inner)
+            .unwrap_or_else(SelfRewriteCfg::default);
+        Ok(Self {
+            inner: Some(DesireAutomation::new(lagrangian, config)),
+        })
+    }
+
+    fn is_consumed(&self) -> bool {
+        self.inner.is_none()
+    }
+
+    fn trigger_count(&self) -> PyResult<u64> {
+        Ok(self.inner()?.trigger_count())
+    }
+
+    fn mean_penalty(&self) -> PyResult<f32> {
+        Ok(self.inner()?.mean_penalty())
+    }
+
+    fn mean_entropy(&self) -> PyResult<f32> {
+        Ok(self.inner()?.mean_entropy())
+    }
+
+    fn desire_vector(&self) -> PyResult<Vec<f32>> {
+        Ok(self.inner()?.desire_vector().to_vec())
+    }
+
+    fn report(&self, py: Python<'_>, limit: usize) -> PyResult<PyObject> {
+        let report = self.inner()?.report(limit);
+        avoidance_report_to_py(py, &report)
+    }
+
+    #[pyo3(signature = (logits, previous_token, concept_hint=None))]
+    fn step(
+        &mut self,
+        py: Python<'_>,
+        logits: Vec<f32>,
+        previous_token: usize,
+        concept_hint: Option<&PyAny>,
+    ) -> PyResult<PyObject> {
+        let hint = concept_hint_from_py(concept_hint)?;
+        let now = Instant::now();
+        let step = convert(self.inner_mut()?.step(&logits, previous_token, &hint, now))?;
+        automated_step_to_py(py, &step)
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesirePipelineBuilder", unsendable)]
+struct PyDesirePipelineBuilder {
+    builder: Option<DesirePipelineBuilder>,
+}
+
+impl PyDesirePipelineBuilder {
+    fn take_builder(&mut self) -> PyResult<DesirePipelineBuilder> {
+        self.builder.take().ok_or_else(|| {
+            PyValueError::new_err("DesirePipelineBuilder has already built a pipeline")
+        })
+    }
+}
+
+#[pymethods]
+impl PyDesirePipelineBuilder {
+    #[new]
+    fn new(mut automation: PyRefMut<PyDesireAutomation>) -> PyResult<Self> {
+        let automation_inner = automation.take_inner()?;
+        Ok(Self {
+            builder: Some(DesirePipeline::builder(automation_inner)),
+        })
+    }
+
+    #[pyo3(signature = (path, flush_every=None))]
+    fn with_logbook<'py>(
+        &'py mut self,
+        path: &str,
+        flush_every: Option<usize>,
+    ) -> PyResult<&'py mut Self> {
+        let builder = self.take_builder()?;
+        let logbook = if let Some(every) = flush_every {
+            convert(DesireLogbook::with_flush_every(path, every))?
+        } else {
+            convert(DesireLogbook::new(path))?
+        };
+        self.builder = Some(builder.with_logbook(logbook));
+        Ok(self)
+    }
+
+    fn with_telemetry<'py>(&'py mut self) -> PyResult<&'py mut Self> {
+        let builder = self.take_builder()?;
+        self.builder = Some(builder.with_telemetry());
+        Ok(self)
+    }
+
+    fn build(&mut self) -> PyResult<PyDesirePipeline> {
+        let builder = self.take_builder()?;
+        Ok(PyDesirePipeline::from_pipeline(builder.build()))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesirePipeline", unsendable)]
+struct PyDesirePipeline {
+    inner: RefCell<DesirePipeline>,
+}
+
+impl PyDesirePipeline {
+    fn from_pipeline(pipeline: DesirePipeline) -> Self {
+        Self {
+            inner: RefCell::new(pipeline),
+        }
+    }
+}
+
+#[pymethods]
+impl PyDesirePipeline {
+    #[pyo3(signature = (logits, previous_token, concept_hint=None))]
+    fn step(
+        &self,
+        py: Python<'_>,
+        logits: Vec<f32>,
+        previous_token: usize,
+        concept_hint: Option<&PyAny>,
+    ) -> PyResult<PyObject> {
+        let hint = concept_hint_from_py(concept_hint)?;
+        let step = convert(
+            self.inner
+                .borrow_mut()
+                .step_realtime(&logits, previous_token, &hint),
+        )?;
+        automated_step_to_py(py, &step)
+    }
+
+    fn flush(&self) -> PyResult<()> {
+        convert(self.inner.borrow_mut().flush())
+    }
+
+    #[getter]
+    fn sink_count(&self) -> usize {
+        self.inner.borrow().sink_count()
+    }
+
+    fn trigger_count(&self) -> u64 {
+        self.inner.borrow().automation().trigger_count()
+    }
+
+    fn desire_vector(&self) -> Vec<f32> {
+        self.inner.borrow().automation().desire_vector().to_vec()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesireRoundtableBridge")]
+#[derive(Clone)]
+struct PyDesireRoundtableBridge {
+    inner: DesireRoundtableBridge,
+}
+
+#[pymethods]
+impl PyDesireRoundtableBridge {
+    #[new]
+    #[pyo3(signature = (blend=0.35, drift_gain=0.35))]
+    fn new(blend: f32, drift_gain: f32) -> Self {
+        let inner = DesireRoundtableBridge::new()
+            .with_blend(blend)
+            .with_drift_gain(drift_gain);
+        Self { inner }
+    }
+
+    fn clone_bridge(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn impulse(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let impulse = convert(self.inner.impulse())?;
+        impulse
+            .map(|imp| {
+                let dict = PyDict::new(py);
+                dict.set_item(
+                    "multipliers",
+                    (imp.multipliers.0, imp.multipliers.1, imp.multipliers.2),
+                )?;
+                dict.set_item("drift", imp.drift)?;
+                dict.set_item(
+                    "timestamp",
+                    imp.timestamp
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0),
+                )?;
+                Ok(dict.into())
+            })
+            .transpose()
+    }
+
+    fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let summary = convert(self.inner.drain_summary())?;
+        summary
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
+struct PyModuleTrainer {
+    inner: ModuleTrainer,
+    roundtable_bridge: Option<DesireRoundtableBridge>,
+}
+
+impl PyModuleTrainer {
+    fn from_trainer(inner: ModuleTrainer) -> Self {
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
 #[pyclass(module = "spiraltorch", name = "ChronoLoopSignal")]
 #[derive(Clone)]
 struct PyChronoLoopSignal {
@@ -2006,6 +2688,22 @@ impl PyChronoLoopSignal {
 }
 
 #[pymethods]
+impl PyModuleTrainer {
+    #[new]
+    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01))]
+    fn new(
+        device: Option<&str>,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Self {
+        let caps = caps_for(device);
+        let inner =
+            ModuleTrainer::new(caps, curvature, hyper_learning_rate, fallback_learning_rate);
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
 impl PyChronoLoopSignal {
     #[getter]
     fn summary(&self) -> PyChronoSummary {
@@ -2081,6 +2779,47 @@ impl PyChronoLoopSignal {
     }
 }
 
+    #[pyo3(signature = (bridge=None, blend=0.35, drift_gain=0.35))]
+    fn enable_desire_roundtable_bridge(
+        &mut self,
+        bridge: Option<PyRef<PyDesireRoundtableBridge>>,
+        blend: f32,
+        drift_gain: f32,
+    ) {
+        let selected = if let Some(handle) = bridge {
+            handle.inner.clone()
+        } else {
+            DesireRoundtableBridge::new()
+                .with_blend(blend)
+                .with_drift_gain(drift_gain)
+        };
+        self.inner.enable_desire_roundtable_bridge(selected.clone());
+        self.roundtable_bridge = Some(selected);
+    }
+
+    fn disable_desire_roundtable_bridge(&mut self) {
+        self.inner.disable_desire_roundtable_bridge();
+        self.roundtable_bridge = None;
+    }
+
+    fn desire_roundtable_bridge(&self) -> Option<PyDesireRoundtableBridge> {
+        self.roundtable_bridge
+            .as_ref()
+            .map(|bridge| PyDesireRoundtableBridge {
+                inner: bridge.clone(),
+            })
+    }
+
+    fn desire_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        self.inner
+            .desire_roundtable_summary()
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
+    }
+
+    #[pyo3(signature = (threshold, participants=2))]
+    fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
+        self.inner.install_meta_conductor(threshold, participants);
 #[pymethods]
 impl PyChronoSummary {
     #[getter]
@@ -2394,6 +3133,1703 @@ impl PyCollapsePulse {
         self.command_kind()
     }
 
+    #[getter]
+    fn loop_signal(&self) -> Option<PyChronoLoopSignal> {
+        self.pulse
+            .loop_signal
+            .clone()
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    fn command_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        match self.pulse.command {
+            DriveCmd::Collapse {
+                grad_scale,
+                max_norm,
+                lr_decay,
+            } => {
+                dict.set_item("grad_scale", grad_scale)?;
+                dict.set_item("max_norm", max_norm)?;
+                dict.set_item("lr_decay", lr_decay)?;
+            }
+            DriveCmd::Bloom { lr_mul } => {
+                dict.set_item("lr_mul", lr_mul)?;
+            }
+            DriveCmd::None => {}
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.pulse.step)?;
+        dict.set_item("total", self.pulse.total)?;
+        dict.set_item("command", self.command_kind())?;
+        dict.set_item("params", self.command_params(py)?)?;
+        if let Some(signal) = self.pulse.loop_signal.clone() {
+            dict.set_item(
+                "loop_signal",
+                PyChronoLoopSignal::from_signal(signal).as_dict(py)?,
+            )?;
+        } else {
+            dict.set_item("loop_signal", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "CollapsePulse(step={}, total={:.3}, command={})",
+            self.pulse.step,
+            self.pulse.total,
+            self.command_kind()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoFrame")]
+#[derive(Clone)]
+struct PyChronoFrame {
+    frame: ChronoFrame,
+}
+
+impl PyChronoFrame {
+    fn from_frame(frame: ChronoFrame) -> Self {
+        Self { frame }
+    }
+
+    fn as_frame(&self) -> &ChronoFrame {
+        &self.frame
+    }
+
+    fn into_frame(self) -> ChronoFrame {
+        self.frame
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoSummary")]
+struct PyChronoSummary {
+    summary: ChronoSummary,
+}
+
+impl PyChronoSummary {
+    fn from_summary(summary: ChronoSummary) -> Self {
+        Self { summary }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasMetric")]
+#[derive(Clone)]
+struct PyAtlasMetric {
+    metric: AtlasMetric,
+}
+
+impl PyAtlasMetric {
+    fn from_metric(metric: AtlasMetric) -> Self {
+        Self { metric }
+    }
+}
+
+#[pymethods]
+impl PyAtlasMetric {
+    #[getter]
+    fn name(&self) -> &str {
+        &self.metric.name
+    }
+
+    #[getter]
+    fn value(&self) -> f32 {
+        self.metric.value
+    }
+
+    #[getter]
+    fn district(&self) -> Option<String> {
+        self.metric.district().map(|name| name.to_string())
+    }
+
+    fn as_tuple(&self) -> (String, f32) {
+        (self.metric.name.clone(), self.metric.value)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        if let Some(district) = self.metric.district() {
+            Ok(format!(
+                "AtlasMetric(name={}, value={:.3}, district={})",
+                self.metric.name, self.metric.value, district
+            ))
+        } else {
+            Ok(format!(
+                "AtlasMetric(name={}, value={:.3})",
+                self.metric.name, self.metric.value
+            ))
+        }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasDistrict")]
+#[derive(Clone)]
+struct PyAtlasDistrict {
+    district: AtlasDistrict,
+}
+
+impl PyAtlasDistrict {
+    fn from_district(district: AtlasDistrict) -> Self {
+        Self { district }
+    }
+}
+
+#[pymethods]
+impl PyAtlasDistrict {
+    #[getter]
+    fn name(&self) -> &str {
+        &self.district.name
+    }
+
+    #[getter]
+    fn mean(&self) -> f32 {
+        self.district.mean
+    }
+
+    #[getter]
+    fn span(&self) -> f32 {
+        self.district.span
+    }
+
+    fn metrics(&self) -> Vec<PyAtlasMetric> {
+        self.district
+            .metrics
+            .iter()
+            .cloned()
+            .map(PyAtlasMetric::from_metric)
+            .collect()
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasDistrict(name={}, mean={:.3}, span={:.3}, metrics={})",
+            self.district.name,
+            self.district.mean,
+            self.district.span,
+            self.district.metrics.len()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasFrame")]
+#[derive(Clone)]
+struct PyAtlasFrame {
+    frame: AtlasFrame,
+}
+
+impl PyAtlasFrame {
+    fn from_frame(frame: AtlasFrame) -> Self {
+        Self { frame }
+    }
+}
+
+#[pymethods]
+impl PyAtlasFrame {
+    #[getter]
+    fn timestamp(&self) -> f32 {
+        self.frame.timestamp
+    }
+
+    #[getter]
+    fn loop_support(&self) -> f32 {
+        self.frame.loop_support
+    }
+
+    #[getter]
+    fn collapse_total(&self) -> Option<f32> {
+        self.frame.collapse_total
+    }
+
+    #[getter]
+    fn z_signal(&self) -> Option<f32> {
+        self.frame.z_signal
+    }
+
+    #[getter]
+    fn script_hint(&self) -> Option<String> {
+        self.frame.script_hint.clone()
+    }
+
+    #[getter]
+    fn maintainer_status(&self) -> Option<String> {
+        self.frame
+            .maintainer_status
+            .map(|status| status.as_str().to_string())
+    }
+
+    #[getter]
+    fn maintainer_diagnostic(&self) -> Option<String> {
+        self.frame.maintainer_diagnostic.clone()
+    }
+
+    #[getter]
+    fn suggested_max_scale(&self) -> Option<f32> {
+        self.frame.suggested_max_scale
+    }
+
+    #[getter]
+    fn suggested_pressure(&self) -> Option<f32> {
+        self.frame.suggested_pressure
+    }
+
+    fn metrics(&self) -> Vec<PyAtlasMetric> {
+        self.frame
+            .metrics
+            .iter()
+            .cloned()
+            .map(PyAtlasMetric::from_metric)
+            .collect()
+    }
+
+    fn districts(&self) -> Vec<PyAtlasDistrict> {
+        self.frame
+            .districts()
+            .into_iter()
+            .map(PyAtlasDistrict::from_district)
+            .collect()
+    }
+
+    fn notes(&self) -> Vec<String> {
+        self.frame.notes.clone()
+    }
+
+    fn summary(&self) -> Option<PyChronoSummary> {
+        self.frame
+            .chrono_summary
+            .clone()
+            .map(PyChronoSummary::from_summary)
+    }
+
+    fn harmonics(&self) -> Option<PyChronoHarmonics> {
+        self.frame
+            .harmonics
+            .clone()
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("timestamp", self.frame.timestamp)?;
+        dict.set_item("loop_support", self.frame.loop_support)?;
+        dict.set_item("collapse_total", self.frame.collapse_total)?;
+        dict.set_item("z_signal", self.frame.z_signal)?;
+        dict.set_item("script_hint", self.frame.script_hint.clone())?;
+        if let Some(status) = self.frame.maintainer_status {
+            dict.set_item("maintainer_status", status.as_str())?;
+        }
+        dict.set_item(
+            "maintainer_diagnostic",
+            self.frame.maintainer_diagnostic.clone(),
+        )?;
+        dict.set_item("suggested_max_scale", self.frame.suggested_max_scale)?;
+        dict.set_item("suggested_pressure", self.frame.suggested_pressure)?;
+        if let Some(summary) = &self.frame.chrono_summary {
+            dict.set_item(
+                "summary",
+                PyChronoSummary::from_summary(summary.clone()).into_py(py),
+            )?;
+        }
+        if let Some(harmonics) = &self.frame.harmonics {
+            dict.set_item(
+                "harmonics",
+                PyChronoHarmonics::from_harmonics(harmonics.clone()).into_py(py),
+            )?;
+        }
+        let metrics: Vec<(String, f32)> = self
+            .frame
+            .metrics
+            .iter()
+            .map(|metric| (metric.name.clone(), metric.value))
+            .collect();
+        dict.set_item("metrics", metrics)?;
+        dict.set_item("notes", self.frame.notes.clone())?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasFrame(t={:.3}, metrics={})",
+            self.frame.timestamp,
+            self.frame.metrics.len()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasRoute")]
+#[derive(Clone)]
+struct PyAtlasRoute {
+    route: AtlasRoute,
+}
+
+impl PyAtlasRoute {
+    fn from_route(route: AtlasRoute) -> Self {
+        Self { route }
+    }
+}
+
+#[pymethods]
+impl PyAtlasRoute {
+    #[getter]
+    fn frames(&self) -> Vec<PyAtlasFrame> {
+        self.route
+            .frames
+            .iter()
+            .cloned()
+            .map(PyAtlasFrame::from_frame)
+            .collect()
+    }
+
+    #[getter]
+    fn length(&self) -> usize {
+        self.route.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.route.is_empty()
+    }
+
+    fn latest(&self) -> Option<PyAtlasFrame> {
+        self.route.latest().cloned().map(PyAtlasFrame::from_frame)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasRoute(length={}, latest_ts={:.3})",
+            self.route.len(),
+            self.route
+                .latest()
+                .map(|frame| frame.timestamp)
+                .unwrap_or(0.0)
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasMetricFocus")]
+#[derive(Clone)]
+struct PyAtlasMetricFocus {
+    focus: AtlasMetricFocus,
+}
+
+impl PyAtlasMetricFocus {
+    fn from_focus(focus: AtlasMetricFocus) -> Self {
+        Self { focus }
+    }
+}
+
+#[pymethods]
+impl PyAtlasMetricFocus {
+    #[getter]
+    fn name(&self) -> &str {
+        &self.focus.name
+    }
+
+    #[getter]
+    fn coverage(&self) -> usize {
+        self.focus.coverage
+    }
+
+    #[getter]
+    fn mean(&self) -> f32 {
+        self.focus.mean
+    }
+
+    #[getter]
+    fn latest(&self) -> f32 {
+        self.focus.latest
+    }
+
+    #[getter]
+    fn delta(&self) -> f32 {
+        self.focus.delta
+    }
+
+    #[getter]
+    fn momentum(&self) -> f32 {
+        self.focus.momentum
+    }
+
+    #[getter]
+    fn std_dev(&self) -> f32 {
+        self.focus.std_dev
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasDistrictSummary")]
+#[derive(Clone)]
+struct PyAtlasDistrictSummary {
+    summary: AtlasDistrictSummary,
+}
+
+impl PyAtlasDistrictSummary {
+    fn from_summary(summary: AtlasDistrictSummary) -> Self {
+        Self { summary }
+    }
+}
+
+#[pymethods]
+impl PyAtlasDistrictSummary {
+    #[getter]
+    fn name(&self) -> &str {
+        &self.summary.name
+    }
+
+    #[getter]
+    fn coverage(&self) -> usize {
+        self.summary.coverage
+    }
+
+    #[getter]
+    fn mean(&self) -> f32 {
+        self.summary.mean
+    }
+
+    #[getter]
+    fn latest(&self) -> f32 {
+        self.summary.latest
+    }
+
+    #[getter]
+    fn min(&self) -> f32 {
+        self.summary.min
+    }
+
+    fn describe_resonance(&self, resonance: &PyDifferentialResonance) -> PyResult<String> {
+        let resonator = TextResonator::with_encoder(self.inner.clone());
+        Ok(resonator.describe_resonance(&resonance.inner).summary)
+    }
+
+    fn speak(&self, frames: Vec<PyChronoFrame>) -> PyResult<Vec<f32>> {
+        let resonator = TextResonator::with_encoder(self.inner.clone());
+        let frames: Vec<ChronoFrame> = frames.into_iter().map(|frame| frame.into_frame()).collect();
+        convert(resonator.speak(&frames))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "LanguageWaveEncoder(curvature={}, temperature={})",
+            self.curvature(),
+            self.temperature()
+        ))
+    #[getter]
+    fn max(&self) -> f32 {
+        self.summary.max
+    }
+
+#[pyclass(module = "spiraltorch", name = "TextResonator")]
+#[derive(Clone)]
+struct PyTextResonator {
+    inner: TextResonator,
+}
+
+impl PyTextResonator {
+    fn from_inner(inner: TextResonator) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyTextResonator {
+    #[new]
+    fn new(curvature: f32, temperature: f32) -> PyResult<Self> {
+        Ok(Self::from_inner(convert(TextResonator::new(
+            curvature,
+            temperature,
+        ))?))
+    }
+
+    fn curvature(&self) -> f32 {
+        self.inner.encoder().curvature()
+    }
+
+    fn temperature(&self) -> f32 {
+        self.inner.encoder().temperature()
+    }
+
+    fn describe_resonance(&self, resonance: &PyDifferentialResonance) -> PyResult<String> {
+        Ok(self.inner.describe_resonance(&resonance.inner).summary)
+    }
+
+    fn describe_frame(&self, frame: &PyChronoFrame) -> PyResult<String> {
+        Ok(self.inner.describe_frame(frame.as_frame()).summary)
+    }
+
+    fn speak(&self, frames: Vec<PyChronoFrame>) -> PyResult<Vec<f32>> {
+        let frames: Vec<ChronoFrame> = frames.into_iter().map(|frame| frame.into_frame()).collect();
+        convert(self.inner.speak(&frames))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "TextResonator(curvature={}, temperature={})",
+            self.curvature(),
+            self.temperature()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceProjector")]
+struct PyZSpaceProjector {
+    inner: Option<NnZSpaceProjector>,
+}
+    #[getter]
+    fn delta(&self) -> f32 {
+        self.summary.delta
+    }
+
+    #[getter]
+    fn std_dev(&self) -> f32 {
+        self.summary.std_dev
+    }
+
+    #[getter]
+    fn focus(&self) -> Vec<PyAtlasMetricFocus> {
+        self.summary
+            .focus
+            .clone()
+            .into_iter()
+            .map(PyAtlasMetricFocus::from_focus)
+            .collect()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasRouteSummary")]
+#[derive(Clone)]
+struct PyAtlasRouteSummary {
+    summary: AtlasRouteSummary,
+}
+
+impl PyAtlasRouteSummary {
+    fn from_summary(summary: AtlasRouteSummary) -> Self {
+        Self { summary }
+    }
+}
+
+#[pymethods]
+impl PyAtlasRouteSummary {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.summary.frames
+    }
+
+    #[getter]
+    fn latest_timestamp(&self) -> f32 {
+        self.summary.latest_timestamp
+    }
+
+    #[getter]
+    fn mean_loop_support(&self) -> f32 {
+        self.summary.mean_loop_support
+    }
+
+    #[getter]
+    fn loop_std(&self) -> f32 {
+        self.summary.loop_std
+    }
+
+    #[getter]
+    fn latest_collapse_total(&self) -> Option<f32> {
+        self.summary.latest_collapse_total
+    }
+
+    #[getter]
+    fn collapse_trend(&self) -> Option<f32> {
+        self.summary.collapse_trend
+    }
+
+    #[getter]
+    fn latest_z_signal(&self) -> Option<f32> {
+        self.summary.latest_z_signal
+    }
+
+    #[getter]
+    fn z_signal_trend(&self) -> Option<f32> {
+        self.summary.z_signal_trend
+    }
+
+    #[getter]
+    fn maintainer_status(&self) -> Option<&'static str> {
+        self.summary.maintainer_status.map(|status| status.as_str())
+    }
+
+    #[getter]
+    fn maintainer_diagnostic(&self) -> Option<&str> {
+        self.summary.maintainer_diagnostic.as_deref()
+    }
+
+    #[getter]
+    fn suggested_max_scale(&self) -> Option<f32> {
+        self.summary.suggested_max_scale
+    }
+
+    #[getter]
+    fn suggested_pressure(&self) -> Option<f32> {
+        self.summary.suggested_pressure
+    }
+
+    #[getter]
+    fn script_hint(&self) -> Option<&str> {
+        self.summary.script_hint.as_deref()
+    }
+
+    #[getter]
+    fn districts(&self) -> Vec<PyAtlasDistrictSummary> {
+        self.summary
+            .districts
+            .clone()
+            .into_iter()
+            .map(PyAtlasDistrictSummary::from_summary)
+            .collect()
+    }
+
+    fn perspectives(&self) -> Vec<PyAtlasPerspective> {
+        self.summary
+            .perspectives()
+            .into_iter()
+            .map(PyAtlasPerspective::from_perspective)
+            .collect()
+    }
+
+    fn perspective_for(&self, district: &str) -> Option<PyAtlasPerspective> {
+        self.summary
+            .perspective_for(district)
+            .map(PyAtlasPerspective::from_perspective)
+    }
+
+    fn perspective_for_prefixes(
+        &self,
+        district: &str,
+        focus_prefixes: Option<Vec<String>>,
+    ) -> Option<PyAtlasPerspective> {
+        let prefixes = focus_prefixes.as_deref();
+        match prefixes {
+            Some(prefixes) => self
+                .summary
+                .perspective_for_with_focus(district, prefixes)
+                .map(PyAtlasPerspective::from_perspective),
+            None => self
+                .summary
+                .perspective_for(district)
+                .map(PyAtlasPerspective::from_perspective),
+        }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "AtlasPerspective")]
+#[derive(Clone)]
+struct PyAtlasPerspective {
+    perspective: AtlasPerspective,
+}
+
+impl PyAtlasPerspective {
+    fn from_perspective(perspective: AtlasPerspective) -> Self {
+        Self { perspective }
+    }
+}
+
+#[pymethods]
+impl PyAtlasPerspective {
+    #[getter]
+    fn district(&self) -> &str {
+        &self.perspective.district
+    }
+
+    #[getter]
+    fn coverage(&self) -> usize {
+        self.perspective.coverage
+    }
+
+    #[getter]
+    fn mean(&self) -> f32 {
+        self.perspective.mean
+    }
+
+    #[getter]
+    fn latest(&self) -> f32 {
+        self.perspective.latest
+    }
+
+    #[getter]
+    fn delta(&self) -> f32 {
+        self.perspective.delta
+    }
+
+    #[getter]
+    fn momentum(&self) -> f32 {
+        self.perspective.momentum
+    }
+
+    #[getter]
+    fn volatility(&self) -> f32 {
+        self.perspective.volatility
+    }
+
+    #[getter]
+    fn stability(&self) -> f32 {
+        self.perspective.stability
+    }
+
+    #[getter]
+    fn focus(&self) -> Vec<PyAtlasMetricFocus> {
+        self.perspective
+            .focus
+            .clone()
+            .into_iter()
+            .map(PyAtlasMetricFocus::from_focus)
+            .collect()
+    }
+
+    #[getter]
+    fn guidance(&self) -> &str {
+        &self.perspective.guidance
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AtlasPerspective(district={}, coverage={}, latest={:.3})",
+            self.perspective.district, self.perspective.coverage, self.perspective.latest
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoPeak")]
+#[derive(Clone)]
+struct PyChronoPeak {
+    peak: ChronoPeak,
+}
+
+impl PyChronoPeak {
+    fn from_peak(peak: ChronoPeak) -> Self {
+        Self { peak }
+    }
+}
+
+#[pymethods]
+impl PyChronoPeak {
+    #[getter]
+    fn frequency(&self) -> f32 {
+        self.peak.frequency
+    }
+
+    #[getter]
+    fn magnitude(&self) -> f32 {
+        self.peak.magnitude
+    }
+
+    #[getter]
+    fn phase(&self) -> f32 {
+        self.peak.phase
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frequency", self.peak.frequency)?;
+        dict.set_item("magnitude", self.peak.magnitude)?;
+        dict.set_item("phase", self.peak.phase)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoPeak(freq={:.3}, magnitude={:.3})",
+            self.peak.frequency, self.peak.magnitude
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoHarmonics")]
+struct PyChronoHarmonics {
+    harmonics: ChronoHarmonics,
+}
+
+impl PyChronoHarmonics {
+    fn from_harmonics(harmonics: ChronoHarmonics) -> Self {
+        Self { harmonics }
+    }
+}
+
+#[pymethods]
+impl PyChronoHarmonics {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.harmonics.frames
+    }
+
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.harmonics.duration
+    }
+
+    #[getter]
+    fn sample_rate(&self) -> f32 {
+        self.harmonics.sample_rate
+    }
+
+    #[getter]
+    fn nyquist(&self) -> f32 {
+        self.harmonics.nyquist
+    }
+
+    #[getter]
+    fn drift_power(&self) -> Vec<f32> {
+        self.harmonics.drift_power.clone()
+    }
+
+    #[getter]
+    fn energy_power(&self) -> Vec<f32> {
+        self.harmonics.energy_power.clone()
+    }
+
+    #[getter]
+    fn dominant_drift(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_drift
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn dominant_energy(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_energy
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frames", self.harmonics.frames)?;
+        dict.set_item("duration", self.harmonics.duration)?;
+        dict.set_item("sample_rate", self.harmonics.sample_rate)?;
+        dict.set_item("nyquist", self.harmonics.nyquist)?;
+        dict.set_item("drift_power", self.harmonics.drift_power.clone())?;
+        dict.set_item("energy_power", self.harmonics.energy_power.clone())?;
+        let drift = if let Some(peak) = self.harmonics.dominant_drift.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_drift", drift)?;
+        let energy = if let Some(peak) = self.harmonics.dominant_energy.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_energy", energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoHarmonics(frames={}, sample_rate={:.3})",
+            self.harmonics.frames, self.harmonics.sample_rate
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesireRoundtableBridge")]
+#[derive(Clone)]
+struct PyDesireRoundtableBridge {
+    inner: DesireRoundtableBridge,
+}
+
+#[pymethods]
+impl PyDesireRoundtableBridge {
+    #[new]
+    #[pyo3(signature = (blend=0.35, drift_gain=0.35))]
+    fn new(blend: f32, drift_gain: f32) -> Self {
+        let inner = DesireRoundtableBridge::new()
+            .with_blend(blend)
+            .with_drift_gain(drift_gain);
+        Self { inner }
+    }
+
+    fn clone_bridge(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn impulse(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let impulse = convert(self.inner.impulse())?;
+        impulse
+            .map(|imp| {
+                let dict = PyDict::new(py);
+                dict.set_item(
+                    "multipliers",
+                    (imp.multipliers.0, imp.multipliers.1, imp.multipliers.2),
+                )?;
+                dict.set_item("drift", imp.drift)?;
+                dict.set_item(
+                    "timestamp",
+                    imp.timestamp
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0),
+                )?;
+                Ok(dict.into())
+            })
+            .transpose()
+    }
+
+    fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let summary = convert(self.inner.drain_summary())?;
+        summary
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
+struct PyModuleTrainer {
+    inner: ModuleTrainer,
+    roundtable_bridge: Option<DesireRoundtableBridge>,
+}
+
+impl PyModuleTrainer {
+    fn from_trainer(inner: ModuleTrainer) -> Self {
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
+#[pyclass(module = "spiraltorch", name = "ChronoLoopSignal")]
+#[derive(Clone)]
+struct PyChronoLoopSignal {
+    signal: ChronoLoopSignal,
+}
+
+impl PyChronoLoopSignal {
+    fn from_signal(signal: ChronoLoopSignal) -> Self {
+        Self { signal }
+    }
+}
+
+#[pymethods]
+impl PyModuleTrainer {
+    #[new]
+    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01))]
+    fn new(
+        device: Option<&str>,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Self {
+        let caps = caps_for(device);
+        let inner =
+            ModuleTrainer::new(caps, curvature, hyper_learning_rate, fallback_learning_rate);
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
+    }
+
+impl PyChronoLoopSignal {
+    #[getter]
+    fn summary(&self) -> PyChronoSummary {
+        PyChronoSummary::from_summary(self.signal.summary.clone())
+    }
+
+    #[getter]
+    fn harmonics(&self) -> Option<PyChronoHarmonics> {
+        self.signal
+            .harmonics
+            .clone()
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.signal.spiralk_script.clone()
+    }
+
+    #[pyo3(signature = (bridge=None, blend=0.35, drift_gain=0.35))]
+    fn enable_desire_roundtable_bridge(
+        &mut self,
+        bridge: Option<PyRef<PyDesireRoundtableBridge>>,
+        blend: f32,
+        drift_gain: f32,
+    ) {
+        let selected = if let Some(handle) = bridge {
+            handle.inner.clone()
+        } else {
+            DesireRoundtableBridge::new()
+                .with_blend(blend)
+                .with_drift_gain(drift_gain)
+        };
+        self.inner.enable_desire_roundtable_bridge(selected.clone());
+        self.roundtable_bridge = Some(selected);
+    }
+
+    fn disable_desire_roundtable_bridge(&mut self) {
+        self.inner.disable_desire_roundtable_bridge();
+        self.roundtable_bridge = None;
+    }
+
+    fn desire_roundtable_bridge(&self) -> Option<PyDesireRoundtableBridge> {
+        self.roundtable_bridge
+            .as_ref()
+            .map(|bridge| PyDesireRoundtableBridge {
+                inner: bridge.clone(),
+            })
+    }
+
+    fn desire_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        self.inner
+            .desire_roundtable_summary()
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
+    }
+
+    #[pyo3(signature = (threshold, participants=2))]
+    fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
+        self.inner.install_meta_conductor(threshold, participants);
+    #[cfg(not(feature = "kdsl"))]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        None
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_hints(&self) -> Vec<String> {
+        self.signal
+            .spiralk_hints
+            .iter()
+            .map(|hint| {
+                format!(
+                    "soft({},{},{},{})",
+                    hint.field, hint.value_expr, hint.weight_expr, hint.condition_expr
+                )
+            })
+            .collect()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item(
+            "summary",
+            PyChronoSummary::from_summary(self.signal.summary.clone()).into_py(py),
+        )?;
+        if let Some(harmonics) = self.signal.harmonics.clone() {
+            dict.set_item(
+                "harmonics",
+                PyChronoHarmonics::from_harmonics(harmonics).into_py(py),
+            )?;
+        } else {
+            dict.set_item("harmonics", py.None())?;
+        }
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.signal.spiralk_script.clone())?;
+            dict.set_item("spiralk_hints", self.spiralk_hints())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoLoopSignal(frames={}, energy_mean={:.3})",
+            self.signal.summary.frames, self.signal.summary.mean_energy
+        ))
+    }
+}
+
+#[pymethods]
+impl PyChronoSummary {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.summary.frames
+    }
+
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.summary.duration
+    }
+
+    #[getter]
+    fn latest_timestamp(&self) -> f32 {
+        self.summary.latest_timestamp
+    }
+
+    #[getter]
+    fn mean_drift(&self) -> f32 {
+        self.summary.mean_drift
+    }
+
+    #[getter]
+    fn mean_abs_drift(&self) -> f32 {
+        self.summary.mean_abs_drift
+    }
+
+    #[getter]
+    fn drift_std(&self) -> f32 {
+        self.summary.drift_std
+    }
+
+    #[getter]
+    fn mean_energy(&self) -> f32 {
+        self.summary.mean_energy
+    }
+
+    #[getter]
+    fn energy_std(&self) -> f32 {
+        self.summary.energy_std
+    }
+
+    #[getter]
+    fn mean_decay(&self) -> f32 {
+        self.summary.mean_decay
+    }
+
+    #[getter]
+    fn min_energy(&self) -> f32 {
+        self.summary.min_energy
+    }
+
+    #[getter]
+    fn max_energy(&self) -> f32 {
+        self.summary.max_energy
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoSummary(frames={}, duration={:.3}, energy={:.3}±{:.3})",
+            self.summary.frames,
+            self.summary.duration,
+            self.summary.mean_energy,
+            self.summary.energy_std
+        ))
+    }
+}
+
+#[pymethods]
+impl PyChronoFrame {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.frame.step
+    }
+
+    #[getter]
+    fn timestamp(&self) -> f32 {
+        self.frame.timestamp
+    }
+
+    #[getter]
+    fn dt(&self) -> f32 {
+        self.frame.dt
+    }
+
+    #[getter]
+    fn observed_curvature(&self) -> f32 {
+        self.frame.observed_curvature
+    }
+
+    #[getter]
+    fn curvature_drift(&self) -> f32 {
+        self.frame.curvature_drift
+    }
+
+    #[getter]
+    fn total_energy(&self) -> f32 {
+        self.frame.total_energy
+    }
+
+    #[getter]
+    fn energy_decay(&self) -> f32 {
+        self.frame.energy_decay
+    }
+
+    #[getter]
+    fn homotopy_energy(&self) -> f32 {
+        self.frame.homotopy_energy
+    }
+
+    #[getter]
+    fn functor_energy(&self) -> f32 {
+        self.frame.functor_energy
+    }
+
+    #[getter]
+    fn recursive_energy(&self) -> f32 {
+        self.frame.recursive_energy
+    }
+
+    #[getter]
+    fn projection_energy(&self) -> f32 {
+        self.frame.projection_energy
+    }
+
+    #[getter]
+    fn infinity_energy(&self) -> f32 {
+        self.frame.infinity_energy
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("step", self.frame.step)?;
+        dict.set_item("timestamp", self.frame.timestamp)?;
+        dict.set_item("dt", self.frame.dt)?;
+        dict.set_item("observed_curvature", self.frame.observed_curvature)?;
+        dict.set_item("curvature_drift", self.frame.curvature_drift)?;
+        dict.set_item("total_energy", self.frame.total_energy)?;
+        dict.set_item("energy_decay", self.frame.energy_decay)?;
+        dict.set_item("homotopy_energy", self.frame.homotopy_energy)?;
+        dict.set_item("functor_energy", self.frame.functor_energy)?;
+        dict.set_item("recursive_energy", self.frame.recursive_energy)?;
+        dict.set_item("projection_energy", self.frame.projection_energy)?;
+        dict.set_item("infinity_energy", self.frame.infinity_energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoFrame(step={}, t={:.3}, energy={:.3})",
+            self.frame.step, self.frame.timestamp, self.frame.total_energy
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "MaintainerReport")]
+#[derive(Clone)]
+struct PyMaintainerReport {
+    report: MaintainerReport,
+}
+
+impl PyMaintainerReport {
+    fn from_report(report: MaintainerReport) -> Self {
+        Self { report }
+    }
+}
+
+#[pymethods]
+impl PyMaintainerReport {
+    #[getter]
+    fn status(&self) -> &'static str {
+        self.report.status.as_str()
+    }
+
+    #[getter]
+    fn average_drift(&self) -> f32 {
+        self.report.average_drift
+    }
+
+    #[getter]
+    fn mean_energy(&self) -> f32 {
+        self.report.mean_energy
+    }
+
+    #[getter]
+    fn mean_decay(&self) -> f32 {
+        self.report.mean_decay
+    }
+
+    #[getter]
+    fn drift_peak(&self) -> Option<PyChronoPeak> {
+        self.report.drift_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn energy_peak(&self) -> Option<PyChronoPeak> {
+        self.report.energy_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn suggested_max_scale(&self) -> Option<f32> {
+        self.report.suggested_max_scale
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let builder = self.ensure_builder()?;
+        let mut config = builder.maintainer_config().clone();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        builder.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
+        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
+        Ok(())
+    #[getter]
+    fn suggested_pressure(&self) -> Option<f32> {
+        self.report.suggested_pressure
+    }
+
+    #[getter]
+    fn diagnostic(&self) -> &str {
+        &self.report.diagnostic
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[getter]
+    fn spiralk_script(&self) -> Option<String> {
+        self.report.spiralk_script.clone()
+    }
+
+    fn should_rewrite(&self) -> bool {
+        self.report.should_rewrite()
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("status", self.report.status.as_str())?;
+        dict.set_item("average_drift", self.report.average_drift)?;
+        dict.set_item("mean_energy", self.report.mean_energy)?;
+        dict.set_item("mean_decay", self.report.mean_decay)?;
+        let drift_peak = if let Some(peak) = self.report.drift_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        let energy_peak = if let Some(peak) = self.report.energy_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("drift_peak", drift_peak)?;
+        dict.set_item("energy_peak", energy_peak)?;
+        dict.set_item("suggested_max_scale", self.report.suggested_max_scale)?;
+        dict.set_item("suggested_pressure", self.report.suggested_pressure)?;
+        dict.set_item("diagnostic", &self.report.diagnostic)?;
+        dict.set_item("should_rewrite", self.report.should_rewrite())?;
+        #[cfg(feature = "kdsl")]
+        {
+            dict.set_item("spiralk_script", self.report.spiralk_script.clone())?;
+        }
+        #[cfg(not(feature = "kdsl"))]
+        {
+            dict.set_item("spiralk_script", py.None())?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let peak = self
+            .report
+            .drift_peak
+            .as_ref()
+            .map(|p| format!(" {:.2}Hz", p.frequency))
+            .unwrap_or_default();
+        Ok(format!(
+            "MaintainerReport(status={}, drift={:.3}{peak}, energy={:.3})",
+            self.report.status.as_str(),
+            self.report.average_drift,
+            self.report.mean_energy
+        ))
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pyclass(module = "spiraltorch", name = "CollapsePulse")]
+#[derive(Clone)]
+struct PyCollapsePulse {
+    pulse: hub::CollapsePulse,
+}
+
+#[cfg(feature = "collapse")]
+impl PyCollapsePulse {
+    fn from_pulse(pulse: hub::CollapsePulse) -> Self {
+        Self { pulse }
+    }
+
+    fn command_kind(&self) -> &'static str {
+        match self.pulse.command {
+            DriveCmd::Collapse { .. } => "collapse",
+            DriveCmd::Bloom { .. } => "bloom",
+            DriveCmd::None => "none",
+        }
+    }
+}
+
+#[cfg(feature = "collapse")]
+#[pymethods]
+impl PyCollapsePulse {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.pulse.step
+    }
+
+    #[getter]
+    fn total(&self) -> f32 {
+        self.pulse.total
+    }
+
+    #[getter]
+    fn command(&self) -> &'static str {
+        self.command_kind()
+    }
+
+    fn resonate_over_time(
+        &self,
+        resonance: &PyDifferentialResonance,
+        dt: f32,
+    ) -> PyResult<PyChronoFrame> {
+        let frame = convert(self.inner.resonate_over_time(&resonance.inner, dt))?;
+        Ok(PyChronoFrame::from_frame(frame))
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn timeline(&self, timesteps: Option<usize>) -> PyResult<Vec<PyChronoFrame>> {
+        let frames = self.inner.chrono_frames();
+        let limit = timesteps.unwrap_or(frames.len());
+        let start = frames.len().saturating_sub(limit);
+        Ok(frames[start..]
+            .iter()
+            .cloned()
+            .map(PyChronoFrame::from_frame)
+            .collect())
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn animate_resonance(
+        &self,
+        timesteps: Option<usize>,
+    ) -> PyResult<(Vec<f32>, Vec<f32>, Vec<f32>)> {
+        let frames = self.timeline(timesteps)?;
+        let mut times = Vec::with_capacity(frames.len());
+        let mut energies = Vec::with_capacity(frames.len());
+        let mut drifts = Vec::with_capacity(frames.len());
+        for frame in &frames {
+            let inner = frame.as_frame();
+            times.push(inner.timestamp);
+            energies.push(inner.total_energy);
+            drifts.push(inner.curvature_drift);
+        }
+        Ok((times, energies, drifts))
+    }
+
+    #[pyo3(signature = (timesteps=None))]
+    fn timeline_summary(&self, timesteps: Option<usize>) -> Option<PyChronoSummary> {
+        self.inner
+            .timeline_summary(timesteps)
+            .map(PyChronoSummary::from_summary)
+    }
+
+    fn atlas(&self) -> Option<PyAtlasFrame> {
+        self.inner.atlas().map(PyAtlasFrame::from_frame)
+    }
+
+    #[pyo3(signature = (limit=None))]
+    fn atlas_route(&self, limit: Option<usize>) -> PyAtlasRoute {
+        PyAtlasRoute::from_route(self.inner.atlas_route(limit))
+    }
+
+    #[pyo3(signature = (limit=None))]
+    fn atlas_route_summary(&self, limit: Option<usize>) -> PyAtlasRouteSummary {
+        PyAtlasRouteSummary::from_summary(self.inner.atlas_route_summary(limit))
+    }
+
+    #[pyo3(signature = (limit=None))]
+    fn atlas_perspectives(&self, limit: Option<usize>) -> Vec<PyAtlasPerspective> {
+        self.inner
+            .atlas_perspectives(limit)
+            .into_iter()
+            .map(PyAtlasPerspective::from_perspective)
+            .collect()
+    }
+
+    #[pyo3(signature = (district, limit=None, focus_prefixes=None))]
+    fn atlas_perspective(
+        &self,
+        district: &str,
+        limit: Option<usize>,
+        focus_prefixes: Option<Vec<String>>,
+    ) -> Option<PyAtlasPerspective> {
+        let prefixes = focus_prefixes.as_deref();
+        self.inner
+            .atlas_perspective_with_focus(district, limit, prefixes)
+            .map(PyAtlasPerspective::from_perspective)
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=16))]
+    fn timeline_harmonics(
+        &self,
+        timesteps: Option<usize>,
+        bins: usize,
+    ) -> Option<PyChronoHarmonics> {
+        self.inner
+            .timeline_harmonics(timesteps, bins)
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=None))]
+    fn loop_signal(
+        &self,
+        timesteps: Option<usize>,
+        bins: Option<usize>,
+    ) -> Option<PyChronoLoopSignal> {
+        self.inner
+            .loop_signal(timesteps, bins)
+            .map(PyChronoLoopSignal::from_signal)
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn timeline_story(
+        &self,
+        timesteps: Option<usize>,
+        temperature: f32,
+    ) -> PyResult<(String, Vec<String>)> {
+        let narrative = self
+            .inner
+            .timeline_narrative(timesteps, temperature)
+            .map_err(tensor_err)?;
+        Ok((narrative.summary, narrative.highlights))
+    }
+
+    #[pyo3(signature = (temperature=0.6))]
+    fn atlas_story(&self, temperature: f32) -> PyResult<Option<(String, Vec<String>)>> {
+        let narrative = self
+            .inner
+            .atlas_narrative(temperature)
+            .map_err(tensor_err)?;
+        Ok(narrative.map(|story| (story.summary, story.highlights)))
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn speak(&self, timesteps: Option<usize>, temperature: f32) -> PyResult<Vec<f32>> {
+        convert(self.inner.speak(timesteps, temperature))
+    }
+
+    fn maintainer_config(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let cfg = self.inner.maintainer_config();
+        let dict = PyDict::new_bound(py);
+        dict.set_item("jitter_threshold", cfg.jitter_threshold)?;
+        dict.set_item("growth_threshold", cfg.growth_threshold)?;
+        dict.set_item("energy_floor", cfg.energy_floor)?;
+        dict.set_item("clamp_min", cfg.clamp_min)?;
+        dict.set_item("clamp_max", cfg.clamp_max)?;
+        dict.set_item("pressure_step", cfg.pressure_step)?;
+        dict.set_item("window", cfg.window)?;
+        Ok(dict.into_py(py))
+    }
+
+    #[cfg(feature = "collapse")]
+    fn collapse_pulse(&self) -> Option<PyCollapsePulse> {
+        hub::get_collapse_pulse().map(PyCollapsePulse::from_pulse)
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn configure_maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let mut config = self.inner.maintainer_config();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        self.inner.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn self_maintain(&self) -> PyMaintainerReport {
+        PyMaintainerReport::from_report(self.inner.maintain())
+    }
+
+    #[pyo3(signature = (resonance=None, temperature=0.6))]
+    fn describe(
+        &self,
+        resonance: Option<&PyDifferentialResonance>,
+        temperature: f32,
+    ) -> PyResult<String> {
+        let resonance = resonance.map(|res| &res.inner);
+        convert(self.inner.describe(resonance, temperature))
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn roundtable(
+        &self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> PyRoundtableSchedule {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
     #[getter]
     fn loop_signal(&self) -> Option<PyChronoLoopSignal> {
         self.pulse
@@ -18122,6 +20558,13 @@ fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
 }
 
 #[pyfunction]
+fn get_desire_telemetry(py: Python<'_>) -> PyResult<Option<PyObject>> {
+    Ok(hub::get_last_desire_step()
+        .map(|sample| desire_telemetry_to_py(py, &sample))
+        .transpose()?)
+}
+
+#[pyfunction]
 fn get_psychoid_stats(py: Python<'_>) -> PyResult<Option<PyObject>> {
     #[cfg(feature = "psychoid")]
     {
@@ -18475,6 +20918,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
+    m.add_function(wrap_pyfunction!(get_desire_telemetry, m)?)?;
     m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
     m.add_function(wrap_pyfunction!(ecosystem_snapshot, m)?)?;
     m.add_function(wrap_pyfunction!(ecosystem_drain, m)?)?;
@@ -18522,6 +20966,18 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTextResonator>()?;
     m.add_class::<PyHypergrad>()?;
     m.add_class::<PyDistConfig>()?;
+    m.add_class::<PySparseKernel>()?;
+    m.add_class::<PySymbolGeometry>()?;
+    m.add_class::<PyRepressionField>()?;
+    m.add_class::<PySemanticBridge>()?;
+    m.add_class::<PyConceptHint>()?;
+    m.add_class::<PyTemperatureController>()?;
+    m.add_class::<PyDesireSchedule>()?;
+    m.add_class::<PySelfRewriteConfig>()?;
+    m.add_class::<PyDesireLagrangian>()?;
+    m.add_class::<PyDesireAutomation>()?;
+    m.add_class::<PyDesirePipelineBuilder>()?;
+    m.add_class::<PyDesirePipeline>()?;
     m.add_class::<PyRoundtableSchedule>()?;
     m.add_class::<PyDesireRoundtableBridge>()?;
     m.add_class::<PyMaintainerConfig>()?;
@@ -18556,6 +21012,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "z_space_barycenter",
             "hip_probe",
             "describe_device",
+            "get_desire_telemetry",
             "get_psychoid_stats",
             "describe_resonance",
             "describe_frame",
@@ -18583,6 +21040,18 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "TextResonator",
             "Hypergrad",
             "DistConfig",
+            "SparseKernel",
+            "SymbolGeometry",
+            "RepressionField",
+            "SemanticBridge",
+            "ConceptHint",
+            "TemperatureController",
+            "DesireSchedule",
+            "SelfRewriteConfig",
+            "DesireLagrangian",
+            "DesireAutomation",
+            "DesirePipelineBuilder",
+            "DesirePipeline",
             "RoundtableSchedule",
             "DesireRoundtableBridge",
             "EpochStats",
