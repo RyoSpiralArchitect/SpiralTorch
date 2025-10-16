@@ -11,7 +11,7 @@ use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule, PySequence, PyTuple};
+use pyo3::types::{PyAny, PyDict, PyList, PyModule, PyTuple};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use pyo3::PyRef;
@@ -120,7 +120,13 @@ fn choose_route(device: Option<&str>) -> PyResult<DeviceRoute> {
     }
 }
 
-fn topk_rows_cpu(data: &[f32], rows: usize, cols: usize, k: usize) -> (Vec<f32>, Vec<i32>) {
+fn topk_rows_cpu(
+    data: &[f32],
+    rows: usize,
+    cols: usize,
+    k: usize,
+    largest: bool,
+) -> (Vec<f32>, Vec<i32>) {
     use std::cmp::Ordering;
 
     let mut out_vals = vec![0.0f32; rows * k];
@@ -137,7 +143,12 @@ fn topk_rows_cpu(data: &[f32], rows: usize, cols: usize, k: usize) -> (Vec<f32>,
             idx_buf.select_nth_unstable_by(k, |&a, &b| {
                 let va = data[row_offset + a];
                 let vb = data[row_offset + b];
-                vb.partial_cmp(&va).unwrap_or(Ordering::Equal)
+                let ordering = va.partial_cmp(&vb).unwrap_or(Ordering::Equal);
+                if largest {
+                    ordering.reverse()
+                } else {
+                    ordering
+                }
             });
         }
 
@@ -145,7 +156,12 @@ fn topk_rows_cpu(data: &[f32], rows: usize, cols: usize, k: usize) -> (Vec<f32>,
         topk.sort_unstable_by(|&a, &b| {
             let va = data[row_offset + a];
             let vb = data[row_offset + b];
-            vb.partial_cmp(&va).unwrap_or(Ordering::Equal)
+            let ordering = va.partial_cmp(&vb).unwrap_or(Ordering::Equal);
+            if largest {
+                ordering.reverse()
+            } else {
+                ordering
+            }
         });
 
         for (j, &col) in topk.iter().enumerate() {
@@ -1711,9 +1727,9 @@ impl PyModuleTrainer {
 
     fn blackcat_minutes<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
         let minutes = self.inner.blackcat_minutes();
-        let list = PyList::empty(py);
+        let list = PyList::empty_bound(py);
         for minute in minutes {
-            let entry = PyDict::new(py);
+            let entry = PyDict::new_bound(py);
             entry.set_item("plan_signature", minute.plan_signature.clone())?;
             entry.set_item("script_hint", minute.script_hint.clone())?;
             entry.set_item("winner", format!("{:?}", minute.winner))?;
@@ -1731,14 +1747,14 @@ impl PyModuleTrainer {
                     .map(|d| d.as_secs_f64())
                     .unwrap_or(0.0),
             )?;
-            let picks = PyDict::new(py);
+            let picks = PyDict::new_bound(py);
             for (k, v) in minute.picks.iter() {
                 picks.set_item(k.clone(), v.clone())?;
             }
-            entry.set_item("picks", picks)?;
-            list.append(entry)?;
+            entry.set_item("picks", picks.into_py(py))?;
+            list.append(entry.into_py(py))?;
         }
-        Ok(list.into())
+        Ok(list.into_py(py))
     }
 
     #[pyo3(signature = (module, loss, batches, schedule))]
@@ -1756,10 +1772,10 @@ impl PyModuleTrainer {
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "SpiralLightning(rows={}, cols={}, auto_prepare={})",
-            self.rows(),
-            self.cols(),
-            self.auto_prepare()
+            "ModuleTrainer(curvature={:.4}, hyper_lr={:.4}, fallback_lr={:.4})",
+            self.curvature(),
+            self.hyper_learning_rate(),
+            self.fallback_learning_rate()
         ))
     }
 }
@@ -2522,12 +2538,18 @@ fn run_epoch_with_lightning(
     batches: &Bound<'_, PyAny>,
 ) -> PyResult<EpochStats> {
     if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
+        let dataset: Vec<(Tensor, Tensor)> = loader
+            .clone_inner()
+            .into_iter()
+            .map(|batch| convert(batch))
+            .collect::<PyResult<_>>()?;
+
         if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
             if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
                 let stats = convert(lightning.train_epoch(
                     seq.borrow_mut()?,
                     mse.inner_mut(),
-                    loader.clone_inner(),
+                    dataset.clone(),
                 ))?;
                 return Ok(stats);
             }
@@ -2538,7 +2560,7 @@ fn run_epoch_with_lightning(
                 let stats = convert(lightning.train_epoch(
                     linear.borrow_mut()?,
                     mse.inner_mut(),
-                    loader.clone_inner(),
+                    dataset.clone(),
                 ))?;
                 return Ok(stats);
             }
@@ -2546,11 +2568,8 @@ fn run_epoch_with_lightning(
 
         if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
             if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(lightning.train_epoch(
-                    relu.borrow_mut()?,
-                    mse.inner_mut(),
-                    loader.clone_inner(),
-                ))?;
+                let stats =
+                    convert(lightning.train_epoch(relu.borrow_mut()?, mse.inner_mut(), dataset))?;
                 return Ok(stats);
             }
         }
@@ -3082,12 +3101,13 @@ fn plan(
 }
 
 #[pyfunction(name = "topk2d_tensor")]
-#[pyo3(signature = (x, k, device=None))]
+#[pyo3(signature = (x, k, *, device=None, largest=true))]
 fn topk2d_tensor_py(
     _py: Python<'_>,
     x: &PyTensor,
     k: usize,
     device: Option<&str>,
+    largest: bool,
 ) -> PyResult<(PyTensor, PyTensor)> {
     let (rows, cols) = x.shape();
     if k == 0 || k > cols {
@@ -3111,7 +3131,7 @@ fn topk2d_tensor_py(
     let data = x.as_tensor().data();
     let (vals, idx) = match route {
         DeviceRoute::Cpu | DeviceRoute::Cuda | DeviceRoute::Mps | DeviceRoute::Wgpu => {
-            topk_rows_cpu(data, rows, cols, k)
+            topk_rows_cpu(data, rows, cols, k, largest)
         }
     };
 
@@ -3271,11 +3291,19 @@ fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySequentialModule>()?;
     m.setattr(
         "__all__",
-        vec!["Linear", "Conv1d", "WaveRnn", "Sequential", "Relu"],
+        vec![
+            "MeanSquaredError",
+            "Linear",
+            "Relu",
+            "Conv1d",
+            "WaveRnn",
+            "ZSpaceProjector",
+            "Sequential",
+        ],
     )?;
     m.setattr(
         "__doc__",
-        "Rust-backed neural network modules: Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, Sequential.",
+        "Rust-backed neural network modules and losses: MeanSquaredError, Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, Sequential.",
     )?;
     Ok(())
 }
@@ -3379,54 +3407,6 @@ fn topk2d_py(tensor: &PyTensor, k: usize, largest: bool) -> PyResult<(PyTensor, 
 
     let values_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, values))?);
     Ok((values_tensor, indices))
-}
-
-#[pyfunction]
-#[pyo3(signature = (tensor, k, *, device="auto", largest=true))]
-fn topk2d_tensor_py(
-    tensor: &PyTensor,
-    k: usize,
-    device: &str,
-    largest: bool,
-) -> PyResult<(PyTensor, PyTensor)> {
-    let device = device.to_ascii_lowercase();
-    if device != "auto" && device != "cpu" {
-        return Err(PyValueError::new_err(
-            "only 'auto' or 'cpu' devices are supported for topk2d_tensor",
-        ));
-    }
-
-    let (rows, cols) = tensor.as_tensor().shape();
-    if k == 0 || k > cols {
-        return Err(PyValueError::new_err(
-            "k must be between 1 and the number of columns",
-        ));
-    }
-
-    let mut values = Vec::with_capacity(rows * k);
-    let mut indices = Vec::with_capacity(rows * k);
-    let data = tensor.as_tensor().data();
-    for row in 0..rows {
-        let slice = &data[row * cols..(row + 1) * cols];
-        let mut pairs: Vec<(usize, f32)> = slice.iter().copied().enumerate().collect();
-        pairs.sort_unstable_by(|a, b| {
-            let ord = a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal);
-            if largest {
-                ord.reverse()
-            } else {
-                ord
-            }
-        });
-
-        for (idx, value) in pairs.into_iter().take(k) {
-            values.push(value);
-            indices.push(idx as f32);
-        }
-    }
-
-    let values_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, values))?);
-    let indices_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, indices))?);
-    Ok((values_tensor, indices_tensor))
 }
 
 /// Surface ROCm probing hints for Python callers.
