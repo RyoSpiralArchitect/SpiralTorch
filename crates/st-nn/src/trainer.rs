@@ -94,7 +94,8 @@ impl ModuleTrainer {
         fallback_learning_rate: f32,
     ) -> Self {
         #[cfg(feature = "psi")]
-        let (psi, psi_log) = Self::init_psi_meter();
+        let psi = Self::init_psi_meter();
+
         Self {
             planner: RankPlanner::new(caps),
             curvature,
@@ -109,7 +110,7 @@ impl ModuleTrainer {
             meta_conductor: None,
             heur_log: HeurOpLog::default(),
             #[cfg(feature = "psi")]
-            psi: Self::init_psi_meter(),
+            psi,
             #[cfg(feature = "psychoid")]
             psychoid: None,
             #[cfg(feature = "psychoid")]
@@ -121,8 +122,6 @@ impl ModuleTrainer {
 
     #[cfg(feature = "psi")]
     fn init_psi_meter() -> Option<PsiMeter> {
-        use std::env;
-
         let enabled = env::var("SPIRAL_PSI")
             .map(|value| {
                 matches!(
