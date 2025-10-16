@@ -221,20 +221,26 @@ print(frame.timestamp, frame.total_energy)
 # Sample the most recent frames for plotting.
 frames = session.timeline(timesteps=128)
 summary = session.timeline_summary(timesteps=128)
+harmonics = session.timeline_harmonics(timesteps=256, bins=24)
 times, energy, drift = session.animate_resonance(timesteps=128)
 wave = session.speak(timesteps=128, temperature=0.7)
+story, highlights = session.timeline_story(timesteps=256, temperature=0.65)
 ```
 
 `ChronoFrame` surfaces per-band energy, curvature drift, and decay estimates so
 you can chart living topology directly in notebooks. Reach for
 `session.timeline_summary()` when you want windowed drift/energy statistics or
-`session.speak(...)` to generate a playback-ready amplitude trace. For instant
-context, call `session.describe()` to synthesise a short narrative about the
-latest state or pass an explicit `resonance` snapshot:
+`session.timeline_harmonics()` to expose dominant oscillations inside the
+timeline. `session.speak(...)` still generates a playback-ready amplitude trace,
+while `session.timeline_story(...)` and `session.describe()` synthesise natural
+language narratives about the latest state (or pass an explicit `resonance`
+snapshot to ground the narration in a fresh observation):
 
 ```python
 print(session.describe())
 print(session.describe(resonance, temperature=0.8))
+print(st.describe_timeline(frames))
+print(harmonics.dominant_energy.frequency if harmonics else None)
 ```
 
 ### Self-maintaining feedback loops
@@ -259,7 +265,9 @@ if report.should_rewrite():
 ```
 
 The maintainer computes curvature jitter, mean energy, and decay across the most
-recent frames, returning actionable clamp and pressure suggestions. Override the
+recent frames, returning actionable clamp and pressure suggestions. Spectral
+peaks are now included in every report so you can see whether high-frequency
+jitter or runaway energy oscillations triggered an intervention. Override the
 defaults on-the-fly with `session.configure_maintainer(...)` to experiment with
 more aggressive rewrite policies or relaxed dormancy thresholds.
 
@@ -273,6 +281,7 @@ amplitude = encoder.speak(frames)
 
 narrator = st.TextResonator(session.curvature(), 0.55)
 print(narrator.describe_resonance(resonance))
+print(narrator.describe_timeline(frames))
 wave = narrator.speak(frames)
 ```
 

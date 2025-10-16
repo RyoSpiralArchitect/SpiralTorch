@@ -30,7 +30,124 @@
 //! memory growth.
 
 use core::f32;
+use core::f32::consts::TAU;
 use std::collections::VecDeque;
+
+/// Dominant harmonic extracted from a chrono spectrum.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChronoPeak {
+    /// Frequency of the harmonic in Hertz (or 1 / caller units).
+    pub frequency: f32,
+    /// Magnitude of the harmonic after normalisation.
+    pub magnitude: f32,
+    /// Phase offset of the harmonic in radians.
+    pub phase: f32,
+}
+
+/// Spectral analysis describing how curvature drift and energy oscillate over time.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChronoHarmonics {
+    /// Number of frames that participated in the spectrum.
+    pub frames: usize,
+    /// Duration covered by the analysed frames.
+    pub duration: f32,
+    /// Sample rate reconstructed from the average frame spacing.
+    pub sample_rate: f32,
+    /// Nyquist frequency associated with the sample rate.
+    pub nyquist: f32,
+    /// Power spectrum of curvature drift, ordered by increasing frequency bin.
+    pub drift_power: Vec<f32>,
+    /// Power spectrum of total energy, ordered by increasing frequency bin.
+    pub energy_power: Vec<f32>,
+    /// Dominant curvature drift harmonic, if any.
+    pub dominant_drift: Option<ChronoPeak>,
+    /// Dominant energy harmonic, if any.
+    pub dominant_energy: Option<ChronoPeak>,
+}
+
+impl ChronoHarmonics {
+    /// Computes the harmonic spectrum for the supplied frames.
+    pub fn from_frames(frames: &[ChronoFrame], bins: usize) -> Option<Self> {
+        if frames.is_empty() || bins == 0 {
+            return None;
+        }
+        let count = frames.len();
+        if count < 2 {
+            return None;
+        }
+        let duration: f32 = frames.iter().map(|frame| frame.dt.max(f32::EPSILON)).sum();
+        if !duration.is_finite() || duration <= f32::EPSILON {
+            return None;
+        }
+        let sample_rate = (count as f32) / duration;
+        let nyquist = 0.5 * sample_rate;
+        let usable_bins = (count / 2 + 1).max(1);
+        let bins = bins.min(usable_bins);
+        let mut drift_series = Vec::with_capacity(count);
+        let mut energy_series = Vec::with_capacity(count);
+        for frame in frames {
+            drift_series.push(frame.curvature_drift);
+            energy_series.push(frame.total_energy);
+        }
+
+        let drift_power = discrete_power_spectrum(&drift_series, bins);
+        let energy_power = discrete_power_spectrum(&energy_series, bins);
+        let dominant_drift = dominant_peak(&drift_power, sample_rate, count);
+        let dominant_energy = dominant_peak(&energy_power, sample_rate, count);
+        Some(Self {
+            frames: count,
+            duration,
+            sample_rate,
+            nyquist,
+            drift_power,
+            energy_power,
+            dominant_drift,
+            dominant_energy,
+        })
+    }
+}
+
+fn discrete_power_spectrum(series: &[f32], bins: usize) -> Vec<f32> {
+    let n = series.len();
+    let norm = n as f32;
+    (0..bins)
+        .map(|k| {
+            let mut re = 0.0f32;
+            let mut im = 0.0f32;
+            for (i, sample) in series.iter().enumerate() {
+                let angle = -TAU * k as f32 * i as f32 / norm;
+                re += sample * angle.cos();
+                im += sample * angle.sin();
+            }
+            (re * re + im * im).sqrt() / norm
+        })
+        .collect()
+}
+
+fn dominant_peak(power: &[f32], sample_rate: f32, samples: usize) -> Option<ChronoPeak> {
+    if power.is_empty() || samples == 0 {
+        return None;
+    }
+    let mut max_index = None;
+    let mut max_value = 0.0f32;
+    for (idx, magnitude) in power.iter().enumerate() {
+        if idx == 0 {
+            continue;
+        }
+        if magnitude.is_finite() && *magnitude > max_value {
+            max_value = *magnitude;
+            max_index = Some(idx);
+        }
+    }
+    max_index.map(|idx| {
+        let frequency = sample_rate * idx as f32 / samples as f32;
+        ChronoPeak {
+            frequency,
+            magnitude: max_value,
+            phase: 0.0,
+        }
+    })
+}
 
 /// Aggregated summary computed over a slice of chrono frames.
 #[derive(Clone, Debug)]
@@ -316,6 +433,17 @@ impl ChronoTimeline {
         let skip = self.frames.len() - window;
         ChronoSummary::from_iter(self.frames.iter().skip(skip))
     }
+
+    /// Computes harmonic statistics over the most recent `window` frames.
+    pub fn harmonics(&self, window: usize, bins: usize) -> Option<ChronoHarmonics> {
+        if self.frames.is_empty() {
+            return None;
+        }
+        let window = window.max(1).min(self.frames.len());
+        let start = self.frames.len() - window;
+        let slice: Vec<_> = self.frames.iter().skip(start).cloned().collect();
+        ChronoHarmonics::from_frames(&slice, bins)
+    }
 }
 
 impl Default for ChronoTimeline {
@@ -377,6 +505,7 @@ impl ResonanceTemporalMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::f32::consts::TAU;
 
     #[test]
     fn timeline_records_and_limits_capacity() {
@@ -504,5 +633,36 @@ mod tests {
         assert_eq!(summary.frames, 2);
         assert!((summary.duration - 0.2).abs() < 1e-6);
         assert!(summary.latest_timestamp > 0.0);
+    }
+
+    #[test]
+    fn harmonics_detects_sine_energy() {
+        let mut timeline = ChronoTimeline::with_capacity(64);
+        let mut timestamp = 0.0f32;
+        let dt = 0.1f32;
+        let frequency = 2.0f32; // Hz equivalent (with dt=0.1 -> sample_rate=10)
+        for step in 0..32 {
+            let phase = TAU * frequency * (step as f32) * dt;
+            let energy = phase.sin();
+            let metrics = ResonanceTemporalMetrics {
+                observed_curvature: 0.0,
+                total_energy: energy,
+                homotopy_energy: 0.0,
+                functor_energy: 0.0,
+                recursive_energy: 0.0,
+                projection_energy: 0.0,
+                infinity_energy: 0.0,
+            };
+            timestamp += dt;
+            let frame = timeline.record(dt, metrics);
+            assert!(frame.timestamp <= timestamp + f32::EPSILON);
+        }
+
+        let harmonics = timeline.harmonics(32, 16).expect("harmonics");
+        assert_eq!(harmonics.frames, 32);
+        assert!(harmonics.sample_rate > 0.0);
+        let peak = harmonics.dominant_energy.unwrap_or_default();
+        assert!((peak.frequency - frequency).abs() < 0.5);
+        assert!(peak.magnitude > 0.1);
     }
 }

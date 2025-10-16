@@ -23,7 +23,7 @@ use st_backend_hip::{
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary};
+use st_core::telemetry::chrono::{ChronoFrame, ChronoHarmonics, ChronoPeak, ChronoSummary};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::telemetry::hub;
 use st_core::telemetry::maintainer::{MaintainerConfig, MaintainerReport};
@@ -55,7 +55,7 @@ use st_tensor::pure::{
 };
 use st_text::{
     describe_frame as text_describe_frame, describe_resonance as text_describe_resonance,
-    TextResonator,
+    describe_timeline as text_describe_timeline, TextResonator,
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -250,6 +250,12 @@ fn describe_resonance(resonance: &PyDifferentialResonance) -> PyResult<String> {
 #[pyfunction]
 fn describe_frame(frame: &PyChronoFrame) -> String {
     text_describe_frame(frame.as_frame())
+}
+
+#[pyfunction]
+fn describe_timeline(frames: Vec<PyChronoFrame>) -> PyResult<String> {
+    let inner: Vec<ChronoFrame> = frames.into_iter().map(PyChronoFrame::into_frame).collect();
+    convert(text_describe_timeline(&inner))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -933,6 +939,141 @@ impl PyChronoSummary {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "ChronoPeak")]
+#[derive(Clone)]
+struct PyChronoPeak {
+    peak: ChronoPeak,
+}
+
+impl PyChronoPeak {
+    fn from_peak(peak: ChronoPeak) -> Self {
+        Self { peak }
+    }
+}
+
+#[pymethods]
+impl PyChronoPeak {
+    #[getter]
+    fn frequency(&self) -> f32 {
+        self.peak.frequency
+    }
+
+    #[getter]
+    fn magnitude(&self) -> f32 {
+        self.peak.magnitude
+    }
+
+    #[getter]
+    fn phase(&self) -> f32 {
+        self.peak.phase
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frequency", self.peak.frequency)?;
+        dict.set_item("magnitude", self.peak.magnitude)?;
+        dict.set_item("phase", self.peak.phase)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoPeak(freq={:.3}, magnitude={:.3})",
+            self.peak.frequency, self.peak.magnitude
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoHarmonics")]
+struct PyChronoHarmonics {
+    harmonics: ChronoHarmonics,
+}
+
+impl PyChronoHarmonics {
+    fn from_harmonics(harmonics: ChronoHarmonics) -> Self {
+        Self { harmonics }
+    }
+}
+
+#[pymethods]
+impl PyChronoHarmonics {
+    #[getter]
+    fn frames(&self) -> usize {
+        self.harmonics.frames
+    }
+
+    #[getter]
+    fn duration(&self) -> f32 {
+        self.harmonics.duration
+    }
+
+    #[getter]
+    fn sample_rate(&self) -> f32 {
+        self.harmonics.sample_rate
+    }
+
+    #[getter]
+    fn nyquist(&self) -> f32 {
+        self.harmonics.nyquist
+    }
+
+    #[getter]
+    fn drift_power(&self) -> Vec<f32> {
+        self.harmonics.drift_power.clone()
+    }
+
+    #[getter]
+    fn energy_power(&self) -> Vec<f32> {
+        self.harmonics.energy_power.clone()
+    }
+
+    #[getter]
+    fn dominant_drift(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_drift
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn dominant_energy(&self) -> Option<PyChronoPeak> {
+        self.harmonics
+            .dominant_energy
+            .clone()
+            .map(PyChronoPeak::from_peak)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frames", self.harmonics.frames)?;
+        dict.set_item("duration", self.harmonics.duration)?;
+        dict.set_item("sample_rate", self.harmonics.sample_rate)?;
+        dict.set_item("nyquist", self.harmonics.nyquist)?;
+        dict.set_item("drift_power", self.harmonics.drift_power.clone())?;
+        dict.set_item("energy_power", self.harmonics.energy_power.clone())?;
+        let drift = if let Some(peak) = self.harmonics.dominant_drift.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_drift", drift)?;
+        let energy = if let Some(peak) = self.harmonics.dominant_energy.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("dominant_energy", energy)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoHarmonics(frames={}, sample_rate={:.3})",
+            self.harmonics.frames, self.harmonics.sample_rate
+        ))
+    }
+}
+
 #[pymethods]
 impl PyChronoSummary {
     #[getter]
@@ -1123,6 +1264,16 @@ impl PyMaintainerReport {
     }
 
     #[getter]
+    fn drift_peak(&self) -> Option<PyChronoPeak> {
+        self.report.drift_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
+    fn energy_peak(&self) -> Option<PyChronoPeak> {
+        self.report.energy_peak.clone().map(PyChronoPeak::from_peak)
+    }
+
+    #[getter]
     fn suggested_max_scale(&self) -> Option<f32> {
         self.report.suggested_max_scale
     }
@@ -1147,6 +1298,18 @@ impl PyMaintainerReport {
         dict.set_item("average_drift", self.report.average_drift)?;
         dict.set_item("mean_energy", self.report.mean_energy)?;
         dict.set_item("mean_decay", self.report.mean_decay)?;
+        let drift_peak = if let Some(peak) = self.report.drift_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        let energy_peak = if let Some(peak) = self.report.energy_peak.clone() {
+            PyChronoPeak::from_peak(peak).as_dict(py)?
+        } else {
+            py.None()
+        };
+        dict.set_item("drift_peak", drift_peak)?;
+        dict.set_item("energy_peak", energy_peak)?;
         dict.set_item("suggested_max_scale", self.report.suggested_max_scale)?;
         dict.set_item("suggested_pressure", self.report.suggested_pressure)?;
         dict.set_item("diagnostic", &self.report.diagnostic)?;
@@ -1155,8 +1318,14 @@ impl PyMaintainerReport {
     }
 
     fn __repr__(&self) -> PyResult<String> {
+        let peak = self
+            .report
+            .drift_peak
+            .as_ref()
+            .map(|p| format!(" {:.2}Hz", p.frequency))
+            .unwrap_or_default();
         Ok(format!(
-            "MaintainerReport(status={}, drift={:.3}, energy={:.3})",
+            "MaintainerReport(status={}, drift={:.3}{peak}, energy={:.3})",
             self.report.status.as_str(),
             self.report.average_drift,
             self.report.mean_energy
@@ -2545,6 +2714,30 @@ impl PySpiralSession {
         self.inner
             .timeline_summary(timesteps)
             .map(PyChronoSummary::from_summary)
+    }
+
+    #[pyo3(signature = (timesteps=None, bins=16))]
+    fn timeline_harmonics(
+        &self,
+        timesteps: Option<usize>,
+        bins: usize,
+    ) -> Option<PyChronoHarmonics> {
+        self.inner
+            .timeline_harmonics(timesteps, bins)
+            .map(PyChronoHarmonics::from_harmonics)
+    }
+
+    #[pyo3(signature = (timesteps=None, temperature=0.6))]
+    fn timeline_story(
+        &self,
+        timesteps: Option<usize>,
+        temperature: f32,
+    ) -> PyResult<(String, Vec<String>)> {
+        let narrative = self
+            .inner
+            .timeline_narrative(timesteps, temperature)
+            .map_err(tensor_err)?;
+        Ok((narrative.summary, narrative.highlights))
     }
 
     #[pyo3(signature = (timesteps=None, temperature=0.6))]
@@ -4530,6 +4723,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
     m.add_function(wrap_pyfunction!(describe_resonance, m)?)?;
     m.add_function(wrap_pyfunction!(describe_frame, m)?)?;
+    m.add_function(wrap_pyfunction!(describe_timeline, m)?)?;
     m.add_class::<PyTensor>()?;
     m.add_class::<PyComplexTensor>()?;
     m.add_class::<PyBarycenterIntermediate>()?;
@@ -4537,6 +4731,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDifferentialResonance>()?;
     m.add_class::<PyChronoFrame>()?;
     m.add_class::<PyChronoSummary>()?;
+    m.add_class::<PyChronoPeak>()?;
+    m.add_class::<PyChronoHarmonics>()?;
     m.add_class::<PyMaintainerReport>()?;
     m.add_class::<PySpiralDifferentialTrace>()?;
     m.add_class::<PyOpenTopos>()?;
@@ -4564,6 +4760,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "get_psychoid_stats",
             "describe_resonance",
             "describe_frame",
+            "describe_timeline",
             "Tensor",
             "ComplexTensor",
             "BarycenterIntermediate",

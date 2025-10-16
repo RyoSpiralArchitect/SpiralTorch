@@ -27,7 +27,7 @@
 //! curvature jitter, energy trends, and dormancy so higher level tooling can decide when to
 //! tighten geometry clamps or escalate into a full self-rewrite cycle.
 
-use super::chrono::{ChronoFrame, ChronoSummary};
+use super::chrono::{ChronoFrame, ChronoHarmonics, ChronoPeak, ChronoSummary};
 
 /// Indicates the level of maintenance required to stabilise the session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,6 +129,10 @@ pub struct MaintainerReport {
     pub mean_energy: f32,
     /// Mean decay rate (positive = energy decaying, negative = energy growing).
     pub mean_decay: f32,
+    /// Dominant oscillation of the curvature drift, if any.
+    pub drift_peak: Option<ChronoPeak>,
+    /// Dominant oscillation of the energy signal, if any.
+    pub energy_peak: Option<ChronoPeak>,
     /// Recommended clamp for geometry max_scale, if any.
     pub suggested_max_scale: Option<f32>,
     /// Recommended bump to Leech density pressure, if any.
@@ -166,6 +170,8 @@ impl Maintainer {
                 average_drift: 0.0,
                 mean_energy: 0.0,
                 mean_decay: 0.0,
+                drift_peak: None,
+                energy_peak: None,
                 suggested_max_scale: None,
                 suggested_pressure: None,
                 diagnostic: "No temporal frames recorded; timeline is dormant.".to_string(),
@@ -181,6 +187,13 @@ impl Maintainer {
         let average_drift = summary.mean_abs_drift;
         let mean_energy = summary.mean_energy;
         let mean_decay = summary.mean_decay;
+        let harmonics = ChronoHarmonics::from_frames(slice, 16);
+        let drift_peak = harmonics
+            .as_ref()
+            .and_then(|spec| spec.dominant_drift.clone());
+        let energy_peak = harmonics
+            .as_ref()
+            .and_then(|spec| spec.dominant_energy.clone());
 
         let growth = (-mean_decay).max(0.0);
         let mut status = if mean_energy <= self.config.energy_floor {
@@ -221,6 +234,31 @@ impl Maintainer {
             suggested_pressure = Some(pressure);
         }
 
+        if let Some(peak) = drift_peak.as_ref() {
+            if peak.magnitude > self.config.jitter_threshold {
+                status = MaintainerStatus::Clamp;
+                reasons.push(format!(
+                    "drift harmonic {:.2}Hz magnitude {:.3}",
+                    peak.frequency, peak.magnitude
+                ));
+                suggested_max_scale = suggested_max_scale.or(Some(self.config.clamp_max));
+            }
+        }
+
+        if let Some(peak) = energy_peak.as_ref() {
+            if peak.magnitude > self.config.growth_threshold {
+                status = MaintainerStatus::Rewrite;
+                reasons.push(format!(
+                    "energy harmonic {:.2}Hz magnitude {:.3}",
+                    peak.frequency, peak.magnitude
+                ));
+                let pressure = (self.config.pressure_step
+                    * (1.0 + peak.magnitude / self.config.growth_threshold))
+                    .min(1.0);
+                suggested_pressure = Some(pressure);
+            }
+        }
+
         if reasons.is_empty() {
             if matches!(status, MaintainerStatus::Dormant) {
                 reasons.push(format!(
@@ -240,6 +278,8 @@ impl Maintainer {
             average_drift,
             mean_energy,
             mean_decay,
+            drift_peak,
+            energy_peak,
             suggested_max_scale,
             suggested_pressure,
             diagnostic: reasons.join("; "),
@@ -250,6 +290,7 @@ impl Maintainer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::f32::consts::TAU;
 
     fn frame(step: u64, drift: f32, energy: f32, decay: f32) -> ChronoFrame {
         ChronoFrame {
@@ -307,5 +348,25 @@ mod tests {
         assert!(report.should_rewrite());
         assert!(report.suggested_pressure.unwrap() > 0.0);
         assert!(report.diagnostic.contains("energy growth"));
+    }
+
+    #[test]
+    fn maintainer_reports_harmonic_peaks() {
+        let maintainer = Maintainer::new(MaintainerConfig {
+            jitter_threshold: 0.05,
+            ..MaintainerConfig::default()
+        });
+        let mut frames = Vec::new();
+        for step in 0..32 {
+            let phase = TAU * step as f32 / 8.0;
+            frames.push(frame(
+                step,
+                phase.sin() * 0.2,
+                (phase.cos() + 1.5).max(0.0),
+                -0.01,
+            ));
+        }
+        let report = maintainer.assess(&frames);
+        assert!(report.drift_peak.is_some());
     }
 }
