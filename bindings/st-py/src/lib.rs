@@ -249,6 +249,22 @@ fn convert_fft<T>(value: Result<T, FftError>) -> PyResult<T> {
     })
 }
 
+#[pyfunction]
+fn describe_resonance(resonance: &PyDifferentialResonance) -> PyResult<String> {
+    convert(text_describe_resonance(&resonance.inner))
+}
+
+#[pyfunction]
+fn describe_frame(frame: &PyChronoFrame) -> String {
+    text_describe_frame(frame.as_frame())
+}
+
+#[pyfunction]
+fn describe_timeline(frames: Vec<PyChronoFrame>) -> PyResult<String> {
+    let inner: Vec<ChronoFrame> = frames.into_iter().map(PyChronoFrame::into_frame).collect();
+    convert(text_describe_timeline(&inner))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_roundtable_config(
     top_k: u32,
@@ -5469,15 +5485,21 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "hip_probe",
             "describe_device",
             "get_psychoid_stats",
+            "describe_resonance",
+            "describe_frame",
+            "describe_timeline",
             "Tensor",
             "ComplexTensor",
             "BarycenterIntermediate",
             "ZSpaceBarycenter",
             "DifferentialResonance",
+            "ChronoFrame",
+            "ChronoSummary",
             "SpiralDifferentialTrace",
             "OpenTopos",
             "TensorBiome",
             "LanguageWaveEncoder",
+            "TextResonator",
             "Hypergrad",
             "DistConfig",
             "RoundtableSchedule",

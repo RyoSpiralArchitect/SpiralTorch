@@ -276,6 +276,97 @@ stats = session.train_epoch(trainer, model, loss, loader, schedule)
 The loader runs entirely in Rust—mini-batches stream straight into
 `train_epoch` and propagate errors as native `TensorError`s when shapes drift.
 
+### Temporal resonance timelines
+
+Sessions now keep a rolling **chrono timeline** that measures how each
+`DifferentialResonance` evolves across calls. Record a frame by piping a fresh
+snapshot through `resonate_over_time(dt)` and inspect the history via
+`session.timeline()` or the underlying `ChronoFrame` handles:
+
+```python
+resonance = trace.resonate()
+frame = session.resonate_over_time(resonance, dt=0.1)
+print(frame.timestamp, frame.total_energy)
+
+# Sample the most recent frames for plotting.
+frames = session.timeline(timesteps=128)
+summary = session.timeline_summary(timesteps=128)
+harmonics = session.timeline_harmonics(timesteps=256, bins=24)
+loop_signal = session.loop_signal(timesteps=256)
+times, energy, drift = session.animate_resonance(timesteps=128)
+wave = session.speak(timesteps=128, temperature=0.7)
+story, highlights = session.timeline_story(timesteps=256, temperature=0.65)
+
+if loop_signal and loop_signal.spiralk_script:
+    print("SpiralK hint:")
+    print(loop_signal.spiralk_script)
+```
+
+`ChronoFrame` surfaces per-band energy, curvature drift, and decay estimates so
+you can chart living topology directly in notebooks. Reach for
+`session.timeline_summary()` when you want windowed drift/energy statistics or
+`session.timeline_harmonics()` to expose dominant oscillations inside the
+timeline. `session.loop_signal(...)` folds both into a reusable bundle that
+includes a SpiralK script (when the `kdsl` feature is enabled) so heuristics can
+be replayed across devices. `session.speak(...)` still generates a playback-ready
+amplitude trace, while `session.timeline_story(...)` and `session.describe()`
+synthesise natural language narratives about the latest state (or pass an
+explicit `resonance` snapshot to ground the narration in a fresh observation):
+
+```python
+print(session.describe())
+print(session.describe(resonance, temperature=0.8))
+print(st.describe_timeline(frames))
+print(harmonics.dominant_energy.frequency if harmonics else None)
+```
+
+### Self-maintaining feedback loops
+
+Temporal telemetry now feeds a lightweight **maintainer** that keeps the
+geometry controller within the recommended 2–3× max-scale band and gently bumps
+Leech density pressure when energy starts to race. Both Rust and Python callers
+can inspect the maintainer report and override thresholds when experimenting:
+
+```python
+# Tune thresholds before building a session.
+session_builder.maintainer(jitter_threshold=0.25, growth_threshold=0.03)
+session = session_builder.build()
+
+# Review the live configuration and trigger an assessment.
+print(session.maintainer_config())
+report = session.self_maintain()
+print(report.status, report.suggested_max_scale)
+
+if report.should_rewrite():
+    print("Maintainer recommends a self-rewrite cycle:", report.diagnostic)
+```
+
+The maintainer computes curvature jitter, mean energy, and decay across the most
+recent frames, returning actionable clamp and pressure suggestions. Spectral
+peaks are now included in every report so you can see whether high-frequency
+jitter or runaway energy oscillations triggered an intervention. Override the
+defaults on-the-fly with `session.configure_maintainer(...)` to experiment with
+more aggressive rewrite policies or relaxed dormancy thresholds.
+
+Maintainer reports now ship with the same SpiralK snippet the session pushes into
+the chrono loop, and `session.collapse_pulse()` returns the latest CollapseDrive
+command (including any associated loop signal) so distributed nodes can stay in
+lockstep without bespoke plumbing.
+
+On the audio front, `LanguageWaveEncoder.speak(frames)` maps chrono timelines to
+wave amplitudes, and the higher-level `TextResonator` class lets Rust or Python
+callers drive the same pipeline with custom curvature/temperature settings:
+
+```python
+encoder = st.LanguageWaveEncoder(session.curvature(), 0.55)
+amplitude = encoder.speak(frames)
+
+narrator = st.TextResonator(session.curvature(), 0.55)
+print(narrator.describe_resonance(resonance))
+print(narrator.describe_timeline(frames))
+wave = narrator.speak(frames)
+```
+
 Prefer a notebook-friendly wrapper? Instantiate `SpiralLightning` from Python
 to bundle the session, trainer, and schedule into a single object that
 auto-prepares modules and returns per-epoch reports with `lightning.fit(...)`.
@@ -452,6 +543,16 @@ spot drift. `GeometryFeedback` keeps `max_scale` inside the recommended `[2, 3]`
 band, raises the floor when rank collapses, and eases the Leech density weight
 if pressure over-saturates—giving you a self-tuning geometric metronome instead
 of a static multiplier.
+
+Chrono loop signals now feed directly into the controller: every
+`SpiralSession::resonate_over_time` call plants a `ChronoLoopSignal` in the
+telemetry hub, and `SpiralPolicyGradient::finish_episode_with_geometry` consumes
+the latest signal before measuring a resonance snapshot. Harmonic gain and decay
+estimates tighten the learning-rate clamps, bump the Λ₂₄ pressure when collapse
+drive pulses flare, and publish the live loop gain/softening factor through
+`PolicyTelemetry.geometry`. In other words, Z-space temporal dynamics, SpiralK
+heuristics, and collapse drive pressure now close a tidy feedback loop without
+additional plumbing.
 
 ### SpiralTorchRec (open-topos recommendation lattice)
 

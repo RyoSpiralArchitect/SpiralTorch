@@ -5,6 +5,7 @@
 
 use std::collections::VecDeque;
 
+use st_core::telemetry::chrono::ChronoLoopSignal;
 use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
@@ -84,6 +85,14 @@ pub struct GeometryTelemetry {
     pub max_scale: f32,
     /// Active Leech density weight following self-rewrites.
     pub leech_density_weight: f64,
+    /// Loopback gain distilled from the latest chrono loop signal.
+    pub loop_gain: f32,
+    /// Collapse pressure inferred from collapse drive pulses or decay drift.
+    pub collapse_bias: f32,
+    /// Timestamp of the most recent loopback modulation.
+    pub loop_timestamp: f32,
+    /// Active softening factor after loopback rewrites.
+    pub softening_beta: f32,
 }
 
 /// Coalgebra-powered feedback loop that measures resonance geometry and emits
@@ -100,11 +109,16 @@ pub struct GeometryFeedback {
     leech_weight: f64,
     ramanujan_pi: f64,
     softening_beta: f32,
+    base_softening_beta: f32,
     rank_history: VecDeque<f64>,
     pressure_history: VecDeque<f64>,
     scale_history: VecDeque<f32>,
     telemetry: GeometryTelemetry,
     last_signal: Option<GeometryFeedbackSignal>,
+    loop_gain: f32,
+    collapse_bias: f32,
+    loop_timestamp: f32,
+    loop_fresh: bool,
 }
 
 impl GeometryFeedback {
@@ -141,11 +155,16 @@ impl GeometryFeedback {
             leech_weight: config.leech_density_weight.max(0.0),
             ramanujan_pi: Self::ramanujan_pi(config.ramanujan_iterations.max(1)),
             softening_beta: config.softening_beta.max(0.0),
+            base_softening_beta: config.softening_beta.max(0.0),
             rank_history: VecDeque::with_capacity(window),
             pressure_history: VecDeque::with_capacity(window),
             scale_history: VecDeque::with_capacity(window),
             telemetry: GeometryTelemetry::default(),
             last_signal: None,
+            loop_gain: 0.0,
+            collapse_bias: 0.0,
+            loop_timestamp: 0.0,
+            loop_fresh: false,
         }
     }
 
@@ -157,6 +176,43 @@ impl GeometryFeedback {
     /// Returns rolling diagnostics summarising the most recent updates.
     pub fn telemetry(&self) -> &GeometryTelemetry {
         &self.telemetry
+    }
+
+    /// Integrates a chrono loop signal so temporal harmonics can steer the
+    /// self-rewrites before the next resonance measurement.
+    pub fn integrate_loop_signal(&mut self, signal: &ChronoLoopSignal) {
+        let summary = &signal.summary;
+        let drift = summary.mean_abs_drift.abs();
+        let energy_std = summary.energy_std.max(0.0);
+        let energy_band = (summary.max_energy - summary.min_energy).max(0.0);
+        let mut gain = drift + energy_std.sqrt() + energy_band.powf(0.25);
+        if let Some(harmonics) = &signal.harmonics {
+            if let Some(peak) = &harmonics.dominant_drift {
+                gain += peak.magnitude;
+            }
+            if let Some(peak) = &harmonics.dominant_energy {
+                gain += peak.magnitude * 0.75;
+            }
+        }
+        self.loop_gain = gain.clamp(0.0, 12.0);
+        let decay_bias = (-summary.mean_decay).max(0.0).clamp(0.0, 6.0);
+        self.collapse_bias = self.collapse_bias.max(decay_bias);
+        self.loop_timestamp = summary.latest_timestamp;
+        let normalized = (self.loop_gain / 12.0).clamp(0.0, 1.0);
+        let target_beta = 0.6 + normalized * 1.4;
+        self.softening_beta = (self.softening_beta * 0.7 + target_beta * 0.3).clamp(0.3, 4.0);
+        self.loop_fresh = true;
+    }
+
+    /// Injects collapse drive pressure so the Leech weighting can respond to
+    /// structural emergencies even when no loop signal is available.
+    pub fn inject_collapse_bias(&mut self, intensity: f32) {
+        if !intensity.is_finite() {
+            return;
+        }
+        let bias = intensity.abs().sqrt().clamp(0.0, 6.0);
+        self.collapse_bias = self.collapse_bias.max(bias);
+        self.loop_fresh = true;
     }
 
     /// Measures the provided resonance snapshot and emits a smoothed feedback
@@ -223,6 +279,10 @@ impl GeometryFeedback {
             min_scale: self.min_scale,
             max_scale: self.max_scale,
             leech_density_weight: self.leech_weight,
+            loop_gain: self.loop_gain,
+            collapse_bias: self.collapse_bias,
+            loop_timestamp: self.loop_timestamp,
+            softening_beta: self.softening_beta,
         };
 
         let signal = GeometryFeedbackSignal {
@@ -321,6 +381,30 @@ impl GeometryFeedback {
             self.max_scale = (self.max_scale + 0.05).min(3.0);
         }
 
+        if self.loop_fresh {
+            let normalized = (self.loop_gain / 8.0).clamp(0.0, 1.5);
+            let tighten = normalized.min(1.0);
+            let relax = (1.0 - tighten).max(0.0);
+            self.max_scale = (self.max_scale - 0.08 * tighten).max(2.0);
+            if tighten > 0.3 {
+                self.min_scale = (self.min_scale * (1.0 - 0.06 * tighten)).max(f32::EPSILON);
+            } else {
+                self.min_scale = (self.min_scale * (1.0 + 0.05 * relax))
+                    .min(self.max_scale - f32::EPSILON)
+                    .max(f32::EPSILON);
+            }
+            let collapse_push = (self.collapse_bias / 6.0).clamp(0.0, 1.0) as f64;
+            let pressure_gain = 1.0 + collapse_push * 0.4 + (tighten as f64) * 0.3;
+            self.leech_weight = (self.leech_weight * pressure_gain).clamp(0.0, 32.0);
+            self.loop_fresh = false;
+        } else {
+            self.loop_gain *= 0.94;
+            self.collapse_bias *= 0.9;
+            self.softening_beta =
+                (self.softening_beta * 0.95 + self.base_softening_beta * 0.05).clamp(0.3, 4.0);
+            self.leech_weight = (self.leech_weight * 0.995).max(0.0);
+        }
+
         self.max_scale = self.max_scale.clamp(2.0, 3.0);
         if self.min_scale >= self.max_scale {
             self.min_scale = (self.max_scale * 0.5).max(f32::EPSILON);
@@ -350,6 +434,7 @@ const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
 mod tests {
     use super::*;
     use st_core::theory::observability::SlotSymmetry;
+    use st_core::telemetry::chrono::{ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary};
 
     fn tensor_from(values: &[f32]) -> Tensor {
         Tensor::from_vec(1, values.len(), values.to_vec()).unwrap()
@@ -447,5 +532,53 @@ mod tests {
         assert!(telemetry.max_scale >= 2.0);
         assert!(telemetry.leech_density_weight >= 0.0);
         assert!(telemetry.rolling_pressure > 0.0);
+    }
+
+    #[test]
+    fn loop_signal_modulates_feedback() {
+        let mut feedback = GeometryFeedback::new(GeometryFeedbackConfig::default_policy());
+        let summary = ChronoSummary {
+            frames: 4,
+            duration: 1.2,
+            latest_timestamp: 1.2,
+            mean_drift: -0.2,
+            mean_abs_drift: 1.4,
+            drift_std: 0.3,
+            mean_energy: 3.0,
+            energy_std: 0.8,
+            mean_decay: -0.45,
+            min_energy: 2.4,
+            max_energy: 3.6,
+        };
+        let harmonics = ChronoHarmonics {
+            frames: 4,
+            duration: 1.2,
+            sample_rate: 3.3,
+            nyquist: 1.65,
+            drift_power: vec![0.0; 4],
+            energy_power: vec![0.0; 4],
+            dominant_drift: Some(ChronoPeak {
+                frequency: 0.5,
+                magnitude: 0.8,
+                phase: 0.0,
+            }),
+            dominant_energy: Some(ChronoPeak {
+                frequency: 0.8,
+                magnitude: 0.6,
+                phase: 0.25,
+            }),
+        };
+        let signal = ChronoLoopSignal::new(summary, Some(harmonics));
+        feedback.integrate_loop_signal(&signal);
+        feedback.inject_collapse_bias(9.0);
+
+        let resonance = resonance_from(&[0.6, -0.4, 0.2, -0.1, 0.3]);
+        let _ = feedback.process_resonance(&resonance);
+        let telemetry = feedback.telemetry();
+        assert!(telemetry.loop_gain > 0.0);
+        assert!(telemetry.collapse_bias > 0.0);
+        assert!(telemetry.softening_beta > 0.6);
+        assert!(telemetry.leech_density_weight > 0.35);
+        assert!(telemetry.loop_timestamp >= 1.2 - f32::EPSILON);
     }
 }

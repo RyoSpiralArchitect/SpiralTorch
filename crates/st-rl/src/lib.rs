@@ -5,6 +5,7 @@
 
 use std::fmt;
 
+use st_core::telemetry::hub;
 use st_tensor::pure::{AmegaHypergrad, DifferentialResonance, Tensor, TensorError};
 
 mod geometry;
@@ -298,6 +299,23 @@ impl SpiralPolicyGradient {
         resonance: &DifferentialResonance,
     ) -> RlResult<(EpisodeReport, Option<GeometryFeedbackSignal>)> {
         let (scale, signal) = if let Some(controller) = self.geometry_feedback.as_mut() {
+            #[allow(unused_mut)]
+            let mut loop_injected = false;
+            #[cfg(feature = "collapse")]
+            {
+                if let Some(pulse) = hub::get_collapse_pulse() {
+                    controller.inject_collapse_bias(pulse.total);
+                    if let Some(signal) = pulse.loop_signal {
+                        controller.integrate_loop_signal(&signal);
+                        loop_injected = true;
+                    }
+                }
+            }
+            if !loop_injected {
+                if let Some(signal) = hub::get_chrono_loop() {
+                    controller.integrate_loop_signal(&signal);
+                }
+            }
             let signal = controller.process_resonance(resonance);
             (signal.learning_rate_scale.max(f32::EPSILON), Some(signal))
         } else {
@@ -419,6 +437,8 @@ mod tests {
         let geo = telemetry.geometry.unwrap();
         assert!(geo.rolling_scale >= 0.0);
         assert!(geo.max_scale <= 3.0);
+        assert!(geo.loop_gain >= 0.0);
+        assert!(geo.softening_beta >= 0.3);
         Ok(())
     }
 }
