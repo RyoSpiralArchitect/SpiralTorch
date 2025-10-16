@@ -24,6 +24,8 @@ pub use self::differential::{
 use self::measure::BarycenterIntermediate;
 pub use self::topos::{OpenCartesianTopos, RewriteMonad, TensorBiome};
 
+#[cfg(feature = "wgpu")]
+use crate::backend::wgpu_dense;
 use core::fmt;
 use std::error::Error;
 use std::f32::consts::PI;
@@ -266,6 +268,18 @@ impl Tensor {
                 left: self.shape(),
                 right: other.shape(),
             });
+        }
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available()
+                && wgpu_dense::should_use(self.rows, self.cols, other.cols)
+            {
+                if let Ok(buffer) =
+                    wgpu_dense::matmul(self.data(), other.data(), self.rows, self.cols, other.cols)
+                {
+                    return Tensor::from_vec(self.rows, other.cols, buffer);
+                }
+            }
         }
         let mut out = Tensor::zeros(self.rows, other.cols)?;
         for r in 0..self.rows {

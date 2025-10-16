@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use crate::module::Module;
-use crate::trainer::ModuleTrainer;
+use crate::trainer::{EpochStats, ModuleTrainer};
 use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedule};
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
@@ -668,6 +668,23 @@ impl SpiralSession {
         L: Loss,
         I: IntoIterator<Item = (Tensor, Tensor)>,
     {
+        trainer.train_epoch(module, loss, batches, schedule)
+    }
+
+    /// Runs a full epoch using a transient trainer built from the session configuration.
+    pub fn train_epoch_with<M, L, I>(
+        &self,
+        module: &mut M,
+        loss: &mut L,
+        batches: I,
+        schedule: &RoundtableSchedule,
+    ) -> PureResult<EpochStats>
+    where
+        M: Module,
+        L: Loss,
+        I: IntoIterator<Item = (Tensor, Tensor)>,
+    {
+        let mut trainer = self.trainer();
         trainer.train_epoch(module, loss, batches, schedule)
     }
 
