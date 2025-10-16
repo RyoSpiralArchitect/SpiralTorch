@@ -36,7 +36,6 @@ use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSch
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
-use st_core::ecosystem::{ConnectorEvent, EcosystemRegistry};
 use st_core::ecosystem::{
     ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample, RankPlanSummary,
     RoundtableConfigSummary, RoundtableSummary,
@@ -1438,6 +1437,11 @@ impl IntoBatch for PureResult<(Tensor, Tensor)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language::{
+        constant, warmup, ConceptHint, DesireAutomation, DesireLagrangian, DesirePipeline,
+        DesireTrainerBridge, DesireTriggerBuffer, RepressionField, SemanticBridge, SparseKernel,
+        SymbolGeometry, TemperatureController,
+    };
     use crate::layers::linear::Linear;
     use crate::layers::sequential::Sequential;
     use crate::layers::wave_gate::WaveGate;
@@ -1446,16 +1450,7 @@ mod tests {
     use crate::schedule::RoundtableConfig;
     use crate::CouncilEvidence;
     use st_tensor::pure::topos::OpenCartesianTopos;
-    use std::collections::HashMap;
-    use std::time::SystemTime;
-    use crate::language::{
-        constant, warmup, ConceptHint, DesireAutomation, DesireLagrangian, DesirePipeline,
-        DesireTrainerBridge, DesireTriggerBuffer, RepressionField, SemanticBridge, SparseKernel,
-        SymbolGeometry, TemperatureController,
-    };
-    use st_tensor::pure::topos::OpenCartesianTopos;
-    use std::collections::HashMap;
-    use std::time::SystemTime;
+    use std::collections::{HashMap, HashSet};
     use std::time::{Duration, Instant, SystemTime};
 
     fn build_language_geometry() -> SymbolGeometry {
@@ -1473,8 +1468,6 @@ mod tests {
     }
 
     fn build_language_semantics() -> SemanticBridge {
-        use std::collections::HashSet;
-
         let log_pi = vec![
             vec![(0, (0.65f32).ln()), (1, (0.35f32).ln())],
             vec![(0, (0.4f32).ln()), (1, (0.6f32).ln())],
@@ -1673,6 +1666,8 @@ mod tests {
             .unwrap();
 
         assert!(bridge.is_empty());
+    }
+
     #[cfg(feature = "golden")]
     #[test]
     fn trainer_records_golden_council_snapshot() {
