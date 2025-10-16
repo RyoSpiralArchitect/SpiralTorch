@@ -15,7 +15,7 @@
 //! without destroying the phase information that lives in the complementary
 //! directions.
 
-use super::{PureResult, Tensor, TensorError};
+use super::{PureResult, RewriteMonad, Tensor, TensorError};
 
 /// Intermediate densities emitted while interpolating the barycenter objective.
 #[derive(Debug, Clone)]
@@ -62,22 +62,42 @@ fn guard_probability_mass(label: &'static str, value: f32) -> PureResult<f32> {
     Ok(value.max(LOG_FLOOR))
 }
 
-fn normalise_distribution(tensor: &Tensor) -> PureResult<Vec<f32>> {
-    let mut data = tensor.data().to_vec();
+fn legacy_guard_probability_slice(label: &'static str, slice: &mut [f32]) -> PureResult<()> {
+    if slice.is_empty() {
+        return Err(TensorError::EmptyInput(label));
+    }
     let mut sum = 0.0f32;
-    for value in data.iter_mut() {
-        *value = guard_probability_mass("density entry", *value)?;
+    for value in slice.iter_mut() {
+        *value = guard_probability_mass(label, *value)?;
         sum += *value;
     }
-    if sum <= 0.0 {
-        return Err(TensorError::NonFiniteValue {
-            label: "density mass",
-            value: sum,
-        });
+    if !sum.is_finite() || sum <= 0.0 {
+        return Err(TensorError::NonFiniteValue { label, value: sum });
     }
-    for value in data.iter_mut() {
+    for value in slice.iter_mut() {
         *value /= sum;
     }
+    Ok(())
+}
+
+fn guard_probability_slice_with(
+    guard: Option<RewriteMonad<'_>>,
+    label: &'static str,
+    slice: &mut [f32],
+) -> PureResult<()> {
+    if let Some(monad) = guard {
+        monad.guard_probability_slice(label, slice)
+    } else {
+        legacy_guard_probability_slice(label, slice)
+    }
+}
+
+fn normalise_distribution(
+    guard: Option<RewriteMonad<'_>>,
+    tensor: &Tensor,
+) -> PureResult<Vec<f32>> {
+    let mut data = tensor.data().to_vec();
+    guard_probability_slice_with(guard, "z_space_barycenter_density", &mut data)?;
     Ok(data)
 }
 
@@ -109,39 +129,63 @@ fn barycenter_objective(
     normalised: &[Vec<f32>],
     entropy_weight: f32,
     coupling_energy: f32,
+    kl_min: f32,
 ) -> PureResult<(f32, f32, f32)> {
-    let mut kl_acc = 0.0f32;
+    let mut raw_kl = 0.0f32;
     for (weight, dist) in weights.iter().zip(normalised.iter()) {
-        kl_acc += *weight * kl_divergence(candidate, dist)?;
+        raw_kl += *weight * kl_divergence(candidate, dist)?;
     }
+    let kl_energy = (raw_kl - kl_min).max(0.0);
     let entropy_value = entropy(candidate);
     Ok((
-        kl_acc,
+        kl_energy,
         entropy_value,
-        kl_acc + entropy_weight * entropy_value + coupling_energy,
+        kl_energy + entropy_weight * entropy_value + coupling_energy,
     ))
 }
 
-fn barycenter_intermediates(
+fn weighted_baseline(
+    guard: Option<RewriteMonad<'_>>,
     weights: &[f32],
     normalised: &[Vec<f32>],
     weight_sum: f32,
-    bary: &[f32],
-    entropy_weight: f32,
-    coupling_energy: f32,
-    rows: usize,
-    cols: usize,
-) -> PureResult<Vec<BarycenterIntermediate>> {
-    let mut baseline = vec![0.0f32; bary.len()];
+) -> PureResult<Vec<f32>> {
+    let volume = normalised
+        .get(0)
+        .map(|dist| dist.len())
+        .ok_or(TensorError::EmptyInput("z_space_barycenter"))?;
+    let mut baseline = vec![0.0f32; volume];
     for (weight, dist) in weights.iter().zip(normalised.iter()) {
         for (slot, value) in baseline.iter_mut().zip(dist.iter()) {
-            *slot += *weight * *value;
+            *slot += *weight * guard_probability_mass("baseline component", *value)?;
         }
+    }
+    if weight_sum <= 0.0 {
+        return Err(TensorError::NonFiniteValue {
+            label: "weight_sum",
+            value: weight_sum,
+        });
     }
     for value in baseline.iter_mut() {
         *value /= weight_sum;
+        *value = guard_probability_mass("baseline component", *value)?;
     }
+    guard_probability_slice_with(guard, "z_space_barycenter_baseline", &mut baseline)?;
+    Ok(baseline)
+}
 
+fn barycenter_intermediates(
+    guard: Option<RewriteMonad<'_>>,
+    baseline: &[f32],
+    bary: &[f32],
+    weights: &[f32],
+    normalised: &[Vec<f32>],
+    entropy_weight: f32,
+    coupling_energy: f32,
+    kl_min: f32,
+    rows: usize,
+    cols: usize,
+) -> PureResult<Vec<BarycenterIntermediate>> {
     let schedule = [0.0f32, 0.25, 0.5, 0.75, 1.0];
     let mut intermediates = Vec::with_capacity(schedule.len());
     for &alpha in &schedule {
@@ -163,8 +207,15 @@ fn barycenter_intermediates(
         for value in mix.iter_mut() {
             *value /= total;
         }
-        let (kl_energy, entropy_value, objective) =
-            barycenter_objective(&mix, weights, normalised, entropy_weight, coupling_energy)?;
+        guard_probability_slice_with(guard, "barycenter intermediate", &mut mix)?;
+        let (kl_energy, entropy_value, objective) = barycenter_objective(
+            &mix,
+            weights,
+            normalised,
+            entropy_weight,
+            coupling_energy,
+            kl_min,
+        )?;
         intermediates.push(BarycenterIntermediate {
             interpolation: alpha,
             density: Tensor::from_vec(rows, cols, mix.clone())?,
@@ -177,6 +228,7 @@ fn barycenter_intermediates(
 }
 
 fn barycenter_mode(
+    guard: Option<RewriteMonad<'_>>,
     weights: &[f32],
     normalised: &[Vec<f32>],
     effective: f32,
@@ -214,6 +266,7 @@ fn barycenter_mode(
     for value in out.iter_mut() {
         *value /= total;
     }
+    guard_probability_slice_with(guard, "z_space_barycenter_mode", &mut out)?;
     Ok(out)
 }
 
@@ -227,7 +280,8 @@ fn barycenter_mode(
 /// * `entropy_weight` --- entropy regulariser \(\gamma_S\)
 /// * `beta_j` --- coupling scale \(\beta_J\)
 /// * `coupling` --- optional matrix \(J_{uv}\)
-pub fn z_space_barycenter(
+fn z_space_barycenter_inner(
+    guard: Option<RewriteMonad<'_>>,
     weights: &[f32],
     densities: &[Tensor],
     entropy_weight: f32,
@@ -287,12 +341,13 @@ pub fn z_space_barycenter(
                 right: density.shape(),
             });
         }
-        normalised.push(normalise_distribution(density)?);
+        normalised.push(normalise_distribution(guard, density)?);
     }
 
+    let baseline = weighted_baseline(weights, &normalised, weight_sum)?;
     let bary = barycenter_mode(weights, &normalised, effective_weight)?;
     let bary_tensor = Tensor::from_vec(rows, cols, bary.clone())?;
-    let kl_energy = {
+    let kl_min = {
         let mut acc = 0.0f32;
         for (weight, dist) in weights.iter().zip(normalised.iter()) {
             acc += *weight * kl_divergence(&bary, dist)?;
@@ -326,25 +381,55 @@ pub fn z_space_barycenter(
     };
 
     let intermediates = barycenter_intermediates(
+        guard,
+        &baseline,
+        &bary,
         weights,
         &normalised,
-        weight_sum,
-        &bary,
         entropy_weight,
         coupling_energy,
+        kl_min,
         rows,
         cols,
     )?;
 
     Ok(ZSpaceBarycenter {
-        objective: kl_energy + entropy_weight * entropy_value + coupling_energy,
+        objective: entropy_weight * entropy_value + coupling_energy,
         density: bary_tensor,
-        kl_energy,
+        kl_energy: 0.0,
         entropy: entropy_value,
         coupling_energy,
         effective_weight,
         intermediates,
     })
+}
+
+pub fn z_space_barycenter_guarded(
+    monad: RewriteMonad<'_>,
+    weights: &[f32],
+    densities: &[Tensor],
+    entropy_weight: f32,
+    beta_j: f32,
+    coupling: Option<&Tensor>,
+) -> PureResult<ZSpaceBarycenter> {
+    z_space_barycenter_inner(
+        Some(monad),
+        weights,
+        densities,
+        entropy_weight,
+        beta_j,
+        coupling,
+    )
+}
+
+pub fn z_space_barycenter(
+    weights: &[f32],
+    densities: &[Tensor],
+    entropy_weight: f32,
+    beta_j: f32,
+    coupling: Option<&Tensor>,
+) -> PureResult<ZSpaceBarycenter> {
+    z_space_barycenter_inner(None, weights, densities, entropy_weight, beta_j, coupling)
 }
 
 /// Trait describing how a group element acts on a tensor through the associated
@@ -408,6 +493,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pure::topos::OpenCartesianTopos;
 
     #[derive(Clone, Debug)]
     struct CyclicShift {
@@ -426,8 +512,8 @@ mod tests {
                 let out_row = &mut out.data_mut()[r * cols..(r + 1) * cols];
                 for c in 0..channels {
                     for x in 0..width {
-                        let src = (x + element) % width;
-                        out_row[c * width + x] = row[c * width + src];
+                        let dest = (x + element) % width;
+                        out_row[c * width + dest] = row[c * width + x];
                     }
                 }
             }
@@ -516,5 +602,28 @@ mod tests {
         let last = result.intermediates.last().unwrap();
         assert!((last.objective - result.objective).abs() < 1e-4);
         assert!((last.interpolation - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn guarded_barycenter_projects_through_topos() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096).unwrap();
+        let weights = vec![1.0, 2.0];
+        let densities = vec![
+            Tensor::from_vec(1, 3, vec![0.2, f32::NAN, 0.6]).unwrap(),
+            Tensor::from_vec(1, 3, vec![-5.0, 0.3, f32::INFINITY]).unwrap(),
+        ];
+        let result = z_space_barycenter_guarded(
+            RewriteMonad::new(&topos),
+            &weights,
+            &densities,
+            0.05,
+            0.0,
+            None,
+        )
+        .unwrap();
+        let data = result.density.data();
+        let sum: f32 = data.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5);
+        assert!(data.iter().all(|value| value.is_finite() && *value >= 0.0));
     }
 }
