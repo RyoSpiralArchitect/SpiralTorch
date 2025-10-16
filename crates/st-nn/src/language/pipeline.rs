@@ -8,18 +8,10 @@ use super::desire::{DesirePhase, DesireSolution, DesireWeights};
 use super::geometry::ConceptHint;
 use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+use crate::roundtable::RoundtableNode;
 use crate::schedule::BandEnergy;
-use crate::PureResult;
-use st_tensor::pure::TensorError;
-use std::cmp::Ordering;
-use crate::roundtable::RoundtableNode;
-use crate::{RoundtableConfig, RoundtableSchedule};
-use super::automation::{DesireAutomatedStep, DesireAutomation, DesireRewriteTrigger};
-use super::desire::{DesirePhase, DesireWeights};
-use super::geometry::ConceptHint;
-use super::logbook::{DesireLogReplay, DesireLogbook};
-use crate::roundtable::RoundtableNode;
 use crate::{PureResult, RoundtableConfig, RoundtableSchedule};
+use std::cmp::Ordering;
 use st_core::ecosystem::{
     ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
     HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
@@ -28,8 +20,6 @@ use st_core::ecosystem::{
 use st_core::ops::rank_entry::RankPlan;
 use st_core::util::math::{ramanujan_pi, LeechProjector};
 use st_tensor::pure::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
-use std::collections::HashMap;
-use std::time::{Instant, SystemTime};
 use std::collections::HashMap;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -846,13 +836,12 @@ impl DesirePsiSummary {
                 z_sum += feedback.z_signal;
             }
             for psi_event in &event.events {
-                if let PsiEvent::ThresholdCross { component, up, .. } = psi_event {
-                    let entry = threshold_crossings.entry(*component).or_insert((0, 0));
-                    if *up {
-                        entry.0 = entry.0.saturating_add(1);
-                    } else {
-                        entry.1 = entry.1.saturating_add(1);
-                    }
+                let PsiEvent::ThresholdCross { component, up, .. } = *psi_event;
+                let entry = threshold_crossings.entry(component).or_insert((0, 0));
+                if up {
+                    entry.0 = entry.0.saturating_add(1);
+                } else {
+                    entry.1 = entry.1.saturating_add(1);
                 }
             }
         }
@@ -905,6 +894,9 @@ impl DesirePsiSummary {
             mean_z_signal,
             last_timestamp,
         }
+    }
+}
+
 #[derive(Debug)]
 pub enum PipelineError {
     EncoderMissing { pipeline: String },
@@ -969,7 +961,6 @@ impl LanguagePipelineBuilder {
     pub fn build(self) -> LanguagePipeline {
         let ramanujan_pi = ramanujan_pi(self.ramanujan_iterations);
         let leech_projector = LeechProjector::new(self.leech_rank, self.leech_weight);
-    pub fn build(self) -> LanguagePipeline {
         LanguagePipeline {
             name: self.name,
             registry: EcosystemRegistry::global(),

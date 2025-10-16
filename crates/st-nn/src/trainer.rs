@@ -47,7 +47,6 @@ use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::ops::rank_entry::RankPlan;
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, BlackcatRuntimeStats, StepMetrics};
-use st_core::telemetry::hub::{self, SoftlogicZFeedback};
 #[cfg(feature = "collapse")]
 use st_core::telemetry::hub::CollapsePulse;
 use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
@@ -295,9 +294,6 @@ impl ModuleTrainer {
             desire_bridge: None,
             #[cfg(feature = "psi")]
             desire_psi_bridge: None,
-            graph_bridge: None,
-            graph_pending: None,
-            graph_last_hint: None,
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
@@ -1531,12 +1527,6 @@ mod tests {
     use crate::CouncilEvidence;
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
     use st_tensor::pure::topos::OpenCartesianTopos;
-    use std::collections::HashMap;
-    use std::time::SystemTime;
-    use crate::CouncilEvidence;
-    use st_tensor::pure::topos::OpenCartesianTopos;
-    use std::collections::HashMap;
-    use std::time::SystemTime;
     use std::collections::{HashMap, HashSet};
     use std::time::{Duration, Instant, SystemTime};
 
@@ -1738,6 +1728,9 @@ mod tests {
         assert_eq!(stats.steps, 1);
         assert!(stats.step_time_ms_ema > 0.0);
         assert_eq!(stats.extras.get("grad_norm").cloned().unwrap(), 0.4);
+    }
+
+    #[test]
     fn trainer_consumes_desire_bridge_summary() {
         let caps = DeviceCaps::wgpu(32, true, 256);
         let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
