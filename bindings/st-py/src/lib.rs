@@ -4216,11 +4216,19 @@ fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySequentialModule>()?;
     m.setattr(
         "__all__",
-        vec!["Linear", "Conv1d", "WaveRnn", "Sequential", "Relu"],
+        vec![
+            "MeanSquaredError",
+            "Linear",
+            "Relu",
+            "Conv1d",
+            "WaveRnn",
+            "ZSpaceProjector",
+            "Sequential",
+        ],
     )?;
     m.setattr(
         "__doc__",
-        "Rust-backed neural network modules: Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, Sequential.",
+        "Rust-backed neural network modules and losses: MeanSquaredError, Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, Sequential.",
     )?;
     Ok(())
 }
