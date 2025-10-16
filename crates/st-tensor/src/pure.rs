@@ -24,6 +24,7 @@ pub use self::differential::{
 use self::measure::BarycenterIntermediate;
 pub use self::topos::{OpenCartesianTopos, RewriteMonad, TensorBiome};
 
+use crate::backend::faer_dense;
 #[cfg(feature = "wgpu")]
 use crate::backend::wgpu_dense;
 use core::fmt;
@@ -81,6 +82,13 @@ pub enum TensorError {
     LoopDetected { depth: usize, max_depth: usize },
     /// Conjugate gradient solver could not reach the requested tolerance.
     ConjugateGradientDiverged { residual: f32, tolerance: f32 },
+    /// Execution failed on an accelerator backend.
+    BackendFailure {
+        backend: &'static str,
+        message: String,
+    },
+    /// Generic configuration violation for pure-language helpers.
+    InvalidValue { label: &'static str },
 }
 
 impl fmt::Display for TensorError {
@@ -186,11 +194,44 @@ impl fmt::Display for TensorError {
                     "conjugate gradient residual {residual} failed to reach tolerance {tolerance}"
                 )
             }
+            TensorError::BackendFailure { backend, message } => {
+                write!(f, "{backend} backend failure: {message}")
+            }
+            TensorError::InvalidValue { label } => {
+                write!(f, "invalid value: {label}")
+            }
         }
     }
 }
 
 impl Error for TensorError {}
+
+/// Explicit matrix multiplication backend selection. `Auto` defers to the heuristics, while
+/// `CpuFaer`/`GpuWgpu` force the respective accelerators.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatmulBackend {
+    /// Use heuristics to pick the best available backend.
+    Auto,
+    /// Force the SIMD-accelerated faer kernel.
+    CpuFaer,
+    /// Always fallback to the scalar implementation.
+    CpuNaive,
+    /// Force the compute-path GEMM running through WGPU.
+    #[cfg(feature = "wgpu")]
+    GpuWgpu,
+}
+
+impl MatmulBackend {
+    fn label(self) -> &'static str {
+        match self {
+            MatmulBackend::Auto => "auto",
+            MatmulBackend::CpuFaer => "faer",
+            MatmulBackend::CpuNaive => "naive",
+            #[cfg(feature = "wgpu")]
+            MatmulBackend::GpuWgpu => "wgpu",
+        }
+    }
+}
 
 /// A simple row-major 2D tensor backed by a `Vec<f32>`.
 #[derive(Clone, Debug, PartialEq)]
@@ -263,35 +304,78 @@ impl Tensor {
 
     /// Matrix multiply (`self @ other`).
     pub fn matmul(&self, other: &Tensor) -> PureResult<Tensor> {
+        self.matmul_with_backend(other, MatmulBackend::Auto)
+    }
+
+    /// Matrix multiply with an explicit backend selection.
+    pub fn matmul_with_backend(
+        &self,
+        other: &Tensor,
+        backend: MatmulBackend,
+    ) -> PureResult<Tensor> {
         if self.cols != other.rows {
             return Err(TensorError::ShapeMismatch {
                 left: self.shape(),
                 right: other.shape(),
             });
         }
+
+        let rows = self.rows;
+        let cols = other.cols;
+        let inner = self.cols;
+
+        let data = match backend {
+            MatmulBackend::Auto => self.matmul_auto(other, rows, inner, cols)?,
+            MatmulBackend::CpuNaive => matmul_naive(self.data(), other.data(), rows, inner, cols),
+            MatmulBackend::CpuFaer => matmul_faer(self.data(), other.data(), rows, inner, cols)?,
+            #[cfg(feature = "wgpu")]
+            MatmulBackend::GpuWgpu => matmul_wgpu(self.data(), other.data(), rows, inner, cols)?,
+        };
+
+        Tensor::from_vec(rows, cols, data)
+    }
+
+    fn matmul_auto(
+        &self,
+        other: &Tensor,
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) -> PureResult<Vec<f32>> {
         #[cfg(feature = "wgpu")]
         {
-            if wgpu_dense::is_available()
-                && wgpu_dense::should_use(self.rows, self.cols, other.cols)
-            {
-                if let Ok(buffer) =
-                    wgpu_dense::matmul(self.data(), other.data(), self.rows, self.cols, other.cols)
+            if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
+                if let Ok(buffer) = wgpu_dense::matmul(self.data(), other.data(), rows, inner, cols)
                 {
-                    return Tensor::from_vec(self.rows, other.cols, buffer);
+                    return Ok(buffer);
                 }
             }
         }
-        let mut out = Tensor::zeros(self.rows, other.cols)?;
-        for r in 0..self.rows {
-            for k in 0..self.cols {
-                let a = self.data[r * self.cols + k];
-                let row_offset = k * other.cols;
-                for c in 0..other.cols {
-                    out.data[r * other.cols + c] += a * other.data[row_offset + c];
-                }
+
+        if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
+            if let Ok(buffer) = faer_dense::matmul(self.data(), other.data(), rows, inner, cols) {
+                return Ok(buffer);
             }
         }
-        Ok(out)
+
+        Ok(matmul_naive(self.data(), other.data(), rows, inner, cols))
+    }
+
+    /// Matrix multiply using the WGPU backend when available.
+    #[cfg(feature = "wgpu")]
+    pub fn matmul_wgpu(&self, other: &Tensor) -> PureResult<Tensor> {
+        if self.cols != other.rows {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: other.shape(),
+            });
+        }
+        let data = wgpu_dense::matmul(self.data(), other.data(), self.rows, other.cols, self.cols)
+            .map_err(|message| TensorError::BackendFailure {
+                backend: "wgpu",
+                message,
+            })?;
+        Tensor::from_vec(self.rows, other.cols, data)
     }
 
     /// Element-wise addition.
@@ -1083,6 +1167,47 @@ impl AmegaHypergrad {
         }
         Ok(())
     }
+}
+
+fn matmul_naive(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize) -> Vec<f32> {
+    let mut out = vec![0.0; rows * cols];
+    for r in 0..rows {
+        for k in 0..inner {
+            let a = lhs[r * inner + k];
+            let row_offset = k * cols;
+            for c in 0..cols {
+                out[r * cols + c] += a * rhs[row_offset + c];
+            }
+        }
+    }
+    out
+}
+
+fn matmul_faer(
+    lhs: &[f32],
+    rhs: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> PureResult<Vec<f32>> {
+    faer_dense::matmul(lhs, rhs, rows, inner, cols).map_err(|message| TensorError::BackendFailure {
+        backend: "faer",
+        message,
+    })
+}
+
+#[cfg(feature = "wgpu")]
+fn matmul_wgpu(
+    lhs: &[f32],
+    rhs: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> PureResult<Vec<f32>> {
+    wgpu_dense::matmul(lhs, rhs, rows, inner, cols).map_err(|message| TensorError::BackendFailure {
+        backend: "wgpu",
+        message,
+    })
 }
 
 #[cfg(test)]

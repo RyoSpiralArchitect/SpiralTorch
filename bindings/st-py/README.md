@@ -43,6 +43,16 @@ NumPy, no PyTorch, and no shim layers.
 - Z-space projector bindings (`spiraltorch.nn.ZSpaceProjector`) so spiral
   trajectories can be rendered onto the canvas or reused inside sequential
   transformer stacks.
+- Deployment and optimisation bridges via `spiraltorch.integrations`: archive
+  TorchServe models, persist BentoML runners, explore hyperparameters with
+  Optuna or Ray Tune, and export trained modules to ONNX—all behind ergonomic
+  Python call sites.
+- Reinforcement learning harness via `spiraltorch.rl`—SpiralTorchRL keeps
+  policy gradients inside Z-space tensors, exposes hypergrad-enabled updates,
+  and streams geometric rewards without leaving Rust.
+- Recommendation toolkit via `spiraltorch.rec`—SpiralTorchRec factors user/item
+  lattices under open-cartesian topos guards so embeddings stay psychoid-safe
+  while training entirely in Rust.
 
 ## Building wheels
 
@@ -215,6 +225,65 @@ trace.with_barycenter_from(weights, densities)
 trace.with_infinity([densities[0].clone()], [])
 resonance = trace.resonate()
 print(resonance.homotopy_flow().tolist())
+```
+
+Temporal telemetry is available directly from Python. Record frames with
+`session.resonate_over_time(resonance, dt)` and animate the geometry through the
+new helpers. Use `timeline_summary` for rolling drift/energy stats,
+`timeline_harmonics` to analyse spectral drift, `loop_signal` for a ready-made
+bundle (complete with SpiralK hints when `kdsl` is enabled), and `session.speak(...)`
+for a ready-to-plot amplitude trace while `timeline_story` narrates the same
+window:
+
+```python
+frame = session.resonate_over_time(resonance, dt=0.1)
+print(frame.timestamp, frame.total_energy, frame.curvature_drift)
+
+frames = session.timeline(timesteps=64)
+summary = session.timeline_summary(timesteps=64)
+harmonics = session.timeline_harmonics(timesteps=128, bins=20)
+loop_signal = session.loop_signal(timesteps=128)
+times, energy, drift = session.animate_resonance(timesteps=64)
+wave = session.speak(timesteps=64, temperature=0.6)
+story, highlights = session.timeline_story(timesteps=128, temperature=0.65)
+print(session.describe())
+print(st.describe_timeline(frames))
+if harmonics and harmonics.dominant_energy:
+    print("Energy harmonic", harmonics.dominant_energy.frequency)
+if loop_signal and loop_signal.spiralk_script:
+    print("SpiralK loop hint:\n", loop_signal.spiralk_script)
+
+encoder = LanguageWaveEncoder(session.curvature(), 0.55)
+wave = encoder.speak(frames)
+
+import spiraltorch as st
+from spiraltorch import TextResonator
+narrator = TextResonator(session.curvature(), 0.55)
+print(narrator.describe_resonance(resonance))
+print(narrator.describe_timeline(frames))
+print(narrator.describe_frame(frames[-1]))
+audio = narrator.speak(frames)
+```
+
+The `SpiralSession` maintainer surfaces clamp and density suggestions directly
+from the temporal stream. Configure it via the builder or tweak thresholds at
+runtime:
+
+```python
+builder.maintainer(jitter_threshold=0.25, clamp_max=2.8)
+session = builder.build()
+
+print(session.maintainer_config())
+report = session.self_maintain()
+print(report.spiralk_script)
+if report.should_rewrite():
+    session.configure_maintainer(pressure_step=0.2)
+    print("Maintainer escalated:", report.diagnostic)
+if report.drift_peak:
+    print("Drift harmonic", report.drift_peak.frequency, report.drift_peak.magnitude)
+pulse = session.collapse_pulse()
+if pulse:
+    print("Collapse pulse", pulse.command, pulse.step)
 ```
 
 ```python
