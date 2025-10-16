@@ -3,4 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#[cfg(feature = "wgpu_frac")]
 pub mod wgpu_frac;
+
+#[cfg(feature = "wgpu")]
+pub mod wgpu_dense;

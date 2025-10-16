@@ -19,7 +19,7 @@ cpu = []
 # Keep the granular feature name for the fractional WGPU kernels while also
 # providing the alias expected by the Python bindings (and end users invoking
 # `--features wgpu`).
-wgpu_frac = ["dep:wgpu", "dep:bytemuck"]
+wgpu_frac = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
 wgpu = ["wgpu_frac"]
 
 # Placeholder features for other accelerators.  These currently do not pull in
@@ -33,6 +33,7 @@ hip = []
 # Optional; only needed if building WGPU kernel
 wgpu = { version = "0.19", optional = true }
 bytemuck = { version = "1.15", features = ["derive"], optional = true }
+pollster = { version = "0.3", optional = true }
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

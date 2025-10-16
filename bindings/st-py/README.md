@@ -64,6 +64,18 @@ maturin build -m bindings/st-py/Cargo.toml --release --features "hip hip-real"
 
 ## Minimal usage
 
+### Rank-K execution
+
+```python
+>>> import spiraltorch as st
+>>> x = st.Tensor(2, 4, [0.1, 0.7, -0.2, 0.4, 0.9, 0.5, 0.6, 0.0])
+>>> vals, idx = st.topk2d_tensor(x, 2)
+>>> vals.tolist()
+[[0.7, 0.4], [0.9, 0.6]]
+>>> [[int(i) for i in row] for row in idx.tolist()]
+[[1, 3], [0, 2]]
+```
+
 ### Hello SpiralSession
 
 ```bash
