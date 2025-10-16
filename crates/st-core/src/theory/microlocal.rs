@@ -30,8 +30,9 @@
 //! oriented data such as co-normals requires an external label `c′` to fix a
 //! sign.  `InterfaceGauge` provides a practical discretisation that measures
 //! the local total-variation density inside shrinking metric balls, emits the
-//! stable boundary indicator, and optionally reconstructs the oriented normal
-//! field when a signed phase label is supplied.
+//! stable boundary indicator, estimates the mean-curvature magnitude that
+//! survives the gauge quotient, and optionally reconstructs the oriented normal
+//! field together with signed curvature when a phase label is supplied.
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::util::math::LeechProjector;
@@ -49,6 +50,10 @@ pub struct InterfaceSignature {
     /// Perimeter density normalised by \(|D\chi_E|(B_\varepsilon)/\varepsilon^{d-1}|\),
     /// mapped to \{0, \kappa_d\} to match the finite perimeter blow-up.
     pub perimeter_density: ArrayD<f32>,
+    /// Gauge invariant mean curvature magnitude estimated from the unlabeled mask.
+    pub mean_curvature: ArrayD<f32>,
+    /// Signed mean curvature reconstructed only when an oriented label `c′` is supplied.
+    pub signed_mean_curvature: Option<ArrayD<f32>>,
     /// Optional unit normal field (only populated when `c_prime` was provided).
     pub orientation: Option<ArrayD<f32>>,
     /// Surface measure of the unit \((d-1)\)-sphere used for the normalisation.
@@ -157,6 +162,8 @@ impl InterfaceGauge {
         let mut r_machine = ArrayD::<f32>::zeros(raw_dim.clone());
         let mut raw_density = ArrayD::<f32>::zeros(raw_dim.clone());
         let mut perimeter_density = ArrayD::<f32>::zeros(raw_dim.clone());
+        let mut mean_curvature = ArrayD::<f32>::zeros(raw_dim.clone());
+        let mut signed_mean_curvature = c_prime.map(|_| ArrayD::<f32>::zeros(raw_dim.clone()));
         let mut orientation = c_prime.map(|_| {
             let mut full_shape = Vec::with_capacity(dim + 1);
             full_shape.push(dim);
@@ -190,6 +197,27 @@ impl InterfaceGauge {
             raw_density[&idx_dyn] = raw_val;
             perimeter_density[&idx_dyn] = if discrete_jump { kappa_d } else { 0.0 };
 
+            if has_interface {
+                if let Some((abs_curv, _)) =
+                    mean_curvature_from_field(mask, idx_slice, &shape, self.grid_spacing, threshold)
+                {
+                    mean_curvature[&idx_dyn] = abs_curv;
+                }
+                if let (Some(label_field), Some(curv_field)) =
+                    (c_prime, signed_mean_curvature.as_mut())
+                {
+                    if let Some((_, signed_curv)) = mean_curvature_from_field(
+                        label_field,
+                        idx_slice,
+                        &shape,
+                        self.grid_spacing,
+                        threshold,
+                    ) {
+                        curv_field[&idx_dyn] = signed_curv;
+                    }
+                }
+            }
+
             if let (Some(label_field), Some(ref mut orient)) = (c_prime, orientation.as_mut()) {
                 if has_interface {
                     let normal = oriented_normal(
@@ -215,6 +243,8 @@ impl InterfaceGauge {
             r_machine,
             raw_density,
             perimeter_density,
+            mean_curvature,
+            signed_mean_curvature,
             orientation,
             kappa_d,
             radius: radius_steps,
@@ -553,12 +583,21 @@ impl InterfaceZConductor {
             pulses.push(pulse);
         }
 
-        let fused = InterfaceZPulse::aggregate(&pulses);
-        let fused = if let Some(prev) = &self.carry {
-            InterfaceZPulse::lerp(prev, &fused, self.smoothing)
+        let fused_raw = InterfaceZPulse::aggregate(&pulses);
+        let mut fused = if let Some(prev) = &self.carry {
+            InterfaceZPulse::lerp(prev, &fused_raw, self.smoothing)
         } else {
-            fused
+            fused_raw
         };
+        if fused_raw.z_bias.abs() > f32::EPSILON
+            && fused.z_bias.signum() != fused_raw.z_bias.signum()
+        {
+            fused.z_bias = fused_raw.z_bias * self.smoothing;
+        }
+        if fused_raw.drift.abs() > f32::EPSILON && fused.drift.signum() != fused_raw.drift.signum()
+        {
+            fused.drift = fused_raw.drift * self.smoothing;
+        }
 
         self.carry = Some(fused);
 
@@ -666,6 +705,15 @@ fn local_raw_density(
                 diff_count += 1.0;
             }
         }
+        if idx[axis] > 0 {
+            neighbor_total += 1.0;
+            let mut coord = idx.to_vec();
+            coord[axis] -= 1;
+            let neigh = mask[IxDyn(&coord)];
+            if (neigh - center).abs() >= threshold {
+                diff_count += 1.0;
+            }
+        }
     }
     if neighbor_total > 0.0 {
         let raw = diff_count / neighbor_total;
@@ -684,6 +732,7 @@ fn oriented_normal(
 ) -> Option<Vec<f32>> {
     let dim = idx.len();
     let mut grad = vec![0.0f32; dim];
+    let mut magnitudes = vec![0.0f32; dim];
     let center = label[IxDyn(idx)];
     for axis in 0..dim {
         let forward = if idx[axis] + 1 < shape[axis] {
@@ -700,7 +749,33 @@ fn oriented_normal(
         } else {
             center
         };
-        grad[axis] = (forward - backward) / (2.0 * h);
+        let forward_delta = forward - center;
+        let backward_delta = center - backward;
+        if forward_delta.abs() >= backward_delta.abs() {
+            grad[axis] = forward_delta / h;
+            magnitudes[axis] = forward_delta.abs();
+        } else {
+            grad[axis] = backward_delta / h;
+            magnitudes[axis] = backward_delta.abs();
+        }
+    }
+    let max_mag = magnitudes.iter().copied().fold(0.0f32, f32::max);
+    if max_mag < threshold {
+        return None;
+    }
+    let mut first_axis = None;
+    for axis in 0..dim {
+        if magnitudes[axis] + f32::EPSILON < max_mag {
+            grad[axis] = 0.0;
+        } else if (magnitudes[axis] - max_mag).abs() <= f32::EPSILON {
+            if let Some(primary) = first_axis {
+                if axis != primary {
+                    grad[axis] = 0.0;
+                }
+            } else {
+                first_axis = Some(axis);
+            }
+        }
     }
     let norm_sq = grad.iter().map(|g| (*g as f64).powi(2)).sum::<f64>() as f32;
     if norm_sq.sqrt() < threshold {
@@ -711,6 +786,92 @@ fn oriented_normal(
         *g /= norm;
     }
     Some(grad)
+}
+
+fn mean_curvature_from_field(
+    field: &ArrayD<f32>,
+    idx: &[usize],
+    shape: &[usize],
+    h: f32,
+    threshold: f32,
+) -> Option<(f32, f32)> {
+    let dim = idx.len();
+    let center_normal = normalized_gradient(field, idx, shape, h, threshold)?;
+    let mut divergence = 0.0f32;
+    for axis in 0..dim {
+        let forward = normalized_gradient_offset(field, idx, shape, axis, 1, h, threshold)
+            .unwrap_or_else(|| center_normal.clone());
+        let backward = normalized_gradient_offset(field, idx, shape, axis, -1, h, threshold)
+            .unwrap_or_else(|| center_normal.clone());
+        let derivative = (forward[axis] - backward[axis]) / (2.0 * h);
+        if derivative.is_finite() {
+            divergence += derivative;
+        }
+    }
+    let signed = divergence;
+    let magnitude = divergence.abs();
+    Some((magnitude, signed))
+}
+
+fn normalized_gradient(
+    field: &ArrayD<f32>,
+    idx: &[usize],
+    shape: &[usize],
+    h: f32,
+    threshold: f32,
+) -> Option<Vec<f32>> {
+    let dim = idx.len();
+    let mut grad = vec![0.0f32; dim];
+    let center = field[IxDyn(idx)];
+    for axis in 0..dim {
+        let forward = if idx[axis] + 1 < shape[axis] {
+            let mut coord = idx.to_vec();
+            coord[axis] += 1;
+            field[IxDyn(&coord)]
+        } else {
+            center
+        };
+        let backward = if idx[axis] > 0 {
+            let mut coord = idx.to_vec();
+            coord[axis] -= 1;
+            field[IxDyn(&coord)]
+        } else {
+            center
+        };
+        grad[axis] = match (idx[axis] > 0, idx[axis] + 1 < shape[axis]) {
+            (true, true) => (forward - backward) / (2.0 * h),
+            (false, true) => (forward - center) / h,
+            (true, false) => (center - backward) / h,
+            (false, false) => 0.0,
+        };
+    }
+    let norm_sq = grad.iter().map(|g| (*g as f64).powi(2)).sum::<f64>() as f32;
+    if norm_sq.sqrt() < threshold {
+        return None;
+    }
+    let norm = norm_sq.sqrt().max(f32::EPSILON);
+    for g in &mut grad {
+        *g /= norm;
+    }
+    Some(grad)
+}
+
+fn normalized_gradient_offset(
+    field: &ArrayD<f32>,
+    idx: &[usize],
+    shape: &[usize],
+    axis: usize,
+    delta: isize,
+    h: f32,
+    threshold: f32,
+) -> Option<Vec<f32>> {
+    let pos = idx[axis] as isize + delta;
+    if pos < 0 || pos >= shape[axis] as isize {
+        return None;
+    }
+    let mut coord = idx.to_vec();
+    coord[axis] = pos as usize;
+    normalized_gradient(field, &coord, shape, h, threshold)
 }
 
 #[cfg(test)]
@@ -774,6 +935,37 @@ mod tests {
         assert!(beneath <= f32::EPSILON);
         assert!(here > 0.0);
         assert_eq!(pulse.z_bias, 0.0);
+    }
+
+    #[test]
+    fn curvature_detects_flat_and_curved_interfaces() {
+        let flat = array![[0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]].into_dyn();
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let flat_sig = gauge.analyze(&flat);
+        let flat_curvature = flat_sig.mean_curvature[IxDyn(&[1, 1])];
+        assert!(
+            flat_curvature.abs() < 1e-3,
+            "flat interface should be near-zero curvature"
+        );
+
+        let curved = array![
+            [0.0, 0.0, 1.0, 0.0, 0.0],
+            [0.0, 1.0, 1.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0, 0.0],
+        ]
+        .mapv(|v| v as f32)
+        .into_dyn();
+        let curved_sig = gauge.analyze(&curved);
+        let max_curvature = curved_sig
+            .mean_curvature
+            .iter()
+            .fold(0.0f32, |acc, v| acc.max(*v));
+        assert!(
+            max_curvature > 0.05,
+            "curved interface should register positive curvature"
+        );
     }
 
     #[test]
