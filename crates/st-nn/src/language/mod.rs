@@ -9,7 +9,10 @@ mod gw;
 mod schrodinger;
 mod temperature;
 
-pub use desire::{DesireLagrangian, DesireSolution, DesireWeights};
+pub use desire::{
+    constant, warmup, DesireAvoidanceReport, DesireLagrangian, DesirePhase, DesireSchedule,
+    DesireSolution, DesireWeights,
+};
 pub use geometry::{ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry};
 pub use gw::{DistanceMatrix, EntropicGwSolver};
 pub use temperature::{entropy, TemperatureController};

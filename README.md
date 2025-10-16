@@ -146,9 +146,38 @@ Feed that bridge into the desire Lagrangian and you obtain a turn-key workflow:
    estimate \(\Pi\) with the EGW solver (optionally seeding anchor pairs).
 2. Initialise the `DesireLagrangian` with those artefacts and wire it to a
    SpiralK loop or roundtable injector.
-3. Stream LM logits through `step(...)` to receive logit offsets, entropy
-   telemetry, and temperature updates that honour the S/s suturing and desire
-   budget.
+3. Stream LM logits through `step(...)` or the phase-aware `step_with_scheduler(...)`
+   to receive logit offsets, entropy telemetry, and temperature updates that
+   honour the S/s suturing and desire budget.
+
+Configure desire as a three-stage routine by combining the provided schedule
+helpers. `warmup(...)` handles the observation phase (desire starts at zero and
+logs avoidance), ramping towards the interference window where `alpha` nudges
+avoided terms while `beta/γ` remain gentle. Once the warmups complete the
+integration phase kicks in, coupling desire with the Z-space barycenter and
+surfacing a hypergrad penalty that measures drift from the barycentric anchor.
+For example:
+
+```rust
+let mut desire = DesireLagrangian::new(geometry, repression, semantics, controller)?
+    .with_alpha_schedule(warmup(0.0, 0.1, 400))
+    .with_beta_schedule(warmup(0.0, 0.05, 800))
+    .with_gamma_schedule(constant(0.02))
+    .with_lambda_schedule(constant(0.08));
+
+let report = desire.step_with_scheduler(&logits, previous_token, &concept_hint)?;
+match report.phase {
+    DesirePhase::Observation => log_observation(report.avoidance),
+    DesirePhase::Injection => reinforce_desire(report.logit_offsets),
+    DesirePhase::Integration => hypergrad.push_penalty(report.hypergrad_penalty),
+}
+```
+
+`DesireAvoidanceReport` exposes the dominant repressed tokens collected during
+observation, while the integration phase emits the barycentric drift so a
+hypergrad or self-rewrite scheduler can keep desire centred without collapse.
+The schedules default to zeroed observation and grow-only ramps, so existing
+callers can continue to provide manual `DesireWeights` without opt-in changes.【F:crates/st-nn/src/language/desire.rs†L1-L388】【F:crates/st-nn/src/language/desire.rs†L389-L487】
 
 The result is a single Rust-native control surface that marries KL control,
 Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
