@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use crate::module::{Module, Parameter};
-use st_tensor::pure::{PureResult, Tensor, TensorError};
+use st_tensor::{PureResult, Tensor, TensorError};
 
 /// Lightweight gating module that modulates Z-space activations column-wise.
 ///

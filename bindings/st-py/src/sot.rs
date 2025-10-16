@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
-use st_tensor::pure::{Tensor, TensorBiome};
+use st_tensor::{Tensor, TensorBiome};
 
 const GOLDEN_ANGLE: f64 = 2.399_963_229_728_653; // π(3 − √5)
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895; // (1 + √5) / 2
@@ -551,7 +551,7 @@ pub struct PySoT3DPlan {
 }
 
 impl PySoT3DPlan {
-    pub(crate) fn positions_tensor(&self) -> Result<Tensor, st_tensor::pure::TensorError> {
+    pub(crate) fn positions_tensor(&self) -> Result<Tensor, st_tensor::TensorError> {
         if self.steps.is_empty() {
             return Tensor::from_vec(0, 3, Vec::new());
         }
