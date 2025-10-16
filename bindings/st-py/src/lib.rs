@@ -23,6 +23,9 @@ use st_backend_hip::{
 };
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::config::self_rewrite::SelfRewriteCfg;
+use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_core::telemetry::hub::{self, DesirePhaseTelemetry, DesireStepTelemetry};
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::DriveCmd;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
@@ -57,12 +60,16 @@ use st_frac::{
 use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
-    Conv1d as NnConv1d, DataLoader as NnDataLoader, DesireRoundtableBridge,
-    DesireRoundtableSummary, DifferentialTrace, DistConfig, DistMode, EpochStats,
-    LightningConfig as NnLightningConfig, Linear as NnLinear, Loss, MeanSquaredError, Module,
-    ModuleTrainer, Relu as NnRelu, RoundtableConfig, RoundtableSchedule,
-    Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
-    SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
+    constant, warmup, ConceptHint, Conv1d as NnConv1d, DataLoader as NnDataLoader,
+    DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport, DesireLagrangian, DesireLogbook,
+    DesirePhase, DesirePipeline, DesirePipelineBuilder, DesireRewriteTrigger,
+    DesireRoundtableBridge, DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireWeights,
+    DifferentialTrace, DistConfig, DistMode, EpochStats, LightningConfig as NnLightningConfig,
+    Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer, Relu as NnRelu,
+    RepressionField, RoundtableConfig, RoundtableSchedule, SemanticBridge,
+    Sequential as NnSequential, SparseKernel, SpiralLightning as NnSpiralLightning, SpiralSession,
+    SpiralSessionBuilder, SymbolGeometry, TemperatureController, WaveRnn as NnWaveRnn,
+    ZSpaceProjector as NnZSpaceProjector,
 };
 #[cfg(feature = "golden")]
 use st_nn::{
@@ -82,6 +89,7 @@ use st_tensor::{
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
     MatmulBackend, PureResult, Tensor, TensorBiome, TensorError,
 };
+use std::cell::RefCell;
 use st_text::{
     describe_atlas as text_describe_atlas, describe_frame as text_describe_frame,
     describe_resonance as text_describe_resonance, describe_timeline as text_describe_timeline,
@@ -91,7 +99,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DeviceRoute {
@@ -219,6 +227,87 @@ fn tensor_err(err: TensorError) -> PyErr {
 
 fn convert<T>(value: PureResult<T>) -> PyResult<T> {
     value.map_err(tensor_err)
+}
+
+fn desire_phase_name(phase: DesirePhase) -> &'static str {
+    match phase {
+        DesirePhase::Observation => "observation",
+        DesirePhase::Injection => "injection",
+        DesirePhase::Integration => "integration",
+    }
+}
+
+fn avoidance_report_to_py(py: Python<'_>, report: &DesireAvoidanceReport) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("tokens", report.tokens.clone())?;
+    dict.set_item("scores", report.scores.clone())?;
+    Ok(dict.into())
+}
+
+fn desire_weights_to_py(py: Python<'_>, weights: &DesireWeights) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("alpha", weights.alpha)?;
+    dict.set_item("beta", weights.beta)?;
+    dict.set_item("gamma", weights.gamma)?;
+    dict.set_item("lambda", weights.lambda)?;
+    Ok(dict.into())
+}
+
+fn desire_solution_to_py(py: Python<'_>, solution: &DesireSolution) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("indices", solution.indices.clone())?;
+    dict.set_item("probabilities", solution.probabilities.clone())?;
+    dict.set_item("logit_offsets", solution.logit_offsets.clone())?;
+    dict.set_item("temperature", solution.temperature)?;
+    dict.set_item("entropy", solution.entropy)?;
+    dict.set_item("phase", desire_phase_name(solution.phase))?;
+    dict.set_item("weights", desire_weights_to_py(py, &solution.weights)?)?;
+    dict.set_item("hypergrad_penalty", solution.hypergrad_penalty)?;
+    if let Some(report) = &solution.avoidance {
+        dict.set_item("avoidance", avoidance_report_to_py(py, report)?)?;
+    } else {
+        dict.set_item("avoidance", py.None())?;
+    }
+    Ok(dict.into())
+}
+
+fn desire_trigger_to_py(py: Python<'_>, trigger: &DesireRewriteTrigger) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("report", avoidance_report_to_py(py, &trigger.report)?)?;
+    dict.set_item("mean_penalty", trigger.mean_penalty)?;
+    dict.set_item("mean_entropy", trigger.mean_entropy)?;
+    dict.set_item("temperature", trigger.temperature)?;
+    dict.set_item("samples", trigger.samples)?;
+    Ok(dict.into())
+}
+
+fn automated_step_to_py(py: Python<'_>, step: &DesireAutomatedStep) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("solution", desire_solution_to_py(py, &step.solution)?)?;
+    if let Some(trigger) = &step.trigger {
+        dict.set_item("trigger", desire_trigger_to_py(py, trigger)?)?;
+    } else {
+        dict.set_item("trigger", py.None())?;
+    }
+    Ok(dict.into())
+}
+
+fn concept_hint_from_py(hint: Option<&PyAny>) -> PyResult<ConceptHint> {
+    if let Some(value) = hint {
+        if value.is_none() {
+            return Ok(ConceptHint::Distribution(Vec::new()));
+        }
+        if let Ok(dist) = value.extract::<Vec<f32>>() {
+            return Ok(ConceptHint::Distribution(dist));
+        }
+        if let Ok(window) = value.extract::<Vec<(usize, f32)>>() {
+            return Ok(ConceptHint::Window(window));
+        }
+        return Err(PyValueError::new_err(
+            "concept_hint must be a sequence of floats or (index, weight) tuples",
+        ));
+    }
+    Ok(ConceptHint::Distribution(Vec::new()))
 }
 
 fn roundtable_summary_to_py<'py>(
@@ -1975,6 +2064,617 @@ impl PyChronoHarmonics {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "SparseKernel")]
+#[derive(Clone)]
+struct PySparseKernel {
+    inner: SparseKernel,
+}
+
+#[pymethods]
+impl PySparseKernel {
+    #[new]
+    #[pyo3(signature = (rows, epsilon=1e-6))]
+    fn new(rows: Vec<Vec<(usize, f32)>>, epsilon: f32) -> PyResult<Self> {
+        let inner = convert(SparseKernel::from_rows(rows, epsilon))?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (dense, epsilon=1e-6))]
+    fn from_dense(dense: Vec<Vec<f32>>, epsilon: f32) -> PyResult<Self> {
+        let inner = convert(SparseKernel::from_dense(dense, epsilon))?;
+        Ok(Self { inner })
+    }
+
+    fn clone_kernel(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn vocab_size(&self) -> usize {
+        self.inner.vocab_size()
+    }
+
+    fn to_dense(&self) -> Vec<Vec<f32>> {
+        self.inner.to_dense()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SymbolGeometry")]
+#[derive(Clone)]
+struct PySymbolGeometry {
+    inner: SymbolGeometry,
+}
+
+#[pymethods]
+impl PySymbolGeometry {
+    #[new]
+    fn new(syn: PyRef<PySparseKernel>, par: PyRef<PySparseKernel>) -> PyResult<Self> {
+        let inner = convert(SymbolGeometry::new(syn.inner.clone(), par.inner.clone()))?;
+        Ok(Self { inner })
+    }
+
+    fn clone_geometry(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn vocab_size(&self) -> usize {
+        self.inner.vocab_size()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "RepressionField")]
+#[derive(Clone)]
+struct PyRepressionField {
+    inner: RepressionField,
+}
+
+#[pymethods]
+impl PyRepressionField {
+    #[new]
+    fn new(values: Vec<f32>) -> PyResult<Self> {
+        let inner = convert(RepressionField::new(values))?;
+        Ok(Self { inner })
+    }
+
+    fn clone_field(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SemanticBridge")]
+#[derive(Clone)]
+struct PySemanticBridge {
+    inner: SemanticBridge,
+}
+
+#[pymethods]
+impl PySemanticBridge {
+    #[new]
+    #[pyo3(signature = (pi, concept_kernel, anchors=None, epsilon=1e-6))]
+    fn new(
+        pi: Vec<Vec<f32>>,
+        concept_kernel: PyRef<PySparseKernel>,
+        anchors: Option<Vec<(usize, usize)>>,
+        epsilon: f32,
+    ) -> PyResult<Self> {
+        let inner = convert(SemanticBridge::from_dense(
+            pi,
+            anchors.unwrap_or_default(),
+            epsilon,
+            concept_kernel.inner.clone(),
+        ))?;
+        Ok(Self { inner })
+    }
+
+    fn clone_bridge(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn vocab_size(&self) -> usize {
+        self.inner.vocab_size()
+    }
+
+    #[getter]
+    fn concept_count(&self) -> usize {
+        self.inner.concept_count()
+    }
+
+    fn row_marginal(&self) -> Vec<f32> {
+        self.inner.row_marginal().to_vec()
+    }
+
+    fn col_marginal(&self) -> Vec<f32> {
+        self.inner.col_marginal().to_vec()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ConceptHint")]
+#[derive(Clone)]
+struct PyConceptHint {
+    inner: ConceptHint,
+}
+
+#[pymethods]
+impl PyConceptHint {
+    #[staticmethod]
+    fn distribution(values: Vec<f32>) -> Self {
+        Self {
+            inner: ConceptHint::Distribution(values),
+        }
+    }
+
+    #[staticmethod]
+    fn window(weights: Vec<(usize, f32)>) -> Self {
+        Self {
+            inner: ConceptHint::Window(weights),
+        }
+    }
+
+    fn as_distribution(&self, bridge: PyRef<PySemanticBridge>) -> Vec<f32> {
+        self.inner.as_distribution(&bridge.inner)
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "TemperatureController")]
+#[derive(Clone)]
+struct PyTemperatureController {
+    inner: TemperatureController,
+}
+
+#[pymethods]
+impl PyTemperatureController {
+    #[new]
+    #[pyo3(signature = (value, target_entropy, eta, min, max))]
+    fn new(value: f32, target_entropy: f32, eta: f32, min: f32, max: f32) -> Self {
+        Self {
+            inner: TemperatureController::new(value, target_entropy, eta, min, max),
+        }
+    }
+
+    fn clone_controller(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn value(&self) -> f32 {
+        self.inner.value()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesireSchedule")]
+#[derive(Clone)]
+struct PyDesireSchedule {
+    inner: DesireSchedule,
+}
+
+#[pymethods]
+impl PyDesireSchedule {
+    #[staticmethod]
+    fn constant(value: f32) -> Self {
+        Self {
+            inner: constant(value),
+        }
+    }
+
+    #[staticmethod]
+    fn warmup(start: f32, end: f32, steps: u64) -> Self {
+        Self {
+            inner: warmup(start, end, steps),
+        }
+    }
+
+    fn clone_schedule(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SelfRewriteConfig")]
+#[derive(Clone, Copy)]
+struct PySelfRewriteConfig {
+    inner: SelfRewriteCfg,
+}
+
+#[pymethods]
+impl PySelfRewriteConfig {
+    #[new]
+    #[pyo3(signature = (score_thresh=0.02, min_samples=30, cooldown_sec=300))]
+    fn new(score_thresh: f32, min_samples: usize, cooldown_sec: u64) -> Self {
+        Self {
+            inner: SelfRewriteCfg {
+                score_thresh,
+                min_samples,
+                cooldown_sec,
+            },
+        }
+    }
+
+    fn clone_config(&self) -> Self {
+        Self { inner: self.inner }
+    }
+
+    #[getter]
+    fn score_thresh(&self) -> f32 {
+        self.inner.score_thresh
+    }
+
+    #[getter]
+    fn min_samples(&self) -> usize {
+        self.inner.min_samples
+    }
+
+    #[getter]
+    fn cooldown_sec(&self) -> u64 {
+        self.inner.cooldown_sec
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesireLagrangian", unsendable)]
+struct PyDesireLagrangian {
+    inner: Option<DesireLagrangian>,
+}
+
+impl PyDesireLagrangian {
+    fn take_inner(&mut self) -> PyResult<DesireLagrangian> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("DesireLagrangian has been consumed"))
+    }
+
+    fn map_inner<F>(&mut self, f: F) -> PyResult<()>
+    where
+        F: FnOnce(DesireLagrangian) -> DesireLagrangian,
+    {
+        let inner = self
+            .inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("DesireLagrangian has been consumed"))?;
+        self.inner = Some(f(inner));
+        Ok(())
+    }
+
+    fn inner(&self) -> PyResult<&DesireLagrangian> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("DesireLagrangian has been consumed"))
+    }
+}
+
+#[pymethods]
+impl PyDesireLagrangian {
+    #[new]
+    fn new(
+        geometry: PyRef<PySymbolGeometry>,
+        repression: PyRef<PyRepressionField>,
+        semantics: PyRef<PySemanticBridge>,
+        controller: PyRef<PyTemperatureController>,
+    ) -> PyResult<Self> {
+        let inner = convert(DesireLagrangian::new(
+            geometry.inner.clone(),
+            repression.inner.clone(),
+            semantics.inner.clone(),
+            controller.inner.clone(),
+        ))?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn is_consumed(&self) -> bool {
+        self.inner.is_none()
+    }
+
+    #[getter]
+    fn vocab_size(&self) -> PyResult<usize> {
+        Ok(self.inner()?.vocab_size())
+    }
+
+    fn set_lookahead(&mut self, iterations: usize) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_lookahead(iterations))
+    }
+
+    fn set_top_k(&mut self, k: Option<usize>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_top_k(k))
+    }
+
+    fn set_alpha_schedule(&mut self, schedule: PyRef<PyDesireSchedule>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_alpha_schedule(schedule.inner.clone()))
+    }
+
+    fn set_beta_schedule(&mut self, schedule: PyRef<PyDesireSchedule>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_beta_schedule(schedule.inner.clone()))
+    }
+
+    fn set_gamma_schedule(&mut self, schedule: PyRef<PyDesireSchedule>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_gamma_schedule(schedule.inner.clone()))
+    }
+
+    fn set_lambda_schedule(&mut self, schedule: PyRef<PyDesireSchedule>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_lambda_schedule(schedule.inner.clone()))
+    }
+
+    fn set_observation_horizon(&mut self, horizon: Option<u64>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_observation_horizon(horizon))
+    }
+
+    fn set_integration_horizon(&mut self, horizon: Option<u64>) -> PyResult<()> {
+        self.map_inner(|inner| inner.with_integration_horizon(horizon))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesireAutomation", unsendable)]
+struct PyDesireAutomation {
+    inner: Option<DesireAutomation>,
+}
+
+impl PyDesireAutomation {
+    fn take_inner(&mut self) -> PyResult<DesireAutomation> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("DesireAutomation has been consumed"))
+    }
+
+    fn inner(&self) -> PyResult<&DesireAutomation> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("DesireAutomation has been consumed"))
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut DesireAutomation> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("DesireAutomation has been consumed"))
+    }
+}
+
+#[pymethods]
+impl PyDesireAutomation {
+    #[new]
+    #[pyo3(signature = (desire, cfg=None))]
+    fn new(
+        mut desire: PyRefMut<PyDesireLagrangian>,
+        cfg: Option<PySelfRewriteConfig>,
+    ) -> PyResult<Self> {
+        let lagrangian = desire.take_inner()?;
+        let config = cfg
+            .map(|cfg| cfg.inner)
+            .unwrap_or_else(SelfRewriteCfg::default);
+        Ok(Self {
+            inner: Some(DesireAutomation::new(lagrangian, config)),
+        })
+    }
+
+    fn is_consumed(&self) -> bool {
+        self.inner.is_none()
+    }
+
+    fn trigger_count(&self) -> PyResult<u64> {
+        Ok(self.inner()?.trigger_count())
+    }
+
+    fn mean_penalty(&self) -> PyResult<f32> {
+        Ok(self.inner()?.mean_penalty())
+    }
+
+    fn mean_entropy(&self) -> PyResult<f32> {
+        Ok(self.inner()?.mean_entropy())
+    }
+
+    fn desire_vector(&self) -> PyResult<Vec<f32>> {
+        Ok(self.inner()?.desire_vector().to_vec())
+    }
+
+    fn report(&self, py: Python<'_>, limit: usize) -> PyResult<PyObject> {
+        let report = self.inner()?.report(limit);
+        avoidance_report_to_py(py, &report)
+    }
+
+    #[pyo3(signature = (logits, previous_token, concept_hint=None))]
+    fn step(
+        &mut self,
+        py: Python<'_>,
+        logits: Vec<f32>,
+        previous_token: usize,
+        concept_hint: Option<&PyAny>,
+    ) -> PyResult<PyObject> {
+        let hint = concept_hint_from_py(concept_hint)?;
+        let now = Instant::now();
+        let step = convert(self.inner_mut()?.step(&logits, previous_token, &hint, now))?;
+        automated_step_to_py(py, &step)
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesirePipelineBuilder", unsendable)]
+struct PyDesirePipelineBuilder {
+    builder: Option<DesirePipelineBuilder>,
+}
+
+impl PyDesirePipelineBuilder {
+    fn take_builder(&mut self) -> PyResult<DesirePipelineBuilder> {
+        self.builder.take().ok_or_else(|| {
+            PyValueError::new_err("DesirePipelineBuilder has already built a pipeline")
+        })
+    }
+}
+
+#[pymethods]
+impl PyDesirePipelineBuilder {
+    #[new]
+    fn new(mut automation: PyRefMut<PyDesireAutomation>) -> PyResult<Self> {
+        let automation_inner = automation.take_inner()?;
+        Ok(Self {
+            builder: Some(DesirePipeline::builder(automation_inner)),
+        })
+    }
+
+    #[pyo3(signature = (path, flush_every=None))]
+    fn with_logbook<'py>(
+        &'py mut self,
+        path: &str,
+        flush_every: Option<usize>,
+    ) -> PyResult<&'py mut Self> {
+        let builder = self.take_builder()?;
+        let logbook = if let Some(every) = flush_every {
+            convert(DesireLogbook::with_flush_every(path, every))?
+        } else {
+            convert(DesireLogbook::new(path))?
+        };
+        self.builder = Some(builder.with_logbook(logbook));
+        Ok(self)
+    }
+
+    fn with_telemetry<'py>(&'py mut self) -> PyResult<&'py mut Self> {
+        let builder = self.take_builder()?;
+        self.builder = Some(builder.with_telemetry());
+        Ok(self)
+    }
+
+    fn build(&mut self) -> PyResult<PyDesirePipeline> {
+        let builder = self.take_builder()?;
+        Ok(PyDesirePipeline::from_pipeline(builder.build()))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesirePipeline", unsendable)]
+struct PyDesirePipeline {
+    inner: RefCell<DesirePipeline>,
+}
+
+impl PyDesirePipeline {
+    fn from_pipeline(pipeline: DesirePipeline) -> Self {
+        Self {
+            inner: RefCell::new(pipeline),
+        }
+    }
+}
+
+#[pymethods]
+impl PyDesirePipeline {
+    #[pyo3(signature = (logits, previous_token, concept_hint=None))]
+    fn step(
+        &self,
+        py: Python<'_>,
+        logits: Vec<f32>,
+        previous_token: usize,
+        concept_hint: Option<&PyAny>,
+    ) -> PyResult<PyObject> {
+        let hint = concept_hint_from_py(concept_hint)?;
+        let step = convert(
+            self.inner
+                .borrow_mut()
+                .step_realtime(&logits, previous_token, &hint),
+        )?;
+        automated_step_to_py(py, &step)
+    }
+
+    fn flush(&self) -> PyResult<()> {
+        convert(self.inner.borrow_mut().flush())
+    }
+
+    #[getter]
+    fn sink_count(&self) -> usize {
+        self.inner.borrow().sink_count()
+    }
+
+    fn trigger_count(&self) -> u64 {
+        self.inner.borrow().automation().trigger_count()
+    }
+
+    fn desire_vector(&self) -> Vec<f32> {
+        self.inner.borrow().automation().desire_vector().to_vec()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesireRoundtableBridge")]
+#[derive(Clone)]
+struct PyDesireRoundtableBridge {
+    inner: DesireRoundtableBridge,
+}
+
+#[pymethods]
+impl PyDesireRoundtableBridge {
+    #[new]
+    #[pyo3(signature = (blend=0.35, drift_gain=0.35))]
+    fn new(blend: f32, drift_gain: f32) -> Self {
+        let inner = DesireRoundtableBridge::new()
+            .with_blend(blend)
+            .with_drift_gain(drift_gain);
+        Self { inner }
+    }
+
+    fn clone_bridge(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn impulse(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let impulse = convert(self.inner.impulse())?;
+        impulse
+            .map(|imp| {
+                let dict = PyDict::new(py);
+                dict.set_item(
+                    "multipliers",
+                    (imp.multipliers.0, imp.multipliers.1, imp.multipliers.2),
+                )?;
+                dict.set_item("drift", imp.drift)?;
+                dict.set_item(
+                    "timestamp",
+                    imp.timestamp
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0),
+                )?;
+                Ok(dict.into())
+            })
+            .transpose()
+    }
+
+    fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let summary = convert(self.inner.drain_summary())?;
+        summary
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
+struct PyModuleTrainer {
+    inner: ModuleTrainer,
+    roundtable_bridge: Option<DesireRoundtableBridge>,
+}
+
+impl PyModuleTrainer {
+    fn from_trainer(inner: ModuleTrainer) -> Self {
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
 #[pyclass(module = "spiraltorch", name = "ChronoLoopSignal")]
 #[derive(Clone)]
 struct PyChronoLoopSignal {
@@ -1988,6 +2688,22 @@ impl PyChronoLoopSignal {
 }
 
 #[pymethods]
+impl PyModuleTrainer {
+    #[new]
+    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01))]
+    fn new(
+        device: Option<&str>,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Self {
+        let caps = caps_for(device);
+        let inner =
+            ModuleTrainer::new(caps, curvature, hyper_learning_rate, fallback_learning_rate);
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
 impl PyChronoLoopSignal {
     #[getter]
     fn summary(&self) -> PyChronoSummary {
@@ -2063,6 +2779,47 @@ impl PyChronoLoopSignal {
     }
 }
 
+    #[pyo3(signature = (bridge=None, blend=0.35, drift_gain=0.35))]
+    fn enable_desire_roundtable_bridge(
+        &mut self,
+        bridge: Option<PyRef<PyDesireRoundtableBridge>>,
+        blend: f32,
+        drift_gain: f32,
+    ) {
+        let selected = if let Some(handle) = bridge {
+            handle.inner.clone()
+        } else {
+            DesireRoundtableBridge::new()
+                .with_blend(blend)
+                .with_drift_gain(drift_gain)
+        };
+        self.inner.enable_desire_roundtable_bridge(selected.clone());
+        self.roundtable_bridge = Some(selected);
+    }
+
+    fn disable_desire_roundtable_bridge(&mut self) {
+        self.inner.disable_desire_roundtable_bridge();
+        self.roundtable_bridge = None;
+    }
+
+    fn desire_roundtable_bridge(&self) -> Option<PyDesireRoundtableBridge> {
+        self.roundtable_bridge
+            .as_ref()
+            .map(|bridge| PyDesireRoundtableBridge {
+                inner: bridge.clone(),
+            })
+    }
+
+    fn desire_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        self.inner
+            .desire_roundtable_summary()
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
+    }
+
+    #[pyo3(signature = (threshold, participants=2))]
+    fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
+        self.inner.install_meta_conductor(threshold, participants);
 #[pymethods]
 impl PyChronoSummary {
     #[getter]
@@ -20209,6 +20966,18 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTextResonator>()?;
     m.add_class::<PyHypergrad>()?;
     m.add_class::<PyDistConfig>()?;
+    m.add_class::<PySparseKernel>()?;
+    m.add_class::<PySymbolGeometry>()?;
+    m.add_class::<PyRepressionField>()?;
+    m.add_class::<PySemanticBridge>()?;
+    m.add_class::<PyConceptHint>()?;
+    m.add_class::<PyTemperatureController>()?;
+    m.add_class::<PyDesireSchedule>()?;
+    m.add_class::<PySelfRewriteConfig>()?;
+    m.add_class::<PyDesireLagrangian>()?;
+    m.add_class::<PyDesireAutomation>()?;
+    m.add_class::<PyDesirePipelineBuilder>()?;
+    m.add_class::<PyDesirePipeline>()?;
     m.add_class::<PyRoundtableSchedule>()?;
     m.add_class::<PyDesireRoundtableBridge>()?;
     m.add_class::<PyMaintainerConfig>()?;
@@ -20271,6 +21040,18 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "TextResonator",
             "Hypergrad",
             "DistConfig",
+            "SparseKernel",
+            "SymbolGeometry",
+            "RepressionField",
+            "SemanticBridge",
+            "ConceptHint",
+            "TemperatureController",
+            "DesireSchedule",
+            "SelfRewriteConfig",
+            "DesireLagrangian",
+            "DesireAutomation",
+            "DesirePipelineBuilder",
+            "DesirePipeline",
             "RoundtableSchedule",
             "DesireRoundtableBridge",
             "EpochStats",

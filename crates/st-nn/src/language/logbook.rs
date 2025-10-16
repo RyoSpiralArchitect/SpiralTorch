@@ -7,7 +7,7 @@ use super::automation::{DesireAutomatedStep, DesireRewriteTrigger};
 use super::desire::DesireSolution;
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
-use st_tensor::TensorError;
+use st_tensor::pure::TensorError;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Lines, Write};
 use std::path::{Path, PathBuf};

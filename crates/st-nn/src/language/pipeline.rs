@@ -29,6 +29,7 @@ use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "psi")]
+use st_core::telemetry::hub::{self, DesirePhaseTelemetry, DesireStepTelemetry};
 use st_core::telemetry::hub::{
     self, DesireAvoidanceTelemetry, DesirePhaseTelemetry, DesireStepTelemetry,
     DesireTriggerTelemetry, DesireWeightsTelemetry, SoftlogicZFeedback,
@@ -1805,6 +1806,7 @@ mod tests {
     use super::super::temperature::TemperatureController;
     use super::*;
     use crate::gnn::spiralk::GraphConsensusBridge;
+    use crate::schedule::BandEnergy;
     use crate::plan::RankPlanner;
     use crate::schedule::BandEnergy;
     use st_core::backend::device_caps::DeviceCaps;
