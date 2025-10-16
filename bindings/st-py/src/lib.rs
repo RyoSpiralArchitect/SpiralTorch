@@ -38,6 +38,8 @@ use st_nn::{
     Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
+use st_rec::{RatingTriple as RecRatingTriple, RecEpochReport, SpiralRecError, SpiralRecommender};
+use st_rl::{EpisodeReport as RlEpisodeReport, SpiralPolicyGradient, SpiralRlError};
 use st_tensor::backend::faer_dense;
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense as tensor_wgpu_dense;
@@ -183,6 +185,40 @@ fn tensor_err(err: TensorError) -> PyErr {
 
 fn convert<T>(value: PureResult<T>) -> PyResult<T> {
     value.map_err(tensor_err)
+}
+
+fn rl_err(err: SpiralRlError) -> PyErr {
+    match err {
+        SpiralRlError::Tensor(err) => tensor_err(err),
+        SpiralRlError::EmptyEpisode => PyValueError::new_err(
+            "no transitions recorded — call record_transition before finishing the episode",
+        ),
+        SpiralRlError::InvalidStateShape {
+            expected,
+            rows,
+            cols,
+        } => PyValueError::new_err(format!(
+            "state tensor must be shaped as (1, {expected}) but received ({rows}, {cols})"
+        )),
+        SpiralRlError::InvalidAction { action, actions } => PyValueError::new_err(format!(
+            "action index {action} exceeds configured action space {actions}"
+        )),
+        SpiralRlError::InvalidDiscount { discount } => PyValueError::new_err(format!(
+            "discount factor must lie within [0, 1]; received {discount}"
+        )),
+    }
+}
+
+fn rec_err(err: SpiralRecError) -> PyErr {
+    match err {
+        SpiralRecError::Tensor(err) => tensor_err(err),
+        SpiralRecError::OutOfBoundsRating { user, item } => PyValueError::new_err(format!(
+            "rating ({user}, {item}) falls outside the configured recommender bounds"
+        )),
+        SpiralRecError::EmptyBatch => {
+            PyValueError::new_err("at least one rating triple is required to train an epoch")
+        }
+    }
 }
 
 fn convert_frac<T>(value: Result<T, FracErr>) -> PyResult<T> {
@@ -3283,6 +3319,206 @@ fn is_wgpu_available_py() -> bool {
     }
 }
 
+#[pyclass(module = "spiraltorch.rl", name = "EpisodeReport")]
+struct PyRlEpisodeReport {
+    inner: RlEpisodeReport,
+}
+
+#[pymethods]
+impl PyRlEpisodeReport {
+    #[getter]
+    fn total_reward(&self) -> f32 {
+        self.inner.total_reward
+    }
+
+    #[getter]
+    fn mean_return(&self) -> f32 {
+        self.inner.mean_return
+    }
+
+    #[getter]
+    fn steps(&self) -> usize {
+        self.inner.steps
+    }
+
+    #[getter]
+    fn hypergrad_applied(&self) -> bool {
+        self.inner.hypergrad_applied
+    }
+}
+
+#[pyclass(module = "spiraltorch.rl", name = "PolicyGradient", unsendable)]
+struct PyPolicyGradient {
+    inner: Mutex<SpiralPolicyGradient>,
+}
+
+#[pymethods]
+impl PyPolicyGradient {
+    #[new]
+    #[pyo3(signature = (state_dim, action_dim, learning_rate=0.01, discount=0.99))]
+    fn new(
+        state_dim: usize,
+        action_dim: usize,
+        learning_rate: f32,
+        discount: f32,
+    ) -> PyResult<Self> {
+        let inner = SpiralPolicyGradient::new(state_dim, action_dim, learning_rate, discount)
+            .map_err(rl_err)?;
+        Ok(Self {
+            inner: Mutex::new(inner),
+        })
+    }
+
+    fn enable_hypergrad(&self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        let mut guard = self.inner.lock().unwrap();
+        guard
+            .enable_hypergrad(curvature, learning_rate)
+            .map_err(rl_err)
+    }
+
+    #[pyo3(signature = (state))]
+    fn select_action(&self, state: &PyTensor) -> PyResult<(usize, Vec<f32>)> {
+        let guard = self.inner.lock().unwrap();
+        let probs = guard.policy(state.as_tensor()).map_err(rl_err)?;
+        let (action, _) = probs
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+            .unwrap();
+        Ok((action, probs))
+    }
+
+    fn record_transition(&self, state: &PyTensor, action: usize, reward: f32) -> PyResult<()> {
+        let mut guard = self.inner.lock().unwrap();
+        guard
+            .record_transition(state.as_tensor().clone(), action, reward)
+            .map_err(rl_err)
+    }
+
+    fn finish_episode(&self) -> PyResult<PyRlEpisodeReport> {
+        let mut guard = self.inner.lock().unwrap();
+        let report = guard.finish_episode().map_err(rl_err)?;
+        Ok(PyRlEpisodeReport { inner: report })
+    }
+
+    fn reset(&self) {
+        let mut guard = self.inner.lock().unwrap();
+        guard.reset_episode();
+    }
+
+    fn weights(&self) -> PyResult<PyTensor> {
+        let guard = self.inner.lock().unwrap();
+        Ok(PyTensor::from_tensor(guard.weights().clone()))
+    }
+
+    fn bias(&self) -> PyResult<Vec<f32>> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.bias().to_vec())
+    }
+}
+
+#[pyclass(module = "spiraltorch.rec", name = "EpochReport")]
+struct PyRecEpochReport {
+    inner: RecEpochReport,
+}
+
+#[pymethods]
+impl PyRecEpochReport {
+    #[getter]
+    fn rmse(&self) -> f32 {
+        self.inner.rmse
+    }
+
+    #[getter]
+    fn samples(&self) -> usize {
+        self.inner.samples
+    }
+
+    #[getter]
+    fn regularization_penalty(&self) -> f32 {
+        self.inner.regularization_penalty
+    }
+}
+
+#[pyclass(module = "spiraltorch.rec", name = "Recommender", unsendable)]
+struct PyRecommender {
+    inner: Mutex<SpiralRecommender>,
+}
+
+#[pymethods]
+impl PyRecommender {
+    #[new]
+    #[pyo3(signature = (users, items, factors, learning_rate=0.01, regularization=0.001, curvature=-1.0))]
+    fn new(
+        users: usize,
+        items: usize,
+        factors: usize,
+        learning_rate: f32,
+        regularization: f32,
+        curvature: f32,
+    ) -> PyResult<Self> {
+        let inner = SpiralRecommender::new(
+            users,
+            items,
+            factors,
+            learning_rate,
+            regularization,
+            curvature,
+        )
+        .map_err(rec_err)?;
+        Ok(Self {
+            inner: Mutex::new(inner),
+        })
+    }
+
+    fn predict(&self, user: usize, item: usize) -> PyResult<f32> {
+        let guard = self.inner.lock().unwrap();
+        guard.predict(user, item).map_err(rec_err)
+    }
+
+    fn train_epoch(&self, ratings: Vec<(usize, usize, f32)>) -> PyResult<PyRecEpochReport> {
+        let triples: Vec<RecRatingTriple> = ratings
+            .into_iter()
+            .map(|(u, i, r)| RecRatingTriple::new(u, i, r))
+            .collect();
+        let mut guard = self.inner.lock().unwrap();
+        let report = guard.train_epoch(&triples).map_err(rec_err)?;
+        Ok(PyRecEpochReport { inner: report })
+    }
+
+    fn user_embedding(&self, user: usize) -> PyResult<PyTensor> {
+        let guard = self.inner.lock().unwrap();
+        Ok(PyTensor::from_tensor(
+            guard.user_embedding(user).map_err(rec_err)?,
+        ))
+    }
+
+    fn item_embedding(&self, item: usize) -> PyResult<PyTensor> {
+        let guard = self.inner.lock().unwrap();
+        Ok(PyTensor::from_tensor(
+            guard.item_embedding(item).map_err(rec_err)?,
+        ))
+    }
+
+    #[getter]
+    fn users(&self) -> PyResult<usize> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.users())
+    }
+
+    #[getter]
+    fn items(&self) -> PyResult<usize> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.items())
+    }
+
+    #[getter]
+    fn factors(&self) -> PyResult<usize> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.factors())
+    }
+}
+
 #[pymodule]
 fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMeanSquaredError>()?;
@@ -3351,6 +3587,30 @@ fn linalg(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.setattr(
         "__doc__",
         "Dense linear algebra helpers accelerated by faer (SIMD) and WGPU compute GEMM.",
+    )?;
+    Ok(())
+}
+
+#[pymodule]
+fn rl(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyPolicyGradient>()?;
+    m.add_class::<PyRlEpisodeReport>()?;
+    m.setattr("__all__", vec!["PolicyGradient", "EpisodeReport"])?;
+    m.setattr(
+        "__doc__",
+        "Policy gradient helpers that keep trajectories and hypergrad updates inside SpiralTorch Z-space.",
+    )?;
+    Ok(())
+}
+
+#[pymodule]
+fn rec(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyRecommender>()?;
+    m.add_class::<PyRecEpochReport>()?;
+    m.setattr("__all__", vec!["Recommender", "EpochReport"])?;
+    m.setattr(
+        "__doc__",
+        "Recommender systems driven by SpiralTorch open-cartesian topos guards and factor models.",
     )?;
     Ok(())
 }
@@ -3752,6 +4012,12 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let linalg_mod = PyModule::new_bound(_py, "linalg")?;
     linalg(_py, &linalg_mod)?;
     m.add_submodule(&linalg_mod)?;
+    let rl_mod = PyModule::new_bound(_py, "rl")?;
+    rl(_py, &rl_mod)?;
+    m.add_submodule(&rl_mod)?;
+    let rec_mod = PyModule::new_bound(_py, "rec")?;
+    rec(_py, &rec_mod)?;
+    m.add_submodule(&rec_mod)?;
     let sot_mod = PyModule::new_bound(_py, "sot")?;
     sot::module(_py, &sot_mod)?;
     m.add_submodule(&sot_mod)?;
@@ -3814,6 +4080,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "frac",
             "dataset",
             "linalg",
+            "rl",
+            "rec",
             "sot",
             "integrations",
         ],

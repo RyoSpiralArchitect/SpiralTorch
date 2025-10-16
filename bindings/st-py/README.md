@@ -47,6 +47,12 @@ NumPy, no PyTorch, and no shim layers.
   TorchServe models, persist BentoML runners, explore hyperparameters with
   Optuna or Ray Tune, and export trained modules to ONNX—all behind ergonomic
   Python call sites.
+- Reinforcement learning harness via `spiraltorch.rl`—SpiralTorchRL keeps
+  policy gradients inside Z-space tensors, exposes hypergrad-enabled updates,
+  and streams geometric rewards without leaving Rust.
+- Recommendation toolkit via `spiraltorch.rec`—SpiralTorchRec factors user/item
+  lattices under open-cartesian topos guards so embeddings stay psychoid-safe
+  while training entirely in Rust.
 
 ## Building wheels
 
@@ -241,6 +247,53 @@ print("TorchServe bundle:", archive_path)
 print("Bento artifact:", bento_ref)
 print("Best Optuna trial:", study.best_trial.value)
 print("Best Ray Tune result:", analysis.get_best_config(metric="loss", mode="min"))
+```
+
+## SpiralTorchRL quickstart
+
+`spiraltorch.rl` packages the policy-gradient harness from the Rust side so
+Python notebooks can lean on SpiralTorchRL without reimplementing Z-space
+plumbing. Policies keep their weight updates inside hypergrad tapes and expose
+the discounted-return baseline used during training.
+
+```python
+from spiraltorch import Tensor
+from spiraltorch.rl import PolicyGradient
+
+policy = PolicyGradient(state_dim=4, action_dim=2, learning_rate=0.02, discount=0.97)
+policy.enable_hypergrad(curvature=-1.0, learning_rate=0.05)
+
+state = Tensor(1, 4, [0.2, 0.4, -0.1, 0.3])
+action, probs = policy.select_action(state)
+policy.record_transition(state, action, reward=1.0)
+
+report = policy.finish_episode()
+print(f"reward={report.total_reward:.2f} baseline={report.mean_return:.2f} hypergrad={report.hypergrad_applied}")
+print("weights", policy.weights().tolist())
+```
+
+## SpiralTorchRec quickstart
+
+`spiraltorch.rec` brings the SpiralTorchRec factorisation stack to notebooks and
+production jobs alike. Embeddings stay guarded by the open-cartesian topos so
+psychoid limits never drift while running alternating updates in pure Rust.
+
+```python
+from spiraltorch.rec import Recommender
+
+rec = Recommender(users=8, items=12, factors=4, learning_rate=0.05, regularization=0.002)
+
+ratings = [
+    (0, 0, 5.0),
+    (0, 1, 3.0),
+    (1, 0, 4.0),
+    (1, 2, 4.5),
+]
+
+epoch = rec.train_epoch(ratings)
+print(f"rmse={epoch.rmse:.4f} samples={epoch.samples}")
+print("prediction", rec.predict(0, 2))
+print("user embedding", rec.user_embedding(0).tolist())
 ```
 
 The `DistConfig` connects the local roundtable to a meta layer that exchanges
