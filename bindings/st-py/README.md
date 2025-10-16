@@ -323,6 +323,43 @@ resonance = trace.resonate()
 print(resonance.homotopy_flow().tolist())
 ```
 
+Temporal telemetry is available directly from Python. Record frames with
+`session.resonate_over_time(resonance, dt)` and animate the geometry through the
+new helpers:
+
+```python
+frame = session.resonate_over_time(resonance, dt=0.1)
+print(frame.timestamp, frame.total_energy, frame.curvature_drift)
+
+frames = session.timeline(timesteps=64)
+times, energy, drift = session.animate_resonance(timesteps=64)
+print(session.describe())
+
+encoder = LanguageWaveEncoder(session.curvature(), 0.55)
+wave = encoder.speak(frames)
+
+from spiraltorch import TextResonator
+narrator = TextResonator(session.curvature(), 0.55)
+print(narrator.describe_resonance(resonance))
+print(narrator.describe_frame(frames[-1]))
+audio = narrator.speak(frames)
+```
+
+The `SpiralSession` maintainer surfaces clamp and density suggestions directly
+from the temporal stream. Configure it via the builder or tweak thresholds at
+runtime:
+
+```python
+builder.maintainer(jitter_threshold=0.25, clamp_max=2.8)
+session = builder.build()
+
+print(session.maintainer_config())
+report = session.self_maintain()
+if report.should_rewrite():
+    session.configure_maintainer(pressure_step=0.2)
+    print("Maintainer escalated:", report.diagnostic)
+```
+
 ```python
 from spiraltorch import SpiralSession, Tensor, TensorBiome
 from spiraltorch.nn import ZSpaceProjector, LanguageWaveEncoder
