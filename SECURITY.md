@@ -10,7 +10,7 @@ the `main` branch and will be included in the next tagged release.
 
 ## Reporting a Vulnerability
 
-Email: security@spiraltorch.dev
+Email: kishkavsesvit@icloud.com
 
 Please include:
 

@@ -58,8 +58,52 @@ tensor shims, no translation layers, and no tracebacks.
   - **Rust by default, Python ready:** Every feature—from WASM tuning to
     hypergrad curvature—is implemented in Rust and exposed unchanged through the
     Python bindings when needed.
+  - **Unified RL + Rec stacks:** SpiralTorchRL and SpiralTorchRec keep policy
+    gradients, recommendation factors, and hypergrad tapes inside the same
+    Z-space geometry so deployment-grade loops never leave Rust.
+  - **Z-space-native graph reasoning:** The Rust core, backend abstraction
+    layer, and Z-space operators already form the spine of a graph neural
+    network stack that embeds large-scale, hierarchical graphs with the same
+    fidelity as its tree-aligned geometry.
+  - **Interpretability as a first-class citizen:** Hypergrad tapes, roundtable
+    transcripts, and ψ telemetry double as explainability artifacts, enabling
+    decision-path inspection without leaving the Z-space calculus.
 
 ---
+
+## Emerging toolkits unique to SpiralTorch
+
+### Z-space-native graph neural networks
+
+SpiralTorch’s hyperbolic geometry grew around hierarchical graphs. The Rust
+kernel, backend abstraction, and Z-space operator families already expose the
+building blocks for graph neural networks that keep distortion in check while
+scaling to social, molecular, or citation graphs. By composing the existing
+SpiralK planners, Z-space resonators, and curvature-aware tensors, new
+`st-gnn` layers can stream hypergrad updates through tree-like manifolds as a
+first-class citizen in the framework—becoming a third pillar alongside
+SpiralTorchRec and SpiralTorchRL. The new `st-nn::gnn` module ships a
+`GraphContext` normaliser plus a `ZSpaceGraphConvolution` layer that attaches
+hypergrad tapes by default and surfaces per-node flow traces via the telemetry
+`GraphFlowTracer`, so graph reasoning can be trained and inspected without
+leaving Z-space. The `GraphContextBuilder` allows you to dial in symmetric or
+row-stochastic normalisation (and self-loop weighting) per graph before it ever
+touches the tape, while the tracer now aggregates energy so higher-level tools
+can see how much of the negotiation passed through each layer at a glance.
+Those traces plug straight into SpiralTorch’s other pillars: `embed_into_biome`
+folds propagated node states into an `OpenCartesianTopos`/`TensorBiome` pair for
+RewriteMonad consumers, the flow grid can be painted onto any canvas projector,
+and `fold_into_roundtable` promotes the graph manifold as a fourth participant
+beside the A/B/C bands.
+
+### Explainability through hypergrad telemetry
+
+Every hypergrad tape, roundtable consensus log, and ψ telemetry stream doubles
+as a geometric audit trail. SpiralTorch can expose these records directly to an
+interpretability toolkit that maps gradient flows, consensus splits, and
+telemetry spikes back to model behaviour. Visualising these pathways keeps
+“why” answers native to Z-space, turning SpiralTorch’s internal instrumentation
+into an Explainable AI surface without external probes.
 
 ## Hello SpiralSession quickstart
 
@@ -151,6 +195,83 @@ GoldenRetriever keeps each trainer behind a poison-resistant mutex, launches the
 epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
 locking or thread book-keeping required.
+
+### SpiralTorchRL (hypergrad policy gradients)
+
+SpiralTorchRL unifies the reinforcement-learning surface around the same
+Z-space tensors that power the supervised stack. Policies stream returns into
+optional `AmegaHypergrad` tapes, meaning the Riemannian curvature remains under
+control even when reward schedules wobble. The Rust crate ships with a
+hypergrad-aware policy gradient learner and the Python bindings mirror it via
+`spiraltorch.rl.PolicyGradient` so notebooks can probe schedules without
+departing from the Rust implementation.
+
+```python
+from spiraltorch import Tensor
+from spiraltorch.rl import PolicyGradient
+
+policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
+policy.enable_hypergrad(curvature=-1.0, learning_rate=0.05)
+
+state = Tensor(1, 6, [0.1, 0.2, -0.3, 0.5, -0.1, 0.0])
+action, probs = policy.select_action(state)
+policy.record_transition(state, action, reward=0.8)
+report = policy.finish_episode()
+print(report.steps, report.hypergrad_applied)
+```
+
+Rust projects can pair the policy with the new geometric feedback module to
+ground the update scale in observability measurements. Feed a
+`DifferentialResonance` snapshot into `GeometryFeedback` and the learner will
+adapt its learning rate according to the coalgebra efficiency.
+
+```rust
+use st_core::theory::observability::{ObservabilityConfig, SlotSymmetry};
+use st_rl::{GeometryFeedback, GeometryFeedbackConfig, SpiralPolicyGradient};
+
+let mut policy = SpiralPolicyGradient::new(6, 3, 0.01, 0.99)?;
+let feedback = GeometryFeedback::new(GeometryFeedbackConfig {
+    observability: ObservabilityConfig::new(1, 5, SlotSymmetry::Symmetric),
+    z_space_rank: 24,                 // Maryna Viazovska's Leech shell as default
+    leech_density_weight: 0.5,        // densify η with Λ24 packing pressure
+    ramanujan_iterations: 4,          // refine π via Ramanujan's fast series
+    softening_beta: 0.6,              // keep the projection memory-light
+    ..GeometryFeedbackConfig::default_policy()
+});
+policy.attach_geometry_feedback(feedback);
+let resonance = session.trace(state.clone())?
+    .generator(direction.clone())?
+    .barycenter(barycenter.clone())?
+    .resonate()?; // DifferentialResonance snapshot
+let (report, signal) = policy.finish_episode_with_geometry(&resonance)?;
+if let Some(signal) = signal {
+    println!("η̄={:.3}, scale={:.2}", signal.averaged_efficiency, signal.learning_rate_scale);
+}
+```
+
+The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
+into its smoothing loop. This keeps the Z-space slice expansive without bloating
+memory: `z_space_rank` picks the dimensional stratum, the Leech density weight
+injects Viazovska's optimal sphere packing pressure, and the softening beta
+maintains latency by compressing the soft power projection back into `[0, 1]`.
+
+### SpiralTorchRec (open-topos recommendation lattice)
+
+SpiralTorchRec factors implicit-feedback matrices under open-cartesian topos
+guards so embeddings stay psychoid-safe during long training arcs. The Rust
+crate exposes a deterministic SGD loop with saturation-aware updates while the
+Python view (`spiraltorch.rec.Recommender`) mirrors the same ergonomics for
+notebooks and serving pipelines. User and item embeddings remain regularised by
+the curvature guard, ensuring they can be re-imported into SpiralTorch modules
+without violating the Z-space contract.
+
+```python
+from spiraltorch.rec import Recommender
+
+rec = Recommender(users=10, items=20, factors=5, learning_rate=0.03, regularization=0.002)
+epoch = rec.train_epoch([(0, 0, 4.0), (0, 3, 5.0), (1, 0, 3.5)])
+print(epoch.rmse, rec.predict(0, 1))
+```
 
 ### Observation DAG calculus (Pólya-calibrated final coalgebra)
 

@@ -1,0 +1,10 @@
+[package]
+name = "st-rec"
+version = "0.1.0"
+edition = "2021"
+description = "Recommendation and ranking harness for SpiralTorch"
+license = "AGPL-3.0-or-later"
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
+
+[dependencies]
+st-tensor = { path = "../st-tensor" }
