@@ -22,13 +22,13 @@
 // ============================================================================
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+#[cfg(feature = "golden")]
+use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 #[cfg(feature = "psi")]
 use crate::language::{DesirePsiBridge, DesirePsiSummary};
 use crate::language::{
     DesireRoundtableBridge, DesireRoundtableSummary, DesireTrainerBridge, DesireTrainerSummary,
 };
-#[cfg(feature = "golden")]
-use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
 use crate::loss::Loss;
 use crate::module::Module;
@@ -57,7 +57,7 @@ use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter, PsychoidReading};
-use st_tensor::pure::topos::OpenCartesianTopos;
+use st_tensor::topos::OpenCartesianTopos;
 use std::collections::HashMap;
 use std::env;
 use std::time::{Duration, Instant, SystemTime};
@@ -1637,7 +1637,7 @@ mod tests {
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
-    use st_tensor::pure::topos::OpenCartesianTopos;
+    use st_tensor::topos::OpenCartesianTopos;
     use std::collections::{HashMap, HashSet};
     use std::time::{Duration, Instant, SystemTime};
 
@@ -1715,7 +1715,7 @@ mod tests {
         let mut gate = WaveGate::with_topos(
             "wg",
             8,
-            st_tensor::pure::LanguageWaveEncoder::new(encoder_curvature, 0.7).unwrap(),
+            st_tensor::LanguageWaveEncoder::new(encoder_curvature, 0.7).unwrap(),
             topos.clone(),
         )
         .unwrap();

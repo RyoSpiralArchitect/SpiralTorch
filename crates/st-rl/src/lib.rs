@@ -6,7 +6,7 @@
 use std::fmt;
 
 use st_core::telemetry::hub;
-use st_tensor::pure::{AmegaHypergrad, DifferentialResonance, Tensor, TensorError};
+use st_tensor::{AmegaHypergrad, DifferentialResonance, Tensor, TensorError};
 
 mod geometry;
 

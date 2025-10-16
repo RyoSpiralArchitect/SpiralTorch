@@ -32,8 +32,8 @@ use st_core::telemetry::chrono::{
     ChronoFrame, ChronoHarmonics, ChronoSummary, ResonanceTemporalMetrics,
 };
 #[cfg(test)]
-use st_tensor::pure::Tensor;
-use st_tensor::pure::{DifferentialResonance, LanguageWaveEncoder, PureResult};
+use st_tensor::Tensor;
+use st_tensor::{DifferentialResonance, LanguageWaveEncoder, PureResult};
 
 /// Human-readable synopsis describing what a resonance snapshot is doing.
 #[derive(Clone, Debug, PartialEq, Eq)]
