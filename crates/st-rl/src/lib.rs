@@ -5,7 +5,11 @@
 
 use std::fmt;
 
-use st_tensor::pure::{AmegaHypergrad, Tensor, TensorError};
+use st_tensor::pure::{AmegaHypergrad, DifferentialResonance, Tensor, TensorError};
+
+mod geometry;
+
+pub use geometry::{GeometryFeedback, GeometryFeedbackConfig, GeometryFeedbackSignal};
 
 /// Reinforcement learning specific error wrapper so callers can surface
 /// meaningful diagnostics without inspecting tensor internals.
@@ -99,6 +103,7 @@ pub struct SpiralPolicyGradient {
     bias: Vec<f32>,
     episode: Vec<Transition>,
     hypergrad: Option<AmegaHypergrad>,
+    geometry_feedback: Option<GeometryFeedback>,
 }
 
 impl SpiralPolicyGradient {
@@ -141,6 +146,7 @@ impl SpiralPolicyGradient {
             bias,
             episode: Vec::new(),
             hypergrad: None,
+            geometry_feedback: None,
         })
     }
 
@@ -155,6 +161,23 @@ impl SpiralPolicyGradient {
     /// Resets the buffered episode without touching the parameters.
     pub fn reset_episode(&mut self) {
         self.episode.clear();
+    }
+
+    /// Attaches a geometric observability feedback controller to the policy.
+    pub fn attach_geometry_feedback(&mut self, feedback: GeometryFeedback) {
+        self.geometry_feedback = Some(feedback);
+    }
+
+    /// Detaches the currently configured geometric feedback controller.
+    pub fn detach_geometry_feedback(&mut self) -> Option<GeometryFeedback> {
+        self.geometry_feedback.take()
+    }
+
+    /// Returns the latest feedback signal emitted by the controller, if any.
+    pub fn last_geometry_signal(&self) -> Option<&GeometryFeedbackSignal> {
+        self.geometry_feedback
+            .as_ref()
+            .and_then(|feedback| feedback.last_signal())
     }
 
     fn ensure_state_shape(&self, state: &Tensor) -> RlResult<()> {
@@ -243,8 +266,34 @@ impl SpiralPolicyGradient {
 
     /// Applies a policy gradient update using the buffered transitions.
     pub fn finish_episode(&mut self) -> RlResult<EpisodeReport> {
+        self.finish_episode_with_rate(self.learning_rate)
+    }
+
+    /// Applies an update modulated by a geometric resonance measurement.
+    pub fn finish_episode_with_geometry(
+        &mut self,
+        resonance: &DifferentialResonance,
+    ) -> RlResult<(EpisodeReport, Option<GeometryFeedbackSignal>)> {
+        let (scale, signal) = if let Some(controller) = self.geometry_feedback.as_mut() {
+            let signal = controller.process_resonance(resonance);
+            (signal.learning_rate_scale.max(f32::EPSILON), Some(signal))
+        } else {
+            (1.0, None)
+        };
+        let effective_rate = (self.learning_rate * scale).max(f32::EPSILON);
+        let report = self.finish_episode_with_rate(effective_rate)?;
+        Ok((report, signal))
+    }
+
+    fn finish_episode_with_rate(&mut self, learning_rate: f32) -> RlResult<EpisodeReport> {
         if self.episode.is_empty() {
             return Err(SpiralRlError::EmptyEpisode);
+        }
+        if !(learning_rate.is_finite()) || learning_rate <= 0.0 {
+            return Err(TensorError::NonPositiveLearningRate {
+                rate: learning_rate,
+            }
+            .into());
         }
         let returns = self.discounted_returns();
         let baseline = returns.iter().sum::<f32>() / returns.len() as f32;
@@ -259,7 +308,7 @@ impl SpiralPolicyGradient {
             for action in 0..self.action_dim {
                 let prob = step.probs[action];
                 let indicator = if action == step.action { 1.0 } else { 0.0 };
-                let grad_coeff = (indicator - prob) * advantage * self.learning_rate;
+                let grad_coeff = (indicator - prob) * advantage * learning_rate;
                 bias_grad[action] += grad_coeff;
                 for feature in 0..self.state_dim {
                     let idx = feature * self.action_dim + action;
