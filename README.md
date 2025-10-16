@@ -79,6 +79,10 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
+## Technical notes
+
+- [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
+
 ## Emerging toolkits unique to SpiralTorch
 
 ### Z-space-native graph neural networks
