@@ -1377,6 +1377,27 @@ await fractal.render(canvas);
 Pixels become Z-space relations, the scheduler keeps memory bounded, and the
 entire loop stays panic-free even under aggressive streaming.
 
+Need FFT heuristics alongside the canvas?  WebAssembly exports now ship auto
+planning helpers and CPU fallbacks:
+
+```javascript
+import init, { auto_plan_fft, fft_forward } from "./pkg/spiraltorch_wasm.js";
+
+await init();
+const plan = auto_plan_fft(512, 4096, 128, true);
+if (plan) {
+  console.log(`radix=${plan.radix} tile=${plan.tileCols}`);
+  const wgsl = plan.wgsl();
+  const spiralk = plan.spiralkHint();
+}
+
+// Run a radix-2/4 FFT on interleaved re/im data
+const freqDomain = fft_forward(timeDomainBuffer);
+```
+
+If you maintain a `WasmTuner`, call `planFft` to reuse your override table and
+capture WGSL/SpiralK artifacts without leaving the browser.
+
 ---
 
 ## Heuristics (SpiralK) — optional & powerful
@@ -1421,6 +1442,20 @@ use st_core::backend::wgpu_heuristics::{auto_fft_spiralk, auto_fft_wgsl};
 let wgsl = auto_fft_wgsl(rows, cols, k, subgroup).expect("heuristics available");
 let spiralk = auto_fft_spiralk(rows, cols, k, subgroup).unwrap();
 // ship `wgsl` to your WebGPU runtime and persist `spiralk` if you want the DSL to learn it.
+```
+
+Prefer to cache the tuned plan for JavaScript without re-running the heuristics? The WASM bindings now serialise plans as JSON or plain JS objects:
+
+```ts
+import { auto_fft_plan_json, WasmFftPlan } from "spiraltorch_wasm";
+
+const planJson = await auto_fft_plan_json(rows, cols, k, true);
+if (planJson) {
+  const plan = WasmFftPlan.fromJson(planJson);
+  await persistPlan(plan.toJson());
+  const wgsl = plan.wgsl();
+  // dispatch `wgsl` and reuse `plan` across workers or page reloads.
+}
 ```
 
 ---
