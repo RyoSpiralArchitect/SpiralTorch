@@ -73,12 +73,13 @@ impl LeechProjector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::assert_abs_diff_eq;
 
     #[test]
     fn ramanujan_cache_reuses_values() {
         let first = ramanujan_pi(3);
         let second = ramanujan_pi(3);
-        assert!((first - second).abs() < f64::EPSILON);
+        assert_abs_diff_eq!(first, second);
     }
 
     #[test]

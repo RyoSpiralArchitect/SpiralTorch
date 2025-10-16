@@ -71,7 +71,10 @@ impl ZSpaceGraphConvolution {
     fn record_forward_flows(&self, flows: Vec<NodeFlowSample>) {
         if let Some(tracer) = &self.tracer {
             let mut guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
-            guard.begin_layer(self.name.clone(), self.curvature, flows);
+            guard.begin_layer(self.name.clone(), self.curvature, flows.clone());
+            if let Ok(mut guard) = tracer.lock() {
+                guard.begin_layer(self.name.clone(), self.curvature, flows);
+            }
         }
     }
 
