@@ -28,3 +28,5 @@ pub mod psi;
 
 #[cfg(feature = "psychoid")]
 pub mod psychoid;
+
+pub mod xai;
