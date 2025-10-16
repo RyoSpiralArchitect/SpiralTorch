@@ -22,6 +22,7 @@
 // ============================================================================
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 use crate::loss::Loss;
@@ -71,6 +72,7 @@ pub struct ModuleTrainer {
     meta_conductor: Option<MetaConductor>,
     heur_log: HeurOpLog,
     softlogic: SoftLogicFlex,
+    desire_bridge: Option<DesireTrainerBridge>,
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
@@ -236,7 +238,10 @@ impl ModuleTrainer {
             meta_conductor: None,
             heur_log: HeurOpLog::default(),
             softlogic: SoftLogicFlex::new(),
+            desire_bridge: None,
             graph_bridge: None,
+            graph_pending: None,
+            graph_last_hint: None,
             graph_pending: None,
             graph_last_hint: None,
             #[cfg(feature = "golden")]
@@ -261,6 +266,12 @@ impl ModuleTrainer {
     pub fn enable_graph_feedback(&mut self, bridge: GraphConsensusBridge) {
         self.graph_bridge = Some(bridge);
         self.graph_pending = None;
+    }
+
+    /// Enables desire telemetry feedback so automation and training can share
+    /// aggregated summaries without bespoke glue.
+    pub fn enable_desire_pipeline(&mut self, bridge: DesireTrainerBridge) {
+        self.desire_bridge = Some(bridge);
     }
 
     /// Returns the SpiralK hint generated from the most recently applied graph
@@ -833,6 +844,11 @@ impl ModuleTrainer {
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
             extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
+            if let Some(bridge) = self.desire_bridge.as_ref() {
+                if let Some(summary) = bridge.drain_summary()? {
+                    Self::insert_desire_summary(&mut extra, &summary);
+                }
+            }
             if let Some(ref digest) = graph_adjustment {
                 extra.insert("graph_share".to_string(), digest.barycentric[3] as f64);
                 extra.insert(
@@ -1103,6 +1119,46 @@ impl ModuleTrainer {
         caps.occupancy_score(caps.max_workgroup) as f64
     }
 
+    fn insert_desire_summary(target: &mut HashMap<String, f64>, summary: &DesireTrainerSummary) {
+        target.insert("desire_steps".to_string(), summary.total as f64);
+        target.insert(
+            "desire_phase_observation".to_string(),
+            summary.observation as f64,
+        );
+        target.insert("desire_phase_injection".to_string(), summary.injection as f64);
+        target.insert(
+            "desire_phase_integration".to_string(),
+            summary.integration as f64,
+        );
+        target.insert("desire_mean_entropy".to_string(), summary.mean_entropy as f64);
+        target.insert(
+            "desire_mean_temperature".to_string(),
+            summary.mean_temperature as f64,
+        );
+        target.insert("desire_mean_penalty".to_string(), summary.mean_penalty as f64);
+        target.insert("desire_mean_alpha".to_string(), summary.mean_alpha as f64);
+        target.insert("desire_mean_beta".to_string(), summary.mean_beta as f64);
+        target.insert("desire_mean_gamma".to_string(), summary.mean_gamma as f64);
+        target.insert("desire_mean_lambda".to_string(), summary.mean_lambda as f64);
+        target.insert("desire_triggers".to_string(), summary.triggers as f64);
+        target.insert(
+            "desire_trigger_mean_penalty".to_string(),
+            summary.trigger_mean_penalty as f64,
+        );
+        target.insert(
+            "desire_trigger_mean_entropy".to_string(),
+            summary.trigger_mean_entropy as f64,
+        );
+        target.insert(
+            "desire_trigger_mean_temperature".to_string(),
+            summary.trigger_mean_temperature as f64,
+        );
+        target.insert(
+            "desire_trigger_mean_samples".to_string(),
+            summary.trigger_mean_samples as f64,
+        );
+    }
+
     #[cfg(feature = "psi")]
     fn bootstrap_psi(&mut self, schedule: &RoundtableSchedule) {
         if self.psi.is_some() || !schedule.psi_enabled() {
@@ -1291,7 +1347,62 @@ mod tests {
     use crate::layers::wave_gate::WaveGate;
     use crate::loss::MeanSquaredError;
     use crate::schedule::RoundtableConfig;
+    use crate::language::{
+        constant, warmup, ConceptHint, DesireAutomation, DesireLagrangian, DesirePipeline,
+        DesireTrainerBridge, DesireTriggerBuffer, RepressionField, SemanticBridge, SparseKernel,
+        SymbolGeometry, TemperatureController,
+    };
     use st_tensor::pure::topos::OpenCartesianTopos;
+    use std::time::{Duration, Instant, SystemTime};
+
+    fn build_language_geometry() -> SymbolGeometry {
+        let syn = SparseKernel::from_rows(
+            vec![vec![(0, 0.6), (1, 0.4)], vec![(0, 0.5), (1, 0.5)]],
+            1e-6,
+        )
+        .unwrap();
+        let par = SparseKernel::from_rows(
+            vec![vec![(0, 0.7), (1, 0.3)], vec![(0, 0.2), (1, 0.8)]],
+            1e-6,
+        )
+        .unwrap();
+        SymbolGeometry::new(syn, par).unwrap()
+    }
+
+    fn build_language_semantics() -> SemanticBridge {
+        use std::collections::HashSet;
+
+        let log_pi = vec![
+            vec![(0, (0.65f32).ln()), (1, (0.35f32).ln())],
+            vec![(0, (0.4f32).ln()), (1, (0.6f32).ln())],
+        ];
+        let row = vec![1.0, 1.0];
+        let col = vec![1.0, 1.0];
+        let anchors = HashSet::new();
+        let concept_kernel = SparseKernel::from_rows(vec![vec![(0, 1.0)], vec![(1, 1.0)]], 1e-6).unwrap();
+        SemanticBridge::new(log_pi, row, col, anchors, 1e-6, concept_kernel).unwrap()
+    }
+
+    fn build_language_automation() -> DesireAutomation {
+        let geometry = build_language_geometry();
+        let repression = RepressionField::new(vec![0.05, 0.15]).unwrap();
+        let semantics = build_language_semantics();
+        let controller = TemperatureController::new(1.0, 0.8, 0.4, 0.4, 1.6);
+        let desire = DesireLagrangian::new(geometry, repression, semantics, controller)
+            .unwrap()
+            .with_alpha_schedule(warmup(0.0, 0.2, 1))
+            .with_beta_schedule(warmup(0.0, 0.1, 1))
+            .with_gamma_schedule(constant(0.04))
+            .with_lambda_schedule(constant(0.02))
+            .with_observation_horizon(Some(1))
+            .with_integration_horizon(Some(2));
+        let cfg = st_core::config::self_rewrite::SelfRewriteCfg {
+            score_thresh: 0.0,
+            min_samples: 2,
+            cooldown_sec: 0,
+        };
+        DesireAutomation::new(desire, cfg)
+    }
 
     #[test]
     fn trainer_attaches_and_steps() {
@@ -1367,6 +1478,53 @@ mod tests {
         assert_ne!(before.data(), after.data());
     }
 
+    #[test]
+    fn trainer_consumes_desire_bridge_summary() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = Sequential::new();
+        model.push(Linear::new("lin", 2, 1).unwrap());
+        trainer.prepare(&mut model).unwrap();
+
+        let automation = build_language_automation();
+        let bridge = DesireTrainerBridge::new();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_trainer_bridge(&bridge)
+            .with_sink(DesireTriggerBuffer::new())
+            .build();
+
+        let logits = vec![2.0, 0.4];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..6 {
+            let now = start + Duration::from_millis((step * 150) as u64);
+            let timestamp = anchor + Duration::from_millis((step * 150) as u64);
+            pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+        }
+
+        assert!(bridge.len() >= 6);
+        trainer.enable_desire_pipeline(bridge.clone());
+
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let dataset = vec![
+            (
+                Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            ),
+        ];
+        let mut loss = MeanSquaredError::new();
+        trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .unwrap();
+
+        assert!(bridge.is_empty());
     #[cfg(feature = "golden")]
     #[test]
     fn trainer_records_golden_council_snapshot() {

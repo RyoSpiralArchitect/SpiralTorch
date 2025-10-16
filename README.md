@@ -296,6 +296,31 @@ for event in receiver.try_iter() {
 }
 ```
 
+Training loops can now subscribe directly. Clone a `DesireTrainerBridge`, attach
+it with `with_trainer_bridge`, and hand the same bridge to `ModuleTrainer` via
+`enable_desire_pipeline`. Each step drains into a shared summary so the trainer
+records phase counts, mean desire weights, and trigger temperatures alongside
+band energy telemetry without custom glue.【F:crates/st-nn/src/language/pipeline.rs†L118-L239】【F:crates/st-nn/src/language/pipeline.rs†L242-L357】【F:crates/st-nn/src/trainer.rs†L214-L365】
+
+```rust
+use st_nn::language::{
+    ConceptHint, DesirePipeline, DesireTrainerBridge, DesireTriggerBuffer,
+};
+use st_nn::trainer::ModuleTrainer;
+
+let bridge = DesireTrainerBridge::new();
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_trainer_bridge(&bridge)
+    .with_sink(DesireTriggerBuffer::new())
+    .build();
+
+trainer.enable_desire_pipeline(bridge.clone());
+let step = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(trigger) = &step.trigger {
+    println!("trigger mean penalty: {:.3}", trigger.mean_penalty);
+}
+```
+
 The result is a single Rust-native control surface that marries KL control,
 Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
 language modules, rewrite monads, or SpiralK trainers without bespoke Python
