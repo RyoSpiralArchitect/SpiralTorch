@@ -515,9 +515,20 @@ impl LanguagePipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::automation::DesireAutomation;
+    use super::super::desire::{constant, warmup, DesireLagrangian};
+    use super::super::geometry::{
+        ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
+    };
+    use super::super::temperature::TemperatureController;
     use crate::plan::RankPlanner;
+    use st_core::config::self_rewrite::SelfRewriteCfg;
     use st_core::backend::device_caps::DeviceCaps;
+    use std::collections::HashSet;
+    use std::sync::mpsc::channel;
     use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant, SystemTime};
+    use tempfile::tempdir;
 
     fn registry_guard() -> &'static Mutex<()> {
         static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
@@ -581,18 +592,7 @@ mod tests {
         let connector = &report.connectors[0];
         assert_eq!(connector.stage, "roundtable");
         assert_eq!(connector.metadata.get("rows"), Some(&"16".to_string()));
-    use super::super::automation::DesireAutomation;
-    use super::super::desire::{constant, warmup, DesireLagrangian};
-    use super::super::geometry::{
-        ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
-    };
-    use super::super::temperature::TemperatureController;
-    use super::*;
-    use st_core::config::self_rewrite::SelfRewriteCfg;
-    use std::collections::HashSet;
-    use std::sync::mpsc::channel;
-    use std::time::{Duration, Instant, SystemTime};
-    use tempfile::tempdir;
+    }
 
     fn build_geometry() -> SymbolGeometry {
         let syn = SparseKernel::from_rows(
