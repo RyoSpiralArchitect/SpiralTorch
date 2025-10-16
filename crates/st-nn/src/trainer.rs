@@ -29,7 +29,6 @@ use crate::language::{DesirePsiBridge, DesirePsiSummary};
 use crate::language::{
     DesireRoundtableBridge, DesireRoundtableSummary, DesireTrainerBridge, DesireTrainerSummary,
 };
-use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
@@ -651,7 +650,7 @@ impl ModuleTrainer {
         config: RoundtableConfig,
         schedule: &RoundtableSchedule,
     ) {
-        let pipeline = crate::language::pipeline::LanguagePipeline::builder("module_trainer")
+        let pipeline = crate::language::LanguagePipeline::builder("module_trainer")
             .with_tag("component", "module_trainer")
             .build();
         pipeline.record_roundtable(

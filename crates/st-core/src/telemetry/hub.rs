@@ -308,62 +308,6 @@ pub fn get_last_desire_step() -> Option<DesireStepTelemetry> {
         .and_then(|guard| guard.as_ref().cloned())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DesirePhaseTelemetry {
-    Observation,
-    Injection,
-    Integration,
-}
-
-#[derive(Debug, Clone)]
-pub struct DesireStepTelemetry {
-    pub timestamp: SystemTime,
-    pub phase: DesirePhaseTelemetry,
-    pub temperature: f32,
-    pub entropy: f32,
-    pub hypergrad_penalty: f32,
-    pub avoidance_energy: f32,
-    pub logit_energy: f32,
-    pub alpha: f32,
-    pub beta: f32,
-    pub gamma: f32,
-    pub lambda: f32,
-    pub trigger_emitted: bool,
-}
-
-impl Default for DesireStepTelemetry {
-    fn default() -> Self {
-        Self {
-            timestamp: UNIX_EPOCH,
-            phase: DesirePhaseTelemetry::Observation,
-            temperature: 0.0,
-            entropy: 0.0,
-            hypergrad_penalty: 0.0,
-            avoidance_energy: 0.0,
-            logit_energy: 0.0,
-            alpha: 0.0,
-            beta: 0.0,
-            gamma: 0.0,
-            lambda: 0.0,
-            trigger_emitted: false,
-        }
-    }
-}
-
-static LAST_DESIRE_STEP: OnceLock<RwLock<Option<DesireStepTelemetry>>> = OnceLock::new();
-
-fn desire_step_cell() -> &'static RwLock<Option<DesireStepTelemetry>> {
-    LAST_DESIRE_STEP.get_or_init(|| RwLock::new(None))
-}
-
-pub fn set_last_desire_step(step: DesireStepTelemetry) {
-    if let Ok(mut guard) = desire_step_cell().write() {
-        *guard = Some(step);
-    }
-}
-
-pub fn get_last_desire_step() -> Option<DesireStepTelemetry> {
-    desire_step_cell()
 static LAST_CHRONO_LOOP: OnceLock<RwLock<Option<ChronoLoopSignal>>> = OnceLock::new();
 
 fn chrono_loop_cell() -> &'static RwLock<Option<ChronoLoopSignal>> {
