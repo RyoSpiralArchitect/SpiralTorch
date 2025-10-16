@@ -767,6 +767,9 @@ impl SpiralSession {
             }
             hub::merge_atlas_fragment(fragment);
         }
+        if let Some(signal) = signal {
+            hub::set_chrono_loop(signal);
+        }
         Ok(frame)
     }
 
