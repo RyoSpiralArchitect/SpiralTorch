@@ -5,7 +5,7 @@
 
 use crate::backend::wgpu_heuristics::Choice;
 use serde::{Deserialize, Serialize};
-use std::cmp::{max, min};
+use std::cmp::{max, min, Ordering};
 use std::fmt;
 
 /// Error emitted when a WASM tuner table cannot be parsed.
@@ -167,20 +167,24 @@ impl fmt::Debug for WasmTunerTable {
 }
 
 impl WasmTunerTable {
+    /// Create an empty table.
+    pub fn new() -> Self {
+        Self {
+            records: Vec::new(),
+        }
+    }
+
+    /// Construct a table from a collection of records.
+    pub fn from_records(records: Vec<WasmTunerRecord>) -> Self {
+        let mut table = Self { records };
+        table.sort_internal();
+        table
+    }
+
     /// Create a table from JSON text.
     pub fn from_json_str(json: &str) -> Result<Self, WasmTunerError> {
-        let mut records: Vec<WasmTunerRecord> = serde_json::from_str(json)?;
-        records.sort_by(|a, b| match (a.subgroup, b.subgroup) {
-            (Some(true), Some(false)) => std::cmp::Ordering::Less,
-            (Some(false), Some(true)) => std::cmp::Ordering::Greater,
-            _ => a
-                .rows_min
-                .unwrap_or(0)
-                .cmp(&b.rows_min.unwrap_or(0))
-                .then(a.cols_min.cmp(&b.cols_min))
-                .then(b.cols_max.cmp(&a.cols_max)),
-        });
-        Ok(Self { records })
+        let records: Vec<WasmTunerRecord> = serde_json::from_str(json)?;
+        Ok(Self::from_records(records))
     }
 
     /// Serialise the table back to JSON.
@@ -201,6 +205,48 @@ impl WasmTunerTable {
     /// Push a new record.
     pub fn push(&mut self, record: WasmTunerRecord) {
         self.records.push(record);
+    }
+
+    /// Push a record while keeping the ordering stable.
+    pub fn push_sorted(&mut self, record: WasmTunerRecord) {
+        self.records.push(record);
+        self.sort_internal();
+    }
+
+    /// Extend the table with new records and keep them ordered.
+    pub fn extend_sorted<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = WasmTunerRecord>,
+    {
+        self.records.extend(iter);
+        self.sort_internal();
+    }
+
+    /// Remove every record stored in the table.
+    pub fn clear(&mut self) {
+        self.records.clear();
+    }
+
+    /// Re-sort the internal dataset.
+    pub fn sort(&mut self) {
+        self.sort_internal();
+    }
+
+    fn sort_internal(&mut self) {
+        self.records.sort_by(Self::compare_records);
+    }
+
+    fn compare_records(a: &WasmTunerRecord, b: &WasmTunerRecord) -> Ordering {
+        match (a.subgroup, b.subgroup) {
+            (Some(true), Some(false)) => Ordering::Less,
+            (Some(false), Some(true)) => Ordering::Greater,
+            _ => a
+                .rows_min
+                .unwrap_or(0)
+                .cmp(&b.rows_min.unwrap_or(0))
+                .then(a.cols_min.cmp(&b.cols_min))
+                .then(b.cols_max.cmp(&a.cols_max)),
+        }
     }
 
     /// Iterate over the internal records.
@@ -281,5 +327,73 @@ mod tests {
         let table = WasmTunerTable::from_json_str(json).unwrap();
         let out = table.to_json().unwrap();
         assert!(out.contains("\"cols_min\": 0"));
+    }
+
+    fn record(
+        rows_min: Option<usize>,
+        rows_max: Option<usize>,
+        cols_min: usize,
+        cols_max: usize,
+        subgroup: Option<bool>,
+    ) -> WasmTunerRecord {
+        WasmTunerRecord {
+            rows_min,
+            rows_max,
+            cols_min,
+            cols_max,
+            k_min: 0,
+            k_max: usize::MAX,
+            subgroup,
+            algo_topk: None,
+            ctile: None,
+            wg: None,
+            kl: None,
+            ch: None,
+            mode_midk: None,
+            mode_bottomk: None,
+            tile_cols: None,
+            radix: None,
+            segments: None,
+            use_2ce: None,
+        }
+    }
+
+    #[test]
+    fn new_table_is_empty() {
+        let table = WasmTunerTable::new();
+        assert_eq!(table.len(), 0);
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn push_sorted_keeps_ordering() {
+        let mut table = WasmTunerTable::new();
+        table.push_sorted(record(Some(256), None, 4096, 8192, Some(false)));
+        table.push_sorted(record(Some(128), None, 0, 4095, Some(true)));
+        table.push_sorted(record(Some(512), None, 8193, 16_384, None));
+        let mut iter = table.iter();
+        assert_eq!(iter.next().unwrap().subgroup, Some(true));
+        assert_eq!(iter.next().unwrap().rows_min, Some(256));
+        assert!(iter.next().unwrap().rows_min.unwrap() >= 512);
+    }
+
+    #[test]
+    fn extend_sorted_merges_records() {
+        let mut table =
+            WasmTunerTable::from_records(vec![record(Some(256), None, 0, 1024, Some(true))]);
+        let extra = vec![
+            record(Some(256), None, 1025, 2048, Some(true)),
+            record(Some(512), None, 0, 1024, Some(false)),
+        ];
+        table.extend_sorted(extra);
+        assert_eq!(table.len(), 3);
+        let mut iter = table.iter();
+        let first = iter.next().unwrap();
+        assert_eq!(first.cols_min, 0);
+        assert_eq!(first.subgroup, Some(true));
+        let second = iter.next().unwrap();
+        assert_eq!(second.cols_min, 1025);
+        let third = iter.next().unwrap();
+        assert_eq!(third.subgroup, Some(false));
     }
 }
