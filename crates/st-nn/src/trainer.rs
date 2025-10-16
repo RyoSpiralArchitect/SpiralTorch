@@ -29,8 +29,8 @@ use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
 use crate::roundtable::{
-    simulate_proposal_locally, BlackcatModerator, DistConfig, GlobalProposal, HeurOpLog,
-    MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
+    simulate_proposal_locally, BlackcatModerator, DistConfig, GlobalProposal, HeurOp, HeurOpKind,
+    HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::{PureResult, Tensor};
@@ -71,6 +71,7 @@ pub struct ModuleTrainer {
     distribution: Option<RoundtableNode>,
     meta_conductor: Option<MetaConductor>,
     heur_log: HeurOpLog,
+    rewrite_budget: Option<RewriteBudget>,
     softlogic: SoftLogicFlex,
     desire_bridge: Option<DesireTrainerBridge>,
     graph_bridge: Option<GraphConsensusBridge>,
@@ -213,6 +214,53 @@ impl SoftLogicFlex {
     }
 }
 
+#[derive(Debug, Clone)]
+struct RewriteBudget {
+    per_epoch: u32,
+    cooldown: u32,
+    used_this_epoch: u32,
+    cooldown_left: u32,
+}
+
+impl RewriteBudget {
+    fn new(per_epoch: u32, cooldown: u32) -> Self {
+        Self {
+            per_epoch: per_epoch.max(1),
+            cooldown,
+            used_this_epoch: 0,
+            cooldown_left: 0,
+        }
+    }
+
+    fn begin_epoch(&mut self) {
+        if self.cooldown_left > 0 {
+            self.cooldown_left -= 1;
+        }
+        self.used_this_epoch = 0;
+    }
+
+    fn try_consume(&mut self, amount: u32) -> bool {
+        if amount == 0 {
+            return true;
+        }
+        if self.cooldown_left > 0 {
+            return false;
+        }
+        if self.used_this_epoch.saturating_add(amount) > self.per_epoch {
+            self.used_this_epoch = self.per_epoch;
+            if self.cooldown > 0 {
+                self.cooldown_left = self.cooldown;
+            }
+            return false;
+        }
+        self.used_this_epoch += amount;
+        if self.used_this_epoch >= self.per_epoch && self.cooldown > 0 {
+            self.cooldown_left = self.cooldown;
+        }
+        true
+    }
+}
+
 impl ModuleTrainer {
     /// Creates a new trainer with the provided device capabilities and learning rates.
     pub fn new(
@@ -237,6 +285,7 @@ impl ModuleTrainer {
             distribution: None,
             meta_conductor: None,
             heur_log: HeurOpLog::default(),
+            rewrite_budget: None,
             softlogic: SoftLogicFlex::new(),
             desire_bridge: None,
             graph_bridge: None,
@@ -511,6 +560,16 @@ impl ModuleTrainer {
         self.golden_council.as_ref()
     }
 
+    /// Configures how many rewrite operations may be applied per epoch and the cooldown required
+    /// before new rewrites are accepted.
+    pub fn set_rewrite_budget(&mut self, per_epoch: u32, cooldown: u32) {
+        if per_epoch == 0 {
+            self.rewrite_budget = None;
+        } else {
+            self.rewrite_budget = Some(RewriteBudget::new(per_epoch, cooldown));
+        }
+    }
+
     /// Clears any registered band weighting rule.
     pub fn clear_band_weights(&mut self) {
         self.band_weight_fn = None;
@@ -778,6 +837,9 @@ impl ModuleTrainer {
         I: IntoIterator,
         I::Item: IntoBatch,
     {
+        if let Some(budget) = self.rewrite_budget.as_mut() {
+            budget.begin_epoch();
+        }
         self.zero(module)?;
         #[cfg(feature = "psi")]
         self.bootstrap_psi(schedule);
@@ -1255,6 +1317,22 @@ impl ModuleTrainer {
         preview_metrics: HashMap<String, f32>,
     ) -> PureResult<()> {
         let _ = preview_metrics;
+        let rewrite_ops = proposal
+            .ops
+            .iter()
+            .filter(|op| {
+                matches!(
+                    op.kind,
+                    HeurOpKind::AppendSoft { .. } | HeurOpKind::Retract { .. }
+                )
+            })
+            .count()
+            .min(u32::MAX as usize) as u32;
+        if let Some(budget) = self.rewrite_budget.as_mut() {
+            if !budget.try_consume(rewrite_ops) {
+                return Ok(());
+            }
+        }
         for op in &proposal.ops {
             self.heur_log.append(op.clone());
         }
@@ -1353,6 +1431,8 @@ mod tests {
         SymbolGeometry, TemperatureController,
     };
     use st_tensor::pure::topos::OpenCartesianTopos;
+    use std::collections::HashMap;
+    use std::time::SystemTime;
     use std::time::{Duration, Instant, SystemTime};
 
     fn build_language_geometry() -> SymbolGeometry {
@@ -1479,6 +1559,51 @@ mod tests {
     }
 
     #[test]
+    fn trainer_enforces_rewrite_budget() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        trainer.set_rewrite_budget(1, 1);
+        if let Some(budget) = trainer.rewrite_budget.as_mut() {
+            budget.begin_epoch();
+        }
+
+        let op = HeurOp {
+            origin: "test".to_string(),
+            kind: HeurOpKind::AppendSoft {
+                script: "k:topk(2)".to_string(),
+                weight: 1.0,
+            },
+            issued_at: SystemTime::now(),
+        };
+        let proposal = GlobalProposal {
+            proposal_id: "proposal-test".to_string(),
+            ops: vec![op],
+            evidence: Vec::new(),
+        };
+
+        let initial = trainer.heuristics_log().entries().len();
+        trainer
+            .apply_proposal(&proposal, HashMap::new())
+            .expect("first rewrite allowed");
+        let after_first = trainer.heuristics_log().entries().len();
+        assert_eq!(after_first, initial + proposal.ops.len());
+
+        trainer
+            .apply_proposal(&proposal, HashMap::new())
+            .expect("second rewrite ignored");
+        let after_second = trainer.heuristics_log().entries().len();
+        assert_eq!(after_second, after_first);
+
+        if let Some(budget) = trainer.rewrite_budget.as_mut() {
+            budget.begin_epoch();
+        }
+        trainer
+            .apply_proposal(&proposal, HashMap::new())
+            .expect("rewrite allowed after cooldown");
+        let after_third = trainer.heuristics_log().entries().len();
+        assert_eq!(after_third, after_first + proposal.ops.len());
+    }
+
     fn trainer_consumes_desire_bridge_summary() {
         let caps = DeviceCaps::wgpu(32, true, 256);
         let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
