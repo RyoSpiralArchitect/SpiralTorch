@@ -357,6 +357,34 @@ if let Some(summary) = graph_bridge.drain_summary()? {
 }
 ```
 
+ψ telemetry can ride the same braid. Attach a `DesirePsiBridge` to fold the
+latest `PsiMeter` readings, SoftLogic Z feedback, and threshold crossings into
+the automation stream. The bridge can be drained directly or wired into
+`ModuleTrainer::enable_desire_psi_bridge` so every optimisation step records the
+aggregated ψ view alongside desire entropy and graph consensus.【F:crates/st-nn/src/language/pipeline.rs†L121-L286】【F:crates/st-nn/src/trainer.rs†L39-L66】【F:crates/st-core/src/telemetry/hub.rs†L1-L72】
+
+```rust
+use st_core::telemetry::hub;
+use st_core::telemetry::psi::{PsiComponent, PsiReading};
+use st_nn::language::{DesirePipeline, DesirePsiBridge};
+
+let psi_bridge = DesirePsiBridge::new();
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_psi_bridge(&psi_bridge)
+    .build();
+
+// seed hub telemetry before each step (normally done by ModuleTrainer)
+let mut breakdown = std::collections::HashMap::new();
+breakdown.insert(PsiComponent::LOSS, 0.9);
+let reading = PsiReading { total: 0.9, breakdown, step: 1 };
+hub::set_last_psi(&reading);
+
+let step = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(summary) = psi_bridge.drain_summary()? {
+    println!("ψ mean total: {:.3}", summary.mean_psi_total);
+}
+```
+
 The result is a single Rust-native control surface that marries KL control,
 Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
 language modules, rewrite monads, or SpiralK trainers without bespoke Python

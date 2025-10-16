@@ -22,6 +22,8 @@
 // ============================================================================
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+#[cfg(feature = "psi")]
+use crate::language::{DesirePsiBridge, DesirePsiSummary};
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
@@ -74,6 +76,8 @@ pub struct ModuleTrainer {
     rewrite_budget: Option<RewriteBudget>,
     softlogic: SoftLogicFlex,
     desire_bridge: Option<DesireTrainerBridge>,
+    #[cfg(feature = "psi")]
+    desire_psi_bridge: Option<DesirePsiBridge>,
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
@@ -288,6 +292,11 @@ impl ModuleTrainer {
             rewrite_budget: None,
             softlogic: SoftLogicFlex::new(),
             desire_bridge: None,
+            #[cfg(feature = "psi")]
+            desire_psi_bridge: None,
+            graph_bridge: None,
+            graph_pending: None,
+            graph_last_hint: None,
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
@@ -319,6 +328,11 @@ impl ModuleTrainer {
     /// aggregated summaries without bespoke glue.
     pub fn enable_desire_pipeline(&mut self, bridge: DesireTrainerBridge) {
         self.desire_bridge = Some(bridge);
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn enable_desire_psi_bridge(&mut self, bridge: DesirePsiBridge) {
+        self.desire_psi_bridge = Some(bridge);
     }
 
     /// Returns the SpiralK hint generated from the most recently applied graph
@@ -934,6 +948,12 @@ impl ModuleTrainer {
                     Self::insert_desire_summary(&mut extra, &summary);
                 }
             }
+            #[cfg(feature = "psi")]
+            if let Some(bridge) = self.desire_psi_bridge.as_ref() {
+                if let Some(summary) = bridge.drain_summary()? {
+                    Self::insert_desire_psi_summary(&mut extra, &summary);
+                }
+            }
             if let Some(ref digest) = graph_adjustment {
                 extra.insert("graph_share".to_string(), digest.barycentric[3] as f64);
                 extra.insert(
@@ -974,6 +994,7 @@ impl ModuleTrainer {
                     let (reading, events) = meter.update(&input_snapshot);
                     psi_snapshot = Some(reading.clone());
                     hub::set_last_psi(&reading);
+                    hub::set_last_psi_events(&events);
                     extra.insert("psi_total".to_string(), reading.total as f64);
                     for (component, value) in reading.breakdown.iter() {
                         let key = format!("psi_{}", component);
@@ -1251,6 +1272,43 @@ impl ModuleTrainer {
             "desire_trigger_mean_samples".to_string(),
             summary.trigger_mean_samples as f64,
         );
+    }
+
+    #[cfg(feature = "psi")]
+    fn insert_desire_psi_summary(target: &mut HashMap<String, f64>, summary: &DesirePsiSummary) {
+        target.insert("desire_psi_steps".to_string(), summary.steps as f64);
+        target.insert("desire_psi_triggers".to_string(), summary.triggers as f64);
+        target.insert("desire_psi_samples".to_string(), summary.psi_samples as f64);
+        target.insert(
+            "desire_psi_mean_total".to_string(),
+            summary.mean_psi_total as f64,
+        );
+        target.insert(
+            "desire_psi_mean_entropy".to_string(),
+            summary.mean_entropy as f64,
+        );
+        target.insert(
+            "desire_psi_mean_temperature".to_string(),
+            summary.mean_temperature as f64,
+        );
+        target.insert(
+            "desire_psi_mean_penalty".to_string(),
+            summary.mean_hypergrad_penalty as f64,
+        );
+        target.insert(
+            "desire_psi_mean_z".to_string(),
+            summary.mean_z_signal as f64,
+        );
+        for (component, mean) in summary.component_means.iter() {
+            let key = format!("desire_psi_component_{}_mean", component);
+            target.insert(key, *mean as f64);
+        }
+        for (component, (up, down)) in summary.threshold_crossings.iter() {
+            let up_key = format!("desire_psi_threshold_{}_up", component);
+            let down_key = format!("desire_psi_threshold_{}_down", component);
+            target.insert(up_key, *up as f64);
+            target.insert(down_key, *down as f64);
+        }
     }
 
     #[cfg(feature = "psi")]

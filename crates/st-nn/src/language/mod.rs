@@ -28,4 +28,6 @@ pub use pipeline::{
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireTrainerBridge,
     DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer, DesireTriggerEvent,
 };
+#[cfg(feature = "psi")]
+pub use pipeline::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
 pub use temperature::{entropy, TemperatureController};
