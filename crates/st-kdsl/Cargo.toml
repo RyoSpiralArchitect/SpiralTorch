@@ -1,7 +1,11 @@
 [package]
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 name = "st-kdsl"
 version = "0.3.0"
 edition = "2021"
 
 [dependencies]
 thiserror = "1"
+
+[package.metadata.spiraltorch]
+copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

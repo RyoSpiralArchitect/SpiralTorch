@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 //! Backend-aware unified chooser (TopK/MidK/BottomK).
 //! The goal is to stitch together the generated WGPU tables, environment DSL,
 //! Redis/KV hints, and the pure Rust fallback so that every backend has a sane
@@ -30,10 +35,14 @@ pub struct Choice {
     pub wg: u32,
     pub kl: u32,
     pub ch: u32,
-    pub mk: u32,    // 0=bitonic,1=shared,2=warp
-    pub mkd: u32,   // 0=auto,1=heap,2=kway,3=bitonic,4=warp_heap,5=warp_bitonic
-    pub tile: u32,  // TopK sweep tile
-    pub ctile: u32, // MidK/BottomK compaction tile
+    pub mk: u32,           // 0=bitonic,1=shared,2=warp
+    pub mkd: u32,          // 0=auto,1=heap,2=kway,3=bitonic,4=warp_heap,5=warp_bitonic
+    pub tile: u32,         // TopK sweep tile
+    pub ctile: u32,        // MidK/BottomK compaction tile
+    pub subgroup: bool,    // Whether the planner assumed subgroup execution
+    pub fft_tile: u32,     // Column tile for FFT/fractional kernels
+    pub fft_radix: u32,    // Preferred radix for the FFT planner
+    pub fft_segments: u32, // Number of ND segments folded by the kernel
 }
 
 impl Choice {
@@ -79,6 +88,15 @@ impl Choice {
             let _ = writeln!(&mut out, "  compaction_tile {}", self.ctile);
         }
         let _ = writeln!(&mut out, "  two_stage {}", self.use_2ce);
+        if self.fft_tile != 0 {
+            let _ = writeln!(&mut out, "  fft_tile {}", self.fft_tile);
+        }
+        if self.fft_radix != 0 {
+            let _ = writeln!(&mut out, "  fft_radix {}", self.fft_radix);
+        }
+        if self.fft_segments != 0 {
+            let _ = writeln!(&mut out, "  fft_segments {}", self.fft_segments);
+        }
         let _ = writeln!(&mut out, "}}");
         out
     }
@@ -98,6 +116,16 @@ fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> 
     let mkd = caps.preferred_substrategy(mk, k);
     let use_2ce = caps.prefers_two_stage_with_rows(rows, cols, k);
 
+    let fft_tile = ((cols.max(1) + 1023) / 1024) as u32 * 1024;
+    let fft_radix = if k.is_power_of_two() { 4 } else { 2 };
+    let fft_segments = if cols > 131_072 {
+        4
+    } else if cols > 32_768 {
+        2
+    } else {
+        1
+    };
+
     Choice {
         use_2ce,
         wg,
@@ -107,6 +135,10 @@ fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> 
         mkd,
         tile,
         ctile,
+        subgroup: caps.subgroup,
+        fft_tile,
+        fft_radix,
+        fft_segments,
     }
 }
 
@@ -152,6 +184,9 @@ fn refine_choice(
     if choice.mkd == 0 {
         choice.mkd = caps.preferred_substrategy(choice.mk, k);
     }
+    if !choice.subgroup {
+        choice.subgroup = baseline.subgroup;
+    }
     if choice.tile == 0 {
         choice.tile = baseline.tile;
     }
@@ -165,6 +200,21 @@ fn refine_choice(
     } else {
         choice.ctile = 0;
     }
+
+    if choice.fft_tile == 0 {
+        choice.fft_tile = baseline.fft_tile;
+    }
+    choice.fft_tile = caps.preferred_tile(cols, choice.fft_tile);
+
+    if choice.fft_radix == 0 {
+        choice.fft_radix = baseline.fft_radix;
+    }
+    choice.fft_radix = choice.fft_radix.clamp(2, 4);
+
+    if choice.fft_segments == 0 {
+        choice.fft_segments = baseline.fft_segments;
+    }
+    choice.fft_segments = choice.fft_segments.clamp(1, 4);
 
     let expected_two_stage = caps.prefers_two_stage_with_rows(rows, cols, k);
     if expected_two_stage && !choice.use_2ce {
@@ -216,6 +266,14 @@ fn score_choice(
         score += closeness(choice.ctile, baseline.ctile) * 0.1;
     }
 
+    score += closeness(choice.fft_tile, baseline.fft_tile) * 0.05;
+    if choice.fft_radix == baseline.fft_radix {
+        score += 0.025;
+    }
+    if choice.fft_segments == baseline.fft_segments {
+        score += 0.025;
+    }
+
     if choice.mk == caps.preferred_merge_kind(k) {
         score += 0.1;
     }
@@ -226,7 +284,7 @@ fn score_choice(
     score
 }
 
-fn convert_wgpu_choice(choice: wgpu_heuristics::Choice) -> Choice {
+fn convert_wgpu_choice(choice: wgpu_heuristics::Choice, subgroup: bool) -> Choice {
     Choice {
         use_2ce: choice.use_2ce,
         wg: choice.wg,
@@ -236,6 +294,10 @@ fn convert_wgpu_choice(choice: wgpu_heuristics::Choice) -> Choice {
         mkd: 0,
         tile: choice.tile_cols,
         ctile: choice.ctile,
+        subgroup,
+        fft_tile: choice.tile_cols,
+        fft_radix: choice.radix,
+        fft_segments: choice.segments,
     }
 }
 
@@ -264,7 +326,7 @@ pub fn choose_unified_rank(
     );
     if let Some(hard) = dsl_hard {
         let refined = refine_choice(
-            convert_wgpu_choice(hard),
+            convert_wgpu_choice(hard, caps.subgroup),
             baseline,
             &caps,
             rows,
@@ -281,7 +343,7 @@ pub fn choose_unified_rank(
 
     if let Some(kv) = kdsl_bridge::choose_from_kv(rows, cols, k, caps.subgroup) {
         let refined = refine_choice(
-            convert_wgpu_choice(kv),
+            convert_wgpu_choice(kv, caps.subgroup),
             baseline,
             &caps,
             rows,
@@ -301,7 +363,7 @@ pub fn choose_unified_rank(
             wgpu_heuristics::choose(rows as usize, cols as usize, k as usize, caps.subgroup)
         {
             let refined = refine_choice(
-                convert_wgpu_choice(choice),
+                convert_wgpu_choice(choice, caps.subgroup),
                 baseline,
                 &caps,
                 rows,
@@ -332,6 +394,10 @@ mod tests {
         assert!(choice.use_2ce);
         assert!(choice.tile >= 1024);
         assert_eq!(choice.mk, 2);
+        assert!(choice.fft_tile >= 1024);
+        assert_eq!(choice.fft_radix, 4);
+        assert!(choice.fft_segments >= 1);
+        assert!(choice.subgroup);
     }
 
     #[test]
@@ -340,6 +406,7 @@ mod tests {
         let out = choose_unified_rank(512, 16_384, 256, caps, RankKind::TopK);
         assert!(out.wg >= 128);
         assert!(out.tile >= 512);
+        assert!(out.fft_tile >= 512);
     }
 
     #[test]
@@ -350,5 +417,6 @@ mod tests {
         assert!(script.contains("unison midk"));
         assert!(script.contains("workgroup"));
         assert!(script.contains("merge"));
+        assert!(script.contains("fft_tile"));
     }
 }

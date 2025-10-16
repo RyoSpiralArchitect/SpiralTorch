@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 //! CUDA DeviceOps skeleton for unified CG (v1.8.2)
 // Implement DeviceOps (dot/axpy/copy) using CUDA buffers & kernels.
 // Fill with PTX launches or cudarc kernels; API matches WGPU/HIP siblings.

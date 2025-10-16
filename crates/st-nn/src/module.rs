@@ -1,5 +1,30 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
+// ============================================================================
+//  SpiralReality Proprietary
+//  Copyright (c) 2025 SpiralReality. All Rights Reserved.
+//
+//  NOTICE: This file contains confidential and proprietary information of
+//  SpiralReality. ANY USE, COPYING, MODIFICATION, DISTRIBUTION, DISPLAY,
+//  OR DISCLOSURE OF THIS FILE, IN WHOLE OR IN PART, IS STRICTLY PROHIBITED
+//  WITHOUT THE PRIOR WRITTEN CONSENT OF SPIRALREALITY.
+//
+//  NO LICENSE IS GRANTED OR IMPLIED BY THIS FILE. THIS SOFTWARE IS PROVIDED
+//  "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+//  NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+//  PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL SPIRALREALITY OR ITS
+//  SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+//  AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+//  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// ============================================================================
+
 use crate::schedule::GradientBands;
 use st_core::backend::device_caps::DeviceCaps;
+#[cfg(feature = "psychoid")]
+use st_core::telemetry::psychoid::PsychoidSample;
 use st_tensor::pure::{
     topos::OpenCartesianTopos, AmegaHypergrad, ComplexTensor, LanguageWaveEncoder, PureResult,
     Tensor, TensorError,
@@ -189,6 +214,53 @@ impl Parameter {
         Ok(())
     }
 
+    /// Scales any accumulated gradient or hypergradient buffers by the provided factor.
+    pub fn scale_accumulators(&mut self, factor: f32) {
+        if !factor.is_finite() {
+            return;
+        }
+        if let Some(tape) = self.hypergrad.as_mut() {
+            for grad in tape.gradient_mut() {
+                *grad *= factor;
+            }
+        }
+        if let Some(grad) = self.gradient.as_mut() {
+            for value in grad.data_mut() {
+                *value *= factor;
+            }
+        }
+    }
+
+    /// Returns the squared L2 norm of any accumulated gradients.
+    pub fn accumulators_norm_sq(&self) -> f64 {
+        if let Some(tape) = self.hypergrad.as_ref() {
+            tape.gradient()
+                .iter()
+                .map(|&value| {
+                    let v = value as f64;
+                    v * v
+                })
+                .sum()
+        } else if let Some(grad) = self.gradient.as_ref() {
+            grad.data()
+                .iter()
+                .map(|&value| {
+                    let v = value as f64;
+                    v * v
+                })
+                .sum()
+        } else {
+            0.0
+        }
+    }
+
+    /// Scales the learning rate inside the attached hypergrad tape, if present.
+    pub fn scale_learning_rate(&mut self, factor: f32) {
+        if let Some(tape) = self.hypergrad.as_mut() {
+            tape.scale_learning_rate(factor);
+        }
+    }
+
     /// Replaces the parameter value with the provided tensor.
     pub fn load_value(&mut self, value: &Tensor) -> PureResult<()> {
         self.assert_shape(value)?;
@@ -262,6 +334,21 @@ pub trait Module {
             param.zero_gradient();
             Ok(())
         })
+    }
+
+    /// Optional hook that surfaces activation drift telemetry for ψ metering.
+    ///
+    /// Implementations may override this to provide a smoothed scalar that
+    /// captures how far their activations drifted during the most recent step.
+    /// Returning `None` indicates that the module does not contribute drift
+    /// telemetry, allowing the ψ meter to fall back to zero for that component.
+    fn psi_probe(&self) -> Option<f32> {
+        None
+    }
+
+    #[cfg(feature = "psychoid")]
+    fn psychoid_sample(&self, _input: &Tensor, _output: &Tensor) -> Option<PsychoidSample> {
+        None
     }
 
     /// Allows modules to describe the device they expect to run on. The default

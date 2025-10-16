@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+# Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+# Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 """Pure Python meta-optimizer for Z-space training metrics.
 
 The helper mirrors the design sketched in the user request but avoids NumPy

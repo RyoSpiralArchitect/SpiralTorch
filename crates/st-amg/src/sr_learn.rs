@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
 // crates/st-amg/src/sr_learn.rs
 //! Example hook that turns an A/B/C dialogue into Wilson anchored rewrites and
 //! optional learn_store updates. Call this from your existing `sr.rs` wiring.

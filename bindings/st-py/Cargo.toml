@@ -4,15 +4,18 @@ version = "0.1.0"
 edition = "2021"
 description = "Python bindings for SpiralTorch heuristics"
 license = "AGPL-3.0-or-later"
-authors = ["SpiralTorch Contributors"]
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 
 [lib]
 name = "spiraltorch"
 crate-type = ["cdylib"]
 
 [features]
-default = ["extension-module"]
+default = ["extension-module", "psi", "psychoid", "collapse"]
 extension-module = ["pyo3/extension-module"]
+psi = []
+psychoid = ["psi"]
+collapse = ["psi"]
 
 # Backend selection (mirrors the CLI surface expected by maturin builds)
 cpu = []
@@ -28,11 +31,17 @@ kdsl = ["st-core/kdsl"]
 "wgpu-frac" = ["st-tensor/wgpu_frac"]
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", "gil-refs"] }
-st-core = { path = "../../crates/st-core", default-features = false }
+pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", "gil-refs", "num-complex"] }
+st-core = { path = "../../crates/st-core", default-features = false, features = ["psi", "psychoid", "collapse"] }
 st-tensor = { path = "../../crates/st-tensor", default-features = false }
-st-nn = { path = "../../crates/st-nn" }
+st-nn = { path = "../../crates/st-nn", features = ["psychoid", "collapse"] }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
+st-frac = { path = "../../crates/st-frac" }
+ndarray = { version = "0.15", default-features = false, features = ["std"] }
+num-complex = { version = "0.4" }
 
 [package.metadata.maturin]
 name = "spiraltorch"
+
+[package.metadata.spiraltorch]
+copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
