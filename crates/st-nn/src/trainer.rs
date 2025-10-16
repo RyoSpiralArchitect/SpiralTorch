@@ -42,7 +42,9 @@ use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::ops::rank_entry::RankPlan;
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
-use st_core::telemetry::hub::{self, SoftlogicZFeedback};
+#[cfg(feature = "collapse")]
+use st_core::telemetry::hub::CollapsePulse;
+use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
@@ -422,12 +424,55 @@ impl ModuleTrainer {
         &self.heur_log
     }
 
+    /// Merges the provided heuristics log into the trainer's local log.
+    pub fn merge_heuristics_log(&mut self, log: &HeurOpLog) {
+        self.heur_log.merge(log);
+    }
+
     /// Returns the latest moderator minutes captured by Blackcat.
     pub fn blackcat_minutes(&self) -> Vec<ModeratorMinutes> {
         self.blackcat_moderator
             .as_ref()
             .map(|m| m.minutes().to_vec())
             .unwrap_or_default()
+    }
+
+    /// Replays moderator minutes so the embedded Blackcat runtime can stay aligned.
+    pub fn sync_blackcat_minutes(&mut self, minutes: &[ModeratorMinutes]) {
+        if let Some(moderator) = self.blackcat_moderator.as_mut() {
+            moderator.absorb_minutes(minutes);
+        }
+    }
+
+    #[cfg(feature = "golden")]
+    /// Applies a cooperative pulse emitted by the Golden retriever.
+    pub fn apply_blackcat_pulse(&mut self, pulse: &GoldenBlackcatPulse) {
+        self.golden_pulse = Some(pulse.clone());
+        self.golden_directive = None;
+        if let Some(node) = self.distribution.as_mut() {
+            let base_interval = node.config().push_interval;
+            let base_window = node.config().summary_window.max(1);
+            let directive = pulse.directive(base_interval, base_window);
+            node.retune(directive.push_interval, directive.summary_window);
+            if directive.reinforcement_weight > 0.1 {
+                self.injector_enabled = true;
+            }
+            self.golden_directive = Some(directive);
+        } else if pulse.reinforcement_weight > 0.1 || pulse.optimization_gain > 0.1 {
+            self.injector_enabled = true;
+        }
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the most recent cooperative pulse applied to this trainer.
+    pub fn last_blackcat_pulse(&self) -> Option<&GoldenBlackcatPulse> {
+        self.golden_pulse.as_ref()
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the latest cooperative directive derived from the Golden pulse.
+    pub fn last_blackcat_directive(&self) -> Option<&GoldenCooperativeDirective> {
+        self.golden_directive.as_ref()
     }
 
     /// Clears any registered band weighting rule.
@@ -749,7 +794,8 @@ impl ModuleTrainer {
             }
             #[cfg(feature = "collapse")]
             if let (Some(driver), Some(reading)) = (self.collapse.as_mut(), psi_snapshot.as_ref()) {
-                match driver.update(reading) {
+                let command = driver.update(reading);
+                match command {
                     DriveCmd::Collapse {
                         grad_scale,
                         max_norm,
@@ -773,6 +819,15 @@ impl ModuleTrainer {
                     }
                     DriveCmd::None => {}
                 }
+                if !matches!(command, DriveCmd::None) {
+                    let loop_signal = hub::get_chrono_loop();
+                    hub::set_collapse_pulse(CollapsePulse {
+                        step: reading.step,
+                        total: reading.total,
+                        command,
+                        loop_signal,
+                    });
+                }
             }
             let psi_total_opt: Option<f32> = {
                 #[cfg(feature = "psi")]
@@ -789,6 +844,7 @@ impl ModuleTrainer {
                 .observe(&band_energy, weighted_loss, psi_total_opt);
             hub::set_softlogic_z(z_feedback);
             extra.insert("softlogic_z".to_string(), z_feedback.z_signal as f64);
+            let mut loop_broadcasted = false;
             if let Some(node) = self.distribution.as_mut() {
                 let outcome = OutcomeBand::from_weights(
                     band_energy.above,
@@ -831,6 +887,34 @@ impl ModuleTrainer {
                             }
                         }
                     }
+                    if let Some(loop_signal) = hub::get_chrono_loop() {
+                        let collapse_hint =
+                            psi_total_opt.filter(|value| *value > 0.0).or_else(|| {
+                                if summary.mean_psi > 0.0 {
+                                    Some(summary.mean_psi)
+                                } else {
+                                    None
+                                }
+                            });
+                        let support = (summary.support + summary.mean_score).max(0.1);
+                        let envelope = LoopbackEnvelope::new(loop_signal)
+                            .with_source(summary.node_id.clone())
+                            .with_support(support)
+                            .with_collapse_total(collapse_hint)
+                            .with_z_signal(Some(z_feedback.z_signal))
+                            .with_script_hint(Some(summary.script_hint.clone()));
+                        hub::push_loopback_envelope(envelope);
+                        loop_broadcasted = true;
+                    }
+                }
+            }
+            if !loop_broadcasted {
+                if let Some(loop_signal) = hub::get_chrono_loop() {
+                    let envelope = LoopbackEnvelope::new(loop_signal)
+                        .with_support(1.0)
+                        .with_collapse_total(psi_total_opt.filter(|value| *value > 0.0))
+                        .with_z_signal(Some(z_feedback.z_signal));
+                    hub::push_loopback_envelope(envelope);
                 }
             }
             self.step(module)?;

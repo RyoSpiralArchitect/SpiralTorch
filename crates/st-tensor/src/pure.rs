@@ -87,6 +87,8 @@ pub enum TensorError {
         backend: &'static str,
         message: String,
     },
+    /// Generic configuration violation for pure-language helpers.
+    InvalidValue { label: &'static str },
 }
 
 impl fmt::Display for TensorError {
@@ -194,6 +196,9 @@ impl fmt::Display for TensorError {
             }
             TensorError::BackendFailure { backend, message } => {
                 write!(f, "{backend} backend failure: {message}")
+            }
+            TensorError::InvalidValue { label } => {
+                write!(f, "invalid value: {label}")
             }
         }
     }
