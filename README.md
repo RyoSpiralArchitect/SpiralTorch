@@ -142,6 +142,12 @@ energy into Above/Here/Beneath bands, enriches the drift with the Leech
 projector, and emits a ready-to-store `SoftlogicZFeedback` pulse so runtimes can
 bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L471】
 
+Beyond the perimeter statistics the gauge now reports a gauge-invariant
+mean-curvature magnitude and, whenever `c′` fixes an orientation, the signed
+mean curvature that restores the co-oriented BV picture. Collapse loops can
+therefore gate on curvature without labels, and only light up the signed
+variant once a label or co-orientation becomes available.【F:crates/st-core/src/theory/microlocal.rs†L42-L259】
+
 To make those bridges operational inside collapse loops the gauge now supports
 multi-radius sweeps and a conductor that fuses their Z pulses with exponential
 smoothing. `InterfaceGauge::analyze_multiradius` probes the same mask at
@@ -149,32 +155,6 @@ different blow-up scales (and reuses an optional `c′` label when supplied),
 while `InterfaceZConductor` drives any number of gauges, aggregates the
 resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
 ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
-
-### Maxwell-coded envelopes meet SpiralK
-
-The coded-envelope utilities now ship with a `MaxwellSpiralKBridge` that turns
-sequential Z pulses into KDSl snippets ready for the runtime. Every channel
-name is sanitised for SpiralK, weights adapt to the observed Z magnitude, and
-existing programs can be prepended so the hints extend a live policy rather than
-replace it.【F:crates/st-core/src/theory/maxwell.rs†L306-L412】 Call
-`push_pulse(channel, &pulse)` for each stream, then `script()` to emit the
-combined `soft(maxwell.bias, …)` rules that SpiralK can ingest without custom
-glue code.【F:crates/st-core/src/theory/maxwell.rs†L333-L378】 The workflow is
-documented in the refreshed Maxwell technical note, which now includes a
-section on streaming detections back into SpiralK orchestration.【F:docs/coded_envelope_maxwell_model.md†L128-L141】
-
-### Maxwell-coded envelopes meet SpiralK
-
-The coded-envelope utilities now ship with a `MaxwellSpiralKBridge` that turns
-sequential Z pulses into KDSl snippets ready for the runtime. Every channel
-name is sanitised for SpiralK, weights adapt to the observed Z magnitude, and
-existing programs can be prepended so the hints extend a live policy rather than
-replace it.【F:crates/st-core/src/theory/maxwell.rs†L306-L412】 Call
-`push_pulse(channel, &pulse)` for each stream, then `script()` to emit the
-combined `soft(maxwell.bias, …)` rules that SpiralK can ingest without custom
-glue code.【F:crates/st-core/src/theory/maxwell.rs†L333-L378】 The workflow is
-documented in the refreshed Maxwell technical note, which now includes a
-section on streaming detections back into SpiralK orchestration.【F:docs/coded_envelope_maxwell_model.md†L128-L141】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
