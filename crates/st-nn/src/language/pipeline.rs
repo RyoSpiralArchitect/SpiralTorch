@@ -1218,7 +1218,7 @@ impl DesirePsiSummary {
 }
 
 #[cfg(test)]
-mod tests {
+mod tests_utils {
 #[derive(Debug)]
 pub enum PipelineError {
     EncoderMissing { pipeline: String },
