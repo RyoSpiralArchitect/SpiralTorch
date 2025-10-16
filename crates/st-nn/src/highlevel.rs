@@ -9,12 +9,23 @@ use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedul
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_tensor::pure::measure::{z_space_barycenter, ZSpaceBarycenter};
+use st_core::telemetry::atlas::{
+    AtlasFragment, AtlasFrame, AtlasPerspective, AtlasRoute, AtlasRouteSummary,
+};
+use st_core::telemetry::chrono::{
+    ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoSummary, ChronoTimeline,
+    ResonanceTemporalMetrics,
+};
+use st_core::telemetry::hub;
+use st_core::telemetry::maintainer::{Maintainer, MaintainerConfig, MaintainerReport};
+use st_tensor::pure::measure::{z_space_barycenter, z_space_barycenter_guarded, ZSpaceBarycenter};
 use st_tensor::pure::{
     AmegaHypergrad, DifferentialResonance, FunctorDifferential, HomotopyDifferential,
-    InfinityDifferential, OpenCartesianTopos, PureResult, RecursiveDifferential,
+    InfinityDifferential, OpenCartesianTopos, PureResult, RecursiveDifferential, RewriteMonad,
     SpiralDifferential, Tensor, TensorError,
 };
+use st_text::{ResonanceNarrative, TextResonator};
+use std::sync::{Arc, Mutex};
 
 /// Configuration describing how the session evaluates the Z-space barycenter objective.
 #[derive(Debug, Clone)]
@@ -68,6 +79,8 @@ pub struct SpiralSessionBuilder {
     fallback_learning_rate: f32,
     barycenter: BarycenterConfig,
     topos: Option<OpenCartesianTopos>,
+    chrono_capacity: usize,
+    maintainer: MaintainerConfig,
 }
 
 impl SpiralSessionBuilder {
@@ -80,6 +93,8 @@ impl SpiralSessionBuilder {
             fallback_learning_rate: 0.01,
             barycenter: BarycenterConfig::default(),
             topos: None,
+            chrono_capacity: 256,
+            maintainer: MaintainerConfig::default(),
         }
     }
 
@@ -155,9 +170,25 @@ impl SpiralSessionBuilder {
         self
     }
 
+    /// Overrides the maintainer configuration used for self-rewrite assessments.
+    pub fn with_maintainer_config(mut self, config: MaintainerConfig) -> Self {
+        self.maintainer = config;
+        self
+    }
+
     /// Updates the coupling matrix in-place.
     pub fn set_barycenter_coupling(&mut self, coupling: Option<Tensor>) {
         self.barycenter.coupling = coupling;
+    }
+
+    /// Returns the maintainer configuration reference.
+    pub fn maintainer_config(&self) -> &MaintainerConfig {
+        &self.maintainer
+    }
+
+    /// Updates the maintainer configuration in-place.
+    pub fn set_maintainer_config(&mut self, config: MaintainerConfig) {
+        self.maintainer = config;
     }
 
     /// Installs an open-cartesian topos guard for all hypergradient tapes.
@@ -169,6 +200,17 @@ impl SpiralSessionBuilder {
     /// Updates the topos guard in-place.
     pub fn set_topos(&mut self, topos: Option<OpenCartesianTopos>) {
         self.topos = topos;
+    }
+
+    /// Overrides the maximum number of temporal resonance frames retained in the session.
+    pub fn with_chrono_capacity(mut self, capacity: usize) -> Self {
+        self.chrono_capacity = capacity.max(1);
+        self
+    }
+
+    /// Updates the chrono capacity in-place.
+    pub fn set_chrono_capacity(&mut self, capacity: usize) {
+        self.chrono_capacity = capacity.max(1);
     }
 
     /// Convenience helper to construct a guard from raw parameters.
@@ -235,6 +277,7 @@ impl SpiralSessionBuilder {
     /// Finalises the builder and returns a [`SpiralSession`].
     pub fn build(self) -> PureResult<SpiralSession> {
         self.validate()?;
+        let maintainer = self.maintainer.clone().sanitise();
         Ok(SpiralSession {
             caps: self.caps,
             curvature: self.curvature,
@@ -242,6 +285,10 @@ impl SpiralSessionBuilder {
             fallback_learning_rate: self.fallback_learning_rate,
             barycenter: self.barycenter,
             topos: self.topos,
+            chrono: Arc::new(Mutex::new(ChronoTimeline::with_capacity(
+                self.chrono_capacity,
+            ))),
+            maintainer,
         })
     }
 }
@@ -256,6 +303,8 @@ pub struct SpiralSession {
     fallback_learning_rate: f32,
     barycenter: BarycenterConfig,
     topos: Option<OpenCartesianTopos>,
+    chrono: Arc<Mutex<ChronoTimeline>>,
+    maintainer: MaintainerConfig,
 }
 
 /// Builder-style trace that wires homotopy, functor, recursive, and \(\infty\)-tower flows.
@@ -504,12 +553,159 @@ impl SpiralSession {
         builder.set_barycenter_beta_j(self.barycenter.beta_j);
         builder.set_barycenter_coupling(self.barycenter.coupling.clone());
         builder.set_topos(self.topos.clone());
+        builder.set_chrono_capacity(self.chrono_capacity());
+        builder.set_maintainer_config(self.maintainer.clone());
         builder
     }
 
     /// Returns the backend capabilities baked into the session.
     pub fn device_caps(&self) -> DeviceCaps {
         self.caps
+    }
+
+    /// Returns the configured capacity of the temporal resonance timeline.
+    pub fn chrono_capacity(&self) -> usize {
+        self.chrono
+            .lock()
+            .map(|timeline| timeline.capacity())
+            .unwrap_or(1)
+    }
+
+    /// Returns a cloned handle to the underlying chrono timeline.
+    pub fn chrono_handle(&self) -> Arc<Mutex<ChronoTimeline>> {
+        self.chrono.clone()
+    }
+
+    /// Returns the current maintainer configuration.
+    pub fn maintainer_config(&self) -> MaintainerConfig {
+        self.maintainer.clone()
+    }
+
+    /// Updates the maintainer configuration in-place.
+    pub fn set_maintainer_config(&mut self, config: MaintainerConfig) {
+        self.maintainer = config.sanitise();
+    }
+
+    /// Clones all recorded chrono frames in chronological order.
+    pub fn chrono_frames(&self) -> Vec<ChronoFrame> {
+        self.chrono
+            .lock()
+            .map(|timeline| timeline.frames().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Returns a rolling summary of the temporal resonance history.
+    pub fn timeline_summary(&self, window: Option<usize>) -> Option<ChronoSummary> {
+        let requested = window.unwrap_or(usize::MAX);
+        self.chrono.lock().ok().and_then(|timeline| {
+            let available = timeline.len();
+            if available == 0 {
+                None
+            } else {
+                let window = requested.min(available).max(1);
+                timeline.summarise(window)
+            }
+        })
+    }
+
+    /// Returns the latest atlas frame aggregated across telemetry subsystems.
+    pub fn atlas(&self) -> Option<AtlasFrame> {
+        hub::get_atlas_frame()
+    }
+
+    /// Returns the recent atlas route up to an optional limit.
+    pub fn atlas_route(&self, limit: Option<usize>) -> AtlasRoute {
+        hub::get_atlas_route(limit)
+    }
+
+    /// Summarises the recent atlas route into district-level statistics.
+    pub fn atlas_route_summary(&self, limit: Option<usize>) -> AtlasRouteSummary {
+        hub::get_atlas_route_summary(limit)
+    }
+
+    /// Builds perspectives for each atlas district so nodes can act on the map.
+    pub fn atlas_perspectives(&self, limit: Option<usize>) -> Vec<AtlasPerspective> {
+        self.atlas_route_summary(limit).perspectives()
+    }
+
+    /// Returns a single district perspective without filtering focus metrics.
+    pub fn atlas_perspective(
+        &self,
+        district: &str,
+        limit: Option<usize>,
+    ) -> Option<AtlasPerspective> {
+        self.atlas_perspective_with_focus(district, limit, None)
+    }
+
+    /// Returns a district perspective filtered by metric prefixes for specialised readers.
+    pub fn atlas_perspective_with_focus(
+        &self,
+        district: &str,
+        limit: Option<usize>,
+        focus_prefixes: Option<&[String]>,
+    ) -> Option<AtlasPerspective> {
+        let summary = self.atlas_route_summary(limit);
+        match focus_prefixes {
+            Some(prefixes) => summary.perspective_for_with_focus(district, prefixes),
+            None => summary.perspective_for(district),
+        }
+    }
+
+    /// Generates a narrative describing the latest atlas frame when available.
+    pub fn atlas_narrative(&self, temperature: f32) -> PureResult<Option<ResonanceNarrative>> {
+        if let Some(frame) = self.atlas() {
+            let temp = temperature.max(f32::EPSILON);
+            let resonator = TextResonator::new(self.curvature, temp)?;
+            Ok(Some(resonator.describe_atlas(&frame)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Returns harmonic statistics for the recent temporal history.
+    pub fn timeline_harmonics(
+        &self,
+        window: Option<usize>,
+        bins: usize,
+    ) -> Option<ChronoHarmonics> {
+        let requested = window.unwrap_or(usize::MAX);
+        let bins = bins.max(1);
+        self.chrono.lock().ok().and_then(|timeline| {
+            let available = timeline.len();
+            if available < 2 {
+                None
+            } else {
+                let window = requested.min(available).max(2);
+                timeline.harmonics(window, bins)
+            }
+        })
+    }
+
+    /// Returns a combined summary and SpiralK-ready loop signal.
+    pub fn loop_signal(
+        &self,
+        window: Option<usize>,
+        bins: Option<usize>,
+    ) -> Option<ChronoLoopSignal> {
+        let requested = window.unwrap_or(self.maintainer.window);
+        let bins = bins.unwrap_or(16).max(1);
+        self.chrono.lock().ok().and_then(|timeline| {
+            if timeline.is_empty() {
+                None
+            } else {
+                let available = timeline.len();
+                let window = requested.max(1).min(available);
+                let harmonic_bins = bins.min(window.max(2));
+                timeline.loop_signal(window, harmonic_bins)
+            }
+        })
+    }
+
+    /// Clears the temporal telemetry stream.
+    pub fn reset_chrono(&self) {
+        if let Ok(mut timeline) = self.chrono.lock() {
+            timeline.reset();
+        }
     }
 
     /// Curvature used for all hypergrad tapes.
@@ -520,6 +716,153 @@ impl SpiralSession {
     /// Hypergradient learning rate.
     pub fn hyper_learning_rate(&self) -> f32 {
         self.hyper_learning_rate
+    }
+
+    /// Records the provided resonance snapshot into the temporal timeline and returns the frame.
+    pub fn resonate_over_time(
+        &self,
+        resonance: &DifferentialResonance,
+        dt: f32,
+    ) -> PureResult<ChronoFrame> {
+        if !dt.is_finite() || dt <= 0.0 {
+            return Err(TensorError::NonPositiveLearningRate { rate: dt });
+        }
+        let homotopy_energy = resonance.homotopy_flow.squared_l2_norm();
+        let functor_energy = resonance.functor_linearisation.squared_l2_norm();
+        let recursive_energy = resonance.recursive_objective.squared_l2_norm();
+        let projection_energy = resonance.infinity_projection.squared_l2_norm();
+        let infinity_energy = resonance.infinity_energy.squared_l2_norm();
+        let total_energy = homotopy_energy
+            + functor_energy
+            + recursive_energy
+            + projection_energy
+            + infinity_energy;
+        let observed_curvature = if homotopy_energy > 0.0 {
+            -homotopy_energy.sqrt()
+        } else {
+            self.curvature
+        };
+        let metrics = ResonanceTemporalMetrics {
+            observed_curvature,
+            total_energy,
+            homotopy_energy,
+            functor_energy,
+            recursive_energy,
+            projection_energy,
+            infinity_energy,
+        }
+        .sanitise();
+        let mut timeline = self.chrono.lock().map_err(|_| TensorError::IoError {
+            message: "chrono timeline poisoned".to_string(),
+        })?;
+        let frame = timeline.record(dt, metrics);
+        let bin_hint = self.maintainer.window.max(4).min(64);
+        let signal = timeline.loop_signal(self.maintainer.window, bin_hint);
+        drop(timeline);
+        let atlas_signal = signal.clone();
+        if let Some(signal) = signal {
+            hub::set_chrono_loop(signal);
+        }
+        if let Some(signal) = atlas_signal {
+            let summary = signal.summary.clone();
+            let harmonics = signal.harmonics.clone();
+            let maintainer = self.maintain();
+            let mut fragment = AtlasFragment::new();
+            fragment.timestamp = Some(summary.latest_timestamp);
+            fragment.summary = Some(summary.clone());
+            fragment.harmonics = harmonics;
+            fragment.loop_support = Some(1.0);
+            fragment.push_metric("timeline.frames", summary.frames as f32);
+            fragment.push_metric("timeline.energy", summary.mean_energy);
+            fragment.push_metric("timeline.drift", summary.mean_drift);
+            fragment.push_metric("timeline.decay", summary.mean_decay);
+            fragment.maintainer_status = Some(maintainer.status);
+            fragment.maintainer_diagnostic = Some(maintainer.diagnostic.clone());
+            fragment.suggested_max_scale = maintainer.suggested_max_scale;
+            fragment.suggested_pressure = maintainer.suggested_pressure;
+            fragment.push_metric("maintainer.average_drift", maintainer.average_drift);
+            fragment.push_metric("maintainer.mean_energy", maintainer.mean_energy);
+            fragment.push_metric("maintainer.mean_decay", maintainer.mean_decay);
+            fragment.push_note(format!("maintainer:{}", maintainer.status.as_str()));
+            #[cfg(feature = "kdsl")]
+            {
+                if let Some(script) = signal.spiralk_script.clone() {
+                    fragment.script_hint = Some(script);
+                }
+                if fragment.script_hint.is_none() {
+                    fragment.script_hint = maintainer.spiralk_script.clone();
+                } else if let Some(extra) = maintainer.spiralk_script.clone() {
+                    fragment.push_note(format!("maintainer.script:{extra}"));
+                }
+            }
+            hub::merge_atlas_fragment(fragment);
+        }
+        Ok(frame)
+    }
+
+    /// Evaluates the temporal telemetry and returns a maintenance recommendation.
+    pub fn maintain(&self) -> MaintainerReport {
+        let frames = self.chrono_frames();
+        let maintainer = Maintainer::new(self.maintainer.clone());
+        maintainer.assess(&frames)
+    }
+
+    /// Generates a natural language narrative describing the resonance.
+    pub fn narrative(
+        &self,
+        resonance: Option<&DifferentialResonance>,
+        temperature: f32,
+    ) -> PureResult<ResonanceNarrative> {
+        let temp = temperature.max(f32::EPSILON);
+        let resonator = TextResonator::new(self.curvature, temp)?;
+        if let Some(resonance) = resonance {
+            Ok(resonator.describe_resonance(resonance))
+        } else {
+            self.timeline_narrative(None, temperature)
+        }
+    }
+
+    /// Returns a short textual description of the resonance snapshot or latest frame.
+    pub fn describe(
+        &self,
+        resonance: Option<&DifferentialResonance>,
+        temperature: f32,
+    ) -> PureResult<String> {
+        self.narrative(resonance, temperature)
+            .map(|narrative| narrative.summary)
+    }
+
+    /// Generates a narrative describing the timeline, optionally restricting to the latest frames.
+    pub fn timeline_narrative(
+        &self,
+        window: Option<usize>,
+        temperature: f32,
+    ) -> PureResult<ResonanceNarrative> {
+        let frames = self.chrono_frames();
+        if frames.is_empty() {
+            return Ok(ResonanceNarrative {
+                summary: "No resonance history recorded.".to_string(),
+                highlights: Vec::new(),
+            });
+        }
+        let limit = window.unwrap_or(frames.len()).min(frames.len());
+        let start = frames.len().saturating_sub(limit);
+        let temp = temperature.max(f32::EPSILON);
+        let resonator = TextResonator::new(self.curvature, temp)?;
+        Ok(resonator.describe_timeline(&frames[start..]))
+    }
+
+    /// Encodes the recent temporal trace into an amplitude envelope.
+    pub fn speak(&self, timesteps: Option<usize>, temperature: f32) -> PureResult<Vec<f32>> {
+        let frames = self.chrono_frames();
+        if frames.is_empty() {
+            return Ok(Vec::new());
+        }
+        let limit = timesteps.unwrap_or(frames.len());
+        let start = frames.len().saturating_sub(limit);
+        let temp = temperature.max(f32::EPSILON);
+        let resonator = TextResonator::new(self.curvature, temp)?;
+        resonator.speak(&frames[start..])
     }
 
     /// Euclidean fallback learning rate.
@@ -606,13 +949,24 @@ impl SpiralSession {
         densities: &[Tensor],
         coupling: Option<&Tensor>,
     ) -> PureResult<ZSpaceBarycenter> {
-        z_space_barycenter(
-            weights,
-            densities,
-            self.barycenter.entropy_weight,
-            self.barycenter.beta_j,
-            coupling,
-        )
+        if let Some(topos) = &self.topos {
+            z_space_barycenter_guarded(
+                RewriteMonad::new(topos),
+                weights,
+                densities,
+                self.barycenter.entropy_weight,
+                self.barycenter.beta_j,
+                coupling,
+            )
+        } else {
+            z_space_barycenter(
+                weights,
+                densities,
+                self.barycenter.entropy_weight,
+                self.barycenter.beta_j,
+                coupling,
+            )
+        }
     }
 
     /// Variant that accepts ad-hoc entropy and coupling parameters.
@@ -624,7 +978,18 @@ impl SpiralSession {
         beta_j: f32,
         coupling: Option<&Tensor>,
     ) -> PureResult<ZSpaceBarycenter> {
-        z_space_barycenter(weights, densities, entropy_weight, beta_j, coupling)
+        if let Some(topos) = &self.topos {
+            z_space_barycenter_guarded(
+                RewriteMonad::new(topos),
+                weights,
+                densities,
+                entropy_weight,
+                beta_j,
+                coupling,
+            )
+        } else {
+            z_space_barycenter(weights, densities, entropy_weight, beta_j, coupling)
+        }
     }
 
     /// Aligns a hypergrad tape with the loss-monotone barycenter interpolation.
@@ -699,6 +1064,8 @@ mod tests {
     use super::*;
     use crate::layers::linear::Linear;
     use crate::loss::MeanSquaredError;
+    use st_core::telemetry::hub;
+    use st_core::telemetry::maintainer::MaintainerStatus;
     use st_tensor::pure::measure::BarycenterIntermediate;
 
     fn toy_tensor(a: &[f32]) -> Tensor {
@@ -876,5 +1243,201 @@ mod tests {
             TensorError::ShapeMismatch { .. } => {}
             other => panic!("expected shape mismatch, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn chrono_timeline_records_frames() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(2)
+            .build()
+            .unwrap();
+        let seed = toy_tensor(&[0.5, -0.2]);
+        let generator = toy_tensor(&[1.0, -1.0]);
+        let direction = toy_tensor(&[0.15, 0.05]);
+        let kernel = Tensor::from_vec(2, 2, vec![1.0, 0.2, -0.3, 1.1]).unwrap();
+        let density = toy_tensor(&[0.6, 0.4]);
+        let weights = vec![1.0];
+        let barycenter = session.barycenter(&weights, &[density.clone()]).unwrap();
+        let resonance = session
+            .trace(seed.clone())
+            .unwrap()
+            .deform(generator.clone(), direction.clone())
+            .unwrap()
+            .via(kernel.clone())
+            .unwrap()
+            .with_barycenter(&barycenter)
+            .unwrap()
+            .resonate()
+            .unwrap();
+        let first = session.resonate_over_time(&resonance, 0.1).unwrap();
+        assert_eq!(first.step, 0);
+        assert!(first.timestamp > 0.0);
+        let second = session.resonate_over_time(&resonance, 0.1).unwrap();
+        assert_eq!(second.step, 1);
+        let frames = session.chrono_frames();
+        assert_eq!(frames.len(), 2);
+        assert!(frames[1].timestamp > frames[0].timestamp);
+        let summary = session.timeline_summary(Some(2)).unwrap();
+        assert_eq!(summary.frames, 2);
+        assert!(summary.mean_energy > 0.0);
+    }
+
+    #[test]
+    fn maintainer_flags_energy_growth() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(8)
+            .build()
+            .unwrap();
+        {
+            let handle = session.chrono_handle();
+            let mut timeline = handle.lock().unwrap();
+            let energies = [1.0, 1.3, 1.6, 1.9];
+            for energy in energies {
+                let metrics = ResonanceTemporalMetrics {
+                    observed_curvature: -1.0,
+                    total_energy: energy,
+                    homotopy_energy: energy * 0.4,
+                    functor_energy: energy * 0.2,
+                    recursive_energy: energy * 0.2,
+                    projection_energy: energy * 0.1,
+                    infinity_energy: energy * 0.1,
+                }
+                .sanitise();
+                timeline.record(0.1, metrics);
+            }
+        }
+        let report = session.maintain();
+        assert!(report.should_rewrite());
+        assert_eq!(report.status, MaintainerStatus::Rewrite);
+        assert!(report.diagnostic.contains("energy growth"));
+    }
+
+    #[test]
+    fn describe_returns_default_when_no_frames() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .build()
+            .unwrap();
+        let summary = session.describe(None, 0.6).unwrap();
+        assert!(summary.contains("No resonance"));
+    }
+
+    #[test]
+    fn speak_generates_waveform() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(8)
+            .build()
+            .unwrap();
+        let resonance = DifferentialResonance {
+            homotopy_flow: toy_tensor(&[0.2, -0.1]),
+            functor_linearisation: toy_tensor(&[0.1, 0.05]),
+            recursive_objective: toy_tensor(&[0.05, 0.02]),
+            infinity_projection: toy_tensor(&[0.03, 0.01]),
+            infinity_energy: toy_tensor(&[0.02, 0.01]),
+        };
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        let waveform = session.speak(Some(2), 0.6).unwrap();
+        assert!(!waveform.is_empty());
+        let narrative = session.describe(None, 0.6).unwrap();
+        assert!(!narrative.is_empty());
+    }
+
+    #[test]
+    fn loop_signal_publishes_and_reads() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(8)
+            .build()
+            .unwrap();
+        let resonance = DifferentialResonance {
+            homotopy_flow: toy_tensor(&[0.2, -0.1]),
+            functor_linearisation: toy_tensor(&[0.1, 0.05]),
+            recursive_objective: toy_tensor(&[0.05, 0.02]),
+            infinity_projection: toy_tensor(&[0.03, 0.01]),
+            infinity_energy: toy_tensor(&[0.02, 0.01]),
+        };
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        let signal = session.loop_signal(None, None).unwrap();
+        assert!(signal.summary.frames >= 2);
+        let hub_signal = hub::get_chrono_loop();
+        assert!(hub_signal.is_some());
+    }
+
+    #[test]
+    fn atlas_collects_telemetry_fragments() {
+        hub::clear_atlas();
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(8)
+            .build()
+            .unwrap();
+        let resonance = DifferentialResonance {
+            homotopy_flow: toy_tensor(&[0.2, -0.1]),
+            functor_linearisation: toy_tensor(&[0.1, 0.05]),
+            recursive_objective: toy_tensor(&[0.05, 0.02]),
+            infinity_projection: toy_tensor(&[0.03, 0.01]),
+            infinity_energy: toy_tensor(&[0.02, 0.01]),
+        };
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        let atlas = session.atlas().expect("atlas");
+        assert!(atlas.timestamp > 0.0);
+        assert!(atlas.loop_support >= 1.0);
+        assert!(atlas
+            .metrics
+            .iter()
+            .any(|metric| metric.name == "timeline.energy"));
+        let districts = atlas.districts();
+        assert!(!districts.is_empty());
+        assert!(districts.iter().any(|d| d.name == "Surface"));
+        let route = session.atlas_route(Some(4));
+        assert!(!route.is_empty());
+        assert!(route.latest().is_some());
+        let summary = session.atlas_route_summary(Some(4));
+        assert!(summary.frames > 0);
+        assert!(!summary.districts.is_empty());
+        let perspectives = session.atlas_perspectives(Some(4));
+        assert!(!perspectives.is_empty());
+        let focus = vec!["timeline".to_string()];
+        let surface = session
+            .atlas_perspective_with_focus("Surface", Some(4), Some(&focus))
+            .or_else(|| session.atlas_perspective("Surface", Some(4)))
+            .expect("surface perspective");
+        assert!(surface.guidance.contains("Surface district"));
+        assert!(surface.stability >= 0.0 && surface.stability <= 1.0);
+        let story = session.atlas_narrative(0.6).unwrap();
+        assert!(story
+            .as_ref()
+            .map(|narrative| narrative.summary.contains("Atlas"))
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn timeline_harmonics_reports_frequency() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(64)
+            .build()
+            .unwrap();
+        for step in 0..48 {
+            let energy = (step as f32 / 6.0).sin() + 1.2;
+            let resonance = DifferentialResonance {
+                homotopy_flow: toy_tensor(&[energy, -energy]),
+                functor_linearisation: toy_tensor(&[0.1, 0.05]),
+                recursive_objective: toy_tensor(&[0.05, 0.02]),
+                infinity_projection: toy_tensor(&[0.03, 0.01]),
+                infinity_energy: toy_tensor(&[0.02, 0.01]),
+            };
+            session.resonate_over_time(&resonance, 0.1).unwrap();
+        }
+        let harmonics = session.timeline_harmonics(Some(48), 16).unwrap();
+        assert!(harmonics.dominant_energy.is_some());
+        let story = session.timeline_narrative(Some(48), 0.6).unwrap();
+        assert!(story.summary.contains("Timeline span"));
     }
 }

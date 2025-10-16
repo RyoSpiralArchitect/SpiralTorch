@@ -20,12 +20,14 @@ collapse = ["psi"]
 # Backend selection (mirrors the CLI surface expected by maturin builds)
 cpu = []
 wgpu = ["st-core/wgpu", "st-tensor/wgpu"]
+"wgp" = ["wgpu"]
 "wgpu-rt" = ["st-core/wgpu-rt", "wgpu"]
 mps = ["st-core/mps", "st-tensor/mps"]
 cuda = ["st-core/cuda", "st-tensor/cuda"]
 hip = ["st-core/hip", "st-tensor/hip"]
 "hip-real" = ["hip", "st-core/hip-real"]
 logic = ["st-core/logic"]
+"logic-learn" = ["st-core/logic-learn"]
 kdsl = ["st-core/kdsl"]
 "kv-redis" = ["st-core/kv-redis"]
 "wgpu-frac" = ["st-tensor/wgpu_frac"]
@@ -37,6 +39,7 @@ st-tensor = { path = "../../crates/st-tensor", default-features = false }
 st-nn = { path = "../../crates/st-nn", features = ["psychoid", "collapse"] }
 st-rl = { path = "../../crates/st-rl" }
 st-rec = { path = "../../crates/st-rec" }
+st-text = { path = "../../crates/st-text" }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }
 ndarray = { version = "0.15", default-features = false, features = ["std"] }

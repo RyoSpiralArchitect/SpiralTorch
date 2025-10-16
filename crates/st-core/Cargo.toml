@@ -19,6 +19,7 @@ wgpu-rt  = ["wgpu"]
 mps      = []
 cuda     = []
 logic    = ["dep:st-logic"]
+"logic-learn" = ["logic", "st-logic/learn_store"]
 kdsl     = ["dep:st-kdsl"]
 kv-redis = ["st-kv/redis"]
 psi      = ["dep:bitflags", "dep:once_cell"]
@@ -33,6 +34,7 @@ serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
 dirs        = "5"
 statrs      = "0.16"
+ndarray     = "0.15"
 
 once_cell   = { version = "1.19", optional = true }
 bytemuck    = { version = "1.16", optional = true, features = ["derive"] }
@@ -45,6 +47,9 @@ st-logic       = { path = "../st-logic",       optional = true }
 st-kdsl        = { path = "../st-kdsl",        optional = true }
 st-kv          = { path = "../st-kv",          optional = true }
 st-frac        = { path = "../st-frac" }
+
+[dev-dependencies]
+approx = "0.5"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

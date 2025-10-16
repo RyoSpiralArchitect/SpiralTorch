@@ -7,10 +7,13 @@ edition = "2021"
 [features]
 default = ["soft"]
 soft = []
+learn_store = ["dep:serde", "dep:serde_json"]
 
 [dependencies]
 thiserror = "1"
 rand = "0.8"
+serde = { version = "1", optional = true, features = ["derive"] }
+serde_json = { version = "1", optional = true }
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
