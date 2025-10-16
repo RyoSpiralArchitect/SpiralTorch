@@ -228,6 +228,12 @@ impl MatmulBackend {
     }
 }
 
+impl fmt::Display for MatmulBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str((*self).label())
+    }
+}
+
 /// A simple row-major 2D tensor backed by a `Vec<f32>`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tensor {

@@ -1816,6 +1816,8 @@ name = "st-logic"
 version = "0.2.0"
 dependencies = [
  "rand",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
