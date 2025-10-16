@@ -914,6 +914,34 @@ impl<'a> RewriteMonad<'a> {
         f(slice)?;
         self.rewrite_slice(label, slice)
     }
+
+    /// Cultivates a fresh tensor biome anchored to this monad's guard.
+    pub fn cultivate_biome(&self) -> TensorBiome {
+        TensorBiome::new(self.topos.clone())
+    }
+
+    /// Absorbs an owned tensor into an existing biome using the monadic guard.
+    pub fn absorb_into_biome(
+        &self,
+        biome: &mut TensorBiome,
+        label: &'static str,
+        mut tensor: Tensor,
+    ) -> PureResult<()> {
+        self.rewrite_tensor(label, &mut tensor)?;
+        biome.push_shoot(tensor, 1.0)
+    }
+
+    /// Absorbs a weighted tensor into an existing biome through the monad guard.
+    pub fn absorb_weighted_into_biome(
+        &self,
+        biome: &mut TensorBiome,
+        label: &'static str,
+        mut tensor: Tensor,
+        weight: f32,
+    ) -> PureResult<()> {
+        self.rewrite_tensor(label, &mut tensor)?;
+        biome.push_shoot(tensor, weight)
+    }
 }
 
 /// Organises tensors rewritten through an open topos into a living "biome".
@@ -996,21 +1024,7 @@ impl TensorBiome {
         }
         let monad = RewriteMonad::new(&self.topos);
         monad.rewrite_tensor(label, &mut tensor)?;
-        let shape = tensor.shape();
-        if let Some(expected) = self.shape {
-            if expected != shape {
-                return Err(TensorError::ShapeMismatch {
-                    left: expected,
-                    right: shape,
-                });
-            }
-        } else {
-            self.shape = Some(shape);
-        }
-        self.shoots.push(tensor);
-        self.weights.push(weight);
-        self.total_weight += weight;
-        Ok(())
+        self.push_shoot(tensor, weight)
     }
 
     /// Absorbs a tensor produced by a monadic builder.
@@ -1034,6 +1048,69 @@ impl TensorBiome {
     {
         let tensor = build(self.monad())?;
         self.absorb_weighted(label, tensor, weight)
+    }
+
+    fn push_shoot(&mut self, tensor: Tensor, weight: f32) -> PureResult<()> {
+        if !weight.is_finite() || weight <= 0.0 {
+            return Err(TensorError::NonPositiveWeight { weight });
+        }
+        let shape = tensor.shape();
+        if let Some(expected) = self.shape {
+            if expected != shape {
+                return Err(TensorError::ShapeMismatch {
+                    left: expected,
+                    right: shape,
+                });
+            }
+        } else {
+            self.shape = Some(shape);
+        }
+        self.total_weight += weight;
+        self.shoots.push(tensor);
+        self.weights.push(weight);
+        Ok(())
+    }
+
+    /// Applies a guarded rewrite to every shoot living inside the biome.
+    pub fn bind_shoots<F>(&mut self, label: &'static str, mut f: F) -> PureResult<()>
+    where
+        F: FnMut(RewriteMonad<'_>, &mut Tensor) -> PureResult<()>,
+    {
+        let topos = self.topos.clone();
+        let monad = RewriteMonad::new(&topos);
+        for shoot in &mut self.shoots {
+            f(monad, shoot)?;
+            monad.rewrite_tensor(label, shoot)?;
+        }
+        Ok(())
+    }
+
+    /// Builds a new biome by mapping the current shoots through a monadic builder.
+    pub fn map_shoots<F>(&self, label: &'static str, mut f: F) -> PureResult<TensorBiome>
+    where
+        F: FnMut(RewriteMonad<'_>, &Tensor) -> PureResult<Tensor>,
+    {
+        let topos = self.topos.clone();
+        let monad = RewriteMonad::new(&topos);
+        let mut biome = TensorBiome::new(topos.clone());
+        for (shoot, &weight) in self.shoots.iter().zip(self.weights.iter()) {
+            let mut mapped = f(monad, shoot)?;
+            monad.rewrite_tensor(label, &mut mapped)?;
+            biome.push_shoot(mapped, weight)?;
+        }
+        Ok(biome)
+    }
+
+    /// Renormalises the shoot weights through the Lawvere–Tierney guard.
+    pub fn renormalise_weights(&mut self) -> PureResult<()> {
+        if self.weights.is_empty() {
+            return Err(TensorError::EmptyInput("tensor_biome_weights"));
+        }
+        let topos = self.topos.clone();
+        let monad = RewriteMonad::new(&topos);
+        monad.guard_probability_slice("tensor_biome_weights", &mut self.weights)?;
+        self.total_weight = self.weights.iter().sum();
+        Ok(())
     }
 
     /// Absorbs a fractal relation patch directly into the biome canopy.
@@ -1451,6 +1528,91 @@ mod tests {
         let canopy = biome.canopy().unwrap();
         assert_eq!(canopy.data(), &[2.0]);
         assert!((biome.total_weight() - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn biome_bind_shoots_rewrites_each_shoot() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos.clone());
+        biome
+            .absorb(
+                "bind_shoot",
+                Tensor::from_vec(1, 1, vec![topos.saturation() * 4.0]).unwrap(),
+            )
+            .unwrap();
+        biome
+            .bind_shoots("bind_shoots", |monad, shoot| {
+                let update = monad.lift_tensor(
+                    "bind_shoot_update",
+                    Tensor::from_vec(1, 1, vec![0.5]).unwrap(),
+                )?;
+                shoot.add_scaled(&update, 1.0)
+            })
+            .unwrap();
+        let canopy = biome.canopy().unwrap();
+        assert!(canopy.data()[0].abs() <= topos.saturation());
+    }
+
+    #[test]
+    fn biome_map_shoots_reuses_weights() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos.clone());
+        biome
+            .absorb_weighted("map_a", Tensor::from_vec(1, 1, vec![1.0]).unwrap(), 2.0)
+            .unwrap();
+        biome
+            .absorb_weighted("map_b", Tensor::from_vec(1, 1, vec![2.0]).unwrap(), 3.0)
+            .unwrap();
+        let base_canopy = biome.canopy().unwrap();
+        let mapped = biome
+            .map_shoots("map_transform", |monad, shoot| {
+                monad.bind_tensor("map_transform_build", shoot.clone(), |tensor| {
+                    tensor.add_scaled(&Tensor::from_vec(1, 1, vec![1.0]).unwrap(), 1.0)
+                })
+            })
+            .unwrap();
+        assert_eq!(mapped.len(), biome.len());
+        assert!((mapped.total_weight() - biome.total_weight()).abs() < 1e-6);
+        let mapped_canopy = mapped.canopy().unwrap();
+        assert!((mapped_canopy.data()[0] - (base_canopy.data()[0] + 1.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn biome_renormalises_weights_preserves_canopy() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos.clone());
+        biome
+            .absorb_weighted("renorm_a", Tensor::from_vec(1, 1, vec![1.0]).unwrap(), 2.0)
+            .unwrap();
+        biome
+            .absorb_weighted("renorm_b", Tensor::from_vec(1, 1, vec![3.0]).unwrap(), 3.0)
+            .unwrap();
+        let canopy_before = biome.canopy().unwrap();
+        biome.renormalise_weights().unwrap();
+        let sum: f32 = biome.weights().iter().sum();
+        assert!((sum - 1.0).abs() < 1e-6);
+        assert!((biome.total_weight() - 1.0).abs() < 1e-6);
+        let canopy_after = biome.canopy().unwrap();
+        assert!((canopy_before.data()[0] - canopy_after.data()[0]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn monad_cultivates_biome_and_absorbs_weighted() {
+        let topos = demo_topos();
+        let monad = RewriteMonad::new(&topos);
+        let mut biome = monad.cultivate_biome();
+        monad
+            .absorb_weighted_into_biome(
+                &mut biome,
+                "monad_absorb",
+                Tensor::from_vec(1, 1, vec![topos.saturation() * 6.0]).unwrap(),
+                2.0,
+            )
+            .unwrap();
+        assert_eq!(biome.len(), 1);
+        assert!((biome.total_weight() - 2.0).abs() < 1e-6);
+        let canopy = biome.canopy().unwrap();
+        assert!(canopy.data()[0].abs() <= topos.saturation());
     }
 
     #[test]

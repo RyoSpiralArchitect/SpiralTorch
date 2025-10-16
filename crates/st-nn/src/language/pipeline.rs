@@ -1031,7 +1031,14 @@ mod tests {
     };
     use super::super::temperature::TemperatureController;
     use super::*;
+    use super::super::automation::DesireAutomation;
+    use super::super::desire::{constant, warmup, DesireLagrangian};
+    use super::super::geometry::{
+        ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
+    };
+    use super::super::temperature::TemperatureController;
     use crate::plan::RankPlanner;
+    use st_core::config::self_rewrite::SelfRewriteCfg;
     use st_core::backend::device_caps::DeviceCaps;
     use st_core::config::self_rewrite::SelfRewriteCfg;
     use std::collections::HashSet;
