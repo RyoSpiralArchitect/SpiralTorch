@@ -35,6 +35,8 @@ pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", 
 st-core = { path = "../../crates/st-core", default-features = false, features = ["psi", "psychoid", "collapse"] }
 st-tensor = { path = "../../crates/st-tensor", default-features = false }
 st-nn = { path = "../../crates/st-nn", features = ["psychoid", "collapse"] }
+st-rl = { path = "../../crates/st-rl" }
+st-rec = { path = "../../crates/st-rec" }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }
 ndarray = { version = "0.15", default-features = false, features = ["std"] }

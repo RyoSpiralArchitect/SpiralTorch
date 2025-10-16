@@ -43,6 +43,16 @@ NumPy, no PyTorch, and no shim layers.
 - Z-space projector bindings (`spiraltorch.nn.ZSpaceProjector`) so spiral
   trajectories can be rendered onto the canvas or reused inside sequential
   transformer stacks.
+- Deployment and optimisation bridges via `spiraltorch.integrations`: archive
+  TorchServe models, persist BentoML runners, explore hyperparameters with
+  Optuna or Ray Tune, and export trained modules to ONNX—all behind ergonomic
+  Python call sites.
+- Reinforcement learning harness via `spiraltorch.rl`—SpiralTorchRL keeps
+  policy gradients inside Z-space tensors, exposes hypergrad-enabled updates,
+  and streams geometric rewards without leaving Rust.
+- Recommendation toolkit via `spiraltorch.rec`—SpiralTorchRec factors user/item
+  lattices under open-cartesian topos guards so embeddings stay psychoid-safe
+  while training entirely in Rust.
 
 ## Building wheels
 
@@ -175,6 +185,115 @@ for epoch, stats in enumerate(reports, start=1):
 # Switch back to manual preparation mid-run if you need custom tape control
 lightning.set_auto_prepare(False)
 session.prepare_module(model)
+```
+
+## Integration helpers
+
+SpiralTorch now exposes first-class hooks into popular deployment and
+optimisation frameworks. Each helper lazily imports its dependency and raises a
+clear error if the optional package is missing.
+
+```python
+from pathlib import Path
+
+import spiraltorch as st
+from spiraltorch.integrations import (
+    bentoml_save_model,
+    export_onnx,
+    optuna_optimize,
+    ray_tune_run,
+    torchserve_archive,
+)
+
+# Export a trained SpiralTorch module through torch.onnx
+model = ...  # torch.nn.Module compatible with SpiralTorch parameters
+example_input = ...
+onnx_path = Path("artifacts/model.onnx")
+export_onnx(model, example_input, onnx_path.as_posix(), opset_version=18)
+
+# Package for TorchServe hosting
+archive_path = torchserve_archive(
+    model_name="spiral-demo",
+    serialized_file="checkpoints/spiral.pt",
+    export_path="artifacts",
+    handler="spiral_handler.py",
+    extra_files=["index_to_name.json"],
+    force=True,
+)
+
+# Persist a BentoML runner
+bento_ref = bentoml_save_model(model, "spiral-demo", signatures={"__call__": {"batchable": True}})
+
+# Run Optuna on a SpiralTorch training loop
+def objective(trial):
+    lr = trial.suggest_float("lr", 1e-4, 1e-1, log=True)
+    # ... wire lr into a SpiralSession run ...
+    return final_loss
+
+study = optuna_optimize(objective, n_trials=25, direction="minimize")
+
+# Dispatch Ray Tune sweeps without leaving the SpiralTorch API surface
+def train_spiral(lr: float):
+    # ... execute a SpiralSession epoch and report Ray-compatible metrics ...
+    return {"loss": 0.42}
+
+analysis = ray_tune_run(
+    trainable=lambda config: train_spiral(config["lr"]),
+    config={"lr": [1e-3, 5e-4, 1e-4]},
+    num_samples=5,
+)
+
+print("TorchServe bundle:", archive_path)
+print("Bento artifact:", bento_ref)
+print("Best Optuna trial:", study.best_trial.value)
+print("Best Ray Tune result:", analysis.get_best_config(metric="loss", mode="min"))
+```
+
+## SpiralTorchRL quickstart
+
+`spiraltorch.rl` packages the policy-gradient harness from the Rust side so
+Python notebooks can lean on SpiralTorchRL without reimplementing Z-space
+plumbing. Policies keep their weight updates inside hypergrad tapes and expose
+the discounted-return baseline used during training.
+
+```python
+from spiraltorch import Tensor
+from spiraltorch.rl import PolicyGradient
+
+policy = PolicyGradient(state_dim=4, action_dim=2, learning_rate=0.02, discount=0.97)
+policy.enable_hypergrad(curvature=-1.0, learning_rate=0.05)
+
+state = Tensor(1, 4, [0.2, 0.4, -0.1, 0.3])
+action, probs = policy.select_action(state)
+policy.record_transition(state, action, reward=1.0)
+
+report = policy.finish_episode()
+print(f"reward={report.total_reward:.2f} baseline={report.mean_return:.2f} hypergrad={report.hypergrad_applied}")
+print("weights", policy.weights().tolist())
+```
+
+## SpiralTorchRec quickstart
+
+`spiraltorch.rec` brings the SpiralTorchRec factorisation stack to notebooks and
+production jobs alike. Embeddings stay guarded by the open-cartesian topos so
+psychoid limits never drift while running alternating updates in pure Rust.
+
+```python
+from spiraltorch.rec import Recommender
+
+rec = Recommender(users=8, items=12, factors=4, learning_rate=0.05, regularization=0.002)
+
+ratings = [
+    (0, 0, 5.0),
+    (0, 1, 3.0),
+    (1, 0, 4.0),
+    (1, 2, 4.5),
+]
+
+epoch = rec.train_epoch(ratings)
+print(f"rmse={epoch.rmse:.4f} samples={epoch.samples}")
+print("prediction", rec.predict(0, 2))
+print("user embedding", rec.user_embedding(0).tolist())
 ```
 
 The `DistConfig` connects the local roundtable to a meta layer that exchanges
