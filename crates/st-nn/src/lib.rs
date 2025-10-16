@@ -34,7 +34,11 @@ pub use gnn::{
     ZSpaceGraphConvolution,
 };
 #[cfg(feature = "golden")]
-pub use golden::{GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig};
+pub use golden::{
+    CouncilDigest, CouncilEvidence, GoldenBlackcatPulse, GoldenCooperativeDirective,
+    GoldenCouncilSnapshot, GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig,
+    GoldenSelfRewriteConfig,
+};
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
