@@ -387,12 +387,24 @@ impl ModuleTrainer {
         &self.heur_log
     }
 
+    /// Merges the provided heuristics log into the trainer's local log.
+    pub fn merge_heuristics_log(&mut self, log: &HeurOpLog) {
+        self.heur_log.merge(log);
+    }
+
     /// Returns the latest moderator minutes captured by Blackcat.
     pub fn blackcat_minutes(&self) -> Vec<ModeratorMinutes> {
         self.blackcat_moderator
             .as_ref()
             .map(|m| m.minutes().to_vec())
             .unwrap_or_default()
+    }
+
+    /// Replays moderator minutes so the embedded Blackcat runtime can stay aligned.
+    pub fn sync_blackcat_minutes(&mut self, minutes: &[ModeratorMinutes]) {
+        if let Some(moderator) = self.blackcat_moderator.as_mut() {
+            moderator.absorb_minutes(minutes);
+        }
     }
 
     /// Clears any registered band weighting rule.

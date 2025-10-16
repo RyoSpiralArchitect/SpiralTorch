@@ -63,7 +63,9 @@ pub use roundtable::{
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use trainer::{EpochStats, ModuleTrainer};
 
+pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};
 pub use st_tensor::pure::topos::OpenCartesianTopos;
 pub use st_tensor::pure::{
     AmegaHypergrad, ComplexTensor, LanguageWaveEncoder, PureResult, Tensor, TensorError,
 };
+pub use st_text::{ResonanceNarrative, TextResonator};
