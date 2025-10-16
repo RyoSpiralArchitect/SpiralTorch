@@ -22,14 +22,14 @@
 // ============================================================================
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
-use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
+use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
 use crate::roundtable::{
-    simulate_proposal_locally, BlackcatModerator, DistConfig, GlobalProposal, HeurOp, HeurOpKind,
+    simulate_proposal_locally, BlackcatModerator, DistConfig, GlobalProposal, HeurOpKind,
     HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
@@ -289,8 +289,6 @@ impl ModuleTrainer {
             softlogic: SoftLogicFlex::new(),
             desire_bridge: None,
             graph_bridge: None,
-            graph_pending: None,
-            graph_last_hint: None,
             graph_pending: None,
             graph_last_hint: None,
             #[cfg(feature = "golden")]
@@ -1204,17 +1202,26 @@ impl ModuleTrainer {
             "desire_phase_observation".to_string(),
             summary.observation as f64,
         );
-        target.insert("desire_phase_injection".to_string(), summary.injection as f64);
+        target.insert(
+            "desire_phase_injection".to_string(),
+            summary.injection as f64,
+        );
         target.insert(
             "desire_phase_integration".to_string(),
             summary.integration as f64,
         );
-        target.insert("desire_mean_entropy".to_string(), summary.mean_entropy as f64);
+        target.insert(
+            "desire_mean_entropy".to_string(),
+            summary.mean_entropy as f64,
+        );
         target.insert(
             "desire_mean_temperature".to_string(),
             summary.mean_temperature as f64,
         );
-        target.insert("desire_mean_penalty".to_string(), summary.mean_penalty as f64);
+        target.insert(
+            "desire_mean_penalty".to_string(),
+            summary.mean_penalty as f64,
+        );
         target.insert("desire_mean_alpha".to_string(), summary.mean_alpha as f64);
         target.insert("desire_mean_beta".to_string(), summary.mean_beta as f64);
         target.insert("desire_mean_gamma".to_string(), summary.mean_gamma as f64);
@@ -1475,7 +1482,8 @@ mod tests {
         let row = vec![1.0, 1.0];
         let col = vec![1.0, 1.0];
         let anchors = HashSet::new();
-        let concept_kernel = SparseKernel::from_rows(vec![vec![(0, 1.0)], vec![(1, 1.0)]], 1e-6).unwrap();
+        let concept_kernel =
+            SparseKernel::from_rows(vec![vec![(0, 1.0)], vec![(1, 1.0)]], 1e-6).unwrap();
         SemanticBridge::new(log_pi, row, col, anchors, 1e-6, concept_kernel).unwrap()
     }
 

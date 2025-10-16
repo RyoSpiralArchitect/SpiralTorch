@@ -52,7 +52,6 @@ impl GraphConsensusBridge {
     /// `Ok(None)` if the tracer has not recorded any layers since the previous
     /// call.
     pub fn digest(&self, baseline: &BandEnergy) -> PureResult<Option<GraphConsensusDigest>> {
-        let reports = self.tracer.borrow_mut().drain();
         let mut tracer = self
             .tracer
             .lock()
