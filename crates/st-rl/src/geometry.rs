@@ -43,7 +43,7 @@ impl GeometryFeedbackConfig {
             activation_threshold: 1e-3,
             smoothing_window: 4,
             min_learning_rate_scale: 0.5,
-            max_learning_rate_scale: 1.5,
+            max_learning_rate_scale: 2.5,
             z_space_rank: 24,
             leech_density_weight: 0.35,
             ramanujan_iterations: 3,
@@ -59,8 +59,31 @@ pub struct GeometryFeedbackSignal {
     pub assessment: ObservabilityAssessment,
     /// Moving-average of the efficiency ratios used for scaling.
     pub averaged_efficiency: f64,
+    /// Smoothed estimate of the effective rank being activated in Z-space.
+    pub smoothed_rank: f64,
+    /// Smoothed Leech packing pressure contributing to the scale.
+    pub smoothed_pressure: f64,
     /// Multiplicative factor suggested for the learning rate.
     pub learning_rate_scale: f32,
+    /// Rolling-average of the emitted scale to help detect drift.
+    pub rolling_scale: f32,
+}
+
+/// Rolling diagnostics describing how the feedback loop is adapting itself.
+#[derive(Clone, Debug, Default)]
+pub struct GeometryTelemetry {
+    /// Smoothed estimate of the effective rank under observation.
+    pub rolling_rank: f64,
+    /// Smoothed Leech packing pressure after weighting.
+    pub rolling_pressure: f64,
+    /// Rolling-average of the emitted learning-rate scale.
+    pub rolling_scale: f32,
+    /// Current minimum learning-rate multiplier after self-tuning.
+    pub min_scale: f32,
+    /// Current maximum learning-rate multiplier after self-tuning.
+    pub max_scale: f32,
+    /// Active Leech density weight following self-rewrites.
+    pub leech_density_weight: f64,
 }
 
 /// Coalgebra-powered feedback loop that measures resonance geometry and emits
@@ -77,6 +100,10 @@ pub struct GeometryFeedback {
     leech_weight: f64,
     ramanujan_pi: f64,
     softening_beta: f32,
+    rank_history: VecDeque<f64>,
+    pressure_history: VecDeque<f64>,
+    scale_history: VecDeque<f32>,
+    telemetry: GeometryTelemetry,
     last_signal: Option<GeometryFeedbackSignal>,
 }
 
@@ -96,17 +123,28 @@ impl GeometryFeedback {
                     config.min_learning_rate_scale,
                 )
             };
+        let mut min_scale = min_scale.max(f32::EPSILON);
+        let max_scale = max_scale.max(f32::EPSILON);
+        let mut clamped_max = max_scale.clamp(2.0, 3.0);
+        if min_scale >= clamped_max {
+            clamped_max = (min_scale + 2.0).clamp(2.0, 3.0);
+        }
+        min_scale = min_scale.min(clamped_max - f32::EPSILON).max(f32::EPSILON);
         Self {
             coalgebra: ObservationalCoalgebra::new(config.observability),
             threshold: config.activation_threshold.abs().max(f32::EPSILON),
             history: VecDeque::with_capacity(window),
             window,
-            min_scale: min_scale.max(f32::EPSILON),
-            max_scale: max_scale.max(f32::EPSILON),
+            min_scale,
+            max_scale: clamped_max,
             z_rank: config.z_space_rank.max(1),
             leech_weight: config.leech_density_weight.max(0.0),
             ramanujan_pi: Self::ramanujan_pi(config.ramanujan_iterations.max(1)),
             softening_beta: config.softening_beta.max(0.0),
+            rank_history: VecDeque::with_capacity(window),
+            pressure_history: VecDeque::with_capacity(window),
+            scale_history: VecDeque::with_capacity(window),
+            telemetry: GeometryTelemetry::default(),
             last_signal: None,
         }
     }
@@ -114,6 +152,11 @@ impl GeometryFeedback {
     /// Returns the most recent signal emitted by the controller.
     pub fn last_signal(&self) -> Option<&GeometryFeedbackSignal> {
         self.last_signal.as_ref()
+    }
+
+    /// Returns rolling diagnostics summarising the most recent updates.
+    pub fn telemetry(&self) -> &GeometryTelemetry {
+        &self.telemetry
     }
 
     /// Measures the provided resonance snapshot and emits a smoothed feedback
@@ -140,11 +183,55 @@ impl GeometryFeedback {
             self.leech_weight * LEECH_PACKING_DENSITY * geodesic * (self.z_rank as f64).sqrt();
         let normalized = ((averaged + densified) / self.ramanujan_pi).clamp(0.0, 1.0);
         let softened = self.soft_project(normalized as f32);
-        let scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
+        let mut scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
+
+        let rank_estimate = self.rank_estimate(&observed, &assessment);
+        self.rank_history.push_back(rank_estimate);
+        while self.rank_history.len() > self.window {
+            self.rank_history.pop_front();
+        }
+        let smoothed_rank =
+            self.rank_history.iter().copied().sum::<f64>() / self.rank_history.len() as f64;
+
+        self.pressure_history.push_back(densified);
+        while self.pressure_history.len() > self.window {
+            self.pressure_history.pop_front();
+        }
+        let smoothed_pressure =
+            self.pressure_history.iter().copied().sum::<f64>() / self.pressure_history.len() as f64;
+
+        self.scale_history.push_back(scale);
+        while self.scale_history.len() > self.window {
+            self.scale_history.pop_front();
+        }
+        let mut rolling_scale =
+            self.scale_history.iter().copied().sum::<f32>() / self.scale_history.len() as f32;
+
+        self.auto_tune(smoothed_rank, smoothed_pressure, rolling_scale);
+
+        scale = scale.clamp(self.min_scale, self.max_scale);
+        if let Some(last) = self.scale_history.back_mut() {
+            *last = scale;
+        }
+        rolling_scale =
+            self.scale_history.iter().copied().sum::<f32>() / self.scale_history.len() as f32;
+
+        self.telemetry = GeometryTelemetry {
+            rolling_rank: smoothed_rank,
+            rolling_pressure: smoothed_pressure,
+            rolling_scale,
+            min_scale: self.min_scale,
+            max_scale: self.max_scale,
+            leech_density_weight: self.leech_weight,
+        };
+
         let signal = GeometryFeedbackSignal {
             assessment,
             averaged_efficiency: averaged,
+            smoothed_rank,
+            smoothed_pressure,
             learning_rate_scale: scale.max(self.min_scale),
+            rolling_scale,
         };
         self.last_signal = Some(signal.clone());
         signal
@@ -191,6 +278,53 @@ impl GeometryFeedback {
     fn soft_project(&self, value: f32) -> f32 {
         let beta = (1.0 + self.softening_beta).max(f32::EPSILON);
         value.clamp(0.0, 1.0).powf(1.0 / beta)
+    }
+
+    fn rank_estimate(&self, observed: &[u128], assessment: &ObservabilityAssessment) -> f64 {
+        let observed_total: f64 = observed.iter().map(|value| *value as f64).sum();
+        let expected_total: f64 = assessment
+            .expected
+            .iter()
+            .map(|value| *value as f64)
+            .sum::<f64>()
+            .max(f64::MIN_POSITIVE);
+        let ratio = (observed_total / expected_total).clamp(0.0, 1.0);
+        ratio * self.z_rank as f64
+    }
+
+    fn auto_tune(&mut self, rank: f64, pressure: f64, rolling_scale: f32) {
+        let recommended = self.max_scale.clamp(2.0, 3.0);
+        if (self.max_scale - recommended).abs() > f32::EPSILON {
+            self.max_scale = recommended.max(self.min_scale + f32::EPSILON);
+        }
+
+        let max_pressure = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
+        if max_pressure > 0.0 {
+            let pressure_ratio = (pressure / max_pressure).clamp(0.0, 4.0);
+            if pressure_ratio > 1.2 {
+                self.leech_weight = (self.leech_weight * 0.9).max(0.0);
+            } else if pressure_ratio < 0.6 {
+                self.leech_weight = (self.leech_weight * 1.1).max(0.0).min(16.0);
+            }
+        }
+
+        let target_rank = self.z_rank as f64 * 0.85;
+        if rank < target_rank {
+            self.min_scale = (self.min_scale * 1.05).min(self.max_scale - f32::EPSILON);
+        } else if rank > self.z_rank as f64 * 0.97 {
+            self.min_scale = (self.min_scale * 0.95).max(f32::EPSILON);
+        }
+
+        if rolling_scale > self.max_scale * 0.92 {
+            self.max_scale = (self.max_scale - 0.05).max(2.0);
+        } else if rolling_scale < (self.min_scale + self.max_scale) * 0.25 {
+            self.max_scale = (self.max_scale + 0.05).min(3.0);
+        }
+
+        self.max_scale = self.max_scale.clamp(2.0, 3.0);
+        if self.min_scale >= self.max_scale {
+            self.min_scale = (self.max_scale * 0.5).max(f32::EPSILON);
+        }
     }
 
     fn ramanujan_pi(iterations: usize) -> f64 {
@@ -251,10 +385,16 @@ mod tests {
 
         let first = feedback.process_resonance(&resonance_high);
         assert!(first.learning_rate_scale > config.min_learning_rate_scale);
+        assert!(first.smoothed_pressure > 0.0);
+        assert!(first.smoothed_rank <= config.z_space_rank as f64);
 
         let second = feedback.process_resonance(&resonance_low);
         assert!(second.learning_rate_scale <= first.learning_rate_scale);
+        assert!(second.rolling_scale >= config.min_learning_rate_scale);
         assert!(feedback.last_signal().is_some());
+        let telemetry = feedback.telemetry().clone();
+        assert!(telemetry.rolling_scale >= config.min_learning_rate_scale);
+        assert!(telemetry.max_scale <= 3.0);
     }
 
     #[test]
@@ -280,5 +420,32 @@ mod tests {
         let base_scale = base.process_resonance(&resonance).learning_rate_scale;
         let enriched_scale = enriched.process_resonance(&resonance).learning_rate_scale;
         assert!(enriched_scale >= base_scale);
+    }
+
+    #[test]
+    fn telemetry_auto_tunes_clamp_and_pressure() {
+        let config = GeometryFeedbackConfig {
+            observability: ObservabilityConfig::new(1, 5, SlotSymmetry::Symmetric),
+            activation_threshold: 0.01,
+            smoothing_window: 3,
+            min_learning_rate_scale: 0.4,
+            max_learning_rate_scale: 8.0,
+            z_space_rank: 24,
+            leech_density_weight: 1.5,
+            ramanujan_iterations: 3,
+            softening_beta: 0.6,
+        };
+        let mut feedback = GeometryFeedback::new(config);
+        let resonance = resonance_from(&[1.2, 1.0, -0.9, 0.8, -0.7]);
+
+        for _ in 0..5 {
+            feedback.process_resonance(&resonance);
+        }
+
+        let telemetry = feedback.telemetry().clone();
+        assert!(telemetry.max_scale <= 3.0);
+        assert!(telemetry.max_scale >= 2.0);
+        assert!(telemetry.leech_density_weight >= 0.0);
+        assert!(telemetry.rolling_pressure > 0.0);
     }
 }

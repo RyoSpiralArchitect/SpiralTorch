@@ -26,6 +26,7 @@
 use crate::dataset::DataLoader;
 use crate::loss::Loss;
 use crate::module::Module;
+use crate::roundtable::{HeurOpLog, ModeratorMinutes};
 use crate::schedule::RoundtableSchedule;
 use crate::trainer::{EpochStats, ModuleTrainer};
 use crate::PureResult;
@@ -33,11 +34,17 @@ use st_core::runtime::golden::{
     GoldenRuntime, GoldenRuntimeConfig, GoldenRuntimeError, SpiralMutex,
 };
 use st_tensor::pure::TensorError;
+use std::cmp::Ordering;
 
 #[derive(Debug, Clone)]
 pub struct GoldenRetrieverConfig {
     pub workers: usize,
     pub runtime: Option<GoldenRuntimeConfig>,
+    pub sync_blackcat_minutes: bool,
+    pub sync_heuristics_log: bool,
+    pub coordinate_blackcat: bool,
+    pub exploration_bias: f32,
+    pub optimization_boost: f32,
 }
 
 impl Default for GoldenRetrieverConfig {
@@ -45,6 +52,11 @@ impl Default for GoldenRetrieverConfig {
         Self {
             workers: 0,
             runtime: None,
+            sync_blackcat_minutes: false,
+            sync_heuristics_log: false,
+            coordinate_blackcat: false,
+            exploration_bias: 1.0,
+            optimization_boost: 1.0,
         }
     }
 }
@@ -61,6 +73,11 @@ struct GoldenWorker {
 pub struct GoldenRetriever {
     runtime: GoldenRuntime,
     workers: Vec<GoldenWorker>,
+    sync_blackcat_minutes: bool,
+    sync_heuristics_log: bool,
+    coordinate_blackcat: bool,
+    exploration_bias: f32,
+    optimization_boost: f32,
 }
 
 impl GoldenRetriever {
@@ -91,7 +108,15 @@ impl GoldenRetriever {
                 trainer: SpiralMutex::new(trainer),
             })
             .collect();
-        Ok(Self { runtime, workers })
+        Ok(Self {
+            runtime,
+            workers,
+            sync_blackcat_minutes: config.sync_blackcat_minutes,
+            sync_heuristics_log: config.sync_heuristics_log,
+            coordinate_blackcat: config.coordinate_blackcat,
+            exploration_bias: config.exploration_bias.max(0.0),
+            optimization_boost: config.optimization_boost.max(0.0),
+        })
     }
 
     pub fn workers(&self) -> usize {
@@ -160,7 +185,132 @@ impl GoldenRetriever {
             }
         }
 
-        Ok(GoldenEpochReport::from_stats(&self.runtime, stats))
+        let (minutes, heuristics) = self.collect_cooperative_state();
+        let pulse = if self.coordinate_blackcat {
+            Some(self.compose_blackcat_pulse(&minutes, &heuristics))
+        } else {
+            None
+        };
+        if self.sync_blackcat_minutes || self.sync_heuristics_log || self.coordinate_blackcat {
+            self.broadcast_cooperative_state(&minutes, &heuristics, pulse.as_ref());
+        }
+
+        Ok(GoldenEpochReport::from_stats(
+            &self.runtime,
+            stats,
+            minutes,
+            heuristics,
+            pulse,
+        ))
+    }
+
+    fn collect_cooperative_state(&self) -> (Vec<ModeratorMinutes>, HeurOpLog) {
+        let mut minutes = Vec::new();
+        let mut heuristics = HeurOpLog::default();
+        for worker in &self.workers {
+            let guard = worker.trainer.lock();
+            minutes.extend(guard.blackcat_minutes());
+            heuristics.merge(guard.heuristics_log());
+        }
+        (dedupe_minutes(minutes), heuristics)
+    }
+
+    fn broadcast_cooperative_state(
+        &self,
+        minutes: &[ModeratorMinutes],
+        heuristics: &HeurOpLog,
+        pulse: Option<&GoldenBlackcatPulse>,
+    ) {
+        for worker in &self.workers {
+            let mut guard = worker.trainer.lock();
+            if self.sync_blackcat_minutes {
+                guard.sync_blackcat_minutes(minutes);
+            }
+            if self.sync_heuristics_log {
+                guard.merge_heuristics_log(heuristics);
+            }
+            #[cfg(feature = "golden")]
+            if let Some(pulse) = pulse {
+                guard.apply_blackcat_pulse(pulse);
+            }
+        }
+    }
+
+    fn compose_blackcat_pulse(
+        &self,
+        minutes: &[ModeratorMinutes],
+        heuristics: &HeurOpLog,
+    ) -> GoldenBlackcatPulse {
+        if minutes.is_empty() && heuristics.entries().is_empty() {
+            return GoldenBlackcatPulse::idle();
+        }
+
+        let mut support_sum = 0.0f32;
+        let mut psi_sum = 0.0f32;
+        let mut reward_sum = 0.0f64;
+        let mut dominant: Option<&ModeratorMinutes> = None;
+
+        for minute in minutes {
+            support_sum += minute.support.max(0.0);
+            psi_sum += minute.mean_psi;
+            reward_sum += minute.reward.max(0.0);
+            dominant = match dominant {
+                Some(current) => match minute.reward.partial_cmp(&current.reward) {
+                    Some(Ordering::Greater) => Some(minute),
+                    Some(Ordering::Equal) => {
+                        let current_conf = current.confidence.0 + current.confidence.1;
+                        let candidate_conf = minute.confidence.0 + minute.confidence.1;
+                        if candidate_conf > current_conf {
+                            Some(minute)
+                        } else {
+                            Some(current)
+                        }
+                    }
+                    _ => Some(current),
+                },
+                None => Some(minute),
+            };
+        }
+
+        let coverage = minutes.len();
+        let heuristics_contributions = heuristics.entries().len();
+        let coverage_f32 = coverage as f32;
+        let mean_support = if coverage > 0 {
+            support_sum / coverage_f32
+        } else {
+            0.0
+        };
+        let mean_reward = if coverage > 0 {
+            reward_sum / coverage as f64
+        } else {
+            0.0
+        };
+        let mean_psi = if coverage > 0 {
+            psi_sum / coverage_f32
+        } else {
+            0.0
+        };
+        let heuristic_factor = if coverage > 0 {
+            heuristics_contributions as f32 / coverage_f32
+        } else {
+            heuristics_contributions as f32
+        };
+
+        let exploration_drive =
+            ((mean_support + mean_psi.abs() * 0.25) * self.exploration_bias).max(0.0);
+        let optimization_gain =
+            ((mean_reward as f32 * 0.5) + heuristic_factor).max(0.0) * self.optimization_boost;
+
+        GoldenBlackcatPulse {
+            exploration_drive,
+            optimization_gain,
+            mean_support,
+            mean_reward,
+            mean_psi,
+            coverage,
+            heuristics_contributions,
+            dominant_plan: dominant.map(|m| m.plan_signature.clone()),
+        }
     }
 }
 
@@ -171,10 +321,19 @@ pub struct GoldenEpochReport {
     pub total_loss: f32,
     pub average_loss: f32,
     pub per_worker: Vec<EpochStats>,
+    pub moderator_minutes: Vec<ModeratorMinutes>,
+    pub heuristics_log: HeurOpLog,
+    pub cooperative_pulse: Option<GoldenBlackcatPulse>,
 }
 
 impl GoldenEpochReport {
-    fn from_stats(runtime: &GoldenRuntime, per_worker: Vec<EpochStats>) -> Self {
+    fn from_stats(
+        runtime: &GoldenRuntime,
+        per_worker: Vec<EpochStats>,
+        moderator_minutes: Vec<ModeratorMinutes>,
+        heuristics_log: HeurOpLog,
+        cooperative_pulse: Option<GoldenBlackcatPulse>,
+    ) -> Self {
         let workers = per_worker.len();
         let (total_loss, total_batches) = runtime.reduce(
             &per_worker,
@@ -193,12 +352,60 @@ impl GoldenEpochReport {
             total_loss,
             average_loss,
             per_worker,
+            moderator_minutes,
+            heuristics_log,
+            cooperative_pulse,
         }
     }
 }
 
 fn runtime_error(err: GoldenRuntimeError) -> TensorError {
     TensorError::IoError { message: err.0 }
+}
+
+fn dedupe_minutes(minutes: Vec<ModeratorMinutes>) -> Vec<ModeratorMinutes> {
+    let mut deduped = Vec::new();
+    for minute in minutes {
+        if deduped.iter().any(|existing: &ModeratorMinutes| {
+            existing.plan_signature == minute.plan_signature
+                && existing.issued_at == minute.issued_at
+        }) {
+            continue;
+        }
+        deduped.push(minute);
+    }
+    deduped
+}
+
+#[derive(Debug, Clone)]
+pub struct GoldenBlackcatPulse {
+    pub exploration_drive: f32,
+    pub optimization_gain: f32,
+    pub mean_support: f32,
+    pub mean_reward: f64,
+    pub mean_psi: f32,
+    pub coverage: usize,
+    pub heuristics_contributions: usize,
+    pub dominant_plan: Option<String>,
+}
+
+impl GoldenBlackcatPulse {
+    pub fn idle() -> Self {
+        Self {
+            exploration_drive: 0.0,
+            optimization_gain: 0.0,
+            mean_support: 0.0,
+            mean_reward: 0.0,
+            mean_psi: 0.0,
+            coverage: 0,
+            heuristics_contributions: 0,
+            dominant_plan: None,
+        }
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.coverage == 0 && self.heuristics_contributions == 0
+    }
 }
 
 #[cfg(test)]
@@ -250,5 +457,56 @@ mod tests {
         assert!(report.average_loss.is_finite());
         assert_eq!(report.per_worker.len(), 2);
         assert!(report.batches >= 2);
+        assert!(report.moderator_minutes.is_empty());
+        assert!(report.heuristics_log.entries().is_empty());
+        assert!(report.cooperative_pulse.is_none());
+    }
+
+    #[test]
+    fn golden_retriever_reports_cooperative_pulse() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let trainers = vec![
+            ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
+            ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
+        ];
+        let mut modules = Vec::new();
+        let mut schedules = Vec::new();
+        let mut losses = Vec::new();
+        let mut loaders = Vec::new();
+        for trainer in trainers.iter() {
+            let mut layer = Linear::new("lin", 2, 1).unwrap();
+            trainer.prepare(&mut layer).unwrap();
+            let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+            schedules.push(schedule);
+            modules.push(layer);
+            losses.push(MeanSquaredError::default());
+            let dataset = Dataset::from_vec(vec![
+                (
+                    crate::Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                    crate::Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+                ),
+                (
+                    crate::Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                    crate::Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+                ),
+            ]);
+            loaders.push(dataset.loader().batched(1));
+        }
+
+        let config = GoldenRetrieverConfig {
+            coordinate_blackcat: true,
+            exploration_bias: 1.0,
+            optimization_boost: 0.5,
+            ..GoldenRetrieverConfig::default()
+        };
+        let retriever = GoldenRetriever::new(config, trainers).unwrap();
+        let report = retriever
+            .run_epoch(modules, losses, loaders, schedules)
+            .unwrap();
+        let pulse = report.cooperative_pulse.expect("cooperative pulse");
+        assert!(pulse.exploration_drive >= 0.0);
+        assert!(pulse.optimization_gain >= 0.0);
+        assert_eq!(pulse.coverage, 0);
+        assert!(pulse.is_idle());
     }
 }
