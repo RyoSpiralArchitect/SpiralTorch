@@ -21,6 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
@@ -61,6 +62,9 @@ pub struct ModuleTrainer {
     meta_conductor: Option<MetaConductor>,
     heur_log: HeurOpLog,
     softlogic: SoftLogicFlex,
+    graph_bridge: Option<GraphConsensusBridge>,
+    graph_pending: Option<GraphConsensusDigest>,
+    graph_last_hint: Option<String>,
     #[cfg(feature = "psi")]
     psi: Option<PsiMeter>,
     #[cfg(feature = "psychoid")]
@@ -217,6 +221,9 @@ impl ModuleTrainer {
             meta_conductor: None,
             heur_log: HeurOpLog::default(),
             softlogic: SoftLogicFlex::new(),
+            graph_bridge: None,
+            graph_pending: None,
+            graph_last_hint: None,
             #[cfg(feature = "psi")]
             psi,
             #[cfg(feature = "psychoid")]
@@ -226,6 +233,19 @@ impl ModuleTrainer {
             #[cfg(feature = "collapse")]
             collapse: None,
         }
+    }
+
+    /// Enables the graph consensus feedback loop by attaching a bridge that
+    /// drains graph flow telemetry after each optimisation step.
+    pub fn enable_graph_feedback(&mut self, bridge: GraphConsensusBridge) {
+        self.graph_bridge = Some(bridge);
+        self.graph_pending = None;
+    }
+
+    /// Returns the SpiralK hint generated from the most recently applied graph
+    /// digest, if any.
+    pub fn graph_hint(&self) -> Option<&str> {
+        self.graph_last_hint.as_deref()
     }
 
     #[cfg(feature = "psi")]
@@ -367,12 +387,24 @@ impl ModuleTrainer {
         &self.heur_log
     }
 
+    /// Merges the provided heuristics log into the trainer's local log.
+    pub fn merge_heuristics_log(&mut self, log: &HeurOpLog) {
+        self.heur_log.merge(log);
+    }
+
     /// Returns the latest moderator minutes captured by Blackcat.
     pub fn blackcat_minutes(&self) -> Vec<ModeratorMinutes> {
         self.blackcat_moderator
             .as_ref()
             .map(|m| m.minutes().to_vec())
             .unwrap_or_default()
+    }
+
+    /// Replays moderator minutes so the embedded Blackcat runtime can stay aligned.
+    pub fn sync_blackcat_minutes(&mut self, minutes: &[ModeratorMinutes]) {
+        if let Some(moderator) = self.blackcat_moderator.as_mut() {
+            moderator.absorb_minutes(minutes);
+        }
     }
 
     /// Clears any registered band weighting rule.
@@ -459,6 +491,10 @@ impl ModuleTrainer {
         let mut steps = 0usize;
         for batch in batches.into_iter() {
             let (input, target) = batch.into_batch()?;
+            let graph_adjustment = self.graph_pending.take();
+            self.graph_last_hint = graph_adjustment
+                .as_ref()
+                .and_then(|digest| digest.spiralk_script.clone());
             let step_start = Instant::now();
             if let Some(rt) = self.blackcat.as_mut() {
                 rt.begin_step();
@@ -475,11 +511,27 @@ impl ModuleTrainer {
             let step_loss = loss_value.data().iter().copied().sum::<f32>();
             let grad_output = loss.backward(&prediction, &target)?;
             let mut band_energy = schedule.band_energy(&grad_output)?;
+            let baseline_band_energy = BandEnergy {
+                above: band_energy.above,
+                here: band_energy.here,
+                beneath: band_energy.beneath,
+                drift: band_energy.drift,
+            };
+            if let Some(ref digest) = graph_adjustment {
+                band_energy.above *= digest.multipliers.0;
+                band_energy.here *= digest.multipliers.1;
+                band_energy.beneath *= digest.multipliers.2;
+            }
             if let Some(rt) = self.blackcat.as_ref() {
                 band_energy.drift = rt.frac_penalty() as f32;
             }
             let mut bands: GradientBands = schedule.split(&grad_output)?;
             let mut weights = self.softlogic.prepare_weights(&band_energy);
+            if let Some(ref digest) = graph_adjustment {
+                weights.0 *= digest.multipliers.0;
+                weights.1 *= digest.multipliers.1;
+                weights.2 *= digest.multipliers.2;
+            }
             if let Some(f) = self.band_weight_fn {
                 let override_weights = f(band_energy);
                 weights.0 *= override_weights.0;
@@ -494,7 +546,26 @@ impl ModuleTrainer {
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
             extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
+            if let Some(ref digest) = graph_adjustment {
+                extra.insert("graph_share".to_string(), digest.barycentric[3] as f64);
+                extra.insert(
+                    "graph_multiplier_above".to_string(),
+                    digest.multipliers.0 as f64,
+                );
+                extra.insert(
+                    "graph_multiplier_here".to_string(),
+                    digest.multipliers.1 as f64,
+                );
+                extra.insert(
+                    "graph_multiplier_beneath".to_string(),
+                    digest.multipliers.2 as f64,
+                );
+                extra.insert("graph_layers".to_string(), digest.layer_count() as f64);
+            }
             let _ = module.backward_bands(&input, &bands)?;
+            if let Some(bridge) = self.graph_bridge.as_ref() {
+                self.graph_pending = bridge.digest(&baseline_band_energy)?;
+            }
             #[cfg(feature = "psychoid")]
             let mut psychoid_events = 0usize;
             #[cfg(feature = "psi")]
