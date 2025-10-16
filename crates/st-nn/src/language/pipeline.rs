@@ -10,23 +10,15 @@ use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::schedule::BandEnergy;
 use crate::PureResult;
-use st_tensor::pure::TensorError;
 use std::cmp::Ordering;
-use crate::roundtable::RoundtableNode;
-use crate::schedule::BandEnergy;
-use crate::{PureResult, RoundtableConfig, RoundtableSchedule};
-use st_core::ecosystem::{
-    ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
-    HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
-    RoundtableSummary,
-};
-use st_core::ops::rank_entry::RankPlan;
-use st_core::util::math::{ramanujan_pi, LeechProjector};
-use st_tensor::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
-use std::cmp::Ordering;
+use st_tensor::TensorError;
 use std::collections::HashMap;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+pub use self::language_pipeline::{
+    LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
+};
 
 #[cfg(feature = "psi")]
 use st_core::telemetry::hub::{
@@ -145,7 +137,10 @@ impl DesireTelemetrySink {
     pub fn new() -> Self {
         Self
     }
+}
 
+#[cfg(feature = "psi")]
+impl DesireTelemetrySink {
     fn phase_to_telemetry(phase: DesirePhase) -> DesirePhaseTelemetry {
         match phase {
             DesirePhase::Observation => DesirePhaseTelemetry::Observation,
@@ -167,6 +162,7 @@ impl DesireTelemetrySink {
     }
 }
 
+#[cfg(feature = "psi")]
 impl DesirePipelineSink for DesireTelemetrySink {
     fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
         let weights = &step.solution.weights;
@@ -185,6 +181,13 @@ impl DesirePipelineSink for DesireTelemetrySink {
             trigger_emitted: step.trigger.is_some(),
         };
         hub::set_last_desire_step(sample);
+        Ok(())
+    }
+}
+
+#[cfg(not(feature = "psi"))]
+impl DesirePipelineSink for DesireTelemetrySink {
+    fn on_step(&mut self, _step: &DesireAutomatedStep, _timestamp: SystemTime) -> PureResult<()> {
         Ok(())
     }
 }
@@ -1217,8 +1220,20 @@ impl DesirePsiSummary {
     }
 }
 
-#[cfg(test)]
-mod tests_utils {
+mod language_pipeline {
+    use crate::{RoundtableConfig, RoundtableSchedule};
+    use crate::roundtable::RoundtableNode;
+    use st_core::ecosystem::{
+        ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
+        HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
+        RoundtableSummary,
+    };
+    use st_core::ops::rank_entry::RankPlan;
+    use st_core::util::math::{ramanujan_pi, LeechProjector};
+    use st_tensor::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
+    use std::collections::HashMap;
+    use std::time::{Instant, SystemTime};
+
 #[derive(Debug)]
 pub enum PipelineError {
     EncoderMissing { pipeline: String },
@@ -1823,9 +1838,6 @@ mod tests {
     use st_core::telemetry::hub::SoftlogicZFeedback;
     #[cfg(feature = "psi")]
     use st_core::telemetry::psi::{PsiComponent, PsiEvent, PsiReading};
-    use st_core::telemetry::hub::{self, SoftlogicZFeedback};
-    #[cfg(feature = "psi")]
-    use st_core::telemetry::psi::{PsiComponent, PsiEvent, PsiReading};
 
     fn registry_guard() -> &'static Mutex<()> {
         static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
@@ -2350,4 +2362,5 @@ mod tests {
             .contains_key(&PsiComponent::LOSS));
         assert!(bridge.drain_summary().unwrap().is_none());
     }
+}
 }
