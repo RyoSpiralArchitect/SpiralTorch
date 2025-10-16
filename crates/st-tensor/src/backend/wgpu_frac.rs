@@ -90,7 +90,6 @@ impl Frac1dKernel {
         alpha: f32,
         h: f32,
         m: usize,
-        shader_src: &str,
     ) -> Result<Vec<f32>, String> {
         let n = x.len();
         let m = m.min(n.saturating_sub(1));

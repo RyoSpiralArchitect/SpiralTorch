@@ -8,12 +8,16 @@ use super::device_caps::DeviceCaps;
 use super::kdsl_bridge;
 use super::spiralk_fft::SpiralKFftPlan;
 use crate::backend::wgpu_heuristics_generated as gen;
+use crate::ecosystem::{
+    EcosystemRegistry, HeuristicChoiceSummary, HeuristicDecision, HeuristicSource,
+};
 #[cfg(feature = "logic-learn")]
 use st_logic::learn;
 #[cfg(feature = "logic")]
 use st_logic::SoftRule;
 #[cfg(feature = "logic-learn")]
 use std::sync::Mutex;
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Choice {
@@ -185,6 +189,72 @@ fn overlay(c: &mut Choice, o: &DslOverrides) {
     }
 }
 
+fn describe_topk_algo(algo: u8) -> &'static str {
+    match algo {
+        1 => "heap",
+        2 => "bitonic",
+        3 => "kway",
+        _ => "auto",
+    }
+}
+
+fn describe_midbottom_mode(mode: u8) -> &'static str {
+    match mode {
+        1 => "1ce",
+        2 => "2ce",
+        _ => "auto",
+    }
+}
+
+fn finalize_choice(
+    kind: &'static str,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    mut choice: Choice,
+    source: HeuristicSource,
+    score_hint: Option<f32>,
+    overrides: &DslOverrides,
+) -> Option<Choice> {
+    overlay(&mut choice, overrides);
+    let algo_hint = match kind {
+        "topk" => Some(format!("algo={}", describe_topk_algo(choice.algo_topk))),
+        "midk" => Some(format!(
+            "mode={}",
+            describe_midbottom_mode(choice.mode_midk)
+        )),
+        "bottomk" => Some(format!(
+            "mode={}",
+            describe_midbottom_mode(choice.mode_bottomk)
+        )),
+        _ => None,
+    };
+    let summary = HeuristicChoiceSummary::new(
+        choice.use_2ce,
+        choice.wg,
+        choice.kl,
+        choice.ch,
+        algo_hint,
+        choice.ctile,
+        choice.tile_cols,
+        choice.radix,
+        choice.segments,
+    );
+    let decision = HeuristicDecision {
+        subsystem: "wgpu".to_string(),
+        kind: kind.to_string(),
+        rows,
+        cols,
+        k,
+        choice: summary,
+        score_hint,
+        source,
+        issued_at: SystemTime::now(),
+    };
+    EcosystemRegistry::global().record_heuristic(decision);
+    Some(choice)
+}
+
 #[cfg(feature = "logic")]
 fn synthesize_soft_choice(base: Choice, rules: &[SoftRule]) -> Option<(Choice, f32)> {
     if rules.is_empty() {
@@ -346,29 +416,51 @@ pub fn choose_kind(
             .map(|v| v == "1")
             .unwrap_or(true);
         if use_soft {
-            if let Some((mut out, score)) = synthesize_soft_choice(base, &all) {
+            if let Some((out, score)) = synthesize_soft_choice(base, &all) {
                 if score > 0.1 {
-                    overlay(&mut out, &ov);
-                    return Some(out);
+                    return finalize_choice(
+                        kind,
+                        rows,
+                        cols,
+                        k,
+                        out,
+                        HeuristicSource::SoftLogic,
+                        Some(score),
+                        &ov,
+                    );
                 }
             }
         }
     }
-    if let Some(mut c) = hard_dsl {
-        overlay(&mut c, &ov);
-        return Some(c);
+    if let Some(c) = hard_dsl {
+        return finalize_choice(kind, rows, cols, k, c, HeuristicSource::HardDsl, None, &ov);
     }
-    if let Some(mut c) = kdsl_bridge::choose_from_kv(rows, cols, k, subgroup) {
-        overlay(&mut c, &ov);
-        return Some(c);
+    if let Some(c) = kdsl_bridge::choose_from_kv(rows, cols, k, subgroup) {
+        return finalize_choice(kind, rows, cols, k, c, HeuristicSource::KeyValue, None, &ov);
     }
-    if let Some(mut c) = gen::choose(rows as usize, cols as usize, k as usize, subgroup) {
-        overlay(&mut c, &ov);
-        return Some(c);
+    if let Some(c) = gen::choose(rows as usize, cols as usize, k as usize, subgroup) {
+        return finalize_choice(
+            kind,
+            rows,
+            cols,
+            k,
+            c,
+            HeuristicSource::Generated,
+            None,
+            &ov,
+        );
     }
-    let mut fallback_choice = base;
-    overlay(&mut fallback_choice, &ov);
-    Some(fallback_choice)
+    let fallback_choice = base;
+    finalize_choice(
+        kind,
+        rows,
+        cols,
+        k,
+        fallback_choice,
+        HeuristicSource::Fallback,
+        None,
+        &ov,
+    )
 }
 
 /// Construct an FFT plan from the same heuristics used for TopK and emit the

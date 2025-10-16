@@ -23,8 +23,14 @@ use st_backend_hip::{
 };
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
-#[cfg(feature = "collapse")]
-use st_core::engine::collapse_drive::DriveCmd;
+use st_core::ecosystem::{
+    ConnectorEvent as CoreConnectorEvent, DistributionSummary as CoreDistributionSummary,
+    EcosystemRegistry, EcosystemReport as CoreEcosystemReport,
+    HeuristicChoiceSummary as CoreHeuristicChoiceSummary,
+    HeuristicDecision as CoreHeuristicDecision, RankPlanSummary as CoreRankPlanSummary,
+    RoundtableConfigSummary as CoreRoundtableConfigSummary,
+    RoundtableSummary as CoreRoundtableSummary,
+};
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
 use st_core::telemetry::atlas::{AtlasFrame, AtlasMetric};
 use st_core::telemetry::chrono::{
@@ -255,25 +261,133 @@ fn convert_fft<T>(value: Result<T, FftError>) -> PyResult<T> {
     })
 }
 
-#[pyfunction]
-fn describe_resonance(resonance: &PyDifferentialResonance) -> PyResult<String> {
-    convert(text_describe_resonance(&resonance.inner))
+fn heuristic_choice_to_py(
+    py: Python<'_>,
+    choice: &CoreHeuristicChoiceSummary,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("use_two_stage", choice.use_two_stage)?;
+    dict.set_item("workgroup", choice.workgroup)?;
+    dict.set_item("lanes", choice.lanes)?;
+    dict.set_item("channel_stride", choice.channel_stride)?;
+    dict.set_item("algo_hint", choice.algo_hint.clone())?;
+    dict.set_item("compaction_tile", choice.compaction_tile)?;
+    dict.set_item("fft_tile_cols", choice.fft_tile_cols)?;
+    dict.set_item("fft_radix", choice.fft_radix)?;
+    dict.set_item("fft_segments", choice.fft_segments)?;
+    Ok(dict.into())
 }
 
-#[pyfunction]
-fn describe_frame(frame: &PyChronoFrame) -> String {
-    text_describe_frame(frame.as_frame())
+fn heuristic_to_py(py: Python<'_>, decision: &CoreHeuristicDecision) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("subsystem", decision.subsystem.clone())?;
+    dict.set_item("kind", decision.kind.clone())?;
+    dict.set_item("rows", decision.rows)?;
+    dict.set_item("cols", decision.cols)?;
+    dict.set_item("k", decision.k)?;
+    dict.set_item("choice", heuristic_choice_to_py(py, &decision.choice)?)?;
+    dict.set_item("score_hint", decision.score_hint)?;
+    dict.set_item("source", decision.source.as_str())?;
+    dict.set_item("issued_at", decision.issued_at_secs())?;
+    Ok(dict.into())
 }
 
-#[pyfunction]
-fn describe_timeline(frames: Vec<PyChronoFrame>) -> PyResult<String> {
-    let inner: Vec<ChronoFrame> = frames.into_iter().map(PyChronoFrame::into_frame).collect();
-    convert(text_describe_timeline(&inner))
+fn roundtable_config_to_py(
+    py: Python<'_>,
+    config: &CoreRoundtableConfigSummary,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("top_k", config.top_k)?;
+    dict.set_item("mid_k", config.mid_k)?;
+    dict.set_item("bottom_k", config.bottom_k)?;
+    dict.set_item("here_tolerance", config.here_tolerance)?;
+    let extras = PyDict::new_bound(py);
+    for (key, value) in &config.extras {
+        extras.set_item(key, *value)?;
+    }
+    dict.set_item("extras", extras)?;
+    Ok(dict.into())
 }
 
-#[pyfunction]
-fn describe_atlas(atlas: &PyAtlasFrame) -> PyResult<String> {
-    convert(text_describe_atlas(&atlas.frame))
+fn rank_plan_to_py(py: Python<'_>, summary: &CoreRankPlanSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("kind", summary.kind.as_str())?;
+    dict.set_item("rows", summary.rows)?;
+    dict.set_item("cols", summary.cols)?;
+    dict.set_item("k", summary.k)?;
+    dict.set_item("workgroup", summary.workgroup)?;
+    dict.set_item("lanes", summary.lanes)?;
+    dict.set_item("channel_stride", summary.channel_stride)?;
+    dict.set_item("tile", summary.tile)?;
+    dict.set_item("compaction_tile", summary.compaction_tile)?;
+    dict.set_item("subgroup", summary.subgroup)?;
+    dict.set_item("fft_tile", summary.fft_tile)?;
+    dict.set_item("fft_radix", summary.fft_radix)?;
+    dict.set_item("fft_segments", summary.fft_segments)?;
+    Ok(dict.into())
+}
+
+fn distribution_to_py(py: Python<'_>, summary: &CoreDistributionSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("node_id", summary.node_id.clone())?;
+    dict.set_item("mode", summary.mode.clone())?;
+    dict.set_item("summary_window", summary.summary_window)?;
+    dict.set_item("push_interval_ms", summary.push_interval_ms)?;
+    dict.set_item("meta_endpoints", summary.meta_endpoints.clone())?;
+    Ok(dict.into())
+}
+
+fn roundtable_to_py(py: Python<'_>, summary: &CoreRoundtableSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("rows", summary.rows)?;
+    dict.set_item("cols", summary.cols)?;
+    dict.set_item("config", roundtable_config_to_py(py, &summary.config)?)?;
+    let plans = PyList::empty_bound(py);
+    for plan in &summary.plans {
+        plans.append(rank_plan_to_py(py, plan)?)?;
+    }
+    dict.set_item("plans", plans)?;
+    dict.set_item("autopilot_enabled", summary.autopilot_enabled)?;
+    if let Some(dist) = &summary.distribution {
+        dict.set_item("distribution", distribution_to_py(py, dist)?)?;
+    } else {
+        dict.set_item("distribution", py.None())?;
+    }
+    dict.set_item("issued_at", summary.issued_at_secs())?;
+    Ok(dict.into())
+}
+
+fn connector_to_py(py: Python<'_>, event: &CoreConnectorEvent) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("name", event.name.clone())?;
+    dict.set_item("stage", event.stage.clone())?;
+    dict.set_item("issued_at", event.issued_at_secs())?;
+    let meta = PyDict::new_bound(py);
+    for (key, value) in &event.metadata {
+        meta.set_item(key, value)?;
+    }
+    dict.set_item("metadata", meta)?;
+    Ok(dict.into())
+}
+
+fn ecosystem_report_to_py(py: Python<'_>, report: &CoreEcosystemReport) -> PyResult<PyObject> {
+    let heuristics = PyList::empty_bound(py);
+    for decision in report.heuristics() {
+        heuristics.append(heuristic_to_py(py, decision)?)?;
+    }
+    let roundtables = PyList::empty_bound(py);
+    for summary in report.roundtables() {
+        roundtables.append(roundtable_to_py(py, summary)?)?;
+    }
+    let connectors = PyList::empty_bound(py);
+    for event in report.connectors() {
+        connectors.append(connector_to_py(py, event)?)?;
+    }
+    let dict = PyDict::new_bound(py);
+    dict.set_item("heuristics", heuristics)?;
+    dict.set_item("roundtables", roundtables)?;
+    dict.set_item("connectors", connectors)?;
+    Ok(dict.into())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1918,6 +2032,45 @@ impl PyChronoLoopSignal {
     }
 
     #[getter]
+    fn distribution(&self) -> Option<PyDistConfig> {
+        self.inner
+            .distribution_config()
+            .map(|config| PyDistConfig::from_config(config.clone()))
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
+    fn roundtable(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+        dist: Option<PyDistConfig>,
+    ) -> PyResult<PyRoundtableSchedule> {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        if let Some(dist_cfg) = dist {
+            self.inner.configure_distribution(dist_cfg.inner.clone());
+        } else {
+            self.inner.clear_distribution();
+        }
+        Ok(PyRoundtableSchedule::from_schedule(
+            self.inner.roundtable(rows, cols, config),
+        ))
     fn harmonics(&self) -> Option<PyChronoHarmonics> {
         self.signal
             .harmonics
@@ -9196,6 +9349,34 @@ fn choice_dict<'py>(py: Python<'py>, plan: &RankPlan) -> PyResult<Bound<'py, PyD
     Ok(choice)
 }
 
+#[pyfunction]
+fn ecosystem_snapshot(py: Python<'_>) -> PyResult<PyObject> {
+    let report = EcosystemRegistry::global().snapshot();
+    ecosystem_report_to_py(py, &report)
+}
+
+#[pyfunction]
+fn ecosystem_drain(py: Python<'_>) -> PyResult<PyObject> {
+    let report = EcosystemRegistry::global().drain();
+    ecosystem_report_to_py(py, &report)
+}
+
+#[pyfunction]
+fn ecosystem_record_connector(
+    name: &str,
+    stage: &str,
+    metadata: Option<HashMap<String, String>>,
+) -> PyResult<()> {
+    let event = CoreConnectorEvent {
+        name: name.to_string(),
+        stage: stage.to_string(),
+        metadata: metadata.unwrap_or_default(),
+        issued_at: SystemTime::now(),
+    };
+    EcosystemRegistry::global().record_connector(event);
+    Ok(())
+}
+
 /// Inspect the unified heuristics for the requested rank family.
 #[pyfunction]
 #[pyo3(signature = (kind, rows, cols, k, device=None))]
@@ -10166,6 +10347,9 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_snapshot, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_drain, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem_record_connector, m)?)?;
     m.add_function(wrap_pyfunction!(describe_resonance, m)?)?;
     m.add_function(wrap_pyfunction!(describe_frame, m)?)?;
     m.add_function(wrap_pyfunction!(describe_timeline, m)?)?;
@@ -10229,6 +10413,9 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "hip_probe",
             "describe_device",
             "get_psychoid_stats",
+            "ecosystem_snapshot",
+            "ecosystem_drain",
+            "ecosystem_record_connector",
             "describe_resonance",
             "describe_frame",
             "describe_timeline",
