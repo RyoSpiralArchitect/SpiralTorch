@@ -344,6 +344,24 @@ print(narrator.describe_frame(frames[-1]))
 audio = narrator.speak(frames)
 ```
 
+Atlas projections collect those temporal statistics, maintainer diagnostics,
+and loopback envelopes into one object. Grab the latest `AtlasFrame` via
+`session.atlas()`, inspect its metrics/notes, and narrate it with
+`session.atlas_story(...)` or `st.describe_atlas(...)`:
+
+```python
+atlas = session.atlas()
+if atlas:
+    print(atlas.timestamp, atlas.maintainer_status)
+    for metric in atlas.metrics():
+        print(metric.name, metric.value)
+    story = session.atlas_story(temperature=0.6)
+    if story:
+        print(story[0])
+        print(story[1])
+    print(st.describe_atlas(atlas))
+```
+
 The `SpiralSession` maintainer surfaces clamp and density suggestions directly
 from the temporal stream. Configure it via the builder or tweak thresholds at
 runtime:

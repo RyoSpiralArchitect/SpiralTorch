@@ -21,6 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+use super::atlas::{AtlasFragment, AtlasFrame};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 use std::sync::{OnceLock, RwLock};
@@ -89,6 +90,48 @@ static LAST_SOFTLOGIC_Z: OnceLock<RwLock<Option<SoftlogicZFeedback>>> = OnceLock
 
 fn softlogic_z_cell() -> &'static RwLock<Option<SoftlogicZFeedback>> {
     LAST_SOFTLOGIC_Z.get_or_init(|| RwLock::new(None))
+}
+
+static ATLAS_FRAME: OnceLock<RwLock<Option<AtlasFrame>>> = OnceLock::new();
+
+fn atlas_cell() -> &'static RwLock<Option<AtlasFrame>> {
+    ATLAS_FRAME.get_or_init(|| RwLock::new(None))
+}
+
+/// Replaces the stored atlas frame with the provided snapshot.
+pub fn set_atlas_frame(frame: AtlasFrame) {
+    if let Ok(mut guard) = atlas_cell().write() {
+        *guard = Some(frame);
+    }
+}
+
+/// Clears the stored atlas frame.
+pub fn clear_atlas() {
+    if let Ok(mut guard) = atlas_cell().write() {
+        *guard = None;
+    }
+}
+
+/// Returns the latest atlas frame if one has been recorded.
+pub fn get_atlas_frame() -> Option<AtlasFrame> {
+    atlas_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
+/// Merges an atlas fragment into the stored frame, creating it if absent.
+pub fn merge_atlas_fragment(fragment: AtlasFragment) {
+    if fragment.is_empty() {
+        return;
+    }
+    if let Ok(mut guard) = atlas_cell().write() {
+        if let Some(frame) = guard.as_mut() {
+            frame.merge_fragment(fragment);
+        } else if let Some(frame) = AtlasFrame::from_fragment(fragment) {
+            *guard = Some(frame);
+        }
+    }
 }
 
 /// Stores the most recent SoftLogic Z feedback sample.
@@ -201,11 +244,36 @@ fn loopback_cell() -> &'static RwLock<VecDeque<LoopbackEnvelope>> {
 /// Pushes a new loopback envelope into the global queue, keeping the buffer bounded.
 pub fn push_loopback_envelope(envelope: LoopbackEnvelope) {
     if let Ok(mut guard) = loopback_cell().write() {
-        guard.push_back(envelope);
+        guard.push_back(envelope.clone());
         while guard.len() > 64 {
             guard.pop_front();
         }
     }
+    merge_atlas_fragment(fragment_from_loopback(&envelope));
+}
+
+fn fragment_from_loopback(envelope: &LoopbackEnvelope) -> AtlasFragment {
+    let mut fragment = AtlasFragment::new();
+    fragment.timestamp = Some(envelope.timestamp);
+    fragment.summary = Some(envelope.loop_signal.summary.clone());
+    fragment.harmonics = envelope.loop_signal.harmonics.clone();
+    fragment.loop_support = Some(envelope.support);
+    fragment.collapse_total = envelope.collapse_total;
+    fragment.z_signal = envelope.z_signal;
+    fragment.script_hint = envelope.script_hint.clone();
+    if let Some(source) = &envelope.source {
+        fragment.push_note(format!("source:{source}"));
+    }
+    fragment.push_metric("loop.frames", envelope.loop_signal.summary.frames as f32);
+    fragment.push_metric("loop.energy", envelope.loop_signal.summary.mean_energy);
+    fragment.push_metric("loop.drift", envelope.loop_signal.summary.mean_drift);
+    if let Some(total) = envelope.collapse_total {
+        fragment.push_metric("collapse.total", total);
+    }
+    if let Some(z) = envelope.z_signal {
+        fragment.push_metric("z.bias", z);
+    }
+    fragment
 }
 
 /// Drains up to `limit` loopback envelopes from the queue in FIFO order.
@@ -303,6 +371,7 @@ mod tests {
     fn loopback_queue_drains_in_order() {
         // Ensure the buffer starts empty for the test.
         let _ = drain_loopback_envelopes(usize::MAX);
+        clear_atlas();
         let signal_a = ChronoLoopSignal::new(sample_summary(1.0), None);
         let mut harmonics = ChronoHarmonics {
             frames: 4,
@@ -341,5 +410,26 @@ mod tests {
         let remaining = drain_loopback_envelopes(2);
         assert_eq!(remaining.len(), 1);
         assert!(drain_loopback_envelopes(1).is_empty());
+    }
+
+    #[test]
+    fn loopback_updates_atlas_snapshot() {
+        clear_atlas();
+        let _ = drain_loopback_envelopes(usize::MAX);
+        let signal = ChronoLoopSignal::new(sample_summary(2.5), None);
+        let envelope = LoopbackEnvelope::new(signal)
+            .with_support(2.5)
+            .with_collapse_total(Some(1.1))
+            .with_z_signal(Some(0.4));
+        push_loopback_envelope(envelope);
+        let atlas = get_atlas_frame().expect("atlas frame");
+        assert!(atlas.timestamp > 0.0);
+        assert!(atlas.loop_support >= 2.5 - f32::EPSILON);
+        assert_eq!(atlas.collapse_total, Some(1.1));
+        assert_eq!(atlas.z_signal, Some(0.4));
+        assert!(atlas
+            .metrics
+            .iter()
+            .any(|metric| metric.name == "loop.energy"));
     }
 }

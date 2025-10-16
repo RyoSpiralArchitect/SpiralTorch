@@ -27,6 +27,7 @@
 //! [`ChronoFrame`] samples so higher level tooling can surface temporal stories about
 //! Z-space activity.
 
+use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::{
     ChronoFrame, ChronoHarmonics, ChronoSummary, ResonanceTemporalMetrics,
 };
@@ -162,6 +163,70 @@ impl TextResonator {
         ResonanceNarrative::new(text, highlights)
     }
 
+    /// Produces a narrative describing the aggregated atlas frame.
+    pub fn describe_atlas(&self, atlas: &AtlasFrame) -> ResonanceNarrative {
+        let mut summary = if let Some(chrono) = &atlas.chrono_summary {
+            format!(
+                "Atlas at t={:.3} spans {:.3}s with energy {:.3} and drift {:+.3}.",
+                atlas.timestamp, chrono.duration, chrono.mean_energy, chrono.mean_drift
+            )
+        } else {
+            format!("Atlas snapshot at t={:.3}.", atlas.timestamp)
+        };
+        if let Some(status) = atlas.maintainer_status {
+            summary.push(' ');
+            summary.push_str("Maintainer ");
+            summary.push_str(status.as_str());
+            summary.push('.');
+        }
+        if let Some(diagnostic) = &atlas.maintainer_diagnostic {
+            if !diagnostic.is_empty() {
+                summary.push(' ');
+                summary.push_str(diagnostic);
+            }
+        }
+        let mut highlights = Vec::new();
+        if let Some(clamp) = atlas.suggested_max_scale {
+            highlights.push(format!("clamp {:.3}", clamp));
+        }
+        if let Some(pressure) = atlas.suggested_pressure {
+            highlights.push(format!("pressure {:.3}", pressure));
+        }
+        if atlas.loop_support > 0.0 {
+            highlights.push(format!("loop support {:.3}", atlas.loop_support));
+        }
+        if let Some(total) = atlas.collapse_total {
+            highlights.push(format!("collapse total {:.3}", total));
+        }
+        if let Some(z) = atlas.z_signal {
+            highlights.push(format!("z bias {:+.3}", z));
+        }
+        if let Some(harmonics) = &atlas.harmonics {
+            if let Some(peak) = &harmonics.dominant_drift {
+                highlights.push(format!(
+                    "drift harmonic {:.2}Hz magnitude {:.3}",
+                    peak.frequency, peak.magnitude
+                ));
+            }
+            if let Some(peak) = &harmonics.dominant_energy {
+                highlights.push(format!(
+                    "energy harmonic {:.2}Hz magnitude {:.3}",
+                    peak.frequency, peak.magnitude
+                ));
+            }
+        }
+        for metric in &atlas.metrics {
+            highlights.push(format!("{} {:.3}", metric.name, metric.value));
+        }
+        for note in &atlas.notes {
+            highlights.push(note.clone());
+        }
+        if let Some(script) = &atlas.script_hint {
+            highlights.push(format!("script {}", script));
+        }
+        ResonanceNarrative::new(summary, highlights)
+    }
+
     /// Encodes the narrative into a wave amplitude for visualisation or audio playback.
     pub fn language_wave(&self, resonance: &DifferentialResonance) -> PureResult<LanguageWave> {
         let narrative = self.describe_resonance(resonance);
@@ -219,6 +284,11 @@ pub fn describe_frame(frame: &ChronoFrame) -> String {
 /// Convenience helper that summarises a timeline with default narrator settings.
 pub fn describe_timeline(frames: &[ChronoFrame]) -> PureResult<String> {
     TextResonator::new(-1.0, 0.6).map(|narrator| narrator.describe_timeline(frames).summary)
+}
+
+/// Convenience helper that summarises an atlas frame with default narrator settings.
+pub fn describe_atlas(atlas: &AtlasFrame) -> PureResult<String> {
+    TextResonator::new(-1.0, 0.6).map(|narrator| narrator.describe_atlas(atlas).summary)
 }
 
 fn resonance_metrics(resonance: &DifferentialResonance) -> ResonanceTemporalMetrics {

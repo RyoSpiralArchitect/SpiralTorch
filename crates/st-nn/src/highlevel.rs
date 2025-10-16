@@ -9,6 +9,7 @@ use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedul
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_core::telemetry::atlas::{AtlasFragment, AtlasFrame};
 use st_core::telemetry::chrono::{
     ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoSummary, ChronoTimeline,
     ResonanceTemporalMetrics,
@@ -605,6 +606,22 @@ impl SpiralSession {
         })
     }
 
+    /// Returns the latest atlas frame aggregated across telemetry subsystems.
+    pub fn atlas(&self) -> Option<AtlasFrame> {
+        hub::get_atlas_frame()
+    }
+
+    /// Generates a narrative describing the latest atlas frame when available.
+    pub fn atlas_narrative(&self, temperature: f32) -> PureResult<Option<ResonanceNarrative>> {
+        if let Some(frame) = self.atlas() {
+            let temp = temperature.max(f32::EPSILON);
+            let resonator = TextResonator::new(self.curvature, temp)?;
+            Ok(Some(resonator.describe_atlas(&frame)))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Returns harmonic statistics for the recent temporal history.
     pub fn timeline_harmonics(
         &self,
@@ -702,6 +719,44 @@ impl SpiralSession {
         let bin_hint = self.maintainer.window.max(4).min(64);
         let signal = timeline.loop_signal(self.maintainer.window, bin_hint);
         drop(timeline);
+        let atlas_signal = signal.clone();
+        if let Some(signal) = signal {
+            hub::set_chrono_loop(signal);
+        }
+        if let Some(signal) = atlas_signal {
+            let summary = signal.summary.clone();
+            let harmonics = signal.harmonics.clone();
+            let maintainer = self.maintain();
+            let mut fragment = AtlasFragment::new();
+            fragment.timestamp = Some(summary.latest_timestamp);
+            fragment.summary = Some(summary.clone());
+            fragment.harmonics = harmonics;
+            fragment.loop_support = Some(1.0);
+            fragment.push_metric("timeline.frames", summary.frames as f32);
+            fragment.push_metric("timeline.energy", summary.mean_energy);
+            fragment.push_metric("timeline.drift", summary.mean_drift);
+            fragment.push_metric("timeline.decay", summary.mean_decay);
+            fragment.maintainer_status = Some(maintainer.status);
+            fragment.maintainer_diagnostic = Some(maintainer.diagnostic.clone());
+            fragment.suggested_max_scale = maintainer.suggested_max_scale;
+            fragment.suggested_pressure = maintainer.suggested_pressure;
+            fragment.push_metric("maintainer.average_drift", maintainer.average_drift);
+            fragment.push_metric("maintainer.mean_energy", maintainer.mean_energy);
+            fragment.push_metric("maintainer.mean_decay", maintainer.mean_decay);
+            fragment.push_note(format!("maintainer:{}", maintainer.status.as_str()));
+            #[cfg(feature = "kdsl")]
+            {
+                if let Some(script) = signal.spiralk_script.clone() {
+                    fragment.script_hint = Some(script);
+                }
+                if fragment.script_hint.is_none() {
+                    fragment.script_hint = maintainer.spiralk_script.clone();
+                } else if let Some(extra) = maintainer.spiralk_script.clone() {
+                    fragment.push_note(format!("maintainer.script:{extra}"));
+                }
+            }
+            hub::merge_atlas_fragment(fragment);
+        }
         if let Some(signal) = signal {
             hub::set_chrono_loop(signal);
         }
@@ -1252,6 +1307,37 @@ mod tests {
         assert!(signal.summary.frames >= 2);
         let hub_signal = hub::get_chrono_loop();
         assert!(hub_signal.is_some());
+    }
+
+    #[test]
+    fn atlas_collects_telemetry_fragments() {
+        hub::clear_atlas();
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .with_chrono_capacity(8)
+            .build()
+            .unwrap();
+        let resonance = DifferentialResonance {
+            homotopy_flow: toy_tensor(&[0.2, -0.1]),
+            functor_linearisation: toy_tensor(&[0.1, 0.05]),
+            recursive_objective: toy_tensor(&[0.05, 0.02]),
+            infinity_projection: toy_tensor(&[0.03, 0.01]),
+            infinity_energy: toy_tensor(&[0.02, 0.01]),
+        };
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        session.resonate_over_time(&resonance, 0.1).unwrap();
+        let atlas = session.atlas().expect("atlas");
+        assert!(atlas.timestamp > 0.0);
+        assert!(atlas.loop_support >= 1.0);
+        assert!(atlas
+            .metrics
+            .iter()
+            .any(|metric| metric.name == "timeline.energy"));
+        let story = session.atlas_narrative(0.6).unwrap();
+        assert!(story
+            .as_ref()
+            .map(|narrative| narrative.summary.contains("Atlas"))
+            .unwrap_or(false));
     }
 
     #[test]

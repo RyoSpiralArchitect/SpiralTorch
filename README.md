@@ -366,6 +366,34 @@ print(st.describe_timeline(frames))
 print(harmonics.dominant_energy.frequency if harmonics else None)
 ```
 
+### Atlas projections
+
+Chrono telemetry, maintainer diagnostics, and loopback envelopes now converge
+into a **SpiralTorch atlas** that captures the city-wide state of your run.
+Every `resonate_over_time` call contributes a fragment with drift, energy,
+collapse pulses, and Z-bias hints; the maintainer folds in clamp/pressure
+recommendations at the same time. Rust sessions expose the aggregated
+`AtlasFrame`, and Python mirrors it via `session.atlas()`:
+
+```python
+atlas = session.atlas()
+if atlas:
+    print(atlas.timestamp, atlas.loop_support)
+    for metric in atlas.metrics():
+        print(metric.name, metric.value)
+    story = session.atlas_story(temperature=0.65)
+    if story:
+        summary, highlights = story
+        print(summary)
+        print(highlights)
+    print(st.describe_atlas(atlas))
+```
+
+`AtlasFrame` exposes the latest `ChronoSummary`, optional harmonics, maintainer
+status, and any SpiralK hints captured along the way. Metrics from auxiliary
+nodes (collapse totals, Z-bias pushes) ride alongside free-form notes so you can
+route the atlas straight into dashboards or back into SpiralK planners.
+
 ### Self-maintaining feedback loops
 
 Temporal telemetry now feeds a lightweight **maintainer** that keeps the
