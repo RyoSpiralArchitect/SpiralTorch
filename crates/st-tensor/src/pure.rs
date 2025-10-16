@@ -16,6 +16,7 @@ pub mod differential;
 pub mod fractal;
 pub mod measure;
 pub mod topos;
+pub mod wasm_canvas;
 
 pub use self::differential::{
     DifferentialResonance, FunctorDifferential, HomotopyDifferential, InfinityDifferential,
@@ -32,7 +33,6 @@ use crate::backend::faer_dense;
 #[cfg(feature = "wgpu")]
 use crate::backend::wgpu_dense;
 use core::fmt;
-#[allow(unused_imports)]
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
