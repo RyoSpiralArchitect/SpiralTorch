@@ -316,6 +316,38 @@ epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
 locking or thread book-keeping required.
 
+Need the distributed run to keep every local Blackcat moderator in sync? Toggle
+the cooperative switches on the config:
+
+```rust
+let config = GoldenRetrieverConfig {
+    sync_blackcat_minutes: true,
+    sync_heuristics_log: true,
+    coordinate_blackcat: true,
+    exploration_bias: 1.5,
+    optimization_boost: 0.75,
+    ..GoldenRetrieverConfig::default()
+};
+let retriever = GoldenRetriever::new(config, vec![trainer_a, trainer_b])?;
+let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
+assert!(!report.moderator_minutes.is_empty());
+if let Some(pulse) = &report.cooperative_pulse {
+    println!(
+        "dominant_plan={:?} exploration_drive={} optimization_gain={}",
+        pulse.dominant_plan, pulse.exploration_drive, pulse.optimization_gain
+    );
+}
+```
+
+Every epoch collects the union of moderator minutes and heuristics ops across
+workers, rebroadcasting them before the next round so proposals and soft rules
+stay aligned. With `coordinate_blackcat` flipped on, GoldenRetriever also emits
+an aggregated **GoldenBlackcatPulse** that nudges every worker’s distributed
+node: summary windows widen in proportion to the shared support (fueling
+exploration) while Blackcat’s reward-weighted gain shortens push intervals to
+accelerate consensus. Trainers expose `last_blackcat_pulse()` so downstream
+tooling can inspect exactly how the synergy evolved during the run.
+
 ### SpiralTorchRL (hypergrad policy gradients)
 
 SpiralTorchRL unifies the reinforcement-learning surface around the same

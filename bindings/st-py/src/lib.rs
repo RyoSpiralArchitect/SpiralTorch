@@ -4464,11 +4464,7 @@ fn export_onnx(
         kwargs.set_item("output_names", output_names)?;
     }
 
-    onnx.call_method(
-        "export",
-        (model, example_input, export_path),
-        Some(&kwargs),
-    )?;
+    onnx.call_method("export", (model, example_input, export_path), Some(&kwargs))?;
 
     Ok(())
 }
