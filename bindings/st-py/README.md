@@ -185,115 +185,19 @@ for epoch, stats in enumerate(reports, start=1):
 # Switch back to manual preparation mid-run if you need custom tape control
 lightning.set_auto_prepare(False)
 session.prepare_module(model)
-```
 
-## Integration helpers
-
-SpiralTorch now exposes first-class hooks into popular deployment and
-optimisation frameworks. Each helper lazily imports its dependency and raises a
-clear error if the optional package is missing.
-
-```python
-from pathlib import Path
-
-import spiraltorch as st
-from spiraltorch.integrations import (
-    bentoml_save_model,
-    export_onnx,
-    optuna_optimize,
-    ray_tune_run,
-    torchserve_archive,
-)
-
-# Export a trained SpiralTorch module through torch.onnx
-model = ...  # torch.nn.Module compatible with SpiralTorch parameters
-example_input = ...
-onnx_path = Path("artifacts/model.onnx")
-export_onnx(model, example_input, onnx_path.as_posix(), opset_version=18)
-
-# Package for TorchServe hosting
-archive_path = torchserve_archive(
-    model_name="spiral-demo",
-    serialized_file="checkpoints/spiral.pt",
-    export_path="artifacts",
-    handler="spiral_handler.py",
-    extra_files=["index_to_name.json"],
-    force=True,
-)
-
-# Persist a BentoML runner
-bento_ref = bentoml_save_model(model, "spiral-demo", signatures={"__call__": {"batchable": True}})
-
-# Run Optuna on a SpiralTorch training loop
-def objective(trial):
-    lr = trial.suggest_float("lr", 1e-4, 1e-1, log=True)
-    # ... wire lr into a SpiralSession run ...
-    return final_loss
-
-study = optuna_optimize(objective, n_trials=25, direction="minimize")
-
-# Dispatch Ray Tune sweeps without leaving the SpiralTorch API surface
-def train_spiral(lr: float):
-    # ... execute a SpiralSession epoch and report Ray-compatible metrics ...
-    return {"loss": 0.42}
-
-analysis = ray_tune_run(
-    trainable=lambda config: train_spiral(config["lr"]),
-    config={"lr": [1e-3, 5e-4, 1e-4]},
-    num_samples=5,
-)
-
-print("TorchServe bundle:", archive_path)
-print("Bento artifact:", bento_ref)
-print("Best Optuna trial:", study.best_trial.value)
-print("Best Ray Tune result:", analysis.get_best_config(metric="loss", mode="min"))
-```
-
-## SpiralTorchRL quickstart
-
-`spiraltorch.rl` packages the policy-gradient harness from the Rust side so
-Python notebooks can lean on SpiralTorchRL without reimplementing Z-space
-plumbing. Policies keep their weight updates inside hypergrad tapes and expose
-the discounted-return baseline used during training.
-
-```python
-from spiraltorch import Tensor
-from spiraltorch.rl import PolicyGradient
-
-policy = PolicyGradient(state_dim=4, action_dim=2, learning_rate=0.02, discount=0.97)
-policy.enable_hypergrad(curvature=-1.0, learning_rate=0.05)
-
-state = Tensor(1, 4, [0.2, 0.4, -0.1, 0.3])
-action, probs = policy.select_action(state)
-policy.record_transition(state, action, reward=1.0)
-
-report = policy.finish_episode()
-print(f"reward={report.total_reward:.2f} baseline={report.mean_return:.2f} hypergrad={report.hypergrad_applied}")
-print("weights", policy.weights().tolist())
-```
-
-## SpiralTorchRec quickstart
-
-`spiraltorch.rec` brings the SpiralTorchRec factorisation stack to notebooks and
-production jobs alike. Embeddings stay guarded by the open-cartesian topos so
-psychoid limits never drift while running alternating updates in pure Rust.
-
-```python
-from spiraltorch.rec import Recommender
-
-rec = Recommender(users=8, items=12, factors=4, learning_rate=0.05, regularization=0.002)
-
-ratings = [
-    (0, 0, 5.0),
-    (0, 1, 3.0),
-    (1, 0, 4.0),
-    (1, 2, 4.5),
+# Stage training plans inherit the previous configuration by default
+plan = [
+    {"label": "warmup", "epochs": [dataset]},
+    {
+        "label": "refine",
+        "config": {"top_k": 4, "auto_prepare": False},
+        "epochs": [dataset],
+    },
 ]
 
-epoch = rec.train_epoch(ratings)
-print(f"rmse={epoch.rmse:.4f} samples={epoch.samples}")
-print("prediction", rec.predict(0, 2))
-print("user embedding", rec.user_embedding(0).tolist())
+report = lightning.fit_plan(model, loss, plan)
+print(report.best_stage_label(), report.best_epoch().average_loss)
 ```
 
 The `DistConfig` connects the local roundtable to a meta layer that exchanges
@@ -325,8 +229,11 @@ print(resonance.homotopy_flow().tolist())
 
 Temporal telemetry is available directly from Python. Record frames with
 `session.resonate_over_time(resonance, dt)` and animate the geometry through the
-new helpers. Use `timeline_summary` when you want rolling drift/energy stats and
-`session.speak(...)` for a ready-to-plot amplitude trace:
+new helpers. Use `timeline_summary` for rolling drift/energy stats,
+`timeline_harmonics` to analyse spectral drift, `loop_signal` for a ready-made
+bundle (complete with SpiralK hints when `kdsl` is enabled), and `session.speak(...)`
+for a ready-to-plot amplitude trace while `timeline_story` narrates the same
+window:
 
 ```python
 frame = session.resonate_over_time(resonance, dt=0.1)
@@ -334,16 +241,26 @@ print(frame.timestamp, frame.total_energy, frame.curvature_drift)
 
 frames = session.timeline(timesteps=64)
 summary = session.timeline_summary(timesteps=64)
+harmonics = session.timeline_harmonics(timesteps=128, bins=20)
+loop_signal = session.loop_signal(timesteps=128)
 times, energy, drift = session.animate_resonance(timesteps=64)
 wave = session.speak(timesteps=64, temperature=0.6)
+story, highlights = session.timeline_story(timesteps=128, temperature=0.65)
 print(session.describe())
+print(st.describe_timeline(frames))
+if harmonics and harmonics.dominant_energy:
+    print("Energy harmonic", harmonics.dominant_energy.frequency)
+if loop_signal and loop_signal.spiralk_script:
+    print("SpiralK loop hint:\n", loop_signal.spiralk_script)
 
 encoder = LanguageWaveEncoder(session.curvature(), 0.55)
 wave = encoder.speak(frames)
 
+import spiraltorch as st
 from spiraltorch import TextResonator
 narrator = TextResonator(session.curvature(), 0.55)
 print(narrator.describe_resonance(resonance))
+print(narrator.describe_timeline(frames))
 print(narrator.describe_frame(frames[-1]))
 audio = narrator.speak(frames)
 ```
@@ -358,9 +275,15 @@ session = builder.build()
 
 print(session.maintainer_config())
 report = session.self_maintain()
+print(report.spiralk_script)
 if report.should_rewrite():
     session.configure_maintainer(pressure_step=0.2)
     print("Maintainer escalated:", report.diagnostic)
+if report.drift_peak:
+    print("Drift harmonic", report.drift_peak.frequency, report.drift_peak.magnitude)
+pulse = session.collapse_pulse()
+if pulse:
+    print("Collapse pulse", pulse.command, pulse.step)
 ```
 
 ```python

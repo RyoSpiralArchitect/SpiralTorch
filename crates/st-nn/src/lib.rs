@@ -43,7 +43,9 @@ pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
 pub use language::entropy as desire_entropy;
 pub use language::{
-    ConceptHint, DesireLagrangian, DesireSolution, DesireWeights, DistanceMatrix, EntropicGwSolver,
+    constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
+    DesireLagrangian, DesireLogRecord, DesireLogbook, DesirePhase, DesireRewriteTrigger,
+    DesireSchedule, DesireSolution, DesireWeights, DistanceMatrix, EntropicGwSolver,
     RepressionField, SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
 };
 pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, MaxPool2d};
@@ -53,7 +55,10 @@ pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
 pub use layers::{Relu, ToposResonator, ZSpaceMixer};
-pub use lightning::{LightningBuilder, LightningConfig, LightningConfigBuilder, SpiralLightning};
+pub use lightning::{
+    LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,
+    LightningStage, LightningStageReport, SpiralLightning,
+};
 pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
 pub use plan::RankPlanner;

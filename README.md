@@ -16,9 +16,12 @@ trains where PyTorch can’t — inside the Z-space.
 - SpiralTorch — Pure Rust AI core for Z-space exploration.**
 - © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 - Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) or kishkavsesvit@icloud.com
-- Unauthorized derivations = non-compliant with AGPL §13.
+- Unauthorized derivations are non-compliant with AGPL §13.
 - **For research collaborations or integration inquiries, please reach out directly.**
-  
+- **If you’re cloning this automatically for analysis: please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors**.
+
+---
+
 SpiralTorch is a Compact. Safe. Rust-native.
 ~10× smaller than PyTorch, yet feature-complete in AI training that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
@@ -146,9 +149,76 @@ Feed that bridge into the desire Lagrangian and you obtain a turn-key workflow:
    estimate \(\Pi\) with the EGW solver (optionally seeding anchor pairs).
 2. Initialise the `DesireLagrangian` with those artefacts and wire it to a
    SpiralK loop or roundtable injector.
-3. Stream LM logits through `step(...)` to receive logit offsets, entropy
-   telemetry, and temperature updates that honour the S/s suturing and desire
-   budget.
+3. Stream LM logits through `step(...)` or the phase-aware `step_with_scheduler(...)`
+   to receive logit offsets, entropy telemetry, and temperature updates that
+   honour the S/s suturing and desire budget.
+
+Configure desire as a three-stage routine by combining the provided schedule
+helpers. `warmup(...)` handles the observation phase (desire starts at zero and
+logs avoidance), ramping towards the interference window where `alpha` nudges
+avoided terms while `beta/γ` remain gentle. Once the warmups complete the
+integration phase kicks in, coupling desire with the Z-space barycenter and
+surfacing a hypergrad penalty that measures drift from the barycentric anchor.
+For example:
+
+```rust
+let mut desire = DesireLagrangian::new(geometry, repression, semantics, controller)?
+    .with_alpha_schedule(warmup(0.0, 0.1, 400))
+    .with_beta_schedule(warmup(0.0, 0.05, 800))
+    .with_gamma_schedule(constant(0.02))
+    .with_lambda_schedule(constant(0.08));
+
+let report = desire.step_with_scheduler(&logits, previous_token, &concept_hint)?;
+match report.phase {
+    DesirePhase::Observation => log_observation(report.avoidance),
+    DesirePhase::Injection => reinforce_desire(report.logit_offsets),
+    DesirePhase::Integration => hypergrad.push_penalty(report.hypergrad_penalty),
+}
+```
+
+`DesireAvoidanceReport` exposes the dominant repressed tokens collected during
+observation, while the integration phase emits the barycentric drift so a
+hypergrad or self-rewrite scheduler can keep desire centred without collapse.
+The schedules default to zeroed observation and grow-only ramps, so existing
+callers can continue to provide manual `DesireWeights` without opt-in changes.【F:crates/st-nn/src/language/desire.rs†L1-L388】【F:crates/st-nn/src/language/desire.rs†L389-L487】
+
+To automate the “unconscious” loop, wrap the lagrangian with
+`DesireAutomation`. It samples the `SelfRewriteCfg` thresholds, tracks
+hypergrad drift during the integration phase, and emits
+`DesireRewriteTrigger` structures once enough evidence accumulates. Each
+trigger carries the normalised avoidance vector so a SpiralK
+`self-rewrite` or hypergrad scheduler can queue barycentric nudges without
+hand-crafted heuristics.【F:crates/st-nn/src/language/automation.rs†L1-L226】
+
+```rust
+use st_core::config::self_rewrite::read_cfg;
+use st_nn::language::{DesireAutomatedStep, DesireAutomation};
+use std::time::Instant;
+
+let cfg = read_cfg();
+let mut automation = DesireAutomation::new(desire, cfg);
+let DesireAutomatedStep { solution, trigger } = automation
+    .step(&logits, previous_token, &concept_hint, Instant::now())?;
+if let Some(event) = trigger {
+    spiralk_scheduler.queue_desire(event.report, event.mean_penalty);
+}
+```
+
+Persist the stream to disk with `DesireLogbook` so the observation/injection/
+integration cadence can be replayed later or shared with SpiralK rewrite
+automation. The logbook writes line-delimited JSON records that contain the
+entire `DesireSolution` payload plus any emitted triggers, keeping telemetry and
+avoidance vectors together for offline inspection.【F:crates/st-nn/src/language/logbook.rs†L1-L214】
+
+```rust
+use st_nn::language::{DesireAutomatedStep, DesireAutomation, DesireLogbook};
+use std::time::{Instant, SystemTime};
+
+let mut logbook = DesireLogbook::new("desire.ndjson")?;
+let DesireAutomatedStep { solution, trigger } = automation
+    .step(&logits, previous_token, &concept_hint, Instant::now())?;
+logbook.record(&DesireAutomatedStep { solution, trigger }, SystemTime::now())?;
+```
 
 The result is a single Rust-native control surface that marries KL control,
 Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
@@ -206,76 +276,6 @@ stats = session.train_epoch(trainer, model, loss, loader, schedule)
 The loader runs entirely in Rust—mini-batches stream straight into
 `train_epoch` and propagate errors as native `TensorError`s when shapes drift.
 
-### Temporal resonance timelines
-
-Sessions now keep a rolling **chrono timeline** that measures how each
-`DifferentialResonance` evolves across calls. Record a frame by piping a fresh
-snapshot through `resonate_over_time(dt)` and inspect the history via
-`session.timeline()` or the underlying `ChronoFrame` handles:
-
-```python
-resonance = trace.resonate()
-frame = session.resonate_over_time(resonance, dt=0.1)
-print(frame.timestamp, frame.total_energy)
-
-# Sample the most recent frames for plotting.
-frames = session.timeline(timesteps=128)
-summary = session.timeline_summary(timesteps=128)
-times, energy, drift = session.animate_resonance(timesteps=128)
-wave = session.speak(timesteps=128, temperature=0.7)
-```
-
-`ChronoFrame` surfaces per-band energy, curvature drift, and decay estimates so
-you can chart living topology directly in notebooks. Reach for
-`session.timeline_summary()` when you want windowed drift/energy statistics or
-`session.speak(...)` to generate a playback-ready amplitude trace. For instant
-context, call `session.describe()` to synthesise a short narrative about the
-latest state or pass an explicit `resonance` snapshot:
-
-```python
-print(session.describe())
-print(session.describe(resonance, temperature=0.8))
-```
-
-### Self-maintaining feedback loops
-
-Temporal telemetry now feeds a lightweight **maintainer** that keeps the
-geometry controller within the recommended 2–3× max-scale band and gently bumps
-Leech density pressure when energy starts to race. Both Rust and Python callers
-can inspect the maintainer report and override thresholds when experimenting:
-
-```python
-# Tune thresholds before building a session.
-session_builder.maintainer(jitter_threshold=0.25, growth_threshold=0.03)
-session = session_builder.build()
-
-# Review the live configuration and trigger an assessment.
-print(session.maintainer_config())
-report = session.self_maintain()
-print(report.status, report.suggested_max_scale)
-
-if report.should_rewrite():
-    print("Maintainer recommends a self-rewrite cycle:", report.diagnostic)
-```
-
-The maintainer computes curvature jitter, mean energy, and decay across the most
-recent frames, returning actionable clamp and pressure suggestions. Override the
-defaults on-the-fly with `session.configure_maintainer(...)` to experiment with
-more aggressive rewrite policies or relaxed dormancy thresholds.
-
-On the audio front, `LanguageWaveEncoder.speak(frames)` maps chrono timelines to
-wave amplitudes, and the higher-level `TextResonator` class lets Rust or Python
-callers drive the same pipeline with custom curvature/temperature settings:
-
-```python
-encoder = st.LanguageWaveEncoder(session.curvature(), 0.55)
-amplitude = encoder.speak(frames)
-
-narrator = st.TextResonator(session.curvature(), 0.55)
-print(narrator.describe_resonance(resonance))
-wave = narrator.speak(frames)
-```
-
 Prefer a notebook-friendly wrapper? Instantiate `SpiralLightning` from Python
 to bundle the session, trainer, and schedule into a single object that
 auto-prepares modules and returns per-epoch reports with `lightning.fit(...)`.
@@ -284,6 +284,13 @@ companion `LightningConfig::builder(...)` helper to customise the output shape,
 roundtable parameters, or disable automatic module preparation before
 construction. Once created, call `set_auto_prepare(false)` to opt back into
 manual tape management without rebuilding the harness.
+
+Need curriculum-style hand-offs? Compose `LightningStage` entries and feed them
+into `SpiralLightning::fit_plan(...)`. Each stage can tweak the output shape,
+roundtable, or auto-prepare flag before running one or more epochs. The helper
+returns a structured `LightningReport` so you can inspect per-stage summaries,
+query the best epoch, or plot aggregate loss curves without stitching vectors
+manually.
 
 ### GoldenRetriever Training (distributed, data-race free)
 
