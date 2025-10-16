@@ -2351,4 +2351,3 @@ mod tests {
         assert!(bridge.drain_summary().unwrap().is_none());
     }
 }
-}
