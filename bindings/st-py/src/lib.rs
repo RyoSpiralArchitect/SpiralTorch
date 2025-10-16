@@ -62,11 +62,6 @@ use st_tensor::pure::{
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
     MatmulBackend, PureResult, Tensor, TensorBiome, TensorError,
 };
-use st_text::{
-    describe_frame as text_describe_frame, describe_resonance as text_describe_resonance,
-    describe_timeline as text_describe_timeline, TextResonator,
-};
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::{Mutex, OnceLock};
@@ -1662,6 +1657,342 @@ impl PyChronoHarmonics {
     fn drift_power(&self) -> Vec<f32> {
         self.harmonics.drift_power.clone()
     }
+}
+
+fn outcome_band_label(band: OutcomeBand) -> &'static str {
+    match band {
+        OutcomeBand::Above => "above",
+        OutcomeBand::Here => "here",
+        OutcomeBand::Beneath => "beneath",
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "MaintainerConfig")]
+#[derive(Clone, Copy, Debug)]
+struct PyMaintainerConfig {
+    threshold: f32,
+    participants: usize,
+}
+
+#[pymethods]
+impl PyMaintainerConfig {
+    #[new]
+    #[pyo3(signature = (threshold=0.6, participants=4))]
+    fn new(threshold: f32, participants: usize) -> PyResult<Self> {
+        if !(0.0..=1.0).contains(&threshold) {
+            return Err(PyValueError::new_err(
+                "maintainer threshold must be within [0.0, 1.0]",
+            ));
+        }
+        Ok(Self {
+            threshold,
+            participants: participants.max(1),
+        })
+    }
+
+    #[getter]
+    fn threshold(&self) -> f32 {
+        self.threshold
+    }
+
+    #[getter]
+    fn participants(&self) -> usize {
+        self.participants
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "MaintainerConfig(threshold={:.3}, participants={})",
+            self.threshold, self.participants
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "MaintainerReport")]
+#[derive(Clone, Debug)]
+struct PyMaintainerReport {
+    minutes: ModeratorMinutes,
+}
+
+impl PyMaintainerReport {
+    fn from_minutes(minutes: ModeratorMinutes) -> Self {
+        Self { minutes }
+    }
+
+    fn minutes(&self) -> &ModeratorMinutes {
+        &self.minutes
+    }
+}
+
+#[pymethods]
+impl PyMaintainerReport {
+    #[getter]
+    fn plan_signature(&self) -> &str {
+        &self.minutes.plan_signature
+    }
+
+    #[getter]
+    fn script_hint(&self) -> &str {
+        &self.minutes.script_hint
+    }
+
+    #[getter]
+    fn winner(&self) -> &'static str {
+        outcome_band_label(self.minutes.winner)
+    }
+
+    #[getter]
+    fn support(&self) -> f32 {
+        self.minutes.support
+    }
+
+    #[getter]
+    fn mean_score(&self) -> f32 {
+        self.minutes.mean_score
+    }
+
+    #[getter]
+    fn mean_psi(&self) -> f32 {
+        self.minutes.mean_psi
+    }
+
+    #[getter]
+    fn mean_z(&self) -> f32 {
+        self.minutes.mean_z
+    }
+
+    #[getter]
+    fn confidence(&self) -> (f32, f32) {
+        self.minutes.confidence
+    }
+
+    #[getter]
+    fn reward(&self) -> f64 {
+        self.minutes.reward
+    }
+
+    #[getter]
+    fn issued_at(&self) -> f64 {
+        self.minutes
+            .issued_at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    fn picks<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let picks = PyDict::new_bound(py);
+        for (plan, choice) in &self.minutes.picks {
+            picks.set_item(plan, choice)?;
+        }
+        Ok(picks)
+    }
+
+    fn notes(&self) -> &str {
+        &self.minutes.notes
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "MaintainerReport(plan='{}', winner={}, support={:.3}, score={:.3})",
+            self.plan_signature(),
+            self.winner(),
+            self.support(),
+            self.mean_score()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ChronoSummary")]
+#[derive(Clone, Debug)]
+struct PyChronoSummary {
+    plan: String,
+    script: String,
+    winner: OutcomeBand,
+    support: f32,
+    score: f32,
+    psi: f32,
+    z: f32,
+    count: usize,
+    earliest: SystemTime,
+    latest: SystemTime,
+}
+
+#[pymethods]
+impl PyChronoSummary {
+    #[getter]
+    fn plan_signature(&self) -> &str {
+        &self.plan
+    }
+
+    #[getter]
+    fn script_hint(&self) -> &str {
+        &self.script
+    }
+
+    #[getter]
+    fn winner(&self) -> &'static str {
+        outcome_band_label(self.winner)
+    }
+
+    #[getter]
+    fn support(&self) -> f32 {
+        self.support
+    }
+
+    #[getter]
+    fn mean_score(&self) -> f32 {
+        self.score
+    }
+
+    #[getter]
+    fn mean_psi(&self) -> f32 {
+        self.psi
+    }
+
+    #[getter]
+    fn mean_z(&self) -> f32 {
+        self.z
+    }
+
+    #[getter]
+    fn samples(&self) -> usize {
+        self.count
+    }
+
+    #[getter]
+    fn window_seconds(&self) -> f64 {
+        self.latest
+            .duration_since(self.earliest)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "ChronoSummary(plan='{}', winner={}, support={:.3}, score={:.3}, samples={})",
+            self.plan_signature(),
+            self.winner(),
+            self.support(),
+            self.mean_score(),
+            self.samples()
+        ))
+    }
+}
+
+fn aggregate_reports(reports: &[PyMaintainerReport]) -> Option<PyChronoSummary> {
+    if reports.is_empty() {
+        return None;
+    }
+
+    let mut support = 0.0f32;
+    let mut score = 0.0f32;
+    let mut psi = 0.0f32;
+    let mut z = 0.0f32;
+    let mut winners: HashMap<OutcomeBand, usize> = HashMap::new();
+    let mut earliest = SystemTime::UNIX_EPOCH;
+    let mut latest = SystemTime::UNIX_EPOCH;
+
+    for report in reports {
+        let minutes = report.minutes();
+        support += minutes.support;
+        score += minutes.mean_score;
+        psi += minutes.mean_psi;
+        z += minutes.mean_z;
+        *winners.entry(minutes.winner).or_insert(0) += 1;
+        if minutes.issued_at < earliest || earliest == SystemTime::UNIX_EPOCH {
+            earliest = minutes.issued_at;
+        }
+        if minutes.issued_at > latest {
+            latest = minutes.issued_at;
+        }
+    }
+
+    let count = reports.len();
+    let dominant = winners
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(band, _)| band)
+        .unwrap_or(OutcomeBand::Here);
+
+    let first = reports.first().unwrap().minutes();
+    Some(PyChronoSummary {
+        plan: first.plan_signature.clone(),
+        script: first.script_hint.clone(),
+        winner: dominant,
+        support: support / count as f32,
+        score: score / count as f32,
+        psi: psi / count as f32,
+        z: z / count as f32,
+        count,
+        earliest,
+        latest,
+    })
+}
+
+#[pyfunction(name = "chrono_summary")]
+fn chrono_summary_py(reports: Vec<PyMaintainerReport>) -> PyResult<PyChronoSummary> {
+    aggregate_reports(&reports).ok_or_else(|| {
+        PyValueError::new_err("expected at least one MaintainerReport for chrono_summary")
+    })
+}
+
+#[pyfunction(name = "summarize_timeline")]
+fn summarize_timeline_py(mut reports: Vec<PyMaintainerReport>) -> PyResult<PyChronoSummary> {
+    reports.sort_by_key(|report| report.minutes().issued_at);
+    chrono_summary_py(reports)
+}
+
+#[pyfunction(name = "speak_timeline")]
+fn speak_timeline_py(reports: Vec<PyMaintainerReport>) -> PyResult<String> {
+    let summary = chrono_summary_py(reports.clone())?;
+    let mut line = String::new();
+    write!(
+        &mut line,
+        "Plan '{}' settled on {} with support {:.2} across {} rounds.",
+        summary.plan_signature(),
+        summary.winner(),
+        summary.support(),
+        summary.samples()
+    )
+    .expect("formatting to string");
+    if summary.mean_z().abs() > 0.0 {
+        write!(
+            &mut line,
+            " Language resonance {:.2} and psi {:.2} guided the decision.",
+            summary.mean_z(),
+            summary.mean_psi()
+        )
+        .expect("formatting to string");
+    }
+    if let Some(report) = reports.last() {
+        if !report.minutes().notes.is_empty() {
+            write!(&mut line, " Notes: {}", report.notes()).expect("formatting to string");
+        }
+    }
+    Ok(line)
+}
+
+#[pyfunction(name = "language_wave_amplitude")]
+fn language_wave_amplitude_py(reports: Vec<PyMaintainerReport>) -> PyResult<f32> {
+    if reports.is_empty() {
+        return Err(PyValueError::new_err(
+            "expected at least one MaintainerReport for language_wave_amplitude",
+        ));
+    }
+    let amplitude = reports
+        .iter()
+        .map(|report| report.minutes().mean_z.abs())
+        .sum::<f32>()
+        / reports.len() as f32;
+    Ok(amplitude)
+}
+
+#[pyclass(module = "spiraltorch", name = "EpochStats")]
+#[derive(Clone, Copy)]
+struct PyEpochStats {
+    inner: EpochStats,
+}
 
     #[getter]
     fn energy_power(&self) -> Vec<f32> {
@@ -1812,9 +2143,17 @@ impl PyChronoSummary {
         self.summary.duration
     }
 
-    #[getter]
-    fn latest_timestamp(&self) -> f32 {
-        self.summary.latest_timestamp
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.inner
+            .install_blackcat_moderator(config.threshold, config.participants);
+    }
+
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.inner
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
     }
 
     #[getter]
@@ -1859,11 +2198,10 @@ impl PyChronoSummary {
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "ChronoSummary(frames={}, duration={:.3}, energy={:.3}±{:.3})",
-            self.summary.frames,
-            self.summary.duration,
-            self.summary.mean_energy,
-            self.summary.energy_std
+            "ModuleTrainer(curvature={:.4}, hyper_lr={:.4}, fallback_lr={:.4})",
+            self.curvature(),
+            self.hyper_learning_rate(),
+            self.fallback_learning_rate()
         ))
     }
 }
@@ -1925,9 +2263,29 @@ impl PyChronoFrame {
         self.frame.projection_energy
     }
 
-    #[getter]
-    fn infinity_energy(&self) -> f32 {
-        self.frame.infinity_energy
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.inner
+            .trainer_mut()
+            .install_blackcat_moderator(config.threshold, config.participants);
+    }
+
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.inner
+            .trainer()
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
+    }
+
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<PyEpochStats> {
+        let stats = run_epoch_with_lightning(&mut self.inner, module, loss, batches)?;
+        Ok(PyEpochStats::from_stats(stats))
     }
 
     fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
@@ -1966,104 +2324,236 @@ impl PyChronoFrame {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "TextResonator")]
-#[derive(Clone)]
-struct PyTextResonator {
-    inner: TextResonator,
-}
-
-impl PyTextResonator {
-    fn from_inner(inner: TextResonator) -> Self {
-        Self { inner }
-    }
+#[pyclass(module = "spiraltorch.rec", name = "Recommender", unsendable)]
+struct PyRecommender {
+    lightning: NnSpiralLightning,
 }
 
 #[pymethods]
-impl PyTextResonator {
+impl PyRecommender {
     #[new]
-    fn new(curvature: f32, temperature: f32) -> PyResult<Self> {
-        Ok(Self::from_inner(convert(TextResonator::new(
-            curvature,
-            temperature,
-        ))?))
+    #[pyo3(signature = (session, rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn new(
+        session: PySpiralSession,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) -> Self {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        let lightning = NnSpiralLightning::with_config(session.inner.clone(), config);
+        Self { lightning }
     }
 
-    fn curvature(&self) -> f32 {
-        self.inner.encoder().curvature()
+    #[getter]
+    fn rows(&self) -> u32 {
+        self.lightning.config().rows()
     }
 
-    fn temperature(&self) -> f32 {
-        self.inner.encoder().temperature()
+    #[getter]
+    fn cols(&self) -> u32 {
+        self.lightning.config().cols()
     }
 
-    fn describe_resonance(&self, resonance: &PyDifferentialResonance) -> PyResult<String> {
-        Ok(self.inner.describe_resonance(&resonance.inner).summary)
+    #[getter]
+    fn auto_prepare(&self) -> bool {
+        self.lightning.config().auto_prepare()
     }
 
-    fn describe_frame(&self, frame: &PyChronoFrame) -> PyResult<String> {
-        Ok(self.inner.describe_frame(frame.as_frame()).summary)
+    fn set_auto_prepare(&mut self, enabled: bool) {
+        self.lightning.set_auto_prepare(enabled);
     }
 
-    fn speak(&self, frames: Vec<PyChronoFrame>) -> PyResult<Vec<f32>> {
-        let frames: Vec<ChronoFrame> = frames.into_iter().map(|frame| frame.into_frame()).collect();
-        convert(self.inner.speak(&frames))
+    fn schedule(&self) -> PyRoundtableSchedule {
+        PyRoundtableSchedule::from_schedule(self.lightning.schedule().clone())
+    }
+
+    #[pyo3(signature = (rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
+    fn reconfigure(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        auto_prepare: bool,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+    ) {
+        let roundtable = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        let config = NnLightningConfig::builder(rows, cols)
+            .roundtable(roundtable)
+            .auto_prepare(auto_prepare)
+            .build();
+        self.lightning.reconfigure(config);
+    }
+
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.lightning
+            .trainer_mut()
+            .install_blackcat_moderator(config.threshold, config.participants);
+    }
+
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.lightning
+            .trainer()
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
+    }
+
+    fn prepare_module(&mut self, module: &Bound<'_, PyAny>) -> PyResult<()> {
+        prepare_module_for_lightning(&mut self.lightning, module)
+    }
+
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<PyEpochStats> {
+        let stats = run_epoch_with_lightning(&mut self.lightning, module, loss, batches)?;
+        Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn recommend(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        input: &PyTensor,
+    ) -> PyResult<PyTensor> {
+        let input_obj = Py::new(py, input.clone_py())?;
+        let output = module.call_method1("forward", (input_obj,))?;
+        output.extract::<PyTensor>()
+    }
+
+    fn recommend_topk(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        input: &PyTensor,
+        k: usize,
+        largest: bool,
+    ) -> PyResult<(PyTensor, PyTensor)> {
+        let output = self.recommend(py, module, input)?;
+        topk2d_tensor_py(py, &output, k, None, largest)
+    }
+
+    fn maintainer_support(&self) -> f32 {
+        let reports = self.maintainer_reports();
+        if reports.is_empty() {
+            0.0
+        } else {
+            reports.iter().map(|r| r.support()).sum::<f32>() / reports.len() as f32
+        }
     }
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "TextResonator(curvature={}, temperature={})",
-            self.curvature(),
-            self.temperature()
+            "Recommender(rows={}, cols={}, auto_prepare={})",
+            self.rows(),
+            self.cols(),
+            self.auto_prepare()
         ))
     }
 }
 
-#[pyclass(module = "spiraltorch.nn", name = "ZSpaceProjector")]
-struct PyZSpaceProjector {
-    inner: Option<NnZSpaceProjector>,
+#[pyclass(module = "spiraltorch", name = "SpiralSessionBuilder")]
+struct PySpiralSessionBuilder {
+    builder: Option<SpiralSessionBuilder>,
 }
 
-impl PyMaintainerReport {
-    fn from_report(report: MaintainerReport) -> Self {
-        Self { report }
+impl PySpiralSessionBuilder {
+    fn from_builder(builder: SpiralSessionBuilder) -> Self {
+        Self {
+            builder: Some(builder),
+        }
+    }
+
+    fn ensure_builder(&mut self) -> PyResult<&mut SpiralSessionBuilder> {
+        self.builder
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("builder has already been consumed"))
     }
 }
 
 #[pymethods]
-impl PyMaintainerReport {
-    #[getter]
-    fn status(&self) -> &'static str {
-        self.report.status.as_str()
+impl PySpiralSessionBuilder {
+    #[new]
+    #[pyo3(signature = (device=None))]
+    fn new(device: Option<&str>) -> Self {
+        let caps = caps_for(device);
+        Self {
+            builder: Some(SpiralSession::builder(caps)),
+        }
     }
 
-    #[getter]
-    fn average_drift(&self) -> f32 {
-        self.report.average_drift
+    fn curvature(&mut self, curvature: f32) -> PyResult<()> {
+        self.ensure_builder()?.set_curvature(curvature);
+        Ok(())
     }
 
-    #[getter]
-    fn mean_energy(&self) -> f32 {
-        self.report.mean_energy
+    fn hyper_learning_rate(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.ensure_builder()?
+            .set_hyper_learning_rate(learning_rate);
+        Ok(())
     }
 
-    #[getter]
-    fn mean_decay(&self) -> f32 {
-        self.report.mean_decay
+    fn fallback_learning_rate(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.ensure_builder()?
+            .set_fallback_learning_rate(learning_rate);
+        Ok(())
     }
 
-    #[getter]
-    fn drift_peak(&self) -> Option<PyChronoPeak> {
-        self.report.drift_peak.clone().map(PyChronoPeak::from_peak)
+    fn entropy_weight(&mut self, entropy_weight: f32) -> PyResult<()> {
+        self.ensure_builder()?
+            .set_barycenter_entropy(entropy_weight);
+        Ok(())
     }
 
-    #[getter]
-    fn energy_peak(&self) -> Option<PyChronoPeak> {
-        self.report.energy_peak.clone().map(PyChronoPeak::from_peak)
+    fn beta_j(&mut self, beta_j: f32) -> PyResult<()> {
+        self.ensure_builder()?.set_barycenter_beta_j(beta_j);
+        Ok(())
     }
 
-    #[getter]
-    fn suggested_max_scale(&self) -> Option<f32> {
-        self.report.suggested_max_scale
+    #[pyo3(signature = (coupling=None))]
+    fn coupling(&mut self, coupling: Option<PyTensor>) -> PyResult<()> {
+        let tensor = coupling.map(PyTensor::into_tensor);
+        self.ensure_builder()?.set_barycenter_coupling(tensor);
+        Ok(())
     }
 
     #[getter]
@@ -5395,6 +5885,124 @@ fn train_trainer_with_dataset(
             return Ok(Some(stats));
         }
     }
+}
+
+#[pyclass(module = "spiraltorch.rl", name = "PolicyGradient", unsendable)]
+struct PyPolicyGradient {
+    trainer: ModuleTrainer,
+}
+
+#[pymethods]
+impl PyPolicyGradient {
+    #[new]
+    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01))]
+    fn new(
+        device: Option<&str>,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Self {
+        let caps = caps_for(device);
+        Self {
+            trainer: ModuleTrainer::new(
+                caps,
+                curvature,
+                hyper_learning_rate,
+                fallback_learning_rate,
+            ),
+        }
+    }
+
+    #[getter]
+    fn curvature(&self) -> f32 {
+        self.trainer.curvature()
+    }
+
+    #[getter]
+    fn hyper_learning_rate(&self) -> f32 {
+        self.trainer.hyper_learning_rate()
+    }
+
+    #[getter]
+    fn fallback_learning_rate(&self) -> f32 {
+        self.trainer.fallback_learning_rate()
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
+    fn roundtable(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+        dist: Option<PyDistConfig>,
+    ) -> PyResult<PyRoundtableSchedule> {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        if let Some(dist_cfg) = dist {
+            self.trainer.configure_distribution(dist_cfg.inner.clone());
+        } else {
+            self.trainer.clear_distribution();
+        }
+        Ok(PyRoundtableSchedule::from_schedule(
+            self.trainer.roundtable(rows, cols, config),
+        ))
+    }
+
+    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
+        self.trainer
+            .install_blackcat_moderator(config.threshold, config.participants);
+    }
+
+    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
+        self.trainer
+            .blackcat_minutes()
+            .into_iter()
+            .map(PyMaintainerReport::from_minutes)
+            .collect()
+    }
+
+    #[pyo3(signature = (module, loss, batches, schedule))]
+    fn train_epoch(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+    ) -> PyResult<PyEpochStats> {
+        let stats =
+            run_epoch_with_trainer(&mut self.trainer, module, loss, batches, &schedule.inner)?;
+        Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "PolicyGradient(curvature={:.3}, hyper_lr={:.3}, fallback_lr={:.3})",
+            self.curvature(),
+            self.hyper_learning_rate(),
+            self.fallback_learning_rate()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "MeanSquaredError")]
+struct PyMeanSquaredError {
+    inner: MeanSquaredError,
+}
 
     Ok(None)
 }
@@ -5477,31 +6085,287 @@ fn prepare_module_for_lightning(
     ))
 }
 
-fn train_lightning_with_dataset(
-    lightning: &mut NnSpiralLightning,
+#[pyclass(module = "spiraltorch.nn", name = "HyperbolicCrossEntropy")]
+struct PyHyperbolicCrossEntropy {
+    inner: NnHyperbolicCrossEntropy,
+}
+
+impl PyHyperbolicCrossEntropy {
+    fn inner_mut(&mut self) -> &mut NnHyperbolicCrossEntropy {
+        &mut self.inner
+    }
+}
+
+#[pymethods]
+impl PyHyperbolicCrossEntropy {
+    #[new]
+    #[pyo3(signature = (curvature=-1.0, epsilon=None))]
+    fn new(curvature: f32, epsilon: Option<f32>) -> PyResult<Self> {
+        let inner = match epsilon {
+            Some(eps) => convert(NnHyperbolicCrossEntropy::with_epsilon(curvature, eps))?,
+            None => convert(NnHyperbolicCrossEntropy::new(curvature))?,
+        };
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn curvature(&self) -> f32 {
+        self.inner.curvature()
+    }
+
+    #[getter]
+    fn epsilon(&self) -> f32 {
+        self.inner.epsilon()
+    }
+
+    fn forward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.inner_mut()
+                .forward(prediction.as_tensor(), target.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.inner_mut()
+                .backward(prediction.as_tensor(), target.as_tensor()),
+        )?))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "HyperbolicCrossEntropy(curvature={:.3}, epsilon={:.3})",
+            self.curvature(),
+            self.epsilon()
+        ))
+    }
+}
+
+fn train_trainer_with_dataset(
+    trainer: &mut ModuleTrainer,
     module: &Bound<'_, PyAny>,
     loss: &Bound<'_, PyAny>,
     dataset: &[(Tensor, Tensor)],
+    schedule: &RoundtableSchedule,
 ) -> PyResult<Option<EpochStats>> {
+    // Sequential
     if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-            let stats = convert(lightning.train_epoch(
+            let stats = convert(trainer.train_epoch(
                 seq.borrow_mut()?,
                 mse.inner_mut(),
                 dataset.to_vec(),
+                schedule,
             ))?;
             return Ok(Some(stats));
         }
     }
     if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
         if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
-            let stats = convert(lightning.train_epoch(
+            let stats = convert(trainer.train_epoch(
                 seq.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // Linear
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                linear.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                linear.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // Relu
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                relu.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                relu.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // Conv1d
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                conv.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                conv.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // WaveRnn
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                wave.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                wave.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // ZSpace projector
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                projector.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            let stats = convert(lightning.train_epoch(
+                linear.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                linear.borrow_mut()?,
                 hce.inner_mut(),
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
+                dataset.clone(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                projector.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // Topos resonator
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                resonator.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                resonator.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    // ZSpace mixer
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                mixer.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(trainer.train_epoch(
+                mixer.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+                schedule,
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    Ok(None)
+}
+
+fn run_epoch_with_trainer(
+    trainer: &mut ModuleTrainer,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
     batches: &Bound<'_, PyAny>,
+    schedule: &RoundtableSchedule,
 ) -> PyResult<EpochStats> {
     if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
         let dataset: Vec<(Tensor, Tensor)> = loader
@@ -5509,36 +6373,13 @@ fn train_lightning_with_dataset(
             .into_iter()
             .map(|batch| convert(batch))
             .collect::<PyResult<_>>()?;
-
-        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(lightning.train_epoch(
-                    seq.borrow_mut()?,
-                    mse.inner_mut(),
-                    dataset.clone(),
-                ))?;
-                return Ok(stats);
-            }
+        if let Some(stats) = train_trainer_with_dataset(trainer, module, loss, &dataset, schedule)?
+        {
+            return Ok(stats);
         }
-
-        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(lightning.train_epoch(
-                    linear.borrow_mut()?,
-                    mse.inner_mut(),
-                    dataset.clone(),
-                ))?;
-                return Ok(stats);
-            }
-        }
-
-        if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats =
-                    convert(lightning.train_epoch(relu.borrow_mut()?, mse.inner_mut(), dataset))?;
-                return Ok(stats);
-            }
-        }
+        return Err(PyValueError::new_err(
+            "ModuleTrainer.train_epoch expects a supported module/loss pairing",
+        ));
     }
 
     let dataset: Vec<(Tensor, Tensor)> = batches
@@ -5547,87 +6388,12 @@ fn train_lightning_with_dataset(
         .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
         .collect();
 
-    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
-        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-            let stats = convert(lightning.train_epoch(
-                seq.borrow_mut()?,
-                mse.inner_mut(),
-                dataset.clone(),
-            ))?;
-            return Ok(stats);
-        }
-    }
-
-    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
-        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-            let stats = convert(lightning.train_epoch(
-                linear.borrow_mut()?,
-                mse.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-        }
-    }
-    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
-        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
-            let stats = convert(lightning.train_epoch(
-                linear.borrow_mut()?,
-                hce.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-                dataset.clone(),
-            ))?;
-            return Ok(stats);
-        }
-    }
-
-    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
-        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-            let stats = convert(lightning.train_epoch(
-                relu.borrow_mut()?,
-                mse.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-        }
-    }
-    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
-        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
-            let stats = convert(lightning.train_epoch(
-                relu.borrow_mut()?,
-                hce.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-        }
-    }
-
-    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
-        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-            let stats = convert(lightning.train_epoch(
-                conv.borrow_mut()?,
-                mse.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-        }
-    }
-    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
-        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
-            let stats = convert(lightning.train_epoch(
-                conv.borrow_mut()?,
-                hce.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-            let stats =
-                convert(lightning.train_epoch(relu.borrow_mut()?, mse.inner_mut(), dataset))?;
-            return Ok(stats);
-        }
+    if let Some(stats) = train_trainer_with_dataset(trainer, module, loss, &dataset, schedule)? {
+        return Ok(stats);
     }
 
     Err(PyValueError::new_err(
+        "ModuleTrainer.train_epoch expects a supported module/loss pairing",
         "SpiralLightning.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
     ))
 }
@@ -5660,27 +6426,106 @@ fn prepare_module_for_lightning(
         convert(lightning.prepare_module(projector.borrow_mut()?))?;
         return Ok(());
     }
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        convert(lightning.prepare_module(resonator.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        convert(lightning.prepare_module(mixer.borrow_mut()?))?;
+        return Ok(());
+    }
     Err(PyValueError::new_err(
-        "SpiralLightning.prepare_module expects Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, or Sequential modules",
+        "SpiralLightning.prepare_module expects Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, ToposResonator, ZSpaceMixer, or Sequential modules",
     ))
 }
 
-fn run_epoch_with_lightning(
+fn train_lightning_with_dataset(
     lightning: &mut NnSpiralLightning,
     module: &Bound<'_, PyAny>,
     loss: &Bound<'_, PyAny>,
-    batches: &Bound<'_, PyAny>,
-) -> PyResult<EpochStats> {
-    if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
-        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(lightning.train_epoch(
-                    seq.borrow_mut()?,
-                    mse.inner_mut(),
-                    loader.clone_inner(),
-                ))?;
-                return Ok(stats);
-            }
+    dataset: &[(Tensor, Tensor)],
+) -> PyResult<Option<EpochStats>> {
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                seq.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                seq.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                linear.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                linear.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                relu.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                relu.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                conv.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                conv.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
         }
     }
 
@@ -5692,6 +6537,12 @@ fn run_epoch_with_lightning(
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                wave.borrow_mut()?,
         }
     }
     if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
@@ -5744,47 +6595,6 @@ fn run_epoch_with_lightning(
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
-        }
-    }
-
-    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
-        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-            let stats = convert(lightning.train_epoch(
-                mixer.borrow_mut()?,
-                mse.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-        }
-    }
-    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
-        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
-            let stats = convert(lightning.train_epoch(
-                mixer.borrow_mut()?,
-                hce.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-        }
-    }
-
-    Ok(None)
-}
-
-fn run_epoch_with_lightning(
-    lightning: &mut NnSpiralLightning,
-    module: &Bound<'_, PyAny>,
-    loss: &Bound<'_, PyAny>,
-    batches: &Bound<'_, PyAny>,
-) -> PyResult<EpochStats> {
-    if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
-        let dataset: Vec<(Tensor, Tensor)> = loader
-            .clone_inner()
-            .into_iter()
-            .map(|batch| convert(batch))
-            .collect::<PyResult<_>>()?;
-        if let Some(stats) = train_lightning_with_dataset(lightning, module, loss, &dataset)? {
-            return Ok(stats);
         }
         return Err(PyValueError::new_err(
             "SpiralLightning.train_epoch expects a supported module/loss pairing",
@@ -5830,6 +6640,24 @@ fn parse_lightning_stage_spec(
         ));
     }
 
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                projector.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                projector.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
     let mut config = base.clone();
     if let Some(config_any) = dict.get_item("config") {
         let config_dict = config_any
@@ -5848,6 +6676,24 @@ fn parse_lightning_stage_spec(
             config = config.with_output_shape(rows, cols);
         }
 
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                resonator.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                resonator.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
         let mut roundtable = config.roundtable();
         if let Some(value) = config_dict.get_item("top_k") {
             roundtable.top_k = value.extract()?;
@@ -5879,27 +6725,65 @@ fn parse_lightning_stage_spec(
         }
         config = config.with_roundtable(roundtable);
 
-        if let Some(value) = config_dict.get_item("auto_prepare") {
-            config = config.with_auto_prepare(value.extract()?);
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                mixer.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
+        }
+    }
+    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
+        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
+            let stats = convert(lightning.train_epoch(
+                mixer.borrow_mut()?,
+                hce.inner_mut(),
+                dataset.to_vec(),
+            ))?;
+            return Ok(Some(stats));
         }
     }
 
-    let label = dict
-        .get_item("label")
-        .and_then(|value| {
-            if value.is_none() {
-                None
-            } else {
-                Some(value.extract::<String>())
-            }
-        })
-        .transpose()?;
+    Ok(None)
+}
 
-    Ok(LightningStageSpec {
-        config,
-        epochs: epoch_objects,
-        label,
-    })
+fn run_epoch_with_lightning(
+    lightning: &mut NnSpiralLightning,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
+    batches: &Bound<'_, PyAny>,
+) -> PyResult<EpochStats> {
+    if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
+        let dataset: Vec<(Tensor, Tensor)> = loader
+            .clone_inner()
+            .into_iter()
+            .map(|batch| convert(batch))
+            .collect::<PyResult<_>>()?;
+        if let Some(stats) = train_lightning_with_dataset(lightning, module, loss, &dataset)? {
+            return Ok(stats);
+        if let Some(value) = config_dict.get_item("auto_prepare") {
+            config = config.with_auto_prepare(value.extract()?);
+        }
+        return Err(PyValueError::new_err(
+            "SpiralLightning.train_epoch expects a supported module/loss pairing",
+        ));
+    }
+
+    let dataset: Vec<(Tensor, Tensor)> = batches
+        .extract::<Vec<(PyTensor, PyTensor)>>()?
+        .into_iter()
+        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+        .collect();
+
+    if let Some(stats) = train_lightning_with_dataset(lightning, module, loss, &dataset)? {
+        return Ok(stats);
+    }
+
+    Err(PyValueError::new_err(
+        "SpiralLightning.train_epoch expects a supported module/loss pairing",
+    ))
 }
 
 #[pyclass(module = "spiraltorch.nn", name = "Relu")]
