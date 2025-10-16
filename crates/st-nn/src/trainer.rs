@@ -21,6 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
@@ -32,8 +33,13 @@ use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSch
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::ecosystem::{
+    ConnectorEvent, DistributionSummary, EcosystemRegistry, RankPlanSummary,
+    RoundtableConfigSummary, RoundtableSummary,
+};
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
+use st_core::ops::rank_entry::RankPlan;
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
 #[cfg(feature = "collapse")]
@@ -46,7 +52,7 @@ use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter,
 use st_tensor::pure::topos::OpenCartesianTopos;
 use std::collections::HashMap;
 use std::env;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
 pub struct ModuleTrainer {
@@ -63,6 +69,9 @@ pub struct ModuleTrainer {
     meta_conductor: Option<MetaConductor>,
     heur_log: HeurOpLog,
     softlogic: SoftLogicFlex,
+    graph_bridge: Option<GraphConsensusBridge>,
+    graph_pending: Option<GraphConsensusDigest>,
+    graph_last_hint: Option<String>,
     #[cfg(feature = "psi")]
     psi: Option<PsiMeter>,
     #[cfg(feature = "psychoid")]
@@ -219,6 +228,9 @@ impl ModuleTrainer {
             meta_conductor: None,
             heur_log: HeurOpLog::default(),
             softlogic: SoftLogicFlex::new(),
+            graph_bridge: None,
+            graph_pending: None,
+            graph_last_hint: None,
             #[cfg(feature = "psi")]
             psi,
             #[cfg(feature = "psychoid")]
@@ -228,6 +240,19 @@ impl ModuleTrainer {
             #[cfg(feature = "collapse")]
             collapse: None,
         }
+    }
+
+    /// Enables the graph consensus feedback loop by attaching a bridge that
+    /// drains graph flow telemetry after each optimisation step.
+    pub fn enable_graph_feedback(&mut self, bridge: GraphConsensusBridge) {
+        self.graph_bridge = Some(bridge);
+        self.graph_pending = None;
+    }
+
+    /// Returns the SpiralK hint generated from the most recently applied graph
+    /// digest, if any.
+    pub fn graph_hint(&self) -> Option<&str> {
+        self.graph_last_hint.as_deref()
     }
 
     #[cfg(feature = "psi")]
@@ -347,6 +372,28 @@ impl ModuleTrainer {
 
     /// Connects the trainer to a distributed roundtable node.
     pub fn configure_distribution(&mut self, config: DistConfig) {
+        let mut metadata = HashMap::new();
+        metadata.insert("node_id".to_string(), config.node_id.clone());
+        metadata.insert("mode".to_string(), config.mode.as_str().to_string());
+        metadata.insert(
+            "push_interval_ms".to_string(),
+            config
+                .push_interval
+                .as_millis()
+                .min(u64::MAX as u128)
+                .to_string(),
+        );
+        metadata.insert(
+            "summary_window".to_string(),
+            config.summary_window.to_string(),
+        );
+        if !config.meta_endpoints.is_empty() {
+            metadata.insert(
+                "meta_endpoints".to_string(),
+                config.meta_endpoints.join(","),
+            );
+        }
+        self.log_connector_event("configure_distribution", metadata);
         self.distribution = Some(RoundtableNode::new(config));
     }
 
@@ -355,7 +402,15 @@ impl ModuleTrainer {
         if let Some(node) = self.distribution.as_mut() {
             node.drain();
         }
+        if self.distribution.is_some() {
+            self.log_connector_event("clear_distribution", HashMap::new());
+        }
         self.distribution = None;
+    }
+
+    /// Returns the currently configured distribution node, if any.
+    pub fn distribution_config(&self) -> Option<&DistConfig> {
+        self.distribution.as_ref().map(|node| node.config())
     }
 
     /// Installs a meta-layer conductor so this trainer can aggregate remote summaries.
@@ -369,12 +424,55 @@ impl ModuleTrainer {
         &self.heur_log
     }
 
+    /// Merges the provided heuristics log into the trainer's local log.
+    pub fn merge_heuristics_log(&mut self, log: &HeurOpLog) {
+        self.heur_log.merge(log);
+    }
+
     /// Returns the latest moderator minutes captured by Blackcat.
     pub fn blackcat_minutes(&self) -> Vec<ModeratorMinutes> {
         self.blackcat_moderator
             .as_ref()
             .map(|m| m.minutes().to_vec())
             .unwrap_or_default()
+    }
+
+    /// Replays moderator minutes so the embedded Blackcat runtime can stay aligned.
+    pub fn sync_blackcat_minutes(&mut self, minutes: &[ModeratorMinutes]) {
+        if let Some(moderator) = self.blackcat_moderator.as_mut() {
+            moderator.absorb_minutes(minutes);
+        }
+    }
+
+    #[cfg(feature = "golden")]
+    /// Applies a cooperative pulse emitted by the Golden retriever.
+    pub fn apply_blackcat_pulse(&mut self, pulse: &GoldenBlackcatPulse) {
+        self.golden_pulse = Some(pulse.clone());
+        self.golden_directive = None;
+        if let Some(node) = self.distribution.as_mut() {
+            let base_interval = node.config().push_interval;
+            let base_window = node.config().summary_window.max(1);
+            let directive = pulse.directive(base_interval, base_window);
+            node.retune(directive.push_interval, directive.summary_window);
+            if directive.reinforcement_weight > 0.1 {
+                self.injector_enabled = true;
+            }
+            self.golden_directive = Some(directive);
+        } else if pulse.reinforcement_weight > 0.1 || pulse.optimization_gain > 0.1 {
+            self.injector_enabled = true;
+        }
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the most recent cooperative pulse applied to this trainer.
+    pub fn last_blackcat_pulse(&self) -> Option<&GoldenBlackcatPulse> {
+        self.golden_pulse.as_ref()
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the latest cooperative directive derived from the Golden pulse.
+    pub fn last_blackcat_directive(&self) -> Option<&GoldenCooperativeDirective> {
+        self.golden_directive.as_ref()
     }
 
     /// Clears any registered band weighting rule.
@@ -394,7 +492,99 @@ impl ModuleTrainer {
 
     /// Produces a roundtable schedule for the provided output dimensions.
     pub fn roundtable(&self, rows: u32, cols: u32, config: RoundtableConfig) -> RoundtableSchedule {
-        RoundtableSchedule::new(&self.planner, rows, cols, config)
+        let schedule = RoundtableSchedule::new(&self.planner, rows, cols, config);
+        self.emit_roundtable_summary(rows, cols, config, &schedule);
+        schedule
+    }
+
+    fn emit_roundtable_summary(
+        &self,
+        rows: u32,
+        cols: u32,
+        config: RoundtableConfig,
+        schedule: &RoundtableSchedule,
+    ) {
+        let cfg_summary = {
+            #[allow(unused_mut)]
+            let mut summary = RoundtableConfigSummary::new(
+                config.top_k,
+                config.mid_k,
+                config.bottom_k,
+                config.here_tolerance,
+            );
+            #[cfg(feature = "psychoid")]
+            {
+                summary
+                    .extras
+                    .insert("psychoid".to_string(), config.psychoid_enabled);
+                if config.psychoid_log {
+                    summary.extras.insert("psychoid_log".to_string(), true);
+                }
+            }
+            #[cfg(feature = "psi")]
+            {
+                summary.extras.insert("psi".to_string(), config.psi_enabled);
+            }
+            #[cfg(feature = "collapse")]
+            {
+                summary
+                    .extras
+                    .insert("collapse".to_string(), config.collapse_enabled);
+            }
+            summary
+        };
+
+        let plans = vec![
+            Self::summarize_rank_plan(schedule.above()),
+            Self::summarize_rank_plan(schedule.here()),
+            Self::summarize_rank_plan(schedule.beneath()),
+        ];
+
+        let distribution = self.distribution.as_ref().map(|node| {
+            let cfg = node.config();
+            DistributionSummary {
+                node_id: cfg.node_id.clone(),
+                mode: cfg.mode.as_str().to_string(),
+                summary_window: cfg.summary_window,
+                push_interval_ms: cfg.push_interval.as_millis().min(u64::MAX as u128) as u64,
+                meta_endpoints: cfg.meta_endpoints.clone(),
+            }
+        });
+
+        let summary = RoundtableSummary {
+            rows,
+            cols,
+            config: cfg_summary,
+            plans,
+            autopilot_enabled: self.autopilot.is_some(),
+            distribution,
+            issued_at: SystemTime::now(),
+        };
+
+        EcosystemRegistry::global().record_roundtable(summary);
+    }
+
+    fn summarize_rank_plan(plan: &RankPlan) -> RankPlanSummary {
+        let mut summary = RankPlanSummary::new(plan.kind, plan.rows, plan.cols, plan.k);
+        summary.workgroup = plan.choice.wg;
+        summary.lanes = plan.choice.kl;
+        summary.channel_stride = plan.choice.ch;
+        summary.tile = plan.choice.tile;
+        summary.compaction_tile = plan.choice.ctile;
+        summary.subgroup = plan.choice.subgroup;
+        summary.fft_tile = plan.choice.fft_tile;
+        summary.fft_radix = plan.choice.fft_radix;
+        summary.fft_segments = plan.choice.fft_segments;
+        summary
+    }
+
+    fn log_connector_event(&self, stage: &str, metadata: HashMap<String, String>) {
+        EcosystemRegistry::global().record_connector(ConnectorEvent {
+            name: "module_trainer".to_string(),
+            stage: stage.to_string(),
+            metadata,
+            issued_at: SystemTime::now(),
+        });
     }
 
     /// Returns the fallback Euclidean learning rate.
@@ -461,6 +651,10 @@ impl ModuleTrainer {
         let mut steps = 0usize;
         for batch in batches.into_iter() {
             let (input, target) = batch.into_batch()?;
+            let graph_adjustment = self.graph_pending.take();
+            self.graph_last_hint = graph_adjustment
+                .as_ref()
+                .and_then(|digest| digest.spiralk_script.clone());
             let step_start = Instant::now();
             if let Some(rt) = self.blackcat.as_mut() {
                 rt.begin_step();
@@ -477,11 +671,27 @@ impl ModuleTrainer {
             let step_loss = loss_value.data().iter().copied().sum::<f32>();
             let grad_output = loss.backward(&prediction, &target)?;
             let mut band_energy = schedule.band_energy(&grad_output)?;
+            let baseline_band_energy = BandEnergy {
+                above: band_energy.above,
+                here: band_energy.here,
+                beneath: band_energy.beneath,
+                drift: band_energy.drift,
+            };
+            if let Some(ref digest) = graph_adjustment {
+                band_energy.above *= digest.multipliers.0;
+                band_energy.here *= digest.multipliers.1;
+                band_energy.beneath *= digest.multipliers.2;
+            }
             if let Some(rt) = self.blackcat.as_ref() {
                 band_energy.drift = rt.frac_penalty() as f32;
             }
             let mut bands: GradientBands = schedule.split(&grad_output)?;
             let mut weights = self.softlogic.prepare_weights(&band_energy);
+            if let Some(ref digest) = graph_adjustment {
+                weights.0 *= digest.multipliers.0;
+                weights.1 *= digest.multipliers.1;
+                weights.2 *= digest.multipliers.2;
+            }
             if let Some(f) = self.band_weight_fn {
                 let override_weights = f(band_energy);
                 weights.0 *= override_weights.0;
@@ -496,7 +706,26 @@ impl ModuleTrainer {
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
             extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
+            if let Some(ref digest) = graph_adjustment {
+                extra.insert("graph_share".to_string(), digest.barycentric[3] as f64);
+                extra.insert(
+                    "graph_multiplier_above".to_string(),
+                    digest.multipliers.0 as f64,
+                );
+                extra.insert(
+                    "graph_multiplier_here".to_string(),
+                    digest.multipliers.1 as f64,
+                );
+                extra.insert(
+                    "graph_multiplier_beneath".to_string(),
+                    digest.multipliers.2 as f64,
+                );
+                extra.insert("graph_layers".to_string(), digest.layer_count() as f64);
+            }
             let _ = module.backward_bands(&input, &bands)?;
+            if let Some(bridge) = self.graph_bridge.as_ref() {
+                self.graph_pending = bridge.digest(&baseline_band_energy)?;
+            }
             #[cfg(feature = "psychoid")]
             let mut psychoid_events = 0usize;
             #[cfg(feature = "psi")]

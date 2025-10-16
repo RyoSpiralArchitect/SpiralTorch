@@ -6,12 +6,28 @@
 use crate::{PureResult, Tensor, TensorError};
 use st_core::telemetry::xai::NodeFlowSample;
 
+/// Strategy used to normalise the adjacency matrix prior to propagation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphNormalization {
+    /// Symmetric normalisation `D^{-1/2} A D^{-1/2}` suitable for undirected graphs.
+    Symmetric,
+    /// Row-stochastic normalisation `D^{-1} A` that keeps outgoing weights summing to one.
+    Row,
+}
+
+impl Default for GraphNormalization {
+    fn default() -> Self {
+        GraphNormalization::Symmetric
+    }
+}
+
 /// Normalised adjacency wrapper that keeps Z-space compatible graph propagation.
 #[derive(Debug, Clone)]
 pub struct GraphContext {
     norm_adjacency: Tensor,
     norm_adjacency_t: Tensor,
     row_sums: Vec<f32>,
+    normalisation: GraphNormalization,
 }
 
 impl GraphContext {
@@ -24,72 +40,29 @@ impl GraphContext {
     /// Builds a context from an adjacency matrix and an explicit self-loop
     /// weight. The adjacency must be square.
     pub fn with_self_loops(adjacency: Tensor, self_loop_weight: f32) -> PureResult<Self> {
-        let (rows, cols) = adjacency.shape();
-        if rows != cols {
-            return Err(TensorError::ShapeMismatch {
-                left: (rows, cols),
-                right: (cols, rows),
-            });
-        }
-        if rows == 0 {
-            return Err(TensorError::EmptyInput("graph_context"));
-        }
-        if self_loop_weight < 0.0 {
-            return Err(TensorError::NonPositiveWeight {
-                weight: self_loop_weight,
-            });
-        }
+        Self::builder(adjacency)
+            .self_loop_weight(self_loop_weight)
+            .build()
+    }
 
-        let mut loop_entries = Vec::with_capacity(rows * cols);
-        for r in 0..rows {
-            for c in 0..cols {
-                if r == c {
-                    loop_entries.push(self_loop_weight);
-                } else {
-                    loop_entries.push(0.0);
-                }
-            }
-        }
-        let loops = Tensor::from_vec(rows, cols, loop_entries)?;
-        let adjusted = adjacency.add(&loops)?;
-
-        let degrees = adjusted.transpose().sum_axis0();
-        let mut inv_sqrt = Vec::with_capacity(degrees.len());
-        for degree in degrees {
-            if degree <= f32::EPSILON {
-                inv_sqrt.push(0.0);
-            } else {
-                inv_sqrt.push(1.0 / degree.sqrt());
-            }
-        }
-
-        let adjusted_data = adjusted.data();
-        let mut normalised = Vec::with_capacity(adjusted_data.len());
-        for r in 0..rows {
-            for c in 0..cols {
-                let value = adjusted_data[r * cols + c];
-                if value.abs() <= f32::EPSILON {
-                    normalised.push(0.0);
-                } else {
-                    normalised.push(value * inv_sqrt[r] * inv_sqrt[c]);
-                }
-            }
-        }
-
-        let norm_adjacency = Tensor::from_vec(rows, cols, normalised)?;
-        let norm_adjacency_t = norm_adjacency.transpose();
-        let row_sums = norm_adjacency.transpose().sum_axis0();
-
-        Ok(Self {
-            norm_adjacency,
-            norm_adjacency_t,
-            row_sums,
-        })
+    /// Builds a configurable context using a builder surface.
+    pub fn builder(adjacency: Tensor) -> GraphContextBuilder {
+        GraphContextBuilder::new(adjacency)
     }
 
     /// Returns the number of nodes represented by the context.
     pub fn node_count(&self) -> usize {
         self.row_sums.len()
+    }
+
+    /// Returns the normalisation strategy used when creating the context.
+    pub fn normalisation(&self) -> GraphNormalization {
+        self.normalisation
+    }
+
+    /// Returns the cached row sums of the normalised adjacency.
+    pub fn row_sums(&self) -> &[f32] {
+        &self.row_sums
     }
 
     /// Propagates features across the normalised adjacency matrix.
@@ -144,6 +117,150 @@ impl GraphContext {
     }
 }
 
+/// Builder that configures the adjacency normalisation and self-loop behaviour.
+pub struct GraphContextBuilder {
+    adjacency: Tensor,
+    self_loop_weight: f32,
+    normalisation: GraphNormalization,
+}
+
+impl GraphContextBuilder {
+    fn new(adjacency: Tensor) -> Self {
+        Self {
+            adjacency,
+            self_loop_weight: 1.0,
+            normalisation: GraphNormalization::default(),
+        }
+    }
+
+    /// Overrides the self-loop weight added before normalisation.
+    pub fn self_loop_weight(mut self, weight: f32) -> Self {
+        self.self_loop_weight = weight;
+        self
+    }
+
+    /// Selects the adjacency normalisation strategy.
+    pub fn normalisation(mut self, strategy: GraphNormalization) -> Self {
+        self.normalisation = strategy;
+        self
+    }
+
+    /// Consumes the builder, producing a fully initialised [`GraphContext`].
+    pub fn build(self) -> PureResult<GraphContext> {
+        GraphContext::build_context(self.adjacency, self.self_loop_weight, self.normalisation)
+    }
+}
+
+impl GraphContext {
+    fn build_context(
+        adjacency: Tensor,
+        self_loop_weight: f32,
+        normalisation: GraphNormalization,
+    ) -> PureResult<Self> {
+        let (rows, cols) = adjacency.shape();
+        if rows != cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (rows, cols),
+                right: (cols, rows),
+            });
+        }
+        if rows == 0 {
+            return Err(TensorError::EmptyInput("graph_context"));
+        }
+        if self_loop_weight < 0.0 {
+            return Err(TensorError::NonPositiveWeight {
+                weight: self_loop_weight,
+            });
+        }
+
+        let mut adjusted = adjacency.data().to_vec();
+        if self_loop_weight > 0.0 {
+            for idx in 0..rows.min(cols) {
+                let offset = idx * cols + idx;
+                adjusted[offset] += self_loop_weight;
+            }
+        }
+
+        let mut row_degrees = vec![0.0f32; rows];
+        let mut col_degrees = vec![0.0f32; cols];
+        for r in 0..rows {
+            let offset = r * cols;
+            for c in 0..cols {
+                let value = adjusted[offset + c];
+                row_degrees[r] += value;
+                col_degrees[c] += value;
+            }
+        }
+
+        let mut normalised = vec![0.0f32; rows * cols];
+        match normalisation {
+            GraphNormalization::Symmetric => {
+                let mut row_scale = vec![0.0f32; rows];
+                for (idx, degree) in row_degrees.iter().enumerate() {
+                    row_scale[idx] = if *degree <= f32::EPSILON {
+                        0.0
+                    } else {
+                        1.0 / degree.sqrt()
+                    };
+                }
+                let mut col_scale = vec![0.0f32; cols];
+                for (idx, degree) in col_degrees.iter().enumerate() {
+                    col_scale[idx] = if *degree <= f32::EPSILON {
+                        0.0
+                    } else {
+                        1.0 / degree.sqrt()
+                    };
+                }
+                for r in 0..rows {
+                    let offset = r * cols;
+                    for c in 0..cols {
+                        let value = adjusted[offset + c];
+                        if value.abs() <= f32::EPSILON {
+                            continue;
+                        }
+                        let scaled = value * row_scale[r] * col_scale[c];
+                        if scaled.abs() > f32::EPSILON {
+                            normalised[offset + c] = scaled;
+                        }
+                    }
+                }
+            }
+            GraphNormalization::Row => {
+                for r in 0..rows {
+                    let offset = r * cols;
+                    let degree = row_degrees[r];
+                    if degree <= f32::EPSILON {
+                        continue;
+                    }
+                    for c in 0..cols {
+                        let value = adjusted[offset + c];
+                        if value.abs() <= f32::EPSILON {
+                            continue;
+                        }
+                        normalised[offset + c] = value / degree;
+                    }
+                }
+            }
+        }
+
+        let norm_adjacency = Tensor::from_vec(rows, cols, normalised)?;
+        let norm_adjacency_t = norm_adjacency.transpose();
+        let mut row_sums = vec![0.0f32; rows];
+        let data = norm_adjacency.data();
+        for r in 0..rows {
+            let offset = r * cols;
+            row_sums[r] = data[offset..offset + cols].iter().sum();
+        }
+
+        Ok(Self {
+            norm_adjacency,
+            norm_adjacency_t,
+            row_sums,
+            normalisation,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +287,29 @@ mod tests {
         let (_prop, flows) = context.propagate_with_trace(&features).unwrap();
         assert_eq!(flows.len(), 3);
         assert_eq!(flows[0].node_index, 0);
+    }
+
+    #[test]
+    fn builder_supports_row_normalisation() {
+        let adjacency = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
+        let context = GraphContext::builder(adjacency)
+            .self_loop_weight(0.5)
+            .normalisation(GraphNormalization::Row)
+            .build()
+            .unwrap();
+        assert_eq!(context.normalisation(), GraphNormalization::Row);
+        for &sum in context.row_sums() {
+            assert!((sum - 1.0).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn builder_rejects_negative_self_loops() {
+        let adjacency = Tensor::from_vec(1, 1, vec![0.0]).unwrap();
+        let err = GraphContext::builder(adjacency)
+            .self_loop_weight(-0.1)
+            .build()
+            .unwrap_err();
+        assert!(matches!(err, TensorError::NonPositiveWeight { .. }));
     }
 }
