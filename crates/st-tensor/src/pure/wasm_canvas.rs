@@ -579,10 +579,7 @@ mod tests {
     fn emit_zspace_patch_respects_canvas_shape() {
         let scheduler = UringFractalScheduler::new(4).unwrap();
         scheduler
-            .push(
-                FractalPatch::new(tensor(&[1.0, 0.5, 0.25, 0.75]), 1.0, 1.0, 0)
-                    .unwrap(),
-            )
+            .push(FractalPatch::new(tensor(&[1.0, 0.5, 0.25, 0.75]), 1.0, 1.0, 0).unwrap())
             .unwrap();
 
         let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
