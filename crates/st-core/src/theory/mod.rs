@@ -28,6 +28,9 @@
 //! microlocal interface gauges used to stabilise boundary detection without
 //! fixing an external label.
 
+pub mod observability;
+
+#[path = "microlocal.rs"]
 pub mod microlocal;
 pub mod maxwell;
 pub mod observability;

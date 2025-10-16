@@ -1820,7 +1820,6 @@ impl LanguagePipeline {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::automation::DesireAutomation;
     use super::super::desire::{constant, warmup, DesireLagrangian};
     use super::super::geometry::{
