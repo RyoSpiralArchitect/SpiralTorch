@@ -498,7 +498,7 @@ pub fn polarisation_slope(fingerprint: &MaxwellFingerprint, samples: usize) -> f
     for k in 0..samples {
         let theta = (k as f64 / (samples - 1) as f64) * PI;
         let alignment = theta.cos().abs();
-        numerator += alignment * fingerprint.lambda();
+        numerator += alignment.powi(2) * fingerprint.lambda();
         denominator += alignment.powi(2);
     }
     if denominator <= f64::EPSILON {
