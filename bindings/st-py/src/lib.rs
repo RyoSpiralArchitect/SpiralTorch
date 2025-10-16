@@ -40,6 +40,11 @@ use st_nn::{
     Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
+#[cfg(feature = "golden")]
+use st_nn::{
+    CouncilEvidence, GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot,
+    HeurOp, HeurOpKind,
+};
 use st_rec::{RatingTriple as RecRatingTriple, RecEpochReport, SpiralRecError, SpiralRecommender};
 use st_rl::{EpisodeReport as RlEpisodeReport, SpiralPolicyGradient, SpiralRlError};
 use st_tensor::backend::faer_dense;
@@ -2017,6 +2022,418 @@ impl PyEpochStats {
     }
 }
 
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenCooperativeDirective")]
+#[derive(Clone)]
+struct PyGoldenCooperativeDirective {
+    inner: GoldenCooperativeDirective,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenCooperativeDirective {
+    fn from_inner(inner: GoldenCooperativeDirective) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenCooperativeDirective {
+    #[getter]
+    fn push_interval(&self) -> f32 {
+        self.inner.push_interval.as_secs_f32()
+    }
+
+    #[getter]
+    fn summary_window(&self) -> usize {
+        self.inner.summary_window
+    }
+
+    #[getter]
+    fn exploration_priority(&self) -> f32 {
+        self.inner.exploration_priority
+    }
+
+    #[getter]
+    fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "GoldenCooperativeDirective(push_interval={:.3}, summary_window={}, exploration_priority={:.3}, reinforcement_weight={:.3})",
+            self.push_interval(),
+            self.summary_window(),
+            self.exploration_priority(),
+            self.reinforcement_weight()
+        ))
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenBlackcatPulse")]
+#[derive(Clone)]
+struct PyGoldenBlackcatPulse {
+    inner: GoldenBlackcatPulse,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenBlackcatPulse {
+    fn from_inner(inner: GoldenBlackcatPulse) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenBlackcatPulse {
+    #[getter]
+    fn exploration_drive(&self) -> f32 {
+        self.inner.exploration_drive
+    }
+
+    #[getter]
+    fn optimization_gain(&self) -> f32 {
+        self.inner.optimization_gain
+    }
+
+    #[getter]
+    fn synergy_score(&self) -> f32 {
+        self.inner.synergy_score
+    }
+
+    #[getter]
+    fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
+    }
+
+    #[getter]
+    fn mean_support(&self) -> f32 {
+        self.inner.mean_support
+    }
+
+    #[getter]
+    fn mean_reward(&self) -> f64 {
+        self.inner.mean_reward
+    }
+
+    #[getter]
+    fn mean_psi(&self) -> f32 {
+        self.inner.mean_psi
+    }
+
+    #[getter]
+    fn mean_confidence(&self) -> f32 {
+        self.inner.mean_confidence
+    }
+
+    #[getter]
+    fn coverage(&self) -> usize {
+        self.inner.coverage
+    }
+
+    #[getter]
+    fn heuristics_contributions(&self) -> usize {
+        self.inner.heuristics_contributions
+    }
+
+    #[getter]
+    fn append_weight(&self) -> f32 {
+        self.inner.append_weight
+    }
+
+    #[getter]
+    fn retract_count(&self) -> usize {
+        self.inner.retract_count
+    }
+
+    #[getter]
+    fn annotate_count(&self) -> usize {
+        self.inner.annotate_count
+    }
+
+    #[getter]
+    fn dominant_plan(&self) -> Option<String> {
+        self.inner.dominant_plan.clone()
+    }
+
+    fn is_idle(&self) -> bool {
+        self.inner.is_idle()
+    }
+
+    #[pyo3(signature = (baseline_interval, baseline_window))]
+    fn directive(
+        &self,
+        baseline_interval: f32,
+        baseline_window: usize,
+    ) -> PyResult<PyGoldenCooperativeDirective> {
+        if baseline_interval <= 0.0 {
+            return Err(PyValueError::new_err(
+                "baseline_interval must be positive seconds",
+            ));
+        }
+        let directive = self.inner.directive(
+            Duration::from_secs_f32(baseline_interval),
+            baseline_window.max(1),
+        );
+        Ok(PyGoldenCooperativeDirective::from_inner(directive))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "GoldenBlackcatPulse(exploration={:.3}, optimization={:.3}, synergy={:.3}, reinforcement={:.3}, coverage={}, heuristics={})",
+            self.exploration_drive(),
+            self.optimization_gain(),
+            self.synergy_score(),
+            self.reinforcement_weight(),
+            self.coverage(),
+            self.heuristics_contributions()
+        ))
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenCouncilSnapshot")]
+#[derive(Clone)]
+struct PyGoldenCouncilSnapshot {
+    inner: GoldenCouncilSnapshot,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenCouncilSnapshot {
+    fn from_inner(inner: GoldenCouncilSnapshot) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "HeurOp")]
+#[derive(Clone)]
+struct PyHeurOp {
+    inner: HeurOp,
+}
+
+#[cfg(feature = "golden")]
+impl PyHeurOp {
+    fn from_inner(inner: HeurOp) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyHeurOp {
+    #[getter]
+    fn origin(&self) -> &str {
+        &self.inner.origin
+    }
+
+    #[getter]
+    fn script(&self) -> Option<String> {
+        match &self.inner.kind {
+            HeurOpKind::AppendSoft { script, .. } => Some(script.clone()),
+            _ => None,
+        }
+    }
+
+    #[getter]
+    fn weight(&self) -> Option<f32> {
+        match &self.inner.kind {
+            HeurOpKind::AppendSoft { weight, .. } => Some(*weight),
+            _ => None,
+        }
+    }
+
+    #[getter]
+    fn note(&self) -> Option<String> {
+        match &self.inner.kind {
+            HeurOpKind::Annotate { note, .. } => Some(note.clone()),
+            _ => None,
+        }
+    }
+
+    #[getter]
+    fn script_hash(&self) -> Option<u64> {
+        match &self.inner.kind {
+            HeurOpKind::Retract { script_hash } | HeurOpKind::Annotate { script_hash, .. } => {
+                Some(*script_hash)
+            }
+            _ => None,
+        }
+    }
+
+    #[getter]
+    fn kind(&self) -> &'static str {
+        match &self.inner.kind {
+            HeurOpKind::AppendSoft { .. } => "append_soft",
+            HeurOpKind::Retract { .. } => "retract",
+            HeurOpKind::Annotate { .. } => "annotate",
+        }
+    }
+
+    #[getter]
+    fn issued_at(&self) -> f64 {
+        self.inner
+            .issued_at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "HeurOp(kind='{}', origin='{}')",
+            self.kind(),
+            self.origin()
+        ))
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "CouncilEvidence")]
+#[derive(Clone)]
+struct PyCouncilEvidence {
+    inner: CouncilEvidence,
+}
+
+#[cfg(feature = "golden")]
+impl PyCouncilEvidence {
+    fn from_inner(inner: CouncilEvidence) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyCouncilEvidence {
+    #[getter]
+    fn band_energy(&self) -> (f32, f32, f32) {
+        self.inner.band_energy
+    }
+
+    #[getter]
+    fn graph_flow(&self) -> f32 {
+        self.inner.graph_flow
+    }
+
+    #[getter]
+    fn psi(&self) -> f32 {
+        self.inner.psi
+    }
+
+    #[getter]
+    fn geometry(&self) -> (f32, f32, f32) {
+        self.inner.geometry
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "CouncilEvidence(band_energy=({:.3}, {:.3}, {:.3}), graph_flow={:.3}, psi={:.3})",
+            self.band_energy().0,
+            self.band_energy().1,
+            self.band_energy().2,
+            self.graph_flow(),
+            self.psi()
+        ))
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenCouncilSnapshot {
+    #[getter]
+    fn epoch(&self) -> u64 {
+        self.inner.epoch
+    }
+
+    #[getter]
+    fn high_watermark(&self) -> u64 {
+        self.inner.high_watermark
+    }
+
+    #[getter]
+    fn missing_ranges(&self) -> Vec<(u64, u64)> {
+        self.inner.missing_ranges.clone()
+    }
+
+    #[getter]
+    fn winners(&self) -> Vec<PyHeurOp> {
+        self.inner
+            .winners
+            .iter()
+            .cloned()
+            .map(PyHeurOp::from_inner)
+            .collect()
+    }
+
+    #[getter]
+    fn evidence(&self) -> PyCouncilEvidence {
+        PyCouncilEvidence::from_inner(self.inner.evidence.clone())
+    }
+
+    #[getter]
+    fn exploration_bias(&self) -> f32 {
+        self.inner.exploration_bias
+    }
+
+    #[getter]
+    fn optimization_bias(&self) -> f32 {
+        self.inner.optimization_bias
+    }
+
+    #[getter]
+    fn synergy_bias(&self) -> f32 {
+        self.inner.synergy_bias
+    }
+
+    #[getter]
+    fn reinforcement_bias(&self) -> f32 {
+        self.inner.reinforcement_bias
+    }
+
+    #[getter]
+    fn resonance(&self) -> f32 {
+        self.inner.resonance
+    }
+
+    #[getter]
+    fn stability(&self) -> f32 {
+        self.inner.stability
+    }
+
+    #[getter]
+    fn momentum(&self) -> f32 {
+        self.inner.momentum
+    }
+
+    #[getter]
+    fn divergence(&self) -> f32 {
+        self.inner.divergence
+    }
+
+    #[getter]
+    fn schedule_hint(&self) -> (f32, f32, f32, f32) {
+        self.inner.schedule_hint
+    }
+
+    #[getter]
+    fn pulse(&self) -> PyGoldenBlackcatPulse {
+        PyGoldenBlackcatPulse::from_inner(self.inner.pulse_recap.clone())
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "GoldenCouncilSnapshot(epoch={}, exploration_bias={:.3}, optimization_bias={:.3}, synergy_bias={:.3}, reinforcement_bias={:.3}, stability={:.3})",
+            self.epoch(),
+            self.exploration_bias(),
+            self.optimization_bias(),
+            self.synergy_bias(),
+            self.reinforcement_bias(),
+            self.stability()
+        ))
+    }
+}
+
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
 struct PyModuleTrainer {
     inner: ModuleTrainer,
@@ -2105,6 +2522,11 @@ impl PyModuleTrainer {
             .install_blackcat_moderator(threshold, participants);
     }
 
+    #[pyo3(signature = (per_epoch, cooldown))]
+    fn set_rewrite_budget(&mut self, per_epoch: u32, cooldown: u32) {
+        self.inner.set_rewrite_budget(per_epoch, cooldown);
+    }
+
     fn blackcat_minutes<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
         let minutes = self.inner.blackcat_minutes();
         let list = PyList::empty_bound(py);
@@ -2135,6 +2557,63 @@ impl PyModuleTrainer {
             list.append(entry.into_py(py))?;
         }
         Ok(list.into_py(py))
+    }
+
+    fn blackcat_scoreboard<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
+        let scores = self.inner.blackcat_scoreboard();
+        let list = PyList::empty_bound(py);
+        for score in scores {
+            let entry = PyDict::new_bound(py);
+            entry.set_item("plan_signature", score.plan_signature.clone())?;
+            entry.set_item("script_hint", score.script_hint.clone())?;
+            entry.set_item("observations", score.observations)?;
+            entry.set_item("mean_support", score.mean_support)?;
+            entry.set_item("mean_reward", score.mean_reward)?;
+            entry.set_item("mean_psi", score.mean_psi)?;
+            entry.set_item("mean_z", score.mean_z)?;
+            entry.set_item("mean_confidence", score.mean_confidence)?;
+            entry.set_item(
+                "last_issued_at",
+                score
+                    .last_issued_at
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs_f64())
+                    .unwrap_or(0.0),
+            )?;
+            list.append(entry.into_py(py))?;
+        }
+        Ok(list.into_py(py))
+    }
+
+    #[cfg(feature = "golden")]
+    fn last_blackcat_pulse(&self) -> Option<PyGoldenBlackcatPulse> {
+        self.inner
+            .last_blackcat_pulse()
+            .cloned()
+            .map(PyGoldenBlackcatPulse::from_inner)
+    }
+
+    #[cfg(feature = "golden")]
+    fn last_blackcat_directive(&self) -> Option<PyGoldenCooperativeDirective> {
+        self.inner
+            .last_blackcat_directive()
+            .cloned()
+            .map(PyGoldenCooperativeDirective::from_inner)
+    }
+
+    #[cfg(feature = "golden")]
+    fn last_golden_council_snapshot(&self) -> Option<PyGoldenCouncilSnapshot> {
+        self.inner
+            .last_golden_council_snapshot()
+            .cloned()
+            .map(PyGoldenCouncilSnapshot::from_inner)
+    }
+
+    #[cfg(feature = "golden")]
+    fn last_council(&self) -> Option<PyGoldenCouncilSnapshot> {
+        self.inner
+            .last_council()
+            .map(PyGoldenCouncilSnapshot::from_inner)
     }
 
     #[pyo3(signature = (module, loss, batches, schedule))]
@@ -4464,11 +4943,7 @@ fn export_onnx(
         kwargs.set_item("output_names", output_names)?;
     }
 
-    onnx.call_method(
-        "export",
-        (model, example_input, export_path),
-        Some(&kwargs),
-    )?;
+    onnx.call_method("export", (model, example_input, export_path), Some(&kwargs))?;
 
     Ok(())
 }
@@ -4548,52 +5023,66 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRoundtableSchedule>()?;
     m.add_class::<PyEpochStats>()?;
     m.add_class::<PyModuleTrainer>()?;
+    #[cfg(feature = "golden")]
+    {
+        m.add_class::<PyGoldenBlackcatPulse>()?;
+        m.add_class::<PyGoldenCooperativeDirective>()?;
+        m.add_class::<PyHeurOp>()?;
+        m.add_class::<PyCouncilEvidence>()?;
+        m.add_class::<PyGoldenCouncilSnapshot>()?;
+    }
     m.add_class::<PySpiralLightning>()?;
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
 
-    m.setattr(
-        "__all__",
-        vec![
-            "plan",
-            "plan_topk",
-            "topk2d_tensor",
-            "z_space_barycenter",
-            "hip_probe",
-            "describe_device",
-            "get_psychoid_stats",
-            "describe_resonance",
-            "describe_frame",
-            "Tensor",
-            "ComplexTensor",
-            "BarycenterIntermediate",
-            "ZSpaceBarycenter",
-            "DifferentialResonance",
-            "ChronoFrame",
-            "ChronoSummary",
-            "SpiralDifferentialTrace",
-            "OpenTopos",
-            "TensorBiome",
-            "LanguageWaveEncoder",
-            "TextResonator",
-            "Hypergrad",
-            "DistConfig",
-            "RoundtableSchedule",
-            "EpochStats",
-            "ModuleTrainer",
-            "SpiralLightning",
-            "SpiralSessionBuilder",
-            "SpiralSession",
-            "nn",
-            "frac",
-            "dataset",
-            "linalg",
-            "rl",
-            "rec",
-            "sot",
-            "integrations",
-        ],
-    )?;
+    let mut exported = vec![
+        "plan",
+        "plan_topk",
+        "topk2d_tensor",
+        "z_space_barycenter",
+        "hip_probe",
+        "describe_device",
+        "get_psychoid_stats",
+        "describe_resonance",
+        "describe_frame",
+        "Tensor",
+        "ComplexTensor",
+        "BarycenterIntermediate",
+        "ZSpaceBarycenter",
+        "DifferentialResonance",
+        "ChronoFrame",
+        "ChronoSummary",
+        "SpiralDifferentialTrace",
+        "OpenTopos",
+        "TensorBiome",
+        "LanguageWaveEncoder",
+        "TextResonator",
+        "Hypergrad",
+        "DistConfig",
+        "RoundtableSchedule",
+        "EpochStats",
+        "ModuleTrainer",
+        "SpiralLightning",
+        "SpiralSessionBuilder",
+        "SpiralSession",
+        "nn",
+        "frac",
+        "dataset",
+        "linalg",
+        "rl",
+        "rec",
+        "sot",
+        "integrations",
+    ];
+    #[cfg(feature = "golden")]
+    {
+        exported.push("GoldenBlackcatPulse");
+        exported.push("GoldenCooperativeDirective");
+        exported.push("HeurOp");
+        exported.push("CouncilEvidence");
+        exported.push("GoldenCouncilSnapshot");
+    }
+    m.setattr("__all__", exported)?;
     m.setattr("__version__", env!("CARGO_PKG_VERSION"))?;
 
     // Provide a tiny doc string that highlights the zero-shim approach.

@@ -34,7 +34,11 @@ pub use gnn::{
     ZSpaceGraphConvolution,
 };
 #[cfg(feature = "golden")]
-pub use golden::{GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig};
+pub use golden::{
+    CouncilDigest, CouncilEvidence, GoldenBlackcatPulse, GoldenCooperativeDirective,
+    GoldenCouncilSnapshot, GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig,
+    GoldenSelfRewriteConfig,
+};
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
@@ -55,9 +59,9 @@ pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
 pub use plan::RankPlanner;
 pub use roundtable::{
-    simulate_proposal_locally, BlackcatModerator, DistConfig, DistMode, GlobalProposal, HeurOp,
-    HeurOpKind, HeurOpLog, MetaConductor, MetaSummary, ModeratorMinutes, OutcomeBand,
-    RoundtableNode,
+    simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, DistMode,
+    GlobalProposal, HeurOp, HeurOpKind, HeurOpLog, MetaConductor, MetaSummary, ModeratorMinutes,
+    OutcomeBand, RoundtableNode,
 };
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use trainer::{EpochStats, ModuleTrainer};

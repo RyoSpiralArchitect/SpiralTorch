@@ -306,7 +306,7 @@ use st_nn::{GoldenRetriever, GoldenRetrieverConfig, Linear, MeanSquaredError, Mo
 
 let mut trainer_a = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
 let mut trainer_b = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
-let retriever = GoldenRetriever::new(GoldenRetrieverConfig::default(), vec![trainer_a, trainer_b])?;
+let mut retriever = GoldenRetriever::new(GoldenRetrieverConfig::default(), vec![trainer_a, trainer_b])?;
 let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
 println!("workers={} avg_loss={}", report.workers, report.average_loss);
 ```
@@ -315,6 +315,131 @@ GoldenRetriever keeps each trainer behind a poison-resistant mutex, launches the
 epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
 locking or thread book-keeping required.
+
+Need the distributed run to keep every local Blackcat moderator in sync? Toggle
+the cooperative switches on the config:
+
+```rust
+let config = GoldenRetrieverConfig {
+    sync_blackcat_minutes: true,
+    sync_heuristics_log: true,
+    coordinate_blackcat: true,
+    exploration_bias: 1.5,
+    optimization_boost: 0.75,
+    synergy_bias: 1.25,
+    reinforcement_bias: 1.1,
+    ..GoldenRetrieverConfig::default()
+};
+let mut retriever = GoldenRetriever::new(config, vec![trainer_a, trainer_b])?;
+let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
+assert!(!report.moderator_minutes.is_empty());
+if let Some(pulse) = &report.cooperative_pulse {
+    use std::time::Duration;
+    println!(
+        "dominant_plan={:?} exploration={} optimization={} synergy={} reinforcement={}",
+        pulse.dominant_plan,
+        pulse.exploration_drive,
+        pulse.optimization_gain,
+        pulse.synergy_score,
+        pulse.reinforcement_weight
+    );
+    let directive = pulse.directive(Duration::from_secs_f32(2.0), 48);
+    println!(
+        "retune: push_interval={:.2}s summary_window={} reinforcement_weight={:.2}",
+        directive.push_interval.as_secs_f32(),
+        directive.summary_window,
+        directive.reinforcement_weight
+    );
+}
+```
+
+Every epoch collects the union of moderator minutes and heuristics ops across
+workers, rebroadcasting them before the next round so proposals and soft rules
+stay aligned. With `coordinate_blackcat` flipped on, GoldenRetriever also emits
+an aggregated **GoldenBlackcatPulse** that nudges every worker’s distributed
+node. The pulse now captures cooperative synergy (`synergy_score`), the amount
+of shared reinforcement from heuristics and moderator minutes
+(`reinforcement_weight`), confidence-weighted coverage, and raw op-log
+composition. Each pulse can synthesize a `GoldenCooperativeDirective`, which
+Golden retrievers and trainers use to retune push intervals and summary windows
+without guessing at scaling factors. Trainers expose both
+`last_blackcat_pulse()` and `last_blackcat_directive()` so downstream tooling
+can inspect exactly how the synergy evolved during the run.
+
+Blackcat now keeps a running scoreboard for every plan signature it moderates.
+Each entry tracks observation counts, mean support, reward, ψ, and confidence so
+dashboards can highlight sustained winners instead of relying on a single
+minute. Access the aggregated view with `ModuleTrainer::blackcat_scoreboard()`
+from Rust or call `trainer.blackcat_scoreboard()` in Python to retrieve a list
+of dictionaries (plan signature, script hint, averages, and timestamps). The
+scoreboard honours the moderator history window and can be capped via
+`BlackcatModerator::set_scoreboard_limit()` when you only care about the top-N
+plans.
+
+`GoldenRetrieverConfig` picked up `synergy_bias` and `reinforcement_bias` knobs
+to tilt how aggressively the aggregated metrics should respond to support vs.
+heuristic weight. Bumping `synergy_bias` favours exploration-heavy, confidence
+driven pulses while `reinforcement_bias` amplifies heuristics and reward
+signals when tightening distributed synchronization. When you want Golden to
+renegotiate those biases automatically, hand it a
+`GoldenSelfRewriteConfig`. The retriever stages a four-party council (explorer,
+optimizer, harmoniser, reinforcer) that blends the latest cooperative pulse
+with scheduler depth to rewrite the coordination biases in-place:
+
+```rust
+use st_nn::{GoldenRetriever, GoldenRetrieverConfig, GoldenSelfRewriteConfig};
+
+let mut retriever = GoldenRetriever::new(
+    GoldenRetrieverConfig::default().with_self_rewrite(
+        GoldenSelfRewriteConfig::default()
+            .with_schedule_weight(0.8)
+            .with_negotiation_rate(0.45)
+            .with_inertia(0.5),
+    ),
+    vec![trainer_a, trainer_b],
+)?;
+let before = retriever.coordination_biases();
+// modules/losses/loaders/schedules prepared as shown above
+let report = retriever.run_epoch(mods.clone(), losses.clone(), loaders.clone(), schedules.clone())?;
+let after = retriever.coordination_biases();
+println!("biases before={before:?} after={after:?}");
+if let Some(pulse) = &report.cooperative_pulse {
+    let mut persisted = GoldenRetrieverConfig::default().with_self_rewrite(
+        GoldenSelfRewriteConfig::default().with_schedule_weight(0.8),
+    );
+    persisted.rewrite_with_scheduler(&schedules, Some(pulse));
+}
+```
+
+`GoldenRetriever::coordination_biases()` exposes the live negotiation result so
+Dashboards can visualise the four delegates converging. The
+`rewrite_with_scheduler` helper mirrors the runtime logic in case you need to
+persist the negotiated configuration or replay it in another process.
+
+For longer runs the self-rewrite council now keeps a rolling transcript. The
+`GoldenSelfRewriteConfig` gained `with_council_memory`,
+`with_schedule_resonance`, and `with_synergy_pressure` knobs so you can tune how
+aggressively schedule depth and Blackcat energy bend the delegates. Every epoch
+emits a `GoldenCouncilSnapshot` that summarises the negotiated biases,
+resonance, and stability alongside the pulse that triggered it. The snapshot now
+tracks the epoch watermark, the heuristics log ranges that still need
+reconciliation, the top soft-rule winners, and a `CouncilEvidence` bundle that
+captures band energy, graph flow, ψ, and geometric cues used for the vote.
+Inspect it via `GoldenEpochReport::council_snapshot()` or the new
+`GoldenRetriever::last_council()` helper to plot convergence, detect
+oscillations, or persist the negotiated state for a follow-up run. Consumers who
+need streaming updates can subscribe with `GoldenRetriever::subscribe_digest()`
+and replay `CouncilDigest` events as nodes fall in and out of the cluster.
+
+Python callers can read the same signals via
+`spiraltorch.ModuleTrainer.last_blackcat_pulse()` and
+`last_blackcat_directive()`, which yield rich `GoldenBlackcatPulse` and
+`GoldenCooperativeDirective` wrappers. The bindings surface getters for every
+metric alongside a `pulse.directive(baseline_interval, baseline_window)` helper
+so notebooks can mirror the Rust-side retuning logic. The council feed is
+available through `ModuleTrainer.last_council()`, which returns a
+`GoldenCouncilSnapshot` wrapper that now exposes the epoch, high watermark,
+missing ranges, council evidence, and decoded winner `HeurOp`s for audit trails.
 
 ### SpiralTorchRL (hypergrad policy gradients)
 
@@ -716,6 +841,14 @@ for op in trainer.heuristics_log().entries() {
 }
 for minute in trainer.blackcat_minutes() {
     println!("moderator: {} -> {:?} (support {:.2})", minute.plan_signature, minute.winner, minute.support);
+}
+for entry in trainer.blackcat_scoreboard() {
+    println!(
+        "scoreboard: {} obs={} reward={:.3}",
+        entry.plan_signature,
+        entry.observations,
+        entry.mean_reward
+    );
 }
 ```
 
