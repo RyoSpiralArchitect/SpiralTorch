@@ -131,7 +131,7 @@ meaning-aligned weights.
 6. Once the physical tests pass, toggle \(\rho\) to probe \(\mu > 0\) using
    difference tests or sequential Bayes factors.
 
-## 10. Streaming Maxwell evidence into SpiralK
+## 10. Streaming Maxwell evidence into SpiralK and desire loops
 
 - The Rust core exposes `MaxwellSpiralKBridge` to translate sequential pulses
   into SpiralK-ready `soft(...)` hints. Each registered channel is sanitised so
@@ -145,6 +145,13 @@ meaning-aligned weights.
 - The resulting string can be injected into the existing SpiralK orchestration
   so code-driven Z pulses bias Above/Here/Beneath steering without bespoke glue
   code.
+- Enable the PSI feature to access `MaxwellPsiTelemetryBridge`. Each pulse is
+  converted into a PSI reading, optional `PsiEvent::ThresholdCross` entries, and
+  a `SoftlogicZFeedback` sample so the `DesirePsiBridge` captures the same
+  evidence stream without manual hub plumbing.
+- Use `MaxwellDesireBridge` to map channel labels to vocabulary windows. When a
+  pulse arrives, call `hint_for(...)` to produce a `ConceptHint::Window` scaled
+  by the observed Z magnitude and feed it directly into the `DesireLagrangian`.
 
 ---
 

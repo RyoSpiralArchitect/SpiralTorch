@@ -156,6 +156,28 @@ while `InterfaceZConductor` drives any number of gauges, aggregates the
 resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
 ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
 
+### Maxwell-coded envelopes meet SpiralK
+
+The coded-envelope utilities now ship with a `MaxwellSpiralKBridge` that turns
+sequential Z pulses into KDSl snippets ready for the runtime. Every channel name
+is sanitised for SpiralK, weights adapt to the observed Z magnitude, and
+existing programs can be prepended so the hints extend a live policy rather than
+replace it.【F:crates/st-core/src/theory/maxwell.rs†L335-L441】 Call
+`push_pulse(channel, &pulse)` for each stream, then `script()` to emit the
+combined `soft(maxwell.bias, …)` rules that SpiralK can ingest without custom
+glue code.【F:crates/st-core/src/theory/maxwell.rs†L362-L408】 The workflow is
+documented in the refreshed Maxwell technical note, which now includes a
+section on streaming detections back into SpiralK orchestration.【F:docs/coded_envelope_maxwell_model.md†L144-L157】
+
+Want the language desire loops to see the same detections? Enable the PSI
+feature and run the new `MaxwellPsiTelemetryBridge`. It converts each pulse into
+a PSI reading, optional band-energy threshold events, and a `SoftlogicZFeedback`
+sample so `DesirePsiBridge` captures the Z drift alongside ψ totals without
+hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:crates/st-core/src/theory/maxwell.rs†L666-L714】
+Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
+concept window that the `DesireLagrangian` can consume, aligning coded-envelope
+channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L132】
+
 ### Semiotic suturing, desire control, and EGW bridges
 
 SpiralTorch now ships a native semiotic optimiser that compresses Lacanian

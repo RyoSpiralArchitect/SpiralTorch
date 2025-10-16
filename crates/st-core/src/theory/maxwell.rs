@@ -32,7 +32,14 @@
 
 use core::f64::consts::PI;
 
+#[cfg(feature = "psi")]
+use crate::telemetry::{
+    hub,
+    psi::{PsiComponent, PsiEvent, PsiReading},
+};
 use crate::{telemetry::hub::SoftlogicZFeedback, util::math::LeechProjector};
+#[cfg(feature = "psi")]
+use std::collections::HashMap;
 
 /// Consolidated Maxwell gain for a single coded envelope channel.
 ///
@@ -324,6 +331,86 @@ impl MaxwellZPulse {
     }
 }
 
+#[cfg(feature = "psi")]
+/// Publishes Maxwell pulses into the PSI telemetry bridge so the desire
+/// lagrangian can observe coded-envelope bias without bespoke glue code.
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct MaxwellPsiTelemetryBridge {
+    psi_gain: f32,
+    loss_gain: f32,
+    band_threshold: f32,
+}
+
+#[cfg(feature = "psi")]
+impl MaxwellPsiTelemetryBridge {
+    /// Creates a new bridge with unit PSI and loss gains.
+    pub fn new() -> Self {
+        Self {
+            psi_gain: 1.0,
+            loss_gain: 1.0,
+            band_threshold: 0.0,
+        }
+    }
+
+    /// Scales the PSI total injected into the telemetry hub.
+    pub fn with_psi_gain(mut self, psi_gain: f32) -> Self {
+        self.psi_gain = psi_gain.max(0.0);
+        self
+    }
+
+    /// Scales the weighted loss recorded alongside the feedback pulse.
+    pub fn with_loss_gain(mut self, loss_gain: f32) -> Self {
+        self.loss_gain = loss_gain.max(0.0);
+        self
+    }
+
+    /// Emits a band-energy threshold crossing event when the accumulated energy
+    /// meets or exceeds the provided value. Set to zero to disable.
+    pub fn with_band_threshold(mut self, threshold: f32) -> Self {
+        self.band_threshold = threshold.max(0.0);
+        self
+    }
+
+    /// Converts the Maxwell pulse into PSI/SoftLogic telemetry and stores it in
+    /// the global hub. The returned feedback can be reused immediately by the
+    /// caller when additional processing is required.
+    pub fn publish(&self, pulse: &MaxwellZPulse, step: u64) -> SoftlogicZFeedback {
+        let (above, here, beneath) = pulse.band_energy;
+        let band_total = (above + here + beneath).max(0.0);
+        let psi_total = band_total * self.psi_gain;
+        let weighted_loss = pulse.magnitude() as f32 * self.loss_gain;
+
+        let mut breakdown = HashMap::new();
+        breakdown.insert(PsiComponent::BAND_ENERGY, band_total);
+
+        let reading = PsiReading {
+            total: psi_total,
+            breakdown,
+            step,
+        };
+        hub::set_last_psi(&reading);
+
+        let mut events = Vec::new();
+        if self.band_threshold > 0.0 && band_total >= self.band_threshold {
+            events.push(PsiEvent::ThresholdCross {
+                component: PsiComponent::BAND_ENERGY,
+                value: band_total,
+                threshold: self.band_threshold,
+                up: pulse.z_score >= 0.0,
+                step,
+            });
+        }
+        hub::set_last_psi_events(&events);
+
+        let feedback = pulse
+            .clone()
+            .into_softlogic_feedback(psi_total, weighted_loss);
+        hub::set_softlogic_z(feedback);
+        feedback
+    }
+}
+
 /// Hint that can be injected into SpiralK so coded-envelope experiments can
 /// steer the runtime once a Maxwell pulse has been detected.
 #[derive(Clone, Debug, PartialEq)]
@@ -606,6 +693,42 @@ mod tests {
         assert!(script.contains("z: 1;"));
         assert!(script.contains("maxwell.bias"));
         assert!(script.contains("blocks >= 12"));
+    }
+
+    #[cfg(feature = "psi")]
+    #[test]
+    fn psi_bridge_streams_into_hub() {
+        use crate::telemetry::hub;
+
+        let pulse = MaxwellZPulse {
+            blocks: 9,
+            mean: 0.18,
+            standard_error: 0.05,
+            z_score: 4.2,
+            band_energy: (0.6, 0.4, 0.2),
+            z_bias: 0.48,
+        };
+
+        let bridge = MaxwellPsiTelemetryBridge::new()
+            .with_psi_gain(1.7)
+            .with_loss_gain(0.3)
+            .with_band_threshold(1.0);
+
+        let feedback = bridge.publish(&pulse, 42);
+
+        let stored_feedback = hub::get_softlogic_z().expect("softlogic feedback");
+        assert_eq!(stored_feedback.z_signal, feedback.z_signal);
+        assert!((stored_feedback.psi_total - feedback.psi_total).abs() <= f32::EPSILON);
+
+        let reading = hub::get_last_psi().expect("psi reading");
+        assert_eq!(reading.step, 42);
+        assert!(reading.total > 0.0);
+        assert_eq!(reading.breakdown.len(), 1);
+
+        let events = hub::get_last_psi_events();
+        if (pulse.band_energy.0 + pulse.band_energy.1 + pulse.band_energy.2) >= 1.0 {
+            assert_eq!(events.len(), 1);
+        }
     }
 
     #[test]
