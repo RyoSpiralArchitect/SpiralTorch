@@ -42,10 +42,10 @@ pub use golden::{
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
+pub use language::entropy as desire_entropy;
 pub use language::pipeline::{
     LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
 };
-pub use language::entropy as desire_entropy;
 pub use language::{
     constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesireLagrangian,
@@ -85,8 +85,8 @@ pub use st_core::runtime::blackcat::{
 pub use trainer::{EpochStats, ModuleTrainer};
 
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};
-pub use st_tensor::pure::topos::OpenCartesianTopos;
-pub use st_tensor::pure::{
+pub use st_tensor::topos::OpenCartesianTopos;
+pub use st_tensor::{
     AmegaHypergrad, ComplexTensor, LanguageWaveEncoder, PureResult, Tensor, TensorError,
 };
 pub use st_text::{ResonanceNarrative, TextResonator};

@@ -5,8 +5,8 @@
 
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor};
-use st_tensor::pure::topos::OpenCartesianTopos;
-use st_tensor::pure::{LanguageWaveEncoder, TensorError};
+use st_tensor::topos::OpenCartesianTopos;
+use st_tensor::{LanguageWaveEncoder, TensorError};
 
 /// Element-wise gate that keeps a persistent Z-space resonance attached to the
 /// hypergrad tape. The resonator can ingest text or complex waves and amplify
