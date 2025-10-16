@@ -283,6 +283,8 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
         .and_then(|guard| guard.as_ref().copied())
 }
 
+#[cfg(feature = "psi")]
+/// Stores the latest desire step telemetry snapshot for downstream consumers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesirePhaseTelemetry {
     Observation,
@@ -337,6 +339,8 @@ pub fn set_last_desire_step(step: DesireStepTelemetry) {
     }
 }
 
+#[cfg(feature = "psi")]
+/// Clears the cached desire step telemetry snapshot.
 pub fn get_last_desire_step() -> Option<DesireStepTelemetry> {
     desire_step_cell()
 /// Stores the latest desire step telemetry snapshot for downstream consumers.
