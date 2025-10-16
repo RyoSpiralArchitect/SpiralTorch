@@ -231,45 +231,15 @@ for epoch, stats in enumerate(reports, start=1):
 # Switch back to manual preparation mid-run if you need custom tape control
 lightning.set_auto_prepare(False)
 session.prepare_module(model)
-```
 
-## Integration helpers
-
-SpiralTorch now exposes first-class hooks into popular deployment and
-optimisation frameworks. Each helper lazily imports its dependency and raises a
-clear error if the optional package is missing.
-
-```python
-from pathlib import Path
-
-import spiraltorch as st
-from spiraltorch.integrations import (
-    bentoml_save_model,
-    export_onnx,
-    optuna_optimize,
-    ray_tune_run,
-    torchserve_archive,
-)
-
-# Export a trained SpiralTorch module through torch.onnx
-model = ...  # torch.nn.Module compatible with SpiralTorch parameters
-example_input = ...
-onnx_path = Path("artifacts/model.onnx")
-export_onnx(model, example_input, onnx_path.as_posix(), opset_version=18)
-
-# Package for TorchServe hosting
-archive_path = torchserve_archive(
-    model_name="spiral-demo",
-    serialized_file="checkpoints/spiral.pt",
-    export_path="artifacts",
-    handler="spiral_handler.py",
-    extra_files=["index_to_name.json"],
-    force=True,
-)
-
-# Persist a BentoML runner
-bento_ref = bentoml_save_model(model, "spiral-demo", signatures={"__call__": {"batchable": True}})
-
+# Stage training plans inherit the previous configuration by default
+plan = [
+    {"label": "warmup", "epochs": [dataset]},
+    {
+        "label": "refine",
+        "config": {"top_k": 4, "auto_prepare": False},
+        "epochs": [dataset],
+    },
 # Run Optuna on a SpiralTorch training loop
 def objective(trial):
     lr = trial.suggest_float("lr", 1e-4, 1e-1, log=True)
@@ -318,6 +288,21 @@ print(f"reward={report.total_reward:.2f} baseline={report.mean_return:.2f} hyper
 print("weights", policy.weights().tolist())
 ```
 
+Chrono telemetry is shared through the global hub, so recording resonance
+histories on the session side automatically feeds loop signals back into the
+policy geometry. Call `session.resonate_over_time(...)`/`session.timeline(...)`
+from Python to keep the hub warm; the Rust learner will tighten its clamps,
+adjust Λ₂₄ pressure, and publish loop gain/softening diagnostics the next time
+you finish an episode with geometry enabled.
+
+Each roundtable summary now contributes to a distributed `LoopbackEnvelope`
+queue. The Python side doesn’t need to manage it directly—whenever a summary
+or collapse pulse fires, the bindings push the latest SpiralK script hint,
+softlogic Z-bias, and PSI total into the hub. `SpiralPolicyGradient` drains the
+queue before processing resonance snapshots, blends the envelopes into a single
+chrono signal, and keeps the strongest script around so the controller can
+rewrite its own clamps on the next pass.
+
 ## SpiralTorchRec quickstart
 
 `spiraltorch.rec` brings the SpiralTorchRec factorisation stack to notebooks and
@@ -336,10 +321,8 @@ ratings = [
     (1, 2, 4.5),
 ]
 
-epoch = rec.train_epoch(ratings)
-print(f"rmse={epoch.rmse:.4f} samples={epoch.samples}")
-print("prediction", rec.predict(0, 2))
-print("user embedding", rec.user_embedding(0).tolist())
+report = lightning.fit_plan(model, loss, plan)
+print(report.best_stage_label(), report.best_epoch().average_loss)
 ```
 
 The `DistConfig` connects the local roundtable to a meta layer that exchanges
@@ -367,6 +350,115 @@ trace.with_barycenter_from(weights, densities)
 trace.with_infinity([densities[0].clone()], [])
 resonance = trace.resonate()
 print(resonance.homotopy_flow().tolist())
+```
+
+Temporal telemetry is available directly from Python. Record frames with
+`session.resonate_over_time(resonance, dt)` and animate the geometry through the
+new helpers. Use `timeline_summary` for rolling drift/energy stats,
+`timeline_harmonics` to analyse spectral drift, `loop_signal` for a ready-made
+bundle (complete with SpiralK hints when `kdsl` is enabled), and `session.speak(...)`
+for a ready-to-plot amplitude trace while `timeline_story` narrates the same
+window:
+
+```python
+frame = session.resonate_over_time(resonance, dt=0.1)
+print(frame.timestamp, frame.total_energy, frame.curvature_drift)
+
+frames = session.timeline(timesteps=64)
+summary = session.timeline_summary(timesteps=64)
+harmonics = session.timeline_harmonics(timesteps=128, bins=20)
+loop_signal = session.loop_signal(timesteps=128)
+times, energy, drift = session.animate_resonance(timesteps=64)
+wave = session.speak(timesteps=64, temperature=0.6)
+story, highlights = session.timeline_story(timesteps=128, temperature=0.65)
+print(session.describe())
+print(st.describe_timeline(frames))
+if harmonics and harmonics.dominant_energy:
+    print("Energy harmonic", harmonics.dominant_energy.frequency)
+if loop_signal and loop_signal.spiralk_script:
+    print("SpiralK loop hint:\n", loop_signal.spiralk_script)
+
+encoder = LanguageWaveEncoder(session.curvature(), 0.55)
+wave = encoder.speak(frames)
+
+import spiraltorch as st
+from spiraltorch import TextResonator
+narrator = TextResonator(session.curvature(), 0.55)
+print(narrator.describe_resonance(resonance))
+print(narrator.describe_timeline(frames))
+print(narrator.describe_frame(frames[-1]))
+audio = narrator.speak(frames)
+```
+
+Atlas projections collect those temporal statistics, maintainer diagnostics,
+and loopback envelopes into one object. Grab the latest `AtlasFrame` via
+`session.atlas()`, inspect its metrics/notes, and narrate it with
+`session.atlas_story(...)` or `st.describe_atlas(...)`:
+
+```python
+atlas = session.atlas()
+if atlas:
+    print(atlas.timestamp, atlas.maintainer_status)
+    for metric in atlas.metrics():
+        print(metric.name, metric.value)
+    for district in atlas.districts():
+        print("district", district.name, district.mean, district.span)
+    story = session.atlas_story(temperature=0.6)
+    if story:
+        print(story[0])
+        print(story[1])
+    print(st.describe_atlas(atlas))
+
+route = session.atlas_route(limit=6)
+print("atlas history", route.length, [frame.timestamp for frame in route.frames])
+
+summary = session.atlas_route_summary(limit=6)
+print(
+    "atlas summary",
+    summary.frames,
+    summary.mean_loop_support,
+    summary.loop_std,
+    summary.collapse_trend,
+    summary.z_signal_trend,
+)
+for district in summary.districts():
+    print("summary", district.name, district.coverage, district.delta, district.std_dev)
+    for focus in district.focus:
+        print("  focus", focus.name, focus.delta, focus.momentum)
+if summary.maintainer_status:
+    print("maintainer", summary.maintainer_status, summary.maintainer_diagnostic)
+
+for perspective in session.atlas_perspectives(limit=6):
+    print("perspective", perspective.district, perspective.guidance)
+    for focus in perspective.focus:
+        print("  ↳", focus.name, focus.latest)
+
+surface = session.atlas_perspective(
+    "Surface", limit=6, focus_prefixes=["timeline", "session.surface"],
+)
+if surface:
+    print("surface view", surface.guidance)
+```
+
+The `SpiralSession` maintainer surfaces clamp and density suggestions directly
+from the temporal stream. Configure it via the builder or tweak thresholds at
+runtime:
+
+```python
+builder.maintainer(jitter_threshold=0.25, clamp_max=2.8)
+session = builder.build()
+
+print(session.maintainer_config())
+report = session.self_maintain()
+print(report.spiralk_script)
+if report.should_rewrite():
+    session.configure_maintainer(pressure_step=0.2)
+    print("Maintainer escalated:", report.diagnostic)
+if report.drift_peak:
+    print("Drift harmonic", report.drift_peak.frequency, report.drift_peak.magnitude)
+pulse = session.collapse_pulse()
+if pulse:
+    print("Collapse pulse", pulse.command, pulse.step)
 ```
 
 ```python
