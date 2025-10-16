@@ -43,6 +43,14 @@ pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSe
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
 pub use language::entropy as desire_entropy;
+pub use language::{
+    constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
+    DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesireLagrangian,
+    DesireLogRecord, DesireLogReplay, DesireLogbook, DesirePhase, DesirePipeline,
+    DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRewriteTrigger,
+    DesireSchedule, DesireSolution, DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary,
+    DesireTriggerBuffer, DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver,
+    RepressionField, SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
 pub use language::pipeline::{
     LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
 };

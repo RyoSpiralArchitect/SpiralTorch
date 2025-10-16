@@ -321,6 +321,42 @@ if let Some(trigger) = &step.trigger {
 }
 ```
 
+Graph telemetry can join the same braid. Instantiate a `GraphFlowTracer`, feed it
+into `GraphConsensusBridge`, and wrap the result with `DesireGraphBridge`. Every
+desire step now captures the latest graph digest, letting you aggregate
+Z-space desire entropy with SpiralK’s quad-band consensus or replay graph
+shares into analytics dashboards via `DesireGraphSummary`.【F:crates/st-nn/src/language/pipeline.rs†L32-L119】【F:crates/st-nn/src/language/pipeline.rs†L575-L676】
+
+```rust
+use std::sync::{Arc, Mutex};
+use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
+use st_nn::language::{DesireGraphBridge, DesirePipeline};
+use st_nn::{BandEnergy, GraphConsensusBridge};
+
+let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+let graph_bridge = DesireGraphBridge::new(
+    GraphConsensusBridge::new(tracer.clone()),
+    BandEnergy { above: 0.4, here: 0.35, beneath: 0.25, drift: 0.0 },
+);
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_graph_bridge(&graph_bridge)
+    .build();
+
+// capture graph flows alongside desire automation
+tracer.lock().unwrap().begin_layer(
+    "gnn::spiral",
+    -1.0,
+    vec![NodeFlowSample { node_index: 0, incoming_weight: 1.0, aggregated_norm: 0.6 }],
+);
+
+let step = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(summary) = graph_bridge.drain_summary()? {
+    for (layer, share) in summary.layer_support {
+        println!("graph layer {layer} captured {:.2}% of energy", share * 100.0);
+    }
+}
+```
+
 The result is a single Rust-native control surface that marries KL control,
 Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
 language modules, rewrite monads, or SpiralK trainers without bespoke Python

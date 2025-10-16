@@ -1475,6 +1475,8 @@ mod tests {
     }
 
     fn build_language_semantics() -> SemanticBridge {
+        use std::collections::HashSet;
+
         let log_pi = vec![
             vec![(0, (0.65f32).ln()), (1, (0.35f32).ln())],
             vec![(0, (0.4f32).ln()), (1, (0.6f32).ln())],

@@ -20,6 +20,9 @@ use std::collections::HashMap;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+    /// Receives emitted rewrite triggers. Implementations can override this to
+    /// react without duplicating persistence if the sink already captured the
+    /// step in [`Self::on_step`].
 /// Sink interface used by [`DesirePipeline`] to braid automation steps into external systems.
 pub trait DesirePipelineSink: Send {
     fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()>;
@@ -32,6 +35,8 @@ pub trait DesirePipelineSink: Send {
         Ok(())
     }
 
+    /// Flushes any buffered side-effects. Called by [`DesirePipeline::flush`]
+    /// and when the pipeline is dropped.
     fn flush(&mut self) -> PureResult<()> {
         Ok(())
     }
@@ -47,6 +52,8 @@ impl DesirePipelineSink for DesireLogbook {
     }
 }
 
+/// Event broadcast by [`DesirePipeline`] when a step is evaluated or a rewrite
+/// trigger fires.
 #[derive(Clone, Debug)]
 pub enum DesirePipelineEvent {
     Step {
@@ -68,6 +75,8 @@ impl DesirePipelineEvent {
     }
 }
 
+/// Simple sink that forwards every pipeline event into a channel so trainers,
+/// schedulers, or external observers can subscribe without manual glue.
 pub struct DesireChannelSink {
     sender: Sender<DesirePipelineEvent>,
 }
@@ -110,6 +119,8 @@ impl DesirePipelineSink for DesireChannelSink {
     }
 }
 
+/// Builder used to configure the braid of sinks attached to a
+/// [`DesirePipeline`].
 pub struct DesirePipelineBuilder {
     automation: DesireAutomation,
     sinks: Vec<Box<dyn DesirePipelineSink>>,
@@ -146,6 +157,11 @@ impl DesirePipelineBuilder {
         self
     }
 
+    pub fn with_graph_bridge(mut self, bridge: &DesireGraphBridge) -> Self {
+        self.sinks.push(Box::new(bridge.clone()));
+        self
+    }
+
     pub fn build(self) -> DesirePipeline {
         DesirePipeline {
             automation: self.automation,
@@ -154,6 +170,8 @@ impl DesirePipelineBuilder {
     }
 }
 
+/// Coordinates desire automation, persistence, and trigger routing so the
+/// "desire stack" can co-evolve with the rest of SpiralTorch.
 pub struct DesirePipeline {
     automation: DesireAutomation,
     sinks: Vec<Box<dyn DesirePipelineSink>>,
@@ -195,6 +213,10 @@ impl DesirePipeline {
     }
 
     pub fn attach_trainer_bridge(&mut self, bridge: &DesireTrainerBridge) {
+        self.sinks.push(Box::new(bridge.clone()));
+    }
+
+    pub fn attach_graph_bridge(&mut self, bridge: &DesireGraphBridge) {
         self.sinks.push(Box::new(bridge.clone()));
     }
 
@@ -313,12 +335,15 @@ fn timestamp_from_millis(ms: u128) -> SystemTime {
     UNIX_EPOCH + Duration::from_millis(clamped)
 }
 
+/// Recorded trigger event captured by [`DesireTriggerBuffer`].
 #[derive(Clone, Debug)]
 pub struct DesireTriggerEvent {
     pub trigger: DesireRewriteTrigger,
     pub timestamp: SystemTime,
 }
 
+/// Shared trigger collector that can be cloned by automation, SpiralK, and
+/// analytics stages while all viewing the same underlying buffer.
 #[derive(Clone, Default)]
 pub struct DesireTriggerBuffer {
     shared: Arc<Mutex<Vec<DesireTriggerEvent>>>,
@@ -1031,6 +1056,15 @@ mod tests {
     };
     use super::super::temperature::TemperatureController;
     use super::*;
+    use crate::gnn::spiralk::GraphConsensusBridge;
+    use crate::schedule::BandEnergy;
+    use st_core::config::self_rewrite::SelfRewriteCfg;
+    use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
+    use std::collections::HashSet;
+    use std::sync::{mpsc::channel, Arc, Mutex};
+    use std::time::{Duration, Instant, SystemTime};
+    use tempfile::tempdir;
+
     use super::super::automation::DesireAutomation;
     use super::super::desire::{constant, warmup, DesireLagrangian};
     use super::super::geometry::{
@@ -1317,6 +1351,54 @@ mod tests {
         assert!(summary.mean_alpha >= 0.0);
         assert!(summary.triggers >= 1);
         assert!(bridge.is_empty());
+        assert!(bridge.drain_summary().unwrap().is_none());
+    }
+
+    #[test]
+    fn graph_bridge_collects_consensus() {
+        let automation = build_automation();
+        let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+        let baseline = BandEnergy {
+            above: 0.4,
+            here: 0.35,
+            beneath: 0.25,
+            drift: 0.0,
+        };
+        let bridge = DesireGraphBridge::new(GraphConsensusBridge::new(tracer.clone()), baseline);
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_graph_bridge(&bridge)
+            .build();
+
+        let logits = vec![2.0, 0.8];
+        let concept = ConceptHint::Distribution(vec![0.65, 0.35]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..3 {
+            {
+                let mut inner = tracer.lock().unwrap();
+                inner.begin_layer(
+                    format!("layer-{}", step),
+                    -1.0,
+                    vec![NodeFlowSample {
+                        node_index: 0,
+                        incoming_weight: 1.0 + step as f32 * 0.1,
+                        aggregated_norm: 0.5 + 0.1 * step as f32,
+                    }],
+                );
+            }
+            let now = start + Duration::from_secs(step as u64);
+            let timestamp = anchor + Duration::from_secs(step as u64);
+            pipeline
+                .step_at(&logits, 0, &concept, now, timestamp)
+                .unwrap();
+        }
+
+        assert_eq!(bridge.len(), 3);
+        let summary = bridge.drain_summary().unwrap().unwrap();
+        assert_eq!(summary.steps, 3);
+        assert!(summary.total_graph_energy > 0.0);
+        assert!(summary.mean_entropy.is_finite());
+        assert!(!summary.layer_support.is_empty());
         assert!(bridge.drain_summary().unwrap().is_none());
     }
 }
