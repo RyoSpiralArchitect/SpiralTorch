@@ -11,7 +11,7 @@ use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
 use pyo3::exceptions::{PyImportError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule, PyTuple};
+use pyo3::types::{PyAny, PyDict, PyList, PyModule, PySequence, PyTuple};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use pyo3::PyRef;
@@ -39,11 +39,14 @@ use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
     Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
-    EpochStats, LightningConfig as NnLightningConfig, Linear as NnLinear, Loss, MeanSquaredError,
+    EpochStats, LightningConfig as NnLightningConfig, LightningReport as NnLightningReport,
+    LightningStageReport as NnLightningStageReport, Linear as NnLinear, Loss, MeanSquaredError,
     Module, ModuleTrainer, Relu as NnRelu, RoundtableConfig, RoundtableSchedule,
     Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
+#[cfg(feature = "golden")]
+use st_nn::{GoldenBlackcatPulse, GoldenCooperativeDirective};
 use st_rec::{RatingTriple as RecRatingTriple, RecEpochReport, SpiralRecError, SpiralRecommender};
 use st_rl::{EpisodeReport as RlEpisodeReport, SpiralPolicyGradient, SpiralRlError};
 use st_tensor::backend::faer_dense;
@@ -2384,6 +2387,176 @@ impl PyEpochStats {
     }
 }
 
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenCooperativeDirective")]
+#[derive(Clone)]
+struct PyGoldenCooperativeDirective {
+    inner: GoldenCooperativeDirective,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenCooperativeDirective {
+    fn from_inner(inner: GoldenCooperativeDirective) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenCooperativeDirective {
+    #[getter]
+    fn push_interval(&self) -> f32 {
+        self.inner.push_interval.as_secs_f32()
+    }
+
+    #[getter]
+    fn summary_window(&self) -> usize {
+        self.inner.summary_window
+    }
+
+    #[getter]
+    fn exploration_priority(&self) -> f32 {
+        self.inner.exploration_priority
+    }
+
+    #[getter]
+    fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "GoldenCooperativeDirective(push_interval={:.3}, summary_window={}, exploration_priority={:.3}, reinforcement_weight={:.3})",
+            self.push_interval(),
+            self.summary_window(),
+            self.exploration_priority(),
+            self.reinforcement_weight()
+        ))
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenBlackcatPulse")]
+#[derive(Clone)]
+struct PyGoldenBlackcatPulse {
+    inner: GoldenBlackcatPulse,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenBlackcatPulse {
+    fn from_inner(inner: GoldenBlackcatPulse) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenBlackcatPulse {
+    #[getter]
+    fn exploration_drive(&self) -> f32 {
+        self.inner.exploration_drive
+    }
+
+    #[getter]
+    fn optimization_gain(&self) -> f32 {
+        self.inner.optimization_gain
+    }
+
+    #[getter]
+    fn synergy_score(&self) -> f32 {
+        self.inner.synergy_score
+    }
+
+    #[getter]
+    fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
+    }
+
+    #[getter]
+    fn mean_support(&self) -> f32 {
+        self.inner.mean_support
+    }
+
+    #[getter]
+    fn mean_reward(&self) -> f64 {
+        self.inner.mean_reward
+    }
+
+    #[getter]
+    fn mean_psi(&self) -> f32 {
+        self.inner.mean_psi
+    }
+
+    #[getter]
+    fn mean_confidence(&self) -> f32 {
+        self.inner.mean_confidence
+    }
+
+    #[getter]
+    fn coverage(&self) -> usize {
+        self.inner.coverage
+    }
+
+    #[getter]
+    fn heuristics_contributions(&self) -> usize {
+        self.inner.heuristics_contributions
+    }
+
+    #[getter]
+    fn append_weight(&self) -> f32 {
+        self.inner.append_weight
+    }
+
+    #[getter]
+    fn retract_count(&self) -> usize {
+        self.inner.retract_count
+    }
+
+    #[getter]
+    fn annotate_count(&self) -> usize {
+        self.inner.annotate_count
+    }
+
+    #[getter]
+    fn dominant_plan(&self) -> Option<String> {
+        self.inner.dominant_plan.clone()
+    }
+
+    fn is_idle(&self) -> bool {
+        self.inner.is_idle()
+    }
+
+    #[pyo3(signature = (baseline_interval, baseline_window))]
+    fn directive(
+        &self,
+        baseline_interval: f32,
+        baseline_window: usize,
+    ) -> PyResult<PyGoldenCooperativeDirective> {
+        if baseline_interval <= 0.0 {
+            return Err(PyValueError::new_err(
+                "baseline_interval must be positive seconds",
+            ));
+        }
+        let directive = self.inner.directive(
+            Duration::from_secs_f32(baseline_interval),
+            baseline_window.max(1),
+        );
+        Ok(PyGoldenCooperativeDirective::from_inner(directive))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "GoldenBlackcatPulse(exploration={:.3}, optimization={:.3}, synergy={:.3}, reinforcement={:.3}, coverage={}, heuristics={})",
+            self.exploration_drive(),
+            self.optimization_gain(),
+            self.synergy_score(),
+            self.reinforcement_weight(),
+            self.coverage(),
+            self.heuristics_contributions()
+        ))
+    }
+}
+
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
 struct PyModuleTrainer {
     inner: ModuleTrainer,
@@ -2424,6 +2597,13 @@ impl PyModuleTrainer {
     #[getter]
     fn fallback_learning_rate(&self) -> f32 {
         self.inner.fallback_learning_rate()
+    }
+
+    #[getter]
+    fn distribution(&self) -> Option<PyDistConfig> {
+        self.inner
+            .distribution_config()
+            .map(|config| PyDistConfig::from_config(config.clone()))
     }
 
     #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
@@ -2504,25 +2684,56 @@ impl PyModuleTrainer {
         Ok(list.into_py(py))
     }
 
+    #[cfg(feature = "golden")]
+    fn last_blackcat_pulse(&self) -> Option<PyGoldenBlackcatPulse> {
+        self.inner
+            .last_blackcat_pulse()
+            .cloned()
+            .map(PyGoldenBlackcatPulse::from_inner)
+    }
+
+    #[cfg(feature = "golden")]
+    fn last_blackcat_directive(&self) -> Option<PyGoldenCooperativeDirective> {
+        self.inner
+            .last_blackcat_directive()
+            .cloned()
+            .map(PyGoldenCooperativeDirective::from_inner)
+    }
+
     #[pyo3(signature = (module, loss, batches, schedule))]
     fn train_epoch(
         &mut self,
         module: &Bound<'_, PyAny>,
         loss: &Bound<'_, PyAny>,
         batches: &Bound<'_, PyAny>,
-        schedule: &PyRoundtableSchedule,
     ) -> PyResult<PyEpochStats> {
-        let stats =
-            run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
+        let stats = run_epoch_with_lightning(&mut self.inner, module, loss, batches)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        epochs: &Bound<'_, PyAny>,
+    ) -> PyResult<Vec<PyEpochStats>> {
+        let epoch_objects: Vec<PyObject> = epochs.extract()?;
+        let mut reports = Vec::with_capacity(epoch_objects.len());
+        for epoch in epoch_objects {
+            let bound = epoch.bind(py);
+            let stats = run_epoch_with_lightning(&mut self.inner, module, loss, &bound)?;
+            reports.push(PyEpochStats::from_stats(stats));
+        }
+        Ok(reports)
     }
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "ModuleTrainer(curvature={:.4}, hyper_lr={:.4}, fallback_lr={:.4})",
-            self.curvature(),
-            self.hyper_learning_rate(),
-            self.fallback_learning_rate()
+            "SpiralLightning(rows={}, cols={}, auto_prepare={})",
+            self.rows(),
+            self.cols(),
+            self.auto_prepare()
         ))
     }
 }
@@ -2662,6 +2873,50 @@ impl PySpiralLightning {
             reports.push(PyEpochStats::from_stats(stats));
         }
         Ok(reports)
+    }
+
+    #[pyo3(signature = (module, loss, stages))]
+    fn fit_plan(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        stages: &Bound<'_, PyAny>,
+    ) -> PyResult<PyLightningReport> {
+        let stage_objects: Vec<PyObject> = stages.extract()?;
+        if stage_objects.is_empty() {
+            return Err(PyValueError::new_err(
+                "SpiralLightning.fit_plan expects at least one stage",
+            ));
+        }
+
+        let mut inherited = self.inner.config().clone();
+        let mut specs = Vec::with_capacity(stage_objects.len());
+        for stage in stage_objects {
+            let bound = stage.bind(py);
+            let spec = parse_lightning_stage_spec(&bound, &inherited)?;
+            inherited = spec.config.clone();
+            specs.push(spec);
+        }
+
+        let mut stage_reports = Vec::with_capacity(specs.len());
+        for spec in specs {
+            self.inner.reconfigure(spec.config.clone());
+            let mut epoch_stats = Vec::with_capacity(spec.epochs.len());
+            for epoch in spec.epochs {
+                let bound = epoch.bind(py);
+                let stats = run_epoch_with_lightning(&mut self.inner, module, loss, &bound)?;
+                epoch_stats.push(stats);
+            }
+            stage_reports.push(NnLightningStageReport::new(
+                spec.config,
+                spec.label,
+                epoch_stats,
+            ));
+        }
+
+        let report = NnLightningReport::new(stage_reports);
+        Ok(PyLightningReport::from_report(report))
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -3556,6 +3811,217 @@ fn run_epoch_with_lightning(
     ))
 }
 
+fn prepare_module_for_lightning(
+    lightning: &mut NnSpiralLightning,
+    module: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        convert(lightning.prepare_module(seq.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        convert(lightning.prepare_module(linear.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        convert(lightning.prepare_module(relu.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+        convert(lightning.prepare_module(conv.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+        convert(lightning.prepare_module(wave.borrow_mut()?))?;
+        return Ok(());
+    }
+    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+        convert(lightning.prepare_module(projector.borrow_mut()?))?;
+        return Ok(());
+    }
+    Err(PyValueError::new_err(
+        "SpiralLightning.prepare_module expects Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, or Sequential modules",
+    ))
+}
+
+fn run_epoch_with_lightning(
+    lightning: &mut NnSpiralLightning,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
+    batches: &Bound<'_, PyAny>,
+) -> PyResult<EpochStats> {
+    if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(lightning.train_epoch(
+                    seq.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                ))?;
+                return Ok(stats);
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(lightning.train_epoch(
+                    linear.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                ))?;
+                return Ok(stats);
+            }
+        }
+
+        if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(lightning.train_epoch(
+                    relu.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                ))?;
+                return Ok(stats);
+            }
+        }
+    }
+
+    let dataset: Vec<(Tensor, Tensor)> = batches
+        .extract::<Vec<(PyTensor, PyTensor)>>()?
+        .into_iter()
+        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+        .collect();
+
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                seq.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.clone(),
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(lightning.train_epoch(
+                linear.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.clone(),
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats =
+                convert(lightning.train_epoch(relu.borrow_mut()?, mse.inner_mut(), dataset))?;
+            return Ok(stats);
+        }
+    }
+
+    Err(PyValueError::new_err(
+        "SpiralLightning.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
+    ))
+}
+
+struct LightningStageSpec {
+    config: NnLightningConfig,
+    epochs: Vec<PyObject>,
+    label: Option<String>,
+}
+
+fn parse_lightning_stage_spec(
+    stage: &Bound<'_, PyAny>,
+    base: &NnLightningConfig,
+) -> PyResult<LightningStageSpec> {
+    let dict = stage.downcast::<PyDict>().map_err(|_| {
+        PyValueError::new_err("Lightning stage must be a mapping with 'config' and 'epochs' keys")
+    })?;
+
+    let epochs_any = dict
+        .get_item("epochs")
+        .ok_or_else(|| PyValueError::new_err("Lightning stage requires an 'epochs' sequence"))?;
+    let epoch_objects: Vec<PyObject> = epochs_any.extract()?;
+    if epoch_objects.is_empty() {
+        return Err(PyValueError::new_err(
+            "Lightning stage requires at least one epoch",
+        ));
+    }
+
+    let mut config = base.clone();
+    if let Some(config_any) = dict.get_item("config") {
+        let config_dict = config_any
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("Lightning stage 'config' must be a mapping"))?;
+
+        let mut rows = config.rows();
+        let mut cols = config.cols();
+        if let Some(value) = config_dict.get_item("rows") {
+            rows = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("cols") {
+            cols = value.extract()?;
+        }
+        if rows != config.rows() || cols != config.cols() {
+            config = config.with_output_shape(rows, cols);
+        }
+
+        let mut roundtable = config.roundtable();
+        if let Some(value) = config_dict.get_item("top_k") {
+            roundtable.top_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("mid_k") {
+            roundtable.mid_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("bottom_k") {
+            roundtable.bottom_k = value.extract()?;
+        }
+        if let Some(value) = config_dict.get_item("here_tolerance") {
+            roundtable.here_tolerance = value.extract()?;
+        }
+        #[cfg(feature = "psychoid")]
+        if let Some(value) = config_dict.get_item("psychoid") {
+            roundtable.psychoid_enabled = value.extract()?;
+        }
+        #[cfg(feature = "psychoid")]
+        if let Some(value) = config_dict.get_item("psychoid_log") {
+            roundtable.psychoid_log = value.extract()?;
+        }
+        #[cfg(feature = "psi")]
+        if let Some(value) = config_dict.get_item("psi") {
+            roundtable.psi_enabled = value.extract()?;
+        }
+        #[cfg(feature = "collapse")]
+        if let Some(value) = config_dict.get_item("collapse") {
+            roundtable.collapse_enabled = value.extract()?;
+        }
+        config = config.with_roundtable(roundtable);
+
+        if let Some(value) = config_dict.get_item("auto_prepare") {
+            config = config.with_auto_prepare(value.extract()?);
+        }
+    }
+
+    let label = dict
+        .get_item("label")
+        .and_then(|value| {
+            if value.is_none() {
+                None
+            } else {
+                Some(value.extract::<String>())
+            }
+        })
+        .transpose()?;
+
+    Ok(LightningStageSpec {
+        config,
+        epochs: epoch_objects,
+        label,
+    })
+}
+
 #[pyclass(module = "spiraltorch.nn", name = "Relu")]
 struct PyReluModule {
     inner: Option<NnRelu>,
@@ -4196,8 +4662,7 @@ fn gemm_py(lhs: &PyTensor, rhs: &PyTensor, backend: Option<&str>) -> PyResult<Py
 #[pyfunction(name = "available_backends")]
 fn available_backends_py() -> Vec<&'static str> {
     let mut options = vec!["auto", "faer", "naive"];
-    #[cfg(feature = "wgpu")]
-    {
+    if cfg!(feature = "wgpu") {
         options.push("wgpu");
     }
     options
@@ -4431,11 +4896,19 @@ fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySequentialModule>()?;
     m.setattr(
         "__all__",
-        vec!["Linear", "Conv1d", "WaveRnn", "Sequential", "Relu"],
+        vec![
+            "MeanSquaredError",
+            "Linear",
+            "Relu",
+            "Conv1d",
+            "WaveRnn",
+            "ZSpaceProjector",
+            "Sequential",
+        ],
     )?;
     m.setattr(
         "__doc__",
-        "Rust-backed neural network modules: Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, Sequential.",
+        "Rust-backed neural network modules and losses: MeanSquaredError, Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, Sequential.",
     )?;
     Ok(())
 }
@@ -4529,7 +5002,34 @@ fn plan_topk(
     plan(py, "topk", rows, cols, k, device)
 }
 
+/// Convenience helper for the MidK family.
 #[pyfunction]
+#[pyo3(signature = (rows, cols, k, device=None))]
+fn plan_midk(
+    py: Python<'_>,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    device: Option<&str>,
+) -> PyResult<PyObject> {
+    plan(py, "midk", rows, cols, k, device)
+}
+
+/// Convenience helper for the BottomK family.
+#[pyfunction]
+#[pyo3(signature = (rows, cols, k, device=None))]
+fn plan_bottomk(
+    py: Python<'_>,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    device: Option<&str>,
+) -> PyResult<PyObject> {
+    plan(py, "bottomk", rows, cols, k, device)
+}
+
+/// Extract row-wise top-k values and column indices on the host for quick inspection.
+#[pyfunction(name = "topk2d")]
 #[pyo3(signature = (tensor, k, *, largest=true))]
 fn topk2d_py(tensor: &PyTensor, k: usize, largest: bool) -> PyResult<(PyTensor, Vec<Vec<usize>>)> {
     let (rows, cols) = tensor.as_tensor().shape();
@@ -4690,14 +5190,14 @@ fn bentoml_save_model(
     py: Python<'_>,
     model: PyObject,
     name: &str,
-    signatures: Option<&PyDict>,
-    labels: Option<&PyDict>,
-    metadata: Option<&PyDict>,
-    custom_objects: Option<&PyDict>,
-    context: Option<&PyDict>,
+    signatures: Option<&Bound<'_, PyDict>>,
+    labels: Option<&Bound<'_, PyDict>>,
+    metadata: Option<&Bound<'_, PyDict>>,
+    custom_objects: Option<&Bound<'_, PyDict>>,
+    context: Option<&Bound<'_, PyDict>>,
     api_version: Option<&str>,
 ) -> PyResult<PyObject> {
-    let bentoml = py.import("bentoml").map_err(|err| {
+    let bentoml = PyModule::import_bound(py, "bentoml").map_err(|err| {
         PyImportError::new_err(format!(
             "bentoml is required for BentoML integration but could not be imported: {err}"
         ))
@@ -4743,7 +5243,7 @@ fn optuna_optimize(
     sampler: Option<PyObject>,
     pruner: Option<PyObject>,
 ) -> PyResult<PyObject> {
-    let optuna = py.import("optuna").map_err(|err| {
+    let optuna = PyModule::import_bound(py, "optuna").map_err(|err| {
         PyImportError::new_err(format!(
             "optuna is required for hyperparameter search but could not be imported: {err}"
         ))
@@ -4784,16 +5284,16 @@ fn optuna_optimize(
 fn ray_tune_run(
     py: Python<'_>,
     trainable: PyObject,
-    config: Option<&PyDict>,
+    config: Option<&Bound<'_, PyDict>>,
     num_samples: Option<usize>,
-    resources_per_trial: Option<&PyDict>,
+    resources_per_trial: Option<&Bound<'_, PyDict>>,
     metric: Option<&str>,
     mode: Option<&str>,
     name: Option<&str>,
     local_dir: Option<&str>,
     init: bool,
 ) -> PyResult<PyObject> {
-    let ray = py.import("ray").map_err(|err| {
+    let ray = PyModule::import_bound(py, "ray").map_err(|err| {
         PyImportError::new_err(format!(
             "ray is required for Ray Tune integration but could not be imported: {err}"
         ))
@@ -4845,12 +5345,12 @@ fn export_onnx(
     example_input: PyObject,
     export_path: &str,
     opset_version: i32,
-    dynamic_axes: Option<&PyDict>,
+    dynamic_axes: Option<&Bound<'_, PyDict>>,
     input_names: Option<Vec<String>>,
     output_names: Option<Vec<String>>,
     do_constant_folding: bool,
 ) -> PyResult<()> {
-    let torch = py.import("torch").map_err(|err| {
+    let torch = PyModule::import_bound(py, "torch").map_err(|err| {
         PyImportError::new_err(format!(
             "torch is required to export ONNX models but could not be imported: {err}"
         ))
@@ -4877,7 +5377,7 @@ fn export_onnx(
     Ok(())
 }
 
-fn integrations(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn integrations(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(torchserve_archive, m)?)?;
     m.add_function(wrap_pyfunction!(bentoml_save_model, m)?)?;
     m.add_function(wrap_pyfunction!(optuna_optimize, m)?)?;
@@ -4927,7 +5427,10 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_submodule(&integrations_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_midk, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_bottomk, m)?)?;
     m.add_function(wrap_pyfunction!(topk2d_tensor_py, m)?)?;
+    m.add_function(wrap_pyfunction!(topk2d_py, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
@@ -4957,7 +5460,14 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDistConfig>()?;
     m.add_class::<PyRoundtableSchedule>()?;
     m.add_class::<PyEpochStats>()?;
+    m.add_class::<PyLightningStageReport>()?;
+    m.add_class::<PyLightningReport>()?;
     m.add_class::<PyModuleTrainer>()?;
+    #[cfg(feature = "golden")]
+    {
+        m.add_class::<PyGoldenBlackcatPulse>()?;
+        m.add_class::<PyGoldenCooperativeDirective>()?;
+    }
     m.add_class::<PySpiralLightning>()?;
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
@@ -4967,7 +5477,10 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         vec![
             "plan",
             "plan_topk",
+            "plan_midk",
+            "plan_bottomk",
             "topk2d_tensor",
+            "topk2d",
             "z_space_barycenter",
             "hip_probe",
             "describe_device",

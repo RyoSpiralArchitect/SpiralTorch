@@ -4,9 +4,11 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 //! Unison mediator: read Redis bucket, compute median Choice, inject low-weight soft rules.
-use crate::backend::wgpu_heuristics::Choice;
-#[cfg(feature="logic")]
-use st_logic::{SoftRule, Field, Value};
+use crate::backend::wgpu_heuristics::{
+    SOFT_NAME_CH, SOFT_NAME_KL, SOFT_NAME_USE2CE, SOFT_NAME_WG,
+};
+#[cfg(feature = "logic")]
+use st_logic::SoftRule;
 
 #[cfg(feature="kv-redis")]
 pub fn soft_from_redis(rows:u32, cols:u32, k:u32, subgroup:bool) -> Vec<SoftRule> {
@@ -17,10 +19,10 @@ pub fn soft_from_redis(rows:u32, cols:u32, k:u32, subgroup:bool) -> Vec<SoftRule
     let key = format!("spiral:heur:v1:sg:{}:c:{}:k:{}", if subgroup{1}else{0}, lg2c, lg2k);
     if let Ok(Some(v)) = st_kv::redis_get_choice(&url, &key) {
         // low-weight nudges
-        out.push(SoftRule{ field: Field::Use2ce, value: Value::B(v.use_2ce), weight: 0.05 });
-        out.push(SoftRule{ field: Field::Wg,     value: Value::U(v.wg),      weight: 0.05 });
-        out.push(SoftRule{ field: Field::Kl,     value: Value::U(v.kl),      weight: 0.05 });
-        out.push(SoftRule{ field: Field::Ch,     value: Value::U(v.ch),      weight: 0.05 });
+        out.push(SoftRule{ name: SOFT_NAME_USE2CE, weight: 0.05, score: if v.use_2ce { 1.0 } else { -1.0 } });
+        out.push(SoftRule{ name: SOFT_NAME_WG,     weight: 0.05, score: v.wg as f32 });
+        out.push(SoftRule{ name: SOFT_NAME_KL,     weight: 0.05, score: v.kl as f32 });
+        out.push(SoftRule{ name: SOFT_NAME_CH,     weight: 0.05, score: v.ch as f32 });
     }
     out
 }
