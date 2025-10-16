@@ -90,7 +90,6 @@ impl Frac1dKernel {
         alpha: f32,
         h: f32,
         m: usize,
-        shader_src: &str,
     ) -> Result<Vec<f32>, String> {
         let n = x.len();
         let m = m.min(n.saturating_sub(1));
@@ -157,22 +156,6 @@ impl Frac1dKernel {
             ],
         });
 
-        let module = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("frac_gl_1d_mod"),
-            source: ShaderSource::Wgsl(shader_src.into()),
-        });
-        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("frac_gl_1d_pl2"),
-            bind_group_layouts: &[&self.bind_layout],
-            push_constant_ranges: &[],
-        });
-        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("frac_gl_1d"),
-            layout: Some(&pipeline_layout),
-            module: &module,
-            entry_point: "main",
-        });
-
         let mut enc = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("frac_gl_1d_enc"),
         });
@@ -181,7 +164,7 @@ impl Frac1dKernel {
                 label: Some("frac_gl_1d_pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&pipeline);
+            pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &bind, &[]);
             let wg = 256u32;
             let n_groups = ((n as u32) + wg - 1) / wg;

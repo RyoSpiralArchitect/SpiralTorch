@@ -47,6 +47,16 @@ impl Default for DistMode {
     }
 }
 
+impl DistMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DistMode::LocalOnly => "local",
+            DistMode::PeriodicMeta => "periodic_meta",
+            DistMode::FullyGlobal => "fully_global",
+        }
+    }
+}
+
 /// Configuration that connects a local roundtable to the distributed coordination fabric.
 #[derive(Debug, Clone)]
 pub struct DistConfig {
