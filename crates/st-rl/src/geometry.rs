@@ -5,9 +5,12 @@
 
 use std::collections::VecDeque;
 
+use st_core::telemetry::chrono::{ChronoHarmonics, ChronoLoopSignal, ChronoSummary};
+use st_core::telemetry::hub::LoopbackEnvelope;
 use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
+use st_core::util::math::{ramanujan_pi, LeechProjector};
 use st_tensor::pure::{DifferentialResonance, Tensor};
 
 /// Configuration describing how geometric observability is converted into
@@ -84,6 +87,18 @@ pub struct GeometryTelemetry {
     pub max_scale: f32,
     /// Active Leech density weight following self-rewrites.
     pub leech_density_weight: f64,
+    /// Loopback gain distilled from the latest chrono loop signal.
+    pub loop_gain: f32,
+    /// Collapse pressure inferred from collapse drive pulses or decay drift.
+    pub collapse_bias: f32,
+    /// Timestamp of the most recent loopback modulation.
+    pub loop_timestamp: f32,
+    /// Active softening factor after loopback rewrites.
+    pub softening_beta: f32,
+    /// Aggregated participation weight from loopback broadcasts.
+    pub loop_support: f32,
+    /// Latest SpiralK script snippet attached to the loopback envelope.
+    pub loop_script: Option<String>,
 }
 
 /// Coalgebra-powered feedback loop that measures resonance geometry and emits
@@ -96,15 +111,21 @@ pub struct GeometryFeedback {
     window: usize,
     min_scale: f32,
     max_scale: f32,
-    z_rank: usize,
-    leech_weight: f64,
+    leech_projector: LeechProjector,
     ramanujan_pi: f64,
     softening_beta: f32,
+    base_softening_beta: f32,
     rank_history: VecDeque<f64>,
     pressure_history: VecDeque<f64>,
     scale_history: VecDeque<f32>,
     telemetry: GeometryTelemetry,
     last_signal: Option<GeometryFeedbackSignal>,
+    loop_gain: f32,
+    collapse_bias: f32,
+    loop_timestamp: f32,
+    loop_fresh: bool,
+    loop_support: f32,
+    loop_script: Option<String>,
 }
 
 impl GeometryFeedback {
@@ -135,17 +156,31 @@ impl GeometryFeedback {
             threshold: config.activation_threshold.abs().max(f32::EPSILON),
             history: VecDeque::with_capacity(window),
             window,
+            min_scale: min_scale.max(f32::EPSILON),
+            max_scale: max_scale.max(f32::EPSILON),
+            leech_projector: LeechProjector::new(
+                config.z_space_rank.max(1),
+                config.leech_density_weight,
+            ),
+            ramanujan_pi: ramanujan_pi(config.ramanujan_iterations.max(1)),
             min_scale,
             max_scale: clamped_max,
             z_rank: config.z_space_rank.max(1),
             leech_weight: config.leech_density_weight.max(0.0),
             ramanujan_pi: Self::ramanujan_pi(config.ramanujan_iterations.max(1)),
             softening_beta: config.softening_beta.max(0.0),
+            base_softening_beta: config.softening_beta.max(0.0),
             rank_history: VecDeque::with_capacity(window),
             pressure_history: VecDeque::with_capacity(window),
             scale_history: VecDeque::with_capacity(window),
             telemetry: GeometryTelemetry::default(),
             last_signal: None,
+            loop_gain: 0.0,
+            collapse_bias: 0.0,
+            loop_timestamp: 0.0,
+            loop_fresh: false,
+            loop_support: 0.0,
+            loop_script: None,
         }
     }
 
@@ -157,6 +192,173 @@ impl GeometryFeedback {
     /// Returns rolling diagnostics summarising the most recent updates.
     pub fn telemetry(&self) -> &GeometryTelemetry {
         &self.telemetry
+    }
+
+    /// Integrates a chrono loop signal so temporal harmonics can steer the
+    /// self-rewrites before the next resonance measurement.
+    pub fn integrate_loop_signal(&mut self, signal: &ChronoLoopSignal) {
+        let summary = &signal.summary;
+        let drift = summary.mean_abs_drift.abs();
+        let energy_std = summary.energy_std.max(0.0);
+        let energy_band = (summary.max_energy - summary.min_energy).max(0.0);
+        let mut gain = drift + energy_std.sqrt() + energy_band.powf(0.25);
+        if let Some(harmonics) = &signal.harmonics {
+            if let Some(peak) = &harmonics.dominant_drift {
+                gain += peak.magnitude;
+            }
+            if let Some(peak) = &harmonics.dominant_energy {
+                gain += peak.magnitude * 0.75;
+            }
+        }
+        self.loop_gain = gain.clamp(0.0, 12.0);
+        let decay_bias = (-summary.mean_decay).max(0.0).clamp(0.0, 6.0);
+        self.collapse_bias = self.collapse_bias.max(decay_bias);
+        self.loop_timestamp = summary.latest_timestamp;
+        self.loop_support = summary.frames as f32;
+        if let Some(script) = Self::signal_script(signal) {
+            self.loop_script = Some(script);
+        }
+        let normalized = (self.loop_gain / 12.0).clamp(0.0, 1.0);
+        let target_beta = 0.6 + normalized * 1.4;
+        self.softening_beta = (self.softening_beta * 0.7 + target_beta * 0.3).clamp(0.3, 4.0);
+        self.loop_fresh = true;
+    }
+
+    /// Integrates aggregated loopback envelopes emitted by other SpiralTorch nodes.
+    pub fn absorb_loopback(&mut self, envelopes: &[LoopbackEnvelope]) {
+        if envelopes.is_empty() {
+            return;
+        }
+        let mut total_support = 0.0f32;
+        let mut duration_acc = 0.0f32;
+        let mut frames_total: usize = 0;
+        let mut drift_acc = 0.0f32;
+        let mut abs_drift_acc = 0.0f32;
+        let mut drift_std_acc = 0.0f32;
+        let mut energy_acc = 0.0f32;
+        let mut energy_std_acc = 0.0f32;
+        let mut decay_acc = 0.0f32;
+        let mut min_energy = f32::INFINITY;
+        let mut max_energy = f32::NEG_INFINITY;
+        let mut latest_ts = self.loop_timestamp;
+        let mut collapse_acc = 0.0f32;
+        let mut collapse_weight = 0.0f32;
+        let mut z_acc = 0.0f32;
+        let mut z_weight = 0.0f32;
+        let mut best_harmonics: Option<ChronoHarmonics> = None;
+        let mut best_score = f32::NEG_INFINITY;
+        let mut fallback_script: Option<String> = None;
+
+        for envelope in envelopes {
+            let support = envelope.support.max(f32::EPSILON);
+            let summary = &envelope.loop_signal.summary;
+            total_support += support;
+            duration_acc += summary.duration * support;
+            frames_total = frames_total.saturating_add(summary.frames);
+            drift_acc += summary.mean_drift * support;
+            abs_drift_acc += summary.mean_abs_drift * support;
+            drift_std_acc += summary.drift_std.powi(2) * support;
+            energy_acc += summary.mean_energy * support;
+            energy_std_acc += summary.energy_std.powi(2) * support;
+            decay_acc += summary.mean_decay * support;
+            min_energy = min_energy.min(summary.min_energy);
+            max_energy = max_energy.max(summary.max_energy);
+            latest_ts = latest_ts.max(summary.latest_timestamp);
+            if let Some(total) = envelope.collapse_total {
+                let positive = total.abs().sqrt().clamp(0.0, 6.0);
+                collapse_acc += positive * support;
+                collapse_weight += support;
+            }
+            if let Some(z) = envelope.z_signal {
+                z_acc += z * support;
+                z_weight += support;
+            }
+            if let Some(harmonics) = &envelope.loop_signal.harmonics {
+                let drift_peak = harmonics
+                    .dominant_drift
+                    .as_ref()
+                    .map(|peak| peak.magnitude)
+                    .unwrap_or(0.0);
+                let energy_peak = harmonics
+                    .dominant_energy
+                    .as_ref()
+                    .map(|peak| peak.magnitude)
+                    .unwrap_or(0.0);
+                let score = (drift_peak + energy_peak) * support;
+                if score > best_score {
+                    best_score = score;
+                    best_harmonics = Some(harmonics.clone());
+                }
+            }
+            if fallback_script.is_none() {
+                if let Some(script) = Self::signal_script(&envelope.loop_signal) {
+                    fallback_script = Some(script);
+                } else if let Some(script) = envelope.script_hint.clone() {
+                    fallback_script = Some(script);
+                }
+            }
+        }
+
+        if total_support <= f32::EPSILON {
+            return;
+        }
+
+        let inv = 1.0 / total_support;
+        let summary = ChronoSummary {
+            frames: frames_total.max(1),
+            duration: (duration_acc * inv).max(f32::EPSILON),
+            latest_timestamp: latest_ts,
+            mean_drift: drift_acc * inv,
+            mean_abs_drift: abs_drift_acc * inv,
+            drift_std: (drift_std_acc * inv).max(0.0).sqrt(),
+            mean_energy: energy_acc * inv,
+            energy_std: (energy_std_acc * inv).max(0.0).sqrt(),
+            mean_decay: decay_acc * inv,
+            min_energy: if min_energy.is_finite() {
+                min_energy
+            } else {
+                0.0
+            },
+            max_energy: if max_energy.is_finite() {
+                max_energy
+            } else {
+                0.0
+            },
+        };
+
+        let aggregated = ChronoLoopSignal::new(summary, best_harmonics);
+        self.integrate_loop_signal(&aggregated);
+        self.loop_support = total_support;
+        if let Some(script) = fallback_script {
+            if Self::signal_script(&aggregated).is_none() {
+                self.loop_script = Some(script);
+            }
+        }
+        if collapse_weight > 0.0 {
+            let mean_collapse = (collapse_acc / collapse_weight).clamp(0.0, 6.0);
+            self.collapse_bias = self.collapse_bias.max(mean_collapse);
+            self.loop_fresh = true;
+        }
+        if z_weight > 0.0 {
+            let mean_z = (z_acc / z_weight).clamp(-2.0, 2.0);
+            let target = self.base_softening_beta + mean_z * 0.4;
+            self.softening_beta = (self.softening_beta * 0.85 + target * 0.15).clamp(0.3, 4.0);
+        }
+        if total_support > 1.0 {
+            let gain_scale = (total_support / envelopes.len() as f32).clamp(0.5, 6.0);
+            self.loop_gain = (self.loop_gain * gain_scale).clamp(0.0, 12.0);
+        }
+    }
+
+    /// Injects collapse drive pressure so the Leech weighting can respond to
+    /// structural emergencies even when no loop signal is available.
+    pub fn inject_collapse_bias(&mut self, intensity: f32) {
+        if !intensity.is_finite() {
+            return;
+        }
+        let bias = intensity.abs().sqrt().clamp(0.0, 6.0);
+        self.collapse_bias = self.collapse_bias.max(bias);
+        self.loop_fresh = true;
     }
 
     /// Measures the provided resonance snapshot and emits a smoothed feedback
@@ -179,8 +381,7 @@ impl GeometryFeedback {
         }
         let averaged = self.history.iter().copied().sum::<f64>() / self.history.len() as f64;
         let geodesic = self.geodesic_projection(resonance);
-        let densified =
-            self.leech_weight * LEECH_PACKING_DENSITY * geodesic * (self.z_rank as f64).sqrt();
+        let densified = self.leech_projector.enrich(geodesic);
         let normalized = ((averaged + densified) / self.ramanujan_pi).clamp(0.0, 1.0);
         let softened = self.soft_project(normalized as f32);
         let mut scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
@@ -223,6 +424,12 @@ impl GeometryFeedback {
             min_scale: self.min_scale,
             max_scale: self.max_scale,
             leech_density_weight: self.leech_weight,
+            loop_gain: self.loop_gain,
+            collapse_bias: self.collapse_bias,
+            loop_timestamp: self.loop_timestamp,
+            softening_beta: self.softening_beta,
+            loop_support: self.loop_support,
+            loop_script: self.loop_script.clone(),
         };
 
         let signal = GeometryFeedbackSignal {
@@ -321,6 +528,30 @@ impl GeometryFeedback {
             self.max_scale = (self.max_scale + 0.05).min(3.0);
         }
 
+        if self.loop_fresh {
+            let normalized = (self.loop_gain / 8.0).clamp(0.0, 1.5);
+            let tighten = normalized.min(1.0);
+            let relax = (1.0 - tighten).max(0.0);
+            self.max_scale = (self.max_scale - 0.08 * tighten).max(2.0);
+            if tighten > 0.3 {
+                self.min_scale = (self.min_scale * (1.0 - 0.06 * tighten)).max(f32::EPSILON);
+            } else {
+                self.min_scale = (self.min_scale * (1.0 + 0.05 * relax))
+                    .min(self.max_scale - f32::EPSILON)
+                    .max(f32::EPSILON);
+            }
+            let collapse_push = (self.collapse_bias / 6.0).clamp(0.0, 1.0) as f64;
+            let pressure_gain = 1.0 + collapse_push * 0.4 + (tighten as f64) * 0.3;
+            self.leech_weight = (self.leech_weight * pressure_gain).clamp(0.0, 32.0);
+            self.loop_fresh = false;
+        } else {
+            self.loop_gain *= 0.94;
+            self.collapse_bias *= 0.9;
+            self.softening_beta =
+                (self.softening_beta * 0.95 + self.base_softening_beta * 0.05).clamp(0.3, 4.0);
+            self.leech_weight = (self.leech_weight * 0.995).max(0.0);
+        }
+
         self.max_scale = self.max_scale.clamp(2.0, 3.0);
         if self.min_scale >= self.max_scale {
             self.min_scale = (self.max_scale * 0.5).max(f32::EPSILON);
@@ -344,11 +575,12 @@ impl GeometryFeedback {
     }
 }
 
-const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use st_core::telemetry::chrono::{
+        ChronoHarmonics, ChronoLoopSignal, ChronoPeak, ChronoSummary,
+    };
     use st_core::theory::observability::SlotSymmetry;
 
     fn tensor_from(values: &[f32]) -> Tensor {
@@ -447,5 +679,117 @@ mod tests {
         assert!(telemetry.max_scale >= 2.0);
         assert!(telemetry.leech_density_weight >= 0.0);
         assert!(telemetry.rolling_pressure > 0.0);
+    }
+
+    #[test]
+    fn loop_signal_modulates_feedback() {
+        let mut feedback = GeometryFeedback::new(GeometryFeedbackConfig::default_policy());
+        let summary = ChronoSummary {
+            frames: 4,
+            duration: 1.2,
+            latest_timestamp: 1.2,
+            mean_drift: -0.2,
+            mean_abs_drift: 1.4,
+            drift_std: 0.3,
+            mean_energy: 3.0,
+            energy_std: 0.8,
+            mean_decay: -0.45,
+            min_energy: 2.4,
+            max_energy: 3.6,
+        };
+        let harmonics = ChronoHarmonics {
+            frames: 4,
+            duration: 1.2,
+            sample_rate: 3.3,
+            nyquist: 1.65,
+            drift_power: vec![0.0; 4],
+            energy_power: vec![0.0; 4],
+            dominant_drift: Some(ChronoPeak {
+                frequency: 0.5,
+                magnitude: 0.8,
+                phase: 0.0,
+            }),
+            dominant_energy: Some(ChronoPeak {
+                frequency: 0.8,
+                magnitude: 0.6,
+                phase: 0.25,
+            }),
+        };
+        let signal = ChronoLoopSignal::new(summary, Some(harmonics));
+        feedback.integrate_loop_signal(&signal);
+        feedback.inject_collapse_bias(9.0);
+
+        let resonance = resonance_from(&[0.6, -0.4, 0.2, -0.1, 0.3]);
+        let _ = feedback.process_resonance(&resonance);
+        let telemetry = feedback.telemetry();
+        assert!(telemetry.loop_gain > 0.0);
+        assert!(telemetry.collapse_bias > 0.0);
+        assert!(telemetry.softening_beta > 0.6);
+        assert!(telemetry.leech_density_weight > 0.35);
+        assert!(telemetry.loop_timestamp >= 1.2 - f32::EPSILON);
+        assert!(telemetry.loop_support >= 4.0);
+    }
+
+    #[test]
+    fn loopback_envelopes_merge_signals() {
+        let mut feedback = GeometryFeedback::new(GeometryFeedbackConfig::default_policy());
+        let summary_a = ChronoSummary {
+            frames: 3,
+            duration: 0.9,
+            latest_timestamp: 0.9,
+            mean_drift: -0.3,
+            mean_abs_drift: 0.7,
+            drift_std: 0.2,
+            mean_energy: 2.5,
+            energy_std: 0.4,
+            mean_decay: -0.15,
+            min_energy: 2.0,
+            max_energy: 3.1,
+        };
+        let summary_b = ChronoSummary {
+            frames: 4,
+            duration: 1.4,
+            latest_timestamp: 1.4,
+            mean_drift: 0.1,
+            mean_abs_drift: 0.5,
+            drift_std: 0.25,
+            mean_energy: 1.8,
+            energy_std: 0.3,
+            mean_decay: -0.05,
+            min_energy: 1.4,
+            max_energy: 2.2,
+        };
+        let signal_a = ChronoLoopSignal::new(summary_a, None);
+        let signal_b = ChronoLoopSignal::new(summary_b, None);
+        let envelope_a = LoopbackEnvelope::new(signal_a)
+            .with_support(1.2)
+            .with_collapse_total(Some(1.6))
+            .with_z_signal(Some(0.3))
+            .with_script_hint(Some("spiralk:above".to_string()));
+        let envelope_b = LoopbackEnvelope::new(signal_b)
+            .with_support(2.0)
+            .with_z_signal(Some(-0.2));
+
+        feedback.absorb_loopback(&[envelope_a, envelope_b]);
+        let resonance = resonance_from(&[0.4, -0.3, 0.2, -0.1, 0.5]);
+        let _ = feedback.process_resonance(&resonance);
+        let telemetry = feedback.telemetry().clone();
+        assert!(telemetry.loop_gain > 0.0);
+        assert!(telemetry.collapse_bias > 0.0);
+        assert!(telemetry.loop_support > 1.0);
+        assert!(telemetry.softening_beta > 0.6 - f32::EPSILON);
+        assert!(telemetry.loop_script.is_some());
+    }
+}
+
+impl GeometryFeedback {
+    #[cfg(feature = "kdsl")]
+    fn signal_script(signal: &ChronoLoopSignal) -> Option<String> {
+        signal.spiralk_script.clone()
+    }
+
+    #[cfg(not(feature = "kdsl"))]
+    fn signal_script(_signal: &ChronoLoopSignal) -> Option<String> {
+        None
     }
 }
