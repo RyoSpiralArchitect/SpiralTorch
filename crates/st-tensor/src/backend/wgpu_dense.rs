@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{mpsc, Arc, OnceLock};
 
 use bytemuck::{cast_slice, Pod, Zeroable};
 use pollster::block_on;
@@ -42,14 +42,13 @@ impl DenseContext {
                 force_fallback_adapter: true,
             }))
         })
-        .flatten()
         .ok_or_else(|| "wgpu adapter unavailable".to_string())?;
 
         let (device, queue) = block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("st-tensor.linear.device"),
-                features: wgpu::Features::empty(),
-                limits: adapter.limits(),
+                required_features: wgpu::Features::empty(),
+                required_limits: adapter.limits(),
                 memory_hints: wgpu::MemoryHints::Performance,
             },
             None,
@@ -252,10 +251,19 @@ pub fn matmul(
     encoder.copy_buffer_to_buffer(&out_buffer, 0, &staging_buffer, 0, out_bytes);
 
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
-
     let slice = staging_buffer.slice(..);
-    block_on(slice.map_async(wgpu::MapMode::Read)).map_err(|err| err.to_string())?;
+    let (sender, receiver) = mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    device.poll(wgpu::Maintain::Wait);
+    match receiver
+        .recv()
+        .map_err(|_| "map_async callback dropped".to_string())?
+    {
+        Ok(()) => {}
+        Err(err) => return Err(err.to_string()),
+    }
     let data = slice.get_mapped_range();
     let mut result = vec![0.0f32; rows * cols];
     result.copy_from_slice(cast_slice(&data));

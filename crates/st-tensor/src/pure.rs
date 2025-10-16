@@ -24,7 +24,28 @@ pub use self::differential::{
 use self::measure::BarycenterIntermediate;
 pub use self::topos::{OpenCartesianTopos, RewriteMonad, TensorBiome};
 
+#[cfg(any(feature = "wgpu_frac", feature = "faer"))]
 use crate::backend::faer_dense;
+#[cfg(not(any(feature = "wgpu_frac", feature = "faer")))]
+mod faer_dense {
+    pub fn is_available() -> bool {
+        false
+    }
+
+    pub fn should_use(_rows: usize, _inner: usize, _cols: usize) -> bool {
+        false
+    }
+
+    pub fn matmul(
+        _lhs: &[f32],
+        _rhs: &[f32],
+        _rows: usize,
+        _inner: usize,
+        _cols: usize,
+    ) -> Result<Vec<f32>, String> {
+        Err("faer backend disabled at compile time".to_string())
+    }
+}
 #[cfg(feature = "wgpu")]
 use crate::backend::wgpu_dense;
 use core::fmt;

@@ -3064,6 +3064,54 @@ fn topk2d_py(tensor: &PyTensor, k: usize, largest: bool) -> PyResult<(PyTensor, 
     Ok((values_tensor, indices))
 }
 
+#[pyfunction]
+#[pyo3(signature = (tensor, k, *, device="auto", largest=true))]
+fn topk2d_tensor_py(
+    tensor: &PyTensor,
+    k: usize,
+    device: &str,
+    largest: bool,
+) -> PyResult<(PyTensor, PyTensor)> {
+    let device = device.to_ascii_lowercase();
+    if device != "auto" && device != "cpu" {
+        return Err(PyValueError::new_err(
+            "only 'auto' or 'cpu' devices are supported for topk2d_tensor",
+        ));
+    }
+
+    let (rows, cols) = tensor.as_tensor().shape();
+    if k == 0 || k > cols {
+        return Err(PyValueError::new_err(
+            "k must be between 1 and the number of columns",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(rows * k);
+    let mut indices = Vec::with_capacity(rows * k);
+    let data = tensor.as_tensor().data();
+    for row in 0..rows {
+        let slice = &data[row * cols..(row + 1) * cols];
+        let mut pairs: Vec<(usize, f32)> = slice.iter().copied().enumerate().collect();
+        pairs.sort_unstable_by(|a, b| {
+            let ord = a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal);
+            if largest {
+                ord.reverse()
+            } else {
+                ord
+            }
+        });
+
+        for (idx, value) in pairs.into_iter().take(k) {
+            values.push(value);
+            indices.push(idx as f32);
+        }
+    }
+
+    let values_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, values))?);
+    let indices_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, indices))?);
+    Ok((values_tensor, indices_tensor))
+}
+
 /// Surface ROCm probing hints for Python callers.
 #[pyfunction]
 fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
