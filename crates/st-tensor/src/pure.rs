@@ -22,7 +22,7 @@ pub use self::differential::{
     RecursiveDifferential, SpiralDifferential,
 };
 use self::measure::BarycenterIntermediate;
-pub use self::topos::{OpenCartesianTopos, RewriteMonad, TensorBiome};
+pub use self::topos::{OpenCartesianTopos, RewriteMonad, TensorBiome, ToposAtlas};
 
 use crate::backend::faer_dense;
 #[cfg(feature = "wgpu")]
