@@ -185,44 +185,6 @@ for epoch, stats in enumerate(reports, start=1):
 # Switch back to manual preparation mid-run if you need custom tape control
 lightning.set_auto_prepare(False)
 session.prepare_module(model)
-```
-
-## Integration helpers
-
-SpiralTorch now exposes first-class hooks into popular deployment and
-optimisation frameworks. Each helper lazily imports its dependency and raises a
-clear error if the optional package is missing.
-
-```python
-from pathlib import Path
-
-import spiraltorch as st
-from spiraltorch.integrations import (
-    bentoml_save_model,
-    export_onnx,
-    optuna_optimize,
-    ray_tune_run,
-    torchserve_archive,
-)
-
-# Export a trained SpiralTorch module through torch.onnx
-model = ...  # torch.nn.Module compatible with SpiralTorch parameters
-example_input = ...
-onnx_path = Path("artifacts/model.onnx")
-export_onnx(model, example_input, onnx_path.as_posix(), opset_version=18)
-
-# Package for TorchServe hosting
-archive_path = torchserve_archive(
-    model_name="spiral-demo",
-    serialized_file="checkpoints/spiral.pt",
-    export_path="artifacts",
-    handler="spiral_handler.py",
-    extra_files=["index_to_name.json"],
-    force=True,
-)
-
-# Persist a BentoML runner
-bento_ref = bentoml_save_model(model, "spiral-demo", signatures={"__call__": {"batchable": True}})
 
 # Run Optuna on a SpiralTorch training loop
 def objective(trial):
@@ -305,10 +267,8 @@ ratings = [
     (1, 2, 4.5),
 ]
 
-epoch = rec.train_epoch(ratings)
-print(f"rmse={epoch.rmse:.4f} samples={epoch.samples}")
-print("prediction", rec.predict(0, 2))
-print("user embedding", rec.user_embedding(0).tolist())
+report = lightning.fit_plan(model, loss, plan)
+print(report.best_stage_label(), report.best_epoch().average_loss)
 ```
 
 The `DistConfig` connects the local roundtable to a meta layer that exchanges
