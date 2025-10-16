@@ -10,11 +10,13 @@
 //! tape and SpiralK planners.
 
 pub mod dataset;
+pub mod gnn;
 #[cfg(feature = "golden")]
 pub mod golden;
 pub mod highlevel;
 pub mod injector;
 pub mod io;
+pub mod language;
 pub mod layers;
 pub mod lightning;
 pub mod loss;
@@ -25,11 +27,23 @@ pub mod schedule;
 pub mod trainer;
 
 pub use dataset::{from_vec as dataset_from_vec, BatchIter, DataLoader, Dataset};
+pub use gnn::{
+    embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,
+    fold_into_roundtable, fold_with_band_energy, GraphConsensusBridge, GraphConsensusDigest,
+    GraphContext, GraphContextBuilder, GraphMonadExport, GraphNormalization, QuadBandEnergy,
+    ZSpaceGraphConvolution,
+};
 #[cfg(feature = "golden")]
 pub use golden::{GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig};
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
+pub use language::entropy as desire_entropy;
+pub use language::{
+    constant, warmup, ConceptHint, DesireAvoidanceReport, DesireLagrangian, DesirePhase,
+    DesireSchedule, DesireSolution, DesireWeights, DistanceMatrix, EntropicGwSolver,
+    RepressionField, SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
+};
 pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, MaxPool2d};
 pub use layers::linear::Linear;
 pub use layers::sequential::Sequential;
