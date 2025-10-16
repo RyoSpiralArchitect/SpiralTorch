@@ -9,15 +9,17 @@ use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedul
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
+use st_core::telemetry::atlas::{
+    AtlasFragment, AtlasFrame, AtlasPerspective, AtlasRoute, AtlasRouteSummary,
+};
 use st_core::telemetry::chrono::{
     ChronoFrame, ChronoHarmonics, ChronoLoopSignal, ChronoSummary, ChronoTimeline,
     ResonanceTemporalMetrics,
 };
 use st_core::telemetry::hub;
 use st_core::telemetry::maintainer::{Maintainer, MaintainerConfig, MaintainerReport};
-use st_tensor::pure::measure::{z_space_barycenter, z_space_barycenter_guarded, ZSpaceBarycenter};
-use st_tensor::pure::{
+use st_tensor::measure::{z_space_barycenter, z_space_barycenter_guarded, ZSpaceBarycenter};
+use st_tensor::{
     AmegaHypergrad, DifferentialResonance, FunctorDifferential, HomotopyDifferential,
     InfinityDifferential, OpenCartesianTopos, PureResult, RecursiveDifferential, RewriteMonad,
     SpiralDifferential, Tensor, TensorError,
@@ -621,6 +623,34 @@ impl SpiralSession {
         hub::get_atlas_route_summary(limit)
     }
 
+    /// Builds perspectives for each atlas district so nodes can act on the map.
+    pub fn atlas_perspectives(&self, limit: Option<usize>) -> Vec<AtlasPerspective> {
+        self.atlas_route_summary(limit).perspectives()
+    }
+
+    /// Returns a single district perspective without filtering focus metrics.
+    pub fn atlas_perspective(
+        &self,
+        district: &str,
+        limit: Option<usize>,
+    ) -> Option<AtlasPerspective> {
+        self.atlas_perspective_with_focus(district, limit, None)
+    }
+
+    /// Returns a district perspective filtered by metric prefixes for specialised readers.
+    pub fn atlas_perspective_with_focus(
+        &self,
+        district: &str,
+        limit: Option<usize>,
+        focus_prefixes: Option<&[String]>,
+    ) -> Option<AtlasPerspective> {
+        let summary = self.atlas_route_summary(limit);
+        match focus_prefixes {
+            Some(prefixes) => summary.perspective_for_with_focus(district, prefixes),
+            None => summary.perspective_for(district),
+        }
+    }
+
     /// Generates a narrative describing the latest atlas frame when available.
     pub fn atlas_narrative(&self, temperature: f32) -> PureResult<Option<ResonanceNarrative>> {
         if let Some(frame) = self.atlas() {
@@ -1036,7 +1066,7 @@ mod tests {
     use crate::loss::MeanSquaredError;
     use st_core::telemetry::hub;
     use st_core::telemetry::maintainer::MaintainerStatus;
-    use st_tensor::pure::measure::BarycenterIntermediate;
+    use st_tensor::measure::BarycenterIntermediate;
 
     fn toy_tensor(a: &[f32]) -> Tensor {
         Tensor::from_vec(1, a.len(), a.to_vec()).unwrap()
@@ -1371,6 +1401,15 @@ mod tests {
         let summary = session.atlas_route_summary(Some(4));
         assert!(summary.frames > 0);
         assert!(!summary.districts.is_empty());
+        let perspectives = session.atlas_perspectives(Some(4));
+        assert!(!perspectives.is_empty());
+        let focus = vec!["timeline".to_string()];
+        let surface = session
+            .atlas_perspective_with_focus("Surface", Some(4), Some(&focus))
+            .or_else(|| session.atlas_perspective("Surface", Some(4)))
+            .expect("surface perspective");
+        assert!(surface.guidance.contains("Surface district"));
+        assert!(surface.stability >= 0.0 && surface.stability <= 1.0);
         let story = session.atlas_narrative(0.6).unwrap();
         assert!(story
             .as_ref()

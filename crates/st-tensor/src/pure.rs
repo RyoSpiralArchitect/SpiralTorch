@@ -16,12 +16,15 @@ pub mod differential;
 pub mod fractal;
 pub mod measure;
 pub mod topos;
+pub mod wasm_canvas;
 
 pub use self::differential::{
     DifferentialResonance, FunctorDifferential, HomotopyDifferential, InfinityDifferential,
     RecursiveDifferential, SpiralDifferential,
 };
-use self::measure::BarycenterIntermediate;
+pub use self::measure::{
+    z_space_barycenter, z_space_barycenter_guarded, BarycenterIntermediate, ZSpaceBarycenter,
+};
 pub use self::topos::{
     LawvereTierneyGuard, OpenCartesianTopos, RewriteMonad, TensorBiome, ToposAtlas, ZBox, ZBoxSite,
 };

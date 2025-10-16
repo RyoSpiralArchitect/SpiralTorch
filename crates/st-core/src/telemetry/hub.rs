@@ -24,11 +24,15 @@
 use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
+#[cfg(feature = "psi")]
+use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
+#[cfg(feature = "psi")]
+use std::time::SystemTime;
 
 use super::chrono::ChronoLoopSignal;
 #[cfg(feature = "psi")]
-use super::psi::{PsiEvent, PsiReading};
+use super::psi::{PsiComponent, PsiEvent, PsiReading};
 #[cfg(feature = "psychoid")]
 use super::psychoid::PsychoidReading;
 #[cfg(feature = "collapse")]
@@ -109,6 +113,64 @@ static LAST_SOFTLOGIC_Z: OnceLock<RwLock<Option<SoftlogicZFeedback>>> = OnceLock
 
 fn softlogic_z_cell() -> &'static RwLock<Option<SoftlogicZFeedback>> {
     LAST_SOFTLOGIC_Z.get_or_init(|| RwLock::new(None))
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct DesireWeightsTelemetry {
+    pub alpha: f32,
+    pub beta: f32,
+    pub gamma: f32,
+    pub lambda: f32,
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub enum DesirePhaseTelemetry {
+    Observation,
+    Injection,
+    Integration,
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct DesireAvoidanceTelemetry {
+    pub tokens: Vec<usize>,
+    pub scores: Vec<f32>,
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct DesireTriggerTelemetry {
+    pub mean_penalty: f32,
+    pub mean_entropy: f32,
+    pub temperature: f32,
+    pub samples: usize,
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct DesireStepTelemetry {
+    pub timestamp: SystemTime,
+    pub entropy: f32,
+    pub temperature: f32,
+    pub hypergrad_penalty: f32,
+    pub phase: DesirePhaseTelemetry,
+    pub weights: DesireWeightsTelemetry,
+    pub avoidance: Option<DesireAvoidanceTelemetry>,
+    pub trigger: Option<DesireTriggerTelemetry>,
+    pub psi_total: Option<f32>,
+    pub psi_breakdown: HashMap<PsiComponent, f32>,
+    pub psi_events: Vec<PsiEvent>,
+    pub z_feedback: Option<SoftlogicZFeedback>,
+}
+
+#[cfg(feature = "psi")]
+static LAST_DESIRE_STEP: OnceLock<RwLock<Option<DesireStepTelemetry>>> = OnceLock::new();
+
+#[cfg(feature = "psi")]
+fn desire_step_cell() -> &'static RwLock<Option<DesireStepTelemetry>> {
+    LAST_DESIRE_STEP.get_or_init(|| RwLock::new(None))
 }
 
 static ATLAS_FRAME: OnceLock<RwLock<Option<AtlasFrame>>> = OnceLock::new();
@@ -221,6 +283,62 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
         .and_then(|guard| guard.as_ref().copied())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesirePhaseTelemetry {
+    Observation,
+    Injection,
+    Integration,
+}
+
+#[derive(Debug, Clone)]
+pub struct DesireStepTelemetry {
+    pub timestamp: SystemTime,
+    pub phase: DesirePhaseTelemetry,
+    pub temperature: f32,
+    pub entropy: f32,
+    pub hypergrad_penalty: f32,
+    pub avoidance_energy: f32,
+    pub logit_energy: f32,
+    pub alpha: f32,
+    pub beta: f32,
+    pub gamma: f32,
+    pub lambda: f32,
+    pub trigger_emitted: bool,
+}
+
+impl Default for DesireStepTelemetry {
+    fn default() -> Self {
+        Self {
+            timestamp: UNIX_EPOCH,
+            phase: DesirePhaseTelemetry::Observation,
+            temperature: 0.0,
+            entropy: 0.0,
+            hypergrad_penalty: 0.0,
+            avoidance_energy: 0.0,
+            logit_energy: 0.0,
+            alpha: 0.0,
+            beta: 0.0,
+            gamma: 0.0,
+            lambda: 0.0,
+            trigger_emitted: false,
+        }
+    }
+}
+
+static LAST_DESIRE_STEP: OnceLock<RwLock<Option<DesireStepTelemetry>>> = OnceLock::new();
+
+fn desire_step_cell() -> &'static RwLock<Option<DesireStepTelemetry>> {
+    LAST_DESIRE_STEP.get_or_init(|| RwLock::new(None))
+}
+
+pub fn set_last_desire_step(step: DesireStepTelemetry) {
+    if let Ok(mut guard) = desire_step_cell().write() {
+        *guard = Some(step);
+    }
+}
+
+pub fn get_last_desire_step() -> Option<DesireStepTelemetry> {
+    desire_step_cell()
 static LAST_CHRONO_LOOP: OnceLock<RwLock<Option<ChronoLoopSignal>>> = OnceLock::new();
 
 fn chrono_loop_cell() -> &'static RwLock<Option<ChronoLoopSignal>> {
