@@ -61,8 +61,45 @@ tensor shims, no translation layers, and no tracebacks.
   - **Unified RL + Rec stacks:** SpiralTorchRL and SpiralTorchRec keep policy
     gradients, recommendation factors, and hypergrad tapes inside the same
     Z-space geometry so deployment-grade loops never leave Rust.
+  - **Z-space-native graph reasoning:** The Rust core, backend abstraction
+    layer, and Z-space operators already form the spine of a graph neural
+    network stack that embeds large-scale, hierarchical graphs with the same
+    fidelity as its tree-aligned geometry.
+  - **Interpretability as a first-class citizen:** Hypergrad tapes, roundtable
+    transcripts, and ψ telemetry double as explainability artifacts, enabling
+    decision-path inspection without leaving the Z-space calculus.
 
 ---
+
+## Emerging toolkits unique to SpiralTorch
+
+### Z-space-native graph neural networks
+
+SpiralTorch’s hyperbolic geometry grew around hierarchical graphs. The Rust
+kernel, backend abstraction, and Z-space operator families already expose the
+building blocks for graph neural networks that keep distortion in check while
+scaling to social, molecular, or citation graphs. By composing the existing
+SpiralK planners, Z-space resonators, and curvature-aware tensors, new
+`st-gnn` layers can stream hypergrad updates through tree-like manifolds as a
+first-class citizen in the framework—becoming a third pillar alongside
+SpiralTorchRec and SpiralTorchRL. The new `st-nn::gnn` module ships a
+`GraphContext` normaliser plus a `ZSpaceGraphConvolution` layer that attaches
+hypergrad tapes by default and surfaces per-node flow traces via the telemetry
+`GraphFlowTracer`, so graph reasoning can be trained and inspected without
+leaving Z-space. Those traces now plug straight into SpiralTorch’s other
+pillars: `embed_into_biome` folds propagated node states into an
+`OpenCartesianTopos`/`TensorBiome` pair for RewriteMonad consumers, the flow
+grid can be painted onto any canvas projector, and `fold_into_roundtable`
+promotes the graph manifold as a fourth participant beside the A/B/C bands.
+
+### Explainability through hypergrad telemetry
+
+Every hypergrad tape, roundtable consensus log, and ψ telemetry stream doubles
+as a geometric audit trail. SpiralTorch can expose these records directly to an
+interpretability toolkit that maps gradient flows, consensus splits, and
+telemetry spikes back to model behaviour. Visualising these pathways keeps
+“why” answers native to Z-space, turning SpiralTorch’s internal instrumentation
+into an Explainable AI surface without external probes.
 
 ## Hello SpiralSession quickstart
 
