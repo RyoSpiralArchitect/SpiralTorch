@@ -5456,51 +5456,46 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
 
-    let mut exported = vec![
-        "plan",
-        "plan_topk",
-        "topk2d_tensor",
-        "z_space_barycenter",
-        "hip_probe",
-        "describe_device",
-        "get_psychoid_stats",
-        "describe_resonance",
-        "describe_frame",
-        "Tensor",
-        "ComplexTensor",
-        "BarycenterIntermediate",
-        "ZSpaceBarycenter",
-        "DifferentialResonance",
-        "ChronoFrame",
-        "ChronoSummary",
-        "SpiralDifferentialTrace",
-        "OpenTopos",
-        "TensorBiome",
-        "LanguageWaveEncoder",
-        "TextResonator",
-        "Hypergrad",
-        "DistConfig",
-        "RoundtableSchedule",
-        "EpochStats",
-        "ModuleTrainer",
-        "SpiralLightning",
-        "SpiralSessionBuilder",
-        "SpiralSession",
-        "nn",
-        "frac",
-        "dataset",
-        "linalg",
-        "rl",
-        "rec",
-        "sot",
-        "integrations",
-    ];
-    #[cfg(feature = "golden")]
-    {
-        exported.push("GoldenBlackcatPulse");
-        exported.push("GoldenCooperativeDirective");
-    }
-    m.setattr("__all__", exported)?;
+    m.setattr(
+        "__all__",
+        vec![
+            "plan",
+            "plan_topk",
+            "plan_midk",
+            "plan_bottomk",
+            "topk2d_tensor",
+            "topk2d",
+            "z_space_barycenter",
+            "hip_probe",
+            "describe_device",
+            "get_psychoid_stats",
+            "Tensor",
+            "ComplexTensor",
+            "BarycenterIntermediate",
+            "ZSpaceBarycenter",
+            "DifferentialResonance",
+            "SpiralDifferentialTrace",
+            "OpenTopos",
+            "TensorBiome",
+            "LanguageWaveEncoder",
+            "Hypergrad",
+            "DistConfig",
+            "RoundtableSchedule",
+            "EpochStats",
+            "ModuleTrainer",
+            "SpiralLightning",
+            "SpiralSessionBuilder",
+            "SpiralSession",
+            "nn",
+            "frac",
+            "dataset",
+            "linalg",
+            "rl",
+            "rec",
+            "sot",
+            "integrations",
+        ],
+    )?;
     m.setattr("__version__", env!("CARGO_PKG_VERSION"))?;
 
     // Provide a tiny doc string that highlights the zero-shim approach.
