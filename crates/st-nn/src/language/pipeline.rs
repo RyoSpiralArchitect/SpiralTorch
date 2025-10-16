@@ -896,7 +896,6 @@ impl DesirePsiSummary {
         }
     }
 }
-
 #[derive(Debug)]
 pub enum PipelineError {
     EncoderMissing { pipeline: String },
