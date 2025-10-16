@@ -386,7 +386,8 @@ impl GeometryFeedback {
         }
         let averaged = self.history.iter().copied().sum::<f64>() / self.history.len() as f64;
         let geodesic = self.geodesic_projection(resonance);
-        let densified = self.leech_projector.enrich(geodesic);
+        let densified =
+            self.leech_weight * LEECH_PACKING_DENSITY * geodesic * (self.z_rank as f64).sqrt();
         let normalized = ((averaged + densified) / self.ramanujan_pi).clamp(0.0, 1.0);
         let softened = self.soft_project(normalized as f32);
         let mut scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
@@ -581,6 +582,8 @@ impl GeometryFeedback {
         (prefactor * sum).recip()
     }
 }
+
+const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
 
 #[cfg(test)]
 mod tests {

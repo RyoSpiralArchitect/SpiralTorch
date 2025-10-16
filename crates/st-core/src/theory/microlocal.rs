@@ -33,6 +33,8 @@
 //! stable boundary indicator, and optionally reconstructs the oriented normal
 //! field when a signed phase label is supplied.
 
+use crate::telemetry::hub::SoftlogicZFeedback;
+use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, IxDyn};
 use ndarray::Dimension;
 use statrs::function::gamma::gamma;
@@ -186,6 +188,187 @@ impl InterfaceGauge {
     }
 }
 
+/// Couples microlocal interface signatures into a Z-space control pulse.
+///
+/// The lift projects oriented perimeter density onto a preferred Z-axis,
+/// accumulates Above/Here/Beneath energy, and enriches the signed drift with a
+/// [`LeechProjector`] so downstream runtimes can bias their Z control signal
+/// using interface geometry alone. When orientations are absent the lift
+/// reduces to a neutral pulse (`z_bias = 0`) that still reports boundary
+/// support through the Here band.
+#[derive(Debug, Clone)]
+pub struct InterfaceZLift {
+    axis: Vec<f32>,
+    projector: LeechProjector,
+    bias_gain: f32,
+    min_support: f32,
+    orientation_floor: f32,
+}
+
+impl InterfaceZLift {
+    /// Builds a new lift for the provided preferred Z-axis and projector.
+    ///
+    /// The axis is normalised internally so callers can provide any non-zero
+    /// vector aligned with the desired Above direction in the microlocal
+    /// lattice.
+    pub fn new(axis: &[f32], projector: LeechProjector) -> Self {
+        assert!(!axis.is_empty(), "axis must not be empty");
+        let mut axis_vec = axis.to_vec();
+        let norm = axis_vec
+            .iter()
+            .map(|v| (*v as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(norm > f64::EPSILON, "axis must have non-zero length");
+        let inv_norm = (norm as f32).recip();
+        for value in &mut axis_vec {
+            *value *= inv_norm;
+        }
+        Self {
+            axis: axis_vec,
+            projector,
+            bias_gain: 1.0,
+            min_support: 1.0,
+            orientation_floor: 0.05,
+        }
+    }
+
+    /// Scales the enriched Z bias produced by the lift.
+    pub fn with_bias_gain(mut self, gain: f32) -> Self {
+        self.bias_gain = gain;
+        self
+    }
+
+    /// Requires a minimum number of interface cells before emitting bias.
+    pub fn with_min_support(mut self, min_support: f32) -> Self {
+        self.min_support = min_support.max(0.0);
+        self
+    }
+
+    /// Floor on the oriented drift before the bias becomes active.
+    pub fn with_orientation_floor(mut self, floor: f32) -> Self {
+        self.orientation_floor = floor.max(0.0);
+        self
+    }
+
+    /// Returns the normalised axis used during projection.
+    pub fn axis(&self) -> &[f32] {
+        &self.axis
+    }
+
+    /// Projects the provided microlocal signature into a Z-space pulse.
+    pub fn project(&self, signature: &InterfaceSignature) -> InterfaceZPulse {
+        let dim = signature.r_machine.ndim();
+        assert_eq!(dim, self.axis.len(), "axis dimension mismatch");
+
+        let mut interface_cells = 0.0f32;
+        let mut boundary_mass = 0.0f32;
+        let mut above = 0.0f32;
+        let mut here = 0.0f32;
+        let mut beneath = 0.0f32;
+
+        let orientation = signature.orientation.as_ref();
+        let mut coord = vec![0usize; dim + 1];
+
+        for idx in indices(signature.r_machine.raw_dim()) {
+            let idx_slice = idx.slice();
+            let idx_dyn = IxDyn(idx_slice);
+            let r_val = signature.r_machine[&idx_dyn];
+            if r_val <= 0.0 {
+                continue;
+            }
+            interface_cells += r_val;
+
+            let weight = signature.perimeter_density[&idx_dyn];
+            if weight <= f32::EPSILON {
+                continue;
+            }
+            boundary_mass += weight;
+
+            if let Some(field) = orientation {
+                coord[1..].clone_from_slice(idx_slice);
+                let mut projection = 0.0f32;
+                for axis_idx in 0..dim {
+                    coord[0] = axis_idx;
+                    projection += field[IxDyn(&coord)] * self.axis[axis_idx];
+                }
+                let projection = projection.clamp(-1.0, 1.0);
+                let aligned = projection.max(0.0);
+                let anti = (-projection).max(0.0);
+                let neutral = (1.0 - aligned - anti).max(0.0);
+                above += weight * aligned;
+                beneath += weight * anti;
+                here += weight * neutral;
+            } else {
+                here += weight;
+            }
+        }
+
+        let drift = above - beneath;
+        let mut z_bias = 0.0f32;
+        if interface_cells >= self.min_support && drift.abs() >= self.orientation_floor {
+            let magnitude = f64::from(drift.abs());
+            let enriched = self.projector.enrich(magnitude) as f32;
+            if enriched > f32::EPSILON && self.bias_gain.abs() > f32::EPSILON {
+                z_bias = drift.signum() * enriched * self.bias_gain;
+            }
+        }
+
+        InterfaceZPulse {
+            support: boundary_mass,
+            interface_cells,
+            band_energy: (above, here, beneath),
+            drift,
+            z_bias,
+        }
+    }
+}
+
+/// Aggregated Z-space pulse produced by [`InterfaceZLift::project`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InterfaceZPulse {
+    /// Total perimeter mass supporting the pulse.
+    pub support: f32,
+    /// Number of interface cells participating in the pulse.
+    pub interface_cells: f32,
+    /// Above/Here/Beneath energy split produced during projection.
+    pub band_energy: (f32, f32, f32),
+    /// Signed drift between Above and Beneath energy.
+    pub drift: f32,
+    /// Signed Z bias generated after enriching the drift.
+    pub z_bias: f32,
+}
+
+impl InterfaceZPulse {
+    /// Returns the total band energy.
+    pub fn total_energy(&self) -> f32 {
+        let (above, here, beneath) = self.band_energy;
+        above + here + beneath
+    }
+
+    /// Converts the pulse into a [`SoftlogicZFeedback`] record using explicit
+    /// ψ and weighted loss totals supplied by the caller.
+    pub fn into_softlogic_feedback_with(
+        self,
+        psi_total: f32,
+        weighted_loss: f32,
+    ) -> SoftlogicZFeedback {
+        SoftlogicZFeedback {
+            psi_total,
+            weighted_loss,
+            band_energy: self.band_energy,
+            drift: self.drift,
+            z_signal: self.z_bias,
+        }
+    }
+
+    /// Converts the pulse into a [`SoftlogicZFeedback`] record using the
+    /// perimeter mass both as ψ total and weighted loss surrogate.
+    pub fn into_softlogic_feedback(self) -> SoftlogicZFeedback {
+        self.into_softlogic_feedback_with(self.support, self.total_energy())
+    }
+}
+
 fn unit_sphere_area(dim: usize) -> f32 {
     let d = dim as f64;
     let area = 2.0 * PI.powf(d / 2.0) / gamma(d / 2.0);
@@ -321,5 +504,38 @@ mod tests {
         let normal_x = orient[IxDyn(&[1, 1, 1])];
         assert!(normal_y.abs() > 0.5);
         assert!(normal_x.abs() < 1e-3);
+    }
+
+    #[test]
+    fn z_lift_produces_oriented_bias() {
+        let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+        let c_prime = mask.mapv(|v| if v > 0.5 { 1.0 } else { -1.0 });
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let sig = gauge.analyze_with_label(&mask, Some(&c_prime));
+        let projector = LeechProjector::new(24, 0.5);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], projector);
+        let pulse = lift.project(&sig);
+        let (above, here, beneath) = pulse.band_energy;
+        assert!(above > beneath);
+        assert!(here >= 0.0);
+        assert!(pulse.z_bias > 0.0);
+        let feedback = pulse.into_softlogic_feedback();
+        assert_eq!(feedback.band_energy, pulse.band_energy);
+        assert_eq!(feedback.z_signal, pulse.z_bias);
+    }
+
+    #[test]
+    fn z_lift_remains_neutral_without_orientation() {
+        let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let sig = gauge.analyze(&mask);
+        let projector = LeechProjector::new(24, 0.5);
+        let lift = InterfaceZLift::new(&[0.0, 1.0], projector);
+        let pulse = lift.project(&sig);
+        let (above, here, beneath) = pulse.band_energy;
+        assert!(above <= f32::EPSILON);
+        assert!(beneath <= f32::EPSILON);
+        assert!(here > 0.0);
+        assert_eq!(pulse.z_bias, 0.0);
     }
 }

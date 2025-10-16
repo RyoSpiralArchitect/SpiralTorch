@@ -159,6 +159,7 @@ loader = (
 stats = session.train_epoch(trainer, model, loss, loader, schedule)
 print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")
 print(st.get_psychoid_stats())
+print(st.get_desire_telemetry())  # phase/temperature/energies recorded by DesireTelemetrySink
 
 summary = trainer.desire_roundtable_summary()
 if summary:
@@ -385,8 +386,21 @@ print(
 )
 for district in summary.districts():
     print("summary", district.name, district.coverage, district.delta, district.std_dev)
+    for focus in district.focus:
+        print("  focus", focus.name, focus.delta, focus.momentum)
 if summary.maintainer_status:
     print("maintainer", summary.maintainer_status, summary.maintainer_diagnostic)
+
+for perspective in session.atlas_perspectives(limit=6):
+    print("perspective", perspective.district, perspective.guidance)
+    for focus in perspective.focus:
+        print("  ↳", focus.name, focus.latest)
+
+surface = session.atlas_perspective(
+    "Surface", limit=6, focus_prefixes=["timeline", "session.surface"],
+)
+if surface:
+    print("surface view", surface.guidance)
 ```
 
 The `SpiralSession` maintainer surfaces clamp and density suggestions directly

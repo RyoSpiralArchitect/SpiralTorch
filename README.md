@@ -132,6 +132,11 @@ and only reconstructs oriented normals when an external label `c′` is supplied
 This lets SpiralTorch stabilise interface detection, switch on co-orientations
 precisely when downstream pipelines inject a label, and keep curvature-ready
 statistics without violating the gauge symmetry of the unlabeled limit.【F:crates/st-core/src/theory/microlocal.rs†L1-L256】
+Once those signatures exist, `InterfaceZLift` pushes them straight into
+Z-space: it projects the perimeter mass onto a preferred Z-axis, splits the
+energy into Above/Here/Beneath bands, enriches the drift with the Leech
+projector, and emits a ready-to-store `SoftlogicZFeedback` pulse so runtimes can
+bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L386】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
@@ -304,6 +309,26 @@ for event in receiver.try_iter() {
         DesirePipelineEvent::Trigger { trigger, .. } =>
             spiralk_scheduler.queue_desire(trigger.report.clone(), trigger.mean_penalty),
     }
+}
+```
+
+Global telemetry consumers can subscribe without owning the pipeline by adding
+`with_telemetry()`. The `DesireTelemetrySink` records every step’s phase,
+temperature, avoidance energy, and schedule weights into the shared telemetry
+hub so trainers, notebooks, or external services can poll the latest state via
+`get_last_desire_step`.【F:crates/st-nn/src/language/pipeline.rs†L101-L239】【F:crates/st-core/src/telemetry/hub.rs†L61-L126】
+
+```rust
+use st_core::telemetry::hub;
+use st_nn::language::DesirePipeline;
+
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_telemetry()
+    .build();
+
+let _ = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(sample) = hub::get_last_desire_step() {
+    println!("phase {:?} at T={:.3}", sample.phase, sample.temperature);
 }
 ```
 
@@ -483,6 +508,12 @@ On the Python side, pass `psychoid=True` when building the roundtable and fetch
 the latest reading via `spiraltorch.get_psychoid_stats()` to log the CTI score,
 raw metrics, and z-scores emitted from the Rust meter.
 
+Need the language desire pulse from Python as well? Call
+`spiraltorch.get_desire_telemetry()` to retrieve the same sample that the
+Rust-side `DesireTelemetrySink` recorded—phase, temperature, avoidance energy,
+logit norms, and the current α/β/γ/λ weights are all surfaced as a dictionary
+ready for notebooks or dashboards.【F:bindings/st-py/src/lib.rs†L227-L243】【F:crates/st-nn/src/language/pipeline.rs†L101-L239】
+
 ψ readings stay inside the automation loop—CollapseDrive, the psychoid dream
 engine, and the distributed roundtable all consume them directly. The examples
 only surface the totals so you can verify wiring; regular runs keep the meter
@@ -609,6 +640,35 @@ and now reports **loop volatility** (`loop_std`) alongside collapse/Z drift so
 dashboards can surface the “city heartbeat” without iterating over each frame.
 District summaries additionally carry a standard deviation so you can flag
 which neighbourhoods are swinging the hardest even when their means stay flat.
+Each district now tracks its headline metrics via `district.focus` so nodes can
+see which signals actually drove the change:
+
+```python
+for metric in district.focus:
+    print(metric.name, metric.delta, metric.momentum, metric.std_dev)
+```
+
+When you want curated guidance for each SpiralTorch “audience”, call
+`session.atlas_perspectives()` to generate **atlas perspectives** that translate
+district trends into actionable narratives:
+
+```python
+for perspective in session.atlas_perspectives(limit=12):
+    print(perspective.district, perspective.guidance)
+    for focus in perspective.focus:
+        print("  ↳", focus.name, focus.latest)
+
+surface = session.atlas_perspective(
+    "Surface", limit=12, focus_prefixes=["timeline", "session.surface"],
+)
+if surface:
+    print(surface.guidance)
+```
+
+Perspectives compute per-frame momentum, volatility-derived stability, and a
+filtered set of focus metrics so every node — Python bindings, maintainer,
+SpiralK scripts, or collapse-drive peers — can read the same atlas route in the
+language that serves them best.
 
 ### Self-maintaining feedback loops
 
