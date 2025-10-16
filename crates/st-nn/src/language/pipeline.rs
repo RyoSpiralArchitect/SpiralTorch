@@ -8,6 +8,7 @@ use super::desire::{DesirePhase, DesireSolution, DesireWeights};
 use super::geometry::ConceptHint;
 use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+use crate::roundtable::RoundtableNode;
 use crate::schedule::BandEnergy;
 use crate::{PureResult, RoundtableConfig, RoundtableSchedule};
 use st_core::ecosystem::{
@@ -1819,13 +1820,13 @@ impl LanguagePipeline {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use super::super::automation::DesireAutomation;
     use super::super::desire::{constant, warmup, DesireLagrangian};
     use super::super::geometry::{
         ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
     };
     use super::super::temperature::TemperatureController;
-    use super::*;
     use crate::gnn::spiralk::GraphConsensusBridge;
     use crate::plan::RankPlanner;
     use crate::schedule::BandEnergy;
@@ -1845,6 +1846,13 @@ mod tests {
     use st_core::telemetry::hub::SoftlogicZFeedback;
     #[cfg(feature = "psi")]
     use st_core::telemetry::psi::{PsiComponent, PsiEvent, PsiReading};
+    use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
+    #[cfg(feature = "psi")]
+    use std::collections::HashMap;
+    use std::collections::HashSet;
+    use std::sync::{mpsc::channel, Arc, Mutex, OnceLock};
+    use std::time::{Duration, Instant, SystemTime};
+    use tempfile::tempdir;
 
     fn registry_guard() -> &'static Mutex<()> {
         static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
