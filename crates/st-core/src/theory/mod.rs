@@ -32,3 +32,11 @@ pub mod observability;
 
 #[path = "microlocal.rs"]
 pub mod microlocal;
+pub mod maxwell;
+pub mod observability;
+
+#[path = "microlocal.rs"]
+#[doc(hidden)]
+pub mod microlocal_impl;
+#[doc(inline)]
+pub use microlocal_impl as microlocal;
