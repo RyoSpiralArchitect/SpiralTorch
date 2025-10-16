@@ -1558,6 +1558,20 @@ let spiralk = auto_fft_spiralk(rows, cols, k, subgroup).unwrap();
 // ship `wgsl` to your WebGPU runtime and persist `spiralk` if you want the DSL to learn it.
 ```
 
+Prefer to cache the tuned plan for JavaScript without re-running the heuristics? The WASM bindings now serialise plans as JSON or plain JS objects:
+
+```ts
+import { auto_fft_plan_json, WasmFftPlan } from "spiraltorch_wasm";
+
+const planJson = await auto_fft_plan_json(rows, cols, k, true);
+if (planJson) {
+  const plan = WasmFftPlan.fromJson(planJson);
+  await persistPlan(plan.toJson());
+  const wgsl = plan.wgsl();
+  // dispatch `wgsl` and reuse `plan` across workers or page reloads.
+}
+```
+
 ---
 
 ## Regenerating the WASM table (optional)
