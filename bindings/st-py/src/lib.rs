@@ -125,7 +125,13 @@ fn choose_route(device: Option<&str>) -> PyResult<DeviceRoute> {
     }
 }
 
-fn topk_rows_cpu(data: &[f32], rows: usize, cols: usize, k: usize) -> (Vec<f32>, Vec<i32>) {
+fn topk_rows_cpu(
+    data: &[f32],
+    rows: usize,
+    cols: usize,
+    k: usize,
+    largest: bool,
+) -> (Vec<f32>, Vec<i32>) {
     use std::cmp::Ordering;
 
     let mut out_vals = vec![0.0f32; rows * k];
@@ -142,7 +148,12 @@ fn topk_rows_cpu(data: &[f32], rows: usize, cols: usize, k: usize) -> (Vec<f32>,
             idx_buf.select_nth_unstable_by(k, |&a, &b| {
                 let va = data[row_offset + a];
                 let vb = data[row_offset + b];
-                vb.partial_cmp(&va).unwrap_or(Ordering::Equal)
+                let ordering = va.partial_cmp(&vb).unwrap_or(Ordering::Equal);
+                if largest {
+                    ordering.reverse()
+                } else {
+                    ordering
+                }
             });
         }
 
@@ -150,7 +161,12 @@ fn topk_rows_cpu(data: &[f32], rows: usize, cols: usize, k: usize) -> (Vec<f32>,
         topk.sort_unstable_by(|&a, &b| {
             let va = data[row_offset + a];
             let vb = data[row_offset + b];
-            vb.partial_cmp(&va).unwrap_or(Ordering::Equal)
+            let ordering = va.partial_cmp(&vb).unwrap_or(Ordering::Equal);
+            if largest {
+                ordering.reverse()
+            } else {
+                ordering
+            }
         });
 
         for (j, &col) in topk.iter().enumerate() {
@@ -1795,10 +1811,10 @@ impl PyModuleTrainer {
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "SpiralLightning(rows={}, cols={}, auto_prepare={})",
-            self.rows(),
-            self.cols(),
-            self.auto_prepare()
+            "ModuleTrainer(curvature={:.4}, hyper_lr={:.4}, fallback_lr={:.4})",
+            self.curvature(),
+            self.hyper_learning_rate(),
+            self.fallback_learning_rate()
         ))
     }
 }
@@ -2561,12 +2577,18 @@ fn run_epoch_with_lightning(
     batches: &Bound<'_, PyAny>,
 ) -> PyResult<EpochStats> {
     if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
+        let dataset: Vec<(Tensor, Tensor)> = loader
+            .clone_inner()
+            .into_iter()
+            .map(|batch| convert(batch))
+            .collect::<PyResult<_>>()?;
+
         if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
             if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
                 let stats = convert(lightning.train_epoch(
                     seq.borrow_mut()?,
                     mse.inner_mut(),
-                    loader.clone_inner(),
+                    dataset.clone(),
                 ))?;
                 return Ok(stats);
             }
@@ -2577,7 +2599,7 @@ fn run_epoch_with_lightning(
                 let stats = convert(lightning.train_epoch(
                     linear.borrow_mut()?,
                     mse.inner_mut(),
-                    loader.clone_inner(),
+                    dataset.clone(),
                 ))?;
                 return Ok(stats);
             }
@@ -2585,11 +2607,8 @@ fn run_epoch_with_lightning(
 
         if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
             if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(lightning.train_epoch(
-                    relu.borrow_mut()?,
-                    mse.inner_mut(),
-                    loader.clone_inner(),
-                ))?;
+                let stats =
+                    convert(lightning.train_epoch(relu.borrow_mut()?, mse.inner_mut(), dataset))?;
                 return Ok(stats);
             }
         }
@@ -3121,12 +3140,13 @@ fn plan(
 }
 
 #[pyfunction(name = "topk2d_tensor")]
-#[pyo3(signature = (x, k, device=None))]
+#[pyo3(signature = (x, k, *, device=None, largest=true))]
 fn topk2d_tensor_py(
     _py: Python<'_>,
     x: &PyTensor,
     k: usize,
     device: Option<&str>,
+    largest: bool,
 ) -> PyResult<(PyTensor, PyTensor)> {
     let (rows, cols) = x.shape();
     if k == 0 || k > cols {
@@ -3150,7 +3170,7 @@ fn topk2d_tensor_py(
     let data = x.as_tensor().data();
     let (vals, idx) = match route {
         DeviceRoute::Cpu | DeviceRoute::Cuda | DeviceRoute::Mps | DeviceRoute::Wgpu => {
-            topk_rows_cpu(data, rows, cols, k)
+            topk_rows_cpu(data, rows, cols, k, largest)
         }
     };
 
