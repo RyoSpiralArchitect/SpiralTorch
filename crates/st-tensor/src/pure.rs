@@ -29,14 +29,12 @@ pub use self::topos::{
 use crate::backend::faer_dense;
 #[cfg(feature = "wgpu")]
 use crate::backend::wgpu_dense;
-#[allow(unused_imports)]
-use rand::distributions::{Distribution, Uniform};
-#[allow(unused_imports)]
-use rand_distr::StandardNormal;
 use core::fmt;
-use rand::distributions::{Distribution, StandardNormal, Uniform};
+use rand::distributions::{Distribution, Uniform};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+#[allow(unused_imports)]
+use rand_distr::StandardNormal;
 use std::error::Error;
 use std::f32::consts::PI;
 

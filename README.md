@@ -122,6 +122,30 @@ telemetry spikes back to model behaviour. Visualising these pathways keeps
 “why” answers native to Z-space, turning SpiralTorch’s internal instrumentation
 into an Explainable AI surface without external probes.
 
+### Microlocal interface gauges
+
+SpiralTorch’s theory core now hosts a microlocal boundary gauge that translates
+the BV/varifold correspondence directly into code. The new
+`st_core::theory::microlocal::InterfaceGauge` measures local total-variation
+density over shrinking metric balls, outputs the gauge-invariant `R` machine,
+and only reconstructs oriented normals when an external label `c′` is supplied.
+This lets SpiralTorch stabilise interface detection, switch on co-orientations
+precisely when downstream pipelines inject a label, and keep curvature-ready
+statistics without violating the gauge symmetry of the unlabeled limit.【F:crates/st-core/src/theory/microlocal.rs†L1-L256】
+Once those signatures exist, `InterfaceZLift` pushes them straight into
+Z-space: it projects the perimeter mass onto a preferred Z-axis, splits the
+energy into Above/Here/Beneath bands, enriches the drift with the Leech
+projector, and emits a ready-to-store `SoftlogicZFeedback` pulse so runtimes can
+bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L471】
+
+To make those bridges operational inside collapse loops the gauge now supports
+multi-radius sweeps and a conductor that fuses their Z pulses with exponential
+smoothing. `InterfaceGauge::analyze_multiradius` probes the same mask at
+different blow-up scales (and reuses an optional `c′` label when supplied),
+while `InterfaceZConductor` drives any number of gauges, aggregates the
+resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
+ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
+
 ### Semiotic suturing, desire control, and EGW bridges
 
 SpiralTorch now ships a native semiotic optimiser that compresses Lacanian
