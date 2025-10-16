@@ -235,9 +235,8 @@ mod tests {
             .lock()
             .map(|mut guard| guard.begin_layer("gnn::conv1", -1.0, sample_flows(0.5)))
             .unwrap_or_else(|poison| {
-                poison
-                    .into_inner()
-                    .begin_layer("gnn::conv1", -1.0, sample_flows(0.5))
+                let mut guard = poison.into_inner();
+                guard.begin_layer("gnn::conv1", -1.0, sample_flows(0.5));
             });
         tracer
             .lock()
