@@ -5,9 +5,43 @@
 
 // crates/st-tensor/src/util.rs
 #![cfg(any(feature = "wgpu", feature = "wgpu_frac"))]
+use std::{
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc,
+    },
+    thread,
+};
 use wgpu::*;
 
-pub fn readback_f32(device: &Device, queue: &Queue, src: &Buffer, len: usize) -> Vec<f32> {
+fn wait_for_map(slice: &BufferSlice, device: &Device) -> Result<(), String> {
+    // 0 => pending, 1 => success, 2 => error
+    let status = Arc::new(AtomicU8::new(0));
+    let flag = Arc::clone(&status);
+    slice.map_async(MapMode::Read, move |result| {
+        let code = if result.is_ok() { 1 } else { 2 };
+        flag.store(code, Ordering::SeqCst);
+    });
+
+    loop {
+        match status.load(Ordering::SeqCst) {
+            0 => {
+                let _ = device.poll(Maintain::Wait);
+                thread::yield_now();
+            }
+            1 => return Ok(()),
+            2 => return Err("buffer map failed".to_string()),
+            _ => unreachable!("unexpected map_async completion flag"),
+        }
+    }
+}
+
+pub fn readback_f32(
+    device: &Device,
+    queue: &Queue,
+    src: &Buffer,
+    len: usize,
+) -> Result<Vec<f32>, String> {
     let size_bytes = (len * std::mem::size_of::<f32>()) as u64;
     let rb = device.create_buffer(&BufferDescriptor {
         label: Some("readback"),
@@ -22,18 +56,12 @@ pub fn readback_f32(device: &Device, queue: &Queue, src: &Buffer, len: usize) ->
     queue.submit(Some(enc.finish()));
 
     let slice = rb.slice(..);
-    let (sender, receiver) = std::sync::mpsc::channel();
-    slice.map_async(MapMode::Read, move |v| sender.send(v).unwrap());
-    device.poll(Maintain::Wait);
-    receiver
-        .recv()
-        .expect("map_async callback dropped")
-        .expect("buffer map failed");
+    wait_for_map(&slice, device)?;
 
     let data = slice.get_mapped_range();
     let mut out = vec![0.0f32; len];
     out.copy_from_slice(bytemuck::cast_slice(&data));
     drop(data);
     rb.unmap();
-    out
+    Ok(out)
 }
