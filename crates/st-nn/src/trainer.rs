@@ -23,6 +23,8 @@
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
+#[cfg(feature = "golden")]
+use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
@@ -34,11 +36,18 @@ use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSch
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::ecosystem::{
+    ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample, RankPlanSummary,
+    RoundtableConfigSummary, RoundtableSummary,
+};
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
+use st_core::ops::rank_entry::RankPlan;
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
-use st_core::telemetry::hub::{self, SoftlogicZFeedback};
+#[cfg(feature = "collapse")]
+use st_core::telemetry::hub::CollapsePulse;
+use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
@@ -46,7 +55,7 @@ use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter,
 use st_tensor::pure::topos::OpenCartesianTopos;
 use std::collections::HashMap;
 use std::env;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
 pub struct ModuleTrainer {
@@ -67,6 +76,12 @@ pub struct ModuleTrainer {
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
+    #[cfg(feature = "golden")]
+    golden_pulse: Option<GoldenBlackcatPulse>,
+    #[cfg(feature = "golden")]
+    golden_directive: Option<GoldenCooperativeDirective>,
+    #[cfg(feature = "golden")]
+    golden_council: Option<GoldenCouncilSnapshot>,
     #[cfg(feature = "psi")]
     psi: Option<PsiMeter>,
     #[cfg(feature = "psychoid")]
@@ -227,6 +242,14 @@ impl ModuleTrainer {
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
+            graph_pending: None,
+            graph_last_hint: None,
+            #[cfg(feature = "golden")]
+            golden_pulse: None,
+            #[cfg(feature = "golden")]
+            golden_directive: None,
+            #[cfg(feature = "golden")]
+            golden_council: None,
             #[cfg(feature = "psi")]
             psi,
             #[cfg(feature = "psychoid")]
@@ -374,6 +397,28 @@ impl ModuleTrainer {
 
     /// Connects the trainer to a distributed roundtable node.
     pub fn configure_distribution(&mut self, config: DistConfig) {
+        let mut metadata = HashMap::new();
+        metadata.insert("node_id".to_string(), config.node_id.clone());
+        metadata.insert("mode".to_string(), config.mode.as_str().to_string());
+        metadata.insert(
+            "push_interval_ms".to_string(),
+            config
+                .push_interval
+                .as_millis()
+                .min(u64::MAX as u128)
+                .to_string(),
+        );
+        metadata.insert(
+            "summary_window".to_string(),
+            config.summary_window.to_string(),
+        );
+        if !config.meta_endpoints.is_empty() {
+            metadata.insert(
+                "meta_endpoints".to_string(),
+                config.meta_endpoints.join(","),
+            );
+        }
+        self.log_connector_event("configure_distribution", metadata);
         self.distribution = Some(RoundtableNode::new(config));
     }
 
@@ -382,7 +427,15 @@ impl ModuleTrainer {
         if let Some(node) = self.distribution.as_mut() {
             node.drain();
         }
+        if self.distribution.is_some() {
+            self.log_connector_event("clear_distribution", HashMap::new());
+        }
         self.distribution = None;
+    }
+
+    /// Returns the currently configured distribution node, if any.
+    pub fn distribution_config(&self) -> Option<&DistConfig> {
+        self.distribution.as_ref().map(|node| node.config())
     }
 
     /// Installs a meta-layer conductor so this trainer can aggregate remote summaries.
@@ -396,12 +449,66 @@ impl ModuleTrainer {
         &self.heur_log
     }
 
+    /// Merges the provided heuristics log into the trainer's local log.
+    pub fn merge_heuristics_log(&mut self, log: &HeurOpLog) {
+        self.heur_log.merge(log);
+    }
+
     /// Returns the latest moderator minutes captured by Blackcat.
     pub fn blackcat_minutes(&self) -> Vec<ModeratorMinutes> {
         self.blackcat_moderator
             .as_ref()
             .map(|m| m.minutes().to_vec())
             .unwrap_or_default()
+    }
+
+    /// Replays moderator minutes so the embedded Blackcat runtime can stay aligned.
+    pub fn sync_blackcat_minutes(&mut self, minutes: &[ModeratorMinutes]) {
+        if let Some(moderator) = self.blackcat_moderator.as_mut() {
+            moderator.absorb_minutes(minutes);
+        }
+    }
+
+    #[cfg(feature = "golden")]
+    /// Applies a cooperative pulse emitted by the Golden retriever.
+    pub fn apply_blackcat_pulse(&mut self, pulse: &GoldenBlackcatPulse) {
+        self.golden_pulse = Some(pulse.clone());
+        self.golden_directive = None;
+        if let Some(node) = self.distribution.as_mut() {
+            let base_interval = node.config().push_interval;
+            let base_window = node.config().summary_window.max(1);
+            let directive = pulse.directive(base_interval, base_window);
+            node.retune(directive.push_interval, directive.summary_window);
+            if directive.reinforcement_weight > 0.1 {
+                self.injector_enabled = true;
+            }
+            self.golden_directive = Some(directive);
+        } else if pulse.reinforcement_weight > 0.1 || pulse.optimization_gain > 0.1 {
+            self.injector_enabled = true;
+        }
+    }
+
+    #[cfg(feature = "golden")]
+    pub(crate) fn record_golden_council(&mut self, snapshot: &GoldenCouncilSnapshot) {
+        self.golden_council = Some(snapshot.clone());
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the most recent cooperative pulse applied to this trainer.
+    pub fn last_blackcat_pulse(&self) -> Option<&GoldenBlackcatPulse> {
+        self.golden_pulse.as_ref()
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the latest cooperative directive derived from the Golden pulse.
+    pub fn last_blackcat_directive(&self) -> Option<&GoldenCooperativeDirective> {
+        self.golden_directive.as_ref()
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the latest self-rewrite council snapshot received from GoldenRetriever.
+    pub fn last_golden_council_snapshot(&self) -> Option<&GoldenCouncilSnapshot> {
+        self.golden_council.as_ref()
     }
 
     /// Clears any registered band weighting rule.
@@ -421,7 +528,201 @@ impl ModuleTrainer {
 
     /// Produces a roundtable schedule for the provided output dimensions.
     pub fn roundtable(&self, rows: u32, cols: u32, config: RoundtableConfig) -> RoundtableSchedule {
-        RoundtableSchedule::new(&self.planner, rows, cols, config)
+        let schedule = RoundtableSchedule::new(&self.planner, rows, cols, config);
+        self.emit_roundtable_summary(rows, cols, config, &schedule);
+        schedule
+    }
+
+    fn emit_roundtable_summary(
+        &self,
+        rows: u32,
+        cols: u32,
+        config: RoundtableConfig,
+        schedule: &RoundtableSchedule,
+    ) {
+        let cfg_summary = {
+            #[allow(unused_mut)]
+            let mut summary = RoundtableConfigSummary::new(
+                config.top_k,
+                config.mid_k,
+                config.bottom_k,
+                config.here_tolerance,
+            );
+            #[cfg(feature = "psychoid")]
+            {
+                summary
+                    .extras
+                    .insert("psychoid".to_string(), config.psychoid_enabled);
+                if config.psychoid_log {
+                    summary.extras.insert("psychoid_log".to_string(), true);
+                }
+            }
+            #[cfg(feature = "psi")]
+            {
+                summary.extras.insert("psi".to_string(), config.psi_enabled);
+            }
+            #[cfg(feature = "collapse")]
+            {
+                summary
+                    .extras
+                    .insert("collapse".to_string(), config.collapse_enabled);
+            }
+            summary
+        };
+
+        let plans = vec![
+            Self::summarize_rank_plan(schedule.above()),
+            Self::summarize_rank_plan(schedule.here()),
+            Self::summarize_rank_plan(schedule.beneath()),
+        ];
+
+        let distribution = self.distribution.as_ref().map(|node| {
+            let cfg = node.config();
+            DistributionSummary {
+                node_id: cfg.node_id.clone(),
+                mode: cfg.mode.as_str().to_string(),
+                summary_window: cfg.summary_window,
+                push_interval_ms: cfg.push_interval.as_millis().min(u64::MAX as u128) as u64,
+                meta_endpoints: cfg.meta_endpoints.clone(),
+            }
+        });
+
+        let summary = RoundtableSummary {
+            rows,
+            cols,
+            config: cfg_summary,
+            plans,
+            autopilot_enabled: self.autopilot.is_some(),
+            distribution,
+            issued_at: SystemTime::now(),
+        };
+
+        let registry = EcosystemRegistry::global();
+        let autopilot_tag = summary.autopilot_enabled.to_string();
+        let distribution_mode = summary.distribution.as_ref().map(|d| d.mode.clone());
+        let tag_sample = |sample: MetricSample| {
+            let mut sample = sample.with_tag("autopilot", autopilot_tag.as_str());
+            if let Some(mode) = &distribution_mode {
+                sample = sample.with_tag("distribution_mode", mode.clone());
+            }
+            sample
+        };
+
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.rows", rows as f64).with_unit("rows"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.cols", cols as f64).with_unit("cols"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new(
+                "roundtable.autopilot",
+                if summary.autopilot_enabled { 1.0 } else { 0.0 },
+            )
+            .with_unit("flag"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.config.top_k", config.top_k as f64).with_unit("items"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.config.mid_k", config.mid_k as f64).with_unit("items"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new("roundtable.config.bottom_k", config.bottom_k as f64)
+                .with_unit("items"),
+        ));
+        registry.record_metric(tag_sample(
+            MetricSample::new(
+                "roundtable.config.here_tolerance",
+                config.here_tolerance as f64,
+            )
+            .with_unit("ratio"),
+        ));
+
+        let plan_summaries = [
+            ("above", schedule.above()),
+            ("here", schedule.here()),
+            ("beneath", schedule.beneath()),
+        ];
+        for (band, plan) in plan_summaries {
+            let tag_band = |sample: MetricSample| tag_sample(sample.with_tag("band", band));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.rows", plan.rows as f64).with_unit("rows"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.cols", plan.cols as f64).with_unit("cols"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.k", plan.k as f64).with_unit("items"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.workgroup", plan.choice.wg as f64)
+                    .with_unit("threads"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.lanes", plan.choice.kl as f64)
+                    .with_unit("lanes"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.channel_stride", plan.choice.ch as f64)
+                    .with_unit("stride"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.tile", plan.choice.tile as f64)
+                    .with_unit("tile"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.compaction_tile", plan.choice.ctile as f64)
+                    .with_unit("tile"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new(
+                    "roundtable.band.subgroup",
+                    if plan.choice.subgroup { 1.0 } else { 0.0 },
+                )
+                .with_unit("flag"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.fft_tile", plan.choice.fft_tile as f64)
+                    .with_unit("tile"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new("roundtable.band.fft_radix", plan.choice.fft_radix as f64)
+                    .with_unit("radix"),
+            ));
+            registry.record_metric(tag_band(
+                MetricSample::new(
+                    "roundtable.band.fft_segments",
+                    plan.choice.fft_segments as f64,
+                )
+                .with_unit("segments"),
+            ));
+        }
+
+        registry.record_roundtable(summary);
+    }
+
+    fn summarize_rank_plan(plan: &RankPlan) -> RankPlanSummary {
+        let mut summary = RankPlanSummary::new(plan.kind, plan.rows, plan.cols, plan.k);
+        summary.workgroup = plan.choice.wg;
+        summary.lanes = plan.choice.kl;
+        summary.channel_stride = plan.choice.ch;
+        summary.tile = plan.choice.tile;
+        summary.compaction_tile = plan.choice.ctile;
+        summary.subgroup = plan.choice.subgroup;
+        summary.fft_tile = plan.choice.fft_tile;
+        summary.fft_radix = plan.choice.fft_radix;
+        summary.fft_segments = plan.choice.fft_segments;
+        summary
+    }
+
+    fn log_connector_event(&self, stage: &str, metadata: HashMap<String, String>) {
+        EcosystemRegistry::global().record_connector(ConnectorEvent {
+            name: "module_trainer".to_string(),
+            stage: stage.to_string(),
+            metadata,
+            issued_at: SystemTime::now(),
+        });
     }
 
     /// Returns the fallback Euclidean learning rate.
@@ -636,7 +937,8 @@ impl ModuleTrainer {
             }
             #[cfg(feature = "collapse")]
             if let (Some(driver), Some(reading)) = (self.collapse.as_mut(), psi_snapshot.as_ref()) {
-                match driver.update(reading) {
+                let command = driver.update(reading);
+                match command {
                     DriveCmd::Collapse {
                         grad_scale,
                         max_norm,
@@ -660,6 +962,15 @@ impl ModuleTrainer {
                     }
                     DriveCmd::None => {}
                 }
+                if !matches!(command, DriveCmd::None) {
+                    let loop_signal = hub::get_chrono_loop();
+                    hub::set_collapse_pulse(CollapsePulse {
+                        step: reading.step,
+                        total: reading.total,
+                        command,
+                        loop_signal,
+                    });
+                }
             }
             let psi_total_opt: Option<f32> = {
                 #[cfg(feature = "psi")]
@@ -676,6 +987,7 @@ impl ModuleTrainer {
                 .observe(&band_energy, weighted_loss, psi_total_opt);
             hub::set_softlogic_z(z_feedback);
             extra.insert("softlogic_z".to_string(), z_feedback.z_signal as f64);
+            let mut loop_broadcasted = false;
             if let Some(node) = self.distribution.as_mut() {
                 let outcome = OutcomeBand::from_weights(
                     band_energy.above,
@@ -718,6 +1030,34 @@ impl ModuleTrainer {
                             }
                         }
                     }
+                    if let Some(loop_signal) = hub::get_chrono_loop() {
+                        let collapse_hint =
+                            psi_total_opt.filter(|value| *value > 0.0).or_else(|| {
+                                if summary.mean_psi > 0.0 {
+                                    Some(summary.mean_psi)
+                                } else {
+                                    None
+                                }
+                            });
+                        let support = (summary.support + summary.mean_score).max(0.1);
+                        let envelope = LoopbackEnvelope::new(loop_signal)
+                            .with_source(summary.node_id.clone())
+                            .with_support(support)
+                            .with_collapse_total(collapse_hint)
+                            .with_z_signal(Some(z_feedback.z_signal))
+                            .with_script_hint(Some(summary.script_hint.clone()));
+                        hub::push_loopback_envelope(envelope);
+                        loop_broadcasted = true;
+                    }
+                }
+            }
+            if !loop_broadcasted {
+                if let Some(loop_signal) = hub::get_chrono_loop() {
+                    let envelope = LoopbackEnvelope::new(loop_signal)
+                        .with_support(1.0)
+                        .with_collapse_total(psi_total_opt.filter(|value| *value > 0.0))
+                        .with_z_signal(Some(z_feedback.z_signal));
+                    hub::push_loopback_envelope(envelope);
                 }
             }
             self.step(module)?;
@@ -1185,5 +1525,31 @@ mod tests {
             .unwrap();
 
         assert!(bridge.is_empty());
+    #[cfg(feature = "golden")]
+    #[test]
+    fn trainer_records_golden_council_snapshot() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut pulse = GoldenBlackcatPulse::idle();
+        pulse.exploration_drive = 0.7;
+        let snapshot = GoldenCouncilSnapshot {
+            exploration_bias: 1.2,
+            optimization_bias: 0.95,
+            synergy_bias: 1.1,
+            reinforcement_bias: 1.05,
+            resonance: 0.4,
+            stability: 0.86,
+            momentum: 0.3,
+            divergence: 0.2,
+            schedule_hint: (1.0, 0.8, 1.1, 0.9),
+            pulse_recap: pulse,
+        };
+        trainer.record_golden_council(&snapshot);
+        let stored = trainer
+            .last_golden_council_snapshot()
+            .expect("snapshot stored");
+        assert!((stored.exploration_bias - 1.2).abs() < 1e-4);
+        assert_eq!(stored.schedule_hint.2, 1.1);
+        assert_eq!(stored.pulse_recap.exploration_drive, 0.7);
     }
 }

@@ -54,6 +54,11 @@ impl GraphConsensusBridge {
     /// call.
     pub fn digest(&self, baseline: &BandEnergy) -> PureResult<Option<GraphConsensusDigest>> {
         let reports = self.tracer.borrow_mut().drain();
+        let mut tracer = self
+            .tracer
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let reports = tracer.drain();
         if reports.is_empty() {
             return Ok(None);
         }
