@@ -8,8 +8,12 @@ use super::device_caps::DeviceCaps;
 use super::kdsl_bridge;
 use super::spiralk_fft::SpiralKFftPlan;
 use crate::backend::wgpu_heuristics_generated as gen;
+#[cfg(feature = "logic-learn")]
+use st_logic::learn;
 #[cfg(feature = "logic")]
 use st_logic::SoftRule;
+#[cfg(feature = "logic-learn")]
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Choice {
@@ -203,22 +207,29 @@ fn synthesize_soft_choice(base: Choice, rules: &[SoftRule]) -> Option<(Choice, f
     let mut segments_vote = NumericVote::default();
 
     for rule in rules {
-        let weight = rule.weight.max(0.0);
+        let mut weight = rule.weight.max(0.0);
+        let mut score = rule.score;
+        #[cfg(feature = "logic-learn")]
+        {
+            let (w, s) = adjust_soft_rule(rule.name, weight, score);
+            weight = w;
+            score = s;
+        }
         if weight <= 0.0 {
             continue;
         }
         match rule.name {
-            SOFT_NAME_USE2CE => use2_vote.push(rule.score >= 0.0, weight),
-            SOFT_NAME_WG => wg_vote.push(rule.score, weight),
-            SOFT_NAME_KL => kl_vote.push(rule.score, weight),
-            SOFT_NAME_CH => ch_vote.push(rule.score, weight),
-            SOFT_NAME_ALGO => algo_vote.push(rule.score, weight),
-            SOFT_NAME_CTILE => ctile_vote.push(rule.score, weight),
-            SOFT_NAME_MODE_MIDK => midk_vote.push(rule.score, weight),
-            SOFT_NAME_MODE_BOTTOMK => bottomk_vote.push(rule.score, weight),
-            SOFT_NAME_TILE_COLS => tile_cols_vote.push(rule.score, weight),
-            SOFT_NAME_RADIX => radix_vote.push(rule.score, weight),
-            SOFT_NAME_SEGMENTS => segments_vote.push(rule.score, weight),
+            SOFT_NAME_USE2CE => use2_vote.push(score >= 0.0, weight),
+            SOFT_NAME_WG => wg_vote.push(score, weight),
+            SOFT_NAME_KL => kl_vote.push(score, weight),
+            SOFT_NAME_CH => ch_vote.push(score, weight),
+            SOFT_NAME_ALGO => algo_vote.push(score, weight),
+            SOFT_NAME_CTILE => ctile_vote.push(score, weight),
+            SOFT_NAME_MODE_MIDK => midk_vote.push(score, weight),
+            SOFT_NAME_MODE_BOTTOMK => bottomk_vote.push(score, weight),
+            SOFT_NAME_TILE_COLS => tile_cols_vote.push(score, weight),
+            SOFT_NAME_RADIX => radix_vote.push(score, weight),
+            SOFT_NAME_SEGMENTS => segments_vote.push(score, weight),
             _ => {}
         }
     }
@@ -271,6 +282,45 @@ fn apply_numeric_vote_u8(field: &mut u8, vote: &NumericVote, min: u8, max: u8) -
         }
     }
     0.0
+}
+
+#[cfg(feature = "logic-learn")]
+fn adjust_soft_rule(name: &str, weight: f32, score: f32) -> (f32, f32) {
+    let mut adj_weight = weight;
+    let mut adj_score = score;
+    if let Ok(weights) = soft_weights_store().lock() {
+        let blend = bandit_blend_factor();
+        let bandit = learn::weight_from_bandit(&*weights, name);
+        let baseline = 0.5f32;
+        let target = blend * bandit + (1.0 - blend) * baseline;
+        if weight > 0.0 {
+            let scale = (target / baseline.max(1e-6)).clamp(0.25, 4.0);
+            adj_weight = weight * scale;
+        }
+        if let Some(bias) = weights.base_coef.get(name) {
+            let bias = bias.clamp(-4.0, 4.0);
+            adj_score = score + bias;
+        }
+    }
+    (adj_weight, adj_score)
+}
+
+#[cfg(feature = "logic-learn")]
+fn bandit_blend_factor() -> f32 {
+    static BLEND: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *BLEND.get_or_init(|| {
+        std::env::var("SPIRAL_SOFT_BANDIT_BLEND")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .map(|v| v.clamp(0.0, 1.0))
+            .unwrap_or(0.5)
+    })
+}
+
+#[cfg(feature = "logic-learn")]
+fn soft_weights_store() -> &'static Mutex<learn::SoftWeights> {
+    static STORE: std::sync::OnceLock<Mutex<learn::SoftWeights>> = std::sync::OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(learn::load()))
 }
 
 pub fn choose_kind(
