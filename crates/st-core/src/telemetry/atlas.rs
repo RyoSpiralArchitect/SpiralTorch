@@ -25,6 +25,7 @@
 
 use super::chrono::{ChronoHarmonics, ChronoSummary};
 use super::maintainer::MaintainerStatus;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 /// Named scalar surfaced through the atlas projection.
@@ -412,7 +413,7 @@ impl AtlasRoute {
                 let entry = district_map
                     .entry(district.name.clone())
                     .or_insert_with(DistrictAccumulator::new);
-                entry.push(district.mean);
+                entry.push(&district);
             }
         }
         if summary.frames > 0 {
@@ -480,6 +481,311 @@ impl AtlasRouteSummary {
     pub fn is_empty(&self) -> bool {
         self.frames == 0
     }
+
+    /// Builds perspectives for all districts captured in the summary.
+    pub fn perspectives(&self) -> Vec<AtlasPerspective> {
+        self.districts
+            .iter()
+            .map(AtlasPerspective::from_district)
+            .collect()
+    }
+
+    /// Builds a district perspective with an optional focus filter.
+    pub fn perspective_for(&self, district: &str) -> Option<AtlasPerspective> {
+        self.perspective_for_with_focus::<&str>(district, &[])
+    }
+
+    /// Builds a district perspective filtered by the provided metric prefixes.
+    pub fn perspective_for_with_focus<S>(
+        &self,
+        district: &str,
+        focus_prefixes: &[S],
+    ) -> Option<AtlasPerspective>
+    where
+        S: AsRef<str>,
+    {
+        let mut perspective = self
+            .districts
+            .iter()
+            .find(|summary| summary.name == district)
+            .map(AtlasPerspective::from_district)?;
+        perspective.apply_focus_filter(focus_prefixes);
+        Some(perspective)
+    }
+
+    /// Highlights the most dynamic metrics across districts as atlas beacons.
+    pub fn beacons(&self, limit: usize) -> Vec<AtlasBeacon> {
+        let mut beacons: Vec<AtlasBeacon> = self
+            .districts
+            .iter()
+            .flat_map(|district| {
+                district
+                    .focus
+                    .iter()
+                    .filter_map(|focus| AtlasBeacon::from_focus(&district.name, focus))
+            })
+            .collect();
+        beacons.sort_by(|a, b| {
+            b.intensity
+                .partial_cmp(&a.intensity)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.metric.cmp(&b.metric))
+        });
+        if limit > 0 && beacons.len() > limit {
+            beacons.truncate(limit);
+        }
+        beacons
+    }
+
+    /// Fetches the beacon associated with a specific metric identifier.
+    pub fn beacon_for(&self, metric: &str) -> Option<AtlasBeacon> {
+        self.beacons(0)
+            .into_iter()
+            .find(|beacon| beacon.metric == metric)
+    }
+}
+
+/// Perspective describing how a particular district can act on the atlas map.
+#[derive(Clone, Debug, Default)]
+pub struct AtlasPerspective {
+    /// Name of the district represented by the perspective.
+    pub district: String,
+    /// Number of frames that contributed to the perspective metrics.
+    pub coverage: usize,
+    /// Mean district activity seen during the sampled frames.
+    pub mean: f32,
+    /// Latest district activity value.
+    pub latest: f32,
+    /// Signed change between the latest and earliest district activity.
+    pub delta: f32,
+    /// Average per-frame delta helping nodes gauge momentum.
+    pub momentum: f32,
+    /// Volatility derived from the district standard deviation.
+    pub volatility: f32,
+    /// Stability score (1.0 stable, 0.0 turbulent) derived from volatility.
+    pub stability: f32,
+    /// Metric focus areas that the district can use as anchors.
+    pub focus: Vec<AtlasMetricFocus>,
+    /// Human readable guidance tying the numbers back to action.
+    pub guidance: String,
+}
+
+impl AtlasPerspective {
+    fn from_district(district: &AtlasDistrictSummary) -> Self {
+        let momentum = if district.coverage > 0 {
+            district.delta / district.coverage as f32
+        } else {
+            0.0
+        };
+        let volatility = district.std_dev;
+        let stability = 1.0 / (1.0 + volatility.abs());
+        let mut perspective = Self {
+            district: district.name.clone(),
+            coverage: district.coverage,
+            mean: district.mean,
+            latest: district.latest,
+            delta: district.delta,
+            momentum,
+            volatility,
+            stability,
+            focus: district.focus.clone(),
+            guidance: String::new(),
+        };
+        perspective.rebuild_guidance();
+        perspective
+    }
+
+    fn apply_focus_filter<S>(&mut self, prefixes: &[S])
+    where
+        S: AsRef<str>,
+    {
+        if prefixes.is_empty() {
+            return;
+        }
+        let filtered: Vec<AtlasMetricFocus> = self
+            .focus
+            .iter()
+            .cloned()
+            .filter(|metric| {
+                prefixes
+                    .iter()
+                    .any(|prefix| metric.name.starts_with(prefix.as_ref()))
+            })
+            .collect();
+        if !filtered.is_empty() {
+            self.focus = filtered;
+            self.rebuild_guidance();
+        }
+    }
+
+    fn rebuild_guidance(&mut self) {
+        let orientation = if self.delta.abs() <= 1e-6 {
+            "is steady"
+        } else if self.delta.is_sign_positive() {
+            "is rising"
+        } else {
+            "is cooling"
+        };
+        let tone = if self.stability >= 0.75 {
+            "stable"
+        } else if self.stability >= 0.45 {
+            "adaptive"
+        } else {
+            "turbulent"
+        };
+        let highlight = if self.focus.is_empty() {
+            "baseline flow".to_string()
+        } else {
+            self.focus
+                .iter()
+                .take(3)
+                .map(|metric| format!("{} ({:+.3})", metric.name, metric.delta))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        self.guidance = format!(
+            "{} district {} with {} stability (momentum {:+.3}, volatility {:.3}); focus on {}.",
+            self.district, orientation, tone, self.momentum, self.volatility, highlight
+        );
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AtlasMetricFocus {
+    /// Metric identifier used within the district.
+    pub name: String,
+    /// Number of frames contributing to the metric statistics.
+    pub coverage: usize,
+    /// Average value recorded for the metric.
+    pub mean: f32,
+    /// Latest recorded value for the metric.
+    pub latest: f32,
+    /// Signed change between the latest and first observation.
+    pub delta: f32,
+    /// Per-step momentum computed from the accumulated delta.
+    pub momentum: f32,
+    /// Standard deviation of the metric across the observed frames.
+    pub std_dev: f32,
+}
+
+impl AtlasMetricFocus {
+    fn is_relevant(&self) -> bool {
+        self.coverage > 0
+    }
+}
+
+/// Direction describing how an atlas beacon is trending.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AtlasBeaconTrend {
+    /// Metric activity is rising across the retained frames.
+    Rising,
+    /// Metric activity is declining across the retained frames.
+    Falling,
+    /// Metric activity is effectively unchanged.
+    Steady,
+}
+
+/// Highlighted metric that other nodes can treat as a navigational beacon.
+#[derive(Clone, Debug)]
+pub struct AtlasBeacon {
+    /// District that produced the beacon metric.
+    pub district: String,
+    /// Metric identifier flagged as a beacon.
+    pub metric: String,
+    /// Number of frames that contributed to the beacon statistics.
+    pub coverage: usize,
+    /// Average value recorded for the beacon metric.
+    pub mean: f32,
+    /// Latest recorded value for the beacon metric.
+    pub latest: f32,
+    /// Signed change between the latest and first observation.
+    pub delta: f32,
+    /// Per-frame momentum computed from the accumulated delta.
+    pub momentum: f32,
+    /// Standard deviation recorded for the beacon metric.
+    pub volatility: f32,
+    /// Strength used to rank beacons (higher means more dynamic).
+    pub intensity: f32,
+    /// Direction describing how the beacon is trending.
+    pub trend: AtlasBeaconTrend,
+    /// Narrative describing how the beacon should be interpreted.
+    pub narrative: String,
+}
+
+impl AtlasBeacon {
+    fn from_focus(district: &str, focus: &AtlasMetricFocus) -> Option<Self> {
+        if focus.coverage == 0 {
+            return None;
+        }
+        let delta = if focus.delta.is_finite() {
+            focus.delta
+        } else {
+            0.0
+        };
+        let momentum = if focus.momentum.is_finite() {
+            focus.momentum
+        } else {
+            0.0
+        };
+        let volatility = if focus.std_dev.is_finite() {
+            focus.std_dev.max(0.0)
+        } else {
+            0.0
+        };
+        let intensity = delta.abs().max(momentum.abs());
+        if intensity <= 1e-6 {
+            return None;
+        }
+        let trend = if delta.abs() <= 1e-6 {
+            AtlasBeaconTrend::Steady
+        } else if delta.is_sign_positive() {
+            AtlasBeaconTrend::Rising
+        } else {
+            AtlasBeaconTrend::Falling
+        };
+        let volatility_note = if volatility <= 1e-6 {
+            "with calm variance"
+        } else if volatility < 0.25 {
+            "with mild variance"
+        } else if volatility < 0.75 {
+            "with adaptive variance"
+        } else {
+            "with turbulent variance"
+        };
+        let tempo_note = if momentum.abs() <= 1e-6 {
+            "flat momentum"
+        } else {
+            "momentum"
+        };
+        let narrative = format!(
+            "{district}::{metric} {orientation} (Δ {:+.3}, {tempo} {:+.3}, σ {:.3}) {variance}.",
+            delta,
+            momentum,
+            volatility,
+            district = district,
+            metric = focus.name,
+            orientation = match trend {
+                AtlasBeaconTrend::Rising => "is surging",
+                AtlasBeaconTrend::Falling => "is easing",
+                AtlasBeaconTrend::Steady => "holds steady",
+            },
+            tempo = tempo_note,
+            variance = volatility_note,
+        );
+        Some(Self {
+            district: district.to_string(),
+            metric: focus.name.clone(),
+            coverage: focus.coverage,
+            mean: focus.mean,
+            latest: focus.latest,
+            delta,
+            momentum,
+            volatility,
+            intensity,
+            trend,
+            narrative,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -500,6 +806,59 @@ pub struct AtlasDistrictSummary {
     pub delta: f32,
     /// Standard deviation of the district activity across observations.
     pub std_dev: f32,
+    /// Focus metrics that describe the district activity in more detail.
+    pub focus: Vec<AtlasMetricFocus>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct MetricAccumulator {
+    sum: f32,
+    sum_sq: f32,
+    first: Option<f32>,
+    last: f32,
+    count: usize,
+}
+
+impl MetricAccumulator {
+    fn push(&mut self, value: f32) {
+        if !value.is_finite() {
+            return;
+        }
+        self.sum += value;
+        self.sum_sq += value * value;
+        self.count += 1;
+        if self.first.is_none() {
+            self.first = Some(value);
+        }
+        self.last = value;
+    }
+
+    fn into_focus(self, name: String) -> AtlasMetricFocus {
+        if self.count == 0 {
+            return AtlasMetricFocus {
+                name,
+                ..Default::default()
+            };
+        }
+        let mean = self.sum / self.count as f32;
+        let variance = (self.sum_sq / self.count as f32) - mean * mean;
+        let first = self.first.unwrap_or(self.last);
+        let delta = self.last - first;
+        let momentum = if self.count > 0 {
+            delta / self.count as f32
+        } else {
+            0.0
+        };
+        AtlasMetricFocus {
+            name,
+            coverage: self.count,
+            mean,
+            latest: self.last,
+            delta,
+            momentum,
+            std_dev: variance.max(0.0).sqrt(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -511,6 +870,7 @@ struct DistrictAccumulator {
     first: Option<f32>,
     last: f32,
     count: usize,
+    metrics: BTreeMap<String, MetricAccumulator>,
 }
 
 impl DistrictAccumulator {
@@ -523,10 +883,12 @@ impl DistrictAccumulator {
             first: None,
             last: 0.0,
             count: 0,
+            metrics: BTreeMap::new(),
         }
     }
 
-    fn push(&mut self, value: f32) {
+    fn push(&mut self, district: &AtlasDistrict) {
+        let value = district.mean;
         if !value.is_finite() {
             return;
         }
@@ -539,6 +901,16 @@ impl DistrictAccumulator {
             self.first = Some(value);
         }
         self.last = value;
+        for metric in &district.metrics {
+            if !metric.value.is_finite() {
+                continue;
+            }
+            let entry = self
+                .metrics
+                .entry(metric.name.clone())
+                .or_insert_with(MetricAccumulator::default);
+            entry.push(metric.value);
+        }
     }
 
     fn into_summary(self, name: String) -> AtlasDistrictSummary {
@@ -551,6 +923,25 @@ impl DistrictAccumulator {
         let mean = self.sum / self.count as f32;
         let variance = (self.sum_sq / self.count as f32) - mean * mean;
         let first = self.first.unwrap_or(self.last);
+        let mut focus: Vec<AtlasMetricFocus> = self
+            .metrics
+            .into_iter()
+            .map(|(name, accumulator)| accumulator.into_focus(name))
+            .filter(AtlasMetricFocus::is_relevant)
+            .collect();
+        focus.sort_by(|a, b| {
+            b.coverage
+                .cmp(&a.coverage)
+                .then_with(|| {
+                    b.latest
+                        .partial_cmp(&a.latest)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        if focus.len() > 8 {
+            focus.truncate(8);
+        }
         AtlasDistrictSummary {
             name,
             coverage: self.count,
@@ -560,6 +951,7 @@ impl DistrictAccumulator {
             max: if self.max.is_finite() { self.max } else { mean },
             delta: self.last - first,
             std_dev: variance.max(0.0).sqrt(),
+            focus,
         }
     }
 }
@@ -707,5 +1099,85 @@ mod tests {
         assert!((surface.latest - 3.0).abs() <= f32::EPSILON);
         assert!((surface.delta - 3.0).abs() <= f32::EPSILON);
         assert!(surface.std_dev > 0.0);
+        assert!(!surface.focus.is_empty());
+    }
+
+    #[test]
+    fn atlas_route_perspectives_filter_focus() {
+        let mut route = AtlasRoute::new();
+        for idx in 0..3 {
+            let mut fragment = AtlasFragment::new();
+            fragment.timestamp = Some((idx + 1) as f32);
+            fragment.push_metric_with_district(
+                "session.surface.latency",
+                0.5 + idx as f32 * 0.25,
+                "Surface",
+            );
+            fragment.push_metric_with_district(
+                "session.surface.io",
+                0.2 + idx as f32 * 0.1,
+                "Surface",
+            );
+            fragment.push_metric_with_district(
+                "trainer.loop.energy",
+                idx as f32 * 0.4,
+                "Concourse",
+            );
+            let mut frame = AtlasFrame::new((idx + 1) as f32);
+            frame.loop_support = 0.3 + idx as f32 * 0.1;
+            frame.merge_fragment(fragment);
+            route.push_bounded(frame, usize::MAX);
+        }
+        let summary = route.summary();
+        let perspectives = summary.perspectives();
+        assert!(perspectives.len() >= 2);
+        let surface = summary
+            .perspective_for_with_focus("Surface", &["session.surface.io"])
+            .expect("surface perspective");
+        assert_eq!(surface.district, "Surface");
+        assert_eq!(surface.coverage, 3);
+        assert!(surface.guidance.contains("Surface district"));
+        assert!(surface
+            .focus
+            .iter()
+            .all(|metric| metric.name.starts_with("session.surface")));
+        assert!(surface.focus.len() <= 2);
+    }
+
+    #[test]
+    fn atlas_route_summary_emits_beacons() {
+        let mut route = AtlasRoute::new();
+        for idx in 0..4 {
+            let mut fragment = AtlasFragment::new();
+            fragment.timestamp = Some((idx + 1) as f32);
+            fragment.push_metric_with_district(
+                "session.surface.latency",
+                0.4 + idx as f32 * 0.3,
+                "Surface",
+            );
+            fragment.push_metric_with_district(
+                "trainer.loop.energy",
+                0.2 + idx as f32 * 0.1,
+                "Concourse",
+            );
+            let mut frame = AtlasFrame::new((idx + 1) as f32);
+            frame.loop_support = 0.2 + idx as f32 * 0.05;
+            frame.merge_fragment(fragment);
+            route.push_bounded(frame, usize::MAX);
+        }
+        let summary = route.summary();
+        let beacons = summary.beacons(4);
+        assert!(beacons.len() >= 2);
+        assert!(beacons[0].intensity >= beacons[1].intensity);
+        assert_eq!(beacons[0].district, "Surface");
+        assert!(matches!(beacons[0].trend, AtlasBeaconTrend::Rising));
+        assert!(beacons[0]
+            .narrative
+            .contains("Surface::session.surface.latency"));
+        let latency_beacon = summary
+            .beacon_for("session.surface.latency")
+            .expect("latency beacon");
+        assert_eq!(latency_beacon.metric, "session.surface.latency");
+        assert!(latency_beacon.intensity >= beacons[0].intensity - 1e-6);
     }
 }

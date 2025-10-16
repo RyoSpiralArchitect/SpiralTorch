@@ -22,14 +22,13 @@
 // ============================================================================
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+#[cfg(feature = "golden")]
+use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 #[cfg(feature = "psi")]
 use crate::language::{DesirePsiBridge, DesirePsiSummary};
 use crate::language::{
     DesireRoundtableBridge, DesireRoundtableSummary, DesireTrainerBridge, DesireTrainerSummary,
 };
-#[cfg(feature = "golden")]
-use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
-use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
@@ -57,7 +56,7 @@ use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter, PsychoidReading};
-use st_tensor::pure::topos::OpenCartesianTopos;
+use st_tensor::topos::OpenCartesianTopos;
 use std::collections::HashMap;
 use std::env;
 use std::time::{Duration, Instant, SystemTime};
@@ -651,7 +650,7 @@ impl ModuleTrainer {
         config: RoundtableConfig,
         schedule: &RoundtableSchedule,
     ) {
-        let pipeline = crate::language::pipeline::LanguagePipeline::builder("module_trainer")
+        let pipeline = crate::language::LanguagePipeline::builder("module_trainer")
             .with_tag("component", "module_trainer")
             .build();
         pipeline.record_roundtable(
@@ -1634,10 +1633,11 @@ mod tests {
     use crate::loss::MeanSquaredError;
     use crate::roundtable::{HeurOp, HeurOpKind};
     use crate::schedule::RoundtableConfig;
+    use st_tensor::pure::topos::OpenCartesianTopos;
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
-    use st_tensor::pure::topos::OpenCartesianTopos;
+    use st_tensor::topos::OpenCartesianTopos;
     use std::collections::{HashMap, HashSet};
     use std::time::{Duration, Instant, SystemTime};
 
@@ -1715,7 +1715,7 @@ mod tests {
         let mut gate = WaveGate::with_topos(
             "wg",
             8,
-            st_tensor::pure::LanguageWaveEncoder::new(encoder_curvature, 0.7).unwrap(),
+            st_tensor::LanguageWaveEncoder::new(encoder_curvature, 0.7).unwrap(),
             topos.clone(),
         )
         .unwrap();
@@ -1937,6 +1937,8 @@ mod tests {
         assert!(bridge.drain_summary().unwrap().is_none());
         let summary = trainer.desire_roundtable_summary();
         assert!(summary.is_some());
+    }
+
     #[cfg(feature = "golden")]
     #[test]
     fn trainer_records_golden_council_snapshot() {

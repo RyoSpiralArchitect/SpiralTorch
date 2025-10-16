@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use crate::PureResult;
-use st_tensor::pure::TensorError;
+use st_tensor::TensorError;
 use std::collections::HashSet;
 
 const DEFAULT_EPSILON: f32 = 1e-6;
@@ -58,6 +58,26 @@ impl SparseKernel {
             rows: norm_rows,
             log_epsilon: epsilon.ln(),
         })
+    }
+
+    pub fn from_dense(dense: Vec<Vec<f32>>, epsilon: f32) -> PureResult<Self> {
+        let mut rows = Vec::with_capacity(dense.len());
+        for row in dense {
+            let mut entries = Vec::new();
+            for (idx, weight) in row.into_iter().enumerate() {
+                if weight.is_nan() || weight.is_infinite() {
+                    return Err(TensorError::InvalidValue {
+                        label: "kernel weight must be finite",
+                    });
+                }
+                if weight <= 0.0 {
+                    continue;
+                }
+                entries.push((idx, weight));
+            }
+            rows.push(entries);
+        }
+        Self::from_rows(rows, epsilon)
     }
 
     pub fn vocab_size(&self) -> usize {
@@ -221,6 +241,83 @@ impl SemanticBridge {
         })
     }
 
+    pub fn from_dense(
+        couplings: Vec<Vec<f32>>,
+        anchors: impl IntoIterator<Item = (usize, usize)>,
+        epsilon: f32,
+        concept_kernel: SparseKernel,
+    ) -> PureResult<Self> {
+        let tokens = couplings.len();
+        if tokens == 0 {
+            return Err(TensorError::InvalidValue {
+                label: "semantic bridge requires at least one symbol",
+            });
+        }
+        let concepts = concept_kernel.vocab_size();
+        if concepts == 0 {
+            return Err(TensorError::InvalidValue {
+                label: "semantic bridge requires at least one concept",
+            });
+        }
+        let mut log_rows = Vec::with_capacity(tokens);
+        let mut row_sums = Vec::with_capacity(tokens);
+        let mut col_sums = vec![0.0f32; concepts];
+        for row in couplings.into_iter() {
+            if row.len() != concepts {
+                return Err(TensorError::InvalidValue {
+                    label: "semantic bridge row must match concept kernel",
+                });
+            }
+            let mut entries = Vec::new();
+            let mut sum = 0.0f32;
+            for (concept_idx, weight) in row.into_iter().enumerate() {
+                if weight.is_nan() || weight.is_infinite() {
+                    return Err(TensorError::InvalidValue {
+                        label: "semantic bridge weight must be finite",
+                    });
+                }
+                if weight <= 0.0 {
+                    continue;
+                }
+                entries.push((concept_idx, weight.ln()));
+                sum += weight;
+                col_sums[concept_idx] += weight;
+            }
+            row_sums.push(if sum <= 0.0 {
+                epsilon.max(f32::EPSILON)
+            } else {
+                sum
+            });
+            log_rows.push(entries);
+        }
+        for value in &mut col_sums {
+            if *value <= 0.0 {
+                *value = epsilon.max(f32::EPSILON);
+            }
+        }
+        let anchors: HashSet<(usize, usize)> = anchors.into_iter().collect();
+        for &(token, concept) in &anchors {
+            if token >= tokens {
+                return Err(TensorError::InvalidValue {
+                    label: "semantic bridge anchor token out of range",
+                });
+            }
+            if concept >= concepts {
+                return Err(TensorError::InvalidValue {
+                    label: "semantic bridge anchor concept out of range",
+                });
+            }
+        }
+        Self::new(
+            log_rows,
+            row_sums,
+            col_sums,
+            anchors,
+            epsilon,
+            concept_kernel,
+        )
+    }
+
     pub fn vocab_size(&self) -> usize {
         self.log_pi.len()
     }
@@ -338,5 +435,59 @@ impl ConceptHint {
             }
             ConceptHint::Window(window) => bridge.infer_from_window(window, DEFAULT_EPSILON),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_kernel() -> SparseKernel {
+        SparseKernel::from_rows(
+            vec![vec![(0, 0.7), (1, 0.3)], vec![(0, 0.2), (1, 0.8)]],
+            1e-6,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn dense_kernel_matches_rows() {
+        let dense = vec![vec![0.7, 0.3], vec![0.2, 0.8]];
+        let dense_kernel = SparseKernel::from_dense(dense, 1e-6).unwrap();
+        assert_eq!(dense_kernel.vocab_size(), 2);
+        assert!((dense_kernel.log_value(0, 0).exp() - 0.7).abs() < 1e-6);
+        assert!((dense_kernel.log_value(1, 1).exp() - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn semantic_bridge_from_dense_matches_manual() {
+        let concept_kernel = sample_kernel();
+        let dense = vec![vec![0.6, 0.4], vec![0.3, 0.7]];
+        let bridge =
+            SemanticBridge::from_dense(dense.clone(), Vec::new(), 1e-6, concept_kernel.clone())
+                .unwrap();
+        assert_eq!(bridge.vocab_size(), 2);
+        assert_eq!(bridge.concept_count(), 2);
+        let manual = SemanticBridge::new(
+            dense
+                .into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .enumerate()
+                        .filter(|(_, value)| *value > 0.0)
+                        .map(|(idx, value)| (idx, value.ln()))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>(),
+            vec![1.0, 1.0],
+            vec![0.9, 1.1],
+            HashSet::new(),
+            1e-6,
+            concept_kernel,
+        )
+        .unwrap();
+        assert!((bridge.log_pi(0, 0) - manual.log_pi(0, 0)).abs() < 1e-6);
+        assert!((bridge.row_marginal()[0] - 1.0).abs() < 1e-6);
+        assert!(bridge.col_marginal()[0] > 0.0);
     }
 }

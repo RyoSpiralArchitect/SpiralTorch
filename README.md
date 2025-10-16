@@ -79,6 +79,10 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
+## Technical notes
+
+- [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
+
 ## Emerging toolkits unique to SpiralTorch
 
 ### Z-space-native graph neural networks
@@ -296,6 +300,55 @@ let replayed = pipeline.replay(DesireLogReplay::open("desire.ndjson")?)?;
 let drained = trigger_buffer.drain()?; // forward to analytics or trainers
 ```
 
+Python bindings mirror the same geometry builders and automation braid. The
+`SparseKernel::from_dense` and `SemanticBridge::from_dense` helpers collapse
+token/concept matrices directly, so notebooks can assemble desire pipelines
+from dense observations without juggling sparse tuples. Once the components are
+assembled, the pipeline builder attaches sinks and steps logits exactly like the
+Rust API:
+
+```python
+from spiraltorch import (
+    SparseKernel,
+    SymbolGeometry,
+    RepressionField,
+    SemanticBridge,
+    TemperatureController,
+    DesireSchedule,
+    DesireLagrangian,
+    SelfRewriteConfig,
+    DesireAutomation,
+    DesirePipelineBuilder,
+    ConceptHint,
+)
+
+syn = SparseKernel.from_dense([[0.6, 0.4], [0.3, 0.7]])
+par = SparseKernel.from_dense([[0.55, 0.45], [0.2, 0.8]])
+geometry = SymbolGeometry(syn, par)
+repression = RepressionField([0.1, 0.05])
+concept_kernel = SparseKernel.from_dense([[0.8, 0.2], [0.2, 0.8]])
+bridge = SemanticBridge(
+    [[0.7, 0.3], [0.25, 0.75]],
+    concept_kernel,
+)
+controller = TemperatureController(1.0, 0.9, 0.4, 0.4, 1.6)
+desire = DesireLagrangian(geometry, repression, bridge, controller)
+desire.set_alpha_schedule(DesireSchedule.warmup(0.0, 0.2, 400))
+automation = DesireAutomation(desire, SelfRewriteConfig())
+pipeline = (
+    DesirePipelineBuilder(automation)
+    .with_logbook("desire.ndjson", flush_every=16)
+    .with_telemetry()
+    .build()
+)
+step = pipeline.step(
+    [1.2, -0.4],
+    previous_token=0,
+    concept_hint=ConceptHint.distribution([0.6, 0.4]),
+)
+print(step["solution"]["phase"], step["solution"]["entropy"])
+```
+
 When you need to splice the stream into other runtimes, attach a
 `DesireChannelSink` via `with_channel`. It emits `DesirePipelineEvent`s over a standard channel so
 rewriters, trainers, or async dashboards can subscribe without bespoke glue—each
@@ -323,6 +376,26 @@ for event in receiver.try_iter() {
         DesirePipelineEvent::Trigger { trigger, .. } =>
             spiralk_scheduler.queue_desire(trigger.report.clone(), trigger.mean_penalty),
     }
+}
+```
+
+Global telemetry consumers can subscribe without owning the pipeline by adding
+`with_telemetry()`. The `DesireTelemetrySink` records every step’s phase,
+temperature, avoidance energy, and schedule weights into the shared telemetry
+hub so trainers, notebooks, or external services can poll the latest state via
+`get_last_desire_step`.【F:crates/st-nn/src/language/pipeline.rs†L101-L239】【F:crates/st-core/src/telemetry/hub.rs†L61-L126】
+
+```rust
+use st_core::telemetry::hub;
+use st_nn::language::DesirePipeline;
+
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_telemetry()
+    .build();
+
+let _ = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(sample) = hub::get_last_desire_step() {
+    println!("phase {:?} at T={:.3}", sample.phase, sample.temperature);
 }
 ```
 
@@ -502,6 +575,12 @@ On the Python side, pass `psychoid=True` when building the roundtable and fetch
 the latest reading via `spiraltorch.get_psychoid_stats()` to log the CTI score,
 raw metrics, and z-scores emitted from the Rust meter.
 
+Need the language desire pulse from Python as well? Call
+`spiraltorch.get_desire_telemetry()` to retrieve the same sample that the
+Rust-side `DesireTelemetrySink` recorded—phase, temperature, avoidance energy,
+logit norms, and the current α/β/γ/λ weights are all surfaced as a dictionary
+ready for notebooks or dashboards.【F:bindings/st-py/src/lib.rs†L227-L243】【F:crates/st-nn/src/language/pipeline.rs†L101-L239】
+
 ψ readings stay inside the automation loop—CollapseDrive, the psychoid dream
 engine, and the distributed roundtable all consume them directly. The examples
 only surface the totals so you can verify wiring; regular runs keep the meter
@@ -628,6 +707,35 @@ and now reports **loop volatility** (`loop_std`) alongside collapse/Z drift so
 dashboards can surface the “city heartbeat” without iterating over each frame.
 District summaries additionally carry a standard deviation so you can flag
 which neighbourhoods are swinging the hardest even when their means stay flat.
+Each district now tracks its headline metrics via `district.focus` so nodes can
+see which signals actually drove the change:
+
+```python
+for metric in district.focus:
+    print(metric.name, metric.delta, metric.momentum, metric.std_dev)
+```
+
+When you want curated guidance for each SpiralTorch “audience”, call
+`session.atlas_perspectives()` to generate **atlas perspectives** that translate
+district trends into actionable narratives:
+
+```python
+for perspective in session.atlas_perspectives(limit=12):
+    print(perspective.district, perspective.guidance)
+    for focus in perspective.focus:
+        print("  ↳", focus.name, focus.latest)
+
+surface = session.atlas_perspective(
+    "Surface", limit=12, focus_prefixes=["timeline", "session.surface"],
+)
+if surface:
+    print(surface.guidance)
+```
+
+Perspectives compute per-frame momentum, volatility-derived stability, and a
+filtered set of focus metrics so every node — Python bindings, maintainer,
+SpiralK scripts, or collapse-drive peers — can read the same atlas route in the
+language that serves them best.
 
 ### Self-maintaining feedback loops
 
@@ -1140,7 +1248,7 @@ print("updated weights", weights.tolist())
   the fractal scheduler without leaving Rust or allocating intermediate
   buffers.
 - Blend chart priors with the new `z_space_barycenter` solver—available in
-  Rust (`st_tensor::pure::measure`) and Python (`spiraltorch.z_space_barycenter`)—to
+  Rust (`st_tensor::z_space_barycenter`) and Python (`spiraltorch.z_space_barycenter`)—to
   wire colour energy directly into the Z-space roundtable.
 - Follow the barycenter's loss-monotone intermediates and feed them straight into
   the hypergradient tape with `Hypergrad.accumulate_barycenter_path` so the
@@ -1339,7 +1447,7 @@ let _ = trainer.train_epoch(&mut model, &mut mse, dataset, &schedule)?;
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{ModuleTrainer, RoundtableConfig, Tensor, ToposResonator, WaveGate, ZSpaceProjector};
-use st_tensor::pure::{topos::OpenCartesianTopos, LanguageWaveEncoder};
+use st_tensor::{topos::OpenCartesianTopos, LanguageWaveEncoder};
 
 let encoder = LanguageWaveEncoder::new(-0.9, 0.7)?;
 let topos = OpenCartesianTopos::new(-0.9, 1e-6, 1e4, 512, 16_384)?;
@@ -1448,8 +1556,8 @@ latest relation patches in a Tokio-uring style queue, blends them by coherence,
 and hands the result straight to your browser front-end.
 
 ```rust
-use st_tensor::pure::{Tensor, PureResult};
-use st_tensor::pure::fractal::{FractalPatch, UringFractalScheduler};
+use st_tensor::{Tensor, PureResult};
+use st_tensor::fractal::{FractalPatch, UringFractalScheduler};
 
 async fn stream_waveforms(samples: Vec<Tensor>) -> PureResult<Tensor> {
     let scheduler = UringFractalScheduler::new(32)?;
@@ -1466,7 +1574,7 @@ For browser builds, wire the folded relation into a WebAssembly export that
 paints onto `<canvas>` without tokenising text or duplicating buffers:
 
 ```rust
-use st_tensor::pure::fractal::UringFractalScheduler;
+use st_tensor::fractal::UringFractalScheduler;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
