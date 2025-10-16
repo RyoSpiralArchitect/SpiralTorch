@@ -3,6 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::roundtable::RoundtableNode;
+use crate::{RoundtableConfig, RoundtableSchedule};
 use super::automation::{DesireAutomatedStep, DesireAutomation, DesireRewriteTrigger};
 use super::desire::{DesirePhase, DesireWeights};
 use super::geometry::ConceptHint;
@@ -15,7 +17,10 @@ use st_core::ecosystem::{
     RoundtableSummary,
 };
 use st_core::ops::rank_entry::RankPlan;
+use st_core::util::math::{ramanujan_pi, LeechProjector};
 use st_tensor::pure::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
+use std::collections::HashMap;
+use std::time::{Instant, SystemTime};
 use std::collections::HashMap;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -563,6 +568,9 @@ pub struct LanguagePipelineBuilder {
     name: String,
     tags: HashMap<String, String>,
     encoder: Option<LanguageWaveEncoder>,
+    ramanujan_iterations: usize,
+    leech_rank: usize,
+    leech_weight: f64,
 }
 
 #[derive(Clone)]
@@ -571,6 +579,8 @@ pub struct LanguagePipeline {
     registry: &'static EcosystemRegistry,
     tags: HashMap<String, String>,
     encoder: Option<LanguageWaveEncoder>,
+    ramanujan_pi: f64,
+    leech_projector: LeechProjector,
 }
 
 impl LanguagePipelineBuilder {
@@ -579,6 +589,9 @@ impl LanguagePipelineBuilder {
             name: name.into(),
             tags: HashMap::new(),
             encoder: None,
+            ramanujan_iterations: 3,
+            leech_rank: 24,
+            leech_weight: 0.35,
         }
     }
 
@@ -592,12 +605,28 @@ impl LanguagePipelineBuilder {
         self
     }
 
+    pub fn with_ramanujan_iterations(mut self, iterations: usize) -> Self {
+        self.ramanujan_iterations = iterations.max(1);
+        self
+    }
+
+    pub fn with_leech_lattice(mut self, rank: usize, weight: f64) -> Self {
+        self.leech_rank = rank.max(1);
+        self.leech_weight = weight.max(0.0);
+        self
+    }
+
+    pub fn build(self) -> LanguagePipeline {
+        let ramanujan_pi = ramanujan_pi(self.ramanujan_iterations);
+        let leech_projector = LeechProjector::new(self.leech_rank, self.leech_weight);
     pub fn build(self) -> LanguagePipeline {
         LanguagePipeline {
             name: self.name,
             registry: EcosystemRegistry::global(),
             tags: self.tags,
             encoder: self.encoder,
+            ramanujan_pi,
+            leech_projector,
         }
     }
 }
@@ -670,6 +699,14 @@ impl LanguagePipeline {
             issued_at: SystemTime::now(),
         };
 
+        let geodesic = (rows as f64).hypot(cols as f64);
+        let leech_density = self.leech_projector.enrich(geodesic);
+        let ramanujan_ratio = if self.ramanujan_pi > f64::EPSILON {
+            geodesic / self.ramanujan_pi
+        } else {
+            0.0
+        };
+
         let mut extra_tags = vec![("autopilot".to_string(), autopilot_enabled.to_string())];
         if let Some(dist) = &distribution_summary {
             extra_tags.push(("distribution_mode".to_string(), dist.mode.clone()));
@@ -715,6 +752,24 @@ impl LanguagePipeline {
                     config.here_tolerance as f64,
                 )
                 .with_unit("ratio"),
+                &extra_tags,
+            ),
+        );
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("roundtable.geodesic.norm", geodesic).with_unit("geodesic"),
+            &extra_tags,
+        ));
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("roundtable.geodesic.leech_density", leech_density)
+                    .with_unit("density"),
+                &extra_tags,
+            ),
+        );
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("roundtable.geodesic.ramanujan_ratio", ramanujan_ratio)
+                    .with_unit("ratio"),
                 &extra_tags,
             ),
         );
@@ -900,6 +955,18 @@ impl LanguagePipeline {
         let elapsed_ms = start.elapsed().as_secs_f64() * 1e3;
         let chars = text.chars().count() as f64;
         let (_, cols) = tensor.shape();
+        let geodesic = tensor
+            .data()
+            .iter()
+            .map(|value| (*value as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let leech_density = self.leech_projector.enrich(geodesic);
+        let ramanujan_ratio = if self.ramanujan_pi > f64::EPSILON {
+            geodesic / self.ramanujan_pi
+        } else {
+            0.0
+        };
 
         let extras = vec![("mode".to_string(), "z_space".to_string())];
         self.registry.record_metric(self.apply_tags(
@@ -925,6 +992,24 @@ impl LanguagePipeline {
             self.apply_tags(
                 MetricSample::new("language.encode.temperature", encoder.temperature() as f64)
                     .with_unit("temperature"),
+                &extras,
+            ),
+        );
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("language.encode.zspace.geodesic", geodesic).with_unit("geodesic"),
+            &extras,
+        ));
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("language.encode.zspace.leech_density", leech_density)
+                    .with_unit("density"),
+                &extras,
+            ),
+        );
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("language.encode.zspace.ramanujan_ratio", ramanujan_ratio)
+                    .with_unit("ratio"),
                 &extras,
             ),
         );
@@ -1049,6 +1134,10 @@ impl LanguagePipeline {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::plan::RankPlanner;
+    use st_core::backend::device_caps::DeviceCaps;
+    use std::sync::{Mutex, OnceLock};
     use super::super::automation::DesireAutomation;
     use super::super::desire::{constant, warmup, DesireLagrangian};
     use super::super::geometry::{
@@ -1125,6 +1214,33 @@ mod tests {
     }
 
     #[test]
+    fn encode_z_space_records_geodesic_metrics() {
+        let _lock = registry_guard().lock().unwrap();
+        let registry = EcosystemRegistry::global();
+        registry.drain();
+        let encoder = LanguageWaveEncoder::new(-0.5, 0.5).unwrap();
+        let pipeline = LanguagePipeline::builder("language-z")
+            .with_encoder(encoder)
+            .with_leech_lattice(12, 0.8)
+            .with_ramanujan_iterations(4)
+            .build();
+        let tensor = pipeline.encode_z_space("pi leech spiral").unwrap();
+        assert_eq!(tensor.shape().0, 1);
+
+        let report = registry.drain();
+        assert!(report
+            .metrics
+            .iter()
+            .any(|m| m.name == "language.encode.zspace.leech_density"));
+        assert!(report
+            .metrics
+            .iter()
+            .any(|m| m.name == "language.encode.zspace.ramanujan_ratio"));
+        assert_eq!(report.connectors.len(), 1);
+        assert_eq!(report.connectors[0].stage, "encode");
+    }
+
+    #[test]
     fn roundtable_records_summary_and_metrics() {
         let _lock = registry_guard().lock().unwrap();
         let registry = EcosystemRegistry::global();
@@ -1139,6 +1255,14 @@ mod tests {
         let report = registry.drain();
         assert_eq!(report.roundtables.len(), 1);
         assert!(report.metrics.iter().any(|m| m.name == "roundtable.rows"));
+        assert!(report
+            .metrics
+            .iter()
+            .any(|m| m.name == "roundtable.geodesic.ramanujan_ratio"));
+        assert!(report
+            .metrics
+            .iter()
+            .any(|m| m.name == "roundtable.geodesic.leech_density"));
         assert_eq!(report.connectors.len(), 1);
         let connector = &report.connectors[0];
         assert_eq!(connector.stage, "roundtable");

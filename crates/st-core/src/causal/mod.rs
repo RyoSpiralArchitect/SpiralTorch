@@ -236,17 +236,10 @@ impl CausalGraph {
                     aggregated_effect: aggregate,
                 }
             };
-            match decision {
-                ExecutionDecision::Execute { .. } => {
-                    active_effect.insert(id, aggregate.max(1e-6));
-                }
-                ExecutionDecision::Skip(SkipReason::LowEffect) => {
-                    active_effect.insert(id, 1.0);
-                }
-                _ => {
-                ExecutionDecision::Skip(_) => {
-                    active_effect.insert(id, 0.0);
-                }
+            if matches!(decision, ExecutionDecision::Execute { .. }) {
+                active_effect.insert(id, aggregate.max(1e-6));
+            } else {
+                active_effect.remove(&id);
             }
             steps.push(ExecutionStep {
                 id,

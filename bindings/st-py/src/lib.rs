@@ -23,6 +23,15 @@ use st_backend_hip::{
 };
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::ecosystem::{
+    ConnectorEvent as CoreConnectorEvent, DistributionSummary as CoreDistributionSummary,
+    EcosystemCapacity, EcosystemRegistry, EcosystemReport as CoreEcosystemReport,
+    HeuristicChoiceSummary as CoreHeuristicChoiceSummary,
+    HeuristicDecision as CoreHeuristicDecision, MetricDigest as CoreMetricDigest,
+    MetricSample as CoreMetricSample, RankPlanSummary as CoreRankPlanSummary,
+    RoundtableConfigSummary as CoreRoundtableConfigSummary,
+    RoundtableSummary as CoreRoundtableSummary,
+};
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::DriveCmd;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
@@ -1973,6 +1982,45 @@ impl PyChronoFrame {
     }
 
     #[getter]
+    fn distribution(&self) -> Option<PyDistConfig> {
+        self.inner
+            .distribution_config()
+            .map(|config| PyDistConfig::from_config(config.clone()))
+    }
+
+    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
+    fn roundtable(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psychoid: bool,
+        psychoid_log: bool,
+        psi: bool,
+        collapse: bool,
+        dist: Option<PyDistConfig>,
+    ) -> PyResult<PyRoundtableSchedule> {
+        let config = build_roundtable_config(
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance,
+            psychoid,
+            psychoid_log,
+            psi,
+            collapse,
+        );
+        if let Some(dist_cfg) = dist {
+            self.inner.configure_distribution(dist_cfg.inner.clone());
+        } else {
+            self.inner.clear_distribution();
+        }
+        Ok(PyRoundtableSchedule::from_schedule(
+            self.inner.roundtable(rows, cols, config),
+        ))
     fn energy_decay(&self) -> f32 {
         self.frame.energy_decay
     }
