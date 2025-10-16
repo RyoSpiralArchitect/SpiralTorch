@@ -94,7 +94,16 @@ Those traces plug straight into SpiralTorch’s other pillars: `embed_into_biome
 folds propagated node states into an `OpenCartesianTopos`/`TensorBiome` pair for
 RewriteMonad consumers, the flow grid can be painted onto any canvas projector,
 and `fold_into_roundtable` promotes the graph manifold as a fourth participant
-beside the A/B/C bands.
+beside the A/B/C bands. The new `fold_with_band_energy` helper lets you blend a
+fresh telemetry report with an existing roundtable split without recomputing the
+schedule, keeping graph energy in lock-step with whatever SpiralK already
+decided for the batch. Feed those reports into `GraphConsensusBridge` to
+generate SpiralK snippets and Above/Here/Beneath multipliers—then hand the
+bridge to `ModuleTrainer::enable_graph_feedback` so every optimisation step
+absorbs graph telemetry before the SoftLogic weighting fires. The trainer keeps
+the SpiralK hint from the last applied digest available via
+`ModuleTrainer::graph_hint()`, making it trivial to stream the graph-aware
+policy back into SpiralK orchestrators or external dashboards.
 
 ### Explainability through hypergrad telemetry
 

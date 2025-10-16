@@ -134,6 +134,18 @@ impl QuadBandEnergy {
     }
 }
 
+impl Default for QuadBandEnergy {
+    fn default() -> Self {
+        Self {
+            above: 0.0,
+            here: 0.0,
+            beneath: 0.0,
+            graph: 0.0,
+            drift: 0.0,
+        }
+    }
+}
+
 /// Folds graph flow energy into the roundtable split, returning a fourth band
 /// that can be consumed by four-party consensus drivers.
 pub fn fold_into_roundtable(
@@ -150,6 +162,19 @@ pub fn fold_into_roundtable(
         graph: graph_energy,
         drift: base.drift,
     })
+}
+
+/// Combines an existing band energy measurement with a graph flow report without
+/// recomputing the schedule split. Useful when the baseline energy has already
+/// been measured for the current training step.
+pub fn fold_with_band_energy(base: &BandEnergy, report: &GraphLayerReport) -> QuadBandEnergy {
+    QuadBandEnergy {
+        above: base.above,
+        here: base.here,
+        beneath: base.beneath,
+        graph: report.total_flow_energy() * (1.0 + report.curvature.abs()),
+        drift: base.drift,
+    }
 }
 
 #[cfg(test)]
@@ -236,5 +261,30 @@ mod tests {
         let weights = quad.barycentric();
         assert!((weights.iter().sum::<f32>() - 1.0).abs() < 1e-3);
         assert!(quad.graph > 0.0);
+    }
+
+    #[test]
+    fn fold_with_band_energy_reuses_baseline() {
+        let base = BandEnergy {
+            above: 0.4,
+            here: 0.3,
+            beneath: 0.2,
+            drift: 0.1,
+        };
+        let report = GraphLayerReport {
+            layer: "graph".into(),
+            curvature: -1.0,
+            node_flows: vec![NodeFlowSample {
+                node_index: 0,
+                incoming_weight: 1.0,
+                aggregated_norm: 0.5,
+            }],
+            weight_update_magnitude: Some(0.1),
+            bias_update_magnitude: Some(0.05),
+        };
+        let quad = fold_with_band_energy(&base, &report);
+        assert_eq!(quad.above, base.above);
+        assert!(quad.graph > 0.0);
+        assert_eq!(quad.drift, base.drift);
     }
 }
