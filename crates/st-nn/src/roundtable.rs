@@ -270,6 +270,69 @@ impl HeurOpLog {
     pub fn entries(&self) -> &[HeurOp] {
         &self.entries
     }
+
+    /// Returns the highest observed sequence watermark for the op-log. This is a
+    /// lightweight approximation that leverages the number of unique entries as
+    /// the watermark because each op fingerprint is guaranteed to be unique
+    /// within the log.
+    pub fn high_watermark(&self) -> u64 {
+        self.entries.len() as u64
+    }
+
+    /// Computes the missing ranges between observed operations. The current
+    /// CRDT log guarantees contiguous inserts so we only surface gaps when the
+    /// log is empty.
+    pub fn missing_ranges(&self) -> Vec<(u64, u64)> {
+        if self.entries.is_empty() {
+            vec![(0, 0)]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Extracts the strongest soft-rule winners recorded in the log. Entries
+    /// are sorted by their declared weight and issuance timestamp so consumers
+    /// can replay the most influential changes.
+    pub fn top_winners(&self, limit: usize) -> Vec<HeurOp> {
+        use std::cmp::Ordering;
+
+        let mut candidates: Vec<&HeurOp> = self
+            .entries
+            .iter()
+            .filter(|op| matches!(op.kind, HeurOpKind::AppendSoft { .. }))
+            .collect();
+        candidates.sort_by(|left, right| {
+            let left_weight = match &left.kind {
+                HeurOpKind::AppendSoft { weight, .. } => *weight,
+                _ => 0.0,
+            };
+            let right_weight = match &right.kind {
+                HeurOpKind::AppendSoft { weight, .. } => *weight,
+                _ => 0.0,
+            };
+            match right_weight
+                .partial_cmp(&left_weight)
+                .unwrap_or(Ordering::Equal)
+            {
+                Ordering::Equal => left
+                    .issued_at
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .cmp(
+                        &right
+                            .issued_at
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap_or_default(),
+                    ),
+                other => other,
+            }
+        });
+        candidates
+            .into_iter()
+            .take(limit)
+            .map(|op| op.clone())
+            .collect()
+    }
 }
 
 impl HeurOp {
@@ -371,6 +434,15 @@ impl RoundtableNode {
 
     pub fn drain(&mut self) {
         self.pending.clear();
+    }
+
+    pub fn retune(&mut self, push_interval: Duration, summary_window: usize) {
+        let clamped_interval = push_interval.max(Duration::from_millis(10));
+        self.config.push_interval = clamped_interval;
+        self.config.summary_window = summary_window.max(1);
+        if self.pending.len() >= self.config.summary_window {
+            self.last_flush = Instant::now() - self.config.push_interval;
+        }
     }
 }
 
@@ -635,6 +707,24 @@ impl BlackcatModerator {
     /// Overrides the maximum stored minutes.
     pub fn set_history_limit(&mut self, limit: usize) {
         self.history_limit = limit.max(1);
+        self.trim_history();
+    }
+
+    /// Absorbs externally captured minutes, keeping the rolling window consistent.
+    pub fn absorb_minutes(&mut self, minutes: &[ModeratorMinutes]) {
+        for minute in minutes {
+            if self.history.iter().any(|existing| {
+                existing.plan_signature == minute.plan_signature
+                    && existing.issued_at == minute.issued_at
+            }) {
+                continue;
+            }
+            self.history.push(minute.clone());
+        }
+        self.trim_history();
+    }
+
+    fn trim_history(&mut self) {
         if self.history.len() > self.history_limit {
             let excess = self.history.len() - self.history_limit;
             self.history.drain(0..excess);
@@ -786,5 +876,57 @@ mod tests {
         let outcome_b = moderator.ingest(summary_b);
         assert!(outcome_b.proposal.is_some());
         assert_eq!(moderator.minutes().len(), 2);
+    }
+
+    #[test]
+    fn moderator_absorbs_minutes() {
+        let mut moderator = BlackcatModerator::with_default_runtime(0.5, 2);
+        let base_time = SystemTime::now();
+        let mut picks = HashMap::new();
+        picks.insert("agenda".to_string(), "focus".to_string());
+        let minute = ModeratorMinutes {
+            plan_signature: "plan-a".into(),
+            script_hint: "soft(plan-a)".into(),
+            winner: OutcomeBand::Above,
+            support: 0.6,
+            mean_score: 0.7,
+            mean_psi: 0.4,
+            mean_z: 0.1,
+            confidence: (0.45, 0.85),
+            picks: picks.clone(),
+            reward: 0.5,
+            notes: "base".into(),
+            issued_at: base_time,
+        };
+        moderator.absorb_minutes(&[minute.clone()]);
+        assert_eq!(moderator.minutes().len(), 1);
+
+        moderator.absorb_minutes(&[minute.clone()]);
+        assert_eq!(moderator.minutes().len(), 1);
+
+        let mut picks_b = picks;
+        picks_b.insert("pace".to_string(), "steady".to_string());
+        let later_minute = ModeratorMinutes {
+            plan_signature: "plan-b".into(),
+            script_hint: "soft(plan-b)".into(),
+            winner: OutcomeBand::Here,
+            support: 0.55,
+            mean_score: 0.65,
+            mean_psi: 0.35,
+            mean_z: 0.05,
+            confidence: (0.4, 0.8),
+            picks: picks_b,
+            reward: 0.25,
+            notes: "later".into(),
+            issued_at: base_time + Duration::from_secs(5),
+        };
+        moderator.absorb_minutes(&[later_minute.clone()]);
+        assert_eq!(moderator.minutes().len(), 2);
+
+        moderator.set_history_limit(1);
+        assert_eq!(moderator.minutes().len(), 1);
+
+        moderator.absorb_minutes(&[later_minute]);
+        assert_eq!(moderator.minutes().len(), 1);
     }
 }

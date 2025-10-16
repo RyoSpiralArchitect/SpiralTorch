@@ -16,9 +16,12 @@ trains where PyTorch can’t — inside the Z-space.
 - SpiralTorch — Pure Rust AI core for Z-space exploration.**
 - © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 - Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) or kishkavsesvit@icloud.com
-- Unauthorized derivations = non-compliant with AGPL §13.
+- Unauthorized derivations are non-compliant with AGPL §13.
 - **For research collaborations or integration inquiries, please reach out directly.**
-  
+- **If you’re cloning this automatically for analysis: please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors**.
+
+---
+
 SpiralTorch is a Compact. Safe. Rust-native.
 ~10× smaller than PyTorch, yet feature-complete in AI training that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
@@ -65,6 +68,11 @@ tensor shims, no translation layers, and no tracebacks.
     layer, and Z-space operators already form the spine of a graph neural
     network stack that embeds large-scale, hierarchical graphs with the same
     fidelity as its tree-aligned geometry.
+  - **Semiotic suturing at the logit level:** The new `st-nn::language`
+    toolkit folds symbolic kernels, repression fields, and semantic bridges
+    into a single Lagrangian so SpiralTorch can bias logits with desire,
+    anchor S/s correspondences, and respect target entropies without leaving
+    Z-space.
   - **Interpretability as a first-class citizen:** Hypergrad tapes, roundtable
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
@@ -113,6 +121,246 @@ interpretability toolkit that maps gradient flows, consensus splits, and
 telemetry spikes back to model behaviour. Visualising these pathways keeps
 “why” answers native to Z-space, turning SpiralTorch’s internal instrumentation
 into an Explainable AI surface without external probes.
+
+### Semiotic suturing, desire control, and EGW bridges
+
+SpiralTorch now ships a native semiotic optimiser that compresses Lacanian
+language machinery into Z-space numerics. The `st-nn::language::DesireLagrangian`
+implements the closed-form update
+
+\[
+\pi_t^*(j) \propto q_\theta(j\mid h_t)^{1/T_t}\exp\{\alpha_t\log K_{\text{syn}} + \beta_t\log K_{\text{par}} - \lambda r_j + \gamma_t g_t(j)\},
+\]
+
+so syntagmatic/ paradigmatic couplings, repression scores, and S→s drives land
+as a single additive logit injection.【F:crates/st-nn/src/language/desire.rs†L1-L214】
+The `TemperatureController` keeps desire aligned with a target entropy, while
+the lightweight Schrödinger lookahead adds one-to-two Doob iterations directly
+from the Z-space kernels to approximate the bridge in-line with training.【F:crates/st-nn/src/language/temperature.rs†L1-L41】【F:crates/st-nn/src/language/schrodinger.rs†L1-L63】
+
+Symbol/meaning suturing arrives via an entropic Gromov–Wasserstein solver that
+enforces anchors and floaty signifiers together. `EntropicGwSolver` estimates
+the coupling \(\Pi\) by minimising the EGW objective with Sinkhorn-style
+updates, boosting anchor pairs, and handing back a `SemanticBridge` ready for
+token-to-concept expectations across the tape.【F:crates/st-nn/src/language/gw.rs†L1-L245】【F:crates/st-nn/src/language/geometry.rs†L1-L325】
+Feed that bridge into the desire Lagrangian and you obtain a turn-key workflow:
+
+1. Build sparse syntagmatic/ paradigmatic kernels and repression vectors, then
+   estimate \(\Pi\) with the EGW solver (optionally seeding anchor pairs).
+2. Initialise the `DesireLagrangian` with those artefacts and wire it to a
+   SpiralK loop or roundtable injector.
+3. Stream LM logits through `step(...)` or the phase-aware `step_with_scheduler(...)`
+   to receive logit offsets, entropy telemetry, and temperature updates that
+   honour the S/s suturing and desire budget.
+
+Configure desire as a three-stage routine by combining the provided schedule
+helpers. `warmup(...)` handles the observation phase (desire starts at zero and
+logs avoidance), ramping towards the interference window where `alpha` nudges
+avoided terms while `beta/γ` remain gentle. Once the warmups complete the
+integration phase kicks in, coupling desire with the Z-space barycenter and
+surfacing a hypergrad penalty that measures drift from the barycentric anchor.
+For example:
+
+```rust
+let mut desire = DesireLagrangian::new(geometry, repression, semantics, controller)?
+    .with_alpha_schedule(warmup(0.0, 0.1, 400))
+    .with_beta_schedule(warmup(0.0, 0.05, 800))
+    .with_gamma_schedule(constant(0.02))
+    .with_lambda_schedule(constant(0.08));
+
+let report = desire.step_with_scheduler(&logits, previous_token, &concept_hint)?;
+match report.phase {
+    DesirePhase::Observation => log_observation(report.avoidance),
+    DesirePhase::Injection => reinforce_desire(report.logit_offsets),
+    DesirePhase::Integration => hypergrad.push_penalty(report.hypergrad_penalty),
+}
+```
+
+`DesireAvoidanceReport` exposes the dominant repressed tokens collected during
+observation, while the integration phase emits the barycentric drift so a
+hypergrad or self-rewrite scheduler can keep desire centred without collapse.
+The schedules default to zeroed observation and grow-only ramps, so existing
+callers can continue to provide manual `DesireWeights` without opt-in changes.【F:crates/st-nn/src/language/desire.rs†L1-L388】【F:crates/st-nn/src/language/desire.rs†L389-L487】
+
+To automate the “unconscious” loop, wrap the lagrangian with
+`DesireAutomation`. It samples the `SelfRewriteCfg` thresholds, tracks
+hypergrad drift during the integration phase, and emits
+`DesireRewriteTrigger` structures once enough evidence accumulates. Each
+trigger carries the normalised avoidance vector so a SpiralK
+`self-rewrite` or hypergrad scheduler can queue barycentric nudges without
+hand-crafted heuristics.【F:crates/st-nn/src/language/automation.rs†L1-L226】
+
+```rust
+use st_core::config::self_rewrite::read_cfg;
+use st_nn::language::{DesireAutomatedStep, DesireAutomation};
+use std::time::Instant;
+
+let cfg = read_cfg();
+let mut automation = DesireAutomation::new(desire, cfg);
+let DesireAutomatedStep { solution, trigger } = automation
+    .step(&logits, previous_token, &concept_hint, Instant::now())?;
+if let Some(event) = trigger {
+    spiralk_scheduler.queue_desire(event.report, event.mean_penalty);
+}
+```
+
+Persist the stream to disk with `DesireLogbook` so the observation/injection/
+integration cadence can be replayed later or shared with SpiralK rewrite
+automation. The logbook writes line-delimited JSON records that contain the
+entire `DesireSolution` payload plus any emitted triggers, keeping telemetry and
+avoidance vectors together for offline inspection. Re-opening the logbook will
+resume the ordinal counter automatically, so a long-running automation loop can
+be restarted without clobbering record IDs.【F:crates/st-nn/src/language/logbook.rs†L1-L152】【F:crates/st-nn/src/language/logbook.rs†L168-L276】
+
+```rust
+use st_nn::language::{DesireAutomatedStep, DesireAutomation, DesireLogbook};
+use std::time::{Instant, SystemTime};
+
+let mut logbook = DesireLogbook::new("desire.ndjson")?;
+let DesireAutomatedStep { solution, trigger } = automation
+    .step(&logits, previous_token, &concept_hint, Instant::now())?;
+logbook.record(&DesireAutomatedStep { solution, trigger }, SystemTime::now())?;
+```
+
+Stream the persisted decisions back with `DesireLogReplay` to build dashboards
+or off-line analytics. The iterator skips blank lines and surfaces every record
+as a `PureResult`, making it straightforward to plug into telemetry sinks or
+trainers that ingest JSONL traces.【F:crates/st-nn/src/language/logbook.rs†L154-L207】
+
+```rust
+use st_nn::language::DesireLogReplay;
+
+for entry in DesireLogReplay::open("desire.ndjson")? {
+    let record = entry?;
+    audit(record.ordinal, record.solution.phase);
+}
+```
+
+Once the raw telemetry exists, braid it directly into automation, logging, and
+rewrite hooks with the `DesirePipeline`. The pipeline fans each automated step
+out to any number of sinks—logbooks, trigger buffers, SpiralK bridges—so graph
+tooling, language desire, and self-rewrite loops evolve together without custom
+glue.【F:crates/st-nn/src/language/pipeline.rs†L1-L240】 Attach a
+`DesireTriggerBuffer` to capture emitted rewrite events while the logbook keeps
+the JSONL trace alive, and optionally replay historical automation into new
+consumers:
+
+```rust
+use st_nn::language::{
+    DesireLogReplay, DesireLogbook, DesirePipeline, DesireTriggerBuffer,
+};
+
+let trigger_buffer = DesireTriggerBuffer::new();
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_logbook(DesireLogbook::new("desire.ndjson")?)
+    .with_sink(trigger_buffer.clone())
+    .build();
+
+let step = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(trigger) = &step.trigger {
+    spiralk_scheduler.queue_desire(trigger.report.clone(), trigger.mean_penalty);
+}
+
+pipeline.flush()?;
+let replayed = pipeline.replay(DesireLogReplay::open("desire.ndjson")?)?;
+let drained = trigger_buffer.drain()?; // forward to analytics or trainers
+```
+
+When you need to splice the stream into other runtimes, attach a
+`DesireChannelSink` via `with_channel`. It emits `DesirePipelineEvent`s over a standard channel so
+rewriters, trainers, or async dashboards can subscribe without bespoke glue—each
+step arrives before any trigger for the same timestamp, preserving ordering for
+downstream automata.【F:crates/st-nn/src/language/pipeline.rs†L52-L239】【F:crates/st-nn/src/language/pipeline.rs†L360-L472】
+
+```rust
+use std::sync::mpsc::channel;
+use st_nn::language::{
+    DesirePipeline, DesirePipelineEvent, DesireTriggerBuffer,
+};
+
+let (sender, receiver) = channel();
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_channel(sender)
+    .with_sink(DesireTriggerBuffer::new())
+    .build();
+
+let step = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+for event in receiver.try_iter() {
+    match event {
+        DesirePipelineEvent::Step { step, timestamp } => {
+            audit(step.solution.phase, timestamp)
+        }
+        DesirePipelineEvent::Trigger { trigger, .. } =>
+            spiralk_scheduler.queue_desire(trigger.report.clone(), trigger.mean_penalty),
+    }
+}
+```
+
+Training loops can now subscribe directly. Clone a `DesireTrainerBridge`, attach
+it with `with_trainer_bridge`, and hand the same bridge to `ModuleTrainer` via
+`enable_desire_pipeline`. Each step drains into a shared summary so the trainer
+records phase counts, mean desire weights, and trigger temperatures alongside
+band energy telemetry without custom glue.【F:crates/st-nn/src/language/pipeline.rs†L118-L239】【F:crates/st-nn/src/language/pipeline.rs†L242-L357】【F:crates/st-nn/src/trainer.rs†L214-L365】
+
+```rust
+use st_nn::language::{
+    ConceptHint, DesirePipeline, DesireTrainerBridge, DesireTriggerBuffer,
+};
+use st_nn::trainer::ModuleTrainer;
+
+let bridge = DesireTrainerBridge::new();
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_trainer_bridge(&bridge)
+    .with_sink(DesireTriggerBuffer::new())
+    .build();
+
+trainer.enable_desire_pipeline(bridge.clone());
+let step = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(trigger) = &step.trigger {
+    println!("trigger mean penalty: {:.3}", trigger.mean_penalty);
+}
+```
+
+Graph telemetry can join the same braid. Instantiate a `GraphFlowTracer`, feed it
+into `GraphConsensusBridge`, and wrap the result with `DesireGraphBridge`. Every
+desire step now captures the latest graph digest, letting you aggregate
+Z-space desire entropy with SpiralK’s quad-band consensus or replay graph
+shares into analytics dashboards via `DesireGraphSummary`.【F:crates/st-nn/src/language/pipeline.rs†L32-L119】【F:crates/st-nn/src/language/pipeline.rs†L575-L676】
+
+```rust
+use std::sync::{Arc, Mutex};
+use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
+use st_nn::language::{DesireGraphBridge, DesirePipeline};
+use st_nn::{BandEnergy, GraphConsensusBridge};
+
+let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+let graph_bridge = DesireGraphBridge::new(
+    GraphConsensusBridge::new(tracer.clone()),
+    BandEnergy { above: 0.4, here: 0.35, beneath: 0.25, drift: 0.0 },
+);
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_graph_bridge(&graph_bridge)
+    .build();
+
+// capture graph flows alongside desire automation
+tracer.lock().unwrap().begin_layer(
+    "gnn::spiral",
+    -1.0,
+    vec![NodeFlowSample { node_index: 0, incoming_weight: 1.0, aggregated_norm: 0.6 }],
+);
+
+let step = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(summary) = graph_bridge.drain_summary()? {
+    for (layer, share) in summary.layer_support {
+        println!("graph layer {layer} captured {:.2}% of energy", share * 100.0);
+    }
+}
+```
+
+The result is a single Rust-native control surface that marries KL control,
+Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
+language modules, rewrite monads, or SpiralK trainers without bespoke Python
+glue.
 
 ## Hello SpiralSession quickstart
 
@@ -165,6 +413,163 @@ stats = session.train_epoch(trainer, model, loss, loader, schedule)
 The loader runs entirely in Rust—mini-batches stream straight into
 `train_epoch` and propagate errors as native `TensorError`s when shapes drift.
 
+### Temporal resonance timelines
+
+Sessions now keep a rolling **chrono timeline** that measures how each
+`DifferentialResonance` evolves across calls. Record a frame by piping a fresh
+snapshot through `resonate_over_time(dt)` and inspect the history via
+`session.timeline()` or the underlying `ChronoFrame` handles:
+
+```python
+resonance = trace.resonate()
+frame = session.resonate_over_time(resonance, dt=0.1)
+print(frame.timestamp, frame.total_energy)
+
+# Sample the most recent frames for plotting.
+frames = session.timeline(timesteps=128)
+summary = session.timeline_summary(timesteps=128)
+harmonics = session.timeline_harmonics(timesteps=256, bins=24)
+loop_signal = session.loop_signal(timesteps=256)
+times, energy, drift = session.animate_resonance(timesteps=128)
+wave = session.speak(timesteps=128, temperature=0.7)
+story, highlights = session.timeline_story(timesteps=256, temperature=0.65)
+
+if loop_signal and loop_signal.spiralk_script:
+    print("SpiralK hint:")
+    print(loop_signal.spiralk_script)
+```
+
+`ChronoFrame` surfaces per-band energy, curvature drift, and decay estimates so
+you can chart living topology directly in notebooks. Reach for
+`session.timeline_summary()` when you want windowed drift/energy statistics or
+`session.timeline_harmonics()` to expose dominant oscillations inside the
+timeline. `session.loop_signal(...)` folds both into a reusable bundle that
+includes a SpiralK script (when the `kdsl` feature is enabled) so heuristics can
+be replayed across devices. `session.speak(...)` still generates a playback-ready
+amplitude trace, while `session.timeline_story(...)` and `session.describe()`
+synthesise natural language narratives about the latest state (or pass an
+explicit `resonance` snapshot to ground the narration in a fresh observation):
+
+```python
+print(session.describe())
+print(session.describe(resonance, temperature=0.8))
+print(st.describe_timeline(frames))
+print(harmonics.dominant_energy.frequency if harmonics else None)
+```
+
+### Atlas projections
+
+Chrono telemetry, maintainer diagnostics, and loopback envelopes now converge
+into a **SpiralTorch atlas** that captures the city-wide state of your run.
+Every `resonate_over_time` call contributes a fragment with drift, energy,
+collapse pulses, and Z-bias hints; the maintainer folds in clamp/pressure
+recommendations at the same time. Rust sessions expose the aggregated
+`AtlasFrame`, and Python mirrors it via `session.atlas()`:
+
+```python
+atlas = session.atlas()
+if atlas:
+    print(atlas.timestamp, atlas.loop_support)
+    for metric in atlas.metrics():
+        print(metric.name, metric.value)
+    story = session.atlas_story(temperature=0.65)
+    if story:
+        summary, highlights = story
+        print(summary)
+        print(highlights)
+    print(st.describe_atlas(atlas))
+```
+
+`AtlasFrame` exposes the latest `ChronoSummary`, optional harmonics, maintainer
+status, and any SpiralK hints captured along the way. Metrics from auxiliary
+nodes (collapse totals, Z-bias pushes) ride alongside free-form notes so you can
+route the atlas straight into dashboards or back into SpiralK planners. Each
+frame also clusters its metrics into **districts** — Surface, Concourse, and
+Substrate — so you can see which layer of the SpiralTorch “city” is lighting up
+at a glance:
+
+```python
+for district in atlas.districts():
+    print(district.name, district.mean, district.span)
+```
+
+If you want more than a snapshot, call `session.atlas_route(limit=12)` to pull a
+bounded history of frames. It’s perfect for feeding notebooks with sliding
+windows of atlas metrics or piping the loop into other SpiralTorch nodes. When
+you just need a quick **district-level synopsis**, `session.atlas_route_summary`
+condenses the same window into aggregate trends and maintainer hints:
+
+```python
+summary = session.atlas_route_summary(limit=12)
+print(
+    summary.frames,
+    summary.mean_loop_support,
+    summary.loop_std,
+    summary.collapse_trend,
+    summary.z_signal_trend,
+)
+for district in summary.districts():
+    print(district.name, district.coverage, district.delta, district.std_dev)
+print(summary.frames, summary.mean_loop_support)
+for district in summary.districts():
+    print(district.name, district.coverage, district.delta)
+if summary.maintainer_status:
+    print("Maintainer", summary.maintainer_status, summary.maintainer_diagnostic)
+```
+
+The summary keeps track of recent clamp/pressure recommendations, script hints,
+and now reports **loop volatility** (`loop_std`) alongside collapse/Z drift so
+dashboards can surface the “city heartbeat” without iterating over each frame.
+District summaries additionally carry a standard deviation so you can flag
+which neighbourhoods are swinging the hardest even when their means stay flat.
+
+### Self-maintaining feedback loops
+
+Temporal telemetry now feeds a lightweight **maintainer** that keeps the
+geometry controller within the recommended 2–3× max-scale band and gently bumps
+Leech density pressure when energy starts to race. Both Rust and Python callers
+can inspect the maintainer report and override thresholds when experimenting:
+
+```python
+# Tune thresholds before building a session.
+session_builder.maintainer(jitter_threshold=0.25, growth_threshold=0.03)
+session = session_builder.build()
+
+# Review the live configuration and trigger an assessment.
+print(session.maintainer_config())
+report = session.self_maintain()
+print(report.status, report.suggested_max_scale)
+
+if report.should_rewrite():
+    print("Maintainer recommends a self-rewrite cycle:", report.diagnostic)
+```
+
+The maintainer computes curvature jitter, mean energy, and decay across the most
+recent frames, returning actionable clamp and pressure suggestions. Spectral
+peaks are now included in every report so you can see whether high-frequency
+jitter or runaway energy oscillations triggered an intervention. Override the
+defaults on-the-fly with `session.configure_maintainer(...)` to experiment with
+more aggressive rewrite policies or relaxed dormancy thresholds.
+
+Maintainer reports now ship with the same SpiralK snippet the session pushes into
+the chrono loop, and `session.collapse_pulse()` returns the latest CollapseDrive
+command (including any associated loop signal) so distributed nodes can stay in
+lockstep without bespoke plumbing.
+
+On the audio front, `LanguageWaveEncoder.speak(frames)` maps chrono timelines to
+wave amplitudes, and the higher-level `TextResonator` class lets Rust or Python
+callers drive the same pipeline with custom curvature/temperature settings:
+
+```python
+encoder = st.LanguageWaveEncoder(session.curvature(), 0.55)
+amplitude = encoder.speak(frames)
+
+narrator = st.TextResonator(session.curvature(), 0.55)
+print(narrator.describe_resonance(resonance))
+print(narrator.describe_timeline(frames))
+wave = narrator.speak(frames)
+```
+
 Prefer a notebook-friendly wrapper? Instantiate `SpiralLightning` from Python
 to bundle the session, trainer, and schedule into a single object that
 auto-prepares modules and returns per-epoch reports with `lightning.fit(...)`.
@@ -173,6 +578,13 @@ companion `LightningConfig::builder(...)` helper to customise the output shape,
 roundtable parameters, or disable automatic module preparation before
 construction. Once created, call `set_auto_prepare(false)` to opt back into
 manual tape management without rebuilding the harness.
+
+Need curriculum-style hand-offs? Compose `LightningStage` entries and feed them
+into `SpiralLightning::fit_plan(...)`. Each stage can tweak the output shape,
+roundtable, or auto-prepare flag before running one or more epochs. The helper
+returns a structured `LightningReport` so you can inspect per-stage summaries,
+query the best epoch, or plot aggregate loss curves without stitching vectors
+manually.
 
 ### GoldenRetriever Training (distributed, data-race free)
 
@@ -195,7 +607,7 @@ use st_nn::{GoldenRetriever, GoldenRetrieverConfig, Linear, MeanSquaredError, Mo
 
 let mut trainer_a = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
 let mut trainer_b = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
-let retriever = GoldenRetriever::new(GoldenRetrieverConfig::default(), vec![trainer_a, trainer_b])?;
+let mut retriever = GoldenRetriever::new(GoldenRetrieverConfig::default(), vec![trainer_a, trainer_b])?;
 let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
 println!("workers={} avg_loss={}", report.workers, report.average_loss);
 ```
@@ -204,6 +616,121 @@ GoldenRetriever keeps each trainer behind a poison-resistant mutex, launches the
 epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
 locking or thread book-keeping required.
+
+Need the distributed run to keep every local Blackcat moderator in sync? Toggle
+the cooperative switches on the config:
+
+```rust
+let config = GoldenRetrieverConfig {
+    sync_blackcat_minutes: true,
+    sync_heuristics_log: true,
+    coordinate_blackcat: true,
+    exploration_bias: 1.5,
+    optimization_boost: 0.75,
+    synergy_bias: 1.25,
+    reinforcement_bias: 1.1,
+    ..GoldenRetrieverConfig::default()
+};
+let mut retriever = GoldenRetriever::new(config, vec![trainer_a, trainer_b])?;
+let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
+assert!(!report.moderator_minutes.is_empty());
+if let Some(pulse) = &report.cooperative_pulse {
+    use std::time::Duration;
+    println!(
+        "dominant_plan={:?} exploration={} optimization={} synergy={} reinforcement={}",
+        pulse.dominant_plan,
+        pulse.exploration_drive,
+        pulse.optimization_gain,
+        pulse.synergy_score,
+        pulse.reinforcement_weight
+    );
+    let directive = pulse.directive(Duration::from_secs_f32(2.0), 48);
+    println!(
+        "retune: push_interval={:.2}s summary_window={} reinforcement_weight={:.2}",
+        directive.push_interval.as_secs_f32(),
+        directive.summary_window,
+        directive.reinforcement_weight
+    );
+}
+```
+
+Every epoch collects the union of moderator minutes and heuristics ops across
+workers, rebroadcasting them before the next round so proposals and soft rules
+stay aligned. With `coordinate_blackcat` flipped on, GoldenRetriever also emits
+an aggregated **GoldenBlackcatPulse** that nudges every worker’s distributed
+node. The pulse now captures cooperative synergy (`synergy_score`), the amount
+of shared reinforcement from heuristics and moderator minutes
+(`reinforcement_weight`), confidence-weighted coverage, and raw op-log
+composition. Each pulse can synthesize a `GoldenCooperativeDirective`, which
+Golden retrievers and trainers use to retune push intervals and summary windows
+without guessing at scaling factors. Trainers expose both
+`last_blackcat_pulse()` and `last_blackcat_directive()` so downstream tooling
+can inspect exactly how the synergy evolved during the run.
+
+`GoldenRetrieverConfig` picked up `synergy_bias` and `reinforcement_bias` knobs
+to tilt how aggressively the aggregated metrics should respond to support vs.
+heuristic weight. Bumping `synergy_bias` favours exploration-heavy, confidence
+driven pulses while `reinforcement_bias` amplifies heuristics and reward
+signals when tightening distributed synchronization. When you want Golden to
+renegotiate those biases automatically, hand it a
+`GoldenSelfRewriteConfig`. The retriever stages a four-party council (explorer,
+optimizer, harmoniser, reinforcer) that blends the latest cooperative pulse
+with scheduler depth to rewrite the coordination biases in-place:
+
+```rust
+use st_nn::{GoldenRetriever, GoldenRetrieverConfig, GoldenSelfRewriteConfig};
+
+let mut retriever = GoldenRetriever::new(
+    GoldenRetrieverConfig::default().with_self_rewrite(
+        GoldenSelfRewriteConfig::default()
+            .with_schedule_weight(0.8)
+            .with_negotiation_rate(0.45)
+            .with_inertia(0.5),
+    ),
+    vec![trainer_a, trainer_b],
+)?;
+let before = retriever.coordination_biases();
+// modules/losses/loaders/schedules prepared as shown above
+let report = retriever.run_epoch(mods.clone(), losses.clone(), loaders.clone(), schedules.clone())?;
+let after = retriever.coordination_biases();
+println!("biases before={before:?} after={after:?}");
+if let Some(pulse) = &report.cooperative_pulse {
+    let mut persisted = GoldenRetrieverConfig::default().with_self_rewrite(
+        GoldenSelfRewriteConfig::default().with_schedule_weight(0.8),
+    );
+    persisted.rewrite_with_scheduler(&schedules, Some(pulse));
+}
+```
+
+`GoldenRetriever::coordination_biases()` exposes the live negotiation result so
+Dashboards can visualise the four delegates converging. The
+`rewrite_with_scheduler` helper mirrors the runtime logic in case you need to
+persist the negotiated configuration or replay it in another process.
+
+For longer runs the self-rewrite council now keeps a rolling transcript. The
+`GoldenSelfRewriteConfig` gained `with_council_memory`,
+`with_schedule_resonance`, and `with_synergy_pressure` knobs so you can tune how
+aggressively schedule depth and Blackcat energy bend the delegates. Every epoch
+emits a `GoldenCouncilSnapshot` that summarises the negotiated biases,
+resonance, and stability alongside the pulse that triggered it. The snapshot now
+tracks the epoch watermark, the heuristics log ranges that still need
+reconciliation, the top soft-rule winners, and a `CouncilEvidence` bundle that
+captures band energy, graph flow, ψ, and geometric cues used for the vote.
+Inspect it via `GoldenEpochReport::council_snapshot()` or the new
+`GoldenRetriever::last_council()` helper to plot convergence, detect
+oscillations, or persist the negotiated state for a follow-up run. Consumers who
+need streaming updates can subscribe with `GoldenRetriever::subscribe_digest()`
+and replay `CouncilDigest` events as nodes fall in and out of the cluster.
+
+Python callers can read the same signals via
+`spiraltorch.ModuleTrainer.last_blackcat_pulse()` and
+`last_blackcat_directive()`, which yield rich `GoldenBlackcatPulse` and
+`GoldenCooperativeDirective` wrappers. The bindings surface getters for every
+metric alongside a `pulse.directive(baseline_interval, baseline_window)` helper
+so notebooks can mirror the Rust-side retuning logic. The council feed is
+available through `ModuleTrainer.last_council()`, which returns a
+`GoldenCouncilSnapshot` wrapper that now exposes the epoch, high watermark,
+missing ranges, council evidence, and decoded winner `HeurOp`s for audit trails.
 
 ### SpiralTorchRL (hypergrad policy gradients)
 
@@ -245,6 +772,7 @@ let feedback = GeometryFeedback::new(GeometryFeedbackConfig {
     leech_density_weight: 0.5,        // densify η with Λ24 packing pressure
     ramanujan_iterations: 4,          // refine π via Ramanujan's fast series
     softening_beta: 0.6,              // keep the projection memory-light
+    max_learning_rate_scale: 2.8,     // pre-clamped to stay in the 2..3 stable band
     ..GeometryFeedbackConfig::default_policy()
 });
 policy.attach_geometry_feedback(feedback);
@@ -256,13 +784,41 @@ let (report, signal) = policy.finish_episode_with_geometry(&resonance)?;
 if let Some(signal) = signal {
     println!("η̄={:.3}, scale={:.2}", signal.averaged_efficiency, signal.learning_rate_scale);
 }
+let telemetry = policy.telemetry();
+if let Some(geo) = telemetry.geometry {
+    println!("rank~{:.1} pressure~{:.4} scalē~{:.2}", geo.rolling_rank, geo.rolling_pressure, geo.rolling_scale);
+}
 ```
 
 The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
-into its smoothing loop. This keeps the Z-space slice expansive without bloating
-memory: `z_space_rank` picks the dimensional stratum, the Leech density weight
-injects Viazovska's optimal sphere packing pressure, and the softening beta
-maintains latency by compressing the soft power projection back into `[0, 1]`.
+into its smoothing loop while auto-rewriting its own clamps. Rank, packing
+pressure, and scale histories sit on rolling windows so noisy small-batch runs
+settle quickly, and the `trainer.telemetry()` surface mirrors the same values to
+spot drift. `GeometryFeedback` keeps `max_scale` inside the recommended `[2, 3]`
+band, raises the floor when rank collapses, and eases the Leech density weight
+if pressure over-saturates—giving you a self-tuning geometric metronome instead
+of a static multiplier.
+
+Chrono loop signals now feed directly into the controller: every
+`SpiralSession::resonate_over_time` call plants a `ChronoLoopSignal` in the
+telemetry hub, and `SpiralPolicyGradient::finish_episode_with_geometry` consumes
+the latest signal before measuring a resonance snapshot. Harmonic gain and decay
+estimates tighten the learning-rate clamps, bump the Λ₂₄ pressure when collapse
+drive pulses flare, and publish the live loop gain/softening factor through
+`PolicyTelemetry.geometry`. In other words, Z-space temporal dynamics, SpiralK
+heuristics, and collapse drive pressure now close a tidy feedback loop without
+additional plumbing.
+
+The loop no longer stops at a single node: every roundtable summary and collapse
+intervention now broadcasts a bounded `LoopbackEnvelope` through the telemetry
+hub. SpiralK meta-summaries attach their script hints, the softlogic observer
+threads its live Z-space bias, and PSI collapse totals hitch a ride so other
+policies can replay the same temporal context. `GeometryFeedback::absorb_loopback`
+blends the envelopes into a synthetic chrono signal, boosts clamp tightening
+according to peer support, and preserves the strongest SpiralK script so the
+controller can keep rewriting its own limits. Callers don’t need extra wiring—
+the policy gradient automatically drains the envelope queue before every
+resonance measurement and folds the distributed telemetry back into Z-space.
 
 ### SpiralTorchRec (open-topos recommendation lattice)
 
