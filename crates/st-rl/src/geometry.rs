@@ -10,7 +10,10 @@ use st_core::telemetry::hub::LoopbackEnvelope;
 use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
-use st_core::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
+use st_core::util::math::{
+    LeechProjector,
+    LEECH_PACKING_DENSITY as CORE_LEECH_PACKING_DENSITY,
+};
 use st_tensor::pure::{DifferentialResonance, Tensor};
 
 /// Configuration describing how geometric observability is converted into
@@ -157,6 +160,8 @@ impl GeometryFeedback {
         let leech_weight = config.leech_density_weight.max(0.0);
         let ramanujan_pi = Self::ramanujan_pi(config.ramanujan_iterations.max(1));
         let softening_beta = config.softening_beta.max(0.0);
+        let leech_projector = LeechProjector::new(z_rank, leech_weight);
+
         Self {
             coalgebra: ObservationalCoalgebra::new(config.observability),
             threshold: config.activation_threshold.abs().max(f32::EPSILON),
@@ -166,7 +171,7 @@ impl GeometryFeedback {
             max_scale: clamped_max,
             z_rank,
             leech_weight,
-            leech_projector: LeechProjector::new(z_rank, leech_weight),
+            leech_projector,
             ramanujan_pi,
             softening_beta,
             base_softening_beta: softening_beta,
@@ -505,7 +510,7 @@ impl GeometryFeedback {
             self.max_scale = recommended.max(self.min_scale + f32::EPSILON);
         }
 
-        let max_pressure = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
+        let max_pressure = CORE_LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
         if max_pressure > 0.0 {
             let pressure_ratio = (pressure / max_pressure).clamp(0.0, 4.0);
             if pressure_ratio > 1.2 {

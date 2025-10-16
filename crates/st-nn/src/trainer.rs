@@ -1937,6 +1937,8 @@ mod tests {
         assert!(bridge.drain_summary().unwrap().is_none());
         let summary = trainer.desire_roundtable_summary();
         assert!(summary.is_some());
+    }
+
     #[cfg(feature = "golden")]
     #[test]
     fn trainer_records_golden_council_snapshot() {
