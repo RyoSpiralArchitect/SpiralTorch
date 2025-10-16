@@ -142,6 +142,10 @@ model = Sequential([Linear(2, 2, name="layer")])
 loss = MeanSquaredError()
 session.prepare_module(model)
 
+# Stream desire impulses back into the A/B/C roundtable.
+bridge = st.DesireRoundtableBridge(blend=0.4, drift_gain=0.5)
+trainer.enable_desire_roundtable_bridge(bridge)
+
 loader = (
     st.dataset.from_vec([
         (st.Tensor(1, 2, [0.0, 1.0]), st.Tensor(1, 2, [0.0, 1.0])),
@@ -155,6 +159,11 @@ loader = (
 stats = session.train_epoch(trainer, model, loss, loader, schedule)
 print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")
 print(st.get_psychoid_stats())
+print(st.get_desire_telemetry())  # phase/temperature/energies recorded by DesireTelemetrySink
+
+summary = trainer.desire_roundtable_summary()
+if summary:
+    print("desire barycentric:", summary["mean_above"], summary["mean_here"], summary["mean_beneath"])
 ```
 
 ### SpiralLightning harness

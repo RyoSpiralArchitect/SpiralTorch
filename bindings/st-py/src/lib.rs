@@ -23,8 +23,7 @@ use st_backend_hip::{
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-#[cfg(any(feature = "psi", feature = "psychoid"))]
-use st_core::telemetry::hub;
+use st_core::telemetry::hub::{self, DesirePhaseTelemetry, DesireStepTelemetry};
 use st_frac::fft::{fft_inplace as frac_fft_inplace, Complex32 as FracComplex32, FftError};
 use st_frac::{
     fracdiff_gl_nd, fracdiff_gl_nd_backward, gl_coeffs as frac_gl_coeffs, FracErr, Pad as FracPad,
@@ -32,9 +31,10 @@ use st_frac::{
 use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
-    Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
-    EpochStats, LightningConfig as NnLightningConfig, Linear as NnLinear, Loss, MeanSquaredError,
-    Module, ModuleTrainer, Relu as NnRelu, RoundtableConfig, RoundtableSchedule,
+    Conv1d as NnConv1d, DataLoader as NnDataLoader, DesireRoundtableBridge,
+    DesireRoundtableSummary, DifferentialTrace, DistConfig, DistMode, EpochStats,
+    LightningConfig as NnLightningConfig, Linear as NnLinear, Loss, MeanSquaredError, Module,
+    ModuleTrainer, Relu as NnRelu, RoundtableConfig, RoundtableSchedule,
     Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
@@ -57,7 +57,7 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DeviceRoute {
@@ -185,6 +185,71 @@ fn tensor_err(err: TensorError) -> PyErr {
 
 fn convert<T>(value: PureResult<T>) -> PyResult<T> {
     value.map_err(tensor_err)
+}
+
+fn roundtable_summary_to_py<'py>(
+    py: Python<'py>,
+    summary: &DesireRoundtableSummary,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("steps", summary.steps)?;
+    dict.set_item("triggers", summary.triggers)?;
+    dict.set_item("mean_entropy", summary.mean_entropy)?;
+    dict.set_item("mean_temperature", summary.mean_temperature)?;
+    dict.set_item("mean_alpha", summary.mean_alpha)?;
+    dict.set_item("mean_beta", summary.mean_beta)?;
+    dict.set_item("mean_gamma", summary.mean_gamma)?;
+    dict.set_item("mean_lambda", summary.mean_lambda)?;
+    dict.set_item("mean_above", summary.mean_above)?;
+    dict.set_item("mean_here", summary.mean_here)?;
+    dict.set_item("mean_beneath", summary.mean_beneath)?;
+    dict.set_item("mean_drift", summary.mean_drift)?;
+    dict.set_item(
+        "last_timestamp",
+        summary
+            .last_timestamp
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0),
+    )?;
+    Ok(dict.into())
+}
+
+fn desire_phase_to_str(phase: DesirePhaseTelemetry) -> &'static str {
+    match phase {
+        DesirePhaseTelemetry::Observation => "observation",
+        DesirePhaseTelemetry::Injection => "injection",
+        DesirePhaseTelemetry::Integration => "integration",
+    }
+}
+
+fn desire_telemetry_to_py<'py>(
+    py: Python<'py>,
+    sample: &DesireStepTelemetry,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    let timestamp_ms = sample
+        .timestamp
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as f64;
+    dict.set_item("timestamp_ms", timestamp_ms)?;
+    dict.set_item("phase", desire_phase_to_str(sample.phase))?;
+    dict.set_item("temperature", sample.temperature)?;
+    dict.set_item("entropy", sample.entropy)?;
+    dict.set_item("hypergrad_penalty", sample.hypergrad_penalty)?;
+    dict.set_item("avoidance_energy", sample.avoidance_energy)?;
+    dict.set_item("logit_energy", sample.logit_energy)?;
+    dict.set_item("trigger_emitted", sample.trigger_emitted)?;
+
+    let weights = PyDict::new_bound(py);
+    weights.set_item("alpha", sample.alpha)?;
+    weights.set_item("beta", sample.beta)?;
+    weights.set_item("gamma", sample.gamma)?;
+    weights.set_item("lambda", sample.lambda)?;
+    dict.set_item("weights", weights)?;
+
+    Ok(dict.into_py(py))
 }
 
 fn rl_err(err: SpiralRlError) -> PyErr {
@@ -1676,14 +1741,79 @@ impl PyEpochStats {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "DesireRoundtableBridge")]
+#[derive(Clone)]
+struct PyDesireRoundtableBridge {
+    inner: DesireRoundtableBridge,
+}
+
+#[pymethods]
+impl PyDesireRoundtableBridge {
+    #[new]
+    #[pyo3(signature = (blend=0.35, drift_gain=0.35))]
+    fn new(blend: f32, drift_gain: f32) -> Self {
+        let inner = DesireRoundtableBridge::new()
+            .with_blend(blend)
+            .with_drift_gain(drift_gain);
+        Self { inner }
+    }
+
+    fn clone_bridge(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn impulse(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let impulse = convert(self.inner.impulse())?;
+        impulse
+            .map(|imp| {
+                let dict = PyDict::new(py);
+                dict.set_item(
+                    "multipliers",
+                    (imp.multipliers.0, imp.multipliers.1, imp.multipliers.2),
+                )?;
+                dict.set_item("drift", imp.drift)?;
+                dict.set_item(
+                    "timestamp",
+                    imp.timestamp
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0),
+                )?;
+                Ok(dict.into())
+            })
+            .transpose()
+    }
+
+    fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let summary = convert(self.inner.drain_summary())?;
+        summary
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
+    }
+}
+
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
 struct PyModuleTrainer {
     inner: ModuleTrainer,
+    roundtable_bridge: Option<DesireRoundtableBridge>,
 }
 
 impl PyModuleTrainer {
     fn from_trainer(inner: ModuleTrainer) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
     }
 }
 
@@ -1700,7 +1830,10 @@ impl PyModuleTrainer {
         let caps = caps_for(device);
         let inner =
             ModuleTrainer::new(caps, curvature, hyper_learning_rate, fallback_learning_rate);
-        Self { inner }
+        Self {
+            inner,
+            roundtable_bridge: None,
+        }
     }
 
     #[getter]
@@ -1751,6 +1884,44 @@ impl PyModuleTrainer {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
+    #[pyo3(signature = (bridge=None, blend=0.35, drift_gain=0.35))]
+    fn enable_desire_roundtable_bridge(
+        &mut self,
+        bridge: Option<PyRef<PyDesireRoundtableBridge>>,
+        blend: f32,
+        drift_gain: f32,
+    ) {
+        let selected = if let Some(handle) = bridge {
+            handle.inner.clone()
+        } else {
+            DesireRoundtableBridge::new()
+                .with_blend(blend)
+                .with_drift_gain(drift_gain)
+        };
+        self.inner.enable_desire_roundtable_bridge(selected.clone());
+        self.roundtable_bridge = Some(selected);
+    }
+
+    fn disable_desire_roundtable_bridge(&mut self) {
+        self.inner.disable_desire_roundtable_bridge();
+        self.roundtable_bridge = None;
+    }
+
+    fn desire_roundtable_bridge(&self) -> Option<PyDesireRoundtableBridge> {
+        self.roundtable_bridge
+            .as_ref()
+            .map(|bridge| PyDesireRoundtableBridge {
+                inner: bridge.clone(),
+            })
+    }
+
+    fn desire_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        self.inner
+            .desire_roundtable_summary()
+            .map(|summary| roundtable_summary_to_py(py, &summary))
+            .transpose()
     }
 
     #[pyo3(signature = (threshold, participants=2))]
@@ -3680,6 +3851,13 @@ fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
 }
 
 #[pyfunction]
+fn get_desire_telemetry(py: Python<'_>) -> PyResult<Option<PyObject>> {
+    Ok(hub::get_last_desire_step()
+        .map(|sample| desire_telemetry_to_py(py, &sample))
+        .transpose()?)
+}
+
+#[pyfunction]
 fn get_psychoid_stats(py: Python<'_>) -> PyResult<Option<PyObject>> {
     #[cfg(feature = "psychoid")]
     {
@@ -4030,6 +4208,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
+    m.add_function(wrap_pyfunction!(get_desire_telemetry, m)?)?;
     m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
     m.add_class::<PyTensor>()?;
     m.add_class::<PyComplexTensor>()?;
@@ -4043,6 +4222,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHypergrad>()?;
     m.add_class::<PyDistConfig>()?;
     m.add_class::<PyRoundtableSchedule>()?;
+    m.add_class::<PyDesireRoundtableBridge>()?;
     m.add_class::<PyEpochStats>()?;
     m.add_class::<PyModuleTrainer>()?;
     m.add_class::<PySpiralLightning>()?;
@@ -4058,6 +4238,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "z_space_barycenter",
             "hip_probe",
             "describe_device",
+            "get_desire_telemetry",
             "get_psychoid_stats",
             "Tensor",
             "ComplexTensor",
@@ -4071,6 +4252,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "Hypergrad",
             "DistConfig",
             "RoundtableSchedule",
+            "DesireRoundtableBridge",
             "EpochStats",
             "ModuleTrainer",
             "SpiralLightning",
