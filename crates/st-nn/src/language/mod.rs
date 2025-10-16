@@ -10,6 +10,7 @@ mod desire;
 mod geometry;
 mod gw;
 mod logbook;
+mod pipeline;
 mod schrodinger;
 mod temperature;
 
@@ -24,8 +25,9 @@ pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
 pub use pipeline::{
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesirePipeline,
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRoundtableBridge,
-    DesireRoundtableEvent, DesireRoundtableImpulse, DesireRoundtableSummary, DesireTrainerBridge,
-    DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer, DesireTriggerEvent,
+    DesireRoundtableEvent, DesireRoundtableImpulse, DesireRoundtableSummary, DesireTelemetrySink,
+    DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
+    DesireTriggerEvent,
 };
 #[cfg(feature = "psi")]
 pub use pipeline::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
