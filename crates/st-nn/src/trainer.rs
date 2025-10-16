@@ -22,12 +22,14 @@
 // ============================================================================
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+#[cfg(feature = "golden")]
+use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
 use crate::roundtable::{
-    simulate_proposal_locally, BlackcatModerator, DistConfig, GlobalProposal, HeurOpLog,
-    MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
+    simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, GlobalProposal,
+    HeurOpKind, HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::{PureResult, Tensor};
@@ -36,7 +38,7 @@ use st_core::backend::unison_heuristics::RankKind;
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::runtime::autopilot::Autopilot;
-use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
+use st_core::runtime::blackcat::{BlackCatRuntime, BlackcatRuntimeStats, StepMetrics};
 use st_core::telemetry::hub::{self, SoftlogicZFeedback};
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
@@ -61,10 +63,17 @@ pub struct ModuleTrainer {
     distribution: Option<RoundtableNode>,
     meta_conductor: Option<MetaConductor>,
     heur_log: HeurOpLog,
+    rewrite_budget: Option<RewriteBudget>,
     softlogic: SoftLogicFlex,
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
+    #[cfg(feature = "golden")]
+    golden_pulse: Option<GoldenBlackcatPulse>,
+    #[cfg(feature = "golden")]
+    golden_directive: Option<GoldenCooperativeDirective>,
+    #[cfg(feature = "golden")]
+    golden_council: Option<GoldenCouncilSnapshot>,
     #[cfg(feature = "psi")]
     psi: Option<PsiMeter>,
     #[cfg(feature = "psychoid")]
@@ -196,6 +205,53 @@ impl SoftLogicFlex {
     }
 }
 
+#[derive(Debug, Clone)]
+struct RewriteBudget {
+    per_epoch: u32,
+    cooldown: u32,
+    used_this_epoch: u32,
+    cooldown_left: u32,
+}
+
+impl RewriteBudget {
+    fn new(per_epoch: u32, cooldown: u32) -> Self {
+        Self {
+            per_epoch: per_epoch.max(1),
+            cooldown,
+            used_this_epoch: 0,
+            cooldown_left: 0,
+        }
+    }
+
+    fn begin_epoch(&mut self) {
+        if self.cooldown_left > 0 {
+            self.cooldown_left -= 1;
+        }
+        self.used_this_epoch = 0;
+    }
+
+    fn try_consume(&mut self, amount: u32) -> bool {
+        if amount == 0 {
+            return true;
+        }
+        if self.cooldown_left > 0 {
+            return false;
+        }
+        if self.used_this_epoch.saturating_add(amount) > self.per_epoch {
+            self.used_this_epoch = self.per_epoch;
+            if self.cooldown > 0 {
+                self.cooldown_left = self.cooldown;
+            }
+            return false;
+        }
+        self.used_this_epoch += amount;
+        if self.used_this_epoch >= self.per_epoch && self.cooldown > 0 {
+            self.cooldown_left = self.cooldown;
+        }
+        true
+    }
+}
+
 impl ModuleTrainer {
     /// Creates a new trainer with the provided device capabilities and learning rates.
     pub fn new(
@@ -220,10 +276,17 @@ impl ModuleTrainer {
             distribution: None,
             meta_conductor: None,
             heur_log: HeurOpLog::default(),
+            rewrite_budget: None,
             softlogic: SoftLogicFlex::new(),
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
+            #[cfg(feature = "golden")]
+            golden_pulse: None,
+            #[cfg(feature = "golden")]
+            golden_directive: None,
+            #[cfg(feature = "golden")]
+            golden_council: None,
             #[cfg(feature = "psi")]
             psi,
             #[cfg(feature = "psychoid")]
@@ -387,12 +450,95 @@ impl ModuleTrainer {
         &self.heur_log
     }
 
+    /// Merges the provided heuristics log into the trainer's local log.
+    pub fn merge_heuristics_log(&mut self, log: &HeurOpLog) {
+        self.heur_log.merge(log);
+    }
+
     /// Returns the latest moderator minutes captured by Blackcat.
     pub fn blackcat_minutes(&self) -> Vec<ModeratorMinutes> {
         self.blackcat_moderator
             .as_ref()
             .map(|m| m.minutes().to_vec())
             .unwrap_or_default()
+    }
+
+    /// Returns the aggregated scoreboard derived from the local Blackcat moderator.
+    pub fn blackcat_scoreboard(&self) -> Vec<BlackcatScore> {
+        self.blackcat_moderator
+            .as_ref()
+            .map(|m| m.scoreboard())
+            .unwrap_or_default()
+    }
+
+    /// Returns aggregated stats tracked by the embedded Blackcat runtime, when available.
+    pub fn blackcat_runtime_stats(&self) -> Option<BlackcatRuntimeStats> {
+        self.blackcat.as_ref().map(|rt| rt.stats())
+    }
+
+    /// Replays moderator minutes so the embedded Blackcat runtime can stay aligned.
+    pub fn sync_blackcat_minutes(&mut self, minutes: &[ModeratorMinutes]) {
+        if let Some(moderator) = self.blackcat_moderator.as_mut() {
+            moderator.absorb_minutes(minutes);
+        }
+    }
+
+    #[cfg(feature = "golden")]
+    /// Applies a cooperative pulse emitted by the Golden retriever.
+    pub fn apply_blackcat_pulse(&mut self, pulse: &GoldenBlackcatPulse) {
+        self.golden_pulse = Some(pulse.clone());
+        self.golden_directive = None;
+        if let Some(node) = self.distribution.as_mut() {
+            let base_interval = node.config().push_interval;
+            let base_window = node.config().summary_window.max(1);
+            let directive = pulse.directive(base_interval, base_window);
+            node.retune(directive.push_interval, directive.summary_window);
+            if directive.reinforcement_weight > 0.1 {
+                self.injector_enabled = true;
+            }
+            self.golden_directive = Some(directive);
+        } else if pulse.reinforcement_weight > 0.1 || pulse.optimization_gain > 0.1 {
+            self.injector_enabled = true;
+        }
+    }
+
+    #[cfg(feature = "golden")]
+    pub(crate) fn record_golden_council(&mut self, snapshot: &GoldenCouncilSnapshot) {
+        self.golden_council = Some(snapshot.clone());
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the most recent cooperative pulse applied to this trainer.
+    pub fn last_blackcat_pulse(&self) -> Option<&GoldenBlackcatPulse> {
+        self.golden_pulse.as_ref()
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the latest cooperative directive derived from the Golden pulse.
+    pub fn last_blackcat_directive(&self) -> Option<&GoldenCooperativeDirective> {
+        self.golden_directive.as_ref()
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the latest self-rewrite council snapshot received from GoldenRetriever.
+    pub fn last_golden_council_snapshot(&self) -> Option<&GoldenCouncilSnapshot> {
+        self.golden_council.as_ref()
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns a clone of the latest council snapshot for downstream mutation.
+    pub fn last_council(&self) -> Option<GoldenCouncilSnapshot> {
+        self.golden_council.clone()
+    }
+
+    /// Configures how many rewrite operations may be applied per epoch and the cooldown required
+    /// before new rewrites are accepted.
+    pub fn set_rewrite_budget(&mut self, per_epoch: u32, cooldown: u32) {
+        if per_epoch == 0 {
+            self.rewrite_budget = None;
+        } else {
+            self.rewrite_budget = Some(RewriteBudget::new(per_epoch, cooldown));
+        }
     }
 
     /// Clears any registered band weighting rule.
@@ -468,6 +614,9 @@ impl ModuleTrainer {
         I: IntoIterator,
         I::Item: IntoBatch,
     {
+        if let Some(budget) = self.rewrite_budget.as_mut() {
+            budget.begin_epoch();
+        }
         self.zero(module)?;
         #[cfg(feature = "psi")]
         self.bootstrap_psi(schedule);
@@ -861,6 +1010,22 @@ impl ModuleTrainer {
         preview_metrics: HashMap<String, f32>,
     ) -> PureResult<()> {
         let _ = preview_metrics;
+        let rewrite_ops = proposal
+            .ops
+            .iter()
+            .filter(|op| {
+                matches!(
+                    op.kind,
+                    HeurOpKind::AppendSoft { .. } | HeurOpKind::Retract { .. }
+                )
+            })
+            .count()
+            .min(u32::MAX as usize) as u32;
+        if let Some(budget) = self.rewrite_budget.as_mut() {
+            if !budget.try_consume(rewrite_ops) {
+                return Ok(());
+            }
+        }
         for op in &proposal.ops {
             self.heur_log.append(op.clone());
         }
@@ -952,8 +1117,14 @@ mod tests {
     use crate::layers::sequential::Sequential;
     use crate::layers::wave_gate::WaveGate;
     use crate::loss::MeanSquaredError;
+    use crate::roundtable::{HeurOp, HeurOpKind};
     use crate::schedule::RoundtableConfig;
+    #[cfg(feature = "golden")]
+    use crate::CouncilEvidence;
+    use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
     use st_tensor::pure::topos::OpenCartesianTopos;
+    use std::collections::HashMap;
+    use std::time::SystemTime;
 
     #[test]
     fn trainer_attaches_and_steps() {
@@ -1027,5 +1198,133 @@ mod tests {
             .unwrap();
         let after = model.forward(&input).unwrap();
         assert_ne!(before.data(), after.data());
+    }
+
+    #[test]
+    fn trainer_enforces_rewrite_budget() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        trainer.set_rewrite_budget(1, 1);
+        if let Some(budget) = trainer.rewrite_budget.as_mut() {
+            budget.begin_epoch();
+        }
+
+        let op = HeurOp {
+            origin: "test".to_string(),
+            kind: HeurOpKind::AppendSoft {
+                script: "k:topk(2)".to_string(),
+                weight: 1.0,
+            },
+            issued_at: SystemTime::now(),
+        };
+        let proposal = GlobalProposal {
+            proposal_id: "proposal-test".to_string(),
+            ops: vec![op],
+            evidence: Vec::new(),
+        };
+
+        let initial = trainer.heuristics_log().entries().len();
+        trainer
+            .apply_proposal(&proposal, HashMap::new())
+            .expect("first rewrite allowed");
+        let after_first = trainer.heuristics_log().entries().len();
+        assert_eq!(after_first, initial + proposal.ops.len());
+
+        trainer
+            .apply_proposal(&proposal, HashMap::new())
+            .expect("second rewrite ignored");
+        let after_second = trainer.heuristics_log().entries().len();
+        assert_eq!(after_second, after_first);
+
+        if let Some(budget) = trainer.rewrite_budget.as_mut() {
+            budget.begin_epoch();
+        }
+        trainer
+            .apply_proposal(&proposal, HashMap::new())
+            .expect("rewrite allowed after cooldown");
+        let after_third = trainer.heuristics_log().entries().len();
+        assert_eq!(after_third, after_first + proposal.ops.len());
+    }
+
+    #[test]
+    fn trainer_exposes_blackcat_runtime_stats() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let mut groups = HashMap::new();
+        groups.insert("tile".to_string(), vec!["a".to_string(), "b".to_string()]);
+        let runtime = BlackCatRuntime::new(
+            ZMetaParams::default(),
+            ChoiceGroups { groups },
+            4,
+            SoftBanditMode::TS,
+            None,
+        );
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_blackcat(runtime);
+        if let Some(rt) = trainer.blackcat.as_mut() {
+            rt.begin_step();
+            let mut metrics = StepMetrics::default();
+            metrics.step_time_ms = 10.0;
+            metrics.mem_peak_mb = 256.0;
+            metrics.retry_rate = 0.05;
+            metrics.extra.insert("grad_norm".into(), 0.4);
+            let _ = rt.post_step(&metrics);
+        }
+        let stats = trainer
+            .blackcat_runtime_stats()
+            .expect("runtime stats available");
+        assert_eq!(stats.steps, 1);
+        assert!(stats.step_time_ms_ema > 0.0);
+        assert_eq!(stats.extras.get("grad_norm").cloned().unwrap(), 0.4);
+    }
+
+    #[cfg(feature = "golden")]
+    #[test]
+    fn trainer_records_golden_council_snapshot() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut pulse = GoldenBlackcatPulse::idle();
+        pulse.exploration_drive = 0.7;
+        let winner = HeurOp {
+            origin: "roundtable-1".to_string(),
+            kind: HeurOpKind::AppendSoft {
+                script: "k:topk(2)".to_string(),
+                weight: 1.2,
+            },
+            issued_at: SystemTime::now(),
+        };
+        let snapshot = GoldenCouncilSnapshot {
+            epoch: 4,
+            high_watermark: 9,
+            missing_ranges: Vec::new(),
+            winners: vec![winner.clone()],
+            evidence: CouncilEvidence {
+                band_energy: (1.0, 0.8, 0.6),
+                graph_flow: 0.4,
+                psi: 0.2,
+                geometry: (0.5, 0.3, 0.1),
+            },
+            exploration_bias: 1.2,
+            optimization_bias: 0.95,
+            synergy_bias: 1.1,
+            reinforcement_bias: 1.05,
+            resonance: 0.4,
+            stability: 0.86,
+            momentum: 0.3,
+            divergence: 0.2,
+            schedule_hint: (1.0, 0.8, 1.1, 0.9),
+            pulse_recap: pulse,
+        };
+        trainer.record_golden_council(&snapshot);
+        let stored = trainer
+            .last_golden_council_snapshot()
+            .expect("snapshot stored");
+        assert!((stored.exploration_bias - 1.2).abs() < 1e-4);
+        assert_eq!(stored.schedule_hint.2, 1.1);
+        assert_eq!(stored.pulse_recap.exploration_drive, 0.7);
+        let winners = trainer.last_council().expect("cloneable snapshot").winners;
+        assert_eq!(winners.len(), 1);
+        match &winners[0].kind {
+            HeurOpKind::AppendSoft { weight, .. } => assert!((*weight - 1.2).abs() < 1e-4),
+            other => panic!("unexpected winner {:?}", other),
+        }
     }
 }
