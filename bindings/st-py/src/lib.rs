@@ -11,7 +11,7 @@ use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule};
+use pyo3::types::{PyAny, PyDict, PyList, PyModule, PyTuple};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use pyo3::PyRef;
@@ -45,6 +45,7 @@ use st_tensor::pure::{
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
     PureResult, Tensor, TensorBiome, TensorError,
 };
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
@@ -1672,90 +1673,9 @@ impl PyModuleTrainer {
         batches: &Bound<'_, PyAny>,
         schedule: &PyRoundtableSchedule,
     ) -> PyResult<PyEpochStats> {
-        let as_loader = batches.extract::<PyRef<PyDataLoader>>();
-        if let Ok(loader) = as_loader {
-            if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
-                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                    let stats = convert(self.inner.train_epoch(
-                        seq.borrow_mut()?,
-                        mse.inner_mut(),
-                        loader.clone_inner(),
-                        &schedule.inner,
-                    ))?;
-                    return Ok(PyEpochStats::from_stats(stats));
-                }
-            }
-
-            if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
-                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                    let stats = convert(self.inner.train_epoch(
-                        linear.borrow_mut()?,
-                        mse.inner_mut(),
-                        loader.clone_inner(),
-                        &schedule.inner,
-                    ))?;
-                    return Ok(PyEpochStats::from_stats(stats));
-                }
-            }
-
-            if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
-                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                    let stats = convert(self.inner.train_epoch(
-                        relu.borrow_mut()?,
-                        mse.inner_mut(),
-                        loader.clone_inner(),
-                        &schedule.inner,
-                    ))?;
-                    return Ok(PyEpochStats::from_stats(stats));
-                }
-            }
-        }
-
-        let dataset: Vec<(Tensor, Tensor)> = batches
-            .extract::<Vec<(PyTensor, PyTensor)>>()?
-            .into_iter()
-            .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
-            .collect();
-
-        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(self.inner.train_epoch(
-                    seq.borrow_mut()?,
-                    mse.inner_mut(),
-                    dataset.clone(),
-                    &schedule.inner,
-                ))?;
-                return Ok(PyEpochStats::from_stats(stats));
-            }
-        }
-
-        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(self.inner.train_epoch(
-                    linear.borrow_mut()?,
-                    mse.inner_mut(),
-                    dataset,
-                    &schedule.inner,
-                ))?;
-                return Ok(PyEpochStats::from_stats(stats));
-            }
-        }
-
-        if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(self.inner.train_epoch(
-                    relu.borrow_mut()?,
-                    mse.inner_mut(),
-                    dataset,
-                    &schedule.inner,
-                ))?;
-                return Ok(PyEpochStats::from_stats(stats));
-            }
-        }
-
-        Err(PyValueError::new_err(
-            "ModuleTrainer.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
-        ))
+        let stats =
+            run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
+        Ok(PyEpochStats::from_stats(stats))
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -1996,16 +1916,37 @@ impl PySpiralSession {
         ))
     }
 
-    #[pyo3(signature = (trainer, module, loss, batches, schedule))]
-    fn train_epoch(
-        &self,
-        trainer: &mut PyModuleTrainer,
-        module: &Bound<'_, PyAny>,
-        loss: &Bound<'_, PyAny>,
-        batches: &Bound<'_, PyAny>,
-        schedule: &PyRoundtableSchedule,
-    ) -> PyResult<PyEpochStats> {
-        trainer.train_epoch(module, loss, batches, schedule)
+    #[pyo3(signature = (*args))]
+    fn train_epoch(&self, args: &Bound<'_, PyTuple>) -> PyResult<PyEpochStats> {
+        match args.len() {
+            5 => {
+                let trainer = args.get_item(0)?;
+                let mut trainer = trainer.extract::<PyRefMut<PyModuleTrainer>>()?;
+                let module = args.get_item(1)?;
+                let loss = args.get_item(2)?;
+                let batches = args.get_item(3)?;
+                let schedule = args.get_item(4)?.extract::<PyRef<PyRoundtableSchedule>>()?;
+                trainer.train_epoch(&module, &loss, &batches, &*schedule)
+            }
+            4 => {
+                let module = args.get_item(0)?;
+                let loss = args.get_item(1)?;
+                let batches = args.get_item(2)?;
+                let schedule = args.get_item(3)?.extract::<PyRef<PyRoundtableSchedule>>()?;
+                let mut trainer = self.inner.trainer();
+                let stats = run_epoch_with_trainer(
+                    &mut trainer,
+                    &module,
+                    &loss,
+                    &batches,
+                    &schedule.inner,
+                )?;
+                Ok(PyEpochStats::from_stats(stats))
+            }
+            _ => Err(PyValueError::new_err(
+                "SpiralSession.train_epoch expects either (trainer, module, loss, batches, schedule) or (module, loss, batches, schedule)",
+            )),
+        }
     }
 
     #[pyo3(signature = (seed, sot=None))]
@@ -2212,6 +2153,98 @@ impl PyMeanSquaredError {
     fn __repr__(&self) -> PyResult<String> {
         Ok("MeanSquaredError()".to_string())
     }
+}
+
+fn run_epoch_with_trainer(
+    trainer: &mut ModuleTrainer,
+    module: &Bound<'_, PyAny>,
+    loss: &Bound<'_, PyAny>,
+    batches: &Bound<'_, PyAny>,
+    schedule: &RoundtableSchedule,
+) -> PyResult<EpochStats> {
+    if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(trainer.train_epoch(
+                    seq.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    schedule,
+                ))?;
+                return Ok(stats);
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(trainer.train_epoch(
+                    linear.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    schedule,
+                ))?;
+                return Ok(stats);
+            }
+        }
+
+        if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(trainer.train_epoch(
+                    relu.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    schedule,
+                ))?;
+                return Ok(stats);
+            }
+        }
+    }
+
+    let dataset: Vec<(Tensor, Tensor)> = batches
+        .extract::<Vec<(PyTensor, PyTensor)>>()?
+        .into_iter()
+        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+        .collect();
+
+    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                seq.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.clone(),
+                schedule,
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                linear.borrow_mut()?,
+                mse.inner_mut(),
+                dataset.clone(),
+                schedule,
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+            let stats = convert(trainer.train_epoch(
+                relu.borrow_mut()?,
+                mse.inner_mut(),
+                dataset,
+                schedule,
+            ))?;
+            return Ok(stats);
+        }
+    }
+
+    Err(PyValueError::new_err(
+        "ModuleTrainer.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
+    ))
 }
 
 #[pyclass(module = "spiraltorch.nn", name = "Relu")]
@@ -2903,6 +2936,42 @@ fn plan_topk(
     plan(py, "topk", rows, cols, k, device)
 }
 
+#[pyfunction]
+#[pyo3(signature = (tensor, k, *, largest=true))]
+fn topk2d_py(tensor: &PyTensor, k: usize, largest: bool) -> PyResult<(PyTensor, Vec<Vec<usize>>)> {
+    let (rows, cols) = tensor.as_tensor().shape();
+    if k == 0 || k > cols {
+        return Err(PyValueError::new_err(
+            "k must be between 1 and the number of columns",
+        ));
+    }
+
+    let mut values = Vec::with_capacity(rows * k);
+    let mut indices = Vec::with_capacity(rows);
+    let data = tensor.as_tensor().data();
+    for row in 0..rows {
+        let slice = &data[row * cols..(row + 1) * cols];
+        let mut pairs: Vec<(usize, f32)> = slice.iter().copied().enumerate().collect();
+        pairs.sort_unstable_by(|a, b| {
+            let ord = a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal);
+            if largest {
+                ord.reverse()
+            } else {
+                ord
+            }
+        });
+        let mut row_indices = Vec::with_capacity(k);
+        for (idx, value) in pairs.into_iter().take(k) {
+            values.push(value);
+            row_indices.push(idx);
+        }
+        indices.push(row_indices);
+    }
+
+    let values_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, values))?);
+    Ok((values_tensor, indices))
+}
+
 /// Surface ROCm probing hints for Python callers.
 #[pyfunction]
 fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
@@ -3031,7 +3100,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Provide a tiny doc string that highlights the zero-shim approach.
     m.setattr(
         "__doc__",
-        "Rust-first training primitives for SpiralTorch: tensors, hypergrads, and unified planners.",
+        "Rust-first training primitives for SpiralTorch: tensors, hypergrads, top-k planners, and unified datasets.",
     )?;
 
     Ok(())
