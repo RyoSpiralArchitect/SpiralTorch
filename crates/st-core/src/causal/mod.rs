@@ -189,6 +189,7 @@ impl CausalGraph {
         let mut steps = Vec::with_capacity(order.len());
         let mut active_effect: HashMap<NodeId, f32> = HashMap::new();
         let mut skipped = HashSet::new();
+        let mut skip_reasons: HashMap<NodeId, SkipReason> = HashMap::new();
         let mut spent_budget = 0.0;
 
         for id in order {
@@ -198,41 +199,47 @@ impl CausalGraph {
             } else {
                 node.parents
                     .iter()
-                    .map(|p| active_effect.get(p).copied().unwrap_or(0.0))
+                    .map(|p| {
+                        if let Some(effect) = active_effect.get(p) {
+                            *effect
+                        } else if matches!(skip_reasons.get(p), Some(SkipReason::LowEffect)) {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    })
                     .fold(1.0, |acc, e| acc * e)
             };
             let aggregate = parent_effect.abs() * node.effect.abs();
             let decision = if aggregate < skip_threshold {
                 skipped.insert(id);
+                skip_reasons.insert(id, SkipReason::LowEffect);
                 ExecutionDecision::Skip(SkipReason::LowEffect)
             } else if let Some(budget) = remaining_budget.as_mut() {
                 if node.cost > *budget {
                     skipped.insert(id);
+                    skip_reasons.insert(id, SkipReason::BudgetExceeded);
                     ExecutionDecision::Skip(SkipReason::BudgetExceeded)
                 } else {
                     *budget -= node.cost;
                     spent_budget += node.cost;
                     skipped.remove(&id);
+                    skip_reasons.remove(&id);
                     ExecutionDecision::Execute {
                         aggregated_effect: aggregate,
                     }
                 }
             } else {
                 skipped.remove(&id);
+                skip_reasons.remove(&id);
                 ExecutionDecision::Execute {
                     aggregated_effect: aggregate,
                 }
             };
-            match decision {
-                ExecutionDecision::Execute { .. } => {
-                    active_effect.insert(id, aggregate.max(1e-6));
-                }
-                ExecutionDecision::Skip(SkipReason::LowEffect) => {
-                    active_effect.insert(id, 1.0);
-                }
-                _ => {
-                    active_effect.insert(id, 0.0);
-                }
+            if matches!(decision, ExecutionDecision::Execute { .. }) {
+                active_effect.insert(id, aggregate.max(1e-6));
+            } else {
+                active_effect.remove(&id);
             }
             steps.push(ExecutionStep {
                 id,
