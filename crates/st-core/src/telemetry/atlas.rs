@@ -359,6 +359,21 @@ impl AtlasRoute {
             .map(|frame| frame.timestamp)
             .unwrap_or(0.0);
         let mut loop_total = 0.0;
+        let mut loop_sq_total = 0.0;
+        let mut loop_samples = 0usize;
+        let mut district_map: BTreeMap<String, DistrictAccumulator> = BTreeMap::new();
+        let mut first_collapse = None;
+        let mut first_z_signal = None;
+        for frame in &self.frames {
+            let support = frame.loop_support.max(0.0);
+            loop_total += support;
+            loop_sq_total += support * support;
+            loop_samples += 1;
+            if let Some(total) = frame.collapse_total {
+                if total.is_finite() {
+                    if first_collapse.is_none() {
+                        first_collapse = Some(total);
+                    }
         let mut district_map: BTreeMap<String, DistrictAccumulator> = BTreeMap::new();
         for frame in &self.frames {
             loop_total += frame.loop_support.max(0.0);
@@ -369,6 +384,9 @@ impl AtlasRoute {
             }
             if let Some(z) = frame.z_signal {
                 if z.is_finite() {
+                    if first_z_signal.is_none() {
+                        first_z_signal = Some(z);
+                    }
                     summary.latest_z_signal = Some(z);
                 }
             }
@@ -405,14 +423,27 @@ impl AtlasRoute {
         if summary.frames > 0 {
             summary.mean_loop_support = loop_total / summary.frames as f32;
         }
+        if loop_samples > 0 {
+            let mean = loop_total / loop_samples as f32;
+            let variance = (loop_sq_total / loop_samples as f32) - mean * mean;
+            summary.loop_std = variance.max(0.0).sqrt();
+        }
+        if let (Some(first), Some(latest)) = (first_collapse, summary.latest_collapse_total) {
+            summary.collapse_trend = Some(latest - first);
+        }
+        if let (Some(first), Some(latest)) = (first_z_signal, summary.latest_z_signal) {
+            summary.z_signal_trend = Some(latest - first);
+        }
         summary.districts = district_map
             .into_iter()
             .map(|(name, accumulator)| accumulator.into_summary(name))
             .filter(|district| district.coverage > 0)
             .collect();
-        summary
-            .districts
-            .sort_by(|a, b| b.coverage.cmp(&a.coverage).then_with(|| a.name.cmp(&b.name)));
+        summary.districts.sort_by(|a, b| {
+            b.coverage
+                .cmp(&a.coverage)
+                .then_with(|| a.name.cmp(&b.name))
+        });
         summary
     }
 }
@@ -425,10 +456,16 @@ pub struct AtlasRouteSummary {
     pub latest_timestamp: f32,
     /// Mean loop support accumulated across the route.
     pub mean_loop_support: f32,
+    /// Standard deviation of loop support across the retained frames.
+    pub loop_std: f32,
     /// Latest collapse total observed within the route.
     pub latest_collapse_total: Option<f32>,
+    /// Signed drift between the first and latest collapse totals.
+    pub collapse_trend: Option<f32>,
     /// Latest Z-space control signal observed within the route.
     pub latest_z_signal: Option<f32>,
+    /// Signed drift between the first and latest Z-space control signals.
+    pub z_signal_trend: Option<f32>,
     /// Last maintainer status routed through the atlas route.
     pub maintainer_status: Option<MaintainerStatus>,
     /// Last maintainer diagnostic routed through the atlas route.
@@ -466,11 +503,14 @@ pub struct AtlasDistrictSummary {
     pub max: f32,
     /// Signed change between the latest and first observation.
     pub delta: f32,
+    /// Standard deviation of the district activity across observations.
+    pub std_dev: f32,
 }
 
 #[derive(Clone, Debug, Default)]
 struct DistrictAccumulator {
     sum: f32,
+    sum_sq: f32,
     min: f32,
     max: f32,
     first: Option<f32>,
@@ -482,6 +522,7 @@ impl DistrictAccumulator {
     fn new() -> Self {
         Self {
             sum: 0.0,
+            sum_sq: 0.0,
             min: f32::INFINITY,
             max: f32::NEG_INFINITY,
             first: None,
@@ -495,6 +536,7 @@ impl DistrictAccumulator {
             return;
         }
         self.sum += value;
+        self.sum_sq += value * value;
         self.count += 1;
         self.min = self.min.min(value);
         self.max = self.max.max(value);
@@ -512,6 +554,7 @@ impl DistrictAccumulator {
             };
         }
         let mean = self.sum / self.count as f32;
+        let variance = (self.sum_sq / self.count as f32) - mean * mean;
         let first = self.first.unwrap_or(self.last);
         AtlasDistrictSummary {
             name,
@@ -521,6 +564,7 @@ impl DistrictAccumulator {
             min: if self.min.is_finite() { self.min } else { mean },
             max: if self.max.is_finite() { self.max } else { mean },
             delta: self.last - first,
+            std_dev: variance.max(0.0).sqrt(),
         }
     }
 }
@@ -631,10 +675,20 @@ mod tests {
             let mut fragment = AtlasFragment::new();
             fragment.timestamp = Some((idx + 1) as f32);
             fragment.push_metric_with_district("session.surface.latency", idx as f32, "Surface");
-            fragment.push_metric_with_district("trainer.loop.energy", idx as f32 + 1.0, "Concourse");
-            fragment.push_metric_with_district("tensor.backend.util", 0.5 + idx as f32 * 0.1, "Substrate");
+            fragment.push_metric_with_district(
+                "trainer.loop.energy",
+                idx as f32 + 1.0,
+                "Concourse",
+            );
+            fragment.push_metric_with_district(
+                "tensor.backend.util",
+                0.5 + idx as f32 * 0.1,
+                "Substrate",
+            );
             let mut frame = AtlasFrame::new((idx + 1) as f32);
             frame.loop_support = (idx as f32) * 0.5;
+            frame.collapse_total = Some(0.5 + idx as f32 * 0.1);
+            frame.z_signal = Some(0.2 + idx as f32 * 0.05);
             frame.merge_fragment(fragment);
             route.push_bounded(frame, usize::MAX);
         }
@@ -642,7 +696,13 @@ mod tests {
         assert_eq!(summary.frames, 4);
         assert!(summary.latest_timestamp >= 4.0 - f32::EPSILON);
         assert!(summary.mean_loop_support > 0.0);
+        assert!(summary.loop_std > 0.0);
         assert!(!summary.districts.is_empty());
+        assert!(summary
+            .collapse_trend
+            .expect("collapse trend")
+            .is_sign_positive());
+        assert!(summary.z_signal_trend.expect("z trend").is_sign_positive());
         let surface = summary
             .districts
             .iter()
@@ -651,5 +711,6 @@ mod tests {
         assert_eq!(surface.coverage, 4);
         assert!((surface.latest - 3.0).abs() <= f32::EPSILON);
         assert!((surface.delta - 3.0).abs() <= f32::EPSILON);
+        assert!(surface.std_dev > 0.0);
     }
 }

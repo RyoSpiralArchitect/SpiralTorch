@@ -35,9 +35,9 @@ use st_core::runtime::golden::{
 };
 use st_tensor::pure::TensorError;
 use std::cmp::Ordering;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 #[derive(Debug, Clone)]
 pub struct GoldenRetrieverConfig {
@@ -883,29 +883,21 @@ impl GoldenRetriever {
         let mut psi_sum = 0.0f32;
         let mut reward_sum = 0.0f64;
         let mut confidence_sum = 0.0f32;
-        let mut dominant: Option<&ModeratorMinutes> = None;
+        let mut plan_totals: HashMap<&str, (f64, usize, SystemTime)> = HashMap::new();
 
         for minute in minutes {
             support_sum += minute.support.max(0.0);
             psi_sum += minute.mean_psi;
             reward_sum += minute.reward.max(0.0);
             confidence_sum += minute.confidence.0 + minute.confidence.1;
-            dominant = match dominant {
-                Some(current) => match minute.reward.partial_cmp(&current.reward) {
-                    Some(Ordering::Greater) => Some(minute),
-                    Some(Ordering::Equal) => {
-                        let current_conf = current.confidence.0 + current.confidence.1;
-                        let candidate_conf = minute.confidence.0 + minute.confidence.1;
-                        if candidate_conf > current_conf {
-                            Some(minute)
-                        } else {
-                            Some(current)
-                        }
-                    }
-                    _ => Some(current),
-                },
-                None => Some(minute),
-            };
+            let entry = plan_totals
+                .entry(minute.plan_signature.as_str())
+                .or_insert((0.0, 0, minute.issued_at));
+            entry.0 += minute.reward.max(0.0);
+            entry.1 += 1;
+            if minute.issued_at > entry.2 {
+                entry.2 = minute.issued_at;
+            }
         }
 
         let coverage = minutes.len();
@@ -970,6 +962,29 @@ impl GoldenRetriever {
                 * self.reinforcement_bias)
                 .max(0.0);
 
+        let dominant_plan = plan_totals
+            .into_iter()
+            .max_by(
+                |(plan_a, (reward_a, count_a, seen_a)), (plan_b, (reward_b, count_b, seen_b))| {
+                    let avg_a = if *count_a == 0 {
+                        0.0
+                    } else {
+                        *reward_a / *count_a as f64
+                    };
+                    let avg_b = if *count_b == 0 {
+                        0.0
+                    } else {
+                        *reward_b / *count_b as f64
+                    };
+                    avg_a
+                        .partial_cmp(&avg_b)
+                        .unwrap_or(Ordering::Equal)
+                        .then_with(|| seen_a.cmp(seen_b))
+                        .then_with(|| plan_a.cmp(plan_b))
+                },
+            )
+            .map(|(plan, _)| plan.to_string());
+
         GoldenBlackcatPulse {
             exploration_drive,
             optimization_gain,
@@ -984,7 +999,7 @@ impl GoldenRetriever {
             append_weight,
             retract_count,
             annotate_count,
-            dominant_plan: dominant.map(|m| m.plan_signature.clone()),
+            dominant_plan,
         }
     }
 }

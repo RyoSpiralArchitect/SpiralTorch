@@ -367,9 +367,16 @@ route = session.atlas_route(limit=6)
 print("atlas history", route.length, [frame.timestamp for frame in route.frames])
 
 summary = session.atlas_route_summary(limit=6)
-print("atlas summary", summary.frames, summary.mean_loop_support)
+print(
+    "atlas summary",
+    summary.frames,
+    summary.mean_loop_support,
+    summary.loop_std,
+    summary.collapse_trend,
+    summary.z_signal_trend,
+)
 for district in summary.districts():
-    print("summary", district.name, district.coverage, district.delta)
+    print("summary", district.name, district.coverage, district.delta, district.std_dev)
 if summary.maintainer_status:
     print("maintainer", summary.maintainer_status, summary.maintainer_diagnostic)
 ```

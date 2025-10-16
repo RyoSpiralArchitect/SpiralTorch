@@ -53,6 +53,11 @@ impl GraphConsensusBridge {
     /// `Ok(None)` if the tracer has not recorded any layers since the previous
     /// call.
     pub fn digest(&self, baseline: &BandEnergy) -> PureResult<Option<GraphConsensusDigest>> {
+        let mut tracer = self
+            .tracer
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let reports = tracer.drain();
         let mut tracer = self.tracer.lock().map_err(|_| TensorError::InvalidValue {
             label: "graph flow tracer poisoned",
         })?;
@@ -235,6 +240,16 @@ mod tests {
         };
         tracer
             .lock()
+            .map(|mut guard| guard.begin_layer("gnn::conv1", -1.0, sample_flows(0.5)))
+            .unwrap_or_else(|poison| {
+                poison
+                    .into_inner()
+                    .begin_layer("gnn::conv1", -1.0, sample_flows(0.5))
+            });
+        tracer
+            .lock()
+            .map(|mut guard| guard.record_weight_update(0.1, Some(0.05)))
+            .unwrap_or_else(|poison| poison.into_inner().record_weight_update(0.1, Some(0.05)));
             .unwrap()
             .begin_layer("gnn::conv1", -1.0, sample_flows(0.5));
         tracer.lock().unwrap().record_weight_update(0.1, Some(0.05));

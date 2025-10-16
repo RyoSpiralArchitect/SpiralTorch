@@ -6,6 +6,9 @@ use st_core::backend::wgpu_heuristics::Choice;
 use wasm_bindgen::prelude::*;
 
 use crate::fft::WasmFftPlan;
+use st_core::backend::wgpu_heuristics::{self, Choice};
+use wasm_bindgen::prelude::*;
+
 use crate::utils::js_error;
 
 #[wasm_bindgen]
@@ -107,6 +110,18 @@ pub fn base_choice_js(rows: u32, cols: u32, k: u32, subgroup: bool) -> Result<Js
         k as usize,
         subgroup,
     ))
+}
+
+/// Emit the auto-generated WGSL kernel using the native heuristics pipeline.
+#[wasm_bindgen]
+pub fn auto_fft_wgsl(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<String> {
+    wgpu_heuristics::auto_fft_wgsl(rows, cols, k, subgroup)
+}
+
+/// Emit the SpiralK hint associated with the generated WGSL kernel.
+#[wasm_bindgen]
+pub fn auto_fft_spiralk(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<String> {
+    wgpu_heuristics::auto_fft_spiralk(rows, cols, k, subgroup)
 }
 
 fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> Choice {

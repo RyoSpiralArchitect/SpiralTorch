@@ -4,6 +4,17 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::automation::{DesireAutomatedStep, DesireAutomation, DesireRewriteTrigger};
+use super::desire::{DesirePhase, DesireSolution, DesireWeights};
+use super::geometry::ConceptHint;
+use super::logbook::{DesireLogReplay, DesireLogbook};
+use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+use crate::schedule::BandEnergy;
+use crate::PureResult;
+use st_tensor::pure::TensorError;
+use std::cmp::Ordering;
+use crate::roundtable::RoundtableNode;
+use crate::{RoundtableConfig, RoundtableSchedule};
+use super::automation::{DesireAutomatedStep, DesireAutomation, DesireRewriteTrigger};
 use super::desire::{DesirePhase, DesireWeights};
 use super::geometry::ConceptHint;
 use super::logbook::{DesireLogReplay, DesireLogbook};
@@ -15,18 +26,29 @@ use st_core::ecosystem::{
     RoundtableSummary,
 };
 use st_core::ops::rank_entry::RankPlan;
+use st_core::util::math::{ramanujan_pi, LeechProjector};
 use st_tensor::pure::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
+use std::collections::HashMap;
+use std::time::{Instant, SystemTime};
 use std::collections::HashMap;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(feature = "psi")]
+use st_core::telemetry::hub::{self, SoftlogicZFeedback};
+#[cfg(feature = "psi")]
+use st_core::telemetry::psi::{PsiComponent, PsiEvent, PsiReading};
+
+/// Sink interface used by [`DesirePipeline`] to braid automation steps into
+/// external systems.
+pub trait DesirePipelineSink: Send {
+    /// Receives every automated step alongside the wall-clock timestamp that
+    /// was supplied to the pipeline.
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()>;
+
     /// Receives emitted rewrite triggers. Implementations can override this to
     /// react without duplicating persistence if the sink already captured the
     /// step in [`Self::on_step`].
-/// Sink interface used by [`DesirePipeline`] to braid automation steps into external systems.
-pub trait DesirePipelineSink: Send {
-    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()>;
-
     fn on_trigger(
         &mut self,
         _trigger: &DesireRewriteTrigger,
@@ -162,6 +184,12 @@ impl DesirePipelineBuilder {
         self
     }
 
+    #[cfg(feature = "psi")]
+    pub fn with_psi_bridge(mut self, bridge: &DesirePsiBridge) -> Self {
+        self.sinks.push(Box::new(bridge.clone()));
+        self
+    }
+
     pub fn build(self) -> DesirePipeline {
         DesirePipeline {
             automation: self.automation,
@@ -217,6 +245,11 @@ impl DesirePipeline {
     }
 
     pub fn attach_graph_bridge(&mut self, bridge: &DesireGraphBridge) {
+        self.sinks.push(Box::new(bridge.clone()));
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn attach_psi_bridge(&mut self, bridge: &DesirePsiBridge) {
         self.sinks.push(Box::new(bridge.clone()));
     }
 
@@ -550,6 +583,328 @@ impl DesirePipelineSink for DesireTrainerBridge {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct DesireGraphEvent {
+    pub timestamp: SystemTime,
+    pub solution: DesireSolution,
+    pub trigger: Option<DesireRewriteTrigger>,
+    pub digest: Option<GraphConsensusDigest>,
+}
+
+#[derive(Clone)]
+pub struct DesireGraphBridge {
+    bridge: GraphConsensusBridge,
+    baseline: BandEnergy,
+    shared: Arc<Mutex<Vec<DesireGraphEvent>>>,
+}
+
+impl DesireGraphBridge {
+    pub fn new(bridge: GraphConsensusBridge, baseline: BandEnergy) -> Self {
+        Self {
+            bridge,
+            baseline,
+            shared: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn baseline(&self) -> BandEnergy {
+        self.baseline
+    }
+
+    pub fn len(&self) -> usize {
+        match self.shared.lock() {
+            Ok(guard) => guard.len(),
+            Err(_) => 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn drain(&self) -> PureResult<Vec<DesireGraphEvent>> {
+        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire graph bridge poisoned",
+        })?;
+        Ok(std::mem::take(&mut *guard))
+    }
+
+    pub fn drain_summary(&self) -> PureResult<Option<DesireGraphSummary>> {
+        let events = self.drain()?;
+        if events.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(DesireGraphSummary::from_events(&events)))
+    }
+}
+
+impl DesirePipelineSink for DesireGraphBridge {
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
+        let digest = self.bridge.digest(&self.baseline)?;
+        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire graph bridge poisoned",
+        })?;
+        guard.push(DesireGraphEvent {
+            timestamp,
+            solution: step.solution.clone(),
+            trigger: step.trigger.clone(),
+            digest,
+        });
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DesireGraphSummary {
+    pub steps: usize,
+    pub triggers: usize,
+    pub total_graph_energy: f32,
+    pub mean_entropy: f32,
+    pub layer_support: Vec<(String, f32)>,
+    pub last_timestamp: SystemTime,
+}
+
+impl DesireGraphSummary {
+    pub fn from_events(events: &[DesireGraphEvent]) -> Self {
+        let mut total_entropy = 0.0f32;
+        let mut total_graph_energy = 0.0f32;
+        let mut triggers = 0usize;
+        let mut digest_count = 0usize;
+        let mut layer_accumulator: HashMap<String, f32> = HashMap::new();
+        let mut last_timestamp = UNIX_EPOCH;
+
+        for event in events {
+            total_entropy += event.solution.entropy;
+            if event.trigger.is_some() {
+                triggers += 1;
+            }
+            if event.timestamp > last_timestamp {
+                last_timestamp = event.timestamp;
+            }
+            if let Some(digest) = &event.digest {
+                digest_count = digest_count.saturating_add(1);
+                total_graph_energy += digest.graph_energy;
+                for (layer, share) in &digest.layer_shares {
+                    *layer_accumulator.entry(layer.clone()).or_insert(0.0) += *share;
+                }
+            }
+        }
+
+        if digest_count > 0 {
+            for value in layer_accumulator.values_mut() {
+                *value /= digest_count as f32;
+            }
+        }
+
+        let mut layer_support: Vec<(String, f32)> = layer_accumulator.into_iter().collect();
+        layer_support
+            .sort_by(|left, right| right.1.partial_cmp(&left.1).unwrap_or(Ordering::Equal));
+
+        let steps = events.len();
+        let mean_entropy = if steps == 0 {
+            0.0
+        } else {
+            total_entropy / steps as f32
+        };
+
+        Self {
+            steps,
+            triggers,
+            total_graph_energy,
+            mean_entropy,
+            layer_support,
+            last_timestamp,
+        }
+    }
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct DesirePsiEvent {
+    pub timestamp: SystemTime,
+    pub solution: DesireSolution,
+    pub trigger: Option<DesireRewriteTrigger>,
+    pub reading: Option<PsiReading>,
+    pub z_feedback: Option<SoftlogicZFeedback>,
+    pub events: Vec<PsiEvent>,
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone)]
+pub struct DesirePsiBridge {
+    shared: Arc<Mutex<Vec<DesirePsiEvent>>>,
+}
+
+#[cfg(feature = "psi")]
+impl DesirePsiBridge {
+    pub fn new() -> Self {
+        Self {
+            shared: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self.shared.lock() {
+            Ok(guard) => guard.len(),
+            Err(_) => 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn drain(&self) -> PureResult<Vec<DesirePsiEvent>> {
+        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire psi bridge poisoned",
+        })?;
+        Ok(std::mem::take(&mut *guard))
+    }
+
+    pub fn drain_summary(&self) -> PureResult<Option<DesirePsiSummary>> {
+        let events = self.drain()?;
+        if events.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(DesirePsiSummary::from_events(&events)))
+    }
+}
+
+#[cfg(feature = "psi")]
+impl DesirePipelineSink for DesirePsiBridge {
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
+        let reading = hub::get_last_psi();
+        let events = hub::get_last_psi_events();
+        let z_feedback = hub::get_softlogic_z();
+        let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire psi bridge poisoned",
+        })?;
+        guard.push(DesirePsiEvent {
+            timestamp,
+            solution: step.solution.clone(),
+            trigger: step.trigger.clone(),
+            reading,
+            z_feedback,
+            events,
+        });
+        Ok(())
+    }
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct DesirePsiSummary {
+    pub steps: usize,
+    pub triggers: usize,
+    pub psi_samples: usize,
+    pub mean_psi_total: f32,
+    pub component_means: HashMap<PsiComponent, f32>,
+    pub threshold_crossings: HashMap<PsiComponent, (usize, usize)>,
+    pub mean_entropy: f32,
+    pub mean_temperature: f32,
+    pub mean_hypergrad_penalty: f32,
+    pub mean_z_signal: f32,
+    pub last_timestamp: SystemTime,
+}
+
+#[cfg(feature = "psi")]
+impl DesirePsiSummary {
+    pub fn from_events(events: &[DesirePsiEvent]) -> Self {
+        let mut triggers = 0usize;
+        let mut psi_samples = 0usize;
+        let mut psi_total = 0.0f32;
+        let mut component_totals: HashMap<PsiComponent, f32> = HashMap::new();
+        let mut component_counts: HashMap<PsiComponent, usize> = HashMap::new();
+        let mut threshold_crossings: HashMap<PsiComponent, (usize, usize)> = HashMap::new();
+        let mut entropy_sum = 0.0f32;
+        let mut temperature_sum = 0.0f32;
+        let mut penalty_sum = 0.0f32;
+        let mut z_sum = 0.0f32;
+        let mut z_samples = 0usize;
+        let mut last_timestamp = UNIX_EPOCH;
+
+        for event in events {
+            if event.trigger.is_some() {
+                triggers += 1;
+            }
+            entropy_sum += event.solution.entropy;
+            temperature_sum += event.solution.temperature;
+            penalty_sum += event.solution.hypergrad_penalty.max(0.0);
+            if event.timestamp > last_timestamp {
+                last_timestamp = event.timestamp;
+            }
+            if let Some(reading) = &event.reading {
+                psi_samples = psi_samples.saturating_add(1);
+                psi_total += reading.total;
+                for (component, value) in reading.breakdown.iter() {
+                    *component_totals.entry(*component).or_insert(0.0) += *value;
+                    *component_counts.entry(*component).or_insert(0) += 1;
+                }
+            }
+            if let Some(feedback) = event.z_feedback {
+                z_samples = z_samples.saturating_add(1);
+                z_sum += feedback.z_signal;
+            }
+            for psi_event in &event.events {
+                if let PsiEvent::ThresholdCross { component, up, .. } = psi_event {
+                    let entry = threshold_crossings.entry(*component).or_insert((0, 0));
+                    if *up {
+                        entry.0 = entry.0.saturating_add(1);
+                    } else {
+                        entry.1 = entry.1.saturating_add(1);
+                    }
+                }
+            }
+        }
+
+        let steps = events.len();
+        let mean_entropy = if steps == 0 {
+            0.0
+        } else {
+            entropy_sum / steps as f32
+        };
+        let mean_temperature = if steps == 0 {
+            0.0
+        } else {
+            temperature_sum / steps as f32
+        };
+        let mean_hypergrad_penalty = if steps == 0 {
+            0.0
+        } else {
+            penalty_sum / steps as f32
+        };
+        let mean_psi_total = if psi_samples == 0 {
+            0.0
+        } else {
+            psi_total / psi_samples as f32
+        };
+        let mean_z_signal = if z_samples == 0 {
+            0.0
+        } else {
+            z_sum / z_samples as f32
+        };
+
+        let mut component_means = HashMap::new();
+        for (component, total) in component_totals.into_iter() {
+            let count = component_counts.get(&component).copied().unwrap_or(0);
+            if count > 0 {
+                component_means.insert(component, total / count as f32);
+            }
+        }
+
+        Self {
+            steps,
+            triggers,
+            psi_samples,
+            mean_psi_total,
+            component_means,
+            threshold_crossings,
+            mean_entropy,
+            mean_temperature,
+            mean_hypergrad_penalty,
+            mean_z_signal,
+            last_timestamp,
+        }
 #[derive(Debug)]
 pub enum PipelineError {
     EncoderMissing { pipeline: String },
@@ -563,6 +918,9 @@ pub struct LanguagePipelineBuilder {
     name: String,
     tags: HashMap<String, String>,
     encoder: Option<LanguageWaveEncoder>,
+    ramanujan_iterations: usize,
+    leech_rank: usize,
+    leech_weight: f64,
 }
 
 #[derive(Clone)]
@@ -571,6 +929,8 @@ pub struct LanguagePipeline {
     registry: &'static EcosystemRegistry,
     tags: HashMap<String, String>,
     encoder: Option<LanguageWaveEncoder>,
+    ramanujan_pi: f64,
+    leech_projector: LeechProjector,
 }
 
 impl LanguagePipelineBuilder {
@@ -579,6 +939,9 @@ impl LanguagePipelineBuilder {
             name: name.into(),
             tags: HashMap::new(),
             encoder: None,
+            ramanujan_iterations: 3,
+            leech_rank: 24,
+            leech_weight: 0.35,
         }
     }
 
@@ -592,12 +955,28 @@ impl LanguagePipelineBuilder {
         self
     }
 
+    pub fn with_ramanujan_iterations(mut self, iterations: usize) -> Self {
+        self.ramanujan_iterations = iterations.max(1);
+        self
+    }
+
+    pub fn with_leech_lattice(mut self, rank: usize, weight: f64) -> Self {
+        self.leech_rank = rank.max(1);
+        self.leech_weight = weight.max(0.0);
+        self
+    }
+
+    pub fn build(self) -> LanguagePipeline {
+        let ramanujan_pi = ramanujan_pi(self.ramanujan_iterations);
+        let leech_projector = LeechProjector::new(self.leech_rank, self.leech_weight);
     pub fn build(self) -> LanguagePipeline {
         LanguagePipeline {
             name: self.name,
             registry: EcosystemRegistry::global(),
             tags: self.tags,
             encoder: self.encoder,
+            ramanujan_pi,
+            leech_projector,
         }
     }
 }
@@ -670,6 +1049,14 @@ impl LanguagePipeline {
             issued_at: SystemTime::now(),
         };
 
+        let geodesic = (rows as f64).hypot(cols as f64);
+        let leech_density = self.leech_projector.enrich(geodesic);
+        let ramanujan_ratio = if self.ramanujan_pi > f64::EPSILON {
+            geodesic / self.ramanujan_pi
+        } else {
+            0.0
+        };
+
         let mut extra_tags = vec![("autopilot".to_string(), autopilot_enabled.to_string())];
         if let Some(dist) = &distribution_summary {
             extra_tags.push(("distribution_mode".to_string(), dist.mode.clone()));
@@ -715,6 +1102,24 @@ impl LanguagePipeline {
                     config.here_tolerance as f64,
                 )
                 .with_unit("ratio"),
+                &extra_tags,
+            ),
+        );
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("roundtable.geodesic.norm", geodesic).with_unit("geodesic"),
+            &extra_tags,
+        ));
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("roundtable.geodesic.leech_density", leech_density)
+                    .with_unit("density"),
+                &extra_tags,
+            ),
+        );
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("roundtable.geodesic.ramanujan_ratio", ramanujan_ratio)
+                    .with_unit("ratio"),
                 &extra_tags,
             ),
         );
@@ -900,6 +1305,18 @@ impl LanguagePipeline {
         let elapsed_ms = start.elapsed().as_secs_f64() * 1e3;
         let chars = text.chars().count() as f64;
         let (_, cols) = tensor.shape();
+        let geodesic = tensor
+            .data()
+            .iter()
+            .map(|value| (*value as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let leech_density = self.leech_projector.enrich(geodesic);
+        let ramanujan_ratio = if self.ramanujan_pi > f64::EPSILON {
+            geodesic / self.ramanujan_pi
+        } else {
+            0.0
+        };
 
         let extras = vec![("mode".to_string(), "z_space".to_string())];
         self.registry.record_metric(self.apply_tags(
@@ -925,6 +1342,24 @@ impl LanguagePipeline {
             self.apply_tags(
                 MetricSample::new("language.encode.temperature", encoder.temperature() as f64)
                     .with_unit("temperature"),
+                &extras,
+            ),
+        );
+        self.registry.record_metric(self.apply_tags(
+            MetricSample::new("language.encode.zspace.geodesic", geodesic).with_unit("geodesic"),
+            &extras,
+        ));
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("language.encode.zspace.leech_density", leech_density)
+                    .with_unit("density"),
+                &extras,
+            ),
+        );
+        self.registry.record_metric(
+            self.apply_tags(
+                MetricSample::new("language.encode.zspace.ramanujan_ratio", ramanujan_ratio)
+                    .with_unit("ratio"),
                 &extras,
             ),
         );
@@ -1049,6 +1484,10 @@ impl LanguagePipeline {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::plan::RankPlanner;
+    use st_core::backend::device_caps::DeviceCaps;
+    use std::sync::{Mutex, OnceLock};
     use super::super::automation::DesireAutomation;
     use super::super::desire::{constant, warmup, DesireLagrangian};
     use super::super::geometry::{
@@ -1060,11 +1499,17 @@ mod tests {
     use crate::schedule::BandEnergy;
     use st_core::config::self_rewrite::SelfRewriteCfg;
     use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
+    #[cfg(feature = "psi")]
+    use std::collections::HashMap;
     use std::collections::HashSet;
     use std::sync::{mpsc::channel, Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime};
     use tempfile::tempdir;
 
+    #[cfg(feature = "psi")]
+    use st_core::telemetry::hub::{self, SoftlogicZFeedback};
+    #[cfg(feature = "psi")]
+    use st_core::telemetry::psi::{PsiComponent, PsiEvent, PsiReading};
     use super::super::automation::DesireAutomation;
     use super::super::desire::{constant, warmup, DesireLagrangian};
     use super::super::geometry::{
@@ -1125,6 +1570,33 @@ mod tests {
     }
 
     #[test]
+    fn encode_z_space_records_geodesic_metrics() {
+        let _lock = registry_guard().lock().unwrap();
+        let registry = EcosystemRegistry::global();
+        registry.drain();
+        let encoder = LanguageWaveEncoder::new(-0.5, 0.5).unwrap();
+        let pipeline = LanguagePipeline::builder("language-z")
+            .with_encoder(encoder)
+            .with_leech_lattice(12, 0.8)
+            .with_ramanujan_iterations(4)
+            .build();
+        let tensor = pipeline.encode_z_space("pi leech spiral").unwrap();
+        assert_eq!(tensor.shape().0, 1);
+
+        let report = registry.drain();
+        assert!(report
+            .metrics
+            .iter()
+            .any(|m| m.name == "language.encode.zspace.leech_density"));
+        assert!(report
+            .metrics
+            .iter()
+            .any(|m| m.name == "language.encode.zspace.ramanujan_ratio"));
+        assert_eq!(report.connectors.len(), 1);
+        assert_eq!(report.connectors[0].stage, "encode");
+    }
+
+    #[test]
     fn roundtable_records_summary_and_metrics() {
         let _lock = registry_guard().lock().unwrap();
         let registry = EcosystemRegistry::global();
@@ -1139,6 +1611,14 @@ mod tests {
         let report = registry.drain();
         assert_eq!(report.roundtables.len(), 1);
         assert!(report.metrics.iter().any(|m| m.name == "roundtable.rows"));
+        assert!(report
+            .metrics
+            .iter()
+            .any(|m| m.name == "roundtable.geodesic.ramanujan_ratio"));
+        assert!(report
+            .metrics
+            .iter()
+            .any(|m| m.name == "roundtable.geodesic.leech_density"));
         assert_eq!(report.connectors.len(), 1);
         let connector = &report.connectors[0];
         assert_eq!(connector.stage, "roundtable");
@@ -1399,6 +1879,67 @@ mod tests {
         assert!(summary.total_graph_energy > 0.0);
         assert!(summary.mean_entropy.is_finite());
         assert!(!summary.layer_support.is_empty());
+        assert!(bridge.drain_summary().unwrap().is_none());
+    }
+
+    #[cfg(feature = "psi")]
+    #[test]
+    fn psi_bridge_collects_telemetry() {
+        let automation = build_automation();
+        let bridge = DesirePsiBridge::new();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_psi_bridge(&bridge)
+            .build();
+
+        let logits = vec![2.0, 0.7];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..4 {
+            let mut breakdown = HashMap::new();
+            breakdown.insert(PsiComponent::LOSS, 0.8 + step as f32 * 0.1);
+            breakdown.insert(PsiComponent::GRAD_NORM, 0.3 + step as f32 * 0.05);
+            let reading = PsiReading {
+                total: breakdown.values().copied().sum(),
+                breakdown,
+                step: step as u64,
+            };
+            let psi_event = PsiEvent::ThresholdCross {
+                component: PsiComponent::LOSS,
+                value: reading.total,
+                threshold: 0.7,
+                up: step % 2 == 0,
+                step: step as u64,
+            };
+            hub::set_last_psi(&reading);
+            hub::set_last_psi_events(&[psi_event]);
+            hub::set_softlogic_z(SoftlogicZFeedback {
+                psi_total: reading.total,
+                weighted_loss: 0.3 + step as f32 * 0.02,
+                band_energy: (0.4, 0.3, 0.3),
+                drift: 0.05,
+                z_signal: 0.1 * step as f32,
+            });
+
+            let now = start + Duration::from_millis((step * 120) as u64);
+            let timestamp = anchor + Duration::from_millis((step * 120) as u64);
+            pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+        }
+
+        assert_eq!(bridge.len(), 4);
+        let summary = bridge.drain_summary().unwrap().unwrap();
+        assert_eq!(summary.steps, 4);
+        assert!(summary.psi_samples >= 4);
+        assert!(summary.mean_psi_total > 0.0);
+        assert!(summary.mean_entropy.is_finite());
+        assert!(summary.mean_temperature.is_finite());
+        assert!(summary.mean_z_signal.is_finite());
+        assert!(summary.component_means.get(&PsiComponent::LOSS).is_some());
+        assert!(summary
+            .threshold_crossings
+            .contains_key(&PsiComponent::LOSS));
         assert!(bridge.drain_summary().unwrap().is_none());
     }
 }

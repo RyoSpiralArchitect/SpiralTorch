@@ -357,6 +357,34 @@ if let Some(summary) = graph_bridge.drain_summary()? {
 }
 ```
 
+ψ telemetry can ride the same braid. Attach a `DesirePsiBridge` to fold the
+latest `PsiMeter` readings, SoftLogic Z feedback, and threshold crossings into
+the automation stream. The bridge can be drained directly or wired into
+`ModuleTrainer::enable_desire_psi_bridge` so every optimisation step records the
+aggregated ψ view alongside desire entropy and graph consensus.【F:crates/st-nn/src/language/pipeline.rs†L121-L286】【F:crates/st-nn/src/trainer.rs†L39-L66】【F:crates/st-core/src/telemetry/hub.rs†L1-L72】
+
+```rust
+use st_core::telemetry::hub;
+use st_core::telemetry::psi::{PsiComponent, PsiReading};
+use st_nn::language::{DesirePipeline, DesirePsiBridge};
+
+let psi_bridge = DesirePsiBridge::new();
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_psi_bridge(&psi_bridge)
+    .build();
+
+// seed hub telemetry before each step (normally done by ModuleTrainer)
+let mut breakdown = std::collections::HashMap::new();
+breakdown.insert(PsiComponent::LOSS, 0.9);
+let reading = PsiReading { total: 0.9, breakdown, step: 1 };
+hub::set_last_psi(&reading);
+
+let step = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(summary) = psi_bridge.drain_summary()? {
+    println!("ψ mean total: {:.3}", summary.mean_psi_total);
+}
+```
+
 The result is a single Rust-native control surface that marries KL control,
 Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
 language modules, rewrite monads, or SpiralK trainers without bespoke Python
@@ -501,6 +529,15 @@ condenses the same window into aggregate trends and maintainer hints:
 
 ```python
 summary = session.atlas_route_summary(limit=12)
+print(
+    summary.frames,
+    summary.mean_loop_support,
+    summary.loop_std,
+    summary.collapse_trend,
+    summary.z_signal_trend,
+)
+for district in summary.districts():
+    print(district.name, district.coverage, district.delta, district.std_dev)
 print(summary.frames, summary.mean_loop_support)
 for district in summary.districts():
     print(district.name, district.coverage, district.delta)
@@ -509,8 +546,10 @@ if summary.maintainer_status:
 ```
 
 The summary keeps track of recent clamp/pressure recommendations, script hints,
-and average loop support so dashboards can surface the “city heartbeat” without
-iterating over each frame.
+and now reports **loop volatility** (`loop_std`) alongside collapse/Z drift so
+dashboards can surface the “city heartbeat” without iterating over each frame.
+District summaries additionally carry a standard deviation so you can flag
+which neighbourhoods are swinging the hardest even when their means stay flat.
 
 ### Self-maintaining feedback loops
 
@@ -655,6 +694,25 @@ Golden retrievers and trainers use to retune push intervals and summary windows
 without guessing at scaling factors. Trainers expose both
 `last_blackcat_pulse()` and `last_blackcat_directive()` so downstream tooling
 can inspect exactly how the synergy evolved during the run.
+
+Blackcat now keeps a running scoreboard for every plan signature it moderates.
+Each entry tracks observation counts, mean support, reward, ψ, and confidence so
+dashboards can highlight sustained winners instead of relying on a single
+minute. Access the aggregated view with `ModuleTrainer::blackcat_scoreboard()`
+from Rust or call `trainer.blackcat_scoreboard()` in Python to retrieve a list
+of dictionaries (plan signature, script hint, averages, and timestamps). The
+scoreboard honours the moderator history window and can be capped via
+`BlackcatModerator::set_scoreboard_limit()` when you only care about the top-N
+plans.
+
+Need runtime telemetry without wiring into a dashboard? The embedded Blackcat
+runtime now keeps exponential moving averages for step time, memory pressure,
+retry rate, and the reward distribution. Call
+`ModuleTrainer::blackcat_runtime_stats()` to fetch a
+`BlackcatRuntimeStats` snapshot that includes the latest reward mean/stddev and
+all tracked extra metrics. Python callers can access the same data via
+`trainer.blackcat_runtime_stats()`, which returns a rich object with dict-like
+extras for quick printing or logging.
 
 `GoldenRetrieverConfig` picked up `synergy_bias` and `reinforcement_bias` knobs
 to tilt how aggressively the aggregated metrics should respond to support vs.
@@ -1142,6 +1200,14 @@ for op in trainer.heuristics_log().entries() {
 }
 for minute in trainer.blackcat_minutes() {
     println!("moderator: {} -> {:?} (support {:.2})", minute.plan_signature, minute.winner, minute.support);
+}
+for entry in trainer.blackcat_scoreboard() {
+    println!(
+        "scoreboard: {} obs={} reward={:.3}",
+        entry.plan_signature,
+        entry.observations,
+        entry.mean_reward
+    );
 }
 ```
 

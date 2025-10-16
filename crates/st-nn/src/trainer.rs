@@ -22,6 +22,8 @@
 // ============================================================================
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+#[cfg(feature = "psi")]
+use crate::language::{DesirePsiBridge, DesirePsiSummary};
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 use crate::language::{DesireTrainerBridge, DesireTrainerSummary};
@@ -29,8 +31,8 @@ use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
 use crate::roundtable::{
-    simulate_proposal_locally, BlackcatModerator, DistConfig, GlobalProposal, HeurOpKind,
-    HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
+    simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, GlobalProposal,
+    HeurOpKind, HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::{PureResult, Tensor};
@@ -44,7 +46,8 @@ use st_core::ecosystem::{
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::ops::rank_entry::RankPlan;
 use st_core::runtime::autopilot::Autopilot;
-use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
+use st_core::runtime::blackcat::{BlackCatRuntime, BlackcatRuntimeStats, StepMetrics};
+use st_core::telemetry::hub::{self, SoftlogicZFeedback};
 #[cfg(feature = "collapse")]
 use st_core::telemetry::hub::CollapsePulse;
 use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
@@ -74,6 +77,8 @@ pub struct ModuleTrainer {
     rewrite_budget: Option<RewriteBudget>,
     softlogic: SoftLogicFlex,
     desire_bridge: Option<DesireTrainerBridge>,
+    #[cfg(feature = "psi")]
+    desire_psi_bridge: Option<DesirePsiBridge>,
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
@@ -288,6 +293,11 @@ impl ModuleTrainer {
             rewrite_budget: None,
             softlogic: SoftLogicFlex::new(),
             desire_bridge: None,
+            #[cfg(feature = "psi")]
+            desire_psi_bridge: None,
+            graph_bridge: None,
+            graph_pending: None,
+            graph_last_hint: None,
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
@@ -319,6 +329,11 @@ impl ModuleTrainer {
     /// aggregated summaries without bespoke glue.
     pub fn enable_desire_pipeline(&mut self, bridge: DesireTrainerBridge) {
         self.desire_bridge = Some(bridge);
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn enable_desire_psi_bridge(&mut self, bridge: DesirePsiBridge) {
+        self.desire_psi_bridge = Some(bridge);
     }
 
     /// Returns the SpiralK hint generated from the most recently applied graph
@@ -507,6 +522,19 @@ impl ModuleTrainer {
             .as_ref()
             .map(|m| m.minutes().to_vec())
             .unwrap_or_default()
+    }
+
+    /// Returns the aggregated scoreboard derived from the local Blackcat moderator.
+    pub fn blackcat_scoreboard(&self) -> Vec<BlackcatScore> {
+        self.blackcat_moderator
+            .as_ref()
+            .map(|m| m.scoreboard())
+            .unwrap_or_default()
+    }
+
+    /// Returns aggregated stats tracked by the embedded Blackcat runtime, when available.
+    pub fn blackcat_runtime_stats(&self) -> Option<BlackcatRuntimeStats> {
+        self.blackcat.as_ref().map(|rt| rt.stats())
     }
 
     /// Replays moderator minutes so the embedded Blackcat runtime can stay aligned.
@@ -926,6 +954,12 @@ impl ModuleTrainer {
                     Self::insert_desire_summary(&mut extra, &summary);
                 }
             }
+            #[cfg(feature = "psi")]
+            if let Some(bridge) = self.desire_psi_bridge.as_ref() {
+                if let Some(summary) = bridge.drain_summary()? {
+                    Self::insert_desire_psi_summary(&mut extra, &summary);
+                }
+            }
             if let Some(ref digest) = graph_adjustment {
                 extra.insert("graph_share".to_string(), digest.barycentric[3] as f64);
                 extra.insert(
@@ -966,6 +1000,7 @@ impl ModuleTrainer {
                     let (reading, events) = meter.update(&input_snapshot);
                     psi_snapshot = Some(reading.clone());
                     hub::set_last_psi(&reading);
+                    hub::set_last_psi_events(&events);
                     extra.insert("psi_total".to_string(), reading.total as f64);
                     for (component, value) in reading.breakdown.iter() {
                         let key = format!("psi_{}", component);
@@ -1246,6 +1281,43 @@ impl ModuleTrainer {
     }
 
     #[cfg(feature = "psi")]
+    fn insert_desire_psi_summary(target: &mut HashMap<String, f64>, summary: &DesirePsiSummary) {
+        target.insert("desire_psi_steps".to_string(), summary.steps as f64);
+        target.insert("desire_psi_triggers".to_string(), summary.triggers as f64);
+        target.insert("desire_psi_samples".to_string(), summary.psi_samples as f64);
+        target.insert(
+            "desire_psi_mean_total".to_string(),
+            summary.mean_psi_total as f64,
+        );
+        target.insert(
+            "desire_psi_mean_entropy".to_string(),
+            summary.mean_entropy as f64,
+        );
+        target.insert(
+            "desire_psi_mean_temperature".to_string(),
+            summary.mean_temperature as f64,
+        );
+        target.insert(
+            "desire_psi_mean_penalty".to_string(),
+            summary.mean_hypergrad_penalty as f64,
+        );
+        target.insert(
+            "desire_psi_mean_z".to_string(),
+            summary.mean_z_signal as f64,
+        );
+        for (component, mean) in summary.component_means.iter() {
+            let key = format!("desire_psi_component_{}_mean", component);
+            target.insert(key, *mean as f64);
+        }
+        for (component, (up, down)) in summary.threshold_crossings.iter() {
+            let up_key = format!("desire_psi_threshold_{}_up", component);
+            let down_key = format!("desire_psi_threshold_{}_down", component);
+            target.insert(up_key, *up as f64);
+            target.insert(down_key, *down as f64);
+        }
+    }
+
+    #[cfg(feature = "psi")]
     fn bootstrap_psi(&mut self, schedule: &RoundtableSchedule) {
         if self.psi.is_some() || !schedule.psi_enabled() {
             return;
@@ -1455,8 +1527,16 @@ mod tests {
     use crate::loss::MeanSquaredError;
     use crate::roundtable::{HeurOp, HeurOpKind};
     use crate::schedule::RoundtableConfig;
+    #[cfg(feature = "golden")]
+    use crate::CouncilEvidence;
+    use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
+    use st_tensor::pure::topos::OpenCartesianTopos;
+    use std::collections::HashMap;
+    use std::time::SystemTime;
     use crate::CouncilEvidence;
     use st_tensor::pure::topos::OpenCartesianTopos;
+    use std::collections::HashMap;
+    use std::time::SystemTime;
     use std::collections::{HashMap, HashSet};
     use std::time::{Duration, Instant, SystemTime};
 
@@ -1630,6 +1710,34 @@ mod tests {
         assert_eq!(after_third, after_first + proposal.ops.len());
     }
 
+    #[test]
+    fn trainer_exposes_blackcat_runtime_stats() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let mut groups = HashMap::new();
+        groups.insert("tile".to_string(), vec!["a".to_string(), "b".to_string()]);
+        let runtime = BlackCatRuntime::new(
+            ZMetaParams::default(),
+            ChoiceGroups { groups },
+            4,
+            SoftBanditMode::TS,
+            None,
+        );
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_blackcat(runtime);
+        if let Some(rt) = trainer.blackcat.as_mut() {
+            rt.begin_step();
+            let mut metrics = StepMetrics::default();
+            metrics.step_time_ms = 10.0;
+            metrics.mem_peak_mb = 256.0;
+            metrics.retry_rate = 0.05;
+            metrics.extra.insert("grad_norm".into(), 0.4);
+            let _ = rt.post_step(&metrics);
+        }
+        let stats = trainer
+            .blackcat_runtime_stats()
+            .expect("runtime stats available");
+        assert_eq!(stats.steps, 1);
+        assert!(stats.step_time_ms_ema > 0.0);
+        assert_eq!(stats.extras.get("grad_norm").cloned().unwrap(), 0.4);
     fn trainer_consumes_desire_bridge_summary() {
         let caps = DeviceCaps::wgpu(32, true, 256);
         let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
