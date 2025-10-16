@@ -333,15 +333,29 @@ let config = GoldenRetrieverConfig {
     coordinate_blackcat: true,
     exploration_bias: 1.5,
     optimization_boost: 0.75,
+    synergy_bias: 1.25,
+    reinforcement_bias: 1.1,
     ..GoldenRetrieverConfig::default()
 };
 let retriever = GoldenRetriever::new(config, vec![trainer_a, trainer_b])?;
 let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
 assert!(!report.moderator_minutes.is_empty());
 if let Some(pulse) = &report.cooperative_pulse {
+    use std::time::Duration;
     println!(
-        "dominant_plan={:?} exploration_drive={} optimization_gain={}",
-        pulse.dominant_plan, pulse.exploration_drive, pulse.optimization_gain
+        "dominant_plan={:?} exploration={} optimization={} synergy={} reinforcement={}",
+        pulse.dominant_plan,
+        pulse.exploration_drive,
+        pulse.optimization_gain,
+        pulse.synergy_score,
+        pulse.reinforcement_weight
+    );
+    let directive = pulse.directive(Duration::from_secs_f32(2.0), 48);
+    println!(
+        "retune: push_interval={:.2}s summary_window={} reinforcement_weight={:.2}",
+        directive.push_interval.as_secs_f32(),
+        directive.summary_window,
+        directive.reinforcement_weight
     );
 }
 ```
@@ -350,10 +364,27 @@ Every epoch collects the union of moderator minutes and heuristics ops across
 workers, rebroadcasting them before the next round so proposals and soft rules
 stay aligned. With `coordinate_blackcat` flipped on, GoldenRetriever also emits
 an aggregated **GoldenBlackcatPulse** that nudges every worker’s distributed
-node: summary windows widen in proportion to the shared support (fueling
-exploration) while Blackcat’s reward-weighted gain shortens push intervals to
-accelerate consensus. Trainers expose `last_blackcat_pulse()` so downstream
-tooling can inspect exactly how the synergy evolved during the run.
+node. The pulse now captures cooperative synergy (`synergy_score`), the amount
+of shared reinforcement from heuristics and moderator minutes
+(`reinforcement_weight`), confidence-weighted coverage, and raw op-log
+composition. Each pulse can synthesize a `GoldenCooperativeDirective`, which
+Golden retrievers and trainers use to retune push intervals and summary windows
+without guessing at scaling factors. Trainers expose both
+`last_blackcat_pulse()` and `last_blackcat_directive()` so downstream tooling
+can inspect exactly how the synergy evolved during the run.
+
+`GoldenRetrieverConfig` picked up `synergy_bias` and `reinforcement_bias` knobs
+to tilt how aggressively the aggregated metrics should respond to support vs.
+heuristic weight. Bumping `synergy_bias` favours exploration-heavy, confidence
+driven pulses while `reinforcement_bias` amplifies heuristics and reward
+signals when tightening distributed synchronization.
+
+Python callers can read the same signals via
+`spiraltorch.ModuleTrainer.last_blackcat_pulse()` and
+`last_blackcat_directive()`, which yield rich `GoldenBlackcatPulse` and
+`GoldenCooperativeDirective` wrappers. The bindings surface getters for every
+metric alongside a `pulse.directive(baseline_interval, baseline_window)` helper
+so notebooks can mirror the Rust-side retuning logic.
 
 ### SpiralTorchRL (hypergrad policy gradients)
 

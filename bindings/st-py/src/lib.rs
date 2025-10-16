@@ -45,6 +45,8 @@ use st_nn::{
     Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
+#[cfg(feature = "golden")]
+use st_nn::{GoldenBlackcatPulse, GoldenCooperativeDirective};
 use st_rec::{RatingTriple as RecRatingTriple, RecEpochReport, SpiralRecError, SpiralRecommender};
 use st_rl::{EpisodeReport as RlEpisodeReport, SpiralPolicyGradient, SpiralRlError};
 use st_tensor::backend::faer_dense;
@@ -2369,178 +2371,172 @@ impl PyEpochStats {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "LightningStageReport")]
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenCooperativeDirective")]
 #[derive(Clone)]
-struct PyLightningStageReport {
-    inner: NnLightningStageReport,
-    epochs: Vec<PyEpochStats>,
+struct PyGoldenCooperativeDirective {
+    inner: GoldenCooperativeDirective,
 }
 
-impl PyLightningStageReport {
-    fn from_report(inner: NnLightningStageReport) -> Self {
-        let epochs = inner
-            .epochs()
-            .iter()
-            .copied()
-            .map(PyEpochStats::from_stats)
-            .collect();
-        Self { inner, epochs }
+#[cfg(feature = "golden")]
+impl PyGoldenCooperativeDirective {
+    fn from_inner(inner: GoldenCooperativeDirective) -> Self {
+        Self { inner }
     }
 }
 
+#[cfg(feature = "golden")]
 #[pymethods]
-impl PyLightningStageReport {
+impl PyGoldenCooperativeDirective {
     #[getter]
-    fn label(&self) -> Option<String> {
-        self.inner.label().map(|label| label.to_string())
+    fn push_interval(&self) -> f32 {
+        self.inner.push_interval.as_secs_f32()
     }
 
     #[getter]
-    fn rows(&self) -> u32 {
-        self.inner.config().rows()
+    fn summary_window(&self) -> usize {
+        self.inner.summary_window
     }
 
     #[getter]
-    fn cols(&self) -> u32 {
-        self.inner.config().cols()
+    fn exploration_priority(&self) -> f32 {
+        self.inner.exploration_priority
     }
 
     #[getter]
-    fn auto_prepare(&self) -> bool {
-        self.inner.config().auto_prepare()
-    }
-
-    #[getter]
-    fn top_k(&self) -> u32 {
-        self.inner.config().roundtable().top_k
-    }
-
-    #[getter]
-    fn mid_k(&self) -> u32 {
-        self.inner.config().roundtable().mid_k
-    }
-
-    #[getter]
-    fn bottom_k(&self) -> u32 {
-        self.inner.config().roundtable().bottom_k
-    }
-
-    #[getter]
-    fn here_tolerance(&self) -> f32 {
-        self.inner.config().roundtable().here_tolerance
-    }
-
-    #[cfg(feature = "psychoid")]
-    #[getter]
-    fn psychoid(&self) -> bool {
-        self.inner.config().roundtable().psychoid_enabled
-    }
-
-    #[cfg(feature = "psychoid")]
-    #[getter]
-    fn psychoid_log(&self) -> bool {
-        self.inner.config().roundtable().psychoid_log
-    }
-
-    #[cfg(feature = "psi")]
-    #[getter]
-    fn psi(&self) -> bool {
-        self.inner.config().roundtable().psi_enabled
-    }
-
-    #[cfg(feature = "collapse")]
-    #[getter]
-    fn collapse(&self) -> bool {
-        self.inner.config().roundtable().collapse_enabled
-    }
-
-    #[getter]
-    fn epochs(&self) -> Vec<PyEpochStats> {
-        self.epochs.clone()
-    }
-
-    #[getter]
-    fn total_batches(&self) -> usize {
-        self.inner.total_batches()
-    }
-
-    fn best_epoch(&self) -> Option<PyEpochStats> {
-        self.inner.best_epoch().map(PyEpochStats::from_stats)
+    fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
     }
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "LightningStageReport(label={:?}, epochs={}, total_batches={})",
-            self.label(),
-            self.epochs.len(),
-            self.total_batches()
+            "GoldenCooperativeDirective(push_interval={:.3}, summary_window={}, exploration_priority={:.3}, reinforcement_weight={:.3})",
+            self.push_interval(),
+            self.summary_window(),
+            self.exploration_priority(),
+            self.reinforcement_weight()
         ))
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "LightningReport")]
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch", name = "GoldenBlackcatPulse")]
 #[derive(Clone)]
-struct PyLightningReport {
-    inner: NnLightningReport,
-    stages: Vec<PyLightningStageReport>,
+struct PyGoldenBlackcatPulse {
+    inner: GoldenBlackcatPulse,
 }
 
-impl PyLightningReport {
-    fn from_report(inner: NnLightningReport) -> Self {
-        let stages = inner
-            .stages()
-            .iter()
-            .cloned()
-            .map(PyLightningStageReport::from_report)
-            .collect();
-        Self { inner, stages }
+#[cfg(feature = "golden")]
+impl PyGoldenBlackcatPulse {
+    fn from_inner(inner: GoldenBlackcatPulse) -> Self {
+        Self { inner }
     }
 }
 
+#[cfg(feature = "golden")]
 #[pymethods]
-impl PyLightningReport {
+impl PyGoldenBlackcatPulse {
     #[getter]
-    fn stages(&self) -> Vec<PyLightningStageReport> {
-        self.stages.clone()
-    }
-
-    #[getter]
-    fn total_epochs(&self) -> usize {
-        self.inner.total_epochs()
+    fn exploration_drive(&self) -> f32 {
+        self.inner.exploration_drive
     }
 
     #[getter]
-    fn total_batches(&self) -> usize {
-        self.inner.total_batches()
+    fn optimization_gain(&self) -> f32 {
+        self.inner.optimization_gain
     }
 
-    fn best_epoch(&self) -> Option<PyEpochStats> {
-        self.inner.best_epoch().map(PyEpochStats::from_stats)
+    #[getter]
+    fn synergy_score(&self) -> f32 {
+        self.inner.synergy_score
     }
 
-    fn best_stage_index(&self) -> Option<usize> {
-        self.inner.best_stage_index()
+    #[getter]
+    fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
     }
 
-    fn best_stage_label(&self) -> Option<String> {
-        self.best_stage_index()
-            .and_then(|idx| self.stages.get(idx))
-            .and_then(|stage| stage.label())
+    #[getter]
+    fn mean_support(&self) -> f32 {
+        self.inner.mean_support
     }
 
-    fn flatten_epochs(&self) -> Vec<PyEpochStats> {
-        self.inner
-            .epochs()
-            .map(|stats| PyEpochStats::from_stats(*stats))
-            .collect()
+    #[getter]
+    fn mean_reward(&self) -> f64 {
+        self.inner.mean_reward
+    }
+
+    #[getter]
+    fn mean_psi(&self) -> f32 {
+        self.inner.mean_psi
+    }
+
+    #[getter]
+    fn mean_confidence(&self) -> f32 {
+        self.inner.mean_confidence
+    }
+
+    #[getter]
+    fn coverage(&self) -> usize {
+        self.inner.coverage
+    }
+
+    #[getter]
+    fn heuristics_contributions(&self) -> usize {
+        self.inner.heuristics_contributions
+    }
+
+    #[getter]
+    fn append_weight(&self) -> f32 {
+        self.inner.append_weight
+    }
+
+    #[getter]
+    fn retract_count(&self) -> usize {
+        self.inner.retract_count
+    }
+
+    #[getter]
+    fn annotate_count(&self) -> usize {
+        self.inner.annotate_count
+    }
+
+    #[getter]
+    fn dominant_plan(&self) -> Option<String> {
+        self.inner.dominant_plan.clone()
+    }
+
+    fn is_idle(&self) -> bool {
+        self.inner.is_idle()
+    }
+
+    #[pyo3(signature = (baseline_interval, baseline_window))]
+    fn directive(
+        &self,
+        baseline_interval: f32,
+        baseline_window: usize,
+    ) -> PyResult<PyGoldenCooperativeDirective> {
+        if baseline_interval <= 0.0 {
+            return Err(PyValueError::new_err(
+                "baseline_interval must be positive seconds",
+            ));
+        }
+        let directive = self.inner.directive(
+            Duration::from_secs_f32(baseline_interval),
+            baseline_window.max(1),
+        );
+        Ok(PyGoldenCooperativeDirective::from_inner(directive))
     }
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "LightningReport(stages={}, total_epochs={}, total_batches={})",
-            self.stages.len(),
-            self.total_epochs(),
-            self.total_batches()
+            "GoldenBlackcatPulse(exploration={:.3}, optimization={:.3}, synergy={:.3}, reinforcement={:.3}, coverage={}, heuristics={})",
+            self.exploration_drive(),
+            self.optimization_gain(),
+            self.synergy_score(),
+            self.reinforcement_weight(),
+            self.coverage(),
+            self.heuristics_contributions()
         ))
     }
 }
@@ -2672,139 +2668,23 @@ impl PyModuleTrainer {
         Ok(list.into_py(py))
     }
 
+    #[cfg(feature = "golden")]
+    fn last_blackcat_pulse(&self) -> Option<PyGoldenBlackcatPulse> {
+        self.inner
+            .last_blackcat_pulse()
+            .cloned()
+            .map(PyGoldenBlackcatPulse::from_inner)
+    }
+
+    #[cfg(feature = "golden")]
+    fn last_blackcat_directive(&self) -> Option<PyGoldenCooperativeDirective> {
+        self.inner
+            .last_blackcat_directive()
+            .cloned()
+            .map(PyGoldenCooperativeDirective::from_inner)
+    }
+
     #[pyo3(signature = (module, loss, batches, schedule))]
-    fn train_epoch(
-        &mut self,
-        module: &Bound<'_, PyAny>,
-        loss: &Bound<'_, PyAny>,
-        batches: &Bound<'_, PyAny>,
-        schedule: &PyRoundtableSchedule,
-    ) -> PyResult<PyEpochStats> {
-        let stats =
-            run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
-        Ok(PyEpochStats::from_stats(stats))
-    }
-
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!(
-            "ModuleTrainer(curvature={:.4}, hyper_lr={:.4}, fallback_lr={:.4})",
-            self.curvature(),
-            self.hyper_learning_rate(),
-            self.fallback_learning_rate()
-        ))
-    }
-}
-
-#[pyclass(module = "spiraltorch", name = "SpiralLightning", unsendable)]
-struct PySpiralLightning {
-    inner: NnSpiralLightning,
-}
-
-impl PySpiralLightning {
-    fn from_inner(inner: NnSpiralLightning) -> Self {
-        Self { inner }
-    }
-}
-
-#[pymethods]
-impl PySpiralLightning {
-    #[new]
-    #[pyo3(signature = (session, rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
-    fn new(
-        session: PySpiralSession,
-        rows: u32,
-        cols: u32,
-        top_k: u32,
-        mid_k: u32,
-        bottom_k: u32,
-        here_tolerance: f32,
-        auto_prepare: bool,
-        psychoid: bool,
-        psychoid_log: bool,
-        psi: bool,
-        collapse: bool,
-    ) -> Self {
-        let roundtable = build_roundtable_config(
-            top_k,
-            mid_k,
-            bottom_k,
-            here_tolerance,
-            psychoid,
-            psychoid_log,
-            psi,
-            collapse,
-        );
-        let config = NnLightningConfig::builder(rows, cols)
-            .roundtable(roundtable)
-            .auto_prepare(auto_prepare)
-            .build();
-        let inner = NnSpiralLightning::with_config(session.inner.clone(), config);
-        Self { inner }
-    }
-
-    #[getter]
-    fn rows(&self) -> u32 {
-        self.inner.config().rows()
-    }
-
-    #[getter]
-    fn cols(&self) -> u32 {
-        self.inner.config().cols()
-    }
-
-    #[getter]
-    fn auto_prepare(&self) -> bool {
-        self.inner.config().auto_prepare()
-    }
-
-    fn set_auto_prepare(&mut self, enabled: bool) {
-        self.inner.set_auto_prepare(enabled);
-    }
-
-    fn schedule(&self) -> PyRoundtableSchedule {
-        PyRoundtableSchedule::from_schedule(self.inner.schedule().clone())
-    }
-
-    #[pyo3(signature = (rows, cols, *, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, auto_prepare=true, psychoid=false, psychoid_log=false, psi=false, collapse=false))]
-    fn reconfigure(
-        &mut self,
-        rows: u32,
-        cols: u32,
-        top_k: u32,
-        mid_k: u32,
-        bottom_k: u32,
-        here_tolerance: f32,
-        auto_prepare: bool,
-        psychoid: bool,
-        psychoid_log: bool,
-        psi: bool,
-        collapse: bool,
-    ) {
-        let roundtable = build_roundtable_config(
-            top_k,
-            mid_k,
-            bottom_k,
-            here_tolerance,
-            psychoid,
-            psychoid_log,
-            psi,
-            collapse,
-        );
-        let config = NnLightningConfig::builder(rows, cols)
-            .roundtable(roundtable)
-            .auto_prepare(auto_prepare)
-            .build();
-        self.inner.reconfigure(config);
-    }
-
-    fn prepare_module(&mut self, module: &Bound<'_, PyAny>) -> PyResult<()> {
-        prepare_module_for_lightning(&mut self.inner, module)
-    }
-
-    fn reset_prepared(&mut self) {
-        self.inner.reset_prepared_modules();
-    }
-
     fn train_epoch(
         &mut self,
         module: &Bound<'_, PyAny>,
@@ -5567,56 +5447,60 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLightningStageReport>()?;
     m.add_class::<PyLightningReport>()?;
     m.add_class::<PyModuleTrainer>()?;
+    #[cfg(feature = "golden")]
+    {
+        m.add_class::<PyGoldenBlackcatPulse>()?;
+        m.add_class::<PyGoldenCooperativeDirective>()?;
+    }
     m.add_class::<PySpiralLightning>()?;
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
 
-    m.setattr(
-        "__all__",
-        vec![
-            "plan",
-            "plan_topk",
-            "plan_midk",
-            "plan_bottomk",
-            "topk2d_tensor",
-            "topk2d",
-            "z_space_barycenter",
-            "hip_probe",
-            "describe_device",
-            "get_psychoid_stats",
-            "describe_resonance",
-            "describe_frame",
-            "describe_timeline",
-            "Tensor",
-            "ComplexTensor",
-            "BarycenterIntermediate",
-            "ZSpaceBarycenter",
-            "DifferentialResonance",
-            "ChronoFrame",
-            "ChronoSummary",
-            "SpiralDifferentialTrace",
-            "OpenTopos",
-            "TensorBiome",
-            "LanguageWaveEncoder",
-            "TextResonator",
-            "Hypergrad",
-            "DistConfig",
-            "RoundtableSchedule",
-            "EpochStats",
-            "ModuleTrainer",
-            "SpiralLightning",
-            "SpiralSessionBuilder",
-            "SpiralSession",
-            "nn",
-            "frac",
-            "dataset",
-            "linalg",
-            "rl",
-            "rec",
-            "sot",
-            "integrations",
-        ],
-    )?;
+    let mut exported = vec![
+        "plan",
+        "plan_topk",
+        "topk2d_tensor",
+        "z_space_barycenter",
+        "hip_probe",
+        "describe_device",
+        "get_psychoid_stats",
+        "describe_resonance",
+        "describe_frame",
+        "Tensor",
+        "ComplexTensor",
+        "BarycenterIntermediate",
+        "ZSpaceBarycenter",
+        "DifferentialResonance",
+        "ChronoFrame",
+        "ChronoSummary",
+        "SpiralDifferentialTrace",
+        "OpenTopos",
+        "TensorBiome",
+        "LanguageWaveEncoder",
+        "TextResonator",
+        "Hypergrad",
+        "DistConfig",
+        "RoundtableSchedule",
+        "EpochStats",
+        "ModuleTrainer",
+        "SpiralLightning",
+        "SpiralSessionBuilder",
+        "SpiralSession",
+        "nn",
+        "frac",
+        "dataset",
+        "linalg",
+        "rl",
+        "rec",
+        "sot",
+        "integrations",
+    ];
+    #[cfg(feature = "golden")]
+    {
+        exported.push("GoldenBlackcatPulse");
+        exported.push("GoldenCooperativeDirective");
+    }
+    m.setattr("__all__", exported)?;
     m.setattr("__version__", env!("CARGO_PKG_VERSION"))?;
 
     // Provide a tiny doc string that highlights the zero-shim approach.
