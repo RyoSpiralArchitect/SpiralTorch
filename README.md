@@ -79,6 +79,10 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
+## Technical notes
+
+- [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
+
 ## Emerging toolkits unique to SpiralTorch
 
 ### Z-space-native graph neural networks
@@ -136,7 +140,28 @@ Once those signatures exist, `InterfaceZLift` pushes them straight into
 Z-space: it projects the perimeter mass onto a preferred Z-axis, splits the
 energy into Above/Here/Beneath bands, enriches the drift with the Leech
 projector, and emits a ready-to-store `SoftlogicZFeedback` pulse so runtimes can
-bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L386】
+bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L471】
+
+To make those bridges operational inside collapse loops the gauge now supports
+multi-radius sweeps and a conductor that fuses their Z pulses with exponential
+smoothing. `InterfaceGauge::analyze_multiradius` probes the same mask at
+different blow-up scales (and reuses an optional `c′` label when supplied),
+while `InterfaceZConductor` drives any number of gauges, aggregates the
+resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
+ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
+
+### Maxwell-coded envelopes meet SpiralK
+
+The coded-envelope utilities now ship with a `MaxwellSpiralKBridge` that turns
+sequential Z pulses into KDSl snippets ready for the runtime. Every channel
+name is sanitised for SpiralK, weights adapt to the observed Z magnitude, and
+existing programs can be prepended so the hints extend a live policy rather than
+replace it.【F:crates/st-core/src/theory/maxwell.rs†L306-L412】 Call
+`push_pulse(channel, &pulse)` for each stream, then `script()` to emit the
+combined `soft(maxwell.bias, …)` rules that SpiralK can ingest without custom
+glue code.【F:crates/st-core/src/theory/maxwell.rs†L333-L378】 The workflow is
+documented in the refreshed Maxwell technical note, which now includes a
+section on streaming detections back into SpiralK orchestration.【F:docs/coded_envelope_maxwell_model.md†L128-L141】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
@@ -282,6 +307,55 @@ let replayed = pipeline.replay(DesireLogReplay::open("desire.ndjson")?)?;
 let drained = trigger_buffer.drain()?; // forward to analytics or trainers
 ```
 
+Python bindings mirror the same geometry builders and automation braid. The
+`SparseKernel::from_dense` and `SemanticBridge::from_dense` helpers collapse
+token/concept matrices directly, so notebooks can assemble desire pipelines
+from dense observations without juggling sparse tuples. Once the components are
+assembled, the pipeline builder attaches sinks and steps logits exactly like the
+Rust API:
+
+```python
+from spiraltorch import (
+    SparseKernel,
+    SymbolGeometry,
+    RepressionField,
+    SemanticBridge,
+    TemperatureController,
+    DesireSchedule,
+    DesireLagrangian,
+    SelfRewriteConfig,
+    DesireAutomation,
+    DesirePipelineBuilder,
+    ConceptHint,
+)
+
+syn = SparseKernel.from_dense([[0.6, 0.4], [0.3, 0.7]])
+par = SparseKernel.from_dense([[0.55, 0.45], [0.2, 0.8]])
+geometry = SymbolGeometry(syn, par)
+repression = RepressionField([0.1, 0.05])
+concept_kernel = SparseKernel.from_dense([[0.8, 0.2], [0.2, 0.8]])
+bridge = SemanticBridge(
+    [[0.7, 0.3], [0.25, 0.75]],
+    concept_kernel,
+)
+controller = TemperatureController(1.0, 0.9, 0.4, 0.4, 1.6)
+desire = DesireLagrangian(geometry, repression, bridge, controller)
+desire.set_alpha_schedule(DesireSchedule.warmup(0.0, 0.2, 400))
+automation = DesireAutomation(desire, SelfRewriteConfig())
+pipeline = (
+    DesirePipelineBuilder(automation)
+    .with_logbook("desire.ndjson", flush_every=16)
+    .with_telemetry()
+    .build()
+)
+step = pipeline.step(
+    [1.2, -0.4],
+    previous_token=0,
+    concept_hint=ConceptHint.distribution([0.6, 0.4]),
+)
+print(step["solution"]["phase"], step["solution"]["entropy"])
+```
+
 When you need to splice the stream into other runtimes, attach a
 `DesireChannelSink` via `with_channel`. It emits `DesirePipelineEvent`s over a standard channel so
 rewriters, trainers, or async dashboards can subscribe without bespoke glue—each
@@ -309,6 +383,26 @@ for event in receiver.try_iter() {
         DesirePipelineEvent::Trigger { trigger, .. } =>
             spiralk_scheduler.queue_desire(trigger.report.clone(), trigger.mean_penalty),
     }
+}
+```
+
+Global telemetry consumers can subscribe without owning the pipeline by adding
+`with_telemetry()`. The `DesireTelemetrySink` records every step’s phase,
+temperature, avoidance energy, and schedule weights into the shared telemetry
+hub so trainers, notebooks, or external services can poll the latest state via
+`get_last_desire_step`.【F:crates/st-nn/src/language/pipeline.rs†L101-L239】【F:crates/st-core/src/telemetry/hub.rs†L61-L126】
+
+```rust
+use st_core::telemetry::hub;
+use st_nn::language::DesirePipeline;
+
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_telemetry()
+    .build();
+
+let _ = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(sample) = hub::get_last_desire_step() {
+    println!("phase {:?} at T={:.3}", sample.phase, sample.temperature);
 }
 ```
 
@@ -487,6 +581,12 @@ cargo run -p st-nn --features "psi psychoid collapse" --example hello_session
 On the Python side, pass `psychoid=True` when building the roundtable and fetch
 the latest reading via `spiraltorch.get_psychoid_stats()` to log the CTI score,
 raw metrics, and z-scores emitted from the Rust meter.
+
+Need the language desire pulse from Python as well? Call
+`spiraltorch.get_desire_telemetry()` to retrieve the same sample that the
+Rust-side `DesireTelemetrySink` recorded—phase, temperature, avoidance energy,
+logit norms, and the current α/β/γ/λ weights are all surfaced as a dictionary
+ready for notebooks or dashboards.【F:bindings/st-py/src/lib.rs†L227-L243】【F:crates/st-nn/src/language/pipeline.rs†L101-L239】
 
 ψ readings stay inside the automation loop—CollapseDrive, the psychoid dream
 engine, and the distributed roundtable all consume them directly. The examples
