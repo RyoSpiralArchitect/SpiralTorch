@@ -37,6 +37,8 @@ use st_core::backend::unison_heuristics::RankKind;
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, StepMetrics};
+#[cfg(feature = "collapse")]
+use st_core::telemetry::hub::CollapsePulse;
 use st_core::telemetry::hub::{self, SoftlogicZFeedback};
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
@@ -387,12 +389,24 @@ impl ModuleTrainer {
         &self.heur_log
     }
 
+    /// Merges the provided heuristics log into the trainer's local log.
+    pub fn merge_heuristics_log(&mut self, log: &HeurOpLog) {
+        self.heur_log.merge(log);
+    }
+
     /// Returns the latest moderator minutes captured by Blackcat.
     pub fn blackcat_minutes(&self) -> Vec<ModeratorMinutes> {
         self.blackcat_moderator
             .as_ref()
             .map(|m| m.minutes().to_vec())
             .unwrap_or_default()
+    }
+
+    /// Replays moderator minutes so the embedded Blackcat runtime can stay aligned.
+    pub fn sync_blackcat_minutes(&mut self, minutes: &[ModeratorMinutes]) {
+        if let Some(moderator) = self.blackcat_moderator.as_mut() {
+            moderator.absorb_minutes(minutes);
+        }
     }
 
     /// Clears any registered band weighting rule.
@@ -622,7 +636,8 @@ impl ModuleTrainer {
             }
             #[cfg(feature = "collapse")]
             if let (Some(driver), Some(reading)) = (self.collapse.as_mut(), psi_snapshot.as_ref()) {
-                match driver.update(reading) {
+                let command = driver.update(reading);
+                match command {
                     DriveCmd::Collapse {
                         grad_scale,
                         max_norm,
@@ -645,6 +660,15 @@ impl ModuleTrainer {
                         }
                     }
                     DriveCmd::None => {}
+                }
+                if !matches!(command, DriveCmd::None) {
+                    let loop_signal = hub::get_chrono_loop();
+                    hub::set_collapse_pulse(CollapsePulse {
+                        step: reading.step,
+                        total: reading.total,
+                        command,
+                        loop_signal,
+                    });
                 }
             }
             let psi_total_opt: Option<f32> = {

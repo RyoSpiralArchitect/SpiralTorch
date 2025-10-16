@@ -26,6 +26,7 @@
 use crate::dataset::DataLoader;
 use crate::loss::Loss;
 use crate::module::Module;
+use crate::roundtable::{HeurOpLog, ModeratorMinutes};
 use crate::schedule::RoundtableSchedule;
 use crate::trainer::{EpochStats, ModuleTrainer};
 use crate::PureResult;
@@ -38,6 +39,8 @@ use st_tensor::pure::TensorError;
 pub struct GoldenRetrieverConfig {
     pub workers: usize,
     pub runtime: Option<GoldenRuntimeConfig>,
+    pub sync_blackcat_minutes: bool,
+    pub sync_heuristics_log: bool,
 }
 
 impl Default for GoldenRetrieverConfig {
@@ -45,6 +48,8 @@ impl Default for GoldenRetrieverConfig {
         Self {
             workers: 0,
             runtime: None,
+            sync_blackcat_minutes: false,
+            sync_heuristics_log: false,
         }
     }
 }
@@ -61,6 +66,8 @@ struct GoldenWorker {
 pub struct GoldenRetriever {
     runtime: GoldenRuntime,
     workers: Vec<GoldenWorker>,
+    sync_blackcat_minutes: bool,
+    sync_heuristics_log: bool,
 }
 
 impl GoldenRetriever {
@@ -91,7 +98,12 @@ impl GoldenRetriever {
                 trainer: SpiralMutex::new(trainer),
             })
             .collect();
-        Ok(Self { runtime, workers })
+        Ok(Self {
+            runtime,
+            workers,
+            sync_blackcat_minutes: config.sync_blackcat_minutes,
+            sync_heuristics_log: config.sync_heuristics_log,
+        })
     }
 
     pub fn workers(&self) -> usize {
@@ -160,7 +172,40 @@ impl GoldenRetriever {
             }
         }
 
-        Ok(GoldenEpochReport::from_stats(&self.runtime, stats))
+        let (minutes, heuristics) = self.collect_cooperative_state();
+        if self.sync_blackcat_minutes || self.sync_heuristics_log {
+            self.broadcast_cooperative_state(&minutes, &heuristics);
+        }
+
+        Ok(GoldenEpochReport::from_stats(
+            &self.runtime,
+            stats,
+            minutes,
+            heuristics,
+        ))
+    }
+
+    fn collect_cooperative_state(&self) -> (Vec<ModeratorMinutes>, HeurOpLog) {
+        let mut minutes = Vec::new();
+        let mut heuristics = HeurOpLog::default();
+        for worker in &self.workers {
+            let guard = worker.trainer.lock();
+            minutes.extend(guard.blackcat_minutes());
+            heuristics.merge(guard.heuristics_log());
+        }
+        (dedupe_minutes(minutes), heuristics)
+    }
+
+    fn broadcast_cooperative_state(&self, minutes: &[ModeratorMinutes], heuristics: &HeurOpLog) {
+        for worker in &self.workers {
+            let mut guard = worker.trainer.lock();
+            if self.sync_blackcat_minutes {
+                guard.sync_blackcat_minutes(minutes);
+            }
+            if self.sync_heuristics_log {
+                guard.merge_heuristics_log(heuristics);
+            }
+        }
     }
 }
 
@@ -171,10 +216,17 @@ pub struct GoldenEpochReport {
     pub total_loss: f32,
     pub average_loss: f32,
     pub per_worker: Vec<EpochStats>,
+    pub moderator_minutes: Vec<ModeratorMinutes>,
+    pub heuristics_log: HeurOpLog,
 }
 
 impl GoldenEpochReport {
-    fn from_stats(runtime: &GoldenRuntime, per_worker: Vec<EpochStats>) -> Self {
+    fn from_stats(
+        runtime: &GoldenRuntime,
+        per_worker: Vec<EpochStats>,
+        moderator_minutes: Vec<ModeratorMinutes>,
+        heuristics_log: HeurOpLog,
+    ) -> Self {
         let workers = per_worker.len();
         let (total_loss, total_batches) = runtime.reduce(
             &per_worker,
@@ -193,12 +245,28 @@ impl GoldenEpochReport {
             total_loss,
             average_loss,
             per_worker,
+            moderator_minutes,
+            heuristics_log,
         }
     }
 }
 
 fn runtime_error(err: GoldenRuntimeError) -> TensorError {
     TensorError::IoError { message: err.0 }
+}
+
+fn dedupe_minutes(minutes: Vec<ModeratorMinutes>) -> Vec<ModeratorMinutes> {
+    let mut deduped = Vec::new();
+    for minute in minutes {
+        if deduped.iter().any(|existing: &ModeratorMinutes| {
+            existing.plan_signature == minute.plan_signature
+                && existing.issued_at == minute.issued_at
+        }) {
+            continue;
+        }
+        deduped.push(minute);
+    }
+    deduped
 }
 
 #[cfg(test)]
@@ -250,5 +318,7 @@ mod tests {
         assert!(report.average_loss.is_finite());
         assert_eq!(report.per_worker.len(), 2);
         assert!(report.batches >= 2);
+        assert!(report.moderator_minutes.is_empty());
+        assert!(report.heuristics_log.entries().is_empty());
     }
 }
