@@ -3,18 +3,19 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#[cfg(not(feature = "logic"))]
 use super::wgpu_heuristics::{Choice, DslOverrides};
 #[cfg(feature = "logic")]
-pub use st_logic::{Field, SoftRule, Value};
+use super::wgpu_heuristics::{
+    Choice, DslOverrides, SOFT_NAME_ALGO, SOFT_NAME_CH, SOFT_NAME_CTILE, SOFT_NAME_KL,
+    SOFT_NAME_MODE_BOTTOMK, SOFT_NAME_MODE_MIDK, SOFT_NAME_RADIX, SOFT_NAME_SEGMENTS,
+    SOFT_NAME_TILE_COLS, SOFT_NAME_USE2CE, SOFT_NAME_WG,
+};
+#[cfg(feature = "logic")]
+pub use st_logic::SoftRule;
 #[cfg(not(feature = "logic"))]
 #[derive(Clone, Debug, Default)]
 pub struct SoftRule;
-#[cfg(not(feature = "logic"))]
-#[derive(Clone, Debug)]
-pub enum Field {}
-#[cfg(not(feature = "logic"))]
-#[derive(Clone, Debug)]
-pub enum Value {}
 #[cfg(feature = "kdsl")]
 use serde::Deserialize;
 
@@ -23,6 +24,7 @@ use serde::Deserialize;
 struct SweetBands {
     small: u32,
     mid: u32,
+    #[allow(dead_code)]
     large: u32,
 }
 #[cfg(feature = "kdsl")]
@@ -177,41 +179,60 @@ pub fn parse_env_dsl_plus_kind(
         for r in out.soft {
             match r {
                 st_kdsl::SoftRule::U2 { val, w } => soft.push(SoftRule {
-                    field: Field::Use2ce,
-                    value: Value::B(val),
+                    name: SOFT_NAME_USE2CE,
                     weight: w,
+                    score: if val { 1.0 } else { -1.0 },
                 }),
                 st_kdsl::SoftRule::Wg { val, w } => soft.push(SoftRule {
-                    field: Field::Wg,
-                    value: Value::U(val),
+                    name: SOFT_NAME_WG,
                     weight: w,
+                    score: val as f32,
                 }),
                 st_kdsl::SoftRule::Kl { val, w } => soft.push(SoftRule {
-                    field: Field::Kl,
-                    value: Value::U(val),
+                    name: SOFT_NAME_KL,
                     weight: w,
+                    score: val as f32,
                 }),
                 st_kdsl::SoftRule::Ch { val, w } => soft.push(SoftRule {
-                    field: Field::Ch,
-                    value: Value::U(val),
+                    name: SOFT_NAME_CH,
                     weight: w,
+                    score: val as f32,
+                }),
+                st_kdsl::SoftRule::Algo { val, w } => soft.push(SoftRule {
+                    name: SOFT_NAME_ALGO,
+                    weight: w,
+                    score: val as f32,
+                }),
+                st_kdsl::SoftRule::Midk { val, w } => soft.push(SoftRule {
+                    name: SOFT_NAME_MODE_MIDK,
+                    weight: w,
+                    score: val as f32,
+                }),
+                st_kdsl::SoftRule::Bottomk { val, w } => soft.push(SoftRule {
+                    name: SOFT_NAME_MODE_BOTTOMK,
+                    weight: w,
+                    score: val as f32,
+                }),
+                st_kdsl::SoftRule::Ctile { val, w } => soft.push(SoftRule {
+                    name: SOFT_NAME_CTILE,
+                    weight: w,
+                    score: val as f32,
                 }),
                 st_kdsl::SoftRule::TileCols { val, w } => soft.push(SoftRule {
-                    field: Field::Ctile,
-                    value: Value::U(val),
+                    name: SOFT_NAME_TILE_COLS,
                     weight: w,
+                    score: val as f32,
                 }),
                 st_kdsl::SoftRule::Radix { val, w } => soft.push(SoftRule {
-                    field: Field::Algo,
-                    value: Value::U(val),
+                    name: SOFT_NAME_RADIX,
                     weight: w,
+                    score: val as f32,
                 }),
                 st_kdsl::SoftRule::Segments { val, w } => soft.push(SoftRule {
-                    field: Field::Kl,
-                    value: Value::U(val),
+                    name: SOFT_NAME_SEGMENTS,
                     weight: w,
+                    score: val as f32,
                 }),
-                _ => {} // algo/midk/bottomk/ctile soft are currently consumed by higher-level selection (optional)
             }
         }
         if let Some(a) = out.hard.algo {
@@ -237,7 +258,11 @@ pub fn parse_env_dsl_plus_kind(
         }
         return (hard, soft, ov);
     }
-    (None, vec![], ov)
+    #[cfg(not(feature = "kdsl"))]
+    {
+        let _ = (rows, cols, k, subgroup, kind);
+        (None, Vec::new(), ov)
+    }
 }
 
 pub fn parse_env_dsl(
