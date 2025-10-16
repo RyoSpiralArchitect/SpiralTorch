@@ -22,6 +22,8 @@
 // ============================================================================
 
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+#[cfg(feature = "golden")]
+use crate::golden::GoldenBlackcatPulse;
 use crate::loss::Loss;
 use crate::module::Module;
 use crate::plan::RankPlanner;
@@ -67,6 +69,8 @@ pub struct ModuleTrainer {
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
+    #[cfg(feature = "golden")]
+    golden_pulse: Option<GoldenBlackcatPulse>,
     #[cfg(feature = "psi")]
     psi: Option<PsiMeter>,
     #[cfg(feature = "psychoid")]
@@ -226,6 +230,8 @@ impl ModuleTrainer {
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
+            #[cfg(feature = "golden")]
+            golden_pulse: None,
             #[cfg(feature = "psi")]
             psi,
             #[cfg(feature = "psychoid")]
@@ -407,6 +413,33 @@ impl ModuleTrainer {
         if let Some(moderator) = self.blackcat_moderator.as_mut() {
             moderator.absorb_minutes(minutes);
         }
+    }
+
+    #[cfg(feature = "golden")]
+    /// Applies a cooperative pulse emitted by the Golden retriever.
+    pub fn apply_blackcat_pulse(&mut self, pulse: &GoldenBlackcatPulse) {
+        self.golden_pulse = Some(pulse.clone());
+        if let Some(node) = self.distribution.as_mut() {
+            let base_interval = node.config().push_interval;
+            let baseline_secs = base_interval.as_secs_f32().max(1.0);
+            let gain = (1.0 + pulse.optimization_gain.max(0.0)).clamp(1.0, 4.0);
+            let new_interval = Duration::from_secs_f32(
+                (baseline_secs / gain).clamp(baseline_secs * 0.25, baseline_secs * 1.5),
+            );
+            let base_window = node.config().summary_window.max(4) as f32;
+            let window_scale = (1.0 + pulse.exploration_drive.max(0.0)).clamp(1.0, 4.0);
+            let new_window = (base_window * window_scale).round().clamp(4.0, 1024.0) as usize;
+            node.retune(new_interval, new_window);
+        }
+        if pulse.optimization_gain > 0.1 {
+            self.injector_enabled = true;
+        }
+    }
+
+    #[cfg(feature = "golden")]
+    /// Returns the most recent cooperative pulse applied to this trainer.
+    pub fn last_blackcat_pulse(&self) -> Option<&GoldenBlackcatPulse> {
+        self.golden_pulse.as_ref()
     }
 
     /// Clears any registered band weighting rule.

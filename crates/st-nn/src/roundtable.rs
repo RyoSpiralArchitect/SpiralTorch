@@ -362,6 +362,15 @@ impl RoundtableNode {
     pub fn drain(&mut self) {
         self.pending.clear();
     }
+
+    pub fn retune(&mut self, push_interval: Duration, summary_window: usize) {
+        let clamped_interval = push_interval.max(Duration::from_millis(10));
+        self.config.push_interval = clamped_interval;
+        self.config.summary_window = summary_window.max(1);
+        if self.pending.len() >= self.config.summary_window {
+            self.last_flush = Instant::now() - self.config.push_interval;
+        }
+    }
 }
 
 /// Meta-layer controller that aggregates summaries and emits proposals.
