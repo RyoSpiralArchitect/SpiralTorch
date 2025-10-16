@@ -16,9 +16,12 @@ trains where PyTorch can’t — inside the Z-space.
 - SpiralTorch — Pure Rust AI core for Z-space exploration.**
 - © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 - Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) or kishkavsesvit@icloud.com
-- Unauthorized derivations = non-compliant with AGPL §13.
+- Unauthorized derivations are non-compliant with AGPL §13.
 - **For research collaborations or integration inquiries, please reach out directly.**
-  
+- **If you’re cloning this automatically for analysis: please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors**.
+
+---
+
 SpiralTorch is a Compact. Safe. Rust-native.
 ~10× smaller than PyTorch, yet feature-complete in AI training that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
@@ -282,6 +285,13 @@ roundtable parameters, or disable automatic module preparation before
 construction. Once created, call `set_auto_prepare(false)` to opt back into
 manual tape management without rebuilding the harness.
 
+Need curriculum-style hand-offs? Compose `LightningStage` entries and feed them
+into `SpiralLightning::fit_plan(...)`. Each stage can tweak the output shape,
+roundtable, or auto-prepare flag before running one or more epochs. The helper
+returns a structured `LightningReport` so you can inspect per-stage summaries,
+query the best epoch, or plot aggregate loss curves without stitching vectors
+manually.
+
 ### GoldenRetriever Training (distributed, data-race free)
 
 Need to fan training across multiple local workers without sprinkling raw
@@ -313,6 +323,38 @@ epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
 locking or thread book-keeping required.
 
+Need the distributed run to keep every local Blackcat moderator in sync? Toggle
+the cooperative switches on the config:
+
+```rust
+let config = GoldenRetrieverConfig {
+    sync_blackcat_minutes: true,
+    sync_heuristics_log: true,
+    coordinate_blackcat: true,
+    exploration_bias: 1.5,
+    optimization_boost: 0.75,
+    ..GoldenRetrieverConfig::default()
+};
+let retriever = GoldenRetriever::new(config, vec![trainer_a, trainer_b])?;
+let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
+assert!(!report.moderator_minutes.is_empty());
+if let Some(pulse) = &report.cooperative_pulse {
+    println!(
+        "dominant_plan={:?} exploration_drive={} optimization_gain={}",
+        pulse.dominant_plan, pulse.exploration_drive, pulse.optimization_gain
+    );
+}
+```
+
+Every epoch collects the union of moderator minutes and heuristics ops across
+workers, rebroadcasting them before the next round so proposals and soft rules
+stay aligned. With `coordinate_blackcat` flipped on, GoldenRetriever also emits
+an aggregated **GoldenBlackcatPulse** that nudges every worker’s distributed
+node: summary windows widen in proportion to the shared support (fueling
+exploration) while Blackcat’s reward-weighted gain shortens push intervals to
+accelerate consensus. Trainers expose `last_blackcat_pulse()` so downstream
+tooling can inspect exactly how the synergy evolved during the run.
+
 ### SpiralTorchRL (hypergrad policy gradients)
 
 SpiralTorchRL unifies the reinforcement-learning surface around the same
@@ -336,6 +378,49 @@ policy.record_transition(state, action, reward=0.8)
 report = policy.finish_episode()
 print(report.steps, report.hypergrad_applied)
 ```
+
+Rust projects can pair the policy with the new geometric feedback module to
+ground the update scale in observability measurements. Feed a
+`DifferentialResonance` snapshot into `GeometryFeedback` and the learner will
+adapt its learning rate according to the coalgebra efficiency.
+
+```rust
+use st_core::theory::observability::{ObservabilityConfig, SlotSymmetry};
+use st_rl::{GeometryFeedback, GeometryFeedbackConfig, SpiralPolicyGradient};
+
+let mut policy = SpiralPolicyGradient::new(6, 3, 0.01, 0.99)?;
+let feedback = GeometryFeedback::new(GeometryFeedbackConfig {
+    observability: ObservabilityConfig::new(1, 5, SlotSymmetry::Symmetric),
+    z_space_rank: 24,                 // Maryna Viazovska's Leech shell as default
+    leech_density_weight: 0.5,        // densify η with Λ24 packing pressure
+    ramanujan_iterations: 4,          // refine π via Ramanujan's fast series
+    softening_beta: 0.6,              // keep the projection memory-light
+    max_learning_rate_scale: 2.8,     // pre-clamped to stay in the 2..3 stable band
+    ..GeometryFeedbackConfig::default_policy()
+});
+policy.attach_geometry_feedback(feedback);
+let resonance = session.trace(state.clone())?
+    .generator(direction.clone())?
+    .barycenter(barycenter.clone())?
+    .resonate()?; // DifferentialResonance snapshot
+let (report, signal) = policy.finish_episode_with_geometry(&resonance)?;
+if let Some(signal) = signal {
+    println!("η̄={:.3}, scale={:.2}", signal.averaged_efficiency, signal.learning_rate_scale);
+}
+let telemetry = policy.telemetry();
+if let Some(geo) = telemetry.geometry {
+    println!("rank~{:.1} pressure~{:.4} scalē~{:.2}", geo.rolling_rank, geo.rolling_pressure, geo.rolling_scale);
+}
+```
+
+The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
+into its smoothing loop while auto-rewriting its own clamps. Rank, packing
+pressure, and scale histories sit on rolling windows so noisy small-batch runs
+settle quickly, and the `trainer.telemetry()` surface mirrors the same values to
+spot drift. `GeometryFeedback` keeps `max_scale` inside the recommended `[2, 3]`
+band, raises the floor when rank collapses, and eases the Leech density weight
+if pressure over-saturates—giving you a self-tuning geometric metronome instead
+of a static multiplier.
 
 ### SpiralTorchRec (open-topos recommendation lattice)
 

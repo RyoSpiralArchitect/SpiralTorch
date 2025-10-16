@@ -141,7 +141,7 @@ fn lex(s: &str) -> Result<Vec<Tok>, Err> {
             }
             _ => {
                 let two = if i + 1 < b.len() {
-                    Some(((b[i] as char).to_string() + &(b[i + 1] as char).to_string()))
+                    Some((b[i] as char).to_string() + &(b[i + 1] as char).to_string())
                 } else {
                     None
                 };
@@ -336,12 +336,12 @@ fn parse_cmp(p: &mut P) -> Result<Box<dyn Fn(&Ctx) -> E>, Err> {
                 let a = lhs(c).as_f();
                 let b = rhs(c).as_f();
                 let r = match op.as_str() {
-                    "<" => (a < b),
-                    "<=" => (a <= b),
-                    ">" => (a > b),
-                    ">=" => (a >= b),
-                    "==" => (a == b),
-                    "!=" => (a != b),
+                    "<" => a < b,
+                    "<=" => a <= b,
+                    ">" => a > b,
+                    ">=" => a >= b,
+                    "==" => a == b,
+                    "!=" => a != b,
                     _ => false,
                 };
                 E::B(r)

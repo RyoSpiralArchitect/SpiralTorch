@@ -91,7 +91,7 @@ impl Frac1dKernel {
         h: f32,
         m: usize,
         shader_src: &str,
-    ) -> Vec<f32> {
+    ) -> Result<Vec<f32>, String> {
         let n = x.len();
         let m = m.min(n.saturating_sub(1));
         let w = gl_coeffs(alpha, m);
