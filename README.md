@@ -58,6 +58,9 @@ tensor shims, no translation layers, and no tracebacks.
   - **Rust by default, Python ready:** Every feature—from WASM tuning to
     hypergrad curvature—is implemented in Rust and exposed unchanged through the
     Python bindings when needed.
+  - **Unified RL + Rec stacks:** SpiralTorchRL and SpiralTorchRec keep policy
+    gradients, recommendation factors, and hypergrad tapes inside the same
+    Z-space geometry so deployment-grade loops never leave Rust.
 
 ---
 
@@ -151,6 +154,48 @@ GoldenRetriever keeps each trainer behind a poison-resistant mutex, launches the
 epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
 locking or thread book-keeping required.
+
+### SpiralTorchRL (hypergrad policy gradients)
+
+SpiralTorchRL unifies the reinforcement-learning surface around the same
+Z-space tensors that power the supervised stack. Policies stream returns into
+optional `AmegaHypergrad` tapes, meaning the Riemannian curvature remains under
+control even when reward schedules wobble. The Rust crate ships with a
+hypergrad-aware policy gradient learner and the Python bindings mirror it via
+`spiraltorch.rl.PolicyGradient` so notebooks can probe schedules without
+departing from the Rust implementation.
+
+```python
+from spiraltorch import Tensor
+from spiraltorch.rl import PolicyGradient
+
+policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
+policy.enable_hypergrad(curvature=-1.0, learning_rate=0.05)
+
+state = Tensor(1, 6, [0.1, 0.2, -0.3, 0.5, -0.1, 0.0])
+action, probs = policy.select_action(state)
+policy.record_transition(state, action, reward=0.8)
+report = policy.finish_episode()
+print(report.steps, report.hypergrad_applied)
+```
+
+### SpiralTorchRec (open-topos recommendation lattice)
+
+SpiralTorchRec factors implicit-feedback matrices under open-cartesian topos
+guards so embeddings stay psychoid-safe during long training arcs. The Rust
+crate exposes a deterministic SGD loop with saturation-aware updates while the
+Python view (`spiraltorch.rec.Recommender`) mirrors the same ergonomics for
+notebooks and serving pipelines. User and item embeddings remain regularised by
+the curvature guard, ensuring they can be re-imported into SpiralTorch modules
+without violating the Z-space contract.
+
+```python
+from spiraltorch.rec import Recommender
+
+rec = Recommender(users=10, items=20, factors=5, learning_rate=0.03, regularization=0.002)
+epoch = rec.train_epoch([(0, 0, 4.0), (0, 3, 5.0), (1, 0, 3.5)])
+print(epoch.rmse, rec.predict(0, 1))
+```
 
 ### Observation DAG calculus (Pólya-calibrated final coalgebra)
 

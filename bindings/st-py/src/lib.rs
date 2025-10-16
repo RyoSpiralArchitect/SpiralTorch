@@ -9,9 +9,9 @@ use crate::sot::{PySoT3DPlan, Sot3DParams};
 
 use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyImportError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule, PySequence, PyTuple};
+use pyo3::types::{PyAny, PyDict, PyList, PyModule, PyTuple};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use pyo3::PyRef;
@@ -38,6 +38,8 @@ use st_nn::{
     Sequential as NnSequential, SpiralLightning as NnSpiralLightning, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
+use st_rec::{RatingTriple as RecRatingTriple, RecEpochReport, SpiralRecError, SpiralRecommender};
+use st_rl::{EpisodeReport as RlEpisodeReport, SpiralPolicyGradient, SpiralRlError};
 use st_tensor::backend::faer_dense;
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense as tensor_wgpu_dense;
@@ -51,6 +53,9 @@ use st_tensor::pure::{
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::io::ErrorKind;
+use std::path::Path;
+use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
@@ -164,6 +169,40 @@ fn tensor_err(err: TensorError) -> PyErr {
 
 fn convert<T>(value: PureResult<T>) -> PyResult<T> {
     value.map_err(tensor_err)
+}
+
+fn rl_err(err: SpiralRlError) -> PyErr {
+    match err {
+        SpiralRlError::Tensor(err) => tensor_err(err),
+        SpiralRlError::EmptyEpisode => PyValueError::new_err(
+            "no transitions recorded — call record_transition before finishing the episode",
+        ),
+        SpiralRlError::InvalidStateShape {
+            expected,
+            rows,
+            cols,
+        } => PyValueError::new_err(format!(
+            "state tensor must be shaped as (1, {expected}) but received ({rows}, {cols})"
+        )),
+        SpiralRlError::InvalidAction { action, actions } => PyValueError::new_err(format!(
+            "action index {action} exceeds configured action space {actions}"
+        )),
+        SpiralRlError::InvalidDiscount { discount } => PyValueError::new_err(format!(
+            "discount factor must lie within [0, 1]; received {discount}"
+        )),
+    }
+}
+
+fn rec_err(err: SpiralRecError) -> PyErr {
+    match err {
+        SpiralRecError::Tensor(err) => tensor_err(err),
+        SpiralRecError::OutOfBoundsRating { user, item } => PyValueError::new_err(format!(
+            "rating ({user}, {item}) falls outside the configured recommender bounds"
+        )),
+        SpiralRecError::EmptyBatch => {
+            PyValueError::new_err("at least one rating triple is required to train an epoch")
+        }
+    }
 }
 
 fn convert_frac<T>(value: Result<T, FracErr>) -> PyResult<T> {
@@ -3260,6 +3299,206 @@ fn is_wgpu_available_py() -> bool {
     }
 }
 
+#[pyclass(module = "spiraltorch.rl", name = "EpisodeReport")]
+struct PyRlEpisodeReport {
+    inner: RlEpisodeReport,
+}
+
+#[pymethods]
+impl PyRlEpisodeReport {
+    #[getter]
+    fn total_reward(&self) -> f32 {
+        self.inner.total_reward
+    }
+
+    #[getter]
+    fn mean_return(&self) -> f32 {
+        self.inner.mean_return
+    }
+
+    #[getter]
+    fn steps(&self) -> usize {
+        self.inner.steps
+    }
+
+    #[getter]
+    fn hypergrad_applied(&self) -> bool {
+        self.inner.hypergrad_applied
+    }
+}
+
+#[pyclass(module = "spiraltorch.rl", name = "PolicyGradient", unsendable)]
+struct PyPolicyGradient {
+    inner: Mutex<SpiralPolicyGradient>,
+}
+
+#[pymethods]
+impl PyPolicyGradient {
+    #[new]
+    #[pyo3(signature = (state_dim, action_dim, learning_rate=0.01, discount=0.99))]
+    fn new(
+        state_dim: usize,
+        action_dim: usize,
+        learning_rate: f32,
+        discount: f32,
+    ) -> PyResult<Self> {
+        let inner = SpiralPolicyGradient::new(state_dim, action_dim, learning_rate, discount)
+            .map_err(rl_err)?;
+        Ok(Self {
+            inner: Mutex::new(inner),
+        })
+    }
+
+    fn enable_hypergrad(&self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        let mut guard = self.inner.lock().unwrap();
+        guard
+            .enable_hypergrad(curvature, learning_rate)
+            .map_err(rl_err)
+    }
+
+    #[pyo3(signature = (state))]
+    fn select_action(&self, state: &PyTensor) -> PyResult<(usize, Vec<f32>)> {
+        let guard = self.inner.lock().unwrap();
+        let probs = guard.policy(state.as_tensor()).map_err(rl_err)?;
+        let (action, _) = probs
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+            .unwrap();
+        Ok((action, probs))
+    }
+
+    fn record_transition(&self, state: &PyTensor, action: usize, reward: f32) -> PyResult<()> {
+        let mut guard = self.inner.lock().unwrap();
+        guard
+            .record_transition(state.as_tensor().clone(), action, reward)
+            .map_err(rl_err)
+    }
+
+    fn finish_episode(&self) -> PyResult<PyRlEpisodeReport> {
+        let mut guard = self.inner.lock().unwrap();
+        let report = guard.finish_episode().map_err(rl_err)?;
+        Ok(PyRlEpisodeReport { inner: report })
+    }
+
+    fn reset(&self) {
+        let mut guard = self.inner.lock().unwrap();
+        guard.reset_episode();
+    }
+
+    fn weights(&self) -> PyResult<PyTensor> {
+        let guard = self.inner.lock().unwrap();
+        Ok(PyTensor::from_tensor(guard.weights().clone()))
+    }
+
+    fn bias(&self) -> PyResult<Vec<f32>> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.bias().to_vec())
+    }
+}
+
+#[pyclass(module = "spiraltorch.rec", name = "EpochReport")]
+struct PyRecEpochReport {
+    inner: RecEpochReport,
+}
+
+#[pymethods]
+impl PyRecEpochReport {
+    #[getter]
+    fn rmse(&self) -> f32 {
+        self.inner.rmse
+    }
+
+    #[getter]
+    fn samples(&self) -> usize {
+        self.inner.samples
+    }
+
+    #[getter]
+    fn regularization_penalty(&self) -> f32 {
+        self.inner.regularization_penalty
+    }
+}
+
+#[pyclass(module = "spiraltorch.rec", name = "Recommender", unsendable)]
+struct PyRecommender {
+    inner: Mutex<SpiralRecommender>,
+}
+
+#[pymethods]
+impl PyRecommender {
+    #[new]
+    #[pyo3(signature = (users, items, factors, learning_rate=0.01, regularization=0.001, curvature=-1.0))]
+    fn new(
+        users: usize,
+        items: usize,
+        factors: usize,
+        learning_rate: f32,
+        regularization: f32,
+        curvature: f32,
+    ) -> PyResult<Self> {
+        let inner = SpiralRecommender::new(
+            users,
+            items,
+            factors,
+            learning_rate,
+            regularization,
+            curvature,
+        )
+        .map_err(rec_err)?;
+        Ok(Self {
+            inner: Mutex::new(inner),
+        })
+    }
+
+    fn predict(&self, user: usize, item: usize) -> PyResult<f32> {
+        let guard = self.inner.lock().unwrap();
+        guard.predict(user, item).map_err(rec_err)
+    }
+
+    fn train_epoch(&self, ratings: Vec<(usize, usize, f32)>) -> PyResult<PyRecEpochReport> {
+        let triples: Vec<RecRatingTriple> = ratings
+            .into_iter()
+            .map(|(u, i, r)| RecRatingTriple::new(u, i, r))
+            .collect();
+        let mut guard = self.inner.lock().unwrap();
+        let report = guard.train_epoch(&triples).map_err(rec_err)?;
+        Ok(PyRecEpochReport { inner: report })
+    }
+
+    fn user_embedding(&self, user: usize) -> PyResult<PyTensor> {
+        let guard = self.inner.lock().unwrap();
+        Ok(PyTensor::from_tensor(
+            guard.user_embedding(user).map_err(rec_err)?,
+        ))
+    }
+
+    fn item_embedding(&self, item: usize) -> PyResult<PyTensor> {
+        let guard = self.inner.lock().unwrap();
+        Ok(PyTensor::from_tensor(
+            guard.item_embedding(item).map_err(rec_err)?,
+        ))
+    }
+
+    #[getter]
+    fn users(&self) -> PyResult<usize> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.users())
+    }
+
+    #[getter]
+    fn items(&self) -> PyResult<usize> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.items())
+    }
+
+    #[getter]
+    fn factors(&self) -> PyResult<usize> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.factors())
+    }
+}
+
 #[pymodule]
 fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMeanSquaredError>()?;
@@ -3332,6 +3571,30 @@ fn linalg(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
+#[pymodule]
+fn rl(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyPolicyGradient>()?;
+    m.add_class::<PyRlEpisodeReport>()?;
+    m.setattr("__all__", vec!["PolicyGradient", "EpisodeReport"])?;
+    m.setattr(
+        "__doc__",
+        "Policy gradient helpers that keep trajectories and hypergrad updates inside SpiralTorch Z-space.",
+    )?;
+    Ok(())
+}
+
+#[pymodule]
+fn rec(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyRecommender>()?;
+    m.add_class::<PyRecEpochReport>()?;
+    m.setattr("__all__", vec!["Recommender", "EpochReport"])?;
+    m.setattr(
+        "__doc__",
+        "Recommender systems driven by SpiralTorch open-cartesian topos guards and factor models.",
+    )?;
+    Ok(())
+}
+
 /// Convenience helper for the TopK family.
 #[pyfunction]
 #[pyo3(signature = (rows, cols, k, device=None))]
@@ -3379,54 +3642,6 @@ fn topk2d_py(tensor: &PyTensor, k: usize, largest: bool) -> PyResult<(PyTensor, 
 
     let values_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, values))?);
     Ok((values_tensor, indices))
-}
-
-#[pyfunction]
-#[pyo3(signature = (tensor, k, *, device="auto", largest=true))]
-fn topk2d_tensor_py(
-    tensor: &PyTensor,
-    k: usize,
-    device: &str,
-    largest: bool,
-) -> PyResult<(PyTensor, PyTensor)> {
-    let device = device.to_ascii_lowercase();
-    if device != "auto" && device != "cpu" {
-        return Err(PyValueError::new_err(
-            "only 'auto' or 'cpu' devices are supported for topk2d_tensor",
-        ));
-    }
-
-    let (rows, cols) = tensor.as_tensor().shape();
-    if k == 0 || k > cols {
-        return Err(PyValueError::new_err(
-            "k must be between 1 and the number of columns",
-        ));
-    }
-
-    let mut values = Vec::with_capacity(rows * k);
-    let mut indices = Vec::with_capacity(rows * k);
-    let data = tensor.as_tensor().data();
-    for row in 0..rows {
-        let slice = &data[row * cols..(row + 1) * cols];
-        let mut pairs: Vec<(usize, f32)> = slice.iter().copied().enumerate().collect();
-        pairs.sort_unstable_by(|a, b| {
-            let ord = a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal);
-            if largest {
-                ord.reverse()
-            } else {
-                ord
-            }
-        });
-
-        for (idx, value) in pairs.into_iter().take(k) {
-            values.push(value);
-            indices.push(idx as f32);
-        }
-    }
-
-    let values_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, values))?);
-    let indices_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k, indices))?);
-    Ok((values_tensor, indices_tensor))
 }
 
 /// Surface ROCm probing hints for Python callers.
@@ -3481,6 +3696,287 @@ fn describe_device(py: Python<'_>, device: Option<&str>) -> PyResult<PyObject> {
     Ok(device_caps_dict(py, caps)?.into_py(py))
 }
 
+#[pyfunction]
+#[pyo3(signature = (model_name, serialized_file, export_path, handler, extra_files=None, config=None, version=None, requirements_file=None, force=false, archive_format=None))]
+fn torchserve_archive(
+    model_name: &str,
+    serialized_file: &str,
+    export_path: &str,
+    handler: &str,
+    extra_files: Option<Vec<String>>,
+    config: Option<&str>,
+    version: Option<&str>,
+    requirements_file: Option<&str>,
+    force: bool,
+    archive_format: Option<&str>,
+) -> PyResult<String> {
+    let mut cmd = Command::new("torch-model-archiver");
+    cmd.arg("--model-name").arg(model_name);
+    cmd.arg("--serialized-file").arg(serialized_file);
+    cmd.arg("--handler").arg(handler);
+    cmd.arg("--export-path").arg(export_path);
+
+    if let Some(extra) = extra_files {
+        if !extra.is_empty() {
+            cmd.arg("--extra-files").arg(extra.join(","));
+        }
+    }
+    if let Some(config) = config {
+        cmd.arg("--config-file").arg(config);
+    }
+    if let Some(version) = version {
+        cmd.arg("--version").arg(version);
+    }
+    if let Some(req) = requirements_file {
+        cmd.arg("--requirements-file").arg(req);
+    }
+    if let Some(fmt) = archive_format {
+        cmd.arg("--archive-format").arg(fmt);
+    }
+    if force {
+        cmd.arg("--force");
+    }
+
+    let output = cmd.output().map_err(|err| match err.kind() {
+        ErrorKind::NotFound => PyRuntimeError::new_err(
+            "torch-model-archiver CLI was not found in PATH; install TorchServe tooling first",
+        ),
+        _ => PyRuntimeError::new_err(format!("failed to execute torch-model-archiver: {err}")),
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PyRuntimeError::new_err(format!(
+            "torch-model-archiver failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        )));
+    }
+
+    let base_name = format!("{model_name}.mar");
+    let default_path = Path::new(export_path).join(&base_name);
+    let archive_path = version
+        .map(|v| Path::new(export_path).join(format!("{model_name}_v{v}.mar")))
+        .filter(|candidate| candidate.exists())
+        .unwrap_or(default_path);
+
+    Ok(archive_path.to_string_lossy().into_owned())
+}
+
+#[pyfunction]
+#[pyo3(signature = (model, name, signatures=None, labels=None, metadata=None, custom_objects=None, context=None, api_version=None))]
+fn bentoml_save_model(
+    py: Python<'_>,
+    model: PyObject,
+    name: &str,
+    signatures: Option<&PyDict>,
+    labels: Option<&PyDict>,
+    metadata: Option<&PyDict>,
+    custom_objects: Option<&PyDict>,
+    context: Option<&PyDict>,
+    api_version: Option<&str>,
+) -> PyResult<PyObject> {
+    let bentoml = py.import("bentoml").map_err(|err| {
+        PyImportError::new_err(format!(
+            "bentoml is required for BentoML integration but could not be imported: {err}"
+        ))
+    })?;
+    let pytorch = bentoml.getattr("pytorch").map_err(|err| {
+        PyImportError::new_err(format!("bentoml.pytorch backend is unavailable: {err}"))
+    })?;
+
+    let kwargs = PyDict::new_bound(py);
+    if let Some(signatures) = signatures {
+        kwargs.set_item("signatures", signatures)?;
+    }
+    if let Some(labels) = labels {
+        kwargs.set_item("labels", labels)?;
+    }
+    if let Some(metadata) = metadata {
+        kwargs.set_item("metadata", metadata)?;
+    }
+    if let Some(custom_objects) = custom_objects {
+        kwargs.set_item("custom_objects", custom_objects)?;
+    }
+    if let Some(context) = context {
+        kwargs.set_item("context", context)?;
+    }
+    if let Some(api_version) = api_version {
+        kwargs.set_item("api_version", api_version)?;
+    }
+
+    let saved = pytorch.call_method("save_model", (name, model), Some(&kwargs))?;
+    Ok(saved.into_py(py))
+}
+
+#[pyfunction]
+#[pyo3(signature = (objective, n_trials=None, timeout=None, study_name=None, storage=None, direction="minimize", sampler=None, pruner=None))]
+fn optuna_optimize(
+    py: Python<'_>,
+    objective: PyObject,
+    n_trials: Option<usize>,
+    timeout: Option<f64>,
+    study_name: Option<&str>,
+    storage: Option<&str>,
+    direction: &str,
+    sampler: Option<PyObject>,
+    pruner: Option<PyObject>,
+) -> PyResult<PyObject> {
+    let optuna = py.import("optuna").map_err(|err| {
+        PyImportError::new_err(format!(
+            "optuna is required for hyperparameter search but could not be imported: {err}"
+        ))
+    })?;
+
+    let create_kwargs = PyDict::new_bound(py);
+    create_kwargs.set_item("direction", direction)?;
+    if let Some(name) = study_name {
+        create_kwargs.set_item("study_name", name)?;
+    }
+    if let Some(storage) = storage {
+        create_kwargs.set_item("storage", storage)?;
+    }
+    if let Some(sampler) = sampler {
+        create_kwargs.set_item("sampler", sampler)?;
+    }
+    if let Some(pruner) = pruner {
+        create_kwargs.set_item("pruner", pruner)?;
+    }
+
+    let study = optuna.call_method("create_study", (), Some(&create_kwargs))?;
+
+    let optimize_kwargs = PyDict::new_bound(py);
+    if let Some(n_trials) = n_trials {
+        optimize_kwargs.set_item("n_trials", n_trials)?;
+    }
+    if let Some(timeout) = timeout {
+        optimize_kwargs.set_item("timeout", timeout)?;
+    }
+
+    study.call_method("optimize", (objective,), Some(&optimize_kwargs))?;
+
+    Ok(study.into_py(py))
+}
+
+#[pyfunction]
+#[pyo3(signature = (trainable, config=None, num_samples=None, resources_per_trial=None, metric=None, mode=None, name=None, local_dir=None, init=true))]
+fn ray_tune_run(
+    py: Python<'_>,
+    trainable: PyObject,
+    config: Option<&PyDict>,
+    num_samples: Option<usize>,
+    resources_per_trial: Option<&PyDict>,
+    metric: Option<&str>,
+    mode: Option<&str>,
+    name: Option<&str>,
+    local_dir: Option<&str>,
+    init: bool,
+) -> PyResult<PyObject> {
+    let ray = py.import("ray").map_err(|err| {
+        PyImportError::new_err(format!(
+            "ray is required for Ray Tune integration but could not be imported: {err}"
+        ))
+    })?;
+
+    if init {
+        let initialized: bool = ray.getattr("is_initialized")?.call0()?.extract()?;
+        if !initialized {
+            let _ = ray.call_method0("init")?;
+        }
+    }
+
+    let tune = ray.getattr("tune").map_err(|err| {
+        PyImportError::new_err(format!("ray.tune namespace is unavailable: {err}"))
+    })?;
+
+    let kwargs = PyDict::new_bound(py);
+    if let Some(config) = config {
+        kwargs.set_item("config", config)?;
+    }
+    if let Some(num_samples) = num_samples {
+        kwargs.set_item("num_samples", num_samples)?;
+    }
+    if let Some(resources_per_trial) = resources_per_trial {
+        kwargs.set_item("resources_per_trial", resources_per_trial)?;
+    }
+    if let Some(metric) = metric {
+        kwargs.set_item("metric", metric)?;
+    }
+    if let Some(mode) = mode {
+        kwargs.set_item("mode", mode)?;
+    }
+    if let Some(name) = name {
+        kwargs.set_item("name", name)?;
+    }
+    if let Some(local_dir) = local_dir {
+        kwargs.set_item("local_dir", local_dir)?;
+    }
+
+    let result = tune.call_method("run", (trainable,), Some(&kwargs))?;
+    Ok(result.into_py(py))
+}
+
+#[pyfunction]
+#[pyo3(signature = (model, example_input, export_path, opset_version=17, dynamic_axes=None, input_names=None, output_names=None, do_constant_folding=true))]
+fn export_onnx(
+    py: Python<'_>,
+    model: PyObject,
+    example_input: PyObject,
+    export_path: &str,
+    opset_version: i32,
+    dynamic_axes: Option<&PyDict>,
+    input_names: Option<Vec<String>>,
+    output_names: Option<Vec<String>>,
+    do_constant_folding: bool,
+) -> PyResult<()> {
+    let torch = py.import("torch").map_err(|err| {
+        PyImportError::new_err(format!(
+            "torch is required to export ONNX models but could not be imported: {err}"
+        ))
+    })?;
+    let onnx = torch.getattr("onnx").map_err(|err| {
+        PyRuntimeError::new_err(format!("torch.onnx export utility unavailable: {err}"))
+    })?;
+
+    let kwargs = PyDict::new_bound(py);
+    kwargs.set_item("opset_version", opset_version)?;
+    kwargs.set_item("do_constant_folding", do_constant_folding)?;
+    if let Some(dynamic_axes) = dynamic_axes {
+        kwargs.set_item("dynamic_axes", dynamic_axes)?;
+    }
+    if let Some(input_names) = input_names {
+        kwargs.set_item("input_names", input_names)?;
+    }
+    if let Some(output_names) = output_names {
+        kwargs.set_item("output_names", output_names)?;
+    }
+
+    onnx.call_method("export", (model, example_input, export_path), Some(&kwargs))?;
+
+    Ok(())
+}
+
+fn integrations(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(torchserve_archive, m)?)?;
+    m.add_function(wrap_pyfunction!(bentoml_save_model, m)?)?;
+    m.add_function(wrap_pyfunction!(optuna_optimize, m)?)?;
+    m.add_function(wrap_pyfunction!(ray_tune_run, m)?)?;
+    m.add_function(wrap_pyfunction!(export_onnx, m)?)?;
+
+    m.setattr(
+        "__all__",
+        vec![
+            "torchserve_archive",
+            "bentoml_save_model",
+            "optuna_optimize",
+            "ray_tune_run",
+            "export_onnx",
+        ],
+    )?;
+
+    Ok(())
+}
+
 /// SpiralTorch Python module.
 #[pymodule]
 fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -3496,9 +3992,18 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let linalg_mod = PyModule::new_bound(_py, "linalg")?;
     linalg(_py, &linalg_mod)?;
     m.add_submodule(&linalg_mod)?;
+    let rl_mod = PyModule::new_bound(_py, "rl")?;
+    rl(_py, &rl_mod)?;
+    m.add_submodule(&rl_mod)?;
+    let rec_mod = PyModule::new_bound(_py, "rec")?;
+    rec(_py, &rec_mod)?;
+    m.add_submodule(&rec_mod)?;
     let sot_mod = PyModule::new_bound(_py, "sot")?;
     sot::module(_py, &sot_mod)?;
     m.add_submodule(&sot_mod)?;
+    let integrations_mod = PyModule::new_bound(_py, "integrations")?;
+    integrations(_py, &integrations_mod)?;
+    m.add_submodule(&integrations_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(topk2d_tensor_py, m)?)?;
@@ -3555,7 +4060,10 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "frac",
             "dataset",
             "linalg",
+            "rl",
+            "rec",
             "sot",
+            "integrations",
         ],
     )?;
     m.setattr("__version__", env!("CARGO_PKG_VERSION"))?;

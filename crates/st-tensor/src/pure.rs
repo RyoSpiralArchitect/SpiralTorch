@@ -31,9 +31,6 @@ use core::fmt;
 use std::error::Error;
 use std::f32::consts::PI;
 
-#[cfg(feature = "wgpu")]
-use crate::backend::wgpu_dense;
-
 /// Result alias used throughout the pure module.
 pub type PureResult<T> = Result<T, TensorError>;
 
