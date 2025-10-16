@@ -57,18 +57,6 @@ pub use language::{
 };
 #[cfg(feature = "psi")]
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
-pub use language::pipeline::{
-    LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
-};
-pub use language::{
-    constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
-    DesireChannelSink, DesireLagrangian, DesireLogRecord, DesireLogReplay, DesireLogbook,
-    DesirePhase, DesirePipeline, DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink,
-    DesireRewriteTrigger, DesireSchedule, DesireSolution, DesireTrainerBridge, DesireTrainerEvent,
-    DesireTrainerSummary, DesireTriggerBuffer, DesireTriggerEvent, DesireWeights, DistanceMatrix,
-    EntropicGwSolver, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
-    TemperatureController,
-};
 pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, MaxPool2d};
 pub use layers::linear::Linear;
 pub use layers::sequential::Sequential;
