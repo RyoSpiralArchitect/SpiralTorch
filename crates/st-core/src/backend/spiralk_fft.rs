@@ -11,9 +11,10 @@
 //! inspect or tweak the kernels before shipping them to end users.
 
 use crate::backend::wgpu_heuristics::Choice;
+use serde::{Deserialize, Serialize};
 
 /// Plan describing the FFT kernel that should be emitted.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpiralKFftPlan {
     /// Preferred radix (2 or 4).
     pub radix: u32,
