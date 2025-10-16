@@ -26,6 +26,9 @@ NumPy, no PyTorch, and no shim layers.
   callers can select devices, spawn hypergrad tapes, plan kernels, and solve
   barycentres with a few intuitive method calls. Structured results are
   returned through the new `ZSpaceBarycenter` class.
+- `SpiralLightning` harness for quick notebook experiments—prepare modules,
+  run epochs, and stream results without manually juggling trainers or
+  schedules.
 - Streaming dataset helpers via `spiraltorch.dataset`—build a
   shuffle/batch/prefetch pipeline entirely in Rust using the native
   `DataLoader`.
@@ -142,6 +145,36 @@ loader = (
 stats = session.train_epoch(trainer, model, loss, loader, schedule)
 print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")
 print(st.get_psychoid_stats())
+```
+
+### SpiralLightning harness
+
+Python callers can skip manual trainer plumbing by instantiating the new
+`SpiralLightning` helper. It prepares modules (honouring the session topos),
+keeps the roundtable schedule cached, and collects epoch reports for you.
+
+```python
+import spiraltorch as st
+from spiraltorch import SpiralSession
+from spiraltorch.nn import Linear, MeanSquaredError
+
+session = SpiralSession(device="wgpu", curvature=-1.0)
+lightning = session.lightning(rows=1, cols=2, auto_prepare=True)
+model = Linear(2, 2, name="layer")
+loss = MeanSquaredError()
+
+dataset = [
+    (st.Tensor(1, 2, [0.0, 1.0]), st.Tensor(1, 2, [0.0, 1.0])),
+    (st.Tensor(1, 2, [1.0, 0.0]), st.Tensor(1, 2, [1.0, 0.0])),
+]
+
+reports = lightning.fit(model, loss, [dataset])
+for epoch, stats in enumerate(reports, start=1):
+    print(f"epoch {epoch}: avg loss={stats.average_loss:.6f}")
+
+# Switch back to manual preparation mid-run if you need custom tape control
+lightning.set_auto_prepare(False)
+session.prepare_module(model)
 ```
 
 The `DistConfig` connects the local roundtable to a meta layer that exchanges
