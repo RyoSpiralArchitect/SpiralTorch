@@ -367,6 +367,13 @@ mod tests {
             let record = record.expect("record");
             phases.push(record.solution.phase);
         }
-        assert_eq!(phases, vec![DesirePhase::Observation, DesirePhase::Injection, DesirePhase::Integration]);
+        assert_eq!(
+            phases,
+            vec![
+                DesirePhase::Observation,
+                DesirePhase::Injection,
+                DesirePhase::Integration
+            ]
+        );
     }
 }

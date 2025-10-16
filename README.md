@@ -236,6 +236,36 @@ for entry in DesireLogReplay::open("desire.ndjson")? {
 }
 ```
 
+Once the raw telemetry exists, braid it directly into automation, logging, and
+rewrite hooks with the `DesirePipeline`. The pipeline fans each automated step
+out to any number of sinks—logbooks, trigger buffers, SpiralK bridges—so graph
+tooling, language desire, and self-rewrite loops evolve together without custom
+glue.【F:crates/st-nn/src/language/pipeline.rs†L1-L240】 Attach a
+`DesireTriggerBuffer` to capture emitted rewrite events while the logbook keeps
+the JSONL trace alive, and optionally replay historical automation into new
+consumers:
+
+```rust
+use st_nn::language::{
+    DesireLogReplay, DesireLogbook, DesirePipeline, DesireTriggerBuffer,
+};
+
+let trigger_buffer = DesireTriggerBuffer::new();
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_logbook(DesireLogbook::new("desire.ndjson")?)
+    .with_sink(trigger_buffer.clone())
+    .build();
+
+let step = pipeline.step_realtime(&logits, previous_token, &concept_hint)?;
+if let Some(trigger) = &step.trigger {
+    spiralk_scheduler.queue_desire(trigger.report.clone(), trigger.mean_penalty);
+}
+
+pipeline.flush()?;
+let replayed = pipeline.replay(DesireLogReplay::open("desire.ndjson")?)?;
+let drained = trigger_buffer.drain()?; // forward to analytics or trainers
+```
+
 The result is a single Rust-native control surface that marries KL control,
 Schrödinger bridges, and entropic GW into SpiralTorch’s Z-space, ready to steer
 language modules, rewrite monads, or SpiralK trainers without bespoke Python

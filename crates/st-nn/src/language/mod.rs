@@ -8,6 +8,7 @@ mod desire;
 mod geometry;
 mod gw;
 mod logbook;
+mod pipeline;
 mod schrodinger;
 mod temperature;
 
@@ -19,4 +20,8 @@ pub use desire::{
 pub use geometry::{ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry};
 pub use gw::{DistanceMatrix, EntropicGwSolver};
 pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
+pub use pipeline::{
+    DesirePipeline, DesirePipelineBuilder, DesirePipelineSink, DesireTriggerBuffer,
+    DesireTriggerEvent,
+};
 pub use temperature::{entropy, TemperatureController};
