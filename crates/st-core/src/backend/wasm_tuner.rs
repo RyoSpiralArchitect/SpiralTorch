@@ -213,6 +213,11 @@ impl WasmTunerTable {
         self.sort_internal();
     }
 
+    /// Retrieve a record by index.
+    pub fn get(&self, index: usize) -> Option<&WasmTunerRecord> {
+        self.records.get(index)
+    }
+
     /// Extend the table with new records and keep them ordered.
     pub fn extend_sorted<I>(&mut self, iter: I)
     where
@@ -220,6 +225,27 @@ impl WasmTunerTable {
     {
         self.records.extend(iter);
         self.sort_internal();
+    }
+
+    /// Replace the record at `index` and keep the ordering stable.  Returns
+    /// `true` when the index existed.
+    pub fn replace(&mut self, index: usize, record: WasmTunerRecord) -> bool {
+        if let Some(slot) = self.records.get_mut(index) {
+            *slot = record;
+            self.sort_internal();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove the record at `index`, returning it if present.
+    pub fn remove(&mut self, index: usize) -> Option<WasmTunerRecord> {
+        if index < self.records.len() {
+            Some(self.records.remove(index))
+        } else {
+            None
+        }
     }
 
     /// Remove every record stored in the table.
@@ -265,14 +291,44 @@ impl WasmTunerTable {
         k: usize,
         subgroup: bool,
     ) -> Option<Choice> {
-        for record in &self.records {
-            if record.matches(rows, cols, k, subgroup) {
-                let mut out = base;
+        self.find_index(rows, cols, k, subgroup).map(|index| {
+            let mut out = base;
+            if let Some(record) = self.records.get(index) {
                 record.apply(&mut out);
-                return Some(out);
             }
-        }
-        None
+            out
+        })
+    }
+
+    /// Find the index of the first record matching the workload parameters.
+    pub fn find_index(&self, rows: usize, cols: usize, k: usize, subgroup: bool) -> Option<usize> {
+        self.records
+            .iter()
+            .position(|record| record.matches(rows, cols, k, subgroup))
+    }
+
+    /// Find a record that matches the workload parameters.
+    pub fn find_record(
+        &self,
+        rows: usize,
+        cols: usize,
+        k: usize,
+        subgroup: bool,
+    ) -> Option<&WasmTunerRecord> {
+        self.find_index(rows, cols, k, subgroup)
+            .and_then(|index| self.records.get(index))
+    }
+
+    /// Remove the first record that matches the workload parameters.
+    pub fn remove_matching(
+        &mut self,
+        rows: usize,
+        cols: usize,
+        k: usize,
+        subgroup: bool,
+    ) -> Option<WasmTunerRecord> {
+        self.find_index(rows, cols, k, subgroup)
+            .map(|index| self.records.remove(index))
     }
 }
 
@@ -395,5 +451,81 @@ mod tests {
         assert_eq!(second.cols_min, 1025);
         let third = iter.next().unwrap();
         assert_eq!(third.subgroup, Some(false));
+    }
+
+    #[test]
+    fn find_replace_and_remove_records() {
+        let mut table = WasmTunerTable::from_records(vec![
+            WasmTunerRecord {
+                rows_min: Some(256),
+                rows_max: Some(1024),
+                cols_min: 0,
+                cols_max: 8192,
+                k_min: 0,
+                k_max: 128,
+                subgroup: Some(true),
+                algo_topk: None,
+                ctile: Some(512),
+                wg: Some(256),
+                kl: Some(16),
+                ch: None,
+                mode_midk: None,
+                mode_bottomk: None,
+                tile_cols: Some(1024),
+                radix: Some(4),
+                segments: Some(2),
+                use_2ce: None,
+            },
+            WasmTunerRecord {
+                rows_min: None,
+                rows_max: None,
+                cols_min: 8193,
+                cols_max: usize::MAX,
+                k_min: 0,
+                k_max: usize::MAX,
+                subgroup: Some(false),
+                algo_topk: Some(1),
+                ctile: Some(1024),
+                wg: Some(128),
+                kl: None,
+                ch: None,
+                mode_midk: None,
+                mode_bottomk: None,
+                tile_cols: Some(4096),
+                radix: Some(2),
+                segments: Some(4),
+                use_2ce: Some(true),
+            },
+        ]);
+
+        let index = table
+            .find_index(512, 4096, 64, true)
+            .expect("record expected");
+        assert_eq!(index, 0);
+        let record = table
+            .find_record(512, 4096, 64, true)
+            .expect("record lookup");
+        assert_eq!(record.wg, Some(256));
+
+        let updated = WasmTunerRecord {
+            wg: Some(192),
+            ..record.clone()
+        };
+        assert!(table.replace(index, updated.clone()));
+        let refreshed = table
+            .find_record(512, 4096, 64, true)
+            .expect("record after replace");
+        assert_eq!(refreshed.wg, Some(192));
+
+        let removed = table
+            .remove_matching(512, 4096, 64, true)
+            .expect("removed record");
+        assert_eq!(removed.wg, Some(192));
+        assert!(table.find_record(512, 4096, 64, true).is_none());
+
+        let tail = table.remove(0).expect("tail record");
+        assert_eq!(tail.tile_cols, Some(4096));
+        assert!(table.remove(10).is_none());
+        assert!(!table.replace(10, tail));
     }
 }
