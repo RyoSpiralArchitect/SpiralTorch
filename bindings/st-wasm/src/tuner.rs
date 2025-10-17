@@ -1,10 +1,10 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::wasm_tuner::{WasmTunerRecord, WasmTunerTable};
 use st_core::backend::wgpu_heuristics::{self, Choice};
 use wasm_bindgen::prelude::*;
 
-use crate::fft::WasmFftPlan;
+use crate::fft::{WasmFftPlan, WasmFftPlanSerde};
 use crate::utils::js_error;
 
 #[wasm_bindgen]
@@ -126,6 +126,41 @@ impl WasmTuner {
             .choose(base, rows as usize, cols as usize, k as usize, subgroup)?;
         Some(WasmFftPlan::from_choice(choice, subgroup))
     }
+
+    /// Resolve a tuned FFT plan. Falls back to heuristics (or base device caps)
+    /// when no explicit override matches.
+    #[wasm_bindgen(js_name = planFftWithFallback)]
+    pub fn plan_fft_with_fallback(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> WasmFftPlan {
+        let (choice, _, _) = self.resolve_fft_choice(rows, cols, k, subgroup);
+        WasmFftPlan::from_choice(choice, subgroup)
+    }
+
+    /// Resolve a tuned FFT plan and return metadata describing how the plan was
+    /// assembled (override vs. heuristic vs. fallback).
+    #[wasm_bindgen(js_name = planFftReport)]
+    pub fn plan_fft_report(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> Result<JsValue, JsValue> {
+        let (choice, source, heuristic_used) = self.resolve_fft_choice(rows, cols, k, subgroup);
+        let plan = WasmFftPlan::from_choice(choice, subgroup);
+        let report = ResolvedPlanSerde {
+            plan: WasmFftPlanSerde::from(&plan),
+            override_applied: matches!(source, PlanSource::Override),
+            heuristic_used,
+            source: PlanSourceSerde::from(source),
+        };
+        JsValue::from_serde(&report).map_err(|err| js_error(err))
+    }
 }
 
 /// Compute the baseline WGPU choice without consulting an override table.
@@ -233,5 +268,138 @@ impl From<Choice> for ChoiceSerde {
             radix: choice.radix,
             segments: choice.segments,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlanSource {
+    Override,
+    Heuristic,
+    Fallback,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum PlanSourceSerde {
+    Override,
+    Heuristic,
+    Fallback,
+}
+
+impl From<PlanSource> for PlanSourceSerde {
+    fn from(source: PlanSource) -> Self {
+        match source {
+            PlanSource::Override => PlanSourceSerde::Override,
+            PlanSource::Heuristic => PlanSourceSerde::Heuristic,
+            PlanSource::Fallback => PlanSourceSerde::Fallback,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ResolvedPlanSerde {
+    plan: WasmFftPlanSerde,
+    #[serde(rename = "overrideApplied")]
+    override_applied: bool,
+    #[serde(rename = "heuristicUsed")]
+    heuristic_used: bool,
+    source: PlanSourceSerde,
+}
+
+impl WasmTuner {
+    fn resolve_fft_choice(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> (Choice, PlanSource, bool) {
+        let fallback = base_choice(rows as usize, cols as usize, k as usize, subgroup);
+        let (candidate, heuristic_used) =
+            match wgpu_heuristics::choose_topk(rows, cols, k, subgroup) {
+                Some(choice) => (choice, true),
+                None => (fallback, false),
+            };
+        let mut source = if heuristic_used {
+            PlanSource::Heuristic
+        } else {
+            PlanSource::Fallback
+        };
+        let resolved = match self.table.choose(
+            candidate,
+            rows as usize,
+            cols as usize,
+            k as usize,
+            subgroup,
+        ) {
+            Some(choice) => {
+                source = PlanSource::Override;
+                choice
+            }
+            None => candidate,
+        };
+        (resolved, source, heuristic_used)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_tuner() -> WasmTuner {
+        WasmTuner {
+            table: WasmTunerTable::new(),
+        }
+    }
+
+    fn override_record() -> WasmTunerRecord {
+        WasmTunerRecord {
+            rows_min: Some(256),
+            rows_max: Some(1024),
+            cols_min: 0,
+            cols_max: 16_384,
+            k_min: 0,
+            k_max: 512,
+            subgroup: Some(true),
+            algo_topk: None,
+            ctile: None,
+            wg: Some(128),
+            kl: None,
+            ch: None,
+            mode_midk: None,
+            mode_bottomk: None,
+            tile_cols: Some(2048),
+            radix: Some(4),
+            segments: Some(2),
+            use_2ce: None,
+        }
+    }
+
+    #[test]
+    fn fallback_plan_prefers_override() {
+        let mut tuner = empty_tuner();
+        tuner.table.push_sorted(override_record());
+        let plan = tuner.plan_fft_with_fallback(512, 4096, 128, true);
+        assert_eq!(plan.tile_cols(), 2048);
+        assert_eq!(plan.radix(), 4);
+        let report = tuner.plan_fft_report(512, 4096, 128, true).expect("report");
+        let parsed: ResolvedPlanSerde = report.into_serde().expect("serde");
+        assert!(parsed.override_applied);
+        assert_eq!(parsed.plan.tile_cols, 2048);
+        assert_eq!(parsed.plan.radix, 4);
+        assert_eq!(parsed.source, PlanSourceSerde::Override);
+    }
+
+    #[test]
+    fn fallback_plan_handles_missing_override() {
+        let tuner = empty_tuner();
+        let report = tuner.plan_fft_report(512, 4096, 128, true).expect("report");
+        let parsed: ResolvedPlanSerde = report.into_serde().expect("serde");
+        assert!(!parsed.override_applied);
+        assert!(matches!(
+            parsed.source,
+            PlanSourceSerde::Heuristic | PlanSourceSerde::Fallback
+        ));
+        assert!(parsed.plan.tile_cols >= 1);
     }
 }

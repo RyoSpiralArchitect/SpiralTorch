@@ -1703,6 +1703,11 @@ tuner.mergeObject([
   { rows: 512, cols_min: 4096, cols_max: 16383, k_max: 256, sg: true, tile_cols: 1024 },
 ]);
 const overrides = tuner.toObject();
+const fallbackPlan = tuner.planFftWithFallback(512, 4096, 128, true);
+const report = tuner.planFftReport(512, 4096, 128, true);
+if (report.source === "override") {
+  console.log(`override tile=${report.plan.tileCols}`);
+}
 ```
 
 ---
