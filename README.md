@@ -1510,7 +1510,18 @@ const freqDomain = fft_forward(timeDomainBuffer);
 ```
 
 If you maintain a `WasmTuner`, call `planFft` to reuse your override table and
-capture WGSL/SpiralK artifacts without leaving the browser.
+capture WGSL/SpiralK artifacts without leaving the browser.  The bindings now
+understand plain JavaScript objects in addition to JSON strings, so you can
+hydrate a tuner from baked data and persist live edits without extra parsing:
+
+```javascript
+const records = [{ rows: 256, cols_min: 0, cols_max: 4095, k_max: 128, sg: true, wg: 128 }];
+const tuner = WasmTuner.fromObject(records);
+tuner.mergeObject([
+  { rows: 512, cols_min: 4096, cols_max: 16383, k_max: 256, sg: true, tile_cols: 1024 },
+]);
+const overrides = tuner.toObject();
+```
 
 ---
 

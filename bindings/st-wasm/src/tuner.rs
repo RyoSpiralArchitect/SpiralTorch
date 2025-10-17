@@ -1,14 +1,10 @@
-use js_sys::JSON;
 use serde::Serialize;
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::wasm_tuner::{WasmTunerRecord, WasmTunerTable};
-use st_core::backend::wgpu_heuristics::Choice;
-use wasm_bindgen::prelude::*;
-
-use crate::fft::WasmFftPlan;
 use st_core::backend::wgpu_heuristics::{self, Choice};
 use wasm_bindgen::prelude::*;
 
+use crate::fft::WasmFftPlan;
 use crate::utils::js_error;
 
 #[wasm_bindgen]
@@ -28,10 +24,27 @@ impl WasmTuner {
         Ok(Self { table })
     }
 
+    /// Construct a tuner from a JavaScript array of records.
+    #[wasm_bindgen(js_name = fromObject)]
+    pub fn from_object(value: &JsValue) -> Result<WasmTuner, JsValue> {
+        let records = parse_records(value)?;
+        Ok(Self {
+            table: WasmTunerTable::from_records(records),
+        })
+    }
+
     /// Replace the table contents with the provided JSON blob.
     #[wasm_bindgen(js_name = loadJson)]
     pub fn load_json(&mut self, json: &str) -> Result<(), JsValue> {
         self.table = WasmTunerTable::from_json_str(json).map_err(js_error)?;
+        Ok(())
+    }
+
+    /// Replace the table contents with the provided array of records.
+    #[wasm_bindgen(js_name = loadObject)]
+    pub fn load_object(&mut self, value: &JsValue) -> Result<(), JsValue> {
+        let records = parse_records(value)?;
+        self.table = WasmTunerTable::from_records(records);
         Ok(())
     }
 
@@ -40,6 +53,14 @@ impl WasmTuner {
     pub fn merge_json(&mut self, json: &str) -> Result<(), JsValue> {
         let parsed = WasmTunerTable::from_json_str(json).map_err(js_error)?;
         let records = parsed.iter().cloned().collect::<Vec<_>>();
+        self.table.extend_sorted(records);
+        Ok(())
+    }
+
+    /// Merge additional overrides from a JavaScript array of records.
+    #[wasm_bindgen(js_name = mergeObject)]
+    pub fn merge_object(&mut self, value: &JsValue) -> Result<(), JsValue> {
+        let records = parse_records(value)?;
         self.table.extend_sorted(records);
         Ok(())
     }
@@ -74,6 +95,12 @@ impl WasmTuner {
 
     /// Return the dataset as an array of JavaScript objects.
     pub fn records(&self) -> Result<JsValue, JsValue> {
+        self.to_object()
+    }
+
+    /// Export the dataset into a JavaScript array of records.
+    #[wasm_bindgen(js_name = toObject)]
+    pub fn to_object(&self) -> Result<JsValue, JsValue> {
         let records: Vec<WasmTunerRecord> = self.table.iter().cloned().collect();
         records_to_js(&records)
     }
@@ -157,8 +184,7 @@ fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> Choice {
 }
 
 fn choice_to_js(choice: Choice) -> Result<JsValue, JsValue> {
-    let json = serde_json::to_string(&ChoiceSerde::from(choice)).map_err(js_error)?;
-    JSON::parse(&json).map_err(|err| js_error(js_value_to_string(&err)))
+    JsValue::from_serde(&ChoiceSerde::from(choice)).map_err(|err| js_error(err))
 }
 
 #[derive(Serialize)]
@@ -177,23 +203,19 @@ struct ChoiceSerde {
 }
 
 fn parse_record(value: JsValue) -> Result<WasmTunerRecord, JsValue> {
-    let json = stringify_js_value(&value)?;
-    serde_json::from_str(&json).map_err(js_error)
+    value
+        .into_serde::<WasmTunerRecord>()
+        .map_err(|err| js_error(err))
 }
 
 fn records_to_js(records: &[WasmTunerRecord]) -> Result<JsValue, JsValue> {
-    let json = serde_json::to_string(records).map_err(js_error)?;
-    JSON::parse(&json).map_err(|err| js_error(js_value_to_string(&err)))
+    JsValue::from_serde(records).map_err(|err| js_error(err))
 }
 
-fn stringify_js_value(value: &JsValue) -> Result<String, JsValue> {
-    let json = JSON::stringify(value).map_err(|err| js_error(js_value_to_string(&err)))?;
-    json.as_string()
-        .ok_or_else(|| js_error("expected JSON string"))
-}
-
-fn js_value_to_string(value: &JsValue) -> String {
-    value.as_string().unwrap_or_else(|| format!("{value:?}"))
+fn parse_records(value: &JsValue) -> Result<Vec<WasmTunerRecord>, JsValue> {
+    value
+        .into_serde::<Vec<WasmTunerRecord>>()
+        .map_err(|err| js_error(err))
 }
 
 impl From<Choice> for ChoiceSerde {
