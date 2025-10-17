@@ -208,7 +208,7 @@ fn complex_to_interleaved(data: &[Complex32]) -> Vec<f32> {
 }
 
 #[derive(Serialize, Deserialize)]
-struct WasmFftPlanSerde {
+pub(crate) struct WasmFftPlanSerde {
     radix: u32,
     #[serde(rename = "tileCols")]
     tile_cols: u32,
