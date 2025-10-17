@@ -316,10 +316,6 @@ fn parse_record(value: JsValue) -> Result<WasmTunerRecord, JsValue> {
     value.into_serde::<WasmTunerRecord>().map_err(js_error)
 }
 
-fn record_to_js(record: &WasmTunerRecord) -> Result<JsValue, JsValue> {
-    JsValue::from_serde(record).map_err(|err| js_error(err))
-}
-
 fn records_to_js(records: &[WasmTunerRecord]) -> Result<JsValue, JsValue> {
     JsValue::from_serde(records).map_err(js_error)
 }

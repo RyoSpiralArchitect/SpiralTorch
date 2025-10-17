@@ -2486,6 +2486,7 @@ dependencies = [
  "pollster",
  "rand",
  "rand_distr",
+ "st-frac",
  "wgpu",
 ]
 
