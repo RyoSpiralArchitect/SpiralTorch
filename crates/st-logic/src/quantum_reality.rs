@@ -11,10 +11,12 @@
 //! relation is expressed through explicit functions so it can participate in
 //! downstream simulations without needing to parse the original TeX.
 
+use std::cmp::Ordering;
 use std::f64::consts::PI;
 use std::iter;
 use std::sync::Arc;
 
+use nalgebra::{DMatrix, DVector, SymmetricEigen};
 use num_complex::Complex64;
 
 /// Convenience alias for scalar-valued time functions.
@@ -103,6 +105,10 @@ impl ClusterStructure {
         ClusterStructure { segments }
     }
 
+    pub fn cluster_count(&self) -> usize {
+        self.segments.len()
+    }
+
     pub fn total_qubits(&self) -> usize {
         self.segments.iter().copied().sum()
     }
@@ -136,6 +142,64 @@ impl ClusterStructure {
             start = end;
         }
         None
+    }
+}
+
+/// Manhattan grid coordinate used for virtual taxicab embeddings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GridCoordinate {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl GridCoordinate {
+    pub fn manhattan_distance(&self, other: &GridCoordinate) -> i32 {
+        (self.x - other.x).abs() + (self.y - other.y).abs()
+    }
+}
+
+/// Virtual physical layout for qubit indices.
+#[derive(Clone, Debug)]
+pub struct TaxicabLayout {
+    coordinates: Vec<GridCoordinate>,
+}
+
+impl TaxicabLayout {
+    pub fn new(coordinates: Vec<GridCoordinate>) -> Self {
+        TaxicabLayout { coordinates }
+    }
+
+    pub fn coordinate_of(&self, index: usize) -> GridCoordinate {
+        self.coordinates
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| GridCoordinate {
+                x: index as i32,
+                y: 0,
+            })
+    }
+
+    pub fn ensure_capacity(&mut self, len: usize) {
+        while self.coordinates.len() < len {
+            let idx = self.coordinates.len() as i32;
+            self.coordinates.push(GridCoordinate { x: idx, y: 0 });
+        }
+    }
+
+    pub fn from_cluster(cluster: &ClusterStructure) -> Self {
+        let total = cluster.total_qubits();
+        let mut coords = Vec::with_capacity(total);
+        let mut offsets = vec![0usize; cluster.cluster_count().max(1)];
+        for idx in 0..total {
+            let cluster_idx = cluster.cluster_of(idx).unwrap_or(0);
+            let offset = offsets[cluster_idx];
+            offsets[cluster_idx] += 1;
+            coords.push(GridCoordinate {
+                x: offset as i32,
+                y: cluster_idx as i32,
+            });
+        }
+        TaxicabLayout::new(coords)
     }
 }
 
@@ -291,6 +355,48 @@ pub struct DriftField {
 pub struct DriftVector {
     pub theta_component: f64,
     pub phi_component: f64,
+}
+
+/// Coherent noise sources affecting the interference atlas dynamics.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoiseModel {
+    pub t2_drift: f64,
+    pub phi_drift: f64,
+    pub omega_variation: f64,
+}
+
+impl NoiseModel {
+    fn is_active(&self) -> bool {
+        self.t2_drift > 0.0 || self.phi_drift.abs() > 0.0 || self.omega_variation.abs() > 0.0
+    }
+}
+
+/// Result of constructing an interference atlas.
+#[derive(Clone, Debug)]
+pub struct AtlasResult {
+    pub kernel: Vec<Vec<f64>>,
+    pub diffusion_coordinates: Vec<Vec<f64>>,
+    pub pseudo_cluster_ratio: f64,
+}
+
+/// Comparison between pristine and noise-perturbed atlas projections.
+#[derive(Clone, Debug)]
+pub struct AtlasAnalysis {
+    pub base: AtlasResult,
+    pub noisy: Option<AtlasResult>,
+    pub stability: f64,
+}
+
+/// Selected parameters for the collapse drive auto-tuning.
+#[derive(Clone, Debug)]
+pub struct AutoTuneResult {
+    pub k_nn: usize,
+    pub k_scale: f64,
+    pub bandwidth: f64,
+    pub objective: f64,
+    pub connectivity: usize,
+    pub lambda2: f64,
+    pub pseudo_ratio: f64,
 }
 
 impl DriftField {
@@ -484,6 +590,369 @@ pub fn superposed_drift(
         .collect()
 }
 
+fn atlas_feature(
+    state: &QubitState,
+    t: f64,
+    bloom: &BloomSignature,
+    drift: &DriftField,
+    coord: GridCoordinate,
+) -> [f64; 5] {
+    let bloom_amp = bloom.amplitude(state.index, t, state);
+    let drift_vec = drift.drift_vector(state, t);
+    [
+        bloom_amp,
+        drift_vec.phi_component,
+        state.omega,
+        coord.x as f64,
+        coord.y as f64,
+    ]
+}
+
+fn dual_local_kernel(
+    states: &[QubitState],
+    t: f64,
+    bloom: &BloomSignature,
+    drift: &DriftField,
+    layout: &TaxicabLayout,
+    k_scale: f64,
+    bandwidth: f64,
+) -> Vec<Vec<f64>> {
+    let sigma = bandwidth.max(1e-9);
+    let freq_scale = k_scale.abs().max(1e-9);
+    states
+        .iter()
+        .map(|m| {
+            let coord_m = layout.coordinate_of(m.index);
+            let feat_m = atlas_feature(m, t, bloom, drift, coord_m);
+            states
+                .iter()
+                .map(|n| {
+                    let coord_n = layout.coordinate_of(n.index);
+                    let feat_n = atlas_feature(n, t, bloom, drift, coord_n);
+                    let delta_b = feat_m[0] - feat_n[0];
+                    let delta_dphi = feat_m[1] - feat_n[1];
+                    let delta_omega = (feat_m[2] - feat_n[2]) / freq_scale;
+                    let delta_x = feat_m[3] - feat_n[3];
+                    let delta_y = feat_m[4] - feat_n[4];
+                    let manhattan = coord_m.manhattan_distance(&coord_n) as f64;
+                    let feature_distance =
+                        delta_b.powi(2) + delta_dphi.powi(2) + delta_omega.powi(2);
+                    let spatial_distance = delta_x.abs() + delta_y.abs() + manhattan;
+                    let norm = feature_distance + spatial_distance;
+                    (-norm / (sigma * sigma)).exp()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn knn_adjacency(kernel: &[Vec<f64>], k: usize) -> Vec<Vec<f64>> {
+    let n = kernel.len();
+    let mut adjacency = vec![vec![0.0; n]; n];
+    for (i, row) in kernel.iter().enumerate() {
+        let mut pairs: Vec<(usize, f64)> = row
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| *j != i)
+            .map(|(j, &w)| (j, w))
+            .collect();
+        pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+        for (idx, &weight) in pairs.iter().take(k) {
+            let j = *idx;
+            let w = weight.max(0.0);
+            adjacency[i][j] = adjacency[i][j].max(w);
+            adjacency[j][i] = adjacency[j][i].max(w);
+        }
+    }
+    adjacency
+}
+
+fn row_normalise_matrix(matrix: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    matrix
+        .iter()
+        .map(|row| {
+            let sum: f64 = row.iter().sum();
+            if sum > 0.0 {
+                row.iter().map(|val| val / sum).collect()
+            } else {
+                row.iter().map(|_| 0.0).collect()
+            }
+        })
+        .collect()
+}
+
+fn connected_components(adjacency: &[Vec<f64>]) -> usize {
+    let n = adjacency.len();
+    if n == 0 {
+        return 0;
+    }
+    let mut visited = vec![false; n];
+    let mut components = 0usize;
+    for start in 0..n {
+        if visited[start] {
+            continue;
+        }
+        components += 1;
+        let mut stack = vec![start];
+        visited[start] = true;
+        while let Some(node) = stack.pop() {
+            for (nbr, &weight) in adjacency[node].iter().enumerate() {
+                if weight > 0.0 && !visited[nbr] {
+                    visited[nbr] = true;
+                    stack.push(nbr);
+                }
+            }
+        }
+    }
+    components
+}
+
+fn laplacian_lambda2(adjacency: &[Vec<f64>]) -> f64 {
+    let n = adjacency.len();
+    if n <= 1 {
+        return 0.0;
+    }
+    let laplacian = DMatrix::from_fn(n, n, |i, j| {
+        if i == j {
+            adjacency[i].iter().sum::<f64>()
+        } else {
+            -adjacency[i][j]
+        }
+    });
+    let eigen = SymmetricEigen::new(laplacian);
+    let mut values: Vec<f64> = eigen.eigenvalues.iter().copied().collect();
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+    if values.len() >= 2 {
+        values[1].max(0.0)
+    } else {
+        0.0
+    }
+}
+
+fn pseudo_ratio_from_matrix(matrix: &[Vec<f64>], clusters: &ClusterStructure) -> f64 {
+    let mut within = 0.0;
+    let mut between = 0.0;
+    for (i, row) in matrix.iter().enumerate() {
+        for (j, &weight) in row.iter().enumerate() {
+            if i == j || weight <= 0.0 {
+                continue;
+            }
+            let ci = clusters.cluster_of(i).unwrap_or(usize::MAX);
+            let cj = clusters.cluster_of(j).unwrap_or(usize::MAX);
+            if ci == cj {
+                within += weight;
+            } else {
+                between += weight;
+            }
+        }
+    }
+    within / (between + 1e-9)
+}
+
+fn matrix_to_vec(matrix: &DMatrix<f64>) -> Vec<Vec<f64>> {
+    (0..matrix.nrows())
+        .map(|i| (0..matrix.ncols()).map(|j| matrix[(i, j)]).collect())
+        .collect()
+}
+
+fn project_to_psd(matrix: DMatrix<f64>) -> DMatrix<f64> {
+    let symmetric = (matrix.clone() + matrix.transpose()) * 0.5;
+    let eigen = SymmetricEigen::new(symmetric);
+    let mut diag = DVector::zeros(eigen.eigenvalues.len());
+    for (idx, val) in eigen.eigenvalues.iter().enumerate() {
+        diag[idx] = val.max(&0.0);
+    }
+    let diag_matrix = DMatrix::from_diagonal(&diag);
+    &eigen.eigenvectors * diag_matrix * eigen.eigenvectors.transpose()
+}
+
+fn diffusion_map(kernel: &DMatrix<f64>, components: usize) -> Vec<Vec<f64>> {
+    let n = kernel.nrows();
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut degrees = DVector::zeros(n);
+    for i in 0..n {
+        let mut sum = 0.0;
+        for j in 0..n {
+            sum += kernel[(i, j)];
+        }
+        degrees[i] = sum.max(1e-9);
+    }
+    let mut norm = DMatrix::zeros(n, n);
+    for i in 0..n {
+        for j in 0..n {
+            norm[(i, j)] = kernel[(i, j)] / (degrees[i] * degrees[j]).sqrt();
+        }
+    }
+    let eigen = SymmetricEigen::new(norm);
+    let mut pairs: Vec<(f64, Vec<f64>)> = eigen
+        .eigenvalues
+        .iter()
+        .zip(eigen.eigenvectors.column_iter())
+        .map(|(val, vec)| (val.abs(), vec.iter().copied().collect()))
+        .collect();
+    pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
+    let embed_dim = components.min(n);
+    let mut embedding = vec![vec![0.0; embed_dim]; n];
+    for (comp_idx, (_eig, vector)) in pairs.into_iter().take(embed_dim).enumerate() {
+        for (row, value) in vector.into_iter().enumerate() {
+            embedding[row][comp_idx] = value;
+        }
+    }
+    embedding
+}
+
+fn build_interference_matrix(
+    states: &[QubitState],
+    t: f64,
+    bloom: &BloomSignature,
+    drift: &DriftField,
+    layout: &TaxicabLayout,
+    bandwidth: f64,
+    noise: Option<NoiseModel>,
+) -> DMatrix<f64> {
+    let sigma = bandwidth.max(1e-6);
+    let mut matrix = DMatrix::zeros(states.len(), states.len());
+    for (i, m) in states.iter().enumerate() {
+        let coord_m = layout.coordinate_of(m.index);
+        for (j, n) in states.iter().enumerate() {
+            let coord_n = layout.coordinate_of(n.index);
+            let amp_m = bloom.amplitude(m.index, t, m);
+            let amp_n = bloom.amplitude(n.index, t, n);
+            let amp = 0.5 * (amp_m + amp_n);
+            let base_phase = (m.omega - n.omega) * t;
+            let spatial = {
+                let dist = coord_m.manhattan_distance(&coord_n) as f64;
+                (-dist * dist / (sigma * sigma)).exp()
+            };
+            let mut phase = base_phase;
+            let mut amplitude = amp;
+            if let Some(model) = noise {
+                if model.t2_drift > 0.0 {
+                    let decay = (-t.abs() / model.t2_drift.max(1e-9)).exp();
+                    amplitude *= decay;
+                }
+                phase += model.phi_drift * (m.trajectory.phi(t) - n.trajectory.phi(t));
+                phase += model.omega_variation * t * (m.index as f64 - n.index as f64);
+            }
+            let drift_delta =
+                drift.drift_vector(m, t).phi_component - drift.drift_vector(n, t).phi_component;
+            phase += drift_delta;
+            matrix[(i, j)] = amplitude * phase.cos() * spatial;
+        }
+    }
+    matrix
+}
+
+pub fn interference_atlas(
+    states: &[QubitState],
+    t: f64,
+    bloom: &BloomSignature,
+    drift: &DriftField,
+    layout: &TaxicabLayout,
+    bandwidth: f64,
+    clusters: &ClusterStructure,
+    noise: Option<NoiseModel>,
+) -> AtlasAnalysis {
+    let base_matrix = build_interference_matrix(states, t, bloom, drift, layout, bandwidth, None);
+    let psd = project_to_psd(base_matrix);
+    let kernel_vec = matrix_to_vec(&psd);
+    let diffusion = diffusion_map(&psd, 3);
+    let pseudo_ratio = pseudo_ratio_from_matrix(&kernel_vec, clusters);
+    let base_result = AtlasResult {
+        kernel: kernel_vec,
+        diffusion_coordinates: diffusion,
+        pseudo_cluster_ratio: pseudo_ratio,
+    };
+
+    let noisy_result = noise.and_then(|model| {
+        if model.is_active() {
+            let noisy_matrix =
+                build_interference_matrix(states, t, bloom, drift, layout, bandwidth, Some(model));
+            let noisy_psd = project_to_psd(noisy_matrix);
+            let kernel_vec = matrix_to_vec(&noisy_psd);
+            let diffusion = diffusion_map(&noisy_psd, 3);
+            let pseudo_ratio = pseudo_ratio_from_matrix(&kernel_vec, clusters);
+            Some(AtlasResult {
+                kernel: kernel_vec,
+                diffusion_coordinates: diffusion,
+                pseudo_cluster_ratio: pseudo_ratio,
+            })
+        } else {
+            None
+        }
+    });
+
+    let stability = noisy_result
+        .as_ref()
+        .map(|noisy| {
+            let denom = base_result.pseudo_cluster_ratio.abs() + 1e-9;
+            1.0 - ((base_result.pseudo_cluster_ratio - noisy.pseudo_cluster_ratio).abs() / denom)
+        })
+        .unwrap_or(1.0)
+        .clamp(0.0, 1.0);
+
+    AtlasAnalysis {
+        base: base_result,
+        noisy: noisy_result,
+        stability,
+    }
+}
+
+pub fn auto_tune_collapse_drive(
+    states: &[QubitState],
+    t: f64,
+    bloom: &BloomSignature,
+    drift: &DriftField,
+    layout: &mut TaxicabLayout,
+    clusters: &ClusterStructure,
+    k_nn_candidates: &[usize],
+    k_scale_candidates: &[f64],
+    bandwidth_candidates: &[f64],
+) -> Option<AutoTuneResult> {
+    layout.ensure_capacity(states.len());
+    let mut best: Option<AutoTuneResult> = None;
+    for &k_nn in k_nn_candidates {
+        if k_nn == 0 {
+            continue;
+        }
+        for &k_scale in k_scale_candidates {
+            for &bandwidth in bandwidth_candidates {
+                let kernel = dual_local_kernel(states, t, bloom, drift, layout, k_scale, bandwidth);
+                let adjacency = knn_adjacency(&kernel, k_nn.min(states.len().saturating_sub(1)));
+                let components = connected_components(&adjacency);
+                let connectivity_score = if components == 0 {
+                    0.0
+                } else {
+                    (1.0 / components as f64).clamp(0.0, 1.0)
+                };
+                let lambda2 = laplacian_lambda2(&adjacency);
+                let lambda_score = (-((lambda2 - 0.5).powi(2)) / 0.25).exp();
+                let pseudo_ratio = pseudo_ratio_from_matrix(&adjacency, clusters);
+                let ratio_score = pseudo_ratio / (1.0 + pseudo_ratio);
+                let objective = connectivity_score * lambda_score * ratio_score;
+                let candidate = AutoTuneResult {
+                    k_nn,
+                    k_scale,
+                    bandwidth,
+                    objective,
+                    connectivity: components,
+                    lambda2,
+                    pseudo_ratio,
+                };
+                match &best {
+                    Some(current) if current.objective >= candidate.objective => {}
+                    _ => {
+                        best = Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+    best
+}
+
 /// Monad biome descriptor.
 #[derive(Clone, Debug)]
 pub struct MonadBiome {
@@ -528,6 +997,52 @@ impl QuantumRealityEngine {
             self.sigma_d,
             self.sigma_bloom,
         )
+    }
+
+    pub fn lambda_with_dual_locality(
+        &self,
+        t: f64,
+        layout: &mut TaxicabLayout,
+        params: &AutoTuneResult,
+    ) -> Vec<Vec<f64>> {
+        layout.ensure_capacity(self.states.len());
+        let kernel = dual_local_kernel(
+            &self.states,
+            t,
+            &self.bloom,
+            &self.drift,
+            layout,
+            params.k_scale,
+            params.bandwidth,
+        );
+        let adjacency = knn_adjacency(
+            &kernel,
+            params.k_nn.min(self.states.len().saturating_sub(1)),
+        );
+        row_normalise_matrix(&adjacency)
+    }
+
+    pub fn tuned_collapse_drive(
+        &self,
+        t: f64,
+        layout: &mut TaxicabLayout,
+        k_nn_candidates: &[usize],
+        k_scale_candidates: &[f64],
+        bandwidth_candidates: &[f64],
+    ) -> Option<(AutoTuneResult, Vec<Vec<f64>>)> {
+        let params = auto_tune_collapse_drive(
+            &self.states,
+            t,
+            &self.bloom,
+            &self.drift,
+            layout,
+            &self.clusters,
+            k_nn_candidates,
+            k_scale_candidates,
+            bandwidth_candidates,
+        )?;
+        let lambda = self.lambda_with_dual_locality(t, layout, &params);
+        Some((params, lambda))
     }
 
     pub fn connect_zspace_monad(
