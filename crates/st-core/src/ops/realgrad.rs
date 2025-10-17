@@ -10,6 +10,8 @@
 //! transliteration from notebooks, but now reuses the shared Ramanujan π series
 //! and Leech density projector that already live inside the repository.
 
+use core::f32::consts::PI;
+
 use crate::util::math::{ramanujan_pi, LeechProjector};
 
 const DEFAULT_RANK: usize = 24;
@@ -36,6 +38,16 @@ impl RealGradProjection {
     /// Returns `true` when the projection yielded any non-zero residuals.
     pub fn has_residuals(&self) -> bool {
         !self.monad_biome.is_empty()
+    }
+
+    /// Returns the total magnitude routed to the monad biome.
+    pub fn residual_energy(&self) -> f32 {
+        self.monad_biome.iter().copied().sum()
+    }
+
+    /// Returns the accumulated energy of the Z-space field.
+    pub fn z_energy(&self) -> f32 {
+        self.z_space.iter().map(|value| value.abs()).sum()
     }
 }
 
@@ -73,6 +85,63 @@ impl RealGradConfig {
             residual_threshold: self.residual_threshold.max(0.0),
         }
     }
+
+    /// Calibrates the configuration against a previous projection and returns
+    /// the tuned configuration alongside the tuning diagnostics.
+    pub fn calibrate(self, projection: &RealGradProjection) -> (Self, RealGradTuning) {
+        let base = self.sanitised();
+        let monad_energy = projection.residual_energy();
+        let z_energy = projection.z_energy();
+        let lebesgue = projection.lebesgue_measure.max(f32::EPSILON);
+        let total_energy = (monad_energy + z_energy).max(f32::EPSILON);
+        let residual_ratio = monad_energy / total_energy;
+        let lebesgue_ratio = monad_energy / lebesgue;
+        let pi_multiplier = if PI > 0.0 {
+            (projection.ramanujan_pi / PI).max(0.0)
+        } else {
+            1.0
+        };
+        let target_ratio = 0.1f32;
+        let raw_adjustment = 1.0 + (residual_ratio - target_ratio) * pi_multiplier + lebesgue_ratio;
+        let adjustment_factor = raw_adjustment.clamp(0.25, 4.0);
+        let suggested_threshold = (base.residual_threshold * adjustment_factor).max(0.0);
+
+        let tuned_config = RealGradConfig {
+            residual_threshold: suggested_threshold,
+            ..base
+        };
+
+        let diagnostics = RealGradTuning {
+            monad_energy,
+            z_energy,
+            residual_ratio,
+            lebesgue_ratio,
+            pi_multiplier,
+            adjustment_factor,
+            suggested_threshold,
+        };
+
+        (tuned_config, diagnostics)
+    }
+}
+
+/// Diagnostics emitted by [`RealGradConfig::calibrate`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RealGradTuning {
+    /// Total magnitude rerouted to the monad biome in the previous projection.
+    pub monad_energy: f32,
+    /// Total magnitude retained in the Z-space field.
+    pub z_energy: f32,
+    /// Share of the overall energy captured by the monad biome.
+    pub residual_ratio: f32,
+    /// Ratio between the monad biome energy and the Lebesgue integral.
+    pub lebesgue_ratio: f32,
+    /// Multiplier derived from the Ramanujan π estimate relative to π.
+    pub pi_multiplier: f32,
+    /// Factor applied to the previous residual threshold.
+    pub adjustment_factor: f32,
+    /// Suggested residual threshold for the next projection.
+    pub suggested_threshold: f32,
 }
 
 /// Projects a Euclidean gradient into the Reach lattice "Realgrad" tape.
@@ -179,5 +248,34 @@ mod tests {
         let projection = project_realgrad(&data, RealGradConfig::default());
         assert!(projection.has_residuals());
         assert!(!projection.monad_biome.is_empty());
+    }
+
+    #[test]
+    fn projection_reports_energy_levels() {
+        let data = [0.25f32; 4];
+        let projection = project_realgrad(&data, RealGradConfig::default());
+        assert!(projection.z_energy() > 0.0);
+        assert_eq!(
+            projection.residual_energy(),
+            projection.monad_biome.iter().sum::<f32>()
+        );
+    }
+
+    #[test]
+    fn calibration_adjusts_threshold_based_on_residual_ratio() {
+        let data = vec![DEFAULT_THRESHOLD * 1024.0; 16];
+        let config = RealGradConfig::default();
+        let projection = project_realgrad(&data, config);
+        let (tuned, tuning) = config.calibrate(&projection);
+        assert!(tuning.monad_energy > 0.0);
+        assert!(tuning.lebesgue_ratio > 0.0);
+        assert!(tuning.adjustment_factor > 1.0);
+        assert!(tuned.residual_threshold > config.residual_threshold);
+
+        let small_data = vec![DEFAULT_THRESHOLD * 0.1; 16];
+        let small_projection = project_realgrad(&small_data, config);
+        let (tuned_small, tuning_small) = config.calibrate(&small_projection);
+        assert!(tuning_small.adjustment_factor < 1.0);
+        assert!(tuned_small.residual_threshold < config.residual_threshold);
     }
 }
