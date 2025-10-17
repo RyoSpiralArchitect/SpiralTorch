@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use st_tensor::pure::{topos::OpenCartesianTopos, Tensor, TensorError};
+use st_tensor::{topos::OpenCartesianTopos, Tensor, TensorError};
 
 /// Errors surfaced by the recommender harness.
 #[derive(Debug)]
