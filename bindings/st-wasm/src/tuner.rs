@@ -294,7 +294,7 @@ fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> Choice {
 }
 
 fn choice_to_js(choice: Choice) -> Result<JsValue, JsValue> {
-    JsValue::from_serde(&ChoiceSerde::from(choice)).map_err(|err| js_error(err))
+    JsValue::from_serde(&ChoiceSerde::from(choice)).map_err(js_error)
 }
 
 #[derive(Serialize)]
@@ -313,9 +313,7 @@ struct ChoiceSerde {
 }
 
 fn parse_record(value: JsValue) -> Result<WasmTunerRecord, JsValue> {
-    value
-        .into_serde::<WasmTunerRecord>()
-        .map_err(|err| js_error(err))
+    value.into_serde::<WasmTunerRecord>().map_err(js_error)
 }
 
 fn record_to_js(record: &WasmTunerRecord) -> Result<JsValue, JsValue> {
@@ -323,13 +321,11 @@ fn record_to_js(record: &WasmTunerRecord) -> Result<JsValue, JsValue> {
 }
 
 fn records_to_js(records: &[WasmTunerRecord]) -> Result<JsValue, JsValue> {
-    JsValue::from_serde(records).map_err(|err| js_error(err))
+    JsValue::from_serde(records).map_err(js_error)
 }
 
 fn parse_records(value: &JsValue) -> Result<Vec<WasmTunerRecord>, JsValue> {
-    value
-        .into_serde::<Vec<WasmTunerRecord>>()
-        .map_err(|err| js_error(err))
+    value.into_serde::<Vec<WasmTunerRecord>>().map_err(js_error)
 }
 
 impl From<Choice> for ChoiceSerde {
@@ -491,7 +487,7 @@ impl ResolvedWasmFftPlan {
 
     #[wasm_bindgen(js_name = toObject)]
     pub fn to_object(&self) -> Result<JsValue, JsValue> {
-        JsValue::from_serde(&self.to_serde()).map_err(|err| js_error(err))
+        JsValue::from_serde(&self.to_serde()).map_err(js_error)
     }
 
     #[wasm_bindgen(js_name = fromJson)]
@@ -502,9 +498,7 @@ impl ResolvedWasmFftPlan {
 
     #[wasm_bindgen(js_name = fromObject)]
     pub fn from_object(value: &JsValue) -> Result<ResolvedWasmFftPlan, JsValue> {
-        let parsed = value
-            .into_serde::<ResolvedPlanSerde>()
-            .map_err(|err| js_error(err))?;
+        let parsed = value.into_serde::<ResolvedPlanSerde>().map_err(js_error)?;
         Ok(Self::from_serde(parsed))
     }
 }
