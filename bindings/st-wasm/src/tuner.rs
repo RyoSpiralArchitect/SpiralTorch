@@ -210,6 +210,21 @@ impl WasmTuner {
 
     /// Resolve a tuned FFT plan and return metadata describing how the plan was
     /// assembled (override vs. heuristic vs. fallback).
+    #[wasm_bindgen(js_name = planFftResolution)]
+    pub fn plan_fft_resolution(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> ResolvedWasmFftPlan {
+        let (choice, source, heuristic_used) = self.resolve_fft_choice(rows, cols, k, subgroup);
+        let plan = WasmFftPlan::from_choice(choice, subgroup);
+        ResolvedWasmFftPlan::new(plan, source, heuristic_used)
+    }
+
+    /// Resolve a tuned FFT plan and return a JSON-ready report describing how the plan was
+    /// assembled (override vs. heuristic vs. fallback).
     #[wasm_bindgen(js_name = planFftReport)]
     pub fn plan_fft_report(
         &self,
@@ -218,15 +233,8 @@ impl WasmTuner {
         k: u32,
         subgroup: bool,
     ) -> Result<JsValue, JsValue> {
-        let (choice, source, heuristic_used) = self.resolve_fft_choice(rows, cols, k, subgroup);
-        let plan = WasmFftPlan::from_choice(choice, subgroup);
-        let report = ResolvedPlanSerde {
-            plan: WasmFftPlanSerde::from(&plan),
-            override_applied: matches!(source, PlanSource::Override),
-            heuristic_used,
-            source: PlanSourceSerde::from(source),
-        };
-        JsValue::from_serde(&report).map_err(|err| js_error(err))
+        let resolved = self.plan_fft_resolution(rows, cols, k, subgroup);
+        resolved.to_object()
     }
 }
 
@@ -349,7 +357,7 @@ enum PlanSource {
     Fallback,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 enum PlanSourceSerde {
     Override,
@@ -364,6 +372,140 @@ impl From<PlanSource> for PlanSourceSerde {
             PlanSource::Heuristic => PlanSourceSerde::Heuristic,
             PlanSource::Fallback => PlanSourceSerde::Fallback,
         }
+    }
+}
+
+impl From<PlanSourceSerde> for PlanSource {
+    fn from(source: PlanSourceSerde) -> Self {
+        match source {
+            PlanSourceSerde::Override => PlanSource::Override,
+            PlanSourceSerde::Heuristic => PlanSource::Heuristic,
+            PlanSourceSerde::Fallback => PlanSource::Fallback,
+        }
+    }
+}
+
+#[wasm_bindgen]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WasmFftPlanSource {
+    Override,
+    Heuristic,
+    Fallback,
+}
+
+impl From<PlanSource> for WasmFftPlanSource {
+    fn from(source: PlanSource) -> Self {
+        match source {
+            PlanSource::Override => WasmFftPlanSource::Override,
+            PlanSource::Heuristic => WasmFftPlanSource::Heuristic,
+            PlanSource::Fallback => WasmFftPlanSource::Fallback,
+        }
+    }
+}
+
+impl From<WasmFftPlanSource> for PlanSource {
+    fn from(source: WasmFftPlanSource) -> Self {
+        match source {
+            WasmFftPlanSource::Override => PlanSource::Override,
+            WasmFftPlanSource::Heuristic => PlanSource::Heuristic,
+            WasmFftPlanSource::Fallback => PlanSource::Fallback,
+        }
+    }
+}
+
+impl From<WasmFftPlanSource> for PlanSourceSerde {
+    fn from(source: WasmFftPlanSource) -> Self {
+        PlanSourceSerde::from(PlanSource::from(source))
+    }
+}
+
+impl From<PlanSourceSerde> for WasmFftPlanSource {
+    fn from(source: PlanSourceSerde) -> Self {
+        WasmFftPlanSource::from(PlanSource::from(source))
+    }
+}
+
+#[wasm_bindgen]
+pub struct ResolvedWasmFftPlan {
+    plan: WasmFftPlanSerde,
+    override_applied: bool,
+    heuristic_used: bool,
+    source: PlanSource,
+}
+
+impl ResolvedWasmFftPlan {
+    fn new(plan: WasmFftPlan, source: PlanSource, heuristic_used: bool) -> Self {
+        Self {
+            plan: plan.to_serde(),
+            override_applied: matches!(source, PlanSource::Override),
+            heuristic_used,
+            source,
+        }
+    }
+
+    fn from_serde(serde: ResolvedPlanSerde) -> Self {
+        Self {
+            plan: serde.plan,
+            override_applied: serde.override_applied,
+            heuristic_used: serde.heuristic_used,
+            source: PlanSource::from(serde.source),
+        }
+    }
+
+    fn to_serde(&self) -> ResolvedPlanSerde {
+        ResolvedPlanSerde {
+            plan: self.plan.clone(),
+            override_applied: self.override_applied,
+            heuristic_used: self.heuristic_used,
+            source: PlanSourceSerde::from(self.source),
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl ResolvedWasmFftPlan {
+    #[wasm_bindgen(getter)]
+    pub fn plan(&self) -> WasmFftPlan {
+        WasmFftPlan::from(self.plan.clone())
+    }
+
+    #[wasm_bindgen(getter, js_name = overrideApplied)]
+    pub fn override_applied(&self) -> bool {
+        self.override_applied
+    }
+
+    #[wasm_bindgen(getter, js_name = heuristicUsed)]
+    pub fn heuristic_used(&self) -> bool {
+        self.heuristic_used
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn source(&self) -> WasmFftPlanSource {
+        WasmFftPlanSource::from(self.source)
+    }
+
+    #[wasm_bindgen(js_name = toJson)]
+    pub fn to_json(&self) -> Result<String, JsValue> {
+        serde_json::to_string(&self.to_serde()).map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = toObject)]
+    pub fn to_object(&self) -> Result<JsValue, JsValue> {
+        JsValue::from_serde(&self.to_serde()).map_err(|err| js_error(err))
+    }
+
+    #[wasm_bindgen(js_name = fromJson)]
+    pub fn from_json(json: &str) -> Result<ResolvedWasmFftPlan, JsValue> {
+        let parsed = serde_json::from_str::<ResolvedPlanSerde>(json).map_err(js_error)?;
+        Ok(Self::from_serde(parsed))
+    }
+
+    #[wasm_bindgen(js_name = fromObject)]
+    pub fn from_object(value: &JsValue) -> Result<ResolvedWasmFftPlan, JsValue> {
+        let parsed = value
+            .into_serde::<ResolvedPlanSerde>()
+            .map_err(|err| js_error(err))?;
+        Ok(Self::from_serde(parsed))
     }
 }
 
@@ -453,24 +595,28 @@ mod tests {
         let plan = tuner.plan_fft_with_fallback(512, 4096, 128, true);
         assert_eq!(plan.tile_cols(), 2048);
         assert_eq!(plan.radix(), 4);
-        let report = tuner.plan_fft_report(512, 4096, 128, true).expect("report");
-        let parsed: ResolvedPlanSerde = report.into_serde().expect("serde");
-        assert!(parsed.override_applied);
-        assert_eq!(parsed.plan.tile_cols, 2048);
-        assert_eq!(parsed.plan.radix, 4);
-        assert_eq!(parsed.source, PlanSourceSerde::Override);
+        let resolved = tuner.plan_fft_resolution(512, 4096, 128, true);
+        assert!(resolved.override_applied());
+        assert_eq!(resolved.plan().tile_cols(), 2048);
+        assert_eq!(resolved.plan().radix(), 4);
+        assert!(matches!(resolved.source(), WasmFftPlanSource::Override));
+        let json = resolved.to_json().expect("json");
+        let roundtrip = ResolvedWasmFftPlan::from_json(&json).expect("from json");
+        assert!(roundtrip.override_applied());
     }
 
     #[test]
     fn fallback_plan_handles_missing_override() {
         let tuner = empty_tuner();
-        let report = tuner.plan_fft_report(512, 4096, 128, true).expect("report");
-        let parsed: ResolvedPlanSerde = report.into_serde().expect("serde");
-        assert!(!parsed.override_applied);
+        let resolved = tuner.plan_fft_resolution(512, 4096, 128, true);
+        assert!(!resolved.override_applied());
         assert!(matches!(
-            parsed.source,
-            PlanSourceSerde::Heuristic | PlanSourceSerde::Fallback
+            resolved.source(),
+            WasmFftPlanSource::Heuristic | WasmFftPlanSource::Fallback
         ));
-        assert!(parsed.plan.tile_cols >= 1);
+        assert!(resolved.plan().tile_cols() >= 1);
+        let object = resolved.to_object().expect("object");
+        let roundtrip = ResolvedWasmFftPlan::from_object(&object).expect("from object");
+        assert_eq!(roundtrip.override_applied(), resolved.override_applied());
     }
 }

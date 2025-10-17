@@ -1704,10 +1704,13 @@ tuner.mergeObject([
 ]);
 const overrides = tuner.toObject();
 const fallbackPlan = tuner.planFftWithFallback(512, 4096, 128, true);
-const report = tuner.planFftReport(512, 4096, 128, true);
-if (report.source === "override") {
-  console.log(`override tile=${report.plan.tileCols}`);
+const resolution = tuner.planFftResolution(512, 4096, 128, true);
+if (resolution.source === WasmFftPlanSource.Override) {
+  console.log(`override tile=${resolution.plan.tileCols}`);
 }
+const snapshot = resolution.toJson();
+const hydrated = ResolvedWasmFftPlan.fromJson(snapshot);
+const report = tuner.planFftReport(512, 4096, 128, true);
 ```
 
 ---

@@ -22,6 +22,10 @@ impl WasmFftPlan {
     pub(crate) fn from_plan(plan: SpiralKFftPlan) -> Self {
         Self { plan }
     }
+
+    pub(crate) fn to_serde(&self) -> WasmFftPlanSerde {
+        WasmFftPlanSerde::from(self)
+    }
 }
 
 #[wasm_bindgen]
@@ -207,7 +211,7 @@ fn complex_to_interleaved(data: &[Complex32]) -> Vec<f32> {
     host
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct WasmFftPlanSerde {
     radix: u32,
     #[serde(rename = "tileCols")]
@@ -230,6 +234,12 @@ impl From<&SpiralKFftPlan> for WasmFftPlanSerde {
 impl From<&WasmFftPlan> for WasmFftPlanSerde {
     fn from(plan: &WasmFftPlan) -> Self {
         Self::from(&plan.plan)
+    }
+}
+
+impl From<WasmFftPlan> for WasmFftPlanSerde {
+    fn from(plan: WasmFftPlan) -> Self {
+        Self::from(&plan)
     }
 }
 
