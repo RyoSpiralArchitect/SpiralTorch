@@ -182,6 +182,30 @@ impl DesirePipelineSink for DesireTelemetrySink {
             hypergrad_penalty: step.solution.hypergrad_penalty.max(0.0),
             avoidance_energy: Self::avoidance_energy(&step.solution),
             logit_energy: Self::logit_energy(&step.solution),
+            weights: DesireWeightsTelemetry {
+                alpha: weights.alpha,
+                beta: weights.beta,
+                gamma: weights.gamma,
+                lambda: weights.lambda,
+            },
+            avoidance: step
+                .solution
+                .avoidance
+                .as_ref()
+                .map(|report| DesireAvoidanceTelemetry {
+                    tokens: report.tokens.clone(),
+                    scores: report.scores.clone(),
+                }),
+            trigger: step.trigger.as_ref().map(|trigger| DesireTriggerTelemetry {
+                mean_penalty: trigger.mean_penalty,
+                mean_entropy: trigger.mean_entropy,
+                temperature: trigger.temperature,
+                samples: trigger.samples,
+            }),
+            psi_total: None,
+            psi_breakdown: HashMap::new(),
+            psi_events: Vec::new(),
+            z_feedback: None,
             alpha: weights.alpha,
             beta: weights.beta,
             gamma: weights.gamma,
@@ -1064,6 +1088,19 @@ impl DesirePipelineSink for DesirePsiBridge {
             gamma: step.solution.weights.gamma,
             lambda: step.solution.weights.lambda,
         };
+        let avoidance_energy = step
+            .solution
+            .avoidance
+            .as_ref()
+            .map(|report| report.scores.iter().copied().map(f32::abs).sum())
+            .unwrap_or(0.0);
+        let logit_energy = step
+            .solution
+            .logit_offsets
+            .iter()
+            .copied()
+            .map(f32::abs)
+            .sum();
         let avoidance = step
             .solution
             .avoidance
@@ -1087,10 +1124,17 @@ impl DesirePipelineSink for DesirePsiBridge {
             entropy: step.solution.entropy,
             temperature: step.solution.temperature,
             hypergrad_penalty: step.solution.hypergrad_penalty,
+            avoidance_energy,
+            logit_energy,
             phase,
             weights,
+            alpha: step.solution.weights.alpha,
+            beta: step.solution.weights.beta,
+            gamma: step.solution.weights.gamma,
+            lambda: step.solution.weights.lambda,
             avoidance,
             trigger: trigger_snapshot,
+            trigger_emitted: step.trigger.is_some(),
             psi_total: reading.as_ref().map(|value| value.total),
             psi_breakdown,
             psi_events: events.clone(),

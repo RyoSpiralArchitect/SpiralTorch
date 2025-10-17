@@ -16,6 +16,8 @@ use super::{
     fractal::{FractalPatch, UringFractalScheduler},
     PureResult, Tensor, TensorError,
 };
+use core::f32::consts::PI;
+use st_frac::fft::{self, Complex32};
 
 /// Streaming Z-space normaliser that keeps canvas updates stable even when the
 /// underlying tensor swings across vastly different value ranges.
@@ -242,6 +244,60 @@ impl ColorVectorField {
         let relation = self.energy_tensor()?;
         FractalPatch::new(relation, coherence, tension, depth)
     }
+
+    /// Compute a row-wise FFT over the energy + chroma channels and expose the
+    /// result as interleaved `[re, im]` floats for each component. This keeps
+    /// the layout transformer-friendly while letting WASM consumers reuse the
+    /// CPU fallback when no tuned plan is available yet.
+    pub fn fft_rows_interleaved(&self, inverse: bool) -> PureResult<Vec<f32>> {
+        let width = self.width;
+        if width == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: self.height,
+                cols: 0,
+            });
+        }
+        let mut energy = vec![Complex32::default(); width];
+        let mut chroma_r = vec![Complex32::default(); width];
+        let mut chroma_g = vec![Complex32::default(); width];
+        let mut chroma_b = vec![Complex32::default(); width];
+        let mut out = Vec::with_capacity(self.height * width * 8);
+
+        for row in 0..self.height {
+            for col in 0..width {
+                let vector = self.vectors[row * width + col];
+                energy[col] = Complex32::new(vector[0], 0.0);
+                chroma_r[col] = Complex32::new(vector[1], 0.0);
+                chroma_g[col] = Complex32::new(vector[2], 0.0);
+                chroma_b[col] = Complex32::new(vector[3], 0.0);
+            }
+
+            compute_fft(&mut energy, inverse)?;
+            compute_fft(&mut chroma_r, inverse)?;
+            compute_fft(&mut chroma_g, inverse)?;
+            compute_fft(&mut chroma_b, inverse)?;
+
+            for col in 0..width {
+                out.push(energy[col].re);
+                out.push(energy[col].im);
+                out.push(chroma_r[col].re);
+                out.push(chroma_r[col].im);
+                out.push(chroma_g[col].re);
+                out.push(chroma_g[col].im);
+                out.push(chroma_b[col].re);
+                out.push(chroma_b[col].im);
+            }
+        }
+
+        Ok(out)
+    }
+
+    /// Convenience wrapper around [`fft_rows_interleaved`] that returns the
+    /// spectrum as a tensor with shape `(height, width * 8)`.
+    pub fn fft_rows_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        let data = self.fft_rows_interleaved(inverse)?;
+        Tensor::from_vec(self.height, self.width * 8, data)
+    }
 }
 
 /// RGBA pixel surface that mirrors a HTML canvas.
@@ -457,9 +513,7 @@ impl CanvasProjector {
         if relation.shape() != self.workspace.shape() {
             self.workspace = relation;
         } else {
-            self.workspace
-                .data_mut()
-                .copy_from_slice(relation.data());
+            self.workspace.data_mut().copy_from_slice(relation.data());
         }
         self.surface.paint_tensor_with_palette_into_vectors(
             &self.workspace,
@@ -485,6 +539,26 @@ impl CanvasProjector {
     /// Last computed vector field without forcing a refresh.
     pub fn vector_field(&self) -> &ColorVectorField {
         &self.vectors
+    }
+
+    /// Refresh the canvas and expose the interleaved FFT spectrum for each row
+    /// (energy + chroma channels). When `inverse` is `true`, the spectrum is
+    /// inverted before returning.
+    pub fn refresh_vector_fft(&mut self, inverse: bool) -> PureResult<Vec<f32>> {
+        self.render()?;
+        self.vectors.fft_rows_interleaved(inverse)
+    }
+
+    /// Access the last computed FFT spectrum without forcing a refresh.
+    pub fn vector_fft(&self, inverse: bool) -> PureResult<Vec<f32>> {
+        self.vectors.fft_rows_interleaved(inverse)
+    }
+
+    /// Refresh the canvas and return the FFT spectrum as a tensor with shape
+    /// `(height, width * 8)`.
+    pub fn refresh_vector_fft_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
+        self.render()?;
+        self.vectors.fft_rows_tensor(inverse)
     }
 
     /// Emit a Z-space fractal patch built from the colour energy field so
@@ -517,6 +591,41 @@ impl Default for CanvasProjectorConfig {
     }
 }
 
+fn compute_fft(line: &mut [Complex32], inverse: bool) -> PureResult<()> {
+    if line.is_empty() {
+        return Err(TensorError::EmptyInput("canvas_fft"));
+    }
+
+    if line.len().is_power_of_two() {
+        fft::fft_inplace(line, inverse).map_err(|err| match err {
+            fft::FftError::Empty => TensorError::EmptyInput("canvas_fft"),
+            fft::FftError::NonPowerOfTwo => TensorError::InvalidDimensions {
+                rows: 1,
+                cols: line.len(),
+            },
+        })?;
+        return Ok(());
+    }
+
+    let len = line.len();
+    let mut output = vec![Complex32::default(); len];
+    let sign = if inverse { 1.0 } else { -1.0 };
+    for k in 0..len {
+        let mut acc = Complex32::default();
+        for (n, value) in line.iter().enumerate() {
+            let angle = 2.0 * PI * k as f32 * n as f32 / len as f32 * sign;
+            let twiddle = Complex32::new(angle.cos(), angle.sin());
+            acc = acc.add(value.mul(twiddle));
+        }
+        if inverse {
+            acc = acc.scale(1.0 / len as f32);
+        }
+        output[k] = acc;
+    }
+    line.copy_from_slice(&output);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,6 +633,11 @@ mod tests {
 
     fn tensor(values: &[f32]) -> Tensor {
         Tensor::from_vec(1, values.len(), values.to_vec()).unwrap()
+    }
+
+    fn tensor_with_shape(rows: usize, cols: usize, values: &[f32]) -> Tensor {
+        assert_eq!(rows * cols, values.len());
+        Tensor::from_vec(rows, cols, values.to_vec()).unwrap()
     }
 
     #[test]
@@ -540,6 +654,9 @@ mod tests {
     #[test]
     fn palette_switch_applies_without_allocation() {
         let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
         let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
         projector.set_palette(CanvasPalette::Grayscale);
         let bytes = projector.refresh().unwrap();
@@ -549,12 +666,52 @@ mod tests {
     #[test]
     fn refresh_with_vectors_surfaces_color_field() {
         let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
         let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
         let (_bytes, field) = projector.refresh_with_vectors().unwrap();
         assert_eq!(field.vectors().len(), 4);
         for vector in field.iter() {
             assert!(vector[0] >= 0.0 && vector[0] <= 1.0);
         }
+    }
+
+    #[test]
+    fn vector_field_fft_emits_interleaved_channels() {
+        let mut field = ColorVectorField::new(4, 1);
+        field.set(0, 1.0, [0.0, 0.0, 0.0]);
+        let spectrum = field.fft_rows_interleaved(false).unwrap();
+        assert_eq!(spectrum.len(), 32);
+        for chunk in spectrum.chunks_exact(8) {
+            assert!((chunk[0] - 1.0).abs() < 1e-6);
+            assert!(chunk[1].abs() < 1e-6);
+            for value in &chunk[2..] {
+                assert!(value.abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn vector_field_fft_handles_non_power_of_two_width() {
+        let mut field = ColorVectorField::new(3, 1);
+        field.set(0, 1.0, [0.0, 0.0, 0.0]);
+        let spectrum = field.fft_rows_interleaved(false).unwrap();
+        assert_eq!(spectrum.len(), 24);
+        for value in spectrum {
+            assert!(value.is_finite());
+        }
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_matches_canvas_shape() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let spectrum = projector.refresh_vector_fft(false).unwrap();
+        assert_eq!(spectrum.len(), 2 * 2 * 8);
     }
 
     #[test]
@@ -586,7 +743,15 @@ mod tests {
     fn emit_zspace_patch_respects_canvas_shape() {
         let scheduler = UringFractalScheduler::new(4).unwrap();
         scheduler
-            .push(FractalPatch::new(tensor(&[1.0, 0.5, 0.25, 0.75]), 1.0, 1.0, 0).unwrap())
+            .push(
+                FractalPatch::new(
+                    tensor_with_shape(2, 2, &[1.0, 0.5, 0.25, 0.75]),
+                    1.0,
+                    1.0,
+                    0,
+                )
+                .unwrap(),
+            )
             .unwrap();
 
         let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
