@@ -1845,13 +1845,6 @@ mod tests {
     use st_core::telemetry::hub::SoftlogicZFeedback;
     #[cfg(feature = "psi")]
     use st_core::telemetry::psi::{PsiComponent, PsiEvent, PsiReading};
-    use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
-    #[cfg(feature = "psi")]
-    use std::collections::HashMap;
-    use std::collections::HashSet;
-    use std::sync::{mpsc::channel, Arc, Mutex, OnceLock};
-    use std::time::{Duration, Instant, SystemTime};
-    use tempfile::tempdir;
 
     fn registry_guard() -> &'static Mutex<()> {
         static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
