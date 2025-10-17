@@ -26,6 +26,11 @@ NumPy, no PyTorch, and no shim layers.
   callers can select devices, spawn hypergrad tapes, plan kernels, and solve
   barycentres with a few intuitive method calls. Structured results are
   returned through the new `ZSpaceBarycenter` class.
+- Language desire geometry and automation builders—`SparseKernel`,
+  `SymbolGeometry`, `SemanticBridge`, `DesireLagrangian`, `DesireAutomation`,
+  and the ergonomic `DesirePipelineBuilder` so notebooks can assemble desire
+  pipelines, logbooks, telemetry sinks, and ConceptHint distributions entirely
+  from Python.
 - `SpiralLightning` harness for quick notebook experiments—prepare modules,
   run epochs, and stream results without manually juggling trainers or
   schedules.
@@ -159,10 +164,43 @@ loader = (
 stats = session.train_epoch(trainer, model, loss, loader, schedule)
 print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")
 print(st.get_psychoid_stats())
+print(st.get_desire_telemetry())  # phase/temperature/energies recorded by DesireTelemetrySink
 
 summary = trainer.desire_roundtable_summary()
 if summary:
     print("desire barycentric:", summary["mean_above"], summary["mean_here"], summary["mean_beneath"])
+```
+
+### Desire pipeline orchestration
+
+```python
+import spiraltorch as st
+
+syn = st.SparseKernel.from_dense([[0.6, 0.4], [0.3, 0.7]])
+par = st.SparseKernel.from_dense([[0.55, 0.45], [0.2, 0.8]])
+geometry = st.SymbolGeometry(syn, par)
+repression = st.RepressionField([0.1, 0.05])
+concept_kernel = st.SparseKernel.from_dense([[0.8, 0.2], [0.2, 0.8]])
+bridge = st.SemanticBridge([[0.7, 0.3], [0.25, 0.75]], concept_kernel)
+controller = st.TemperatureController(1.0, 0.9, 0.4, 0.4, 1.6)
+
+desire = st.DesireLagrangian(geometry, repression, bridge, controller)
+desire.set_alpha_schedule(st.DesireSchedule.warmup(0.0, 0.2, 400))
+
+automation = st.DesireAutomation(desire, st.SelfRewriteConfig())
+pipeline = (
+    st.DesirePipelineBuilder(automation)
+    .with_logbook("desire.ndjson", flush_every=16)
+    .with_telemetry()
+    .build()
+)
+
+step = pipeline.step(
+    [1.2, -0.4],
+    previous_token=0,
+    concept_hint=st.ConceptHint.distribution([0.6, 0.4]),
+)
+print("phase", step["solution"]["phase"], "entropy", step["solution"]["entropy"])
 ```
 
 ### SpiralLightning harness

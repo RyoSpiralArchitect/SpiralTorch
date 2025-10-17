@@ -12,6 +12,7 @@ learn_store = ["dep:serde", "dep:serde_json"]
 [dependencies]
 thiserror = "1"
 rand = "0.8"
+num-complex = "0.4"
 serde = { version = "1", optional = true, features = ["derive"] }
 serde_json = { version = "1", optional = true }
 

@@ -453,7 +453,14 @@ impl CanvasProjector {
     }
 
     fn render(&mut self) -> PureResult<()> {
-        self.scheduler.fold_coherence_into(&mut self.workspace)?;
+        let relation = self.scheduler.fold_coherence()?;
+        if relation.shape() != self.workspace.shape() {
+            self.workspace = relation;
+        } else {
+            self.workspace
+                .data_mut()
+                .copy_from_slice(relation.data());
+        }
         self.surface.paint_tensor_with_palette_into_vectors(
             &self.workspace,
             &mut self.normalizer,
