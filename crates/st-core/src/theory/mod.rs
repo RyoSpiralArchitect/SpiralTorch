@@ -24,6 +24,19 @@
 //! Category-flavoured theoretical utilities for the observability pipeline.
 //!
 //! The modules hosted here encode the Pólya-counting driven recursion that
-//! underpins SpiralTorch's observation DAG compression experiments.
+//! underpins SpiralTorch's observation DAG compression experiments and the
+//! microlocal interface gauges used to stabilise boundary detection without
+//! fixing an external label.
 
 pub mod observability;
+
+#[path = "microlocal.rs"]
+pub mod microlocal;
+pub mod maxwell;
+pub mod observability;
+
+#[path = "microlocal.rs"]
+#[doc(hidden)]
+pub mod microlocal_impl;
+#[doc(inline)]
+pub use microlocal_impl as microlocal;

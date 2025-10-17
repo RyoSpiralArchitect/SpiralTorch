@@ -28,7 +28,7 @@ hip = ["st-core/hip", "st-tensor/hip"]
 "hip-real" = ["hip", "st-core/hip-real"]
 logic = ["st-core/logic"]
 "logic-learn" = ["st-core/logic-learn"]
-kdsl = ["st-core/kdsl"]
+kdsl = ["st-core/kdsl", "st-nn/kdsl", "st-rl/kdsl"]
 "kv-redis" = ["st-core/kv-redis"]
 "wgpu-frac" = ["st-tensor/wgpu_frac"]
 

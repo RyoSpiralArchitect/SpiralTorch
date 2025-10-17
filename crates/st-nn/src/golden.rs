@@ -33,7 +33,7 @@ use crate::PureResult;
 use st_core::runtime::golden::{
     GoldenRuntime, GoldenRuntimeConfig, GoldenRuntimeError, SpiralMutex,
 };
-use st_tensor::pure::TensorError;
+use st_tensor::TensorError;
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{mpsc, Arc, Mutex};
