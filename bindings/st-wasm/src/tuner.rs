@@ -24,10 +24,27 @@ impl WasmTuner {
         Ok(Self { table })
     }
 
+    /// Construct a tuner from a JavaScript array of records.
+    #[wasm_bindgen(js_name = fromObject)]
+    pub fn from_object(value: &JsValue) -> Result<WasmTuner, JsValue> {
+        let records = parse_records(value)?;
+        Ok(Self {
+            table: WasmTunerTable::from_records(records),
+        })
+    }
+
     /// Replace the table contents with the provided JSON blob.
     #[wasm_bindgen(js_name = loadJson)]
     pub fn load_json(&mut self, json: &str) -> Result<(), JsValue> {
         self.table = WasmTunerTable::from_json_str(json).map_err(js_error)?;
+        Ok(())
+    }
+
+    /// Replace the table contents with the provided array of records.
+    #[wasm_bindgen(js_name = loadObject)]
+    pub fn load_object(&mut self, value: &JsValue) -> Result<(), JsValue> {
+        let records = parse_records(value)?;
+        self.table = WasmTunerTable::from_records(records);
         Ok(())
     }
 
@@ -36,6 +53,14 @@ impl WasmTuner {
     pub fn merge_json(&mut self, json: &str) -> Result<(), JsValue> {
         let parsed = WasmTunerTable::from_json_str(json).map_err(js_error)?;
         let records = parsed.iter().cloned().collect::<Vec<_>>();
+        self.table.extend_sorted(records);
+        Ok(())
+    }
+
+    /// Merge additional overrides from a JavaScript array of records.
+    #[wasm_bindgen(js_name = mergeObject)]
+    pub fn merge_object(&mut self, value: &JsValue) -> Result<(), JsValue> {
+        let records = parse_records(value)?;
         self.table.extend_sorted(records);
         Ok(())
     }
@@ -70,6 +95,12 @@ impl WasmTuner {
 
     /// Return the dataset as an array of JavaScript objects.
     pub fn records(&self) -> Result<JsValue, JsValue> {
+        self.to_object()
+    }
+
+    /// Export the dataset into a JavaScript array of records.
+    #[wasm_bindgen(js_name = toObject)]
+    pub fn to_object(&self) -> Result<JsValue, JsValue> {
         let records: Vec<WasmTunerRecord> = self.table.iter().cloned().collect();
         records_to_js(&records)
     }
@@ -179,6 +210,12 @@ fn parse_record(value: JsValue) -> Result<WasmTunerRecord, JsValue> {
 
 fn records_to_js(records: &[WasmTunerRecord]) -> Result<JsValue, JsValue> {
     JsValue::from_serde(records).map_err(|err| js_error(err))
+}
+
+fn parse_records(value: &JsValue) -> Result<Vec<WasmTunerRecord>, JsValue> {
+    value
+        .into_serde::<Vec<WasmTunerRecord>>()
+        .map_err(|err| js_error(err))
 }
 
 impl From<Choice> for ChoiceSerde {
