@@ -1703,6 +1703,15 @@ tuner.mergeObject([
   { rows: 512, cols_min: 4096, cols_max: 16383, k_max: 256, sg: true, tile_cols: 1024 },
 ]);
 const overrides = tuner.toObject();
+
+// Inspect or mutate specific entries without copying the entire table.
+const first = tuner.recordAt(0);
+if (first) {
+  first.tile_cols = 2048;
+  tuner.replaceIndex(0, first);
+}
+const tuned = tuner.findRecord(512, 4096, 128, true);
+const dropped = tuner.removeRecord(256, 1024, 64, true);
 ```
 
 ---
