@@ -153,8 +153,9 @@ multi-radius sweeps and a conductor that fuses their Z pulses with exponential
 smoothing. `InterfaceGauge::analyze_multiradius` probes the same mask at
 different blow-up scales (and reuses an optional `c′` label when supplied),
 while `InterfaceZConductor` drives any number of gauges, aggregates the
-resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
-ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
+resulting pulses, and hands back a `ZFused` packet with attribution weights and
+event tags alongside the smoothed `SoftlogicZFeedback` record so runtime loops
+can see which layer dominated the decision.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L515】【F:crates/st-core/src/theory/zpulse.rs†L22-L344】
 
 ### Maxwell-coded envelopes meet SpiralK
 
@@ -1320,6 +1321,11 @@ tape.apply(weights)
 print("updated weights", weights.tolist())
 ```
 
+Prefer flat-space optimisation? Reach for the new Rust-side
+`st_tensor::AmegaRealgrad` tape to mirror the same API without the Poincaré
+projection step—handy when Canvas Transformer energy needs to feed classical
+optimisers alongside its hypergradient updates.
+
 ### Canvas Pixel Transformer → Z-space feedback
 
 - `CanvasProjector::refresh_with_vectors` now returns both the RGBA buffer and
@@ -1328,9 +1334,31 @@ print("updated weights", weights.tolist())
 - `FractalCanvas::vectorFieldFft(false)` surfaces the per-row FFT spectrum as
   interleaved energy/chroma pairs so Canvas Transformer pipelines can ingest
   frequency features without leaving Rust.
+- `CanvasProjector::accumulate_hypergrad` and
+  `CanvasProjector::accumulate_realgrad` stream the refreshed canvas tensor
+  directly into SpiralTorch's Riemannian or Euclidean optimisers without
+  additional copies.
+- `FractalCanvas::relation()` mirrors the projector's tensor output as a
+  `Float32Array` so browser call-sites can feed the raw relation into custom
+  pipelines or training loops.
+- `FractalCanvas::hypergradWave(curvature)` and `FractalCanvas::realgradWave()`
+  surface curvature-aware hypergrad updates alongside Euclidean gradients so the
+  Canvas Transformer can keep hypergrad/Realgrad buffers in sync by default.
+- `FractalCanvas::gradientSummary(curvature)` condenses both tapes into shared
+  L1/L2/∞ norms plus RMS/mean-absolute magnitudes so monitoring dashboards can
+  watch gradient health without shipping the full relation buffers across the
+  WASM boundary.
+- `FractalCanvas::desireInterpretation(curvature)` lifts the paired gradient
+  summaries into Desire-ready feedback metrics (pressure, balance, stability)
+  so automation layers can steer the Desire Lagrangian without leaving WASM.
 - `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
   WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
   the vector field and accumulate the spectrum fully on-GPU.
+- `FractalCanvas::hypergradOperatorKernel(false)` emits the complementary WGSL
+  pass that accumulates relation tensors into hypergradient buffers directly on
+  the GPU, with `hypergradOperatorUniform(mix, gain)` +
+  `hypergradOperatorDispatch(subgroup)` mirroring the uniform payload and
+  workgroup math for WebGPU callers.
 - `FractalCanvas::vectorFieldFftUniform(false)` packages the `CanvasFftParams`
   uniform (width, height, inverse flag, padding) as a `Uint32Array` so the WGSL
   kernel can be dispatched without manual byte packing.

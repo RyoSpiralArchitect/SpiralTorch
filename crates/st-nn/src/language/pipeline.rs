@@ -189,14 +189,14 @@ impl DesireTelemetrySink {
     pub(crate) fn with_psi_context(
         mut sample: DesireStepTelemetry,
         reading: Option<&PsiReading>,
-        events: &[PsiEvent],
+        events: Vec<PsiEvent>,
         z_feedback: Option<SoftlogicZFeedback>,
     ) -> DesireStepTelemetry {
         sample.psi_total = reading.map(|value| value.total);
         sample.psi_breakdown = reading
             .map(|value| value.breakdown.clone())
             .unwrap_or_default();
-        sample.psi_events = events.to_vec();
+        sample.psi_events = events;
         sample.z_feedback = z_feedback;
         sample
     }
@@ -207,7 +207,6 @@ impl DesireTelemetrySink {
     ) -> (
         DesireStepTelemetry,
         Option<PsiReading>,
-        Vec<PsiEvent>,
         Option<SoftlogicZFeedback>,
     ) {
         let reading = hub::get_last_psi();
@@ -216,11 +215,11 @@ impl DesireTelemetrySink {
         let sample = Self::with_psi_context(
             Self::base_sample(step, timestamp),
             reading.as_ref(),
-            &events,
+            events,
             z_feedback,
         );
         hub::set_last_desire_step(sample.clone());
-        (sample, reading, events, z_feedback)
+        (sample, reading, z_feedback)
     }
 
     fn phase_to_telemetry(phase: DesirePhase) -> DesirePhaseTelemetry {
@@ -247,7 +246,7 @@ impl DesireTelemetrySink {
 #[cfg(feature = "psi")]
 impl DesirePipelineSink for DesireTelemetrySink {
     fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
-        hub::set_last_desire_step(Self::base_sample(step, timestamp));
+        Self::record_with_psi(step, timestamp);
         Ok(())
     }
 }
@@ -1110,8 +1109,9 @@ impl DesirePsiBridge {
 #[cfg(feature = "psi")]
 impl DesirePipelineSink for DesirePsiBridge {
     fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
-        let (telemetry, reading, events, z_feedback) =
+        let (telemetry, reading, z_feedback) =
             DesireTelemetrySink::record_with_psi(step, timestamp);
+        let events = telemetry.psi_events.clone();
         let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
             label: "desire psi bridge poisoned",
         })?;
