@@ -3,7 +3,7 @@ use st_tensor::fractal::{FractalPatch, UringFractalScheduler};
 use st_tensor::wasm_canvas::{
     CanvasFftLayout as ProjectorCanvasFftLayout, CanvasPalette, CanvasProjector,
 };
-use st_tensor::{Tensor, TensorError};
+use st_tensor::{AmegaHypergrad, AmegaRealgrad, Tensor, TensorError};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
@@ -170,6 +170,34 @@ impl FractalCanvas {
             .refresh_vector_fft(inverse)
             .map_err(js_error)?;
         Ok(Float32Array::from(spectrum.as_slice()))
+    }
+
+    /// Refresh the projector and expose the raw relation tensor feeding the canvas.
+    pub fn relation(&mut self) -> Result<Float32Array, JsValue> {
+        let tensor = self.projector.refresh_tensor().map_err(js_error)?;
+        Ok(Float32Array::from(tensor.data()))
+    }
+
+    /// Refresh the projector and emit the hypergradient-aligned update for the
+    /// current canvas relation.
+    #[wasm_bindgen(js_name = hypergradWave)]
+    pub fn hypergrad_wave(&mut self, curvature: f32) -> Result<Float32Array, JsValue> {
+        let tensor = self.projector.refresh_tensor().map_err(js_error)?;
+        let (rows, cols) = tensor.shape();
+        let mut tape = AmegaHypergrad::new(curvature, 1.0, rows, cols).map_err(js_error)?;
+        tape.accumulate_wave(tensor).map_err(js_error)?;
+        Ok(Float32Array::from(tape.gradient()))
+    }
+
+    /// Refresh the projector and emit the Euclidean gradient update for the
+    /// current canvas relation.
+    #[wasm_bindgen(js_name = realgradWave)]
+    pub fn realgrad_wave(&mut self) -> Result<Float32Array, JsValue> {
+        let tensor = self.projector.refresh_tensor().map_err(js_error)?;
+        let (rows, cols) = tensor.shape();
+        let mut tape = AmegaRealgrad::new(1.0, rows, cols).map_err(js_error)?;
+        tape.accumulate_wave(tensor).map_err(js_error)?;
+        Ok(Float32Array::from(tape.gradient()))
     }
 
     /// Emit the WGSL kernel that mirrors [`vector_field_fft`] so WebGPU

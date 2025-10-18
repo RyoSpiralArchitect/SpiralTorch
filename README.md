@@ -1320,6 +1320,11 @@ tape.apply(weights)
 print("updated weights", weights.tolist())
 ```
 
+Prefer flat-space optimisation? Reach for the new Rust-side
+`st_tensor::AmegaRealgrad` tape to mirror the same API without the Poincaré
+projection step—handy when Canvas Transformer energy needs to feed classical
+optimisers alongside its hypergradient updates.
+
 ### Canvas Pixel Transformer → Z-space feedback
 
 - `CanvasProjector::refresh_with_vectors` now returns both the RGBA buffer and
@@ -1328,6 +1333,16 @@ print("updated weights", weights.tolist())
 - `FractalCanvas::vectorFieldFft(false)` surfaces the per-row FFT spectrum as
   interleaved energy/chroma pairs so Canvas Transformer pipelines can ingest
   frequency features without leaving Rust.
+- `CanvasProjector::accumulate_hypergrad` and
+  `CanvasProjector::accumulate_realgrad` stream the refreshed canvas tensor
+  directly into SpiralTorch's Riemannian or Euclidean optimisers without
+  additional copies.
+- `FractalCanvas::relation()` mirrors the projector's tensor output as a
+  `Float32Array` so browser call-sites can feed the raw relation into custom
+  pipelines or training loops.
+- `FractalCanvas::hypergradWave(curvature)` and `FractalCanvas::realgradWave()`
+  surface curvature-aware hypergrad updates alongside Euclidean gradients so the
+  Canvas Transformer can keep hypergrad/Realgrad buffers in sync by default.
 - `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
   WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
   the vector field and accumulate the spectrum fully on-GPU.

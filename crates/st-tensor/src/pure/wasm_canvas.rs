@@ -14,7 +14,7 @@
 
 use super::{
     fractal::{FractalPatch, UringFractalScheduler},
-    PureResult, Tensor, TensorError,
+    AmegaHypergrad, AmegaRealgrad, PureResult, Tensor, TensorError,
 };
 use core::f32::consts::PI;
 use st_frac::fft::{self, Complex32};
@@ -554,6 +554,17 @@ impl CanvasProjector {
         Ok(self.surface.as_rgba())
     }
 
+    /// Refresh the canvas and expose the latest relation tensor.
+    pub fn refresh_tensor(&mut self) -> PureResult<&Tensor> {
+        self.render()?;
+        Ok(&self.workspace)
+    }
+
+    /// Returns the last relation tensor without forcing a refresh.
+    pub fn tensor(&self) -> &Tensor {
+        &self.workspace
+    }
+
     fn render(&mut self) -> PureResult<()> {
         let relation = self.scheduler.fold_coherence()?;
         if relation.shape() != self.workspace.shape() {
@@ -593,6 +604,18 @@ impl CanvasProjector {
     pub fn refresh_vector_fft(&mut self, inverse: bool) -> PureResult<Vec<f32>> {
         self.render()?;
         self.vectors.fft_rows_interleaved(inverse)
+    }
+
+    /// Accumulate the refreshed tensor into the provided hypergradient tape.
+    pub fn accumulate_hypergrad(&mut self, tape: &mut AmegaHypergrad) -> PureResult<()> {
+        let tensor = self.refresh_tensor()?;
+        tape.accumulate_wave(tensor)
+    }
+
+    /// Accumulate the refreshed tensor into the provided Euclidean gradient tape.
+    pub fn accumulate_realgrad(&mut self, tape: &mut AmegaRealgrad) -> PureResult<()> {
+        let tensor = self.refresh_tensor()?;
+        tape.accumulate_wave(tensor)
     }
 
     /// Access the last computed FFT spectrum without forcing a refresh.
@@ -933,6 +956,33 @@ mod tests {
         for value in spectrum {
             assert!(value.is_finite());
         }
+    }
+
+    #[test]
+    fn projector_refresh_tensor_exposes_workspace() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let tensor = projector.refresh_tensor().unwrap();
+        assert_eq!(tensor.shape(), (2, 2));
+        assert!(tensor.data().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn projector_accumulates_into_gradients() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let mut hypergrad = AmegaHypergrad::new(-1.0, 0.05, 2, 2).unwrap();
+        let mut realgrad = AmegaRealgrad::new(0.05, 2, 2).unwrap();
+        projector.accumulate_hypergrad(&mut hypergrad).unwrap();
+        projector.accumulate_realgrad(&mut realgrad).unwrap();
+        assert!(hypergrad.gradient().iter().all(|value| value.is_finite()));
+        assert_eq!(realgrad.gradient().len(), 4);
     }
 
     #[test]
