@@ -8,17 +8,9 @@ use super::desire::{DesirePhase, DesireSolution, DesireWeights};
 use super::geometry::ConceptHint;
 use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
-use crate::roundtable::RoundtableNode;
 use crate::schedule::BandEnergy;
-use crate::{PureResult, RoundtableConfig, RoundtableSchedule};
-use st_core::ecosystem::{
-    ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
-    HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
-    RoundtableSummary,
-};
-use st_core::ops::rank_entry::RankPlan;
-use st_core::util::math::{ramanujan_pi, LeechProjector};
-use st_tensor::{ComplexTensor, LanguageWaveEncoder, Tensor, TensorError};
+use crate::PureResult;
+use st_tensor::TensorError;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::{mpsc::Sender, Arc, Mutex};
@@ -1161,14 +1153,12 @@ impl DesirePsiSummary {
                 z_samples = z_samples.saturating_add(1);
                 z_sum += feedback.z_signal;
             }
-            for psi_event in &event.events {
-                if let PsiEvent::ThresholdCross { component, up, .. } = psi_event {
-                    let entry = threshold_crossings.entry(*component).or_insert((0, 0));
-                    if *up {
-                        entry.0 = entry.0.saturating_add(1);
-                    } else {
-                        entry.1 = entry.1.saturating_add(1);
-                    }
+            for PsiEvent::ThresholdCross { component, up, .. } in &event.events {
+                let entry = threshold_crossings.entry(*component).or_insert((0, 0));
+                if *up {
+                    entry.0 = entry.0.saturating_add(1);
+                } else {
+                    entry.1 = entry.1.saturating_add(1);
                 }
             }
         }
