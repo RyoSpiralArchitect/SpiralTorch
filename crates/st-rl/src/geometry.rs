@@ -128,6 +128,7 @@ pub struct GeometryFeedback {
     loop_fresh: bool,
     loop_support: f32,
     loop_script: Option<String>,
+    last_loop_signal: Option<ChronoLoopSignal>,
 }
 
 impl GeometryFeedback {
@@ -183,6 +184,7 @@ impl GeometryFeedback {
             loop_fresh: false,
             loop_support: 0.0,
             loop_script: None,
+            last_loop_signal: None,
         }
     }
 
@@ -220,6 +222,7 @@ impl GeometryFeedback {
         if let Some(script) = Self::signal_script(signal) {
             self.loop_script = Some(script);
         }
+        self.last_loop_signal = Some(signal.clone());
         let normalized = (self.loop_gain / 12.0).clamp(0.0, 1.0);
         let target_beta = 0.6 + normalized * 1.4;
         self.softening_beta = (self.softening_beta * 0.7 + target_beta * 0.3).clamp(0.3, 4.0);
@@ -349,6 +352,90 @@ impl GeometryFeedback {
         if total_support > 1.0 {
             let gain_scale = (total_support / envelopes.len() as f32).clamp(0.5, 6.0);
             self.loop_gain = (self.loop_gain * gain_scale).clamp(0.0, 12.0);
+        }
+    }
+
+    /// Synthesises a loopback envelope capturing the most recent feedback
+    /// signal so other nodes can replay the learning loop modulation.
+    pub fn emit_loopback_envelope(
+        &mut self,
+        signal: &GeometryFeedbackSignal,
+        source: Option<&str>,
+    ) -> LoopbackEnvelope {
+        let loop_signal = self.prepare_loop_signal(signal);
+        let support = if self.loop_support > f32::EPSILON {
+            self.loop_support
+        } else {
+            signal.smoothed_rank.max(1.0) as f32
+        };
+        let collapse_total = if self.collapse_bias > f32::EPSILON {
+            Some(self.collapse_bias)
+        } else {
+            None
+        };
+        let z_signal = (signal.learning_rate_scale - 1.0).clamp(-3.0, 3.0);
+        let mut envelope = LoopbackEnvelope::new(loop_signal).with_support(support);
+        if let Some(src) = source {
+            envelope = envelope.with_source(src);
+        }
+        let mut script_hint = self.telemetry.loop_script.clone();
+        if script_hint.is_none() {
+            script_hint = Some(format!(
+                "rl.policy(scale={:.3},rank={:.2},pressure={:.2})",
+                signal.learning_rate_scale, signal.smoothed_rank, signal.smoothed_pressure,
+            ));
+        }
+        envelope
+            .with_collapse_total(collapse_total)
+            .with_z_signal(Some(z_signal))
+            .with_script_hint(script_hint)
+    }
+
+    fn prepare_loop_signal(&mut self, signal: &GeometryFeedbackSignal) -> ChronoLoopSignal {
+        let drift = (signal.learning_rate_scale - 1.0).clamp(-2.0, 2.0);
+        let drift_abs = signal.learning_rate_scale.abs().min(6.0);
+        let drift_std = (signal.averaged_efficiency - 1.0).abs().min(4.0) as f32;
+        let pressure = signal.smoothed_pressure as f32;
+        let rank = signal.smoothed_rank as f32;
+        if let Some(existing) = &self.last_loop_signal {
+            let mut enriched = existing.clone();
+            enriched.summary.frames = enriched.summary.frames.max(1);
+            enriched.summary.duration = enriched.summary.duration.max(f32::EPSILON);
+            enriched.summary.latest_timestamp =
+                enriched.summary.latest_timestamp.max(self.loop_timestamp);
+            enriched.summary.mean_drift =
+                (enriched.summary.mean_drift * 0.7 + drift * 0.3).clamp(-2.0, 2.0);
+            enriched.summary.mean_abs_drift = enriched.summary.mean_abs_drift.max(drift_abs);
+            enriched.summary.drift_std =
+                (enriched.summary.drift_std * 0.8 + drift_std * 0.2).max(0.0);
+            enriched.summary.mean_energy =
+                (enriched.summary.mean_energy * 0.6 + pressure * 0.4).max(0.0);
+            enriched.summary.energy_std =
+                (enriched.summary.energy_std * 0.6 + rank.abs() * 0.2).max(0.0);
+            enriched.summary.mean_decay =
+                (enriched.summary.mean_decay * 0.8 - self.collapse_bias * 0.2).min(0.0);
+            enriched.summary.min_energy = enriched.summary.min_energy.min(pressure);
+            enriched.summary.max_energy = enriched.summary.max_energy.max(pressure);
+            self.last_loop_signal = Some(enriched.clone());
+            enriched
+        } else {
+            let frames = signal.assessment.expected.len().max(1);
+            let summary = ChronoSummary {
+                frames,
+                duration: self.loop_support.max(1.0),
+                latest_timestamp: self.loop_timestamp,
+                mean_drift: drift,
+                mean_abs_drift: drift_abs,
+                drift_std,
+                mean_energy: pressure.max(0.0),
+                energy_std: rank.abs(),
+                mean_decay: -self.collapse_bias,
+                min_energy: pressure.max(0.0),
+                max_energy: pressure.max(0.0),
+            };
+            let generated = ChronoLoopSignal::new(summary, None);
+            self.last_loop_signal = Some(generated.clone());
+            generated
         }
     }
 
@@ -784,6 +871,18 @@ mod tests {
         assert!(telemetry.loop_support > 1.0);
         assert!(telemetry.softening_beta > 0.6 - f32::EPSILON);
         assert!(telemetry.loop_script.is_some());
+    }
+
+    #[test]
+    fn emit_loopback_envelope_generates_signal() {
+        let mut feedback = GeometryFeedback::new(GeometryFeedbackConfig::default_policy());
+        let resonance = resonance_from(&[0.6, -0.4, 0.2, -0.1, 0.3]);
+        let signal = feedback.process_resonance(&resonance);
+        let envelope = feedback.emit_loopback_envelope(&signal, Some("test.rl"));
+        assert_eq!(envelope.source.as_deref(), Some("test.rl"));
+        assert!(envelope.z_signal.is_some());
+        assert!(envelope.loop_signal.summary.frames >= 1);
+        assert!(envelope.support >= 1.0);
     }
 }
 
