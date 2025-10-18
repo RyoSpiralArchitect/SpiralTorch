@@ -126,10 +126,12 @@ state store).
 
 Real-time co-creation becomes much easier with `types/canvas-collab.ts`. The new
 `SpiralCanvasCollabSession` peers a `SpiralCanvasView` across any number of browser tabs
-or devices using the `BroadcastChannel` API. Every participant – whether they're a human
-artist, a trainer supervising gradients, or the training run itself – has the same
-authority to steer palettes, zoom levels, navigation toggles, stats sampling, and render
-loop state.
+or devices using the `BroadcastChannel` API with automatic fallbacks. Every participant –
+whether they're a human artist, a trainer supervising gradients, or the training run
+itself – has the same authority to steer palettes, zoom levels, navigation toggles,
+stats sampling, and render loop state. Updates are batched into 16 ms micro-windows,
+governed by a 20 diff/s token bucket, and pointer broadcasts are throttled to 30 Hz so
+the UI keeps a steady 60 fps even under heavy interaction.
 
 ```ts
 import { SpiralCanvasCollabSession } from "./canvas-collab";
@@ -140,7 +142,21 @@ const session = new SpiralCanvasCollabSession(view, {
         role: "trainer", // "trainer" | "model" | "human" or your own identifier
         label: "Curator A",
         color: "#facc15",
+        capabilities: {
+            wgpu: typeof navigator !== "undefined" && "gpu" in navigator,
+            wasm: true,
+            controlSurface: "palette",
+        },
     },
+    patchRateHz: 20,
+    pointerRateHz: 30,
+    telemetry: (event) => console.debug("collab", event),
+    attributionSink: (sample) => conductor.step(sample), // pipe into your ZConductor
+    rolePolicies: {
+        trainer: { canPatch: true, canState: true, rateLimitHz: 30, gain: 1.2 },
+        model: { canPatch: false, canState: true, gain: 0.4 },
+    },
+    defaultRolePolicy: { canPatch: true, canState: true, rateLimitHz: 10, gain: 0.7 },
 });
 
 // Surface shared presence, last input timestamps, and pointer motions inside the HUD.
@@ -157,7 +173,50 @@ session.on("pointer", ({ participant, event }) => {
 });
 ```
 
-When `BroadcastChannel` is unavailable the helper gracefully degrades to single-client
-behavior, so you can still wire it into dashboards without special casing. Each message
-includes participant metadata, making it straightforward to colour-code the dashboard or
-enforce your own policies on top of the symmetric default.
+When `BroadcastChannel` is unavailable the helper degrades to a
+`localStorage`/`storage`-event transport with a safety-net polling loop, so you can still
+wire it into dashboards without special casing. The session emits presence heartbeats at
+1 Hz, records join/leave/suppression events via the optional `telemetry` hook, and pipes
+every patch (local or remote) through the `attributionSink` so it can be fused straight
+into your `ZConductor` dashboards. Each message carries schema version tags, participant
+metadata (including the resolved `gain` for each participant), and size guards, making it
+straightforward to colour-code the HUD or enforce your own policies on top of the
+symmetric default. Declarative `rolePolicies` let you switch individual roles between
+read-only, bursty, or high-authority modes: the token bucket honours the narrowest
+`rateLimitHz`, the optional `gain` flows through to attribution samples, and the telemetry
+hook reports `policy-blocked` events whenever a disallowed patch/state arrives.
+
+Participants can now advertise a structured capability surface via the optional
+`capabilities` object. Keys are automatically trimmed to 64 characters, values are limited
+to simple JSON primitives (boolean, finite number, string, or null), and the helper keeps
+at most 16 entries per participant (512 UTF‑8 bytes per value) by default. The advertised
+set shows up on `session.participants`, in presence heartbeats, and in the payload passed
+to `attributionSink`, enabling downstream dashboards to fan out richer context (e.g. GPU
+availability, palette control preference, experiment tags). Call `session.setCapabilities`
+at runtime to push an updated advertisement without waiting for the next presence tick:
+
+```ts
+session.setCapabilities({
+    wgpu: typeof navigator !== "undefined" && "gpu" in navigator,
+    wasm: true,
+    sandbox: "beta-2025-10",
+});
+
+// Clearing the object broadcasts `null` to peers so they can retire cached badges.
+session.setCapabilities(null);
+```
+
+Capability propagation keeps the “safe-by-default” posture from earlier hardening work.
+Each `CollabRolePolicy` can now declare:
+
+* `allowedCapabilities`: allow-list of keys that the role may broadcast (omit or `null`
+  for "anything goes").
+* `blockedCapabilities`: deny-list enforced before the allow-list.
+* `maxCapabilityEntries`: per-participant ceiling (default 16, hard cap 64).
+* `maxCapabilityValueBytes`: UTF‑8 byte budget per value (default 512, hard cap 4096).
+
+Capabilities that miss the allow-list, hit a deny-list, overflow the quota, or include an
+unsupported primitive are dropped locally and emit `policy-blocked` telemetry with the
+reason code `capability:<context>:<constraint>:<key>`. That keeps innovation room wide
+open—roles can still introduce new markers on the fly—while preserving a deterministic
+boundary around what crosses the wire and what reaches downstream attribution sinks.
