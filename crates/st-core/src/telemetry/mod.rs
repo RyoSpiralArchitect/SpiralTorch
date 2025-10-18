@@ -23,6 +23,7 @@
 
 pub mod atlas;
 pub mod chrono;
+pub mod dashboard;
 pub mod hub;
 pub mod maintainer;
 
