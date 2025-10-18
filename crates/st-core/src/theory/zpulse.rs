@@ -155,6 +155,7 @@ impl Default for ZFrequencyConfig {
             minimum_energy: 0.0,
         }
     }
+}
 
 impl ZFrequencyConfig {
     pub fn new(smoothing: f32, minimum_energy: f32) -> Self {
