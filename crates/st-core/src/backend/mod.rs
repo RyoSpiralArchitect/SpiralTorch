@@ -16,5 +16,6 @@ pub mod spiralk_fft;
 pub mod temporal_fusion;
 pub mod unison_heuristics;
 pub mod wasm_tuner;
+pub mod wasm_tuner_builder;
 pub mod wgpu_heuristics;
 pub mod wgpu_heuristics_generated;
