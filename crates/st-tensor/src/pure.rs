@@ -39,6 +39,7 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 #[allow(unused_imports)]
 use rand_distr::StandardNormal;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::f32::consts::PI;
 
@@ -1217,7 +1218,15 @@ impl DesireGradientInterpretation {
     /// steer both the CPU and GPU loops without reimplementing the heuristics.
     #[inline]
     pub fn control(&self) -> DesireGradientControl {
-        DesireGradientControl::from_interpretation(*self)
+        self.control_with_gain(1.0)
+    }
+
+    /// Collapse the interpretation into a control packet while scaling the
+    /// adaptive heuristics by `gain`. Passing `0.0` retains the legacy neutral
+    /// behaviour whereas `1.0` enables the full tuning guidance.
+    #[inline]
+    pub fn control_with_gain(&self, gain: f32) -> DesireGradientControl {
+        DesireGradientControl::from_interpretation_with_gain(*self, gain)
     }
 }
 
@@ -1230,6 +1239,77 @@ impl Default for DesireGradientInterpretation {
             stability: 1.0,
             saturation: 0.0,
         }
+    }
+}
+
+/// Event bitflags describing notable actions suggested by
+/// [`DesireGradientControl`]. The bitmask can be surfaced directly to telemetry
+/// systems without additional allocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DesireControlEvents {
+    bits: u32,
+}
+
+impl DesireControlEvents {
+    pub const NONE: Self = Self { bits: 0 };
+    pub const LR_INCREASE: Self = Self { bits: 1 << 0 };
+    pub const LR_DECREASE: Self = Self { bits: 1 << 1 };
+    pub const CLIPPED: Self = Self { bits: 1 << 2 };
+    pub const TEMPERATURE_ADJUST: Self = Self { bits: 1 << 3 };
+    pub const QUALITY_BOOST: Self = Self { bits: 1 << 4 };
+
+    #[inline]
+    pub const fn new(bits: u32) -> Self {
+        Self { bits }
+    }
+
+    #[inline]
+    pub const fn bits(self) -> u32 {
+        self.bits
+    }
+
+    #[inline]
+    pub const fn is_empty(self) -> bool {
+        self.bits == 0
+    }
+
+    #[inline]
+    pub const fn contains(self, other: Self) -> bool {
+        (self.bits & other.bits) == other.bits
+    }
+
+    #[inline]
+    pub const fn insert(self, other: Self) -> Self {
+        Self {
+            bits: self.bits | other.bits,
+        }
+    }
+
+    pub fn labels(self) -> Vec<&'static str> {
+        let mut labels = Vec::new();
+        if self.contains(Self::LR_INCREASE) {
+            labels.push("lr_increase");
+        }
+        if self.contains(Self::LR_DECREASE) {
+            labels.push("lr_decrease");
+        }
+        if self.contains(Self::CLIPPED) {
+            labels.push("clip_adjust");
+        }
+        if self.contains(Self::TEMPERATURE_ADJUST) {
+            labels.push("temperature_adjust");
+        }
+        if self.contains(Self::QUALITY_BOOST) {
+            labels.push("quality_weight");
+        }
+        labels
+    }
+}
+
+impl Default for DesireControlEvents {
+    fn default() -> Self {
+        Self::NONE
     }
 }
 
@@ -1246,15 +1326,113 @@ pub struct DesireGradientControl {
     real_rate_scale: f32,
     operator_mix: f32,
     operator_gain: f32,
+    #[serde(default = "DesireGradientControl::default_tuning_gain")]
+    tuning_gain: f32,
+    #[serde(default = "DesireGradientControl::default_target_entropy")]
+    target_entropy: f32,
+    #[serde(default = "DesireGradientControl::default_lr_eta")]
+    learning_rate_eta: f32,
+    #[serde(default = "DesireGradientControl::default_lr_min")]
+    learning_rate_min: f32,
+    #[serde(default = "DesireGradientControl::default_lr_max")]
+    learning_rate_max: f32,
+    #[serde(default = "DesireGradientControl::default_lr_slew")]
+    learning_rate_slew: f32,
+    #[serde(default = "DesireGradientControl::default_clip_norm")]
+    clip_norm: f32,
+    #[serde(default = "DesireGradientControl::default_clip_floor")]
+    clip_floor: f32,
+    #[serde(default = "DesireGradientControl::default_clip_ceiling")]
+    clip_ceiling: f32,
+    #[serde(default = "DesireGradientControl::default_clip_ema")]
+    clip_ema: f32,
+    #[serde(default = "DesireGradientControl::default_temperature_kappa")]
+    temperature_kappa: f32,
+    #[serde(default = "DesireGradientControl::default_temperature_slew")]
+    temperature_slew: f32,
+    #[serde(default = "DesireGradientControl::default_quality_gain")]
+    quality_gain: f32,
+    #[serde(default = "DesireGradientControl::default_quality_bias")]
+    quality_bias: f32,
+    #[serde(default = "DesireGradientControl::default_events")]
+    events: DesireControlEvents,
 }
 
 impl DesireGradientControl {
     const MIN_RATE: f32 = 0.25;
     const MAX_RATE: f32 = 1.6;
 
+    const fn default_tuning_gain() -> f32 {
+        0.0
+    }
+
+    const fn default_target_entropy() -> f32 {
+        3.5
+    }
+
+    const fn default_lr_eta() -> f32 {
+        0.0
+    }
+
+    const fn default_lr_min() -> f32 {
+        1.0
+    }
+
+    const fn default_lr_max() -> f32 {
+        1.0
+    }
+
+    const fn default_lr_slew() -> f32 {
+        0.0
+    }
+
+    const fn default_clip_norm() -> f32 {
+        1.0
+    }
+
+    const fn default_clip_floor() -> f32 {
+        0.1
+    }
+
+    const fn default_clip_ceiling() -> f32 {
+        1.0
+    }
+
+    const fn default_clip_ema() -> f32 {
+        0.2
+    }
+
+    const fn default_temperature_kappa() -> f32 {
+        0.0
+    }
+
+    const fn default_temperature_slew() -> f32 {
+        0.0
+    }
+
+    const fn default_quality_gain() -> f32 {
+        0.0
+    }
+
+    const fn default_quality_bias() -> f32 {
+        0.0
+    }
+
+    const fn default_events() -> DesireControlEvents {
+        DesireControlEvents::NONE
+    }
+
     /// Build a control packet from an interpretation, collapsing the
     /// higher-level descriptors into concrete gains and learning-rate scales.
     pub fn from_interpretation(interpretation: DesireGradientInterpretation) -> Self {
+        Self::from_interpretation_with_gain(interpretation, 1.0)
+    }
+
+    /// Build a control packet while scaling the adaptive heuristics by `gain`.
+    pub fn from_interpretation_with_gain(
+        interpretation: DesireGradientInterpretation,
+        gain: f32,
+    ) -> Self {
         let penalty_gain = interpretation.penalty_gain();
         let bias_mix = interpretation.bias_mix();
         let observation_gain = interpretation.observation_gain();
@@ -1284,6 +1462,46 @@ impl DesireGradientControl {
         let operator_mix = (0.4 + 0.6 * interpretation.stability()).clamp(0.25, 1.0);
         let operator_gain = penalty_gain * (1.0 - 0.35 * saturation).clamp(0.5, 1.0);
 
+        let tuning_gain = gain.clamp(0.0, 1.0);
+        let entropy_bias = 3.5 + 0.8 * caution;
+        let lr_eta = tuning_gain * (0.08 + 0.14 * caution);
+        let lr_min = (Self::MIN_RATE * 0.6).max(0.05);
+        let lr_max = (Self::MAX_RATE * (1.0 + 0.25 * (1.0 - caution))).clamp(0.75, 2.5);
+        let lr_slew = tuning_gain * (0.25 - 0.15 * caution).clamp(0.05, 0.25);
+
+        let clip_floor = (0.18 + 0.12 * caution).clamp(0.15, 0.3);
+        let clip_target = interpretation
+            .saturation()
+            .max(interpretation.hyper_pressure() * 2.5)
+            .max(interpretation.real_pressure() * 3.0);
+        let clip_norm = (clip_target * (0.6 + 0.4 * tuning_gain)).clamp(clip_floor, 32.0);
+        let clip_ceiling = (clip_norm * 1.6).max(clip_norm + 0.05);
+        let clip_ema = (0.25 + 0.35 * caution).clamp(0.2, 0.6);
+
+        let temperature_kappa =
+            tuning_gain * (0.02 + 0.08 * (1.0 - interpretation.stability())).clamp(0.0, 0.12);
+        let temperature_slew = tuning_gain * (0.22 - 0.1 * caution).clamp(0.05, 0.22);
+
+        let quality_gain = tuning_gain * (0.6 + 0.4 * (1.0 - caution));
+        let quality_bias = 0.0;
+
+        let mut events = DesireControlEvents::NONE;
+        if hyper_rate_scale < 1.0 - 1e-3 || real_rate_scale < 1.0 - 1e-3 {
+            events = events.insert(DesireControlEvents::LR_DECREASE);
+        }
+        if hyper_rate_scale > 1.0 + 1e-3 || real_rate_scale > 1.0 + 1e-3 {
+            events = events.insert(DesireControlEvents::LR_INCREASE);
+        }
+        if (clip_norm - clip_floor).abs() < 1e-3 {
+            events = events.insert(DesireControlEvents::CLIPPED);
+        }
+        if temperature_kappa > 0.0 {
+            events = events.insert(DesireControlEvents::TEMPERATURE_ADJUST);
+        }
+        if quality_gain > 0.0 {
+            events = events.insert(DesireControlEvents::QUALITY_BOOST);
+        }
+
         Self {
             penalty_gain,
             bias_mix,
@@ -1293,6 +1511,21 @@ impl DesireGradientControl {
             real_rate_scale,
             operator_mix,
             operator_gain,
+            tuning_gain,
+            target_entropy: entropy_bias,
+            learning_rate_eta: lr_eta,
+            learning_rate_min: lr_min,
+            learning_rate_max: lr_max,
+            learning_rate_slew: lr_slew,
+            clip_norm,
+            clip_floor,
+            clip_ceiling,
+            clip_ema,
+            temperature_kappa,
+            temperature_slew,
+            quality_gain,
+            quality_bias,
+            events,
         }
     }
 
@@ -1336,6 +1569,83 @@ impl DesireGradientControl {
     pub fn operator_gain(&self) -> f32 {
         self.operator_gain
     }
+
+    /// Strength applied to the adaptive heuristics. `0.0` disables the tuning
+    /// feedback while `1.0` enables the recommended behaviour.
+    pub fn tuning_gain(&self) -> f32 {
+        self.tuning_gain
+    }
+
+    /// Target entropy that the learning-rate controller should chase.
+    pub fn target_entropy(&self) -> f32 {
+        self.target_entropy
+    }
+
+    /// Exponential learning-rate update coefficient.
+    pub fn learning_rate_eta(&self) -> f32 {
+        self.learning_rate_eta
+    }
+
+    /// Lower bound for the adaptive learning rate.
+    pub fn learning_rate_min(&self) -> f32 {
+        self.learning_rate_min
+    }
+
+    /// Upper bound for the adaptive learning rate.
+    pub fn learning_rate_max(&self) -> f32 {
+        self.learning_rate_max
+    }
+
+    /// Maximum relative change permitted between learning-rate updates.
+    pub fn learning_rate_slew(&self) -> f32 {
+        self.learning_rate_slew
+    }
+
+    /// Recommended gradient clipping norm.
+    pub fn clip_norm(&self) -> f32 {
+        self.clip_norm
+    }
+
+    /// Floor applied when smoothing the clipping window.
+    pub fn clip_floor(&self) -> f32 {
+        self.clip_floor
+    }
+
+    /// Ceiling applied when smoothing the clipping window.
+    pub fn clip_ceiling(&self) -> f32 {
+        self.clip_ceiling
+    }
+
+    /// Exponential moving-average factor for the clipping window.
+    pub fn clip_ema(&self) -> f32 {
+        self.clip_ema
+    }
+
+    /// Coupling factor applied when adjusting Desire temperature against the
+    /// Z-order magnitude.
+    pub fn temperature_kappa(&self) -> f32 {
+        self.temperature_kappa
+    }
+
+    /// Maximum allowed change in Desire temperature per step.
+    pub fn temperature_slew(&self) -> f32 {
+        self.temperature_slew
+    }
+
+    /// Gain applied when incorporating external quality metrics.
+    pub fn quality_gain(&self) -> f32 {
+        self.quality_gain
+    }
+
+    /// Baseline offset for external quality metrics.
+    pub fn quality_bias(&self) -> f32 {
+        self.quality_bias
+    }
+
+    /// Event bitmask describing the adjustments suggested by the control.
+    pub fn events(&self) -> DesireControlEvents {
+        self.events
+    }
 }
 
 impl Default for DesireGradientControl {
@@ -1349,6 +1659,21 @@ impl Default for DesireGradientControl {
             real_rate_scale: 1.0,
             operator_mix: 1.0,
             operator_gain: 1.0,
+            tuning_gain: Self::default_tuning_gain(),
+            target_entropy: Self::default_target_entropy(),
+            learning_rate_eta: Self::default_lr_eta(),
+            learning_rate_min: Self::default_lr_min(),
+            learning_rate_max: Self::default_lr_max(),
+            learning_rate_slew: Self::default_lr_slew(),
+            clip_norm: Self::default_clip_norm(),
+            clip_floor: Self::default_clip_floor(),
+            clip_ceiling: Self::default_clip_ceiling(),
+            clip_ema: Self::default_clip_ema(),
+            temperature_kappa: Self::default_temperature_kappa(),
+            temperature_slew: Self::default_temperature_slew(),
+            quality_gain: Self::default_quality_gain(),
+            quality_bias: Self::default_quality_bias(),
+            events: Self::default_events(),
         }
     }
 }
@@ -1865,6 +2190,35 @@ mod tests {
         assert!(control.hyper_rate_scale() <= 1.0 + f32::EPSILON);
         assert!(control.real_rate_scale() >= 0.25);
         assert!(control.operator_mix() <= 1.0);
+        assert!(control.clip_norm() >= control.clip_floor());
+        assert!(control.clip_ceiling() >= control.clip_norm());
+        assert!(control.learning_rate_max() >= control.learning_rate_min());
+        assert!(control.temperature_kappa() >= 0.0);
+        assert!(control.events().bits() != 0);
+    }
+
+    #[test]
+    fn desire_gradient_control_scales_with_gain() {
+        let hyper = GradientSummary::from_slice(&[0.2, -0.1, 0.05, -0.02]);
+        let real = GradientSummary::from_slice(&[0.2, -0.1, 0.05, -0.02]);
+        let interpretation = DesireGradientInterpretation::from_summaries(hyper, real);
+        let neutral = interpretation.control_with_gain(0.0);
+        let tuned = interpretation.control_with_gain(1.0);
+        assert!(neutral.learning_rate_eta() <= tuned.learning_rate_eta());
+        assert!(neutral.temperature_kappa() <= tuned.temperature_kappa());
+        assert!(neutral.quality_gain() <= tuned.quality_gain());
+        assert!(tuned.events().bits() >= neutral.events().bits());
+    }
+
+    #[test]
+    fn desire_control_events_report_labels() {
+        let events = DesireControlEvents::LR_INCREASE
+            .insert(DesireControlEvents::CLIPPED)
+            .insert(DesireControlEvents::QUALITY_BOOST);
+        let labels = events.labels();
+        assert!(labels.contains(&"lr_increase"));
+        assert!(labels.contains(&"clip_adjust"));
+        assert!(labels.contains(&"quality_weight"));
     }
 
     #[test]

@@ -109,6 +109,8 @@ pub struct DesireSolution {
     pub avoidance: Option<DesireAvoidanceReport>,
     pub hypergrad_penalty: f32,
     pub gradient_control: DesireGradientControl,
+    #[serde(default)]
+    pub control_events: Vec<String>,
 }
 
 pub struct DesireLagrangian {
@@ -375,6 +377,13 @@ impl DesireLagrangian {
         let hypergrad_penalty = self.hypergrad_penalty(phase, &active, &offsets, &distribution);
         let avoidance = self.build_report(phase);
         self.step_index = self.step_index.saturating_add(1);
+        let control_events = self
+            .gradient_control
+            .events()
+            .labels()
+            .into_iter()
+            .map(|label| label.to_string())
+            .collect();
         Ok(DesireSolution {
             indices: active,
             probabilities: distribution,
@@ -386,6 +395,7 @@ impl DesireLagrangian {
             avoidance,
             hypergrad_penalty,
             gradient_control: self.gradient_control,
+            control_events,
         })
     }
 

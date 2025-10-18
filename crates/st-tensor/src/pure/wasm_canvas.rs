@@ -645,10 +645,7 @@ impl CanvasProjector {
     }
 
     /// Derive Desire control signals directly from the refreshed canvas tensor.
-    pub fn gradient_control(
-        &mut self,
-        curvature: f32,
-    ) -> PureResult<DesireGradientControl> {
+    pub fn gradient_control(&mut self, curvature: f32) -> PureResult<DesireGradientControl> {
         let interpretation = self.gradient_interpretation(curvature)?;
         Ok(interpretation.control())
     }
@@ -726,6 +723,30 @@ impl CanvasProjector {
         control: &DesireGradientControl,
     ) -> [f32; 4] {
         self.hypergrad_operator_uniform(control.operator_mix(), control.operator_gain())
+    }
+
+    /// Pack Desire's control feedback into a 16-float uniform suitable for WGSL
+    /// consumption. The layout keeps every block aligned to 16 bytes so WebGPU
+    /// callers can upload it without manual padding or serde churn.
+    pub fn desire_control_uniform(&self, control: &DesireGradientControl) -> [f32; 16] {
+        [
+            control.target_entropy(),
+            control.learning_rate_eta(),
+            control.learning_rate_min(),
+            control.learning_rate_max(),
+            control.learning_rate_slew(),
+            control.clip_norm(),
+            control.clip_floor(),
+            control.clip_ceiling(),
+            control.clip_ema(),
+            control.temperature_kappa(),
+            control.temperature_slew(),
+            control.quality_gain(),
+            control.quality_bias(),
+            control.hyper_rate_scale(),
+            control.real_rate_scale(),
+            control.tuning_gain(),
+        ]
     }
 
     /// Compute the workgroup triplet for the hypergradient WGSL operator.
@@ -1139,8 +1160,13 @@ mod tests {
         let scheduler = UringFractalScheduler::new(4).unwrap();
         scheduler
             .push(
-                FractalPatch::new(tensor_with_shape(2, 2, &[0.25, 0.1, -0.35, 0.6]), 1.0, 1.0, 0)
-                    .unwrap(),
+                FractalPatch::new(
+                    tensor_with_shape(2, 2, &[0.25, 0.1, -0.35, 0.6]),
+                    1.0,
+                    1.0,
+                    0,
+                )
+                .unwrap(),
             )
             .unwrap();
         let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
@@ -1152,6 +1178,12 @@ mod tests {
         assert_eq!(uniform[1], 2.0);
         assert!((uniform[2] - control.operator_mix()).abs() < 1e-6);
         assert!((uniform[3] - control.operator_gain()).abs() < 1e-6);
+        let packed = projector.desire_control_uniform(&control);
+        assert_eq!(packed.len(), 16);
+        assert!((packed[0] - control.target_entropy()).abs() < 1e-6);
+        assert!((packed[1] - control.learning_rate_eta()).abs() < 1e-6);
+        assert!((packed[5] - control.clip_norm()).abs() < 1e-6);
+        assert!((packed[9] - control.temperature_kappa()).abs() < 1e-6);
     }
 
     #[test]
