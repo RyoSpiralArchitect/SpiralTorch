@@ -484,6 +484,54 @@ fn desire_telemetry_to_py<'py>(
     Ok(dict.into_py(py))
 }
 
+fn serde_json_value_to_py(py: Python<'_>, value: &JsonValue) -> PyResult<PyObject> {
+    Ok(match value {
+        JsonValue::Null => py.None(),
+        JsonValue::Bool(flag) => (*flag).into_py(py),
+        JsonValue::Number(number) => {
+            if let Some(v) = number.as_i64() {
+                v.into_py(py)
+            } else if let Some(v) = number.as_u64() {
+                v.into_py(py)
+            } else if let Some(v) = number.as_f64() {
+                v.into_py(py)
+            } else {
+                py.None()
+            }
+        }
+        JsonValue::String(s) => s.clone().into_py(py),
+        JsonValue::Array(items) => {
+            let list = PyList::empty_bound(py);
+            for item in items {
+                list.append(serde_json_value_to_py(py, item)?)?;
+            }
+            list.into_py(py)
+        }
+        JsonValue::Object(map) => {
+            let dict = PyDict::new_bound(py);
+            for (key, val) in map {
+                dict.set_item(key, serde_json_value_to_py(py, val)?)?;
+            }
+            dict.into_py(py)
+        }
+    })
+}
+
+fn config_event_to_py(py: Python<'_>, event: &ConfigDiffEvent) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("layer", event.layer.to_string())?;
+    dict.set_item("path", &event.path)?;
+    match event.previous.as_ref() {
+        Some(value) => dict.set_item("previous", serde_json_value_to_py(py, value)?)?,
+        None => dict.set_item("previous", py.None())?,
+    }
+    match event.current.as_ref() {
+        Some(value) => dict.set_item("current", serde_json_value_to_py(py, value)?)?,
+        None => dict.set_item("current", py.None())?,
+    }
+    Ok(dict.into_py(py))
+}
+
 fn rl_err(err: SpiralRlError) -> PyErr {
     match err {
         SpiralRlError::Tensor(err) => tensor_err(err),
@@ -1402,7 +1450,6 @@ impl PyDifferentialResonance {
         Ok("DifferentialResonance(...)".to_string())
     }
 }
-
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {
@@ -2782,6 +2829,49 @@ impl PyModuleTrainer {
     #[pyo3(signature = (threshold, participants=2))]
     fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
         self.inner.install_meta_conductor(threshold, participants);
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let builder = self.ensure_builder()?;
+        let mut config = builder.maintainer_config().clone();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        builder.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
+        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
+        Ok(())
     }
 }
 
@@ -4384,48 +4474,8 @@ impl PyCollapsePulse {
     }
 }
 
-    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
-    fn maintainer(
-        &mut self,
-        jitter_threshold: Option<f32>,
-        growth_threshold: Option<f32>,
-        energy_floor: Option<f32>,
-        clamp_min: Option<f32>,
-        clamp_max: Option<f32>,
-        pressure_step: Option<f32>,
-        window: Option<usize>,
-    ) -> PyResult<()> {
-        let builder = self.ensure_builder()?;
-        let mut config = builder.maintainer_config().clone();
-        if let Some(value) = jitter_threshold {
-            config.jitter_threshold = value;
-        }
-        if let Some(value) = growth_threshold {
-            config.growth_threshold = value;
-        }
-        if let Some(value) = energy_floor {
-            config.energy_floor = value;
-        }
-        if let Some(value) = clamp_min {
-            config.clamp_min = value;
-        }
-        if let Some(value) = clamp_max {
-            config.clamp_max = value;
-        }
-        if let Some(value) = pressure_step {
-            config.pressure_step = value;
-        }
-        if let Some(value) = window {
-            config.window = value;
-        }
-        builder.set_maintainer_config(config);
-        Ok(())
-    }
+}
 
-    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
-        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
-        Ok(())
-    }
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {
@@ -18921,6 +18971,14 @@ fn get_desire_telemetry(py: Python<'_>) -> PyResult<Option<PyObject>> {
 }
 
 #[pyfunction]
+fn get_config_events(py: Python<'_>) -> PyResult<Vec<PyObject>> {
+    hub::get_config_events()
+        .iter()
+        .map(|event| config_event_to_py(py, event))
+        .collect()
+}
+
+#[pyfunction]
 fn get_psychoid_stats(py: Python<'_>) -> PyResult<Option<PyObject>> {
     #[cfg(feature = "psychoid")]
     {
@@ -19283,6 +19341,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
+    m.add_function(wrap_pyfunction!(get_config_events, m)?)?;
     m.add_function(wrap_pyfunction!(get_desire_telemetry, m)?)?;
     m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
     m.add_function(wrap_pyfunction!(ecosystem_snapshot, m)?)?;
@@ -19441,6 +19500,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "z_space_barycenter",
         "hip_probe",
         "describe_device",
+        "get_config_events",
+        "get_desire_telemetry",
         "get_psychoid_stats",
         "describe_resonance",
         "describe_frame",

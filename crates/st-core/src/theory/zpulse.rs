@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 //! Canonical representation of Z pulses together with a lightweight
 //! conductor that fuses multiple sources into a single control signal.
 
-use std::collections::VecDeque;
+use std::borrow::Cow;
+use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::fs;
+use std::io::{ErrorKind, Read};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
+
+use serde::Deserialize;
 
 /// Identifies a source capable of emitting [`ZPulse`] records.
 pub trait ZEmitter {
@@ -168,13 +175,29 @@ pub struct ZAdaptiveGainCfg {
     pub responsiveness: f32,
 }
 
+impl Default for ZAdaptiveGainCfg {
+    fn default() -> Self {
+        Self {
+            gain_floor: 0.0,
+            gain_ceil: 1.0,
+            responsiveness: 0.0,
+        }
+    }
+}
+
 impl ZAdaptiveGainCfg {
     pub fn new(gain_floor: f32, gain_ceil: f32, responsiveness: f32) -> Self {
+        let floor = gain_floor.max(0.0);
+        let ceil = gain_ceil.max(floor);
         Self {
-            gain_floor: gain_floor.max(0.0),
-            gain_ceil: gain_ceil.max(gain_floor),
+            gain_floor: floor,
+            gain_ceil: ceil,
             responsiveness: responsiveness.clamp(0.0, 1.0),
         }
+    }
+
+    pub fn update(&mut self, gain_floor: f32, gain_ceil: f32, responsiveness: f32) {
+        *self = Self::new(gain_floor, gain_ceil, responsiveness);
     }
 }
 
@@ -228,6 +251,9 @@ pub struct ZConductor {
     adaptive_cfg: Option<ZAdaptiveGainCfg>,
     latency_cfg: Option<ZLatencyConfig>,
     latency_events: VecDeque<String>,
+    source_gains: HashMap<String, f32>,
+    source_limits: HashMap<String, f32>,
+    config_events: VecDeque<String>,
 }
 
 impl Default for ZConductor {
@@ -248,6 +274,9 @@ impl ZConductor {
             adaptive_cfg: None,
             latency_cfg: None,
             latency_events: VecDeque::new(),
+            source_gains: HashMap::new(),
+            source_limits: HashMap::new(),
+            config_events: VecDeque::new(),
         }
     }
 
@@ -290,15 +319,35 @@ impl ZConductor {
 
         for pulse in pulses {
             had_pulse = true;
-            total_support += pulse.support.max(0.0);
+            let support = pulse.support.max(0.0);
+            total_support += support;
             fused.drift += pulse.drift;
-            weighted_z += pulse.z_bias * pulse.support.max(0.0);
-            let weight = pulse.support.max(1e-6);
+            let key = source_lookup_key(&pulse.source);
+            let gain = self
+                .source_gains
+                .get(key.as_ref())
+                .copied()
+                .unwrap_or(1.0)
+                .max(0.0);
+            let limit = self
+                .source_limits
+                .get(key.as_ref())
+                .copied()
+                .unwrap_or(f32::INFINITY)
+                .max(0.0);
+            let mut z_bias = pulse.z_bias * gain;
+            if limit.is_finite() {
+                if limit == 0.0 {
+                    z_bias = 0.0;
+                } else {
+                    z_bias = z_bias.clamp(-limit, limit);
+                }
+            }
+            weighted_z += z_bias * support;
+            let weight = support.max(1e-6);
             weighted_quality += pulse.quality * weight;
             total_quality_weight += weight;
-            fused
-                .attributions
-                .push((pulse.source, pulse.support.max(0.0)));
+            fused.attributions.push((pulse.source, support));
         }
 
         if !had_pulse {
