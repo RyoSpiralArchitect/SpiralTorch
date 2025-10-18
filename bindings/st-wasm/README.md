@@ -72,6 +72,12 @@ const dashboard = new SpiralCanvasDashboard(hudContainer, view, {
             gamma: 0.85,
         },
     },
+    showRecorder: true,
+    snapshotFilename: "latest-frame.png",
+    onRecordingComplete: async (clip) => {
+        // implement uploadBlobToS3 to push the recording to your backend
+        await uploadBlobToS3(clip);
+    },
 });
 
 view.start();
@@ -81,3 +87,77 @@ The dashboard ships lightweight glassmorphism-inspired defaults, can be embedded
 layout, and exposes options for supplying custom palette presets or toggling controls on
 and off. Since it only depends on `SpiralCanvasView`, it can be further wrapped inside
 framework components as needed.
+
+### Frame capture and recording
+
+`SpiralCanvasView` now exposes helpers for exporting the currently rendered frame:
+
+```ts
+const pixels = view.capturePixels({ applyPalette: true }); // Uint8ClampedArray copy
+const pngBlob = await view.toBlob("image/png");
+const dataUrl = view.toDataURL("image/webp", 0.9);
+const bitmap = await view.toImageBitmap();
+const stream = view.createCaptureStream(60); // MediaStream for WebRTC/recording
+```
+
+For time-based captures hook the new `types/canvas-recorder.ts` helper. It wraps the
+browser's `MediaRecorder` and automatically wires it to the canvas capture stream:
+
+```ts
+import { SpiralCanvasRecorder } from "./canvas-recorder";
+
+const recorder = new SpiralCanvasRecorder(view, {
+    mimeType: "video/webm;codecs=vp9",
+    videoBitsPerSecond: 6_000_000,
+});
+
+recorder.start();
+
+// ... wait for a few seconds ...
+const clip = await recorder.stop();
+```
+
+The vanilla dashboard exposes snapshot/recording buttons out of the box. Provide
+`snapshotFilename`, `onSnapshot`, or `onRecordingComplete` callbacks to integrate the
+capture workflow with your own UX (e.g. uploading to a backend or pushing into a React
+state store).
+
+### Collaborative control between trainers, models, and humans
+
+Real-time co-creation becomes much easier with `types/canvas-collab.ts`. The new
+`SpiralCanvasCollabSession` peers a `SpiralCanvasView` across any number of browser tabs
+or devices using the `BroadcastChannel` API. Every participant – whether they're a human
+artist, a trainer supervising gradients, or the training run itself – has the same
+authority to steer palettes, zoom levels, navigation toggles, stats sampling, and render
+loop state.
+
+```ts
+import { SpiralCanvasCollabSession } from "./canvas-collab";
+
+const session = new SpiralCanvasCollabSession(view, {
+    sessionId: "lab-floor-7", // pick any shared identifier for the room
+    participant: {
+        role: "trainer", // "trainer" | "model" | "human" or your own identifier
+        label: "Curator A",
+        color: "#facc15",
+    },
+});
+
+// Surface shared presence, last input timestamps, and pointer motions inside the HUD.
+dashboard.attachCollaboration(session);
+
+// React to remote updates (for example to log attribution or build custom UI chrome).
+session.on("state", ({ participant, origin }) => {
+    console.info(`%s adjusted the view (%s)`, participant.label ?? participant.role, origin);
+});
+
+session.on("pointer", ({ participant, event }) => {
+    // Mirror pointer navigation in a minimap, trigger haptics, etc.
+    highlightParticipantCursor(participant.id, event.offset);
+});
+```
+
+When `BroadcastChannel` is unavailable the helper gracefully degrades to single-client
+behavior, so you can still wire it into dashboards without special casing. Each message
+includes participant metadata, making it straightforward to colour-code the dashboard or
+enforce your own policies on top of the symmetric default.

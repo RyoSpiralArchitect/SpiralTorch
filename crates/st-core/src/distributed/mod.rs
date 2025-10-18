@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 pub mod autograd;
+pub mod collective;
 pub mod prob_params;
 pub mod topk3_stage;
 pub mod topk_dist;
