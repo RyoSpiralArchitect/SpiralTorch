@@ -5,6 +5,8 @@
 
 use num_complex::Complex32;
 
+use crate::zspace::{mellin_log_lattice_prefactor, trapezoidal_weights, weighted_z_transform};
+
 /// Change-of-variable helper for Mellin integrals.
 ///
 /// Given a positive interval `(a, b)` we operate in the logarithmic domain by
@@ -13,7 +15,10 @@ use num_complex::Complex32;
 #[inline]
 fn map_range_to_log(range: (f32, f32)) -> (f32, f32) {
     let (a, b) = range;
-    assert!(a.is_finite() && b.is_finite(), "integration bounds must be finite");
+    assert!(
+        a.is_finite() && b.is_finite(),
+        "integration bounds must be finite"
+    );
     assert!(a > 0.0 && b > 0.0, "integration bounds must be positive");
     assert!(a < b, "integration bounds must be ordered");
     (a.ln(), b.ln())
@@ -33,16 +38,14 @@ fn map_range_to_log(range: (f32, f32)) -> (f32, f32) {
 ///
 /// Using the logarithmic domain provides stable behaviour for rapidly decaying
 /// functions and mirrors the Hilbert space setting for `L^2((0, \infty), dx/x)`.
-pub fn mellin_transform<F>(
-    f: F,
-    s: Complex32,
-    range: (f32, f32),
-    steps: usize,
-) -> Complex32
+pub fn mellin_transform<F>(f: F, s: Complex32, range: (f32, f32), steps: usize) -> Complex32
 where
     F: Fn(f32) -> Complex32,
 {
-    assert!(steps >= 2, "at least two steps required for trapezoidal rule");
+    assert!(
+        steps >= 2,
+        "at least two steps required for trapezoidal rule"
+    );
     let (log_a, log_b) = map_range_to_log(range);
     let h = (log_b - log_a) / steps as f32;
 
@@ -74,21 +77,25 @@ pub fn mellin_transform_log_samples(
     samples: &[Complex32],
     s: Complex32,
 ) -> Complex32 {
-    assert!(log_step.is_finite() && log_step > 0.0, "log_step must be positive");
+    assert!(
+        log_step.is_finite() && log_step > 0.0,
+        "log_step must be positive"
+    );
     assert!(!samples.is_empty(), "samples must not be empty");
+    assert!(
+        samples.len() >= 2,
+        "samples must contain at least two points"
+    );
 
-    let mut acc = Complex32::new(0.0, 0.0);
+    let weights = trapezoidal_weights(samples.len());
+    let (prefactor, z) = mellin_log_lattice_prefactor(log_start, log_step, s);
     for (idx, &sample) in samples.iter().enumerate() {
-        let weight = if idx == 0 || idx + 1 == samples.len() { 0.5 } else { 1.0 };
-        let t = log_start + log_step * idx as f32;
-        let kernel = (s * Complex32::new(t, 0.0)).exp();
         if !(sample.re.is_finite() && sample.im.is_finite()) {
             panic!("sample {} produced non-finite value", idx);
         }
-        acc += kernel * sample * weight;
     }
-
-    acc * Complex32::new(log_step, 0.0)
+    let series = weighted_z_transform(samples, &weights, z);
+    prefactor * series
 }
 
 /// Inner product associated with the Hilbert space `L^2((0, \infty), dx/x)`.
@@ -97,17 +104,15 @@ pub fn mellin_transform_log_samples(
 /// unitary operator (Plancherel theorem).  Numerically we again employ the log
 /// domain so that the weight `dx/x` becomes the standard Lebesgue measure in the
 /// `t` variable.
-pub fn mellin_l2_inner_product<F, G>(
-    f: F,
-    g: G,
-    range: (f32, f32),
-    steps: usize,
-) -> Complex32
+pub fn mellin_l2_inner_product<F, G>(f: F, g: G, range: (f32, f32), steps: usize) -> Complex32
 where
     F: Fn(f32) -> Complex32,
     G: Fn(f32) -> Complex32,
 {
-    assert!(steps >= 2, "at least two steps required for trapezoidal rule");
+    assert!(
+        steps >= 2,
+        "at least two steps required for trapezoidal rule"
+    );
     let (log_a, log_b) = map_range_to_log(range);
     let h = (log_b - log_a) / steps as f32;
 
@@ -129,6 +134,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::zspace::mellin_transform_via_z;
     use libm::tgammaf;
 
     fn exp_decay(x: f32) -> Complex32 {
@@ -141,7 +147,12 @@ mod tests {
         let s = Complex32::new(2.5, 0.0);
         let approx = mellin_transform(exp_decay, s, (1e-4, 40.0), 16_384);
         let expected = tgammaf(2.5);
-        assert!((approx.re - expected).abs() < 1e-3, "approx={} expected={}", approx, expected);
+        assert!(
+            (approx.re - expected).abs() < 1e-3,
+            "approx={} expected={}",
+            approx,
+            expected
+        );
         assert!(approx.im.abs() < 1e-3);
     }
 
@@ -159,9 +170,48 @@ mod tests {
             samples.push(exp_decay(x));
         }
         let discrete = mellin_transform_log_samples(log_start, log_step, &samples, s);
-        let continuous = mellin_transform(exp_decay, s, ((log_start).exp(), (log_start + log_step * (n - 1) as f32).exp()), n - 1);
+        let continuous = mellin_transform(
+            exp_decay,
+            s,
+            (
+                (log_start).exp(),
+                (log_start + log_step * (n - 1) as f32).exp(),
+            ),
+            n - 1,
+        );
         let diff = (discrete - continuous).norm();
-        assert!(diff < 5e-3, "diff={} discrete={} continuous={}", diff, discrete, continuous);
+        assert!(
+            diff < 5e-3,
+            "diff={} discrete={} continuous={}",
+            diff,
+            discrete,
+            continuous
+        );
+    }
+
+    #[test]
+    fn log_samples_match_z_bridge() {
+        let s = Complex32::new(0.8, -0.3);
+        let log_start = -2.5f32;
+        let log_step = 0.1f32;
+        let n = 64;
+        let mut samples = Vec::with_capacity(n);
+        for i in 0..n {
+            let t = log_start + log_step * i as f32;
+            let x = t.exp();
+            samples.push(exp_decay(x));
+        }
+
+        let via_direct = mellin_transform_log_samples(log_start, log_step, &samples, s);
+        let via_z = mellin_transform_via_z(log_start, log_step, &samples, s);
+        let diff = (via_direct - via_z).norm();
+        assert!(
+            diff < 1e-6,
+            "diff={} direct={} via_z={}",
+            diff,
+            via_direct,
+            via_z
+        );
     }
 
     #[test]

@@ -8,6 +8,7 @@ use thiserror::Error;
 
 pub mod fft;
 pub mod mellin;
+pub mod zspace;
 
 /// Enumeration of fractional regularisation backends.
 #[derive(Clone, Debug, PartialEq)]
