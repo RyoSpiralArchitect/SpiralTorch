@@ -13,9 +13,9 @@
 use core::f32::consts::PI;
 use core::fmt;
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use crate::theory::zpulse::{ZPulse, ZSource};
+use crate::theory::zpulse::{ZEmitter, ZPulse, ZSource};
 use crate::util::math::{ramanujan_pi, LeechProjector};
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 
@@ -949,7 +949,7 @@ impl RealGradZProjector {
         let quality = spectral_quality(&projection.spectrum, band).max(self.quality_floor);
 
         ZPulse {
-            source: ZSource::Other("RealGrad"),
+            source: ZSource::RealGrad,
             ts: 0,
             band_energy: (above, here, beneath),
             drift,
@@ -1329,7 +1329,7 @@ mod tests {
             .iter()
             .map(|value| (*value as f64).powi(2))
             .sum::<f64>())
-            .sqrt() as f32;
+        .sqrt() as f32;
         assert_abs_diff_eq!(default_summary.norm, expected_norm, epsilon = 1.0e-6);
         assert_abs_diff_eq!(custom_summary.norm, expected_norm, epsilon = 1.0e-6);
         assert_abs_diff_eq!(default_summary.sparsity, 0.5, epsilon = 1.0e-6);
@@ -1554,7 +1554,7 @@ mod tests {
         )
         .with_band(0..projection.spectrum.len());
         let pulse = projector.project(&projection);
-        assert!(matches!(pulse.source, ZSource::Other("RealGrad")));
+        assert!(matches!(pulse.source, ZSource::RealGrad));
         assert!(pulse.support >= 0.0);
         assert!(pulse.band_energy.0 >= 0.0);
         assert!(pulse.quality >= 0.0);
@@ -1620,5 +1620,41 @@ mod tests {
         let pulse_on = projector_on.project(&projection);
         let pulse_off = projector_off.project(&projection);
         assert!(pulse_on.quality >= pulse_off.quality);
+    }
+}
+#[derive(Clone, Default, Debug)]
+pub struct RealGradEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
+}
+
+impl RealGradEmitter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn enqueue(&self, pulse: ZPulse) {
+        let mut queue = self.queue.lock().expect("realgrad emitter queue poisoned");
+        queue.push_back(pulse);
+    }
+
+    pub fn extend<I>(&self, pulses: I)
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut queue = self.queue.lock().expect("realgrad emitter queue poisoned");
+        queue.extend(pulses);
+    }
+}
+
+impl ZEmitter for RealGradEmitter {
+    fn name(&self) -> ZSource {
+        ZSource::RealGrad
+    }
+
+    fn tick(&mut self, _now: u64) -> Option<ZPulse> {
+        self.queue
+            .lock()
+            .expect("realgrad emitter queue poisoned")
+            .pop_front()
     }
 }
