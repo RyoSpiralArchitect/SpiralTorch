@@ -3,27 +3,94 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-//! Microlocal pulse fusion utilities shared between observability backends and
-//! telemetry exporters. The module exposes a canonical [`ZPulse`] structure
-//! together with a conductor that fuses heterogeneous sources while keeping
-//! track of latency, robust statistics, and optional adaptive gain stages.
+//! Canonical representation of Z pulses together with a lightweight
+//! conductor that fuses multiple sources into a single control signal.
 
-use rustc_hash::FxHashMap;
-use std::cmp::Ordering;
-use std::collections::VecDeque;
+use std::borrow::Cow;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-/// Identifies the origin of a [`ZPulse`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ZSource {
-    Microlocal,
-    Maxwell,
-    Graph,
-    Desire,
-    Graph,
-    GW,
-    Other(&'static str),
+/// Support triplet describing Above/Here/Beneath contributions backing a Z pulse.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZSupport {
+    pub leading: f32,
+    pub central: f32,
+    pub trailing: f32,
 }
+
+impl ZSupport {
+    /// Creates a new support triplet, clamping each component to be finite and non-negative.
+    pub fn new(leading: f32, central: f32, trailing: f32) -> Self {
+        Self {
+            leading: leading.max(0.0).finite_or_zero(),
+            central: central.max(0.0).finite_or_zero(),
+            trailing: trailing.max(0.0).finite_or_zero(),
+        }
+    }
+
+    /// Builds a support triplet straight from an Above/Here/Beneath energy tuple.
+    pub fn from_band_energy(bands: (f32, f32, f32)) -> Self {
+        Self::new(bands.0, bands.1, bands.2)
+    }
+
+    /// Returns the total perimeter mass supporting the pulse.
+    pub fn total(&self) -> f32 {
+        self.leading + self.central + self.trailing
+    }
+
+    /// Returns `true` when all support components vanish.
+    pub fn is_empty(&self) -> bool {
+        self.leading <= f32::EPSILON
+            && self.central <= f32::EPSILON
+            && self.trailing <= f32::EPSILON
+    }
+}
+
+impl Default for ZSupport {
+    fn default() -> Self {
+        Self {
+            leading: 0.0,
+            central: 0.0,
+            trailing: 0.0,
+        }
+    }
+}
+
+trait FiniteClamp {
+    fn finite_or_zero(self) -> f32;
+}
+
+impl FiniteClamp for f32 {
+    fn finite_or_zero(self) -> f32 {
+        if self.is_finite() {
+            self
+        } else {
+            0.0
+        }
+    }
+}
+
+fn source_lookup_key(source: &ZSource) -> Cow<'static, str> {
+    match source {
+        ZSource::Microlocal => Cow::Borrowed("microlocal"),
+        ZSource::Maxwell => Cow::Borrowed("maxwell"),
+        ZSource::RealGrad => Cow::Borrowed("realgrad"),
+        ZSource::Desire => Cow::Borrowed("desire"),
+        ZSource::External(name) | ZSource::Other(name) => Cow::Borrowed(name),
+    }
+}
+
+/// Identifies a source capable of emitting [`ZPulse`] records.
+pub trait ZEmitter {
+    /// Returns the canonical source identifier for pulses emitted by this
+    /// implementation.
+    fn name(&self) -> ZSource;
+
+    /// Advances the emitter one step and returns the next available pulse, if
+    /// any. Implementations may return more than one pulse per call by keeping
+    /// an internal queue; [`ZRegistry::gather`] will keep polling the emitter
+    /// until it reports `None`.
+    fn tick(&mut self, now: u64) -> Option<ZPulse>;
 
 impl Default for ZSource {
     fn default() -> Self {
@@ -111,10 +178,10 @@ impl Default for ZPulse {
             source: ZSource::Microlocal,
             ts: 0,
             tempo: 0.0,
+            band_energy: (0.0, 0.0, 0.0),
             drift: 0.0,
             z_bias: 0.0,
             support: ZSupport::default(),
-            band_energy: (0.0, 0.0, 0.0),
             quality: 0.0,
             stderr: 0.0,
             latency_ms: 0.0,
@@ -800,63 +867,44 @@ impl ZConductor {
         self.pending.push_back(pulse);
     }
 
-    pub fn step(&mut self, now: u64) -> ZFused {
-        let mut events = Vec::new();
-        if let Some(latency) = self.latency.as_mut() {
-            latency.prepare(now, &mut events);
-        }
-        let mut ready = Vec::new();
-        let mut retained = VecDeque::with_capacity(self.pending.len());
-        while let Some(mut pulse) = self.pending.pop_front() {
-            if let Some(latency) = self.latency.as_ref() {
-                latency.apply(&mut pulse);
-            }
-            if pulse.ts <= now {
-                ready.push(pulse);
-            } else {
-                retained.push_back(pulse);
-            }
-        }
-        self.pending = retained;
+    pub fn step<I>(&mut self, pulses: I, now: u64) -> ZFused
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut fused = ZFused::default();
+        fused.ts = now;
 
-        let mut drift = 0.0;
-        let mut attributions = Vec::new();
-        let mut total_support = 0.0;
+        let mut total_support = 0.0f32;
+        let mut weighted_z = 0.0f32;
+        let mut weighted_quality = 0.0f32;
+        let mut total_quality_weight = 0.0f32;
 
-        if !ready.is_empty() {
-            total_support = ready
-                .iter()
-                .filter(|p| !p.is_empty())
-                .map(|pulse| pulse.support_strength().max(0.0))
-                .sum();
-            let mut contributions: Vec<(ZSource, f32, f32)> = ready
-                .iter()
-                .filter(|p| !p.is_empty())
-                .map(|pulse| {
-                    let gain = *self.cfg.gain.get(&pulse.source).unwrap_or(&1.0);
-                    let base_w = (pulse.quality * gain).max(1e-6);
-                    (pulse.source, base_w, pulse.normalised_drift())
-                })
-                .collect();
+        let mut had_pulse = false;
 
-            if !contributions.is_empty() {
-                let mut drifts: Vec<f32> = contributions.iter().map(|(_, _, d)| *d).collect();
-                let median = median(&mut drifts);
-                let mut weight_sum = 0.0f32;
-                let mut numerator = 0.0f32;
-                for (source, weight, drift_norm) in contributions.iter_mut() {
-                    let robust = huber_weight(*drift_norm - median, self.cfg.robust_delta);
-                    *weight *= robust;
-                    weight_sum += *weight;
-                    numerator += *weight * *drift_norm;
-                    attributions.push((*source, *weight));
-                }
-                if weight_sum > 0.0 {
-                    drift = numerator / weight_sum;
-                    let inv = 1.0 / weight_sum;
-                    for attrib in &mut attributions {
-                        attrib.1 *= inv;
-                    }
+        for pulse in pulses {
+            had_pulse = true;
+            let support = pulse.support.total().max(0.0);
+            total_support += support;
+            fused.drift += pulse.drift;
+            let key = source_lookup_key(&pulse.source);
+            let gain = self
+                .source_gains
+                .get(key.as_ref())
+                .copied()
+                .unwrap_or(1.0)
+                .max(0.0);
+            let limit = self
+                .source_limits
+                .get(key.as_ref())
+                .copied()
+                .unwrap_or(f32::INFINITY)
+                .max(0.0);
+            let mut z_bias = pulse.z_bias * gain;
+            if limit.is_finite() {
+                if limit == 0.0 {
+                    z_bias = 0.0;
+                } else {
+                    z_bias = z_bias.clamp(-limit, limit);
                 }
             }
             weighted_z += z_bias * support;
@@ -1306,11 +1354,8 @@ mod conductor_tests {
 
         let mut pulse = ZPulse {
             source: ZSource::Microlocal,
-            support: ZSupport {
-                leading: 0.4,
-                central: 0.4,
-                trailing: 0.4,
-            },
+            tempo: 0.0,
+            support: ZSupport::new(0.2, 0.1, 0.1),
             drift: 0.1,
             ..ZPulse::default()
         };

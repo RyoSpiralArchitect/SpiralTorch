@@ -45,7 +45,6 @@ use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
-use std::f64::consts::PI;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
@@ -697,6 +696,33 @@ impl Default for InterfaceZPulse {
     }
 }
 
+/// Z-space fusion summary combining the conductor output with a canonical pulse.
+#[derive(Debug, Clone)]
+pub struct InterfaceZFused {
+    pub pulse: ZPulse,
+    pub z: f32,
+    pub attributions: Vec<(ZSource, f32)>,
+    pub events: Vec<String>,
+}
+
+/// Result emitted after executing one conductor step.
+#[derive(Debug, Clone)]
+pub struct InterfaceZReport {
+    pub pulses: Vec<InterfaceZPulse>,
+    pub qualities: Vec<f32>,
+    pub fused_pulse: InterfaceZPulse,
+    pub fused_z: InterfaceZFused,
+    pub feedback: SoftlogicZFeedback,
+    pub budget_scale: f32,
+}
+
+impl InterfaceZReport {
+    /// Returns `true` when any of the contributing gauges detected an interface.
+    pub fn has_interface(&self) -> bool {
+        self.pulses.iter().any(|pulse| !pulse.is_empty())
+    }
+}
+
 /// Policy hook controlling per-source quality weights and fused adjustments.
 pub trait ZSourcePolicy: Send + Sync {
     /// Computes a quality score in `[0, 1]` used to weight the corresponding
@@ -1022,6 +1048,12 @@ pub struct InterfaceZConductor {
     previous: Option<InterfaceZPulse>,
     carry: Option<InterfaceZPulse>,
     emitter: MicrolocalEmitter,
+    smoothing: f32,
+    policy: Arc<dyn ZSourcePolicy>,
+    band_policy: Option<BandPolicy>,
+    budget_policy: Option<BudgetPolicy>,
+    previous: Option<InterfaceZPulse>,
+    carry: Option<InterfaceZPulse>,
 }
 
 impl InterfaceZConductor {
@@ -1042,6 +1074,12 @@ impl InterfaceZConductor {
             previous: None,
             carry: None,
             emitter,
+            smoothing: 0.0,
+            policy: Arc::new(DefaultZSourcePolicy::new()),
+            band_policy: None,
+            budget_policy: None,
+            previous: None,
+            carry: None,
         }
     }
 
@@ -1112,6 +1150,8 @@ impl InterfaceZConductor {
             }
         }
 
+        let now = ts.unwrap_or(self.clock);
+        self.clock = now.wrapping_add(1);
         let now = if let Some(ts) = ts {
             self.clock = ts.wrapping_add(1);
             ts
@@ -1133,6 +1173,11 @@ impl InterfaceZConductor {
             .map(|pulse| ZPulse {
                 source: pulse.source,
                 ts: now,
+                tempo: tempo.unwrap_or(pulse.total_energy()),
+                band_energy: pulse.band_energy,
+                drift: pulse.drift,
+                z_bias: pulse.z_bias,
+                support: ZSupport::from_band_energy(pulse.band_energy),
                 band_energy: pulse.band_energy,
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
@@ -1145,7 +1190,7 @@ impl InterfaceZConductor {
         self.emitter.extend(zpulses);
         let mut registry = ZRegistry::with_capacity(1);
         registry.register(self.emitter.clone());
-        let fused_state = self.conductor.step_from_registry(&mut registry, now);
+        let z_fused = self.conductor.step_from_registry(&mut registry, now);
 
         self.policy.late_fuse(&mut fused, &pulses, &qualities);
 
@@ -1156,8 +1201,11 @@ impl InterfaceZConductor {
 
         self.carry = Some(fused.clone());
         let feedback = fused.clone().into_softlogic_feedback();
-        self.previous = Some(fused.clone());
         self.carry = Some(fused.clone());
+        self.previous = Some(fused.clone());
+
+        let mut fused_events = events;
+        fused_events.extend(z_fused.events.clone());
 
         let avg_quality = if qualities.is_empty() {
             0.0
@@ -1181,14 +1229,21 @@ impl InterfaceZConductor {
         let mut events = fused_state.events.clone();
         events.extend(smoothing_events);
         let fused_z = InterfaceZFused {
-            ts: fused_state.ts,
-            z: fused_state.z,
-            support: fused_state.support,
-            drift: fused_state.drift,
-            quality: fused_state.quality,
-            events,
-            attributions: fused_state.attributions.clone(),
-            pulse: z_pulse,
+            pulse: ZPulse {
+                source: ZSource::Microlocal,
+                ts: z_fused.ts,
+                tempo: tempo.unwrap_or(fused.total_energy()),
+                band_energy: fused.band_energy,
+                drift: fused.drift,
+                z_bias: z_fused.z,
+                support: ZSupport::from_band_energy(fused.band_energy),
+                quality: z_fused.quality,
+                stderr: 0.0,
+                latency_ms: 0.0,
+            },
+            z: z_fused.z,
+            attributions: z_fused.attributions.clone(),
+            events: fused_events,
         };
 
         InterfaceZReport {
