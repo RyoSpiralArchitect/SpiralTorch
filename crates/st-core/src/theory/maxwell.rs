@@ -39,7 +39,7 @@ use crate::telemetry::{
 };
 use crate::{
     telemetry::hub::SoftlogicZFeedback,
-    theory::zpulse::{PulseSource, ZPulse},
+    theory::zpulse::{ZPulse, ZSource},
     util::math::LeechProjector,
 };
 #[cfg(feature = "psi")]
@@ -340,15 +340,26 @@ impl From<MaxwellZPulse> for ZPulse {
         let support = pulse.blocks as f32;
         let drift = pulse.mean as f32;
         let latency_ms = pulse.blocks as f32;
-        let scale = pulse.standard_error.max(0.0) as f32;
+        let stderr = pulse.standard_error.max(0.0) as f32;
+        let quality = {
+            let snr = if stderr > 0.0 {
+                (1.0 / stderr).min(1.0)
+            } else {
+                1.0
+            };
+            let z = pulse.z_score.abs() as f32;
+            z.tanh() * snr
+        };
         ZPulse {
-            source: PulseSource::Maxwell,
-            support,
+            source: ZSource::Maxwell,
+            ts: pulse.blocks,
             band_energy: pulse.band_energy,
             drift,
             z_bias: pulse.z_bias,
+            support,
+            quality,
+            stderr,
             latency_ms,
-            scale,
         }
     }
 }

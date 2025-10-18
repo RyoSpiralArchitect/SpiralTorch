@@ -21,25 +21,31 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // =============================================================================
 
-use std::collections::VecDeque;
+use rustc_hash::FxHashMap;
+use std::cmp::Ordering;
 
 /// Canonical pulse exchanged across the Z-space control stack.
 #[derive(Clone, Debug)]
 pub struct ZPulse {
     /// Which layer originated the pulse.
-    pub source: PulseSource,
-    /// Scalar support describing how much mass or evidence backs the pulse.
-    pub support: f32,
+    pub source: ZSource,
+    /// Timestamp of the pulse in the caller's clock domain.
+    pub ts: u64,
     /// Above/Here/Beneath energy split.
     pub band_energy: (f32, f32, f32),
-    /// Signed drift between Above and Beneath energy.
+    /// Signed drift between Above and Beneath energy prior to normalisation.
     pub drift: f32,
     /// Signed Z bias produced after enrichment.
     pub z_bias: f32,
+    /// Scalar support describing how much mass or evidence backs the pulse.
+    pub support: f32,
+    /// Optional quality score provided by the emitter. When `0` the conductor
+    /// derives a surrogate based on the pulse statistics.
+    pub quality: f32,
+    /// Optional estimated standard error backing the pulse. `0` means unknown.
+    pub stderr: f32,
     /// Estimated latency between generation and observation in milliseconds.
     pub latency_ms: f32,
-    /// Characteristic spatial or physical scale of the pulse.
-    pub scale: f32,
 }
 
 impl ZPulse {
@@ -47,6 +53,13 @@ impl ZPulse {
     pub fn total_energy(&self) -> f32 {
         let (above, here, beneath) = self.band_energy;
         above + here + beneath
+    }
+
+    /// Returns the drift normalised by the total band energy.
+    pub fn normalised_drift(&self) -> f32 {
+        let total = self.total_energy().max(1e-6);
+        let (above, _, beneath) = self.band_energy;
+        (above - beneath) / total
     }
 
     /// Returns `true` when the pulse carries no actionable signal.
@@ -58,243 +71,425 @@ impl ZPulse {
 impl Default for ZPulse {
     fn default() -> Self {
         ZPulse {
-            source: PulseSource::Microlocal,
-            support: 0.0,
+            source: ZSource::Microlocal,
+            ts: 0,
             band_energy: (0.0, 0.0, 0.0),
             drift: 0.0,
             z_bias: 0.0,
+            support: 0.0,
+            quality: 0.0,
+            stderr: 0.0,
             latency_ms: 0.0,
-            scale: 0.0,
         }
     }
 }
 
 /// Origin of a [`ZPulse`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PulseSource {
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ZSource {
     Microlocal,
     Maxwell,
     Desire,
+    Graph,
     GW,
+    Other(&'static str),
+}
+
+/// Configuration governing the behaviour of [`ZConductor`].
+#[derive(Clone, Debug)]
+pub struct ZConductorCfg {
+    /// Per-source gains applied on top of the quality weighting.
+    pub gain: FxHashMap<ZSource, f32>,
+    /// Fast EMA used to track the fused sign.
+    pub alpha_fast: f32,
+    /// Slow EMA used to track the fused magnitude.
+    pub alpha_slow: f32,
+    /// Maximum delta allowed between subsequent fused Z outputs.
+    pub slew_max: f32,
+    /// Number of steps a sign flip is held before allowing the reversal.
+    pub flip_hold: u32,
+    /// Robustness threshold for the Huber loss.
+    pub robust_delta: f32,
+    /// Absolute budget allowed for the fused Z output.
+    pub z_budget: f32,
+    /// Back-calculation coefficient used when the budget engages.
+    pub back_calculation: f32,
+}
+
+impl Default for ZConductorCfg {
+    fn default() -> Self {
+        Self {
+            gain: FxHashMap::default(),
+            alpha_fast: 0.35,
+            alpha_slow: 0.12,
+            slew_max: 0.35,
+            flip_hold: 3,
+            robust_delta: 0.25,
+            z_budget: 1.2,
+            back_calculation: 0.5,
+        }
+    }
+}
+
+/// Attribution assigned to a specific source during fusion.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZAttribution {
+    pub source: ZSource,
+    pub weight: f32,
+}
+
+/// Result of a [`ZConductor::step`] call.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZFused {
+    pub z: f32,
+    pub drift: f32,
+    pub attributions: Vec<ZAttribution>,
+    pub events: Vec<&'static str>,
 }
 
 /// Stateful conductor that fuses heterogeneous Z pulses into a stabilised control
-/// signal while applying anti-windup and slew protections.
+/// signal while applying anti-windup, hysteresis and slew protections.
 #[derive(Clone, Debug)]
 pub struct ZConductor {
-    alpha: f32,
-    anti_windup: f32,
-    slew_rate: f32,
-    history_len: usize,
-    sign_history: VecDeque<i8>,
-    last: Option<ZPulse>,
+    cfg: ZConductorCfg,
+    pending: Vec<ZPulse>,
+    sign_hat: f32,
+    mag_hat: f32,
+    last_sign: f32,
+    flip_age: u32,
+    last_z: f32,
+    last_step_ts: Option<u64>,
 }
 
 impl Default for ZConductor {
     fn default() -> Self {
-        Self::new(1.0)
+        Self::new(ZConductorCfg::default())
     }
 }
 
 impl ZConductor {
-    /// Creates a new conductor using the supplied smoothing factor.
-    pub fn new(alpha: f32) -> Self {
+    /// Creates a new conductor with the supplied configuration.
+    pub fn new(cfg: ZConductorCfg) -> Self {
         ZConductor {
-            alpha: alpha.clamp(0.0, 1.0),
-            anti_windup: 1.0,
-            slew_rate: 1.0,
-            history_len: 5,
-            sign_history: VecDeque::with_capacity(5),
-            last: None,
+            cfg,
+            pending: Vec::new(),
+            sign_hat: 0.0,
+            mag_hat: 0.0,
+            last_sign: 0.0,
+            flip_age: u32::MAX,
+            last_z: 0.0,
+            last_step_ts: None,
         }
     }
 
-    /// Configures the exponential smoothing factor.
-    pub fn with_alpha(mut self, alpha: f32) -> Self {
-        self.alpha = alpha.clamp(0.0, 1.0);
-        self
+    /// Returns a mutable reference to the configuration, enabling on-line tuning.
+    pub fn cfg_mut(&mut self) -> &mut ZConductorCfg {
+        &mut self.cfg
     }
 
-    /// Configures the anti-windup magnitude limit.
-    pub fn with_anti_windup(mut self, limit: f32) -> Self {
-        let magnitude = limit.abs();
-        self.anti_windup = if magnitude <= f32::EPSILON {
-            1.0
+    /// Enqueues a pulse to be considered during the next [`step`](Self::step).
+    pub fn ingest(&mut self, mut pulse: ZPulse) {
+        if !pulse.quality.is_finite() || pulse.quality <= 0.0 {
+            pulse.quality = derive_quality(&pulse);
         } else {
-            magnitude
-        };
-        if self.slew_rate <= f32::EPSILON {
-            self.slew_rate = self.anti_windup;
+            pulse.quality = pulse.quality.clamp(0.0, 1.0);
         }
-        self
+        self.pending.push(pulse);
     }
 
-    /// Configures the slew rate limiter applied to Z bias updates.
-    pub fn with_slew_rate(mut self, rate: f32) -> Self {
-        self.slew_rate = rate.abs();
-        self
-    }
-
-    /// Configures the history length used for sign stability voting.
-    pub fn with_history_len(mut self, len: usize) -> Self {
-        self.history_len = len.max(1);
-        self.sign_history = VecDeque::with_capacity(self.history_len);
-        self
-    }
-
-    /// Updates the smoothing factor in place.
-    pub fn set_alpha(&mut self, alpha: f32) {
-        self.alpha = alpha.clamp(0.0, 1.0);
-    }
-
-    /// Returns the last fused pulse, if available.
-    pub fn last(&self) -> Option<&ZPulse> {
-        self.last.as_ref()
-    }
-
-    /// Fuses the supplied pulses into a single stabilised pulse.
-    pub fn fuse(&mut self, pulses: &[ZPulse]) -> ZPulse {
-        if pulses.is_empty() {
-            return self.last.clone().unwrap_or_default();
-        }
-
-        let mut total_weight = 0.0f32;
-        let mut support_total = 0.0f32;
-        let mut band_energy = (0.0f32, 0.0f32, 0.0f32);
-        let mut drift = 0.0f32;
-        let mut z_bias = 0.0f32;
-        let mut latency = 0.0f32;
-        let mut scale = 0.0f32;
-        let mut best_weight = f32::NEG_INFINITY;
-        let mut best_pulse: Option<ZPulse> = None;
-
-        for pulse in pulses {
-            let weight = self.weight_for(pulse);
-            if weight <= f32::EPSILON {
-                continue;
-            }
-            support_total += pulse.support;
-            band_energy.0 += pulse.band_energy.0 * weight;
-            band_energy.1 += pulse.band_energy.1 * weight;
-            band_energy.2 += pulse.band_energy.2 * weight;
-            drift += pulse.drift * weight;
-            z_bias += pulse.z_bias * weight;
-            latency += pulse.latency_ms * weight;
-            scale += pulse.scale * weight;
-            total_weight += weight;
-            if weight > best_weight {
-                best_weight = weight;
-                best_pulse = Some(pulse.clone());
+    /// Executes one fusion step at the provided timestamp.
+    pub fn step(&mut self, now: u64) -> ZFused {
+        let mut ready = Vec::new();
+        let mut retained = Vec::with_capacity(self.pending.len());
+        for pulse in self.pending.drain(..) {
+            if pulse.ts <= now {
+                ready.push(pulse);
+            } else {
+                retained.push(pulse);
             }
         }
+        self.pending = retained;
 
-        let mut fused = if total_weight > f32::EPSILON {
-            let inv = 1.0 / total_weight;
-            ZPulse {
-                source: best_pulse
-                    .as_ref()
-                    .map(|p| p.source)
-                    .unwrap_or(PulseSource::Microlocal),
-                support: support_total,
-                band_energy: (
-                    band_energy.0 * inv,
-                    band_energy.1 * inv,
-                    band_energy.2 * inv,
-                ),
-                drift: drift * inv,
-                z_bias: z_bias * inv,
-                latency_ms: latency * inv,
-                scale: scale * inv,
-            }
-        } else if let Some(best) = best_pulse {
-            best
-        } else {
-            pulses[0].clone()
-        };
-        let proposed_sign = fused.z_bias.signum();
-        let proposed_magnitude = fused.z_bias.abs();
+        let mut events = Vec::new();
+        let mut drift = 0.0;
+        let mut attributions = Vec::new();
 
-        let alpha = self.alpha;
-        if let Some(prev) = &self.last {
-            fused.support = prev.support + alpha * (fused.support - prev.support);
-            fused.band_energy.0 =
-                prev.band_energy.0 + alpha * (fused.band_energy.0 - prev.band_energy.0);
-            fused.band_energy.1 =
-                prev.band_energy.1 + alpha * (fused.band_energy.1 - prev.band_energy.1);
-            fused.band_energy.2 =
-                prev.band_energy.2 + alpha * (fused.band_energy.2 - prev.band_energy.2);
-            fused.drift = prev.drift + alpha * (fused.drift - prev.drift);
-            fused.z_bias = prev.z_bias + alpha * (fused.z_bias - prev.z_bias);
-            fused.latency_ms = prev.latency_ms + alpha * (fused.latency_ms - prev.latency_ms);
-            fused.scale = prev.scale + alpha * (fused.scale - prev.scale);
-        }
+        if !ready.is_empty() {
+            let mut contributions: Vec<(ZSource, f32, f32)> = ready
+                .iter()
+                .filter(|p| !p.is_empty())
+                .map(|pulse| {
+                    let gain = *self.cfg.gain.get(&pulse.source).unwrap_or(&1.0);
+                    let base_w = (pulse.quality * gain).max(1e-6);
+                    (pulse.source.clone(), base_w, pulse.normalised_drift())
+                })
+                .collect();
 
-        let limit = self.anti_windup.max(f32::EPSILON);
-        let scaled = (fused.z_bias / limit).clamp(-10.0, 10.0);
-        fused.z_bias = scaled.tanh() * limit;
-
-        if let Some(prev) = &self.last {
-            if self.slew_rate > f32::EPSILON {
-                let delta = fused.z_bias - prev.z_bias;
-                let bounded = delta.clamp(-self.slew_rate, self.slew_rate);
-                fused.z_bias = prev.z_bias + bounded;
-            }
-        }
-
-        let sign = fused.z_bias.signum();
-        let candidate_sign = if proposed_sign != 0.0 {
-            proposed_sign
-        } else {
-            sign
-        };
-        if candidate_sign != 0.0 {
-            if self.history_len > 0 {
-                let majority: i32 = self.sign_history.iter().copied().map(i32::from).sum();
-                let mut final_sign = candidate_sign;
-                if majority != 0 && candidate_sign != majority.signum() as f32 {
-                    let allow_flip = self
-                        .last
-                        .as_ref()
-                        .map(|prev| proposed_magnitude + f32::EPSILON >= prev.z_bias.abs() * 0.25)
-                        .unwrap_or(true);
-                    if !allow_flip {
-                        let enforced = majority.signum() as f32;
-                        fused.z_bias = fused.z_bias.abs() * enforced;
-                        fused.drift = fused.drift.abs() * enforced;
-                        final_sign = enforced;
+            if !contributions.is_empty() {
+                let mut drifts: Vec<f32> = contributions.iter().map(|(_, _, d)| *d).collect();
+                let median = median(&mut drifts);
+                let mut weight_sum = 0.0f32;
+                let mut numerator = 0.0f32;
+                for (source, weight, drift_norm) in contributions.iter_mut() {
+                    let robust = huber_weight(*drift_norm - median, self.cfg.robust_delta);
+                    *weight *= robust;
+                    weight_sum += *weight;
+                    numerator += *weight * *drift_norm;
+                    attributions.push((source.clone(), *weight));
+                }
+                if weight_sum > 0.0 {
+                    drift = numerator / weight_sum;
+                    let inv = 1.0 / weight_sum;
+                    for attrib in &mut attributions {
+                        attrib.1 *= inv;
                     }
                 }
-                if self.sign_history.len() == self.history_len {
-                    self.sign_history.pop_front();
-                }
-                self.sign_history.push_back(final_sign as i8);
             }
-        } else {
-            self.sign_history.clear();
         }
 
-        self.last = Some(fused.clone());
-        fused
+        if attributions.is_empty() {
+            attributions.push((ZSource::Microlocal, 0.0));
+        }
+
+        let filtered = self.apply_temporal_filters(drift, &mut events);
+        let mut z = filtered * self.mag_hat.abs().max(1e-6);
+        if filtered.abs() <= f32::EPSILON {
+            z = 0.0;
+        }
+
+        let z_before_limits = z;
+        let limited = slew_limit(self.last_z, z, self.cfg.slew_max);
+        if (limited - z).abs() > 1e-5 {
+            events.push("slew-limited");
+            z = limited;
+        }
+
+        let budget = self.cfg.z_budget.max(f32::EPSILON);
+        if z.abs() > budget {
+            let clamped = z.signum() * budget;
+            if self.cfg.back_calculation > 0.0 {
+                let correction = self.cfg.back_calculation * (clamped - z_before_limits);
+                self.mag_hat = (self.mag_hat + correction).max(0.0);
+            }
+            z = clamped;
+            events.push("saturated");
+        }
+
+        self.last_z = z;
+        self.last_step_ts = Some(now);
+
+        let attributions = attributions
+            .into_iter()
+            .map(|(source, weight)| ZAttribution { source, weight })
+            .collect();
+
+        ZFused {
+            z,
+            drift,
+            attributions,
+            events,
+        }
     }
 
-    fn weight_for(&self, pulse: &ZPulse) -> f32 {
-        let stability = 1.0 / (1.0 + pulse.latency_ms.abs());
-        let energy = pulse.total_energy().max(f32::EPSILON);
-        let agreement = self
-            .last
-            .as_ref()
-            .map(|prev| {
-                if prev.z_bias.abs() <= f32::EPSILON {
-                    1.0
-                } else if pulse.z_bias.signum() == prev.z_bias.signum() {
-                    1.0
+    fn apply_temporal_filters(&mut self, drift: f32, events: &mut Vec<&'static str>) -> f32 {
+        let sign = if drift.abs() > f32::EPSILON {
+            drift.signum()
+        } else {
+            self.last_sign
+        };
+
+        let mut target_sign = self.last_sign;
+        if sign != 0.0 {
+            if self.last_sign == 0.0 {
+                target_sign = sign;
+                self.flip_age = 0;
+                events.push("sign-init");
+            } else if (sign - self.last_sign).abs() > f32::EPSILON {
+                if self.flip_age < self.cfg.flip_hold {
+                    events.push("flip-held");
                 } else {
-                    0.25
+                    target_sign = sign;
+                    self.flip_age = 0;
+                    events.push("sign-flip");
                 }
-            })
-            .unwrap_or(1.0);
-        let drift_gain = 1.0 + pulse.drift.abs();
-        let base = (pulse.support + energy).max(f32::EPSILON);
-        base * stability * agreement * drift_gain
+            }
+        }
+
+        self.flip_age = self.flip_age.saturating_add(1);
+        self.last_sign = target_sign;
+
+        let alpha_fast = self.cfg.alpha_fast.clamp(0.0, 1.0);
+        if alpha_fast > 0.0 {
+            self.sign_hat = ema(self.sign_hat, target_sign, alpha_fast);
+        }
+
+        let magnitude_target = drift.abs();
+        let alpha_slow = self.cfg.alpha_slow.clamp(0.0, 1.0);
+        if alpha_slow > 0.0 {
+            self.mag_hat = ema(self.mag_hat, magnitude_target, alpha_slow);
+        } else {
+            self.mag_hat = magnitude_target;
+        }
+
+        if self.sign_hat.abs() <= f32::EPSILON {
+            0.0
+        } else {
+            self.sign_hat.signum()
+        }
+    }
+}
+
+fn derive_quality(pulse: &ZPulse) -> f32 {
+    match pulse.source {
+        ZSource::Microlocal | ZSource::Graph => {
+            let total = pulse.total_energy().max(1e-6);
+            let support_norm = (pulse.support / total).clamp(0.0, 8.0);
+            sigmoid(1.75 * support_norm)
+        }
+        ZSource::Maxwell | ZSource::GW => {
+            let stderr = pulse.stderr.max(1e-6);
+            let snr = (1.0 / stderr).min(1.0);
+            let z = pulse.z_bias.abs().max(pulse.drift.abs());
+            z.tanh() * snr
+        }
+        ZSource::Desire => {
+            if pulse.quality > 0.0 {
+                pulse.quality.clamp(0.0, 1.0)
+            } else {
+                0.5
+            }
+        }
+        ZSource::Other(_) => {
+            if pulse.quality > 0.0 {
+                pulse.quality.clamp(0.0, 1.0)
+            } else {
+                0.5
+            }
+        }
+    }
+}
+
+fn huber_weight(residual: f32, delta: f32) -> f32 {
+    if delta <= 0.0 {
+        return 1.0;
+    }
+    if residual.abs() <= delta {
+        1.0
+    } else {
+        delta / residual.abs()
+    }
+}
+
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+fn ema(prev: f32, value: f32, alpha: f32) -> f32 {
+    let alpha = alpha.clamp(0.0, 1.0);
+    (1.0 - alpha) * prev + alpha * value
+}
+
+fn median(values: &mut [f32]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mid = values.len() / 2;
+    let (_, median, _) =
+        values.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+    *median
+}
+
+fn slew_limit(prev: f32, next: f32, slew: f32) -> f32 {
+    if slew <= f32::EPSILON {
+        return next;
+    }
+    let delta = next - prev;
+    let clamped = delta.clamp(-slew, slew);
+    prev + clamped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hysteresis_holds_sign_during_flip_window() {
+        let mut conductor = ZConductor::new(ZConductorCfg {
+            flip_hold: 2,
+            ..Default::default()
+        });
+
+        let sequence: [f32; 5] = [1.0, 1.0, -1.0, -1.0, 1.0];
+        for (idx, sign) in sequence.into_iter().enumerate() {
+            conductor.ingest(ZPulse {
+                source: ZSource::Microlocal,
+                ts: idx as u64,
+                band_energy: (1.0 + sign.max(0.0), 0.0, 1.0 + (-sign).max(0.0)),
+                drift: sign,
+                z_bias: sign,
+                support: 1.0,
+                quality: 1.0,
+                stderr: 0.0,
+                latency_ms: 0.0,
+            });
+            let fused = conductor.step(idx as u64);
+            if idx == 2 {
+                assert!(fused.events.contains(&"flip-held"));
+            }
+        }
+    }
+
+    #[test]
+    fn budget_clamps_output_and_normalises_attributions() {
+        let mut cfg = ZConductorCfg::default();
+        cfg.z_budget = 0.5;
+        cfg.slew_max = 10.0;
+        cfg.alpha_fast = 1.0;
+        cfg.alpha_slow = 1.0;
+        let mut conductor = ZConductor::new(cfg);
+
+        conductor.ingest(ZPulse {
+            source: ZSource::Microlocal,
+            ts: 0,
+            band_energy: (10.0, 0.0, 0.0),
+            drift: 10.0,
+            z_bias: 10.0,
+            support: 10.0,
+            quality: 1.0,
+            stderr: 0.0,
+            latency_ms: 0.0,
+        });
+        let fused = conductor.step(0);
+        assert!(fused.z.abs() <= 0.5 + 1e-6);
+        assert!((fused.attributions.iter().map(|a| a.weight).sum::<f32>() - 1.0).abs() < 1e-6);
+        assert!(fused.events.contains(&"saturated"));
+    }
+
+    #[test]
+    fn slew_limit_bounds_delta_z() {
+        let mut cfg = ZConductorCfg::default();
+        cfg.slew_max = 0.1;
+        cfg.alpha_fast = 1.0;
+        cfg.alpha_slow = 1.0;
+        let mut conductor = ZConductor::new(cfg);
+
+        for step in 0..3 {
+            conductor.ingest(ZPulse {
+                source: ZSource::Microlocal,
+                ts: step,
+                band_energy: (5.0, 0.0, 0.0),
+                drift: 1.0,
+                z_bias: 1.0,
+                support: 5.0,
+                quality: 1.0,
+                stderr: 0.0,
+                latency_ms: 0.0,
+            });
+            let fused = conductor.step(step);
+            if step > 0 {
+                assert!((fused.z - 0.1 * step as f32).abs() < 1e-4);
+            }
+        }
     }
 }
