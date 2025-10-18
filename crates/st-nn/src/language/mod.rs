@@ -32,8 +32,8 @@ pub use pipeline::{
     DesireTriggerEvent,
 };
 #[cfg(feature = "psi")]
-pub use pipeline_exports::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
-pub use pipeline_exports::{
+pub use pipeline::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
+pub use pipeline::{
     LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
 };
 pub use temperature::{entropy, TemperatureController};
