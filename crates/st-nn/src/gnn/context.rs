@@ -77,21 +77,7 @@ impl GraphContext {
         features: &Tensor,
     ) -> PureResult<(Tensor, Vec<NodeFlowSample>)> {
         let propagated = self.propagate(features)?;
-        let (_, feature_dim) = propagated.shape();
-        let mut flows = Vec::with_capacity(self.node_count());
-        let data = propagated.data();
-        for node in 0..self.node_count() {
-            let start = node * feature_dim;
-            let mut norm = 0.0f32;
-            for value in &data[start..start + feature_dim] {
-                norm += value.abs();
-            }
-            flows.push(NodeFlowSample {
-                node_index: node,
-                incoming_weight: self.row_sums[node],
-                aggregated_norm: norm,
-            });
-        }
+        let flows = self.measure_flows(&propagated)?;
         Ok((propagated, flows))
     }
 
@@ -104,6 +90,27 @@ impl GraphContext {
             });
         }
         self.norm_adjacency_t.matmul(features)
+    }
+
+    /// Computes explainability-friendly flow summaries for the provided features.
+    pub fn measure_flows(&self, features: &Tensor) -> PureResult<Vec<NodeFlowSample>> {
+        self.validate_features(features)?;
+        let (_, feature_dim) = features.shape();
+        let mut flows = Vec::with_capacity(self.node_count());
+        let data = features.data();
+        for node in 0..self.node_count() {
+            let start = node * feature_dim;
+            let mut norm = 0.0f32;
+            for value in &data[start..start + feature_dim] {
+                norm += value.abs();
+            }
+            flows.push(NodeFlowSample {
+                node_index: node,
+                incoming_weight: self.row_sums[node],
+                aggregated_norm: norm,
+            });
+        }
+        Ok(flows)
     }
 
     fn validate_features(&self, features: &Tensor) -> PureResult<()> {

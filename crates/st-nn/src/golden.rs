@@ -35,7 +35,7 @@ use st_core::runtime::golden::{
 };
 use st_tensor::TensorError;
 use std::cmp::Ordering;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -51,6 +51,8 @@ pub struct GoldenRetrieverConfig {
     pub synergy_bias: f32,
     pub reinforcement_bias: f32,
     pub self_rewrite: Option<GoldenSelfRewriteConfig>,
+    pub allow_dropout: bool,
+    pub min_successful_workers: usize,
 }
 
 impl Default for GoldenRetrieverConfig {
@@ -66,6 +68,8 @@ impl Default for GoldenRetrieverConfig {
             synergy_bias: 1.0,
             reinforcement_bias: 1.0,
             self_rewrite: None,
+            allow_dropout: false,
+            min_successful_workers: 1,
         }
     }
 }
@@ -116,6 +120,21 @@ impl GoldenRetrieverConfig {
 struct GoldenWorker {
     _id: usize,
     trainer: SpiralMutex<ModuleTrainer>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GoldenDropoutRecord {
+    pub worker: usize,
+    pub error: String,
+}
+
+impl GoldenDropoutRecord {
+    fn from_error(worker: usize, error: &TensorError) -> Self {
+        Self {
+            worker,
+            error: error.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -565,6 +584,9 @@ pub struct GoldenRetriever {
     synergy_bias: f32,
     reinforcement_bias: f32,
     self_rewrite: Option<GoldenSelfRewriteState>,
+    allow_dropout: bool,
+    min_successful_workers: usize,
+    last_dropouts: Vec<GoldenDropoutRecord>,
     latest_council: Option<GoldenCouncilSnapshot>,
     epoch: u64,
     digest_subscribers: Arc<Mutex<Vec<mpsc::Sender<CouncilDigest>>>>,
@@ -586,6 +608,8 @@ impl GoldenRetriever {
             synergy_bias,
             reinforcement_bias,
             self_rewrite,
+            allow_dropout,
+            min_successful_workers,
         } = config;
         let worker_count = if workers == 0 {
             trainers.len()
@@ -614,6 +638,7 @@ impl GoldenRetriever {
         let optimization_boost = optimization_boost.max(0.0);
         let synergy_bias = synergy_bias.max(0.0);
         let reinforcement_bias = reinforcement_bias.max(0.0);
+        let min_successful_workers = min_successful_workers.max(1).min(worker_count.max(1));
         let self_rewrite = self_rewrite.map(|cfg| {
             GoldenSelfRewriteState::new(
                 cfg,
@@ -636,6 +661,9 @@ impl GoldenRetriever {
             synergy_bias,
             reinforcement_bias,
             self_rewrite,
+            allow_dropout,
+            min_successful_workers,
+            last_dropouts: Vec::new(),
             latest_council: None,
             epoch: 0,
             digest_subscribers: Arc::new(Mutex::new(Vec::new())),
@@ -657,6 +685,10 @@ impl GoldenRetriever {
             self.synergy_bias,
             self.reinforcement_bias,
         )
+    }
+
+    pub fn last_dropouts(&self) -> &[GoldenDropoutRecord] {
+        &self.last_dropouts
     }
 
     pub fn last_council_snapshot(&self) -> Option<&GoldenCouncilSnapshot> {
@@ -715,6 +747,7 @@ impl GoldenRetriever {
             });
         }
 
+        self.last_dropouts.clear();
         self.epoch = self.epoch.wrapping_add(1);
         let current_epoch = self.epoch;
         let schedule_signal = self
@@ -740,22 +773,64 @@ impl GoldenRetriever {
                     guard.train_epoch(&mut module, &mut loss, loader, &schedule)
                 })
                 .map_err(runtime_error)?;
-            handles.push(handle);
+            handles.push((worker._id, handle));
         }
 
         let mut stats = Vec::with_capacity(expected);
-        for handle in handles {
+        let mut successes = Vec::with_capacity(expected);
+        let mut dropouts = Vec::new();
+        for (worker_id, handle) in handles {
             match handle.join() {
-                Ok(result) => stats.push(result?),
+                Ok(result) => match result {
+                    Ok(epoch_stats) => {
+                        successes.push(worker_id);
+                        stats.push(epoch_stats);
+                    }
+                    Err(err) => {
+                        if self.allow_dropout {
+                            dropouts.push(GoldenDropoutRecord::from_error(worker_id, &err));
+                        } else {
+                            return Err(err);
+                        }
+                    }
+                },
                 Err(_) => {
-                    return Err(TensorError::IoError {
-                        message: "golden retriever worker panicked".into(),
-                    });
+                    let panic_error = TensorError::IoError {
+                        message: format!(
+                            "golden retriever worker {worker_id} panicked during epoch"
+                        ),
+                    };
+                    if self.allow_dropout {
+                        dropouts.push(GoldenDropoutRecord::from_error(worker_id, &panic_error));
+                    } else {
+                        return Err(panic_error);
+                    }
                 }
             }
         }
 
-        let (minutes, heuristics) = self.collect_cooperative_state();
+        if stats.len() < self.min_successful_workers {
+            let mut message = format!(
+                "golden retriever completed {} of {} workers (minimum required {})",
+                stats.len(),
+                expected,
+                self.min_successful_workers
+            );
+            if !dropouts.is_empty() {
+                let reasons: Vec<String> = dropouts
+                    .iter()
+                    .map(|record| format!("worker {}: {}", record.worker, record.error))
+                    .collect();
+                message.push_str("; dropouts -> ");
+                message.push_str(&reasons.join(", "));
+            }
+            self.last_dropouts = dropouts;
+            return Err(TensorError::IoError { message });
+        }
+
+        self.last_dropouts = dropouts;
+
+        let (minutes, heuristics) = self.collect_cooperative_state(&successes);
         let pulse = if self.coordinate_blackcat {
             Some(self.compose_blackcat_pulse(&minutes, &heuristics))
         } else {
@@ -780,13 +855,24 @@ impl GoldenRetriever {
             heuristics,
             pulse,
             self.latest_council.clone(),
+            self.last_dropouts.clone(),
         ))
     }
 
-    fn collect_cooperative_state(&self) -> (Vec<ModeratorMinutes>, HeurOpLog) {
+    fn collect_cooperative_state(
+        &self,
+        participants: &[usize],
+    ) -> (Vec<ModeratorMinutes>, HeurOpLog) {
+        if participants.is_empty() {
+            return (Vec::new(), HeurOpLog::default());
+        }
+        let active: HashSet<usize> = participants.iter().copied().collect();
         let mut minutes = Vec::new();
         let mut heuristics = HeurOpLog::default();
         for worker in &self.workers {
+            if !active.contains(&worker._id) {
+                continue;
+            }
             let guard = worker.trainer.lock();
             minutes.extend(guard.blackcat_minutes());
             heuristics.merge(guard.heuristics_log());
@@ -1015,6 +1101,7 @@ pub struct GoldenEpochReport {
     pub heuristics_log: HeurOpLog,
     pub cooperative_pulse: Option<GoldenBlackcatPulse>,
     pub council_snapshot: Option<GoldenCouncilSnapshot>,
+    pub dropouts: Vec<GoldenDropoutRecord>,
 }
 
 impl GoldenEpochReport {
@@ -1025,6 +1112,7 @@ impl GoldenEpochReport {
         heuristics_log: HeurOpLog,
         cooperative_pulse: Option<GoldenBlackcatPulse>,
         council_snapshot: Option<GoldenCouncilSnapshot>,
+        dropouts: Vec<GoldenDropoutRecord>,
     ) -> Self {
         let workers = per_worker.len();
         let (total_loss, total_batches) = runtime.reduce(
@@ -1048,6 +1136,7 @@ impl GoldenEpochReport {
             heuristics_log,
             cooperative_pulse,
             council_snapshot,
+            dropouts,
         }
     }
 
@@ -1167,8 +1256,53 @@ mod tests {
     use crate::layers::linear::Linear;
     use crate::loss::MeanSquaredError;
     use crate::schedule::RoundtableConfig;
+    use crate::Tensor;
     use st_core::backend::device_caps::DeviceCaps;
+    use st_tensor::TensorError;
     use std::time::Duration;
+
+    struct MaybeFailingLoss {
+        fail_forward: bool,
+        inner: MeanSquaredError,
+    }
+
+    impl MaybeFailingLoss {
+        fn failing() -> Self {
+            Self {
+                fail_forward: true,
+                inner: MeanSquaredError::default(),
+            }
+        }
+
+        fn healthy() -> Self {
+            Self {
+                fail_forward: false,
+                inner: MeanSquaredError::default(),
+            }
+        }
+    }
+
+    impl Loss for MaybeFailingLoss {
+        fn forward(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<Tensor> {
+            if self.fail_forward {
+                Err(TensorError::IoError {
+                    message: "forced dropout".into(),
+                })
+            } else {
+                self.inner.forward(prediction, target)
+            }
+        }
+
+        fn backward(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<Tensor> {
+            if self.fail_forward {
+                Err(TensorError::IoError {
+                    message: "forced dropout".into(),
+                })
+            } else {
+                self.inner.backward(prediction, target)
+            }
+        }
+    }
 
     #[test]
     fn golden_retriever_trains_in_parallel() {
@@ -1214,6 +1348,7 @@ mod tests {
         assert!(report.moderator_minutes.is_empty());
         assert!(report.heuristics_log.entries().is_empty());
         assert!(report.cooperative_pulse.is_none());
+        assert!(report.dropouts.is_empty());
     }
 
     #[test]
@@ -1273,6 +1408,7 @@ mod tests {
         assert!(directive.push_interval.as_secs_f32() > 0.0);
         assert!(directive.exploration_priority >= 0.0);
         assert!(directive.reinforcement_weight >= 0.0);
+        assert!(report.dropouts.is_empty());
     }
 
     #[test]
@@ -1332,6 +1468,7 @@ mod tests {
             assert_eq!(last.schedule_hint.0, snapshot.schedule_hint.0);
         }
         assert!(retriever.last_council().is_some());
+        assert!(report.dropouts.is_empty());
     }
 
     #[test]
@@ -1378,6 +1515,7 @@ mod tests {
             .expect("council digest delivered");
         assert!(digest.epoch() >= 1);
         assert!(digest.snapshot.high_watermark >= digest.snapshot.winners.len() as u64);
+        assert!(retriever.last_dropouts().is_empty());
     }
 
     #[test]
@@ -1439,6 +1577,7 @@ mod tests {
                 || (updated.2 - initial.2).abs() > 1e-4
                 || (updated.3 - initial.3).abs() > 1e-4
         );
+        assert!(report.dropouts.is_empty());
     }
 
     #[test]
@@ -1468,5 +1607,149 @@ mod tests {
                 || (config.synergy_bias - 1.0).abs() > 1e-4
                 || (config.reinforcement_bias - 1.0).abs() > 1e-4
         );
+    }
+
+    #[test]
+    fn golden_retriever_requires_success_without_dropout() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let trainers = vec![
+            ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
+            ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
+        ];
+        let mut modules = Vec::new();
+        let mut schedules = Vec::new();
+        let mut losses = Vec::new();
+        let mut loaders = Vec::new();
+        for (idx, trainer) in trainers.iter().enumerate() {
+            let mut layer = Linear::new("lin", 2, 1).unwrap();
+            trainer.prepare(&mut layer).unwrap();
+            let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+            schedules.push(schedule);
+            modules.push(layer);
+            let dataset = Dataset::from_vec(vec![
+                (
+                    crate::Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                    crate::Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+                ),
+                (
+                    crate::Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                    crate::Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+                ),
+            ]);
+            loaders.push(dataset.loader().batched(1));
+            if idx == 0 {
+                losses.push(MaybeFailingLoss::failing());
+            } else {
+                losses.push(MaybeFailingLoss::healthy());
+            }
+        }
+
+        let mut retriever =
+            GoldenRetriever::new(GoldenRetrieverConfig::default(), trainers).unwrap();
+        let result = retriever.run_epoch(modules, losses, loaders, schedules);
+        match result {
+            Err(TensorError::IoError { message }) => {
+                assert!(message.contains("forced dropout"));
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
+        assert!(retriever.last_dropouts().is_empty());
+    }
+
+    #[test]
+    fn golden_retriever_tolerates_single_dropout() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let trainers = vec![
+            ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
+            ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
+        ];
+        let mut modules = Vec::new();
+        let mut schedules = Vec::new();
+        let mut losses = Vec::new();
+        let mut loaders = Vec::new();
+        for (idx, trainer) in trainers.iter().enumerate() {
+            let mut layer = Linear::new("lin", 2, 1).unwrap();
+            trainer.prepare(&mut layer).unwrap();
+            let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+            schedules.push(schedule);
+            modules.push(layer);
+            let dataset = Dataset::from_vec(vec![
+                (
+                    crate::Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                    crate::Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+                ),
+                (
+                    crate::Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                    crate::Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+                ),
+            ]);
+            loaders.push(dataset.loader().batched(1));
+            if idx == 0 {
+                losses.push(MaybeFailingLoss::failing());
+            } else {
+                losses.push(MaybeFailingLoss::healthy());
+            }
+        }
+
+        let mut config = GoldenRetrieverConfig::default();
+        config.allow_dropout = true;
+        config.min_successful_workers = 1;
+        let mut retriever = GoldenRetriever::new(config, trainers).unwrap();
+        let report = retriever
+            .run_epoch(modules, losses, loaders, schedules)
+            .expect("dropout tolerated");
+        assert_eq!(report.workers, 1);
+        assert_eq!(report.dropouts.len(), 1);
+        assert_eq!(retriever.last_dropouts().len(), 1);
+        assert!(report.dropouts[0].error.contains("forced dropout"));
+    }
+
+    #[test]
+    fn golden_retriever_enforces_minimum_successes() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let trainers = vec![
+            ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
+            ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
+        ];
+        let mut modules = Vec::new();
+        let mut schedules = Vec::new();
+        let mut losses = Vec::new();
+        let mut loaders = Vec::new();
+        for (idx, trainer) in trainers.iter().enumerate() {
+            let mut layer = Linear::new("lin", 2, 1).unwrap();
+            trainer.prepare(&mut layer).unwrap();
+            let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+            schedules.push(schedule);
+            modules.push(layer);
+            let dataset = Dataset::from_vec(vec![
+                (
+                    crate::Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                    crate::Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+                ),
+                (
+                    crate::Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                    crate::Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+                ),
+            ]);
+            loaders.push(dataset.loader().batched(1));
+            if idx == 0 {
+                losses.push(MaybeFailingLoss::failing());
+            } else {
+                losses.push(MaybeFailingLoss::healthy());
+            }
+        }
+
+        let mut config = GoldenRetrieverConfig::default();
+        config.allow_dropout = true;
+        config.min_successful_workers = 2;
+        let mut retriever = GoldenRetriever::new(config, trainers).unwrap();
+        let result = retriever.run_epoch(modules, losses, loaders, schedules);
+        match result {
+            Err(TensorError::IoError { message }) => {
+                assert!(message.contains("minimum required 2"));
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
+        assert_eq!(retriever.last_dropouts().len(), 1);
     }
 }
