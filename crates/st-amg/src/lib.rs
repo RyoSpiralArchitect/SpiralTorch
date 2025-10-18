@@ -19,5 +19,5 @@ pub use backend::wgpu_heuristics_amg::{
     choose as choose_wgpu_amg, choose_with_profile as choose_wgpu_amg_with_profile,
     Choice as WgpuHeuristicChoice,
 };
-pub use profile::{DensityClass, ProblemProfile, ProfileBuilder};
+pub use profile::{AspectClass, DensityClass, ProblemProfile, ProfileBuilder};
 pub use sr_learn::{maybe_append_soft, on_abc_conversation, wilson_lower_bound};

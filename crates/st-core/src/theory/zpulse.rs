@@ -766,6 +766,11 @@ impl ZRegistry {
             emitters: Vec::with_capacity(capacity),
         }
     }
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            emitters: Vec::with_capacity(capacity),
+        }
+    }
 
     pub fn register<E>(&mut self, emitter: E)
     where

@@ -9,7 +9,7 @@
 //!   SPIRAL_SOFT_MODE = {Sum|Normalize|Softmax|Prob}
 //!   SPIRAL_BEAM_K = <usize>
 //!   SPIRAL_SOFT_BANDIT_BLEND = <0..1>  (mixing weight for bandit feedback)
-use crate::profile::{DensityClass, ProblemProfile};
+use crate::profile::{AspectClass, DensityClass, ProblemProfile};
 
 use st_logic::{SoftMode, SolveCfg};
 
@@ -51,6 +51,8 @@ impl Choice {
             profile.density(),
             profile.density_class()
         ));
+        reasons.push(format!("aspect={:?}", profile.aspect_class()));
+        reasons.push(format!("spread={:.3}", profile.row_nnz_spread()));
         reasons.push(format!("wg {}→{}", profile.lane_hint(), self.wg));
         reasons.push(format!("tile {}→{}", profile.tile_hint(), self.tile_cols));
         reasons.push(format!("jacobi {}", self.jacobi_passes));
@@ -68,21 +70,60 @@ impl Choice {
     }
 }
 
+fn promote_tile(tile: u32) -> u32 {
+    match tile {
+        2_048 => 4_096,
+        4_096 => 8_192,
+        8_192 => 16_384,
+        _ => tile,
+    }
+}
+
+fn demote_tile(tile: u32) -> u32 {
+    match tile {
+        16_384 => 8_192,
+        8_192 => 4_096,
+        4_096 => 2_048,
+        _ => tile,
+    }
+}
+
 fn initial_choice(profile: &ProblemProfile) -> Choice {
     let wg = profile.lane_hint();
-    let tile_cols = profile.tile_hint();
+    let mut tile_cols = profile.tile_hint();
     let mut jacobi_passes = profile.jacobi_hint() as i32;
     let diag_ratio = profile.diag_ratio();
+    let spread = profile.row_nnz_spread();
+    let aspect = profile.aspect_class();
+
+    if matches!(aspect, AspectClass::Wide) && profile.bandwidth_hint() > 9_000 {
+        tile_cols = promote_tile(tile_cols);
+    } else if matches!(aspect, AspectClass::Tall) && profile.bandwidth_hint() < 6_000 {
+        tile_cols = demote_tile(tile_cols);
+    }
+
     if diag_ratio < 0.45 {
         jacobi_passes -= 1;
     } else if diag_ratio > 0.9 && profile.mean_row_nnz() > 48.0 {
         jacobi_passes += 1;
     }
+
+    if spread > 0.75 {
+        jacobi_passes += 1;
+    } else if spread < 0.25 && diag_ratio > 0.65 && jacobi_passes > 0 {
+        jacobi_passes -= 1;
+    }
+
+    if matches!(aspect, AspectClass::Wide) && profile.bandwidth_hint() > 9_000 {
+        jacobi_passes = jacobi_passes.max(1);
+    }
     jacobi_passes = jacobi_passes.clamp(0, 5);
 
     let density_class = profile.density_class();
-    let mut use_2ce = matches!(density_class, DensityClass::UltraSparse | DensityClass::Sparse)
-        || profile.cols() >= 16_384;
+    let mut use_2ce = matches!(
+        density_class,
+        DensityClass::UltraSparse | DensityClass::Sparse
+    ) || profile.cols() >= 16_384;
     if diag_ratio > 0.88 && !matches!(density_class, DensityClass::UltraSparse) {
         use_2ce = false;
     }
@@ -146,13 +187,28 @@ fn soft_rules_from_spiralk(profile: &ProblemProfile) -> Vec<st_logic::SoftRule> 
     let tile_hint = profile.tile_hint();
     let wg_hint = profile.lane_hint();
     let jacobi_hint = profile.jacobi_hint();
+    let aspect = profile.aspect_class();
+    let spread = profile.row_nnz_spread();
 
     let mut rules = Vec::with_capacity(11);
 
     let wg_bias = if subgroup { 0.35 } else { 0.55 };
+    let wide_bonus = match aspect {
+        AspectClass::Wide => 0.12 + spread * 0.08,
+        AspectClass::Square => 0.04 + spread * 0.05,
+        AspectClass::Tall => 0.0,
+    };
+    let tall_lean = match aspect {
+        AspectClass::Tall => 0.06 + (0.4 - spread).max(0.0) * 0.05,
+        _ => 0.0,
+    };
     rules.push(SoftRule {
         name: WG128,
-        weight: emphasize(wg_hint == 128, 0.57, 0.40 + (1.0 - density) * 0.2),
+        weight: emphasize(
+            wg_hint == 128,
+            0.57 + tall_lean,
+            0.40 + (1.0 - density) * 0.2 + tall_lean * 0.5,
+        ),
         score: 0.85,
     });
     rules.push(SoftRule {
@@ -160,7 +216,7 @@ fn soft_rules_from_spiralk(profile: &ProblemProfile) -> Vec<st_logic::SoftRule> 
         weight: emphasize(
             wg_hint == 256,
             0.55 + wg_bias,
-            0.50 + (profile.bandwidth_hint() as f32 / 16_384.0).min(0.08),
+            0.50 + (profile.bandwidth_hint() as f32 / 16_384.0).min(0.08) + tall_lean,
         ),
         score: 1.35,
     });
@@ -168,8 +224,8 @@ fn soft_rules_from_spiralk(profile: &ProblemProfile) -> Vec<st_logic::SoftRule> 
         name: WG512,
         weight: emphasize(
             wg_hint == 512,
-            0.65 + (profile.bandwidth_hint() as f32 / 16_384.0).min(0.1),
-            0.35 + (profile.bandwidth_hint() as f32 / 12_000.0).min(0.25),
+            0.65 + (profile.bandwidth_hint() as f32 / 16_384.0).min(0.1) + wide_bonus,
+            0.35 + (profile.bandwidth_hint() as f32 / 12_000.0).min(0.25) + wide_bonus * 0.6,
         ),
         score: 1.10,
     });
@@ -190,23 +246,50 @@ fn soft_rules_from_spiralk(profile: &ProblemProfile) -> Vec<st_logic::SoftRule> 
 
     let tile_base = match tile_hint {
         2_048 => (0.74, 0.28),
-        4_096 => (0.80, 0.30 + (profile.bandwidth_hint() as f32 / 8192.0) * 0.05),
-        8_192 => (0.82, 0.32 + (profile.bandwidth_hint() as f32 / 10_000.0) * 0.05),
-        _ => (0.86, 0.34 + (profile.bandwidth_hint() as f32 / 12_000.0) * 0.04),
+        4_096 => (
+            0.80,
+            0.30 + (profile.bandwidth_hint() as f32 / 8192.0) * 0.05,
+        ),
+        8_192 => (
+            0.82,
+            0.32 + (profile.bandwidth_hint() as f32 / 10_000.0) * 0.05,
+        ),
+        _ => (
+            0.86,
+            0.34 + (profile.bandwidth_hint() as f32 / 12_000.0) * 0.04,
+        ),
+    };
+    let tile_wide_boost = wide_bonus.min(0.18);
+    let tile_tall_trim = if matches!(aspect, AspectClass::Tall) {
+        (0.05 + spread * 0.1).min(0.12)
+    } else {
+        0.0
     };
     rules.push(SoftRule {
         name: TILE4K,
-        weight: emphasize(tile_hint == 4_096, tile_base.0, tile_base.1),
+        weight: emphasize(
+            tile_hint == 4_096,
+            tile_base.0 - tile_tall_trim,
+            tile_base.1 + tile_tall_trim,
+        ),
         score: 0.88,
     });
     rules.push(SoftRule {
         name: TILE8K,
-        weight: emphasize(tile_hint == 8_192, tile_base.0, tile_base.1 + 0.02),
+        weight: emphasize(
+            tile_hint == 8_192,
+            tile_base.0 + tile_wide_boost * 0.5,
+            tile_base.1 + 0.02 + tile_wide_boost * 0.3,
+        ),
         score: 0.97,
     });
     rules.push(SoftRule {
         name: TILE16K,
-        weight: emphasize(tile_hint == 16_384, tile_base.0 + 0.04, tile_base.1 + 0.04),
+        weight: emphasize(
+            tile_hint == 16_384,
+            tile_base.0 + 0.04 + tile_wide_boost,
+            tile_base.1 + 0.04 + tile_wide_boost * 0.6,
+        ),
         score: 0.92,
     });
 
@@ -222,12 +305,12 @@ fn soft_rules_from_spiralk(profile: &ProblemProfile) -> Vec<st_logic::SoftRule> 
     });
     rules.push(SoftRule {
         name: JACOBI2,
-        weight: emphasize(jacobi_hint == 2, 0.70, 0.35),
+        weight: emphasize(jacobi_hint == 2, 0.70 + spread * 0.2, 0.35 + spread * 0.15),
         score: 0.95,
     });
     rules.push(SoftRule {
         name: JACOBI3,
-        weight: emphasize(jacobi_hint >= 3, 0.55, 0.20),
+        weight: emphasize(jacobi_hint >= 3, 0.55 + spread * 0.25, 0.20 + spread * 0.2),
         score: 0.75,
     });
 
@@ -309,7 +392,8 @@ fn instantiate_soft_rules(
             "jacobi=3" => {
                 if c.jacobi_passes >= 3 {
                     score *= 1.05 + (diag_ratio - 0.7).max(0.0) * 0.3;
-                    weight *= 1.05 + (diag_ratio - 0.7).max(0.0) * 0.2;
+                    let spread = profile.row_nnz_spread();
+                    weight *= 1.05 + (diag_ratio - 0.7).max(0.0) * 0.2 + spread * 0.15;
                 } else {
                     weight *= 0.2;
                     score *= 0.2;
@@ -444,7 +528,8 @@ mod tests {
         let choice = choose_with_profile(&profile);
         let summary = choice.explain(&profile);
         assert!(summary.contains("density="));
-        assert!(summary.contains("wg=512") || summary.contains("wg=256"));
+        assert!(summary.contains("aspect"));
+        assert!(summary.contains("spread"));
     }
 
     #[test]
@@ -468,5 +553,36 @@ mod tests {
         let choice = choose_with_profile(&profile);
         assert_eq!(choice.wg, 512);
         assert!(choice.tile_cols >= 8_192);
+    }
+
+    #[test]
+    fn wide_profile_promotes_large_tiles() {
+        use crate::profile::ProfileBuilder;
+
+        let mut builder = ProfileBuilder::new(2_048, 32_768, false);
+        for i in 0..2_048 {
+            let nnz = 40 + (i % 16) as usize;
+            builder.observe_row(nnz, i % 3 != 0, Some(14_000 + (i % 512) as usize));
+        }
+        let profile = builder.build();
+        assert_eq!(profile.aspect_class(), AspectClass::Wide);
+        let choice = choose_with_profile(&profile);
+        assert_eq!(choice.tile_cols, 16_384);
+        assert!(choice.jacobi_passes >= 1);
+    }
+
+    #[test]
+    fn tall_low_variance_prefers_smaller_tiles() {
+        use crate::profile::ProfileBuilder;
+
+        let mut builder = ProfileBuilder::new(16_384, 2_048, false);
+        for _ in 0..1_024 {
+            builder.observe_row(6, true, Some(1_200));
+        }
+        let profile = builder.build();
+        assert_eq!(profile.aspect_class(), AspectClass::Tall);
+        let choice = choose_with_profile(&profile);
+        assert!(choice.tile_cols <= 8_192);
+        assert!(choice.jacobi_passes <= 2);
     }
 }
