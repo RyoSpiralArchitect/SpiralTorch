@@ -189,8 +189,6 @@ impl ZLatencyConfig {
             smoothing,
         }
     }
-}
-
     pub fn update(&mut self, target_ms: f32, clamp_ms: f32, smoothing: f32) {
         self.target_ms = target_ms;
         self.clamp_ms = clamp_ms;
@@ -1180,8 +1178,6 @@ mod tests {
         assert!((fused.attributions.iter().map(|a| a.weight).sum::<f32>() - 1.0).abs() < 1e-6);
         assert!(fused.events.iter().any(|e| e == "saturated"));
     }
-}
-
 #[derive(Clone, Default, Debug)]
 pub struct DesireEmitter {
     queue: Arc<Mutex<VecDeque<ZPulse>>>,
