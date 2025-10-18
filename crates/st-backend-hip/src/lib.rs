@@ -34,6 +34,8 @@ impl DeviceInfo {
 }
 
 #[cfg(feature = "hip-real")]
+pub mod compaction;
+#[cfg(feature = "hip-real")]
 pub mod rccl_comm;
 #[cfg(feature = "hip-real")]
 pub mod real;
