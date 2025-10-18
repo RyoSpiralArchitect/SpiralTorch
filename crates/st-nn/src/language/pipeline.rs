@@ -2469,6 +2469,7 @@ mod language_pipeline {
                     band_energy: (0.4, 0.3, 0.3),
                     drift: 0.05,
                     z_signal: 0.1 * step as f32,
+                    scale: None,
                 });
 
                 let now = start + Duration::from_millis((step * 120) as u64);

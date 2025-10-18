@@ -13,6 +13,7 @@
 //! pulling in async machinery.
 
 use rustc_hash::FxHashMap;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
@@ -980,6 +981,7 @@ mod conductor_tests {
             drift,
             z_bias: drift,
             support,
+            scale: None,
             quality,
             stderr: 0.0,
             latency_ms: 0.0,

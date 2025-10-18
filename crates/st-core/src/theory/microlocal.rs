@@ -509,6 +509,7 @@ impl InterfaceZPulse {
             band_energy: self.band_energy,
             drift: self.drift,
             z_signal: self.z_bias,
+            scale: self.scale,
         }
     }
 
@@ -927,6 +928,7 @@ impl InterfaceZConductor {
                 drift: fused.drift,
                 z_bias: z_fused.z,
                 support: ZSupport::from_band_energy(fused.band_energy),
+                scale: fused.scale,
                 quality: z_fused.quality,
                 stderr: fused.standard_error.unwrap_or(0.0),
                 latency_ms: 0.0,
