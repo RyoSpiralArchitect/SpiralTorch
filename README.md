@@ -260,6 +260,49 @@ hypergrad or self-rewrite scheduler can keep desire centred without collapse.
 The schedules default to zeroed observation and grow-only ramps, so existing
 callers can continue to provide manual `DesireWeights` without opt-in changes.【F:crates/st-nn/src/language/desire.rs†L1-L388】【F:crates/st-nn/src/language/desire.rs†L389-L487】
 
+Every step now ships a `DesireGradientControl` alongside the interpretation so
+automation layers can react without recomputing heuristics. Grab it via
+`DesireLagrangian::gradient_control()` (or directly from the streamed
+`DesireSolution`) to inspect the recommended hyper/Realgrad learning-rate
+scales, penalty gains, and WGSL operator mix/gain before issuing GPU updates.
+The control packet also captures Desire's “feel-good” tuning: exponential
+learning-rate gains driven by entropy deltas (with min/max bounds and slew
+limits), EMA-smoothed clipping windows anchored at the 95th percentile, Z-space
+temperature coupling (`κ`) guidance, and sigmoid quality scaling hooks so
+Maxwell/Microlocal evidence can raise the step size only when the gradients look
+clean. Each packet carries a telemetry bitmask plus string labels (e.g.
+`lr_increase`, `lr_clipped`, `temperature_suppress`, `quality_suppress`,
+`lr_slew_limit`) so PSI dashboards can log _why_ the controller nudged Desire in
+a given direction, and the new `control_events` field on `DesireSolution` keeps
+historical replays compatible with older logs via the serde default.
+
+When you want to feed live telemetry back into Desire, use the new
+`DesireGradientControl::control_with_gain()` builder. It mirrors the ergonomic
+sketch above—pipe the latest entropy estimate, Z magnitude, quality score, and
+clip hints directly into the builder and call `finalise()` to obtain the packed
+control:
+
+```rust
+let ctrl = DesireGradientControl::control_with_gain()
+    .with_gain(gain_factor)
+    .with_entropy(last_entropy)
+    .with_z_coupling(z_magnitude)
+    .with_quality(quality_estimate)
+    .with_bounds(1e-4, 3e-3)
+    .with_clip_p95_hint(p95_gradient)
+    .finalise();
+lag.set_gradient_control(ctrl.clone());
+```
+
+For GPU loops, call `CanvasProjector::desire_control_uniform` (or the WASM
+`FractalCanvas.desireControlUniform`) to obtain a `Uint32Array` view of the
+packed uniform. Each lane stores the IEEE-754 bits for the target entropy,
+learning-rate envelope, clipping window, Z coupling, quality gain, and rate
+scales, with the final element containing the raw telemetry mask. Reinterpret
+the buffer as a `Float32Array` when uploading to WGSL so the compute shader sees
+the expected 16-lane, 64-byte-aligned payload without reserialising structs for
+every dispatch.
+
 To automate the “unconscious” loop, wrap the lagrangian with
 `DesireAutomation`. It samples the `SelfRewriteCfg` thresholds, tracks
 hypergrad drift during the integration phase, and emits
@@ -1283,11 +1326,63 @@ tape.apply(weights)
 print("updated weights", weights.tolist())
 ```
 
+Prefer flat-space optimisation? Reach for the new Rust-side
+`st_tensor::AmegaRealgrad` tape to mirror the same API without the Poincaré
+projection step—handy when Canvas Transformer energy needs to feed classical
+optimisers alongside its hypergradient updates.
+
 ### Canvas Pixel Transformer → Z-space feedback
 
 - `CanvasProjector::refresh_with_vectors` now returns both the RGBA buffer and
   a colour vector field that carries normalised energy and chroma as
   Z-space-friendly coordinates.
+- `FractalCanvas::vectorFieldFft(false)` surfaces the per-row FFT spectrum as
+  interleaved energy/chroma pairs so Canvas Transformer pipelines can ingest
+  frequency features without leaving Rust.
+- `CanvasProjector::accumulate_hypergrad` and
+  `CanvasProjector::accumulate_realgrad` stream the refreshed canvas tensor
+  directly into SpiralTorch's Riemannian or Euclidean optimisers without
+  additional copies.
+- `FractalCanvas::relation()` mirrors the projector's tensor output as a
+  `Float32Array` so browser call-sites can feed the raw relation into custom
+  pipelines or training loops.
+- `FractalCanvas::hypergradWave(curvature)` and `FractalCanvas::realgradWave()`
+  surface curvature-aware hypergrad updates alongside Euclidean gradients so the
+  Canvas Transformer can keep hypergrad/Realgrad buffers in sync by default.
+- `FractalCanvas::gradientSummary(curvature)` condenses both tapes into shared
+  L1/L2/∞ norms plus RMS/mean-absolute magnitudes so monitoring dashboards can
+  watch gradient health without shipping the full relation buffers across the
+  WASM boundary.
+- `FractalCanvas::desireInterpretation(curvature)` lifts the paired gradient
+  summaries into Desire-ready feedback metrics (pressure, balance, stability)
+  so automation layers can steer the Desire Lagrangian without leaving WASM.
+- `FractalCanvas::desireControl(curvature)` extends that pipeline with
+  ready-to-apply Desire gradient control packets—penalty gains, bias/observation
+  mixers, and tuned hyper/Realgrad learning-rate scales—mirroring the Rust
+  automation layer on the browser side.
+- `FractalCanvas::hypergradOperatorUniformFromControl(control)` and
+  `FractalCanvas::hypergradOperatorUniformAuto(curvature)` map those Desire
+  control packets directly into the WGSL uniform payload, saving JavaScript
+  callers from recomputing the blend/gain heuristics before dispatching the
+  GPU hypergrad operator.
+- `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
+  WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
+  the vector field and accumulate the spectrum fully on-GPU.
+- `FractalCanvas::hypergradOperatorKernel(false)` emits the complementary WGSL
+  pass that accumulates relation tensors into hypergradient buffers directly on
+  the GPU, with `hypergradOperatorUniform(mix, gain)` +
+  `hypergradOperatorDispatch(subgroup)` mirroring the uniform payload and
+  workgroup math for WebGPU callers.
+- `FractalCanvas::vectorFieldFftUniform(false)` packages the `CanvasFftParams`
+  uniform (width, height, inverse flag, padding) as a `Uint32Array` so the WGSL
+  kernel can be dispatched without manual byte packing.
+- `FractalCanvas::vectorFieldFftLayout()` reports the byte lengths and strides
+  for the `FieldSample`/`SpectrumSample` storage buffers plus the uniform block
+  so WebGPU callers can allocate resources without hard-coding struct sizes.
+- `FractalCanvas::vectorFieldFftDispatch(true)` computes the workgroup triplet
+  for the generated WGSL so callers can hand the counts directly to
+  `computePass.dispatchWorkgroups(...)` (or the Rust equivalent) without
+  duplicating the ceil division logic.
 - Use `CanvasProjector::emit_zspace_patch` to fold the canvas state back into
   the fractal scheduler without leaving Rust or allocating intermediate
   buffers.
@@ -1667,11 +1762,37 @@ const wasm = await init();
 const canvas = document.getElementById("zspace");
 const fractal = new FractalCanvas(64);
 await fractal.render(canvas);
+const spectrum = fractal.vectorFieldFft(false);
+console.log(`fft bins=${spectrum.length / 8}`);
+const kernel = fractal.vectorFieldFftKernel(true);
+console.log(kernel.split("\n")[0]);
+const uniform = fractal.vectorFieldFftUniform(false);
+console.log(`fft uniform=${uniform.join(',')}`);
+const layout = fractal.vectorFieldFftLayout();
+console.log(`fft field bytes=${layout.fieldBytes} stride=${layout.fieldStride}`);
+const dispatch = fractal.vectorFieldFftDispatch(true);
+console.log(`fft dispatch=${dispatch.join('x')}`);
 </script>
 ```
 
 Pixels become Z-space relations, the scheduler keeps memory bounded, and the
 entire loop stays panic-free even under aggressive streaming.
+
+The returned spectrum stores `[energy_re, energy_im, chroma_r_re, chroma_r_im,
+chroma_g_re, chroma_g_im, chroma_b_re, chroma_b_im]` per bin, so Canvas
+Transformers can slice the energy or chroma lanes directly or feed the full
+tensor back through `fft_inverse_in_place` for quick spatial reconstruction.
+
+When dispatching the WGSL kernel, bind the colour field as a tightly-packed
+array of `FieldSample { energy, chroma }`, store the complex spectrum in a
+matching `SpectrumSample` buffer, and provide the canvas dimensions plus an
+inverse flag through a `CanvasFftParams` uniform struct. The
+`vectorFieldFftUniform` helper yields the `[width, height, inverse, padding]`
+`Uint32Array` so you can upload the uniform buffer directly without worrying
+about alignment, `vectorFieldFftLayout` reports the byte lengths and strides for
+the field/spectrum storage buffers, and `vectorFieldFftDispatch` returns the
+`[x, y, z]` workgroup counts that correspond to the generated WGSL (respecting
+subgroup or full wave execution).
 
 Need FFT heuristics alongside the canvas?  WebAssembly exports now ship auto
 planning helpers and CPU fallbacks:
@@ -1703,6 +1824,14 @@ tuner.mergeObject([
   { rows: 512, cols_min: 4096, cols_max: 16383, k_max: 256, sg: true, tile_cols: 1024 },
 ]);
 const overrides = tuner.toObject();
+const fallbackPlan = tuner.planFftWithFallback(512, 4096, 128, true);
+const resolution = tuner.planFftResolution(512, 4096, 128, true);
+if (resolution.source === WasmFftPlanSource.Override) {
+  console.log(`override tile=${resolution.plan.tileCols}`);
+}
+const snapshot = resolution.toJson();
+const hydrated = ResolvedWasmFftPlan.fromJson(snapshot);
+const report = tuner.planFftReport(512, 4096, 128, true);
 ```
 
 ---

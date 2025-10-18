@@ -39,6 +39,8 @@ use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use statrs::function::gamma::gamma;
 use std::f64::consts::PI;
+use std::fmt;
+use std::sync::Arc;
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
 #[derive(Debug, Clone)]
@@ -396,7 +398,7 @@ impl InterfaceZLift {
 }
 
 /// Aggregated Z-space pulse produced by [`InterfaceZLift::project`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct InterfaceZPulse {
     /// Total perimeter mass supporting the pulse.
     pub support: f32,
@@ -468,10 +470,10 @@ impl InterfaceZPulse {
     pub fn lerp(current: &InterfaceZPulse, next: &InterfaceZPulse, alpha: f32) -> InterfaceZPulse {
         let alpha = alpha.clamp(0.0, 1.0);
         if alpha <= f32::EPSILON {
-            return *current;
+            return current.clone();
         }
         if (1.0 - alpha) <= f32::EPSILON {
-            return *next;
+            return next.clone();
         }
         let beta = 1.0 - alpha;
         let (cur_above, cur_here, cur_beneath) = current.band_energy;
@@ -508,7 +510,28 @@ impl InterfaceZPulse {
     /// Converts the pulse into a [`SoftlogicZFeedback`] record using the
     /// perimeter mass both as ψ total and weighted loss surrogate.
     pub fn into_softlogic_feedback(self) -> SoftlogicZFeedback {
-        self.into_softlogic_feedback_with(self.support, self.total_energy())
+        let total = self.total_energy();
+        SoftlogicZFeedback {
+            psi_total: self.support,
+            weighted_loss: total,
+            band_energy: self.band_energy,
+            drift: self.drift,
+            z_signal: self.z_bias,
+        }
+    }
+
+    /// Scales the pulse by `gain`, attenuating the support, band energy, and
+    /// derived signals uniformly. Negative gains flip the drift and Z bias but
+    /// keep the magnitude scaling consistent.
+    pub fn scaled(&self, gain: f32) -> InterfaceZPulse {
+        let (above, here, beneath) = self.band_energy;
+        InterfaceZPulse {
+            support: self.support * gain,
+            interface_cells: self.interface_cells * gain,
+            band_energy: (above * gain, here * gain, beneath * gain),
+            drift: self.drift * gain,
+            z_bias: self.z_bias * gain,
+        }
     }
 }
 
@@ -524,14 +547,128 @@ impl Default for InterfaceZPulse {
     }
 }
 
+/// Policy hook controlling per-source quality weights and fused adjustments.
+pub trait ZSourcePolicy: Send + Sync {
+    /// Computes a quality score in `[0, 1]` used to weight the corresponding
+    /// pulse during fusion.
+    fn quality(&self, pulse: &InterfaceZPulse) -> f32 {
+        let total = pulse.total_energy().max(1e-6);
+        let drift = (pulse.drift.abs() / total).tanh();
+        let support = pulse.support.tanh();
+        (drift * support).clamp(0.0, 1.0)
+    }
+
+    /// Provides an opportunity to amend the fused pulse once all sources have
+    /// been combined.
+    fn late_fuse(
+        &self,
+        _fused: &mut InterfaceZPulse,
+        _pulses: &[InterfaceZPulse],
+        _qualities: &[f32],
+    ) {
+    }
+}
+
+/// Default quality policy mirroring the stock microlocal heuristics.
+#[derive(Debug, Default)]
+pub struct DefaultZSourcePolicy;
+
+impl DefaultZSourcePolicy {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl ZSourcePolicy for DefaultZSourcePolicy {}
+
+/// Band-energy gating applied on top of the quality policy.
+#[derive(Debug, Clone)]
+pub struct BandPolicy {
+    min_quality: [f32; 3],
+    hysteresis: f32,
+}
+
+impl BandPolicy {
+    /// Creates a new policy with per-band minimum quality thresholds.
+    pub fn new(min_quality: [f32; 3]) -> Self {
+        BandPolicy {
+            min_quality: min_quality.map(|v| v.clamp(0.0, 1.0)),
+            hysteresis: 0.0,
+        }
+    }
+
+    /// Configures a hysteresis margin applied when demoting bands.
+    pub fn with_hysteresis(mut self, hysteresis: f32) -> Self {
+        self.hysteresis = hysteresis.max(0.0);
+        self
+    }
+
+    fn gate(&self, band: usize, quality: f32) -> f32 {
+        let threshold = self.min_quality[band];
+        if quality + self.hysteresis < threshold {
+            if threshold <= f32::EPSILON {
+                0.0
+            } else {
+                (quality / threshold).clamp(0.0, 1.0)
+            }
+        } else {
+            1.0
+        }
+    }
+
+    /// Projects an overall quality multiplier derived from the band energies.
+    pub fn project_quality(&self, pulse: &InterfaceZPulse) -> f32 {
+        let total = pulse.total_energy().max(1e-6);
+        let ratios = [
+            pulse.band_energy.0 / total,
+            pulse.band_energy.1 / total,
+            pulse.band_energy.2 / total,
+        ];
+        let mut scale = 1.0f32;
+        for (idx, ratio) in ratios.into_iter().enumerate() {
+            scale *= self.gate(idx, ratio.clamp(0.0, 1.0));
+        }
+        scale.clamp(0.0, 1.0)
+    }
+}
+
+/// Budget guard that clamps the fused Z pulse magnitude.
+#[derive(Debug, Clone)]
+pub struct BudgetPolicy {
+    z_max: f32,
+}
+
+impl BudgetPolicy {
+    /// Creates a new budget policy bounding the fused Z-bias magnitude.
+    pub fn new(z_max: f32) -> Self {
+        BudgetPolicy { z_max: z_max.abs() }
+    }
+
+    /// Applies the budget to the fused pulse, returning the applied scale.
+    pub fn apply(&self, fused: &mut InterfaceZPulse) -> f32 {
+        let limit = self.z_max.max(f32::EPSILON);
+        let magnitude = fused.z_bias.abs();
+        if magnitude <= limit {
+            return 1.0;
+        }
+        let scale = (limit / magnitude).clamp(0.0, 1.0);
+        let scaled = fused.scaled(scale);
+        *fused = scaled;
+        scale
+    }
+}
+
 /// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
 /// smoothed control signal suitable for Softlogic feedback.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct InterfaceZConductor {
     gauges: Vec<InterfaceGauge>,
     lift: InterfaceZLift,
     smoothing: f32,
     carry: Option<InterfaceZPulse>,
+    policy: Arc<dyn ZSourcePolicy>,
+    band_policy: Option<BandPolicy>,
+    budget_policy: Option<BudgetPolicy>,
 }
 
 impl InterfaceZConductor {
@@ -545,6 +682,9 @@ impl InterfaceZConductor {
             lift,
             smoothing: 1.0,
             carry: None,
+            policy: Arc::new(DefaultZSourcePolicy::new()),
+            band_policy: None,
+            budget_policy: None,
         }
     }
 
@@ -560,6 +700,29 @@ impl InterfaceZConductor {
     /// Returns the gauges driven by the conductor.
     pub fn gauges(&self) -> &[InterfaceGauge] {
         &self.gauges
+    }
+
+    /// Configures the conductor with a custom policy controlling per-source
+    /// quality weighting and post-fusion adjustments.
+    pub fn with_policy<P>(mut self, policy: P) -> Self
+    where
+        P: ZSourcePolicy + 'static,
+    {
+        self.policy = Arc::new(policy);
+        self
+    }
+
+    /// Applies a band policy to modulate quality weights using band-energy
+    /// heuristics.
+    pub fn with_band_policy(mut self, policy: BandPolicy) -> Self {
+        self.band_policy = Some(policy);
+        self
+    }
+
+    /// Enforces a budget over the fused Z signal to prevent runaway drift.
+    pub fn with_budget_policy(mut self, policy: BudgetPolicy) -> Self {
+        self.budget_policy = Some(policy);
+        self
     }
 
     /// Processes a binary mask through each gauge, lifts the resulting
@@ -583,11 +746,22 @@ impl InterfaceZConductor {
             pulses.push(pulse);
         }
 
-        let fused_raw = InterfaceZPulse::aggregate(&pulses);
+        let mut qualities = Vec::with_capacity(pulses.len());
+        let mut weighted = Vec::with_capacity(pulses.len());
+        for pulse in &pulses {
+            let mut quality = self.policy.quality(pulse).clamp(0.0, 1.0);
+            if let Some(band_policy) = &self.band_policy {
+                quality *= band_policy.project_quality(pulse);
+            }
+            qualities.push(quality);
+            weighted.push(pulse.scaled(quality));
+        }
+
+        let fused_raw = InterfaceZPulse::aggregate(&weighted);
         let mut fused = if let Some(prev) = &self.carry {
             InterfaceZPulse::lerp(prev, &fused_raw, self.smoothing)
         } else {
-            fused_raw
+            fused_raw.clone()
         };
         if fused_raw.z_bias.abs() > f32::EPSILON
             && fused.z_bias.signum() != fused_raw.z_bias.signum()
@@ -599,18 +773,39 @@ impl InterfaceZConductor {
             fused.drift = fused_raw.drift * self.smoothing;
         }
 
-        self.carry = Some(fused);
+        self.policy.late_fuse(&mut fused, &pulses, &qualities);
+
+        let mut budget_scale = 1.0;
+        if let Some(budget) = &self.budget_policy {
+            budget_scale = budget.apply(&mut fused);
+        }
+
+        self.carry = Some(fused.clone());
 
         let psi = psi_total.unwrap_or(fused.support);
         let loss = weighted_loss.unwrap_or(fused.total_energy());
-        let feedback = fused.into_softlogic_feedback_with(psi, loss);
+        let feedback = fused.clone().into_softlogic_feedback_with(psi, loss);
 
         InterfaceZReport {
             signatures,
             pulses,
             fused_pulse: fused,
             feedback,
+            qualities,
+            budget_scale,
         }
+    }
+}
+
+impl fmt::Debug for InterfaceZConductor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InterfaceZConductor")
+            .field("gauges", &self.gauges.len())
+            .field("smoothing", &self.smoothing)
+            .field("carry", &self.carry)
+            .field("band_policy", &self.band_policy)
+            .field("budget_policy", &self.budget_policy)
+            .finish()
     }
 }
 
@@ -626,6 +821,10 @@ pub struct InterfaceZReport {
     pub fused_pulse: InterfaceZPulse,
     /// Ready-to-store Softlogic feedback record.
     pub feedback: SoftlogicZFeedback,
+    /// Quality weights assigned to each pulse prior to fusion.
+    pub qualities: Vec<f32>,
+    /// Scale factor applied by the budget policy (1.0 when unclamped).
+    pub budget_scale: f32,
 }
 
 impl InterfaceZReport {
@@ -917,7 +1116,7 @@ mod tests {
         assert!(above > beneath);
         assert!(here >= 0.0);
         assert!(pulse.z_bias > 0.0);
-        let feedback = pulse.into_softlogic_feedback();
+        let feedback = pulse.clone().into_softlogic_feedback();
         assert_eq!(feedback.band_energy, pulse.band_energy);
         assert_eq!(feedback.z_signal, pulse.z_bias);
     }
@@ -1012,6 +1211,8 @@ mod tests {
         let first = conductor.step(&mask, Some(&c_prime), None, None);
         assert!(first.has_interface());
         assert!(first.fused_pulse.z_bias > 0.0);
+        assert_eq!(first.qualities.len(), first.pulses.len());
+        assert!(first.budget_scale > 0.0);
 
         let second = conductor.step(&flipped, Some(&c_prime_neg), None, None);
         let raw_second = InterfaceZPulse::aggregate(&second.pulses);
@@ -1019,5 +1220,63 @@ mod tests {
         assert!(second.fused_pulse.z_bias < 0.0);
         assert!(second.fused_pulse.z_bias > raw_second.z_bias);
         assert_eq!(second.feedback.band_energy, second.fused_pulse.band_energy);
+        assert_eq!(second.qualities.len(), second.pulses.len());
+        assert!(second.budget_scale > 0.0);
+    }
+
+    #[derive(Debug)]
+    struct HalfPolicy;
+
+    impl ZSourcePolicy for HalfPolicy {
+        fn quality(&self, _: &InterfaceZPulse) -> f32 {
+            0.5
+        }
+    }
+
+    #[test]
+    fn custom_policy_scales_fused_pulse() {
+        let mask = array![[0.0, 1.0, 1.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0],].into_dyn();
+        let c_prime = mask.mapv(|v| if v > 0.5 { 1.0 } else { -1.0 });
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let projector = LeechProjector::new(16, 0.5);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], projector);
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift).with_policy(HalfPolicy);
+
+        let report = conductor.step(&mask, Some(&c_prime), None, None);
+        let raw = InterfaceZPulse::aggregate(&report.pulses);
+        assert_eq!(report.qualities.len(), 1);
+        let quality = report.qualities[0];
+        assert!((quality - 0.5).abs() < 1e-6);
+        assert!((report.fused_pulse.support - raw.support * 0.5).abs() < 1e-6);
+        assert!((report.fused_pulse.z_bias - raw.z_bias * 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn budget_policy_clamps_bias() {
+        let mask = array![[0.0, 0.0, 1.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0],].into_dyn();
+        let c_prime = mask.mapv(|v| if v > 0.5 { 1.0 } else { -1.0 });
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let projector = LeechProjector::new(16, 0.5);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], projector);
+        let mut conductor =
+            InterfaceZConductor::new(vec![gauge], lift).with_budget_policy(BudgetPolicy::new(0.02));
+
+        let report = conductor.step(&mask, Some(&c_prime), None, None);
+        assert!(report.budget_scale <= 1.0);
+        assert!(report.fused_pulse.z_bias.abs() <= 0.02 + 1e-6);
+    }
+
+    #[test]
+    fn band_policy_demotes_unbalanced_energy() {
+        let pulse = InterfaceZPulse {
+            support: 1.0,
+            interface_cells: 1.0,
+            band_energy: (0.9, 0.05, 0.05),
+            drift: 0.4,
+            z_bias: 0.3,
+        };
+        let policy = BandPolicy::new([0.2, 0.2, 0.2]);
+        let quality = policy.project_quality(&pulse);
+        assert!(quality < 1.0);
     }
 }
