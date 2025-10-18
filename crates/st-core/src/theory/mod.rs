@@ -39,3 +39,9 @@ pub use observability_impl as observability;
 pub mod microlocal_impl;
 #[doc(inline)]
 pub use microlocal_impl as microlocal;
+
+#[path = "maxwell.rs"]
+#[doc(hidden)]
+pub mod maxwell_impl;
+#[doc(inline)]
+pub use maxwell_impl as maxwell;

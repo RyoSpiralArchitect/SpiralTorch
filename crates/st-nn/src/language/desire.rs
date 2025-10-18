@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::geometry::{ConceptHint, RepressionField, SemanticBridge, SymbolGeometry};
+use super::maxwell::NarrativeHint;
 use super::schrodinger::schrodinger_boost;
 use super::temperature::{entropy, TemperatureController};
 use crate::PureResult;
@@ -104,6 +105,7 @@ pub struct DesireSolution {
     pub phase: DesirePhase,
     pub avoidance: Option<DesireAvoidanceReport>,
     pub hypergrad_penalty: f32,
+    pub narrative: Option<NarrativeHint>,
 }
 
 pub struct DesireLagrangian {
@@ -124,6 +126,7 @@ pub struct DesireLagrangian {
     phase: DesirePhase,
     avoidance_accumulator: Vec<f32>,
     desire_bias: Vec<f32>,
+    active_narrative: Option<NarrativeHint>,
 }
 
 impl DesireLagrangian {
@@ -162,6 +165,7 @@ impl DesireLagrangian {
             phase: DesirePhase::Observation,
             avoidance_accumulator: vec![0.0; vocab],
             desire_bias: vec![0.0; vocab],
+            active_narrative: None,
         })
     }
 
@@ -219,6 +223,22 @@ impl DesireLagrangian {
 
     pub fn phase(&self) -> DesirePhase {
         self.phase
+    }
+
+    pub fn narrative_hint(&self) -> Option<&NarrativeHint> {
+        self.active_narrative.as_ref()
+    }
+
+    pub fn set_narrative_hint(&mut self, hint: NarrativeHint) {
+        self.active_narrative = Some(hint);
+    }
+
+    pub fn set_narrative_hint_opt(&mut self, hint: Option<NarrativeHint>) {
+        self.active_narrative = hint;
+    }
+
+    pub fn clear_narrative_hint(&mut self) {
+        self.active_narrative = None;
     }
 
     pub fn step_with_scheduler(
@@ -333,6 +353,7 @@ impl DesireLagrangian {
             phase,
             avoidance,
             hypergrad_penalty,
+            narrative: self.active_narrative.clone(),
         })
     }
 
@@ -550,6 +571,7 @@ mod tests {
     use super::super::geometry::{
         ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
     };
+    use super::super::maxwell::NarrativeHint;
     use super::*;
     use std::collections::HashSet;
 
@@ -607,6 +629,7 @@ mod tests {
         assert_eq!(result.weights.alpha, weights.alpha);
         assert_eq!(result.phase, DesirePhase::Injection);
         assert!(result.hypergrad_penalty >= 0.0);
+        assert!(result.narrative.is_none());
     }
 
     #[test]
@@ -644,9 +667,37 @@ mod tests {
                     assert!(result.hypergrad_penalty >= 0.0);
                 }
             }
+            assert!(result.narrative.is_none());
         }
         assert!(phases.contains(&DesirePhase::Observation));
         assert!(phases.contains(&DesirePhase::Injection));
         assert!(phases.contains(&DesirePhase::Integration));
+    }
+
+    #[test]
+    fn narrative_hint_round_trips_through_solution() {
+        let geometry = build_geometry();
+        let repression = RepressionField::new(vec![0.1, 0.2]).unwrap();
+        let semantics = build_semantics();
+        let controller = TemperatureController::new(1.0, 0.7, 0.5, 0.5, 2.0);
+        let mut lagrangian = DesireLagrangian::new(geometry, repression, semantics, controller)
+            .unwrap()
+            .with_top_k(Some(2));
+        lagrangian.set_narrative_hint(NarrativeHint::new("alpha", vec!["glimmer".into()], 0.7));
+        let logits = vec![2.0, 0.5];
+        let weights = DesireWeights::new(0.2, 0.1, 0.3, 0.05);
+        let result = lagrangian
+            .step(
+                &logits,
+                0,
+                &ConceptHint::Distribution(vec![0.6, 0.4]),
+                &weights,
+            )
+            .unwrap();
+        assert!(result.narrative.is_some());
+        let hint = result.narrative.unwrap();
+        assert_eq!(hint.channel(), "alpha");
+        assert_eq!(hint.tags(), &[String::from("glimmer")]);
+        assert!(lagrangian.narrative_hint().is_some());
     }
 }
