@@ -13,13 +13,17 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn heur_path() -> PathBuf {
-    if let Ok(p) = std::env::var("SPIRAL_HEUR_FILE") { return PathBuf::from(p); }
+    if let Ok(p) = std::env::var("SPIRAL_HEUR_FILE") {
+        return PathBuf::from(p);
+    }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(format!("{home}/.spiraltorch/heur.kdsl"))
 }
 
 fn roundtable_log_path() -> PathBuf {
-    if let Ok(p) = std::env::var("SPIRAL_SR_LOG_FILE") { return PathBuf::from(p); }
+    if let Ok(p) = std::env::var("SPIRAL_SR_LOG_FILE") {
+        return PathBuf::from(p);
+    }
     let heur = heur_path();
     let mut log = heur;
     log.set_file_name("roundtable.log");
@@ -28,24 +32,47 @@ fn roundtable_log_path() -> PathBuf {
 
 fn normalize_rule(rule_expr: &str) -> Option<String> {
     let trimmed = rule_expr.trim();
-    if trimmed.is_empty() { return None; }
-    let mut line = trimmed.trim_end_matches(';').trim().to_string();
-    if line.is_empty() { return None; }
-    if !line.starts_with("soft(") {
-        line = format!("soft({line})");
+    if trimmed.is_empty() {
+        return None;
     }
-    line.push(';');
-    Some(line)
+
+    let trimmed = trimmed.trim_end_matches(';').trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let inner = if let Some(rest) = trimmed.strip_prefix("soft(") {
+        rest.trim_end_matches(')').trim().to_string()
+    } else {
+        trimmed.to_string()
+    };
+
+    let parts: Vec<String> = inner
+        .split(',')
+        .map(|segment| segment.trim())
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| segment.to_string())
+        .collect();
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    Some(format!("soft({});", parts.join(", ")))
 }
 
 fn already_present(path: &PathBuf, line: &str) -> bool {
-    if !path.exists() { return false; }
+    if !path.exists() {
+        return false;
+    }
     match fs::File::open(path) {
         Ok(f) => {
             let rdr = BufReader::new(f);
             let needle = line.trim();
             for read in rdr.lines().flatten() {
-                if read.trim() == needle { return true; }
+                if read.trim() == needle {
+                    return true;
+                }
             }
             false
         }
@@ -54,7 +81,9 @@ fn already_present(path: &PathBuf, line: &str) -> bool {
 }
 
 pub fn maybe_append_soft(rule_expr: &str) {
-    let Some(line) = normalize_rule(rule_expr) else { return; };
+    let Some(line) = normalize_rule(rule_expr) else {
+        return;
+    };
     let path = heur_path();
     if already_present(&path, &line) {
         return;
@@ -87,7 +116,7 @@ pub fn maybe_append_soft(rule_expr: &str) {
 }
 
 fn label_for(idx: usize) -> char {
-    ((b'A' + (idx as u8)) as char)
+    (b'A' + (idx as u8)) as char
 }
 
 fn log_roundtable(
@@ -106,16 +135,23 @@ fn log_roundtable(
         }
     }
 
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs()).unwrap_or_default();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
 
     let mut entry = String::new();
-    entry.push_str(&format!("[{ts}] wins={wins} trials={trials} lb={:.4} thresh={:.4}\n", lb, lb_thresh));
+    entry.push_str(&format!(
+        "[{ts}] wins={wins} trials={trials} lb={:.4} thresh={:.4}\n",
+        lb, lb_thresh
+    ));
     if consensus_rules.is_empty() {
         entry.push_str("consensus: (none)\n");
     } else {
         entry.push_str("consensus:\n");
-        for rule in consensus_rules { entry.push_str(&format!("  - {rule}\n")); }
+        for rule in consensus_rules {
+            entry.push_str(&format!("  - {rule}\n"));
+        }
     }
     for (idx, group) in other_proposals.iter().enumerate() {
         let label = label_for(idx);
@@ -123,12 +159,17 @@ fn log_roundtable(
         if group.is_empty() {
             entry.push_str("  (no proposals)\n");
         } else {
-            for rule in *group { entry.push_str(&format!("  - {rule}\n")); }
+            for rule in *group {
+                entry.push_str(&format!("  - {rule}\n"));
+            }
         }
     }
     entry.push('\n');
 
-    if let Err(err) = OpenOptions::new().create(true).append(true).open(&path)
+    if let Err(err) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
         .and_then(|mut f| f.write_all(entry.as_bytes()))
     {
         eprintln!("[sr] roundtable log append failed: {err}");
@@ -137,13 +178,15 @@ fn log_roundtable(
 
 /// Wilson score lower bound (normal approximation, z≈1.96 → 95%).
 pub fn wilson_lower_bound(wins: u32, trials: u32, z: f32) -> f32 {
-    if trials == 0 { return 0.0; }
+    if trials == 0 {
+        return 0.0;
+    }
     let n = trials as f32;
     let p = (wins as f32) / n;
     let z2 = z * z;
     let denom = 1.0 + z2 / n;
-    let center = p + z2/(2.0*n);
-    let margin = (p*(1.0-p)/n + z2/(4.0*n*n)).sqrt() * z;
+    let center = p + z2 / (2.0 * n);
+    let margin = (p * (1.0 - p) / n + z2 / (4.0 * n * n)).sqrt() * z;
     (center - margin) / denom
 }
 
@@ -157,13 +200,22 @@ pub fn on_abc_conversation(
     lb_thresh: f32,
 ) {
     let lb = wilson_lower_bound(wins, trials, z);
-    log_roundtable(consensus_rules, other_proposals, wins, trials, lb, lb_thresh);
+    log_roundtable(
+        consensus_rules,
+        other_proposals,
+        wins,
+        trials,
+        lb,
+        lb_thresh,
+    );
     if lb >= lb_thresh && !consensus_rules.is_empty() {
         let gain = (lb - lb_thresh).max(0.0);
         let soft_weight = (0.15 + gain as f32).min(1.0);
         for (idx, rule) in consensus_rules.iter().copied().enumerate() {
             let boost = soft_weight * (1.0 - (idx as f32 * 0.12));
-            if boost <= 0.0 { break; }
+            if boost <= 0.0 {
+                break;
+            }
             maybe_append_soft(&format!("{rule}, {:.3}", boost));
         }
     }
@@ -220,7 +272,14 @@ mod tests {
         let _ = std::fs::remove_file(&log);
         std::env::set_var("SPIRAL_SR_LOG_FILE", &log);
 
-        log_roundtable(&["soft(tile, 2048, 0.4)"], &[&["soft(tile, 4096, 0.2)"]], 12, 20, 0.66, 0.55);
+        log_roundtable(
+            &["soft(tile, 2048, 0.4)"],
+            &[&["soft(tile, 4096, 0.2)"]],
+            12,
+            20,
+            0.66,
+            0.55,
+        );
 
         let body = std::fs::read_to_string(&log).unwrap();
         assert!(body.contains("wins=12"));
