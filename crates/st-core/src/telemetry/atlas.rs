@@ -395,7 +395,7 @@ impl AtlasFrame {
         if !fragment.concepts.is_empty() {
             self.concepts.extend(fragment.concepts.into_iter());
         }
-        if self.timestamp <= 0.0 && !self.concepts.is_empty() {
+        if self.timestamp <= 0.0 {
             self.timestamp = f32::EPSILON;
         }
     }
@@ -1230,6 +1230,20 @@ fn infer_district(name: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atlas_frame_retains_metrics_without_timestamp() {
+        let mut fragment = AtlasFragment::new();
+        fragment.push_metric("loop.energy", 1.2);
+        fragment.push_note("source:test");
+        let frame = AtlasFrame::from_fragment(fragment).expect("frame");
+        assert!(frame.timestamp > 0.0);
+        assert_eq!(frame.metrics.len(), 1);
+        assert!(frame
+            .notes
+            .iter()
+            .any(|note| note == "source:test"));
+    }
 
     #[test]
     fn atlas_frame_groups_metrics_into_districts() {
