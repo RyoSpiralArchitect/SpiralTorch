@@ -1255,9 +1255,12 @@ impl DesireControlEvents {
     pub const NONE: Self = Self { bits: 0 };
     pub const LR_INCREASE: Self = Self { bits: 1 << 0 };
     pub const LR_DECREASE: Self = Self { bits: 1 << 1 };
-    pub const CLIPPED: Self = Self { bits: 1 << 2 };
-    pub const TEMPERATURE_ADJUST: Self = Self { bits: 1 << 3 };
+    pub const LR_CLIPPED: Self = Self { bits: 1 << 2 };
+    pub const TEMPERATURE_SUPPRESS: Self = Self { bits: 1 << 3 };
     pub const QUALITY_BOOST: Self = Self { bits: 1 << 4 };
+    pub const QUALITY_SUPPRESS: Self = Self { bits: 1 << 5 };
+    pub const Z_SUPPRESS: Self = Self { bits: 1 << 6 };
+    pub const SLEW_LIMIT: Self = Self { bits: 1 << 7 };
 
     #[inline]
     pub const fn new(bits: u32) -> Self {
@@ -1294,14 +1297,23 @@ impl DesireControlEvents {
         if self.contains(Self::LR_DECREASE) {
             labels.push("lr_decrease");
         }
-        if self.contains(Self::CLIPPED) {
-            labels.push("clip_adjust");
+        if self.contains(Self::LR_CLIPPED) {
+            labels.push("lr_clipped");
         }
-        if self.contains(Self::TEMPERATURE_ADJUST) {
-            labels.push("temperature_adjust");
+        if self.contains(Self::TEMPERATURE_SUPPRESS) {
+            labels.push("temperature_suppress");
         }
         if self.contains(Self::QUALITY_BOOST) {
             labels.push("quality_weight");
+        }
+        if self.contains(Self::QUALITY_SUPPRESS) {
+            labels.push("quality_suppress");
+        }
+        if self.contains(Self::Z_SUPPRESS) {
+            labels.push("z_suppress");
+        }
+        if self.contains(Self::SLEW_LIMIT) {
+            labels.push("lr_slew_limit");
         }
         labels
     }
@@ -1359,9 +1371,6 @@ pub struct DesireGradientControl {
 }
 
 impl DesireGradientControl {
-    const MIN_RATE: f32 = 0.25;
-    const MAX_RATE: f32 = 1.6;
-
     const fn default_tuning_gain() -> f32 {
         0.0
     }
@@ -1371,19 +1380,19 @@ impl DesireGradientControl {
     }
 
     const fn default_lr_eta() -> f32 {
-        0.0
+        1.0
     }
 
     const fn default_lr_min() -> f32 {
-        1.0
+        1e-4
     }
 
     const fn default_lr_max() -> f32 {
-        1.0
+        3e-3
     }
 
     const fn default_lr_slew() -> f32 {
-        0.0
+        0.2
     }
 
     const fn default_clip_norm() -> f32 {
@@ -1395,11 +1404,11 @@ impl DesireGradientControl {
     }
 
     const fn default_clip_ceiling() -> f32 {
-        1.0
+        8.0
     }
 
     const fn default_clip_ema() -> f32 {
-        0.2
+        0.5
     }
 
     const fn default_temperature_kappa() -> f32 {
@@ -1407,15 +1416,15 @@ impl DesireGradientControl {
     }
 
     const fn default_temperature_slew() -> f32 {
-        0.0
+        0.15
     }
 
     const fn default_quality_gain() -> f32 {
-        0.0
+        4.0
     }
 
     const fn default_quality_bias() -> f32 {
-        0.0
+        0.1
     }
 
     const fn default_events() -> DesireControlEvents {
@@ -1433,100 +1442,10 @@ impl DesireGradientControl {
         interpretation: DesireGradientInterpretation,
         gain: f32,
     ) -> Self {
-        let penalty_gain = interpretation.penalty_gain();
-        let bias_mix = interpretation.bias_mix();
-        let observation_gain = interpretation.observation_gain();
-        let damping = interpretation.damping();
-
-        let imbalance = (interpretation.balance() - 1.0).clamp(-4.0, 4.0);
-        let saturation = interpretation.saturation().tanh().clamp(0.0, 1.0);
-        let caution = (1.0 - interpretation.stability()).clamp(0.0, 1.0);
-
-        let (hyper_base, real_base) = if imbalance >= 0.0 {
-            (
-                (1.0 / (1.0 + imbalance)).clamp(Self::MIN_RATE, 1.0),
-                (1.0 + 0.5 * imbalance).clamp(1.0, Self::MAX_RATE),
-            )
-        } else {
-            (
-                (1.0 - 0.5 * imbalance).clamp(1.0, Self::MAX_RATE),
-                (1.0 / (1.0 - imbalance)).clamp(Self::MIN_RATE, 1.0),
-            )
-        };
-
-        let hyper_guard = (1.0 - 0.6 * caution - 0.4 * saturation).clamp(0.3, 1.0);
-        let real_guard = (1.0 - 0.4 * caution - 0.25 * saturation).clamp(0.4, 1.0);
-        let hyper_rate_scale = (hyper_base * hyper_guard).clamp(Self::MIN_RATE, Self::MAX_RATE);
-        let real_rate_scale = (real_base * real_guard).clamp(Self::MIN_RATE, Self::MAX_RATE);
-
-        let operator_mix = (0.4 + 0.6 * interpretation.stability()).clamp(0.25, 1.0);
-        let operator_gain = penalty_gain * (1.0 - 0.35 * saturation).clamp(0.5, 1.0);
-
-        let tuning_gain = gain.clamp(0.0, 1.0);
-        let entropy_bias = 3.5 + 0.8 * caution;
-        let lr_eta = tuning_gain * (0.08 + 0.14 * caution);
-        let lr_min = (Self::MIN_RATE * 0.6).max(0.05);
-        let lr_max = (Self::MAX_RATE * (1.0 + 0.25 * (1.0 - caution))).clamp(0.75, 2.5);
-        let lr_slew = tuning_gain * (0.25 - 0.15 * caution).clamp(0.05, 0.25);
-
-        let clip_floor = (0.18 + 0.12 * caution).clamp(0.15, 0.3);
-        let clip_target = interpretation
-            .saturation()
-            .max(interpretation.hyper_pressure() * 2.5)
-            .max(interpretation.real_pressure() * 3.0);
-        let clip_norm = (clip_target * (0.6 + 0.4 * tuning_gain)).clamp(clip_floor, 32.0);
-        let clip_ceiling = (clip_norm * 1.6).max(clip_norm + 0.05);
-        let clip_ema = (0.25 + 0.35 * caution).clamp(0.2, 0.6);
-
-        let temperature_kappa =
-            tuning_gain * (0.02 + 0.08 * (1.0 - interpretation.stability())).clamp(0.0, 0.12);
-        let temperature_slew = tuning_gain * (0.22 - 0.1 * caution).clamp(0.05, 0.22);
-
-        let quality_gain = tuning_gain * (0.6 + 0.4 * (1.0 - caution));
-        let quality_bias = 0.0;
-
-        let mut events = DesireControlEvents::NONE;
-        if hyper_rate_scale < 1.0 - 1e-3 || real_rate_scale < 1.0 - 1e-3 {
-            events = events.insert(DesireControlEvents::LR_DECREASE);
-        }
-        if hyper_rate_scale > 1.0 + 1e-3 || real_rate_scale > 1.0 + 1e-3 {
-            events = events.insert(DesireControlEvents::LR_INCREASE);
-        }
-        if (clip_norm - clip_floor).abs() < 1e-3 {
-            events = events.insert(DesireControlEvents::CLIPPED);
-        }
-        if temperature_kappa > 0.0 {
-            events = events.insert(DesireControlEvents::TEMPERATURE_ADJUST);
-        }
-        if quality_gain > 0.0 {
-            events = events.insert(DesireControlEvents::QUALITY_BOOST);
-        }
-
-        Self {
-            penalty_gain,
-            bias_mix,
-            observation_gain,
-            damping,
-            hyper_rate_scale,
-            real_rate_scale,
-            operator_mix,
-            operator_gain,
-            tuning_gain,
-            target_entropy: entropy_bias,
-            learning_rate_eta: lr_eta,
-            learning_rate_min: lr_min,
-            learning_rate_max: lr_max,
-            learning_rate_slew: lr_slew,
-            clip_norm,
-            clip_floor,
-            clip_ceiling,
-            clip_ema,
-            temperature_kappa,
-            temperature_slew,
-            quality_gain,
-            quality_bias,
-            events,
-        }
+        DesireControlBuilder::new()
+            .with_interpretation(interpretation)
+            .with_gain(gain)
+            .finalise()
     }
 
     /// Hypergradient penalty amplification factor mirrored from the
@@ -1681,6 +1600,256 @@ impl Default for DesireGradientControl {
 impl From<DesireGradientInterpretation> for DesireGradientControl {
     fn from(value: DesireGradientInterpretation) -> Self {
         Self::from_interpretation(value)
+    }
+}
+
+/// Builder that assembles a [`DesireGradientControl`] packet from
+/// interpretation metrics and live telemetry (entropy, Z magnitude, quality
+/// estimates, etc.).
+#[derive(Clone, Debug)]
+pub struct DesireControlBuilder {
+    control: DesireGradientControl,
+    gain: f32,
+    entropy: f32,
+    target_entropy: f32,
+    entropy_eta: f32,
+    lr_min: f32,
+    lr_max: f32,
+    lr_slew: f32,
+    hyper_base: f32,
+    real_base: f32,
+    operator_mix: f32,
+    operator_gain: f32,
+    clip_hint: f32,
+    clip_floor: f32,
+    clip_ceiling: f32,
+    clip_ema: f32,
+    z_magnitude: f32,
+    z_kappa: f32,
+    z_slew: f32,
+    quality: f32,
+    quality_bias: f32,
+    quality_gain: f32,
+    events: DesireControlEvents,
+}
+
+impl DesireControlBuilder {
+    fn new() -> Self {
+        Self {
+            control: DesireGradientControl::default(),
+            gain: 1.0,
+            entropy: 0.8,
+            target_entropy: DesireGradientControl::default_target_entropy(),
+            entropy_eta: DesireGradientControl::default_lr_eta(),
+            lr_min: DesireGradientControl::default_lr_min(),
+            lr_max: DesireGradientControl::default_lr_max(),
+            lr_slew: DesireGradientControl::default_lr_slew(),
+            hyper_base: 1.0,
+            real_base: 1.0,
+            operator_mix: 1.0,
+            operator_gain: 1.0,
+            clip_hint: DesireGradientControl::default_clip_norm(),
+            clip_floor: DesireGradientControl::default_clip_floor(),
+            clip_ceiling: DesireGradientControl::default_clip_ceiling(),
+            clip_ema: DesireGradientControl::default_clip_ema(),
+            z_magnitude: 0.0,
+            z_kappa: DesireGradientControl::default_temperature_kappa(),
+            z_slew: DesireGradientControl::default_temperature_slew(),
+            quality: 1.0,
+            quality_bias: DesireGradientControl::default_quality_bias(),
+            quality_gain: DesireGradientControl::default_quality_gain(),
+            events: DesireControlEvents::NONE,
+        }
+    }
+
+    pub fn with_interpretation(mut self, interpretation: DesireGradientInterpretation) -> Self {
+        self.control.penalty_gain = interpretation.penalty_gain();
+        self.control.bias_mix = interpretation.bias_mix();
+        self.control.observation_gain = interpretation.observation_gain();
+        self.control.damping = interpretation.damping();
+
+        let imbalance = (interpretation.balance() - 1.0).clamp(-4.0, 4.0);
+        let saturation = interpretation.saturation().tanh().clamp(0.0, 1.0);
+        let stability = interpretation.stability().clamp(0.0, 1.0);
+        let caution = (1.0 - stability).clamp(0.0, 1.0);
+
+        let (hyper_base, real_base) = if imbalance >= 0.0 {
+            (
+                (1.0 / (1.0 + imbalance)).clamp(0.25, 1.0),
+                (1.0 + 0.5 * imbalance).clamp(1.0, 1.8),
+            )
+        } else {
+            (
+                (1.0 - 0.5 * imbalance).clamp(1.0, 1.8),
+                (1.0 / (1.0 - imbalance)).clamp(0.25, 1.0),
+            )
+        };
+
+        let hyper_guard = (1.0 - 0.6 * caution - 0.4 * saturation).clamp(0.25, 1.0);
+        let real_guard = (1.0 - 0.4 * caution - 0.25 * saturation).clamp(0.3, 1.0);
+        self.hyper_base = (hyper_base * hyper_guard).clamp(0.25, 1.8);
+        self.real_base = (real_base * real_guard).clamp(0.25, 1.8);
+
+        self.operator_mix = (0.4 + 0.6 * stability).clamp(0.25, 1.0);
+        self.operator_gain =
+            (self.control.penalty_gain * (1.0 - 0.35 * saturation)).clamp(0.5, 1.5);
+
+        self.target_entropy = 3.5 + 0.8 * caution;
+        self.entropy_eta = 0.08 + 0.14 * caution;
+        self.lr_slew = (0.25 - 0.15 * caution).clamp(0.05, 0.25);
+
+        let clip_floor = (0.18 + 0.12 * caution).clamp(0.15, 0.3);
+        let clip_target = interpretation
+            .saturation()
+            .max(interpretation.hyper_pressure() * 2.5)
+            .max(interpretation.real_pressure() * 3.0);
+        self.clip_floor = clip_floor;
+        self.clip_hint = (clip_target * (0.6 + 0.4 * self.gain)).clamp(clip_floor, 32.0);
+        self.clip_ceiling = (self.clip_hint * 1.6).max(self.clip_hint + 0.05);
+        self.clip_ema = (0.25 + 0.35 * caution).clamp(0.2, 0.6);
+
+        self.z_kappa = (0.02 + 0.08 * (1.0 - stability)).clamp(0.0, 0.12);
+        self.z_slew = (0.22 - 0.1 * caution).clamp(0.05, 0.22);
+
+        self.quality_gain = (0.6 + 0.4 * (1.0 - caution)).clamp(0.4, 1.0);
+
+        self
+    }
+
+    pub fn with_gain(mut self, gain: f32) -> Self {
+        self.gain = gain.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_entropy(mut self, entropy: f32) -> Self {
+        self.entropy = entropy.max(0.0);
+        self
+    }
+
+    pub fn with_target_entropy(mut self, target: f32) -> Self {
+        self.target_entropy = target.max(0.0);
+        self
+    }
+
+    pub fn with_entropy_eta(mut self, eta: f32) -> Self {
+        self.entropy_eta = eta.max(0.0);
+        self
+    }
+
+    pub fn with_bounds(mut self, min: f32, max: f32) -> Self {
+        self.lr_min = min.min(max).max(1e-8);
+        self.lr_max = max.max(self.lr_min + 1e-8);
+        self
+    }
+
+    pub fn with_slew_limit(mut self, slew: f32) -> Self {
+        self.lr_slew = slew.max(0.0);
+        self
+    }
+
+    pub fn with_clip_p95_hint(mut self, p95: f32) -> Self {
+        self.clip_hint = p95.max(0.0);
+        self
+    }
+
+    pub fn with_clip_parameters(mut self, floor: f32, ceiling: f32, ema: f32) -> Self {
+        self.clip_floor = floor.max(0.0);
+        self.clip_ceiling = ceiling.max(self.clip_floor + 1e-6);
+        self.clip_ema = ema.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_z_coupling(mut self, magnitude: f32) -> Self {
+        self.z_magnitude = magnitude.abs();
+        self
+    }
+
+    pub fn with_z_strength(mut self, kappa: f32) -> Self {
+        self.z_kappa = kappa.max(0.0);
+        self
+    }
+
+    pub fn with_quality(mut self, quality: f32) -> Self {
+        self.quality = quality.max(0.0);
+        self
+    }
+
+    pub fn with_quality_parameters(mut self, gain: f32, bias: f32) -> Self {
+        self.quality_gain = gain.max(0.0);
+        self.quality_bias = bias.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn finalise(mut self) -> DesireGradientControl {
+        self.control.tuning_gain = self.gain;
+        self.control.target_entropy = self.target_entropy;
+        self.control.learning_rate_eta = self.entropy_eta * self.gain;
+        self.control.learning_rate_min = self.lr_min;
+        self.control.learning_rate_max = self.lr_max;
+        self.control.learning_rate_slew = self.lr_slew;
+
+        self.control.clip_floor = self.clip_floor;
+        self.control.clip_ceiling = self.clip_ceiling.max(self.clip_floor + 1e-6);
+        self.control.clip_ema = self.clip_ema;
+        let clip_norm = self
+            .clip_hint
+            .clamp(self.control.clip_floor, self.control.clip_ceiling);
+        self.control.clip_norm = clip_norm;
+
+        let z_kappa = self.z_kappa * self.gain;
+        self.control.temperature_kappa = z_kappa;
+        self.control.temperature_slew = self.z_slew;
+        let z_suppress = (-z_kappa * self.z_magnitude).exp().clamp(0.05, 1.0);
+        if z_kappa > 0.0 && self.z_magnitude > 1e-3 {
+            self.events = self.events.insert(DesireControlEvents::Z_SUPPRESS);
+            self.events = self
+                .events
+                .insert(DesireControlEvents::TEMPERATURE_SUPPRESS);
+        }
+
+        let entropy_error = (self.target_entropy - self.entropy).clamp(-8.0, 8.0);
+        if entropy_error > 0.05 {
+            self.events = self.events.insert(DesireControlEvents::LR_INCREASE);
+        } else if entropy_error < -0.05 {
+            self.events = self.events.insert(DesireControlEvents::LR_DECREASE);
+        }
+
+        if (clip_norm - self.control.clip_floor).abs() < 1e-4 {
+            self.events = self.events.insert(DesireControlEvents::LR_CLIPPED);
+        }
+
+        if self.lr_slew < 0.1 {
+            self.events = self.events.insert(DesireControlEvents::SLEW_LIMIT);
+        }
+
+        let quality_bias = self.quality_bias;
+        self.control.quality_bias = quality_bias;
+        let quality_gain = (self.quality_gain * self.gain).max(0.0);
+        self.control.quality_gain = quality_gain;
+        let q_delta = (self.quality - quality_bias).clamp(-4.0, 4.0);
+        let quality_weight = 1.0 / (1.0 + (-quality_gain * q_delta).exp());
+        if quality_weight > 0.55 {
+            self.events = self.events.insert(DesireControlEvents::QUALITY_BOOST);
+        } else if quality_weight < 0.45 {
+            self.events = self.events.insert(DesireControlEvents::QUALITY_SUPPRESS);
+        }
+
+        let quality_scale = 0.4 + 0.9 * quality_weight;
+        self.control.hyper_rate_scale =
+            (self.hyper_base * z_suppress * quality_scale).clamp(0.1, 2.0);
+        self.control.real_rate_scale =
+            (self.real_base * z_suppress * quality_scale).clamp(0.1, 2.0);
+
+        self.control.operator_mix = self.operator_mix;
+        self.control.operator_gain = self.operator_gain;
+        self.control.events = self.events;
+        self.control
+    }
+}
+
+impl DesireGradientControl {
+    pub fn control_with_gain() -> DesireControlBuilder {
+        DesireControlBuilder::new()
     }
 }
 
@@ -2187,11 +2356,14 @@ mod tests {
         let interpretation = DesireGradientInterpretation::from_summaries(hyper, real);
         let control = interpretation.control();
         assert!(control.penalty_gain() >= interpretation.penalty_gain());
-        assert!(control.hyper_rate_scale() <= 1.0 + f32::EPSILON);
-        assert!(control.real_rate_scale() >= 0.25);
+        assert!(control.hyper_rate_scale() >= 0.1);
+        assert!(control.hyper_rate_scale() <= 2.0);
+        assert!(control.real_rate_scale() >= 0.1);
+        assert!(control.real_rate_scale() <= 2.0);
         assert!(control.operator_mix() <= 1.0);
         assert!(control.clip_norm() >= control.clip_floor());
         assert!(control.clip_ceiling() >= control.clip_norm());
+        assert!(control.learning_rate_min() >= 0.0);
         assert!(control.learning_rate_max() >= control.learning_rate_min());
         assert!(control.temperature_kappa() >= 0.0);
         assert!(control.events().bits() != 0);
@@ -2213,12 +2385,62 @@ mod tests {
     #[test]
     fn desire_control_events_report_labels() {
         let events = DesireControlEvents::LR_INCREASE
-            .insert(DesireControlEvents::CLIPPED)
-            .insert(DesireControlEvents::QUALITY_BOOST);
+            .insert(DesireControlEvents::LR_CLIPPED)
+            .insert(DesireControlEvents::QUALITY_SUPPRESS)
+            .insert(DesireControlEvents::SLEW_LIMIT);
         let labels = events.labels();
         assert!(labels.contains(&"lr_increase"));
-        assert!(labels.contains(&"clip_adjust"));
-        assert!(labels.contains(&"quality_weight"));
+        assert!(labels.contains(&"lr_clipped"));
+        assert!(labels.contains(&"quality_suppress"));
+        assert!(labels.contains(&"lr_slew_limit"));
+    }
+
+    #[test]
+    fn desire_control_builder_tracks_entropy_and_bounds() {
+        let control = DesireGradientControl::control_with_gain()
+            .with_entropy(0.5)
+            .with_target_entropy(3.0)
+            .with_bounds(1e-4, 5e-3)
+            .with_slew_limit(0.05)
+            .finalise();
+        assert!(control.learning_rate_min() >= 1e-4);
+        assert!((control.learning_rate_max() - 5e-3).abs() < 1e-8);
+        assert!(control.events().contains(DesireControlEvents::LR_INCREASE));
+        assert!(control.events().contains(DesireControlEvents::SLEW_LIMIT));
+    }
+
+    #[test]
+    fn desire_control_builder_marks_z_suppression() {
+        let control = DesireGradientControl::control_with_gain()
+            .with_z_strength(0.6)
+            .with_z_coupling(2.0)
+            .finalise();
+        assert!(control.temperature_kappa() > 0.0);
+        assert!(control.hyper_rate_scale() < 1.0);
+        assert!(control.events().contains(DesireControlEvents::Z_SUPPRESS));
+        assert!(control
+            .events()
+            .contains(DesireControlEvents::TEMPERATURE_SUPPRESS));
+    }
+
+    #[test]
+    fn desire_control_builder_quality_events() {
+        let boosted = DesireGradientControl::control_with_gain()
+            .with_quality_parameters(2.0, 0.1)
+            .with_quality(0.9)
+            .finalise();
+        assert!(boosted
+            .events()
+            .contains(DesireControlEvents::QUALITY_BOOST));
+
+        let suppressed = DesireGradientControl::control_with_gain()
+            .with_quality_parameters(2.0, 0.6)
+            .with_quality(0.05)
+            .finalise();
+        assert!(suppressed
+            .events()
+            .contains(DesireControlEvents::QUALITY_SUPPRESS));
+        assert!(suppressed.real_rate_scale() <= boosted.real_rate_scale());
     }
 
     #[test]

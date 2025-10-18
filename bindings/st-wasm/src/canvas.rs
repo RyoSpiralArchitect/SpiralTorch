@@ -419,14 +419,23 @@ impl CanvasDesireControl {
         if self.events & DesireControlEvents::LR_DECREASE.bits() != 0 {
             array.push(&JsValue::from_str("lr_decrease"));
         }
-        if self.events & DesireControlEvents::CLIPPED.bits() != 0 {
-            array.push(&JsValue::from_str("clip_adjust"));
+        if self.events & DesireControlEvents::LR_CLIPPED.bits() != 0 {
+            array.push(&JsValue::from_str("lr_clipped"));
         }
-        if self.events & DesireControlEvents::TEMPERATURE_ADJUST.bits() != 0 {
-            array.push(&JsValue::from_str("temperature_adjust"));
+        if self.events & DesireControlEvents::TEMPERATURE_SUPPRESS.bits() != 0 {
+            array.push(&JsValue::from_str("temperature_suppress"));
         }
         if self.events & DesireControlEvents::QUALITY_BOOST.bits() != 0 {
             array.push(&JsValue::from_str("quality_weight"));
+        }
+        if self.events & DesireControlEvents::QUALITY_SUPPRESS.bits() != 0 {
+            array.push(&JsValue::from_str("quality_suppress"));
+        }
+        if self.events & DesireControlEvents::Z_SUPPRESS.bits() != 0 {
+            array.push(&JsValue::from_str("z_suppress"));
+        }
+        if self.events & DesireControlEvents::SLEW_LIMIT.bits() != 0 {
+            array.push(&JsValue::from_str("lr_slew_limit"));
         }
         array
     }
@@ -605,15 +614,17 @@ impl FractalCanvas {
     }
 
     /// Refresh the projector, derive Desire's control packet, and pack it into
-    /// a WGSL-friendly uniform layout.
+    /// a WGSL-friendly uniform layout. The returned `Uint32Array` holds the raw
+    /// IEEE-754 bits so callers can reinterpret the underlying buffer as a
+    /// `Float32Array` when uploading to WebGPU.
     #[wasm_bindgen(js_name = desireControlUniform)]
-    pub fn desire_control_uniform(&mut self, curvature: f32) -> Result<Float32Array, JsValue> {
+    pub fn desire_control_uniform(&mut self, curvature: f32) -> Result<Uint32Array, JsValue> {
         let control = self
             .projector
             .gradient_control(curvature)
             .map_err(js_error)?;
         let packed = self.projector.desire_control_uniform(&control);
-        Ok(Float32Array::from(packed.as_slice()))
+        Ok(Uint32Array::from(packed.as_slice()))
     }
 
     /// Emit the WGSL kernel that mirrors [`vector_field_fft`] so WebGPU

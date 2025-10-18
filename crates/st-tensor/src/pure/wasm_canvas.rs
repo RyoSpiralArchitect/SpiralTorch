@@ -728,24 +728,24 @@ impl CanvasProjector {
     /// Pack Desire's control feedback into a 16-float uniform suitable for WGSL
     /// consumption. The layout keeps every block aligned to 16 bytes so WebGPU
     /// callers can upload it without manual padding or serde churn.
-    pub fn desire_control_uniform(&self, control: &DesireGradientControl) -> [f32; 16] {
+    pub fn desire_control_uniform(&self, control: &DesireGradientControl) -> [u32; 16] {
         [
-            control.target_entropy(),
-            control.learning_rate_eta(),
-            control.learning_rate_min(),
-            control.learning_rate_max(),
-            control.learning_rate_slew(),
-            control.clip_norm(),
-            control.clip_floor(),
-            control.clip_ceiling(),
-            control.clip_ema(),
-            control.temperature_kappa(),
-            control.temperature_slew(),
-            control.quality_gain(),
-            control.quality_bias(),
-            control.hyper_rate_scale(),
-            control.real_rate_scale(),
-            control.tuning_gain(),
+            control.target_entropy().to_bits(),
+            control.learning_rate_eta().to_bits(),
+            control.learning_rate_min().to_bits(),
+            control.learning_rate_max().to_bits(),
+            control.learning_rate_slew().to_bits(),
+            control.clip_norm().to_bits(),
+            control.clip_floor().to_bits(),
+            control.clip_ceiling().to_bits(),
+            control.clip_ema().to_bits(),
+            control.temperature_kappa().to_bits(),
+            control.temperature_slew().to_bits(),
+            control.hyper_rate_scale().to_bits(),
+            control.real_rate_scale().to_bits(),
+            control.tuning_gain().to_bits(),
+            control.quality_gain().to_bits(),
+            control.events().bits(),
         ]
     }
 
@@ -1180,10 +1180,10 @@ mod tests {
         assert!((uniform[3] - control.operator_gain()).abs() < 1e-6);
         let packed = projector.desire_control_uniform(&control);
         assert_eq!(packed.len(), 16);
-        assert!((packed[0] - control.target_entropy()).abs() < 1e-6);
-        assert!((packed[1] - control.learning_rate_eta()).abs() < 1e-6);
-        assert!((packed[5] - control.clip_norm()).abs() < 1e-6);
-        assert!((packed[9] - control.temperature_kappa()).abs() < 1e-6);
+        assert!((f32::from_bits(packed[0]) - control.target_entropy()).abs() < 1e-6);
+        assert!((f32::from_bits(packed[1]) - control.learning_rate_eta()).abs() < 1e-6);
+        assert!((f32::from_bits(packed[5]) - control.clip_norm()).abs() < 1e-6);
+        assert!((f32::from_bits(packed[9]) - control.temperature_kappa()).abs() < 1e-6);
     }
 
     #[test]
