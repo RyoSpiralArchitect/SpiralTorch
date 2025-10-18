@@ -34,6 +34,11 @@ hip = []
 # Deterministic sampling helpers for pure tensor stochastic initialisers.
 rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
 rand_distr = { version = "0.4", default-features = false, features = ["std"] }
+# Fractional calculus + FFT helpers shared with the WASM canvas transformer.
+st-frac = { path = "../st-frac" }
+# Structured serialisation for gradient feedback packets shared across
+# automation layers and WASM bindings.
+serde = { version = "1.0", features = ["derive"], default-features = false }
 # High-performance SIMD dense linear algebra for CPU matmul acceleration.
 faer = { version = "0.18", default-features = false, features = ["std"], optional = true }
 # Optional; only needed if building WGPU kernel
