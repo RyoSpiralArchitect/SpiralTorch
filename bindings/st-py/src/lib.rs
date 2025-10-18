@@ -25,10 +25,13 @@ use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::config::self_rewrite::SelfRewriteCfg;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::hub::{self, DesirePhaseTelemetry, DesireStepTelemetry};
+use st_core::telemetry::hub::{
+    self, DesireAvoidanceTelemetry, DesirePhaseTelemetry, DesireStepTelemetry, DesireTriggerTelemetry,
+    DesireWeightsTelemetry, SoftlogicZFeedback,
+};
+use st_core::telemetry::psi::PsiEvent;
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::DriveCmd;
-use st_core::ops::rank_entry::{plan_rank, RankPlan};
 use st_core::telemetry::atlas::{
     AtlasDistrict, AtlasDistrictSummary, AtlasFrame, AtlasMetric, AtlasMetricFocus,
     AtlasPerspective, AtlasRoute, AtlasRouteSummary,
@@ -383,11 +386,89 @@ fn desire_telemetry_to_py<'py>(
     dict.set_item("trigger_emitted", sample.trigger_emitted)?;
 
     let weights = PyDict::new_bound(py);
-    weights.set_item("alpha", sample.alpha)?;
-    weights.set_item("beta", sample.beta)?;
-    weights.set_item("gamma", sample.gamma)?;
-    weights.set_item("lambda", sample.lambda)?;
+    weights.set_item("alpha", sample.weights.alpha)?;
+    weights.set_item("beta", sample.weights.beta)?;
+    weights.set_item("gamma", sample.weights.gamma)?;
+    weights.set_item("lambda", sample.weights.lambda)?;
     dict.set_item("weights", weights)?;
+    dict.set_item("alpha", sample.alpha)?;
+    dict.set_item("beta", sample.beta)?;
+    dict.set_item("gamma", sample.gamma)?;
+    dict.set_item("lambda", sample.lambda)?;
+
+    if let Some(avoidance) = &sample.avoidance {
+        let avoidance_dict = PyDict::new_bound(py);
+        avoidance_dict.set_item("tokens", avoidance.tokens.clone())?;
+        avoidance_dict.set_item("scores", avoidance.scores.clone())?;
+        dict.set_item("avoidance", avoidance_dict)?;
+    } else {
+        dict.set_item("avoidance", py.None())?;
+    }
+
+    if let Some(trigger) = &sample.trigger {
+        let trigger_dict = PyDict::new_bound(py);
+        trigger_dict.set_item("mean_penalty", trigger.mean_penalty)?;
+        trigger_dict.set_item("mean_entropy", trigger.mean_entropy)?;
+        trigger_dict.set_item("temperature", trigger.temperature)?;
+        trigger_dict.set_item("samples", trigger.samples)?;
+        dict.set_item("trigger", trigger_dict)?;
+    } else {
+        dict.set_item("trigger", py.None())?;
+    }
+
+    if let Some(total) = sample.psi_total {
+        dict.set_item("psi_total", total)?;
+    } else {
+        dict.set_item("psi_total", py.None())?;
+    }
+
+    let breakdown = PyDict::new_bound(py);
+    for (component, value) in &sample.psi_breakdown {
+        breakdown.set_item(component.to_string(), *value)?;
+    }
+    dict.set_item("psi_breakdown", breakdown)?;
+
+    let events = PyList::empty_bound(py);
+    for event in &sample.psi_events {
+        match event {
+            PsiEvent::ThresholdCross {
+                component,
+                value,
+                threshold,
+                up,
+                step,
+            } => {
+                let event_dict = PyDict::new_bound(py);
+                event_dict.set_item("kind", "threshold_cross")?;
+                event_dict.set_item("component", component.to_string())?;
+                event_dict.set_item("value", *value)?;
+                event_dict.set_item("threshold", *threshold)?;
+                event_dict.set_item("up", *up)?;
+                event_dict.set_item("step", *step)?;
+                events.append(event_dict)?;
+            }
+        }
+    }
+    dict.set_item("psi_events", events)?;
+
+    if let Some(feedback) = &sample.z_feedback {
+        let feedback_dict = PyDict::new_bound(py);
+        feedback_dict.set_item("psi_total", feedback.psi_total)?;
+        feedback_dict.set_item("weighted_loss", feedback.weighted_loss)?;
+        feedback_dict.set_item(
+            "band_energy",
+            (
+                feedback.band_energy.0,
+                feedback.band_energy.1,
+                feedback.band_energy.2,
+            ),
+        )?;
+        feedback_dict.set_item("drift", feedback.drift)?;
+        feedback_dict.set_item("z_signal", feedback.z_signal)?;
+        dict.set_item("z_feedback", feedback_dict)?;
+    } else {
+        dict.set_item("z_feedback", py.None())?;
+    }
 
     Ok(dict.into_py(py))
 }
@@ -2194,6 +2275,20 @@ impl PyTemperatureController {
     #[getter]
     fn value(&self) -> f32 {
         self.inner.value()
+    }
+
+    fn observe_grad(&mut self, norm: f32, sparsity: f32) {
+        self.inner.observe_grad(norm, sparsity);
+    }
+
+    fn update(&mut self, distribution: Vec<f32>) -> f32 {
+        self.inner.update(&distribution)
+    }
+
+    #[pyo3(signature = (distribution, gradient_gain=1.0))]
+    fn update_with_gradient(&mut self, distribution: Vec<f32>, gradient_gain: f32) -> f32 {
+        self.inner
+            .update_with_gradient(&distribution, gradient_gain)
     }
 }
 
@@ -5367,6 +5462,8 @@ impl PyGoldenBlackcatPulse {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
     #[getter]
     fn mean_confidence(&self) -> f32 {
         self.inner.mean_confidence
@@ -5682,6 +5779,8 @@ impl PyGoldenCouncilSnapshot {
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
 struct PyModuleTrainer {
     inner: ModuleTrainer,
+}
+
 #[pyclass(module = "spiraltorch", name = "AtlasFrame")]
 #[derive(Clone)]
 struct PyAtlasFrame {
@@ -5838,6 +5937,8 @@ impl PyAtlasFrame {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
     #[getter]
     fn suggested_max_scale(&self) -> Option<f32> {
         self.frame.suggested_max_scale
@@ -6545,6 +6646,9 @@ impl PyChronoFrame {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
+    #[getter]
     fn energy_decay(&self) -> f32 {
         self.frame.energy_decay
     }
@@ -6853,6 +6957,8 @@ impl PyCollapsePulse {
     fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
         self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
         Ok(())
+    }
+
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {
@@ -8135,6 +8241,8 @@ impl PyChronoPeak {
             list.append(entry.into_py(py))?;
         }
         Ok(list.into_py(py))
+    }
+
 #[pyclass(module = "spiraltorch", name = "TextResonator")]
 #[derive(Clone)]
 struct PyTextResonator {
@@ -8213,6 +8321,8 @@ impl PyTextResonator {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
 #[pymethods]
 impl PyTextResonator {
     #[new]
@@ -9143,6 +9253,8 @@ impl PyChronoHarmonics {
     fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
         self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
         Ok(())
+    }
+
     #[getter]
     fn duration(&self) -> f32 {
         self.harmonics.duration
@@ -9807,6 +9919,8 @@ impl PyChronoSummary {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
     #[getter]
     fn mean_drift(&self) -> f32 {
         self.summary.mean_drift
@@ -10456,6 +10570,9 @@ impl PyChronoLoopSignal {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
+    #[getter]
     fn harmonics(&self) -> Option<PyChronoHarmonics> {
         self.signal
             .harmonics
@@ -10682,6 +10799,8 @@ impl PyChronoFrame {
     fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
         self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
         Ok(())
+    }
+
     #[getter]
     fn projection_energy(&self) -> f32 {
         self.frame.projection_energy
@@ -11608,6 +11727,8 @@ impl PyMaintainerReport {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
     #[getter]
     fn mean_score(&self) -> f32 {
         self.minutes.mean_score
@@ -14751,6 +14872,8 @@ impl PyModuleTrainer {
             .into_iter()
             .map(PyMaintainerReport::from_minutes)
             .collect()
+    }
+
     fn blackcat_minutes<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
         let minutes = self.inner.blackcat_minutes();
         let list = PyList::empty_bound(py);
@@ -18113,6 +18236,26 @@ impl PyRecommender {
         let mut guard = self.inner.lock().unwrap();
         let report = guard.train_epoch(&triples).map_err(rec_err)?;
         Ok(PyRecEpochReport { inner: report })
+    }
+
+    #[pyo3(signature = (user, k, exclude=None))]
+    fn recommend_top_k(
+        &self,
+        user: usize,
+        k: usize,
+        exclude: Option<Vec<usize>>,
+    ) -> PyResult<Vec<(usize, f32)>> {
+        let exclude = exclude.unwrap_or_default();
+        let exclude_slice = if exclude.is_empty() {
+            None
+        } else {
+            Some(exclude.as_slice())
+        };
+        let guard = self.inner.lock().unwrap();
+        let recs = guard
+            .recommend_top_k(user, k, exclude_slice)
+            .map_err(rec_err)?;
+        Ok(recs.into_iter().map(|rec| (rec.item, rec.score)).collect())
     }
 
     fn user_embedding(&self, user: usize) -> PyResult<PyTensor> {

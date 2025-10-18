@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 use st_tensor::{topos::OpenCartesianTopos, Tensor, TensorError};
 
@@ -67,6 +67,13 @@ pub struct RecEpochReport {
     pub rmse: f32,
     pub samples: usize,
     pub regularization_penalty: f32,
+}
+
+/// Ranked item recommendation for a specific user.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recommendation {
+    pub item: usize,
+    pub score: f32,
 }
 
 /// Matrix factorisation harness backed by SpiralTorch tensors and open topos guards.
@@ -239,5 +246,90 @@ impl SpiralRecommender {
     /// Returns the latent factor dimensionality.
     pub fn factors(&self) -> usize {
         self.factors
+    }
+
+    /// Produces the top-K ranked items for a user while respecting optional exclusions.
+    pub fn recommend_top_k(
+        &self,
+        user: usize,
+        k: usize,
+        exclude: Option<&[usize]>,
+    ) -> RecResult<Vec<Recommendation>> {
+        if k == 0 {
+            return Ok(Vec::new());
+        }
+
+        self.guard_indices(user, 0)?;
+        let user_slice = &self.user_factors.data()[user * self.factors..(user + 1) * self.factors];
+
+        let skip = exclude.map(|items| {
+            let mut set = HashSet::with_capacity(items.len());
+            set.extend(items.iter().copied());
+            set
+        });
+
+        let mut recommendations = Vec::with_capacity(self.items);
+        for item in 0..self.items {
+            if skip.as_ref().is_some_and(|set| set.contains(&item)) {
+                continue;
+            }
+
+            let item_slice =
+                &self.item_factors.data()[item * self.factors..(item + 1) * self.factors];
+            let score = user_slice
+                .iter()
+                .zip(item_slice.iter())
+                .map(|(u, i)| u * i)
+                .sum();
+            recommendations.push(Recommendation { item, score });
+        }
+
+        recommendations.sort_by(|a, b| b.score.total_cmp(&a.score));
+        if recommendations.len() > k {
+            recommendations.truncate(k);
+        }
+
+        Ok(recommendations)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_basic_recommender() -> SpiralRecommender {
+        let mut rec = SpiralRecommender::new(2, 5, 3, 0.05, 0.01, -1.0).unwrap();
+        let ratings = vec![
+            RatingTriple::new(0, 0, 5.0),
+            RatingTriple::new(0, 1, 3.0),
+            RatingTriple::new(0, 2, 1.0),
+            RatingTriple::new(1, 2, 4.0),
+            RatingTriple::new(1, 3, 2.0),
+        ];
+
+        for _ in 0..8 {
+            rec.train_epoch(&ratings).unwrap();
+        }
+        rec
+    }
+
+    #[test]
+    fn recommend_top_k_orders_scores_descending() {
+        let rec = build_basic_recommender();
+        let results = rec.recommend_top_k(0, 3, None).unwrap();
+        assert!(results.len() <= 3);
+        for window in results.windows(2) {
+            assert!(window[0].score >= window[1].score - f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn recommend_top_k_respects_exclusions_and_limits() {
+        let rec = build_basic_recommender();
+        let exclude = vec![0, 3];
+        let results = rec.recommend_top_k(0, 10, Some(&exclude)).unwrap();
+        assert!(results.iter().all(|rec| !exclude.contains(&rec.item)));
+        assert!(results.len() <= rec.items() - exclude.len());
+        assert!(rec.recommend_top_k(0, 0, None).unwrap().is_empty());
     }
 }

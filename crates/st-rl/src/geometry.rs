@@ -10,7 +10,9 @@ use st_core::telemetry::hub::LoopbackEnvelope;
 use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
-use st_core::util::math::LeechProjector;
+use st_core::util::math::{
+    ramanujan_pi as shared_ramanujan_pi, LeechProjector, LEECH_PACKING_DENSITY,
+};
 use st_tensor::{DifferentialResonance, Tensor};
 
 /// Configuration describing how geometric observability is converted into
@@ -115,6 +117,7 @@ pub struct GeometryFeedback {
     leech_weight: f64,
     leech_projector: LeechProjector,
     ramanujan_pi: f64,
+    pressure_baseline: f64,
     softening_beta: f32,
     base_softening_beta: f32,
     rank_history: VecDeque<f64>,
@@ -156,9 +159,10 @@ impl GeometryFeedback {
         min_scale = min_scale.min(clamped_max - f32::EPSILON).max(f32::EPSILON);
         let z_rank = config.z_space_rank.max(1);
         let leech_weight = config.leech_density_weight.max(0.0);
-        let ramanujan_pi = Self::ramanujan_pi(config.ramanujan_iterations.max(1));
+        let ramanujan_pi = shared_ramanujan_pi(config.ramanujan_iterations.max(1));
         let softening_beta = config.softening_beta.max(0.0);
         let leech_projector = LeechProjector::new(z_rank, leech_weight);
+        let pressure_baseline = LEECH_PACKING_DENSITY * (z_rank.max(1) as f64).sqrt();
 
         Self {
             coalgebra: ObservationalCoalgebra::new(config.observability),
@@ -171,6 +175,7 @@ impl GeometryFeedback {
             leech_weight,
             leech_projector,
             ramanujan_pi,
+            pressure_baseline,
             softening_beta,
             base_softening_beta: softening_beta,
             rank_history: VecDeque::with_capacity(window),
@@ -470,7 +475,8 @@ impl GeometryFeedback {
         }
         let averaged = self.history.iter().copied().sum::<f64>() / self.history.len() as f64;
         let geodesic = self.geodesic_projection(resonance);
-        let densified = self.leech_projector.enrich(geodesic);
+        let pressure_baseline = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
+        let densified = self.leech_projector.enrich(geodesic) + pressure_baseline;
         let normalized = ((averaged + densified) / self.ramanujan_pi).clamp(0.0, 1.0);
         let softened = self.soft_project(normalized as f32);
         let mut scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
@@ -594,7 +600,8 @@ impl GeometryFeedback {
             self.max_scale = recommended.max(self.min_scale + f32::EPSILON);
         }
 
-        let max_pressure = LeechProjector::new(self.z_rank, 1.0).enrich(1.0);
+        let pressure_baseline = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
+        let max_pressure = pressure_baseline + LeechProjector::new(self.z_rank, 1.0).enrich(1.0);
         if max_pressure > 0.0 {
             let pressure_ratio = (pressure / max_pressure).clamp(0.0, 4.0);
             if pressure_ratio > 1.2 {
@@ -650,19 +657,7 @@ impl GeometryFeedback {
     }
 
     fn ramanujan_pi(iterations: usize) -> f64 {
-        let mut sum = 0.0;
-        let mut factor = 1.0;
-        let base = 396_f64.powi(4);
-        for k in 0..iterations {
-            sum += factor * (1103.0 + 26390.0 * k as f64);
-            let k1 = k + 1;
-            let numerator =
-                (4 * k1 - 3) as f64 * (4 * k1 - 2) as f64 * (4 * k1 - 1) as f64 * (4 * k1) as f64;
-            let denominator = (k1 as f64).powi(4) * base;
-            factor *= numerator / denominator;
-        }
-        let prefactor = (2.0 * 2.0_f64.sqrt()) / 9801.0;
-        (prefactor * sum).recip()
+        shared_ramanujan_pi(iterations)
     }
 }
 

@@ -17,7 +17,7 @@ hip      = ["dep:st-backend-hip"]
 wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:once_cell"]
 wgpu-rt  = ["wgpu"]
 mps      = []
-cuda     = []
+cuda     = ["dep:cudarc"]
 logic    = ["dep:st-logic"]
 "logic-learn" = ["logic", "st-logic/learn_store"]
 kdsl     = ["dep:st-kdsl", "logic"]
@@ -32,9 +32,12 @@ thiserror   = "1"
 rand        = "0.8"
 serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
+toml        = "0.8"
 dirs        = "5"
 statrs      = "0.16"
 ndarray     = "0.15"
+rustc-hash  = "1.1"
+rustfft     = "6"
 
 once_cell   = { version = "1.19", optional = true }
 bytemuck    = { version = "1.16", optional = true, features = ["derive"] }
@@ -47,6 +50,7 @@ st-logic       = { path = "../st-logic",       optional = true }
 st-kdsl        = { path = "../st-kdsl",        optional = true }
 st-kv          = { path = "../st-kv",          optional = true }
 st-frac        = { path = "../st-frac" }
+cudarc         = { version = "0.11", optional = true, features = ["nvrtc"] }
 
 [dev-dependencies]
 approx = "0.5"
