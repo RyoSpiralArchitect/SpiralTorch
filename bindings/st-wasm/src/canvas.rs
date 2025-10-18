@@ -133,6 +133,15 @@ impl FractalCanvas {
         Uint32Array::from(params.as_slice())
     }
 
+    /// Compute the workgroup dispatch dimensions that pair with
+    /// [`vector_field_fft_kernel`]. The returned `[x, y, z]` triplet already
+    /// accounts for the workgroup size when toggling subgroup execution.
+    #[wasm_bindgen(js_name = vectorFieldFftDispatch)]
+    pub fn vector_field_fft_dispatch(&self, subgroup: bool) -> Uint32Array {
+        let dispatch = self.projector.vector_fft_dispatch(subgroup);
+        Uint32Array::from(dispatch.as_slice())
+    }
+
     /// Reset the internal normaliser so the next frame recomputes brightness ranges.
     pub fn reset_normalizer(&mut self) {
         self.projector.normalizer_mut().reset();
