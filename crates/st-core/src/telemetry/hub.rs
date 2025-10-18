@@ -275,14 +275,7 @@ pub fn snapshot_dashboard_frames(limit: usize) -> Vec<DashboardFrame> {
     }
     dashboard_ring()
         .read()
-        .map(|guard| {
-            guard
-                .iter()
-                .rev()
-                .take(limit)
-                .cloned()
-                .collect()
-        })
+        .map(|guard| guard.iter().rev().take(limit).cloned().collect())
         .unwrap_or_default()
 }
 
