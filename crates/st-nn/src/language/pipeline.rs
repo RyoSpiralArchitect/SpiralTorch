@@ -149,32 +149,12 @@ impl DesireTelemetrySink {
 
 #[cfg(feature = "psi")]
 impl DesireTelemetrySink {
-    fn phase_to_telemetry(phase: DesirePhase) -> DesirePhaseTelemetry {
-        match phase {
-            DesirePhase::Observation => DesirePhaseTelemetry::Observation,
-            DesirePhase::Injection => DesirePhaseTelemetry::Injection,
-            DesirePhase::Integration => DesirePhaseTelemetry::Integration,
-        }
-    }
-
-    fn avoidance_energy(solution: &DesireSolution) -> f32 {
-        solution
-            .avoidance
-            .as_ref()
-            .map(|report| report.scores.iter().copied().map(f32::abs).sum())
-            .unwrap_or(0.0)
-    }
-
-    fn logit_energy(solution: &DesireSolution) -> f32 {
-        solution.logit_offsets.iter().copied().map(f32::abs).sum()
-    }
-}
-
-#[cfg(feature = "psi")]
-impl DesirePipelineSink for DesireTelemetrySink {
-    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
+    fn base_sample(
+        step: &DesireAutomatedStep,
+        timestamp: SystemTime,
+    ) -> DesireStepTelemetry {
         let weights = &step.solution.weights;
-        let sample = DesireStepTelemetry {
+        DesireStepTelemetry {
             timestamp,
             phase: Self::phase_to_telemetry(step.solution.phase),
             temperature: step.solution.temperature,
@@ -211,8 +191,34 @@ impl DesirePipelineSink for DesireTelemetrySink {
             gamma: weights.gamma,
             lambda: weights.lambda,
             trigger_emitted: step.trigger.is_some(),
-        };
-        hub::set_last_desire_step(sample);
+        }
+    }
+
+    fn phase_to_telemetry(phase: DesirePhase) -> DesirePhaseTelemetry {
+        match phase {
+            DesirePhase::Observation => DesirePhaseTelemetry::Observation,
+            DesirePhase::Injection => DesirePhaseTelemetry::Injection,
+            DesirePhase::Integration => DesirePhaseTelemetry::Integration,
+        }
+    }
+
+    fn avoidance_energy(solution: &DesireSolution) -> f32 {
+        solution
+            .avoidance
+            .as_ref()
+            .map(|report| report.scores.iter().copied().map(f32::abs).sum())
+            .unwrap_or(0.0)
+    }
+
+    fn logit_energy(solution: &DesireSolution) -> f32 {
+        solution.logit_offsets.iter().copied().map(f32::abs).sum()
+    }
+}
+
+#[cfg(feature = "psi")]
+impl DesirePipelineSink for DesireTelemetrySink {
+    fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
+        hub::set_last_desire_step(Self::base_sample(step, timestamp));
         Ok(())
     }
 }
@@ -1077,69 +1083,15 @@ impl DesirePipelineSink for DesirePsiBridge {
         let reading = hub::get_last_psi();
         let events = hub::get_last_psi_events();
         let z_feedback = hub::get_softlogic_z();
-        let phase = match step.solution.phase {
-            DesirePhase::Observation => DesirePhaseTelemetry::Observation,
-            DesirePhase::Injection => DesirePhaseTelemetry::Injection,
-            DesirePhase::Integration => DesirePhaseTelemetry::Integration,
-        };
-        let weights = DesireWeightsTelemetry {
-            alpha: step.solution.weights.alpha,
-            beta: step.solution.weights.beta,
-            gamma: step.solution.weights.gamma,
-            lambda: step.solution.weights.lambda,
-        };
-        let avoidance_energy = step
-            .solution
-            .avoidance
-            .as_ref()
-            .map(|report| report.scores.iter().copied().map(f32::abs).sum())
-            .unwrap_or(0.0);
-        let logit_energy = step
-            .solution
-            .logit_offsets
-            .iter()
-            .copied()
-            .map(f32::abs)
-            .sum();
-        let avoidance = step
-            .solution
-            .avoidance
-            .clone()
-            .map(|report| DesireAvoidanceTelemetry {
-                tokens: report.tokens,
-                scores: report.scores,
-            });
-        let trigger_snapshot = step.trigger.as_ref().map(|trigger| DesireTriggerTelemetry {
-            mean_penalty: trigger.mean_penalty,
-            mean_entropy: trigger.mean_entropy,
-            temperature: trigger.temperature,
-            samples: trigger.samples,
-        });
-        let psi_breakdown = reading
+        let mut sample = DesireTelemetrySink::base_sample(step, timestamp);
+        sample.psi_total = reading.as_ref().map(|value| value.total);
+        sample.psi_breakdown = reading
             .as_ref()
             .map(|value| value.breakdown.clone())
             .unwrap_or_default();
-        hub::set_last_desire_step(DesireStepTelemetry {
-            timestamp,
-            entropy: step.solution.entropy,
-            temperature: step.solution.temperature,
-            hypergrad_penalty: step.solution.hypergrad_penalty,
-            avoidance_energy,
-            logit_energy,
-            phase,
-            weights,
-            alpha: step.solution.weights.alpha,
-            beta: step.solution.weights.beta,
-            gamma: step.solution.weights.gamma,
-            lambda: step.solution.weights.lambda,
-            avoidance,
-            trigger: trigger_snapshot,
-            trigger_emitted: step.trigger.is_some(),
-            psi_total: reading.as_ref().map(|value| value.total),
-            psi_breakdown,
-            psi_events: events.clone(),
-            z_feedback,
-        });
+        sample.psi_events = events.clone();
+        sample.z_feedback = z_feedback;
+        hub::set_last_desire_step(sample);
         let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
             label: "desire psi bridge poisoned",
         })?;
