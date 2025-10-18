@@ -5,7 +5,7 @@ use st_core::backend::wgpu_heuristics::{self, Choice};
 use st_frac::fft::{self, Complex32};
 use wasm_bindgen::prelude::*;
 
-use crate::utils::{js_error, json_to_js_value, stringify_js_value};
+use crate::utils::js_error;
 
 #[wasm_bindgen]
 pub struct WasmFftPlan {
@@ -84,7 +84,7 @@ impl WasmFftPlan {
     /// Convert the plan into a plain JavaScript object with the same fields as [`toJson`].
     #[wasm_bindgen(js_name = toObject)]
     pub fn to_object(&self) -> Result<JsValue, JsValue> {
-        JsValue::from_serde(&self.plan).map_err(|err| js_error(err))
+        JsValue::from_serde(&self.plan).map_err(js_error)
     }
 
     /// Rebuild a plan from a JSON string produced by [`toJson`].
@@ -97,9 +97,7 @@ impl WasmFftPlan {
     /// Rebuild a plan from a plain JavaScript object with the same fields as [`toObject`].
     #[wasm_bindgen(js_name = fromObject)]
     pub fn from_object(value: &JsValue) -> Result<WasmFftPlan, JsValue> {
-        let plan = value
-            .into_serde::<SpiralKFftPlan>()
-            .map_err(|err| js_error(err))?;
+        let plan = value.into_serde::<SpiralKFftPlan>().map_err(js_error)?;
         Ok(WasmFftPlan::from_plan(plan))
     }
 }

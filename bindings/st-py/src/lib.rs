@@ -47,7 +47,6 @@ use st_core::ecosystem::{
     RoundtableConfigSummary as CoreRoundtableConfigSummary,
     RoundtableSummary as CoreRoundtableSummary,
 };
-};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::runtime::blackcat::BlackcatRuntimeStats;
 use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary};
@@ -18523,23 +18522,6 @@ fn train_trainer_with_dataset(
                 mse.inner_mut(),
                 dataset.to_vec(),
                 schedule,
-            let stats = convert(lightning.train_epoch(
-                linear.borrow_mut()?,
-                mse.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-        }
-    }
-    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
-        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
-            let stats = convert(lightning.train_epoch(
-                linear.borrow_mut()?,
-                hce.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-                dataset.clone(),
             ))?;
             return Ok(Some(stats));
         }
@@ -18641,7 +18623,6 @@ fn run_epoch_with_trainer(
 
     Err(PyValueError::new_err(
         "ModuleTrainer.train_epoch expects a supported module/loss pairing",
-        "SpiralLightning.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
     ))
 }
 
@@ -18692,20 +18673,21 @@ fn train_lightning_with_dataset(
     loss: &Bound<'_, PyAny>,
     dataset: &[(Tensor, Tensor)],
 ) -> PyResult<Option<EpochStats>> {
-    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+    // Sequential
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
             let stats = convert(lightning.train_epoch(
-                seq.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 mse.inner_mut(),
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
         }
     }
-    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
         if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
             let stats = convert(lightning.train_epoch(
-                seq.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 hce.inner_mut(),
                 dataset.to_vec(),
             ))?;
@@ -18713,20 +18695,21 @@ fn train_lightning_with_dataset(
         }
     }
 
-    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+    // Linear
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
             let stats = convert(lightning.train_epoch(
-                linear.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 mse.inner_mut(),
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
         }
     }
-    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
         if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
             let stats = convert(lightning.train_epoch(
-                linear.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 hce.inner_mut(),
                 dataset.to_vec(),
             ))?;
@@ -18734,20 +18717,21 @@ fn train_lightning_with_dataset(
         }
     }
 
-    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+    // Relu
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyReluModule>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
             let stats = convert(lightning.train_epoch(
-                relu.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 mse.inner_mut(),
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
         }
     }
-    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyReluModule>>() {
         if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
             let stats = convert(lightning.train_epoch(
-                relu.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 hce.inner_mut(),
                 dataset.to_vec(),
             ))?;
@@ -18755,20 +18739,21 @@ fn train_lightning_with_dataset(
         }
     }
 
-    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+    // Conv1d
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
             let stats = convert(lightning.train_epoch(
-                conv.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 mse.inner_mut(),
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
         }
     }
-    if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
         if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
             let stats = convert(lightning.train_epoch(
-                conv.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 hce.inner_mut(),
                 dataset.to_vec(),
             ))?;
@@ -18776,26 +18761,21 @@ fn train_lightning_with_dataset(
         }
     }
 
-    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+    // WaveRnn
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
             let stats = convert(lightning.train_epoch(
-                wave.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 mse.inner_mut(),
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
         }
     }
-    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
         if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
             let stats = convert(lightning.train_epoch(
-                wave.borrow_mut()?,
-        }
-    }
-    if let Ok(mut wave) = module.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
-        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
-            let stats = convert(lightning.train_epoch(
-                wave.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 hce.inner_mut(),
                 dataset.to_vec(),
             ))?;
@@ -18803,20 +18783,21 @@ fn train_lightning_with_dataset(
         }
     }
 
-    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+    // ZSpace projector
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
             let stats = convert(lightning.train_epoch(
-                projector.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 mse.inner_mut(),
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
         }
     }
-    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
         if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
             let stats = convert(lightning.train_epoch(
-                projector.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 hce.inner_mut(),
                 dataset.to_vec(),
             ))?;
@@ -18824,168 +18805,43 @@ fn train_lightning_with_dataset(
         }
     }
 
-    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+    // Topos resonator
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
             let stats = convert(lightning.train_epoch(
-                resonator.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 mse.inner_mut(),
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
         }
     }
-    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
         if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
             let stats = convert(lightning.train_epoch(
-                resonator.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 hce.inner_mut(),
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
         }
-        return Err(PyValueError::new_err(
-            "SpiralLightning.train_epoch expects a supported module/loss pairing",
-        ));
     }
 
-    let dataset: Vec<(Tensor, Tensor)> = batches
-        .extract::<Vec<(PyTensor, PyTensor)>>()?
-        .into_iter()
-        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
-        .collect();
-
-    if let Some(stats) = train_lightning_with_dataset(lightning, module, loss, &dataset)? {
-        return Ok(stats);
-    }
-
-    Err(PyValueError::new_err(
-        "SpiralLightning.train_epoch expects a supported module/loss pairing",
-    ))
-}
-
-struct LightningStageSpec {
-    config: NnLightningConfig,
-    epochs: Vec<PyObject>,
-    label: Option<String>,
-}
-
-fn parse_lightning_stage_spec(
-    stage: &Bound<'_, PyAny>,
-    base: &NnLightningConfig,
-) -> PyResult<LightningStageSpec> {
-    let dict = stage.downcast::<PyDict>().map_err(|_| {
-        PyValueError::new_err("Lightning stage must be a mapping with 'config' and 'epochs' keys")
-    })?;
-
-    let epochs_any = dict
-        .get_item("epochs")
-        .ok_or_else(|| PyValueError::new_err("Lightning stage requires an 'epochs' sequence"))?;
-    let epoch_objects: Vec<PyObject> = epochs_any.extract()?;
-    if epoch_objects.is_empty() {
-        return Err(PyValueError::new_err(
-            "Lightning stage requires at least one epoch",
-        ));
-    }
-
-    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+    // ZSpace mixer
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
         if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
             let stats = convert(lightning.train_epoch(
-                projector.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 mse.inner_mut(),
                 dataset.to_vec(),
             ))?;
             return Ok(Some(stats));
         }
     }
-    if let Ok(mut projector) = module.extract::<PyRefMut<'_, PyZSpaceProjector>>() {
+    if let Ok(mut module_ref) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
         if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
             let stats = convert(lightning.train_epoch(
-                projector.borrow_mut()?,
-                hce.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-    let mut config = base.clone();
-    if let Some(config_any) = dict.get_item("config") {
-        let config_dict = config_any
-            .downcast::<PyDict>()
-            .map_err(|_| PyValueError::new_err("Lightning stage 'config' must be a mapping"))?;
-
-        let mut rows = config.rows();
-        let mut cols = config.cols();
-        if let Some(value) = config_dict.get_item("rows") {
-            rows = value.extract()?;
-        }
-        if let Some(value) = config_dict.get_item("cols") {
-            cols = value.extract()?;
-        }
-        if rows != config.rows() || cols != config.cols() {
-            config = config.with_output_shape(rows, cols);
-        }
-
-    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
-        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-            let stats = convert(lightning.train_epoch(
-                resonator.borrow_mut()?,
-                mse.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-        }
-    }
-    if let Ok(mut resonator) = module.extract::<PyRefMut<'_, PyToposResonator>>() {
-        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
-            let stats = convert(lightning.train_epoch(
-                resonator.borrow_mut()?,
-                hce.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-        let mut roundtable = config.roundtable();
-        if let Some(value) = config_dict.get_item("top_k") {
-            roundtable.top_k = value.extract()?;
-        }
-        if let Some(value) = config_dict.get_item("mid_k") {
-            roundtable.mid_k = value.extract()?;
-        }
-        if let Some(value) = config_dict.get_item("bottom_k") {
-            roundtable.bottom_k = value.extract()?;
-        }
-        if let Some(value) = config_dict.get_item("here_tolerance") {
-            roundtable.here_tolerance = value.extract()?;
-        }
-        #[cfg(feature = "psychoid")]
-        if let Some(value) = config_dict.get_item("psychoid") {
-            roundtable.psychoid_enabled = value.extract()?;
-        }
-        #[cfg(feature = "psychoid")]
-        if let Some(value) = config_dict.get_item("psychoid_log") {
-            roundtable.psychoid_log = value.extract()?;
-        }
-        #[cfg(feature = "psi")]
-        if let Some(value) = config_dict.get_item("psi") {
-            roundtable.psi_enabled = value.extract()?;
-        }
-        #[cfg(feature = "collapse")]
-        if let Some(value) = config_dict.get_item("collapse") {
-            roundtable.collapse_enabled = value.extract()?;
-        }
-        config = config.with_roundtable(roundtable);
-
-    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
-        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-            let stats = convert(lightning.train_epoch(
-                mixer.borrow_mut()?,
-                mse.inner_mut(),
-                dataset.to_vec(),
-            ))?;
-            return Ok(Some(stats));
-        }
-    }
-    if let Ok(mut mixer) = module.extract::<PyRefMut<'_, PyZSpaceMixer>>() {
-        if let Ok(mut hce) = loss.extract::<PyRefMut<'_, PyHyperbolicCrossEntropy>>() {
-            let stats = convert(lightning.train_epoch(
-                mixer.borrow_mut()?,
+                module_ref.borrow_mut()?,
                 hce.inner_mut(),
                 dataset.to_vec(),
             ))?;
@@ -19010,8 +18866,6 @@ fn run_epoch_with_lightning(
             .collect::<PyResult<_>>()?;
         if let Some(stats) = train_lightning_with_dataset(lightning, module, loss, &dataset)? {
             return Ok(stats);
-        if let Some(value) = config_dict.get_item("auto_prepare") {
-            config = config.with_auto_prepare(value.extract()?);
         }
         return Err(PyValueError::new_err(
             "SpiralLightning.train_epoch expects a supported module/loss pairing",
@@ -19063,88 +18917,6 @@ fn prepare_module_for_lightning(
     }
     Err(PyValueError::new_err(
         "SpiralLightning.prepare_module expects Linear, Relu, Conv1d, WaveRnn, ZSpaceProjector, or Sequential modules",
-    ))
-}
-
-fn run_epoch_with_lightning(
-    lightning: &mut NnSpiralLightning,
-    module: &Bound<'_, PyAny>,
-    loss: &Bound<'_, PyAny>,
-    batches: &Bound<'_, PyAny>,
-) -> PyResult<EpochStats> {
-    if let Ok(loader) = batches.extract::<PyRef<PyDataLoader>>() {
-        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(lightning.train_epoch(
-                    seq.borrow_mut()?,
-                    mse.inner_mut(),
-                    loader.clone_inner(),
-                ))?;
-                return Ok(stats);
-            }
-        }
-
-        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(lightning.train_epoch(
-                    linear.borrow_mut()?,
-                    mse.inner_mut(),
-                    loader.clone_inner(),
-                ))?;
-                return Ok(stats);
-            }
-        }
-
-        if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
-            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-                let stats = convert(lightning.train_epoch(
-                    relu.borrow_mut()?,
-                    mse.inner_mut(),
-                    loader.clone_inner(),
-                ))?;
-                return Ok(stats);
-            }
-        }
-    }
-
-    let dataset: Vec<(Tensor, Tensor)> = batches
-        .extract::<Vec<(PyTensor, PyTensor)>>()?
-        .into_iter()
-        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
-        .collect();
-
-    if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
-        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-            let stats = convert(lightning.train_epoch(
-                seq.borrow_mut()?,
-                mse.inner_mut(),
-                dataset.clone(),
-            ))?;
-            return Ok(stats);
-        }
-    }
-
-    if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
-        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-            let stats = convert(lightning.train_epoch(
-                linear.borrow_mut()?,
-                mse.inner_mut(),
-                dataset.clone(),
-            ))?;
-            return Ok(stats);
-        }
-    }
-
-    if let Ok(mut relu) = module.extract::<PyRefMut<'_, PyReluModule>>() {
-        if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
-            let stats =
-                convert(lightning.train_epoch(relu.borrow_mut()?, mse.inner_mut(), dataset))?;
-            return Ok(stats);
-        }
-    }
-
-    Err(PyValueError::new_err(
-        "SpiralLightning.train_epoch expects a Sequential, Linear, or Relu module and a supported loss",
     ))
 }
 

@@ -1288,6 +1288,9 @@ print("updated weights", weights.tolist())
 - `CanvasProjector::refresh_with_vectors` now returns both the RGBA buffer and
   a colour vector field that carries normalised energy and chroma as
   Z-space-friendly coordinates.
+- `FractalCanvas::vectorFieldFft(false)` surfaces the per-row FFT spectrum as
+  interleaved energy/chroma pairs so Canvas Transformer pipelines can ingest
+  frequency features without leaving Rust.
 - Use `CanvasProjector::emit_zspace_patch` to fold the canvas state back into
   the fractal scheduler without leaving Rust or allocating intermediate
   buffers.
@@ -1667,11 +1670,18 @@ const wasm = await init();
 const canvas = document.getElementById("zspace");
 const fractal = new FractalCanvas(64);
 await fractal.render(canvas);
+const spectrum = fractal.vectorFieldFft(false);
+console.log(`fft bins=${spectrum.length / 8}`);
 </script>
 ```
 
 Pixels become Z-space relations, the scheduler keeps memory bounded, and the
 entire loop stays panic-free even under aggressive streaming.
+
+The returned spectrum stores `[energy_re, energy_im, chroma_r_re, chroma_r_im,
+chroma_g_re, chroma_g_im, chroma_b_re, chroma_b_im]` per bin, so Canvas
+Transformers can slice the energy or chroma lanes directly or feed the full
+tensor back through `fft_inverse_in_place` for quick spatial reconstruction.
 
 Need FFT heuristics alongside the canvas?  WebAssembly exports now ship auto
 planning helpers and CPU fallbacks:
