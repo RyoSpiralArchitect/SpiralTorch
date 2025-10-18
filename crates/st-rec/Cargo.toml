@@ -8,3 +8,5 @@ authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 
 [dependencies]
 st-tensor = { path = "../st-tensor" }
+st-kdsl = { path = "../st-kdsl" }
+st-rl    = { path = "../st-rl" }

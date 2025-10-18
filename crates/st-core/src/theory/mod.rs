@@ -34,12 +34,6 @@ pub mod observability_impl;
 #[doc(inline)]
 pub use observability_impl as observability;
 
-#[path = "zpulse.rs"]
-#[doc(hidden)]
-pub mod zpulse_impl;
-#[doc(inline)]
-pub use zpulse_impl as zpulse;
-
 #[path = "microlocal.rs"]
 #[doc(hidden)]
 pub mod microlocal_impl;
