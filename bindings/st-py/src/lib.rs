@@ -80,10 +80,16 @@ use st_nn::{
     CouncilEvidence, GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot,
     HeurOp, HeurOpKind,
 };
+use st_core::telemetry::dashboard::{
+    DashboardEvent as CoreDashboardEvent, DashboardFrame as CoreDashboardFrame,
+    DashboardMetric as CoreDashboardMetric, DashboardRing as CoreDashboardRing,
+    EventSeverity as CoreEventSeverity,
+};
 use st_rec::{RatingTriple as RecRatingTriple, RecEpochReport, SpiralRecError, SpiralRecommender};
 use st_rl::{
-    EpisodeReport as RlEpisodeReport, GeometryFeedback, GeometryFeedbackConfig,
-    GeometryFeedbackSignal, GeometryTelemetry, SpiralPolicyGradient, SpiralRlError,
+    DqnAgent, EpisodeReport as RlEpisodeReport, GeometryFeedback, GeometryFeedbackConfig,
+    GeometryFeedbackSignal, GeometryTelemetry, PpoAgent, SacAgent, SpiralPolicyGradient,
+    SpiralRlError,
 };
 use st_tensor::backend::faer_dense;
 #[cfg(feature = "wgpu")]
@@ -18167,6 +18173,102 @@ impl PyPolicyGradient {
     }
 }
 
+#[pyclass(module = "spiraltorch.rl", name = "DqnAgent", unsendable)]
+struct PyDqnAgent {
+    inner: Mutex<DqnAgent>,
+}
+
+#[pymethods]
+impl PyDqnAgent {
+    #[new]
+    fn new(state_dim: usize, action_dim: usize, discount: f32, learning_rate: f32) -> PyResult<Self> {
+        let inner = DqnAgent::new(state_dim, action_dim, discount, learning_rate).map_err(rl_err)?;
+        Ok(Self {
+            inner: Mutex::new(inner),
+        })
+    }
+
+    fn select_action(&self, state: usize) -> PyResult<usize> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.select_action(state))
+    }
+
+    fn update(&self, state: usize, action: usize, reward: f32, next_state: usize) -> PyResult<()> {
+        let mut guard = self.inner.lock().unwrap();
+        guard.update(state, action, reward, next_state);
+        Ok(())
+    }
+
+    #[getter]
+    fn epsilon(&self) -> PyResult<f32> {
+        Ok(self.inner.lock().unwrap().epsilon())
+    }
+
+    fn set_epsilon(&self, epsilon: f32) -> PyResult<()> {
+        self.inner.lock().unwrap().set_epsilon(epsilon);
+        Ok(())
+    }
+}
+
+#[pyclass(module = "spiraltorch.rl", name = "PpoAgent", unsendable)]
+struct PyPpoAgent {
+    inner: Mutex<PpoAgent>,
+}
+
+#[pymethods]
+impl PyPpoAgent {
+    #[new]
+    fn new(state_dim: usize, action_dim: usize, learning_rate: f32, clip_range: f32) -> PyResult<Self> {
+        let inner = PpoAgent::new(state_dim, action_dim, learning_rate, clip_range).map_err(rl_err)?;
+        Ok(Self {
+            inner: Mutex::new(inner),
+        })
+    }
+
+    fn score_actions(&self, state: Vec<f32>) -> PyResult<Vec<f32>> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.score_actions(&state))
+    }
+
+    fn value(&self, state: Vec<f32>) -> PyResult<f32> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.value(&state))
+    }
+
+    fn update(&self, state: Vec<f32>, action: usize, advantage: f32, old_log_prob: f32) -> PyResult<()> {
+        let mut guard = self.inner.lock().unwrap();
+        guard.update(&state, action, advantage, old_log_prob);
+        Ok(())
+    }
+}
+
+#[pyclass(module = "spiraltorch.rl", name = "SacAgent", unsendable)]
+struct PySacAgent {
+    inner: Mutex<SacAgent>,
+}
+
+#[pymethods]
+impl PySacAgent {
+    #[new]
+    fn new(state_dim: usize, action_dim: usize, temperature: f32) -> PyResult<Self> {
+        let inner = SacAgent::new(state_dim, action_dim, temperature).map_err(rl_err)?;
+        Ok(Self {
+            inner: Mutex::new(inner),
+        })
+    }
+
+    fn sample_action(&self, state: Vec<f32>) -> PyResult<usize> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.sample_action(&state))
+    }
+
+    fn jitter(&self, entropy_target: f32) -> PyResult<()> {
+        let mut guard = self.inner.lock().unwrap();
+        guard.jitter(entropy_target);
+        Ok(())
+    }
+}
+
 #[pyclass(module = "spiraltorch.rec", name = "EpochReport")]
 struct PyRecEpochReport {
     inner: RecEpochReport,
@@ -18187,6 +18289,184 @@ impl PyRecEpochReport {
     #[getter]
     fn regularization_penalty(&self) -> f32 {
         self.inner.regularization_penalty
+    }
+}
+
+#[pyclass(module = "spiraltorch.telemetry", name = "Metric")]
+#[derive(Clone)]
+struct PyDashboardMetric {
+    inner: CoreDashboardMetric,
+}
+
+#[pymethods]
+impl PyDashboardMetric {
+    #[new]
+    fn new(name: String, value: f64, unit: Option<String>, trend: Option<f64>) -> Self {
+        let mut metric = CoreDashboardMetric::new(name, value);
+        if let Some(unit) = unit {
+            metric = metric.with_unit(unit);
+        }
+        if let Some(trend) = trend {
+            metric = metric.with_trend(trend);
+        }
+        Self { inner: metric }
+    }
+
+    #[getter]
+    fn name(&self) -> &str {
+        &self.inner.name
+    }
+
+    #[getter]
+    fn value(&self) -> f64 {
+        self.inner.value
+    }
+
+    #[getter]
+    fn unit(&self) -> Option<&str> {
+        self.inner.unit.as_deref()
+    }
+
+    #[getter]
+    fn trend(&self) -> Option<f64> {
+        self.inner.trend
+    }
+}
+
+#[pyclass(module = "spiraltorch.telemetry", name = "Event")]
+#[derive(Clone)]
+struct PyDashboardEvent {
+    inner: CoreDashboardEvent,
+}
+
+#[pymethods]
+impl PyDashboardEvent {
+    #[new]
+    fn new(message: String, severity: &str) -> PyResult<Self> {
+        let severity = match severity.to_ascii_lowercase().as_str() {
+            "info" => CoreEventSeverity::Info,
+            "warning" | "warn" => CoreEventSeverity::Warning,
+            "critical" | "error" => CoreEventSeverity::Critical,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unsupported severity '{other}', expected info/warning/critical"
+                )))
+            }
+        };
+        Ok(Self {
+            inner: CoreDashboardEvent { message, severity },
+        })
+    }
+
+    #[getter]
+    fn message(&self) -> &str {
+        &self.inner.message
+    }
+
+    #[getter]
+    fn severity(&self) -> &'static str {
+        match self.inner.severity {
+            CoreEventSeverity::Info => "info",
+            CoreEventSeverity::Warning => "warning",
+            CoreEventSeverity::Critical => "critical",
+        }
+    }
+}
+
+#[pyclass(module = "spiraltorch.telemetry", name = "Frame")]
+#[derive(Clone)]
+struct PyDashboardFrame {
+    inner: CoreDashboardFrame,
+}
+
+#[pymethods]
+impl PyDashboardFrame {
+    #[new]
+    fn new(timestamp: Option<f64>) -> PyResult<Self> {
+        let instant = if let Some(ts) = timestamp {
+            UNIX_EPOCH
+                .checked_add(Duration::from_secs_f64(ts))
+                .ok_or_else(|| PyValueError::new_err("invalid timestamp"))?
+        } else {
+            SystemTime::now()
+        };
+        Ok(Self {
+            inner: CoreDashboardFrame::new(instant),
+        })
+    }
+
+    fn add_metric(&mut self, metric: PyDashboardMetric) {
+        self.inner.push_metric(metric.inner);
+    }
+
+    fn add_event(&mut self, event: PyDashboardEvent) {
+        self.inner.push_event(event.inner);
+    }
+
+    #[getter]
+    fn timestamp(&self) -> PyResult<f64> {
+        let duration = self
+            .inner
+            .timestamp
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| PyValueError::new_err("timestamp predates unix epoch"))?;
+        Ok(duration.as_secs_f64())
+    }
+
+    fn metrics(&self) -> Vec<PyDashboardMetric> {
+        self.inner
+            .metrics
+            .iter()
+            .cloned()
+            .map(|inner| PyDashboardMetric { inner })
+            .collect()
+    }
+
+    fn events(&self) -> Vec<PyDashboardEvent> {
+        self.inner
+            .events
+            .iter()
+            .cloned()
+            .map(|inner| PyDashboardEvent { inner })
+            .collect()
+    }
+}
+
+#[pyclass(module = "spiraltorch.telemetry", name = "Ring", unsendable)]
+struct PyDashboardRing {
+    inner: Mutex<CoreDashboardRing>,
+}
+
+#[pymethods]
+impl PyDashboardRing {
+    #[new]
+    fn new(capacity: usize) -> Self {
+        Self {
+            inner: Mutex::new(CoreDashboardRing::new(capacity)),
+        }
+    }
+
+    fn push(&self, frame: PyDashboardFrame) {
+        self.inner.lock().unwrap().push(frame.inner);
+    }
+
+    fn latest(&self) -> Option<PyDashboardFrame> {
+        self.inner
+            .lock()
+            .unwrap()
+            .latest()
+            .cloned()
+            .map(|inner| PyDashboardFrame { inner })
+    }
+
+    fn frames(&self) -> Vec<PyDashboardFrame> {
+        self.inner
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .map(|inner| PyDashboardFrame { inner })
+            .collect()
     }
 }
 
@@ -18234,6 +18514,26 @@ impl PyRecommender {
         let mut guard = self.inner.lock().unwrap();
         let report = guard.train_epoch(&triples).map_err(rec_err)?;
         Ok(PyRecEpochReport { inner: report })
+    }
+
+    #[pyo3(signature = (user, k, exclude=None))]
+    fn recommend_top_k(
+        &self,
+        user: usize,
+        k: usize,
+        exclude: Option<Vec<usize>>,
+    ) -> PyResult<Vec<(usize, f32)>> {
+        let exclude = exclude.unwrap_or_default();
+        let exclude_slice = if exclude.is_empty() {
+            None
+        } else {
+            Some(exclude.as_slice())
+        };
+        let guard = self.inner.lock().unwrap();
+        let recs = guard
+            .recommend_top_k(user, k, exclude_slice)
+            .map_err(rec_err)?;
+        Ok(recs.into_iter().map(|rec| (rec.item, rec.score)).collect())
     }
 
     fn user_embedding(&self, user: usize) -> PyResult<PyTensor> {
@@ -18371,10 +18671,13 @@ fn linalg(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pymodule]
 fn rl(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPolicyGradient>()?;
-    m.setattr("__all__", vec!["PolicyGradient"])?;
+    m.add_class::<PyDqnAgent>()?;
+    m.add_class::<PyPpoAgent>()?;
+    m.add_class::<PySacAgent>()?;
+    m.setattr("__all__", vec!["PolicyGradient", "DqnAgent", "PpoAgent", "SacAgent"])?;
     m.setattr(
         "__doc__",
-        "Policy gradient learner with optional Z-space geometry feedback and telemetry surfaces returned as dictionaries.",
+        "Reinforcement learning agents: policy gradient with geometry feedback, DQN, PPO, and SAC primitives.",
     )?;
     Ok(())
 }
@@ -18386,6 +18689,20 @@ fn rec(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.setattr(
         "__doc__",
         "Recommendation harness that wraps SpiralLightning for inference and ranking.",
+    )?;
+    Ok(())
+}
+
+#[pymodule]
+fn telemetry(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyDashboardMetric>()?;
+    m.add_class::<PyDashboardEvent>()?;
+    m.add_class::<PyDashboardFrame>()?;
+    m.add_class::<PyDashboardRing>()?;
+    m.setattr("__all__", vec!["Metric", "Event", "Frame", "Ring"])?;
+    m.setattr(
+        "__doc__",
+        "Telemetry dashboard primitives for building real-time monitoring overlays.",
     )?;
     Ok(())
 }
@@ -18827,6 +19144,9 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let rec_mod = PyModule::new_bound(_py, "rec")?;
     rec(_py, &rec_mod)?;
     m.add_submodule(&rec_mod)?;
+    let telemetry_mod = PyModule::new_bound(_py, "telemetry")?;
+    telemetry(_py, &telemetry_mod)?;
+    m.add_submodule(&telemetry_mod)?;
     let sot_mod = PyModule::new_bound(_py, "sot")?;
     sot::module(_py, &sot_mod)?;
     m.add_submodule(&sot_mod)?;

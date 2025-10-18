@@ -8,8 +8,10 @@ use std::fmt;
 use st_core::telemetry::hub;
 use st_tensor::{AmegaHypergrad, DifferentialResonance, Tensor, TensorError};
 
+pub mod algorithms;
 mod geometry;
 
+pub use algorithms::{DqnAgent, PpoAgent, SacAgent};
 pub use geometry::{
     GeometryFeedback, GeometryFeedbackConfig, GeometryFeedbackSignal, GeometryTelemetry,
 };
