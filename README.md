@@ -23,7 +23,20 @@ Managed hosting or production babysitting is out of scope.
 Automated scraping, traffic mirroring, or idle star-farming will not receive attention.
 
 <!-- STATS:START -->
-_Stats will appear here…_
+> _auto-generated: 2025-10-18 21:39 UTC_
+
+| Metric | Value |
+|---|---:|
+| Rust code LOC | **71,317** |
+| Rust files | 197 |
+| Total code LOC (all langs) | 76,480 |
+| Workspace+deps crates | 241 |
+
+<p>
+<img src="docs/badges/rust-loc.svg" alt="rust loc" />
+<img src="docs/badges/total-code.svg" alt="total code" />
+<img src="docs/badges/deps.svg" alt="crates" />
+</p>
 <!-- STATS:END -->
 ---
 
