@@ -1853,7 +1853,7 @@ mod language_pipeline {
         }
     }
 
-    #[cfg(all(test, feature = "psi"))]
+    #[cfg(test)]
     mod tests {
         use super::super::automation::DesireAutomation;
         use super::super::desire::{constant, warmup, DesireLagrangian};
