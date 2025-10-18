@@ -141,7 +141,7 @@ impl DesireTelemetrySink {
 
 #[cfg(feature = "psi")]
 impl DesireTelemetrySink {
-    fn base_sample(
+    pub(crate) fn base_sample(
         step: &DesireAutomatedStep,
         timestamp: SystemTime,
     ) -> DesireStepTelemetry {
@@ -184,6 +184,21 @@ impl DesireTelemetrySink {
             lambda: weights.lambda,
             trigger_emitted: step.trigger.is_some(),
         }
+    }
+
+    pub(crate) fn with_psi_context(
+        mut sample: DesireStepTelemetry,
+        reading: Option<&PsiReading>,
+        events: &[PsiEvent],
+        z_feedback: Option<SoftlogicZFeedback>,
+    ) -> DesireStepTelemetry {
+        sample.psi_total = reading.map(|value| value.total);
+        sample.psi_breakdown = reading
+            .map(|value| value.breakdown.clone())
+            .unwrap_or_default();
+        sample.psi_events = events.to_vec();
+        sample.z_feedback = z_feedback;
+        sample
     }
 
     fn phase_to_telemetry(phase: DesirePhase) -> DesirePhaseTelemetry {
@@ -1075,14 +1090,12 @@ impl DesirePipelineSink for DesirePsiBridge {
         let reading = hub::get_last_psi();
         let events = hub::get_last_psi_events();
         let z_feedback = hub::get_softlogic_z();
-        let mut sample = DesireTelemetrySink::base_sample(step, timestamp);
-        sample.psi_total = reading.as_ref().map(|value| value.total);
-        sample.psi_breakdown = reading
-            .as_ref()
-            .map(|value| value.breakdown.clone())
-            .unwrap_or_default();
-        sample.psi_events = events.clone();
-        sample.z_feedback = z_feedback;
+        let sample = DesireTelemetrySink::with_psi_context(
+            DesireTelemetrySink::base_sample(step, timestamp),
+            reading.as_ref(),
+            &events,
+            z_feedback,
+        );
         hub::set_last_desire_step(sample);
         let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
             label: "desire psi bridge poisoned",
