@@ -37,14 +37,35 @@ pub struct JuliaSpan {
 }
 
 impl JuliaSpan {
+    const MAX_RENDERED_LEN: usize = 3 * 10 + 2; // u32::MAX has 10 decimal digits.
+
+    #[inline]
     pub fn new(start: u32, step: u32, end: u32) -> Self {
         Self { start, step, end }
+    }
+
+    #[inline]
+    pub fn as_tuple(&self) -> (u32, u32, u32) {
+        (self.start, self.step, self.end)
+    }
+
+    #[inline]
+    pub fn write_into<W: std::fmt::Write>(&self, mut out: W) -> std::fmt::Result {
+        write!(out, "{}:{}:{}", self.start, self.step, self.end)
+    }
+
+    #[inline]
+    pub fn to_string_fast(&self) -> String {
+        let mut buf = String::with_capacity(Self::MAX_RENDERED_LEN);
+        // SAFETY: writing into a `String` via the fmt machinery cannot fail.
+        let _ = self.write_into(&mut buf);
+        buf
     }
 }
 
 impl std::fmt::Display for JuliaSpan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}:{}", self.start, self.step, self.end)
+        self.write_into(f)
     }
 }
 
@@ -181,10 +202,28 @@ impl Choice {
         out
     }
 
+    /// Returns the latency window expressed as a Julia span without allocating.
+    pub fn ctile_julia_span_components(&self) -> Option<JuliaSpan> {
+        self.latency_window.map(|window| window.julia_span())
+    }
+
     /// Returns the latency window expressed in Julia-style span syntax.
+    /// Prefer [`Self::ctile_julia_span_components`] when you only need the numeric values.
     pub fn ctile_julia_span(&self) -> Option<String> {
-        self.latency_window
-            .map(|window| window.julia_span().to_string())
+        self.ctile_julia_span_components()
+            .map(|span| span.to_string_fast())
+    }
+
+    /// Writes the latency window span into the provided formatter.
+    /// Returns `Ok(())` even when the latency window is absent.
+    pub fn write_ctile_julia_span<W: std::fmt::Write>(
+        &self,
+        mut out: W,
+    ) -> std::fmt::Result {
+        if let Some(span) = self.ctile_julia_span_components() {
+            span.write_into(&mut out)?;
+        }
+        Ok(())
     }
 }
 
@@ -999,14 +1038,25 @@ mod tests {
     fn latency_span_uses_julia_notation() {
         let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
         let choice = fallback(96, 8_192, 64, &caps, RankKind::MidK);
-        let span = choice
-            .ctile_julia_span()
+        let window = choice
+            .latency_window
+            .expect("latency window should be captured in fallback");
+        let span_components = choice
+            .ctile_julia_span_components()
             .expect("latency span should be available");
+        let span = span_components.to_string_fast();
         assert!(span.matches(':').count() >= 2);
         assert!(span.split(':').all(|part| !part.is_empty()));
+        assert_eq!(span_components.as_tuple().0, window.lower);
         let script = choice.to_unison_script(RankKind::MidK);
         assert!(script.contains("#= latency window"));
         assert!(script.contains(&span));
+        let mut buf = String::new();
+        choice
+            .write_ctile_julia_span(&mut buf)
+            .expect("writing julia span should succeed");
+        assert_eq!(buf, span);
+        assert!(!buf.is_empty());
     }
 
     #[test]
