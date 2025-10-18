@@ -150,6 +150,8 @@ const session = new SpiralCanvasCollabSession(view, {
     },
     patchRateHz: 20,
     pointerRateHz: 30,
+    pointerTrailMs: 240,
+    replayWindowMs: 12_000,
     telemetry: (event) => console.debug("collab", event),
     attributionSink: (sample) => conductor.step(sample), // pipe into your ZConductor
     rolePolicies: {
@@ -167,9 +169,10 @@ session.on("state", ({ participant, origin }) => {
     console.info(`%s adjusted the view (%s)`, participant.label ?? participant.role, origin);
 });
 
-session.on("pointer", ({ participant, event }) => {
+session.on("pointer", ({ participant, event, origin }) => {
     // Mirror pointer navigation in a minimap, trigger haptics, etc.
     highlightParticipantCursor(participant.id, event.offset);
+    console.debug("pointer", origin, participant.id);
 });
 ```
 
@@ -220,3 +223,35 @@ unsupported primitive are dropped locally and emit `policy-blocked` telemetry wi
 reason code `capability:<context>:<constraint>:<key>`. That keeps innovation room wide
 open—roles can still introduce new markers on the fly—while preserving a deterministic
 boundary around what crosses the wire and what reaches downstream attribution sinks.
+
+Pointer broadcasts now include two companion surfaces that make spectator UX and replay
+dashboards effortless:
+
+* Set `pointerTrailMs` (defaults to `200`) to accumulate per-participant cursor trails.
+  Every time a pointer update lands, the session emits a `pointerTrail` event with the
+  most recent positions, and you can query the latest trail with
+  `session.getPointerTrail(participantId)`.
+* Configure `replayWindowMs`/`replayMaxEntries` to bound an in-memory timeline that keeps
+  recent pointer, patch, and full-state events. Call `session.replay({ windowMs: 3_000,
+  kinds: ["pointer", "patch"] })` to obtain chronologically ordered `CollabReplayFrame`
+  records for scrubbers, instant replays, or audit tooling.
+
+```ts
+session.on("pointerTrail", ({ participant, trail }) => {
+    // Fade a ghost cursor using the recent positions.
+    paintTrail(participant.id, trail);
+});
+
+const frames = session.replay({ windowMs: 5_000, participantId: "trainer-1" });
+frames.forEach((frame) => {
+    if (frame.kind === "pointer") {
+        timeline.push({ type: "cursor", at: frame.timestamp, offset: frame.pointer!.offset });
+    }
+});
+```
+
+Replay frames preserve the `origin` (local vs. remote), Lamport `clock`, `kind`, and
+sanitised payloads, so dashboards can interleave them with attribution reports without
+touching the internal queues. Pointer trail emissions are equally policy-aware—roles that
+cannot patch still broadcast trails for spectating, while deny-listed capabilities never
+reach the queue that feeds the replay log.

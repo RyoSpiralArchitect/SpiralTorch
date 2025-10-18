@@ -12,6 +12,9 @@ const COLLAB_DEFAULT_PATCH_RATE_HZ = 20;
 const COLLAB_DEFAULT_PRESENCE_INTERVAL_MS = 1_000;
 const COLLAB_MAX_MESSAGE_BYTES_DEFAULT = 256 * 1024;
 const COLLAB_STORAGE_POLL_INTERVAL_MS = 750;
+const COLLAB_POINTER_TRAIL_WINDOW_MS_DEFAULT = 200;
+const COLLAB_REPLAY_WINDOW_MS_DEFAULT = 10_000;
+const COLLAB_REPLAY_MAX_ENTRIES_DEFAULT = 2_048;
 const COLLAB_CAPABILITY_KEY_MAX_LENGTH = 64;
 const COLLAB_CAPABILITY_MAX_ENTRIES_DEFAULT = 16;
 const COLLAB_CAPABILITY_MAX_ENTRIES_HARD_LIMIT = 64;
@@ -78,7 +81,35 @@ export interface CanvasCollabEventMap {
     pointer: {
         participant: CanvasCollabParticipantState;
         event: CanvasPointerEvent;
+        origin: "local" | "remote";
     };
+    pointerTrail: {
+        participant: CanvasCollabParticipantState;
+        origin: "local" | "remote";
+        trail: CanvasPointerEvent[];
+    };
+}
+
+export type CollabReplayFrameKind = "state" | "patch" | "pointer";
+
+export interface CollabReplayFrame {
+    timestamp: number;
+    clock: number;
+    participantId: string;
+    origin: "local" | "remote";
+    kind: CollabReplayFrameKind;
+    state?: CanvasCollabState;
+    patch?: Partial<CanvasCollabState>;
+    pointer?: CanvasPointerEvent;
+    full?: boolean;
+}
+
+export interface CollabReplayOptions {
+    to?: number;
+    windowMs?: number;
+    participantId?: string;
+    kinds?: ReadonlyArray<CollabReplayFrameKind>;
+    limit?: number;
 }
 
 export type CollabTelemetryEvent =
@@ -130,9 +161,12 @@ export interface SpiralCanvasCollabOptions {
     participant: CanvasCollabParticipant;
     sharePointer?: boolean;
     pointerRateHz?: number;
+    pointerTrailMs?: number;
     patchRateHz?: number;
     presenceIntervalMs?: number;
     maxMessageBytes?: number;
+    replayWindowMs?: number;
+    replayMaxEntries?: number;
     telemetry?: CollabTelemetrySink;
     attributionSink?: (event: CollabPatchAttributionEvent) => void;
     rolePolicies?: Partial<Record<CanvasCollabRole, CollabRolePolicy>>;
@@ -333,6 +367,23 @@ interface ParticipantRecord {
     policy: ResolvedRolePolicy;
 }
 
+interface PointerTrailEntry {
+    timestamp: number;
+    event: CanvasPointerEvent;
+}
+
+interface CollabTimelineEntry {
+    timestamp: number;
+    clock: number;
+    participantId: string;
+    origin: "local" | "remote";
+    kind: CollabReplayFrameKind;
+    state?: CanvasCollabState;
+    patch?: Partial<CanvasCollabState>;
+    pointer?: CanvasPointerEvent;
+    full?: boolean;
+}
+
 function generateId(): string {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
         return crypto.randomUUID();
@@ -365,6 +416,15 @@ function cloneState(state: CanvasCollabState): CanvasCollabState {
         statsInterval: state.statsInterval,
         devicePixelRatio: state.devicePixelRatio,
         running: state.running,
+    };
+}
+
+function clonePointerEvent(event: CanvasPointerEvent): CanvasPointerEvent {
+    return {
+        kind: event.kind,
+        source: event.source,
+        zoom: event.zoom,
+        offset: { x: event.offset.x, y: event.offset.y },
     };
 }
 
@@ -820,6 +880,8 @@ export class SpiralCanvasCollabSession {
     readonly #restoreStack: Array<() => void> = [];
     #pointerMinInterval: number;
     #lastPointerSentAt = 0;
+    #pointerTrailWindowMs: number;
+    readonly #pointerTrails = new Map<string, PointerTrailEntry[]>();
 
     #pendingPatch: Partial<CanvasCollabState> | null = null;
     #pendingFullSync = false;
@@ -834,6 +896,9 @@ export class SpiralCanvasCollabSession {
     #presenceTimer: ReturnType<typeof setInterval> | null = null;
 
     #maxMessageBytes: number;
+    #timelineWindowMs: number;
+    #timelineMaxEntries: number;
+    readonly #timeline: CollabTimelineEntry[] = [];
     #telemetry?: CollabTelemetrySink;
     #attributionSink?: (event: CollabPatchAttributionEvent) => void;
     #rolePolicyByRole = new Map<string, ResolvedRolePolicy>();
@@ -864,6 +929,15 @@ export class SpiralCanvasCollabSession {
         this.#lastPatchRefill = nowMillis();
         this.#presenceIntervalMs = Math.max(options.presenceIntervalMs ?? COLLAB_DEFAULT_PRESENCE_INTERVAL_MS, 250);
         this.#maxMessageBytes = options.maxMessageBytes ?? COLLAB_MAX_MESSAGE_BYTES_DEFAULT;
+        this.#pointerTrailWindowMs = Math.max(
+            0,
+            Math.floor(options.pointerTrailMs ?? COLLAB_POINTER_TRAIL_WINDOW_MS_DEFAULT),
+        );
+        this.#timelineWindowMs = Math.max(0, Math.floor(options.replayWindowMs ?? COLLAB_REPLAY_WINDOW_MS_DEFAULT));
+        this.#timelineMaxEntries = Math.max(
+            0,
+            Math.floor(options.replayMaxEntries ?? COLLAB_REPLAY_MAX_ENTRIES_DEFAULT),
+        );
 
         const participantId = options.participant.id ?? generateId();
         this.#participantId = participantId;
@@ -906,27 +980,56 @@ export class SpiralCanvasCollabSession {
             }
             const now = nowMillis();
             const record = this.#participants.get(this.#participantId);
+            const pointerClone = clonePointerEvent(event);
             if (record) {
-                record.info.lastPointer = event;
+                record.info.lastPointer = pointerClone;
                 record.info.lastSeen = Date.now();
                 record.info.state = this.#snapshotState();
                 this.#emitState("local", record.info);
+                this.#updatePointerTrail(record, pointerClone, "local");
             }
             this.#enqueuePatch({ zoom: event.zoom, offset: event.offset });
             const allowPointer = now - this.#lastPointerSentAt >= this.#pointerMinInterval;
             if (this.#sharePointer && allowPointer) {
                 this.#lastPointerSentAt = now;
+                const clock = this.#tick();
+                if (record) {
+                    record.clock = clock;
+                }
                 this.#postMessage({
                     type: "pointer",
                     id: this.#participantId,
                     participant: this.#participantEnvelope(),
-                    clock: this.#tick(),
-                    event,
+                    clock,
+                    event: pointerClone,
+                });
+                this.#recordTimelineEntry({
+                    timestamp: Date.now(),
+                    clock,
+                    participantId: this.#participantId,
+                    origin: "local",
+                    kind: "pointer",
+                    pointer: pointerClone,
                 });
                 this.#emitTelemetry({ type: "pointer", participantId: this.#participantId });
                 if (record) {
-                    this.#events.emit("pointer", { participant: this.#cloneParticipant(record.info), event });
+                    this.#events.emit("pointer", {
+                        participant: this.#cloneParticipant(record.info),
+                        event,
+                        origin: "local",
+                    });
                 }
+            } else if (record) {
+                const clock = this.#tick();
+                record.clock = clock;
+                this.#recordTimelineEntry({
+                    timestamp: Date.now(),
+                    clock,
+                    participantId: this.#participantId,
+                    origin: "local",
+                    kind: "pointer",
+                    pointer: pointerClone,
+                });
             }
         };
         this.#view.on("pointer", this.#pointerHandler);
@@ -964,6 +1067,68 @@ export class SpiralCanvasCollabSession {
     /** Returns an immutable view of known participants. */
     get participants(): CanvasCollabParticipantState[] {
         return Array.from(this.#participants.values()).map((record) => this.#cloneParticipant(record.info));
+    }
+
+    /** Returns the most recent pointer trail for the requested participant. */
+    getPointerTrail(participantId: string): CanvasPointerEvent[] {
+        if (this.#pointerTrailWindowMs <= 0) {
+            return [];
+        }
+        const entries = this.#pointerTrails.get(participantId);
+        if (!entries || entries.length === 0) {
+            return [];
+        }
+        const now = Date.now();
+        this.#prunePointerTrail(entries, now);
+        if (entries.length === 0) {
+            return [];
+        }
+        return entries.map((entry) => clonePointerEvent(entry.event));
+    }
+
+    /**
+     * Returns a chronological slice of the collaboration timeline bounded by the
+     * supplied options. Use this to drive lightweight replays or visual scrubbers.
+     */
+    replay(options?: CollabReplayOptions): CollabReplayFrame[] {
+        if (this.#timeline.length === 0 || this.#timelineMaxEntries <= 0) {
+            return [];
+        }
+        const to = typeof options?.to === "number" && Number.isFinite(options.to) ? options.to : Date.now();
+        const windowMs =
+            typeof options?.windowMs === "number" && Number.isFinite(options.windowMs)
+                ? Math.max(0, Math.floor(options.windowMs))
+                : this.#timelineWindowMs;
+        const from = windowMs > 0 ? to - windowMs : 0;
+        const participantId = options?.participantId;
+        const kinds = options?.kinds ? new Set(options.kinds) : null;
+        const limit =
+            typeof options?.limit === "number" && Number.isFinite(options.limit)
+                ? Math.max(0, Math.floor(options.limit))
+                : this.#timelineMaxEntries;
+        if (limit === 0) {
+            return [];
+        }
+        const frames: CollabReplayFrame[] = [];
+        for (const entry of this.#timeline) {
+            if (entry.timestamp > to) {
+                continue;
+            }
+            if (windowMs > 0 && entry.timestamp < from) {
+                continue;
+            }
+            if (participantId && entry.participantId !== participantId) {
+                continue;
+            }
+            if (kinds && !kinds.has(entry.kind)) {
+                continue;
+            }
+            frames.push(this.#cloneReplayFrame(entry));
+        }
+        if (Number.isFinite(limit) && frames.length > limit) {
+            return frames.slice(-limit);
+        }
+        return frames;
     }
 
     on<K extends keyof CanvasCollabEventMap>(type: K, handler: EventHandler<CanvasCollabEventMap[K]>): void {
@@ -1027,6 +1192,8 @@ export class SpiralCanvasCollabSession {
             this.#view.off("pointer", this.#pointerHandler);
             this.#pointerHandler = null;
         }
+        this.#pointerTrails.clear();
+        this.#timeline.length = 0;
         while (this.#restoreStack.length) {
             const restore = this.#restoreStack.pop();
             restore?.();
@@ -1259,6 +1426,17 @@ export class SpiralCanvasCollabSession {
             });
         }
         this.#recordAttribution("local", record.info, diff, clock, record.policy);
+        const timestamp = Date.now();
+        this.#recordTimelineEntry({
+            timestamp,
+            clock,
+            participantId: this.#participantId,
+            origin: "local",
+            kind: patch ? "patch" : "state",
+            patch: patch ? mergePatches(null, patch) : undefined,
+            state: patch ? undefined : cloneState(clonedNext),
+            full: !patch,
+        });
         this.#emitState("local", record.info);
         this.#emitParticipants();
     }
@@ -1524,6 +1702,15 @@ export class SpiralCanvasCollabSession {
                     record.info.state = cloneState(message.state);
                     this.#applyRemoteState(record, message.state);
                     this.#recordAttribution("remote", record.info, message.state, message.clock, record.policy);
+                    this.#recordTimelineEntry({
+                        timestamp: Date.now(),
+                        clock: message.clock,
+                        participantId: record.info.id,
+                        origin: "remote",
+                        kind: "state",
+                        state: cloneState(record.info.state),
+                        full: true,
+                    });
                     this.#emitState("remote", record.info);
                 }
                 this.#enqueueFullSync();
@@ -1545,29 +1732,50 @@ export class SpiralCanvasCollabSession {
                 record.info.state = cloneState(merged);
                 record.info.lastSeen = Date.now();
                 if (message.state.offset) {
-                    record.info.lastPointer = {
+                    const pointerFromState: CanvasPointerEvent = {
                         kind: "pan",
                         source: "drag",
                         zoom: merged.zoom,
                         offset: { ...merged.offset },
                     };
+                    record.info.lastPointer = pointerFromState;
+                    this.#updatePointerTrail(record, pointerFromState, "remote");
                 }
                 this.#applyRemoteState(record, merged);
                 this.#recordAttribution("remote", record.info, message.state, message.clock, record.policy);
+                const timelineTimestamp = Date.now();
+                const isFull = message.full === true;
+                this.#recordTimelineEntry({
+                    timestamp: timelineTimestamp,
+                    clock: message.clock,
+                    participantId: record.info.id,
+                    origin: "remote",
+                    kind: isFull ? "state" : "patch",
+                    state: isFull ? cloneState(record.info.state) : undefined,
+                    patch: isFull ? undefined : mergePatches(null, message.state),
+                    full: isFull,
+                });
                 this.#emitState("remote", record.info);
                 break;
             }
             case "pointer": {
-                record.info.lastPointer = {
-                    kind: message.event.kind,
-                    source: message.event.source,
-                    zoom: message.event.zoom,
-                    offset: { ...message.event.offset },
-                };
+                const pointerEvent = clonePointerEvent(message.event);
+                record.info.lastPointer = pointerEvent;
                 record.info.lastSeen = Date.now();
+                record.clock = Math.max(record.clock, message.clock);
+                this.#updatePointerTrail(record, pointerEvent, "remote");
+                this.#recordTimelineEntry({
+                    timestamp: Date.now(),
+                    clock: message.clock,
+                    participantId: record.info.id,
+                    origin: "remote",
+                    kind: "pointer",
+                    pointer: pointerEvent,
+                });
                 this.#events.emit("pointer", {
                     participant: this.#cloneParticipant(record.info),
-                    event: message.event,
+                    event: pointerEvent,
+                    origin: "remote",
                 });
                 this.#emitTelemetry({ type: "pointer", participantId: record.info.id });
                 this.#emitParticipants();
@@ -1575,6 +1783,7 @@ export class SpiralCanvasCollabSession {
             }
             case "leave": {
                 this.#participants.delete(record.info.id);
+                this.#pointerTrails.delete(record.info.id);
                 this.#emitTelemetry({ type: "leave", participantId: record.info.id });
                 this.#emitParticipants();
                 break;
@@ -1584,24 +1793,6 @@ export class SpiralCanvasCollabSession {
                 break;
             }
         }
-        const selfRecord = this.#participants.get(this.#participantId);
-        if (selfRecord) {
-            selfRecord.info.lastSeen = Date.now();
-            this.#emitParticipants();
-        }
-        const roster = Array.from(this.#participants.values()).map((entry) => ({
-            id: entry.info.id,
-            role: entry.info.role,
-            lastSeen: entry.info.lastSeen,
-        }));
-        this.#postMessage({
-            type: "presence",
-            id: this.#participantId,
-            participant: this.#participantEnvelope(),
-            clock: this.#tick(),
-            roster,
-        });
-        this.#emitTelemetry({ type: "presence", participants: roster.length });
     }
 
     #applyPresence(message: CollabPresenceMessage): void {
@@ -1627,6 +1818,7 @@ export class SpiralCanvasCollabSession {
                 const policy = this.#resolvePolicyForRole(entry.role);
                 info.gain = policy.gain;
                 const record: ParticipantRecord = { info, clock: 0, policy };
+                this.#pointerTrails.delete(entry.id);
                 this.#participants.set(entry.id, record);
                 this.#applyCapabilities(record, entry.capabilities, "presence");
                 this.#emitTelemetry({ type: "join", participant: this.#cloneParticipant(info) });
@@ -1686,6 +1878,7 @@ export class SpiralCanvasCollabSession {
         const policy = this.#resolvePolicyForRole(info.role);
         info.gain = policy.gain;
         const record: ParticipantRecord = { info, clock: message.clock, policy };
+        this.#pointerTrails.delete(message.id);
         this.#participants.set(message.id, record);
         this.#applyCapabilities(record, message.participant.capabilities, "message");
         this.#emitTelemetry({ type: "join", participant: this.#cloneParticipant(info) });
@@ -1707,6 +1900,80 @@ export class SpiralCanvasCollabSession {
         } catch {
             this.#emitTelemetry({ type: "message-dropped", reason: "transport-error" });
         }
+    }
+
+    #updatePointerTrail(record: ParticipantRecord, event: CanvasPointerEvent, origin: "local" | "remote"): void {
+        if (this.#pointerTrailWindowMs <= 0) {
+            return;
+        }
+        const now = Date.now();
+        let trail = this.#pointerTrails.get(record.info.id);
+        if (!trail) {
+            trail = [];
+            this.#pointerTrails.set(record.info.id, trail);
+        }
+        trail.push({ timestamp: now, event: clonePointerEvent(event) });
+        this.#prunePointerTrail(trail, now);
+        this.#events.emit("pointerTrail", {
+            participant: this.#cloneParticipant(record.info),
+            origin,
+            trail: trail.map((entry) => clonePointerEvent(entry.event)),
+        });
+    }
+
+    #prunePointerTrail(trail: PointerTrailEntry[], now: number): void {
+        if (this.#pointerTrailWindowMs <= 0) {
+            trail.length = 0;
+            return;
+        }
+        const threshold = now - this.#pointerTrailWindowMs;
+        while (trail.length > 0 && trail[0].timestamp < threshold) {
+            trail.shift();
+        }
+    }
+
+    #recordTimelineEntry(entry: CollabTimelineEntry): void {
+        if (this.#timelineMaxEntries <= 0) {
+            return;
+        }
+        this.#timeline.push(entry);
+        this.#trimTimeline(entry.timestamp);
+    }
+
+    #trimTimeline(now: number): void {
+        if (this.#timelineWindowMs > 0) {
+            const threshold = now - this.#timelineWindowMs;
+            while (this.#timeline.length > 0 && this.#timeline[0].timestamp < threshold) {
+                this.#timeline.shift();
+            }
+        }
+        const overflow = this.#timeline.length - this.#timelineMaxEntries;
+        if (overflow > 0) {
+            this.#timeline.splice(0, overflow);
+        }
+    }
+
+    #cloneReplayFrame(entry: CollabTimelineEntry): CollabReplayFrame {
+        const frame: CollabReplayFrame = {
+            timestamp: entry.timestamp,
+            clock: entry.clock,
+            participantId: entry.participantId,
+            origin: entry.origin,
+            kind: entry.kind,
+        };
+        if (entry.full !== undefined) {
+            frame.full = entry.full;
+        }
+        if (entry.state) {
+            frame.state = cloneState(entry.state);
+        }
+        if (entry.patch) {
+            frame.patch = mergePatches(null, entry.patch);
+        }
+        if (entry.pointer) {
+            frame.pointer = clonePointerEvent(entry.pointer);
+        }
+        return frame;
     }
 
     #emitParticipants(): void {
