@@ -1343,6 +1343,10 @@ optimisers alongside its hypergradient updates.
 - `FractalCanvas::hypergradWave(curvature)` and `FractalCanvas::realgradWave()`
   surface curvature-aware hypergrad updates alongside Euclidean gradients so the
   Canvas Transformer can keep hypergrad/Realgrad buffers in sync by default.
+- `FractalCanvas::gradientSummary(curvature)` condenses both tapes into shared
+  L1/L2/∞ norms plus RMS/mean-absolute magnitudes so monitoring dashboards can
+  watch gradient health without shipping the full relation buffers across the
+  WASM boundary.
 - `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
   WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
   the vector field and accumulate the spectrum fully on-GPU.

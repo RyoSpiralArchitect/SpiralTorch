@@ -14,7 +14,7 @@
 
 use super::{
     fractal::{FractalPatch, UringFractalScheduler},
-    AmegaHypergrad, AmegaRealgrad, PureResult, Tensor, TensorError,
+    AmegaHypergrad, AmegaRealgrad, GradientSummary, PureResult, Tensor, TensorError,
 };
 use core::f32::consts::PI;
 use st_frac::fft::{self, Complex32};
@@ -618,6 +618,22 @@ impl CanvasProjector {
         tape.accumulate_wave(tensor)
     }
 
+    /// Refresh the canvas and return gradient summary statistics for both the
+    /// hypergradient and Euclidean tapes. The returned tuple packs
+    /// `(hypergrad_summary, realgrad_summary)`.
+    pub fn gradient_summary(
+        &mut self,
+        curvature: f32,
+    ) -> PureResult<(GradientSummary, GradientSummary)> {
+        let tensor = self.refresh_tensor()?;
+        let (rows, cols) = tensor.shape();
+        let mut hypergrad = AmegaHypergrad::new(curvature, 1.0, rows, cols)?;
+        hypergrad.accumulate_wave(tensor)?;
+        let mut realgrad = AmegaRealgrad::new(1.0, rows, cols)?;
+        realgrad.accumulate_wave(tensor)?;
+        Ok((hypergrad.summary(), realgrad.summary()))
+    }
+
     /// Access the last computed FFT spectrum without forcing a refresh.
     pub fn vector_fft(&self, inverse: bool) -> PureResult<Vec<f32>> {
         self.vectors.fft_rows_interleaved(inverse)
@@ -983,6 +999,27 @@ mod tests {
         projector.accumulate_realgrad(&mut realgrad).unwrap();
         assert!(hypergrad.gradient().iter().all(|value| value.is_finite()));
         assert_eq!(realgrad.gradient().len(), 4);
+    }
+
+    #[test]
+    fn projector_surfaces_gradient_summary() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(
+                FractalPatch::new(tensor_with_shape(2, 2, &[1.0, -2.0, 0.5, 0.0]), 1.0, 1.0, 0)
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let (hyper, real) = projector.gradient_summary(-1.0).unwrap();
+        assert_eq!(hyper.count(), 4);
+        assert_eq!(real.count(), 4);
+        assert!(hyper.l2() > 0.0);
+        assert!(real.l1() > 0.0);
+        let mean_identity = real.mean_abs() * real.count() as f32;
+        assert!((mean_identity - real.l1()).abs() < 1e-6);
+        let rms_identity = real.rms() * (real.count() as f32).sqrt();
+        assert!((rms_identity - real.l2()).abs() < 1e-6);
     }
 
     #[test]
