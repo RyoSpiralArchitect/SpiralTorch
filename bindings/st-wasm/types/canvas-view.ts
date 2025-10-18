@@ -78,6 +78,20 @@ export interface SpiralCanvasViewOptions {
     autoStart?: boolean;
 }
 
+/** Options used when copying pixel data from the canvas. */
+export interface CapturePixelsOptions {
+    /**
+     * When `true`, re-renders the fractal before copying pixels. Defaults to
+     * refreshing still canvases while leaving active render loops untouched.
+     */
+    refresh?: boolean;
+    /**
+     * When `true`, the currently active palette is applied to the returned
+     * pixels. Defaults to `true`.
+     */
+    applyPalette?: boolean;
+}
+
 export interface CanvasViewEventMap {
     frame: CanvasFrameEvent;
     stats: CanvasStatsEvent;
@@ -214,6 +228,21 @@ function applyPalette(
     }
 }
 
+function dataUrlToBlob(dataUrl: string, fallbackType: string): Blob {
+    const [header, payload] = dataUrl.split(",", 2);
+    const mimeMatch = /data:([^;]+);/.exec(header ?? "");
+    const type = mimeMatch?.[1] ?? fallbackType;
+    if (typeof atob !== "function") {
+        throw new Error("atob is not available to decode data URLs");
+    }
+    const binary = atob(payload ?? "");
+    const buffer = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        buffer[i] = binary.charCodeAt(i);
+    }
+    return new Blob([buffer], { type });
+}
+
 /**
  * High level orchestrator that manages rendering, palette application and
  * interaction for {@link FractalCanvas} instances.
@@ -297,6 +326,11 @@ export class SpiralCanvasView {
     /** Returns the underlying {@link FractalCanvas}. */
     get fractal(): FractalCanvas {
         return this.#fractal;
+    }
+
+    /** Exposes the managed canvas element. */
+    get element(): HTMLCanvasElement {
+        return this.#canvas;
     }
 
     /** Returns the current palette configuration. */
@@ -493,6 +527,95 @@ export class SpiralCanvasView {
         this.stop();
         this.#detachPointerNavigation();
         this.#destroyed = true;
+    }
+
+    /**
+     * Copies the latest RGBA pixels from the WASM surface. When custom
+     * palettes are active the returned data will contain the remapped colors by
+     * default.
+     */
+    capturePixels(options: CapturePixelsOptions = {}): Uint8ClampedArray {
+        const shouldRefresh = options.refresh ?? !this.#running;
+        if (shouldRefresh) {
+            if (this.#running) {
+                this.#fractal.render_to_canvas(this.#offscreen);
+            } else {
+                this.invalidate();
+            }
+        }
+
+        const pixels = this.#fractal.pixels();
+        const source = new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength);
+        const result = new Uint8ClampedArray(source.length);
+        const apply = options.applyPalette ?? true;
+        if (!apply || this.#palette.type === "builtin") {
+            result.set(source);
+        } else {
+            applyPalette(source, result, this.#palette.lut);
+        }
+        return result;
+    }
+
+    /** Returns a data URL representing the current canvas contents. */
+    toDataURL(type?: string, quality?: number): string {
+        if (!this.#running) {
+            this.invalidate();
+        }
+        return this.#canvas.toDataURL(type, quality);
+    }
+
+    /**
+     * Produces a {@link Blob} containing an encoded snapshot of the canvas.
+     * When the runtime lacks `HTMLCanvasElement#toBlob`, a manual data URL
+     * conversion is used.
+     */
+    async toBlob(type = "image/png", quality?: number): Promise<Blob> {
+        if (!this.#running) {
+            this.invalidate();
+        }
+
+        const canvas: HTMLCanvasElement & {
+            toBlob?: (callback: (blob: Blob | null) => void, type?: string, quality?: number) => void;
+        } = this.#canvas;
+
+        if (typeof canvas.toBlob === "function") {
+            const blob = await new Promise<Blob | null>((resolve) => {
+                canvas.toBlob((result) => resolve(result), type, quality);
+            });
+            if (!blob) {
+                throw new Error("Canvas failed to produce a blob snapshot");
+            }
+            return blob;
+        }
+
+        const dataUrl = canvas.toDataURL(type, quality);
+        return dataUrlToBlob(dataUrl, type);
+    }
+
+    /** Creates an {@link ImageBitmap} of the current canvas state. */
+    async toImageBitmap(options?: ImageBitmapOptions): Promise<ImageBitmap> {
+        if (typeof createImageBitmap !== "function") {
+            throw new Error("createImageBitmap is not supported in this environment");
+        }
+        if (!this.#running) {
+            this.invalidate();
+        }
+        return await createImageBitmap(this.#canvas, options);
+    }
+
+    /**
+     * Creates a {@link MediaStream} suitable for piping into a
+     * {@link MediaRecorder}. Throws when the current environment does not
+     * support `HTMLCanvasElement#captureStream`.
+     */
+    createCaptureStream(frameRate?: number): MediaStream {
+        const canvas: HTMLCanvasElement & {
+            captureStream?: (frameRate?: number) => MediaStream;
+        } = this.#canvas;
+        if (typeof canvas.captureStream !== "function") {
+            throw new Error("HTMLCanvasElement.captureStream is not available");
+        }
+        return canvas.captureStream(frameRate);
     }
 
     #renderFrame(timestamp: number): void {

@@ -80,10 +80,21 @@ use st_nn::{
     CouncilEvidence, GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot,
     HeurOp, HeurOpKind,
 };
+use st_core::telemetry::dashboard::{
+    DashboardEvent as CoreDashboardEvent, DashboardFrame as CoreDashboardFrame,
+    DashboardMetric as CoreDashboardMetric, DashboardRing as CoreDashboardRing,
+    EventSeverity as CoreEventSeverity,
+};
 use st_rec::{RatingTriple as RecRatingTriple, RecEpochReport, SpiralRecError, SpiralRecommender};
+#[cfg(feature = "kdsl")]
+use st_kdsl::query::{
+    compile as kdsl_compile, Filter as KdslFilter, OrderDirection as KdslOrderDirection,
+    QueryPlan as KdslQueryPlan,
+};
 use st_rl::{
-    EpisodeReport as RlEpisodeReport, GeometryFeedback, GeometryFeedbackConfig,
-    GeometryFeedbackSignal, GeometryTelemetry, SpiralPolicyGradient, SpiralRlError,
+    DqnAgent, EpisodeReport as RlEpisodeReport, GeometryFeedback, GeometryFeedbackConfig,
+    GeometryFeedbackSignal, GeometryTelemetry, PpoAgent, SacAgent, SpiralPolicyGradient,
+    SpiralRlError,
 };
 use st_tensor::backend::faer_dense;
 #[cfg(feature = "wgpu")]
@@ -470,6 +481,54 @@ fn desire_telemetry_to_py<'py>(
         dict.set_item("z_feedback", py.None())?;
     }
 
+    Ok(dict.into_py(py))
+}
+
+fn serde_json_value_to_py(py: Python<'_>, value: &JsonValue) -> PyResult<PyObject> {
+    Ok(match value {
+        JsonValue::Null => py.None(),
+        JsonValue::Bool(flag) => (*flag).into_py(py),
+        JsonValue::Number(number) => {
+            if let Some(v) = number.as_i64() {
+                v.into_py(py)
+            } else if let Some(v) = number.as_u64() {
+                v.into_py(py)
+            } else if let Some(v) = number.as_f64() {
+                v.into_py(py)
+            } else {
+                py.None()
+            }
+        }
+        JsonValue::String(s) => s.clone().into_py(py),
+        JsonValue::Array(items) => {
+            let list = PyList::empty_bound(py);
+            for item in items {
+                list.append(serde_json_value_to_py(py, item)?)?;
+            }
+            list.into_py(py)
+        }
+        JsonValue::Object(map) => {
+            let dict = PyDict::new_bound(py);
+            for (key, val) in map {
+                dict.set_item(key, serde_json_value_to_py(py, val)?)?;
+            }
+            dict.into_py(py)
+        }
+    })
+}
+
+fn config_event_to_py(py: Python<'_>, event: &ConfigDiffEvent) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("layer", event.layer.to_string())?;
+    dict.set_item("path", &event.path)?;
+    match event.previous.as_ref() {
+        Some(value) => dict.set_item("previous", serde_json_value_to_py(py, value)?)?,
+        None => dict.set_item("previous", py.None())?,
+    }
+    match event.current.as_ref() {
+        Some(value) => dict.set_item("current", serde_json_value_to_py(py, value)?)?,
+        None => dict.set_item("current", py.None())?,
+    }
     Ok(dict.into_py(py))
 }
 
@@ -18169,6 +18228,102 @@ impl PyPolicyGradient {
     }
 }
 
+#[pyclass(module = "spiraltorch.rl", name = "DqnAgent", unsendable)]
+struct PyDqnAgent {
+    inner: Mutex<DqnAgent>,
+}
+
+#[pymethods]
+impl PyDqnAgent {
+    #[new]
+    fn new(state_dim: usize, action_dim: usize, discount: f32, learning_rate: f32) -> PyResult<Self> {
+        let inner = DqnAgent::new(state_dim, action_dim, discount, learning_rate).map_err(rl_err)?;
+        Ok(Self {
+            inner: Mutex::new(inner),
+        })
+    }
+
+    fn select_action(&self, state: usize) -> PyResult<usize> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.select_action(state))
+    }
+
+    fn update(&self, state: usize, action: usize, reward: f32, next_state: usize) -> PyResult<()> {
+        let mut guard = self.inner.lock().unwrap();
+        guard.update(state, action, reward, next_state);
+        Ok(())
+    }
+
+    #[getter]
+    fn epsilon(&self) -> PyResult<f32> {
+        Ok(self.inner.lock().unwrap().epsilon())
+    }
+
+    fn set_epsilon(&self, epsilon: f32) -> PyResult<()> {
+        self.inner.lock().unwrap().set_epsilon(epsilon);
+        Ok(())
+    }
+}
+
+#[pyclass(module = "spiraltorch.rl", name = "PpoAgent", unsendable)]
+struct PyPpoAgent {
+    inner: Mutex<PpoAgent>,
+}
+
+#[pymethods]
+impl PyPpoAgent {
+    #[new]
+    fn new(state_dim: usize, action_dim: usize, learning_rate: f32, clip_range: f32) -> PyResult<Self> {
+        let inner = PpoAgent::new(state_dim, action_dim, learning_rate, clip_range).map_err(rl_err)?;
+        Ok(Self {
+            inner: Mutex::new(inner),
+        })
+    }
+
+    fn score_actions(&self, state: Vec<f32>) -> PyResult<Vec<f32>> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.score_actions(&state))
+    }
+
+    fn value(&self, state: Vec<f32>) -> PyResult<f32> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.value(&state))
+    }
+
+    fn update(&self, state: Vec<f32>, action: usize, advantage: f32, old_log_prob: f32) -> PyResult<()> {
+        let mut guard = self.inner.lock().unwrap();
+        guard.update(&state, action, advantage, old_log_prob);
+        Ok(())
+    }
+}
+
+#[pyclass(module = "spiraltorch.rl", name = "SacAgent", unsendable)]
+struct PySacAgent {
+    inner: Mutex<SacAgent>,
+}
+
+#[pymethods]
+impl PySacAgent {
+    #[new]
+    fn new(state_dim: usize, action_dim: usize, temperature: f32) -> PyResult<Self> {
+        let inner = SacAgent::new(state_dim, action_dim, temperature).map_err(rl_err)?;
+        Ok(Self {
+            inner: Mutex::new(inner),
+        })
+    }
+
+    fn sample_action(&self, state: Vec<f32>) -> PyResult<usize> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.sample_action(&state))
+    }
+
+    fn jitter(&self, entropy_target: f32) -> PyResult<()> {
+        let mut guard = self.inner.lock().unwrap();
+        guard.jitter(entropy_target);
+        Ok(())
+    }
+}
+
 #[pyclass(module = "spiraltorch.rec", name = "EpochReport")]
 struct PyRecEpochReport {
     inner: RecEpochReport,
@@ -18189,6 +18344,253 @@ impl PyRecEpochReport {
     #[getter]
     fn regularization_penalty(&self) -> f32 {
         self.inner.regularization_penalty
+    }
+}
+
+#[pyclass(module = "spiraltorch.telemetry", name = "Metric")]
+#[derive(Clone)]
+struct PyDashboardMetric {
+    inner: CoreDashboardMetric,
+}
+
+#[pymethods]
+impl PyDashboardMetric {
+    #[new]
+    fn new(name: String, value: f64, unit: Option<String>, trend: Option<f64>) -> Self {
+        let mut metric = CoreDashboardMetric::new(name, value);
+        if let Some(unit) = unit {
+            metric = metric.with_unit(unit);
+        }
+        if let Some(trend) = trend {
+            metric = metric.with_trend(trend);
+        }
+        Self { inner: metric }
+    }
+
+    #[getter]
+    fn name(&self) -> &str {
+        &self.inner.name
+    }
+
+    #[getter]
+    fn value(&self) -> f64 {
+        self.inner.value
+    }
+
+    #[getter]
+    fn unit(&self) -> Option<&str> {
+        self.inner.unit.as_deref()
+    }
+
+    #[getter]
+    fn trend(&self) -> Option<f64> {
+        self.inner.trend
+    }
+}
+
+#[pyclass(module = "spiraltorch.telemetry", name = "Event")]
+#[derive(Clone)]
+struct PyDashboardEvent {
+    inner: CoreDashboardEvent,
+}
+
+#[pymethods]
+impl PyDashboardEvent {
+    #[new]
+    fn new(message: String, severity: &str) -> PyResult<Self> {
+        let severity = match severity.to_ascii_lowercase().as_str() {
+            "info" => CoreEventSeverity::Info,
+            "warning" | "warn" => CoreEventSeverity::Warning,
+            "critical" | "error" => CoreEventSeverity::Critical,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unsupported severity '{other}', expected info/warning/critical"
+                )))
+            }
+        };
+        Ok(Self {
+            inner: CoreDashboardEvent { message, severity },
+        })
+    }
+
+    #[getter]
+    fn message(&self) -> &str {
+        &self.inner.message
+    }
+
+    #[getter]
+    fn severity(&self) -> &'static str {
+        match self.inner.severity {
+            CoreEventSeverity::Info => "info",
+            CoreEventSeverity::Warning => "warning",
+            CoreEventSeverity::Critical => "critical",
+        }
+    }
+}
+
+#[pyclass(module = "spiraltorch.telemetry", name = "Frame")]
+#[derive(Clone)]
+struct PyDashboardFrame {
+    inner: CoreDashboardFrame,
+}
+
+#[pymethods]
+impl PyDashboardFrame {
+    #[new]
+    fn new(timestamp: Option<f64>) -> PyResult<Self> {
+        let instant = if let Some(ts) = timestamp {
+            UNIX_EPOCH
+                .checked_add(Duration::from_secs_f64(ts))
+                .ok_or_else(|| PyValueError::new_err("invalid timestamp"))?
+        } else {
+            SystemTime::now()
+        };
+        Ok(Self {
+            inner: CoreDashboardFrame::new(instant),
+        })
+    }
+
+    fn add_metric(&mut self, metric: PyDashboardMetric) {
+        self.inner.push_metric(metric.inner);
+    }
+
+    fn add_event(&mut self, event: PyDashboardEvent) {
+        self.inner.push_event(event.inner);
+    }
+
+    #[getter]
+    fn timestamp(&self) -> PyResult<f64> {
+        let duration = self
+            .inner
+            .timestamp
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| PyValueError::new_err("timestamp predates unix epoch"))?;
+        Ok(duration.as_secs_f64())
+    }
+
+    fn metrics(&self) -> Vec<PyDashboardMetric> {
+        self.inner
+            .metrics
+            .iter()
+            .cloned()
+            .map(|inner| PyDashboardMetric { inner })
+            .collect()
+    }
+
+    fn events(&self) -> Vec<PyDashboardEvent> {
+        self.inner
+            .events
+            .iter()
+            .cloned()
+            .map(|inner| PyDashboardEvent { inner })
+            .collect()
+    }
+}
+
+#[pyclass(module = "spiraltorch.telemetry", name = "Ring", unsendable)]
+struct PyDashboardRing {
+    inner: Mutex<CoreDashboardRing>,
+}
+
+#[pymethods]
+impl PyDashboardRing {
+    #[new]
+    fn new(capacity: usize) -> Self {
+        Self {
+            inner: Mutex::new(CoreDashboardRing::new(capacity)),
+        }
+    }
+
+    fn push(&self, frame: PyDashboardFrame) {
+        self.inner.lock().unwrap().push(frame.inner);
+    }
+
+    fn latest(&self) -> Option<PyDashboardFrame> {
+        self.inner
+            .lock()
+            .unwrap()
+            .latest()
+            .cloned()
+            .map(|inner| PyDashboardFrame { inner })
+    }
+
+    fn frames(&self) -> Vec<PyDashboardFrame> {
+        self.inner
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .map(|inner| PyDashboardFrame { inner })
+            .collect()
+    }
+}
+
+#[cfg(feature = "kdsl")]
+#[pyclass(module = "spiraltorch.kdsl", name = "QueryPlan", unsendable)]
+struct PyKdslQueryPlan {
+    inner: KdslQueryPlan,
+    raw: String,
+}
+
+#[cfg(feature = "kdsl")]
+#[pymethods]
+impl PyKdslQueryPlan {
+    #[new]
+    fn new(query: &str) -> PyResult<Self> {
+        let plan = kdsl_compile(query).map_err(|err| PyValueError::new_err(err.to_string()))?;
+        Ok(Self {
+            inner: plan,
+            raw: query.to_string(),
+        })
+    }
+
+    #[getter]
+    fn query(&self) -> &str {
+        &self.raw
+    }
+
+    fn selects(&self) -> Vec<String> {
+        self.inner.selects.clone()
+    }
+
+    fn limit(&self) -> Option<usize> {
+        self.inner.limit
+    }
+
+    fn order(&self) -> Option<(String, String)> {
+        self.inner.order.as_ref().map(|(column, direction)| {
+            let dir = match direction {
+                KdslOrderDirection::Asc => "asc",
+                KdslOrderDirection::Desc => "desc",
+            };
+            (column.clone(), dir.to_string())
+        })
+    }
+
+    fn filters(&self) -> Vec<(String, String, f64)> {
+        self.inner
+            .filters
+            .iter()
+            .map(|filter| match filter {
+                KdslFilter::Eq(column, value) => (column.clone(), "=".to_string(), *value),
+                KdslFilter::Neq(column, value) => (column.clone(), "!=".to_string(), *value),
+                KdslFilter::Gt(column, value) => (column.clone(), ">".to_string(), *value),
+                KdslFilter::Lt(column, value) => (column.clone(), "<".to_string(), *value),
+                KdslFilter::Ge(column, value) => (column.clone(), ">=".to_string(), *value),
+                KdslFilter::Le(column, value) => (column.clone(), "<=".to_string(), *value),
+            })
+            .collect()
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "QueryPlan(query=\"{}\", selects={:?}, filters={}, order={:?}, limit={:?})",
+            self.raw,
+            self.inner.selects,
+            self.inner.filters.len(),
+            self.inner.order,
+            self.inner.limit
+        ))
     }
 }
 
@@ -18256,6 +18658,36 @@ impl PyRecommender {
             .recommend_top_k(user, k, exclude_slice)
             .map_err(rec_err)?;
         Ok(recs.into_iter().map(|rec| (rec.item, rec.score)).collect())
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[pyo3(signature = (user, query, exclude=None))]
+    fn recommend_query(
+        &self,
+        py: Python<'_>,
+        user: usize,
+        query: &PyKdslQueryPlan,
+        exclude: Option<Vec<usize>>,
+    ) -> PyResult<Vec<PyObject>> {
+        let exclude = exclude.unwrap_or_default();
+        let exclude_slice = if exclude.is_empty() {
+            None
+        } else {
+            Some(exclude.as_slice())
+        };
+        let guard = self.inner.lock().unwrap();
+        let rows = guard
+            .recommend_with_query(user, &query.inner, exclude_slice)
+            .map_err(rec_err)?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let dict = PyDict::new_bound(py);
+            for (key, value) in row {
+                dict.set_item(key, value)?;
+            }
+            out.push(dict.into_py(py));
+        }
+        Ok(out)
     }
 
     fn user_embedding(&self, user: usize) -> PyResult<PyTensor> {
@@ -18393,10 +18825,13 @@ fn linalg(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pymodule]
 fn rl(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPolicyGradient>()?;
-    m.setattr("__all__", vec!["PolicyGradient"])?;
+    m.add_class::<PyDqnAgent>()?;
+    m.add_class::<PyPpoAgent>()?;
+    m.add_class::<PySacAgent>()?;
+    m.setattr("__all__", vec!["PolicyGradient", "DqnAgent", "PpoAgent", "SacAgent"])?;
     m.setattr(
         "__doc__",
-        "Policy gradient learner with optional Z-space geometry feedback and telemetry surfaces returned as dictionaries.",
+        "Reinforcement learning agents: policy gradient with geometry feedback, DQN, PPO, and SAC primitives.",
     )?;
     Ok(())
 }
@@ -18408,6 +18843,31 @@ fn rec(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.setattr(
         "__doc__",
         "Recommendation harness that wraps SpiralLightning for inference and ranking.",
+    )?;
+    Ok(())
+}
+
+#[cfg(feature = "kdsl")]
+fn kdsl(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyKdslQueryPlan>()?;
+    m.setattr("__all__", vec!["QueryPlan"])?;
+    m.setattr(
+        "__doc__",
+        "KDsl query utilities for filtering ranked telemetry and recommendation results.",
+    )?;
+    Ok(())
+}
+
+#[pymodule]
+fn telemetry(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyDashboardMetric>()?;
+    m.add_class::<PyDashboardEvent>()?;
+    m.add_class::<PyDashboardFrame>()?;
+    m.add_class::<PyDashboardRing>()?;
+    m.setattr("__all__", vec!["Metric", "Event", "Frame", "Ring"])?;
+    m.setattr(
+        "__doc__",
+        "Telemetry dashboard primitives for building real-time monitoring overlays.",
     )?;
     Ok(())
 }
@@ -18508,6 +18968,14 @@ fn get_desire_telemetry(py: Python<'_>) -> PyResult<Option<PyObject>> {
     Ok(hub::get_last_desire_step()
         .map(|sample| desire_telemetry_to_py(py, &sample))
         .transpose()?)
+}
+
+#[pyfunction]
+fn get_config_events(py: Python<'_>) -> PyResult<Vec<PyObject>> {
+    hub::get_config_events()
+        .iter()
+        .map(|event| config_event_to_py(py, event))
+        .collect()
 }
 
 #[pyfunction]
@@ -18849,6 +19317,15 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let rec_mod = PyModule::new_bound(_py, "rec")?;
     rec(_py, &rec_mod)?;
     m.add_submodule(&rec_mod)?;
+    #[cfg(feature = "kdsl")]
+    {
+        let kdsl_mod = PyModule::new_bound(_py, "kdsl")?;
+        kdsl(_py, &kdsl_mod)?;
+        m.add_submodule(&kdsl_mod)?;
+    }
+    let telemetry_mod = PyModule::new_bound(_py, "telemetry")?;
+    telemetry(_py, &telemetry_mod)?;
+    m.add_submodule(&telemetry_mod)?;
     let sot_mod = PyModule::new_bound(_py, "sot")?;
     sot::module(_py, &sot_mod)?;
     m.add_submodule(&sot_mod)?;
@@ -18864,6 +19341,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
+    m.add_function(wrap_pyfunction!(get_config_events, m)?)?;
     m.add_function(wrap_pyfunction!(get_desire_telemetry, m)?)?;
     m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
     m.add_function(wrap_pyfunction!(ecosystem_snapshot, m)?)?;
@@ -18946,75 +19424,75 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
 
-    m.setattr(
-        "__all__",
-        vec![
-            "plan",
-            "plan_topk",
-            "plan_midk",
-            "plan_bottomk",
-            "topk2d_tensor",
-            "topk2d",
-            "z_space_barycenter",
-            "hip_probe",
-            "describe_device",
-            "get_desire_telemetry",
-            "get_psychoid_stats",
-            "describe_resonance",
-            "describe_frame",
-            "describe_timeline",
-            "describe_atlas",
-            "ecosystem_snapshot",
-            "ecosystem_drain",
-            "ecosystem_record_connector",
-            "ecosystem_record_metric",
-            "ecosystem_capacity",
-            "ecosystem_configure",
-            "Tensor",
-            "ComplexTensor",
-            "BarycenterIntermediate",
-            "ZSpaceBarycenter",
-            "DifferentialResonance",
-            "AtlasMetric",
-            "AtlasFrame",
-            "ChronoFrame",
-            "ChronoSummary",
-            "SpiralDifferentialTrace",
-            "OpenTopos",
-            "TensorBiome",
-            "LanguageWaveEncoder",
-            "TextResonator",
-            "Hypergrad",
-            "DistConfig",
-            "SparseKernel",
-            "SymbolGeometry",
-            "RepressionField",
-            "SemanticBridge",
-            "ConceptHint",
-            "TemperatureController",
-            "DesireSchedule",
-            "SelfRewriteConfig",
-            "DesireLagrangian",
-            "DesireAutomation",
-            "DesirePipelineBuilder",
-            "DesirePipeline",
-            "RoundtableSchedule",
-            "DesireRoundtableBridge",
-            "EpochStats",
-            "ModuleTrainer",
-            "SpiralLightning",
-            "SpiralSessionBuilder",
-            "SpiralSession",
-            "nn",
-            "frac",
-            "dataset",
-            "linalg",
-            "rl",
-            "rec",
-            "sot",
-            "integrations",
-        ],
-    )?;
+    let mut root_all = vec![
+        "plan",
+        "plan_topk",
+        "plan_midk",
+        "plan_bottomk",
+        "topk2d_tensor",
+        "topk2d",
+        "z_space_barycenter",
+        "hip_probe",
+        "describe_device",
+        "get_desire_telemetry",
+        "get_psychoid_stats",
+        "describe_resonance",
+        "describe_frame",
+        "describe_timeline",
+        "describe_atlas",
+        "ecosystem_snapshot",
+        "ecosystem_drain",
+        "ecosystem_record_connector",
+        "ecosystem_record_metric",
+        "ecosystem_capacity",
+        "ecosystem_configure",
+        "Tensor",
+        "ComplexTensor",
+        "BarycenterIntermediate",
+        "ZSpaceBarycenter",
+        "DifferentialResonance",
+        "AtlasMetric",
+        "AtlasFrame",
+        "ChronoFrame",
+        "ChronoSummary",
+        "SpiralDifferentialTrace",
+        "OpenTopos",
+        "TensorBiome",
+        "LanguageWaveEncoder",
+        "TextResonator",
+        "Hypergrad",
+        "DistConfig",
+        "SparseKernel",
+        "SymbolGeometry",
+        "RepressionField",
+        "SemanticBridge",
+        "ConceptHint",
+        "TemperatureController",
+        "DesireSchedule",
+        "SelfRewriteConfig",
+        "DesireLagrangian",
+        "DesireAutomation",
+        "DesirePipelineBuilder",
+        "DesirePipeline",
+        "RoundtableSchedule",
+        "DesireRoundtableBridge",
+        "EpochStats",
+        "ModuleTrainer",
+        "SpiralLightning",
+        "SpiralSessionBuilder",
+        "SpiralSession",
+        "nn",
+        "frac",
+        "dataset",
+        "linalg",
+        "rl",
+        "rec",
+        "sot",
+        "integrations",
+    ];
+    #[cfg(feature = "kdsl")]
+    root_all.push("kdsl");
+    m.setattr("__all__", root_all)?;
     let mut exported = vec![
         "plan",
         "plan_topk",
@@ -19022,6 +19500,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "z_space_barycenter",
         "hip_probe",
         "describe_device",
+        "get_config_events",
+        "get_desire_telemetry",
         "get_psychoid_stats",
         "describe_resonance",
         "describe_frame",
@@ -19055,6 +19535,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "sot",
         "integrations",
     ];
+    #[cfg(feature = "kdsl")]
+    exported.push("kdsl");
     #[cfg(feature = "golden")]
     {
         exported.push("GoldenBlackcatPulse");

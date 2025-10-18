@@ -954,7 +954,7 @@ impl RealGradZProjector {
             trailing: beneath,
         };
         ZPulse {
-            source: ZSource::RealGrad,
+            source: ZSource::Other("RealGrad"),
             ts: 0,
             tempo: z_energy,
             drift,

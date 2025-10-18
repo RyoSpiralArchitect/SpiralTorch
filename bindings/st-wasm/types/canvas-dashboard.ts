@@ -7,6 +7,11 @@ import {
     type CanvasFrameEvent,
     type CanvasPointerEvent,
 } from "./canvas-view";
+import { SpiralCanvasRecorder, type SpiralCanvasRecorderOptions } from "./canvas-recorder";
+import type {
+    SpiralCanvasCollabSession,
+    CanvasCollabParticipantState,
+} from "./canvas-collab";
 
 /** Options used to configure {@link SpiralCanvasDashboard}. */
 export interface SpiralCanvasDashboardOptions {
@@ -18,6 +23,26 @@ export interface SpiralCanvasDashboardOptions {
     showPointerToggle?: boolean;
     /** Whether to render the reset view button. Defaults to `true`. */
     showResetView?: boolean;
+    /** Whether to expose snapshot and recording buttons. Defaults to `true`. */
+    showSnapshot?: boolean;
+    /** Optional file name used when downloading snapshots. */
+    snapshotFilename?: string;
+    /** MIME type forwarded to {@link SpiralCanvasView#toBlob}. Defaults to PNG. */
+    snapshotMimeType?: string;
+    /** Quality forwarded to {@link SpiralCanvasView#toBlob}. */
+    snapshotQuality?: number;
+    /** Callback invoked with the captured snapshot {@link Blob}. */
+    onSnapshot?: (blob: Blob) => void | Promise<void>;
+    /** Callback invoked when snapshot capture fails. */
+    onSnapshotError?: (error: unknown) => void;
+    /** Whether to expose a recording toggle. Disabled when unsupported. */
+    showRecorder?: boolean;
+    /** Options forwarded to {@link SpiralCanvasRecorder}. */
+    recorderOptions?: SpiralCanvasRecorderOptions;
+    /** Callback invoked once a recording blob has been assembled. */
+    onRecordingComplete?: (blob: Blob) => void | Promise<void>;
+    /** Callback invoked when recording fails to start or stop. */
+    onRecordingError?: (error: unknown) => void;
     /** Minimum curvature value exposed by the slider. Defaults to `0.1`. */
     curvatureMin?: number;
     /** Maximum curvature value exposed by the slider. Defaults to `4`. */
@@ -31,6 +56,12 @@ export interface SpiralCanvasDashboardOptions {
 }
 
 const DASHBOARD_STYLE_ID = "spiraltorch-dashboard-style";
+const ROLE_COLORS: Record<string, string> = {
+    trainer: "#6366f1",
+    model: "#22d3ee",
+    human: "#f97316",
+};
+
 const DEFAULT_STYLES = `
 .spiraltorch-dashboard {
     font-family: system-ui, sans-serif;
@@ -107,6 +138,26 @@ const DEFAULT_STYLES = `
     flex: 0 0 auto;
 }
 
+.spiraltorch-dashboard .actions-row {
+    display: flex;
+    gap: 8px;
+}
+
+.spiraltorch-dashboard .actions-row button {
+    flex: 1 1 auto;
+}
+
+.spiraltorch-dashboard .actions-row button.recording-active {
+    background: #ef4444;
+    color: #fff;
+}
+
+.spiraltorch-dashboard .actions-row .recording-indicator {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+}
+
 .spiraltorch-dashboard .slider-row {
     display: flex;
     align-items: center;
@@ -117,6 +168,62 @@ const DEFAULT_STYLES = `
     font-variant-numeric: tabular-nums;
     min-width: 48px;
     text-align: right;
+}
+
+.spiraltorch-dashboard .participants {
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 8px;
+}
+
+.spiraltorch-dashboard .participants h2 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.7;
+}
+
+.spiraltorch-dashboard .participants-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.spiraltorch-dashboard .participant-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    background: rgba(148, 163, 184, 0.08);
+}
+
+.spiraltorch-dashboard .participant-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.spiraltorch-dashboard .participant-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    background: var(--indicator, #22d3ee);
+    box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.18);
+}
+
+.spiraltorch-dashboard .participant-label {
+    font-weight: 600;
+}
+
+.spiraltorch-dashboard .participant-meta,
+.spiraltorch-dashboard .participant-pointer {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
 }
 `;
 
@@ -193,20 +300,35 @@ export class SpiralCanvasDashboard {
     readonly #customPalettes = new Map<string, CustomPalette>();
     readonly #customPaletteLookup = new WeakMap<object, string>();
     readonly #statsDigits: number;
+    readonly #options: SpiralCanvasDashboardOptions;
 
     #paletteSelect?: HTMLSelectElement;
     #curvatureSlider?: HTMLInputElement;
     #curvatureLabel?: HTMLSpanElement;
     #pointerToggle?: HTMLInputElement;
+    #snapshotButton?: HTMLButtonElement;
+    #recordButton?: HTMLButtonElement;
+    #recordingIndicator?: HTMLElement;
     #fpsField: HTMLElement;
     #zoomField: HTMLElement;
     #offsetField: HTMLElement;
     #paletteField: HTMLElement;
     #statFields = new Map<string, HTMLElement>();
 
+    #participantsContainer?: HTMLElement;
+    #participantsList?: HTMLElement;
+    #collabSession: SpiralCanvasCollabSession | null = null;
+    #collabParticipantsHandler?: (event: { participants: CanvasCollabParticipantState[] }) => void;
+    #collabStateHandler?: (event: {
+        participant: CanvasCollabParticipantState;
+        origin: "local" | "remote";
+    }) => void;
+
     #frameHandler: (event: CanvasFrameEvent) => void;
     #statsHandler: (event: CanvasStatsEvent) => void;
     #pointerHandler: (event: CanvasPointerEvent) => void;
+    #recorder: SpiralCanvasRecorder | null = null;
+    #recordingStart = 0;
 
     constructor(container: HTMLElement, view: SpiralCanvasView, options: SpiralCanvasDashboardOptions = {}) {
         if (!container) {
@@ -216,6 +338,7 @@ export class SpiralCanvasDashboard {
             throw new Error("Dashboard container must be attached to a document");
         }
         this.#view = view;
+        this.#options = options;
         const digits = options.statsDigits ?? 3;
         this.#statsDigits = Number.isFinite(digits) ? Math.max(0, Math.round(digits)) : 3;
 
@@ -229,6 +352,7 @@ export class SpiralCanvasDashboard {
         this.#buildHeader(options);
         this.#buildControls(options);
         this.#buildStats();
+        this.#buildParticipantsPane();
 
         const palette = this.#view.palette;
         this.#updatePaletteField(palette);
@@ -265,7 +389,68 @@ export class SpiralCanvasDashboard {
         this.#view.off("frame", this.#frameHandler);
         this.#view.off("stats", this.#statsHandler);
         this.#view.off("pointer", this.#pointerHandler);
+        this.detachCollaboration();
+        if (this.#recorder?.recording) {
+            this.#recorder.cancel();
+        }
+        this.#recorder = null;
+        this.#recordButton?.classList.remove("recording-active");
+        if (this.#recordingIndicator) {
+            this.#recordingIndicator.textContent = "";
+        }
         this.#root.remove();
+    }
+
+    /**
+     * Connects the dashboard to a {@link SpiralCanvasCollabSession} so that
+     * participants and remote activity are surfaced within the UI.
+     */
+    attachCollaboration(session: SpiralCanvasCollabSession): void {
+        if (this.#collabSession === session) {
+            this.#renderParticipants(session.participants);
+            return;
+        }
+        this.detachCollaboration();
+        this.#collabSession = session;
+        if (!this.#participantsContainer || !this.#participantsList) {
+            this.#buildParticipantsPane();
+        }
+        if (this.#participantsContainer) {
+            this.#participantsContainer.style.display = "flex";
+        }
+        this.#collabParticipantsHandler = (event) => {
+            this.#renderParticipants(event.participants);
+        };
+        this.#collabStateHandler = () => {
+            this.#renderParticipants(session.participants);
+        };
+        session.on("participants", this.#collabParticipantsHandler);
+        session.on("state", this.#collabStateHandler);
+        this.#renderParticipants(session.participants);
+    }
+
+    /**
+     * Detaches the dashboard from any active collaboration session.
+     */
+    detachCollaboration(): void {
+        if (!this.#collabSession) {
+            return;
+        }
+        if (this.#collabParticipantsHandler) {
+            this.#collabSession.off("participants", this.#collabParticipantsHandler);
+            this.#collabParticipantsHandler = undefined;
+        }
+        if (this.#collabStateHandler) {
+            this.#collabSession.off("state", this.#collabStateHandler);
+            this.#collabStateHandler = undefined;
+        }
+        this.#collabSession = null;
+        if (this.#participantsContainer) {
+            this.#participantsContainer.style.display = "none";
+        }
+        if (this.#participantsList) {
+            this.#participantsList.innerHTML = "";
+        }
     }
 
     #buildHeader(options: SpiralCanvasDashboardOptions): void {
@@ -355,6 +540,52 @@ export class SpiralCanvasDashboard {
             controls.appendChild(row);
         }
 
+        const snapshotEnabled = options.showSnapshot ?? true;
+        const recorderRequested = options.showRecorder ?? false;
+        const recorderSupported =
+            recorderRequested &&
+            SpiralCanvasRecorder.isSupported() &&
+            typeof this.#view.element.captureStream === "function";
+
+        if (snapshotEnabled || recorderRequested) {
+            const row = this.#root.ownerDocument!.createElement("div");
+            row.className = "control-row actions-row";
+
+            if (snapshotEnabled) {
+                const button = this.#root.ownerDocument!.createElement("button");
+                button.type = "button";
+                button.textContent = "Snapshot";
+                button.addEventListener("click", () => {
+                    void this.#handleSnapshot();
+                });
+                this.#snapshotButton = button;
+                row.appendChild(button);
+            }
+
+            if (recorderRequested) {
+                const button = this.#root.ownerDocument!.createElement("button");
+                button.type = "button";
+                button.textContent = "Start recording";
+                if (recorderSupported) {
+                    button.addEventListener("click", () => {
+                        void this.#toggleRecording();
+                    });
+                } else {
+                    button.disabled = true;
+                    button.title = "MediaRecorder API is not available";
+                }
+                this.#recordButton = button;
+                row.appendChild(button);
+
+                const indicator = this.#root.ownerDocument!.createElement("span");
+                indicator.className = "recording-indicator";
+                this.#recordingIndicator = indicator;
+                row.appendChild(indicator);
+            }
+
+            controls.appendChild(row);
+        }
+
         this.#root.appendChild(controls);
     }
 
@@ -406,6 +637,102 @@ export class SpiralCanvasDashboard {
         }
 
         this.#root.appendChild(statsSection);
+    }
+
+    #buildParticipantsPane(): void {
+        if (this.#participantsContainer) {
+            return;
+        }
+        const section = this.#root.ownerDocument!.createElement("section");
+        section.className = "participants";
+        section.style.display = "none";
+        const title = this.#root.ownerDocument!.createElement("h2");
+        title.textContent = "Participants";
+        const list = this.#root.ownerDocument!.createElement("div");
+        list.className = "participants-list";
+        section.appendChild(title);
+        section.appendChild(list);
+        this.#participantsContainer = section;
+        this.#participantsList = list;
+        this.#root.appendChild(section);
+    }
+
+    #renderParticipants(participants: CanvasCollabParticipantState[]): void {
+        if (!this.#participantsContainer || !this.#participantsList) {
+            return;
+        }
+        if (!this.#collabSession) {
+            this.#participantsContainer.style.display = "none";
+            this.#participantsList.innerHTML = "";
+            return;
+        }
+        this.#participantsContainer.style.display = "flex";
+        this.#participantsList.innerHTML = "";
+        const doc = this.#participantsList.ownerDocument!;
+        for (const participant of participants) {
+            const row = doc.createElement("div");
+            row.className = "participant-row";
+
+            const header = doc.createElement("div");
+            header.className = "participant-header";
+
+            const indicator = doc.createElement("span");
+            indicator.className = "participant-indicator";
+            indicator.style.setProperty("--indicator", this.#resolveParticipantColor(participant));
+            header.appendChild(indicator);
+
+            const label = doc.createElement("span");
+            label.className = "participant-label";
+            label.textContent = participant.label ?? participant.role;
+            header.appendChild(label);
+
+            if (participant.label && participant.label !== participant.role) {
+                const role = doc.createElement("span");
+                role.className = "participant-meta";
+                role.textContent = `(${participant.role})`;
+                header.appendChild(role);
+            }
+
+            row.appendChild(header);
+
+            const stateLine = doc.createElement("div");
+            stateLine.className = "participant-meta";
+            const state = participant.state;
+            stateLine.textContent = `zoom ${formatNumber(state.zoom, this.#statsDigits)} · offset ${formatNumber(
+                state.offset.x,
+                this.#statsDigits,
+            )}, ${formatNumber(state.offset.y, this.#statsDigits)}`;
+            row.appendChild(stateLine);
+
+            if (participant.lastPointer) {
+                const pointerLine = doc.createElement("div");
+                pointerLine.className = "participant-pointer";
+                pointerLine.textContent = `${participant.lastPointer.kind} via ${participant.lastPointer.source} · offset ${formatNumber(
+                    participant.lastPointer.offset.x,
+                    this.#statsDigits,
+                )}, ${formatNumber(participant.lastPointer.offset.y, this.#statsDigits)}`;
+                row.appendChild(pointerLine);
+            }
+
+            const lastSeen = doc.createElement("div");
+            lastSeen.className = "participant-meta";
+            const seconds = Math.max(0, Math.round((Date.now() - participant.lastSeen) / 1000));
+            lastSeen.textContent = seconds === 0 ? "active now" : `last input ${seconds}s ago`;
+            row.appendChild(lastSeen);
+
+            this.#participantsList.appendChild(row);
+        }
+    }
+
+    #resolveParticipantColor(participant: CanvasCollabParticipantState): string {
+        if (participant.color) {
+            return participant.color;
+        }
+        const preset = ROLE_COLORS[participant.role];
+        if (preset) {
+            return preset;
+        }
+        return "#38bdf8";
     }
 
     #populatePaletteOptions(): void {
@@ -504,6 +831,9 @@ export class SpiralCanvasDashboard {
         this.#zoomField.textContent = formatNumber(event.zoom, this.#statsDigits);
         this.#setOffsetReadout(event.offset.x, event.offset.y);
         this.#syncPointerToggle();
+        if (this.#recorder?.recording) {
+            this.#updateRecordingIndicator(event.time);
+        }
     }
 
     #updateStats(event: CanvasStatsEvent): void {
@@ -533,5 +863,135 @@ export class SpiralCanvasDashboard {
 
     #setOffsetReadout(x: number, y: number): void {
         this.#offsetField.textContent = `${formatNumber(x, this.#statsDigits)}, ${formatNumber(y, this.#statsDigits)}`;
+    }
+
+    async #handleSnapshot(): Promise<void> {
+        if (!this.#snapshotButton) {
+            return;
+        }
+        this.#snapshotButton.disabled = true;
+        try {
+            const blob = await this.#view.toBlob(
+                this.#options.snapshotMimeType ?? "image/png",
+                this.#options.snapshotQuality,
+            );
+            if (this.#options.onSnapshot) {
+                await this.#options.onSnapshot(blob);
+            } else {
+                const name = this.#options.snapshotFilename ?? "spiraltorch-canvas.png";
+                this.#downloadBlob(blob, name);
+            }
+        } catch (error) {
+            this.#options.onSnapshotError?.(error);
+            if (typeof console !== "undefined" && typeof console.error === "function") {
+                console.error("Failed to capture snapshot", error);
+            }
+        } finally {
+            this.#snapshotButton.disabled = false;
+        }
+    }
+
+    async #toggleRecording(): Promise<void> {
+        if (!this.#recordButton) {
+            return;
+        }
+        if (!this.#recorder) {
+            this.#recorder = new SpiralCanvasRecorder(
+                this.#view,
+                this.#options.recorderOptions ?? {},
+            );
+        }
+        const button = this.#recordButton;
+        const indicator = this.#recordingIndicator;
+
+        if (!this.#recorder.recording) {
+            try {
+                this.#recorder.start();
+                this.#recordingStart =
+                    typeof performance !== "undefined" && typeof performance.now === "function"
+                        ? performance.now()
+                        : Date.now();
+                button.textContent = "Stop recording";
+                button.classList.add("recording-active");
+                if (indicator) {
+                    indicator.textContent = "Rec 0.0s";
+                }
+            } catch (error) {
+                button.textContent = "Start recording";
+                button.classList.remove("recording-active");
+                if (indicator) {
+                    indicator.textContent = "";
+                }
+                this.#options.onRecordingError?.(error);
+                if (typeof console !== "undefined" && typeof console.error === "function") {
+                    console.error("Failed to start recording", error);
+                }
+            }
+            return;
+        }
+
+        button.disabled = true;
+        try {
+            const blob = await this.#recorder.stop();
+            button.textContent = "Start recording";
+            button.classList.remove("recording-active");
+            button.disabled = false;
+            this.#recordingStart = 0;
+            if (indicator) {
+                indicator.textContent = "";
+            }
+            if (this.#options.onRecordingComplete) {
+                await this.#options.onRecordingComplete(blob);
+            } else {
+                const filename = this.#resolveRecordingFilename(blob.type);
+                this.#downloadBlob(blob, filename);
+            }
+        } catch (error) {
+            button.disabled = false;
+            button.classList.remove("recording-active");
+            if (indicator) {
+                indicator.textContent = "";
+            }
+            this.#options.onRecordingError?.(error);
+            if (typeof console !== "undefined" && typeof console.error === "function") {
+                console.error("Failed to stop recording", error);
+            }
+        }
+    }
+
+    #updateRecordingIndicator(now?: number): void {
+        if (!this.#recordingIndicator || !this.#recorder?.recording) {
+            return;
+        }
+        const current =
+            typeof now === "number"
+                ? now
+                : typeof performance !== "undefined" && typeof performance.now === "function"
+                  ? performance.now()
+                  : Date.now();
+        const elapsed = Math.max(0, current - this.#recordingStart);
+        this.#recordingIndicator.textContent = `Rec ${(elapsed / 1000).toFixed(1)}s`;
+    }
+
+    #downloadBlob(blob: Blob, filename: string): void {
+        const doc = this.#root.ownerDocument!;
+        const url = URL.createObjectURL(blob);
+        const link = doc.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.style.display = "none";
+        const parent = doc.body ?? this.#root;
+        parent.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    #resolveRecordingFilename(type?: string): string {
+        const fallback = this.#options.recorderOptions?.mimeType ?? "video/webm";
+        const mime = type && type.length > 0 ? type : fallback;
+        const extension = mime.includes("/") ? mime.split("/").pop() ?? "webm" : mime;
+        const clean = extension.split(";")[0] || "webm";
+        return `spiraltorch-canvas.${clean}`;
     }
 }

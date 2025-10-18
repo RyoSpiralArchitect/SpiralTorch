@@ -62,6 +62,25 @@ pub struct LanguageWave {
     pub amplitude: Vec<f32>,
 }
 
+impl LanguageWave {
+    /// Synthesises mono PCM samples from the amplitude envelope.
+    pub fn to_audio_samples(&self, sample_rate: usize) -> Vec<f32> {
+        if self.amplitude.is_empty() || sample_rate == 0 {
+            return Vec::new();
+        }
+        let mut samples = Vec::with_capacity(self.amplitude.len() * sample_rate);
+        for (idx, amp) in self.amplitude.iter().enumerate() {
+            let phase = idx as f32 / self.amplitude.len() as f32;
+            let carrier = (phase * std::f32::consts::TAU * 220.0).sin();
+            let frame = carrier * *amp;
+            for _ in 0..sample_rate {
+                samples.push(frame);
+            }
+        }
+        samples
+    }
+}
+
 /// Narrative generator that casts resonance telemetry into descriptive language.
 #[derive(Clone, Debug)]
 pub struct TextResonator {
@@ -242,6 +261,25 @@ impl TextResonator {
         })
     }
 
+    /// Produces a language wave from a pre-baked narrative.
+    pub fn synthesize_wave(&self, narrative: &ResonanceNarrative) -> PureResult<LanguageWave> {
+        let mut story = narrative.summary.clone();
+        for highlight in &narrative.highlights {
+            story.push(' ');
+            story.push_str(highlight);
+        }
+        let wave = self.encoder.encode_wave(&story)?;
+        let amplitude = wave
+            .data()
+            .iter()
+            .map(|complex| complex.modulus())
+            .collect();
+        Ok(LanguageWave {
+            summary: narrative.summary.clone(),
+            amplitude,
+        })
+    }
+
     /// Generates an amplitude envelope describing an entire temporal trace.
     pub fn speak(&self, frames: &[ChronoFrame]) -> PureResult<Vec<f32>> {
         if frames.is_empty() {
@@ -260,6 +298,41 @@ impl TextResonator {
             .iter()
             .map(|complex| complex.modulus())
             .collect())
+    }
+}
+
+/// Realtime narrator that emits audio-ready samples.
+#[derive(Clone, Debug)]
+pub struct RealtimeNarrator {
+    inner: TextResonator,
+    sample_rate: usize,
+}
+
+impl RealtimeNarrator {
+    pub fn new(curvature: f32, temperature: f32, sample_rate: usize) -> PureResult<Self> {
+        Ok(Self {
+            inner: TextResonator::new(curvature, temperature)?,
+            sample_rate: sample_rate.max(1),
+        })
+    }
+
+    pub fn from_resonator(resonator: TextResonator, sample_rate: usize) -> Self {
+        Self {
+            inner: resonator,
+            sample_rate: sample_rate.max(1),
+        }
+    }
+
+    pub fn narrate_resonance(&self, resonance: &DifferentialResonance) -> PureResult<Vec<f32>> {
+        let narrative = self.inner.describe_resonance(resonance);
+        let wave = self.inner.synthesize_wave(&narrative)?;
+        Ok(wave.to_audio_samples(self.sample_rate))
+    }
+
+    pub fn narrate_timeline(&self, frames: &[ChronoFrame]) -> PureResult<Vec<f32>> {
+        let narrative = self.inner.describe_timeline(frames);
+        let wave = self.inner.synthesize_wave(&narrative)?;
+        Ok(wave.to_audio_samples(self.sample_rate))
     }
 }
 

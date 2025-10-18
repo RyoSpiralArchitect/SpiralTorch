@@ -6,6 +6,9 @@
 use thiserror::Error;
 
 pub mod auto;
+pub mod query;
+
+pub use query::{compile as compile_query, Filter, OrderDirection, QueryPlan};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Ctx {
