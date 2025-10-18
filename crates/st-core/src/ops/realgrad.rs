@@ -23,6 +23,60 @@ const DEFAULT_RANK: usize = 24;
 const DEFAULT_WEIGHT: f64 = 1.0;
 const DEFAULT_THRESHOLD: f32 = 0.005;
 
+/// Summary statistics describing a projected RealGrad field.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GradientSummary {
+    /// L2 norm of the projected gradient.
+    pub norm: f32,
+    /// Ratio of entries considered near-zero under the residual threshold.
+    pub sparsity: f32,
+}
+
+impl GradientSummary {
+    /// Creates a summary from the provided projected gradient values using the
+    /// default residual threshold.
+    pub fn from_realgrad(values: &[f32]) -> Self {
+        Self::from_realgrad_with_threshold(values, DEFAULT_THRESHOLD)
+    }
+
+    /// Creates a summary from the provided projected gradient values while
+    /// allowing a custom residual threshold to be supplied.
+    pub fn from_realgrad_with_threshold(values: &[f32], threshold: f32) -> Self {
+        if values.is_empty() {
+            return Self::default();
+        }
+
+        let threshold = if threshold.is_finite() {
+            threshold.abs()
+        } else {
+            DEFAULT_THRESHOLD
+        };
+
+        let mut norm_sq = 0.0f64;
+        let mut sparse = 0usize;
+        for &value in values {
+            let abs = value.abs();
+            norm_sq += f64::from(value) * f64::from(value);
+            if abs <= threshold {
+                sparse += 1;
+            }
+        }
+        let norm = norm_sq.sqrt() as f32;
+        let len = values.len() as f32;
+        let sparsity = (sparse as f32 / len).clamp(0.0, 1.0);
+        Self { norm, sparsity }
+    }
+}
+
+impl Default for GradientSummary {
+    fn default() -> Self {
+        Self {
+            norm: 0.0,
+            sparsity: 1.0,
+        }
+    }
+}
+
 /// Discrete Fourier transform backend used by [`RealGradKernel`].
 pub trait SpectralEngine {
     /// Computes the complex DFT of the provided real input.
@@ -1087,12 +1141,14 @@ pub fn project_tempered_realgrad(
 #[cfg(test)]
 mod tests {
     use super::{
-        project_realgrad, project_tempered_realgrad, CpuChirpZ, CpuRustFft, RealGradAutoTuner,
-        RealGradConfig, RealGradKernel, RealGradProjectionScratch, RealGradZProjector,
-        SchwartzSequence, SpectralEngine, SpectrumNorm, DEFAULT_THRESHOLD,
+        project_realgrad, project_tempered_realgrad, CpuChirpZ, CpuRustFft, GradientSummary,
+        RealGradAutoTuner, RealGradConfig, RealGradKernel, RealGradProjection,
+        RealGradProjectionScratch, RealGradZProjector, SchwartzSequence, SpectralEngine,
+        SpectrumNorm, TemperedRealGradProjection, DEFAULT_THRESHOLD,
     };
     use crate::theory::zpulse::ZSource;
     use crate::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
+    use approx::assert_abs_diff_eq;
 
     #[test]
     fn projection_handles_empty_input() {
