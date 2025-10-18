@@ -1093,6 +1093,12 @@ impl Default for ZConductor {
     }
 }
 
+impl Default for ZConductor {
+    fn default() -> Self {
+        ZConductor::new(ZConductorCfg::default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

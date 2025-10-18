@@ -1560,8 +1560,10 @@ mod tests {
         )
         .with_band(0..projection.spectrum.len());
         let pulse = projector.project(&projection);
-        assert!(matches!(pulse.source, ZSource::Other("RealGrad")));
-        assert!(pulse.support >= 0.0);
+        assert!(matches!(pulse.source, ZSource::RealGrad));
+        assert!(pulse.support.leading >= 0.0);
+        assert!(pulse.support.central >= 0.0);
+        assert!(pulse.support.trailing >= 0.0);
         assert!(pulse.band_energy.0 >= 0.0);
         assert!(pulse.quality >= 0.0);
         assert!(pulse.quality <= 1.0);
