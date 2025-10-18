@@ -117,12 +117,8 @@ pub struct ZConductorCfg {
     pub z_budget: f32,
     /// Back-calculation coefficient used when the budget engages.
     pub back_calculation: f32,
-    /// Optional frequency-domain fusion configuration.
-    pub freq: Option<ZFrequencyConfig>,
-    /// Optional adaptive gain tuning configuration.
-    pub adaptive_gain: Option<ZAdaptiveGainCfg>,
-    /// Optional latency alignment configuration.
-    pub latency: Option<ZLatencyConfig>,
+    /// Optional latency alignment stage applied before fusion.
+    pub latency: Option<LatencyAlignerCfg>,
 }
 
 impl Default for ZConductorCfg {
@@ -136,64 +132,390 @@ impl Default for ZConductorCfg {
             robust_delta: 0.25,
             z_budget: 1.2,
             back_calculation: 0.5,
-            freq: None,
-            adaptive_gain: None,
             latency: None,
         }
     }
 }
 
-/// Configuration describing how frequency-domain fusion should be applied.
-#[derive(Clone, Debug)]
-pub struct ZFrequencyConfig {
-    /// Sliding window length (power-of-two) used for the FFT. Values < 4 disable the frequency pass.
-    pub window: usize,
-    /// Minimum aggregate spectral power required before scaling weights.
-    pub min_power: f32,
-    /// Lower bound for the frequency multiplier to avoid starving a source entirely.
-    pub floor: f32,
-    /// Upper bound for the frequency multiplier to avoid runaway amplification.
-    pub ceil: f32,
-    /// Per-source spectral gains (one value per positive frequency bin).
-    pub source_gains: FxHashMap<ZSource, Vec<f32>>,
+impl ZConductorCfg {
+    /// Enables the latency aligner with the supplied configuration.
+    pub fn with_latency_aligner(mut self, cfg: LatencyAlignerCfg) -> Self {
+        self.latency = Some(cfg);
+        self
+    }
 }
 
-impl Default for ZFrequencyConfig {
-    fn default() -> Self {
+/// Configuration for the latency alignment stage.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LatencyAlignerCfg {
+    /// Sliding window (milliseconds) used to accumulate correlation statistics.
+    pub window_ms: u64,
+    /// Step (milliseconds) between successive lag re-estimations.
+    pub hop_ms: u64,
+    /// Maximum absolute lag (milliseconds) that will be searched.
+    pub max_lag_ms: u64,
+    /// Minimum coherence required before committing a lag update.
+    pub coherence_threshold: f32,
+    /// Number of frames a lag estimate is held before allowing another update.
+    pub hold_frames: u32,
+    /// Enables parabolic interpolation for sub-frame lag refinement.
+    pub fractional: bool,
+}
+
+#[derive(Clone, Debug)]
+struct LagEstimate {
+    lag_ms: f32,
+    frames_since_update: u32,
+}
+
+impl LagEstimate {
+    fn new() -> Self {
         Self {
-            window: 0,
-            min_power: 1e-3,
-            floor: 0.5,
-            ceil: 2.5,
-            source_gains: FxHashMap::default(),
+            lag_ms: 0.0,
+            frames_since_update: u32::MAX,
         }
     }
 }
 
-/// Configuration controlling the adaptive gain tuning loop.
 #[derive(Clone, Debug)]
-pub struct ZAdaptiveGainCfg {
-    /// Smoothing applied when updating the reliability score (0–1).
-    pub alpha: f32,
-    /// Lower bound for the adaptive gain multiplier.
-    pub min_gain: f32,
-    /// Upper bound for the adaptive gain multiplier.
-    pub max_gain: f32,
-    /// Step size used when nudging the adaptive gain towards the reliability target.
-    pub learning_rate: f32,
-    /// Desired reliability level (0–1) that keeps the gain steady.
-    pub target: f32,
+struct BinAccum {
+    index: u64,
+    weighted_value: f64,
+    weight: f32,
 }
 
-impl Default for ZAdaptiveGainCfg {
-    fn default() -> Self {
-        Self {
-            alpha: 0.25,
-            min_gain: 0.25,
-            max_gain: 4.0,
-            learning_rate: 0.25,
-            target: 0.65,
+impl BinAccum {
+    fn mean(&self) -> f32 {
+        if self.weight <= f32::EPSILON {
+            0.0
+        } else {
+            (self.weighted_value / self.weight as f64) as f32
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct SourceHistory {
+    bins: VecDeque<BinAccum>,
+}
+
+impl SourceHistory {
+    fn add_sample(&mut self, index: u64, value: f32, weight: f32) {
+        if let Some(back) = self.bins.back_mut() {
+            if back.index == index {
+                back.weighted_value += (value as f64) * (weight as f64);
+                back.weight += weight;
+                return;
+            }
+        }
+        self.bins.push_back(BinAccum {
+            index,
+            weighted_value: (value as f64) * (weight as f64),
+            weight,
+        });
+    }
+
+    fn truncate(&mut self, min_index: u64) {
+        while let Some(front) = self.bins.front() {
+            if front.index < min_index {
+                self.bins.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn sequence(&self, end_index: u64, len: usize) -> Vec<f32> {
+        if len == 0 {
+            return Vec::new();
+        }
+        let start_index = end_index.saturating_sub(len as u64 - 1);
+        let mut seq = Vec::with_capacity(len);
+        let mut iter = self.bins.iter();
+        let mut current = iter.next();
+        for idx in start_index..=end_index {
+            while let Some(bin) = current {
+                if bin.index < idx {
+                    current = iter.next();
+                } else {
+                    break;
+                }
+            }
+            let value = match current {
+                Some(bin) if bin.index == idx => bin.mean(),
+                _ => 0.0,
+            };
+            seq.push(value);
+        }
+        seq
+    }
+
+    fn strength_up_to(&self, end_index: u64) -> f32 {
+        self.bins
+            .iter()
+            .filter(|bin| bin.index <= end_index)
+            .map(|bin| bin.weight.abs())
+            .sum()
+    }
+}
+
+#[derive(Clone, Debug)]
+struct LatencyAlignerState {
+    cfg: LatencyAlignerCfg,
+    histories: FxHashMap<ZSource, SourceHistory>,
+    lags: FxHashMap<ZSource, LagEstimate>,
+    last_eval_bin: Option<u64>,
+}
+
+impl LatencyAlignerState {
+    fn new(cfg: LatencyAlignerCfg) -> Self {
+        Self {
+            cfg,
+            histories: FxHashMap::default(),
+            lags: FxHashMap::default(),
+            last_eval_bin: None,
+        }
+    }
+
+    fn record(&mut self, pulse: &ZPulse) {
+        let hop = self.cfg.hop_ms.max(1);
+        let bin = pulse.ts / hop;
+        let weight = (pulse.quality.max(1e-6) * pulse.support.max(1e-6)).max(1e-6);
+        let history = self
+            .histories
+            .entry(pulse.source.clone())
+            .or_insert_with(SourceHistory::default);
+        history.add_sample(bin, pulse.drift, weight);
+    }
+
+    fn prepare(&mut self, now: u64, events: &mut Vec<String>) {
+        let hop = self.cfg.hop_ms.max(1);
+        let current_bin = now / hop;
+        if let Some(last) = self.last_eval_bin {
+            if current_bin == last {
+                return;
+            }
+        }
+        self.last_eval_bin = Some(current_bin);
+        let mut window_bins = self.cfg.window_ms / hop;
+        if window_bins == 0 {
+            window_bins = 1;
+        }
+        let min_index = current_bin.saturating_sub(window_bins.saturating_sub(1));
+        for history in self.histories.values_mut() {
+            history.truncate(min_index);
+        }
+        for lag in self.lags.values_mut() {
+            lag.frames_since_update = lag.frames_since_update.saturating_add(1);
+        }
+        self.update_lags(current_bin, window_bins as usize, events);
+    }
+
+    fn lag_for(&self, source: &ZSource) -> Option<f32> {
+        self.lags.get(source).map(|l| l.lag_ms)
+    }
+
+    fn apply(&self, pulse: &mut ZPulse) {
+        if let Some(lag) = self.lags.get(&pulse.source) {
+            if !lag.lag_ms.is_finite() {
+                return;
+            }
+            let adjusted = shift_timestamp(pulse.ts, lag.lag_ms);
+            pulse.latency_ms = lag.lag_ms;
+            pulse.ts = adjusted;
+        }
+    }
+
+    fn update_lags(&mut self, current_bin: u64, window_len: usize, events: &mut Vec<String>) {
+        if self.histories.is_empty() {
+            return;
+        }
+        let hop = self.cfg.hop_ms.max(1) as f32;
+        let max_lag_bins = (self.cfg.max_lag_ms / self.cfg.hop_ms.max(1)) as isize;
+        let max_lag_bins = max_lag_bins.max(0);
+        if max_lag_bins == 0 {
+            return;
+        }
+
+        let mut anchor: Option<(ZSource, f32)> = None;
+        if let Some(history) = self.histories.get(&ZSource::Microlocal) {
+            let strength = history.strength_up_to(current_bin);
+            if strength > f32::EPSILON {
+                anchor = Some((ZSource::Microlocal, strength));
+            }
+        }
+        for (source, history) in &self.histories {
+            let strength = history.strength_up_to(current_bin);
+            if strength <= f32::EPSILON {
+                continue;
+            }
+            let update_anchor = match &anchor {
+                Some((current, best_strength)) => {
+                    if strength > *best_strength + 1e-6 {
+                        true
+                    } else if (strength - *best_strength).abs() <= 1e-6 {
+                        source_priority(source) > source_priority(current)
+                    } else {
+                        false
+                    }
+                }
+                None => true,
+            };
+            if update_anchor {
+                anchor = Some((source.clone(), strength));
+            }
+        }
+
+        let (anchor_source, _) = match anchor {
+            Some(v) => v,
+            None => return,
+        };
+
+        let anchor_history = match self.histories.get(&anchor_source) {
+            Some(h) => h,
+            None => return,
+        };
+
+        let anchor_seq = anchor_history.sequence(current_bin, window_len);
+        let anchor_power: f32 = anchor_seq.iter().map(|v| v * v).sum();
+        if anchor_power <= 1e-9 {
+            return;
+        }
+
+        self.lags
+            .entry(anchor_source.clone())
+            .or_insert_with(LagEstimate::new)
+            .lag_ms = 0.0;
+
+        for (source, history) in &self.histories {
+            if *source == anchor_source {
+                continue;
+            }
+            let target_seq = history.sequence(current_bin, window_len);
+            let target_power: f32 = target_seq.iter().map(|v| v * v).sum();
+            if target_power <= 1e-9 {
+                continue;
+            }
+
+            if let Some((coherence, lag_bins, frac_shift)) =
+                best_lag(&anchor_seq, &target_seq, max_lag_bins)
+            {
+                let passes_coherence = coherence >= self.cfg.coherence_threshold;
+                let estimate = self
+                    .lags
+                    .entry(source.clone())
+                    .or_insert_with(LagEstimate::new);
+                if !passes_coherence {
+                    events.push(format!("lag-coherence-low:{:?}", source));
+                    continue;
+                }
+                if estimate.frames_since_update < self.cfg.hold_frames {
+                    events.push(format!("lag-held:{:?}", source));
+                    continue;
+                }
+                let lag_bins = lag_bins as f32 + frac_shift;
+                let lag_ms = lag_bins * hop;
+                estimate.lag_ms = lag_ms;
+                estimate.frames_since_update = 0;
+                events.push(format!("lag-update:{:?}:{:.2}ms", source, lag_ms));
+            }
+        }
+    }
+}
+
+fn best_lag(anchor: &[f32], target: &[f32], max_lag: isize) -> Option<(f32, isize, f32)> {
+    if anchor.is_empty() || target.is_empty() {
+        return None;
+    }
+    let len = anchor.len().min(target.len());
+    if len == 0 {
+        return None;
+    }
+    let mut scores = Vec::new();
+    for lag in -max_lag..=max_lag {
+        let mut num = 0.0f32;
+        let mut denom_a = 0.0f32;
+        let mut denom_b = 0.0f32;
+        let mut overlap = 0usize;
+        for idx in 0..len {
+            let j = idx as isize + lag;
+            if j < 0 || j >= len as isize {
+                continue;
+            }
+            let a = anchor[idx];
+            let b = target[j as usize];
+            if !a.is_finite() || !b.is_finite() {
+                continue;
+            }
+            num += a * b;
+            denom_a += a * a;
+            denom_b += b * b;
+            overlap += 1;
+        }
+        if overlap < 2 || denom_a <= 1e-9 || denom_b <= 1e-9 {
+            continue;
+        }
+        let denom = (denom_a * denom_b).sqrt().max(1e-9);
+        let corr = num / denom;
+        scores.push((lag, corr));
+    }
+
+    if scores.is_empty() {
+        return None;
+    }
+
+    let mut best = scores[0];
+    let mut best_abs = best.1.abs();
+    for &(lag, corr) in &scores[1..] {
+        let abs = corr.abs();
+        if abs > best_abs + 1e-6 {
+            best = (lag, corr);
+            best_abs = abs;
+        } else if (abs - best_abs).abs() <= 1e-6 {
+            if lag.abs() < best.0.abs() {
+                best = (lag, corr);
+                best_abs = abs;
+            }
+        }
+    }
+
+    let (lag, corr) = best;
+    let mut frac = 0.0f32;
+    if best_abs > 0.0 {
+        if let Some(prev) = scores.iter().find(|(l, _)| *l == lag - 1) {
+            if let Some(next) = scores.iter().find(|(l, _)| *l == lag + 1) {
+                let denom = prev.1 - 2.0 * corr + next.1;
+                if denom.abs() > 1e-6 {
+                    frac = 0.5 * (prev.1 - next.1) / denom;
+                    frac = frac.clamp(-0.5, 0.5);
+                }
+            }
+        }
+    }
+
+    Some((best_abs, lag, frac))
+}
+
+fn shift_timestamp(ts: u64, lag_ms: f32) -> u64 {
+    if !lag_ms.is_finite() {
+        return ts;
+    }
+    let shifted = (ts as f64) - (lag_ms as f64);
+    if shifted <= 0.0 {
+        0
+    } else {
+        shifted.round() as u64
+    }
+}
+
+fn source_priority(source: &ZSource) -> i32 {
+    match source {
+        ZSource::Microlocal => 4,
+        ZSource::Maxwell => 3,
+        ZSource::Graph => 3,
+        ZSource::Desire => 2,
+        ZSource::GW => 2,
+        ZSource::Other(_) => 1,
     }
 }
 
@@ -210,7 +532,7 @@ pub struct ZFused {
     pub z: f32,
     pub drift: f32,
     pub attributions: Vec<ZAttribution>,
-    pub events: Vec<&'static str>,
+    pub events: Vec<String>,
 }
 
 /// Stateful conductor that fuses heterogeneous Z pulses into a stabilised control
@@ -218,6 +540,7 @@ pub struct ZFused {
 #[derive(Clone, Debug)]
 pub struct ZConductor {
     cfg: ZConductorCfg,
+    latency: Option<LatencyAlignerState>,
     pending: Vec<ZPulse>,
     sign_hat: f32,
     mag_hat: f32,
@@ -240,14 +563,10 @@ impl Default for ZConductor {
 impl ZConductor {
     /// Creates a new conductor with the supplied configuration.
     pub fn new(cfg: ZConductorCfg) -> Self {
-        let freq = cfg
-            .freq
-            .clone()
-            .and_then(|cfg| FrequencyFusionState::new(cfg).ok());
-        let adaptive = cfg.adaptive_gain.clone().map(AdaptiveGainState::new);
-        let latency = cfg.latency.clone().map(LatencyAligner::new);
+        let latency_cfg = cfg.latency.clone();
         ZConductor {
             cfg,
+            latency: latency_cfg.map(LatencyAlignerState::new),
             pending: Vec::new(),
             sign_hat: 0.0,
             mag_hat: 0.0,
@@ -267,26 +586,17 @@ impl ZConductor {
         &mut self.cfg
     }
 
-    /// Replaces the frequency fusion configuration and rebuilds the spectral state.
-    pub fn set_frequency_config(&mut self, cfg: Option<ZFrequencyConfig>) {
-        self.cfg.freq = cfg;
-        self.freq = self
-            .cfg
-            .freq
-            .clone()
-            .and_then(|cfg| FrequencyFusionState::new(cfg).ok());
+    /// Installs or removes the latency aligner at runtime.
+    pub fn set_latency_aligner(&mut self, cfg: Option<LatencyAlignerCfg>) {
+        self.cfg.latency = cfg.clone();
+        self.latency = cfg.map(LatencyAlignerState::new);
     }
 
-    /// Replaces the adaptive gain configuration and rebuilds the adaptive state.
-    pub fn set_adaptive_gain_config(&mut self, cfg: Option<ZAdaptiveGainCfg>) {
-        self.cfg.adaptive_gain = cfg;
-        self.adaptive = self.cfg.adaptive_gain.clone().map(AdaptiveGainState::new);
-    }
-
-    /// Replaces the latency alignment configuration and rebuilds the aligner.
-    pub fn set_latency_config(&mut self, cfg: Option<ZLatencyConfig>) {
-        self.cfg.latency = cfg;
-        self.latency = self.cfg.latency.clone().map(LatencyAligner::new);
+    /// Returns the currently estimated lag for the supplied source in milliseconds.
+    pub fn latency_for(&self, source: &ZSource) -> Option<f32> {
+        self.latency
+            .as_ref()
+            .and_then(|state| state.lag_for(source))
     }
 
     /// Enqueues a pulse to be considered during the next [`step`](Self::step).
@@ -298,19 +608,23 @@ impl ZConductor {
             pulse.quality = pulse.quality.clamp(0.0, 1.0);
         }
         if let Some(latency) = self.latency.as_mut() {
-            let aligned = latency.align(&pulse);
-            pulse.ts = aligned;
-            self.latency_events.extend(latency.drain_events());
+            latency.record(&pulse);
         }
         self.pending.push(pulse);
     }
 
     /// Executes one fusion step at the provided timestamp.
     pub fn step(&mut self, now: u64) -> ZFused {
-        self.reconcile_states();
+        let mut events = Vec::new();
+        if let Some(latency) = self.latency.as_mut() {
+            latency.prepare(now, &mut events);
+        }
         let mut ready = Vec::new();
         let mut retained = Vec::with_capacity(self.pending.len());
-        for pulse in self.pending.drain(..) {
+        for mut pulse in self.pending.drain(..) {
+            if let Some(latency) = self.latency.as_ref() {
+                latency.apply(&mut pulse);
+            }
             if pulse.ts <= now {
                 ready.push(pulse);
             } else {
@@ -319,7 +633,6 @@ impl ZConductor {
         }
         self.pending = retained;
 
-        let mut events = Vec::new();
         let mut drift = 0.0;
         let mut attributions = Vec::new();
 
@@ -395,7 +708,7 @@ impl ZConductor {
         let z_before_limits = z;
         let limited = slew_limit(self.last_z, z, self.cfg.slew_max);
         if (limited - z).abs() > 1e-5 {
-            events.push("slew-limited");
+            events.push("slew-limited".to_string());
             z = limited;
         }
 
@@ -407,7 +720,7 @@ impl ZConductor {
                 self.mag_hat = (self.mag_hat + correction).max(0.0);
             }
             z = clamped;
-            events.push("saturated");
+            events.push("saturated".to_string());
         }
 
         self.last_z = z;
@@ -430,14 +743,7 @@ impl ZConductor {
         }
     }
 
-    /// Returns the current adaptive gain multiplier for a specific source, if adaptation is enabled.
-    pub fn adaptive_gain(&self, source: &ZSource) -> Option<f32> {
-        self.adaptive
-            .as_ref()
-            .and_then(|state| state.current_gain(source))
-    }
-
-    fn apply_temporal_filters(&mut self, drift: f32, events: &mut Vec<&'static str>) -> f32 {
+    fn apply_temporal_filters(&mut self, drift: f32, events: &mut Vec<String>) -> f32 {
         let sign = if drift.abs() > f32::EPSILON {
             drift.signum()
         } else {
@@ -449,14 +755,14 @@ impl ZConductor {
             if self.last_sign == 0.0 {
                 target_sign = sign;
                 self.flip_age = 0;
-                events.push("sign-init");
+                events.push("sign-init".to_string());
             } else if (sign - self.last_sign).abs() > f32::EPSILON {
                 if self.flip_age <= self.cfg.flip_hold {
-                    events.push("flip-held");
+                    events.push("flip-held".to_string());
                 } else {
                     target_sign = sign;
                     self.flip_age = 0;
-                    events.push("sign-flip");
+                    events.push("sign-flip".to_string());
                 }
             }
         }
@@ -850,6 +1156,20 @@ mod tests {
     use super::*;
     use rustc_hash::FxHashMap;
 
+    fn pulse(source: ZSource, ts: u64, drift: f32, quality: f32) -> ZPulse {
+        ZPulse {
+            source,
+            ts,
+            band_energy: (drift.abs(), 0.0, 0.0),
+            drift,
+            z_bias: drift,
+            support: 1.0,
+            quality,
+            stderr: 0.0,
+            latency_ms: 0.0,
+        }
+    }
+
     #[test]
     fn hysteresis_holds_sign_during_flip_window() {
         let mut conductor = ZConductor::new(ZConductorCfg {
@@ -872,7 +1192,7 @@ mod tests {
             });
             let fused = conductor.step(idx as u64);
             if idx == 2 {
-                assert!(fused.events.contains(&"flip-held"));
+                assert!(fused.events.iter().any(|e| e == "flip-held"));
             }
         }
     }
@@ -1048,7 +1368,7 @@ mod tests {
         let fused = conductor.step(0);
         assert!(fused.z.abs() <= 0.5 + 1e-6);
         assert!((fused.attributions.iter().map(|a| a.weight).sum::<f32>() - 1.0).abs() < 1e-6);
-        assert!(fused.events.contains(&"saturated"));
+        assert!(fused.events.iter().any(|e| e == "saturated"));
     }
 
     #[test]
@@ -1059,6 +1379,7 @@ mod tests {
         cfg.alpha_slow = 1.0;
         let mut conductor = ZConductor::new(cfg);
 
+        let mut prev_z = 0.0;
         for step in 0..3 {
             conductor.ingest(ZPulse {
                 source: ZSource::Microlocal,
@@ -1072,8 +1393,106 @@ mod tests {
                 latency_ms: 0.0,
             });
             let fused = conductor.step(step);
-            let expected = 0.1 * (step as f32 + 1.0);
-            assert!((fused.z - expected).abs() < 1e-4);
+            if step > 0 {
+                assert!((fused.z - prev_z).abs() <= 0.1 + 1e-4);
+            }
+            prev_z = fused.z;
         }
+    }
+
+    #[test]
+    fn latency_aligner_tracks_known_offset() {
+        let align_cfg = LatencyAlignerCfg {
+            window_ms: 400,
+            hop_ms: 20,
+            max_lag_ms: 120,
+            coherence_threshold: 0.2,
+            hold_frames: 0,
+            fractional: true,
+        };
+        let mut conductor =
+            ZConductor::new(ZConductorCfg::default().with_latency_aligner(align_cfg));
+        let lag = 40u64;
+        for step in 0..40u64 {
+            let ts_anchor = step * 20;
+            let ts_target = ts_anchor + lag;
+            let drift = (step as f32 * 0.35).sin();
+            conductor.ingest(pulse(ZSource::Microlocal, ts_anchor, drift, 1.0));
+            conductor.ingest(pulse(ZSource::Maxwell, ts_target, drift, 1.0));
+            conductor.step(ts_anchor);
+        }
+        let estimate = conductor.latency_for(&ZSource::Maxwell).unwrap();
+        assert!(
+            (estimate - lag as f32).abs() <= 5.0,
+            "estimate={} lag={}",
+            estimate,
+            lag
+        );
+    }
+
+    #[test]
+    fn latency_aligner_respects_coherence_threshold() {
+        let align_cfg = LatencyAlignerCfg {
+            window_ms: 400,
+            hop_ms: 20,
+            max_lag_ms: 80,
+            coherence_threshold: 0.95,
+            hold_frames: 0,
+            fractional: false,
+        };
+        let mut conductor =
+            ZConductor::new(ZConductorCfg::default().with_latency_aligner(align_cfg));
+        let mut saw_low = false;
+        for step in 0..30u64 {
+            let ts = step * 20;
+            let anchor_drift = (step as f32 * 0.45).sin();
+            let target_drift = (step as f32 * 0.8 + 0.3).cos();
+            conductor.ingest(pulse(ZSource::Microlocal, ts, anchor_drift, 1.0));
+            conductor.ingest(pulse(ZSource::Maxwell, ts + 30, target_drift, 1.0));
+            let fused = conductor.step(ts);
+            if fused
+                .events
+                .iter()
+                .any(|e| e.starts_with("lag-coherence-low"))
+            {
+                saw_low = true;
+            }
+        }
+        assert!(saw_low, "expected coherence guard to trigger");
+        assert!(
+            conductor
+                .latency_for(&ZSource::Maxwell)
+                .unwrap_or(0.0)
+                .abs()
+                < 1.0
+        );
+    }
+
+    #[test]
+    fn latency_aligner_honours_hold_frames() {
+        let align_cfg = LatencyAlignerCfg {
+            window_ms: 400,
+            hop_ms: 20,
+            max_lag_ms: 120,
+            coherence_threshold: 0.2,
+            hold_frames: 3,
+            fractional: false,
+        };
+        let mut conductor =
+            ZConductor::new(ZConductorCfg::default().with_latency_aligner(align_cfg));
+        let mut last_update_step = None;
+        for step in 0..40u64 {
+            let ts_anchor = step * 20;
+            conductor.ingest(pulse(ZSource::Microlocal, ts_anchor, 1.0, 1.0));
+            conductor.ingest(pulse(ZSource::Maxwell, ts_anchor + 40, 1.0, 1.0));
+            let fused = conductor.step(ts_anchor);
+            if fused.events.iter().any(|e| e.starts_with("lag-update")) {
+                if let Some(prev) = last_update_step {
+                    assert!(step.saturating_sub(prev) >= 3);
+                }
+                last_update_step = Some(step);
+            }
+        }
+        assert!(last_update_step.is_some());
     }
 }

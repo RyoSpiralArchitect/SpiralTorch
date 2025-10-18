@@ -297,6 +297,23 @@ automation layers can react without recomputing heuristics. Grab it via
 `DesireLagrangian::gradient_control()` (or directly from the streamed
 `DesireSolution`) to inspect the recommended hyper/Realgrad learning-rate
 scales, penalty gains, and WGSL operator mix/gain before issuing GPU updates.
+The control packet also captures Desire's “feel-good” tuning: exponential
+learning-rate gains driven by entropy deltas (with min/max bounds and slew
+limits), EMA-smoothed clipping windows anchored at the 95th percentile, Z-space
+temperature coupling (`κ`) guidance, and sigmoid quality scaling hooks so
+Maxwell/Microlocal evidence can raise the step size only when the gradients look
+clean. Each packet carries a telemetry bitmask plus string labels (e.g.
+`lr_increase`, `clip_adjust`) so PSI dashboards can log _why_ the controller
+nudged Desire in a given direction, and the new `control_events` field on
+`DesireSolution` keeps historical replays compatible with older logs via the
+serde default.
+
+For GPU loops, call `CanvasProjector::desire_control_uniform` (or the WASM
+`FractalCanvas.desireControlUniform`) to obtain a 16-float, 64-byte-aligned
+uniform buffer containing the target entropy, learning-rate envelopes, clipping
+window, Z coupling, quality gains, and rate scales. This keeps WGSL kernels hot
+without serialising structs on every dispatch while satisfying WebGPU's 16-byte
+alignment rules.
 
 To automate the “unconscious” loop, wrap the lagrangian with
 `DesireAutomation`. It samples the `SelfRewriteCfg` thresholds, tracks

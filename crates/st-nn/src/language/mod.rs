@@ -34,5 +34,5 @@ pub use pipeline::{
 };
 #[cfg(feature = "psi")]
 pub use pipeline::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
-pub use st_tensor::{DesireGradientControl, DesireGradientInterpretation};
+pub use st_tensor::{DesireControlEvents, DesireGradientControl, DesireGradientInterpretation};
 pub use temperature::{entropy, TemperatureController};
