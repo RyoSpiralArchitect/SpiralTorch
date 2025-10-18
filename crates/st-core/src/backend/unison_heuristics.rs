@@ -127,7 +127,11 @@ fn align_down_to_lanes(value: u32, lanes: u32) -> u32 {
         return value.max(1);
     }
     let aligned = (value / lanes) * lanes;
-    if aligned == 0 { lanes } else { aligned }
+    if aligned == 0 {
+        lanes
+    } else {
+        aligned
+    }
 }
 
 fn lane_range(min: u32, max: u32, lanes: u32) -> (u32, u32) {
@@ -215,16 +219,33 @@ fn latency_ctile_target(rows: u32, k: u32, lanes: u32, min_ctile: u32, max_ctile
     closest_lane_multiple(desired, lanes, min_lane, max_lane)
 }
 
+fn latency_ctile_slack(rows: u32, k: u32, lanes: u32) -> u32 {
+    let lanes = lanes.max(1);
+    let tight_rows = rows <= lanes.saturating_mul(2);
+    let tight_k = k <= lanes.saturating_mul(2);
+    if tight_rows && tight_k {
+        return lanes;
+    }
+
+    let medium_rows = rows <= lanes.saturating_mul(6);
+    let medium_k = k <= lanes.saturating_mul(6);
+    if medium_rows && medium_k {
+        return lanes.saturating_mul(2);
+    }
+
+    lanes.saturating_mul(3).max(lanes)
+}
+
 fn latency_ctile_window(
     rows: u32,
     k: u32,
     lanes: u32,
     min_ctile: u32,
     max_ctile: u32,
-) -> (u32, u32, u32, u32, u32) {
+) -> (u32, u32, u32, u32, u32, u32) {
     let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
     let target = latency_ctile_target(rows, k, lanes, min_lane, max_lane);
-    let slack = lanes.saturating_mul(2).max(lanes);
+    let slack = latency_ctile_slack(rows, k, lanes);
     let mut lower = align_down_to_lanes(target.saturating_sub(slack), lanes);
     if lower < min_lane {
         lower = min_lane;
@@ -237,7 +258,7 @@ fn latency_ctile_window(
         lower = min_lane;
         upper = min_lane;
     }
-    (target, lower, upper, min_lane, max_lane)
+    (target, lower, upper, min_lane, max_lane, slack)
 }
 
 fn snap_latency_ctile(
@@ -248,10 +269,9 @@ fn snap_latency_ctile(
     min_ctile: u32,
     max_ctile: u32,
 ) -> (u32, u32) {
-    let (target, lower, upper, min_lane, max_lane) =
+    let (target, lower, upper, min_lane, max_lane, slack) =
         latency_ctile_window(rows, k, lanes, min_ctile, max_ctile);
     let mut candidate = closest_lane_multiple(current, lanes, min_lane, max_lane);
-    let slack = lanes.saturating_mul(2).max(lanes);
     if candidate < lower || candidate > upper || candidate.abs_diff(target) >= slack {
         candidate = closest_lane_multiple(target, lanes, min_lane, max_lane);
     }
@@ -439,7 +459,7 @@ fn refine_choice(
                     upper = upper.min(align_down_to_lanes(half_tile, lanes).max(min_ctile));
                 }
             }
-            let (snapped, _) = snap_latency_ctile(
+            let (snapped, target) = snap_latency_ctile(
                 choice.ctile,
                 rows,
                 k,
@@ -448,6 +468,17 @@ fn refine_choice(
                 upper.max(min_ctile),
             );
             choice.ctile = snapped;
+            if choice.ctile != target {
+                choice.ctile = target;
+            }
+            let (_, lower, upper, ..) =
+                latency_ctile_window(rows, k, lanes, min_ctile, upper.max(min_ctile));
+            if choice.ctile < lower {
+                choice.ctile = lower;
+            }
+            if choice.ctile > upper {
+                choice.ctile = upper;
+            }
         }
     } else {
         choice.ctile = 0;
@@ -562,7 +593,7 @@ fn score_choice(
         }
         if matches!(kind, RankKind::MidK | RankKind::BottomK) {
             let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
-            let (target, lower, upper, min_lane, max_lane) =
+            let (target, lower, upper, min_lane, max_lane, slack) =
                 latency_ctile_window(rows, k, lanes, min_ctile, max_ctile);
             score += closeness(choice.ctile, target) * 0.05;
             let snapped = closest_lane_multiple(choice.ctile, lanes, min_lane, max_lane);
@@ -575,6 +606,11 @@ fn score_choice(
                 score += 0.015;
             } else {
                 score -= 0.03;
+            }
+            if choice.ctile.abs_diff(target) as u32 <= slack {
+                score += 0.01;
+            } else {
+                score -= 0.015;
             }
         }
     }
@@ -755,7 +791,7 @@ mod tests {
         };
         assert!(choice.ctile <= lane_cap.max(128));
         let (min_ctile, _max_ctile) = latency_ctile_bounds(8_192, lanes);
-        let (target, lower, upper, min_lane, max_lane) =
+        let (target, lower, upper, min_lane, max_lane, _slack) =
             latency_ctile_window(96, 64, lanes, min_ctile, lane_cap.max(min_ctile));
         assert!(choice.ctile >= lower);
         assert!(choice.ctile <= upper);
@@ -780,12 +816,13 @@ mod tests {
         let lanes = caps.lane_width.max(1);
         let (min_ctile, max_ctile) = latency_ctile_bounds(4_096, lanes);
         let (snapped, target) = snap_latency_ctile(2048, 24, 32, lanes, min_ctile, max_ctile);
-        let (_, lower, upper, min_lane, max_lane) =
+        let (_, lower, upper, min_lane, max_lane, slack) =
             latency_ctile_window(24, 32, lanes, min_ctile, max_ctile);
         assert!(snapped >= lower && snapped <= upper);
         let lane_snapped = closest_lane_multiple(snapped, lanes, min_lane, max_lane);
         assert_eq!(snapped, lane_snapped);
         assert_eq!(snapped, target);
+        assert!(snapped.abs_diff(target) as u32 <= slack);
     }
 
     #[test]
@@ -794,7 +831,15 @@ mod tests {
         let baseline = fallback(80, 16_384, 96, &caps, RankKind::BottomK);
         let mut candidate = baseline;
         candidate.ctile = baseline.ctile.saturating_add(256);
-        let refined = refine_choice(candidate, baseline, &caps, 80, 16_384, 96, RankKind::BottomK);
+        let refined = refine_choice(
+            candidate,
+            baseline,
+            &caps,
+            80,
+            16_384,
+            96,
+            RankKind::BottomK,
+        );
         let lanes = caps.lane_width.max(1);
         let half_tile = refined.tile / 2;
         let lane_cap = if half_tile == 0 {
@@ -803,5 +848,44 @@ mod tests {
             align_down_to_lanes(half_tile, lanes)
         };
         assert!(refined.ctile <= lane_cap.max(128));
+    }
+
+    #[test]
+    fn latency_ctile_slack_scales_with_rows_and_k() {
+        let lanes = 32;
+        let tight = latency_ctile_slack(32, 32, lanes);
+        let medium = latency_ctile_slack(160, 160, lanes);
+        let wide = latency_ctile_slack(512, 768, lanes);
+        assert_eq!(tight, lanes);
+        assert!(medium >= lanes.saturating_mul(2));
+        assert!(wide >= lanes.saturating_mul(3));
+        assert!(tight < medium && medium <= wide);
+    }
+
+    #[test]
+    fn latency_refine_clamps_to_window_bounds() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        let baseline = fallback(48, 8_192, 64, &caps, RankKind::MidK);
+        let mut candidate = baseline;
+        candidate.ctile = baseline.ctile.saturating_add(1024);
+        let refined = refine_choice(candidate, baseline, &caps, 48, 8_192, 64, RankKind::MidK);
+        let lanes = caps.lane_width.max(1);
+        let (min_ctile, max_ctile) = latency_ctile_bounds(8_192, lanes);
+        let (_, lower, upper, ..) = latency_ctile_window(48, 64, lanes, min_ctile, max_ctile);
+        assert!(refined.ctile >= lower && refined.ctile <= upper);
+    }
+
+    #[test]
+    fn latency_score_rewards_window_alignment() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        let baseline = fallback(64, 8_192, 48, &caps, RankKind::BottomK);
+        let mut aligned = baseline;
+        let mut off = baseline;
+        aligned.ctile = baseline.ctile;
+        off.ctile = baseline.ctile.saturating_add(caps.lane_width * 4);
+        let aligned_score =
+            score_choice(&aligned, &caps, 64, 8_192, 48, &baseline, RankKind::BottomK);
+        let off_score = score_choice(&off, &caps, 64, 8_192, 48, &baseline, RankKind::BottomK);
+        assert!(aligned_score > off_score);
     }
 }
