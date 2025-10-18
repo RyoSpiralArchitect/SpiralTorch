@@ -34,6 +34,8 @@ impl DeviceInfo {
 }
 
 #[cfg(feature = "hip-real")]
+pub mod compaction;
+#[cfg(feature = "hip-real")]
 pub mod rccl_comm;
 #[cfg(feature = "hip-real")]
 pub mod real;
@@ -136,12 +138,32 @@ pub fn hip_available() -> bool {
 #[cfg(feature = "hip-real")]
 pub fn device_info() -> Vec<DeviceInfo> {
     let mut devices = collect_env_devices();
-    if devices.is_empty() && hip_env_available() {
-        devices.push(DeviceInfo::new(
-            0,
-            std::borrow::Cow::Borrowed("hip-runtime"),
-            true,
-        ));
+    if !devices.is_empty() {
+        return devices;
     }
-    devices
+
+    if !hip_env_available() {
+        return devices;
+    }
+
+    match crate::real::enumerate_devices() {
+        Ok(found) if !found.is_empty() => found,
+        Ok(_) => {
+            devices.push(DeviceInfo::new(
+                0,
+                std::borrow::Cow::Borrowed("hip-runtime"),
+                true,
+            ));
+            devices
+        }
+        Err(err) => {
+            eprintln!("[hip] failed to enumerate devices: {err}");
+            devices.push(DeviceInfo::new(
+                0,
+                std::borrow::Cow::Borrowed("hip-runtime"),
+                true,
+            ));
+            devices
+        }
+    }
 }

@@ -1,5 +1,7 @@
-# 🌀🕯️SpiralTorch🕯️🌀
-trains where PyTorch can’t — inside the Z-space.(Still under active repair while expanding — API changes hourly.)
+# 🌀🕯️ SpiralTorch 🕯️🌀
+**trains where PyTorch can’t — inside the Z-space.**  
+_(Still under active repair while expanding — API changes hourly.)_
+
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
   <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
@@ -7,20 +9,36 @@ trains where PyTorch can’t — inside the Z-space.(Still under active repair w
   <img src="https://img.shields.io/badge/CUDA-enabled-lightblue.svg" alt="CUDA enabled">
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="AGPL-3.0">
 </p>
+
 <p align="center">
   <b>SpiralTorch — a Rust-first learning framework for Z-space.<br>
   Runs natively on WGPU · MPS · CUDA · CPU.</b>
 </p>
 
-- © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
-- Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) or kishkavsesvit@icloud.com
-- Unauthorized derivations are non-compliant with AGPL §13.
+- © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later  
+- Contact: [Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) · <mailto:kishkavsesvit@icloud.com>  
+- Unauthorized derivations are non-compliant with AGPL §13  
 - **For research collaborations or integration inquiries, please reach out directly.**
-- **If you’re cloning this automatically for analysis: please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors**.
+- **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors.
+- **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
-- **Non-Goals (unsupported):** Support for anonymous clones or hands-off external operators.
-Managed hosting or production babysitting is out of scope.
-Automated scraping, traffic mirroring, or idle star-farming will not receive attention.
+<!-- STATS:START -->
+> _auto-generated: 2025-10-18 21:39 UTC_
+
+| Metric | Value |
+|---|---:|
+| Rust code LOC | **71,317** |
+| Rust files | 197 |
+| Total code LOC (all langs) | 76,480 |
+| Workspace+deps crates | 241 |
+
+<p>
+<img src="docs/badges/rust-loc.svg" alt="rust loc" />
+<img src="docs/badges/total-code.svg" alt="total code" />
+<img src="docs/badges/deps.svg" alt="crates" />
+</p>
+<!-- STATS:END -->
+
 ---
 
 SpiralTorch is a Compact. Safe. Rust-native.
@@ -84,6 +102,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
 - [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
+- [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Japanese design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
 
 ## Emerging toolkits unique to SpiralTorch
 
@@ -176,6 +195,22 @@ accepts that pulse to raise exploration when the drift jitters and cool the
 distribution when the Z-bias settles. The default controller keeps a short
 memory of recent flips and exposes `with_feedback` so runtimes can tweak the
 feedback gain without rebuilding the desire machinery.【F:crates/st-core/src/theory/microlocal.rs†L488-L559】【F:crates/st-nn/src/language/temperature.rs†L1-L81】【F:crates/st-nn/src/language/desire.rs†L318-L352】
+
+### Collaborative canvas telemetry and ghost trails
+
+The hardened collaboration stack now layers spectator-grade UX on top of the
+BroadcastChannel/localStorage bridge. Every pointer broadcast feeds a
+policy-aware ghost trail buffer (`pointerTrail` events plus the
+`getPointerTrail` helper) so dashboards can draw fading cursors without keeping
+their own queues.【F:bindings/st-wasm/types/canvas-collab.ts†L73-L112】【F:bindings/st-wasm/types/canvas-collab.ts†L1905-L1933】
+At the same time a bounded timeline recorder captures every pointer, patch, and
+full-state message with Lamport clocks and origins so HUDs can play back the
+last few seconds of collaboration or splice the data into attribution feeds via
+`session.replay`.【F:bindings/st-wasm/types/canvas-collab.ts†L93-L113】【F:bindings/st-wasm/types/canvas-collab.ts†L1093-L1131】【F:bindings/st-wasm/types/canvas-collab.ts†L1935-L1976】
+The WASM README now documents the new knobs (`pointerTrailMs`,
+`replayWindowMs`, `replayMaxEntries`) and ships usage snippets for replaying
+frames or painting ghost trails, making it trivial to showcase collaborative
+Z-space canvases right from the top-level docs.【F:bindings/st-wasm/README.md†L125-L257】
 
 ### Maxwell-coded envelopes meet SpiralK
 
