@@ -23,6 +23,47 @@ const DEFAULT_RANK: usize = 24;
 const DEFAULT_WEIGHT: f64 = 1.0;
 const DEFAULT_THRESHOLD: f32 = 0.005;
 
+/// Summary statistics describing a projected RealGrad field.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GradientSummary {
+    /// L2 norm of the projected gradient.
+    pub norm: f32,
+    /// Ratio of entries considered near-zero under the residual threshold.
+    pub sparsity: f32,
+}
+
+impl GradientSummary {
+    /// Creates a summary from the provided projected gradient values.
+    pub fn from_realgrad(values: &[f32]) -> Self {
+        if values.is_empty() {
+            return Self::default();
+        }
+
+        let mut norm_sq = 0.0f64;
+        let mut sparse = 0usize;
+        for &value in values {
+            let abs = value.abs();
+            norm_sq += f64::from(value) * f64::from(value);
+            if abs <= DEFAULT_THRESHOLD {
+                sparse += 1;
+            }
+        }
+        let norm = norm_sq.sqrt() as f32;
+        let len = values.len() as f32;
+        let sparsity = (sparse as f32 / len).clamp(0.0, 1.0);
+        Self { norm, sparsity }
+    }
+}
+
+impl Default for GradientSummary {
+    fn default() -> Self {
+        Self {
+            norm: 0.0,
+            sparsity: 1.0,
+        }
+    }
+}
+
 /// Discrete Fourier transform backend used by [`RealGradKernel`].
 pub trait SpectralEngine {
     /// Computes the complex DFT of the provided real input.
@@ -402,6 +443,11 @@ impl RealGradProjection {
     /// Returns `true` when the projection yielded any non-zero residuals.
     pub fn has_residuals(&self) -> bool {
         !self.monad_biome.is_empty()
+    }
+
+    /// Returns the gradient summary describing the projected field.
+    pub fn gradient_summary(&self) -> GradientSummary {
+        GradientSummary::from_realgrad(&self.realgrad)
     }
 
     /// Returns the total magnitude routed to the monad biome.
