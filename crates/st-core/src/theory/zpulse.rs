@@ -30,13 +30,8 @@ use std::cmp::Ordering;
 //! conductor that fuses multiple sources into a single control signal.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::fs;
-use std::io::{ErrorKind, Read};
-use std::path::Path;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-
-use serde::Deserialize;
 
 /// Identifies a source capable of emitting [`ZPulse`] records.
 pub trait ZEmitter {
@@ -125,15 +120,70 @@ impl Default for ZSource {
     Other(&'static str),
 }
 
+fn source_lookup_key(source: &ZSource) -> Cow<'static, str> {
+    match source {
+        ZSource::Microlocal => Cow::Borrowed("microlocal"),
+        ZSource::Maxwell => Cow::Borrowed("maxwell"),
+        ZSource::RealGrad => Cow::Borrowed("realgrad"),
+        ZSource::Desire => Cow::Borrowed("desire"),
+        ZSource::External(label) | ZSource::Other(label) => Cow::Borrowed(*label),
+    }
+}
+
+/// Per-band support accounting used by [`ZPulse`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZSupport {
+    pub leading: f32,
+    pub central: f32,
+    pub trailing: f32,
+}
+
+impl ZSupport {
+    /// Returns the total support mass contributed by the pulse.
+    pub fn total(&self) -> f32 {
+        self.leading.max(0.0) + self.central.max(0.0) + self.trailing.max(0.0)
+    }
+
+    /// Scales all support components by the provided gain.
+    pub fn scaled(self, gain: f32) -> Self {
+        Self {
+            leading: self.leading * gain,
+            central: self.central * gain,
+            trailing: self.trailing * gain,
+        }
+    }
+}
+
+impl Default for ZSupport {
+    fn default() -> Self {
+        Self {
+            leading: 0.0,
+            central: 0.0,
+            trailing: 0.0,
+        }
+    }
+}
+
+impl From<(f32, f32, f32)> for ZSupport {
+    fn from(bands: (f32, f32, f32)) -> Self {
+        Self {
+            leading: bands.0,
+            central: bands.1,
+            trailing: bands.2,
+        }
+    }
+}
+
 /// Discrete Z pulse emitted by an upstream source.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZPulse {
     pub source: ZSource,
     pub ts: u64,
+    pub tempo: f32,
     pub band_energy: (f32, f32, f32),
     pub drift: f32,
     pub z_bias: f32,
-    pub support: f32,
+    pub support: ZSupport,
     pub quality: f32,
     pub stderr: f32,
     pub latency_ms: f32,
@@ -169,6 +219,7 @@ impl Default for ZPulse {
         Self {
             source: ZSource::Microlocal,
             ts: 0,
+            tempo: 0.0,
             band_energy: (0.0, 0.0, 0.0),
             drift: 0.0,
             z_bias: 0.0,
@@ -578,64 +629,44 @@ impl ZConductor {
         }
     }
 
-    /// Executes one fusion step at the provided timestamp.
-    pub fn step(&mut self, now: u64) -> ZFused {
-        let mut events = Vec::new();
-        if let Some(latency) = self.latency.as_mut() {
-            latency.prepare(now, &mut events);
-        }
-        let mut ready = Vec::new();
-        let mut retained = Vec::with_capacity(self.pending.len());
-        for mut pulse in self.pending.drain(..) {
-            if let Some(latency) = self.latency.as_ref() {
-                latency.apply(&mut pulse);
-            }
-            if pulse.ts <= now {
-                ready.push(pulse);
-            } else {
-                retained.push(pulse);
-            }
-        }
-        self.pending = retained;
+    pub fn step<I>(&mut self, pulses: I, now: u64) -> ZFused
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut fused = ZFused::default();
+        fused.ts = now;
 
-        let mut drift = 0.0;
-        let mut attributions = Vec::new();
-        let mut total_support = 0.0;
+        let mut total_support = 0.0f32;
+        let mut weighted_z = 0.0f32;
+        let mut weighted_quality = 0.0f32;
+        let mut total_quality_weight = 0.0f32;
 
-        if !ready.is_empty() {
-            total_support = ready
-                .iter()
-                .filter(|p| !p.is_empty())
-                .map(|pulse| pulse.support_mass().max(0.0))
-                .sum();
-            let mut contributions: Vec<(ZSource, f32, f32)> = ready
-                .iter()
-                .filter(|p| !p.is_empty())
-                .map(|pulse| {
-                    let gain = *self.cfg.gain.get(&pulse.source).unwrap_or(&1.0);
-                    let base_w = (pulse.quality * gain).max(1e-6);
-                    (pulse.source.clone(), base_w, pulse.normalised_drift())
-                })
-                .collect();
+        let mut had_pulse = false;
 
-            if !contributions.is_empty() {
-                let mut drifts: Vec<f32> = contributions.iter().map(|(_, _, d)| *d).collect();
-                let median = median(&mut drifts);
-                let mut weight_sum = 0.0f32;
-                let mut numerator = 0.0f32;
-                for (source, weight, drift_norm) in contributions.iter_mut() {
-                    let robust = huber_weight(*drift_norm - median, self.cfg.robust_delta);
-                    *weight *= robust;
-                    weight_sum += *weight;
-                    numerator += *weight * *drift_norm;
-                    attributions.push((source.clone(), *weight));
-                }
-                if weight_sum > 0.0 {
-                    drift = numerator / weight_sum;
-                    let inv = 1.0 / weight_sum;
-                    for attrib in &mut attributions {
-                        attrib.1 *= inv;
-                    }
+        for pulse in pulses {
+            had_pulse = true;
+            let support = pulse.support.total().max(0.0);
+            total_support += support;
+            fused.drift += pulse.drift;
+            let key = source_lookup_key(&pulse.source);
+            let gain = self
+                .source_gains
+                .get(key.as_ref())
+                .copied()
+                .unwrap_or(1.0)
+                .max(0.0);
+            let limit = self
+                .source_limits
+                .get(key.as_ref())
+                .copied()
+                .unwrap_or(f32::INFINITY)
+                .max(0.0);
+            let mut z_bias = pulse.z_bias * gain;
+            if limit.is_finite() {
+                if limit == 0.0 {
+                    z_bias = 0.0;
+                } else {
+                    z_bias = z_bias.clamp(-limit, limit);
                 }
             }
             weighted_z += z_bias * support;
@@ -1056,11 +1087,7 @@ mod conductor_config_tests {
 
         let mut pulse = ZPulse {
             source: ZSource::Microlocal,
-            support: ZSupport {
-                leading: 0.2,
-                central: 0.2,
-                trailing: 0.0,
-            },
+            support: ZSupport::from((0.2, 0.2, 0.0)),
             drift: 0.1,
             ..ZPulse::default()
         };
