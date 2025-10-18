@@ -49,6 +49,60 @@ pub struct ZPulse {
     pub latency_ms: f32,
 }
 
+impl ZPulse {
+    /// Returns the total band energy.
+    pub fn total_energy(&self) -> f32 {
+        let (above, here, beneath) = self.band_energy;
+        above + here + beneath
+    }
+
+    /// Returns the drift normalised by the total band energy.
+    pub fn normalised_drift(&self) -> f32 {
+        let total = self.total_energy().max(1e-6);
+        let (above, _, beneath) = self.band_energy;
+        (above - beneath) / total
+    }
+
+    /// Returns `true` when the pulse carries no actionable signal.
+    pub fn is_empty(&self) -> bool {
+        self.support <= f32::EPSILON && self.total_energy() <= f32::EPSILON
+    }
+}
+
+impl Default for ZPulse {
+    fn default() -> Self {
+        ZPulse {
+            source: ZSource::Microlocal,
+            ts: 0,
+            band_energy: (0.0, 0.0, 0.0),
+            drift: 0.0,
+            z_bias: 0.0,
+            support: 0.0,
+            quality: 0.0,
+            stderr: 0.0,
+            latency_ms: 0.0,
+        }
+    }
+}
+
+/// Origin of a [`ZPulse`].
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ZSource {
+    Microlocal,
+    Maxwell,
+    Desire,
+    Graph,
+    GW,
+    Other(&'static str),
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ZFrequencyConfig {
+    pub smoothing: f32,
+    pub minimum_energy: f32,
+}
+
 impl ZFrequencyConfig {
     pub fn new(smoothing: f32, minimum_energy: f32) -> Self {
         Self {
@@ -58,7 +112,7 @@ impl ZFrequencyConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct ZAdaptiveGainCfg {
     pub gain_floor: f32,
     pub gain_ceil: f32,
@@ -73,27 +127,6 @@ impl ZAdaptiveGainCfg {
             responsiveness: responsiveness.clamp(0.0, 1.0),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ZLatencyConfig {
-    pub history: usize,
-    pub hysteresis: f32,
-}
-
-impl ZLatencyConfig {
-    pub fn new(history: usize, hysteresis: f32) -> Self {
-        Self {
-            history: history.max(1),
-            hysteresis: hysteresis.max(0.0),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ZTempo {
-    pub target_latency: f32,
-    pub smoothing: f32,
 }
 
 /// Configuration governing the behaviour of [`ZConductor`].
@@ -572,10 +605,108 @@ pub struct ZAttribution {
 /// Result of a [`ZConductor::step`] call.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZFused {
-    pub support: f32,
+    pub z: f32,
     pub drift: f32,
+    pub support: f32,
+    pub z_bias: f32,
     pub attributions: Vec<ZAttribution>,
     pub events: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct FrequencyFusionSnapshot {
+    support: f32,
+    drift: f32,
+    z_bias: f32,
+    z: f32,
+}
+
+impl FrequencyFusionSnapshot {
+    fn from_fused(fused: &ZFused) -> Self {
+        Self {
+            support: fused.support,
+            drift: fused.drift,
+            z_bias: fused.z_bias,
+            z: fused.z,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FrequencyFusionState {
+    cfg: ZFrequencyConfig,
+    snapshot: Option<FrequencyFusionSnapshot>,
+}
+
+impl FrequencyFusionState {
+    fn new(cfg: ZFrequencyConfig) -> Self {
+        Self {
+            cfg,
+            snapshot: None,
+        }
+    }
+
+    fn update_config(&mut self, cfg: ZFrequencyConfig) {
+        self.cfg = cfg;
+    }
+
+    fn fuse(&mut self, fused: &mut ZFused) {
+        if fused.support < self.cfg.minimum_energy {
+            self.snapshot = None;
+            return;
+        }
+
+        if let Some(prev) = self.snapshot {
+            let alpha = self.cfg.smoothing.clamp(0.0, 1.0);
+            if alpha > 0.0 {
+                fused.support = lerp(prev.support, fused.support, alpha);
+                fused.drift = lerp(prev.drift, fused.drift, alpha);
+                fused.z_bias = lerp(prev.z_bias, fused.z_bias, alpha);
+                fused.z = lerp(prev.z, fused.z, alpha);
+                fused.events.push("freq.smoothed".to_string());
+            }
+        }
+
+        self.snapshot = Some(FrequencyFusionSnapshot::from_fused(fused));
+    }
+}
+
+#[derive(Clone, Debug)]
+struct AdaptiveGainState {
+    cfg: ZAdaptiveGainCfg,
+    gain: f32,
+}
+
+impl AdaptiveGainState {
+    fn new(cfg: ZAdaptiveGainCfg) -> Self {
+        let baseline = cfg.gain_floor.max(1e-6);
+        Self {
+            cfg,
+            gain: baseline,
+        }
+    }
+
+    fn update_config(&mut self, cfg: ZAdaptiveGainCfg) {
+        self.cfg = cfg;
+        let floor = self.cfg.gain_floor.max(1e-6);
+        let ceil = self.cfg.gain_ceil.max(floor);
+        self.gain = self.gain.clamp(floor, ceil);
+    }
+
+    fn adapt(&mut self, fused: &mut ZFused) {
+        let response = fused.support.abs() + fused.drift.abs() + fused.z_bias.abs();
+        let target =
+            (self.cfg.gain_floor + response).min(self.cfg.gain_ceil.max(self.cfg.gain_floor));
+        let alpha = self.cfg.responsiveness.clamp(0.0, 1.0);
+        let previous = self.gain;
+        self.gain = lerp(self.gain, target.max(self.cfg.gain_floor.max(1e-6)), alpha);
+
+        fused.z *= self.gain;
+        fused.z_bias *= self.gain;
+        if (self.gain - previous).abs() > 1e-6 {
+            fused.events.push(format!("adaptive.gain:{:.3}", self.gain));
+        }
+    }
 }
 
 /// Stateful conductor that fuses heterogeneous Z pulses into a stabilised control
@@ -583,6 +714,8 @@ pub struct ZFused {
 #[derive(Clone, Debug)]
 pub struct ZConductor {
     cfg: ZConductorCfg,
+    freq: Option<FrequencyFusionState>,
+    adaptive: Option<AdaptiveGainState>,
     latency: Option<LatencyAlignerState>,
     pending: Vec<ZPulse>,
     sign_hat: f32,
@@ -593,12 +726,9 @@ pub struct ZConductor {
     last_step_ts: Option<u64>,
 }
 
-impl ZSource {
-    pub fn new(name: impl Into<String>, pulse: ZPulse) -> Self {
-        Self {
-            name: name.into(),
-            pulse,
-        }
+impl Default for ZConductor {
+    fn default() -> Self {
+        Self::new(ZConductorCfg::default())
     }
 }
 
@@ -608,6 +738,8 @@ impl ZConductor {
         let latency_cfg = cfg.latency.clone();
         ZConductor {
             cfg,
+            freq: None,
+            adaptive: None,
             latency: latency_cfg.map(LatencyAlignerState::new),
             pending: Vec::new(),
             sign_hat: 0.0,
@@ -619,14 +751,41 @@ impl ZConductor {
         }
     }
 
-    pub fn update_config(&mut self, cfg: ZFrequencyConfig) {
-        self.cfg = cfg;
+    /// Returns a mutable reference to the configuration, enabling on-line tuning.
+    pub fn cfg_mut(&mut self) -> &mut ZConductorCfg {
+        &mut self.cfg
     }
 
     /// Installs or removes the latency aligner at runtime.
     pub fn set_latency_aligner(&mut self, cfg: Option<LatencyAlignerCfg>) {
         self.cfg.latency = cfg.clone();
         self.latency = cfg.map(LatencyAlignerState::new);
+    }
+
+    pub fn set_frequency_config(&mut self, cfg: Option<ZFrequencyConfig>) {
+        match (&mut self.freq, cfg) {
+            (Some(state), Some(new_cfg)) => state.update_config(new_cfg),
+            (slot @ None, Some(new_cfg)) => {
+                *slot = Some(FrequencyFusionState::new(new_cfg));
+            }
+            (state @ Some(_), None) => {
+                *state = None;
+            }
+            (None, None) => {}
+        }
+    }
+
+    pub fn set_adaptive_gain_config(&mut self, cfg: Option<ZAdaptiveGainCfg>) {
+        match (&mut self.adaptive, cfg) {
+            (Some(state), Some(new_cfg)) => state.update_config(new_cfg),
+            (slot @ None, Some(new_cfg)) => {
+                *slot = Some(AdaptiveGainState::new(new_cfg));
+            }
+            (state @ Some(_), None) => {
+                *state = None;
+            }
+            (None, None) => {}
+        }
     }
 
     /// Returns the currently estimated lag for the supplied source in milliseconds.
@@ -648,7 +807,6 @@ impl ZConductor {
         }
         self.pending.push(pulse);
     }
-}
 
     /// Executes one fusion step at the provided timestamp.
     pub fn step(&mut self, now: u64) -> ZFused {
@@ -672,8 +830,14 @@ impl ZConductor {
 
         let mut drift = 0.0;
         let mut attributions = Vec::new();
+        let mut total_support = 0.0;
 
         if !ready.is_empty() {
+            total_support = ready
+                .iter()
+                .filter(|p| !p.is_empty())
+                .map(|pulse| pulse.support.max(0.0))
+                .sum();
             let mut contributions: Vec<(ZSource, f32, f32)> = ready
                 .iter()
                 .filter(|p| !p.is_empty())
@@ -722,7 +886,6 @@ impl ZConductor {
             events.push("slew-limited".to_string());
             z = limited;
         }
-    }
 
         let budget = self.cfg.z_budget.max(f32::EPSILON);
         if z.abs() > budget {
@@ -735,26 +898,32 @@ impl ZConductor {
             events.push("saturated".to_string());
         }
 
-    pub fn adapt(&mut self, fused: &ZFused) {
-        let response = fused.support.abs() + fused.drift.abs() + fused.z_bias.abs();
-        let alpha = self.cfg.responsiveness;
-        let target = (self.cfg.gain_floor + response).min(self.cfg.gain_ceil);
-        self.gain = lerp(self.gain, target, alpha);
-    }
-}
+        let attributions: Vec<ZAttribution> = attributions
+            .into_iter()
+            .map(|(source, weight)| ZAttribution { source, weight })
+            .collect();
 
-#[derive(Debug, Clone)]
-pub struct LatencyAlignerCfg {
-    pub history: usize,
-}
+        let mut fused = ZFused {
+            z,
+            drift,
+            support: total_support,
+            z_bias: z_before_limits,
+            attributions,
+            events,
+        };
 
-impl LatencyAlignerCfg {
-    pub fn new(history: usize) -> Self {
-        Self {
-            history: history.max(1),
+        if let Some(state) = self.freq.as_mut() {
+            state.fuse(&mut fused);
         }
+        if let Some(state) = self.adaptive.as_mut() {
+            state.adapt(&mut fused);
+        }
+
+        self.last_z = fused.z;
+        self.last_step_ts = Some(now);
+
+        fused
     }
-}
 
     fn apply_temporal_filters(&mut self, drift: f32, events: &mut Vec<String>) -> f32 {
         let sign = if drift.abs() > f32::EPSILON {
@@ -783,91 +952,100 @@ impl LatencyAlignerCfg {
         self.flip_age = self.flip_age.saturating_add(1);
         self.last_sign = target_sign;
 
-impl LatencyAlignerState {
-    pub fn new(cfg: ZLatencyConfig) -> Self {
-        Self {
-            cfg: LatencyAlignerCfg::new(cfg.history),
-            events: VecDeque::new(),
+        let alpha_fast = self.cfg.alpha_fast.clamp(0.0, 1.0);
+        if alpha_fast > 0.0 {
+            self.sign_hat = ema(self.sign_hat, target_sign, alpha_fast);
+        }
+
+        let magnitude_target = drift.abs();
+        let alpha_slow = self.cfg.alpha_slow.clamp(0.0, 1.0);
+        if alpha_slow > 0.0 {
+            self.mag_hat = ema(self.mag_hat, magnitude_target, alpha_slow);
+        } else {
+            self.mag_hat = magnitude_target;
+        }
+
+        if self.sign_hat.abs() <= f32::EPSILON {
+            0.0
+        } else {
+            self.sign_hat.signum()
         }
     }
+}
 
-    pub fn update_config(&mut self, cfg: ZLatencyConfig) {
-        self.cfg = LatencyAlignerCfg::new(cfg.history);
-        while self.events.len() > self.cfg.history {
-            self.events.pop_front();
+fn derive_quality(pulse: &ZPulse) -> f32 {
+    match pulse.source {
+        ZSource::Microlocal | ZSource::Graph => {
+            let total = pulse.total_energy().max(1e-6);
+            let support_norm = (pulse.support / total).clamp(0.0, 8.0);
+            sigmoid(1.75 * support_norm)
         }
-    }
-
-    pub fn record(&mut self, event: impl Into<String>) {
-        self.events.push_back(event.into());
-        while self.events.len() > self.cfg.history {
-            self.events.pop_front();
+        ZSource::Maxwell | ZSource::GW => {
+            let stderr = pulse.stderr.max(1e-6);
+            let snr = (1.0 / stderr).min(1.0);
+            let z = pulse.z_bias.abs().max(pulse.drift.abs());
+            z.tanh() * snr
         }
-    }
-
-    pub fn drain(&mut self) -> Vec<String> {
-        self.events.drain(..).collect()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct LatencyAligner {
-    cfg: ZLatencyConfig,
-}
-
-impl LatencyAligner {
-    fn new(cfg: ZLatencyConfig) -> Self {
-        Self { cfg }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ZConductorCfg {
-    pub freq: Option<ZFrequencyConfig>,
-    pub adaptive_gain: Option<ZAdaptiveGainCfg>,
-    pub latency: Option<ZLatencyConfig>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ZConductor {
-    cfg: ZConductorCfg,
-    freq: Option<FrequencyFusionState>,
-    adaptive: Option<AdaptiveGainState>,
-    latency: Option<LatencyAlignerState>,
-    latency_events: VecDeque<String>,
-    fused: ZFused,
-}
-
-impl ZConductor {
-    pub fn new(cfg: ZConductorCfg) -> Self {
-        let freq = cfg.freq.map(FrequencyFusionState::new);
-        let adaptive = cfg.adaptive_gain.map(AdaptiveGainState::new);
-        let latency = cfg
-            .latency
-            .map(|latency_cfg| LatencyAlignerState::new(latency_cfg));
-        Self {
-            cfg,
-            freq,
-            adaptive,
-            latency,
-            latency_events: VecDeque::new(),
-            fused: ZFused::default(),
-        }
-    }
-
-    pub fn set_frequency_config(&mut self, cfg: Option<ZFrequencyConfig>) {
-        self.cfg.freq = cfg;
-        match (&mut self.freq, cfg) {
-            (Some(state), Some(new_cfg)) => state.update_config(new_cfg),
-            (slot @ None, Some(new_cfg)) => {
-                *slot = Some(FrequencyFusionState::new(new_cfg));
+        ZSource::Desire => {
+            if pulse.quality > 0.0 {
+                pulse.quality.clamp(0.0, 1.0)
+            } else {
+                0.5
             }
-            (state @ Some(_), None) => {
-                *state = None;
+        }
+        ZSource::Other(_) => {
+            if pulse.quality > 0.0 {
+                pulse.quality.clamp(0.0, 1.0)
+            } else {
+                0.5
             }
-            (None, None) => {}
         }
     }
+}
+
+fn huber_weight(residual: f32, delta: f32) -> f32 {
+    if delta <= 0.0 {
+        return 1.0;
+    }
+    if residual.abs() <= delta {
+        1.0
+    } else {
+        delta / residual.abs()
+    }
+}
+
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+fn ema(prev: f32, value: f32, alpha: f32) -> f32 {
+    let alpha = alpha.clamp(0.0, 1.0);
+    (1.0 - alpha) * prev + alpha * value
+}
+
+fn lerp(current: f32, target: f32, alpha: f32) -> f32 {
+    let alpha = alpha.clamp(0.0, 1.0);
+    current + (target - current) * alpha
+}
+
+fn median(values: &mut [f32]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mid = values.len() / 2;
+    let (_, median, _) =
+        values.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+    *median
+}
+
+fn slew_limit(prev: f32, next: f32, slew: f32) -> f32 {
+    if slew <= f32::EPSILON {
+        return next;
+    }
+    let delta = next - prev;
+    let clamped = delta.clamp(-slew, slew);
+    prev + clamped
+}
 
 #[cfg(test)]
 mod tests {
@@ -911,7 +1089,6 @@ mod tests {
             if idx == 2 {
                 assert!(fused.events.iter().any(|e| e == "flip-held"));
             }
-            (None, None) => {}
         }
     }
 
@@ -968,27 +1145,6 @@ mod tests {
             }
             prev_z = fused.z;
         }
-
-        if let Some(state) = &mut self.freq {
-            fused = state.fuse(ZPulse {
-                support: fused.support,
-                drift: fused.drift,
-                z_bias: fused.z_bias,
-                tempo: fused.tempo,
-            });
-        }
-
-        if let Some(state) = &mut self.adaptive {
-            state.adapt(&fused);
-        }
-
-        if let Some(latency) = &mut self.latency {
-            latency.record("fused");
-            self.latency_events.extend(latency.drain());
-        }
-
-        self.fused = fused;
-        fused
     }
 
     #[test]
