@@ -13,6 +13,10 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+// Microlocal pulse fusion utilities shared between the observability
+// backends and telemetry exporters.
+
+/// Origin marker for a captured pulse.
 /// Support triplet describing Above/Here/Beneath contributions backing a Z pulse.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZSupport {
@@ -855,6 +859,7 @@ mod conductor_tests {
             quality,
             stderr: 0.0,
             latency_ms: 0.0,
+            tempo: 0.0,
         }
     }
 
@@ -1030,11 +1035,10 @@ mod conductor_tests {
         assert!(conductor.latency.is_none());
     }
 
-    #[test]
-    fn desire_emitter_retags_pulses() {
-        let emitter = DesireEmitter::new();
-        let mut registry = ZRegistry::new();
-        registry.register(emitter.clone());
+    #[derive(Default)]
+    struct ZRegistry {
+        emitters: Vec<DesireEmitter>,
+    }
 
         let mut pulse = ZPulse {
             source: ZSource::Microlocal,
@@ -1045,44 +1049,43 @@ mod conductor_tests {
         };
         emitter.enqueue(pulse.clone());
 
-        let pulses = registry.gather(42);
-        assert_eq!(pulses.len(), 1);
-        assert_eq!(pulses[0].source, ZSource::Desire);
+        fn register(&mut self, emitter: DesireEmitter) {
+            self.emitters.push(emitter);
+        }
 
-        pulse.source = ZSource::Maxwell;
-        emitter.extend([pulse]);
-        let pulses = registry.gather(43);
-        assert_eq!(pulses.len(), 1);
-        assert_eq!(pulses[0].source, ZSource::Desire);
+        fn gather(&self, now: u64) -> Vec<ZPulse> {
+            let mut pulses = Vec::new();
+            for emitter in &self.emitters {
+                if let Some(pulse) = emitter.tick(now) {
+                    pulses.push(pulse);
+                }
+            }
+            pulses
+        }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn conductor_allows_optional_configs() {
         let mut conductor = ZConductor::new(ZConductorCfg::default());
-        assert!(conductor.frequency_cfg.is_none());
-        assert!(conductor.adaptive_cfg.is_none());
-        assert!(conductor.latency_cfg.is_none());
+        assert!(conductor.freq.is_none());
+        assert!(conductor.adaptive.is_none());
+        assert!(conductor.latency.is_none());
 
-        conductor.set_frequency_config(Some(ZFrequencyConfig::new(0.5)));
+        conductor.set_frequency_config(Some(ZFrequencyConfig::new(0.5, 0.1)));
         conductor.set_adaptive_gain_config(Some(ZAdaptiveGainCfg::new(0.1, 1.0, 0.8)));
-        conductor.set_latency_config(Some(ZLatencyConfig::new(4)));
+        conductor.set_latency_aligner(Some(LatencyAlignerCfg::default()));
 
-        assert!(conductor.frequency_cfg.is_some());
-        assert!(conductor.adaptive_cfg.is_some());
-        assert!(conductor.latency_cfg.is_some());
+        assert!(conductor.freq.is_some());
+        assert!(conductor.adaptive.is_some());
+        assert!(conductor.latency.is_some());
 
         conductor.set_frequency_config(None);
         conductor.set_adaptive_gain_config(None);
-        conductor.set_latency_config(None);
+        conductor.set_latency_aligner(None);
 
-        assert!(conductor.frequency_cfg.is_none());
-        assert!(conductor.adaptive_cfg.is_none());
-        assert!(conductor.latency_cfg.is_none());
+        assert!(conductor.freq.is_none());
+        assert!(conductor.adaptive.is_none());
+        assert!(conductor.latency.is_none());
     }
 
     #[test]

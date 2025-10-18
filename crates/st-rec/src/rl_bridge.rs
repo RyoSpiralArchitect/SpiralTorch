@@ -171,21 +171,63 @@ impl RecBanditController {
             });
         }
         let state = recommender.user_embedding(user)?;
-        let probabilities = self.policy.policy(&state)?;
-        let (action_index, _) = probabilities
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.total_cmp(b))
-            .unwrap();
         let mut recs = Vec::with_capacity(candidates.len());
         for &item in candidates {
             let score = recommender.predict(user, item)?;
             recs.push(Recommendation { item, score });
         }
-        let chosen_item = candidates[action_index];
+        self.make_decision(user, state, recs)
+    }
+
+    /// Pulls the recommender's top-k slate and routes it through the policy.
+    pub fn select_top_k(
+        &self,
+        recommender: &SpiralRecommender,
+        user: usize,
+        k: usize,
+        exclude: Option<&[usize]>,
+    ) -> RecRlResult<RecBanditDecision> {
+        if k != self.action_dim {
+            return Err(RecRlError::CandidateMismatch {
+                expected: self.action_dim,
+                provided: k,
+            });
+        }
+        let state = recommender.user_embedding(user)?;
+        let recs = recommender.recommend_top_k(user, k, exclude)?;
+        self.make_decision(user, state, recs)
+    }
+
+    fn make_decision(
+        &self,
+        user: usize,
+        state: Tensor,
+        candidates: Vec<Recommendation>,
+    ) -> RecRlResult<RecBanditDecision> {
+        if candidates.len() != self.action_dim {
+            return Err(RecRlError::CandidateMismatch {
+                expected: self.action_dim,
+                provided: candidates.len(),
+            });
+        }
+
+        let probabilities = self.policy.policy(&state)?;
+        if probabilities.len() != self.action_dim {
+            return Err(RecRlError::CandidateMismatch {
+                expected: self.action_dim,
+                provided: probabilities.len(),
+            });
+        }
+        let (action_index, _) = probabilities
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))
+            .unwrap();
+        let chosen_item = candidates[action_index].item;
+
         Ok(RecBanditDecision {
             user,
-            candidates: recs,
+            candidates,
             chosen_item,
             action_index,
             state,
@@ -280,6 +322,37 @@ mod tests {
             RecRlError::CandidateMismatch { expected, provided } => {
                 assert_eq!(expected, 3);
                 assert_eq!(provided, 2);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn top_k_selection_routes_through_policy() {
+        let rec = build_basic_recommender();
+        let mut controller = RecBanditController::new(&rec, 3, 0.01, 0.9).unwrap();
+        let decision = controller
+            .select_top_k(&rec, 0, 3, None)
+            .expect("top-k decision");
+        assert_eq!(decision.candidates.len(), 3);
+        assert!(decision.action_index < 3);
+
+        controller.observe_reward(decision, 0.5).unwrap();
+        let report = controller.finish_episode().unwrap();
+        assert_eq!(report.steps, 1);
+    }
+
+    #[test]
+    fn top_k_mismatch_surfaces_error() {
+        let rec = build_basic_recommender();
+        let controller = RecBanditController::new(&rec, 4, 0.01, 0.9).unwrap();
+        let err = controller
+            .select_top_k(&rec, 0, 3, None)
+            .expect_err("mismatched top-k should error");
+        match err {
+            RecRlError::CandidateMismatch { expected, provided } => {
+                assert_eq!(expected, 4);
+                assert_eq!(provided, 3);
             }
             other => panic!("unexpected error: {other:?}"),
         }

@@ -45,6 +45,7 @@ use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
 use std::fmt;
+use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
