@@ -2674,15 +2674,6 @@ impl PyModuleTrainer {
             inner,
             roundtable_bridge: None,
         }
-#[pyclass(module = "spiraltorch", name = "ChronoLoopSignal")]
-#[derive(Clone)]
-struct PyChronoLoopSignal {
-    signal: ChronoLoopSignal,
-}
-
-impl PyChronoLoopSignal {
-    fn from_signal(signal: ChronoLoopSignal) -> Self {
-        Self { signal }
     }
 }
 
@@ -2703,81 +2694,7 @@ impl PyModuleTrainer {
             inner,
             roundtable_bridge: None,
         }
-impl PyChronoLoopSignal {
-    #[getter]
-    fn summary(&self) -> PyChronoSummary {
-        PyChronoSummary::from_summary(self.signal.summary.clone())
     }
-
-    #[getter]
-    fn harmonics(&self) -> Option<PyChronoHarmonics> {
-        self.signal
-            .harmonics
-            .clone()
-            .map(PyChronoHarmonics::from_harmonics)
-    }
-
-    #[cfg(feature = "kdsl")]
-    #[getter]
-    fn spiralk_script(&self) -> Option<String> {
-        self.signal.spiralk_script.clone()
-    }
-
-    #[cfg(not(feature = "kdsl"))]
-    #[getter]
-    fn spiralk_script(&self) -> Option<String> {
-        None
-    }
-
-    #[cfg(feature = "kdsl")]
-    #[getter]
-    fn spiralk_hints(&self) -> Vec<String> {
-        self.signal
-            .spiralk_hints
-            .iter()
-            .map(|hint| {
-                format!(
-                    "soft({},{},{},{})",
-                    hint.field, hint.value_expr, hint.weight_expr, hint.condition_expr
-                )
-            })
-            .collect()
-    }
-
-    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
-        dict.set_item(
-            "summary",
-            PyChronoSummary::from_summary(self.signal.summary.clone()).into_py(py),
-        )?;
-        if let Some(harmonics) = self.signal.harmonics.clone() {
-            dict.set_item(
-                "harmonics",
-                PyChronoHarmonics::from_harmonics(harmonics).into_py(py),
-            )?;
-        } else {
-            dict.set_item("harmonics", py.None())?;
-        }
-        #[cfg(feature = "kdsl")]
-        {
-            dict.set_item("spiralk_script", self.signal.spiralk_script.clone())?;
-            dict.set_item("spiralk_hints", self.spiralk_hints())?;
-        }
-        #[cfg(not(feature = "kdsl"))]
-        {
-            dict.set_item("spiralk_script", py.None())?;
-        }
-        Ok(dict.into_py(py))
-    }
-
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!(
-            "ChronoLoopSignal(frames={}, energy_mean={:.3})",
-            self.signal.summary.frames, self.signal.summary.mean_energy
-        ))
-    }
-}
-
     #[pyo3(signature = (bridge=None, blend=0.35, drift_gain=0.35))]
     fn enable_desire_roundtable_bridge(
         &mut self,
@@ -2819,6 +2736,9 @@ impl PyChronoLoopSignal {
     #[pyo3(signature = (threshold, participants=2))]
     fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
         self.inner.install_meta_conductor(threshold, participants);
+    }
+}
+
 #[pymethods]
 impl PyChronoSummary {
     #[getter]
@@ -5788,6 +5708,7 @@ impl PyModuleTrainer {
             roundtable_bridge: None,
         }
     }
+}
 
 #[pymethods]
 impl PyModuleTrainer {
