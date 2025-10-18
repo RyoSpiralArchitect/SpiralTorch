@@ -418,7 +418,6 @@ impl From<MaxwellZPulse> for ZPulse {
             drift,
             z_bias: pulse.z_bias,
             support,
-            scale: None,
             quality,
             stderr,
             latency_ms,

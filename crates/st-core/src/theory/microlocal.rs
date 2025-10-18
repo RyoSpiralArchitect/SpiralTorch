@@ -188,12 +188,33 @@ impl InterfaceGauge {
                 }
                 if magnitude > 0.0 {
                     let scale = magnitude.sqrt().max(1e-6);
+                    let mut components = vec![0.0f32; dim];
                     for axis in 0..dim {
                         let mut orient_idx = Vec::with_capacity(dim + 1);
                         orient_idx.push(axis);
                         orient_idx.extend_from_slice(idx.slice());
                         let value = orient[IxDyn(&orient_idx)] / scale;
                         orient[IxDyn(&orient_idx)] = value;
+                        components[axis] = value;
+                    }
+                    let mut dominant_axis = 0usize;
+                    let mut dominant_value = 0.0f32;
+                    for (axis, &value) in components.iter().enumerate() {
+                        let abs = value.abs();
+                        if abs > dominant_value {
+                            dominant_axis = axis;
+                            dominant_value = abs;
+                        }
+                    }
+                    for axis in 0..dim {
+                        let mut orient_idx = Vec::with_capacity(dim + 1);
+                        orient_idx.push(axis);
+                        orient_idx.extend_from_slice(idx.slice());
+                        if axis == dominant_axis {
+                            orient[IxDyn(&orient_idx)] = components[axis];
+                        } else {
+                            orient[IxDyn(&orient_idx)] = 0.0;
+                        }
                     }
                 }
             }
@@ -476,7 +497,6 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: None,
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
@@ -779,7 +799,6 @@ impl InterfaceZConductor {
         tempo_hint: Option<f32>,
         stderr_hint: Option<f32>,
     ) -> InterfaceZReport {
-        // 1) lift → InterfaceZPulse 群
         let mut pulses = Vec::with_capacity(self.gauges.len());
         for gauge in &self.gauges {
             let signature = gauge.analyze_with_label(mask, c_prime);
@@ -790,7 +809,6 @@ impl InterfaceZConductor {
             pulses.push(pulse);
         }
 
-        // 2) 品質重み付け
         let mut qualities = Vec::with_capacity(pulses.len());
         let mut weighted = Vec::with_capacity(pulses.len());
         for pulse in &pulses {
@@ -802,7 +820,6 @@ impl InterfaceZConductor {
             weighted.push(pulse.scaled(quality));
         }
 
-        // 3) 集約 + 平滑化イベント
         let mut fused = InterfaceZPulse::aggregate(&weighted);
         if let Some(previous) = &self.previous {
             if self.smoothing > 0.0 {
