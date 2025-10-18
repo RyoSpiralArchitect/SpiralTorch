@@ -1,4 +1,4 @@
-use js_sys::{Array, Float32Array, Uint8Array};
+use js_sys::{Array, Float32Array, Uint32Array, Uint8Array};
 use st_tensor::fractal::{FractalPatch, UringFractalScheduler};
 use st_tensor::wasm_canvas::{CanvasPalette, CanvasProjector};
 use st_tensor::{Tensor, TensorError};
@@ -120,6 +120,26 @@ impl FractalCanvas {
     #[wasm_bindgen(js_name = vectorFieldFftKernel)]
     pub fn vector_field_fft_kernel(&self, subgroup: bool) -> String {
         self.projector.vector_fft_wgsl(subgroup)
+    }
+
+    /// Generate the uniform parameters expected by [`vector_field_fft_kernel`].
+    ///
+    /// The returned array packs the canvas `width`, `height`, the `inverse`
+    /// flag (1 = inverse, 0 = forward) and a padding slot so the buffer aligns
+    /// to 16 bytes as required by WGSL uniform layout rules.
+    #[wasm_bindgen(js_name = vectorFieldFftUniform)]
+    pub fn vector_field_fft_uniform(&self, inverse: bool) -> Uint32Array {
+        let params = self.projector.vector_fft_uniform(inverse);
+        Uint32Array::from(params.as_slice())
+    }
+
+    /// Compute the workgroup dispatch dimensions that pair with
+    /// [`vector_field_fft_kernel`]. The returned `[x, y, z]` triplet already
+    /// accounts for the workgroup size when toggling subgroup execution.
+    #[wasm_bindgen(js_name = vectorFieldFftDispatch)]
+    pub fn vector_field_fft_dispatch(&self, subgroup: bool) -> Uint32Array {
+        let dispatch = self.projector.vector_fft_dispatch(subgroup);
+        Uint32Array::from(dispatch.as_slice())
     }
 
     /// Reset the internal normaliser so the next frame recomputes brightness ranges.

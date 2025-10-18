@@ -1294,6 +1294,13 @@ print("updated weights", weights.tolist())
 - `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
   WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
   the vector field and accumulate the spectrum fully on-GPU.
+- `FractalCanvas::vectorFieldFftUniform(false)` packages the `CanvasFftParams`
+  uniform (width, height, inverse flag, padding) as a `Uint32Array` so the WGSL
+  kernel can be dispatched without manual byte packing.
+- `FractalCanvas::vectorFieldFftDispatch(true)` computes the workgroup triplet
+  for the generated WGSL so callers can hand the counts directly to
+  `computePass.dispatchWorkgroups(...)` (or the Rust equivalent) without
+  duplicating the ceil division logic.
 - Use `CanvasProjector::emit_zspace_patch` to fold the canvas state back into
   the fractal scheduler without leaving Rust or allocating intermediate
   buffers.
@@ -1677,6 +1684,10 @@ const spectrum = fractal.vectorFieldFft(false);
 console.log(`fft bins=${spectrum.length / 8}`);
 const kernel = fractal.vectorFieldFftKernel(true);
 console.log(kernel.split("\n")[0]);
+const uniform = fractal.vectorFieldFftUniform(false);
+console.log(`fft uniform=${uniform.join(',')}`);
+const dispatch = fractal.vectorFieldFftDispatch(true);
+console.log(`fft dispatch=${dispatch.join('x')}`);
 </script>
 ```
 
@@ -1691,7 +1702,12 @@ tensor back through `fft_inverse_in_place` for quick spatial reconstruction.
 When dispatching the WGSL kernel, bind the colour field as a tightly-packed
 array of `FieldSample { energy, chroma }`, store the complex spectrum in a
 matching `SpectrumSample` buffer, and provide the canvas dimensions plus an
-inverse flag through a `CanvasFftParams` uniform struct.
+inverse flag through a `CanvasFftParams` uniform struct. The
+`vectorFieldFftUniform` helper yields the `[width, height, inverse, padding]`
+`Uint32Array` so you can upload the uniform buffer directly without worrying
+about alignment, while `vectorFieldFftDispatch` returns the `[x, y, z]`
+workgroup counts that correspond to the generated WGSL (respecting subgroup or
+full wave execution).
 
 Need FFT heuristics alongside the canvas?  WebAssembly exports now ship auto
 planning helpers and CPU fallbacks:

@@ -10,7 +10,7 @@ use st_core::telemetry::hub::LoopbackEnvelope;
 use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
-use st_core::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
+use st_core::util::math::LeechProjector;
 use st_tensor::{DifferentialResonance, Tensor};
 
 /// Configuration describing how geometric observability is converted into
@@ -383,8 +383,7 @@ impl GeometryFeedback {
         }
         let averaged = self.history.iter().copied().sum::<f64>() / self.history.len() as f64;
         let geodesic = self.geodesic_projection(resonance);
-        let densified =
-            self.leech_weight * LEECH_PACKING_DENSITY * geodesic * (self.z_rank as f64).sqrt();
+        let densified = self.leech_projector.enrich(geodesic);
         let normalized = ((averaged + densified) / self.ramanujan_pi).clamp(0.0, 1.0);
         let softened = self.soft_project(normalized as f32);
         let mut scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
@@ -508,7 +507,7 @@ impl GeometryFeedback {
             self.max_scale = recommended.max(self.min_scale + f32::EPSILON);
         }
 
-        let max_pressure = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
+        let max_pressure = LeechProjector::new(self.z_rank, 1.0).enrich(1.0);
         if max_pressure > 0.0 {
             let pressure_ratio = (pressure / max_pressure).clamp(0.0, 4.0);
             if pressure_ratio > 1.2 {

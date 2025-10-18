@@ -554,6 +554,36 @@ impl CanvasProjector {
         self.vectors.fft_rows_interleaved(inverse)
     }
 
+    /// Uniform parameters expected by [`vector_fft_wgsl`]. The layout mirrors
+    /// the WGSL `CanvasFftParams` struct and includes padding so the buffer
+    /// occupies 16 bytes.
+    pub fn vector_fft_uniform(&self, inverse: bool) -> [u32; 4] {
+        [
+            self.surface.width() as u32,
+            self.surface.height() as u32,
+            inverse as u32,
+            0,
+        ]
+    }
+
+    /// Suggested dispatch dimensions for [`vector_fft_wgsl`]. The kernel
+    /// operates over the full canvas grid, so we pack the height into the
+    /// `y`-dimension while the `x`-dimension is chunked by the workgroup size.
+    /// Consumers can feed the returned triplet directly into
+    /// `queue.write_buffer` / `compute_pass.dispatch_workgroups` without
+    /// recomputing the ceil division in JavaScript.
+    pub fn vector_fft_dispatch(&self, subgroup: bool) -> [u32; 3] {
+        let width = self.surface.width() as u32;
+        let height = self.surface.height() as u32;
+        let workgroup = if subgroup { 32 } else { 64 };
+        let groups_x = if width == 0 {
+            0
+        } else {
+            (width + workgroup - 1) / workgroup
+        };
+        [groups_x, height, 1]
+    }
+
     /// Emit a WGSL kernel that mirrors [`refresh_vector_fft`] so GPU/WebGPU
     /// callers can reproduce the spectrum without leaving the browser. The
     /// shader expects the following bindings:
@@ -565,7 +595,8 @@ impl CanvasProjector {
     ///   `SpectrumSample` per pixel (output – 8 floats for the complex energy
     ///   and chroma channels).
     /// - `@group(0) @binding(2)`: uniform `CanvasFftParams` with the canvas
-    ///   `width`, `height`, and an `inverse` flag (1 = inverse, 0 = forward).
+    ///   `width`, `height`, and an `inverse` flag (1 = inverse, 0 = forward)
+    ///   plus one padding lane so the struct spans 16 bytes.
     pub fn vector_fft_wgsl(&self, subgroup: bool) -> String {
         emit_canvas_fft_wgsl(
             self.surface.width() as u32,
@@ -665,6 +696,7 @@ fn emit_canvas_fft_wgsl(width: u32, height: u32, subgroup: bool) -> String {
              width: u32,\n\
              height: u32,\n\
              inverse: u32,\n\
+             _pad: u32,\n\
          }};\n\
          @group(0) @binding(0) var<storage, read> field: array<FieldSample>;\n\
          @group(0) @binding(1) var<storage, read_write> spectrum: array<SpectrumSample>;\n\
@@ -775,6 +807,28 @@ mod tests {
         assert!(wgsl.contains("@binding(2)"));
         assert!(wgsl.contains("SpectrumSample"));
         assert!(wgsl.contains("@compute"));
+    }
+
+    #[test]
+    fn vector_fft_uniform_matches_canvas_dimensions() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let projector = CanvasProjector::new(scheduler, 3, 5).unwrap();
+        let params = projector.vector_fft_uniform(true);
+        assert_eq!(params, [3, 5, 1, 0]);
+    }
+
+    #[test]
+    fn vector_fft_dispatch_respects_workgroup_chunks() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let projector = CanvasProjector::new(scheduler, 130, 4).unwrap();
+        assert_eq!(projector.vector_fft_dispatch(false), [3, 4, 1]);
+        assert_eq!(projector.vector_fft_dispatch(true), [5, 4, 1]);
     }
 
     #[test]
