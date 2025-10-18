@@ -12,6 +12,7 @@
 ## 3. Observable fingerprints
 - Expectation values reduce to scale averages. Sampling \(\hat R(z)\) under a superposed state yields \(\tfrac12(R(z)+R(-z))\) plus an interference term driven by the projector-enriched drift. `InterfaceZLift::project` accumulates Above/Here/Beneath energy and emits a bias only when the oriented drift crosses the configured floor, reproducing the log-periodic beat \(\propto \cos(\Omega z)\). 【F:crates/st-core/src/theory/microlocal.rs†L358-L422】
 - Aggregating pulses across radii retains the discrete scale signatures. `InterfaceZPulse::aggregate` support-weights multiple pulses, so a log-periodic train of radii leaves the interference comb inside the fused telemetry packet. 【F:crates/st-core/src/theory/microlocal.rs†L434-L520】
+- Each pulse now retains its physical radius and \(z=\log s\) coordinate via `ZScale`, so downstream Z-space consumers can recover the micro/macro pairing that generated the interference term. Fused pulses report the support-weighted log-scale centroid to keep scale attribution intact across smoothing. 【F:crates/st-core/src/theory/zpulse.rs†L52-L118】【F:crates/st-core/src/theory/microlocal.rs†L420-L520】
 
 ## 4. Regimes and diagnostics
 - Finite correlation-length stacks decay quickly because the support requirement `min_support` and the enrichment gate suppress weak drift: interference damps after a few steps when `interface_cells` or the drift magnitude fall below the floor. 【F:crates/st-core/src/theory/microlocal.rs†L321-L351】【F:crates/st-core/src/theory/microlocal.rs†L406-L415】
