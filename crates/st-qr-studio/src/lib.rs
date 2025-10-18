@@ -6,7 +6,7 @@
 //! narrative tags, and immersive overlays together.
 
 use serde::{Deserialize, Serialize};
-use st_core::theory::maxwell::MaxwellZPulse;
+use st_core::maxwell::MaxwellZPulse;
 use st_nn::{ConceptHint, MaxwellDesireBridge, NarrativeHint};
 use std::collections::{HashMap, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
