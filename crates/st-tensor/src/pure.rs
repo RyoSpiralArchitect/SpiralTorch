@@ -1023,6 +1023,90 @@ pub struct AmegaHypergrad {
 
 /// Euclidean gradient accumulator that mirrors the hypergradient API while
 /// staying entirely within flat-space optimisation loops.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GradientSummary {
+    l1: f32,
+    l2: f32,
+    linf: f32,
+    count: usize,
+}
+
+impl GradientSummary {
+    #[inline]
+    pub fn from_slice(values: &[f32]) -> Self {
+        let mut l1 = 0.0f32;
+        let mut sum_squares = 0.0f32;
+        let mut linf = 0.0f32;
+        let mut count = 0usize;
+        for &value in values {
+            if !value.is_finite() {
+                continue;
+            }
+            let abs = value.abs();
+            l1 += abs;
+            sum_squares += value * value;
+            linf = linf.max(abs);
+            count += 1;
+        }
+        let l2 = sum_squares.sqrt();
+        Self {
+            l1,
+            l2,
+            linf,
+            count,
+        }
+    }
+
+    #[inline]
+    pub fn l1(&self) -> f32 {
+        self.l1
+    }
+
+    #[inline]
+    pub fn l2(&self) -> f32 {
+        self.l2
+    }
+
+    #[inline]
+    pub fn linf(&self) -> f32 {
+        self.linf
+    }
+
+    #[inline]
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    #[inline]
+    pub fn mean_abs(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.l1 / self.count as f32
+        }
+    }
+
+    #[inline]
+    pub fn rms(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.l2 / (self.count as f32).sqrt()
+        }
+    }
+}
+
+impl Default for GradientSummary {
+    fn default() -> Self {
+        Self {
+            l1: 0.0,
+            l2: 0.0,
+            linf: 0.0,
+            count: 0,
+        }
+    }
+}
+
 pub struct AmegaRealgrad {
     learning_rate: f32,
     rows: usize,
@@ -1120,6 +1204,11 @@ impl AmegaHypergrad {
     /// Provides mutable access to the accumulated gradient buffer.
     pub fn gradient_mut(&mut self) -> &mut [f32] {
         &mut self.gradient
+    }
+
+    /// Summarise the accumulated gradient using basic norm statistics.
+    pub fn summary(&self) -> GradientSummary {
+        GradientSummary::from_slice(&self.gradient)
     }
 
     /// Returns the guard topos enforcing open-cartesian safety constraints.
@@ -1300,6 +1389,11 @@ impl AmegaRealgrad {
     /// Mutable access to the gradient buffer.
     pub fn gradient_mut(&mut self) -> &mut [f32] {
         &mut self.gradient
+    }
+
+    /// Summarise the accumulated gradient using basic norm statistics.
+    pub fn summary(&self) -> GradientSummary {
+        GradientSummary::from_slice(&self.gradient)
     }
 
     fn assert_tensor_shape(&self, tensor: &Tensor) -> PureResult<()> {
@@ -1548,6 +1642,36 @@ mod tests {
             .gradient()
             .iter()
             .any(|value| value.abs() > f32::EPSILON));
+    }
+
+    #[test]
+    fn gradient_summary_reports_norms() {
+        let summary = GradientSummary::from_slice(&[1.0, -2.0, 0.0, 3.0]);
+        assert_eq!(summary.count(), 4);
+        assert!((summary.l1() - 6.0).abs() < 1e-6);
+        let expected_l2 = (1.0f32 + 4.0 + 0.0 + 9.0).sqrt();
+        assert!((summary.l2() - expected_l2).abs() < 1e-6);
+        assert!((summary.mean_abs() - 1.5).abs() < 1e-6);
+        let expected_rms = expected_l2 / (4.0f32).sqrt();
+        assert!((summary.rms() - expected_rms).abs() < 1e-6);
+        assert_eq!(summary.linf(), 3.0);
+    }
+
+    #[test]
+    fn gradient_tapes_surface_summary_metrics() {
+        let tensor = Tensor::from_vec(1, 3, vec![1.0, -2.0, 4.0]).unwrap();
+        let mut hypergrad = AmegaHypergrad::new(-1.0, 0.1, 1, 3).unwrap();
+        hypergrad.accumulate_wave(&tensor).unwrap();
+        let hyper_summary = hypergrad.summary();
+        assert_eq!(hyper_summary.count(), 3);
+        assert!(hyper_summary.l2() > 0.0);
+
+        let mut realgrad = AmegaRealgrad::new(0.1, 1, 3).unwrap();
+        realgrad.accumulate_wave(&tensor).unwrap();
+        let real_summary = realgrad.summary();
+        assert_eq!(real_summary.count(), 3);
+        let expected_l1: f32 = tensor.data().iter().map(|value| value.abs()).sum();
+        assert!((real_summary.l1() - expected_l1).abs() < 1e-6);
     }
 
     #[test]
