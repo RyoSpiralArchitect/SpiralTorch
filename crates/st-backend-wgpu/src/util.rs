@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     fs,
     path::{Path, PathBuf},
 };
@@ -69,18 +69,16 @@ impl ShaderCache {
     /// Retrieve the WGSL source for `file`, reading it from disk if necessary.
     pub fn source(&mut self, file: &str) -> Result<&str, ShaderLoadError> {
         let path = self.shader_dir.join(file);
-        if !self.sources.contains_key(&path) {
-            let source = fs::read_to_string(&path).map_err(|source| ShaderLoadError::Io {
-                source,
-                path: path.clone(),
-            })?;
-            self.sources.insert(path.clone(), source);
+        match self.sources.entry(path.clone()) {
+            Entry::Occupied(entry) => Ok(entry.into_mut().as_str()),
+            Entry::Vacant(entry) => {
+                let source = fs::read_to_string(&path).map_err(|source| ShaderLoadError::Io {
+                    source,
+                    path: path.clone(),
+                })?;
+                Ok(entry.insert(source).as_str())
+            }
         }
-        Ok(self
-            .sources
-            .get(&path)
-            .expect("shader cache entry missing")
-            .as_str())
     }
 
     /// Load a compute pipeline by file name using the cached shader source.
@@ -91,17 +89,41 @@ impl ShaderCache {
         label: &str,
         entry_point: &str,
     ) -> Result<ComputePipeline, ShaderLoadError> {
-        let source = self.source(file)?.to_owned();
+        self.load_compute_pipeline_with_layout(device, file, label, entry_point, None)
+    }
+
+    /// Variant of [`ShaderCache::load_compute_pipeline`] that accepts an explicit layout.
+    pub fn load_compute_pipeline_with_layout(
+        &mut self,
+        device: &Device,
+        file: &str,
+        label: &str,
+        entry_point: &str,
+        layout: Option<&wgpu::PipelineLayout>,
+    ) -> Result<ComputePipeline, ShaderLoadError> {
+        let source = self.source(file)?;
         let module = device.create_shader_module(ShaderModuleDescriptor {
             label: Some(label),
             source: ShaderSource::Wgsl(source.into()),
         });
         Ok(device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some(label),
-            layout: None,
+            layout,
             module: &module,
             entry_point,
         }))
+    }
+
+    /// Ensure that all `files` are loaded into the cache.
+    pub fn prefetch<I, S>(&mut self, files: I) -> Result<(), ShaderLoadError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        for file in files {
+            self.source(file.as_ref())?;
+        }
+        Ok(())
     }
 }
 
@@ -140,4 +162,76 @@ pub fn load_compute_pipeline_with_layout(
         module: &module,
         entry_point,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_DIR_ID: AtomicUsize = AtomicUsize::new(0);
+
+    struct TempShaderDir {
+        path: PathBuf,
+    }
+
+    impl TempShaderDir {
+        fn new() -> Self {
+            let mut path = std::env::temp_dir();
+            let unique = NEXT_DIR_ID.fetch_add(1, Ordering::Relaxed);
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock before UNIX_EPOCH")
+                .as_nanos();
+            path.push(format!("spiraltorch-wgpu-cache-{unique}-{nanos}"));
+            fs::create_dir(&path).expect("failed to create temporary shader directory");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn write(&self, name: &str, contents: &str) {
+            fs::write(self.path.join(name), contents).expect("failed to write shader file");
+        }
+    }
+
+    impl Drop for TempShaderDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn cache_reuses_source_without_retouching_disk() {
+        let temp = TempShaderDir::new();
+        temp.write("example.wgsl", "// first pass\n");
+
+        let mut cache = ShaderCache::new(temp.path());
+        let first = cache.source("example.wgsl").expect("initial read");
+        assert_eq!(first, "// first pass\n");
+
+        temp.write("example.wgsl", "// second pass\n");
+        let cached = cache.source("example.wgsl").expect("cached read");
+        assert_eq!(cached, "// first pass\n");
+    }
+
+    #[test]
+    fn prefetch_warms_cache_for_multiple_files() {
+        let temp = TempShaderDir::new();
+        temp.write("a.wgsl", "// A\n");
+        temp.write("b.wgsl", "// B\n");
+
+        let mut cache = ShaderCache::new(temp.path());
+        cache
+            .prefetch(["a.wgsl", "b.wgsl"])
+            .expect("prefetch should succeed");
+
+        assert_eq!(cache.source("a.wgsl").unwrap(), "// A\n");
+        assert_eq!(cache.source("b.wgsl").unwrap(), "// B\n");
+    }
 }

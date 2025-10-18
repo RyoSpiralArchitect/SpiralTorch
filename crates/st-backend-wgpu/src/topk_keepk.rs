@@ -8,16 +8,18 @@
 
 use std::path::PathBuf;
 
-use wgpu::*;
+use wgpu::{ComputePipeline, Device};
 
 use crate::{ShaderCache, ShaderLoadError};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MergeKind {
     Bitonic = 0,
     Shared = 1,
     Warp = 2,
 }
 
+#[derive(Debug)]
 pub struct Pipelines {
     pub keepk_subgroup: Option<ComputePipeline>,
     pub keepk_workgroup: ComputePipeline,
@@ -107,8 +109,7 @@ impl<'a> Builder<'a> {
         self
     }
 
-    /// Consume the builder, load the requested shaders and produce pipeline handles.
-    pub fn build(mut self) -> Result<Pipelines, ShaderLoadError> {
+    fn assemble(&mut self) -> Result<Pipelines, ShaderLoadError> {
         let keepk_workgroup = self.cache.load_compute_pipeline(
             self.device,
             "topk_keepk_workgroup.wgsl",
@@ -116,38 +117,39 @@ impl<'a> Builder<'a> {
             "main_cs",
         )?;
 
-        let keepk_subgroup = if self.supports_subgroup {
-            Some(self.cache.load_compute_pipeline(
-                self.device,
-                "topk_keepk_subgroup.wgsl",
-                "keepk_subgroup",
-                "main_cs",
-            )?)
-        } else {
-            None
-        };
+        let keepk_subgroup = self
+            .supports_subgroup
+            .then(|| {
+                self.cache.load_compute_pipeline(
+                    self.device,
+                    "topk_keepk_subgroup.wgsl",
+                    "keepk_subgroup",
+                    "main_cs",
+                )
+            })
+            .transpose()?;
 
-        let keepk_subgroup_1ce = if self.include_1ce {
-            Some(self.cache.load_compute_pipeline(
-                self.device,
-                "topk_keepk_subgroup_1ce.wgsl",
-                "keepk_subgroup_1ce",
-                "main_cs",
-            )?)
-        } else {
-            None
-        };
+        let keepk_subgroup_1ce = (self.supports_subgroup && self.include_1ce)
+            .then(|| {
+                self.cache.load_compute_pipeline(
+                    self.device,
+                    "topk_keepk_subgroup_1ce.wgsl",
+                    "keepk_subgroup_1ce",
+                    "main_cs",
+                )
+            })
+            .transpose()?;
 
-        let keepk_subgroup_1ce_large = if self.include_large_1ce {
-            Some(self.cache.load_compute_pipeline(
-                self.device,
-                "topk_keepk_subgroup_1ce_large.wgsl",
-                "keepk_subgroup_1ce_large",
-                "main_cs",
-            )?)
-        } else {
-            None
-        };
+        let keepk_subgroup_1ce_large = (self.supports_subgroup && self.include_large_1ce)
+            .then(|| {
+                self.cache.load_compute_pipeline(
+                    self.device,
+                    "topk_keepk_subgroup_1ce_large.wgsl",
+                    "keepk_subgroup_1ce_large",
+                    "main_cs",
+                )
+            })
+            .transpose()?;
 
         Ok(Pipelines {
             keepk_subgroup,
@@ -155,6 +157,17 @@ impl<'a> Builder<'a> {
             keepk_subgroup_1ce,
             keepk_subgroup_1ce_large,
         })
+    }
+
+    /// Consume the builder, load the requested shaders and produce pipeline handles.
+    pub fn build(mut self) -> Result<Pipelines, ShaderLoadError> {
+        self.assemble()
+    }
+
+    /// Build pipelines while returning the underlying [`ShaderCache`] for reuse.
+    pub fn build_with_cache(mut self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
+        let pipelines = self.assemble()?;
+        Ok((pipelines, self.cache))
     }
 }
 

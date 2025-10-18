@@ -3,7 +3,9 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use wgpu::*;
+use wgpu::{ComputePipeline, Device};
+
+use crate::util::{load_compute_pipeline, ShaderLoadError};
 
 use crate::util::{load_compute_pipeline, ShaderLoadError};
 
