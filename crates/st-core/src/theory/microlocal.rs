@@ -34,6 +34,7 @@
 //! survives the gauge quotient, and optionally reconstructs the oriented normal
 //! field together with signed curvature when a phase label is supplied.
 
+use crate::coop::ai::{CoopAgent, CoopProposal};
 use crate::telemetry::hub::{self, SoftlogicZFeedback};
 use crate::theory::zpulse::{
     ZAdaptiveGainCfg, ZConductor, ZFrequencyConfig, ZFused, ZPulse, ZSource,
@@ -325,6 +326,26 @@ impl InterfaceZLift {
         self
     }
 
+    /// Returns the current bias gain multiplier applied to the enriched drift.
+    pub fn bias_gain(&self) -> f32 {
+        self.bias_gain
+    }
+
+    /// Overrides the bias gain used during projection.
+    pub fn set_bias_gain(&mut self, gain: f32) {
+        self.bias_gain = gain.max(0.0);
+    }
+
+    /// Returns the minimum oriented drift required before emitting bias.
+    pub fn orientation_floor(&self) -> f32 {
+        self.orientation_floor
+    }
+
+    /// Adjusts the oriented drift floor that guards the bias emission.
+    pub fn set_orientation_floor(&mut self, floor: f32) {
+        self.orientation_floor = floor.clamp(0.0, 1.0);
+    }
+
     /// Returns the normalised axis used during projection.
     pub fn axis(&self) -> &[f32] {
         &self.axis
@@ -564,6 +585,7 @@ pub struct InterfaceZConductor {
     lift: InterfaceZLift,
     conductor: ZConductor,
     clock: u64,
+    last_pulse: InterfaceZPulse,
 }
 
 impl InterfaceZConductor {
@@ -577,6 +599,7 @@ impl InterfaceZConductor {
             lift,
             conductor: ZConductor::default(),
             clock: 0,
+            last_pulse: InterfaceZPulse::default(),
         }
     }
 
@@ -658,6 +681,8 @@ impl InterfaceZConductor {
         let feedback = fused.into_softlogic_feedback_with(psi, loss);
         hub::set_softlogic_z(feedback);
 
+        self.last_pulse = fused;
+
         InterfaceZReport {
             signatures,
             pulses,
@@ -665,6 +690,11 @@ impl InterfaceZConductor {
             fused_z,
             feedback,
         }
+    }
+
+    /// Returns the most recent fused pulse emitted by the conductor.
+    pub fn last_fused_pulse(&self) -> InterfaceZPulse {
+        self.last_pulse
     }
 }
 
@@ -682,6 +712,40 @@ pub struct InterfaceZReport {
     pub fused_z: ZFused,
     /// Ready-to-store Softlogic feedback record.
     pub feedback: SoftlogicZFeedback,
+}
+
+impl CoopAgent for InterfaceZConductor {
+    fn propose(&mut self) -> CoopProposal {
+        let fused = self.last_fused_pulse();
+        let (above, here, beneath) = fused.band_energy;
+        let there = (above + beneath).max(1e-6);
+        let here_ratio = here / there;
+        if fused.total_energy() <= f32::EPSILON {
+            return CoopProposal::neutral();
+        }
+        let weight = (fused.support + there).max(1e-3) * here_ratio.max(0.0);
+        CoopProposal::new(fused.z_bias, weight)
+    }
+
+    fn observe(&mut self, team_reward: f32, credit: f32) {
+        let fused = self.last_fused_pulse();
+        let (above, here, beneath) = fused.band_energy;
+        let there = (above + beneath).max(1e-3);
+        let curvature_ratio = here / there;
+        let imbalance = (above - beneath) / there;
+
+        let mut bias_gain = self.lift.bias_gain();
+        let credit_push = (credit * (1.0 - curvature_ratio)).clamp(-1.0, 1.0);
+        bias_gain = (bias_gain + 0.08 * credit_push).clamp(0.05, 8.0);
+        self.lift.set_bias_gain(bias_gain);
+
+        let mut floor = self.lift.orientation_floor();
+        let reward_push = team_reward.tanh();
+        floor = (floor * (1.0 - 0.05 * reward_push)).clamp(0.01, 0.6);
+        let drift_adjust = (imbalance * credit).clamp(-1.0, 1.0);
+        floor = (floor - 0.015 * drift_adjust).clamp(0.01, 0.6);
+        self.lift.set_orientation_floor(floor);
+    }
 }
 
 impl InterfaceZReport {
@@ -1104,5 +1168,27 @@ mod tests {
             last_report.feedback.band_energy,
             last_report.fused_pulse.band_energy
         );
+    }
+
+    #[test]
+    fn conductor_coop_agent_tracks_credit() {
+        let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0],].into_dyn();
+        let c_prime = mask.mapv(|v| if v > 0.5 { 1.0 } else { -1.0 });
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let projector = LeechProjector::new(12, 0.5);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], projector).with_bias_gain(0.5);
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift);
+
+        conductor.step(&mask, Some(&c_prime), None, None);
+        let proposal = CoopAgent::propose(&mut conductor);
+        assert!(proposal.weight > 0.0);
+
+        let before_bias = conductor.lift.bias_gain();
+        CoopAgent::observe(&mut conductor, 0.2, 0.5);
+        let after_bias = conductor.lift.bias_gain();
+        assert!(after_bias >= before_bias);
+
+        crate::telemetry::hub::clear_atlas();
+        let _ = crate::telemetry::hub::drain_loopback_envelopes(usize::MAX);
     }
 }
