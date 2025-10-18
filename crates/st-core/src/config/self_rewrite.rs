@@ -3,7 +3,11 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-#[derive(Clone, Copy, Debug)]
+use crate::config::layered::{ConfigLayering, LayeredConfig};
+use serde::Deserialize;
+use std::env;
+
+#[derive(Clone, Copy, Debug, Deserialize)]
 pub struct SelfRewriteCfg {
     pub score_thresh: f32,
     pub min_samples: usize,
@@ -19,23 +23,40 @@ impl Default for SelfRewriteCfg {
         }
     }
 }
+
 pub fn read_cfg() -> SelfRewriteCfg {
-    let d = SelfRewriteCfg::default();
-    let t = std::env::var("SPIRAL_SELF_REWRITE_THRESH")
+    let mut cfg = load_layered().unwrap_or_default();
+    if let Some(value) = env::var("SPIRAL_SELF_REWRITE_THRESH")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(d.score_thresh);
-    let m = std::env::var("SPIRAL_SELF_REWRITE_MIN_SAMPLES")
+    {
+        cfg.score_thresh = value;
+    }
+    if let Some(value) = env::var("SPIRAL_SELF_REWRITE_MIN_SAMPLES")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(d.min_samples);
-    let c = std::env::var("SPIRAL_SELF_REWRITE_COOLDOWN_SEC")
+    {
+        cfg.min_samples = value;
+    }
+    if let Some(value) = env::var("SPIRAL_SELF_REWRITE_COOLDOWN_SEC")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(d.cooldown_sec);
-    SelfRewriteCfg {
-        score_thresh: t,
-        min_samples: m,
-        cooldown_sec: c,
+    {
+        cfg.cooldown_sec = value;
+    }
+    cfg
+}
+
+fn load_layered() -> Option<SelfRewriteCfg> {
+    let layering = ConfigLayering::discover();
+    match LayeredConfig::load(layering) {
+        Ok(config) => config
+            .section::<SelfRewriteCfg>(&["desire", "self_rewrite"])
+            .ok()
+            .flatten(),
+        Err(err) => {
+            eprintln!("[config] failed to load layered Desire config: {err}");
+            None
+        }
     }
 }

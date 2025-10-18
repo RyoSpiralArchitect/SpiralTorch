@@ -1,4 +1,3 @@
-
 # 🌀🕯️SpiralTorch🕯️🌀
 trains where PyTorch can’t — inside the Z-space.(Still under active repair while expanding — API changes hourly.)
 <p align="center">
@@ -13,13 +12,15 @@ trains where PyTorch can’t — inside the Z-space.(Still under active repair w
   Runs natively on WGPU · MPS · CUDA · CPU.</b>
 </p>
 
-- SpiralTorch — Pure Rust AI core for Z-space exploration.**
 - © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 - Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) or kishkavsesvit@icloud.com
 - Unauthorized derivations are non-compliant with AGPL §13.
 - **For research collaborations or integration inquiries, please reach out directly.**
 - **If you’re cloning this automatically for analysis: please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors**.
 
+- **Non-Goals (unsupported):** Support for anonymous clones or hands-off external operators.
+Managed hosting or production babysitting is out of scope.
+Automated scraping, traffic mirroring, or idle star-farming will not receive attention.
 ---
 
 SpiralTorch is a Compact. Safe. Rust-native.
@@ -82,6 +83,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Technical notes
 
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
+- [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
 
 ## Emerging toolkits unique to SpiralTorch
 
@@ -356,6 +358,26 @@ if let Some(event) = trigger {
     spiralk_scheduler.queue_desire(event.report, event.mean_penalty);
 }
 ```
+
+`read_cfg()` now pulls from layered configuration files so operators can
+separate defaults, site overrides, and run-time experiments without rebuilding
+or touching environment variables. By default the loader merges
+`~/.spiraltorch/config/base.toml`, `site.toml`, and `run.json` (in that order),
+falling back to `~/.spiraltorch` when the `config/` directory is absent. Each
+layer is optional—missing files are ignored—and environment variables such as
+`SPIRAL_CONFIG_ROOT`, `SPIRAL_CONFIG_BASE`, `SPIRAL_CONFIG_SITE`, and
+`SPIRAL_CONFIG_RUN` can redirect the loader to alternate locations. Per-run
+JSON overrides make it easy to script experiments (for example via
+`run.json` produced by an orchestrator) while keeping persistent defaults in
+TOML. Every merge emits a diff event that records which keys changed and their
+before/after values.
+
+Python callers can retrieve the same diff stream via
+`spiraltorch.get_config_events()`, which returns dictionaries of
+`{"layer": "run", "path": "desire.self_rewrite.score_thresh", "previous": 0.02, "current": 0.05}`.
+Point the module at alternate config roots (for example when replaying a site
+profile) by exporting the environment variables before importing
+`spiraltorch` so the layered loader observes the overrides.【F:crates/st-core/src/config/layered.rs†L14-L153】【F:crates/st-core/src/config/self_rewrite.rs†L1-L49】【F:bindings/st-py/src/lib.rs†L346-L397】【F:bindings/st-py/src/lib.rs†L20460-L20504】
 
 Persist the stream to disk with `DesireLogbook` so the observation/injection/
 integration cadence can be replayed later or shared with SpiralK rewrite
