@@ -15,7 +15,7 @@ use core::fmt;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crate::theory::zpulse::{ZEmitter, ZPulse, ZSource};
+use crate::theory::zpulse::{ZEmitter, ZPulse, ZSource, ZSupport};
 use crate::util::math::{ramanujan_pi, LeechProjector};
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 
@@ -948,13 +948,19 @@ impl RealGradZProjector {
         let band = start..end;
         let quality = spectral_quality(&projection.spectrum, band).max(self.quality_floor);
 
+        let support = ZSupport {
+            leading: above,
+            central: here,
+            trailing: beneath,
+        };
         ZPulse {
             source: ZSource::RealGrad,
             ts: 0,
-            band_energy: (above, here, beneath),
+            tempo: z_energy,
             drift,
             z_bias,
-            support: z_energy,
+            support,
+            band_energy: (above, here, beneath),
             quality,
             stderr: 0.0,
             latency_ms: 0.0,
@@ -1555,7 +1561,7 @@ mod tests {
         .with_band(0..projection.spectrum.len());
         let pulse = projector.project(&projection);
         assert!(matches!(pulse.source, ZSource::RealGrad));
-        assert!(pulse.support >= 0.0);
+        assert!(pulse.support.total() >= 0.0);
         assert!(pulse.band_energy.0 >= 0.0);
         assert!(pulse.quality >= 0.0);
         assert!(pulse.quality <= 1.0);

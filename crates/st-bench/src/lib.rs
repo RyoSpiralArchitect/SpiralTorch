@@ -89,6 +89,28 @@ impl BenchmarkReport {
     }
 }
 
+/// Synthetic backend identifier used by the benchmark harness.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BackendProbe<'a> {
+    pub name: &'a str,
+    pub base_throughput: f32,
+    pub latency_ms: f32,
+}
+
+/// Aggregated benchmark metrics for a backend run.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BenchmarkSample {
+    pub backend: String,
+    pub throughput: f32,
+    pub latency_ms: f32,
+}
+
+/// Report summarising all simulated backend runs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BenchmarkReport {
+    pub samples: Vec<BenchmarkSample>,
+}
+
 struct BenchAgent {
     rng: StdRng,
 }
