@@ -28,7 +28,7 @@ pub use pipeline::{
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRoundtableBridge,
     DesireRoundtableEvent, DesireRoundtableImpulse, DesireRoundtableSummary, DesireTelemetrySink,
     DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
-    DesireTriggerEvent,
+    DesireTriggerEvent, LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
 };
 #[cfg(feature = "psi")]
 pub use pipeline::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
