@@ -3,7 +3,6 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-pub use pipeline::{LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult};
 mod automation;
 mod desire;
 mod geometry;
@@ -13,6 +12,8 @@ mod maxwell;
 mod pipeline;
 mod schrodinger;
 mod temperature;
+
+use self::pipeline as pipeline_exports;
 
 pub use automation::{DesireAutomatedStep, DesireAutomation, DesireRewriteTrigger};
 pub use desire::{
@@ -28,9 +29,11 @@ pub use pipeline::{
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRoundtableBridge,
     DesireRoundtableEvent, DesireRoundtableImpulse, DesireRoundtableSummary, DesireTelemetrySink,
     DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
-    DesireTriggerEvent, LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
+    DesireTriggerEvent,
 };
 #[cfg(feature = "psi")]
-pub use pipeline::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
-pub use st_tensor::DesireGradientInterpretation;
+pub use pipeline_exports::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
+pub use pipeline_exports::{
+    LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
+};
 pub use temperature::{entropy, TemperatureController};
