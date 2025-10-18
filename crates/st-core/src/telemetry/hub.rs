@@ -283,6 +283,61 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
         .and_then(|guard| guard.as_ref().copied())
 }
 
+/// Snapshot summarising the latest RealGrad projection applied by the system.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RealGradPulse {
+    /// L¹ magnitude of the input signal.
+    pub lebesgue_measure: f32,
+    /// Total magnitude routed into the monad biome.
+    pub monad_energy: f32,
+    /// Total magnitude retained in the Z-space field.
+    pub z_energy: f32,
+    /// Share of the total energy routed to the monad biome.
+    pub residual_ratio: f32,
+    /// Ratio between the monad biome and the Lebesgue measure.
+    pub lebesgue_ratio: f32,
+    /// Ramanujan π estimate used for the projection.
+    pub ramanujan_pi: f32,
+    /// Tolerance that bounded the tempered sequence convergence.
+    pub tolerance: f32,
+    /// Final convergence error produced by the tempered sequence (if any).
+    pub convergence_error: f32,
+    /// Number of sequence members processed.
+    pub iterations: u32,
+    /// Whether the sequence remained dominated by its bounding function.
+    pub dominated: bool,
+    /// Whether the sequence satisfied the configured tolerance.
+    pub converged: bool,
+}
+
+static LAST_REALGRAD: OnceLock<RwLock<Option<RealGradPulse>>> = OnceLock::new();
+
+fn realgrad_cell() -> &'static RwLock<Option<RealGradPulse>> {
+    LAST_REALGRAD.get_or_init(|| RwLock::new(None))
+}
+
+/// Stores the latest RealGrad pulse emitted by the engine.
+pub fn set_last_realgrad(pulse: &RealGradPulse) {
+    if let Ok(mut guard) = realgrad_cell().write() {
+        *guard = Some(*pulse);
+    }
+}
+
+/// Returns the most recent RealGrad pulse, if one has been recorded.
+pub fn get_last_realgrad() -> Option<RealGradPulse> {
+    realgrad_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().copied())
+}
+
+#[cfg(test)]
+pub(crate) fn clear_last_realgrad_for_test() {
+    if let Ok(mut guard) = realgrad_cell().write() {
+        *guard = None;
+    }
+}
+
 #[cfg_attr(feature = "psi", doc = "Stores the latest desire step telemetry snapshot for downstream consumers.")]
 #[cfg(feature = "psi")]
 pub fn set_last_desire_step(step: DesireStepTelemetry) {
@@ -640,5 +695,30 @@ mod tests {
             .expect("concourse summary");
         assert_eq!(concourse.coverage, 3);
         assert!(concourse.delta > 0.0);
+    }
+
+    #[test]
+    fn realgrad_pulse_roundtrips_through_cache() {
+        clear_last_realgrad_for_test();
+        assert!(get_last_realgrad().is_none());
+        let mut pulse = RealGradPulse::default();
+        pulse.lebesgue_measure = 4.0;
+        pulse.monad_energy = 1.0;
+        pulse.z_energy = 3.0;
+        pulse.residual_ratio = 0.25;
+        pulse.lebesgue_ratio = 0.5;
+        pulse.ramanujan_pi = 3.1415;
+        pulse.tolerance = 1.0e-3;
+        pulse.convergence_error = 5.0e-4;
+        pulse.iterations = 3;
+        pulse.dominated = true;
+        pulse.converged = true;
+        set_last_realgrad(&pulse);
+        let stored = get_last_realgrad().expect("pulse stored");
+        assert_eq!(stored.iterations, 3);
+        assert!(stored.converged);
+        assert!((stored.residual_ratio - 0.25).abs() < f32::EPSILON);
+        clear_last_realgrad_for_test();
+        assert!(get_last_realgrad().is_none());
     }
 }
