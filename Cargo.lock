@@ -2394,6 +2394,7 @@ dependencies = [
  "once_cell",
  "pollster",
  "rand",
+ "rustc-hash",
  "serde",
  "serde_json",
  "st-backend-hip",
