@@ -15,6 +15,8 @@ pub struct TemperatureController {
     z_kappa: f32,
     z_relax: f32,
     z_memory: f32,
+    grad_pressure: f32,
+    grad_entropy: f32,
 }
 
 impl TemperatureController {
@@ -28,6 +30,8 @@ impl TemperatureController {
             z_kappa: 0.35,
             z_relax: 0.2,
             z_memory: 0.0,
+            grad_pressure: 0.0,
+            grad_entropy: 0.0,
         };
         if controller.value < controller.min {
             controller.value = controller.min;
@@ -68,6 +72,23 @@ impl TemperatureController {
 
         self.value
     }
+
+    pub fn observe_grad(&mut self, pressure: f32, entropy_bias: f32) {
+        self.grad_pressure = pressure.max(0.0);
+        self.grad_entropy = entropy_bias.clamp(0.0, 1.0);
+    }
+
+    pub fn update_with_gradient(&mut self, distribution: &[f32], heat: f32) -> f32 {
+        let baseline = self.update(distribution, None);
+        if self.grad_pressure > 0.0 {
+            let effective_heat = heat.max(0.0);
+            let adjustment = self.grad_pressure * self.grad_entropy * effective_heat;
+            self.value = (baseline + self.eta * adjustment).clamp(self.min, self.max);
+            self.grad_pressure *= 0.5;
+            self.grad_entropy *= 0.5;
+        }
+        self.value
+    }
 }
 
 pub fn entropy(distribution: &[f32]) -> f32 {
@@ -87,7 +108,7 @@ mod tests {
     #[test]
     fn controller_tracks_gradient_pressure() {
         let mut controller = TemperatureController::new(1.0, 0.8, 0.4, 0.4, 2.0);
-        let baseline = controller.update(&[0.6, 0.4]);
+        let baseline = controller.update(&[0.6, 0.4], None);
         controller.observe_grad(32.0, 0.15);
         let warmed = controller.update_with_gradient(&[0.6, 0.4], 1.5);
         assert!(warmed >= baseline);

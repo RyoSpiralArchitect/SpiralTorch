@@ -640,12 +640,12 @@ impl<'a> RankScenario<'a> {
 }
 
 #[derive(Clone, Debug)]
-struct TempoLearner {
+struct TempoSmoother {
     avg: f32,
     jitter: f32,
 }
 
-impl TempoLearner {
+impl TempoSmoother {
     fn new() -> Self {
         Self {
             avg: 0.0,
@@ -679,7 +679,7 @@ impl TempoLearner {
 #[derive(Clone, Debug)]
 struct AdaptiveWindowTuner {
     lanes: u32,
-    tempo: TempoLearner,
+    tempo: TempoSmoother,
     energy_state: f32,
 }
 
@@ -687,7 +687,7 @@ impl AdaptiveWindowTuner {
     fn new(lanes: u32) -> Self {
         Self {
             lanes: lanes.max(1),
-            tempo: TempoLearner::new(),
+            tempo: TempoSmoother::new(),
             energy_state: 0.0,
         }
     }
@@ -1454,15 +1454,8 @@ fn intersect_latency(a: LaneWindow, b: LaneWindow) -> LaneWindow {
     }
 }
 
-fn refine_choice(
-    mut choice: Choice,
-    baseline: Choice,
-    caps: &DeviceCaps,
-    rows: u32,
-    cols: u32,
-    k: u32,
-    kind: RankKind,
-) -> Choice {
+fn refine_choice(mut choice: Choice, baseline: Choice, scenario: RankScenario<'_>) -> Choice {
+    let caps = scenario.caps();
     if choice.wg == 0 {
         choice.wg = baseline.wg;
     }
@@ -2277,6 +2270,7 @@ mod tests {
             }
         }
     }
+
 
     fn sample_window(target: u32, lower: u32, upper: u32, stride: u32) -> LaneWindow {
         LaneWindow {

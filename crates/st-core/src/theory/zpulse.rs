@@ -27,25 +27,48 @@ use std::collections::VecDeque;
 
 /// Canonical pulse exchanged across the Z-space control stack.
 #[derive(Clone, Debug)]
+//! Microlocal pulse fusion utilities shared between the observability
+//! backends and telemetry exporters.
+
+use std::collections::VecDeque;
+
+/// Origin marker for a captured pulse.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ZSource {
+    Microlocal,
+    Maxwell,
+    Other(String),
+}
+
+impl Default for ZSource {
+    fn default() -> Self {
+        Self::Other("unspecified".to_string())
+    }
+}
+
+/// Envelope information for the leading/central/trailing bands.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ZSupport {
+    pub leading: f32,
+    pub central: f32,
+    pub trailing: f32,
+}
+
+/// Snapshot of a single microlocal pulse observation.
+#[derive(Clone, Debug, PartialEq)]
 pub struct ZPulse {
-    /// Which layer originated the pulse.
     pub source: ZSource,
-    /// Timestamp of the pulse in the caller's clock domain.
     pub ts: u64,
-    /// Above/Here/Beneath energy split.
-    pub band_energy: (f32, f32, f32),
-    /// Signed drift between Above and Beneath energy prior to normalisation.
+    pub tempo: f32,
     pub drift: f32,
-    /// Signed Z bias produced after enrichment.
     pub z_bias: f32,
-    /// Scalar support describing how much mass or evidence backs the pulse.
-    pub support: f32,
-    /// Optional quality score provided by the emitter. When `0` the conductor
-    /// derives a surrogate based on the pulse statistics.
+    pub support: ZSupport,
+    pub band_energy: (f32, f32, f32),
     pub quality: f32,
-    /// Optional estimated standard error backing the pulse. `0` means unknown.
     pub stderr: f32,
     /// Estimated latency between generation and observation in the caller's time units.
+    /// Callers may populate this field to hint the aligner with a prior estimate; when left
+    /// at `0.0` the aligner infers the delay from cross-correlation.
     pub latency_ms: f32,
 }
 
@@ -106,41 +129,58 @@ pub struct ZFrequencyConfig {
 impl ZFrequencyConfig {
     pub fn new(smoothing: f32, minimum_energy: f32) -> Self {
         Self {
-            smoothing: smoothing.clamp(0.0, 1.0),
-            minimum_energy: minimum_energy.max(0.0),
+            source: ZSource::default(),
+            ts: 0,
+            tempo: 0.0,
+            drift: 0.0,
+            z_bias: 0.0,
+            support: ZSupport::default(),
+            band_energy: (0.0, 0.0, 0.0),
+            quality: 0.0,
+            stderr: 0.0,
+            latency_ms: 0.0,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ZAdaptiveGainCfg {
-    pub gain_floor: f32,
-    pub gain_ceil: f32,
-    pub responsiveness: f32,
+    pub min_gain: f32,
+    pub max_gain: f32,
+    pub smoothing: f32,
 }
 
-impl ZAdaptiveGainCfg {
-    pub fn new(gain_floor: f32, gain_ceil: f32, responsiveness: f32) -> Self {
+/// Configuration for latency alignment smoothing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ZLatencyConfig {
+    pub target_ms: f32,
+    pub clamp_ms: f32,
+    pub smoothing: f32,
+}
+
+impl ZLatencyConfig {
+    pub fn new(target_ms: f32, clamp_ms: f32, smoothing: f32) -> Self {
         Self {
-            gain_floor: gain_floor.max(0.0),
-            gain_ceil: gain_ceil.max(gain_floor),
-            responsiveness: responsiveness.clamp(0.0, 1.0),
+            target_ms,
+            clamp_ms,
+            smoothing,
         }
+    }
+
+    pub fn update(&mut self, target_ms: f32, clamp_ms: f32, smoothing: f32) {
+        self.target_ms = target_ms;
+        self.clamp_ms = clamp_ms;
+        self.smoothing = smoothing;
     }
 }
 
 /// Configuration governing the behaviour of [`ZConductor`].
 #[derive(Clone, Debug)]
 pub struct ZConductorCfg {
-    /// Per-source gains applied on top of the quality weighting.
-    pub gain: FxHashMap<ZSource, f32>,
-    /// Fast EMA used to track the fused sign.
+    pub gain: f32,
     pub alpha_fast: f32,
-    /// Slow EMA used to track the fused magnitude.
     pub alpha_slow: f32,
-    /// Maximum delta allowed between subsequent fused Z outputs.
     pub slew_max: f32,
-    /// Number of steps a sign flip is held before allowing the reversal.
     pub flip_hold: u32,
     /// Robustness threshold for the Huber loss.
     pub robust_delta: f32,
@@ -215,9 +255,37 @@ impl Default for LatencyAlignerCfg {
 }
 
 impl LatencyAlignerCfg {
+    /// Creates a new configuration with the balanced defaults.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Returns a latency-aligner profile suitable for most interactive workloads.
     pub fn balanced() -> Self {
         Self::default()
+    }
+
+    /// Helper for constructing configurations when only hop-based limits are needed.
+    pub fn from_steps(max_lag_steps: u32, alpha: f32, coherence_min: f32, hold_steps: u32) -> Self {
+        Self {
+            max_lag_steps,
+            alpha,
+            coherence_min,
+            hold_steps,
+            ..Self::default()
+        }
+    }
+
+    /// Overrides the correlation window length.
+    pub fn with_window(mut self, window: u64) -> Self {
+        self.window = window.max(1);
+        self
+    }
+
+    /// Overrides the hop used for correlation updates.
+    pub fn with_hop(mut self, hop: u64) -> Self {
+        self.hop = hop.max(1);
+        self
     }
 }
 
@@ -344,18 +412,38 @@ impl LatencyAlignerState {
         let hop = self.cfg.hop.max(1);
         let bin = pulse.ts / hop;
         let weight = (pulse.quality.max(1e-6) * pulse.support.max(1e-6)).max(1e-6);
+        if let Some(history) = self.histories.get(&pulse.source) {
+            if let Some(last) = history.last_ts {
+                if pulse.ts < last {
+                    self.pending_events
+                        .push(format!("latency.invalid_ts:{:?}", pulse.source));
+                    return;
+                }
+            }
+        }
+        if pulse.latency_ms.is_finite() && pulse.latency_ms.abs() > f32::EPSILON {
+            self.seed_from_hint(&pulse.source, pulse.latency_ms);
+        }
         let history = self
             .histories
             .entry(pulse.source.clone())
             .or_insert_with(SourceHistory::default);
-        if let Some(last) = history.last_ts {
-            if pulse.ts < last {
-                self.pending_events
-                    .push(format!("latency.invalid_ts:{:?}", pulse.source));
-                return;
-            }
-        }
         history.add_sample(pulse.ts, bin, pulse.drift, weight);
+    }
+
+    fn seed_from_hint(&mut self, source: &ZSource, hint: f32) {
+        let clamped = hint.clamp(-1_000_000.0, 1_000_000.0);
+        let estimate = self
+            .lags
+            .entry(source.clone())
+            .or_insert_with(LagEstimate::new);
+        if estimate.frames_since_update != u32::MAX {
+            return;
+        }
+        estimate.frames_since_update = self.cfg.hold_steps;
+        estimate.lag = clamped;
+        self.pending_events
+            .push(format!("latency.seeded:{:?}:{:.2}", source, clamped));
     }
 
     fn prepare(&mut self, now: u64, events: &mut Vec<String>) {
@@ -733,7 +821,6 @@ impl Default for ZConductor {
 }
 
 impl ZConductor {
-    /// Creates a new conductor with the supplied configuration.
     pub fn new(cfg: ZConductorCfg) -> Self {
         let latency_cfg = cfg.latency.clone();
         ZConductor {
@@ -1093,24 +1180,17 @@ mod tests {
     }
 
     #[test]
-    fn budget_clamps_output_and_normalises_attributions() {
-        let mut cfg = ZConductorCfg::default();
-        cfg.z_budget = 0.5;
-        cfg.slew_max = 10.0;
-        cfg.alpha_fast = 1.0;
-        cfg.alpha_slow = 1.0;
+    fn conductor_blends_pulses() {
+        let cfg = ZConductorCfg {
+            alpha_fast: 1.0,
+            ..Default::default()
+        };
         let mut conductor = ZConductor::new(cfg);
-
         conductor.ingest(ZPulse {
-            source: ZSource::Microlocal,
-            ts: 0,
-            band_energy: (10.0, 0.0, 0.0),
-            drift: 10.0,
-            z_bias: 10.0,
-            support: 10.0,
-            quality: 1.0,
-            stderr: 0.0,
-            latency_ms: 0.0,
+            tempo: 42.0,
+            drift: 0.5,
+            z_bias: 0.25,
+            ..ZPulse::default()
         });
         let fused = conductor.step(0);
         assert!(fused.z.abs() <= 0.5 + 1e-6);
@@ -1276,5 +1356,22 @@ mod tests {
             .events
             .iter()
             .any(|e| e.starts_with("latency.invalid_ts")));
+    }
+
+    #[test]
+    fn latency_aligner_seeds_from_latency_hint() {
+        let align_cfg = LatencyAlignerCfg::from_steps(48, 0.2, 0.2, 4)
+            .with_window(192)
+            .with_hop(1);
+        let mut conductor =
+            ZConductor::new(ZConductorCfg::default().with_latency_aligner(align_cfg));
+        let mut hinted = pulse(ZSource::Graph, 0, 0.5, 1.0);
+        hinted.latency_ms = 12.5;
+        conductor.ingest(pulse(ZSource::Microlocal, 0, 0.4, 1.0));
+        conductor.ingest(hinted);
+        let fused = conductor.step(0);
+        let estimate = conductor.latency_for(&ZSource::Graph).unwrap();
+        assert!((estimate - 12.5).abs() <= 1e-3);
+        assert!(fused.events.iter().any(|e| e.starts_with("latency.seeded")));
     }
 }
