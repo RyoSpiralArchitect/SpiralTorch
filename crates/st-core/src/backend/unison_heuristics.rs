@@ -36,6 +36,84 @@ pub struct JuliaSpan {
     pub end: u32,
 }
 
+#[derive(Debug, Clone)]
+pub struct JuliaSpanBuf {
+    bytes: [u8; JuliaSpan::MAX_RENDERED_LEN],
+    len: usize,
+}
+
+impl Default for JuliaSpanBuf {
+    fn default() -> Self {
+        Self {
+            bytes: [0; JuliaSpan::MAX_RENDERED_LEN],
+            len: 0,
+        }
+    }
+}
+
+impl JuliaSpanBuf {
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    fn clear(&mut self) {
+        self.len = 0;
+    }
+
+    #[inline]
+    fn ensure_capacity(&self, additional: usize) {
+        debug_assert!(self.len + additional <= self.bytes.len());
+    }
+
+    #[inline]
+    fn push_colon(&mut self) {
+        self.ensure_capacity(1);
+        self.bytes[self.len] = b':';
+        self.len += 1;
+    }
+
+    #[inline]
+    fn push_number(&mut self, mut value: u32) {
+        self.ensure_capacity(10);
+        let start = self.len;
+        let mut i = 0;
+        loop {
+            self.bytes[start + i] = (value % 10) as u8 + b'0';
+            i += 1;
+            value /= 10;
+            if value == 0 {
+                break;
+            }
+        }
+        self.len += i;
+        self.bytes[start..self.len].reverse();
+    }
+
+    #[inline]
+    pub fn render_span<'a>(&'a mut self, span: &JuliaSpan) -> &'a str {
+        self.clear();
+        self.push_number(span.start);
+        self.push_colon();
+        self.push_number(span.step);
+        self.push_colon();
+        self.push_number(span.end);
+        self.as_str()
+    }
+
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        // SAFETY: we only ever populate ASCII digits and ':' characters.
+        unsafe { std::str::from_utf8_unchecked(&self.bytes[..self.len]) }
+    }
+
+    #[inline]
+    pub fn to_owned(&self) -> String {
+        self.as_str().to_owned()
+    }
+}
+
 impl JuliaSpan {
     const MAX_RENDERED_LEN: usize = 3 * 10 + 2; // u32::MAX has 10 decimal digits.
 
@@ -50,16 +128,22 @@ impl JuliaSpan {
     }
 
     #[inline]
+    pub fn render_into<'a>(&self, buf: &'a mut JuliaSpanBuf) -> &'a str {
+        buf.render_span(self)
+    }
+
+    #[inline]
     pub fn write_into<W: std::fmt::Write>(&self, mut out: W) -> std::fmt::Result {
-        write!(out, "{}:{}:{}", self.start, self.step, self.end)
+        let mut buf = JuliaSpanBuf::new();
+        let rendered = self.render_into(&mut buf);
+        out.write_str(rendered)
     }
 
     #[inline]
     pub fn to_string_fast(&self) -> String {
-        let mut buf = String::with_capacity(Self::MAX_RENDERED_LEN);
-        // SAFETY: writing into a `String` via the fmt machinery cannot fail.
-        let _ = self.write_into(&mut buf);
-        buf
+        let mut buf = JuliaSpanBuf::new();
+        self.render_into(&mut buf);
+        buf.to_owned()
     }
 }
 
@@ -83,6 +167,10 @@ pub struct LaneWindow {
 impl LaneWindow {
     pub fn julia_span(&self) -> JuliaSpan {
         JuliaSpan::new(self.lower, self.stride, self.upper)
+    }
+
+    pub fn julia_span_into<'a>(&self, buf: &'a mut JuliaSpanBuf) -> &'a str {
+        self.julia_span().render_into(buf)
     }
 
     pub fn clamp(&self, value: u32) -> u32 {
@@ -214,6 +302,16 @@ impl Choice {
             .map(|span| span.to_string_fast())
     }
 
+    /// Writes the latency window span into a reusable scratch buffer.
+    #[inline]
+    pub fn ctile_julia_span_into<'a>(
+        &self,
+        buf: &'a mut JuliaSpanBuf,
+    ) -> Option<&'a str> {
+        self.latency_window
+            .map(|window| window.julia_span().render_into(buf))
+    }
+
     /// Writes the latency window span into the provided formatter.
     /// Returns `Ok(())` even when the latency window is absent.
     pub fn write_ctile_julia_span<W: std::fmt::Write>(
@@ -221,7 +319,9 @@ impl Choice {
         mut out: W,
     ) -> std::fmt::Result {
         if let Some(span) = self.ctile_julia_span_components() {
-            span.write_into(&mut out)?;
+            let mut buf = JuliaSpanBuf::new();
+            let rendered = span.render_into(&mut buf);
+            out.write_str(rendered)?;
         }
         Ok(())
     }
@@ -1044,7 +1144,9 @@ mod tests {
         let span_components = choice
             .ctile_julia_span_components()
             .expect("latency span should be available");
-        let span = span_components.to_string_fast();
+        let mut scratch = JuliaSpanBuf::new();
+        let rendered = span_components.render_into(&mut scratch);
+        let span = rendered.to_owned();
         assert!(span.matches(':').count() >= 2);
         assert!(span.split(':').all(|part| !part.is_empty()));
         assert_eq!(span_components.as_tuple().0, window.lower);
@@ -1057,6 +1159,29 @@ mod tests {
             .expect("writing julia span should succeed");
         assert_eq!(buf, span);
         assert!(!buf.is_empty());
+        let mut window_scratch = JuliaSpanBuf::new();
+        let reused = window
+            .julia_span_into(&mut window_scratch)
+            .to_owned();
+        assert_eq!(reused, span);
+        let mut choice_scratch = JuliaSpanBuf::new();
+        let from_choice = choice
+            .ctile_julia_span_into(&mut choice_scratch)
+            .expect("span should be renderable into scratch");
+        assert_eq!(from_choice, span);
+    }
+
+    #[test]
+    fn julia_span_buffer_matches_display() {
+        let span = JuliaSpan::new(128, 32, 640);
+        let mut buf = JuliaSpanBuf::new();
+        let rendered = span.render_into(&mut buf);
+        assert_eq!(rendered, "128:32:640");
+        assert_eq!(rendered, span.to_string());
+        let mut second = JuliaSpanBuf::new();
+        let reused = span.render_into(&mut second);
+        assert_eq!(rendered, reused);
+        assert_eq!(buf.as_str(), reused);
     }
 
     #[test]
