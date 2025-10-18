@@ -35,7 +35,10 @@
 //! field together with signed curvature when a phase label is supplied.
 
 use crate::telemetry::hub::SoftlogicZFeedback;
-use crate::theory::zpulse::{ZConductor, ZEmitter, ZPulse, ZRegistry, ZSource, ZSupport};
+use crate::theory::zpulse::{
+    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZSource,
+    ZSupport,
+};
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
@@ -981,16 +984,19 @@ impl BudgetPolicy {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Default)]
 struct MicrolocalEmitter {
     queue: Arc<Mutex<VecDeque<ZPulse>>>,
 }
 
 impl MicrolocalEmitter {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self::default()
     }
 
+    #[allow(dead_code)]
     fn extend<I>(&self, pulses: I)
     where
         I: IntoIterator<Item = ZPulse>,
@@ -1034,6 +1040,12 @@ pub struct InterfaceZConductor {
     lift: InterfaceZLift,
     conductor: ZConductor,
     clock: u64,
+    smoothing: f32,
+    policy: Arc<dyn ZSourcePolicy>,
+    band_policy: Option<BandPolicy>,
+    budget_policy: Option<BudgetPolicy>,
+    previous: Option<InterfaceZPulse>,
+    carry: Option<InterfaceZPulse>,
     emitter: MicrolocalEmitter,
     smoothing: f32,
     policy: Arc<dyn ZSourcePolicy>,
@@ -1048,11 +1060,18 @@ impl InterfaceZConductor {
     pub fn new(gauges: Vec<InterfaceGauge>, lift: InterfaceZLift) -> Self {
         assert!(!gauges.is_empty(), "at least one gauge must be supplied");
         let emitter = MicrolocalEmitter::new();
+        let policy: Arc<dyn ZSourcePolicy> = Arc::new(DefaultZSourcePolicy::new());
         InterfaceZConductor {
             gauges,
             lift,
             conductor: ZConductor::default(),
             clock: 0,
+            smoothing: 0.0,
+            policy,
+            band_policy: None,
+            budget_policy: None,
+            previous: None,
+            carry: None,
             emitter,
             smoothing: 0.0,
             policy: Arc::new(DefaultZSourcePolicy::new()),
@@ -1122,11 +1141,11 @@ impl InterfaceZConductor {
         }
 
         let mut fused = InterfaceZPulse::aggregate(&weighted);
-        let mut events = Vec::new();
+        let mut smoothing_events = Vec::new();
         if let (Some(previous), smoothing) = (self.previous.as_ref(), self.smoothing) {
             if smoothing > 0.0 {
                 fused = InterfaceZPulse::lerp(previous, &fused, smoothing);
-                events.push("smoothing.applied".to_string());
+                smoothing_events.push("smoothing.applied".to_string());
             }
         }
 
@@ -1135,7 +1154,8 @@ impl InterfaceZConductor {
 
         let zpulses: Vec<ZPulse> = pulses
             .iter()
-            .map(|pulse| ZPulse {
+            .zip(qualities.iter().copied())
+            .map(|(pulse, quality)| ZPulse {
                 source: pulse.source,
                 ts: now,
                 tempo: tempo.unwrap_or(pulse.total_energy()),
@@ -1167,6 +1187,27 @@ impl InterfaceZConductor {
         let mut fused_events = events;
         fused_events.extend(z_fused.events.clone());
 
+        let avg_quality = if qualities.is_empty() {
+            0.0
+        } else {
+            qualities.iter().copied().sum::<f32>() / qualities.len() as f32
+        };
+
+        let z_pulse = ZPulse {
+            source: ZSource::Microlocal,
+            ts: now,
+            tempo: tempo_hint,
+            band_energy: fused.band_energy,
+            drift: fused.drift,
+            z_bias: fused.z_bias,
+            support: ZSupport::from(fused.band_energy),
+            quality: avg_quality,
+            stderr: fused.standard_error.unwrap_or(0.0),
+            latency_ms: 0.0,
+        };
+
+        let mut events = fused_state.events.clone();
+        events.extend(smoothing_events);
         let fused_z = InterfaceZFused {
             pulse: ZPulse {
                 source: ZSource::Microlocal,
@@ -1199,6 +1240,32 @@ impl InterfaceZConductor {
     pub fn last_fused_pulse(&self) -> InterfaceZPulse {
         self.carry.clone().unwrap_or_else(InterfaceZPulse::default)
     }
+
+    fn into_zpulse(fused: &InterfaceZPulse, now: u64, qualities: &[f32]) -> ZPulse {
+        let (above, here, beneath) = fused.band_energy;
+        let support = ZSupport {
+            leading: above,
+            central: here,
+            trailing: beneath,
+        };
+        let quality = if qualities.is_empty() {
+            1.0
+        } else {
+            qualities.iter().copied().sum::<f32>() / qualities.len() as f32
+        };
+        ZPulse {
+            source: fused.source,
+            ts: now,
+            tempo: fused.total_energy(),
+            drift: fused.drift,
+            z_bias: fused.z_bias,
+            support,
+            band_energy: fused.band_energy,
+            quality,
+            stderr: fused.standard_error.unwrap_or_default(),
+            latency_ms: 0.0,
+        }
+    }
 }
 
 impl fmt::Debug for InterfaceZConductor {
@@ -1207,6 +1274,7 @@ impl fmt::Debug for InterfaceZConductor {
             .field("gauges", &self.gauges)
             .field("lift", &self.lift)
             .field("smoothing", &self.smoothing)
+            .field("clock", &self.clock)
             .field("band_policy", &self.band_policy)
             .field("budget_policy", &self.budget_policy)
             .field("previous", &self.previous)

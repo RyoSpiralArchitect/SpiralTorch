@@ -809,7 +809,9 @@ if atlas:
 `AtlasFrame` exposes the latest `ChronoSummary`, optional harmonics, maintainer
 status, and any SpiralK hints captured along the way. Metrics from auxiliary
 nodes (collapse totals, Z-bias pushes) ride alongside free-form notes so you can
-route the atlas straight into dashboards or back into SpiralK planners. Each
+route the atlas straight into dashboards or back into SpiralK planners. Even
+fragments that arrive without explicit timestamps now stay alive, so stray
+Z-space nudges or maintainer notes still land on the shared map. Each
 frame also clusters its metrics into **districts** — Surface, Concourse, and
 Substrate — so you can see which layer of the SpiralTorch “city” is lighting up
 at a glance:
