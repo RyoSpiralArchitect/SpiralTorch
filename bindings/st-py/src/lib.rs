@@ -47,7 +47,6 @@ use st_core::ecosystem::{
     RoundtableConfigSummary as CoreRoundtableConfigSummary,
     RoundtableSummary as CoreRoundtableSummary,
 };
-};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::runtime::blackcat::BlackcatRuntimeStats;
 use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary};
