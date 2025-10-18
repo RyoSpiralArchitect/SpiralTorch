@@ -1,0 +1,18 @@
+[package]
+name = "st-qr-studio"
+version = "0.1.0"
+edition = "2021"
+authors = ["SpiralTorch Contributors"]
+license = "AGPL-3.0-or-later"
+description = "Quantum Reality Studio utilities for SpiralTorch"
+
+[lib]
+name = "st_qr_studio"
+path = "src/lib.rs"
+
+[dependencies]
+st-core = { path = "../st-core" }
+st-nn = { path = "../st-nn" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
