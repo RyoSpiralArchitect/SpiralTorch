@@ -4,13 +4,13 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 pub use pipeline::{LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult};
-mod pipeline;
 mod automation;
 mod desire;
 mod geometry;
 mod gw;
-mod maxwell;
 mod logbook;
+mod maxwell;
+mod pipeline;
 mod schrodinger;
 mod temperature;
 
@@ -21,8 +21,8 @@ pub use desire::{
 };
 pub use geometry::{ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry};
 pub use gw::{DistanceMatrix, EntropicGwSolver};
-pub use maxwell::MaxwellDesireBridge;
 pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
+pub use maxwell::MaxwellDesireBridge;
 pub use pipeline::{
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesirePipeline,
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRoundtableBridge,
