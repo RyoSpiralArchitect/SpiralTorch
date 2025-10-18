@@ -1,4 +1,8 @@
 
+**Non-Goals (unsupported):** Support for anonymous clones or hands-off external operators.
+Managed hosting or production babysitting is out of scope.
+Automated scraping, traffic mirroring, or idle star-farming will not receive attention.
+
 # 🌀🕯️SpiralTorch🕯️🌀
 trains where PyTorch can’t — inside the Z-space.(Still under active repair while expanding — API changes hourly.)
 <p align="center">
