@@ -1107,6 +1107,122 @@ impl Default for GradientSummary {
     }
 }
 
+/// Interprets paired gradient summaries into high-level signals that can drive
+/// Desire Lagrangian feedback loops.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DesireGradientInterpretation {
+    hyper_pressure: f32,
+    real_pressure: f32,
+    balance: f32,
+    stability: f32,
+    saturation: f32,
+}
+
+impl DesireGradientInterpretation {
+    const EPS: f32 = 1e-6;
+
+    /// Analyse the hypergradient and Euclidean summaries returning a compact
+    /// interpretation of their relative magnitudes and stability.
+    #[inline]
+    pub fn from_summaries(hyper: GradientSummary, real: GradientSummary) -> Self {
+        let hyper_pressure = hyper.mean_abs();
+        let real_pressure = real.mean_abs();
+        let hyper_rms = hyper.rms();
+        let real_rms = real.rms();
+        let balance = if real_rms > Self::EPS {
+            (hyper_rms / real_rms).clamp(0.0, 16.0)
+        } else if hyper_rms > Self::EPS {
+            16.0
+        } else {
+            1.0
+        };
+        let stability_raw = 1.0
+            - (hyper_pressure - real_pressure).abs() / (hyper_pressure + real_pressure + Self::EPS);
+        let stability = stability_raw.clamp(0.0, 1.0);
+        let saturation = hyper.linf().max(real.linf());
+        Self {
+            hyper_pressure,
+            real_pressure,
+            balance,
+            stability,
+            saturation,
+        }
+    }
+
+    /// Mean absolute magnitude of the hypergradient summary.
+    #[inline]
+    pub fn hyper_pressure(&self) -> f32 {
+        self.hyper_pressure
+    }
+
+    /// Mean absolute magnitude of the Euclidean gradient summary.
+    #[inline]
+    pub fn real_pressure(&self) -> f32 {
+        self.real_pressure
+    }
+
+    /// Ratio between the hypergradient and Euclidean RMS magnitudes.
+    #[inline]
+    pub fn balance(&self) -> f32 {
+        self.balance
+    }
+
+    /// Stability score where `1` indicates matching mean-absolute gradients and
+    /// `0` indicates divergent magnitudes.
+    #[inline]
+    pub fn stability(&self) -> f32 {
+        self.stability
+    }
+
+    /// Maximum absolute value observed across both summaries.
+    #[inline]
+    pub fn saturation(&self) -> f32 {
+        self.saturation
+    }
+
+    /// Gain factor for hypergradient penalties when the two tapes disagree.
+    #[inline]
+    pub fn penalty_gain(&self) -> f32 {
+        let imbalance = (self.balance - 1.0).abs().min(2.0);
+        let instability = (1.0 - self.stability).min(1.0);
+        (1.0 + 0.5 * imbalance + 0.5 * instability).clamp(1.0, 2.5)
+    }
+
+    /// Mixing factor used when blending Desire bias updates – drops towards zero
+    /// when the gradients disagree so the automation can tread lightly.
+    #[inline]
+    pub fn bias_mix(&self) -> f32 {
+        (0.25 + 0.75 * self.stability).clamp(0.1, 1.0)
+    }
+
+    /// Gain used when accumulating avoidance reports during the observation
+    /// phase. High saturation dampens the contribution to avoid runaway spikes.
+    #[inline]
+    pub fn observation_gain(&self) -> f32 {
+        let saturation = self.saturation.tanh().clamp(0.0, 1.0);
+        (0.5 + 0.5 * (1.0 - saturation)).clamp(0.25, 1.0)
+    }
+
+    /// Damping factor that can shrink epsilon-like tolerances when gradients
+    /// spike.
+    #[inline]
+    pub fn damping(&self) -> f32 {
+        (0.5 + 0.5 * self.saturation.tanh()).clamp(0.1, 1.0)
+    }
+}
+
+impl Default for DesireGradientInterpretation {
+    fn default() -> Self {
+        Self {
+            hyper_pressure: 0.0,
+            real_pressure: 0.0,
+            balance: 1.0,
+            stability: 1.0,
+            saturation: 0.0,
+        }
+    }
+}
+
 pub struct AmegaRealgrad {
     learning_rate: f32,
     rows: usize,
@@ -1655,6 +1771,19 @@ mod tests {
         let expected_rms = expected_l2 / (4.0f32).sqrt();
         assert!((summary.rms() - expected_rms).abs() < 1e-6);
         assert_eq!(summary.linf(), 3.0);
+    }
+
+    #[test]
+    fn desire_gradient_interpretation_balances_metrics() {
+        let hyper = GradientSummary::from_slice(&[1.0, -0.5, 0.25, 0.75]);
+        let real = GradientSummary::from_slice(&[0.05, -0.1, 0.0, 0.1]);
+        let interpretation = DesireGradientInterpretation::from_summaries(hyper, real);
+        assert!(interpretation.balance() > 1.0);
+        assert!(interpretation.penalty_gain() > 1.0);
+        let stable = DesireGradientInterpretation::from_summaries(hyper, hyper);
+        assert!(stable.stability() > interpretation.stability());
+        assert!(stable.bias_mix() > interpretation.bias_mix());
+        assert!(stable.observation_gain() >= interpretation.observation_gain());
     }
 
     #[test]
