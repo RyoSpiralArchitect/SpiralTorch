@@ -12,7 +12,7 @@ use crate::telemetry::hub::{set_last_realgrad, RealGradPulse};
 /// High level driver that reuses the cached RealGrad kernel, applies adaptive tuning,
 /// and reports telemetry back into the global hub so runtimes can react to Z-space
 /// energy changes.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RealGradEngine {
     kernel: RealGradKernel,
     tolerance: f32,
