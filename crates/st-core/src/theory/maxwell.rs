@@ -39,11 +39,56 @@ use crate::telemetry::{
 };
 use crate::{
     telemetry::hub::SoftlogicZFeedback,
-    theory::zpulse::{ZPulse, ZSource},
+    theory::zpulse::{ZEmitter, ZPulse, ZSource},
     util::math::LeechProjector,
 };
 #[cfg(feature = "psi")]
 use std::collections::HashMap;
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
+
+#[derive(Clone, Default, Debug)]
+pub struct MaxwellEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
+}
+
+impl MaxwellEmitter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn enqueue(&self, pulse: ZPulse) {
+        let mut queue = self.queue.lock().expect("maxwell emitter queue poisoned");
+        queue.push_back(pulse);
+    }
+
+    pub fn enqueue_maxwell(&self, pulse: MaxwellZPulse) {
+        self.enqueue(pulse.into());
+    }
+
+    pub fn extend<I>(&self, pulses: I)
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut queue = self.queue.lock().expect("maxwell emitter queue poisoned");
+        queue.extend(pulses);
+    }
+}
+
+impl ZEmitter for MaxwellEmitter {
+    fn name(&self) -> ZSource {
+        ZSource::Maxwell
+    }
+
+    fn tick(&mut self, _now: u64) -> Option<ZPulse> {
+        self.queue
+            .lock()
+            .expect("maxwell emitter queue poisoned")
+            .pop_front()
+    }
+}
 
 /// Consolidated Maxwell gain for a single coded envelope channel.
 ///
