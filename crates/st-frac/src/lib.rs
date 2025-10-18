@@ -7,6 +7,7 @@ use ndarray::{ArrayD, Axis};
 use thiserror::Error;
 
 pub mod fft;
+pub mod mellin;
 
 /// Enumeration of fractional regularisation backends.
 #[derive(Clone, Debug, PartialEq)]
