@@ -44,7 +44,6 @@ pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
 pub use language::entropy as desire_entropy;
 pub use language::{
-    LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
     constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesireLagrangian,
     DesireLogRecord, DesireLogReplay, DesireLogbook, DesirePhase, DesirePipeline,
@@ -53,8 +52,8 @@ pub use language::{
     DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireTelemetrySink,
     DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
     DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, LanguagePipeline,
-    LanguagePipelineBuilder, MaxwellDesireBridge, PipelineError, PipelineResult, RepressionField,
-    SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
+    LanguagePipelineBuilder, MaxwellDesireBridge, NarrativeHint, PipelineError, PipelineResult,
+    RepressionField, SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
 };
 #[cfg(feature = "psi")]
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};

@@ -198,7 +198,20 @@ sample so `DesirePsiBridge` captures the Z drift alongside ψ totals without
 hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:crates/st-core/src/theory/maxwell.rs†L666-L714】
 Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
 concept window that the `DesireLagrangian` can consume, aligning coded-envelope
-channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L132】
+channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L214】
+
+### Quantum Reality Studio overlays
+
+The new `st-qr-studio` crate spins up a **QuantumRealityStudio** that records
+Maxwell pulses, emits concept windows, and stitches narrative tags into VR/AR
+overlays. Signal capture sessions enforce which laboratory rigs may publish
+pulses, semantic taggers mirror the `MaxwellDesireBridge` lexicon, and overlay
+frames surface glyph/intensity pairs for immersive projection.【F:crates/st-qr-studio/src/lib.rs†L1-L234】 Storyboard exports drop
+directly into `tools/qr_storyboard.py`, which converts JSON/NDJSON captures into
+Markdown decks grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The
+companion [Quantum Reality Playbook](docs/qr_playbook/README.md) provides
+rituals, collaboration tips, and art-direction cues so research and cultural
+teams stay synchronised.【F:docs/qr_playbook/README.md†L1-L49】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
@@ -1033,6 +1046,30 @@ report = policy.finish_episode()
 print(report.steps, report.hypergrad_applied)
 ```
 
+Python bindings mirror the geometry controller as well. Pass a dictionary of
+overrides to `PolicyGradient.attach_geometry_feedback` to customise the
+observability parameters and smoothing ranges without leaving Python.
+
+```python
+from spiraltorch import SpiralSession
+from spiraltorch.rl import PolicyGradient
+
+session = SpiralSession(device="wgpu", curvature=-1.0)
+policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
+policy.attach_geometry_feedback({"z_space_rank": 24, "slot_symmetry": "cyclic"})
+
+resonance = session.trace(state).resonate()
+policy.record_transition(state, action, reward=0.8)
+
+report, signal = policy.finish_episode_with_geometry(resonance)
+if signal:
+    print(f"η̄={signal['averaged_efficiency']:.3f} scale={signal['learning_rate_scale']:.2f}")
+
+telemetry = policy.geometry_telemetry()
+if telemetry:
+    print("loop gain", telemetry["loop_gain"], "script", telemetry["loop_script"])
+```
+
 Rust projects can pair the policy with the new geometric feedback module to
 ground the update scale in observability measurements. Feed a
 `DifferentialResonance` snapshot into `GeometryFeedback` and the learner will
@@ -1572,6 +1609,10 @@ print(plan["choice"])  # unified merge-kind, tiles, and workgroup sizing
 Need a bootstrap-friendly learning loop without heavyweight dependencies?
 `st-nn` layers sit directly on top of the `st-tensor::pure` stack so you can
 train, schedule, and log every A/B/C decision entirely in Rust.
+
+Geometry-aware policy loops now broadcast their feedback as loopback envelopes,
+so reinforcement learners automatically feed their learning-rate modulation
+into the global telemetry hub for other SpiralTorch nodes to replay.
 
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
