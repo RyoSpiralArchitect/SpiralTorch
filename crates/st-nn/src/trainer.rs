@@ -56,10 +56,162 @@ use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter, PsychoidReading};
-use st_tensor::topos::OpenCartesianTopos;
+use st_tensor::{topos::OpenCartesianTopos, GradientSummary};
 use std::collections::HashMap;
 use std::env;
 use std::time::{Duration, Instant, SystemTime};
+
+/// Adaptive curvature controller that nudges the trainer's hyperbolic geometry
+/// towards the pressure window observed in recent gradients.
+#[derive(Debug, Clone)]
+pub struct CurvatureScheduler {
+    min_curvature: f32,
+    max_curvature: f32,
+    target_pressure: f32,
+    tolerance: f32,
+    step: f32,
+    alpha: f32,
+    current: f32,
+    ema_pressure: Option<f32>,
+}
+
+impl CurvatureScheduler {
+    /// Builds a scheduler anchored to the provided curvature range and target
+    /// gradient pressure. `initial` is clamped into `[min_curvature,
+    /// max_curvature]` and the range itself is normalised so both bounds remain
+    /// negative.
+    pub fn new(initial: f32, min_curvature: f32, max_curvature: f32, target_pressure: f32) -> Self {
+        let mut min_curvature = min_curvature.min(-1e-6);
+        let mut max_curvature = max_curvature.min(-1e-6);
+        if min_curvature > max_curvature {
+            core::mem::swap(&mut min_curvature, &mut max_curvature);
+        }
+        let current = initial.clamp(min_curvature, max_curvature).min(-1e-6);
+        Self {
+            min_curvature,
+            max_curvature,
+            target_pressure: target_pressure.max(0.0),
+            tolerance: 0.05,
+            step: 0.05,
+            alpha: 0.2,
+            current,
+            ema_pressure: None,
+        }
+    }
+
+    /// Adjusts the maximum step a single observation may move the curvature by.
+    pub fn with_step(mut self, step: f32) -> Self {
+        if step.is_finite() && step > 0.0 {
+            self.step = step;
+        }
+        self
+    }
+
+    /// Adjusts the tolerated pressure band before the curvature is nudged.
+    pub fn with_tolerance(mut self, tolerance: f32) -> Self {
+        if tolerance.is_finite() && tolerance >= 0.0 {
+            self.tolerance = tolerance;
+        }
+        self
+    }
+
+    /// Adjusts the smoothing factor applied to the pressure EMA.
+    pub fn with_smoothing(mut self, alpha: f32) -> Self {
+        if alpha.is_finite() && alpha > 0.0 {
+            self.alpha = alpha.clamp(0.01, 1.0);
+        }
+        self
+    }
+
+    /// Returns the curvature currently enforced by the scheduler.
+    pub fn current(&self) -> f32 {
+        self.current
+    }
+
+    /// Returns the configured target pressure.
+    pub fn target_pressure(&self) -> f32 {
+        self.target_pressure
+    }
+
+    /// Returns the last smoothed pressure observation, if available.
+    pub fn last_pressure(&self) -> Option<f32> {
+        self.ema_pressure
+    }
+
+    /// Synchronises the scheduler with an externally adjusted curvature and
+    /// clears the pressure history so subsequent observations start fresh.
+    pub fn sync(&mut self, curvature: f32) {
+        self.current = curvature
+            .clamp(self.min_curvature, self.max_curvature)
+            .min(-1e-6);
+        self.ema_pressure = None;
+    }
+
+    /// Records a gradient summary returning the raw/smoothed pressure alongside
+    /// the curvature chosen for the next step.
+    pub fn observe(&mut self, summary: GradientSummary) -> CurvatureDecision {
+        let raw_pressure = summary.mean_abs();
+        let smoothed = match self.ema_pressure {
+            Some(prev) => prev + self.alpha * (raw_pressure - prev),
+            None => raw_pressure,
+        };
+        self.ema_pressure = Some(smoothed);
+
+        let mut curvature = self.current;
+        let mut changed = false;
+        if smoothed > self.target_pressure + self.tolerance {
+            let next = (self.current + self.step).min(self.max_curvature);
+            if (next - self.current).abs() > f32::EPSILON {
+                curvature = next;
+                changed = true;
+            }
+        } else if smoothed < self.target_pressure - self.tolerance {
+            let next = (self.current - self.step).max(self.min_curvature);
+            if (next - self.current).abs() > f32::EPSILON {
+                curvature = next;
+                changed = true;
+            }
+        }
+
+        if changed {
+            self.current = curvature;
+        }
+
+        CurvatureDecision {
+            raw_pressure,
+            smoothed_pressure: smoothed,
+            curvature,
+            changed,
+        }
+    }
+}
+
+/// Decision emitted by [`CurvatureScheduler::observe`].
+#[derive(Debug, Clone, Copy)]
+pub struct CurvatureDecision {
+    pub raw_pressure: f32,
+    pub smoothed_pressure: f32,
+    pub curvature: f32,
+    pub changed: bool,
+}
+
+/// Last curvature update captured by the trainer.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CurvatureMetrics {
+    pub raw_pressure: f32,
+    pub smoothed_pressure: f32,
+    pub curvature: f32,
+}
+
+impl From<CurvatureDecision> for CurvatureMetrics {
+    fn from(decision: CurvatureDecision) -> Self {
+        Self {
+            raw_pressure: decision.raw_pressure,
+            smoothed_pressure: decision.smoothed_pressure,
+            curvature: decision.curvature,
+        }
+    }
+}
 
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
 pub struct ModuleTrainer {
@@ -85,6 +237,8 @@ pub struct ModuleTrainer {
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
+    curvature_scheduler: Option<CurvatureScheduler>,
+    last_curvature_metrics: Option<CurvatureMetrics>,
     #[cfg(feature = "golden")]
     golden_pulse: Option<GoldenBlackcatPulse>,
     #[cfg(feature = "golden")]
@@ -303,6 +457,8 @@ impl ModuleTrainer {
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
+            curvature_scheduler: None,
+            last_curvature_metrics: None,
             #[cfg(feature = "golden")]
             golden_pulse: None,
             #[cfg(feature = "golden")]
@@ -343,6 +499,26 @@ impl ModuleTrainer {
     pub fn disable_desire_roundtable_bridge(&mut self) {
         self.desire_roundtable_bridge = None;
         self.last_desire_roundtable_summary = None;
+    }
+
+    /// Installs a curvature scheduler so the trainer can adapt its hyperbolic
+    /// geometry based on recent gradient pressure observations.
+    pub fn enable_curvature_scheduler(&mut self, mut scheduler: CurvatureScheduler) {
+        scheduler.sync(self.curvature);
+        self.curvature_scheduler = Some(scheduler);
+        self.last_curvature_metrics = None;
+    }
+
+    /// Disables any configured curvature scheduler and clears cached metrics.
+    pub fn disable_curvature_scheduler(&mut self) {
+        self.curvature_scheduler = None;
+        self.last_curvature_metrics = None;
+    }
+
+    /// Returns the most recently recorded curvature metrics emitted by the
+    /// scheduler, when available.
+    pub fn curvature_metrics(&self) -> Option<CurvatureMetrics> {
+        self.last_curvature_metrics
     }
 
     #[cfg(feature = "psi")]
@@ -1227,7 +1403,28 @@ impl ModuleTrainer {
                     hub::push_loopback_envelope(envelope);
                 }
             }
+            let curvature_summary = if self.curvature_scheduler.is_some() {
+                Some(Self::collect_gradient_summary(module)?)
+            } else {
+                None
+            };
             self.step(module)?;
+            if let Some(summary) = curvature_summary {
+                if let Some(decision) = self.apply_curvature_scheduler(module, summary)? {
+                    extra.insert(
+                        "curvature_pressure".to_string(),
+                        decision.raw_pressure as f64,
+                    );
+                    extra.insert(
+                        "curvature_pressure_ema".to_string(),
+                        decision.smoothed_pressure as f64,
+                    );
+                    extra.insert("curvature_value".to_string(), decision.curvature as f64);
+                    if decision.changed {
+                        extra.insert("curvature_adjusted".to_string(), 1.0);
+                    }
+                }
+            }
             self.zero(module)?;
             steps += 1;
 
@@ -1281,9 +1478,52 @@ impl ModuleTrainer {
         })
     }
 
+    fn apply_curvature_scheduler<M: Module>(
+        &mut self,
+        module: &mut M,
+        summary: GradientSummary,
+    ) -> PureResult<Option<CurvatureDecision>> {
+        let Some(scheduler) = self.curvature_scheduler.as_mut() else {
+            return Ok(None);
+        };
+        let decision = scheduler.observe(summary);
+        self.last_curvature_metrics = Some(decision.into());
+        if decision.changed {
+            Self::retune_hypergrads(module, decision.curvature, self.hyper_learning_rate)?;
+            self.curvature = decision.curvature;
+        }
+        Ok(Some(decision))
+    }
+
     fn estimate_device_load(&self) -> f64 {
         let caps = self.planner.device_caps();
         caps.occupancy_score(caps.max_workgroup) as f64
+    }
+
+    fn collect_gradient_summary<M: Module>(module: &M) -> PureResult<GradientSummary> {
+        let mut accumulator = CurvatureGradientAccumulator::default();
+        module.visit_parameters(&mut |param| {
+            if let Some(tape) = param.hypergrad() {
+                accumulator.accumulate(tape.summary());
+            } else if let Some(grad) = param.gradient() {
+                accumulator.accumulate(GradientSummary::from_slice(grad.data()));
+            }
+            Ok(())
+        })?;
+        Ok(accumulator.finish())
+    }
+
+    fn retune_hypergrads<M: Module>(
+        module: &mut M,
+        curvature: f32,
+        learning_rate: f32,
+    ) -> PureResult<()> {
+        module.visit_parameters_mut(&mut |param| {
+            if let Some(tape) = param.hypergrad_mut() {
+                tape.retune(curvature, learning_rate)?;
+            }
+            Ok(())
+        })
     }
 
     fn insert_desire_summary(target: &mut HashMap<String, f64>, summary: &DesireTrainerSummary) {
@@ -1600,6 +1840,36 @@ pub struct EpochStats {
     pub average_loss: f32,
 }
 
+#[derive(Default)]
+struct CurvatureGradientAccumulator {
+    l1: f64,
+    sum_squares: f64,
+    linf: f32,
+    count: usize,
+}
+
+impl CurvatureGradientAccumulator {
+    fn accumulate(&mut self, summary: GradientSummary) {
+        self.l1 += summary.l1() as f64;
+        self.sum_squares += summary.sum_squares() as f64;
+        self.linf = self.linf.max(summary.linf());
+        self.count += summary.count();
+    }
+
+    fn finish(self) -> GradientSummary {
+        if self.count == 0 {
+            GradientSummary::default()
+        } else {
+            GradientSummary::from_moments(
+                self.l1 as f32,
+                self.sum_squares as f32,
+                self.linf,
+                self.count,
+            )
+        }
+    }
+}
+
 /// Helper trait that allows [`ModuleTrainer::train_epoch`] to accept both raw
 /// `(Tensor, Tensor)` batches and fallible [`PureResult`] batches produced by
 /// the [`dataset::DataLoader`] surface.
@@ -1631,12 +1901,12 @@ mod tests {
     use crate::layers::sequential::Sequential;
     use crate::layers::wave_gate::WaveGate;
     use crate::loss::MeanSquaredError;
+    use crate::module::Parameter;
     use crate::roundtable::{HeurOp, HeurOpKind};
     use crate::schedule::RoundtableConfig;
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
-    use st_tensor::pure::topos::OpenCartesianTopos;
     use st_tensor::topos::OpenCartesianTopos;
     use std::collections::HashMap;
     use std::time::{Duration, Instant, SystemTime};
@@ -1689,6 +1959,45 @@ mod tests {
             cooldown_sec: 0,
         };
         DesireAutomation::new(desire, cfg)
+    }
+
+    struct FixedGradientModule {
+        param: Parameter,
+        grad_value: f32,
+    }
+
+    impl FixedGradientModule {
+        fn new(grad_value: f32) -> Self {
+            let tensor = Tensor::zeros(1, 1).unwrap();
+            let param = Parameter::new("weight", tensor);
+            Self { param, grad_value }
+        }
+    }
+
+    impl Module for FixedGradientModule {
+        fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+            Ok(input.clone())
+        }
+
+        fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+            let update = Tensor::from_vec(1, 1, vec![self.grad_value])?;
+            self.param.accumulate_euclidean(&update)?;
+            Ok(grad_output.clone())
+        }
+
+        fn visit_parameters(
+            &self,
+            visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            visitor(&self.param)
+        }
+
+        fn visit_parameters_mut(
+            &mut self,
+            visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            visitor(&mut self.param)
+        }
     }
 
     #[test]
@@ -1839,6 +2148,37 @@ mod tests {
         assert_eq!(stats.steps, 1);
         assert!(stats.step_time_ms_ema > 0.0);
         assert_eq!(stats.extras.get("grad_norm").cloned().unwrap(), 0.4);
+    }
+
+    #[test]
+    fn curvature_scheduler_adjusts_curvature_and_records_metrics() {
+        let caps = DeviceCaps::wgpu(8, true, 64);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.1, 0.01);
+        let scheduler = CurvatureScheduler::new(-1.0, -2.0, -0.2, 0.01)
+            .with_step(0.2)
+            .with_tolerance(0.0)
+            .with_smoothing(1.0);
+        trainer.enable_curvature_scheduler(scheduler);
+        let mut module = FixedGradientModule::new(4.0);
+        trainer.prepare(&mut module).unwrap();
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let input = Tensor::from_vec(1, 1, vec![1.0]).unwrap();
+        let target = Tensor::from_vec(1, 1, vec![0.0]).unwrap();
+        let dataset = vec![
+            (input.clone(), target.clone()),
+            (input.clone(), target.clone()),
+            (input, target),
+        ];
+        let mut loss = MeanSquaredError::new();
+        trainer
+            .train_epoch(&mut module, &mut loss, dataset, &schedule)
+            .unwrap();
+        assert!(trainer.curvature() != -1.0);
+        let metrics = trainer
+            .curvature_metrics()
+            .expect("curvature metrics recorded");
+        assert!(metrics.raw_pressure > 0.0);
+        assert_eq!(metrics.curvature, trainer.curvature());
     }
 
     #[test]

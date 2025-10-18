@@ -594,6 +594,7 @@ impl<'a> RankScenario<'a> {
         let mut window = latency_ctile_window_with_slack(
             self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
         );
+        let baseline_window = window;
         if let (Some(fusion), Some(pulse)) = (
             TemporalSpectralFusion::analyse(&window, self.rows, self.cols, self.k, self.lanes),
             hub::get_last_realgrad(),
@@ -602,6 +603,18 @@ impl<'a> RankScenario<'a> {
             if summary.norm > 0.0 {
                 let mut tuner = AdaptiveWindowTuner::new(self.lanes);
                 window = tuner.tune(window, min_ctile, max_ctile, &fusion, Some(summary));
+                if window.slack < baseline_window.slack {
+                    let target = window.target;
+                    let lower = target
+                        .saturating_sub(baseline_window.slack)
+                        .max(window.min_lane);
+                    let upper = target
+                        .saturating_add(baseline_window.slack)
+                        .min(window.max_lane);
+                    window.lower = lower;
+                    window.upper = upper;
+                    window.slack = target.abs_diff(lower).max(target.abs_diff(upper));
+                }
             }
         }
         window
@@ -655,6 +668,13 @@ impl TempoLearner {
     fn jitter(&self) -> f32 {
         self.jitter
     }
+
+    #[allow(dead_code)]
+    fn reset(&mut self) {
+        self.avg = 0.0;
+        self.jitter = 0.0;
+    }
+}
 
 #[derive(Clone, Debug)]
 struct AdaptiveWindowTuner {
@@ -1510,111 +1530,6 @@ pub fn choose_unified_rank(
 mod tests {
     use super::*;
     use crate::telemetry::hub;
-
-    #[derive(Default)]
-    struct CountingWriter {
-        writes: usize,
-        chars: usize,
-        buf: String,
-    }
-
-    impl std::fmt::Write for CountingWriter {
-        fn write_str(&mut self, s: &str) -> std::fmt::Result {
-            self.writes += 1;
-            self.buf.push_str(s);
-            Ok(())
-        }
-
-        fn write_char(&mut self, c: char) -> std::fmt::Result {
-            self.chars += 1;
-            self.buf.push(c);
-            Ok(())
-        }
-    }
-
-    fn legacy_score_choice(choice: &Choice, baseline: &Choice, scenario: RankScenario<'_>) -> f32 {
-        let caps = scenario.caps();
-        let mut score = 0.0;
-
-        let expected_two_stage = scenario.expected_two_stage();
-        if choice.use_2ce == expected_two_stage {
-            score += 0.25;
-        } else {
-            score -= 0.1;
-        }
-
-        score += closeness(choice.wg, baseline.wg) * 0.2;
-        score += caps.occupancy_score(choice.wg) * 0.2;
-
-        score += closeness(choice.kl, baseline.kl) * 0.15;
-        score += closeness(choice.tile, baseline.tile) * 0.1;
-
-        if scenario.requires_compaction() {
-            score += closeness(choice.ctile, baseline.ctile) * 0.1;
-        }
-
-        score += closeness(choice.fft_tile, baseline.fft_tile) * 0.05;
-        if choice.fft_radix == baseline.fft_radix {
-            score += 0.025;
-        }
-        if choice.fft_segments == baseline.fft_segments {
-            score += 0.025;
-        }
-
-        if choice.mk == caps.preferred_merge_kind(scenario.k()) {
-            score += 0.1;
-        }
-        if choice.mkd == caps.preferred_substrategy(choice.mk, scenario.k()) {
-            score += 0.1;
-        }
-
-        if scenario.low_latency() {
-            if !choice.use_2ce {
-                score += 0.05;
-            } else {
-                score -= 0.05;
-            }
-            if choice.ch == 0 {
-                score += 0.025;
-            } else {
-                score -= 0.025;
-            }
-            let lanes = scenario.lanes();
-            let latency_cap = if scenario.cols() <= 16_384 { 512 } else { 1024 };
-            let aligned_cap = align_to_lanes(latency_cap, lanes);
-            score += closeness(choice.tile, aligned_cap) * 0.05;
-            if choice.mk == 2 {
-                score += 0.025;
-            }
-            if scenario.requires_compaction() {
-                let (min_ctile, max_ctile) = scenario
-                    .latency_bounds()
-                    .expect("latency bounds should exist for compaction");
-                let window = choice
-                    .latency_window
-                    .unwrap_or_else(|| scenario.latency_window(min_ctile, max_ctile));
-                score += closeness(choice.ctile, window.target) * 0.05;
-                let snapped = window.snapped(choice.ctile);
-                if snapped == choice.ctile {
-                    score += 0.02;
-                } else {
-                    score -= 0.02;
-                }
-                if choice.ctile >= window.lower && choice.ctile <= window.upper {
-                    score += 0.015;
-                } else {
-                    score -= 0.03;
-                }
-                if choice.ctile.abs_diff(window.target) as u32 <= window.slack {
-                    score += 0.01;
-                } else {
-                    score -= 0.015;
-                }
-            }
-        }
-
-        score
-    }
 
     #[test]
     fn tuned_latency_window_responds_to_gradient_feedback() {
