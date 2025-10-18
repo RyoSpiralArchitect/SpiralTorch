@@ -3,6 +3,10 @@
 // Build with hipcc → HSACO. Shared-heap and warp-heap illustrate structure.
 
 #include <hip/hip_runtime.h>
+
+static constexpr int kWavefront = 64;
+static constexpr int kLaneKeep = 8;
+
 extern "C" {
 
 __device__ inline float wf_reduce_max(float v) {
@@ -96,6 +100,67 @@ __global__ void topk_warp_heap_rowwise_kernel(
       s_vals[best_j] = -INFINITY;
     }
   }
+}
+
+extern "C" hipError_t st_hip_topk_rowwise_launch(
+    const float* host_input,
+    int rows,
+    int cols,
+    int k,
+    float* host_out_vals,
+    int* host_out_idx)
+{
+  if (k > kWavefront * kLaneKeep) {
+    return hipErrorInvalidValue;
+  }
+
+  size_t input_bytes = static_cast<size_t>(rows) * static_cast<size_t>(cols) * sizeof(float);
+  size_t out_val_bytes = static_cast<size_t>(rows) * static_cast<size_t>(k) * sizeof(float);
+  size_t out_idx_bytes = static_cast<size_t>(rows) * static_cast<size_t>(k) * sizeof(int);
+
+  float* d_input = nullptr;
+  float* d_vals = nullptr;
+  int* d_idx = nullptr;
+
+  auto cleanup = [&](hipError_t status) {
+    if (d_idx) hipFree(d_idx);
+    if (d_vals) hipFree(d_vals);
+    if (d_input) hipFree(d_input);
+    return status;
+  };
+
+  hipError_t err = hipMalloc(reinterpret_cast<void**>(&d_input), input_bytes);
+  if (err != hipSuccess) return cleanup(err);
+  err = hipMalloc(reinterpret_cast<void**>(&d_vals), out_val_bytes);
+  if (err != hipSuccess) return cleanup(err);
+  err = hipMalloc(reinterpret_cast<void**>(&d_idx), out_idx_bytes);
+  if (err != hipSuccess) return cleanup(err);
+
+  err = hipMemcpy(d_input, host_input, input_bytes, hipMemcpyHostToDevice);
+  if (err != hipSuccess) return cleanup(err);
+
+  dim3 grid(1, rows, 1);
+  dim3 block(kWavefront, 1, 1);
+  size_t shared = static_cast<size_t>(kWavefront) * kLaneKeep * (sizeof(float) + sizeof(int));
+  hipLaunchKernelGGL(topk_warp_heap_rowwise_kernel, grid, block, shared, 0,
+                     d_input, rows, cols, k, d_vals, d_idx);
+
+  err = hipGetLastError();
+  if (err != hipSuccess) return cleanup(err);
+
+  err = hipDeviceSynchronize();
+  if (err != hipSuccess) return cleanup(err);
+
+  err = hipMemcpy(host_out_vals, d_vals, out_val_bytes, hipMemcpyDeviceToHost);
+  if (err != hipSuccess) return cleanup(err);
+  err = hipMemcpy(host_out_idx, d_idx, out_idx_bytes, hipMemcpyDeviceToHost);
+  if (err != hipSuccess) return cleanup(err);
+
+  return cleanup(hipSuccess);
+}
+
+extern "C" const char* st_hip_error_string(int code) {
+  return hipGetErrorString(static_cast<hipError_t>(code));
 }
 
 } // extern "C"

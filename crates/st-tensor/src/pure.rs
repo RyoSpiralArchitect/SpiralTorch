@@ -1057,6 +1057,27 @@ impl GradientSummary {
         }
     }
 
+    /// Builds a summary directly from raw moment statistics. `l1` captures the
+    /// sum of absolute values, `sum_squares` is the accumulated \(L_2^2\)
+    /// energy, `linf` is the maximum absolute entry, and `count` indicates how
+    /// many samples contributed to the summary.
+    #[inline]
+    pub fn from_moments(l1: f32, sum_squares: f32, linf: f32, count: usize) -> Self {
+        let l1 = if l1.is_finite() { l1.max(0.0) } else { 0.0 };
+        let sum_squares = if sum_squares.is_finite() {
+            sum_squares.max(0.0)
+        } else {
+            0.0
+        };
+        let linf = if linf.is_finite() { linf.max(0.0) } else { 0.0 };
+        Self {
+            l1,
+            l2: sum_squares.sqrt(),
+            linf,
+            count,
+        }
+    }
+
     #[inline]
     pub fn l1(&self) -> f32 {
         self.l1
@@ -1093,6 +1114,12 @@ impl GradientSummary {
         } else {
             self.l2 / (self.count as f32).sqrt()
         }
+    }
+
+    /// Returns the accumulated sum of squares captured by the summary.
+    #[inline]
+    pub fn sum_squares(&self) -> f32 {
+        self.l2 * self.l2
     }
 }
 
@@ -1337,6 +1364,32 @@ impl AmegaHypergrad {
         if factor.is_finite() && factor > 0.0 {
             self.learning_rate *= factor;
         }
+    }
+
+    /// Retunes the curvature and learning rate while rebuilding the guard topos.
+    /// The accumulated gradient buffer is cleared to avoid mixing incompatible
+    /// geometries across updates.
+    pub fn retune(&mut self, curvature: f32, learning_rate: f32) -> PureResult<()> {
+        if curvature >= 0.0 {
+            return Err(TensorError::NonHyperbolicCurvature { curvature });
+        }
+        if learning_rate <= 0.0 {
+            return Err(TensorError::NonPositiveLearningRate {
+                rate: learning_rate,
+            });
+        }
+        let topos = topos::OpenCartesianTopos::new(
+            curvature,
+            self.topos.tolerance(),
+            self.topos.saturation(),
+            self.topos.max_depth(),
+            self.topos.max_volume(),
+        )?;
+        self.curvature = curvature;
+        self.learning_rate = learning_rate;
+        self.topos = topos;
+        self.reset();
+        Ok(())
     }
 
     fn assert_tensor_shape(&self, tensor: &Tensor) -> PureResult<()> {
@@ -1774,6 +1827,17 @@ mod tests {
     }
 
     #[test]
+    fn gradient_summary_from_moments_matches_slice() {
+        let from_slice = GradientSummary::from_slice(&[1.0, -2.0, 0.0, 3.0]);
+        let from_moments = GradientSummary::from_moments(6.0, 14.0, 3.0, 4);
+        assert!((from_slice.l1() - from_moments.l1()).abs() < 1e-6);
+        assert!((from_slice.l2() - from_moments.l2()).abs() < 1e-6);
+        assert_eq!(from_slice.count(), from_moments.count());
+        assert_eq!(from_slice.linf(), from_moments.linf());
+        assert!((from_slice.sum_squares() - from_moments.sum_squares()).abs() < 1e-6);
+    }
+
+    #[test]
     fn desire_gradient_interpretation_balances_metrics() {
         let hyper = GradientSummary::from_slice(&[1.0, -0.5, 0.25, 0.75]);
         let real = GradientSummary::from_slice(&[0.05, -0.1, 0.0, 0.1]);
@@ -1801,6 +1865,20 @@ mod tests {
         assert_eq!(real_summary.count(), 3);
         let expected_l1: f32 = tensor.data().iter().map(|value| value.abs()).sum();
         assert!((real_summary.l1() - expected_l1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hypergrad_retune_updates_curvature_and_resets() {
+        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 1, 2).unwrap();
+        let tensor = Tensor::from_vec(1, 2, vec![0.25, -0.4]).unwrap();
+        tape.accumulate_wave(&tensor).unwrap();
+        assert!(tape.gradient().iter().any(|value| value.abs() > 0.0));
+        tape.retune(-0.5, 0.1).unwrap();
+        assert!((tape.curvature() + 0.5).abs() < 1e-6);
+        assert!((tape.learning_rate() - 0.1).abs() < 1e-6);
+        assert!(tape.gradient().iter().all(|value| value.abs() < 1e-6));
+        let guard = tape.topos();
+        assert!((guard.curvature() + 0.5).abs() < 1e-6);
     }
 
     #[test]
