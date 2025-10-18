@@ -19,15 +19,6 @@ extern "C" {
     fn rcclCommDestroy(comm: RcclComm) -> i32;
 }
 
-#[repr(C)]
-pub struct RcclUniqueId {
-    pub internal: [u8; 128],
-}
-#[repr(C)]
-pub struct RcclComm {
-    pub internal: *mut std::ffi::c_void,
-}
-
 pub struct RcclCommGuard {
     pub comm: RcclComm,
     pub world: i32,
