@@ -1568,6 +1568,10 @@ Need a bootstrap-friendly learning loop without heavyweight dependencies?
 `st-nn` layers sit directly on top of the `st-tensor::pure` stack so you can
 train, schedule, and log every A/B/C decision entirely in Rust.
 
+Geometry-aware policy loops now broadcast their feedback as loopback envelopes,
+so reinforcement learners automatically feed their learning-rate modulation
+into the global telemetry hub for other SpiralTorch nodes to replay.
+
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{
