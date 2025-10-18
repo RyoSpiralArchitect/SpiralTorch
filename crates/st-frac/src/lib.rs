@@ -26,7 +26,7 @@ pub enum FracErr {
 }
 
 /// Padding behaviour for fractional convolution boundaries.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Pad {
     /// Use zeros for samples that fall outside the signal bounds.
     Zero,
@@ -49,34 +49,98 @@ pub fn gl_coeffs(alpha: f32, len: usize) -> Vec<f32> {
     c
 }
 
-fn conv1d_gl_line(x: &[f32], y: &mut [f32], coeff: &[f32], pad: Pad, scale: f32) {
-    let n = x.len();
-    let klen = coeff.len();
-    for i in 0..n {
-        let mut acc = 0.0f32;
-        for k in 0..klen {
-            if i >= k {
-                acc += coeff[k] * x[i - k];
-                continue;
-            }
-            match pad {
-                Pad::Zero => {}
-                Pad::Reflect => {
-                    let idx = k - i - 1;
-                    let jj = if idx < n {
-                        idx
-                    } else {
-                        n.saturating_sub(1) - ((idx - (n - 1)) % n)
-                    };
-                    acc += coeff[k] * x[jj];
-                }
-                Pad::Constant(v) => {
-                    acc += coeff[k] * v;
-                }
-            }
+fn reflected_index(mut idx: isize, len: usize) -> usize {
+    debug_assert!(len > 0);
+    let len = len as isize;
+    loop {
+        if idx < 0 {
+            idx = -idx - 1;
+        } else if idx >= len {
+            idx = len - (idx - len) - 1;
+        } else {
+            break idx as usize;
         }
-        y[i] = scale * acc;
     }
+}
+
+#[inline]
+fn sample_with_pad(x: &[f32], idx: isize, pad: Pad) -> f32 {
+    if idx >= 0 {
+        return x[idx as usize];
+    }
+
+    match pad {
+        Pad::Zero => 0.0,
+        Pad::Constant(v) => v,
+        Pad::Reflect => {
+            if x.is_empty() {
+                return 0.0;
+            }
+            let len = x.len();
+            let idx = reflected_index(idx, len);
+            x[idx]
+        }
+    }
+}
+
+fn conv1d_gl_line(x: &[f32], y: &mut [f32], coeff: &[f32], pad: Pad, scale: f32) {
+    for (i, out) in y.iter_mut().enumerate() {
+        let mut acc = 0.0f32;
+        for (k, &c) in coeff.iter().enumerate() {
+            let idx = i as isize - k as isize;
+            acc += c * sample_with_pad(x, idx, pad);
+        }
+        *out = scale * acc;
+    }
+}
+
+/// Generate Grünwald–Letnikov coefficients until their magnitude drops below `tol`
+/// or until `max_len` coefficients have been produced.
+pub fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
+    assert!(max_len > 0);
+    assert!(tol > 0.0);
+
+    let mut coeffs = Vec::with_capacity(max_len);
+    let mut prev = 1.0f32;
+    coeffs.push(prev);
+
+    for k in 1..max_len {
+        let num = alpha - (k as f32 - 1.0);
+        prev *= (num / k as f32) * -1.0;
+        coeffs.push(prev);
+        if prev.abs() < tol {
+            break;
+        }
+    }
+
+    coeffs
+}
+
+/// Apply a fractional difference along a 1-D slice.
+pub fn fracdiff_gl_1d(
+    x: &[f32],
+    alpha: f32,
+    kernel_len: usize,
+    pad: Pad,
+    scale: Option<f32>,
+) -> Result<Vec<f32>, FracErr> {
+    if kernel_len == 0 {
+        return Err(FracErr::Kernel);
+    }
+    let coeff = gl_coeffs(alpha, kernel_len);
+    Ok(fracdiff_gl_1d_with_coeffs(x, &coeff, pad, scale))
+}
+
+/// Apply a fractional difference along a 1-D slice using precomputed coefficients.
+pub fn fracdiff_gl_1d_with_coeffs(
+    x: &[f32],
+    coeff: &[f32],
+    pad: Pad,
+    scale: Option<f32>,
+) -> Vec<f32> {
+    let mut y = vec![0.0f32; x.len()];
+    conv1d_gl_line(x, &mut y, coeff, pad, scale.unwrap_or(1.0));
+    y
 }
 
 /// Generate Grünwald–Letnikov coefficients until their magnitude drops below `tol`
@@ -246,5 +310,15 @@ mod tests {
         // When padding with 5, the first element should only see the padded value
         // except for the zeroth coefficient which stays 1.
         assert!((y[0] - (coeff[0] * 1.0 + coeff[1] * 5.0 + coeff[2] * 5.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn reflect_pad_mirrors_left_edge() {
+        let x = vec![10.0, 20.0, 30.0];
+        let coeff = vec![1.0, 1.0, 1.0, 1.0];
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Reflect, Some(1.0));
+
+        assert_eq!(y[0], 10.0 + 10.0 + 20.0 + 30.0);
+        assert_eq!(y[1], 20.0 + 10.0 + 10.0 + 20.0);
     }
 }
