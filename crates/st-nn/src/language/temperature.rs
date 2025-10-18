@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use st_core::telemetry::hub::SoftlogicZFeedback;
+use st_core::theory::zpulse::ZScale;
 
 #[derive(Clone, Debug)]
 pub struct TemperatureController {
@@ -15,6 +16,8 @@ pub struct TemperatureController {
     z_kappa: f32,
     z_relax: f32,
     z_memory: f32,
+    scale_gain: f32,
+    scale_memory: f32,
     grad_pressure: f32,
     grad_entropy: f32,
 }
@@ -30,6 +33,8 @@ impl TemperatureController {
             z_kappa: 0.35,
             z_relax: 0.2,
             z_memory: 0.0,
+            scale_gain: 0.25,
+            scale_memory: 0.0,
             grad_pressure: 0.0,
             grad_entropy: 0.0,
         };
@@ -42,6 +47,11 @@ impl TemperatureController {
     pub fn with_feedback(mut self, kappa: f32, relax: f32) -> Self {
         self.z_kappa = kappa.max(0.0);
         self.z_relax = relax.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_scale_gain(mut self, gain: f32) -> Self {
+        self.scale_gain = gain.clamp(0.0, 1.0);
         self
     }
 
@@ -68,6 +78,15 @@ impl TemperatureController {
             let roam = 1.0 + self.z_kappa * (explore + self.z_memory.max(0.0));
             let anchor = 1.0 / (1.0 + self.z_kappa * (settle + (-self.z_memory).max(0.0)));
             self.value = (self.value * bias * roam * anchor).clamp(self.min, self.max);
+            if self.scale_gain > 0.0 {
+                if let Some(scale) = feedback.scale {
+                    let bias = (-scale.log_radius).tanh();
+                    self.scale_memory =
+                        (1.0 - self.z_relax) * self.scale_memory + self.z_relax * bias;
+                    let scale_factor = (1.0 + self.scale_gain * self.scale_memory).clamp(0.5, 2.0);
+                    self.value = (self.value * scale_factor).clamp(self.min, self.max);
+                }
+            }
         }
 
         self.value
@@ -116,5 +135,35 @@ mod tests {
         let cooled = controller.update_with_gradient(&[0.6, 0.4], 1.5);
         assert!(cooled <= warmed);
         assert!(cooled >= baseline);
+    }
+
+    #[test]
+    fn controller_responds_to_scale_feedback() {
+        let mut controller = TemperatureController::new(1.0, 0.8, 0.2, 0.3, 2.0)
+            .with_feedback(0.4, 0.2)
+            .with_scale_gain(0.6);
+        let distribution = [0.6, 0.4];
+        let baseline = controller.update(&distribution, None);
+        let micro_feedback = SoftlogicZFeedback {
+            psi_total: 0.0,
+            weighted_loss: 0.0,
+            band_energy: (0.0, 0.0, 0.0),
+            drift: 0.0,
+            z_signal: 0.0,
+            scale: ZScale::new(0.25),
+        };
+        let warmed = controller.update(&distribution, Some(&micro_feedback));
+        assert!(warmed > baseline);
+
+        let macro_feedback = SoftlogicZFeedback {
+            psi_total: 0.0,
+            weighted_loss: 0.0,
+            band_energy: (0.0, 0.0, 0.0),
+            drift: 0.0,
+            z_signal: 0.0,
+            scale: ZScale::new(8.0),
+        };
+        let cooled = controller.update(&distribution, Some(&macro_feedback));
+        assert!(cooled < warmed);
     }
 }

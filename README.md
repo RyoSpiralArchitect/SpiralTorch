@@ -22,6 +22,8 @@ _(Still under active repair while expanding — API changes hourly.)_
 - **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
+> **Fresh in st-frac:** the Mellin/Hilbert toolkit now exposes `MellinLogGrid` log-lattices, reusable Z-plane series sweeps, and batch-friendly integration weights so logarithmic quadrature can flow straight into Z-space without touching the pulse primitives.
+
 <!-- STATS:START -->
 > _auto-generated: 2025-10-18 21:39 UTC_
 
@@ -74,6 +76,10 @@ tensor shims, no translation layers, and no tracebacks.
   - **Open Z-space:** Gradient splits honour the A/B/C roundtable through the
     new `zspace_round` ops module so Above/Here/Beneath bands stay in sync with
     SpiralK plans without auxiliary buffers.
+  - **Hilbert-grounded Mellin bridges:** `st-frac::mellin::MellinLogGrid` keeps
+    log-uniform quadrature aligned with reusable `st-frac::zspace` weights so
+    Mellin sweeps across vertical lines reuse the same energy checks in
+    L^2((0, ∞), dx/x).
   - **Three-voice consensus:** SpiralK heuristics, DSL directives, and the
     generated WASM tuner table discuss every launch decision and keep the
     transcript in the roundtable log.
@@ -233,28 +239,6 @@ hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:c
 Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
 concept window that the `DesireLagrangian` can consume, aligning coded-envelope
 channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L132】
-
-### Maxwell-coded envelopes meet SpiralK
-
-The coded-envelope utilities now ship with a `MaxwellSpiralKBridge` that turns
-sequential Z pulses into KDSl snippets ready for the runtime. Every channel name
-is sanitised for SpiralK, weights adapt to the observed Z magnitude, and
-existing programs can be prepended so the hints extend a live policy rather than
-replace it.【F:crates/st-core/src/theory/maxwell.rs†L335-L441】 Call
-`push_pulse(channel, &pulse)` for each stream, then `script()` to emit the
-combined `soft(maxwell.bias, …)` rules that SpiralK can ingest without custom
-glue code.【F:crates/st-core/src/theory/maxwell.rs†L362-L408】 The workflow is
-documented in the refreshed Maxwell technical note, which now includes a
-section on streaming detections back into SpiralK orchestration.【F:docs/coded_envelope_maxwell_model.md†L144-L157】
-
-Want the language desire loops to see the same detections? Enable the PSI
-feature and run the new `MaxwellPsiTelemetryBridge`. It converts each pulse into
-a PSI reading, optional band-energy threshold events, and a `SoftlogicZFeedback`
-sample so `DesirePsiBridge` captures the Z drift alongside ψ totals without
-hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:crates/st-core/src/theory/maxwell.rs†L666-L714】
-Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
-concept window that the `DesireLagrangian` can consume, aligning coded-envelope
-channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L214】
 
 ### Quantum Reality Studio overlays
 

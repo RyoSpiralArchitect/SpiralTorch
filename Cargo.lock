@@ -2485,7 +2485,9 @@ dependencies = [
 name = "st-frac"
 version = "0.1.1"
 dependencies = [
+ "libm",
  "ndarray",
+ "num-complex",
  "thiserror 1.0.69",
 ]
 
