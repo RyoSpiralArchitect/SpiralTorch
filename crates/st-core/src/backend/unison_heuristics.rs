@@ -903,8 +903,13 @@ fn latency_ctile_target(
         lanes.saturating_mul(8)
     };
 
-    let desired = base.max(column_bias).clamp(min_ctile, max_ctile);
-    let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
+    let (lower, upper) = if min_ctile <= max_ctile {
+        (min_ctile, max_ctile)
+    } else {
+        (min_ctile, min_ctile)
+    };
+    let desired = base.max(column_bias).clamp(lower, upper);
+    let (min_lane, max_lane) = lane_range(lower, upper, lanes);
     closest_lane_multiple(desired, lanes, min_lane, max_lane)
 }
 
@@ -916,8 +921,13 @@ fn latency_ctile_target_legacy(
     max_ctile: u32,
 ) -> u32 {
     let lanes = lanes.max(1);
-    let base = latency_ctile_core_target(rows, k, lanes).clamp(min_ctile, max_ctile);
-    let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
+    let (lower, upper) = if min_ctile <= max_ctile {
+        (min_ctile, max_ctile)
+    } else {
+        (min_ctile, min_ctile)
+    };
+    let base = latency_ctile_core_target(rows, k, lanes).clamp(lower, upper);
+    let (min_lane, max_lane) = lane_range(lower, upper, lanes);
     closest_lane_multiple(base, lanes, min_lane, max_lane)
 }
 
