@@ -34,7 +34,8 @@
 //! survives the gauge quotient, and optionally reconstructs the oriented normal
 //! field together with signed curvature when a phase label is supplied.
 
-use crate::telemetry::hub::{self, SoftlogicZFeedback};
+use crate::coop::ai::{CoopAgent, CoopProposal};
+use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
     ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZRegistry, ZSource,
 };
@@ -42,54 +43,10 @@ use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
+use std::collections::VecDeque;
 use std::f64::consts::PI;
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
-};
-
-#[derive(Clone, Default, Debug)]
-pub struct MicrolocalEmitter {
-    queue: Arc<Mutex<VecDeque<ZPulse>>>,
-}
-
-impl MicrolocalEmitter {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn enqueue(&self, pulse: ZPulse) {
-        let mut queue = self
-            .queue
-            .lock()
-            .expect("microlocal emitter queue poisoned");
-        queue.push_back(pulse);
-    }
-
-    pub fn extend<I>(&self, pulses: I)
-    where
-        I: IntoIterator<Item = ZPulse>,
-    {
-        let mut queue = self
-            .queue
-            .lock()
-            .expect("microlocal emitter queue poisoned");
-        queue.extend(pulses);
-    }
-}
-
-impl ZEmitter for MicrolocalEmitter {
-    fn name(&self) -> ZSource {
-        ZSource::Microlocal
-    }
-
-    fn tick(&mut self, _now: u64) -> Option<ZPulse> {
-        self.queue
-            .lock()
-            .expect("microlocal emitter queue poisoned")
-            .pop_front()
-    }
-}
+use std::fmt;
+use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
 #[derive(Debug, Clone)]
@@ -1001,46 +958,53 @@ impl BudgetPolicy {
     }
 }
 
-/// Result of fusing microlocal pulses into a Z-space packet.
-#[derive(Debug, Clone)]
-pub struct InterfaceZFused {
-    /// Synthetic Z pulse emitted after fusion.
-    pub pulse: ZPulse,
-    /// Scalar Z value mirroring the fused pulse bias.
-    pub z: f32,
-    /// Normalised attributions assigned to each contributing gauge.
-    pub attributions: Vec<ZAttribution>,
-    /// Optional events generated during fusion (e.g. smoothing, clamping).
-    pub events: Vec<String>,
+#[derive(Clone, Default)]
+struct MicrolocalEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
 }
 
-/// Aggregated report returned by [`InterfaceZConductor::step`].
-#[derive(Debug, Clone)]
-pub struct InterfaceZReport {
-    /// Raw pulses produced by the gauges prior to weighting.
-    pub pulses: Vec<InterfaceZPulse>,
-    /// Quality weights assigned to each pulse.
-    pub qualities: Vec<f32>,
-    /// Weighted and smoothed microlocal pulse.
-    pub fused_pulse: InterfaceZPulse,
-    /// Z-space projection of the fused pulse.
-    pub fused_z: InterfaceZFused,
-    /// Softlogic feedback derived from the fused pulse.
-    pub feedback: SoftlogicZFeedback,
-    /// Scale applied by the optional budget policy.
-    pub budget_scale: f32,
-}
+impl MicrolocalEmitter {
+    fn new() -> Self {
+        Self::default()
+    }
 
-impl InterfaceZReport {
-    /// Returns `true` when any contributing pulse reports an interface.
-    pub fn has_interface(&self) -> bool {
-        self.pulses.iter().any(|pulse| !pulse.is_empty()) || !self.fused_pulse.is_empty()
+    fn extend<I>(&self, pulses: I)
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.extend(pulses);
     }
 }
 
-/// Stateful conductor that runs multiple interface gauges, projects their
-/// signatures into Z-space, and fuses the resulting pulses with optional
-/// smoothing and budget guards.
+impl ZEmitter for MicrolocalEmitter {
+    fn name(&self) -> ZSource {
+        ZSource::Microlocal
+    }
+
+    fn tick(&mut self, now: u64) -> Option<ZPulse> {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.pop_front().map(|mut pulse| {
+            if pulse.ts == 0 {
+                pulse.ts = now;
+            }
+            pulse
+        })
+    }
+
+    fn quality_hint(&self) -> Option<f32> {
+        None
+    }
+}
+
+/// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
+/// smoothed control signal suitable for Softlogic feedback.
 #[derive(Clone)]
 pub struct InterfaceZConductor {
     gauges: Vec<InterfaceGauge>,
@@ -1130,66 +1094,36 @@ impl InterfaceZConductor {
                 events.push("smoothing.applied".to_string());
             }
         }
-        self.emitter.extend(z_pulses);
+        let now = self.clock;
+        self.clock = self.clock.wrapping_add(1);
+
+        let zpulses: Vec<ZPulse> = pulses
+            .iter()
+            .map(|pulse| ZPulse {
+                source: pulse.source,
+                ts: now,
+                band_energy: pulse.band_energy,
+                drift: pulse.drift,
+                z_bias: pulse.z_bias,
+                support: pulse.support,
+                quality: pulse.quality_hint.unwrap_or(1.0),
+                stderr: pulse.standard_error.unwrap_or(0.0),
+                latency_ms: 0.0,
+            })
+            .collect();
+        self.emitter.extend(zpulses);
         let mut registry = ZRegistry::with_capacity(1);
         registry.register(self.emitter.clone());
         let fused_z = self.conductor.step_from_registry(&mut registry, now);
 
-        let feedback = fused.clone().into_softlogic_feedback();
-        let mean_quality = if qualities.is_empty() {
-            0.0
-        } else {
-            qualities.iter().copied().sum::<f32>() / qualities.len() as f32
-        };
+        self.policy.late_fuse(&mut fused, &pulses, &qualities);
 
-        let (above, here, beneath) = fused.band_energy;
-        let ts = ts.unwrap_or_else(|| {
-            let assigned = self.next_ts;
-            self.next_ts = self.next_ts.wrapping_add(1);
-            assigned
-        });
-        let tempo = tempo.unwrap_or(0.0);
+        let mut budget_scale = 1.0;
+        if let Some(budget) = &self.budget_policy {
+            budget_scale = budget.apply(&mut fused);
+        }
 
-        let z_pulse = ZPulse {
-            source: fused.source,
-            ts,
-            tempo,
-            drift: fused.drift,
-            z_bias: fused.z_bias,
-            support: ZSupport {
-                leading: above,
-                central: here,
-                trailing: beneath,
-            },
-            band_energy: fused.band_energy,
-            quality: mean_quality.clamp(0.0, 1.0),
-            stderr: fused.standard_error.unwrap_or(0.0),
-            latency_ms: 0.0,
-        };
-
-        let attribution_weights: Vec<(ZSource, f32)> = pulses
-            .iter()
-            .zip(qualities.iter())
-            .map(|(pulse, &quality)| {
-                let weight = (pulse.support * quality).max(0.0);
-                (pulse.source, weight)
-            })
-            .collect();
-        let total_weight: f32 = attribution_weights.iter().map(|(_, w)| *w).sum();
-        let attributions = if total_weight > 0.0 {
-            attribution_weights
-                .into_iter()
-                .map(|(source, weight)| ZAttribution {
-                    source,
-                    weight: weight / total_weight,
-                })
-                .collect()
-        } else {
-            vec![ZAttribution {
-                source: ZSource::Microlocal,
-                weight: 0.0,
-            }]
-        };
+        self.carry = Some(fused.clone());
 
         let fused_z = InterfaceZFused {
             pulse: z_pulse,
@@ -1206,6 +1140,11 @@ impl InterfaceZConductor {
             feedback,
             budget_scale,
         }
+    }
+
+    /// Returns the most recent fused pulse emitted by the conductor.
+    pub fn last_fused_pulse(&self) -> InterfaceZPulse {
+        self.carry.clone().unwrap_or_else(InterfaceZPulse::default)
     }
 }
 
