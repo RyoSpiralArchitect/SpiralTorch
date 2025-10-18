@@ -157,6 +157,21 @@ resulting pulses, and hands back a `ZFused` packet with attribution weights and
 event tags alongside the smoothed `SoftlogicZFeedback` record so runtime loops
 can see which layer dominated the decision.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L515】【F:crates/st-core/src/theory/zpulse.rs†L22-L344】
 
+The conductor can now blend the pulses in both time and frequency: `set_frequency_config`
+installs a power-of-two FFT window and per-source spectral gains so high-frequency
+microlocal gradients or low-frequency desire trends can be emphasised without a
+second pass, while `set_adaptive_gain_config` keeps a per-source reliability
+score and nudges their gains on-line until the fused drift stabilises. Tests
+cover both the spectral weighting and the adaptive loop so the new knobs keep
+their invariants.【F:crates/st-core/src/theory/zpulse.rs†L121-L233】【F:crates/st-core/src/theory/zpulse.rs†L244-L405】【F:crates/st-core/src/theory/zpulse.rs†L458-L557】
+
+Desire loops pick up the fused Z feedback straight from the hub: the conductor
+stores the latest `SoftlogicZFeedback`, and the temperature controller now
+accepts that pulse to raise exploration when the drift jitters and cool the
+distribution when the Z-bias settles. The default controller keeps a short
+memory of recent flips and exposes `with_feedback` so runtimes can tweak the
+feedback gain without rebuilding the desire machinery.【F:crates/st-core/src/theory/microlocal.rs†L488-L559】【F:crates/st-nn/src/language/temperature.rs†L1-L81】【F:crates/st-nn/src/language/desire.rs†L318-L352】
+
 ### Maxwell-coded envelopes meet SpiralK
 
 The coded-envelope utilities now ship with a `MaxwellSpiralKBridge` that turns
@@ -1348,9 +1363,17 @@ optimisers alongside its hypergradient updates.
   L1/L2/∞ norms plus RMS/mean-absolute magnitudes so monitoring dashboards can
   watch gradient health without shipping the full relation buffers across the
   WASM boundary.
+- `FractalCanvas::desireInterpretation(curvature)` lifts the paired gradient
+  summaries into Desire-ready feedback metrics (pressure, balance, stability)
+  so automation layers can steer the Desire Lagrangian without leaving WASM.
 - `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
   WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
   the vector field and accumulate the spectrum fully on-GPU.
+- `FractalCanvas::hypergradOperatorKernel(false)` emits the complementary WGSL
+  pass that accumulates relation tensors into hypergradient buffers directly on
+  the GPU, with `hypergradOperatorUniform(mix, gain)` +
+  `hypergradOperatorDispatch(subgroup)` mirroring the uniform payload and
+  workgroup math for WebGPU callers.
 - `FractalCanvas::vectorFieldFftUniform(false)` packages the `CanvasFftParams`
   uniform (width, height, inverse flag, padding) as a `Uint32Array` so the WGSL
   kernel can be dispatched without manual byte packing.
