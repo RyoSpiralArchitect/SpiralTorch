@@ -657,11 +657,15 @@ fn knn_adjacency(kernel: &[Vec<f64>], k: usize) -> Vec<Vec<f64>> {
             .map(|(j, &w)| (j, w))
             .collect();
         pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
-        for (idx, &weight) in pairs.iter().take(k) {
-            let j = *idx;
+        for &(idx, weight) in pairs.iter().take(k) {
+            let j = idx;
             let w = weight.max(0.0);
-            adjacency[i][j] = adjacency[i][j].max(w);
-            adjacency[j][i] = adjacency[j][i].max(w);
+            if adjacency[i][j] < w {
+                adjacency[i][j] = w;
+            }
+            if adjacency[j][i] < w {
+                adjacency[j][i] = w;
+            }
         }
     }
     adjacency
@@ -760,7 +764,7 @@ fn project_to_psd(matrix: DMatrix<f64>) -> DMatrix<f64> {
     let eigen = SymmetricEigen::new(symmetric);
     let mut diag = DVector::zeros(eigen.eigenvalues.len());
     for (idx, val) in eigen.eigenvalues.iter().enumerate() {
-        diag[idx] = val.max(&0.0);
+        diag[idx] = val.max(0.0);
     }
     let diag_matrix = DMatrix::from_diagonal(&diag);
     &eigen.eigenvectors * diag_matrix * eigen.eigenvectors.transpose()
@@ -973,6 +977,19 @@ pub struct ZMonadBridge {
     pub coherence: f64,
 }
 
+/// Summary of the collapse manifold state used for diagnostics.
+#[derive(Clone, Debug)]
+pub struct CollapseManifold {
+    /// Entropy contributions per cluster on the taxicab manifold.
+    pub cluster_entropies: Vec<f64>,
+    /// Degeneracy counts per qubit used when constructing the manifold.
+    pub degeneracy: Vec<usize>,
+    /// Thermo-pressure samples per qubit at the query time.
+    pub pressure_map: Vec<f64>,
+    /// Mean entropy across all clusters for a quick stability indicator.
+    pub average_entropy: f64,
+}
+
 /// Complete engine tying the various components together.
 #[derive(Clone)]
 pub struct QuantumRealityEngine {
@@ -1069,6 +1086,52 @@ impl QuantumRealityEngine {
             coherence,
         }
     }
+
+    /// Construct a diagnostic collapse manifold snapshot at time `t`.
+    ///
+    /// `degeneracy_epsilon` controls the tolerance when counting near-degenerate
+    /// bloom amplitudes, while `alpha_th` governs the thermo-pressure decay.
+    pub fn collapse_manifold(
+        &self,
+        t: f64,
+        degeneracy_epsilon: f64,
+        alpha_th: f64,
+    ) -> CollapseManifold {
+        let epsilon = degeneracy_epsilon.max(1e-9);
+        let degeneracy = degeneracy_counts(&self.states, t, &self.bloom, epsilon);
+
+        let mut cluster_entropies = Vec::new();
+        for cluster_idx in 0..self.clusters.cluster_count() {
+            let entropy = taxicab_entropy(
+                &self.clusters,
+                cluster_idx,
+                &self.states,
+                t,
+                &self.bloom,
+                &degeneracy,
+            );
+            cluster_entropies.push(entropy);
+        }
+
+        let pressure_map = self
+            .states
+            .iter()
+            .map(|state| thermo_pressure(state, t, &self.bloom, alpha_th))
+            .collect::<Vec<_>>();
+
+        let average_entropy = if cluster_entropies.is_empty() {
+            0.0
+        } else {
+            cluster_entropies.iter().sum::<f64>() / cluster_entropies.len() as f64
+        };
+
+        CollapseManifold {
+            cluster_entropies,
+            degeneracy,
+            pressure_map,
+            average_entropy,
+        }
+    }
 }
 
 fn normalize(weights: &[f64]) -> Vec<f64> {
@@ -1077,4 +1140,139 @@ fn normalize(weights: &[f64]) -> Vec<f64> {
         sum = 1.0;
     }
     weights.iter().map(|w| w.max(0.0) / sum).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f64::consts::PI;
+    use std::sync::Arc;
+
+    fn constant_fn(value: f64) -> TimeFn {
+        Arc::new(move |_| value)
+    }
+
+    #[test]
+    fn collapse_manifold_reports_cluster_metrics() {
+        let hardware = HardwareStack {
+            qubit_layer: QubitLayer {
+                material: "NbTiN",
+                geometry: "planar",
+            },
+            junction: JosephsonJunction {
+                barrier_material: "AlOx",
+                barrier_thickness_nm: 1.8,
+            },
+            on_chip_lines: OnChipLines {
+                topology: "coplanar",
+                center_width_microns: 10.0,
+                impedance_ohms: 50.0,
+            },
+            ground_plane: GroundPlane {
+                material: "Nb",
+                shielded: true,
+            },
+            cryo_enclosure: CryoEnclosure {
+                temperature_mk: 10.0,
+                shields: "mu-metal",
+            },
+        };
+
+        let substrate = SubstratePhysicalModel {
+            lattice_a_angstrom: 4.76,
+            lattice_c_angstrom: 12.99,
+            die_dims_mm: [8.0, 8.0, 0.5],
+            epsilon_r: 9.4,
+            thermal_conductivity_w_mk: 35.0,
+            cte_per_k: 5.6e-6,
+        };
+
+        let simulation = SimulationParameters {
+            qubit_frequency_ghz: 5.0,
+            anharmonicity_mhz: -300.0,
+            coupling_mhz: 20.0,
+            t1_microseconds: 30.0,
+            t2_microseconds: 40.0,
+            pi_pulse_ns: 25.0,
+        };
+
+        let clusters = ClusterStructure::new(vec![2, 1]);
+
+        let states = vec![
+            QubitState {
+                index: 0,
+                omega: 5.0,
+                trajectory: QubitTrajectory {
+                    theta: constant_fn(PI / 4.0),
+                    phi: constant_fn(0.0),
+                    theta_dot: constant_fn(0.0),
+                    phi_dot: constant_fn(0.0),
+                },
+            },
+            QubitState {
+                index: 1,
+                omega: 5.2,
+                trajectory: QubitTrajectory {
+                    theta: constant_fn(PI / 3.0),
+                    phi: constant_fn(PI / 8.0),
+                    theta_dot: constant_fn(0.01),
+                    phi_dot: constant_fn(0.02),
+                },
+            },
+            QubitState {
+                index: 2,
+                omega: 4.8,
+                trajectory: QubitTrajectory {
+                    theta: constant_fn(PI / 6.0),
+                    phi: constant_fn(PI / 7.0),
+                    theta_dot: constant_fn(0.0),
+                    phi_dot: constant_fn(0.0),
+                },
+            },
+        ];
+
+        let bloom = BloomSignature {
+            varphi0: 0.7,
+            epsilon_t: 0.05,
+            psi: constant_fn(1.2),
+        };
+
+        let drift = DriftField {
+            phi: constant_fn(0.3),
+            omega: 0.15,
+            zeta: vec![Complex64::new(1.0, 0.0); 3],
+        };
+
+        let engine = QuantumRealityEngine {
+            hardware,
+            substrate,
+            simulation,
+            clusters,
+            states,
+            bloom,
+            drift,
+            sigma_d: 0.2,
+            sigma_bloom: 0.3,
+        };
+
+        let cluster_count = engine.clusters.cluster_count();
+        let state_count = engine.states.len();
+
+        let manifold = engine.collapse_manifold(0.1, 0.05, 0.4);
+
+        assert_eq!(manifold.degeneracy.len(), state_count);
+        assert_eq!(manifold.pressure_map.len(), state_count);
+        assert_eq!(manifold.cluster_entropies.len(), cluster_count);
+
+        let expected_average = if manifold.cluster_entropies.is_empty() {
+            0.0
+        } else {
+            manifold.cluster_entropies.iter().sum::<f64>() / manifold.cluster_entropies.len() as f64
+        };
+        assert!((manifold.average_entropy - expected_average).abs() < 1e-9);
+
+        for pressure in manifold.pressure_map {
+            assert!(pressure.is_finite());
+        }
+    }
 }
