@@ -3970,6 +3970,9 @@ impl PyModuleTrainer {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
+    #[getter]
     fn energy_decay(&self) -> f32 {
         self.frame.energy_decay
     }
@@ -4602,6 +4605,8 @@ impl PyAtlasMetric {
             collapse,
         );
         PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
+    }
+
     fn as_tuple(&self) -> (String, f32) {
         (self.metric.name.clone(), self.metric.value)
     }
@@ -5360,6 +5365,8 @@ impl PyGoldenBlackcatPulse {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
     #[getter]
     fn mean_confidence(&self) -> f32 {
         self.inner.mean_confidence
@@ -5675,6 +5682,8 @@ impl PyGoldenCouncilSnapshot {
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
 struct PyModuleTrainer {
     inner: ModuleTrainer,
+}
+
 #[pyclass(module = "spiraltorch", name = "AtlasFrame")]
 #[derive(Clone)]
 struct PyAtlasFrame {
@@ -5831,6 +5840,8 @@ impl PyAtlasFrame {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
     #[getter]
     fn suggested_max_scale(&self) -> Option<f32> {
         self.frame.suggested_max_scale
@@ -6538,6 +6549,9 @@ impl PyChronoFrame {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
+    #[getter]
     fn energy_decay(&self) -> f32 {
         self.frame.energy_decay
     }
@@ -6846,6 +6860,8 @@ impl PyCollapsePulse {
     fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
         self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
         Ok(())
+    }
+
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {
@@ -8128,6 +8144,8 @@ impl PyChronoPeak {
             list.append(entry.into_py(py))?;
         }
         Ok(list.into_py(py))
+    }
+
 #[pyclass(module = "spiraltorch", name = "TextResonator")]
 #[derive(Clone)]
 struct PyTextResonator {
@@ -8206,6 +8224,8 @@ impl PyTextResonator {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
 #[pymethods]
 impl PyTextResonator {
     #[new]
@@ -9136,6 +9156,8 @@ impl PyChronoHarmonics {
     fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
         self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
         Ok(())
+    }
+
     #[getter]
     fn duration(&self) -> f32 {
         self.harmonics.duration
@@ -9800,6 +9822,8 @@ impl PyChronoSummary {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
     #[getter]
     fn mean_drift(&self) -> f32 {
         self.summary.mean_drift
@@ -10449,6 +10473,9 @@ impl PyChronoLoopSignal {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
+    #[getter]
     fn harmonics(&self) -> Option<PyChronoHarmonics> {
         self.signal
             .harmonics
@@ -10675,6 +10702,8 @@ impl PyChronoFrame {
     fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
         self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
         Ok(())
+    }
+
     #[getter]
     fn projection_energy(&self) -> f32 {
         self.frame.projection_energy
@@ -11601,6 +11630,8 @@ impl PyMaintainerReport {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
     #[getter]
     fn mean_score(&self) -> f32 {
         self.minutes.mean_score
@@ -14744,6 +14775,8 @@ impl PyModuleTrainer {
             .into_iter()
             .map(PyMaintainerReport::from_minutes)
             .collect()
+    }
+
     fn blackcat_minutes<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
         let minutes = self.inner.blackcat_minutes();
         let list = PyList::empty_bound(py);
