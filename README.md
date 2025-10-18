@@ -1288,6 +1288,12 @@ print("updated weights", weights.tolist())
 - `CanvasProjector::refresh_with_vectors` now returns both the RGBA buffer and
   a colour vector field that carries normalised energy and chroma as
   Z-space-friendly coordinates.
+- `FractalCanvas::vectorFieldFft(false)` surfaces the per-row FFT spectrum as
+  interleaved energy/chroma pairs so Canvas Transformer pipelines can ingest
+  frequency features without leaving Rust.
+- `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
+  WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
+  the vector field and accumulate the spectrum fully on-GPU.
 - Use `CanvasProjector::emit_zspace_patch` to fold the canvas state back into
   the fractal scheduler without leaving Rust or allocating intermediate
   buffers.
@@ -1667,11 +1673,25 @@ const wasm = await init();
 const canvas = document.getElementById("zspace");
 const fractal = new FractalCanvas(64);
 await fractal.render(canvas);
+const spectrum = fractal.vectorFieldFft(false);
+console.log(`fft bins=${spectrum.length / 8}`);
+const kernel = fractal.vectorFieldFftKernel(true);
+console.log(kernel.split("\n")[0]);
 </script>
 ```
 
 Pixels become Z-space relations, the scheduler keeps memory bounded, and the
 entire loop stays panic-free even under aggressive streaming.
+
+The returned spectrum stores `[energy_re, energy_im, chroma_r_re, chroma_r_im,
+chroma_g_re, chroma_g_im, chroma_b_re, chroma_b_im]` per bin, so Canvas
+Transformers can slice the energy or chroma lanes directly or feed the full
+tensor back through `fft_inverse_in_place` for quick spatial reconstruction.
+
+When dispatching the WGSL kernel, bind the colour field as a tightly-packed
+array of `FieldSample { energy, chroma }`, store the complex spectrum in a
+matching `SpectrumSample` buffer, and provide the canvas dimensions plus an
+inverse flag through a `CanvasFftParams` uniform struct.
 
 Need FFT heuristics alongside the canvas?  WebAssembly exports now ship auto
 planning helpers and CPU fallbacks:
@@ -1703,6 +1723,14 @@ tuner.mergeObject([
   { rows: 512, cols_min: 4096, cols_max: 16383, k_max: 256, sg: true, tile_cols: 1024 },
 ]);
 const overrides = tuner.toObject();
+const fallbackPlan = tuner.planFftWithFallback(512, 4096, 128, true);
+const resolution = tuner.planFftResolution(512, 4096, 128, true);
+if (resolution.source === WasmFftPlanSource.Override) {
+  console.log(`override tile=${resolution.plan.tileCols}`);
+}
+const snapshot = resolution.toJson();
+const hydrated = ResolvedWasmFftPlan.fromJson(snapshot);
+const report = tuner.planFftReport(512, 4096, 128, true);
 ```
 
 ---

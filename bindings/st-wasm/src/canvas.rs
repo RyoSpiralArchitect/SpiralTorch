@@ -103,6 +103,25 @@ impl FractalCanvas {
         Ok(Float32Array::from(data.as_slice()))
     }
 
+    /// Refresh the projector and return the interleaved FFT spectrum for each
+    /// canvas row. Each frequency sample contributes eight floats (real/imag
+    /// pairs for energy + RGB chroma).
+    #[wasm_bindgen(js_name = vectorFieldFft)]
+    pub fn vector_field_fft(&mut self, inverse: bool) -> Result<Float32Array, JsValue> {
+        let spectrum = self
+            .projector
+            .refresh_vector_fft(inverse)
+            .map_err(js_error)?;
+        Ok(Float32Array::from(spectrum.as_slice()))
+    }
+
+    /// Emit the WGSL kernel that mirrors [`vector_field_fft`] so WebGPU
+    /// consumers can reproduce the spectral pass directly on the GPU.
+    #[wasm_bindgen(js_name = vectorFieldFftKernel)]
+    pub fn vector_field_fft_kernel(&self, subgroup: bool) -> String {
+        self.projector.vector_fft_wgsl(subgroup)
+    }
+
     /// Reset the internal normaliser so the next frame recomputes brightness ranges.
     pub fn reset_normalizer(&mut self) {
         self.projector.normalizer_mut().reset();
