@@ -41,6 +41,7 @@ use st_core::telemetry::chrono::{
 };
 use st_core::telemetry::hub;
 use st_core::telemetry::maintainer::MaintainerReport;
+use st_core::theory::observability::{ObservabilityConfig, SlotSymmetry};
 use st_core::ecosystem::{
     ConnectorEvent as CoreConnectorEvent, DistributionSummary as CoreDistributionSummary,
     EcosystemCapacity, EcosystemRegistry, EcosystemReport as CoreEcosystemReport,
@@ -80,7 +81,10 @@ use st_nn::{
     HeurOp, HeurOpKind,
 };
 use st_rec::{RatingTriple as RecRatingTriple, RecEpochReport, SpiralRecError, SpiralRecommender};
-use st_rl::{EpisodeReport as RlEpisodeReport, SpiralPolicyGradient, SpiralRlError};
+use st_rl::{
+    EpisodeReport as RlEpisodeReport, GeometryFeedback, GeometryFeedbackConfig,
+    GeometryFeedbackSignal, GeometryTelemetry, SpiralPolicyGradient, SpiralRlError,
+};
 use st_tensor::backend::faer_dense;
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense as tensor_wgpu_dense;
@@ -15910,118 +15914,6 @@ impl PySpiralSession {
     }
 }
 
-#[pyclass(module = "spiraltorch.rl", name = "PolicyGradient", unsendable)]
-struct PyPolicyGradient {
-    trainer: ModuleTrainer,
-}
-
-#[pymethods]
-impl PyPolicyGradient {
-    #[new]
-    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01))]
-    fn new(
-        device: Option<&str>,
-        curvature: f32,
-        hyper_learning_rate: f32,
-        fallback_learning_rate: f32,
-    ) -> Self {
-        let caps = caps_for(device);
-        Self {
-            trainer: ModuleTrainer::new(
-                caps,
-                curvature,
-                hyper_learning_rate,
-                fallback_learning_rate,
-            ),
-        }
-    }
-
-    #[getter]
-    fn curvature(&self) -> f32 {
-        self.trainer.curvature()
-    }
-
-    #[getter]
-    fn hyper_learning_rate(&self) -> f32 {
-        self.trainer.hyper_learning_rate()
-    }
-
-    #[getter]
-    fn fallback_learning_rate(&self) -> f32 {
-        self.trainer.fallback_learning_rate()
-    }
-
-    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
-    fn roundtable(
-        &mut self,
-        rows: u32,
-        cols: u32,
-        top_k: u32,
-        mid_k: u32,
-        bottom_k: u32,
-        here_tolerance: f32,
-        psychoid: bool,
-        psychoid_log: bool,
-        psi: bool,
-        collapse: bool,
-        dist: Option<PyDistConfig>,
-    ) -> PyResult<PyRoundtableSchedule> {
-        let config = build_roundtable_config(
-            top_k,
-            mid_k,
-            bottom_k,
-            here_tolerance,
-            psychoid,
-            psychoid_log,
-            psi,
-            collapse,
-        );
-        if let Some(dist_cfg) = dist {
-            self.trainer.configure_distribution(dist_cfg.inner.clone());
-        } else {
-            self.trainer.clear_distribution();
-        }
-        Ok(PyRoundtableSchedule::from_schedule(
-            self.trainer.roundtable(rows, cols, config),
-        ))
-    }
-
-    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
-        self.trainer
-            .install_blackcat_moderator(config.threshold, config.participants);
-    }
-
-    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
-        self.trainer
-            .blackcat_minutes()
-            .into_iter()
-            .map(PyMaintainerReport::from_minutes)
-            .collect()
-    }
-
-    #[pyo3(signature = (module, loss, batches, schedule))]
-    fn train_epoch(
-        &mut self,
-        module: &Bound<'_, PyAny>,
-        loss: &Bound<'_, PyAny>,
-        batches: &Bound<'_, PyAny>,
-        schedule: &PyRoundtableSchedule,
-    ) -> PyResult<PyEpochStats> {
-        let stats =
-            run_epoch_with_trainer(&mut self.trainer, module, loss, batches, &schedule.inner)?;
-        Ok(PyEpochStats::from_stats(stats))
-    }
-
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!(
-            "PolicyGradient(curvature={:.3}, hyper_lr={:.3}, fallback_lr={:.3})",
-            self.curvature(),
-            self.hyper_learning_rate(),
-            self.fallback_learning_rate()
-        ))
-    }
-}
-
 #[pyclass(module = "spiraltorch.nn", name = "MeanSquaredError")]
 struct PyMeanSquaredError {
     inner: MeanSquaredError,
@@ -16314,118 +16206,6 @@ fn train_trainer_with_dataset(
             ))?;
             return Ok(Some(stats));
         }
-    }
-}
-
-#[pyclass(module = "spiraltorch.rl", name = "PolicyGradient", unsendable)]
-struct PyPolicyGradient {
-    trainer: ModuleTrainer,
-}
-
-#[pymethods]
-impl PyPolicyGradient {
-    #[new]
-    #[pyo3(signature = (device=None, curvature=-1.0, hyper_learning_rate=0.05, fallback_learning_rate=0.01))]
-    fn new(
-        device: Option<&str>,
-        curvature: f32,
-        hyper_learning_rate: f32,
-        fallback_learning_rate: f32,
-    ) -> Self {
-        let caps = caps_for(device);
-        Self {
-            trainer: ModuleTrainer::new(
-                caps,
-                curvature,
-                hyper_learning_rate,
-                fallback_learning_rate,
-            ),
-        }
-    }
-
-    #[getter]
-    fn curvature(&self) -> f32 {
-        self.trainer.curvature()
-    }
-
-    #[getter]
-    fn hyper_learning_rate(&self) -> f32 {
-        self.trainer.hyper_learning_rate()
-    }
-
-    #[getter]
-    fn fallback_learning_rate(&self) -> f32 {
-        self.trainer.fallback_learning_rate()
-    }
-
-    #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
-    fn roundtable(
-        &mut self,
-        rows: u32,
-        cols: u32,
-        top_k: u32,
-        mid_k: u32,
-        bottom_k: u32,
-        here_tolerance: f32,
-        psychoid: bool,
-        psychoid_log: bool,
-        psi: bool,
-        collapse: bool,
-        dist: Option<PyDistConfig>,
-    ) -> PyResult<PyRoundtableSchedule> {
-        let config = build_roundtable_config(
-            top_k,
-            mid_k,
-            bottom_k,
-            here_tolerance,
-            psychoid,
-            psychoid_log,
-            psi,
-            collapse,
-        );
-        if let Some(dist_cfg) = dist {
-            self.trainer.configure_distribution(dist_cfg.inner.clone());
-        } else {
-            self.trainer.clear_distribution();
-        }
-        Ok(PyRoundtableSchedule::from_schedule(
-            self.trainer.roundtable(rows, cols, config),
-        ))
-    }
-
-    fn install_maintainer(&mut self, config: &PyMaintainerConfig) {
-        self.trainer
-            .install_blackcat_moderator(config.threshold, config.participants);
-    }
-
-    fn maintainer_reports(&self) -> Vec<PyMaintainerReport> {
-        self.trainer
-            .blackcat_minutes()
-            .into_iter()
-            .map(PyMaintainerReport::from_minutes)
-            .collect()
-    }
-
-    #[pyo3(signature = (module, loss, batches, schedule))]
-    fn train_epoch(
-        &mut self,
-        module: &Bound<'_, PyAny>,
-        loss: &Bound<'_, PyAny>,
-        batches: &Bound<'_, PyAny>,
-        schedule: &PyRoundtableSchedule,
-    ) -> PyResult<PyEpochStats> {
-        let stats =
-            run_epoch_with_trainer(&mut self.trainer, module, loss, batches, &schedule.inner)?;
-        Ok(PyEpochStats::from_stats(stats))
-    }
-
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!(
-            "PolicyGradient(curvature={:.3}, hyper_lr={:.3}, fallback_lr={:.3})",
-            self.curvature(),
-            self.hyper_learning_rate(),
-            self.fallback_learning_rate()
-        ))
     }
 }
 
@@ -18101,6 +17881,100 @@ fn is_wgpu_available_py() -> bool {
     }
 }
 
+fn parse_slot_symmetry(label: &str) -> PyResult<SlotSymmetry> {
+    match label.to_ascii_lowercase().as_str() {
+        "symmetric" | "sym" | "sb" => Ok(SlotSymmetry::Symmetric),
+        "cyclic" | "cyc" | "cb" => Ok(SlotSymmetry::Cyclic),
+        "dihedral" | "dih" | "db" => Ok(SlotSymmetry::Dihedral),
+        other => Err(PyValueError::new_err(format!(
+            "unsupported slot symmetry '{other}' — expected 'symmetric', 'cyclic', or 'dihedral'",
+        ))),
+    }
+}
+
+fn geometry_config_from_dict(dict: Option<&Bound<'_, PyDict>>) -> PyResult<GeometryFeedbackConfig> {
+    let mut config = GeometryFeedbackConfig::default_policy();
+    let mut root_cardinality = config.observability.root_cardinality;
+    let mut branching_factor = config.observability.branching_factor;
+    let mut symmetry = config.observability.slot_symmetry;
+
+    if let Some(dict) = dict {
+        if let Some(value) = dict.get_item("root_cardinality")? {
+            root_cardinality = u128::from(value.extract::<u64>()?);
+        }
+        if let Some(value) = dict.get_item("branching_factor")? {
+            branching_factor = value.extract::<u32>()?.max(1);
+        }
+        if let Some(value) = dict.get_item("slot_symmetry")? {
+            let label: &str = value.extract()?;
+            symmetry = parse_slot_symmetry(label)?;
+        }
+        if let Some(value) = dict.get_item("activation_threshold")? {
+            config.activation_threshold = value.extract()?;
+        }
+        if let Some(value) = dict.get_item("smoothing_window")? {
+            config.smoothing_window = value.extract()?;
+        }
+        if let Some(value) = dict.get_item("min_learning_rate_scale")? {
+            config.min_learning_rate_scale = value.extract()?;
+        }
+        if let Some(value) = dict.get_item("max_learning_rate_scale")? {
+            config.max_learning_rate_scale = value.extract()?;
+        }
+        if let Some(value) = dict.get_item("z_space_rank")? {
+            config.z_space_rank = value.extract()?;
+        }
+        if let Some(value) = dict.get_item("leech_density_weight")? {
+            config.leech_density_weight = value.extract()?;
+        }
+        if let Some(value) = dict.get_item("ramanujan_iterations")? {
+            config.ramanujan_iterations = value.extract()?;
+        }
+        if let Some(value) = dict.get_item("softening_beta")? {
+            config.softening_beta = value.extract()?;
+        }
+    }
+
+    config.observability = ObservabilityConfig::new(root_cardinality, branching_factor, symmetry);
+    Ok(config)
+}
+
+fn geometry_signal_to_dict(
+    py: Python<'_>,
+    signal: &GeometryFeedbackSignal,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("expected", signal.assessment.expected.clone())?;
+    dict.set_item("efficiency", signal.assessment.efficiency.clone())?;
+    dict.set_item("averaged_efficiency", signal.averaged_efficiency)?;
+    dict.set_item("smoothed_rank", signal.smoothed_rank)?;
+    dict.set_item("smoothed_pressure", signal.smoothed_pressure)?;
+    dict.set_item("learning_rate_scale", signal.learning_rate_scale)?;
+    dict.set_item("rolling_scale", signal.rolling_scale)?;
+    Ok(dict.into_py(py))
+}
+
+fn geometry_telemetry_to_dict(
+    py: Python<'_>,
+    telemetry: &GeometryTelemetry,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("rolling_rank", telemetry.rolling_rank)?;
+    dict.set_item("rolling_pressure", telemetry.rolling_pressure)?;
+    dict.set_item("rolling_scale", telemetry.rolling_scale)?;
+    dict.set_item("min_scale", telemetry.min_scale)?;
+    dict.set_item("max_scale", telemetry.max_scale)?;
+    dict.set_item("leech_density_weight", telemetry.leech_density_weight)?;
+    dict.set_item("loop_gain", telemetry.loop_gain)?;
+    dict.set_item("collapse_bias", telemetry.collapse_bias)?;
+    dict.set_item("loop_timestamp", telemetry.loop_timestamp)?;
+    dict.set_item("softening_beta", telemetry.softening_beta)?;
+    dict.set_item("loop_support", telemetry.loop_support)?;
+    dict.set_item("loop_script", telemetry.loop_script.clone())?;
+    Ok(dict.into_py(py))
+}
+
+
 #[pyclass(module = "spiraltorch.rl", name = "EpisodeReport")]
 struct PyRlEpisodeReport {
     inner: RlEpisodeReport,
@@ -18177,10 +18051,57 @@ impl PyPolicyGradient {
             .map_err(rl_err)
     }
 
+    #[pyo3(signature = (config=None))]
+    fn attach_geometry_feedback(&self, config: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        let mut guard = self.inner.lock().unwrap();
+        let cfg = geometry_config_from_dict(config)?;
+        guard.attach_geometry_feedback(GeometryFeedback::new(cfg));
+        Ok(())
+    }
+
+    fn detach_geometry_feedback(&self) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        guard.detach_geometry_feedback().is_some()
+    }
+
     fn finish_episode(&self) -> PyResult<PyRlEpisodeReport> {
         let mut guard = self.inner.lock().unwrap();
         let report = guard.finish_episode().map_err(rl_err)?;
         Ok(PyRlEpisodeReport { inner: report })
+    }
+
+    fn finish_episode_with_geometry(
+        &self,
+        py: Python<'_>,
+        resonance: &PyDifferentialResonance,
+    ) -> PyResult<(PyRlEpisodeReport, Option<PyObject>)> {
+        let mut guard = self.inner.lock().unwrap();
+        let (report, signal) = guard
+            .finish_episode_with_geometry(&resonance.inner)
+            .map_err(rl_err)?;
+        let py_signal = match signal {
+            Some(signal) => Some(geometry_signal_to_dict(py, &signal)?),
+            None => None,
+        };
+        Ok((PyRlEpisodeReport { inner: report }, py_signal))
+    }
+
+    fn last_geometry_signal(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let guard = self.inner.lock().unwrap();
+        if let Some(signal) = guard.last_geometry_signal() {
+            Ok(Some(geometry_signal_to_dict(py, signal)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn geometry_telemetry(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let guard = self.inner.lock().unwrap();
+        if let Some(telemetry) = guard.telemetry().geometry.as_ref() {
+            Ok(Some(geometry_telemetry_to_dict(py, telemetry)?))
+        } else {
+            Ok(None)
+        }
     }
 
     fn reset(&self) {
@@ -18406,7 +18327,7 @@ fn rl(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.setattr("__all__", vec!["PolicyGradient"])?;
     m.setattr(
         "__doc__",
-        "Reinforcement learning helpers built on top of SpiralTorch's module trainer.",
+        "Policy gradient learner with optional Z-space geometry feedback and telemetry surfaces returned as dictionaries.",
     )?;
     Ok(())
 }

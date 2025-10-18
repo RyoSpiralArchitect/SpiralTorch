@@ -1046,6 +1046,30 @@ report = policy.finish_episode()
 print(report.steps, report.hypergrad_applied)
 ```
 
+Python bindings mirror the geometry controller as well. Pass a dictionary of
+overrides to `PolicyGradient.attach_geometry_feedback` to customise the
+observability parameters and smoothing ranges without leaving Python.
+
+```python
+from spiraltorch import SpiralSession
+from spiraltorch.rl import PolicyGradient
+
+session = SpiralSession(device="wgpu", curvature=-1.0)
+policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
+policy.attach_geometry_feedback({"z_space_rank": 24, "slot_symmetry": "cyclic"})
+
+resonance = session.trace(state).resonate()
+policy.record_transition(state, action, reward=0.8)
+
+report, signal = policy.finish_episode_with_geometry(resonance)
+if signal:
+    print(f"η̄={signal['averaged_efficiency']:.3f} scale={signal['learning_rate_scale']:.2f}")
+
+telemetry = policy.geometry_telemetry()
+if telemetry:
+    print("loop gain", telemetry["loop_gain"], "script", telemetry["loop_script"])
+```
+
 Rust projects can pair the policy with the new geometric feedback module to
 ground the update scale in observability measurements. Feed a
 `DifferentialResonance` snapshot into `GeometryFeedback` and the learner will

@@ -247,7 +247,7 @@ impl DesireTelemetrySink {
 #[cfg(feature = "psi")]
 impl DesirePipelineSink for DesireTelemetrySink {
     fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
-        hub::set_last_desire_step(Self::base_sample(step, timestamp));
+        let _ = Self::record_with_psi(step, timestamp);
         Ok(())
     }
 }
