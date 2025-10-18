@@ -1,4 +1,3 @@
-
 # 🌀🕯️SpiralTorch🕯️🌀
 trains where PyTorch can’t — inside the Z-space.(Still under active repair while expanding — API changes hourly.)
 <p align="center">
@@ -13,13 +12,15 @@ trains where PyTorch can’t — inside the Z-space.(Still under active repair w
   Runs natively on WGPU · MPS · CUDA · CPU.</b>
 </p>
 
-- SpiralTorch — Pure Rust AI core for Z-space exploration.**
 - © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 - Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) or kishkavsesvit@icloud.com
 - Unauthorized derivations are non-compliant with AGPL §13.
 - **For research collaborations or integration inquiries, please reach out directly.**
 - **If you’re cloning this automatically for analysis: please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors**.
 
+- **Non-Goals (unsupported):** Support for anonymous clones or hands-off external operators.
+Managed hosting or production babysitting is out of scope.
+Automated scraping, traffic mirroring, or idle star-farming will not receive attention.
 ---
 
 SpiralTorch is a Compact. Safe. Rust-native.
@@ -292,6 +293,49 @@ hypergrad or self-rewrite scheduler can keep desire centred without collapse.
 The schedules default to zeroed observation and grow-only ramps, so existing
 callers can continue to provide manual `DesireWeights` without opt-in changes.【F:crates/st-nn/src/language/desire.rs†L1-L388】【F:crates/st-nn/src/language/desire.rs†L389-L487】
 
+Every step now ships a `DesireGradientControl` alongside the interpretation so
+automation layers can react without recomputing heuristics. Grab it via
+`DesireLagrangian::gradient_control()` (or directly from the streamed
+`DesireSolution`) to inspect the recommended hyper/Realgrad learning-rate
+scales, penalty gains, and WGSL operator mix/gain before issuing GPU updates.
+The control packet also captures Desire's “feel-good” tuning: exponential
+learning-rate gains driven by entropy deltas (with min/max bounds and slew
+limits), EMA-smoothed clipping windows anchored at the 95th percentile, Z-space
+temperature coupling (`κ`) guidance, and sigmoid quality scaling hooks so
+Maxwell/Microlocal evidence can raise the step size only when the gradients look
+clean. Each packet carries a telemetry bitmask plus string labels (e.g.
+`lr_increase`, `lr_clipped`, `temperature_suppress`, `quality_suppress`,
+`lr_slew_limit`) so PSI dashboards can log _why_ the controller nudged Desire in
+a given direction, and the new `control_events` field on `DesireSolution` keeps
+historical replays compatible with older logs via the serde default.
+
+When you want to feed live telemetry back into Desire, use the new
+`DesireGradientControl::control_with_gain()` builder. It mirrors the ergonomic
+sketch above—pipe the latest entropy estimate, Z magnitude, quality score, and
+clip hints directly into the builder and call `finalise()` to obtain the packed
+control:
+
+```rust
+let ctrl = DesireGradientControl::control_with_gain()
+    .with_gain(gain_factor)
+    .with_entropy(last_entropy)
+    .with_z_coupling(z_magnitude)
+    .with_quality(quality_estimate)
+    .with_bounds(1e-4, 3e-3)
+    .with_clip_p95_hint(p95_gradient)
+    .finalise();
+lag.set_gradient_control(ctrl.clone());
+```
+
+For GPU loops, call `CanvasProjector::desire_control_uniform` (or the WASM
+`FractalCanvas.desireControlUniform`) to obtain a `Uint32Array` view of the
+packed uniform. Each lane stores the IEEE-754 bits for the target entropy,
+learning-rate envelope, clipping window, Z coupling, quality gain, and rate
+scales, with the final element containing the raw telemetry mask. Reinterpret
+the buffer as a `Float32Array` when uploading to WGSL so the compute shader sees
+the expected 16-lane, 64-byte-aligned payload without reserialising structs for
+every dispatch.
+
 To automate the “unconscious” loop, wrap the lagrangian with
 `DesireAutomation`. It samples the `SelfRewriteCfg` thresholds, tracks
 hypergrad drift during the integration phase, and emits
@@ -313,6 +357,26 @@ if let Some(event) = trigger {
     spiralk_scheduler.queue_desire(event.report, event.mean_penalty);
 }
 ```
+
+`read_cfg()` now pulls from layered configuration files so operators can
+separate defaults, site overrides, and run-time experiments without rebuilding
+or touching environment variables. By default the loader merges
+`~/.spiraltorch/config/base.toml`, `site.toml`, and `run.json` (in that order),
+falling back to `~/.spiraltorch` when the `config/` directory is absent. Each
+layer is optional—missing files are ignored—and environment variables such as
+`SPIRAL_CONFIG_ROOT`, `SPIRAL_CONFIG_BASE`, `SPIRAL_CONFIG_SITE`, and
+`SPIRAL_CONFIG_RUN` can redirect the loader to alternate locations. Per-run
+JSON overrides make it easy to script experiments (for example via
+`run.json` produced by an orchestrator) while keeping persistent defaults in
+TOML. Every merge emits a diff event that records which keys changed and their
+before/after values.
+
+Python callers can retrieve the same diff stream via
+`spiraltorch.get_config_events()`, which returns dictionaries of
+`{"layer": "run", "path": "desire.self_rewrite.score_thresh", "previous": 0.02, "current": 0.05}`.
+Point the module at alternate config roots (for example when replaying a site
+profile) by exporting the environment variables before importing
+`spiraltorch` so the layered loader observes the overrides.【F:crates/st-core/src/config/layered.rs†L14-L153】【F:crates/st-core/src/config/self_rewrite.rs†L1-L49】【F:bindings/st-py/src/lib.rs†L346-L397】【F:bindings/st-py/src/lib.rs†L20460-L20504】
 
 Persist the stream to disk with `DesireLogbook` so the observation/injection/
 integration cadence can be replayed later or shared with SpiralK rewrite
@@ -1369,6 +1433,15 @@ optimisers alongside its hypergradient updates.
 - `FractalCanvas::desireInterpretation(curvature)` lifts the paired gradient
   summaries into Desire-ready feedback metrics (pressure, balance, stability)
   so automation layers can steer the Desire Lagrangian without leaving WASM.
+- `FractalCanvas::desireControl(curvature)` extends that pipeline with
+  ready-to-apply Desire gradient control packets—penalty gains, bias/observation
+  mixers, and tuned hyper/Realgrad learning-rate scales—mirroring the Rust
+  automation layer on the browser side.
+- `FractalCanvas::hypergradOperatorUniformFromControl(control)` and
+  `FractalCanvas::hypergradOperatorUniformAuto(curvature)` map those Desire
+  control packets directly into the WGSL uniform payload, saving JavaScript
+  callers from recomputing the blend/gain heuristics before dispatching the
+  GPU hypergrad operator.
 - `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
   WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
   the vector field and accumulate the spectrum fully on-GPU.
