@@ -9,6 +9,7 @@ use super::schrodinger::schrodinger_boost;
 use super::temperature::{entropy, TemperatureController};
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
+use st_core::telemetry::hub;
 use st_tensor::TensorError;
 
 const REPORT_SIZE: usize = 8;
@@ -338,7 +339,8 @@ impl DesireLagrangian {
         stabilise(&mut scores);
         let distribution = softmax(&scores);
         let entropy = entropy(&distribution);
-        let temperature = self.controller.update(&distribution);
+        let z_feedback = hub::get_softlogic_z();
+        let temperature = self.controller.update(&distribution, z_feedback.as_ref());
         self.update_tracking(phase, &active, &distribution);
         let hypergrad_penalty = self.hypergrad_penalty(phase, &active, &offsets, &distribution);
         let avoidance = self.build_report(phase);
