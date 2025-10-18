@@ -68,7 +68,7 @@ where
         let total_weight: f32 = proposals.iter().map(|p| p.weight).sum();
         let total_weighted: f32 = proposals.iter().map(|p| p.z_bias * p.weight).sum();
 
-        for (idx, proposal) in proposals.iter().enumerate() {
+        for proposal in proposals.iter() {
             let remainder_weight = total_weight - proposal.weight;
             let remainder_weighted = total_weighted - proposal.z_bias * proposal.weight;
             let counterfactual_z = if remainder_weight.abs() <= f32::EPSILON {
@@ -95,7 +95,7 @@ pub fn team_reward(z: f32, flip_rate: f32, here: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{fuse_z_bias, team_reward, DifferenceRewardMixer, TeamTelemetry};
+    use super::{fuse_z_bias, team_reward, DifferenceRewardMixer, TeamMixer, TeamTelemetry};
     use crate::coop::ai::CoopProposal;
 
     #[test]

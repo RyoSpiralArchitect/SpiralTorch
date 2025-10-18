@@ -78,7 +78,7 @@ mod tests {
             .map(|idx| Box::new(FakeAgent::new(idx as u64 + 1)) as Box<dyn CoopAgent>)
             .collect();
 
-        let mut mixer = DifferenceRewardMixer::new(|z, telemetry: &TeamTelemetry| {
+        let mixer = DifferenceRewardMixer::new(|z, telemetry: &TeamTelemetry| {
             team_reward(z, telemetry.flip_rate, telemetry.here_ratio)
         });
 
