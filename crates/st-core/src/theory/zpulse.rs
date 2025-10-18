@@ -33,16 +33,18 @@ use std::collections::VecDeque;
 use std::collections::VecDeque;
 
 /// Origin marker for a captured pulse.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ZSource {
     Microlocal,
     Maxwell,
-    Other(String),
+    RealGrad,
+    Desire,
+    Custom(u8),
 }
 
 impl Default for ZSource {
     fn default() -> Self {
-        Self::Other("unspecified".to_string())
+        Self::Custom(0)
     }
 }
 
@@ -143,7 +145,24 @@ impl ZFrequencyConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+/// Trait implemented by pulse emitters that can feed the conductor.
+pub trait ZEmitter: Send {
+    /// Identifies the emitter source backing the generated pulses.
+    fn name(&self) -> ZSource;
+
+    /// Produces the next available pulse for the provided timestamp.
+    fn tick(&mut self, now: u64) -> Option<ZPulse>;
+}
+
+/// Configuration for the conductor frequency tracker.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ZFrequencyConfig {
+    pub target_hz: f32,
+    pub window_hz: f32,
+}
+
+/// Configuration for adaptive gain smoothing.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ZAdaptiveGainCfg {
     pub min_gain: f32,
     pub max_gain: f32,
@@ -1060,78 +1079,10 @@ impl ZConductor {
     }
 }
 
-fn derive_quality(pulse: &ZPulse) -> f32 {
-    match pulse.source {
-        ZSource::Microlocal | ZSource::Graph => {
-            let total = pulse.total_energy().max(1e-6);
-            let support_norm = (pulse.support / total).clamp(0.0, 8.0);
-            sigmoid(1.75 * support_norm)
-        }
-        ZSource::Maxwell | ZSource::GW => {
-            let stderr = pulse.stderr.max(1e-6);
-            let snr = (1.0 / stderr).min(1.0);
-            let z = pulse.z_bias.abs().max(pulse.drift.abs());
-            z.tanh() * snr
-        }
-        ZSource::Desire => {
-            if pulse.quality > 0.0 {
-                pulse.quality.clamp(0.0, 1.0)
-            } else {
-                0.5
-            }
-        }
-        ZSource::Other(_) => {
-            if pulse.quality > 0.0 {
-                pulse.quality.clamp(0.0, 1.0)
-            } else {
-                0.5
-            }
-        }
+impl Default for ZConductor {
+    fn default() -> Self {
+        ZConductor::new(ZConductorCfg::default())
     }
-}
-
-fn huber_weight(residual: f32, delta: f32) -> f32 {
-    if delta <= 0.0 {
-        return 1.0;
-    }
-    if residual.abs() <= delta {
-        1.0
-    } else {
-        delta / residual.abs()
-    }
-}
-
-fn sigmoid(x: f32) -> f32 {
-    1.0 / (1.0 + (-x).exp())
-}
-
-fn ema(prev: f32, value: f32, alpha: f32) -> f32 {
-    let alpha = alpha.clamp(0.0, 1.0);
-    (1.0 - alpha) * prev + alpha * value
-}
-
-fn lerp(current: f32, target: f32, alpha: f32) -> f32 {
-    let alpha = alpha.clamp(0.0, 1.0);
-    current + (target - current) * alpha
-}
-
-fn median(values: &mut [f32]) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
-    let mid = values.len() / 2;
-    let (_, median, _) =
-        values.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-    *median
-}
-
-fn slew_limit(prev: f32, next: f32, slew: f32) -> f32 {
-    if slew <= f32::EPSILON {
-        return next;
-    }
-    let delta = next - prev;
-    let clamped = delta.clamp(-slew, slew);
-    prev + clamped
 }
 
 #[cfg(test)]
