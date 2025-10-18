@@ -7,7 +7,6 @@ use super::geometry::{ConceptHint, RepressionField, SemanticBridge, SymbolGeomet
 use super::maxwell::NarrativeHint;
 use super::schrodinger::schrodinger_boost;
 use super::temperature::{entropy, TemperatureController};
-use crate::language::DesireGradientInterpretation;
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
 use st_tensor::{
