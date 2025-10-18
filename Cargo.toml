@@ -11,6 +11,7 @@ members = [
   "crates/st-text",
   "crates/st-rl",
   "crates/st-rec",
+  "crates/st-bench",
   "bindings/st-py",
   "bindings/st-wasm"
 ]

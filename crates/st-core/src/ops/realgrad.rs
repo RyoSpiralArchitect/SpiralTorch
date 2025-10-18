@@ -396,12 +396,22 @@ impl TemperedRealGradProjection {
     pub fn converged(&self, tolerance: f32) -> bool {
         self.convergence_error <= tolerance.max(0.0)
     }
+
+    /// Returns the gradient summary describing the final projection in the sequence.
+    pub fn gradient_summary(&self) -> GradientSummary {
+        self.projection.gradient_summary()
+    }
 }
 
 impl RealGradProjection {
     /// Returns `true` when the projection yielded any non-zero residuals.
     pub fn has_residuals(&self) -> bool {
         !self.monad_biome.is_empty()
+    }
+
+    /// Returns the gradient summary describing the projected field.
+    pub fn gradient_summary(&self) -> GradientSummary {
+        GradientSummary::from_realgrad(&self.realgrad)
     }
 
     /// Returns the total magnitude routed to the monad biome.
@@ -1243,6 +1253,55 @@ mod tests {
                 .map(|residual| residual.magnitude)
                 .sum::<f32>()
         );
+    }
+
+    #[test]
+    fn projection_reports_gradient_summary() {
+        let data = [0.5f32, 0.0, -0.5, 0.25];
+        let projection = project_realgrad(&data, RealGradConfig::default());
+        let summary = projection.gradient_summary();
+        assert!(summary.norm >= 0.0);
+        assert!(summary.sparsity >= 0.0 && summary.sparsity <= 1.0);
+    }
+
+    #[test]
+    fn gradient_summary_supports_custom_thresholds() {
+        let values = [0.0f32, 0.004, 0.006, -0.007];
+        let default_summary = GradientSummary::from_realgrad(&values);
+        let custom_summary = GradientSummary::from_realgrad_with_threshold(&values, 0.006);
+        let expected_norm = (values
+            .iter()
+            .map(|value| (*value as f64).powi(2))
+            .sum::<f64>())
+            .sqrt() as f32;
+        assert_abs_diff_eq!(default_summary.norm, expected_norm, epsilon = 1.0e-6);
+        assert_abs_diff_eq!(custom_summary.norm, expected_norm, epsilon = 1.0e-6);
+        assert_abs_diff_eq!(default_summary.sparsity, 0.5, epsilon = 1.0e-6);
+        assert_abs_diff_eq!(custom_summary.sparsity, 0.75, epsilon = 1.0e-6);
+    }
+
+    #[test]
+    fn gradient_summary_handles_non_finite_thresholds() {
+        let values = [0.0f32, DEFAULT_THRESHOLD * 2.0];
+        let default_summary = GradientSummary::from_realgrad(&values);
+        let nan_summary = GradientSummary::from_realgrad_with_threshold(&values, f32::NAN);
+        assert_eq!(default_summary, nan_summary);
+    }
+
+    #[test]
+    fn tempered_projection_reports_gradient_summary() {
+        let projection = RealGradProjection {
+            realgrad: vec![0.1f32, -0.2, 0.3],
+            ..RealGradProjection::default()
+        };
+        let expected = projection.gradient_summary();
+        let tempered = TemperedRealGradProjection {
+            projection,
+            dominated: true,
+            convergence_error: 0.0,
+            iterations: 3,
+        };
+        assert_eq!(tempered.gradient_summary(), expected);
     }
 
     #[test]

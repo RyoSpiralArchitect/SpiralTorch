@@ -14,7 +14,8 @@
 
 use super::{
     fractal::{FractalPatch, UringFractalScheduler},
-    AmegaHypergrad, AmegaRealgrad, GradientSummary, PureResult, Tensor, TensorError,
+    AmegaHypergrad, AmegaRealgrad, DesireGradientControl, DesireGradientInterpretation,
+    GradientSummary, PureResult, Tensor, TensorError,
 };
 use core::f32::consts::PI;
 use st_frac::fft::{self, Complex32};
@@ -634,6 +635,21 @@ impl CanvasProjector {
         Ok((hypergrad.summary(), realgrad.summary()))
     }
 
+    /// Interpret the gradient summaries into Desire-aligned feedback signals.
+    pub fn gradient_interpretation(
+        &mut self,
+        curvature: f32,
+    ) -> PureResult<DesireGradientInterpretation> {
+        let (hyper, real) = self.gradient_summary(curvature)?;
+        Ok(DesireGradientInterpretation::from_summaries(hyper, real))
+    }
+
+    /// Derive Desire control signals directly from the refreshed canvas tensor.
+    pub fn gradient_control(&mut self, curvature: f32) -> PureResult<DesireGradientControl> {
+        let interpretation = self.gradient_interpretation(curvature)?;
+        Ok(interpretation.control())
+    }
+
     /// Access the last computed FFT spectrum without forcing a refresh.
     pub fn vector_fft(&self, inverse: bool) -> PureResult<Vec<f32>> {
         self.vectors.fft_rows_interleaved(inverse)
@@ -686,6 +702,74 @@ impl CanvasProjector {
             (width + workgroup - 1) / workgroup
         };
         [groups_x, height, 1]
+    }
+
+    /// Uniform parameters for the hypergradient WGSL operator. The layout packs
+    /// the canvas dimensions alongside the blend/gain controls as four floats
+    /// (16 bytes) so WebGPU callers can upload them without manual padding.
+    pub fn hypergrad_operator_uniform(&self, mix: f32, gain: f32) -> [f32; 4] {
+        [
+            self.surface.width() as f32,
+            self.surface.height() as f32,
+            mix.clamp(0.0, 1.0),
+            gain,
+        ]
+    }
+
+    /// Convenience wrapper that feeds Desire's control signals straight into the
+    /// hypergradient WGSL uniform layout.
+    pub fn hypergrad_operator_uniform_from_control(
+        &self,
+        control: &DesireGradientControl,
+    ) -> [f32; 4] {
+        self.hypergrad_operator_uniform(control.operator_mix(), control.operator_gain())
+    }
+
+    /// Pack Desire's control feedback into a 16-float uniform suitable for WGSL
+    /// consumption. The layout keeps every block aligned to 16 bytes so WebGPU
+    /// callers can upload it without manual padding or serde churn.
+    pub fn desire_control_uniform(&self, control: &DesireGradientControl) -> [u32; 16] {
+        [
+            control.target_entropy().to_bits(),
+            control.learning_rate_eta().to_bits(),
+            control.learning_rate_min().to_bits(),
+            control.learning_rate_max().to_bits(),
+            control.learning_rate_slew().to_bits(),
+            control.clip_norm().to_bits(),
+            control.clip_floor().to_bits(),
+            control.clip_ceiling().to_bits(),
+            control.clip_ema().to_bits(),
+            control.temperature_kappa().to_bits(),
+            control.temperature_slew().to_bits(),
+            control.hyper_rate_scale().to_bits(),
+            control.real_rate_scale().to_bits(),
+            control.tuning_gain().to_bits(),
+            control.quality_gain().to_bits(),
+            control.events().bits(),
+        ]
+    }
+
+    /// Compute the workgroup triplet for the hypergradient WGSL operator.
+    pub fn hypergrad_operator_dispatch(&self, subgroup: bool) -> [u32; 3] {
+        let width = self.surface.width() as u32;
+        let height = self.surface.height() as u32;
+        let workgroup = if subgroup { 32 } else { 64 };
+        let groups_x = if width == 0 {
+            0
+        } else {
+            (width + workgroup - 1) / workgroup
+        };
+        [groups_x, height, 1]
+    }
+
+    /// Emit a WGSL kernel that accumulates the canvas relation directly into a
+    /// hypergradient buffer entirely on the GPU.
+    pub fn hypergrad_operator_wgsl(&self, subgroup: bool) -> String {
+        emit_canvas_hypergrad_wgsl(
+            self.surface.width() as u32,
+            self.surface.height() as u32,
+            subgroup,
+        )
     }
 
     /// Emit a WGSL kernel that mirrors [`refresh_vector_fft`] so GPU/WebGPU
@@ -842,6 +926,40 @@ fn emit_canvas_fft_wgsl(width: u32, height: u32, subgroup: bool) -> String {
                  chroma_g * norm,\n\
                  chroma_b * norm,\n\
              );\n\
+         }}\n",
+        width = width,
+        height = height,
+        workgroup = workgroup,
+    )
+}
+
+fn emit_canvas_hypergrad_wgsl(width: u32, height: u32, subgroup: bool) -> String {
+    let workgroup = if subgroup { 32 } else { 64 };
+    format!(
+        "// Canvas hypergrad operator WGSL (width {width}, height {height})\n\
+         const WORKGROUP_SIZE: u32 = {workgroup}u;\n\
+         struct CanvasHypergradParams {{\n\
+             width: f32;\n\
+             height: f32;\n\
+             mix: f32;\n\
+             gain: f32;\n\
+         }};\n\
+         @group(0) @binding(0) var<storage, read> relation: array<f32>;\n\
+         @group(0) @binding(1) var<storage, read_write> hypergrad: array<f32>;\n\
+         @group(0) @binding(2) var<uniform> params: CanvasHypergradParams;\n\
+         @compute @workgroup_size(WORKGROUP_SIZE)\n\
+         fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n\
+             let width = u32(params.width + 0.5);\n\
+             let height = u32(params.height + 0.5);\n\
+             if (gid.x >= width || gid.y >= height) {{\n\
+                 return;\n\
+             }}\n\
+             let index = gid.y * width + gid.x;\n\
+             let blend = clamp(params.mix, 0.0, 1.0);\n\
+             let gain = params.gain;\n\
+             let current = hypergrad[index];\n\
+             let update = relation[index] * gain;\n\
+             hypergrad[index] = current * (1.0 - blend) + update;\n\
          }}\n",
         width = width,
         height = height,
@@ -1020,6 +1138,74 @@ mod tests {
         assert!((mean_identity - real.l1()).abs() < 1e-6);
         let rms_identity = real.rms() * (real.count() as f32).sqrt();
         assert!((rms_identity - real.l2()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn projector_surfaces_desire_interpretation() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(
+                FractalPatch::new(tensor_with_shape(2, 2, &[0.2, -0.1, 0.4, 0.3]), 1.0, 1.0, 0)
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let interpretation = projector.gradient_interpretation(-1.0).unwrap();
+        assert!(interpretation.penalty_gain() >= 1.0);
+        assert!(interpretation.bias_mix() > 0.0);
+    }
+
+    #[test]
+    fn projector_surfaces_desire_control() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(
+                FractalPatch::new(
+                    tensor_with_shape(2, 2, &[0.25, 0.1, -0.35, 0.6]),
+                    1.0,
+                    1.0,
+                    0,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let control = projector.gradient_control(-1.0).unwrap();
+        assert!(control.penalty_gain() >= 1.0);
+        assert!(control.hyper_rate_scale().is_finite());
+        let uniform = projector.hypergrad_operator_uniform_from_control(&control);
+        assert_eq!(uniform[0], 2.0);
+        assert_eq!(uniform[1], 2.0);
+        assert!((uniform[2] - control.operator_mix()).abs() < 1e-6);
+        assert!((uniform[3] - control.operator_gain()).abs() < 1e-6);
+        let packed = projector.desire_control_uniform(&control);
+        assert_eq!(packed.len(), 16);
+        assert!((f32::from_bits(packed[0]) - control.target_entropy()).abs() < 1e-6);
+        assert!((f32::from_bits(packed[1]) - control.learning_rate_eta()).abs() < 1e-6);
+        assert!((f32::from_bits(packed[5]) - control.clip_norm()).abs() < 1e-6);
+        assert!((f32::from_bits(packed[9]) - control.temperature_kappa()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hypergrad_operator_surfaces_wgsl_and_metadata() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(
+                FractalPatch::new(tensor_with_shape(2, 2, &[0.1, 0.2, 0.3, 0.4]), 1.0, 1.0, 0)
+                    .unwrap(),
+            )
+            .unwrap();
+        let projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let shader = projector.hypergrad_operator_wgsl(false);
+        assert!(shader.contains("CanvasHypergradParams"));
+        assert!(shader.contains("width 2"));
+        let uniform = projector.hypergrad_operator_uniform(0.5, 2.0);
+        assert_eq!(uniform[0], 2.0);
+        assert_eq!(uniform[1], 2.0);
+        assert!((uniform[2] - 0.5).abs() < 1e-6);
+        assert!((uniform[3] - 2.0).abs() < 1e-6);
+        let dispatch = projector.hypergrad_operator_dispatch(false);
+        assert_eq!(dispatch, [1, 2, 1]);
     }
 
     #[test]

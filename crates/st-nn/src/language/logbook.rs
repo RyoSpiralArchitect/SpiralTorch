@@ -335,6 +335,8 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("desire.ndjson");
         let mut logbook = DesireLogbook::with_flush_every(&path, 1).expect("logbook");
+        use st_tensor::DesireGradientControl;
+
         let mut solution = DesireSolution {
             indices: vec![0, 1],
             probabilities: vec![0.6, 0.4],
@@ -345,7 +347,8 @@ mod tests {
             phase: DesirePhase::Observation,
             avoidance: None,
             hypergrad_penalty: 0.1,
-            narrative: None,
+            gradient_control: DesireGradientControl::default(),
+            control_events: Vec::new(),
         };
         for ordinal in 0..3 {
             solution.phase = match ordinal {
