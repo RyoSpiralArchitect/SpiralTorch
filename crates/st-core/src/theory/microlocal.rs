@@ -37,14 +37,59 @@
 use crate::coop::ai::{CoopAgent, CoopProposal};
 use crate::telemetry::hub::{self, SoftlogicZFeedback};
 use crate::theory::zpulse::{
-    ZAdaptiveGainCfg, ZConductor, ZFrequencyConfig, ZFused, ZPulse, ZSource,
+    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZRegistry, ZSource,
 };
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use statrs::function::gamma::gamma;
 use std::f64::consts::PI;
-use std::fmt;
-use std::sync::Arc;
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
+
+#[derive(Clone, Default, Debug)]
+pub struct MicrolocalEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
+}
+
+impl MicrolocalEmitter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn enqueue(&self, pulse: ZPulse) {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.push_back(pulse);
+    }
+
+    pub fn extend<I>(&self, pulses: I)
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.extend(pulses);
+    }
+}
+
+impl ZEmitter for MicrolocalEmitter {
+    fn name(&self) -> ZSource {
+        ZSource::Microlocal
+    }
+
+    fn tick(&mut self, _now: u64) -> Option<ZPulse> {
+        self.queue
+            .lock()
+            .expect("microlocal emitter queue poisoned")
+            .pop_front()
+    }
+}
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
 #[derive(Debug, Clone)]
@@ -688,11 +733,9 @@ impl BudgetPolicy {
 pub struct InterfaceZConductor {
     gauges: Vec<InterfaceGauge>,
     lift: InterfaceZLift,
-    smoothing: f32,
-    carry: Option<InterfaceZPulse>,
-    policy: Arc<dyn ZSourcePolicy>,
-    band_policy: Option<BandPolicy>,
-    budget_policy: Option<BudgetPolicy>,
+    conductor: ZConductor,
+    clock: u64,
+    emitter: MicrolocalEmitter,
 }
 
 impl InterfaceZConductor {
@@ -701,14 +744,13 @@ impl InterfaceZConductor {
     /// latest measurement unless [`with_smoothing`] is invoked.
     pub fn new(gauges: Vec<InterfaceGauge>, lift: InterfaceZLift) -> Self {
         assert!(!gauges.is_empty(), "at least one gauge must be supplied");
+        let emitter = MicrolocalEmitter::new();
         InterfaceZConductor {
             gauges,
             lift,
-            smoothing: 1.0,
-            carry: None,
-            policy: Arc::new(DefaultZSourcePolicy::new()),
-            band_policy: None,
-            budget_policy: None,
+            conductor: ZConductor::default(),
+            clock: 0,
+            emitter,
         }
     }
 
@@ -813,10 +855,10 @@ impl InterfaceZConductor {
         {
             fused.z_bias = fused_raw.z_bias * self.smoothing;
         }
-        for pulse in z_pulses {
-            self.conductor.ingest(pulse);
-        }
-        let fused_z = self.conductor.step(now);
+        self.emitter.extend(z_pulses);
+        let mut registry = ZRegistry::with_capacity(1);
+        registry.register(self.emitter.clone());
+        let fused_z = self.conductor.step_from_registry(&mut registry, now);
 
         self.policy.late_fuse(&mut fused, &pulses, &qualities);
 

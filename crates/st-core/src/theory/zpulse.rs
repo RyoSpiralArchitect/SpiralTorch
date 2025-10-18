@@ -5,7 +5,75 @@
 //! Canonical representation of Z pulses together with a lightweight
 //! conductor that fuses multiple sources into a single control signal.
 
-use std::time::Duration;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+
+/// Identifies a source capable of emitting [`ZPulse`] records.
+pub trait ZEmitter {
+    /// Returns the canonical source identifier for pulses emitted by this
+    /// implementation.
+    fn name(&self) -> ZSource;
+
+    /// Advances the emitter one step and returns the next available pulse, if
+    /// any. Implementations may return more than one pulse per call by keeping
+    /// an internal queue; [`ZRegistry::gather`] will keep polling the emitter
+    /// until it reports `None`.
+    fn tick(&mut self, now: u64) -> Option<ZPulse>;
+
+    /// Optional quality hint describing the reliability of upcoming pulses.
+    /// When absent the conductor infers quality from the pulses themselves.
+    fn quality_hint(&self) -> Option<f32> {
+        None
+    }
+}
+
+/// Central registry that owns a fleet of [`ZEmitter`] implementations.
+#[derive(Default)]
+pub struct ZRegistry {
+    emitters: Vec<Box<dyn ZEmitter + Send>>,
+}
+
+impl ZRegistry {
+    /// Creates an empty registry.
+    pub fn new() -> Self {
+        Self {
+            emitters: Vec::new(),
+        }
+    }
+
+    /// Creates a registry with pre-allocated storage for the provided number of
+    /// emitters.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            emitters: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Registers a new emitter so it participates in subsequent gather calls.
+    pub fn register<E>(&mut self, emitter: E)
+    where
+        E: ZEmitter + Send + 'static,
+    {
+        self.emitters.push(Box::new(emitter));
+    }
+
+    /// Polls each registered emitter and aggregates all pulses emitted at the
+    /// supplied timestamp.
+    pub fn gather(&mut self, now: u64) -> Vec<ZPulse> {
+        let mut pulses = Vec::new();
+        for emitter in &mut self.emitters {
+            while let Some(pulse) = emitter.tick(now) {
+                pulses.push(pulse);
+            }
+        }
+        pulses
+    }
+
+    /// Returns `true` when no emitters are registered.
+    pub fn is_empty(&self) -> bool {
+        self.emitters.is_empty()
+    }
+}
 
 /// Identifies the origin of a [`ZPulse`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -114,9 +182,10 @@ pub struct ZLatencyConfig {
 
 impl ZLatencyConfig {
     pub fn new(history: usize) -> Self {
-        Self { history: history.max(1) }
+        Self {
+            history: history.max(1),
+        }
     }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZConductorCfg {
@@ -146,7 +215,6 @@ impl Default for ZConductorCfg {
 #[derive(Clone, Debug)]
 pub struct ZConductor {
     cfg: ZConductorCfg,
-    pending: Vec<ZPulse>,
     fused: ZFused,
     last_step: Option<u64>,
     hold_until: Option<u64>,
@@ -167,7 +235,6 @@ impl ZConductor {
     pub fn new(cfg: ZConductorCfg) -> Self {
         Self {
             cfg,
-            pending: Vec::new(),
             fused: ZFused::default(),
             last_step: None,
             hold_until: None,
@@ -177,7 +244,6 @@ impl ZConductor {
             latency_cfg: None,
             latency_events: VecDeque::new(),
         }
-    }
 
     pub fn cfg(&self) -> &ZConductorCfg {
         &self.cfg
@@ -200,20 +266,11 @@ impl ZConductor {
         if let Some(cfg) = cfg {
             self.latency_events.truncate(cfg.history);
         }
-    }
 
-    pub fn ingest(&mut self, pulse: ZPulse) {
-        self.pending.push(pulse);
-    }
-
-    pub fn step(&mut self, now: u64) -> ZFused {
-        if self.pending.is_empty() {
-            self.fused.ts = now;
-            self.last_step = Some(now);
-            return self.fused.clone();
-        }
-
-        let pulses = std::mem::take(&mut self.pending);
+    pub fn step<I>(&mut self, pulses: I, now: u64) -> ZFused
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
         let mut fused = ZFused::default();
         fused.ts = now;
 
@@ -222,14 +279,25 @@ impl ZConductor {
         let mut weighted_quality = 0.0f32;
         let mut total_quality_weight = 0.0f32;
 
+        let mut had_pulse = false;
+
         for pulse in pulses {
+            had_pulse = true;
             total_support += pulse.support.max(0.0);
             fused.drift += pulse.drift;
             weighted_z += pulse.z_bias * pulse.support.max(0.0);
             let weight = pulse.support.max(1e-6);
             weighted_quality += pulse.quality * weight;
             total_quality_weight += weight;
-            fused.attributions.push((pulse.source, pulse.support.max(0.0)));
+            fused
+                .attributions
+                .push((pulse.source, pulse.support.max(0.0)));
+        }
+
+        if !had_pulse {
+            self.fused.ts = now;
+            self.last_step = Some(now);
+            return self.fused.clone();
         }
 
         fused.support = total_support;
@@ -263,7 +331,11 @@ impl ZConductor {
         } else {
             desired_raw.signum()
         };
-        let previous_sign = if previous_z == 0.0 { 0.0 } else { previous_z.signum() };
+        let previous_sign = if previous_z == 0.0 {
+            0.0
+        } else {
+            previous_z.signum()
+        };
 
         if self.hold_until.is_none() && !flip_armed {
             if previous_sign != 0.0 && incoming_sign != 0.0 && incoming_sign != previous_sign {
@@ -276,12 +348,19 @@ impl ZConductor {
 
         if self.hold_until.is_none() {
             if flip_armed {
-                let desired = self
-                    .pending_flip_sign
-                    .take()
-                    .unwrap_or_else(|| if incoming_sign != 0.0 { incoming_sign } else { -previous_sign });
+                let desired = self.pending_flip_sign.take().unwrap_or_else(|| {
+                    if incoming_sign != 0.0 {
+                        incoming_sign
+                    } else {
+                        -previous_sign
+                    }
+                });
                 let sign = if desired == 0.0 {
-                    if previous_sign >= 0.0 { -1.0 } else { 1.0 }
+                    if previous_sign >= 0.0 {
+                        -1.0
+                    } else {
+                        1.0
+                    }
                 } else {
                     desired.signum()
                 };
@@ -325,6 +404,13 @@ impl ZConductor {
         fused
     }
 
+    /// Convenience helper that gathers pulses from the provided registry prior
+    /// to fusing them.
+    pub fn step_from_registry(&mut self, registry: &mut ZRegistry, now: u64) -> ZFused {
+        let pulses = registry.gather(now);
+        self.step(pulses, now)
+    }
+
     pub fn latest(&self) -> ZFused {
         self.fused.clone()
     }
@@ -336,5 +422,45 @@ impl ZConductor {
         let cfg = conductor.cfg_mut();
         cfg.freq = None;
         assert!(conductor.cfg.freq.is_none());
+    }
+}
+#[derive(Clone, Default, Debug)]
+pub struct DesireEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
+}
+
+impl DesireEmitter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn enqueue(&self, mut pulse: ZPulse) {
+        pulse.source = ZSource::Desire;
+        let mut queue = self.queue.lock().expect("desire emitter queue poisoned");
+        queue.push_back(pulse);
+    }
+
+    pub fn extend<I>(&self, pulses: I)
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut queue = self.queue.lock().expect("desire emitter queue poisoned");
+        queue.extend(pulses.into_iter().map(|mut pulse| {
+            pulse.source = ZSource::Desire;
+            pulse
+        }));
+    }
+}
+
+impl ZEmitter for DesireEmitter {
+    fn name(&self) -> ZSource {
+        ZSource::Desire
+    }
+
+    fn tick(&mut self, _now: u64) -> Option<ZPulse> {
+        self.queue
+            .lock()
+            .expect("desire emitter queue poisoned")
+            .pop_front()
     }
 }
