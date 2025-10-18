@@ -1,7 +1,5 @@
 # Invariant barrier gating and contraction notes
 
-> こんなの、使えそうなところに使ってみて🐈‍⬛
->
 > Japanese notes from the SpiralTorch dynamics journal, organised so they can be slotted into the runtime design docs.
 
 ## A. バリア設計：\( \mu_{\mathrm{eff}} \le 0 \) を不変集合化
