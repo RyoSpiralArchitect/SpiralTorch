@@ -496,7 +496,6 @@ impl LatencyAlignerState {
     pub fn lag_for(&self, source: &ZSource) -> Option<f32> {
         self.states.get(source).map(|state| state.lag)
     }
-}
 
 /// Configuration governing the behaviour of [`ZConductor`].
 #[derive(Clone, Debug)]
@@ -632,7 +631,13 @@ impl Default for ZConductor {
 
 impl ZConductor {
     pub fn new(cfg: ZConductorCfg) -> Self {
-        let latency = cfg.latency.map(LatencyAlignerState::new);
+        let mut cfg = cfg;
+        let latency = if cfg.latency_align {
+            cfg.latency.map(LatencyAlignerState::new)
+        } else {
+            cfg.latency = None;
+            None
+        };
         Self {
             cfg,
             freq: None,
@@ -663,7 +668,20 @@ impl ZConductor {
 
     pub fn set_latency_aligner(&mut self, cfg: Option<LatencyAlignerCfg>) {
         self.cfg.latency = cfg;
-        self.latency = self.cfg.latency.map(LatencyAlignerState::new);
+        if self.cfg.latency_align {
+            self.latency = self.cfg.latency.map(LatencyAlignerState::new);
+        } else {
+            self.latency = None;
+        }
+    }
+
+    pub fn set_latency_align(&mut self, enabled: bool) {
+        self.cfg.latency_align = enabled;
+        if enabled {
+            self.latency = self.cfg.latency.map(LatencyAlignerState::new);
+        } else {
+            self.latency = None;
+        }
     }
 
     pub fn step<I>(&mut self, pulses: I, now: u64) -> ZFused
@@ -713,6 +731,9 @@ impl ZConductor {
             fused.attributions.push((pulse.source, support));
         }
     pub fn latency_for(&self, source: &ZSource) -> Option<f32> {
+        if !self.cfg.latency_align {
+            return None;
+        }
         self.latency
             .as_ref()
             .and_then(|state| state.lag_for(source))
@@ -724,8 +745,10 @@ impl ZConductor {
         } else {
             pulse.quality = pulse.quality.clamp(0.0, 1.0);
         }
-        if let Some(latency) = self.latency.as_mut() {
-            latency.record(&pulse);
+        if self.cfg.latency_align {
+            if let Some(latency) = self.latency.as_mut() {
+                latency.record(&pulse);
+            }
         }
         self.pending.push_back(pulse);
     }
@@ -733,10 +756,16 @@ impl ZConductor {
     pub fn step(&mut self, now: u64) -> ZFused {
         self.last_step = Some(now);
         let mut events = Vec::new();
-        if let Some(latency) = self.latency.as_mut() {
-            latency.prepare(now, &mut events);
+        if self.cfg.latency_align {
+            if let Some(latency) = self.latency.as_mut() {
+                latency.prepare(now, &mut events);
+            }
         }
-        let latency_ref = self.latency.as_ref();
+        let latency_ref = if self.cfg.latency_align {
+            self.latency.as_ref()
+        } else {
+            None
+        };
         let mut ready = Vec::new();
         let mut retained = VecDeque::with_capacity(self.pending.len());
         while let Some(mut pulse) = self.pending.pop_front() {
@@ -847,6 +876,14 @@ impl ZConductor {
         }
         self.step(now)
     }
+
+    pub fn step_from_registry(&mut self, registry: &mut ZRegistry, now: u64) -> ZFused {
+        let pulses = registry.gather(now);
+        for pulse in pulses {
+            self.ingest(pulse);
+        }
+        self.step(now)
+    }
 }
 
 /// Simple registry used in tests to multiplex emitters.
@@ -864,6 +901,12 @@ impl ZRegistry {
 }
 
 #[derive(Clone, Default, Debug)]
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            emitters: Vec::with_capacity(capacity),
+        }
+    }
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {

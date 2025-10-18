@@ -279,25 +279,6 @@ pub fn snapshot_dashboard_frames(limit: usize) -> Vec<DashboardFrame> {
         .unwrap_or_default()
 }
 
-/// Summarises the most recent dashboard frames, returning aggregated metrics and event counts.
-pub fn summarize_dashboard(limit: Option<usize>) -> Option<DashboardSummary> {
-    dashboard_ring()
-        .read()
-        .ok()
-        .and_then(|guard| guard.summarize(limit))
-}
-
-        .map(|guard| {
-            guard
-                .iter()
-                .rev()
-                .take(limit)
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn push_atlas_route(frame: &AtlasFrame) {
     if frame.timestamp <= 0.0 {
         return;
