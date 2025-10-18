@@ -128,7 +128,8 @@ fn conductor_fuses_multiscale_pulses_with_smoothing() {
     let gauge_coarse = InterfaceGauge::new(1.0, 2.5);
     let projector = LeechProjector::new(24, 0.5);
     let lift = InterfaceZLift::new(&[1.0, 0.0], projector).with_bias_gain(0.5);
-    let mut conductor = InterfaceZConductor::new(vec![gauge_fine, gauge_coarse], lift).with_smoothing(0.5);
+    let mut conductor =
+        InterfaceZConductor::new(vec![gauge_fine, gauge_coarse], lift).with_smoothing(0.5);
 
     let first = conductor.step(&mask, Some(&c_prime), None, None);
     assert!(first.has_interface());
@@ -184,7 +185,8 @@ fn budget_policy_clamps_bias() {
     let gauge = InterfaceGauge::new(1.0, 1.0);
     let projector = LeechProjector::new(16, 0.5);
     let lift = InterfaceZLift::new(&[1.0, 0.0], projector);
-    let mut conductor = InterfaceZConductor::new(vec![gauge], lift).with_budget_policy(BudgetPolicy::new(0.02));
+    let mut conductor =
+        InterfaceZConductor::new(vec![gauge], lift).with_budget_policy(BudgetPolicy::new(0.02));
 
     let report = conductor.step(&mask, Some(&c_prime), None, None);
     assert!(report.budget_scale <= 1.0);
@@ -225,9 +227,7 @@ fn maxwell_policy_prefers_confident_z_scores() {
     let weak = policy.quality(&pulse);
     assert!(strong > weak);
     pulse.z_score = None;
-    assert!(
-        (policy.quality(&pulse) - DefaultZSourcePolicy::new().quality(&pulse)).abs() < 1e-6
-    );
+    assert!((policy.quality(&pulse) - DefaultZSourcePolicy::new().quality(&pulse)).abs() < 1e-6);
 }
 
 #[test]

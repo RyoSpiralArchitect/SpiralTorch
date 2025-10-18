@@ -15,7 +15,7 @@ use core::fmt;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crate::theory::zpulse::{ZEmitter, ZPulse, ZSource};
+use crate::theory::zpulse::{ZEmitter, ZPulse, ZSource, ZSupport};
 use crate::util::math::{ramanujan_pi, LeechProjector};
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 
@@ -1561,7 +1561,7 @@ mod tests {
         .with_band(0..projection.spectrum.len());
         let pulse = projector.project(&projection);
         assert!(matches!(pulse.source, ZSource::RealGrad));
-        assert!(pulse.support >= 0.0);
+        assert!(pulse.support.total() >= 0.0);
         assert!(pulse.band_energy.0 >= 0.0);
         assert!(pulse.quality >= 0.0);
         assert!(pulse.quality <= 1.0);

@@ -7,13 +7,8 @@
 //! conductor that fuses multiple sources into a single control signal.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::fs;
-use std::io::{ErrorKind, Read};
-use std::path::Path;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-
-use serde::Deserialize;
 
 /// Identifies a source capable of emitting [`ZPulse`] records.
 pub trait ZEmitter {
@@ -93,15 +88,70 @@ pub enum ZSource {
     Other(&'static str),
 }
 
+fn source_lookup_key(source: &ZSource) -> Cow<'static, str> {
+    match source {
+        ZSource::Microlocal => Cow::Borrowed("microlocal"),
+        ZSource::Maxwell => Cow::Borrowed("maxwell"),
+        ZSource::RealGrad => Cow::Borrowed("realgrad"),
+        ZSource::Desire => Cow::Borrowed("desire"),
+        ZSource::External(label) | ZSource::Other(label) => Cow::Borrowed(*label),
+    }
+}
+
+/// Per-band support accounting used by [`ZPulse`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZSupport {
+    pub leading: f32,
+    pub central: f32,
+    pub trailing: f32,
+}
+
+impl ZSupport {
+    /// Returns the total support mass contributed by the pulse.
+    pub fn total(&self) -> f32 {
+        self.leading.max(0.0) + self.central.max(0.0) + self.trailing.max(0.0)
+    }
+
+    /// Scales all support components by the provided gain.
+    pub fn scaled(self, gain: f32) -> Self {
+        Self {
+            leading: self.leading * gain,
+            central: self.central * gain,
+            trailing: self.trailing * gain,
+        }
+    }
+}
+
+impl Default for ZSupport {
+    fn default() -> Self {
+        Self {
+            leading: 0.0,
+            central: 0.0,
+            trailing: 0.0,
+        }
+    }
+}
+
+impl From<(f32, f32, f32)> for ZSupport {
+    fn from(bands: (f32, f32, f32)) -> Self {
+        Self {
+            leading: bands.0,
+            central: bands.1,
+            trailing: bands.2,
+        }
+    }
+}
+
 /// Discrete Z pulse emitted by an upstream source.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZPulse {
     pub source: ZSource,
     pub ts: u64,
+    pub tempo: f32,
     pub band_energy: (f32, f32, f32),
     pub drift: f32,
     pub z_bias: f32,
-    pub support: f32,
+    pub support: ZSupport,
     pub quality: f32,
     pub stderr: f32,
     pub latency_ms: f32,
@@ -112,10 +162,11 @@ impl Default for ZPulse {
         Self {
             source: ZSource::Microlocal,
             ts: 0,
+            tempo: 0.0,
             band_energy: (0.0, 0.0, 0.0),
             drift: 0.0,
             z_bias: 0.0,
-            support: 0.0,
+            support: ZSupport::default(),
             quality: 0.0,
             stderr: 0.0,
             latency_ms: 0.0,
@@ -319,7 +370,7 @@ impl ZConductor {
 
         for pulse in pulses {
             had_pulse = true;
-            let support = pulse.support.max(0.0);
+            let support = pulse.support.total().max(0.0);
             total_support += support;
             fused.drift += pulse.drift;
             let key = source_lookup_key(&pulse.source);
@@ -549,7 +600,7 @@ mod tests {
 
         let mut pulse = ZPulse {
             source: ZSource::Microlocal,
-            support: 0.4,
+            support: ZSupport::from((0.2, 0.2, 0.0)),
             drift: 0.1,
             ..ZPulse::default()
         };
