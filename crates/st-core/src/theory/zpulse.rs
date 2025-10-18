@@ -13,6 +13,12 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+/// Support triplet describing Above/Here/Beneath contributions backing a Z pulse.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZSupport {
+    pub leading: f32,
+    pub central: f32,
+    pub trailing: f32,
 /// Identifies the origin of a [`ZPulse`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ZSource {
@@ -24,6 +30,80 @@ pub enum ZSource {
     RealGrad,
     Other(&'static str),
 }
+
+impl ZSupport {
+    /// Creates a new support triplet, clamping each component to be finite and non-negative.
+    pub fn new(leading: f32, central: f32, trailing: f32) -> Self {
+        Self {
+            leading: leading.max(0.0).finite_or_zero(),
+            central: central.max(0.0).finite_or_zero(),
+            trailing: trailing.max(0.0).finite_or_zero(),
+        }
+    }
+
+    /// Builds a support triplet straight from an Above/Here/Beneath energy tuple.
+    pub fn from_band_energy(bands: (f32, f32, f32)) -> Self {
+        Self::new(bands.0, bands.1, bands.2)
+    }
+
+    /// Returns the total perimeter mass supporting the pulse.
+    pub fn total(&self) -> f32 {
+        self.leading + self.central + self.trailing
+    }
+
+    /// Returns `true` when all support components vanish.
+    pub fn is_empty(&self) -> bool {
+        self.leading <= f32::EPSILON
+            && self.central <= f32::EPSILON
+            && self.trailing <= f32::EPSILON
+    }
+}
+
+impl Default for ZSupport {
+    fn default() -> Self {
+        Self {
+            leading: 0.0,
+            central: 0.0,
+            trailing: 0.0,
+        }
+    }
+}
+
+trait FiniteClamp {
+    fn finite_or_zero(self) -> f32;
+}
+
+impl FiniteClamp for f32 {
+    fn finite_or_zero(self) -> f32 {
+        if self.is_finite() {
+            self
+        } else {
+            0.0
+        }
+    }
+}
+
+fn source_lookup_key(source: &ZSource) -> Cow<'static, str> {
+    match source {
+        ZSource::Microlocal => Cow::Borrowed("microlocal"),
+        ZSource::Maxwell => Cow::Borrowed("maxwell"),
+        ZSource::RealGrad => Cow::Borrowed("realgrad"),
+        ZSource::Desire => Cow::Borrowed("desire"),
+        ZSource::External(name) | ZSource::Other(name) => Cow::Borrowed(name),
+    }
+}
+
+/// Identifies a source capable of emitting [`ZPulse`] records.
+pub trait ZEmitter {
+    /// Returns the canonical source identifier for pulses emitted by this
+    /// implementation.
+    fn name(&self) -> ZSource;
+
+    /// Advances the emitter one step and returns the next available pulse, if
+    /// any. Implementations may return more than one pulse per call by keeping
+    /// an internal queue; [`ZRegistry::gather`] will keep polling the emitter
+    /// until it reports `None`.
+    fn tick(&mut self, now: u64) -> Option<ZPulse>;
 
 impl Default for ZSource {
     fn default() -> Self {
@@ -73,7 +153,7 @@ pub struct ZPulse {
 
 impl ZPulse {
     pub fn support_mass(&self) -> f32 {
-        self.support.leading + self.support.central + self.support.trailing
+        self.support.total()
     }
     pub fn total_energy(&self) -> f32 {
         let (a, h, b) = self.band_energy;
@@ -120,7 +200,7 @@ impl Default for ZPulse {
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
+    a + (b - a) * t.clamp(0.0, 1.0)
 }
 
 /// Trait implemented by pulse emitters that can feed the conductor.
@@ -130,6 +210,10 @@ pub trait ZEmitter: Send {
     fn quality_hint(&self) -> Option<f32> {
         None
     }
+    let support = pulse.support.total().max(1e-6);
+    let stderr = pulse.stderr.abs() + 1e-6;
+    let ratio = support / (support + stderr);
+    ratio.clamp(0.0, 1.0)
 }
 
 /// Optional smoothing applied to the fused support/energy.
@@ -149,8 +233,8 @@ impl Default for ZFrequencyConfig {
 impl ZFrequencyConfig {
     pub fn new(smoothing: f32, minimum_energy: f32) -> Self {
         Self {
-            smoothing,
-            minimum_energy,
+            smoothing: smoothing.clamp(0.0, 1.0),
+            minimum_energy: minimum_energy.max(0.0),
         }
     }
 }
@@ -174,15 +258,15 @@ impl Default for ZAdaptiveGainCfg {
 impl ZAdaptiveGainCfg {
     pub fn new(gain_floor: f32, gain_ceil: f32, responsiveness: f32) -> Self {
         Self {
-            gain_floor,
+            gain_floor: gain_floor.max(0.0),
             gain_ceil: gain_ceil.max(gain_floor),
-            responsiveness,
+            responsiveness: responsiveness.clamp(0.0, 1.0),
         }
     }
 }
 
 /// Configuration for the latency alignment stage.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LatencyAlignerCfg {
     pub window: u64,
     pub hop: u64,
@@ -232,13 +316,18 @@ impl LatencyAlignerCfg {
 #[derive(Clone, Debug)]
 struct LagEstimate {
     lag: f32,
-    frames_since_update: u32,
+    hold: u32,
+    seeded: bool,
+    strength: f32,
 }
 impl Default for LagEstimate {
     fn default() -> Self {
         Self {
+            last_ts: None,
             lag: 0.0,
-            frames_since_update: u32::MAX,
+            hold: 0,
+            seeded: false,
+            strength: 0.0,
         }
     }
 }
@@ -365,22 +454,24 @@ impl LatencyAlignerState {
 pub struct ZConductorCfg {
     pub alpha_fast: f32,
     pub alpha_slow: f32,
-    pub flip_hold: u64,
+    pub flip_hold: u32,
     pub slew_max: f32,
     pub z_budget: f32,
     pub robust_delta: f32,
     pub latency_align: bool,
+    pub latency: Option<LatencyAlignerCfg>,
 }
 impl Default for ZConductorCfg {
     fn default() -> Self {
         Self {
-            alpha_fast: 0.6,
+            alpha_fast: 0.35,
             alpha_slow: 0.12,
-            flip_hold: 5,
-            slew_max: 0.08,
-            z_budget: 0.9,
-            robust_delta: 0.2,
+            flip_hold: 3,
+            slew_max: 0.35,
+            z_budget: 1.2,
+            robust_delta: 0.25,
             latency_align: true,
+            latency: None,
         }
     }
 }
@@ -421,12 +512,12 @@ impl AdaptiveGainState {
 }
 
 /// Stateful conductor that fuses heterogeneous Z pulses into a stabilised control signal.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ZConductor {
     cfg: ZConductorCfg,
-    freq: Option<FrequencyFusionState>,
-    adaptive: Option<AdaptiveGainState>,
-    latency: Option<LatencyAlignerState>,
+    pub freq: Option<ZFrequencyConfig>,
+    pub adaptive: Option<ZAdaptiveGainCfg>,
+    pub latency: Option<LatencyAlignerState>,
     pending: VecDeque<ZPulse>,
     last_z: f32,
     hold_until: Option<u64>,
@@ -472,15 +563,15 @@ impl ZConductor {
         self.freq = cfg.map(FrequencyFusionState::new);
     }
     pub fn set_adaptive_gain_config(&mut self, cfg: Option<ZAdaptiveGainCfg>) {
-        match (&mut self.adaptive, cfg) {
-            (Some(state), Some(new_cfg)) => state.update_config(new_cfg),
-            (slot @ None, Some(new_cfg)) => {
-                *slot = Some(AdaptiveGainState::new(new_cfg));
-            }
-            (state @ Some(_), None) => {
-                *state = None;
-            }
-            (None, None) => {}
+        self.adaptive = cfg;
+    }
+
+    pub fn set_latency_aligner(&mut self, cfg: Option<LatencyAlignerCfg>) {
+        self.cfg.latency = cfg;
+        if self.cfg.latency_align {
+            self.latency = self.cfg.latency.map(LatencyAlignerState::new);
+        } else {
+            self.latency = None;
         }
     }
     pub fn latency_for(&self, source: &ZSource) -> Option<f32> {
@@ -498,10 +589,16 @@ impl ZConductor {
         self.pending.push_back(pulse);
     }
     pub fn step(&mut self, now: u64) -> ZFused {
+        self.last_step = Some(now);
         let mut events = Vec::new();
         if let Some(lat) = self.latency.as_mut() {
             lat.prepare(now, &mut events);
         }
+        let latency_ref = if self.cfg.latency_align {
+            self.latency.as_ref()
+        } else {
+            None
+        };
         let mut ready = Vec::new();
         let mut retained = VecDeque::with_capacity(self.pending.len());
         while let Some(mut pulse) = self.pending.pop_front() {
@@ -540,8 +637,8 @@ impl ZConductor {
             attributions.push((pulse.source, support));
         }
 
-        let mut raw_z = if total_support > 0.0 {
-            weighted_z / total_support.max(1e-6)
+        let support_total = if weight_sum > 0.0 {
+            support_acc.total() / weight_sum
         } else {
             weighted_z
         };
@@ -570,6 +667,7 @@ impl ZConductor {
                 events.push("flip-held".to_string());
                 raw_z = 0.0;
             }
+            attributions.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
         }
         if self.hold_until.is_none() && flip_armed {
             let desired = self.pending_flip_sign.take().unwrap_or_else(|| {
@@ -583,6 +681,7 @@ impl ZConductor {
             let magnitude = raw_z.abs().max(self.cfg.robust_delta.max(1e-6));
             raw_z = magnitude * desired.signum();
         }
+    }
 
         let alpha = self.cfg.alpha_fast.clamp(0.0, 1.0);
         let mut target = lerp(self.last_z, raw_z, alpha);
@@ -608,6 +707,7 @@ impl ZConductor {
             events,
             attributions,
         }
+        self.step(now)
     }
 
     pub fn step_from_registry(&mut self, registry: &mut ZRegistry, now: u64) -> ZFused {
@@ -641,7 +741,7 @@ impl ZRegistry {
         self.emitters.push(Box::new(emitter));
     }
     pub fn gather(&mut self, now: u64) -> Vec<ZPulse> {
-        let mut pulses = Vec::new();
+        let mut pulses = Vec::with_capacity(self.emitters.len());
         for emitter in &mut self.emitters {
             if let Some(pulse) = emitter.tick(now) {
                 pulses.push(pulse);
@@ -658,7 +758,9 @@ pub struct DesireEmitter {
 }
 impl DesireEmitter {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            queue: Arc::new(Mutex::new(VecDeque::new())),
+        }
     }
     pub fn enqueue(&self, pulse: ZPulse) {
         let mut q = self.queue.lock().expect("desire emitter queue poisoned");
@@ -936,15 +1038,67 @@ mod conductor_tests {
 
         let mut pulse = ZPulse {
             source: ZSource::Microlocal,
-            support: ZSupport {
-                leading: 0.4,
-                central: 0.4,
-                trailing: 0.4,
-            },
+            tempo: 0.0,
+            support: ZSupport::new(0.2, 0.1, 0.1),
             drift: 0.1,
             ..ZPulse::default()
         };
         emitter.enqueue(pulse.clone());
+
+        let pulses = registry.gather(42);
+        assert_eq!(pulses.len(), 1);
+        assert_eq!(pulses[0].source, ZSource::Desire);
+
+        pulse.source = ZSource::Maxwell;
+        emitter.extend([pulse]);
+        let pulses = registry.gather(43);
+        assert_eq!(pulses.len(), 1);
+        assert_eq!(pulses[0].source, ZSource::Desire);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conductor_allows_optional_configs() {
+        let mut conductor = ZConductor::new(ZConductorCfg::default());
+        assert!(conductor.frequency_cfg.is_none());
+        assert!(conductor.adaptive_cfg.is_none());
+        assert!(conductor.latency_cfg.is_none());
+
+        conductor.set_frequency_config(Some(ZFrequencyConfig::new(0.5)));
+        conductor.set_adaptive_gain_config(Some(ZAdaptiveGainCfg::new(0.1, 1.0, 0.8)));
+        conductor.set_latency_config(Some(ZLatencyConfig::new(4)));
+
+        assert!(conductor.frequency_cfg.is_some());
+        assert!(conductor.adaptive_cfg.is_some());
+        assert!(conductor.latency_cfg.is_some());
+
+        conductor.set_frequency_config(None);
+        conductor.set_adaptive_gain_config(None);
+        conductor.set_latency_config(None);
+
+        assert!(conductor.frequency_cfg.is_none());
+        assert!(conductor.adaptive_cfg.is_none());
+        assert!(conductor.latency_cfg.is_none());
+    }
+
+    #[test]
+    fn desire_emitter_retags_pulses() {
+        let emitter = DesireEmitter::new();
+        let mut registry = ZRegistry::new();
+        registry.register(emitter.clone());
+
+        let mut pulse = ZPulse {
+            source: ZSource::Microlocal,
+            tempo: 0.0,
+            support: ZSupport::new(0.2, 0.1, 0.1),
+            drift: 0.1,
+            ..ZPulse::default()
+        };
+        emitter.enqueue(pulse);
 
         let pulses = registry.gather(42);
         assert_eq!(pulses.len(), 1);

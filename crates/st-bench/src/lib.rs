@@ -7,109 +7,93 @@ use st_core::coop::mixer::{team_reward, DifferenceRewardMixer, TeamTelemetry};
 use st_core::coop::r#loop::CoopLoop;
 use std::collections::HashMap;
 
-/// Synthetic backend identifier used by the benchmark harness.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BackendProbe<'a> {
-    pub name: &'a str,
-    pub base_throughput: f32,
-    pub latency_ms: f32,
-}
+mod model {
+    use super::*;
 
-/// Aggregated benchmark metrics for a backend run.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BenchmarkSample {
-    pub backend: String,
-    pub throughput: f32,
-    pub latency_ms: f32,
-}
+    /// Synthetic backend identifier used by the benchmark harness.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct BackendProbe<'a> {
+        pub name: &'a str,
+        pub base_throughput: f32,
+        pub latency_ms: f32,
+    }
 
-/// Statistical summary derived from one or more [`BenchmarkSample`] entries.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BenchmarkStats {
-    pub backend: String,
-    pub throughput_mean: f32,
-    pub throughput_std: f32,
-    pub latency_mean: f32,
-    pub latency_p95: f32,
-}
+    /// Aggregated benchmark metrics for a backend run.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct BenchmarkSample {
+        pub backend: String,
+        pub throughput: f32,
+        pub latency_ms: f32,
+    }
 
-/// Report summarising all simulated backend runs.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BenchmarkReport {
-    pub samples: Vec<BenchmarkSample>,
-}
+    /// Statistical summary derived from one or more [`BenchmarkSample`] entries.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct BenchmarkStats {
+        pub backend: String,
+        pub throughput_mean: f32,
+        pub throughput_std: f32,
+        pub latency_mean: f32,
+        pub latency_p95: f32,
+    }
 
-impl BenchmarkReport {
-    /// Collapses the samples into per-backend statistics capturing mean, standard deviation,
-    /// and an approximate 95th percentile latency estimate.
-    pub fn summaries(&self) -> Vec<BenchmarkStats> {
-        if self.samples.is_empty() {
-            return Vec::new();
+    /// Report summarising all simulated backend runs.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct BenchmarkReport {
+        pub samples: Vec<BenchmarkSample>,
+    }
+
+    impl BenchmarkReport {
+        /// Collapses the samples into per-backend statistics capturing mean, standard deviation,
+        /// and an approximate 95th percentile latency estimate.
+        pub fn summaries(&self) -> Vec<BenchmarkStats> {
+            if self.samples.is_empty() {
+                return Vec::new();
+            }
+
+            let mut buckets: HashMap<&str, Vec<&BenchmarkSample>> = HashMap::new();
+            for sample in &self.samples {
+                buckets.entry(&sample.backend).or_default().push(sample);
+            }
+
+            let mut summaries: Vec<BenchmarkStats> = buckets
+                .into_iter()
+                .map(|(backend, bucket)| {
+                    let count = bucket.len() as f32;
+                    let throughput_mean = bucket.iter().map(|s| s.throughput).sum::<f32>() / count;
+                    let latency_mean = bucket.iter().map(|s| s.latency_ms).sum::<f32>() / count;
+                    let throughput_std = bucket
+                        .iter()
+                        .map(|s| {
+                            let diff = s.throughput - throughput_mean;
+                            diff * diff
+                        })
+                        .sum::<f32>()
+                        .max(0.0)
+                        .sqrt()
+                        / count.max(1.0).sqrt();
+
+                    let mut latencies: Vec<f32> = bucket.iter().map(|s| s.latency_ms).collect();
+                    latencies.sort_by(|a, b| a.total_cmp(b));
+                    let idx = ((latencies.len() as f32 * 0.95).ceil() as usize).saturating_sub(1);
+                    let latency_p95 = latencies.get(idx).copied().unwrap_or(latency_mean);
+
+                    BenchmarkStats {
+                        backend: backend.to_string(),
+                        throughput_mean,
+                        throughput_std,
+                        latency_mean,
+                        latency_p95,
+                    }
+                })
+                .collect();
+
+            summaries.sort_by(|a, b| a.backend.cmp(&b.backend));
+            summaries
         }
-
-        let mut buckets: HashMap<&str, Vec<&BenchmarkSample>> = HashMap::new();
-        for sample in &self.samples {
-            buckets.entry(&sample.backend).or_default().push(sample);
-        }
-
-        let mut summaries: Vec<BenchmarkStats> = buckets
-            .into_iter()
-            .map(|(backend, bucket)| {
-                let count = bucket.len() as f32;
-                let throughput_mean = bucket.iter().map(|s| s.throughput).sum::<f32>() / count;
-                let latency_mean = bucket.iter().map(|s| s.latency_ms).sum::<f32>() / count;
-                let throughput_std = bucket
-                    .iter()
-                    .map(|s| {
-                        let diff = s.throughput - throughput_mean;
-                        diff * diff
-                    })
-                    .sum::<f32>()
-                    .max(0.0)
-                    .sqrt()
-                    / count.max(1.0).sqrt();
-
-                let mut latencies: Vec<f32> = bucket.iter().map(|s| s.latency_ms).collect();
-                latencies.sort_by(|a, b| a.total_cmp(b));
-                let idx = ((latencies.len() as f32 * 0.95).ceil() as usize).saturating_sub(1);
-                let latency_p95 = latencies.get(idx).copied().unwrap_or(latency_mean);
-
-                BenchmarkStats {
-                    backend: backend.to_string(),
-                    throughput_mean,
-                    throughput_std,
-                    latency_mean,
-                    latency_p95,
-                }
-            })
-            .collect();
-
-        summaries.sort_by(|a, b| a.backend.cmp(&b.backend));
-        summaries
     }
 }
 
-/// Synthetic backend identifier used by the benchmark harness.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BackendProbe<'a> {
-    pub name: &'a str,
-    pub base_throughput: f32,
-    pub latency_ms: f32,
-}
-
-/// Aggregated benchmark metrics for a backend run.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BenchmarkSample {
-    pub backend: String,
-    pub throughput: f32,
-    pub latency_ms: f32,
-}
-
-/// Report summarising all simulated backend runs.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BenchmarkReport {
-    pub samples: Vec<BenchmarkSample>,
-}
+pub use model::{BackendProbe, BenchmarkReport, BenchmarkSample, BenchmarkStats};
 
 struct BenchAgent {
     rng: StdRng,

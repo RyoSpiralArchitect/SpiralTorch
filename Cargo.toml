@@ -27,5 +27,7 @@ default-members = [
   "crates/st-text",
   "crates/st-rl",
   "crates/st-rec",
+  "crates/st-bench",
+  "bindings/st-wasm"
 ]
 resolver = "2"

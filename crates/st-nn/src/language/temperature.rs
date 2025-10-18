@@ -114,6 +114,7 @@ mod tests {
         assert!(warmed >= baseline);
         controller.observe_grad(0.0, 0.95);
         let cooled = controller.update_with_gradient(&[0.6, 0.4], 1.5);
-        assert!(cooled >= warmed);
+        assert!(cooled <= warmed);
+        assert!(cooled >= baseline);
     }
 }
