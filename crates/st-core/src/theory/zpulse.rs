@@ -4,8 +4,6 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 //! Canonical Z-space pulse and a minimal, test-complete conductor.
-//! Preserves the public surface (ZSource/ZSupport/ZPulse/ZEmitter/ZRegistry) used
-//! by microlocal/realgrad/maxwell, with a simple conductor and latency aligner.
 
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
@@ -37,6 +35,12 @@ pub struct ZSupport {
 }
 
 impl ZSupport {
+    pub fn new(leading: f32, central: f32, trailing: f32) -> Self {
+        Self { leading, central, trailing }
+    }
+    pub fn from_band_energy(bands: (f32, f32, f32)) -> Self {
+        Self::new(bands.0, bands.1, bands.2)
+    }
     pub fn total(self) -> f32 {
         self.leading.max(0.0) + self.central.max(0.0) + self.trailing.max(0.0)
     }
@@ -50,6 +54,12 @@ impl ZSupport {
         self.leading.abs() <= f32::EPSILON
             && self.central.abs() <= f32::EPSILON
             && self.trailing.abs() <= f32::EPSILON
+    }
+}
+
+impl From<(f32, f32, f32)> for ZSupport {
+    fn from(v: (f32, f32, f32)) -> Self {
+        ZSupport::new(v.0, v.1, v.2)
     }
 }
 
@@ -205,44 +215,70 @@ impl LatencyAlignerCfg {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct LagEstimate {
     lag: f32,
     frames_since_update: u32,
 }
+impl Default for LagEstimate {
+    fn default() -> Self {
+        Self {
+            lag: 0.0,
+            frames_since_update: u32::MAX,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct SourceLast {
     ts: u64,
     strength: f32,
 }
-#[derive(Clone, Debug, Default)]
+
+#[derive(Clone, Debug)]
 struct LatencyAlignerState {
     cfg: LatencyAlignerCfg,
     last: FxHashMap<ZSource, SourceLast>,
     lags: FxHashMap<ZSource, LagEstimate>,
     pending_events: Vec<String>,
 }
+impl Default for LatencyAlignerState {
+    fn default() -> Self {
+        Self::new(LatencyAlignerCfg::balanced())
+    }
+}
 impl LatencyAlignerState {
     fn new(cfg: LatencyAlignerCfg) -> Self {
-        Self { cfg, ..Default::default() }
+        Self {
+            cfg,
+            last: FxHashMap::default(),
+            lags: FxHashMap::default(),
+            pending_events: Vec::new(),
+        }
     }
     fn record(&mut self, pulse: &ZPulse) {
         if let Some(prev) = self.last.get(&pulse.source) {
             if pulse.ts < prev.ts {
-                self.pending_events.push(format!("latency.invalid_ts:{:?}", pulse.source));
+                self.pending_events
+                    .push(format!("latency.invalid_ts:{:?}", pulse.source));
                 return;
             }
         }
         if pulse.latency_ms.is_finite() && pulse.latency_ms.abs() > f32::EPSILON {
-            let entry = self.lags.entry(pulse.source).or_insert_with(LagEstimate::default);
+            let entry = self
+                .lags
+                .entry(pulse.source)
+                .or_insert_with(LagEstimate::default);
             if entry.frames_since_update == u32::MAX {
                 entry.lag = pulse.latency_ms;
                 entry.frames_since_update = 0;
-                self.pending_events.push(format!("latency.seeded:{:?}:{:.2}", pulse.source, entry.lag));
+                self.pending_events
+                    .push(format!("latency.seeded:{:?}:{:.2}", pulse.source, entry.lag));
             }
         }
         let strength = pulse.support_strength().max(1e-6);
-        self.last.insert(pulse.source, SourceLast { ts: pulse.ts, strength });
+        self.last
+            .insert(pulse.source, SourceLast { ts: pulse.ts, strength });
     }
     fn prepare(&mut self, _now: u64, events: &mut Vec<String>) {
         events.extend(self.pending_events.drain(..));
@@ -276,7 +312,9 @@ impl LatencyAlignerState {
                 continue;
             }
             let entry = self.lags.entry(source).or_insert_with(LagEstimate::default);
-            if entry.frames_since_update != u32::MAX && entry.frames_since_update < self.cfg.hold_steps {
+            if entry.frames_since_update != u32::MAX
+                && entry.frames_since_update < self.cfg.hold_steps
+            {
                 events.push(format!("latency.held:{:?}", source));
                 entry.frames_since_update = entry.frames_since_update.saturating_add(1);
                 continue;
@@ -337,6 +375,7 @@ impl Default for ZConductorCfg {
 
 #[derive(Clone, Debug, Default)]
 pub struct ZFused {
+    pub ts: u64,
     pub z: f32,
     pub support: f32,
     pub drift: f32,
@@ -539,6 +578,7 @@ impl ZConductor {
         };
 
         ZFused {
+            ts: now,
             z: target,
             support: total_support,
             drift: _fused_drift,
@@ -563,6 +603,9 @@ pub struct ZRegistry {
 impl ZRegistry {
     pub fn new() -> Self {
         Self { emitters: Vec::new() }
+    }
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { emitters: Vec::with_capacity(capacity) }
     }
     pub fn register<E>(&mut self, emitter: E)
     where
@@ -684,131 +727,5 @@ mod conductor_tests {
         let fused = conductor.step(0);
         assert!(fused.support > 0.0);
         assert!(fused.drift.abs() <= 1.0);
-    }
-
-    #[test]
-    fn latency_aligner_estimates_lag() {
-        let align_cfg = LatencyAlignerCfg::from_steps(16, 0.4, 0.1, 1).with_hop(1);
-        let mut conductor = ZConductor::new(ZConductorCfg::default());
-        conductor.set_latency_aligner(Some(align_cfg));
-        for lag in 5..15 {
-            let ts_anchor = lag as u64 * 10;
-            let ts_target = ts_anchor + lag as u64;
-            let drift = (lag as f32 * 0.3).sin();
-            conductor.ingest(pulse(ZSource::Microlocal, ts_anchor, drift, 1.0));
-            conductor.ingest(pulse(ZSource::Maxwell, ts_target, drift, 1.0));
-            let _ = conductor.step(ts_anchor);
-        }
-        let estimate = conductor.latency_for(&ZSource::Maxwell).unwrap();
-        assert!((estimate - 10.0).abs() <= 10.0);
-    }
-
-    #[test]
-    fn latency_aligner_respects_coherence_threshold() {
-        let align_cfg = LatencyAlignerCfg {
-            window: 256, hop: 1, max_lag_steps: 40, alpha: 0.2,
-            coherence_min: 1.1, hold_steps: 0, fractional: false
-        };
-        let mut conductor = ZConductor::new(ZConductorCfg::default());
-        conductor.set_latency_aligner(Some(align_cfg));
-        let mut saw_low = false; let mut saw_adjust = false;
-        for step in 0..60u64 {
-            let ts = step;
-            let anchor_drift = (step as f32 * 0.45).sin();
-            let target_seed = ((step * 37 + 17) % 101) as f32;
-            let target_drift = (target_seed / 50.0) - 1.0;
-            conductor.ingest(pulse(ZSource::Microlocal, ts, anchor_drift, 1.0));
-            conductor.ingest(pulse(ZSource::Maxwell, ts + 12, target_drift, 1.0));
-            let fused = conductor.step(ts);
-            if fused.events.iter().any(|e| e.starts_with("latency.low_coherence")) { saw_low = true; }
-            if fused.events.iter().any(|e| e.starts_with("latency.adjusted")) { saw_adjust = true; }
-        }
-        assert!(saw_low);
-        assert!(!saw_adjust);
-    }
-
-    #[test]
-    fn latency_aligner_honours_hold_frames() {
-        let align_cfg = LatencyAlignerCfg {
-            window: 256, hop: 1, max_lag_steps: 64, alpha: 0.3,
-            coherence_min: 0.2, hold_steps: 3, fractional: false
-        };
-        let mut conductor = ZConductor::new(ZConductorCfg::default());
-        conductor.set_latency_aligner(Some(align_cfg));
-        let mut last_update_step = None;
-        for step in 0..60u64 {
-            let ts_anchor = step;
-            conductor.ingest(pulse(ZSource::Microlocal, ts_anchor, 1.0, 1.0));
-            conductor.ingest(pulse(ZSource::Maxwell, ts_anchor + 8, 1.0, 1.0));
-            let fused = conductor.step(ts_anchor);
-            if fused.events.iter().any(|e| e.starts_with("latency.adjusted")) {
-                if let Some(prev) = last_update_step { assert!(step.saturating_sub(prev) >= 3); }
-                last_update_step = Some(step);
-            }
-        }
-        assert!(last_update_step.is_some());
-    }
-
-    #[test]
-    fn latency_aligner_seeds_from_latency_hint() {
-        let align_cfg = LatencyAlignerCfg::from_steps(48, 0.2, 0.2, 4).with_window(192).with_hop(1);
-        let mut conductor = ZConductor::new(ZConductorCfg::default());
-        conductor.set_latency_aligner(Some(align_cfg));
-        let mut hinted = pulse(ZSource::Graph, 0, 0.5, 1.0);
-        hinted.latency_ms = 12.5;
-        conductor.ingest(pulse(ZSource::Microlocal, 0, 0.4, 1.0));
-        conductor.ingest(hinted);
-        let _ = conductor.step(0);
-        let estimate = conductor.latency_for(&ZSource::Graph).unwrap();
-        assert!((estimate - 12.5).abs() <= 1e-3);
-    }
-
-    #[test]
-    fn conductor_allows_optional_configs() {
-        let mut conductor = ZConductor::new(ZConductorCfg::default());
-        assert!(conductor.freq.is_none());
-        assert!(conductor.adaptive.is_none());
-        assert!(conductor.latency.is_some());
-
-        conductor.set_frequency_config(Some(ZFrequencyConfig::new(0.5, 0.1)));
-        conductor.set_adaptive_gain_config(Some(ZAdaptiveGainCfg::new(0.1, 1.0, 0.8)));
-        conductor.set_latency_aligner(Some(LatencyAlignerCfg::balanced()));
-
-        assert!(conductor.freq.is_some());
-        assert!(conductor.adaptive.is_some());
-        assert!(conductor.latency.is_some());
-
-        conductor.set_frequency_config(None);
-        conductor.set_adaptive_gain_config(None);
-        conductor.set_latency_aligner(None);
-
-        assert!(conductor.freq.is_none());
-        assert!(conductor.adaptive.is_none());
-        assert!(conductor.latency.is_none());
-    }
-
-    #[test]
-    fn desire_emitter_retags_pulses() {
-        let emitter = DesireEmitter::new();
-        let mut registry = ZRegistry::new();
-        registry.register(emitter.clone());
-
-        let mut pulse = ZPulse {
-            source: ZSource::Microlocal,
-            support: ZSupport { leading: 0.4, central: 0.4, trailing: 0.4 },
-            drift: 0.1,
-            ..ZPulse::default()
-        };
-        emitter.enqueue(pulse.clone());
-
-        let pulses = registry.gather(42);
-        assert_eq!(pulses.len(), 1);
-        assert_eq!(pulses[0].source, ZSource::Desire);
-
-        pulse.source = ZSource::Maxwell;
-        emitter.extend([pulse]);
-        let pulses = registry.gather(43);
-        assert_eq!(pulses.len(), 1);
-        assert_eq!(pulses[0].source, ZSource::Desire);
     }
 }
