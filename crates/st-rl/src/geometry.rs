@@ -475,7 +475,8 @@ impl GeometryFeedback {
         }
         let averaged = self.history.iter().copied().sum::<f64>() / self.history.len() as f64;
         let geodesic = self.geodesic_projection(resonance);
-        let densified = self.leech_projector.enrich(geodesic);
+        let pressure_baseline = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
+        let densified = self.leech_projector.enrich(geodesic) + pressure_baseline;
         let normalized = ((averaged + densified) / self.ramanujan_pi).clamp(0.0, 1.0);
         let softened = self.soft_project(normalized as f32);
         let mut scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
@@ -599,7 +600,8 @@ impl GeometryFeedback {
             self.max_scale = recommended.max(self.min_scale + f32::EPSILON);
         }
 
-        let max_pressure = self.pressure_baseline;
+        let pressure_baseline = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
+        let max_pressure = pressure_baseline + LeechProjector::new(self.z_rank, 1.0).enrich(1.0);
         if max_pressure > 0.0 {
             let pressure_ratio = (pressure / max_pressure).clamp(0.0, 4.0);
             if pressure_ratio > 1.2 {
@@ -652,6 +654,10 @@ impl GeometryFeedback {
         }
 
         self.leech_projector = LeechProjector::new(self.z_rank, self.leech_weight);
+    }
+
+    fn ramanujan_pi(iterations: usize) -> f64 {
+        shared_ramanujan_pi(iterations)
     }
 }
 

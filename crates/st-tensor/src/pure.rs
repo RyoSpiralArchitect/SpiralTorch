@@ -1023,6 +1023,206 @@ pub struct AmegaHypergrad {
 
 /// Euclidean gradient accumulator that mirrors the hypergradient API while
 /// staying entirely within flat-space optimisation loops.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GradientSummary {
+    l1: f32,
+    l2: f32,
+    linf: f32,
+    count: usize,
+}
+
+impl GradientSummary {
+    #[inline]
+    pub fn from_slice(values: &[f32]) -> Self {
+        let mut l1 = 0.0f32;
+        let mut sum_squares = 0.0f32;
+        let mut linf = 0.0f32;
+        let mut count = 0usize;
+        for &value in values {
+            if !value.is_finite() {
+                continue;
+            }
+            let abs = value.abs();
+            l1 += abs;
+            sum_squares += value * value;
+            linf = linf.max(abs);
+            count += 1;
+        }
+        let l2 = sum_squares.sqrt();
+        Self {
+            l1,
+            l2,
+            linf,
+            count,
+        }
+    }
+
+    #[inline]
+    pub fn l1(&self) -> f32 {
+        self.l1
+    }
+
+    #[inline]
+    pub fn l2(&self) -> f32 {
+        self.l2
+    }
+
+    #[inline]
+    pub fn linf(&self) -> f32 {
+        self.linf
+    }
+
+    #[inline]
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    #[inline]
+    pub fn mean_abs(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.l1 / self.count as f32
+        }
+    }
+
+    #[inline]
+    pub fn rms(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.l2 / (self.count as f32).sqrt()
+        }
+    }
+}
+
+impl Default for GradientSummary {
+    fn default() -> Self {
+        Self {
+            l1: 0.0,
+            l2: 0.0,
+            linf: 0.0,
+            count: 0,
+        }
+    }
+}
+
+/// Interprets paired gradient summaries into high-level signals that can drive
+/// Desire Lagrangian feedback loops.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DesireGradientInterpretation {
+    hyper_pressure: f32,
+    real_pressure: f32,
+    balance: f32,
+    stability: f32,
+    saturation: f32,
+}
+
+impl DesireGradientInterpretation {
+    const EPS: f32 = 1e-6;
+
+    /// Analyse the hypergradient and Euclidean summaries returning a compact
+    /// interpretation of their relative magnitudes and stability.
+    #[inline]
+    pub fn from_summaries(hyper: GradientSummary, real: GradientSummary) -> Self {
+        let hyper_pressure = hyper.mean_abs();
+        let real_pressure = real.mean_abs();
+        let hyper_rms = hyper.rms();
+        let real_rms = real.rms();
+        let balance = if real_rms > Self::EPS {
+            (hyper_rms / real_rms).clamp(0.0, 16.0)
+        } else if hyper_rms > Self::EPS {
+            16.0
+        } else {
+            1.0
+        };
+        let stability_raw = 1.0
+            - (hyper_pressure - real_pressure).abs() / (hyper_pressure + real_pressure + Self::EPS);
+        let stability = stability_raw.clamp(0.0, 1.0);
+        let saturation = hyper.linf().max(real.linf());
+        Self {
+            hyper_pressure,
+            real_pressure,
+            balance,
+            stability,
+            saturation,
+        }
+    }
+
+    /// Mean absolute magnitude of the hypergradient summary.
+    #[inline]
+    pub fn hyper_pressure(&self) -> f32 {
+        self.hyper_pressure
+    }
+
+    /// Mean absolute magnitude of the Euclidean gradient summary.
+    #[inline]
+    pub fn real_pressure(&self) -> f32 {
+        self.real_pressure
+    }
+
+    /// Ratio between the hypergradient and Euclidean RMS magnitudes.
+    #[inline]
+    pub fn balance(&self) -> f32 {
+        self.balance
+    }
+
+    /// Stability score where `1` indicates matching mean-absolute gradients and
+    /// `0` indicates divergent magnitudes.
+    #[inline]
+    pub fn stability(&self) -> f32 {
+        self.stability
+    }
+
+    /// Maximum absolute value observed across both summaries.
+    #[inline]
+    pub fn saturation(&self) -> f32 {
+        self.saturation
+    }
+
+    /// Gain factor for hypergradient penalties when the two tapes disagree.
+    #[inline]
+    pub fn penalty_gain(&self) -> f32 {
+        let imbalance = (self.balance - 1.0).abs().min(2.0);
+        let instability = (1.0 - self.stability).min(1.0);
+        (1.0 + 0.5 * imbalance + 0.5 * instability).clamp(1.0, 2.5)
+    }
+
+    /// Mixing factor used when blending Desire bias updates – drops towards zero
+    /// when the gradients disagree so the automation can tread lightly.
+    #[inline]
+    pub fn bias_mix(&self) -> f32 {
+        (0.25 + 0.75 * self.stability).clamp(0.1, 1.0)
+    }
+
+    /// Gain used when accumulating avoidance reports during the observation
+    /// phase. High saturation dampens the contribution to avoid runaway spikes.
+    #[inline]
+    pub fn observation_gain(&self) -> f32 {
+        let saturation = self.saturation.tanh().clamp(0.0, 1.0);
+        (0.5 + 0.5 * (1.0 - saturation)).clamp(0.25, 1.0)
+    }
+
+    /// Damping factor that can shrink epsilon-like tolerances when gradients
+    /// spike.
+    #[inline]
+    pub fn damping(&self) -> f32 {
+        (0.5 + 0.5 * self.saturation.tanh()).clamp(0.1, 1.0)
+    }
+}
+
+impl Default for DesireGradientInterpretation {
+    fn default() -> Self {
+        Self {
+            hyper_pressure: 0.0,
+            real_pressure: 0.0,
+            balance: 1.0,
+            stability: 1.0,
+            saturation: 0.0,
+        }
+    }
+}
+
 pub struct AmegaRealgrad {
     learning_rate: f32,
     rows: usize,
@@ -1120,6 +1320,11 @@ impl AmegaHypergrad {
     /// Provides mutable access to the accumulated gradient buffer.
     pub fn gradient_mut(&mut self) -> &mut [f32] {
         &mut self.gradient
+    }
+
+    /// Summarise the accumulated gradient using basic norm statistics.
+    pub fn summary(&self) -> GradientSummary {
+        GradientSummary::from_slice(&self.gradient)
     }
 
     /// Returns the guard topos enforcing open-cartesian safety constraints.
@@ -1300,6 +1505,11 @@ impl AmegaRealgrad {
     /// Mutable access to the gradient buffer.
     pub fn gradient_mut(&mut self) -> &mut [f32] {
         &mut self.gradient
+    }
+
+    /// Summarise the accumulated gradient using basic norm statistics.
+    pub fn summary(&self) -> GradientSummary {
+        GradientSummary::from_slice(&self.gradient)
     }
 
     fn assert_tensor_shape(&self, tensor: &Tensor) -> PureResult<()> {
@@ -1548,6 +1758,49 @@ mod tests {
             .gradient()
             .iter()
             .any(|value| value.abs() > f32::EPSILON));
+    }
+
+    #[test]
+    fn gradient_summary_reports_norms() {
+        let summary = GradientSummary::from_slice(&[1.0, -2.0, 0.0, 3.0]);
+        assert_eq!(summary.count(), 4);
+        assert!((summary.l1() - 6.0).abs() < 1e-6);
+        let expected_l2 = (1.0f32 + 4.0 + 0.0 + 9.0).sqrt();
+        assert!((summary.l2() - expected_l2).abs() < 1e-6);
+        assert!((summary.mean_abs() - 1.5).abs() < 1e-6);
+        let expected_rms = expected_l2 / (4.0f32).sqrt();
+        assert!((summary.rms() - expected_rms).abs() < 1e-6);
+        assert_eq!(summary.linf(), 3.0);
+    }
+
+    #[test]
+    fn desire_gradient_interpretation_balances_metrics() {
+        let hyper = GradientSummary::from_slice(&[1.0, -0.5, 0.25, 0.75]);
+        let real = GradientSummary::from_slice(&[0.05, -0.1, 0.0, 0.1]);
+        let interpretation = DesireGradientInterpretation::from_summaries(hyper, real);
+        assert!(interpretation.balance() > 1.0);
+        assert!(interpretation.penalty_gain() > 1.0);
+        let stable = DesireGradientInterpretation::from_summaries(hyper, hyper);
+        assert!(stable.stability() > interpretation.stability());
+        assert!(stable.bias_mix() > interpretation.bias_mix());
+        assert!(stable.observation_gain() >= interpretation.observation_gain());
+    }
+
+    #[test]
+    fn gradient_tapes_surface_summary_metrics() {
+        let tensor = Tensor::from_vec(1, 3, vec![1.0, -2.0, 4.0]).unwrap();
+        let mut hypergrad = AmegaHypergrad::new(-1.0, 0.1, 1, 3).unwrap();
+        hypergrad.accumulate_wave(&tensor).unwrap();
+        let hyper_summary = hypergrad.summary();
+        assert_eq!(hyper_summary.count(), 3);
+        assert!(hyper_summary.l2() > 0.0);
+
+        let mut realgrad = AmegaRealgrad::new(0.1, 1, 3).unwrap();
+        realgrad.accumulate_wave(&tensor).unwrap();
+        let real_summary = realgrad.summary();
+        assert_eq!(real_summary.count(), 3);
+        let expected_l1: f32 = tensor.data().iter().map(|value| value.abs()).sum();
+        assert!((real_summary.l1() - expected_l1).abs() < 1e-6);
     }
 
     #[test]
