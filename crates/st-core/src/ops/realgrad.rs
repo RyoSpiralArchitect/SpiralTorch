@@ -12,6 +12,7 @@
 
 use core::f32::consts::PI;
 use core::fmt;
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::theory::zpulse::{ZPulse, ZSource};
@@ -640,14 +641,25 @@ impl SpectrumNorm {
             }
             SpectrumNorm::Backward | SpectrumNorm::LebesgueL1 => {}
             SpectrumNorm::Whitened => {
-                let epsilon = 1.0e-6f64;
+                let epsilon = 1.0e-9f64;
+                let mut total_magnitude = 0.0f64;
                 for (re, im) in spectrum.iter_mut() {
                     let re_f = *re as f64;
                     let im_f = *im as f64;
                     let energy = re_f * re_f + im_f * im_f;
                     let denom = (energy + epsilon).sqrt();
-                    *re = (re_f / denom) as f32;
-                    *im = (im_f / denom) as f32;
+                    let new_re = re_f / denom;
+                    let new_im = im_f / denom;
+                    *re = new_re as f32;
+                    *im = new_im as f32;
+                    total_magnitude += (new_re * new_re + new_im * new_im).sqrt();
+                }
+                if total_magnitude > 0.0 {
+                    let inv_mean = spectrum.len() as f64 / total_magnitude;
+                    for (re, im) in spectrum.iter_mut() {
+                        *re = (*re as f64 * inv_mean) as f32;
+                        *im = (*im as f64 * inv_mean) as f32;
+                    }
                 }
             }
         }
@@ -920,7 +932,7 @@ fn spectral_quality(spectrum: &[(f32, f32)], band: std::ops::Range<usize>) -> f3
 pub struct RealGradAutoTuner {
     ema_ratio: f32,
     ema_alpha: f32,
-    history: Vec<f32>,
+    history: VecDeque<f32>,
     history_cap: usize,
     gain: f32,
     last_adjustment: f32,
@@ -932,7 +944,7 @@ impl RealGradAutoTuner {
         Self {
             ema_ratio: 0.0,
             ema_alpha: ema_alpha.clamp(0.0, 1.0),
-            history: Vec::new(),
+            history: VecDeque::new(),
             history_cap: 64,
             gain: 1.0,
             last_adjustment: 1.0,
@@ -942,6 +954,9 @@ impl RealGradAutoTuner {
     /// Sets the maximum number of residual magnitudes tracked when estimating quantiles.
     pub fn with_history_capacity(mut self, capacity: usize) -> Self {
         self.history_cap = capacity.max(1);
+        while self.history.len() > self.history_cap {
+            self.history.pop_front();
+        }
         self
     }
 
@@ -971,19 +986,32 @@ impl RealGradAutoTuner {
             return;
         }
         if self.history.len() == self.history_cap {
-            self.history.remove(0);
+            self.history.pop_front();
         }
-        self.history.push(value);
+        self.history.push_back(value);
     }
 
     fn percentile(&self, q: f32) -> f32 {
         if self.history.is_empty() {
             return 0.0;
         }
-        let mut scratch = self.history.clone();
+        let mut scratch: Vec<f32> = self.history.iter().copied().collect();
         scratch.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-        let pos = ((scratch.len() - 1) as f32 * q.clamp(0.0, 1.0)).round() as usize;
-        scratch[pos.min(scratch.len() - 1)]
+        if scratch.len() == 1 {
+            return scratch[0];
+        }
+        let q = q.clamp(0.0, 1.0);
+        let max_index = scratch.len() as f32 - 1.0;
+        let position = q * max_index;
+        let lower = position.floor() as usize;
+        let upper = position.ceil() as usize;
+        if lower == upper {
+            return scratch[lower];
+        }
+        let fraction = position - lower as f32;
+        let lower_value = scratch[lower];
+        let upper_value = scratch[upper];
+        lower_value + (upper_value - lower_value) * fraction
     }
 
     /// Updates the residual threshold based on the projection statistics.
@@ -1146,6 +1174,40 @@ mod tests {
     }
 
     #[test]
+    fn chirpz_matches_fft_when_zoom_is_unity() {
+        let data: Vec<f32> = (0..24)
+            .map(|idx| ((idx as f32) * core::f32::consts::TAU * 5.0 / 24.0).cos())
+            .collect();
+        let mut fft_kernel = RealGradKernel::new(RealGradConfig::default())
+            .with_engine(Box::new(CpuRustFft::default()));
+        let mut chirpz_kernel = RealGradKernel::new(RealGradConfig::default())
+            .with_engine(Box::new(CpuChirpZ::new(0..usize::MAX, 1)));
+
+        let fft_projection = fft_kernel.project(&data);
+        let chirpz_projection = chirpz_kernel.project(&data);
+        assert_eq!(
+            fft_projection.spectrum.len(),
+            chirpz_projection.spectrum.len()
+        );
+
+        let mut num = 0.0f64;
+        let mut denom = 0.0f64;
+        for ((fft_re, fft_im), (czt_re, czt_im)) in fft_projection
+            .spectrum
+            .iter()
+            .zip(chirpz_projection.spectrum.iter())
+        {
+            let dr = *fft_re as f64 - *czt_re as f64;
+            let di = *fft_im as f64 - *czt_im as f64;
+            num += dr * dr + di * di;
+            denom +=
+                (*fft_re as f64 * *fft_re as f64) + (*fft_im as f64 * *fft_im as f64) + 1.0e-18;
+        }
+        let rel = (num / denom.max(1.0e-18)).sqrt();
+        assert!(rel < 1.0e-5, "rel={rel}");
+    }
+
+    #[test]
     fn chirpz_focuses_requested_band() {
         let mut engine = CpuChirpZ::new(2..6, 3);
         let mut output = vec![(0.0f32, 0.0f32); 16];
@@ -1244,6 +1306,80 @@ mod tests {
     }
 
     #[test]
+    fn spectrum_norms_respect_parseval_relations() {
+        let data: Vec<f32> = (0..32)
+            .map(|idx| ((idx as f32) * core::f32::consts::TAU / 9.0).sin())
+            .collect();
+        let time_energy: f64 = data.iter().map(|value| (*value as f64).powi(2)).sum();
+        let norms = [
+            SpectrumNorm::Unitary,
+            SpectrumNorm::EnergyPreserving,
+            SpectrumNorm::Forward,
+            SpectrumNorm::Backward,
+            SpectrumNorm::LebesgueL1,
+        ];
+
+        for norm in norms {
+            let mut config = RealGradConfig::default();
+            config.spectrum_norm = norm;
+            let projection = project_realgrad(&data, config);
+            let spectral_energy: f64 = projection
+                .spectrum
+                .iter()
+                .map(|(re, im)| {
+                    let re = *re as f64;
+                    let im = *im as f64;
+                    re * re + im * im
+                })
+                .sum();
+            let len = data.len() as f64;
+            let expected = match norm {
+                SpectrumNorm::Unitary | SpectrumNorm::EnergyPreserving => time_energy,
+                SpectrumNorm::Forward => time_energy * len,
+                SpectrumNorm::Backward | SpectrumNorm::LebesgueL1 => time_energy / len,
+                SpectrumNorm::Whitened => continue,
+            };
+            let diff = (spectral_energy - expected).abs();
+            let tol = expected.abs().max(1.0) * 1.0e-5;
+            assert!(
+                diff <= tol,
+                "norm {:?} diff {diff} expected {expected} actual {spectral_energy}",
+                norm
+            );
+        }
+    }
+
+    #[test]
+    fn whitened_normalisation_targets_unit_magnitude() {
+        let mut samples = Vec::with_capacity(128);
+        let mut state = 0x1234_5678u32;
+        for _ in 0..128 {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let value = ((state >> 8) & 0xFFFF) as f32 / 65535.0 - 0.5;
+            samples.push(value * 2.0);
+        }
+        let mut config = RealGradConfig::default();
+        config.spectrum_norm = SpectrumNorm::Whitened;
+        let projection = project_realgrad(&samples, config);
+        let len = projection.spectrum.len() as f64;
+        assert!(len > 0.0);
+        let mean_magnitude = projection
+            .spectrum
+            .iter()
+            .map(|(re, im)| {
+                let re = *re as f64;
+                let im = *im as f64;
+                (re * re + im * im).sqrt()
+            })
+            .sum::<f64>()
+            / len;
+        assert!(
+            (mean_magnitude - 1.0).abs() < 0.05,
+            "mean magnitude {mean_magnitude}"
+        );
+    }
+
+    #[test]
     fn schwartz_sequence_detects_dominated_terms() {
         let dominator = vec![1.0f32; 8];
         let mut members = Vec::new();
@@ -1329,6 +1465,30 @@ mod tests {
         assert!(tuner.residual_ratio() > 0.0);
         assert!(config.residual_threshold > previous);
         assert!(tuner.last_adjustment() >= 1.0);
+    }
+
+    #[test]
+    fn auto_tuner_percentiles_are_monotonic() {
+        let mut tuner = RealGradAutoTuner::new(0.3).with_history_capacity(16);
+        for value in [0.05f32, 0.1, 0.2, 0.4, 0.8, 1.2] {
+            tuner.push_history(value);
+        }
+        let p50 = tuner.percentile(0.5);
+        let p90 = tuner.percentile(0.9);
+        let p95 = tuner.percentile(0.95);
+        assert!(p50 <= p90 && p90 <= p95);
+
+        let mut sparse = RealGradAutoTuner::new(0.3);
+        sparse.push_history(0.42);
+        let p_single = sparse.percentile(0.95);
+        assert!((p_single - 0.42).abs() < 1.0e-6);
+
+        let mut tiny = RealGradAutoTuner::new(0.3);
+        tiny.push_history(0.1);
+        tiny.push_history(0.9);
+        let p90_tiny = tiny.percentile(0.9);
+        let p95_tiny = tiny.percentile(0.95);
+        assert!(p95_tiny >= p90_tiny);
     }
 
     #[test]

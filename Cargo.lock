@@ -2418,6 +2418,7 @@ dependencies = [
  "pollster",
  "rand",
  "rustc-hash",
+ "rustfft",
  "serde",
  "serde_json",
  "st-backend-hip",
