@@ -1021,6 +1021,15 @@ pub struct AmegaHypergrad {
     topos: topos::OpenCartesianTopos,
 }
 
+/// Euclidean gradient accumulator that mirrors the hypergradient API while
+/// staying entirely within flat-space optimisation loops.
+pub struct AmegaRealgrad {
+    learning_rate: f32,
+    rows: usize,
+    cols: usize,
+    gradient: Vec<f32>,
+}
+
 impl AmegaHypergrad {
     /// Create a new hypergradient tape with the provided curvature and step size.
     pub fn new(curvature: f32, learning_rate: f32, rows: usize, cols: usize) -> PureResult<Self> {
@@ -1247,6 +1256,121 @@ impl AmegaHypergrad {
     }
 }
 
+impl AmegaRealgrad {
+    /// Create a new Euclidean gradient tape with the provided step size.
+    pub fn new(learning_rate: f32, rows: usize, cols: usize) -> PureResult<Self> {
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        if learning_rate <= 0.0 || !learning_rate.is_finite() {
+            return Err(TensorError::NonPositiveLearningRate {
+                rate: learning_rate,
+            });
+        }
+        Ok(Self {
+            learning_rate,
+            rows,
+            cols,
+            gradient: vec![0.0; rows * cols],
+        })
+    }
+
+    /// Returns the learning rate applied during [`apply`].
+    pub fn learning_rate(&self) -> f32 {
+        self.learning_rate
+    }
+
+    /// Adjust the learning rate used for subsequent updates.
+    pub fn scale_learning_rate(&mut self, factor: f32) {
+        if factor.is_finite() && factor > 0.0 {
+            self.learning_rate *= factor;
+        }
+    }
+
+    /// Dimensions of the gradient buffer.
+    pub fn shape(&self) -> (usize, usize) {
+        (self.rows, self.cols)
+    }
+
+    /// Read-only view into the accumulated gradient.
+    pub fn gradient(&self) -> &[f32] {
+        &self.gradient
+    }
+
+    /// Mutable access to the gradient buffer.
+    pub fn gradient_mut(&mut self) -> &mut [f32] {
+        &mut self.gradient
+    }
+
+    fn assert_tensor_shape(&self, tensor: &Tensor) -> PureResult<()> {
+        if tensor.shape() != (self.rows, self.cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: tensor.shape(),
+                right: (self.rows, self.cols),
+            });
+        }
+        Ok(())
+    }
+
+    /// Reset the accumulated gradient to zero.
+    pub fn reset(&mut self) {
+        for value in &mut self.gradient {
+            *value = 0.0;
+        }
+    }
+
+    /// Accumulate an Euclidean tensor into the tape.
+    pub fn accumulate_wave(&mut self, tensor: &Tensor) -> PureResult<()> {
+        self.assert_tensor_shape(tensor)?;
+        for (grad, value) in self.gradient.iter_mut().zip(tensor.data().iter()) {
+            *grad += *value;
+        }
+        Ok(())
+    }
+
+    /// Accumulate a complex wave by flattening it into real/imag lanes.
+    pub fn accumulate_complex_wave(&mut self, wave: &ComplexTensor) -> PureResult<()> {
+        let tensor = wave.to_tensor()?;
+        self.accumulate_wave(&tensor)
+    }
+
+    /// Encode text into Z-space and accumulate the resulting tensor.
+    pub fn absorb_text(&mut self, encoder: &LanguageWaveEncoder, text: &str) -> PureResult<()> {
+        let tensor = encoder.encode_z_space(text)?;
+        self.accumulate_wave(&tensor)
+    }
+
+    /// Integrate a prediction/target pair as a residual update.
+    pub fn accumulate_pair(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<()> {
+        self.assert_tensor_shape(prediction)?;
+        if prediction.shape() != target.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: prediction.shape(),
+                right: target.shape(),
+            });
+        }
+        for ((grad, pred), tgt) in self
+            .gradient
+            .iter_mut()
+            .zip(prediction.data().iter())
+            .zip(target.data().iter())
+        {
+            *grad += pred - tgt;
+        }
+        Ok(())
+    }
+
+    /// Apply the accumulated gradient to the provided weights and clear it.
+    pub fn apply(&mut self, weights: &mut Tensor) -> PureResult<()> {
+        self.assert_tensor_shape(weights)?;
+        for (value, grad) in weights.data_mut().iter_mut().zip(self.gradient.iter()) {
+            *value -= self.learning_rate * *grad;
+        }
+        self.reset();
+        Ok(())
+    }
+}
+
 fn matmul_naive(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize) -> Vec<f32> {
     let mut out = vec![0.0; rows * cols];
     for r in 0..rows {
@@ -1400,6 +1524,40 @@ mod tests {
             .unwrap();
         let gradient = tape.gradient();
         assert!(gradient.iter().any(|value| value.abs() > 0.0));
+    }
+
+    #[test]
+    fn amega_realgrad_accumulates_and_applies() {
+        let mut tape = AmegaRealgrad::new(0.1, 1, 3).unwrap();
+        let tensor = Tensor::from_vec(1, 3, vec![1.0, -2.0, 0.5]).unwrap();
+        tape.accumulate_wave(&tensor).unwrap();
+        let mut weights = Tensor::from_vec(1, 3, vec![0.0, 0.0, 0.0]).unwrap();
+        tape.apply(&mut weights).unwrap();
+        assert!((weights.data()[0] + 0.1).abs() < 1e-6);
+        assert!((weights.data()[1] - 0.2).abs() < 1e-6);
+        assert!((weights.data()[2] + 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn amega_realgrad_absorbs_text() {
+        let encoder = LanguageWaveEncoder::new(-1.0, 0.6).unwrap();
+        let z = encoder.encode_z_space("spiral torch realgrad").unwrap();
+        let mut tape = AmegaRealgrad::new(0.05, z.shape().0, z.shape().1).unwrap();
+        tape.absorb_text(&encoder, "spiral torch realgrad").unwrap();
+        assert!(tape
+            .gradient()
+            .iter()
+            .any(|value| value.abs() > f32::EPSILON));
+    }
+
+    #[test]
+    fn amega_realgrad_accumulates_pair() {
+        let mut tape = AmegaRealgrad::new(0.01, 1, 2).unwrap();
+        let prediction = Tensor::from_vec(1, 2, vec![0.5, -0.5]).unwrap();
+        let target = Tensor::from_vec(1, 2, vec![0.25, -0.75]).unwrap();
+        tape.accumulate_pair(&prediction, &target).unwrap();
+        assert!((tape.gradient()[0] - 0.25).abs() < 1e-6);
+        assert!((tape.gradient()[1] - 0.25).abs() < 1e-6);
     }
 
     #[test]
