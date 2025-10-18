@@ -35,61 +35,19 @@
 //! field together with signed curvature when a phase label is supplied.
 
 use crate::coop::ai::{CoopAgent, CoopProposal};
-use crate::telemetry::hub::{self, SoftlogicZFeedback};
+use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZRegistry, ZSource,
+    ZAdaptiveGainCfg, ZConductor, ZFrequencyConfig, ZFused, ZPulse, ZSource, ZSupport,
 };
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
+use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
+use std::collections::VecDeque;
+use std::fmt;
 use std::f64::consts::PI;
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
-};
-
-#[derive(Clone, Default, Debug)]
-pub struct MicrolocalEmitter {
-    queue: Arc<Mutex<VecDeque<ZPulse>>>,
-}
-
-impl MicrolocalEmitter {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn enqueue(&self, pulse: ZPulse) {
-        let mut queue = self
-            .queue
-            .lock()
-            .expect("microlocal emitter queue poisoned");
-        queue.push_back(pulse);
-    }
-
-    pub fn extend<I>(&self, pulses: I)
-    where
-        I: IntoIterator<Item = ZPulse>,
-    {
-        let mut queue = self
-            .queue
-            .lock()
-            .expect("microlocal emitter queue poisoned");
-        queue.extend(pulses);
-    }
-}
-
-impl ZEmitter for MicrolocalEmitter {
-    fn name(&self) -> ZSource {
-        ZSource::Microlocal
-    }
-
-    fn tick(&mut self, _now: u64) -> Option<ZPulse> {
-        self.queue
-            .lock()
-            .expect("microlocal emitter queue poisoned")
-            .pop_front()
-    }
-}
+use std::fmt;
+use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
 #[derive(Debug, Clone)]
@@ -462,6 +420,14 @@ impl InterfaceZLift {
             band_energy: (above, here, beneath),
             drift,
             z_bias,
+            source: ZSource::Microlocal,
+            z_score: None,
+            standard_error: None,
+            residual_p90: None,
+            quality_hint: None,
+            has_low_band: beneath > f32::EPSILON,
+            has_mid_band: here > f32::EPSILON,
+            has_high_band: above > f32::EPSILON,
         }
     }
 }
@@ -479,6 +445,22 @@ pub struct InterfaceZPulse {
     pub drift: f32,
     /// Signed Z bias generated after enriching the drift.
     pub z_bias: f32,
+    /// Source of the pulse, used for policy routing and debugging.
+    pub source: ZSource,
+    /// Optional Z score (Maxwell, spectral trackers).
+    pub z_score: Option<f32>,
+    /// Optional standard error backing the Z score.
+    pub standard_error: Option<f32>,
+    /// Optional P90 residual estimate for RealGrad quality gating.
+    pub residual_p90: Option<f32>,
+    /// Optional pre-computed quality hint from the projector.
+    pub quality_hint: Option<f32>,
+    /// Indicates whether the pulse carries low-band support.
+    pub has_low_band: bool,
+    /// Indicates whether the pulse carries mid-band support.
+    pub has_mid_band: bool,
+    /// Indicates whether the pulse carries high-band support.
+    pub has_high_band: bool,
 }
 
 impl InterfaceZPulse {
@@ -508,6 +490,18 @@ impl InterfaceZPulse {
         let mut here = 0.0f32;
         let mut beneath = 0.0f32;
         let mut weighted_bias = 0.0f32;
+        let mut z_score_sum = 0.0f32;
+        let mut z_score_weight = 0.0f32;
+        let mut stderr_sum = 0.0f32;
+        let mut stderr_weight = 0.0f32;
+        let mut residual_sum = 0.0f32;
+        let mut residual_weight = 0.0f32;
+        let mut quality_sum = 0.0f32;
+        let mut quality_weight = 0.0f32;
+        let mut has_low_band = false;
+        let mut has_mid_band = false;
+        let mut has_high_band = false;
+        let mut source = pulses[0].source;
 
         for pulse in pulses {
             let (p_above, p_here, p_beneath) = pulse.band_energy;
@@ -517,6 +511,30 @@ impl InterfaceZPulse {
             interface_cells += pulse.interface_cells;
             support += pulse.support;
             weighted_bias += pulse.z_bias * pulse.support;
+            if let Some(z) = pulse.z_score {
+                let weight = pulse.support.max(f32::EPSILON);
+                z_score_sum += z * weight;
+                z_score_weight += weight;
+            }
+            if let Some(stderr) = pulse.standard_error {
+                stderr_sum += stderr;
+                stderr_weight += 1.0;
+            }
+            if let Some(residual) = pulse.residual_p90 {
+                residual_sum += residual;
+                residual_weight += 1.0;
+            }
+            if let Some(quality) = pulse.quality_hint {
+                let weight = pulse.support.max(f32::EPSILON);
+                quality_sum += quality * weight;
+                quality_weight += weight;
+            }
+            has_low_band |= pulse.has_low_band;
+            has_mid_band |= pulse.has_mid_band;
+            has_high_band |= pulse.has_high_band;
+            if pulse.source != source {
+                source = pulse.source;
+            }
         }
 
         let drift = above - beneath;
@@ -526,12 +544,41 @@ impl InterfaceZPulse {
             0.0
         };
 
+        let z_score = if z_score_weight > 0.0 {
+            Some(z_score_sum / z_score_weight)
+        } else {
+            None
+        };
+        let standard_error = if stderr_weight > 0.0 {
+            Some(stderr_sum / stderr_weight)
+        } else {
+            None
+        };
+        let residual_p90 = if residual_weight > 0.0 {
+            Some(residual_sum / residual_weight)
+        } else {
+            None
+        };
+        let quality_hint = if quality_weight > 0.0 {
+            Some(quality_sum / quality_weight)
+        } else {
+            None
+        };
+
         InterfaceZPulse {
             support,
             interface_cells,
             band_energy: (above, here, beneath),
             drift,
             z_bias,
+            source,
+            z_score,
+            standard_error,
+            residual_p90,
+            quality_hint,
+            has_low_band,
+            has_mid_band,
+            has_high_band,
         }
     }
 
@@ -547,6 +594,12 @@ impl InterfaceZPulse {
         let beta = 1.0 - alpha;
         let (cur_above, cur_here, cur_beneath) = current.band_energy;
         let (next_above, next_here, next_beneath) = next.band_energy;
+        let blend = |lhs: Option<f32>, rhs: Option<f32>| match (lhs, rhs) {
+            (Some(a), Some(b)) => Some(a * beta + b * alpha),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
         InterfaceZPulse {
             support: current.support * beta + next.support * alpha,
             interface_cells: current.interface_cells * beta + next.interface_cells * alpha,
@@ -557,6 +610,18 @@ impl InterfaceZPulse {
             ),
             drift: current.drift * beta + next.drift * alpha,
             z_bias: current.z_bias * beta + next.z_bias * alpha,
+            source: if alpha >= 0.5 {
+                next.source
+            } else {
+                current.source
+            },
+            z_score: blend(current.z_score, next.z_score),
+            standard_error: blend(current.standard_error, next.standard_error),
+            residual_p90: blend(current.residual_p90, next.residual_p90),
+            quality_hint: blend(current.quality_hint, next.quality_hint),
+            has_low_band: current.has_low_band || next.has_low_band,
+            has_mid_band: current.has_mid_band || next.has_mid_band,
+            has_high_band: current.has_high_band || next.has_high_band,
         }
     }
 
@@ -600,6 +665,14 @@ impl InterfaceZPulse {
             band_energy: (above * gain, here * gain, beneath * gain),
             drift: self.drift * gain,
             z_bias: self.z_bias * gain,
+            source: self.source,
+            z_score: self.z_score,
+            standard_error: self.standard_error,
+            residual_p90: self.residual_p90,
+            quality_hint: self.quality_hint,
+            has_low_band: self.has_low_band,
+            has_mid_band: self.has_mid_band,
+            has_high_band: self.has_high_band,
         }
     }
 }
@@ -612,6 +685,14 @@ impl Default for InterfaceZPulse {
             band_energy: (0.0, 0.0, 0.0),
             drift: 0.0,
             z_bias: 0.0,
+            source: ZSource::Microlocal,
+            z_score: None,
+            standard_error: None,
+            residual_p90: None,
+            quality_hint: None,
+            has_low_band: false,
+            has_mid_band: false,
+            has_high_band: false,
         }
     }
 }
@@ -649,6 +730,464 @@ impl DefaultZSourcePolicy {
 }
 
 impl ZSourcePolicy for DefaultZSourcePolicy {}
+
+/// Quality policy that prioritises large-magnitude Maxwell Z scores with low
+/// standard error.
+#[derive(Debug, Clone, Copy)]
+pub struct MaxwellPolicy {
+    /// Lower bound applied to the standard error when computing weights.
+    pub stderr_floor: f32,
+    /// Gain applied to the absolute Z score prior to squashing.
+    pub zscore_gain: f32,
+}
+
+impl Default for MaxwellPolicy {
+    fn default() -> Self {
+        MaxwellPolicy {
+            stderr_floor: 1e-3,
+            zscore_gain: 1.0,
+        }
+    }
+}
+
+impl MaxwellPolicy {
+    /// Creates a new policy with the provided standard-error floor and Z gain.
+    pub fn new(stderr_floor: f32, zscore_gain: f32) -> Self {
+        MaxwellPolicy {
+            stderr_floor: stderr_floor.max(f32::EPSILON),
+            zscore_gain,
+        }
+    }
+}
+
+impl ZSourcePolicy for MaxwellPolicy {
+    fn quality(&self, pulse: &InterfaceZPulse) -> f32 {
+        if let (Some(z), Some(stderr)) = (pulse.z_score, pulse.standard_error) {
+            let zq = (z.abs() * self.zscore_gain).tanh();
+            let serr = (1.0 / stderr.max(self.stderr_floor)).clamp(0.0, 1.0);
+            (zq * serr).clamp(0.0, 1.0)
+        } else {
+            DefaultZSourcePolicy::new().quality(pulse)
+        }
+    }
+}
+
+/// Quality policy leveraging RealGrad residual statistics and band metadata.
+#[derive(Debug, Clone, Copy)]
+pub struct RealGradPolicy {
+    /// Target residual P90 used to down-weight noisy gradients.
+    pub residual_target_p90: f32,
+    /// Additional boost applied when the pulse carries low-band support.
+    pub band_bonus_low: f32,
+}
+
+impl Default for RealGradPolicy {
+    fn default() -> Self {
+        RealGradPolicy {
+            residual_target_p90: 0.1,
+            band_bonus_low: 0.2,
+        }
+    }
+}
+
+impl RealGradPolicy {
+    /// Creates a new policy with the provided residual target and low-band
+    /// bonus gain.
+    pub fn new(residual_target_p90: f32, band_bonus_low: f32) -> Self {
+        RealGradPolicy {
+            residual_target_p90: residual_target_p90.max(1e-6),
+            band_bonus_low,
+        }
+    }
+}
+
+impl ZSourcePolicy for RealGradPolicy {
+    fn quality(&self, pulse: &InterfaceZPulse) -> f32 {
+        let base = pulse
+            .quality_hint
+            .unwrap_or_else(|| DefaultZSourcePolicy::new().quality(pulse));
+        let residual_ratio = pulse
+            .residual_p90
+            .map(|residual| residual / self.residual_target_p90)
+            .unwrap_or(1.0);
+        let residual_gate = (1.0 / residual_ratio.max(1.0)).clamp(0.5, 1.0);
+        let low_bonus = if pulse.has_low_band {
+            1.0 + self.band_bonus_low
+        } else {
+            1.0
+        };
+        (base * residual_gate * low_bonus).min(1.0)
+    }
+}
+
+/// Composite policy that routes quality decisions based on the pulse source.
+#[derive(Clone)]
+pub struct CompositePolicy {
+    default: Arc<dyn ZSourcePolicy>,
+    overrides: FxHashMap<ZSource, Arc<dyn ZSourcePolicy>>,
+}
+
+impl fmt::Debug for CompositePolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CompositePolicy")
+            .field("default", &"dyn policy")
+            .field("overrides", &self.overrides.len())
+            .finish()
+    }
+}
+
+impl CompositePolicy {
+    /// Creates a new composite policy with the provided default policy.
+    pub fn new<P>(default: P) -> Self
+    where
+        P: ZSourcePolicy + 'static,
+    {
+        CompositePolicy {
+            default: Arc::new(default),
+            overrides: FxHashMap::default(),
+        }
+    }
+
+    /// Registers a source-specific policy override.
+    pub fn with<P>(mut self, source: ZSource, policy: P) -> Self
+    where
+        P: ZSourcePolicy + 'static,
+    {
+        self.overrides.insert(source, Arc::new(policy));
+        self
+    }
+}
+
+impl ZSourcePolicy for CompositePolicy {
+    fn quality(&self, pulse: &InterfaceZPulse) -> f32 {
+        if let Some(policy) = self.overrides.get(&pulse.source) {
+            policy.quality(pulse)
+        } else {
+            self.default.quality(pulse)
+        }
+    }
+
+    fn late_fuse(
+        &self,
+        fused: &mut InterfaceZPulse,
+        pulses: &[InterfaceZPulse],
+        qualities: &[f32],
+    ) {
+        self.default.late_fuse(fused, pulses, qualities);
+        for (source, policy) in &self.overrides {
+            if pulses.iter().any(|pulse| &pulse.source == source) {
+                policy.late_fuse(fused, pulses, qualities);
+            }
+        }
+    }
+}
+
+/// Band-energy gating applied on top of the quality policy.
+#[derive(Debug, Clone)]
+pub struct BandPolicy {
+    min_quality: [f32; 3],
+    hysteresis: f32,
+}
+
+impl BandPolicy {
+    /// Creates a new policy with per-band minimum quality thresholds.
+    pub fn new(min_quality: [f32; 3]) -> Self {
+        BandPolicy {
+            min_quality: min_quality.map(|v| v.clamp(0.0, 1.0)),
+            hysteresis: 0.0,
+        }
+    }
+
+    /// Configures a hysteresis margin applied when demoting bands.
+    pub fn with_hysteresis(mut self, hysteresis: f32) -> Self {
+        self.hysteresis = hysteresis.max(0.0);
+        self
+    }
+
+    fn gate(&self, band: usize, quality: f32) -> f32 {
+        let threshold = self.min_quality[band];
+        if quality + self.hysteresis < threshold {
+            if threshold <= f32::EPSILON {
+                0.0
+            } else {
+                (quality / threshold).clamp(0.0, 1.0)
+            }
+        } else {
+            1.0
+        }
+    }
+
+    /// Projects an overall quality multiplier derived from the band energies.
+    pub fn project_quality(&self, pulse: &InterfaceZPulse) -> f32 {
+        let total = pulse.total_energy().max(1e-6);
+        let ratios = [
+            pulse.band_energy.0 / total,
+            pulse.band_energy.1 / total,
+            pulse.band_energy.2 / total,
+        ];
+        let mut scale = 1.0f32;
+        for (idx, ratio) in ratios.into_iter().enumerate() {
+            scale *= self.gate(idx, ratio.clamp(0.0, 1.0));
+        }
+        scale.clamp(0.0, 1.0)
+    }
+}
+
+/// Budget guard that clamps the fused Z pulse magnitude.
+#[derive(Debug, Clone)]
+pub struct BudgetPolicy {
+    z_max: f32,
+}
+
+impl BudgetPolicy {
+    /// Creates a new budget policy bounding the fused Z-bias magnitude.
+    pub fn new(z_max: f32) -> Self {
+        BudgetPolicy { z_max: z_max.abs() }
+    }
+
+    /// Applies the budget to the fused pulse, returning the applied scale.
+    pub fn apply(&self, fused: &mut InterfaceZPulse) -> f32 {
+        let limit = self.z_max.max(f32::EPSILON);
+        let magnitude = fused.z_bias.abs();
+        if magnitude <= limit {
+            return 1.0;
+        }
+        let scale = (limit / magnitude).clamp(0.0, 1.0);
+        let scaled = fused.scaled(scale);
+        *fused = scaled;
+        scale
+    }
+}
+
+#[derive(Clone, Default)]
+struct MicrolocalEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
+}
+
+impl MicrolocalEmitter {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn extend<I>(&self, pulses: I)
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.extend(pulses);
+    }
+}
+
+impl ZEmitter for MicrolocalEmitter {
+    fn name(&self) -> ZSource {
+        ZSource::Microlocal
+    }
+
+    fn tick(&mut self, now: u64) -> Option<ZPulse> {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.pop_front().map(|mut pulse| {
+            if pulse.ts == 0 {
+                pulse.ts = now;
+            }
+            pulse
+        })
+    }
+
+    fn quality_hint(&self) -> Option<f32> {
+        None
+    }
+}
+
+/// Policy hook controlling per-source quality weights and fused adjustments.
+pub trait ZSourcePolicy: Send + Sync {
+    /// Computes a quality score in `[0, 1]` used to weight the corresponding
+    /// pulse during fusion.
+    fn quality(&self, pulse: &InterfaceZPulse) -> f32 {
+        let total = pulse.total_energy().max(1e-6);
+        let drift = (pulse.drift.abs() / total).tanh();
+        let support = pulse.support.tanh();
+        (drift * support).clamp(0.0, 1.0)
+    }
+
+    /// Provides an opportunity to amend the fused pulse once all sources have
+    /// been combined.
+    fn late_fuse(
+        &self,
+        _fused: &mut InterfaceZPulse,
+        _pulses: &[InterfaceZPulse],
+        _qualities: &[f32],
+    ) {
+    }
+}
+
+/// Default quality policy mirroring the stock microlocal heuristics.
+#[derive(Debug, Default)]
+pub struct DefaultZSourcePolicy;
+
+impl DefaultZSourcePolicy {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl ZSourcePolicy for DefaultZSourcePolicy {}
+
+/// Quality policy that prioritises large-magnitude Maxwell Z scores with low
+/// standard error.
+#[derive(Debug, Clone, Copy)]
+pub struct MaxwellPolicy {
+    /// Lower bound applied to the standard error when computing weights.
+    pub stderr_floor: f32,
+    /// Gain applied to the absolute Z score prior to squashing.
+    pub zscore_gain: f32,
+}
+
+impl Default for MaxwellPolicy {
+    fn default() -> Self {
+        MaxwellPolicy {
+            stderr_floor: 1e-3,
+            zscore_gain: 1.0,
+        }
+    }
+}
+
+impl MaxwellPolicy {
+    /// Creates a new policy with the provided standard-error floor and Z gain.
+    pub fn new(stderr_floor: f32, zscore_gain: f32) -> Self {
+        MaxwellPolicy {
+            stderr_floor: stderr_floor.max(f32::EPSILON),
+            zscore_gain,
+        }
+    }
+}
+
+impl ZSourcePolicy for MaxwellPolicy {
+    fn quality(&self, pulse: &InterfaceZPulse) -> f32 {
+        if let (Some(z), Some(stderr)) = (pulse.z_score, pulse.standard_error) {
+            let zq = (z.abs() * self.zscore_gain).tanh();
+            let serr = (1.0 / stderr.max(self.stderr_floor)).clamp(0.0, 1.0);
+            (zq * serr).clamp(0.0, 1.0)
+        } else {
+            DefaultZSourcePolicy::new().quality(pulse)
+        }
+    }
+}
+
+/// Quality policy leveraging RealGrad residual statistics and band metadata.
+#[derive(Debug, Clone, Copy)]
+pub struct RealGradPolicy {
+    /// Target residual P90 used to down-weight noisy gradients.
+    pub residual_target_p90: f32,
+    /// Additional boost applied when the pulse carries low-band support.
+    pub band_bonus_low: f32,
+}
+
+impl Default for RealGradPolicy {
+    fn default() -> Self {
+        RealGradPolicy {
+            residual_target_p90: 0.1,
+            band_bonus_low: 0.2,
+        }
+    }
+}
+
+impl RealGradPolicy {
+    /// Creates a new policy with the provided residual target and low-band
+    /// bonus gain.
+    pub fn new(residual_target_p90: f32, band_bonus_low: f32) -> Self {
+        RealGradPolicy {
+            residual_target_p90: residual_target_p90.max(1e-6),
+            band_bonus_low,
+        }
+    }
+}
+
+impl ZSourcePolicy for RealGradPolicy {
+    fn quality(&self, pulse: &InterfaceZPulse) -> f32 {
+        let base = pulse
+            .quality_hint
+            .unwrap_or_else(|| DefaultZSourcePolicy::new().quality(pulse));
+        let residual_ratio = pulse
+            .residual_p90
+            .map(|residual| residual / self.residual_target_p90)
+            .unwrap_or(1.0);
+        let residual_gate = (1.0 / residual_ratio.max(1.0)).clamp(0.5, 1.0);
+        let low_bonus = if pulse.has_low_band {
+            1.0 + self.band_bonus_low
+        } else {
+            1.0
+        };
+        (base * residual_gate * low_bonus).min(1.0)
+    }
+}
+
+/// Composite policy that routes quality decisions based on the pulse source.
+#[derive(Clone)]
+pub struct CompositePolicy {
+    default: Arc<dyn ZSourcePolicy>,
+    overrides: FxHashMap<ZSource, Arc<dyn ZSourcePolicy>>,
+}
+
+impl fmt::Debug for CompositePolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CompositePolicy")
+            .field("default", &"dyn policy")
+            .field("overrides", &self.overrides.len())
+            .finish()
+    }
+}
+
+impl CompositePolicy {
+    /// Creates a new composite policy with the provided default policy.
+    pub fn new<P>(default: P) -> Self
+    where
+        P: ZSourcePolicy + 'static,
+    {
+        CompositePolicy {
+            default: Arc::new(default),
+            overrides: FxHashMap::default(),
+        }
+    }
+
+    /// Registers a source-specific policy override.
+    pub fn with<P>(mut self, source: ZSource, policy: P) -> Self
+    where
+        P: ZSourcePolicy + 'static,
+    {
+        self.overrides.insert(source, Arc::new(policy));
+        self
+    }
+}
+
+impl ZSourcePolicy for CompositePolicy {
+    fn quality(&self, pulse: &InterfaceZPulse) -> f32 {
+        if let Some(policy) = self.overrides.get(&pulse.source) {
+            policy.quality(pulse)
+        } else {
+            self.default.quality(pulse)
+        }
+    }
+
+    fn late_fuse(
+        &self,
+        fused: &mut InterfaceZPulse,
+        pulses: &[InterfaceZPulse],
+        qualities: &[f32],
+    ) {
+        self.default.late_fuse(fused, pulses, qualities);
+        for (source, policy) in &self.overrides {
+            if pulses.iter().any(|pulse| &pulse.source == source) {
+                policy.late_fuse(fused, pulses, qualities);
+            }
+        }
+    }
+}
 
 /// Band-energy gating applied on top of the quality policy.
 #[derive(Debug, Clone)]
@@ -733,9 +1272,13 @@ impl BudgetPolicy {
 pub struct InterfaceZConductor {
     gauges: Vec<InterfaceGauge>,
     lift: InterfaceZLift,
+    smoothing: f32,
+    carry: Option<InterfaceZPulse>,
+    policy: Arc<dyn ZSourcePolicy>,
+    band_policy: Option<BandPolicy>,
+    budget_policy: Option<BudgetPolicy>,
     conductor: ZConductor,
     clock: u64,
-    emitter: MicrolocalEmitter,
 }
 
 impl InterfaceZConductor {
@@ -744,13 +1287,16 @@ impl InterfaceZConductor {
     /// latest measurement unless [`with_smoothing`] is invoked.
     pub fn new(gauges: Vec<InterfaceGauge>, lift: InterfaceZLift) -> Self {
         assert!(!gauges.is_empty(), "at least one gauge must be supplied");
-        let emitter = MicrolocalEmitter::new();
         InterfaceZConductor {
             gauges,
             lift,
+            smoothing: 1.0,
+            carry: None,
+            policy: Arc::new(DefaultZSourcePolicy::new()),
+            band_policy: None,
+            budget_policy: None,
             conductor: ZConductor::default(),
             clock: 0,
-            emitter,
         }
     }
 
@@ -855,7 +1401,24 @@ impl InterfaceZConductor {
         {
             fused.z_bias = fused_raw.z_bias * self.smoothing;
         }
-        self.emitter.extend(z_pulses);
+        let now = self.clock;
+        self.clock = self.clock.wrapping_add(1);
+
+        let zpulses: Vec<ZPulse> = pulses
+            .iter()
+            .map(|pulse| ZPulse {
+                source: pulse.source,
+                ts: now,
+                band_energy: pulse.band_energy,
+                drift: pulse.drift,
+                z_bias: pulse.z_bias,
+                support: pulse.support,
+                quality: pulse.quality_hint.unwrap_or(1.0),
+                stderr: pulse.standard_error.unwrap_or(0.0),
+                latency_ms: 0.0,
+            })
+            .collect();
+        self.emitter.extend(zpulses);
         let mut registry = ZRegistry::with_capacity(1);
         registry.register(self.emitter.clone());
         let fused_z = self.conductor.step_from_registry(&mut registry, now);
@@ -866,6 +1429,21 @@ impl InterfaceZConductor {
         if let Some(budget) = &self.budget_policy {
             budget_scale = budget.apply(&mut fused);
         }
+
+        self.policy.late_fuse(&mut fused, &pulses, &qualities);
+
+        let mut budget_scale = 1.0;
+        if let Some(budget) = &self.budget_policy {
+            budget_scale = budget.apply(&mut fused);
+        }
+        let now = self.clock;
+        self.clock = self.clock.wrapping_add(1);
+
+        let fused_z = {
+            let z_pulse = Self::into_zpulse(&fused, now, &qualities);
+            self.conductor.ingest(z_pulse);
+            self.conductor.step(now)
+        };
 
         self.carry = Some(fused.clone());
 
@@ -886,7 +1464,37 @@ impl InterfaceZConductor {
 
     /// Returns the most recent fused pulse emitted by the conductor.
     pub fn last_fused_pulse(&self) -> InterfaceZPulse {
-        self.last_pulse
+        self.carry.clone().unwrap_or_else(InterfaceZPulse::default)
+        self.carry
+            .clone()
+            .unwrap_or_else(InterfaceZPulse::default)
+    }
+
+    fn into_zpulse(fused: &InterfaceZPulse, now: u64, qualities: &[f32]) -> ZPulse {
+        let (above, here, beneath) = fused.band_energy;
+        let support = ZSupport {
+            leading: above,
+            central: here,
+            trailing: beneath,
+        };
+        let quality = if qualities.is_empty() {
+            1.0
+        } else {
+            qualities.iter().copied().sum::<f32>()
+                / qualities.len() as f32
+        };
+        ZPulse {
+            source: fused.source,
+            ts: now,
+            tempo: fused.total_energy(),
+            drift: fused.drift,
+            z_bias: fused.z_bias,
+            support,
+            band_energy: fused.band_energy,
+            quality,
+            stderr: fused.standard_error.unwrap_or_default(),
+            latency_ms: 0.0,
+        }
     }
 }
 
@@ -1346,7 +1954,11 @@ mod tests {
         let second = conductor.step(&flipped, Some(&c_prime_neg), None, None);
         let raw_second = InterfaceZPulse::aggregate(&second.pulses);
         assert!(raw_second.z_bias < 0.0);
-        assert!(second.fused_z.events.iter().any(|e| e == "flip-held"));
+        let (above, here, beneath) = second.fused_pulse.band_energy;
+        assert!(second.fused_z.pulse.band_energy == second.fused_pulse.band_energy);
+        assert!((second.fused_z.pulse.support.leading - above).abs() < 1e-6);
+        assert!((second.fused_z.pulse.support.central - here).abs() < 1e-6);
+        assert!((second.fused_z.pulse.support.trailing - beneath).abs() < 1e-6);
         assert!(second.fused_z.z > raw_second.z_bias);
         assert_eq!(second.feedback.band_energy, second.fused_pulse.band_energy);
         assert_eq!(second.qualities.len(), second.pulses.len());
@@ -1359,6 +1971,26 @@ mod tests {
     impl ZSourcePolicy for HalfPolicy {
         fn quality(&self, _: &InterfaceZPulse) -> f32 {
             0.5
+        let second_z = second.fused_z.z;
+        let mut saw_flip_hold = second.fused_z.events.iter().any(|e| e == "flip-held");
+        let mut saw_flip = false;
+        let mut went_negative = false;
+        let mut last_report = second;
+        for _ in 0..8 {
+            let report = conductor.step(&flipped, Some(&c_prime_neg), None, None);
+            if report.fused_z.events.iter().any(|e| e == "flip-held") {
+                saw_flip_hold = true;
+            }
+            if report.fused_z.events.iter().any(|e| e == "sign-flip") {
+                saw_flip = true;
+            }
+            if report.fused_z.z < 0.0 {
+                assert!(report.fused_z.z <= second_z);
+                went_negative = true;
+                last_report = report;
+                break;
+            }
+            last_report = report;
         }
     }
 
@@ -1403,9 +2035,84 @@ mod tests {
             band_energy: (0.9, 0.05, 0.05),
             drift: 0.4,
             z_bias: 0.3,
+            ..InterfaceZPulse::default()
         };
         let policy = BandPolicy::new([0.2, 0.2, 0.2]);
         let quality = policy.project_quality(&pulse);
         assert!(quality < 1.0);
+    }
+
+    #[test]
+    fn maxwell_policy_prefers_confident_z_scores() {
+        let mut pulse = InterfaceZPulse {
+            support: 1.0,
+            interface_cells: 1.0,
+            band_energy: (0.6, 0.2, 0.2),
+            drift: 0.4,
+            z_bias: 0.2,
+            source: ZSource::Maxwell,
+            z_score: Some(2.5),
+            standard_error: Some(0.05),
+            ..InterfaceZPulse::default()
+        };
+        let policy = MaxwellPolicy::default();
+        let strong = policy.quality(&pulse);
+        pulse.z_score = Some(0.5);
+        let weak = policy.quality(&pulse);
+        assert!(strong > weak);
+        pulse.z_score = None;
+        assert!(
+            (policy.quality(&pulse) - DefaultZSourcePolicy::new().quality(&pulse)).abs() < 1e-6
+        );
+    }
+
+    #[test]
+    fn realgrad_policy_scales_with_residual_and_band() {
+        let mut pulse = InterfaceZPulse {
+            support: 1.0,
+            interface_cells: 1.0,
+            band_energy: (0.2, 0.4, 0.4),
+            drift: 0.1,
+            z_bias: 0.05,
+            source: ZSource::RealGrad,
+            residual_p90: Some(0.05),
+            quality_hint: Some(0.8),
+            has_low_band: true,
+            ..InterfaceZPulse::default()
+        };
+        let policy = RealGradPolicy::default();
+        let baseline = policy.quality(&pulse);
+        pulse.residual_p90 = Some(0.5);
+        let noisy = policy.quality(&pulse);
+        assert!(baseline > noisy);
+        pulse.has_low_band = false;
+        let no_bonus = policy.quality(&pulse);
+        assert!(baseline > no_bonus);
+    }
+
+    #[derive(Clone, Debug)]
+    struct FixedPolicy(f32);
+
+    impl ZSourcePolicy for FixedPolicy {
+        fn quality(&self, _: &InterfaceZPulse) -> f32 {
+            self.0
+        }
+    }
+
+    #[test]
+    fn composite_policy_routes_per_source() {
+        let composite =
+            CompositePolicy::new(FixedPolicy(0.5)).with(ZSource::RealGrad, FixedPolicy(0.9));
+        let mut pulse = InterfaceZPulse {
+            support: 1.0,
+            interface_cells: 1.0,
+            band_energy: (0.3, 0.3, 0.4),
+            drift: 0.2,
+            z_bias: 0.1,
+            ..InterfaceZPulse::default()
+        };
+        assert!((composite.quality(&pulse) - 0.5).abs() < 1e-6);
+        pulse.source = ZSource::RealGrad;
+        assert!((composite.quality(&pulse) - 0.9).abs() < 1e-6);
     }
 }
