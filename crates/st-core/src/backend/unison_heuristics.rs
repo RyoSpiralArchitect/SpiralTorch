@@ -412,6 +412,223 @@ fn snap_latency_ctile(
     (candidate, window)
 }
 
+fn latency_sensitive(rows: u32, cols: u32, k: u32, caps: &DeviceCaps) -> bool {
+    if rows == 0 {
+        return false;
+    }
+
+    let lanes = caps.lane_width.max(1);
+    let small_rows = rows <= lanes.saturating_mul(4).max(64);
+    let modest_cols = cols <= 131_072;
+    let modest_k = k <= lanes.saturating_mul(8);
+
+    small_rows && modest_cols && modest_k
+}
+
+fn align_to_lanes(value: u32, lanes: u32) -> u32 {
+    if lanes <= 1 {
+        return value.max(1);
+    }
+    ((value + lanes - 1) / lanes) * lanes
+}
+
+fn align_down_to_lanes(value: u32, lanes: u32) -> u32 {
+    if lanes <= 1 {
+        return value.max(1);
+    }
+    let aligned = (value / lanes) * lanes;
+    if aligned == 0 {
+        lanes
+    } else {
+        aligned
+    }
+}
+
+fn lane_range(min: u32, max: u32, lanes: u32) -> (u32, u32) {
+    if lanes <= 1 {
+        let floor = min.max(1);
+        return (floor, max.max(floor));
+    }
+    let lanes = lanes.max(1);
+    let min_lane = align_to_lanes(min.max(lanes), lanes);
+    let max_lane = align_down_to_lanes(max.max(lanes), lanes);
+    if max_lane < min_lane {
+        (min_lane, min_lane)
+    } else {
+        (min_lane, max_lane)
+    }
+}
+
+fn closest_lane_multiple(value: u32, lanes: u32, min: u32, max: u32) -> u32 {
+    if lanes <= 1 {
+        return value.clamp(min.max(1), max.max(min.max(1)));
+    }
+
+    let (min_lane, max_lane) = lane_range(min, max, lanes);
+    let mut base = align_down_to_lanes(value.max(min_lane), lanes);
+    if base < min_lane {
+        base = min_lane;
+    }
+    if base > max_lane {
+        base = max_lane;
+    }
+
+    let mut best = base;
+    let mut best_diff = best.abs_diff(value);
+    for step in 1..=4 {
+        let offsets = [step as i32, -(step as i32)];
+        for offset in offsets {
+            let candidate_i64 = base as i64 + offset as i64 * lanes as i64;
+            if candidate_i64 < min_lane as i64 || candidate_i64 > max_lane as i64 {
+                continue;
+            }
+            let candidate = candidate_i64 as u32;
+            let diff = candidate.abs_diff(value);
+            if diff < best_diff || (diff == best_diff && candidate < best) {
+                best = candidate;
+                best_diff = diff;
+            }
+        }
+    }
+
+    best
+}
+
+fn latency_ctile_bounds(cols: u32, lanes: u32) -> (u32, u32) {
+    let latency_cap = if cols <= 16_384 {
+        lanes.saturating_mul(8)
+    } else {
+        lanes.saturating_mul(16)
+    };
+    let aligned_cap = align_to_lanes(latency_cap, lanes);
+    let min_latency = align_to_lanes(64, lanes);
+    (min_latency.max(lanes), aligned_cap.max(lanes))
+}
+
+fn latency_ctile_target(rows: u32, k: u32, lanes: u32, min_ctile: u32, max_ctile: u32) -> u32 {
+    let lanes = lanes.max(1);
+
+    let row_bucket = if rows <= lanes.saturating_mul(2) {
+        lanes.saturating_mul(4)
+    } else if rows <= lanes.saturating_mul(4) {
+        lanes.saturating_mul(6)
+    } else {
+        lanes.saturating_mul(8)
+    };
+
+    let k_bucket = if k <= lanes.saturating_mul(2) {
+        lanes.saturating_mul(4)
+    } else if k <= lanes.saturating_mul(4) {
+        lanes.saturating_mul(6)
+    } else {
+        lanes.saturating_mul(8)
+    };
+
+    let desired = row_bucket.max(k_bucket).clamp(min_ctile, max_ctile);
+    let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
+    closest_lane_multiple(desired, lanes, min_lane, max_lane)
+}
+
+fn latency_ctile_column_slack_range(cols: u32, lanes: u32) -> (u32, u32) {
+    let lanes = lanes.max(1);
+    if cols <= 4_096 {
+        (lanes, lanes.saturating_mul(2))
+    } else if cols <= 16_384 {
+        (
+            lanes.saturating_mul(1),
+            lanes.saturating_mul(3).max(lanes.saturating_mul(1)),
+        )
+    } else if cols <= 65_536 {
+        (
+            lanes.saturating_mul(2),
+            lanes.saturating_mul(4).max(lanes.saturating_mul(2)),
+        )
+    } else {
+        (
+            lanes.saturating_mul(3),
+            lanes.saturating_mul(5).max(lanes.saturating_mul(3)),
+        )
+    }
+}
+
+fn latency_ctile_slack(rows: u32, cols: u32, k: u32, lanes: u32) -> u32 {
+    let lanes = lanes.max(1);
+    let tight_rows = rows <= lanes.saturating_mul(2);
+    let tight_k = k <= lanes.saturating_mul(2);
+    if tight_rows && tight_k {
+        let (floor, _) = latency_ctile_column_slack_range(cols, lanes);
+        return floor;
+    }
+
+    let medium_rows = rows <= lanes.saturating_mul(6);
+    let medium_k = k <= lanes.saturating_mul(6);
+    let mut slack = if medium_rows && medium_k {
+        lanes.saturating_mul(2)
+    } else {
+        lanes.saturating_mul(3).max(lanes)
+    };
+
+    let (floor, ceil) = latency_ctile_column_slack_range(cols, lanes);
+    if slack < floor {
+        slack = floor;
+    }
+    if slack > ceil {
+        slack = ceil;
+    }
+
+    slack
+}
+
+fn latency_ctile_window(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+) -> (u32, u32, u32, u32, u32, u32) {
+    let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
+    let target = latency_ctile_target(rows, k, lanes, min_lane, max_lane);
+    let slack = latency_ctile_slack(rows, cols, k, lanes);
+    let mut lower = align_down_to_lanes(target.saturating_sub(slack), lanes);
+    if lower < min_lane {
+        lower = min_lane;
+    }
+    let mut upper = align_to_lanes(target.saturating_add(slack), lanes);
+    if upper > max_lane {
+        upper = max_lane;
+    }
+    if lower > upper {
+        lower = min_lane;
+        upper = min_lane;
+    }
+    (target, lower, upper, min_lane, max_lane, slack)
+}
+
+fn snap_latency_ctile(
+    current: u32,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+) -> (u32, u32) {
+    let (target, lower, upper, min_lane, max_lane, slack) =
+        latency_ctile_window(rows, cols, k, lanes, min_ctile, max_ctile);
+    let mut candidate = closest_lane_multiple(current, lanes, min_lane, max_lane);
+    if candidate < lower || candidate > upper || candidate.abs_diff(target) >= slack {
+        candidate = closest_lane_multiple(target, lanes, min_lane, max_lane);
+    }
+    if candidate < lower {
+        candidate = lower;
+    }
+    if candidate > upper {
+        candidate = upper;
+    }
+    (candidate, target)
+}
+
 fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> Choice {
     let wg = caps.recommended_workgroup(rows);
     let kl = caps.recommended_kl(k);
