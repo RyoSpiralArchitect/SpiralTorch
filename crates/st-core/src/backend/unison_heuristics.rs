@@ -102,19 +102,78 @@ impl Choice {
     }
 }
 
+fn latency_sensitive(rows: u32, cols: u32, k: u32, caps: &DeviceCaps) -> bool {
+    if rows == 0 {
+        return false;
+    }
+
+    let lanes = caps.lane_width.max(1);
+    let small_rows = rows <= lanes.saturating_mul(4).max(64);
+    let modest_cols = cols <= 131_072;
+    let modest_k = k <= lanes.saturating_mul(8);
+
+    small_rows && modest_cols && modest_k
+}
+
+fn latency_ctile_bounds(cols: u32, lanes: u32) -> (u32, u32) {
+    let latency_cap = if cols <= 16_384 {
+        lanes.saturating_mul(8)
+    } else {
+        lanes.saturating_mul(16)
+    };
+    let aligned_cap = ((latency_cap + lanes - 1) / lanes) * lanes;
+    let min_latency = ((64 + lanes - 1) / lanes) * lanes;
+    (min_latency.max(lanes), aligned_cap.max(lanes))
+}
+
 fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> Choice {
     let wg = caps.recommended_workgroup(rows);
     let kl = caps.recommended_kl(k);
-    let ch = caps.recommended_channel_stride(cols);
-    let (tile, mut ctile) = caps.recommended_tiles(cols);
+    let mut ch = caps.recommended_channel_stride(cols);
+    let (mut tile, mut ctile) = caps.recommended_tiles(cols);
+
+    let low_latency = latency_sensitive(rows, cols, k, caps);
+    if low_latency {
+        ch = 0;
+        let lanes = caps.lane_width.max(1);
+        let latency_cap = if cols <= 16_384 { 512 } else { 1024 };
+        let aligned_cap = ((latency_cap + lanes - 1) / lanes) * lanes;
+        let min_cap = ((128 + lanes - 1) / lanes) * lanes;
+        tile = tile.min(aligned_cap.max(lanes)).max(min_cap.max(lanes));
+        if matches!(kind, RankKind::MidK | RankKind::BottomK) {
+            let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
+            ctile = ctile.min(max_ctile).max(min_ctile);
+        }
+    }
 
     if matches!(kind, RankKind::BottomK) {
         ctile = ctile.min(tile / 2).max(128);
+        if low_latency {
+            let lanes = caps.lane_width.max(1);
+            let (min_ctile, _) = latency_ctile_bounds(cols, lanes);
+            let half_tile = tile / 2;
+            let lane_aligned = if half_tile == 0 {
+                min_ctile
+            } else {
+                let aligned = ((half_tile + lanes - 1) / lanes) * lanes;
+                aligned.max(lanes)
+            };
+            ctile = ctile.min(lane_aligned.max(min_ctile)).max(min_ctile);
+        }
     }
 
-    let mk = caps.preferred_merge_kind(k);
-    let mkd = caps.preferred_substrategy(mk, k);
-    let use_2ce = caps.prefers_two_stage_with_rows(rows, cols, k);
+    let mut mk = caps.preferred_merge_kind(k);
+    let mut mkd = caps.preferred_substrategy(mk, k);
+    if low_latency && caps.subgroup && matches!(kind, RankKind::TopK) {
+        if k <= caps.lane_width.saturating_mul(8) {
+            mk = 2;
+            mkd = if k <= 128 { 4 } else { 5 };
+        }
+    }
+    let mut use_2ce = caps.prefers_two_stage_with_rows(rows, cols, k);
+    if low_latency {
+        use_2ce = false;
+    }
 
     let fft_tile = ((cols.max(1) + 1023) / 1024) as u32 * 1024;
     let fft_radix = if k.is_power_of_two() { 4 } else { 2 };
@@ -192,11 +251,37 @@ fn refine_choice(
     }
     choice.tile = caps.preferred_tile(cols, choice.tile);
 
+    let low_latency = latency_sensitive(rows, cols, k, caps);
+    if low_latency {
+        choice.use_2ce = false;
+        if baseline.ch == 0 {
+            choice.ch = 0;
+        }
+        if choice.tile > baseline.tile {
+            choice.tile = baseline.tile;
+        }
+    }
+
     if matches!(kind, RankKind::MidK | RankKind::BottomK) {
         if choice.ctile == 0 {
             choice.ctile = baseline.ctile;
         }
         choice.ctile = caps.preferred_compaction_tile(cols, choice.ctile);
+        if low_latency {
+            let lanes = caps.lane_width.max(1);
+            let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
+            if choice.ctile > baseline.ctile {
+                choice.ctile = baseline.ctile;
+            }
+            choice.ctile = choice.ctile.min(max_ctile).max(min_ctile);
+            if matches!(kind, RankKind::BottomK) {
+                let half_tile = choice.tile / 2;
+                if half_tile > 0 {
+                    let aligned = ((half_tile + lanes - 1) / lanes) * lanes;
+                    choice.ctile = choice.ctile.min(aligned.max(min_ctile)).max(min_ctile);
+                }
+            }
+        }
     } else {
         choice.ctile = 0;
     }
@@ -224,6 +309,13 @@ fn refine_choice(
         choice.use_2ce = false;
     }
 
+    if low_latency {
+        choice.use_2ce = false;
+        if baseline.ch == 0 {
+            choice.ch = 0;
+        }
+    }
+
     enforce_shared_memory(&mut choice, caps, k);
 
     choice
@@ -248,6 +340,8 @@ fn score_choice(
     kind: RankKind,
 ) -> f32 {
     let mut score = 0.0;
+
+    let low_latency = latency_sensitive(rows, cols, k, caps);
 
     let expected_two_stage = caps.prefers_two_stage_with_rows(rows, cols, k);
     if choice.use_2ce == expected_two_stage {
@@ -279,6 +373,31 @@ fn score_choice(
     }
     if choice.mkd == caps.preferred_substrategy(choice.mk, k) {
         score += 0.1;
+    }
+
+    if low_latency {
+        if !choice.use_2ce {
+            score += 0.05;
+        } else {
+            score -= 0.05;
+        }
+        if choice.ch == 0 {
+            score += 0.025;
+        } else {
+            score -= 0.025;
+        }
+        let lanes = caps.lane_width.max(1);
+        let latency_cap = if cols <= 16_384 { 512 } else { 1024 };
+        let aligned_cap = ((latency_cap + lanes - 1) / lanes) * lanes;
+        score += closeness(choice.tile, aligned_cap) * 0.05;
+        if choice.mk == 2 {
+            score += 0.025;
+        }
+        if matches!(kind, RankKind::MidK | RankKind::BottomK) {
+            let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
+            let target = (min_ctile + max_ctile) / 2;
+            score += closeness(choice.ctile, target) * 0.05;
+        }
     }
 
     score
@@ -418,5 +537,37 @@ mod tests {
         assert!(script.contains("workgroup"));
         assert!(script.contains("merge"));
         assert!(script.contains("fft_tile"));
+    }
+
+    #[test]
+    fn latency_sensitive_topk_avoids_two_stage_and_channel_stride() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        let choice = fallback(96, 8_192, 64, &caps, RankKind::TopK);
+        assert!(!choice.use_2ce);
+        assert_eq!(choice.ch, 0);
+        assert!(choice.tile <= 1024);
+        assert_eq!(choice.mk, 2);
+    }
+
+    #[test]
+    fn latency_sensitive_midk_limits_compaction_tile() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        let choice = fallback(96, 8_192, 64, &caps, RankKind::MidK);
+        assert!(!choice.use_2ce);
+        assert_eq!(choice.ch, 0);
+        assert!(choice.ctile >= 64);
+        assert!(choice.ctile <= 512);
+    }
+
+    #[test]
+    fn latency_sensitive_bottomk_respects_lane_alignment() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        let choice = fallback(96, 8_192, 64, &caps, RankKind::BottomK);
+        assert!(!choice.use_2ce);
+        assert_eq!(choice.ch, 0);
+        assert!(choice.ctile >= 64);
+        if choice.tile > 0 {
+            assert!(choice.ctile <= ((choice.tile / 2 + 31) / 32) * 32);
+        }
     }
 }
