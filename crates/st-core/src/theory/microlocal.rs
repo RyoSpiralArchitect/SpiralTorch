@@ -35,7 +35,7 @@
 //! field together with signed curvature when a phase label is supplied.
 
 use crate::coop::ai::{CoopAgent, CoopProposal};
-use crate::telemetry::hub::{self, SoftlogicZFeedback};
+use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
     ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZRegistry, ZSource,
 };
@@ -43,9 +43,10 @@ use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
+use std::collections::VecDeque;
 use std::f64::consts::PI;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
 #[derive(Debug, Clone)]
@@ -428,21 +429,6 @@ impl InterfaceZLift {
             has_high_band: above > f32::EPSILON,
         }
     }
-}
-
-/// Identifiers describing the source of a Z pulse.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ZSource {
-    /// Microlocal boundary gauges.
-    Microlocal,
-    /// Sequential Maxwell matched filters.
-    Maxwell,
-    /// RealGrad spectral accumulators.
-    RealGrad,
-    /// Desire feedback loops.
-    Desire,
-    /// Custom source identified by caller-supplied slot.
-    Custom(u8),
 }
 
 /// Aggregated Z-space pulse produced by [`InterfaceZLift::project`].
@@ -972,6 +958,51 @@ impl BudgetPolicy {
     }
 }
 
+#[derive(Clone, Default)]
+struct MicrolocalEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
+}
+
+impl MicrolocalEmitter {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn extend<I>(&self, pulses: I)
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.extend(pulses);
+    }
+}
+
+impl ZEmitter for MicrolocalEmitter {
+    fn name(&self) -> ZSource {
+        ZSource::Microlocal
+    }
+
+    fn tick(&mut self, now: u64) -> Option<ZPulse> {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.pop_front().map(|mut pulse| {
+            if pulse.ts == 0 {
+                pulse.ts = now;
+            }
+            pulse
+        })
+    }
+
+    fn quality_hint(&self) -> Option<f32> {
+        None
+    }
+}
+
 /// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
 /// smoothed control signal suitable for Softlogic feedback.
 #[derive(Clone)]
@@ -1110,17 +1141,27 @@ impl InterfaceZConductor {
         {
             fused.z_bias = fused_raw.z_bias * self.smoothing;
         }
-        self.emitter.extend(z_pulses);
+        let now = self.clock;
+        self.clock = self.clock.wrapping_add(1);
+
+        let zpulses: Vec<ZPulse> = pulses
+            .iter()
+            .map(|pulse| ZPulse {
+                source: pulse.source,
+                ts: now,
+                band_energy: pulse.band_energy,
+                drift: pulse.drift,
+                z_bias: pulse.z_bias,
+                support: pulse.support,
+                quality: pulse.quality_hint.unwrap_or(1.0),
+                stderr: pulse.standard_error.unwrap_or(0.0),
+                latency_ms: 0.0,
+            })
+            .collect();
+        self.emitter.extend(zpulses);
         let mut registry = ZRegistry::with_capacity(1);
         registry.register(self.emitter.clone());
         let fused_z = self.conductor.step_from_registry(&mut registry, now);
-
-        self.policy.late_fuse(&mut fused, &pulses, &qualities);
-
-        let mut budget_scale = 1.0;
-        if let Some(budget) = &self.budget_policy {
-            budget_scale = budget.apply(&mut fused);
-        }
 
         self.policy.late_fuse(&mut fused, &pulses, &qualities);
 
@@ -1148,19 +1189,7 @@ impl InterfaceZConductor {
 
     /// Returns the most recent fused pulse emitted by the conductor.
     pub fn last_fused_pulse(&self) -> InterfaceZPulse {
-        self.last_pulse
-    }
-}
-
-impl fmt::Debug for InterfaceZConductor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("InterfaceZConductor")
-            .field("gauges", &self.gauges.len())
-            .field("smoothing", &self.smoothing)
-            .field("carry", &self.carry)
-            .field("band_policy", &self.band_policy)
-            .field("budget_policy", &self.budget_policy)
-            .finish()
+        self.carry.clone().unwrap_or_else(InterfaceZPulse::default)
     }
 }
 
