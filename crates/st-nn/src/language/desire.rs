@@ -10,9 +10,6 @@ use super::temperature::{entropy, TemperatureController};
 use crate::language::DesireGradientInterpretation;
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
-use st_tensor::{
-    DesireGradientControl, DesireGradientInterpretation, GradientSummary, TensorError,
-};
 use st_core::telemetry::hub;
 use st_tensor::{GradientSummary, TensorError};
 

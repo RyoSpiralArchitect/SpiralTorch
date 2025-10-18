@@ -98,26 +98,118 @@ fn stack_batch(batch: &[Sample]) -> PureResult<(Tensor, Tensor)> {
     Ok((input, target))
 }
 
-fn chunk_indices(order: &[usize], batch_size: usize) -> impl Iterator<Item = &[usize]> {
-    order.chunks(batch_size.max(1))
+#[derive(Clone, Copy, Debug)]
+enum BatchStrategy {
+    Fixed { batch_size: usize },
+    DynamicRows { max_rows: usize },
+}
+
+impl BatchStrategy {
+    fn fixed(batch_size: usize) -> Self {
+        Self::Fixed {
+            batch_size: batch_size.max(1),
+        }
+    }
+
+    fn dynamic_rows(max_rows: usize) -> Self {
+        Self::DynamicRows {
+            max_rows: max_rows.max(1),
+        }
+    }
+
+    fn batch_size_hint(&self) -> usize {
+        match *self {
+            Self::Fixed { batch_size } => batch_size,
+            Self::DynamicRows { max_rows } => max_rows,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct BatchState {
+    samples: Arc<[Sample]>,
+    order: Arc<Vec<usize>>,
+    strategy: BatchStrategy,
+    position: usize,
+}
+
+impl BatchState {
+    fn new(samples: Arc<[Sample]>, order: Arc<Vec<usize>>, strategy: BatchStrategy) -> Self {
+        Self {
+            samples,
+            order,
+            strategy,
+            position: 0,
+        }
+    }
+
+    fn next_indices(&mut self) -> Option<Vec<usize>> {
+        if self.position >= self.order.len() {
+            return None;
+        }
+        match self.strategy {
+            BatchStrategy::Fixed { batch_size } => {
+                let start = self.position;
+                let end = (self.position + batch_size).min(self.order.len());
+                self.position = end;
+                if start == end {
+                    None
+                } else {
+                    Some(self.order[start..end].to_vec())
+                }
+            }
+            BatchStrategy::DynamicRows { max_rows } => {
+                let mut rows_acc = 0usize;
+                let mut indices = Vec::new();
+                while self.position < self.order.len() {
+                    let idx = self.order[self.position];
+                    let sample_rows = self.samples[idx].0.shape().0.max(1);
+                    let would_exceed = !indices.is_empty() && rows_acc + sample_rows > max_rows;
+                    if would_exceed && rows_acc > 0 {
+                        break;
+                    }
+                    indices.push(idx);
+                    rows_acc += sample_rows;
+                    self.position += 1;
+                    if rows_acc >= max_rows {
+                        break;
+                    }
+                }
+                if indices.is_empty() {
+                    // No rows accumulated due to `max_rows == 0` (guarded) or empty order.
+                    // Include at least the next sample to make forward progress.
+                    if self.position < self.order.len() {
+                        let idx = self.order[self.position];
+                        self.position += 1;
+                        Some(vec![idx])
+                    } else {
+                        None
+                    }
+                } else {
+                    Some(indices)
+                }
+            }
+        }
+    }
+
+    fn next_batch(&mut self) -> Option<PureResult<(Tensor, Tensor)>> {
+        let indices = self.next_indices()?;
+        let mut batch = Vec::with_capacity(indices.len());
+        for idx in indices {
+            batch.push(self.samples[idx].clone());
+        }
+        Some(stack_batch(&batch))
+    }
 }
 
 #[derive(Clone)]
 struct ImmediateBatches {
-    samples: Arc<[Sample]>,
-    order: Arc<Vec<usize>>,
-    batch_size: usize,
-    position: usize,
+    state: BatchState,
 }
 
 impl ImmediateBatches {
-    fn new(samples: Arc<[Sample]>, order: Arc<Vec<usize>>, batch_size: usize) -> Self {
-        Self {
-            samples,
-            order,
-            batch_size: batch_size.max(1),
-            position: 0,
-        }
+    fn new(state: BatchState) -> Self {
+        Self { state }
     }
 }
 
@@ -125,21 +217,7 @@ impl Iterator for ImmediateBatches {
     type Item = PureResult<(Tensor, Tensor)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.position >= self.order.len() {
-            return None;
-        }
-        let start = self.position;
-        let end = (self.position + self.batch_size).min(self.order.len());
-        self.position = end;
-        let indices = &self.order[start..end];
-        if indices.is_empty() {
-            return None;
-        }
-        let mut batch = Vec::with_capacity(indices.len());
-        for &idx in indices {
-            batch.push(self.samples[idx].clone());
-        }
-        Some(stack_batch(&batch))
+        self.state.next_batch()
     }
 }
 
@@ -149,20 +227,12 @@ struct PrefetchBatches {
 }
 
 impl PrefetchBatches {
-    fn spawn(
-        samples: Arc<[Sample]>,
-        order: Arc<Vec<usize>>,
-        batch_size: usize,
-        depth: usize,
-    ) -> Self {
+    fn spawn(state: BatchState, depth: usize) -> Self {
         let (tx, rx) = mpsc::sync_channel(depth.max(1));
         let handle = thread::spawn(move || {
-            for indices in chunk_indices(&order, batch_size) {
-                let mut batch = Vec::with_capacity(indices.len());
-                for &idx in indices {
-                    batch.push(samples[idx].clone());
-                }
-                if tx.send(Some(stack_batch(&batch))).is_err() {
+            let mut state = state;
+            while let Some(batch) = state.next_batch() {
+                if tx.send(Some(batch)).is_err() {
                     return;
                 }
             }
@@ -205,23 +275,24 @@ pub struct DataLoaderBatches {
 }
 
 impl DataLoaderBatches {
-    fn immediate(samples: Arc<[Sample]>, order: Arc<Vec<usize>>, batch_size: usize) -> Self {
+    fn immediate(samples: Arc<[Sample]>, order: Arc<Vec<usize>>, strategy: BatchStrategy) -> Self {
         Self {
-            backend: DataLoaderBackend::Immediate(ImmediateBatches::new(
-                samples, order, batch_size,
-            )),
+            backend: DataLoaderBackend::Immediate(ImmediateBatches::new(BatchState::new(
+                samples, order, strategy,
+            ))),
         }
     }
 
     fn prefetch(
         samples: Arc<[Sample]>,
         order: Arc<Vec<usize>>,
-        batch_size: usize,
+        strategy: BatchStrategy,
         depth: usize,
     ) -> Self {
         Self {
             backend: DataLoaderBackend::Prefetch(PrefetchBatches::spawn(
-                samples, order, batch_size, depth,
+                BatchState::new(samples, order, strategy),
+                depth,
             )),
         }
     }
@@ -244,7 +315,7 @@ impl Iterator for DataLoaderBatches {
 pub struct DataLoader {
     samples: Arc<[Sample]>,
     order: Arc<Vec<usize>>,
-    batch_size: usize,
+    strategy: BatchStrategy,
     prefetch: usize,
 }
 
@@ -254,7 +325,7 @@ impl DataLoader {
         Self {
             samples,
             order: default_order(len),
-            batch_size: 1,
+            strategy: BatchStrategy::fixed(1),
             prefetch: 0,
         }
     }
@@ -271,7 +342,7 @@ impl DataLoader {
 
     /// Returns the configured batch size.
     pub fn batch_size(&self) -> usize {
-        self.batch_size
+        self.strategy.batch_size_hint()
     }
 
     /// Returns the configured prefetch depth.
@@ -291,7 +362,16 @@ impl DataLoader {
 
     /// Updates the loader to emit batches of `batch_size` samples.
     pub fn batched(mut self, batch_size: usize) -> Self {
-        self.batch_size = batch_size.max(1);
+        self.strategy = BatchStrategy::fixed(batch_size);
+        self
+    }
+
+    /// Dynamically groups samples so each batch covers at most `max_rows` input rows.
+    ///
+    /// The loader continues to guarantee forward progress even if a single
+    /// sample exceeds `max_rows` by emitting that sample as a standalone batch.
+    pub fn dynamic_batch_by_rows(mut self, max_rows: usize) -> Self {
+        self.strategy = BatchStrategy::dynamic_rows(max_rows);
         self
     }
 
@@ -313,9 +393,9 @@ impl IntoIterator for DataLoader {
 
     fn into_iter(self) -> Self::IntoIter {
         if self.prefetch == 0 {
-            DataLoaderBatches::immediate(self.samples, self.order, self.batch_size)
+            DataLoaderBatches::immediate(self.samples, self.order, self.strategy)
         } else {
-            DataLoaderBatches::prefetch(self.samples, self.order, self.batch_size, self.prefetch)
+            DataLoaderBatches::prefetch(self.samples, self.order, self.strategy, self.prefetch)
         }
     }
 }
@@ -471,5 +551,62 @@ mod tests {
         for (lhs, rhs) in eager.iter().zip(prefetched.iter()) {
             assert_eq!(lhs.data(), rhs.data());
         }
+    }
+
+    #[test]
+    fn dataloader_dynamic_rows_groups_by_capacity() {
+        let samples: Vec<(Tensor, Tensor)> = vec![
+            (
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+                Tensor::zeros(1, 1).unwrap(),
+            ),
+            (
+                Tensor::from_vec(2, 1, vec![2.0, 3.0]).unwrap(),
+                Tensor::zeros(2, 1).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 1, vec![4.0]).unwrap(),
+                Tensor::zeros(1, 1).unwrap(),
+            ),
+            (
+                Tensor::from_vec(4, 1, vec![5.0, 6.0, 7.0, 8.0]).unwrap(),
+                Tensor::zeros(4, 1).unwrap(),
+            ),
+        ];
+        let mut batches = from_vec(samples).dynamic_batch_by_rows(3).iter();
+        let first = batches.next().unwrap().unwrap();
+        assert_eq!(first.0.shape(), (3, 1));
+        assert_eq!(first.1.shape(), (3, 1));
+        let second = batches.next().unwrap().unwrap();
+        assert_eq!(second.0.shape(), (1, 1));
+        assert_eq!(second.1.shape(), (1, 1));
+        let third = batches.next().unwrap().unwrap();
+        assert_eq!(third.0.shape(), (4, 1));
+        assert_eq!(third.1.shape(), (4, 1));
+        assert!(batches.next().is_none());
+    }
+
+    #[test]
+    fn dataloader_dynamic_rows_prefetch_matches_immediate() {
+        let samples: Vec<(Tensor, Tensor)> = (0..6)
+            .map(|i| {
+                let rows = (i % 3) + 1;
+                let input = Tensor::from_vec(rows, 1, vec![i as f32; rows]).unwrap();
+                let target = Tensor::zeros(rows, 1).unwrap();
+                (input, target)
+            })
+            .collect();
+        let eager: Vec<_> = from_vec(samples.clone())
+            .dynamic_batch_by_rows(4)
+            .iter()
+            .map(|batch| batch.unwrap().0.shape().0)
+            .collect();
+        let prefetched: Vec<_> = from_vec(samples)
+            .dynamic_batch_by_rows(4)
+            .prefetch(2)
+            .iter()
+            .map(|batch| batch.unwrap().0.shape().0)
+            .collect();
+        assert_eq!(eager, prefetched);
     }
 }

@@ -140,8 +140,11 @@ fn conductor_fuses_multiscale_pulses_with_smoothing() {
     let second = conductor.step(&flipped, Some(&c_prime_neg), None, None);
     let raw_second = InterfaceZPulse::aggregate(&second.pulses);
     assert!(raw_second.z_bias < 0.0);
-    let _band_energy = second.fused_pulse.band_energy;
-    assert!((second.fused_z.support - second.fused_pulse.support).abs() < 1e-6);
+    let (above, here, beneath) = second.fused_pulse.band_energy;
+    assert!(second.fused_z.pulse.band_energy == second.fused_pulse.band_energy);
+    assert!((second.fused_z.pulse.support.leading - above).abs() < 1e-6);
+    assert!((second.fused_z.pulse.support.central - here).abs() < 1e-6);
+    assert!((second.fused_z.pulse.support.trailing - beneath).abs() < 1e-6);
     assert!(second.fused_z.z > raw_second.z_bias);
     assert_eq!(second.feedback.band_energy, second.fused_pulse.band_energy);
     assert_eq!(second.qualities.len(), second.pulses.len());
