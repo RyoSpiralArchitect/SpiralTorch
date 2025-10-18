@@ -1,4 +1,5 @@
 #include <hip/hip_runtime.h>
+#include <stdint.h>
 extern "C" __global__
 void hip_compaction_apply_pass(const float* __restrict__ vin,
                                const int*   __restrict__ iin,
@@ -20,4 +21,27 @@ void hip_compaction_apply_pass(const float* __restrict__ vin,
             }
         }
     }
+}
+
+extern "C"
+hipError_t st_compaction_apply_pass(const float* vin,
+                                    const int32_t* iin,
+                                    const unsigned int* pos,
+                                    int rows,
+                                    int cols,
+                                    float low,
+                                    float high,
+                                    float* vout,
+                                    int32_t* iout,
+                                    hipStream_t stream)
+{
+    if (rows <= 0 || cols <= 0) {
+        return hipSuccess;
+    }
+
+    dim3 grid(rows);
+    dim3 block(256);
+    hipLaunchKernelGGL(hip_compaction_apply_pass, grid, block, 0, stream,
+                       vin, iin, pos, rows, cols, low, high, vout, iout);
+    return hipGetLastError();
 }

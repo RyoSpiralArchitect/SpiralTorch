@@ -2414,6 +2414,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "st-amg"
+version = "0.1.0"
+dependencies = [
+ "st-logic",
+ "st-tensor",
+]
+
+[[package]]
 name = "st-backend-hip"
 version = "0.4.0"
 dependencies = [
@@ -2421,6 +2429,14 @@ dependencies = [
  "cc",
  "serde",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "st-backend-wgpu"
+version = "0.1.0"
+dependencies = [
+ "thiserror 1.0.69",
+ "wgpu",
 ]
 
 [[package]]
@@ -2468,7 +2484,9 @@ dependencies = [
 name = "st-frac"
 version = "0.1.1"
 dependencies = [
+ "libm",
  "ndarray",
+ "num-complex",
  "thiserror 1.0.69",
 ]
 
