@@ -7,13 +7,78 @@
 //! conductor that fuses multiple sources into a single control signal.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::fs;
-use std::io::{ErrorKind, Read};
-use std::path::Path;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use serde::Deserialize;
+/// Support triplet describing Above/Here/Beneath contributions backing a Z pulse.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZSupport {
+    pub leading: f32,
+    pub central: f32,
+    pub trailing: f32,
+}
+
+impl ZSupport {
+    /// Creates a new support triplet, clamping each component to be finite and non-negative.
+    pub fn new(leading: f32, central: f32, trailing: f32) -> Self {
+        Self {
+            leading: leading.max(0.0).finite_or_zero(),
+            central: central.max(0.0).finite_or_zero(),
+            trailing: trailing.max(0.0).finite_or_zero(),
+        }
+    }
+
+    /// Builds a support triplet straight from an Above/Here/Beneath energy tuple.
+    pub fn from_band_energy(bands: (f32, f32, f32)) -> Self {
+        Self::new(bands.0, bands.1, bands.2)
+    }
+
+    /// Returns the total perimeter mass supporting the pulse.
+    pub fn total(&self) -> f32 {
+        self.leading + self.central + self.trailing
+    }
+
+    /// Returns `true` when all support components vanish.
+    pub fn is_empty(&self) -> bool {
+        self.leading <= f32::EPSILON
+            && self.central <= f32::EPSILON
+            && self.trailing <= f32::EPSILON
+    }
+}
+
+impl Default for ZSupport {
+    fn default() -> Self {
+        Self {
+            leading: 0.0,
+            central: 0.0,
+            trailing: 0.0,
+        }
+    }
+}
+
+trait FiniteClamp {
+    fn finite_or_zero(self) -> f32;
+}
+
+impl FiniteClamp for f32 {
+    fn finite_or_zero(self) -> f32 {
+        if self.is_finite() {
+            self
+        } else {
+            0.0
+        }
+    }
+}
+
+fn source_lookup_key(source: &ZSource) -> Cow<'static, str> {
+    match source {
+        ZSource::Microlocal => Cow::Borrowed("microlocal"),
+        ZSource::Maxwell => Cow::Borrowed("maxwell"),
+        ZSource::RealGrad => Cow::Borrowed("realgrad"),
+        ZSource::Desire => Cow::Borrowed("desire"),
+        ZSource::External(name) | ZSource::Other(name) => Cow::Borrowed(name),
+    }
+}
 
 /// Identifies a source capable of emitting [`ZPulse`] records.
 pub trait ZEmitter {
@@ -98,10 +163,11 @@ pub enum ZSource {
 pub struct ZPulse {
     pub source: ZSource,
     pub ts: u64,
+    pub tempo: f32,
     pub band_energy: (f32, f32, f32),
     pub drift: f32,
     pub z_bias: f32,
-    pub support: f32,
+    pub support: ZSupport,
     pub quality: f32,
     pub stderr: f32,
     pub latency_ms: f32,
@@ -112,10 +178,11 @@ impl Default for ZPulse {
         Self {
             source: ZSource::Microlocal,
             ts: 0,
+            tempo: 0.0,
             band_energy: (0.0, 0.0, 0.0),
             drift: 0.0,
             z_bias: 0.0,
-            support: 0.0,
+            support: ZSupport::default(),
             quality: 0.0,
             stderr: 0.0,
             latency_ms: 0.0,
@@ -319,7 +386,7 @@ impl ZConductor {
 
         for pulse in pulses {
             had_pulse = true;
-            let support = pulse.support.max(0.0);
+            let support = pulse.support.total().max(0.0);
             total_support += support;
             fused.drift += pulse.drift;
             let key = source_lookup_key(&pulse.source);
@@ -549,7 +616,8 @@ mod tests {
 
         let mut pulse = ZPulse {
             source: ZSource::Microlocal,
-            support: 0.4,
+            tempo: 0.0,
+            support: ZSupport::new(0.2, 0.1, 0.1),
             drift: 0.1,
             ..ZPulse::default()
         };
