@@ -1329,7 +1329,7 @@ mod tests {
             .iter()
             .map(|value| (*value as f64).powi(2))
             .sum::<f64>())
-        .sqrt() as f32;
+            .sqrt() as f32;
         assert_abs_diff_eq!(default_summary.norm, expected_norm, epsilon = 1.0e-6);
         assert_abs_diff_eq!(custom_summary.norm, expected_norm, epsilon = 1.0e-6);
         assert_abs_diff_eq!(default_summary.sparsity, 0.5, epsilon = 1.0e-6);
