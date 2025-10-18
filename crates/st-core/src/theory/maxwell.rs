@@ -40,7 +40,7 @@ use crate::telemetry::{
 use crate::{
     coop::ai::{CoopAgent, CoopProposal},
     telemetry::hub::SoftlogicZFeedback,
-    theory::zpulse::{ZEmitter, ZPulse, ZSource, ZSupport},
+    theory::zpulse::{ZEmitter, ZPulse, ZSource},
     util::math::LeechProjector,
 };
 use std::cell::RefCell;
