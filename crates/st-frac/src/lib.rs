@@ -65,7 +65,16 @@ fn reflected_index(mut idx: isize, len: usize) -> usize {
 
 #[inline]
 fn sample_with_pad(x: &[f32], idx: isize, pad: Pad) -> f32 {
-    if idx >= 0 {
+    let len = x.len() as isize;
+
+    if len == 0 {
+        return match pad {
+            Pad::Zero | Pad::Reflect => 0.0,
+            Pad::Constant(v) => v,
+        };
+    }
+
+    if (0..len).contains(&idx) {
         return x[idx as usize];
     }
 
@@ -73,11 +82,7 @@ fn sample_with_pad(x: &[f32], idx: isize, pad: Pad) -> f32 {
         Pad::Zero => 0.0,
         Pad::Constant(v) => v,
         Pad::Reflect => {
-            if x.is_empty() {
-                return 0.0;
-            }
-            let len = x.len();
-            let idx = reflected_index(idx, len);
+            let idx = reflected_index(idx, x.len());
             x[idx]
         }
     }
@@ -92,55 +97,6 @@ fn conv1d_gl_line(x: &[f32], y: &mut [f32], coeff: &[f32], pad: Pad, scale: f32)
         }
         *out = scale * acc;
     }
-}
-
-/// Generate Grünwald–Letnikov coefficients until their magnitude drops below `tol`
-/// or until `max_len` coefficients have been produced.
-pub fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
-    assert!(max_len > 0);
-    assert!(tol > 0.0);
-
-    let mut coeffs = Vec::with_capacity(max_len);
-    let mut prev = 1.0f32;
-    coeffs.push(prev);
-
-    for k in 1..max_len {
-        let num = alpha - (k as f32 - 1.0);
-        prev *= (num / k as f32) * -1.0;
-        coeffs.push(prev);
-        if prev.abs() < tol {
-            break;
-        }
-    }
-
-    coeffs
-}
-
-/// Apply a fractional difference along a 1-D slice.
-pub fn fracdiff_gl_1d(
-    x: &[f32],
-    alpha: f32,
-    kernel_len: usize,
-    pad: Pad,
-    scale: Option<f32>,
-) -> Result<Vec<f32>, FracErr> {
-    if kernel_len == 0 {
-        return Err(FracErr::Kernel);
-    }
-    let coeff = gl_coeffs(alpha, kernel_len);
-    Ok(fracdiff_gl_1d_with_coeffs(x, &coeff, pad, scale))
-}
-
-/// Apply a fractional difference along a 1-D slice using precomputed coefficients.
-pub fn fracdiff_gl_1d_with_coeffs(
-    x: &[f32],
-    coeff: &[f32],
-    pad: Pad,
-    scale: Option<f32>,
-) -> Vec<f32> {
-    let mut y = vec![0.0f32; x.len()];
-    conv1d_gl_line(x, &mut y, coeff, pad, scale.unwrap_or(1.0));
-    y
 }
 
 /// Generate Grünwald–Letnikov coefficients until their magnitude drops below `tol`
@@ -320,5 +276,26 @@ mod tests {
 
         assert_eq!(y[0], 10.0 + 10.0 + 20.0 + 30.0);
         assert_eq!(y[1], 20.0 + 10.0 + 10.0 + 20.0);
+    }
+
+    #[test]
+    fn constant_pad_applies_to_right_edge() {
+        let x = vec![1.0, 2.0];
+        let coeff = vec![1.0, 0.5, 0.25];
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Constant(5.0), Some(1.0));
+
+        assert_eq!(y[1], 2.0 * 1.0 + 1.0 * 0.5 + 5.0 * 0.25);
+    }
+
+    #[test]
+    fn reflected_index_wraps_right_edge() {
+        assert_eq!(super::reflected_index(3, 3), 2);
+        assert_eq!(super::reflected_index(4, 3), 1);
+    }
+
+    #[test]
+    fn sample_with_pad_handles_right_constant() {
+        let x = [1.0, 2.0];
+        assert_eq!(super::sample_with_pad(&x, 2, Pad::Constant(5.0)), 5.0);
     }
 }
