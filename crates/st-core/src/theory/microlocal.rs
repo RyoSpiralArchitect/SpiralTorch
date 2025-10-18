@@ -12,14 +12,13 @@
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
+    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZSource, ZSupport,
 };
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
-use std::f64::consts::PI;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
@@ -189,33 +188,12 @@ impl InterfaceGauge {
                 }
                 if magnitude > 0.0 {
                     let scale = magnitude.sqrt().max(1e-6);
-                    let mut components = vec![0.0f32; dim];
                     for axis in 0..dim {
                         let mut orient_idx = Vec::with_capacity(dim + 1);
                         orient_idx.push(axis);
                         orient_idx.extend_from_slice(idx.slice());
                         let value = orient[IxDyn(&orient_idx)] / scale;
                         orient[IxDyn(&orient_idx)] = value;
-                        components[axis] = value;
-                    }
-                    let mut dominant_axis = 0usize;
-                    let mut dominant_value = 0.0f32;
-                    for (axis, &value) in components.iter().enumerate() {
-                        let abs = value.abs();
-                        if abs > dominant_value {
-                            dominant_axis = axis;
-                            dominant_value = abs;
-                        }
-                    }
-                    for axis in 0..dim {
-                        let mut orient_idx = Vec::with_capacity(dim + 1);
-                        orient_idx.push(axis);
-                        orient_idx.extend_from_slice(idx.slice());
-                        if axis == dominant_axis {
-                            orient[IxDyn(&orient_idx)] = components[axis];
-                        } else {
-                            orient[IxDyn(&orient_idx)] = 0.0;
-                        }
                     }
                 }
             }
@@ -362,7 +340,6 @@ impl InterfaceZLift {
             support: total_support,
             interface_cells,
             band_energy,
-            scale: ZScale::new(signature.physical_radius),
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -378,7 +355,6 @@ pub struct InterfaceZPulse {
     pub support: f32,
     pub interface_cells: f32,
     pub band_energy: (f32, f32, f32),
-    pub scale: Option<ZScale>,
     pub drift: f32,
     pub z_bias: f32,
     pub quality_hint: Option<f32>,
@@ -406,9 +382,6 @@ impl InterfaceZPulse {
         let mut drift_weight = 0.0f32;
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
-        let mut scale_weighted_physical = 0.0f32;
-        let mut scale_weighted_log = 0.0f32;
-        let mut scale_weight_total = 0.0f32;
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
@@ -420,26 +393,12 @@ impl InterfaceZPulse {
             drift_weight += weight;
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
-            if let Some(scale) = pulse.scale {
-                let w = scale_weight(pulse);
-                scale_weight_total += w;
-                scale_weighted_physical += scale.physical_radius * w;
-                scale_weighted_log += scale.log_radius * w;
-            }
         }
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
             interface_cells,
             band_energy: band,
-            scale: if scale_weight_total > 0.0 {
-                ZScale::from_components(
-                    scale_weighted_physical / scale_weight_total,
-                    scale_weighted_log / scale_weight_total,
-                )
-            } else {
-                None
-            },
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -466,12 +425,6 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            scale: match (current.scale, next.scale) {
-                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            },
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -490,7 +443,6 @@ impl InterfaceZPulse {
                 self.band_energy.1 * gain,
                 self.band_energy.2 * gain,
             ),
-            scale: self.scale,
             drift: self.drift * gain,
             z_bias: self.z_bias * gain,
             quality_hint: self.quality_hint,
@@ -516,10 +468,6 @@ impl InterfaceZPulse {
     pub fn into_softlogic_feedback(self) -> SoftlogicZFeedback {
         self.into_softlogic_feedback_with(0.0, 0.0)
     }
-}
-
-fn scale_weight(pulse: &InterfaceZPulse) -> f32 {
-    pulse.support.max(pulse.total_energy()).max(f32::EPSILON)
 }
 
 impl Default for InterfaceZPulse {
@@ -793,12 +741,12 @@ impl InterfaceZConductor {
             conductor: ZConductor::new(ZConductorCfg::default()),
             clock: 0,
             smoothing: 0.0,
-            policy,
+            policy: Arc::new(DefaultZSourcePolicy::new()),
             band_policy: None,
             budget_policy: None,
             previous: None,
             carry: None,
-            emitter,
+            emitter: MicrolocalEmitter::new(),
         }
     }
 
@@ -857,37 +805,37 @@ impl InterfaceZConductor {
 
         // 3) 集約 + 平滑化イベント
         let mut fused = InterfaceZPulse::aggregate(&weighted);
-        let mut events = Vec::new();
-        if let (Some(previous), smoothing) = (self.previous.as_ref(), self.smoothing) {
-            if smoothing > 0.0 {
-                fused = InterfaceZPulse::lerp(previous, &fused, smoothing);
-                events.push("smoothing.applied".to_string());
+        if let Some(previous) = &self.previous {
+            if self.smoothing > 0.0 {
+                fused = InterfaceZPulse::lerp(previous, &fused, self.smoothing);
             }
         }
 
-        let now = if let Some(ts) = ts {
-            self.clock = ts.wrapping_add(1);
-            ts
-        } else {
-            let current = self.clock;
-            self.clock = self.clock.wrapping_add(1);
-            current
-        };
+        let mut budget_scale = 1.0;
+        if let Some(policy) = &self.budget_policy {
+            budget_scale = policy.apply(&mut fused);
+        }
 
-        let tempo_hint = tempo.unwrap_or_else(|| fused.total_energy());
+        self.policy.late_fuse(&mut fused, &pulses, &qualities);
+
+        let now = self.clock;
+        self.clock = self.clock.wrapping_add(1);
 
         let mut zpulses = Vec::with_capacity(pulses.len());
-        for pulse in &pulses {
+        for (pulse, &quality) in pulses.iter().zip(&qualities) {
+            let support = ZSupport::from_band_energy(pulse.band_energy);
+            let tempo = tempo_hint.unwrap_or(pulse.total_energy());
+            let stderr = pulse.standard_error.unwrap_or(0.0);
             zpulses.push(ZPulse {
                 source: pulse.source,
                 ts: now,
-                tempo: tempo_hint,
+                tempo,
                 band_energy: pulse.band_energy,
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
-                support: ZSupport::from_band_energy(pulse.band_energy),
-                quality: pulse.quality_hint.unwrap_or(1.0),
-                stderr: pulse.standard_error.unwrap_or(0.0),
+                support,
+                quality,
+                stderr,
                 latency_ms: 0.0,
             });
         }
@@ -895,43 +843,20 @@ impl InterfaceZConductor {
 
         let mut registry = ZRegistry::with_capacity(1);
         registry.register(self.emitter.clone());
-        let z_fused = self.conductor.step_from_registry(&mut registry, now);
-
-        events.extend(z_fused.events.clone());
-
-        self.policy.late_fuse(&mut fused, &pulses, &qualities);
-
-        let mut budget_scale = 1.0;
-        if let Some(budget) = &self.budget_policy {
-            budget_scale = budget.apply(&mut fused);
-        }
+        let fused_z = self.conductor.step_from_registry(&mut registry, now);
 
         let fused_pulse = fused.clone();
         let feedback = fused.clone().into_softlogic_feedback();
         self.previous = Some(fused.clone());
         self.carry = Some(fused.clone());
 
-        let fused_z = InterfaceZFused {
-            ts: z_fused.ts,
-            z: z_fused.z,
-            support: z_fused.support,
-            drift: z_fused.drift,
-            quality: z_fused.quality,
-            events,
-            attributions: z_fused.attributions.clone(),
-            pulse: ZPulse {
-                source: ZSource::Microlocal,
-                ts: z_fused.ts,
-                tempo: tempo_hint,
-                band_energy: fused.band_energy,
-                drift: fused.drift,
-                z_bias: z_fused.z,
-                support: ZSupport::from_band_energy(fused.band_energy),
-                scale: fused.scale,
-                quality: z_fused.quality,
-                stderr: fused.standard_error.unwrap_or(0.0),
-                latency_ms: 0.0,
-            },
+        let z_pulse = InterfaceZConductor::into_zpulse(&fused, now, &qualities);
+        let fused_report = InterfaceZFused {
+            z: fused_z.z,
+            support: fused_z.support,
+            attributions: fused_z.attributions,
+            events: fused_z.events,
+            pulse: z_pulse,
         };
 
         InterfaceZReport {
@@ -963,7 +888,6 @@ impl InterfaceZConductor {
             drift: fused.drift,
             z_bias: fused.z_bias,
             support,
-            scale: fused.scale,
             quality: avg_quality,
             stderr: fused.standard_error.unwrap_or(0.0),
             latency_ms: 0.0,
