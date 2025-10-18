@@ -1,12 +1,240 @@
-use js_sys::{Array, Float32Array, Uint8Array};
+use js_sys::{Array, Float32Array, Uint32Array, Uint8Array};
 use st_tensor::fractal::{FractalPatch, UringFractalScheduler};
-use st_tensor::wasm_canvas::{CanvasPalette, CanvasProjector};
-use st_tensor::{Tensor, TensorError};
+use st_tensor::wasm_canvas::{
+    CanvasFftLayout as ProjectorCanvasFftLayout, CanvasPalette, CanvasProjector,
+};
+use st_tensor::{
+    AmegaHypergrad, AmegaRealgrad, DesireGradientInterpretation, GradientSummary, Tensor,
+    TensorError,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 
 use crate::utils::js_error;
+
+#[wasm_bindgen]
+pub struct CanvasFftLayout {
+    field_bytes: u32,
+    field_stride: u32,
+    spectrum_bytes: u32,
+    spectrum_stride: u32,
+    uniform_bytes: u32,
+}
+
+impl From<ProjectorCanvasFftLayout> for CanvasFftLayout {
+    fn from(layout: ProjectorCanvasFftLayout) -> Self {
+        let clamp = |value: usize| -> u32 { value.min(u32::MAX as usize) as u32 };
+        Self {
+            field_bytes: clamp(layout.field_bytes()),
+            field_stride: clamp(layout.field_stride()),
+            spectrum_bytes: clamp(layout.spectrum_bytes()),
+            spectrum_stride: clamp(layout.spectrum_stride()),
+            uniform_bytes: clamp(layout.uniform_bytes()),
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl CanvasFftLayout {
+    /// Total byte length required for the `FieldSample` storage buffer.
+    #[wasm_bindgen(getter, js_name = fieldBytes)]
+    pub fn field_bytes(&self) -> u32 {
+        self.field_bytes
+    }
+
+    /// Size in bytes of each vector field sample.
+    #[wasm_bindgen(getter, js_name = fieldStride)]
+    pub fn field_stride(&self) -> u32 {
+        self.field_stride
+    }
+
+    /// Total byte length required for the FFT spectrum storage buffer.
+    #[wasm_bindgen(getter, js_name = spectrumBytes)]
+    pub fn spectrum_bytes(&self) -> u32 {
+        self.spectrum_bytes
+    }
+
+    /// Size in bytes of each FFT spectrum sample.
+    #[wasm_bindgen(getter, js_name = spectrumStride)]
+    pub fn spectrum_stride(&self) -> u32 {
+        self.spectrum_stride
+    }
+
+    /// Byte length of the `CanvasFftParams` uniform buffer.
+    #[wasm_bindgen(getter, js_name = uniformBytes)]
+    pub fn uniform_bytes(&self) -> u32 {
+        self.uniform_bytes
+    }
+}
+
+#[wasm_bindgen]
+pub struct CanvasGradientSummary {
+    hypergrad_l1: f32,
+    hypergrad_l2: f32,
+    hypergrad_linf: f32,
+    hypergrad_mean: f32,
+    hypergrad_rms: f32,
+    hypergrad_count: u32,
+    realgrad_l1: f32,
+    realgrad_l2: f32,
+    realgrad_linf: f32,
+    realgrad_mean: f32,
+    realgrad_rms: f32,
+    realgrad_count: u32,
+}
+
+impl CanvasGradientSummary {
+    fn from_summaries(hyper: GradientSummary, real: GradientSummary) -> Self {
+        Self {
+            hypergrad_l1: hyper.l1(),
+            hypergrad_l2: hyper.l2(),
+            hypergrad_linf: hyper.linf(),
+            hypergrad_mean: hyper.mean_abs(),
+            hypergrad_rms: hyper.rms(),
+            hypergrad_count: hyper.count().min(u32::MAX as usize) as u32,
+            realgrad_l1: real.l1(),
+            realgrad_l2: real.l2(),
+            realgrad_linf: real.linf(),
+            realgrad_mean: real.mean_abs(),
+            realgrad_rms: real.rms(),
+            realgrad_count: real.count().min(u32::MAX as usize) as u32,
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl CanvasGradientSummary {
+    #[wasm_bindgen(getter, js_name = hypergradL1)]
+    pub fn hypergrad_l1(&self) -> f32 {
+        self.hypergrad_l1
+    }
+
+    #[wasm_bindgen(getter, js_name = hypergradL2)]
+    pub fn hypergrad_l2(&self) -> f32 {
+        self.hypergrad_l2
+    }
+
+    #[wasm_bindgen(getter, js_name = hypergradLInf)]
+    pub fn hypergrad_linf(&self) -> f32 {
+        self.hypergrad_linf
+    }
+
+    #[wasm_bindgen(getter, js_name = hypergradMeanAbs)]
+    pub fn hypergrad_mean_abs(&self) -> f32 {
+        self.hypergrad_mean
+    }
+
+    #[wasm_bindgen(getter, js_name = hypergradRms)]
+    pub fn hypergrad_rms(&self) -> f32 {
+        self.hypergrad_rms
+    }
+
+    #[wasm_bindgen(getter, js_name = hypergradCount)]
+    pub fn hypergrad_count(&self) -> u32 {
+        self.hypergrad_count
+    }
+
+    #[wasm_bindgen(getter, js_name = realgradL1)]
+    pub fn realgrad_l1(&self) -> f32 {
+        self.realgrad_l1
+    }
+
+    #[wasm_bindgen(getter, js_name = realgradL2)]
+    pub fn realgrad_l2(&self) -> f32 {
+        self.realgrad_l2
+    }
+
+    #[wasm_bindgen(getter, js_name = realgradLInf)]
+    pub fn realgrad_linf(&self) -> f32 {
+        self.realgrad_linf
+    }
+
+    #[wasm_bindgen(getter, js_name = realgradMeanAbs)]
+    pub fn realgrad_mean_abs(&self) -> f32 {
+        self.realgrad_mean
+    }
+
+    #[wasm_bindgen(getter, js_name = realgradRms)]
+    pub fn realgrad_rms(&self) -> f32 {
+        self.realgrad_rms
+    }
+
+    #[wasm_bindgen(getter, js_name = realgradCount)]
+    pub fn realgrad_count(&self) -> u32 {
+        self.realgrad_count
+    }
+}
+
+#[wasm_bindgen]
+pub struct CanvasDesireInterpretation {
+    hyper_pressure: f32,
+    real_pressure: f32,
+    balance: f32,
+    stability: f32,
+    saturation: f32,
+    penalty_gain: f32,
+    bias_mix: f32,
+    observation_gain: f32,
+}
+
+impl From<DesireGradientInterpretation> for CanvasDesireInterpretation {
+    fn from(value: DesireGradientInterpretation) -> Self {
+        Self {
+            hyper_pressure: value.hyper_pressure(),
+            real_pressure: value.real_pressure(),
+            balance: value.balance(),
+            stability: value.stability(),
+            saturation: value.saturation(),
+            penalty_gain: value.penalty_gain(),
+            bias_mix: value.bias_mix(),
+            observation_gain: value.observation_gain(),
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl CanvasDesireInterpretation {
+    #[wasm_bindgen(getter, js_name = hyperPressure)]
+    pub fn hyper_pressure(&self) -> f32 {
+        self.hyper_pressure
+    }
+
+    #[wasm_bindgen(getter, js_name = realPressure)]
+    pub fn real_pressure(&self) -> f32 {
+        self.real_pressure
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn balance(&self) -> f32 {
+        self.balance
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn stability(&self) -> f32 {
+        self.stability
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn saturation(&self) -> f32 {
+        self.saturation
+    }
+
+    #[wasm_bindgen(getter, js_name = penaltyGain)]
+    pub fn penalty_gain(&self) -> f32 {
+        self.penalty_gain
+    }
+
+    #[wasm_bindgen(getter, js_name = biasMix)]
+    pub fn bias_mix(&self) -> f32 {
+        self.bias_mix
+    }
+
+    #[wasm_bindgen(getter, js_name = observationGain)]
+    pub fn observation_gain(&self) -> f32 {
+        self.observation_gain
+    }
+}
 
 #[wasm_bindgen]
 pub struct FractalCanvas {
@@ -101,6 +329,129 @@ impl FractalCanvas {
             data.extend_from_slice(&vector);
         }
         Ok(Float32Array::from(data.as_slice()))
+    }
+
+    /// Refresh the projector and return the interleaved FFT spectrum for each
+    /// canvas row. Each frequency sample contributes eight floats (real/imag
+    /// pairs for energy + RGB chroma).
+    #[wasm_bindgen(js_name = vectorFieldFft)]
+    pub fn vector_field_fft(&mut self, inverse: bool) -> Result<Float32Array, JsValue> {
+        let spectrum = self
+            .projector
+            .refresh_vector_fft(inverse)
+            .map_err(js_error)?;
+        Ok(Float32Array::from(spectrum.as_slice()))
+    }
+
+    /// Refresh the projector and expose the raw relation tensor feeding the canvas.
+    pub fn relation(&mut self) -> Result<Float32Array, JsValue> {
+        let tensor = self.projector.refresh_tensor().map_err(js_error)?;
+        Ok(Float32Array::from(tensor.data()))
+    }
+
+    /// Refresh the projector and emit the hypergradient-aligned update for the
+    /// current canvas relation.
+    #[wasm_bindgen(js_name = hypergradWave)]
+    pub fn hypergrad_wave(&mut self, curvature: f32) -> Result<Float32Array, JsValue> {
+        let tensor = self.projector.refresh_tensor().map_err(js_error)?;
+        let (rows, cols) = tensor.shape();
+        let mut tape = AmegaHypergrad::new(curvature, 1.0, rows, cols).map_err(js_error)?;
+        tape.accumulate_wave(tensor).map_err(js_error)?;
+        Ok(Float32Array::from(tape.gradient()))
+    }
+
+    /// Refresh the projector and emit the Euclidean gradient update for the
+    /// current canvas relation.
+    #[wasm_bindgen(js_name = realgradWave)]
+    pub fn realgrad_wave(&mut self) -> Result<Float32Array, JsValue> {
+        let tensor = self.projector.refresh_tensor().map_err(js_error)?;
+        let (rows, cols) = tensor.shape();
+        let mut tape = AmegaRealgrad::new(1.0, rows, cols).map_err(js_error)?;
+        tape.accumulate_wave(tensor).map_err(js_error)?;
+        Ok(Float32Array::from(tape.gradient()))
+    }
+
+    /// Summarise the current canvas relation across both the hypergradient and
+    /// Euclidean tapes. The returned object exposes the common norms so callers
+    /// can monitor gradient stability without materialising the full buffers.
+    #[wasm_bindgen(js_name = gradientSummary)]
+    pub fn gradient_summary(&mut self, curvature: f32) -> Result<CanvasGradientSummary, JsValue> {
+        let (hyper, real) = self
+            .projector
+            .gradient_summary(curvature)
+            .map_err(js_error)?;
+        Ok(CanvasGradientSummary::from_summaries(hyper, real))
+    }
+
+    /// Refresh the projector and interpret the gradient health into Desire's
+    /// feedback coordinates.
+    #[wasm_bindgen(js_name = desireInterpretation)]
+    pub fn desire_interpretation(
+        &mut self,
+        curvature: f32,
+    ) -> Result<CanvasDesireInterpretation, JsValue> {
+        let interpretation = self
+            .projector
+            .gradient_interpretation(curvature)
+            .map_err(js_error)?;
+        Ok(CanvasDesireInterpretation::from(interpretation))
+    }
+
+    /// Emit the WGSL kernel that mirrors [`vector_field_fft`] so WebGPU
+    /// consumers can reproduce the spectral pass directly on the GPU.
+    #[wasm_bindgen(js_name = vectorFieldFftKernel)]
+    pub fn vector_field_fft_kernel(&self, subgroup: bool) -> String {
+        self.projector.vector_fft_wgsl(subgroup)
+    }
+
+    /// Generate the uniform parameters expected by [`vector_field_fft_kernel`].
+    ///
+    /// The returned array packs the canvas `width`, `height`, the `inverse`
+    /// flag (1 = inverse, 0 = forward) and a padding slot so the buffer aligns
+    /// to 16 bytes as required by WGSL uniform layout rules.
+    #[wasm_bindgen(js_name = vectorFieldFftUniform)]
+    pub fn vector_field_fft_uniform(&self, inverse: bool) -> Uint32Array {
+        let params = self.projector.vector_fft_uniform(inverse);
+        Uint32Array::from(params.as_slice())
+    }
+
+    /// Compute the workgroup dispatch dimensions that pair with
+    /// [`vector_field_fft_kernel`]. The returned `[x, y, z]` triplet already
+    /// accounts for the workgroup size when toggling subgroup execution.
+    #[wasm_bindgen(js_name = vectorFieldFftDispatch)]
+    pub fn vector_field_fft_dispatch(&self, subgroup: bool) -> Uint32Array {
+        let dispatch = self.projector.vector_fft_dispatch(subgroup);
+        Uint32Array::from(dispatch.as_slice())
+    }
+
+    /// Emit the WGSL kernel that accumulates the relation tensor directly into
+    /// a hypergradient buffer without leaving the GPU.
+    #[wasm_bindgen(js_name = hypergradOperatorKernel)]
+    pub fn hypergrad_operator_kernel(&self, subgroup: bool) -> String {
+        self.projector.hypergrad_operator_wgsl(subgroup)
+    }
+
+    /// Uniform parameters (width, height, blend, gain) consumed by the
+    /// hypergradient WGSL operator.
+    #[wasm_bindgen(js_name = hypergradOperatorUniform)]
+    pub fn hypergrad_operator_uniform(&self, mix: f32, gain: f32) -> Float32Array {
+        let params = self.projector.hypergrad_operator_uniform(mix, gain);
+        Float32Array::from(params.as_ref())
+    }
+
+    /// Workgroup dispatch dimensions matching `hypergradOperatorKernel`.
+    #[wasm_bindgen(js_name = hypergradOperatorDispatch)]
+    pub fn hypergrad_operator_dispatch(&self, subgroup: bool) -> Uint32Array {
+        let dispatch = self.projector.hypergrad_operator_dispatch(subgroup);
+        Uint32Array::from(dispatch.as_slice())
+    }
+
+    /// Byte layout metadata mirroring the WGSL `FieldSample`, `SpectrumSample`
+    /// and uniform structs so WebGPU callers can size buffers without manual
+    /// calculations.
+    #[wasm_bindgen(js_name = vectorFieldFftLayout)]
+    pub fn vector_field_fft_layout(&self) -> CanvasFftLayout {
+        self.projector.vector_fft_layout().into()
     }
 
     /// Reset the internal normaliser so the next frame recomputes brightness ranges.
