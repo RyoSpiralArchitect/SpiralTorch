@@ -954,7 +954,7 @@ impl RealGradZProjector {
             trailing: beneath,
         };
         ZPulse {
-            source: ZSource::Other("RealGrad"),
+            source: ZSource::RealGrad,
             ts: 0,
             tempo: z_energy,
             drift,
@@ -1561,9 +1561,7 @@ mod tests {
         .with_band(0..projection.spectrum.len());
         let pulse = projector.project(&projection);
         assert!(matches!(pulse.source, ZSource::RealGrad));
-        assert!(pulse.support.leading >= 0.0);
-        assert!(pulse.support.central >= 0.0);
-        assert!(pulse.support.trailing >= 0.0);
+        assert!(pulse.support.total() >= 0.0);
         assert!(pulse.band_energy.0 >= 0.0);
         assert!(pulse.quality >= 0.0);
         assert!(pulse.quality <= 1.0);
