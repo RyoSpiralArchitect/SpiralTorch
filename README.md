@@ -83,6 +83,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Technical notes
 
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
+- [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
 
 ## Emerging toolkits unique to SpiralTorch
 
