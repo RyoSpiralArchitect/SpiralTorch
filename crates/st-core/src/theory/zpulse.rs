@@ -36,7 +36,11 @@ pub struct ZSupport {
 
 impl ZSupport {
     pub fn new(leading: f32, central: f32, trailing: f32) -> Self {
-        Self { leading, central, trailing }
+        Self {
+            leading,
+            central,
+            trailing,
+        }
     }
     pub fn from_band_energy(bands: (f32, f32, f32)) -> Self {
         Self::new(bands.0, bands.1, bands.2)
@@ -272,13 +276,20 @@ impl LatencyAlignerState {
             if entry.frames_since_update == u32::MAX {
                 entry.lag = pulse.latency_ms;
                 entry.frames_since_update = 0;
-                self.pending_events
-                    .push(format!("latency.seeded:{:?}:{:.2}", pulse.source, entry.lag));
+                self.pending_events.push(format!(
+                    "latency.seeded:{:?}:{:.2}",
+                    pulse.source, entry.lag
+                ));
             }
         }
         let strength = pulse.support_strength().max(1e-6);
-        self.last
-            .insert(pulse.source, SourceLast { ts: pulse.ts, strength });
+        self.last.insert(
+            pulse.source,
+            SourceLast {
+                ts: pulse.ts,
+                strength,
+            },
+        );
     }
     fn prepare(&mut self, _now: u64, events: &mut Vec<String>) {
         events.extend(self.pending_events.drain(..));
@@ -553,10 +564,13 @@ impl ZConductor {
             }
         }
         if self.hold_until.is_none() && flip_armed {
-            let desired = self
-                .pending_flip_sign
-                .take()
-                .unwrap_or_else(|| if incoming_sign != 0.0 { incoming_sign } else { -self.last_z.signum() });
+            let desired = self.pending_flip_sign.take().unwrap_or_else(|| {
+                if incoming_sign != 0.0 {
+                    incoming_sign
+                } else {
+                    -self.last_z.signum()
+                }
+            });
             events.push("sign-flip".to_string());
             let magnitude = raw_z.abs().max(self.cfg.robust_delta.max(1e-6));
             raw_z = magnitude * desired.signum();
@@ -602,10 +616,14 @@ pub struct ZRegistry {
 }
 impl ZRegistry {
     pub fn new() -> Self {
-        Self { emitters: Vec::new() }
+        Self {
+            emitters: Vec::new(),
+        }
     }
     pub fn with_capacity(capacity: usize) -> Self {
-        Self { emitters: Vec::with_capacity(capacity) }
+        Self {
+            emitters: Vec::with_capacity(capacity),
+        }
     }
     pub fn register<E>(&mut self, emitter: E)
     where
@@ -655,7 +673,9 @@ impl ZEmitter for DesireEmitter {
 }
 
 fn median(values: &mut [f32]) -> f32 {
-    if values.is_empty() { return 0.0; }
+    if values.is_empty() {
+        return 0.0;
+    }
     let mid = values.len() / 2;
     values.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
     values[mid]
@@ -663,7 +683,11 @@ fn median(values: &mut [f32]) -> f32 {
 fn huber_weight(residual: f32, delta: f32) -> f32 {
     let delta = delta.max(1e-6);
     let abs = residual.abs();
-    if abs <= delta { 1.0 } else { (delta / abs).clamp(0.0, 1.0) }
+    if abs <= delta {
+        1.0
+    } else {
+        (delta / abs).clamp(0.0, 1.0)
+    }
 }
 fn derive_quality(pulse: &ZPulse) -> f32 {
     let support = pulse.support_strength().max(1e-6);
@@ -676,9 +700,15 @@ fn derive_quality(pulse: &ZPulse) -> f32 {
     (0.4 * snr + 0.3 * support_norm + 0.3 * drift_norm).clamp(0.0, 1.0)
 }
 fn shift_timestamp(ts: u64, lag: f32) -> u64 {
-    if !lag.is_finite() { return ts; }
+    if !lag.is_finite() {
+        return ts;
+    }
     let shifted = (ts as f64) - (lag as f64);
-    if shifted <= 0.0 { 0 } else { shifted.round() as u64 }
+    if shifted <= 0.0 {
+        0
+    } else {
+        shifted.round() as u64
+    }
 }
 fn source_priority(source: &ZSource) -> i32 {
     match source {
@@ -695,34 +725,59 @@ mod conductor_tests {
     use super::*;
 
     fn pulse(source: ZSource, ts: u64, drift: f32, quality: f32) -> ZPulse {
-        let support = ZSupport { leading: drift.abs(), central: 0.0, trailing: drift.abs() };
+        let support = ZSupport {
+            leading: drift.abs(),
+            central: 0.0,
+            trailing: drift.abs(),
+        };
         ZPulse {
-            source, ts, tempo: drift.abs(),
+            source,
+            ts,
+            tempo: drift.abs(),
             band_energy: (support.leading, 0.0, support.trailing),
-            drift, z_bias: drift, support, quality,
-            stderr: 0.0, latency_ms: 0.0
+            drift,
+            z_bias: drift,
+            support,
+            quality,
+            stderr: 0.0,
+            latency_ms: 0.0,
         }
     }
 
     #[test]
     fn hysteresis_holds_sign_during_flip_window() {
-        let mut conductor = ZConductor::new(ZConductorCfg { flip_hold: 2, ..Default::default() });
+        let mut conductor = ZConductor::new(ZConductorCfg {
+            flip_hold: 2,
+            ..Default::default()
+        });
         let sequence: [f32; 5] = [1.0, 1.0, -1.0, -1.0, 1.0];
         for (idx, sign) in sequence.into_iter().enumerate() {
             conductor.ingest(pulse(ZSource::Microlocal, idx as u64, sign, 1.0));
             let fused = conductor.step(idx as u64);
-            if idx == 2 { assert!(fused.events.iter().any(|e| e == "flip-held")); }
+            if idx == 2 {
+                assert!(fused.events.iter().any(|e| e == "flip-held"));
+            }
         }
     }
 
     #[test]
     fn conductor_blends_pulses() {
-        let cfg = ZConductorCfg { alpha_fast: 1.0, ..Default::default() };
+        let cfg = ZConductorCfg {
+            alpha_fast: 1.0,
+            ..Default::default()
+        };
         let mut conductor = ZConductor::new(cfg);
         conductor.ingest(ZPulse {
-            tempo: 42.0, drift: 0.5, z_bias: 0.5,
-            support: ZSupport { leading: 0.6, central: 0.8, trailing: 0.4 },
-            quality: 1.0, ..ZPulse::default()
+            tempo: 42.0,
+            drift: 0.5,
+            z_bias: 0.5,
+            support: ZSupport {
+                leading: 0.6,
+                central: 0.8,
+                trailing: 0.4,
+            },
+            quality: 1.0,
+            ..ZPulse::default()
         });
         let fused = conductor.step(0);
         assert!(fused.support > 0.0);

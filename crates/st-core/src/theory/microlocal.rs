@@ -44,8 +44,8 @@ use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
-use std::fmt;
 use std::f64::consts::PI;
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
@@ -1057,12 +1057,6 @@ pub struct InterfaceZConductor {
     previous: Option<InterfaceZPulse>,
     carry: Option<InterfaceZPulse>,
     emitter: MicrolocalEmitter,
-    smoothing: f32,
-    policy: Arc<dyn ZSourcePolicy>,
-    band_policy: Option<BandPolicy>,
-    budget_policy: Option<BudgetPolicy>,
-    previous: Option<InterfaceZPulse>,
-    carry: Option<InterfaceZPulse>,
 }
 
 impl InterfaceZConductor {
@@ -1083,12 +1077,6 @@ impl InterfaceZConductor {
             previous: None,
             carry: None,
             emitter,
-            smoothing: 0.0,
-            policy: Arc::new(DefaultZSourcePolicy::new()),
-            band_policy: None,
-            budget_policy: None,
-            previous: None,
-            carry: None,
         }
     }
 
@@ -1128,6 +1116,7 @@ impl InterfaceZConductor {
         ts: Option<u64>,
         tempo: Option<f32>,
     ) -> InterfaceZReport {
+        // 1) lift → InterfaceZPulse 群
         let mut pulses = Vec::with_capacity(self.gauges.len());
         for gauge in &self.gauges {
             let signature = if let Some(label) = c_prime {
@@ -1138,6 +1127,7 @@ impl InterfaceZConductor {
             pulses.push(self.lift.project(&signature));
         }
 
+        // 2) 品質重み付け
         let mut qualities = Vec::with_capacity(pulses.len());
         let mut weighted = Vec::with_capacity(pulses.len());
         for pulse in &pulses {
@@ -1150,49 +1140,33 @@ impl InterfaceZConductor {
             weighted.push(pulse.scaled(quality));
         }
 
+        // 3) 集約 + 平滑化イベント
         let mut fused = InterfaceZPulse::aggregate(&weighted);
-        let mut smoothing_events = Vec::new();
-        if let (Some(previous), smoothing) = (self.previous.as_ref(), self.smoothing) {
-            if smoothing > 0.0 {
-                fused = InterfaceZPulse::lerp(previous, &fused, smoothing);
-                smoothing_events.push("smoothing.applied".to_string());
+        let mut events = Vec::<String>::new();
+        if let (Some(prev), s) = (self.previous.as_ref(), self.smoothing) {
+            if s > 0.0 {
+                fused = InterfaceZPulse::lerp(prev, &fused, s);
+                events.push("smoothing.applied".to_string());
             }
         }
 
+        // 4) 時刻確定
         let now = ts.unwrap_or(self.clock);
         self.clock = now.wrapping_add(1);
-        let now = if let Some(ts) = ts {
-            self.clock = ts.wrapping_add(1);
-            ts
-        } else {
-            let current = self.clock;
-            self.clock = self.clock.wrapping_add(1);
-            current
-        };
-        if fused_raw.z_bias.abs() > f32::EPSILON
-            && fused.z_bias.signum() != fused_raw.z_bias.signum()
-        {
-            fused.z_bias = fused_raw.z_bias * self.smoothing;
-        }
-        let now = self.clock;
-        self.clock = self.clock.wrapping_add(1);
 
+        // 5) Z-pulse を conductor に供給
         let zpulses: Vec<ZPulse> = pulses
             .iter()
-            .map(|pulse| ZPulse {
-                source: pulse.source,
+            .map(|p| ZPulse {
+                source: p.source,
                 ts: now,
-                tempo: tempo.unwrap_or(pulse.total_energy()),
-                band_energy: pulse.band_energy,
-                drift: pulse.drift,
-                z_bias: pulse.z_bias,
-                support: ZSupport::from_band_energy(pulse.band_energy),
-                band_energy: pulse.band_energy,
-                drift: pulse.drift,
-                z_bias: pulse.z_bias,
-                support: ZSupport::from_band_energy(pulse.band_energy),
-                quality: pulse.quality_hint.unwrap_or(1.0),
-                stderr: pulse.standard_error.unwrap_or(0.0),
+                tempo: tempo.unwrap_or(p.total_energy()),
+                band_energy: p.band_energy,
+                drift: p.drift,
+                z_bias: p.z_bias,
+                support: ZSupport::from_band_energy(p.band_energy),
+                quality: p.quality_hint.unwrap_or(1.0),
+                stderr: p.standard_error.unwrap_or(0.0),
                 latency_ms: 0.0,
             })
             .collect();
@@ -1201,6 +1175,7 @@ impl InterfaceZConductor {
         registry.register(self.emitter.clone());
         let z_fused = self.conductor.step_from_registry(&mut registry, now);
 
+        // 6) ポリシーの late_fuse と予算適用
         self.policy.late_fuse(&mut fused, &pulses, &qualities);
 
         let mut budget_scale = 1.0;
@@ -1208,44 +1183,26 @@ impl InterfaceZConductor {
             budget_scale = budget.apply(&mut fused);
         }
 
+        // 7) フィードバックと状態更新
         let feedback = fused.clone().into_softlogic_feedback();
         self.carry = Some(fused.clone());
         self.previous = Some(fused.clone());
 
-        let mut fused_events = events;
-        fused_events.extend(z_fused.events.clone());
-        let feedback = fused.clone().into_softlogic_feedback();
-        self.carry = Some(fused.clone());
-        self.previous = Some(fused.clone());
+        // 8) z_fused のイベントを結合
+        events.extend(z_fused.events.clone());
 
-        let mut fused_events = events;
-        fused_events.extend(z_fused.events.clone());
-
-        let avg_quality = if qualities.is_empty() {
-            0.0
-        } else {
-            qualities.iter().copied().sum::<f32>() / qualities.len() as f32
-        };
-
-        let z_pulse = ZPulse {
-            source: ZSource::Microlocal,
-            ts: now,
-            tempo: tempo_hint,
-            band_energy: fused.band_energy,
-            drift: fused.drift,
-            z_bias: fused.z_bias,
-            support: ZSupport::from(fused.band_energy),
-            quality: avg_quality,
-            stderr: fused.standard_error.unwrap_or(0.0),
-            latency_ms: 0.0,
-        };
-
-        let mut events = fused_state.events.clone();
-        events.extend(smoothing_events);
+        // 9) InterfaceZFused を構築
         let fused_z = InterfaceZFused {
+            ts: z_fused.ts,
+            z: z_fused.z,
+            support: z_fused.support,
+            drift: z_fused.drift,
+            quality: z_fused.quality,
+            events,
+            attributions: z_fused.attributions.clone(),
             pulse: ZPulse {
                 source: ZSource::Microlocal,
-                ts: z_fused.ts,
+                ts: now,
                 tempo: tempo.unwrap_or(fused.total_energy()),
                 band_energy: fused.band_energy,
                 drift: fused.drift,
@@ -1255,9 +1212,6 @@ impl InterfaceZConductor {
                 stderr: 0.0,
                 latency_ms: 0.0,
             },
-            z: z_fused.z,
-            attributions: z_fused.attributions.clone(),
-            events: fused_events,
         };
 
         InterfaceZReport {
