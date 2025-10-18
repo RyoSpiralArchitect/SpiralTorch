@@ -1470,5 +1470,5 @@ fn normalized_gradient_offset(
 }
 
 #[cfg(test)]
-#[path = "microlocal/tests.rs"]
+#[path = "microlocal/tests/mod.rs"]
 mod tests;
