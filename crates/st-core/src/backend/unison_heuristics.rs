@@ -2271,6 +2271,7 @@ mod tests {
         }
     }
 
+
     fn sample_window(target: u32, lower: u32, upper: u32, stride: u32) -> LaneWindow {
         LaneWindow {
             target,
