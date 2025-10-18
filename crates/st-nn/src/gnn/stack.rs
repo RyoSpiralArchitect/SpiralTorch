@@ -7,8 +7,10 @@ use super::{GraphContext, NeighborhoodAggregation, ZSpaceGraphConvolution};
 use crate::layers::activation::Relu;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
+use st_core::telemetry::xai::GraphFlowTracer;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
+use std::sync::{Arc, Mutex};
 
 /// Activation applied after each convolutional stage in a graph network stack.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +66,7 @@ pub struct ZSpaceGraphNetworkBuilder {
     curvature: f32,
     learning_rate: f32,
     layers: Vec<GraphLayerSpec>,
+    tracer: Option<Arc<Mutex<GraphFlowTracer>>>,
 }
 
 impl ZSpaceGraphNetworkBuilder {
@@ -80,6 +83,7 @@ impl ZSpaceGraphNetworkBuilder {
             curvature,
             learning_rate,
             layers: Vec::new(),
+            tracer: None,
         }
     }
 
@@ -88,24 +92,46 @@ impl ZSpaceGraphNetworkBuilder {
         self.layers.push(layer);
     }
 
+    /// Registers a shared flow tracer that each layer will use to emit telemetry.
+    pub fn set_tracer(&mut self, tracer: Arc<Mutex<GraphFlowTracer>>) {
+        self.tracer = Some(tracer);
+    }
+
+    /// Consumes the builder while installing a shared flow tracer.
+    pub fn with_tracer(mut self, tracer: Arc<Mutex<GraphFlowTracer>>) -> Self {
+        self.set_tracer(tracer);
+        self
+    }
+
     /// Consumes the builder and returns a fully initialised network.
     pub fn build(self, name: impl Into<String>) -> PureResult<ZSpaceGraphNetwork> {
         if self.layers.is_empty() {
             return Err(TensorError::EmptyInput("graph_network_layers"));
         }
+        let ZSpaceGraphNetworkBuilder {
+            context,
+            input_dim,
+            curvature,
+            learning_rate,
+            layers: layer_specs,
+            tracer,
+        } = self;
         let name = name.into();
-        let mut current_dim = self.input_dim.get();
-        let mut layers = Vec::with_capacity(self.layers.len());
-        for (idx, spec) in self.layers.into_iter().enumerate() {
+        let mut current_dim = input_dim.get();
+        let mut layers = Vec::with_capacity(layer_specs.len());
+        for (idx, spec) in layer_specs.into_iter().enumerate() {
             let mut layer = ZSpaceGraphConvolution::new(
                 format!("{name}::layer{idx}"),
-                self.context.clone(),
+                context.clone(),
                 current_dim,
                 spec.output_dim.get(),
-                self.curvature,
-                self.learning_rate,
+                curvature,
+                learning_rate,
             )?;
             layer.set_aggregation(spec.aggregation)?;
+            if let Some(tracer) = tracer.as_ref() {
+                layer.set_tracer(tracer.clone());
+            }
             layers.push(GraphLayer {
                 conv: layer,
                 activation: GraphActivationRuntime::from_spec(spec.activation),
@@ -272,6 +298,9 @@ impl Module for ZSpaceGraphNetwork {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use st_core::telemetry::xai::GraphFlowTracer;
+    use std::num::NonZeroUsize;
+    use std::sync::{Arc, Mutex};
 
     fn sample_context() -> GraphContext {
         let adjacency =
@@ -311,5 +340,32 @@ mod tests {
         let grad_input = network.backward(&input, &grad_output).unwrap();
         assert_eq!(grad_input.shape(), (3, 2));
         assert!(grad_input.data().iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn stack_records_flow_traces_with_shared_tracer() {
+        let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+        let mut builder = ZSpaceGraphNetworkBuilder::new(
+            sample_context(),
+            NonZeroUsize::new(2).unwrap(),
+            -1.0,
+            0.05,
+        )
+        .with_tracer(tracer.clone());
+        builder.push_layer(GraphLayerSpec::new(NonZeroUsize::new(3).unwrap()));
+        builder.push_layer(
+            GraphLayerSpec::new(NonZeroUsize::new(2).unwrap())
+                .with_activation(GraphActivation::Relu),
+        );
+        let mut network = builder.build("stack_trace").unwrap();
+        let input = Tensor::from_vec(3, 2, vec![1.0, 0.25, 0.5, -0.5, -0.25, 1.0]).unwrap();
+        let grad_output = Tensor::from_vec(3, 2, vec![0.1, -0.2, 0.05, 0.15, -0.1, 0.2]).unwrap();
+        let _ = network.forward(&input).unwrap();
+        let _ = network.backward(&input, &grad_output).unwrap();
+        let guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
+        assert_eq!(guard.layers().len(), 2);
+        assert_eq!(guard.layers()[0].layer, "stack_trace::layer0");
+        assert_eq!(guard.layers()[1].layer, "stack_trace::layer1");
+        assert!(guard.total_energy() > 0.0);
     }
 }
