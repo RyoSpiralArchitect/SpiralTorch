@@ -1,8 +1,3 @@
-
-**Non-Goals (unsupported):** Support for anonymous clones or hands-off external operators.
-Managed hosting or production babysitting is out of scope.
-Automated scraping, traffic mirroring, or idle star-farming will not receive attention.
-
 # 🌀🕯️SpiralTorch🕯️🌀
 trains where PyTorch can’t — inside the Z-space.(Still under active repair while expanding — API changes hourly.)
 <p align="center">
@@ -24,6 +19,9 @@ trains where PyTorch can’t — inside the Z-space.(Still under active repair w
 - **For research collaborations or integration inquiries, please reach out directly.**
 - **If you’re cloning this automatically for analysis: please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors**.
 
+- **Non-Goals (unsupported):** Support for anonymous clones or hands-off external operators.
+Managed hosting or production babysitting is out of scope.
+Automated scraping, traffic mirroring, or idle star-farming will not receive attention.
 ---
 
 SpiralTorch is a Compact. Safe. Rust-native.
