@@ -37,7 +37,11 @@ use crate::telemetry::{
     hub,
     psi::{PsiComponent, PsiEvent, PsiReading},
 };
-use crate::{telemetry::hub::SoftlogicZFeedback, util::math::LeechProjector};
+use crate::{
+    telemetry::hub::SoftlogicZFeedback,
+    theory::zpulse::{PulseSource, ZPulse},
+    util::math::LeechProjector,
+};
 #[cfg(feature = "psi")]
 use std::collections::HashMap;
 
@@ -327,6 +331,24 @@ impl MaxwellZPulse {
             band_energy: self.band_energy,
             drift: self.mean as f32,
             z_signal: self.z_bias,
+        }
+    }
+}
+
+impl From<MaxwellZPulse> for ZPulse {
+    fn from(pulse: MaxwellZPulse) -> Self {
+        let support = pulse.blocks as f32;
+        let drift = pulse.mean as f32;
+        let latency_ms = pulse.blocks as f32;
+        let scale = pulse.standard_error.max(0.0) as f32;
+        ZPulse {
+            source: PulseSource::Maxwell,
+            support,
+            band_energy: pulse.band_energy,
+            drift,
+            z_bias: pulse.z_bias,
+            latency_ms,
+            scale,
         }
     }
 }
