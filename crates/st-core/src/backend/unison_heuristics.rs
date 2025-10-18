@@ -76,19 +76,18 @@ impl JuliaSpanBuf {
 
     #[inline]
     fn push_number(&mut self, mut value: u32) {
-        self.ensure_capacity(10);
-        let start = self.len;
-        let mut i = 0;
+        let digits = JuliaSpan::decimal_len(value);
+        self.ensure_capacity(digits);
+        let mut idx = self.len + digits;
+        self.len = idx;
         loop {
-            self.bytes[start + i] = (value % 10) as u8 + b'0';
-            i += 1;
+            idx -= 1;
+            self.bytes[idx] = (value % 10) as u8 + b'0';
             value /= 10;
             if value == 0 {
                 break;
             }
         }
-        self.len += i;
-        self.bytes[start..self.len].reverse();
     }
 
     #[inline]
@@ -115,7 +114,33 @@ impl JuliaSpanBuf {
 }
 
 impl JuliaSpan {
-    const MAX_RENDERED_LEN: usize = 3 * 10 + 2; // u32::MAX has 10 decimal digits.
+    const MAX_DIGITS: usize = 10; // u32::MAX has 10 decimal digits.
+    const MAX_RENDERED_LEN: usize = Self::MAX_DIGITS * 3 + 2;
+
+    #[inline(always)]
+    const fn decimal_len(value: u32) -> usize {
+        if value >= 1_000_000_000 {
+            10
+        } else if value >= 100_000_000 {
+            9
+        } else if value >= 10_000_000 {
+            8
+        } else if value >= 1_000_000 {
+            7
+        } else if value >= 100_000 {
+            6
+        } else if value >= 10_000 {
+            5
+        } else if value >= 1_000 {
+            4
+        } else if value >= 100 {
+            3
+        } else if value >= 10 {
+            2
+        } else {
+            1
+        }
+    }
 
     #[inline]
     pub fn new(start: u32, step: u32, end: u32) -> Self {
@@ -133,17 +158,36 @@ impl JuliaSpan {
     }
 
     #[inline]
-    pub fn write_into<W: std::fmt::Write>(&self, mut out: W) -> std::fmt::Result {
-        let mut buf = JuliaSpanBuf::new();
-        let rendered = self.render_into(&mut buf);
-        out.write_str(rendered)
+    pub fn write_into<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
+        fn write_number<W: std::fmt::Write>(out: &mut W, mut value: u32) -> std::fmt::Result {
+            let mut buf = [0u8; JuliaSpan::MAX_DIGITS];
+            let mut idx = JuliaSpan::MAX_DIGITS;
+            loop {
+                idx -= 1;
+                buf[idx] = (value % 10) as u8 + b'0';
+                value /= 10;
+                if value == 0 {
+                    break;
+                }
+            }
+            // SAFETY: buf is populated solely with ASCII digits.
+            unsafe { out.write_str(std::str::from_utf8_unchecked(&buf[idx..])) }
+        }
+
+        write_number(out, self.start)?;
+        out.write_char(':')?;
+        write_number(out, self.step)?;
+        out.write_char(':')?;
+        write_number(out, self.end)
     }
 
     #[inline]
     pub fn to_string_fast(&self) -> String {
-        let mut buf = JuliaSpanBuf::new();
-        self.render_into(&mut buf);
-        buf.to_owned()
+        let mut out = String::with_capacity(Self::MAX_RENDERED_LEN);
+        self
+            .write_into(&mut out)
+            .expect("writing into String should not fail");
+        out
     }
 }
 
@@ -319,9 +363,7 @@ impl Choice {
         mut out: W,
     ) -> std::fmt::Result {
         if let Some(span) = self.ctile_julia_span_components() {
-            let mut buf = JuliaSpanBuf::new();
-            let rendered = span.render_into(&mut buf);
-            out.write_str(rendered)?;
+            span.write_into(&mut out)?;
         }
         Ok(())
     }
@@ -1175,13 +1217,18 @@ mod tests {
     fn julia_span_buffer_matches_display() {
         let span = JuliaSpan::new(128, 32, 640);
         let mut buf = JuliaSpanBuf::new();
-        let rendered = span.render_into(&mut buf);
+        let rendered = span.render_into(&mut buf).to_owned();
         assert_eq!(rendered, "128:32:640");
         assert_eq!(rendered, span.to_string());
         let mut second = JuliaSpanBuf::new();
-        let reused = span.render_into(&mut second);
+        let reused = span.render_into(&mut second).to_owned();
         assert_eq!(rendered, reused);
-        assert_eq!(buf.as_str(), reused);
+        assert_eq!(buf.as_str(), rendered);
+        let mut direct = String::new();
+        span
+            .write_into(&mut direct)
+            .expect("writing into a String should succeed");
+        assert_eq!(direct, rendered);
     }
 
     #[test]
