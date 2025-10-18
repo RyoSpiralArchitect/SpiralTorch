@@ -4,8 +4,8 @@ use st_tensor::wasm_canvas::{
     CanvasFftLayout as ProjectorCanvasFftLayout, CanvasPalette, CanvasProjector,
 };
 use st_tensor::{
-    AmegaHypergrad, AmegaRealgrad, DesireGradientControl, DesireGradientInterpretation,
-    GradientSummary, Tensor, TensorError,
+    AmegaHypergrad, AmegaRealgrad, DesireControlEvents, DesireGradientControl,
+    DesireGradientInterpretation, GradientSummary, Tensor, TensorError,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
@@ -246,6 +246,21 @@ pub struct CanvasDesireControl {
     real_rate_scale: f32,
     operator_mix: f32,
     operator_gain: f32,
+    tuning_gain: f32,
+    target_entropy: f32,
+    learning_rate_eta: f32,
+    learning_rate_min: f32,
+    learning_rate_max: f32,
+    learning_rate_slew: f32,
+    clip_norm: f32,
+    clip_floor: f32,
+    clip_ceiling: f32,
+    clip_ema: f32,
+    temperature_kappa: f32,
+    temperature_slew: f32,
+    quality_gain: f32,
+    quality_bias: f32,
+    events: u32,
 }
 
 impl From<DesireGradientControl> for CanvasDesireControl {
@@ -259,6 +274,21 @@ impl From<DesireGradientControl> for CanvasDesireControl {
             real_rate_scale: value.real_rate_scale(),
             operator_mix: value.operator_mix(),
             operator_gain: value.operator_gain(),
+            tuning_gain: value.tuning_gain(),
+            target_entropy: value.target_entropy(),
+            learning_rate_eta: value.learning_rate_eta(),
+            learning_rate_min: value.learning_rate_min(),
+            learning_rate_max: value.learning_rate_max(),
+            learning_rate_slew: value.learning_rate_slew(),
+            clip_norm: value.clip_norm(),
+            clip_floor: value.clip_floor(),
+            clip_ceiling: value.clip_ceiling(),
+            clip_ema: value.clip_ema(),
+            temperature_kappa: value.temperature_kappa(),
+            temperature_slew: value.temperature_slew(),
+            quality_gain: value.quality_gain(),
+            quality_bias: value.quality_bias(),
+            events: value.events().bits(),
         }
     }
 }
@@ -303,6 +333,111 @@ impl CanvasDesireControl {
     #[wasm_bindgen(getter, js_name = operatorGain)]
     pub fn operator_gain(&self) -> f32 {
         self.operator_gain
+    }
+
+    #[wasm_bindgen(getter, js_name = tuningGain)]
+    pub fn tuning_gain(&self) -> f32 {
+        self.tuning_gain
+    }
+
+    #[wasm_bindgen(getter, js_name = targetEntropy)]
+    pub fn target_entropy(&self) -> f32 {
+        self.target_entropy
+    }
+
+    #[wasm_bindgen(getter, js_name = learningRateEta)]
+    pub fn learning_rate_eta(&self) -> f32 {
+        self.learning_rate_eta
+    }
+
+    #[wasm_bindgen(getter, js_name = learningRateMin)]
+    pub fn learning_rate_min(&self) -> f32 {
+        self.learning_rate_min
+    }
+
+    #[wasm_bindgen(getter, js_name = learningRateMax)]
+    pub fn learning_rate_max(&self) -> f32 {
+        self.learning_rate_max
+    }
+
+    #[wasm_bindgen(getter, js_name = learningRateSlew)]
+    pub fn learning_rate_slew(&self) -> f32 {
+        self.learning_rate_slew
+    }
+
+    #[wasm_bindgen(getter, js_name = clipNorm)]
+    pub fn clip_norm(&self) -> f32 {
+        self.clip_norm
+    }
+
+    #[wasm_bindgen(getter, js_name = clipFloor)]
+    pub fn clip_floor(&self) -> f32 {
+        self.clip_floor
+    }
+
+    #[wasm_bindgen(getter, js_name = clipCeiling)]
+    pub fn clip_ceiling(&self) -> f32 {
+        self.clip_ceiling
+    }
+
+    #[wasm_bindgen(getter, js_name = clipEma)]
+    pub fn clip_ema(&self) -> f32 {
+        self.clip_ema
+    }
+
+    #[wasm_bindgen(getter, js_name = temperatureKappa)]
+    pub fn temperature_kappa(&self) -> f32 {
+        self.temperature_kappa
+    }
+
+    #[wasm_bindgen(getter, js_name = temperatureSlew)]
+    pub fn temperature_slew(&self) -> f32 {
+        self.temperature_slew
+    }
+
+    #[wasm_bindgen(getter, js_name = qualityGain)]
+    pub fn quality_gain(&self) -> f32 {
+        self.quality_gain
+    }
+
+    #[wasm_bindgen(getter, js_name = qualityBias)]
+    pub fn quality_bias(&self) -> f32 {
+        self.quality_bias
+    }
+
+    #[wasm_bindgen(js_name = eventsMask)]
+    pub fn events_mask(&self) -> u32 {
+        self.events
+    }
+
+    #[wasm_bindgen(js_name = eventLabels)]
+    pub fn event_labels(&self) -> Array {
+        let array = Array::new();
+        if self.events & DesireControlEvents::LR_INCREASE.bits() != 0 {
+            array.push(&JsValue::from_str("lr_increase"));
+        }
+        if self.events & DesireControlEvents::LR_DECREASE.bits() != 0 {
+            array.push(&JsValue::from_str("lr_decrease"));
+        }
+        if self.events & DesireControlEvents::LR_CLIPPED.bits() != 0 {
+            array.push(&JsValue::from_str("lr_clipped"));
+        }
+        if self.events & DesireControlEvents::TEMPERATURE_SUPPRESS.bits() != 0 {
+            array.push(&JsValue::from_str("temperature_suppress"));
+        }
+        if self.events & DesireControlEvents::QUALITY_BOOST.bits() != 0 {
+            array.push(&JsValue::from_str("quality_weight"));
+        }
+        if self.events & DesireControlEvents::QUALITY_SUPPRESS.bits() != 0 {
+            array.push(&JsValue::from_str("quality_suppress"));
+        }
+        if self.events & DesireControlEvents::Z_SUPPRESS.bits() != 0 {
+            array.push(&JsValue::from_str("z_suppress"));
+        }
+        if self.events & DesireControlEvents::SLEW_LIMIT.bits() != 0 {
+            array.push(&JsValue::from_str("lr_slew_limit"));
+        }
+        array
     }
 }
 
@@ -470,15 +605,26 @@ impl FractalCanvas {
     /// Refresh the projector and collapse the gradient summaries into Desire's
     /// control packet, exposing precomputed gains and learning-rate scales.
     #[wasm_bindgen(js_name = desireControl)]
-    pub fn desire_control(
-        &mut self,
-        curvature: f32,
-    ) -> Result<CanvasDesireControl, JsValue> {
+    pub fn desire_control(&mut self, curvature: f32) -> Result<CanvasDesireControl, JsValue> {
         let control = self
             .projector
             .gradient_control(curvature)
             .map_err(js_error)?;
         Ok(CanvasDesireControl::from(control))
+    }
+
+    /// Refresh the projector, derive Desire's control packet, and pack it into
+    /// a WGSL-friendly uniform layout. The returned `Uint32Array` holds the raw
+    /// IEEE-754 bits so callers can reinterpret the underlying buffer as a
+    /// `Float32Array` when uploading to WebGPU.
+    #[wasm_bindgen(js_name = desireControlUniform)]
+    pub fn desire_control_uniform(&mut self, curvature: f32) -> Result<Uint32Array, JsValue> {
+        let control = self
+            .projector
+            .gradient_control(curvature)
+            .map_err(js_error)?;
+        let packed = self.projector.desire_control_uniform(&control);
+        Ok(Uint32Array::from(packed.as_slice()))
     }
 
     /// Emit the WGSL kernel that mirrors [`vector_field_fft`] so WebGPU

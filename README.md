@@ -297,6 +297,43 @@ automation layers can react without recomputing heuristics. Grab it via
 `DesireLagrangian::gradient_control()` (or directly from the streamed
 `DesireSolution`) to inspect the recommended hyper/Realgrad learning-rate
 scales, penalty gains, and WGSL operator mix/gain before issuing GPU updates.
+The control packet also captures Desire's “feel-good” tuning: exponential
+learning-rate gains driven by entropy deltas (with min/max bounds and slew
+limits), EMA-smoothed clipping windows anchored at the 95th percentile, Z-space
+temperature coupling (`κ`) guidance, and sigmoid quality scaling hooks so
+Maxwell/Microlocal evidence can raise the step size only when the gradients look
+clean. Each packet carries a telemetry bitmask plus string labels (e.g.
+`lr_increase`, `lr_clipped`, `temperature_suppress`, `quality_suppress`,
+`lr_slew_limit`) so PSI dashboards can log _why_ the controller nudged Desire in
+a given direction, and the new `control_events` field on `DesireSolution` keeps
+historical replays compatible with older logs via the serde default.
+
+When you want to feed live telemetry back into Desire, use the new
+`DesireGradientControl::control_with_gain()` builder. It mirrors the ergonomic
+sketch above—pipe the latest entropy estimate, Z magnitude, quality score, and
+clip hints directly into the builder and call `finalise()` to obtain the packed
+control:
+
+```rust
+let ctrl = DesireGradientControl::control_with_gain()
+    .with_gain(gain_factor)
+    .with_entropy(last_entropy)
+    .with_z_coupling(z_magnitude)
+    .with_quality(quality_estimate)
+    .with_bounds(1e-4, 3e-3)
+    .with_clip_p95_hint(p95_gradient)
+    .finalise();
+lag.set_gradient_control(ctrl.clone());
+```
+
+For GPU loops, call `CanvasProjector::desire_control_uniform` (or the WASM
+`FractalCanvas.desireControlUniform`) to obtain a `Uint32Array` view of the
+packed uniform. Each lane stores the IEEE-754 bits for the target entropy,
+learning-rate envelope, clipping window, Z coupling, quality gain, and rate
+scales, with the final element containing the raw telemetry mask. Reinterpret
+the buffer as a `Float32Array` when uploading to WGSL so the compute shader sees
+the expected 16-lane, 64-byte-aligned payload without reserialising structs for
+every dispatch.
 
 To automate the “unconscious” loop, wrap the lagrangian with
 `DesireAutomation`. It samples the `SelfRewriteCfg` thresholds, tracks

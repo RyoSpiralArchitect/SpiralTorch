@@ -3,7 +3,6 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-pub use pipeline::{LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult};
 mod automation;
 mod desire;
 mod geometry;
@@ -32,5 +31,5 @@ pub use pipeline::{
 };
 #[cfg(feature = "psi")]
 pub use pipeline::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
-pub use st_tensor::{DesireGradientControl, DesireGradientInterpretation};
+pub use pipeline::{LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult};
 pub use temperature::{entropy, TemperatureController};
