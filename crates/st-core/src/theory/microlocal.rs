@@ -44,8 +44,53 @@ use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::f64::consts::PI;
-use std::fmt;
-use std::sync::Arc;
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
+
+#[derive(Clone, Default, Debug)]
+pub struct MicrolocalEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
+}
+
+impl MicrolocalEmitter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn enqueue(&self, pulse: ZPulse) {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.push_back(pulse);
+    }
+
+    pub fn extend<I>(&self, pulses: I)
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.extend(pulses);
+    }
+}
+
+impl ZEmitter for MicrolocalEmitter {
+    fn name(&self) -> ZSource {
+        ZSource::Microlocal
+    }
+
+    fn tick(&mut self, _now: u64) -> Option<ZPulse> {
+        self.queue
+            .lock()
+            .expect("microlocal emitter queue poisoned")
+            .pop_front()
+    }
+}
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
 #[derive(Debug, Clone)]
@@ -1121,13 +1166,10 @@ impl InterfaceZConductor {
         if let Some(budget) = &self.budget_policy {
             budget_scale = budget.apply(&mut fused);
         }
-
-        self.policy.late_fuse(&mut fused, &pulses, &qualities);
-
-        let mut budget_scale = 1.0;
-        if let Some(budget) = &self.budget_policy {
-            budget_scale = budget.apply(&mut fused);
-        }
+        self.emitter.extend(z_pulses);
+        let mut registry = ZRegistry::with_capacity(1);
+        registry.register(self.emitter.clone());
+        let fused_z = self.conductor.step_from_registry(&mut registry, now);
 
         self.carry = Some(fused.clone());
 

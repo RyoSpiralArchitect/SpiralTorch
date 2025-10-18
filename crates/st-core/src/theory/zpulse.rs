@@ -5,8 +5,14 @@
 //! Canonical representation of Z pulses together with a lightweight
 //! conductor that fuses multiple sources into a single control signal.
 
-use std::collections::VecDeque;
+use std::borrow::Cow;
+use std::collections::{HashMap, VecDeque};
+use std::fs;
+use std::io::Read;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
+
+use serde::Deserialize;
 
 /// Identifies a source capable of emitting [`ZPulse`] records.
 pub trait ZEmitter {
@@ -223,6 +229,8 @@ pub struct ZConductor {
     adaptive_cfg: Option<ZAdaptiveGainCfg>,
     latency_cfg: Option<ZLatencyConfig>,
     latency_events: VecDeque<String>,
+    source_gains: HashMap<String, f32>,
+    source_limits: HashMap<String, f32>,
 }
 
 impl Default for ZConductor {
@@ -243,7 +251,17 @@ impl ZConductor {
             adaptive_cfg: None,
             latency_cfg: None,
             latency_events: VecDeque::new(),
+            source_gains: HashMap::new(),
+            source_limits: HashMap::new(),
         }
+
+    pub fn cfg(&self) -> &ZConductorCfg {
+        &self.cfg
+    }
+
+    pub fn cfg_mut(&mut self) -> &mut ZConductorCfg {
+        &mut self.cfg
+    }
 
     pub fn cfg(&self) -> &ZConductorCfg {
         &self.cfg
@@ -267,6 +285,14 @@ impl ZConductor {
             self.latency_events.truncate(cfg.history);
         }
 
+    pub fn set_source_gains(&mut self, gains: HashMap<String, f32>) {
+        self.source_gains = sanitize_tuning_map(gains);
+    }
+
+    pub fn set_source_limits(&mut self, limits: HashMap<String, f32>) {
+        self.source_limits = sanitize_tuning_map(limits);
+    }
+
     pub fn step<I>(&mut self, pulses: I, now: u64) -> ZFused
     where
         I: IntoIterator<Item = ZPulse>,
@@ -283,15 +309,35 @@ impl ZConductor {
 
         for pulse in pulses {
             had_pulse = true;
-            total_support += pulse.support.max(0.0);
+            let support = pulse.support.max(0.0);
+            total_support += support;
             fused.drift += pulse.drift;
-            weighted_z += pulse.z_bias * pulse.support.max(0.0);
-            let weight = pulse.support.max(1e-6);
+            let key = source_lookup_key(&pulse.source);
+            let gain = self
+                .source_gains
+                .get(key.as_ref())
+                .copied()
+                .unwrap_or(1.0)
+                .max(0.0);
+            let limit = self
+                .source_limits
+                .get(key.as_ref())
+                .copied()
+                .unwrap_or(f32::INFINITY)
+                .max(0.0);
+            let mut z_bias = pulse.z_bias * gain;
+            if limit.is_finite() {
+                if limit == 0.0 {
+                    z_bias = 0.0;
+                } else {
+                    z_bias = z_bias.clamp(-limit, limit);
+                }
+            }
+            weighted_z += z_bias * support;
+            let weight = support.max(1e-6);
             weighted_quality += pulse.quality * weight;
             total_quality_weight += weight;
-            fused
-                .attributions
-                .push((pulse.source, pulse.support.max(0.0)));
+            fused.attributions.push((pulse.source, support));
         }
 
         if !had_pulse {
@@ -434,6 +480,38 @@ impl DesireEmitter {
         Self::default()
     }
 
+fn source_lookup_key(source: &ZSource) -> Cow<'_, str> {
+    match source {
+        ZSource::Microlocal => Cow::Borrowed("Microlocal"),
+        ZSource::Maxwell => Cow::Borrowed("Maxwell"),
+        ZSource::RealGrad => Cow::Borrowed("RealGrad"),
+        ZSource::Desire => Cow::Borrowed("Desire"),
+        ZSource::External(name) => Cow::Owned(format!("External.{name}")),
+        ZSource::Other(name) => Cow::Owned(format!("Other.{name}")),
+    }
+}
+
+fn sanitize_tuning_map(map: HashMap<String, f32>) -> HashMap<String, f32> {
+    map.into_iter()
+        .filter(|(_, value)| value.is_finite())
+        .map(|(key, value)| (key, value.max(0.0)))
+        .collect()
+}
+
+fn lerp(current: f32, target: f32, alpha: f32) -> f32 {
+    let alpha = alpha.clamp(0.0, 1.0);
+    (1.0 - alpha) * current + alpha * target
+}
+#[derive(Clone, Default, Debug)]
+pub struct DesireEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
+}
+
+impl DesireEmitter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn enqueue(&self, mut pulse: ZPulse) {
         pulse.source = ZSource::Desire;
         let mut queue = self.queue.lock().expect("desire emitter queue poisoned");
@@ -462,5 +540,272 @@ impl ZEmitter for DesireEmitter {
             .lock()
             .expect("desire emitter queue poisoned")
             .pop_front()
+    }
+}
+
+/// Parsed representation of a ZPulse configuration file.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ZPulseConfigDocument {
+    #[serde(default)]
+    pub zpulse: ZPulseConfig,
+}
+
+impl ZPulseConfigDocument {
+    /// Parses a TOML configuration string.
+    pub fn from_toml_str(input: &str) -> Result<Self, ZPulseConfigError> {
+        toml::from_str(input).map_err(ZPulseConfigError::from)
+    }
+
+    /// Parses a JSON configuration string.
+    pub fn from_json_str(input: &str) -> Result<Self, ZPulseConfigError> {
+        serde_json::from_str(input).map_err(ZPulseConfigError::from)
+    }
+
+    /// Parses a TOML document from an arbitrary reader.
+    pub fn from_toml_reader<R: Read>(mut reader: R) -> Result<Self, ZPulseConfigError> {
+        let mut buf = String::new();
+        reader.read_to_string(&mut buf)?;
+        Self::from_toml_str(&buf)
+    }
+
+    /// Parses a JSON document from an arbitrary reader.
+    pub fn from_json_reader<R: Read>(mut reader: R) -> Result<Self, ZPulseConfigError> {
+        let mut buf = String::new();
+        reader.read_to_string(&mut buf)?;
+        Self::from_json_str(&buf)
+    }
+
+    /// Loads a configuration document from a filesystem path. The format is
+    /// detected using the file extension (".json" selects JSON, everything else
+    /// defaults to TOML).
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, ZPulseConfigError> {
+        let path = path.as_ref();
+        let data = fs::read_to_string(path)?;
+        match path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("json"))
+        {
+            Some(true) => Self::from_json_str(&data),
+            _ => Self::from_toml_str(&data),
+        }
+    }
+}
+
+/// Runtime configuration for the ZPulse conductor.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ZPulseConfig {
+    #[serde(default)]
+    pub conductor: ZConductorCfgPartial,
+    #[serde(default)]
+    gain: ZSourceTable,
+    #[serde(default)]
+    limit: ZSourceTable,
+}
+
+impl ZPulseConfig {
+    /// Applies the configuration to the supplied conductor. Existing values are
+    /// overwritten when present in the configuration file while unspecified
+    /// entries keep their previous defaults.
+    pub fn apply(&self, conductor: &mut ZConductor) {
+        self.conductor.apply(conductor.cfg_mut());
+        let gains = self.gain.resolve();
+        if !gains.is_empty() || !conductor.source_gains.is_empty() {
+            conductor.set_source_gains(gains);
+        }
+        let limits = self.limit.resolve();
+        if !limits.is_empty() || !conductor.source_limits.is_empty() {
+            conductor.set_source_limits(limits);
+        }
+    }
+
+    /// Returns the parsed source gain table.
+    pub fn source_gains(&self) -> HashMap<String, f32> {
+        self.gain.resolve()
+    }
+
+    /// Returns the parsed source limit table.
+    pub fn source_limits(&self) -> HashMap<String, f32> {
+        self.limit.resolve()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct ZSourceTable {
+    #[serde(flatten)]
+    entries: HashMap<String, ZSourceTableValue>,
+}
+
+impl ZSourceTable {
+    fn resolve(&self) -> HashMap<String, f32> {
+        let mut result = HashMap::new();
+        for (key, value) in &self.entries {
+            match value {
+                ZSourceTableValue::Scalar(v) => {
+                    result.insert(key.clone(), *v);
+                }
+                ZSourceTableValue::Nested(nested) => {
+                    for (nested_key, nested_value) in nested {
+                        result.insert(format!("{key}.{nested_key}"), *nested_value);
+                    }
+                }
+            }
+        }
+        result
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum ZSourceTableValue {
+    Scalar(f32),
+    Nested(HashMap<String, f32>),
+}
+
+/// Partial override for [`ZConductorCfg`] read from configuration files.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ZConductorCfgPartial {
+    pub alpha_fast: Option<f32>,
+    pub alpha_slow: Option<f32>,
+    pub flip_hold: Option<u64>,
+    pub slew_max: Option<f32>,
+    pub z_budget: Option<f32>,
+    pub robust_delta: Option<f32>,
+    pub latency_align: Option<bool>,
+}
+
+impl ZConductorCfgPartial {
+    fn apply(&self, cfg: &mut ZConductorCfg) {
+        if let Some(alpha_fast) = self.alpha_fast {
+            cfg.alpha_fast = alpha_fast.clamp(0.0, 1.0);
+        }
+        if let Some(alpha_slow) = self.alpha_slow {
+            cfg.alpha_slow = alpha_slow.clamp(0.0, 1.0);
+        }
+        if let Some(flip_hold) = self.flip_hold {
+            cfg.flip_hold = flip_hold;
+        }
+        if let Some(slew_max) = self.slew_max {
+            cfg.slew_max = slew_max.max(0.0);
+        }
+        if let Some(z_budget) = self.z_budget {
+            cfg.z_budget = z_budget.max(0.0);
+        }
+        if let Some(robust_delta) = self.robust_delta {
+            cfg.robust_delta = robust_delta.max(0.0);
+        }
+        if let Some(latency_align) = self.latency_align {
+            cfg.latency_align = latency_align;
+        }
+    }
+}
+
+/// Errors produced when loading ZPulse configuration files.
+#[derive(Debug, thiserror::Error)]
+pub enum ZPulseConfigError {
+    #[error("failed to read configuration: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("failed to parse TOML: {0}")]
+    Toml(#[from] toml::de::Error),
+    #[error("failed to parse JSON: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn toml_config_parses_and_applies() {
+        let toml = r#"
+            [zpulse.conductor]
+            alpha_fast = 0.7
+            alpha_slow = 0.2
+            flip_hold = 7
+            slew_max = 0.5
+            z_budget = 1.1
+            robust_delta = 0.05
+            latency_align = false
+
+            [zpulse.gain]
+            Microlocal = 0.8
+            External."imu" = 1.3
+
+            [zpulse.limit]
+            Maxwell = 0.4
+            External."imu" = 0.5
+        "#;
+
+        let doc = ZPulseConfigDocument::from_toml_str(toml).expect("valid toml config");
+        assert!(!doc.zpulse.source_gains().is_empty());
+        assert!(!doc.zpulse.source_limits().is_empty());
+
+        let mut conductor = ZConductor::default();
+        doc.zpulse.apply(&mut conductor);
+
+        assert!((conductor.cfg.alpha_fast - 0.7).abs() < 1e-6);
+        assert!((conductor.cfg.alpha_slow - 0.2).abs() < 1e-6);
+        assert_eq!(conductor.cfg.flip_hold, 7);
+        assert!((conductor.cfg.slew_max - 0.5).abs() < 1e-6);
+        assert!((conductor.cfg.z_budget - 1.1).abs() < 1e-6);
+        assert!((conductor.cfg.robust_delta - 0.05).abs() < 1e-6);
+        assert!(!conductor.cfg.latency_align);
+
+        assert!((conductor.source_gains["Microlocal"] - 0.8).abs() < 1e-6);
+        assert!((conductor.source_gains["External.imu"] - 1.3).abs() < 1e-6);
+        assert!((conductor.source_limits["Maxwell"] - 0.4).abs() < 1e-6);
+        assert!((conductor.source_limits["External.imu"] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn json_config_round_trips() {
+        let json = r#"
+        {
+            "zpulse": {
+                "conductor": {"alpha_fast": 0.9},
+                "gain": {"RealGrad": 0.75, "External": {"lidar": 1.1}},
+                "limit": {"RealGrad": 0.6}
+            }
+        }
+        "#;
+
+        let doc = ZPulseConfigDocument::from_json_str(json).expect("valid json config");
+        let mut conductor = ZConductor::default();
+        doc.zpulse.apply(&mut conductor);
+
+        assert!((conductor.cfg.alpha_fast - 0.9).abs() < 1e-6);
+        assert!((conductor.source_gains["RealGrad"] - 0.75).abs() < 1e-6);
+        assert!((conductor.source_gains["External.lidar"] - 1.1).abs() < 1e-6);
+        assert!((conductor.source_limits["RealGrad"] - 0.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn source_gain_and_limit_control_bias() {
+        let mut cfg = ZConductorCfg::default();
+        cfg.alpha_fast = 1.0;
+        cfg.alpha_slow = 1.0;
+        cfg.slew_max = 10.0;
+        cfg.z_budget = 1.0;
+        cfg.flip_hold = 0;
+
+        let mut conductor = ZConductor::new(cfg);
+        conductor.set_source_gains(HashMap::from([(String::from("Maxwell"), 2.0)]));
+        conductor.set_source_limits(HashMap::from([(String::from("Maxwell"), 0.3)]));
+
+        let pulse = ZPulse {
+            source: ZSource::Maxwell,
+            ts: 0,
+            band_energy: (0.0, 0.0, 0.0),
+            drift: 0.0,
+            z_bias: 0.5,
+            support: 1.0,
+            quality: 1.0,
+            stderr: 0.0,
+            latency_ms: 0.0,
+        };
+
+        let fused = conductor.step(vec![pulse], 0);
+        assert!((fused.z - 0.3).abs() < 1e-6);
     }
 }
