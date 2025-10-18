@@ -13297,8 +13297,50 @@ impl PySpiralDifferentialTrace {
 #[pymethods]
 impl PySpiralDifferentialTrace {
     #[getter]
+    fn has_sot_plan(&self) -> bool {
+        self.sot_plan.is_some()
+    }
+
+    #[getter]
     fn sot_plan(&self) -> Option<PySoT3DPlan> {
         self.sot_plan.clone()
+    }
+
+    fn set_sot_plan(&mut self, plan: Option<&PySoT3DPlan>) -> PyResult<()> {
+        self.sot_plan = plan.cloned();
+        Ok(())
+    }
+
+    #[pyo3(signature = (topos, label_prefix=None, include_reflections=true, include_roles=true))]
+    fn sot_biome(
+        &self,
+        topos: &PyOpenTopos,
+        label_prefix: Option<&str>,
+        include_reflections: bool,
+        include_roles: bool,
+    ) -> PyResult<Option<PyTensorBiome>> {
+        if let Some(plan) = &self.sot_plan {
+            let biome = plan.grow_biome(topos, label_prefix, include_reflections, include_roles)?;
+            Ok(Some(biome))
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[pyo3(signature = (biome, label_prefix=None, include_reflections=true, include_roles=true))]
+    fn deposit_sot_into(
+        &self,
+        biome: &mut PyTensorBiome,
+        label_prefix: Option<&str>,
+        include_reflections: bool,
+        include_roles: bool,
+    ) -> PyResult<bool> {
+        if let Some(plan) = &self.sot_plan {
+            plan.infuse_biome(biome, label_prefix, include_reflections, include_roles)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn deform(&mut self, generator: &PyTensor, direction: &PyTensor) -> PyResult<()> {
