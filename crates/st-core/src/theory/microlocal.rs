@@ -44,8 +44,8 @@ use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
-use std::fmt;
 use std::f64::consts::PI;
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
@@ -1057,12 +1057,6 @@ pub struct InterfaceZConductor {
     previous: Option<InterfaceZPulse>,
     carry: Option<InterfaceZPulse>,
     emitter: MicrolocalEmitter,
-    smoothing: f32,
-    policy: Arc<dyn ZSourcePolicy>,
-    band_policy: Option<BandPolicy>,
-    budget_policy: Option<BudgetPolicy>,
-    previous: Option<InterfaceZPulse>,
-    carry: Option<InterfaceZPulse>,
 }
 
 impl InterfaceZConductor {
@@ -1083,12 +1077,6 @@ impl InterfaceZConductor {
             previous: None,
             carry: None,
             emitter,
-            smoothing: 0.0,
-            policy: Arc::new(DefaultZSourcePolicy::new()),
-            band_policy: None,
-            budget_policy: None,
-            previous: None,
-            carry: None,
         }
     }
 
@@ -1151,16 +1139,14 @@ impl InterfaceZConductor {
         }
 
         let mut fused = InterfaceZPulse::aggregate(&weighted);
-        let mut smoothing_events = Vec::new();
+        let mut events = Vec::new();
         if let (Some(previous), smoothing) = (self.previous.as_ref(), self.smoothing) {
             if smoothing > 0.0 {
                 fused = InterfaceZPulse::lerp(previous, &fused, smoothing);
-                smoothing_events.push("smoothing.applied".to_string());
+                events.push("smoothing.applied".to_string());
             }
         }
 
-        let now = ts.unwrap_or(self.clock);
-        self.clock = now.wrapping_add(1);
         let now = if let Some(ts) = ts {
             self.clock = ts.wrapping_add(1);
             ts
@@ -1169,24 +1155,15 @@ impl InterfaceZConductor {
             self.clock = self.clock.wrapping_add(1);
             current
         };
-        if fused_raw.z_bias.abs() > f32::EPSILON
-            && fused.z_bias.signum() != fused_raw.z_bias.signum()
-        {
-            fused.z_bias = fused_raw.z_bias * self.smoothing;
-        }
-        let now = self.clock;
-        self.clock = self.clock.wrapping_add(1);
 
-        let zpulses: Vec<ZPulse> = pulses
-            .iter()
-            .map(|pulse| ZPulse {
+        let tempo_hint = tempo.unwrap_or_else(|| fused.total_energy());
+
+        let mut zpulses = Vec::with_capacity(pulses.len());
+        for pulse in &pulses {
+            zpulses.push(ZPulse {
                 source: pulse.source,
                 ts: now,
-                tempo: tempo.unwrap_or(pulse.total_energy()),
-                band_energy: pulse.band_energy,
-                drift: pulse.drift,
-                z_bias: pulse.z_bias,
-                support: ZSupport::from_band_energy(pulse.band_energy),
+                tempo: tempo_hint,
                 band_energy: pulse.band_energy,
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
@@ -1194,12 +1171,15 @@ impl InterfaceZConductor {
                 quality: pulse.quality_hint.unwrap_or(1.0),
                 stderr: pulse.standard_error.unwrap_or(0.0),
                 latency_ms: 0.0,
-            })
-            .collect();
+            });
+        }
         self.emitter.extend(zpulses);
+
         let mut registry = ZRegistry::with_capacity(1);
         registry.register(self.emitter.clone());
         let z_fused = self.conductor.step_from_registry(&mut registry, now);
+
+        events.extend(z_fused.events.clone());
 
         self.policy.late_fuse(&mut fused, &pulses, &qualities);
 
@@ -1209,55 +1189,29 @@ impl InterfaceZConductor {
         }
 
         let feedback = fused.clone().into_softlogic_feedback();
-        self.carry = Some(fused.clone());
         self.previous = Some(fused.clone());
-
-        let mut fused_events = events;
-        fused_events.extend(z_fused.events.clone());
-        let feedback = fused.clone().into_softlogic_feedback();
         self.carry = Some(fused.clone());
-        self.previous = Some(fused.clone());
 
-        let mut fused_events = events;
-        fused_events.extend(z_fused.events.clone());
-
-        let avg_quality = if qualities.is_empty() {
-            0.0
-        } else {
-            qualities.iter().copied().sum::<f32>() / qualities.len() as f32
-        };
-
-        let z_pulse = ZPulse {
-            source: ZSource::Microlocal,
-            ts: now,
-            tempo: tempo_hint,
-            band_energy: fused.band_energy,
-            drift: fused.drift,
-            z_bias: fused.z_bias,
-            support: ZSupport::from(fused.band_energy),
-            quality: avg_quality,
-            stderr: fused.standard_error.unwrap_or(0.0),
-            latency_ms: 0.0,
-        };
-
-        let mut events = fused_state.events.clone();
-        events.extend(smoothing_events);
         let fused_z = InterfaceZFused {
+            ts: z_fused.ts,
+            z: z_fused.z,
+            support: z_fused.support,
+            drift: z_fused.drift,
+            quality: z_fused.quality,
+            events,
+            attributions: z_fused.attributions.clone(),
             pulse: ZPulse {
                 source: ZSource::Microlocal,
                 ts: z_fused.ts,
-                tempo: tempo.unwrap_or(fused.total_energy()),
+                tempo: tempo_hint,
                 band_energy: fused.band_energy,
                 drift: fused.drift,
                 z_bias: z_fused.z,
                 support: ZSupport::from_band_energy(fused.band_energy),
                 quality: z_fused.quality,
-                stderr: 0.0,
+                stderr: fused.standard_error.unwrap_or(0.0),
                 latency_ms: 0.0,
             },
-            z: z_fused.z,
-            attributions: z_fused.attributions.clone(),
-            events: fused_events,
         };
 
         InterfaceZReport {
