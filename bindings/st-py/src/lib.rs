@@ -86,6 +86,11 @@ use st_core::telemetry::dashboard::{
     EventSeverity as CoreEventSeverity,
 };
 use st_rec::{RatingTriple as RecRatingTriple, RecEpochReport, SpiralRecError, SpiralRecommender};
+#[cfg(feature = "kdsl")]
+use st_kdsl::query::{
+    compile as kdsl_compile, Filter as KdslFilter, OrderDirection as KdslOrderDirection,
+    QueryPlan as KdslQueryPlan,
+};
 use st_rl::{
     DqnAgent, EpisodeReport as RlEpisodeReport, GeometryFeedback, GeometryFeedbackConfig,
     GeometryFeedbackSignal, GeometryTelemetry, PpoAgent, SacAgent, SpiralPolicyGradient,
@@ -18520,6 +18525,75 @@ impl PyDashboardRing {
     }
 }
 
+#[cfg(feature = "kdsl")]
+#[pyclass(module = "spiraltorch.kdsl", name = "QueryPlan", unsendable)]
+struct PyKdslQueryPlan {
+    inner: KdslQueryPlan,
+    raw: String,
+}
+
+#[cfg(feature = "kdsl")]
+#[pymethods]
+impl PyKdslQueryPlan {
+    #[new]
+    fn new(query: &str) -> PyResult<Self> {
+        let plan = kdsl_compile(query).map_err(|err| PyValueError::new_err(err.to_string()))?;
+        Ok(Self {
+            inner: plan,
+            raw: query.to_string(),
+        })
+    }
+
+    #[getter]
+    fn query(&self) -> &str {
+        &self.raw
+    }
+
+    fn selects(&self) -> Vec<String> {
+        self.inner.selects.clone()
+    }
+
+    fn limit(&self) -> Option<usize> {
+        self.inner.limit
+    }
+
+    fn order(&self) -> Option<(String, String)> {
+        self.inner.order.as_ref().map(|(column, direction)| {
+            let dir = match direction {
+                KdslOrderDirection::Asc => "asc",
+                KdslOrderDirection::Desc => "desc",
+            };
+            (column.clone(), dir.to_string())
+        })
+    }
+
+    fn filters(&self) -> Vec<(String, String, f64)> {
+        self.inner
+            .filters
+            .iter()
+            .map(|filter| match filter {
+                KdslFilter::Eq(column, value) => (column.clone(), "=".to_string(), *value),
+                KdslFilter::Neq(column, value) => (column.clone(), "!=".to_string(), *value),
+                KdslFilter::Gt(column, value) => (column.clone(), ">".to_string(), *value),
+                KdslFilter::Lt(column, value) => (column.clone(), "<".to_string(), *value),
+                KdslFilter::Ge(column, value) => (column.clone(), ">=".to_string(), *value),
+                KdslFilter::Le(column, value) => (column.clone(), "<=".to_string(), *value),
+            })
+            .collect()
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "QueryPlan(query=\"{}\", selects={:?}, filters={}, order={:?}, limit={:?})",
+            self.raw,
+            self.inner.selects,
+            self.inner.filters.len(),
+            self.inner.order,
+            self.inner.limit
+        ))
+    }
+}
+
 #[pyclass(module = "spiraltorch.rec", name = "Recommender", unsendable)]
 struct PyRecommender {
     inner: Mutex<SpiralRecommender>,
@@ -18584,6 +18658,36 @@ impl PyRecommender {
             .recommend_top_k(user, k, exclude_slice)
             .map_err(rec_err)?;
         Ok(recs.into_iter().map(|rec| (rec.item, rec.score)).collect())
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[pyo3(signature = (user, query, exclude=None))]
+    fn recommend_query(
+        &self,
+        py: Python<'_>,
+        user: usize,
+        query: &PyKdslQueryPlan,
+        exclude: Option<Vec<usize>>,
+    ) -> PyResult<Vec<PyObject>> {
+        let exclude = exclude.unwrap_or_default();
+        let exclude_slice = if exclude.is_empty() {
+            None
+        } else {
+            Some(exclude.as_slice())
+        };
+        let guard = self.inner.lock().unwrap();
+        let rows = guard
+            .recommend_with_query(user, &query.inner, exclude_slice)
+            .map_err(rec_err)?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let dict = PyDict::new_bound(py);
+            for (key, value) in row {
+                dict.set_item(key, value)?;
+            }
+            out.push(dict.into_py(py));
+        }
+        Ok(out)
     }
 
     fn user_embedding(&self, user: usize) -> PyResult<PyTensor> {
@@ -18739,6 +18843,17 @@ fn rec(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.setattr(
         "__doc__",
         "Recommendation harness that wraps SpiralLightning for inference and ranking.",
+    )?;
+    Ok(())
+}
+
+#[cfg(feature = "kdsl")]
+fn kdsl(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyKdslQueryPlan>()?;
+    m.setattr("__all__", vec!["QueryPlan"])?;
+    m.setattr(
+        "__doc__",
+        "KDsl query utilities for filtering ranked telemetry and recommendation results.",
     )?;
     Ok(())
 }
@@ -19202,6 +19317,12 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let rec_mod = PyModule::new_bound(_py, "rec")?;
     rec(_py, &rec_mod)?;
     m.add_submodule(&rec_mod)?;
+    #[cfg(feature = "kdsl")]
+    {
+        let kdsl_mod = PyModule::new_bound(_py, "kdsl")?;
+        kdsl(_py, &kdsl_mod)?;
+        m.add_submodule(&kdsl_mod)?;
+    }
     let telemetry_mod = PyModule::new_bound(_py, "telemetry")?;
     telemetry(_py, &telemetry_mod)?;
     m.add_submodule(&telemetry_mod)?;
@@ -19303,76 +19424,75 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
 
-    m.setattr(
-        "__all__",
-        vec![
-            "plan",
-            "plan_topk",
-            "plan_midk",
-            "plan_bottomk",
-            "topk2d_tensor",
-            "topk2d",
-            "z_space_barycenter",
-            "hip_probe",
-            "describe_device",
-            "get_config_events",
-            "get_desire_telemetry",
-            "get_psychoid_stats",
-            "describe_resonance",
-            "describe_frame",
-            "describe_timeline",
-            "describe_atlas",
-            "ecosystem_snapshot",
-            "ecosystem_drain",
-            "ecosystem_record_connector",
-            "ecosystem_record_metric",
-            "ecosystem_capacity",
-            "ecosystem_configure",
-            "Tensor",
-            "ComplexTensor",
-            "BarycenterIntermediate",
-            "ZSpaceBarycenter",
-            "DifferentialResonance",
-            "AtlasMetric",
-            "AtlasFrame",
-            "ChronoFrame",
-            "ChronoSummary",
-            "SpiralDifferentialTrace",
-            "OpenTopos",
-            "TensorBiome",
-            "LanguageWaveEncoder",
-            "TextResonator",
-            "Hypergrad",
-            "DistConfig",
-            "SparseKernel",
-            "SymbolGeometry",
-            "RepressionField",
-            "SemanticBridge",
-            "ConceptHint",
-            "TemperatureController",
-            "DesireSchedule",
-            "SelfRewriteConfig",
-            "DesireLagrangian",
-            "DesireAutomation",
-            "DesirePipelineBuilder",
-            "DesirePipeline",
-            "RoundtableSchedule",
-            "DesireRoundtableBridge",
-            "EpochStats",
-            "ModuleTrainer",
-            "SpiralLightning",
-            "SpiralSessionBuilder",
-            "SpiralSession",
-            "nn",
-            "frac",
-            "dataset",
-            "linalg",
-            "rl",
-            "rec",
-            "sot",
-            "integrations",
-        ],
-    )?;
+    let mut root_all = vec![
+        "plan",
+        "plan_topk",
+        "plan_midk",
+        "plan_bottomk",
+        "topk2d_tensor",
+        "topk2d",
+        "z_space_barycenter",
+        "hip_probe",
+        "describe_device",
+        "get_desire_telemetry",
+        "get_psychoid_stats",
+        "describe_resonance",
+        "describe_frame",
+        "describe_timeline",
+        "describe_atlas",
+        "ecosystem_snapshot",
+        "ecosystem_drain",
+        "ecosystem_record_connector",
+        "ecosystem_record_metric",
+        "ecosystem_capacity",
+        "ecosystem_configure",
+        "Tensor",
+        "ComplexTensor",
+        "BarycenterIntermediate",
+        "ZSpaceBarycenter",
+        "DifferentialResonance",
+        "AtlasMetric",
+        "AtlasFrame",
+        "ChronoFrame",
+        "ChronoSummary",
+        "SpiralDifferentialTrace",
+        "OpenTopos",
+        "TensorBiome",
+        "LanguageWaveEncoder",
+        "TextResonator",
+        "Hypergrad",
+        "DistConfig",
+        "SparseKernel",
+        "SymbolGeometry",
+        "RepressionField",
+        "SemanticBridge",
+        "ConceptHint",
+        "TemperatureController",
+        "DesireSchedule",
+        "SelfRewriteConfig",
+        "DesireLagrangian",
+        "DesireAutomation",
+        "DesirePipelineBuilder",
+        "DesirePipeline",
+        "RoundtableSchedule",
+        "DesireRoundtableBridge",
+        "EpochStats",
+        "ModuleTrainer",
+        "SpiralLightning",
+        "SpiralSessionBuilder",
+        "SpiralSession",
+        "nn",
+        "frac",
+        "dataset",
+        "linalg",
+        "rl",
+        "rec",
+        "sot",
+        "integrations",
+    ];
+    #[cfg(feature = "kdsl")]
+    root_all.push("kdsl");
+    m.setattr("__all__", root_all)?;
     let mut exported = vec![
         "plan",
         "plan_topk",
@@ -19415,6 +19535,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "sot",
         "integrations",
     ];
+    #[cfg(feature = "kdsl")]
+    exported.push("kdsl");
     #[cfg(feature = "golden")]
     {
         exported.push("GoldenBlackcatPulse");

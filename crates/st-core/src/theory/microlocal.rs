@@ -43,10 +43,11 @@ use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
+use std::collections::VecDeque;
 use std::fmt;
 use std::f64::consts::PI;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
 #[derive(Debug, Clone)]
@@ -429,21 +430,6 @@ impl InterfaceZLift {
             has_high_band: above > f32::EPSILON,
         }
     }
-}
-
-/// Identifiers describing the source of a Z pulse.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ZSource {
-    /// Microlocal boundary gauges.
-    Microlocal,
-    /// Sequential Maxwell matched filters.
-    Maxwell,
-    /// RealGrad spectral accumulators.
-    RealGrad,
-    /// Desire feedback loops.
-    Desire,
-    /// Custom source identified by caller-supplied slot.
-    Custom(u8),
 }
 
 /// Aggregated Z-space pulse produced by [`InterfaceZLift::project`].
@@ -1415,6 +1401,27 @@ impl InterfaceZConductor {
         {
             fused.z_bias = fused_raw.z_bias * self.smoothing;
         }
+        let now = self.clock;
+        self.clock = self.clock.wrapping_add(1);
+
+        let zpulses: Vec<ZPulse> = pulses
+            .iter()
+            .map(|pulse| ZPulse {
+                source: pulse.source,
+                ts: now,
+                band_energy: pulse.band_energy,
+                drift: pulse.drift,
+                z_bias: pulse.z_bias,
+                support: pulse.support,
+                quality: pulse.quality_hint.unwrap_or(1.0),
+                stderr: pulse.standard_error.unwrap_or(0.0),
+                latency_ms: 0.0,
+            })
+            .collect();
+        self.emitter.extend(zpulses);
+        let mut registry = ZRegistry::with_capacity(1);
+        registry.register(self.emitter.clone());
+        let fused_z = self.conductor.step_from_registry(&mut registry, now);
 
         self.policy.late_fuse(&mut fused, &pulses, &qualities);
 
@@ -1457,6 +1464,7 @@ impl InterfaceZConductor {
 
     /// Returns the most recent fused pulse emitted by the conductor.
     pub fn last_fused_pulse(&self) -> InterfaceZPulse {
+        self.carry.clone().unwrap_or_else(InterfaceZPulse::default)
         self.carry
             .clone()
             .unwrap_or_else(InterfaceZPulse::default)

@@ -3,8 +3,10 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use std::{collections::HashSet, fmt};
+use std::collections::{BTreeMap, HashSet};
+use std::fmt;
 
+use st_kdsl::query::QueryPlan;
 use st_tensor::{topos::OpenCartesianTopos, Tensor, TensorError};
 
 /// Errors surfaced by the recommender harness.
@@ -536,11 +538,59 @@ impl SpiralRecommender {
 
         Ok(recommendations)
     }
+
+    /// Applies a KDsl query plan to the recommendation surface so callers can
+    /// filter, order, and project the ranked items without leaving Rust.
+    pub fn recommend_with_query(
+        &self,
+        user: usize,
+        plan: &QueryPlan,
+        exclude: Option<&[usize]>,
+    ) -> RecResult<Vec<BTreeMap<String, f64>>> {
+        let mut rows = Vec::new();
+        let ranked = self.recommend_top_k(user, self.items, exclude)?;
+
+        if ranked.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let max_score = ranked
+            .iter()
+            .map(|rec| rec.score)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let normaliser: f32 = ranked.iter().map(|rec| (rec.score - max_score).exp()).sum();
+
+        if normaliser.is_finite() && normaliser > f32::EPSILON {
+            for (rank, rec) in ranked.iter().enumerate() {
+                let mut row = BTreeMap::new();
+                row.insert("user".to_string(), user as f64);
+                row.insert("item".to_string(), rec.item as f64);
+                row.insert("score".to_string(), rec.score as f64);
+                let softmax = (rec.score - max_score).exp() / normaliser;
+                row.insert("score_softmax".to_string(), softmax as f64);
+                row.insert("rank".to_string(), (rank + 1) as f64);
+                rows.push(row);
+            }
+        } else {
+            for (rank, rec) in ranked.iter().enumerate() {
+                let mut row = BTreeMap::new();
+                row.insert("user".to_string(), user as f64);
+                row.insert("item".to_string(), rec.item as f64);
+                row.insert("score".to_string(), rec.score as f64);
+                row.insert("score_softmax".to_string(), 0.0);
+                row.insert("rank".to_string(), (rank + 1) as f64);
+                rows.push(row);
+            }
+        }
+
+        Ok(plan.execute(&rows))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use st_kdsl::compile_query;
 
     fn build_basic_recommender() -> SpiralRecommender {
         let mut rec = SpiralRecommender::new(2, 5, 3, 0.05, 0.01, -1.0).unwrap();
@@ -611,5 +661,23 @@ mod tests {
         let recs = graph.recommend(0, 2, 2).unwrap();
         assert!(recs.iter().any(|rec| rec.item == 1));
         assert!(graph.item_degree(0).unwrap() > 0);
+    }
+
+    #[test]
+    fn recommend_with_query_filters_rows() {
+        let rec = build_basic_recommender();
+        let plan = compile_query(
+            "SELECT item,score,score_softmax WHERE score_softmax > 0.2 ORDER BY score DESC LIMIT 2",
+        )
+        .unwrap();
+        let exclude = vec![3];
+        let rows = rec.recommend_with_query(0, &plan, Some(&exclude)).unwrap();
+        assert!(rows.len() <= 2);
+        for row in &rows {
+            assert!(row.contains_key("item"));
+            assert!(row.contains_key("score"));
+            assert!(row.get("item").unwrap() != &3.0);
+            assert!(row.get("score_softmax").unwrap() > &0.2);
+        }
     }
 }
