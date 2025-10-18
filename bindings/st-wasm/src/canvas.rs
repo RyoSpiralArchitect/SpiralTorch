@@ -115,6 +115,13 @@ impl FractalCanvas {
         Ok(Float32Array::from(spectrum.as_slice()))
     }
 
+    /// Emit the WGSL kernel that mirrors [`vector_field_fft`] so WebGPU
+    /// consumers can reproduce the spectral pass directly on the GPU.
+    #[wasm_bindgen(js_name = vectorFieldFftKernel)]
+    pub fn vector_field_fft_kernel(&self, subgroup: bool) -> String {
+        self.projector.vector_fft_wgsl(subgroup)
+    }
+
     /// Reset the internal normaliser so the next frame recomputes brightness ranges.
     pub fn reset_normalizer(&mut self) {
         self.projector.normalizer_mut().reset();

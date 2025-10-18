@@ -554,6 +554,26 @@ impl CanvasProjector {
         self.vectors.fft_rows_interleaved(inverse)
     }
 
+    /// Emit a WGSL kernel that mirrors [`refresh_vector_fft`] so GPU/WebGPU
+    /// callers can reproduce the spectrum without leaving the browser. The
+    /// shader expects the following bindings:
+    ///
+    /// - `@group(0) @binding(0)`: storage buffer containing one
+    ///   `FieldSample {{ energy: f32, chroma: vec3<f32> }}` per pixel laid out
+    ///   in row-major order.
+    /// - `@group(0) @binding(1)`: storage buffer containing one
+    ///   `SpectrumSample` per pixel (output – 8 floats for the complex energy
+    ///   and chroma channels).
+    /// - `@group(0) @binding(2)`: uniform `CanvasFftParams` with the canvas
+    ///   `width`, `height`, and an `inverse` flag (1 = inverse, 0 = forward).
+    pub fn vector_fft_wgsl(&self, subgroup: bool) -> String {
+        emit_canvas_fft_wgsl(
+            self.surface.width() as u32,
+            self.surface.height() as u32,
+            subgroup,
+        )
+    }
+
     /// Refresh the canvas and return the FFT spectrum as a tensor with shape
     /// `(height, width * 8)`.
     pub fn refresh_vector_fft_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
@@ -626,6 +646,73 @@ fn compute_fft(line: &mut [Complex32], inverse: bool) -> PureResult<()> {
     Ok(())
 }
 
+fn emit_canvas_fft_wgsl(width: u32, height: u32, subgroup: bool) -> String {
+    let workgroup = if subgroup { 32 } else { 64 };
+    format!(
+        "// Canvas vector FFT WGSL (width {width}, height {height})\n\
+         const WORKGROUP_SIZE: u32 = {workgroup}u;\n\
+         struct FieldSample {{\n\
+             energy: f32,\n\
+             chroma: vec3<f32>,\n\
+         }};\n\
+         struct SpectrumSample {{\n\
+             energy: vec2<f32>,\n\
+             chroma_r: vec2<f32>,\n\
+             chroma_g: vec2<f32>,\n\
+             chroma_b: vec2<f32>,\n\
+         }};\n\
+         struct CanvasFftParams {{\n\
+             width: u32,\n\
+             height: u32,\n\
+             inverse: u32,\n\
+         }};\n\
+         @group(0) @binding(0) var<storage, read> field: array<FieldSample>;\n\
+         @group(0) @binding(1) var<storage, read_write> spectrum: array<SpectrumSample>;\n\
+         @group(0) @binding(2) var<uniform> params: CanvasFftParams;\n\
+         fn twiddle(angle: f32, inverse: bool) -> vec2<f32> {{\n\
+             let cos_a = cos(angle);\n\
+             let sin_a = sin(angle);\n\
+             let sign = select(-1.0, 1.0, inverse);\n\
+             return vec2<f32>(cos_a, sign * sin_a);\n\
+         }}\n\
+         fn accumulate(acc: vec2<f32>, sample: f32, tw: vec2<f32>) -> vec2<f32> {{\n\
+             return vec2<f32>(acc.x + sample * tw.x, acc.y + sample * tw.y);\n\
+         }}\n\
+         @compute @workgroup_size(WORKGROUP_SIZE)\n\
+         fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n\
+             if (gid.x >= params.width || gid.y >= params.height) {{\n\
+                 return;\n\
+             }}\n\
+             let row_offset = gid.y * params.width;\n\
+             let inverse = params.inverse == 1u;\n\
+             let frequency = f32(gid.x);\n\
+             let norm = select(1.0, 1.0 / f32(params.width), inverse);\n\
+             var energy = vec2<f32>(0.0, 0.0);\n\
+             var chroma_r = vec2<f32>(0.0, 0.0);\n\
+             var chroma_g = vec2<f32>(0.0, 0.0);\n\
+             var chroma_b = vec2<f32>(0.0, 0.0);\n\
+             for (var n = 0u; n < params.width; n = n + 1u) {{\n\
+                 let sample = field[row_offset + n];\n\
+                 let angle = 6.2831855 * frequency * f32(n) / f32(params.width);\n\
+                 let tw = twiddle(angle, inverse);\n\
+                 energy = accumulate(energy, sample.energy, tw);\n\
+                 chroma_r = accumulate(chroma_r, sample.chroma.x, tw);\n\
+                 chroma_g = accumulate(chroma_g, sample.chroma.y, tw);\n\
+                 chroma_b = accumulate(chroma_b, sample.chroma.z, tw);\n\
+             }}\n\
+             spectrum[row_offset + gid.x] = SpectrumSample(\n\
+                 energy * norm,\n\
+                 chroma_r * norm,\n\
+                 chroma_g * norm,\n\
+                 chroma_b * norm,\n\
+             );\n\
+         }}\n",
+        width = width,
+        height = height,
+        workgroup = workgroup,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -675,6 +762,19 @@ mod tests {
         for vector in field.iter() {
             assert!(vector[0] >= 0.0 && vector[0] <= 1.0);
         }
+    }
+
+    #[test]
+    fn vector_fft_wgsl_covers_expected_bindings() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
+        let wgsl = projector.vector_fft_wgsl(false);
+        assert!(wgsl.contains("@binding(2)"));
+        assert!(wgsl.contains("SpectrumSample"));
+        assert!(wgsl.contains("@compute"));
     }
 
     #[test]
