@@ -22,7 +22,7 @@
 // ============================================================================
 
 use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
-use super::dashboard::{DashboardFrame, DashboardRing};
+use super::dashboard::{DashboardFrame, DashboardRing, DashboardSummary};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
@@ -275,6 +275,18 @@ pub fn snapshot_dashboard_frames(limit: usize) -> Vec<DashboardFrame> {
     }
     dashboard_ring()
         .read()
+        .map(|guard| guard.iter().rev().take(limit).cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Summarises the most recent dashboard frames, returning aggregated metrics and event counts.
+pub fn summarize_dashboard(limit: Option<usize>) -> Option<DashboardSummary> {
+    dashboard_ring()
+        .read()
+        .ok()
+        .and_then(|guard| guard.summarize(limit))
+}
+
         .map(|guard| {
             guard
                 .iter()

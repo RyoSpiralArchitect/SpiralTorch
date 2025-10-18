@@ -34,6 +34,7 @@
 //! survives the gauge quotient, and optionally reconstructs the oriented normal
 //! field together with signed curvature when a phase label is supplied.
 
+use crate::coop::ai::{CoopAgent, CoopProposal};
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
     ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZSource,
@@ -1151,11 +1152,25 @@ impl InterfaceZConductor {
 
         let now = ts.unwrap_or(self.clock);
         self.clock = now.wrapping_add(1);
+        let now = if let Some(ts) = ts {
+            self.clock = ts.wrapping_add(1);
+            ts
+        } else {
+            let current = self.clock;
+            self.clock = self.clock.wrapping_add(1);
+            current
+        };
+        if fused_raw.z_bias.abs() > f32::EPSILON
+            && fused.z_bias.signum() != fused_raw.z_bias.signum()
+        {
+            fused.z_bias = fused_raw.z_bias * self.smoothing;
+        }
+        let now = self.clock;
+        self.clock = self.clock.wrapping_add(1);
 
         let zpulses: Vec<ZPulse> = pulses
             .iter()
-            .zip(qualities.iter().copied())
-            .map(|(pulse, quality)| ZPulse {
+            .map(|pulse| ZPulse {
                 source: pulse.source,
                 ts: now,
                 tempo: tempo.unwrap_or(pulse.total_energy()),
@@ -1163,6 +1178,10 @@ impl InterfaceZConductor {
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
                 support: ZSupport::from_band_energy(pulse.band_energy),
+                band_energy: pulse.band_energy,
+                drift: pulse.drift,
+                z_bias: pulse.z_bias,
+                support: pulse.support,
                 quality: pulse.quality_hint.unwrap_or(1.0),
                 stderr: pulse.standard_error.unwrap_or(0.0),
                 latency_ms: 0.0,
@@ -1180,6 +1199,7 @@ impl InterfaceZConductor {
             budget_scale = budget.apply(&mut fused);
         }
 
+        self.carry = Some(fused.clone());
         let feedback = fused.clone().into_softlogic_feedback();
         self.carry = Some(fused.clone());
         self.previous = Some(fused.clone());
