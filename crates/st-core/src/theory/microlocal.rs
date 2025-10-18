@@ -37,7 +37,7 @@
 use crate::coop::ai::{CoopAgent, CoopProposal};
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZSource,
+    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZRegistry, ZSource,
     ZSupport,
 };
 use crate::util::math::LeechProjector;
@@ -696,17 +696,21 @@ impl Default for InterfaceZPulse {
     }
 }
 
-/// Z-space fusion summary combining the conductor output with a canonical pulse.
-#[derive(Debug, Clone)]
+/// Fused Z-space report emitted by the conductor.
+#[derive(Clone, Debug)]
 pub struct InterfaceZFused {
-    pub pulse: ZPulse,
+    pub ts: u64,
     pub z: f32,
-    pub attributions: Vec<(ZSource, f32)>,
+    pub support: f32,
+    pub drift: f32,
+    pub quality: f32,
     pub events: Vec<String>,
+    pub attributions: Vec<(ZSource, f32)>,
+    pub pulse: ZPulse,
 }
 
-/// Result emitted after executing one conductor step.
-#[derive(Debug, Clone)]
+/// Aggregate outcome of a full conductor step across all gauges.
+#[derive(Clone, Debug)]
 pub struct InterfaceZReport {
     pub pulses: Vec<InterfaceZPulse>,
     pub qualities: Vec<f32>,
@@ -717,9 +721,14 @@ pub struct InterfaceZReport {
 }
 
 impl InterfaceZReport {
-    /// Returns `true` when any of the contributing gauges detected an interface.
+    /// Returns `true` when at least one contributing pulse carried interface mass.
     pub fn has_interface(&self) -> bool {
-        self.pulses.iter().any(|pulse| !pulse.is_empty())
+        if self.fused_pulse.support > 0.0 {
+            return true;
+        }
+        self.pulses
+            .iter()
+            .any(|pulse| pulse.support > 0.0 || pulse.interface_cells > 0.0)
     }
 }
 
