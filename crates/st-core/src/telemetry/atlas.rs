@@ -1128,7 +1128,8 @@ impl ConceptAccumulator {
     }
 }
 
-mod tests {
+#[cfg(test)]
+mod concept_tests {
     use super::*;
 
     #[test]

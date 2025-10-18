@@ -177,6 +177,22 @@ distribution when the Z-bias settles. The default controller keeps a short
 memory of recent flips and exposes `with_feedback` so runtimes can tweak the
 feedback gain without rebuilding the desire machinery.【F:crates/st-core/src/theory/microlocal.rs†L488-L559】【F:crates/st-nn/src/language/temperature.rs†L1-L81】【F:crates/st-nn/src/language/desire.rs†L318-L352】
 
+### Collaborative canvas telemetry and ghost trails
+
+The hardened collaboration stack now layers spectator-grade UX on top of the
+BroadcastChannel/localStorage bridge. Every pointer broadcast feeds a
+policy-aware ghost trail buffer (`pointerTrail` events plus the
+`getPointerTrail` helper) so dashboards can draw fading cursors without keeping
+their own queues.【F:bindings/st-wasm/types/canvas-collab.ts†L73-L112】【F:bindings/st-wasm/types/canvas-collab.ts†L1905-L1933】
+At the same time a bounded timeline recorder captures every pointer, patch, and
+full-state message with Lamport clocks and origins so HUDs can play back the
+last few seconds of collaboration or splice the data into attribution feeds via
+`session.replay`.【F:bindings/st-wasm/types/canvas-collab.ts†L93-L113】【F:bindings/st-wasm/types/canvas-collab.ts†L1093-L1131】【F:bindings/st-wasm/types/canvas-collab.ts†L1935-L1976】
+The WASM README now documents the new knobs (`pointerTrailMs`,
+`replayWindowMs`, `replayMaxEntries`) and ships usage snippets for replaying
+frames or painting ghost trails, making it trivial to showcase collaborative
+Z-space canvases right from the top-level docs.【F:bindings/st-wasm/README.md†L125-L257】
+
 ### Maxwell-coded envelopes meet SpiralK
 
 The coded-envelope utilities now ship with a `MaxwellSpiralKBridge` that turns
