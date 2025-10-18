@@ -333,7 +333,7 @@ mod tests {
             .expect("ingest");
         assert!(frame.concept.is_some());
         assert!(frame.narrative.is_some());
-        assert_eq!(frame.overlay.glyph, "glimmer");
+        assert_eq!(frame.overlay.glyph, "braid");
         assert!(frame.overlay.intensity > 0.0);
     }
 }

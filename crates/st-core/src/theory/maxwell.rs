@@ -40,7 +40,7 @@ use crate::telemetry::{
 use crate::{
     coop::ai::{CoopAgent, CoopProposal},
     telemetry::hub::SoftlogicZFeedback,
-    theory::zpulse::{ZEmitter, ZPulse, ZSource},
+    theory::zpulse::{ZEmitter, ZPulse, ZSource, ZSupport},
     util::math::LeechProjector,
 };
 use std::cell::RefCell;
@@ -393,11 +393,11 @@ impl MaxwellZPulse {
 
 impl From<MaxwellZPulse> for ZPulse {
     fn from(pulse: MaxwellZPulse) -> Self {
-        let support = ZSupport {
-            leading: pulse.band_energy.0,
-            central: pulse.band_energy.1,
-            trailing: pulse.band_energy.2,
-        };
+        let support = ZSupport::new(
+            pulse.band_energy.0,
+            pulse.band_energy.1,
+            pulse.band_energy.2,
+        );
         let drift = pulse.mean as f32;
         let latency_ms = pulse.blocks as f32;
         let stderr = pulse.standard_error.max(0.0) as f32;

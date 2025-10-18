@@ -62,18 +62,24 @@ impl ConceptSense {
     /// Returns a prose description summarising the sense.
     pub fn description(&self) -> &'static str {
         match self {
-            ConceptSense::QualiaLewisGiven =>
-                "Lewis: qualia as pre-conceptual givens underwriting epistemic grounding.",
-            ConceptSense::QualiaNagelSubjectivity =>
-                "Nagel: qualia as the irreducibly subjective 'what it is like' perspective.",
-            ConceptSense::QualiaJacksonKnowledge =>
-                "Jackson: qualia as phenomenal knowledge unattainable from physical facts alone.",
-            ConceptSense::QualiaChalmersHardProblem =>
-                "Chalmers: qualia as the hard problem's phenomenal core resisting reduction.",
-            ConceptSense::QualiaTononiIit =>
-                "Tononi: qualia identified with IIT's maximally irreducible conceptual structures.",
-            ConceptSense::QualiaGeneralDiscourse =>
-                "General discourse: qualia as a loose synonym for feeling or consciousness.",
+            ConceptSense::QualiaLewisGiven => {
+                "Lewis: qualia as pre-conceptual givens underwriting epistemic grounding."
+            }
+            ConceptSense::QualiaNagelSubjectivity => {
+                "Nagel: qualia as the irreducibly subjective 'what it is like' perspective."
+            }
+            ConceptSense::QualiaJacksonKnowledge => {
+                "Jackson: qualia as phenomenal knowledge unattainable from physical facts alone."
+            }
+            ConceptSense::QualiaChalmersHardProblem => {
+                "Chalmers: qualia as the hard problem's phenomenal core resisting reduction."
+            }
+            ConceptSense::QualiaTononiIit => {
+                "Tononi: qualia identified with IIT's maximally irreducible conceptual structures."
+            }
+            ConceptSense::QualiaGeneralDiscourse => {
+                "General discourse: qualia as a loose synonym for feeling or consciousness."
+            }
         }
     }
 }
@@ -248,11 +254,7 @@ impl AtlasFragment {
     }
 
     /// Convenience helper to attach a qualia annotation with optional rationale.
-    pub fn annotate_qualia(
-        &mut self,
-        sense: ConceptSense,
-        rationale: Option<impl Into<String>>,
-    ) {
+    pub fn annotate_qualia(&mut self, sense: ConceptSense, rationale: Option<impl Into<String>>) {
         let mut annotation = ConceptAnnotation::new("qualia", sense);
         if let Some(rationale) = rationale {
             annotation.rationale = Some(rationale.into());
@@ -477,8 +479,7 @@ impl AtlasRoute {
         let mut loop_sq_total = 0.0;
         let mut loop_samples = 0usize;
         let mut district_map: BTreeMap<String, DistrictAccumulator> = BTreeMap::new();
-        let mut concept_map: BTreeMap<(String, ConceptSense), ConceptAccumulator> =
-            BTreeMap::new();
+        let mut concept_map: BTreeMap<(String, ConceptSense), ConceptAccumulator> = BTreeMap::new();
         let mut first_collapse = None;
         let mut first_z_signal = None;
         for frame in &self.frames {
@@ -528,7 +529,9 @@ impl AtlasRoute {
             if !frame.concepts.is_empty() {
                 for concept in &frame.concepts {
                     let key = (concept.term.clone(), concept.sense);
-                    let entry = concept_map.entry(key).or_insert_with(ConceptAccumulator::new);
+                    let entry = concept_map
+                        .entry(key)
+                        .or_insert_with(ConceptAccumulator::new);
                     entry.mentions += 1;
                     if let Some(rationale) = concept.rationale.as_ref() {
                         entry.last_rationale = Some(rationale.clone());
@@ -1126,7 +1129,7 @@ impl ConceptAccumulator {
 }
 
 #[cfg(test)]
-mod tests {
+mod concept_tests {
     use super::*;
 
     #[test]
@@ -1139,7 +1142,10 @@ mod tests {
         let frame = AtlasFrame::from_fragment(fragment).expect("frame");
         assert!(frame.timestamp > 0.0);
         assert_eq!(frame.concepts.len(), 1);
-        assert_eq!(frame.concepts[0].sense, ConceptSense::QualiaNagelSubjectivity);
+        assert_eq!(
+            frame.concepts[0].sense,
+            ConceptSense::QualiaNagelSubjectivity
+        );
         assert_eq!(
             frame.concepts[0].rationale.as_deref(),
             Some("subjective vantage guard")

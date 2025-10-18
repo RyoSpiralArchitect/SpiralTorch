@@ -275,14 +275,7 @@ pub fn snapshot_dashboard_frames(limit: usize) -> Vec<DashboardFrame> {
     }
     dashboard_ring()
         .read()
-        .map(|guard| {
-            guard
-                .iter()
-                .rev()
-                .take(limit)
-                .cloned()
-                .collect()
-        })
+        .map(|guard| guard.iter().rev().take(limit).cloned().collect())
         .unwrap_or_default()
 }
 
@@ -708,7 +701,13 @@ mod tests {
     use super::*;
     use crate::telemetry::chrono::{ChronoHarmonics, ChronoPeak, ChronoSummary};
     use crate::telemetry::dashboard::DashboardMetric;
+    use std::sync::{Mutex, OnceLock};
     use std::time::SystemTime;
+
+    fn atlas_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn sample_summary(timestamp: f32) -> ChronoSummary {
         ChronoSummary {
@@ -728,6 +727,7 @@ mod tests {
 
     #[test]
     fn loopback_queue_drains_in_order() {
+        let _guard = atlas_test_lock().lock().unwrap();
         // Ensure the buffer starts empty for the test.
         let _ = drain_loopback_envelopes(usize::MAX);
         clear_atlas();
@@ -773,6 +773,7 @@ mod tests {
 
     #[test]
     fn loopback_updates_atlas_snapshot() {
+        let _guard = atlas_test_lock().lock().unwrap();
         clear_atlas();
         let _ = drain_loopback_envelopes(usize::MAX);
         let signal = ChronoLoopSignal::new(sample_summary(2.5), None);
@@ -797,6 +798,7 @@ mod tests {
 
     #[test]
     fn atlas_route_retains_recent_frames() {
+        let _guard = atlas_test_lock().lock().unwrap();
         clear_atlas();
         clear_atlas_route();
         for idx in 0..6 {
@@ -812,6 +814,7 @@ mod tests {
 
     #[test]
     fn atlas_route_summary_exposes_recent_activity() {
+        let _guard = atlas_test_lock().lock().unwrap();
         clear_atlas();
         clear_atlas_route();
         for idx in 0..3 {
