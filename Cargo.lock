@@ -2432,6 +2432,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "st-backend-wgpu"
+version = "0.1.0"
+dependencies = [
+ "thiserror 1.0.69",
+ "wgpu",
+]
+
+[[package]]
 name = "st-bench"
 version = "0.1.0"
 dependencies = [
@@ -2476,7 +2484,9 @@ dependencies = [
 name = "st-frac"
 version = "0.1.1"
 dependencies = [
+ "libm",
  "ndarray",
+ "num-complex",
  "thiserror 1.0.69",
 ]
 

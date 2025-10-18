@@ -12,6 +12,7 @@
 ## 3. Observable fingerprints
 - Expectation values reduce to scale averages. Sampling \(\hat R(z)\) under a superposed state yields \(\tfrac12(R(z)+R(-z))\) plus an interference term driven by the projector-enriched drift. `InterfaceZLift::project` accumulates Above/Here/Beneath energy and emits a bias only when the oriented drift crosses the configured floor, reproducing the log-periodic beat \(\propto \cos(\Omega z)\). 【F:crates/st-core/src/theory/microlocal.rs†L358-L422】
 - Aggregating pulses across radii retains the discrete scale signatures. `InterfaceZPulse::aggregate` support-weights multiple pulses, so a log-periodic train of radii leaves the interference comb inside the fused telemetry packet. 【F:crates/st-core/src/theory/microlocal.rs†L434-L520】
+- Each pulse now retains its physical radius and \(z=\log s\) coordinate via `ZScale`, so downstream Z-space consumers can recover the micro/macro pairing that generated the interference term. Fused pulses report the support-weighted log-scale centroid to keep scale attribution intact across smoothing. 【F:crates/st-core/src/theory/zpulse.rs†L52-L118】【F:crates/st-core/src/theory/microlocal.rs†L420-L520】
 
 ## 4. Regimes and diagnostics
 - Finite correlation-length stacks decay quickly because the support requirement `min_support` and the enrichment gate suppress weak drift: interference damps after a few steps when `interface_cells` or the drift magnitude fall below the floor. 【F:crates/st-core/src/theory/microlocal.rs†L321-L351】【F:crates/st-core/src/theory/microlocal.rs†L406-L415】
@@ -35,6 +36,7 @@ The routine mirrors the microlocal sweep (`analyze_multiradius`), the spiral pro
 - Gauge invariance stays intact because unsigned probes never depend on `c′`; the oriented sector is optional and guarded by the drift floor. 【F:crates/st-core/src/theory/microlocal.rs†L214-L247】【F:crates/st-core/src/theory/microlocal.rs†L321-L351】
 - Coarse-to-fine refinement is unitary in log-scale: radii simply translate the probe window, matching the dilation generator \(\hat p_z=-i\partial_z\). 【F:crates/st-core/src/theory/microlocal.rs†L125-L156】【F:crates/st-core/src/theory/microlocal.rs†L358-L420】
 - Telemetry layers (`SoftlogicZFeedback` consumers) read the aggregate pulse, so the log-periodic comb and spiral polarisation persist inside runtime analytics without violating the existing Z-space contracts. 【F:crates/st-core/src/theory/microlocal.rs†L416-L520】
+- The Desire temperature controller and SoftLogic trainer now fold the log-scale tag into their feedback loops: micro-biased pulses lift exploration temperature while macro-biased pulses damp it, and the band-weight scheduler skews Above/Beneath weights accordingly. 【F:crates/st-nn/src/language/temperature.rs†L21-L134】【F:crates/st-nn/src/trainer.rs†L272-L420】
 
 ## 7. One-line summary
 Entangle the smallest and largest microlocal probes, spin them through the spiral lift, and listen for the log-scale beat plus orientation bias that the Z pulse leaves behind.

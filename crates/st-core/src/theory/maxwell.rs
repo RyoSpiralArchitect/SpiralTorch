@@ -387,6 +387,7 @@ impl MaxwellZPulse {
             band_energy: self.band_energy,
             drift: self.mean as f32,
             z_signal: self.z_bias,
+            scale: None,
         }
     }
 }
@@ -418,6 +419,7 @@ impl From<MaxwellZPulse> for ZPulse {
             drift,
             z_bias: pulse.z_bias,
             support,
+            scale: None,
             quality,
             stderr,
             latency_ms,
