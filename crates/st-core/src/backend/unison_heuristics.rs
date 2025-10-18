@@ -115,6 +115,17 @@ fn latency_sensitive(rows: u32, cols: u32, k: u32, caps: &DeviceCaps) -> bool {
     small_rows && modest_cols && modest_k
 }
 
+fn latency_ctile_bounds(cols: u32, lanes: u32) -> (u32, u32) {
+    let latency_cap = if cols <= 16_384 {
+        lanes.saturating_mul(8)
+    } else {
+        lanes.saturating_mul(16)
+    };
+    let aligned_cap = ((latency_cap + lanes - 1) / lanes) * lanes;
+    let min_latency = ((64 + lanes - 1) / lanes) * lanes;
+    (min_latency.max(lanes), aligned_cap.max(lanes))
+}
+
 fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> Choice {
     let wg = caps.recommended_workgroup(rows);
     let kl = caps.recommended_kl(k);
@@ -129,10 +140,26 @@ fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> 
         let aligned_cap = ((latency_cap + lanes - 1) / lanes) * lanes;
         let min_cap = ((128 + lanes - 1) / lanes) * lanes;
         tile = tile.min(aligned_cap.max(lanes)).max(min_cap.max(lanes));
+        if matches!(kind, RankKind::MidK | RankKind::BottomK) {
+            let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
+            ctile = ctile.min(max_ctile).max(min_ctile);
+        }
     }
 
     if matches!(kind, RankKind::BottomK) {
         ctile = ctile.min(tile / 2).max(128);
+        if low_latency {
+            let lanes = caps.lane_width.max(1);
+            let (min_ctile, _) = latency_ctile_bounds(cols, lanes);
+            let half_tile = tile / 2;
+            let lane_aligned = if half_tile == 0 {
+                min_ctile
+            } else {
+                let aligned = ((half_tile + lanes - 1) / lanes) * lanes;
+                aligned.max(lanes)
+            };
+            ctile = ctile.min(lane_aligned.max(min_ctile)).max(min_ctile);
+        }
     }
 
     let mut mk = caps.preferred_merge_kind(k);
@@ -240,6 +267,21 @@ fn refine_choice(
             choice.ctile = baseline.ctile;
         }
         choice.ctile = caps.preferred_compaction_tile(cols, choice.ctile);
+        if low_latency {
+            let lanes = caps.lane_width.max(1);
+            let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
+            if choice.ctile > baseline.ctile {
+                choice.ctile = baseline.ctile;
+            }
+            choice.ctile = choice.ctile.min(max_ctile).max(min_ctile);
+            if matches!(kind, RankKind::BottomK) {
+                let half_tile = choice.tile / 2;
+                if half_tile > 0 {
+                    let aligned = ((half_tile + lanes - 1) / lanes) * lanes;
+                    choice.ctile = choice.ctile.min(aligned.max(min_ctile)).max(min_ctile);
+                }
+            }
+        }
     } else {
         choice.ctile = 0;
     }
@@ -350,6 +392,11 @@ fn score_choice(
         score += closeness(choice.tile, aligned_cap) * 0.05;
         if choice.mk == 2 {
             score += 0.025;
+        }
+        if matches!(kind, RankKind::MidK | RankKind::BottomK) {
+            let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
+            let target = (min_ctile + max_ctile) / 2;
+            score += closeness(choice.ctile, target) * 0.05;
         }
     }
 
@@ -500,5 +547,27 @@ mod tests {
         assert_eq!(choice.ch, 0);
         assert!(choice.tile <= 1024);
         assert_eq!(choice.mk, 2);
+    }
+
+    #[test]
+    fn latency_sensitive_midk_limits_compaction_tile() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        let choice = fallback(96, 8_192, 64, &caps, RankKind::MidK);
+        assert!(!choice.use_2ce);
+        assert_eq!(choice.ch, 0);
+        assert!(choice.ctile >= 64);
+        assert!(choice.ctile <= 512);
+    }
+
+    #[test]
+    fn latency_sensitive_bottomk_respects_lane_alignment() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        let choice = fallback(96, 8_192, 64, &caps, RankKind::BottomK);
+        assert!(!choice.use_2ce);
+        assert_eq!(choice.ch, 0);
+        assert!(choice.ctile >= 64);
+        if choice.tile > 0 {
+            assert!(choice.ctile <= ((choice.tile / 2 + 31) / 32) * 32);
+        }
     }
 }
