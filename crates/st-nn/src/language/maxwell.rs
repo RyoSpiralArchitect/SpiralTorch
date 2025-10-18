@@ -5,9 +5,46 @@
 
 use super::geometry::ConceptHint;
 use crate::PureResult;
+use serde::{Deserialize, Serialize};
 use st_core::theory::maxwell::MaxwellZPulse;
 use st_tensor::TensorError;
 use std::collections::HashMap;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NarrativeHint {
+    channel: String,
+    tags: Vec<String>,
+    intensity: f32,
+}
+
+impl NarrativeHint {
+    pub fn new(channel: impl Into<String>, tags: Vec<String>, intensity: f32) -> Self {
+        Self {
+            channel: channel.into(),
+            tags,
+            intensity,
+        }
+    }
+
+    pub fn channel(&self) -> &str {
+        &self.channel
+    }
+
+    pub fn tags(&self) -> &[String] {
+        &self.tags
+    }
+
+    pub fn intensity(&self) -> f32 {
+        self.intensity
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ChannelProgram {
+    window: Vec<(usize, f32)>,
+    tags: Vec<String>,
+    narrative_gain: f32,
+}
 
 /// Couples Maxwell Z pulses with concept windows so the desire lagrangian can
 /// project coded-envelope detections back onto the language manifold.
@@ -15,7 +52,7 @@ use std::collections::HashMap;
 pub struct MaxwellDesireBridge {
     smoothing: f32,
     magnitude_floor: f32,
-    channels: HashMap<String, Vec<(usize, f32)>>,
+    channels: HashMap<String, ChannelProgram>,
 }
 
 impl MaxwellDesireBridge {
@@ -59,7 +96,159 @@ impl MaxwellDesireBridge {
         channel: impl Into<String>,
         window: Vec<(usize, f32)>,
     ) -> PureResult<()> {
-        let channel = channel.into();
+        self.register_channel_internal(channel.into(), window, Vec::new(), 1.0)
+    }
+
+    /// Convenience builder that registers a channel and returns the bridge.
+    pub fn with_channel(
+        mut self,
+        channel: impl Into<String>,
+        window: Vec<(usize, f32)>,
+    ) -> PureResult<Self> {
+        self.register_channel(channel, window)?;
+        Ok(self)
+    }
+
+    pub fn register_channel_with_narrative(
+        &mut self,
+        channel: impl Into<String>,
+        window: Vec<(usize, f32)>,
+        tags: Vec<String>,
+    ) -> PureResult<()> {
+        self.register_channel_internal(channel.into(), window, tags, 1.0)
+    }
+
+    pub fn with_channel_and_narrative(
+        mut self,
+        channel: impl Into<String>,
+        window: Vec<(usize, f32)>,
+        tags: Vec<String>,
+    ) -> PureResult<Self> {
+        self.register_channel_with_narrative(channel, window, tags)?;
+        Ok(self)
+    }
+
+    pub fn set_narrative_tags(
+        &mut self,
+        channel: impl AsRef<str>,
+        tags: Vec<String>,
+    ) -> PureResult<()> {
+        let program = self
+            .channels
+            .get_mut(channel.as_ref())
+            .ok_or(TensorError::InvalidValue {
+                label: "channel is not registered",
+            })?;
+        program.tags = sanitise_tags(tags)?;
+        Ok(())
+    }
+
+    pub fn with_narrative_gain(mut self, channel: impl AsRef<str>, gain: f32) -> Self {
+        if let Some(program) = self.channels.get_mut(channel.as_ref()) {
+            program.narrative_gain = gain.max(0.0);
+        }
+        self
+    }
+
+    pub fn set_narrative_gain(&mut self, channel: impl AsRef<str>, gain: f32) -> PureResult<()> {
+        let program = self
+            .channels
+            .get_mut(channel.as_ref())
+            .ok_or(TensorError::InvalidValue {
+                label: "channel is not registered",
+            })?;
+        program.narrative_gain = gain.max(0.0);
+        Ok(())
+    }
+
+    /// Returns a concept hint aligned with the provided channel, scaled by the
+    /// magnitude of the supplied Maxwell pulse.
+    pub fn hint_for(&self, channel: impl AsRef<str>, pulse: &MaxwellZPulse) -> Option<ConceptHint> {
+        let program = self.channels.get(channel.as_ref())?;
+        if program.window.is_empty() {
+            return None;
+        }
+        let magnitude = (pulse.magnitude() as f32).max(self.magnitude_floor);
+        if magnitude <= f32::EPSILON && self.smoothing <= f32::EPSILON {
+            return None;
+        }
+        let mut scaled = Vec::with_capacity(program.window.len());
+        for &(token, weight) in &program.window {
+            let base = weight.max(0.0) + self.smoothing;
+            let value = base * magnitude;
+            if value > f32::EPSILON {
+                scaled.push((token, value));
+            }
+        }
+        if scaled.is_empty() {
+            None
+        } else {
+            Some(ConceptHint::Window(scaled))
+        }
+    }
+
+    /// Returns true when the bridge has a concept window for the given channel.
+    pub fn contains(&self, channel: impl AsRef<str>) -> bool {
+        self.channels.contains_key(channel.as_ref())
+    }
+
+    pub fn channel_names(&self) -> Vec<String> {
+        self.channels.keys().cloned().collect()
+    }
+
+    pub fn narrative_tags(&self, channel: impl AsRef<str>) -> Option<&[String]> {
+        self.channels
+            .get(channel.as_ref())
+            .map(|program| program.tags.as_slice())
+    }
+
+    pub fn narrative_gain(&self, channel: impl AsRef<str>) -> Option<f32> {
+        self.channels
+            .get(channel.as_ref())
+            .map(|program| program.narrative_gain)
+    }
+
+    pub fn narrative_for(
+        &self,
+        channel: impl AsRef<str>,
+        pulse: &MaxwellZPulse,
+    ) -> Option<NarrativeHint> {
+        let program = self.channels.get(channel.as_ref())?;
+        if program.tags.is_empty() {
+            return None;
+        }
+        let magnitude = (pulse.magnitude() as f32).max(self.magnitude_floor);
+        if magnitude <= f32::EPSILON {
+            return None;
+        }
+        let intensity = magnitude * program.narrative_gain;
+        if intensity <= f32::EPSILON {
+            return None;
+        }
+        Some(NarrativeHint::new(
+            channel.as_ref(),
+            program.tags.clone(),
+            intensity,
+        ))
+    }
+
+    pub fn emit(
+        &self,
+        channel: impl AsRef<str>,
+        pulse: &MaxwellZPulse,
+    ) -> Option<(ConceptHint, Option<NarrativeHint>)> {
+        let concept = self.hint_for(channel.as_ref(), pulse)?;
+        let narrative = self.narrative_for(channel, pulse);
+        Some((concept, narrative))
+    }
+
+    fn register_channel_internal(
+        &mut self,
+        channel: String,
+        window: Vec<(usize, f32)>,
+        tags: Vec<String>,
+        gain: f32,
+    ) -> PureResult<()> {
         if channel.trim().is_empty() {
             return Err(TensorError::InvalidValue {
                 label: "channel name cannot be empty",
@@ -84,50 +273,36 @@ impl MaxwellDesireBridge {
             }
             sanitized.push((token, weight));
         }
-        self.channels.insert(channel, sanitized);
+        let tags = sanitise_tags(tags)?;
+        self.channels.insert(
+            channel,
+            ChannelProgram {
+                window: sanitized,
+                tags,
+                narrative_gain: gain.max(0.0),
+            },
+        );
         Ok(())
     }
+}
 
-    /// Convenience builder that registers a channel and returns the bridge.
-    pub fn with_channel(
-        mut self,
-        channel: impl Into<String>,
-        window: Vec<(usize, f32)>,
-    ) -> PureResult<Self> {
-        self.register_channel(channel, window)?;
-        Ok(self)
+fn sanitise_tags(tags: Vec<String>) -> PureResult<Vec<String>> {
+    if tags.is_empty() {
+        return Ok(Vec::new());
     }
-
-    /// Returns a concept hint aligned with the provided channel, scaled by the
-    /// magnitude of the supplied Maxwell pulse.
-    pub fn hint_for(&self, channel: impl AsRef<str>, pulse: &MaxwellZPulse) -> Option<ConceptHint> {
-        let window = self.channels.get(channel.as_ref())?;
-        if window.is_empty() {
-            return None;
+    let mut sanitized = Vec::with_capacity(tags.len());
+    for tag in tags {
+        let trimmed = tag.trim();
+        if trimmed.is_empty() {
+            return Err(TensorError::InvalidValue {
+                label: "narrative tag cannot be empty",
+            });
         }
-        let magnitude = (pulse.magnitude() as f32).max(self.magnitude_floor);
-        if magnitude <= f32::EPSILON && self.smoothing <= f32::EPSILON {
-            return None;
-        }
-        let mut scaled = Vec::with_capacity(window.len());
-        for &(token, weight) in window {
-            let base = weight.max(0.0) + self.smoothing;
-            let value = base * magnitude;
-            if value > f32::EPSILON {
-                scaled.push((token, value));
-            }
-        }
-        if scaled.is_empty() {
-            None
-        } else {
-            Some(ConceptHint::Window(scaled))
-        }
+        sanitized.push(trimmed.to_string());
     }
-
-    /// Returns true when the bridge has a concept window for the given channel.
-    pub fn contains(&self, channel: impl AsRef<str>) -> bool {
-        self.channels.contains_key(channel.as_ref())
-    }
+    sanitized.sort();
+    sanitized.dedup();
+    Ok(sanitized)
 }
 
 #[cfg(test)]
@@ -183,5 +358,33 @@ mod tests {
         let bridge = bridge.with_smoothing(0.1);
         // With smoothing the same pulse should now yield a hint.
         assert!(bridge.hint_for("beta", &sample_pulse()).is_some());
+    }
+
+    #[test]
+    fn narrative_hint_tracks_tags() {
+        let mut bridge = MaxwellDesireBridge::new();
+        bridge
+            .register_channel_with_narrative(
+                "gamma",
+                vec![(0, 0.9), (1, 0.1)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        bridge.set_narrative_gain("gamma", 2.0).unwrap();
+        let pulse = sample_pulse();
+        let narrative = bridge.narrative_for("gamma", &pulse).unwrap();
+        assert_eq!(narrative.channel(), "gamma");
+        assert_eq!(narrative.tags().len(), 2);
+        assert!(narrative.intensity() > 0.0);
+    }
+
+    #[test]
+    fn narrative_tags_cannot_be_empty_strings() {
+        let result = MaxwellDesireBridge::new().register_channel_with_narrative(
+            "delta",
+            vec![(0, 0.4)],
+            vec!["  ".into()],
+        );
+        assert!(result.is_err());
     }
 }
