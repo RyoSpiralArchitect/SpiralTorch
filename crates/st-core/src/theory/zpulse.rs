@@ -13,6 +13,7 @@
 //! pulling in async machinery.
 
 use rustc_hash::FxHashMap;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
@@ -107,6 +108,7 @@ pub struct ZPulse {
     pub drift: f32,
     pub z_bias: f32,
     pub support: ZSupport,
+    pub scale: Option<ZScale>,
     pub quality: f32,
     pub stderr: f32,
     pub latency_ms: f32,
@@ -147,6 +149,7 @@ impl Default for ZPulse {
             drift: 0.0,
             z_bias: 0.0,
             support: ZSupport::default(),
+            scale: None,
             quality: 0.0,
             stderr: 0.0,
             latency_ms: 0.0,
@@ -174,7 +177,6 @@ pub trait ZEmitter: Send {
     }
 }
 
-/// Optional smoothing applied to the fused support/energy.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZFrequencyConfig {
     pub smoothing: f32,
@@ -193,13 +195,12 @@ impl Default for ZFrequencyConfig {
 impl ZFrequencyConfig {
     pub fn new(smoothing: f32, minimum_energy: f32) -> Self {
         Self {
-            smoothing: smoothing.clamp(0.0, 1.0),
-            minimum_energy: minimum_energy.max(0.0),
+            smoothing,
+            minimum_energy,
         }
     }
 }
 
-/// Optional adaptive gain configuration for downstream consumers.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZAdaptiveGainCfg {
     pub gain_floor: f32,
@@ -223,13 +224,12 @@ impl ZAdaptiveGainCfg {
         Self {
             gain_floor,
             gain_ceil: gain_ceil.max(gain_floor),
-            responsiveness: responsiveness.clamp(0.0, 1.0),
+            responsiveness,
         }
     }
 }
 
-/// Configuration for the latency alignment stage.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LatencyAlignerCfg {
     pub window: u64,
     pub hop: u64,
@@ -362,7 +362,11 @@ impl LatencyAlignerState {
                     events.push(format!("latency.low_coherence:{:?}", source));
                 }
             }
-            self.increment_all();
+            for lag in self.lags.values_mut() {
+                if lag.frames_since_update != u32::MAX {
+                    lag.frames_since_update = lag.frames_since_update.saturating_add(1);
+                }
+            }
             return;
         }
 
@@ -377,6 +381,7 @@ impl LatencyAlignerState {
                 && entry.frames_since_update < self.cfg.hold_steps
             {
                 events.push(format!("latency.held:{:?}", source));
+                entry.frames_since_update = entry.frames_since_update.saturating_add(1);
                 continue;
             }
             let raw_lag_bins = (state.ts as i64 - anchor.ts as i64) as f32;
@@ -417,35 +422,32 @@ impl LatencyAlignerState {
     }
 }
 
-/// Configuration governing the behaviour of [`ZConductor`].
 #[derive(Clone, Debug)]
 pub struct ZConductorCfg {
     pub alpha_fast: f32,
     pub alpha_slow: f32,
-    pub flip_hold: u32,
+    pub flip_hold: u64,
     pub slew_max: f32,
     pub z_budget: f32,
     pub robust_delta: f32,
     pub latency_align: bool,
-    pub latency: Option<LatencyAlignerCfg>,
 }
 
 impl Default for ZConductorCfg {
     fn default() -> Self {
         Self {
-            alpha_fast: 0.35,
+            alpha_fast: 0.6,
             alpha_slow: 0.12,
-            flip_hold: 3,
-            slew_max: 0.35,
-            z_budget: 1.2,
-            robust_delta: 0.25,
+            flip_hold: 5,
+            slew_max: 0.08,
+            z_budget: 0.9,
+            robust_delta: 0.2,
             latency_align: true,
             latency: Some(LatencyAlignerCfg::balanced()),
         }
     }
 }
 
-/// Fused output returned by the conductor.
 #[derive(Clone, Debug, Default)]
 pub struct ZFused {
     pub ts: u64,
@@ -532,7 +534,6 @@ impl ZConductor {
     }
 
     pub fn step(&mut self, now: u64) -> ZFused {
-        self.last_step = Some(now);
         let mut events = Vec::new();
         if let Some(latency) = self.latency.as_mut() {
             latency.prepare(now, &mut events);
@@ -569,6 +570,7 @@ impl ZConductor {
             let support = pulse.support_strength();
             total_support += support;
             weighted_z += pulse.z_bias * support;
+
             let weight = support.max(1e-6);
             weighted_quality += pulse.quality * weight;
             quality_weight += weight;
