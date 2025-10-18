@@ -1391,7 +1391,6 @@ impl PyDifferentialResonance {
         Ok("DifferentialResonance(...)".to_string())
     }
 }
-
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {
@@ -2277,6 +2276,20 @@ impl PyTemperatureController {
     fn value(&self) -> f32 {
         self.inner.value()
     }
+
+    fn observe_grad(&mut self, norm: f32, sparsity: f32) {
+        self.inner.observe_grad(norm, sparsity);
+    }
+
+    fn update(&mut self, distribution: Vec<f32>) -> f32 {
+        self.inner.update(&distribution)
+    }
+
+    #[pyo3(signature = (distribution, gradient_gain=1.0))]
+    fn update_with_gradient(&mut self, distribution: Vec<f32>, gradient_gain: f32) -> f32 {
+        self.inner
+            .update_with_gradient(&distribution, gradient_gain)
+    }
 }
 
 #[pyclass(module = "spiraltorch", name = "DesireSchedule")]
@@ -2757,6 +2770,49 @@ impl PyModuleTrainer {
     #[pyo3(signature = (threshold, participants=2))]
     fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
         self.inner.install_meta_conductor(threshold, participants);
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let builder = self.ensure_builder()?;
+        let mut config = builder.maintainer_config().clone();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        builder.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
+        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
+        Ok(())
     }
 }
 
@@ -4051,6 +4107,9 @@ impl PyModuleTrainer {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
+    #[getter]
     fn energy_decay(&self) -> f32 {
         self.frame.energy_decay
     }
@@ -4356,48 +4415,8 @@ impl PyCollapsePulse {
     }
 }
 
-    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
-    fn maintainer(
-        &mut self,
-        jitter_threshold: Option<f32>,
-        growth_threshold: Option<f32>,
-        energy_floor: Option<f32>,
-        clamp_min: Option<f32>,
-        clamp_max: Option<f32>,
-        pressure_step: Option<f32>,
-        window: Option<usize>,
-    ) -> PyResult<()> {
-        let builder = self.ensure_builder()?;
-        let mut config = builder.maintainer_config().clone();
-        if let Some(value) = jitter_threshold {
-            config.jitter_threshold = value;
-        }
-        if let Some(value) = growth_threshold {
-            config.growth_threshold = value;
-        }
-        if let Some(value) = energy_floor {
-            config.energy_floor = value;
-        }
-        if let Some(value) = clamp_min {
-            config.clamp_min = value;
-        }
-        if let Some(value) = clamp_max {
-            config.clamp_max = value;
-        }
-        if let Some(value) = pressure_step {
-            config.pressure_step = value;
-        }
-        if let Some(value) = window {
-            config.window = value;
-        }
-        builder.set_maintainer_config(config);
-        Ok(())
-    }
+}
 
-    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
-        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
-        Ok(())
-    }
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {
@@ -4683,6 +4702,8 @@ impl PyAtlasMetric {
             collapse,
         );
         PyRoundtableSchedule::from_schedule(self.inner.roundtable(rows, cols, config))
+    }
+
     fn as_tuple(&self) -> (String, f32) {
         (self.metric.name.clone(), self.metric.value)
     }
@@ -5441,6 +5462,8 @@ impl PyGoldenBlackcatPulse {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
     #[getter]
     fn mean_confidence(&self) -> f32 {
         self.inner.mean_confidence
@@ -5756,6 +5779,8 @@ impl PyGoldenCouncilSnapshot {
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
 struct PyModuleTrainer {
     inner: ModuleTrainer,
+}
+
 #[pyclass(module = "spiraltorch", name = "AtlasFrame")]
 #[derive(Clone)]
 struct PyAtlasFrame {
@@ -5912,6 +5937,8 @@ impl PyAtlasFrame {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
     #[getter]
     fn suggested_max_scale(&self) -> Option<f32> {
         self.frame.suggested_max_scale
@@ -6619,6 +6646,9 @@ impl PyChronoFrame {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
+    #[getter]
     fn energy_decay(&self) -> f32 {
         self.frame.energy_decay
     }
@@ -6927,6 +6957,8 @@ impl PyCollapsePulse {
     fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
         self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
         Ok(())
+    }
+
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {
@@ -8209,6 +8241,8 @@ impl PyChronoPeak {
             list.append(entry.into_py(py))?;
         }
         Ok(list.into_py(py))
+    }
+
 #[pyclass(module = "spiraltorch", name = "TextResonator")]
 #[derive(Clone)]
 struct PyTextResonator {
@@ -8287,6 +8321,8 @@ impl PyTextResonator {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
 #[pymethods]
 impl PyTextResonator {
     #[new]
@@ -9217,6 +9253,8 @@ impl PyChronoHarmonics {
     fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
         self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
         Ok(())
+    }
+
     #[getter]
     fn duration(&self) -> f32 {
         self.harmonics.duration
@@ -9881,6 +9919,8 @@ impl PyChronoSummary {
         let stats =
             run_epoch_with_trainer(&mut self.inner, module, loss, batches, &schedule.inner)?;
         Ok(PyEpochStats::from_stats(stats))
+    }
+
     #[getter]
     fn mean_drift(&self) -> f32 {
         self.summary.mean_drift
@@ -10530,6 +10570,9 @@ impl PyChronoLoopSignal {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
+    #[getter]
     fn harmonics(&self) -> Option<PyChronoHarmonics> {
         self.signal
             .harmonics
@@ -10756,6 +10799,8 @@ impl PyChronoFrame {
     fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
         self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
         Ok(())
+    }
+
     #[getter]
     fn projection_energy(&self) -> f32 {
         self.frame.projection_energy
@@ -11682,6 +11727,8 @@ impl PyMaintainerReport {
         Ok(PyRoundtableSchedule::from_schedule(
             self.inner.roundtable(rows, cols, config),
         ))
+    }
+
     #[getter]
     fn mean_score(&self) -> f32 {
         self.minutes.mean_score
@@ -14825,6 +14872,8 @@ impl PyModuleTrainer {
             .into_iter()
             .map(PyMaintainerReport::from_minutes)
             .collect()
+    }
+
     fn blackcat_minutes<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
         let minutes = self.inner.blackcat_minutes();
         let list = PyList::empty_bound(py);
@@ -18187,6 +18236,26 @@ impl PyRecommender {
         let mut guard = self.inner.lock().unwrap();
         let report = guard.train_epoch(&triples).map_err(rec_err)?;
         Ok(PyRecEpochReport { inner: report })
+    }
+
+    #[pyo3(signature = (user, k, exclude=None))]
+    fn recommend_top_k(
+        &self,
+        user: usize,
+        k: usize,
+        exclude: Option<Vec<usize>>,
+    ) -> PyResult<Vec<(usize, f32)>> {
+        let exclude = exclude.unwrap_or_default();
+        let exclude_slice = if exclude.is_empty() {
+            None
+        } else {
+            Some(exclude.as_slice())
+        };
+        let guard = self.inner.lock().unwrap();
+        let recs = guard
+            .recommend_top_k(user, k, exclude_slice)
+            .map_err(rec_err)?;
+        Ok(recs.into_iter().map(|rec| (rec.item, rec.score)).collect())
     }
 
     fn user_embedding(&self, user: usize) -> PyResult<PyTensor> {
