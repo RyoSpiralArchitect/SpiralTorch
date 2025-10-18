@@ -18238,6 +18238,26 @@ impl PyRecommender {
         Ok(PyRecEpochReport { inner: report })
     }
 
+    #[pyo3(signature = (user, k, exclude=None))]
+    fn recommend_top_k(
+        &self,
+        user: usize,
+        k: usize,
+        exclude: Option<Vec<usize>>,
+    ) -> PyResult<Vec<(usize, f32)>> {
+        let exclude = exclude.unwrap_or_default();
+        let exclude_slice = if exclude.is_empty() {
+            None
+        } else {
+            Some(exclude.as_slice())
+        };
+        let guard = self.inner.lock().unwrap();
+        let recs = guard
+            .recommend_top_k(user, k, exclude_slice)
+            .map_err(rec_err)?;
+        Ok(recs.into_iter().map(|rec| (rec.item, rec.score)).collect())
+    }
+
     fn user_embedding(&self, user: usize) -> PyResult<PyTensor> {
         let guard = self.inner.lock().unwrap();
         Ok(PyTensor::from_tensor(
