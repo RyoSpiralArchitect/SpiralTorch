@@ -33,6 +33,7 @@ use crate::backend::faer_dense;
 #[cfg(feature = "wgpu")]
 use crate::backend::wgpu_dense;
 use core::fmt;
+use serde::{Deserialize, Serialize};
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -1209,6 +1210,15 @@ impl DesireGradientInterpretation {
     pub fn damping(&self) -> f32 {
         (0.5 + 0.5 * self.saturation.tanh()).clamp(0.1, 1.0)
     }
+
+    /// Collapse the interpretation into ready-to-apply control signals for
+    /// Desire's automation layers. The returned structure encodes the tuned
+    /// penalty, mixing, and learning-rate factors so downstream consumers can
+    /// steer both the CPU and GPU loops without reimplementing the heuristics.
+    #[inline]
+    pub fn control(&self) -> DesireGradientControl {
+        DesireGradientControl::from_interpretation(*self)
+    }
 }
 
 impl Default for DesireGradientInterpretation {
@@ -1220,6 +1230,132 @@ impl Default for DesireGradientInterpretation {
             stability: 1.0,
             saturation: 0.0,
         }
+    }
+}
+
+/// Packaged feedback parameters derived from [`DesireGradientInterpretation`]
+/// that automation layers can apply directly to gradient tapes, WGSL kernels,
+/// and Desire's avoidance/bias mixers.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DesireGradientControl {
+    penalty_gain: f32,
+    bias_mix: f32,
+    observation_gain: f32,
+    damping: f32,
+    hyper_rate_scale: f32,
+    real_rate_scale: f32,
+    operator_mix: f32,
+    operator_gain: f32,
+}
+
+impl DesireGradientControl {
+    const MIN_RATE: f32 = 0.25;
+    const MAX_RATE: f32 = 1.6;
+
+    /// Build a control packet from an interpretation, collapsing the
+    /// higher-level descriptors into concrete gains and learning-rate scales.
+    pub fn from_interpretation(interpretation: DesireGradientInterpretation) -> Self {
+        let penalty_gain = interpretation.penalty_gain();
+        let bias_mix = interpretation.bias_mix();
+        let observation_gain = interpretation.observation_gain();
+        let damping = interpretation.damping();
+
+        let imbalance = (interpretation.balance() - 1.0).clamp(-4.0, 4.0);
+        let saturation = interpretation.saturation().tanh().clamp(0.0, 1.0);
+        let caution = (1.0 - interpretation.stability()).clamp(0.0, 1.0);
+
+        let (hyper_base, real_base) = if imbalance >= 0.0 {
+            (
+                (1.0 / (1.0 + imbalance)).clamp(Self::MIN_RATE, 1.0),
+                (1.0 + 0.5 * imbalance).clamp(1.0, Self::MAX_RATE),
+            )
+        } else {
+            (
+                (1.0 - 0.5 * imbalance).clamp(1.0, Self::MAX_RATE),
+                (1.0 / (1.0 - imbalance)).clamp(Self::MIN_RATE, 1.0),
+            )
+        };
+
+        let hyper_guard = (1.0 - 0.6 * caution - 0.4 * saturation).clamp(0.3, 1.0);
+        let real_guard = (1.0 - 0.4 * caution - 0.25 * saturation).clamp(0.4, 1.0);
+        let hyper_rate_scale = (hyper_base * hyper_guard).clamp(Self::MIN_RATE, Self::MAX_RATE);
+        let real_rate_scale = (real_base * real_guard).clamp(Self::MIN_RATE, Self::MAX_RATE);
+
+        let operator_mix = (0.4 + 0.6 * interpretation.stability()).clamp(0.25, 1.0);
+        let operator_gain = penalty_gain * (1.0 - 0.35 * saturation).clamp(0.5, 1.0);
+
+        Self {
+            penalty_gain,
+            bias_mix,
+            observation_gain,
+            damping,
+            hyper_rate_scale,
+            real_rate_scale,
+            operator_mix,
+            operator_gain,
+        }
+    }
+
+    /// Hypergradient penalty amplification factor mirrored from the
+    /// interpretation stage.
+    pub fn penalty_gain(&self) -> f32 {
+        self.penalty_gain
+    }
+
+    /// Desire bias blending factor for integration phases.
+    pub fn bias_mix(&self) -> f32 {
+        self.bias_mix
+    }
+
+    /// Observation accumulation gain applied to avoidance tracking.
+    pub fn observation_gain(&self) -> f32 {
+        self.observation_gain
+    }
+
+    /// Recommended damping factor for epsilon / tolerance schedules.
+    pub fn damping(&self) -> f32 {
+        self.damping
+    }
+
+    /// Multiplicative scale applied to the hypergradient learning rate.
+    pub fn hyper_rate_scale(&self) -> f32 {
+        self.hyper_rate_scale
+    }
+
+    /// Multiplicative scale applied to the Euclidean learning rate.
+    pub fn real_rate_scale(&self) -> f32 {
+        self.real_rate_scale
+    }
+
+    /// Suggested blend factor for GPU hypergradient kernels.
+    pub fn operator_mix(&self) -> f32 {
+        self.operator_mix
+    }
+
+    /// Suggested gain for GPU hypergradient kernels.
+    pub fn operator_gain(&self) -> f32 {
+        self.operator_gain
+    }
+}
+
+impl Default for DesireGradientControl {
+    fn default() -> Self {
+        Self {
+            penalty_gain: 1.0,
+            bias_mix: 1.0,
+            observation_gain: 1.0,
+            damping: 1.0,
+            hyper_rate_scale: 1.0,
+            real_rate_scale: 1.0,
+            operator_mix: 1.0,
+            operator_gain: 1.0,
+        }
+    }
+}
+
+impl From<DesireGradientInterpretation> for DesireGradientControl {
+    fn from(value: DesireGradientInterpretation) -> Self {
+        Self::from_interpretation(value)
     }
 }
 
@@ -1717,6 +1853,18 @@ mod tests {
             .gradient()
             .iter()
             .any(|value| value.abs() > f32::EPSILON));
+    }
+
+    #[test]
+    fn desire_gradient_control_respects_balance() {
+        let hyper = GradientSummary::from_slice(&[0.8, -0.6, 0.4, -0.2]);
+        let real = GradientSummary::from_slice(&[0.1, -0.05, 0.02, -0.01]);
+        let interpretation = DesireGradientInterpretation::from_summaries(hyper, real);
+        let control = interpretation.control();
+        assert!(control.penalty_gain() >= interpretation.penalty_gain());
+        assert!(control.hyper_rate_scale() <= 1.0 + f32::EPSILON);
+        assert!(control.real_rate_scale() >= 0.25);
+        assert!(control.operator_mix() <= 1.0);
     }
 
     #[test]

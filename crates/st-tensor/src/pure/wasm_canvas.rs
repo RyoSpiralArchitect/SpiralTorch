@@ -14,8 +14,8 @@
 
 use super::{
     fractal::{FractalPatch, UringFractalScheduler},
-    AmegaHypergrad, AmegaRealgrad, DesireGradientInterpretation, GradientSummary, PureResult,
-    Tensor, TensorError,
+    AmegaHypergrad, AmegaRealgrad, DesireGradientControl, DesireGradientInterpretation,
+    GradientSummary, PureResult, Tensor, TensorError,
 };
 use core::f32::consts::PI;
 use st_frac::fft::{self, Complex32};
@@ -644,6 +644,15 @@ impl CanvasProjector {
         Ok(DesireGradientInterpretation::from_summaries(hyper, real))
     }
 
+    /// Derive Desire control signals directly from the refreshed canvas tensor.
+    pub fn gradient_control(
+        &mut self,
+        curvature: f32,
+    ) -> PureResult<DesireGradientControl> {
+        let interpretation = self.gradient_interpretation(curvature)?;
+        Ok(interpretation.control())
+    }
+
     /// Access the last computed FFT spectrum without forcing a refresh.
     pub fn vector_fft(&self, inverse: bool) -> PureResult<Vec<f32>> {
         self.vectors.fft_rows_interleaved(inverse)
@@ -708,6 +717,15 @@ impl CanvasProjector {
             mix.clamp(0.0, 1.0),
             gain,
         ]
+    }
+
+    /// Convenience wrapper that feeds Desire's control signals straight into the
+    /// hypergradient WGSL uniform layout.
+    pub fn hypergrad_operator_uniform_from_control(
+        &self,
+        control: &DesireGradientControl,
+    ) -> [f32; 4] {
+        self.hypergrad_operator_uniform(control.operator_mix(), control.operator_gain())
     }
 
     /// Compute the workgroup triplet for the hypergradient WGSL operator.
@@ -1114,6 +1132,26 @@ mod tests {
         let interpretation = projector.gradient_interpretation(-1.0).unwrap();
         assert!(interpretation.penalty_gain() >= 1.0);
         assert!(interpretation.bias_mix() > 0.0);
+    }
+
+    #[test]
+    fn projector_surfaces_desire_control() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(
+                FractalPatch::new(tensor_with_shape(2, 2, &[0.25, 0.1, -0.35, 0.6]), 1.0, 1.0, 0)
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let control = projector.gradient_control(-1.0).unwrap();
+        assert!(control.penalty_gain() >= 1.0);
+        assert!(control.hyper_rate_scale().is_finite());
+        let uniform = projector.hypergrad_operator_uniform_from_control(&control);
+        assert_eq!(uniform[0], 2.0);
+        assert_eq!(uniform[1], 2.0);
+        assert!((uniform[2] - control.operator_mix()).abs() < 1e-6);
+        assert!((uniform[3] - control.operator_gain()).abs() < 1e-6);
     }
 
     #[test]

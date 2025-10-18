@@ -4,8 +4,8 @@ use st_tensor::wasm_canvas::{
     CanvasFftLayout as ProjectorCanvasFftLayout, CanvasPalette, CanvasProjector,
 };
 use st_tensor::{
-    AmegaHypergrad, AmegaRealgrad, DesireGradientInterpretation, GradientSummary, Tensor,
-    TensorError,
+    AmegaHypergrad, AmegaRealgrad, DesireGradientControl, DesireGradientInterpretation,
+    GradientSummary, Tensor, TensorError,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
@@ -237,6 +237,76 @@ impl CanvasDesireInterpretation {
 }
 
 #[wasm_bindgen]
+pub struct CanvasDesireControl {
+    penalty_gain: f32,
+    bias_mix: f32,
+    observation_gain: f32,
+    damping: f32,
+    hyper_rate_scale: f32,
+    real_rate_scale: f32,
+    operator_mix: f32,
+    operator_gain: f32,
+}
+
+impl From<DesireGradientControl> for CanvasDesireControl {
+    fn from(value: DesireGradientControl) -> Self {
+        Self {
+            penalty_gain: value.penalty_gain(),
+            bias_mix: value.bias_mix(),
+            observation_gain: value.observation_gain(),
+            damping: value.damping(),
+            hyper_rate_scale: value.hyper_rate_scale(),
+            real_rate_scale: value.real_rate_scale(),
+            operator_mix: value.operator_mix(),
+            operator_gain: value.operator_gain(),
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl CanvasDesireControl {
+    #[wasm_bindgen(getter, js_name = penaltyGain)]
+    pub fn penalty_gain(&self) -> f32 {
+        self.penalty_gain
+    }
+
+    #[wasm_bindgen(getter, js_name = biasMix)]
+    pub fn bias_mix(&self) -> f32 {
+        self.bias_mix
+    }
+
+    #[wasm_bindgen(getter, js_name = observationGain)]
+    pub fn observation_gain(&self) -> f32 {
+        self.observation_gain
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn damping(&self) -> f32 {
+        self.damping
+    }
+
+    #[wasm_bindgen(getter, js_name = hyperLearningRateScale)]
+    pub fn hyper_learning_rate_scale(&self) -> f32 {
+        self.hyper_rate_scale
+    }
+
+    #[wasm_bindgen(getter, js_name = realLearningRateScale)]
+    pub fn real_learning_rate_scale(&self) -> f32 {
+        self.real_rate_scale
+    }
+
+    #[wasm_bindgen(getter, js_name = operatorMix)]
+    pub fn operator_mix(&self) -> f32 {
+        self.operator_mix
+    }
+
+    #[wasm_bindgen(getter, js_name = operatorGain)]
+    pub fn operator_gain(&self) -> f32 {
+        self.operator_gain
+    }
+}
+
+#[wasm_bindgen]
 pub struct FractalCanvas {
     projector: CanvasProjector,
     width: usize,
@@ -397,6 +467,20 @@ impl FractalCanvas {
         Ok(CanvasDesireInterpretation::from(interpretation))
     }
 
+    /// Refresh the projector and collapse the gradient summaries into Desire's
+    /// control packet, exposing precomputed gains and learning-rate scales.
+    #[wasm_bindgen(js_name = desireControl)]
+    pub fn desire_control(
+        &mut self,
+        curvature: f32,
+    ) -> Result<CanvasDesireControl, JsValue> {
+        let control = self
+            .projector
+            .gradient_control(curvature)
+            .map_err(js_error)?;
+        Ok(CanvasDesireControl::from(control))
+    }
+
     /// Emit the WGSL kernel that mirrors [`vector_field_fft`] so WebGPU
     /// consumers can reproduce the spectral pass directly on the GPU.
     #[wasm_bindgen(js_name = vectorFieldFftKernel)]
@@ -437,6 +521,37 @@ impl FractalCanvas {
     pub fn hypergrad_operator_uniform(&self, mix: f32, gain: f32) -> Float32Array {
         let params = self.projector.hypergrad_operator_uniform(mix, gain);
         Float32Array::from(params.as_ref())
+    }
+
+    /// Compute the hypergradient operator uniform directly from the current
+    /// Desire control packet. Useful when the control data is computed once on
+    /// the Rust side and then cached in JavaScript.
+    #[wasm_bindgen(js_name = hypergradOperatorUniformFromControl)]
+    pub fn hypergrad_operator_uniform_from_control(
+        &self,
+        control: &CanvasDesireControl,
+    ) -> Float32Array {
+        let params = self
+            .projector
+            .hypergrad_operator_uniform(control.operator_mix, control.operator_gain);
+        Float32Array::from(params.as_ref())
+    }
+
+    /// Refresh the canvas, derive the Desire control packet, and emit the
+    /// matching hypergradient operator uniform in a single step.
+    #[wasm_bindgen(js_name = hypergradOperatorUniformAuto)]
+    pub fn hypergrad_operator_uniform_auto(
+        &mut self,
+        curvature: f32,
+    ) -> Result<Float32Array, JsValue> {
+        let control = self
+            .projector
+            .gradient_control(curvature)
+            .map_err(js_error)?;
+        let params = self
+            .projector
+            .hypergrad_operator_uniform_from_control(&control);
+        Ok(Float32Array::from(params.as_ref()))
     }
 
     /// Workgroup dispatch dimensions matching `hypergradOperatorKernel`.

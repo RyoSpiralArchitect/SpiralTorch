@@ -10,7 +10,7 @@ use super::geometry::ConceptHint;
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
 use st_core::config::self_rewrite::SelfRewriteCfg;
-use st_tensor::DesireGradientInterpretation;
+use st_tensor::{DesireGradientControl, DesireGradientInterpretation};
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -70,6 +70,10 @@ impl DesireAutomation {
 
     pub fn gradient_interpretation(&self) -> DesireGradientInterpretation {
         self.desire.gradient_interpretation()
+    }
+
+    pub fn gradient_control(&self) -> DesireGradientControl {
+        self.desire.gradient_control()
     }
 
     pub fn trigger_count(&self) -> u64 {

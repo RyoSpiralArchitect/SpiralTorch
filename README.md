@@ -292,6 +292,12 @@ hypergrad or self-rewrite scheduler can keep desire centred without collapse.
 The schedules default to zeroed observation and grow-only ramps, so existing
 callers can continue to provide manual `DesireWeights` without opt-in changes.【F:crates/st-nn/src/language/desire.rs†L1-L388】【F:crates/st-nn/src/language/desire.rs†L389-L487】
 
+Every step now ships a `DesireGradientControl` alongside the interpretation so
+automation layers can react without recomputing heuristics. Grab it via
+`DesireLagrangian::gradient_control()` (or directly from the streamed
+`DesireSolution`) to inspect the recommended hyper/Realgrad learning-rate
+scales, penalty gains, and WGSL operator mix/gain before issuing GPU updates.
+
 To automate the “unconscious” loop, wrap the lagrangian with
 `DesireAutomation`. It samples the `SelfRewriteCfg` thresholds, tracks
 hypergrad drift during the integration phase, and emits
@@ -1369,6 +1375,15 @@ optimisers alongside its hypergradient updates.
 - `FractalCanvas::desireInterpretation(curvature)` lifts the paired gradient
   summaries into Desire-ready feedback metrics (pressure, balance, stability)
   so automation layers can steer the Desire Lagrangian without leaving WASM.
+- `FractalCanvas::desireControl(curvature)` extends that pipeline with
+  ready-to-apply Desire gradient control packets—penalty gains, bias/observation
+  mixers, and tuned hyper/Realgrad learning-rate scales—mirroring the Rust
+  automation layer on the browser side.
+- `FractalCanvas::hypergradOperatorUniformFromControl(control)` and
+  `FractalCanvas::hypergradOperatorUniformAuto(curvature)` map those Desire
+  control packets directly into the WGSL uniform payload, saving JavaScript
+  callers from recomputing the blend/gain heuristics before dispatching the
+  GPU hypergrad operator.
 - `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
   WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
   the vector field and accumulate the spectrum fully on-GPU.
