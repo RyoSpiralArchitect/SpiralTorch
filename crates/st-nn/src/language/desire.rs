@@ -110,6 +110,8 @@ pub struct DesireSolution {
     pub avoidance: Option<DesireAvoidanceReport>,
     pub hypergrad_penalty: f32,
     pub gradient_control: DesireGradientControl,
+    #[serde(default)]
+    pub control_events: Vec<String>,
     pub narrative: Option<NarrativeHint>,
 }
 
@@ -397,6 +399,7 @@ impl DesireLagrangian {
             avoidance,
             hypergrad_penalty,
             gradient_control: self.gradient_control,
+            control_events,
             narrative: self.active_narrative.clone(),
         })
     }
