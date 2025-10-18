@@ -1,4 +1,4 @@
-use js_sys::{Array, Float32Array, Uint8Array};
+use js_sys::{Array, Float32Array, Uint32Array, Uint8Array};
 use st_tensor::fractal::{FractalPatch, UringFractalScheduler};
 use st_tensor::wasm_canvas::{CanvasPalette, CanvasProjector};
 use st_tensor::{Tensor, TensorError};
@@ -101,6 +101,36 @@ impl FractalCanvas {
             data.extend_from_slice(&vector);
         }
         Ok(Float32Array::from(data.as_slice()))
+    }
+
+    /// Refresh the projector and return the interleaved FFT spectrum for each
+    /// canvas row. Each frequency sample contributes eight floats (real/imag
+    /// pairs for energy + RGB chroma).
+    #[wasm_bindgen(js_name = vectorFieldFft)]
+    pub fn vector_field_fft(&mut self, inverse: bool) -> Result<Float32Array, JsValue> {
+        let spectrum = self
+            .projector
+            .refresh_vector_fft(inverse)
+            .map_err(js_error)?;
+        Ok(Float32Array::from(spectrum.as_slice()))
+    }
+
+    /// Emit the WGSL kernel that mirrors [`vector_field_fft`] so WebGPU
+    /// consumers can reproduce the spectral pass directly on the GPU.
+    #[wasm_bindgen(js_name = vectorFieldFftKernel)]
+    pub fn vector_field_fft_kernel(&self, subgroup: bool) -> String {
+        self.projector.vector_fft_wgsl(subgroup)
+    }
+
+    /// Generate the uniform parameters expected by [`vector_field_fft_kernel`].
+    ///
+    /// The returned array packs the canvas `width`, `height`, the `inverse`
+    /// flag (1 = inverse, 0 = forward) and a padding slot so the buffer aligns
+    /// to 16 bytes as required by WGSL uniform layout rules.
+    #[wasm_bindgen(js_name = vectorFieldFftUniform)]
+    pub fn vector_field_fft_uniform(&self, inverse: bool) -> Uint32Array {
+        let params = self.projector.vector_fft_uniform(inverse);
+        Uint32Array::from(params.as_slice())
     }
 
     /// Reset the internal normaliser so the next frame recomputes brightness ranges.
