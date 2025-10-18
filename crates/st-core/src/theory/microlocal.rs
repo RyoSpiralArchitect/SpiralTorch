@@ -19,6 +19,7 @@ use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
+use std::f64::consts::PI;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
@@ -740,12 +741,12 @@ impl InterfaceZConductor {
             conductor: ZConductor::new(ZConductorCfg::default()),
             clock: 0,
             smoothing: 0.0,
-            policy: Arc::new(DefaultZSourcePolicy::new()),
+            policy,
             band_policy: None,
             budget_policy: None,
             previous: None,
             carry: None,
-            emitter: MicrolocalEmitter::new(),
+            emitter,
         }
     }
 
@@ -804,31 +805,31 @@ impl InterfaceZConductor {
 
         // 3) 集約 + 平滑化イベント
         let mut fused = InterfaceZPulse::aggregate(&weighted);
-        if let Some(previous) = &self.previous {
-            if self.smoothing > 0.0 {
-                fused = InterfaceZPulse::lerp(previous, &fused, self.smoothing);
+        let mut events = Vec::new();
+        if let (Some(previous), smoothing) = (self.previous.as_ref(), self.smoothing) {
+            if smoothing > 0.0 {
+                fused = InterfaceZPulse::lerp(previous, &fused, smoothing);
+                events.push("smoothing.applied".to_string());
             }
         }
 
-        let mut budget_scale = 1.0;
-        if let Some(policy) = &self.budget_policy {
-            budget_scale = policy.apply(&mut fused);
-        }
+        let now = if let Some(ts) = ts {
+            self.clock = ts.wrapping_add(1);
+            ts
+        } else {
+            let current = self.clock;
+            self.clock = self.clock.wrapping_add(1);
+            current
+        };
 
-        self.policy.late_fuse(&mut fused, &pulses, &qualities);
-
-        let now = self.clock;
-        self.clock = self.clock.wrapping_add(1);
+        let tempo_hint = tempo.unwrap_or_else(|| fused.total_energy());
 
         let mut zpulses = Vec::with_capacity(pulses.len());
-        for (pulse, &quality) in pulses.iter().zip(&qualities) {
-            let support = ZSupport::from_band_energy(pulse.band_energy);
-            let tempo = tempo_hint.unwrap_or(pulse.total_energy());
-            let stderr = pulse.standard_error.unwrap_or(0.0);
+        for pulse in &pulses {
             zpulses.push(ZPulse {
                 source: pulse.source,
                 ts: now,
-                tempo,
+                tempo: tempo_hint,
                 band_energy: pulse.band_energy,
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
@@ -842,20 +843,42 @@ impl InterfaceZConductor {
 
         let mut registry = ZRegistry::with_capacity(1);
         registry.register(self.emitter.clone());
-        let fused_z = self.conductor.step_from_registry(&mut registry, now);
+        let z_fused = self.conductor.step_from_registry(&mut registry, now);
+
+        events.extend(z_fused.events.clone());
+
+        self.policy.late_fuse(&mut fused, &pulses, &qualities);
+
+        let mut budget_scale = 1.0;
+        if let Some(budget) = &self.budget_policy {
+            budget_scale = budget.apply(&mut fused);
+        }
 
         let fused_pulse = fused.clone();
         let feedback = fused.clone().into_softlogic_feedback();
         self.previous = Some(fused.clone());
         self.carry = Some(fused.clone());
 
-        let z_pulse = InterfaceZConductor::into_zpulse(&fused, now, &qualities);
-        let fused_report = InterfaceZFused {
-            z: fused_z.z,
-            support: fused_z.support,
-            attributions: fused_z.attributions,
-            events: fused_z.events,
-            pulse: z_pulse,
+        let fused_z = InterfaceZFused {
+            ts: z_fused.ts,
+            z: z_fused.z,
+            support: z_fused.support,
+            drift: z_fused.drift,
+            quality: z_fused.quality,
+            events,
+            attributions: z_fused.attributions.clone(),
+            pulse: ZPulse {
+                source: ZSource::Microlocal,
+                ts: z_fused.ts,
+                tempo: tempo_hint,
+                band_energy: fused.band_energy,
+                drift: fused.drift,
+                z_bias: z_fused.z,
+                support: ZSupport::from_band_energy(fused.band_energy),
+                quality: z_fused.quality,
+                stderr: fused.standard_error.unwrap_or(0.0),
+                latency_ms: 0.0,
+            },
         };
 
         InterfaceZReport {
