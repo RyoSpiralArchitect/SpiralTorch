@@ -12,9 +12,11 @@
 
 use core::f32::consts::PI;
 use core::fmt;
+use std::sync::Arc;
 
 use crate::theory::zpulse::{ZPulse, ZSource};
 use crate::util::math::{ramanujan_pi, LeechProjector};
+use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 
 const DEFAULT_RANK: usize = 24;
 const DEFAULT_WEIGHT: f64 = 1.0;
@@ -107,6 +109,167 @@ impl SpectralEngine for CpuNaive {
     }
 }
 
+/// FFT-based implementation backed by [`rustfft`].
+pub struct CpuRustFft {
+    len: usize,
+    planner: FftPlanner<f32>,
+    plan: Option<Arc<dyn Fft<f32>>>,
+    scratch: Vec<Complex32>,
+    buffer: Vec<Complex32>,
+}
+
+impl fmt::Debug for CpuRustFft {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CpuRustFft")
+            .field("len", &self.len)
+            .field("buffer_len", &self.buffer.len())
+            .finish()
+    }
+}
+
+impl Default for CpuRustFft {
+    fn default() -> Self {
+        Self {
+            len: 0,
+            planner: FftPlanner::new(),
+            plan: None,
+            scratch: Vec::new(),
+            buffer: Vec::new(),
+        }
+    }
+}
+
+impl CpuRustFft {
+    fn ensure_plan(&mut self, len: usize) {
+        if self.len == len {
+            return;
+        }
+        self.len = len;
+        if len == 0 {
+            self.plan = None;
+            self.buffer.clear();
+            self.scratch.clear();
+            return;
+        }
+        let plan = self.planner.plan_fft_forward(len);
+        let scratch_len = plan.get_inplace_scratch_len();
+        self.buffer.resize(len, Complex32::default());
+        self.scratch.resize(scratch_len, Complex32::default());
+        self.plan = Some(plan);
+    }
+}
+
+impl SpectralEngine for CpuRustFft {
+    fn dft(&mut self, input: &[f32], out: &mut [(f32, f32)]) {
+        let len = input.len();
+        assert_eq!(out.len(), len, "output length must match input length");
+        if len == 0 {
+            return;
+        }
+
+        self.ensure_plan(len);
+        self.buffer.resize(len, Complex32::default());
+        let plan = match &self.plan {
+            Some(plan) => plan.clone(),
+            None => return,
+        };
+
+        let required = plan.get_inplace_scratch_len();
+        if self.scratch.len() < required {
+            self.scratch.resize(required, Complex32::default());
+        }
+
+        for (slot, &value) in self.buffer.iter_mut().zip(input.iter()) {
+            *slot = Complex32::new(value, 0.0);
+        }
+
+        if self.scratch.is_empty() {
+            plan.process(&mut self.buffer);
+        } else {
+            plan.process_with_scratch(&mut self.buffer, &mut self.scratch);
+        }
+
+        let scale = 1.0f32 / len as f32;
+        for (slot, value) in out.iter_mut().zip(self.buffer.iter()) {
+            *slot = (value.re * scale, -value.im * scale);
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+/// High-resolution zoomed transform using a band-limited chirp-Z evaluation.
+#[derive(Debug, Clone)]
+pub struct CpuChirpZ {
+    len: usize,
+    band: std::ops::Range<usize>,
+    zoom: usize,
+}
+
+impl CpuChirpZ {
+    /// Creates a new chirp-Z evaluator for the provided band.
+    pub fn new(band: std::ops::Range<usize>, zoom: usize) -> Self {
+        Self {
+            len: 0,
+            band,
+            zoom: zoom.max(1),
+        }
+    }
+
+    fn update_len(&mut self, len: usize) {
+        self.len = len;
+    }
+}
+
+impl SpectralEngine for CpuChirpZ {
+    fn dft(&mut self, input: &[f32], out: &mut [(f32, f32)]) {
+        let len = input.len();
+        assert_eq!(out.len(), len, "output length must match input length");
+        if len == 0 {
+            return;
+        }
+
+        self.update_len(len);
+        out.fill((0.0, 0.0));
+
+        let delta_x = 1.0f64 / len as f64;
+        let base = -2.0f64 * core::f64::consts::PI / len as f64;
+
+        for bin in self.band.clone() {
+            if bin >= len {
+                break;
+            }
+            let mut best = (0.0f64, 0.0f64);
+            let mut best_mag = -1.0f64;
+            for zoom_idx in 0..self.zoom {
+                let fractional = bin as f64 + zoom_idx as f64 / self.zoom as f64;
+                let angle_step = base * fractional;
+                let mut acc_re = 0.0f64;
+                let mut acc_im = 0.0f64;
+                for (sample_idx, &value) in input.iter().enumerate() {
+                    let theta = angle_step * sample_idx as f64;
+                    let (sin, cos) = theta.sin_cos();
+                    let value = value as f64;
+                    acc_re = f64::mul_add(value * cos, delta_x, acc_re);
+                    acc_im = f64::mul_add(-value * sin, delta_x, acc_im);
+                }
+                let magnitude = (acc_re * acc_re + acc_im * acc_im).sqrt();
+                if magnitude > best_mag {
+                    best_mag = magnitude;
+                    best = (acc_re, acc_im);
+                }
+            }
+            out[bin] = (best.0 as f32, best.1 as f32);
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
 /// Result emitted by [`project_realgrad`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct RealGradProjection {
@@ -114,6 +277,8 @@ pub struct RealGradProjection {
     pub realgrad: Vec<f32>,
     /// Leech-projected Z-space magnitudes.
     pub z_space: Vec<f32>,
+    /// Complex spectrum produced by the discrete transform backend.
+    pub spectrum: Vec<(f32, f32)>,
     /// Residual magnitudes that were too large to keep and were therefore sent
     /// to the "monad biome" side channel for dedicated treatment.
     pub monad_biome: Vec<Residual>,
@@ -123,13 +288,37 @@ pub struct RealGradProjection {
     pub ramanujan_pi: f32,
 }
 
-/// Summary statistics derived from a RealGrad projection.
+impl Default for RealGradProjection {
+    fn default() -> Self {
+        Self {
+            realgrad: Vec::new(),
+            z_space: Vec::new(),
+            spectrum: Vec::new(),
+            monad_biome: Vec::new(),
+            lebesgue_measure: 0.0,
+            ramanujan_pi: 0.0,
+        }
+    }
+}
+
+/// Reason why a RealGrad residual was routed to the monad biome.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GradientSummary {
-    /// L¹ norm of the projected gradient.
-    pub norm: f32,
-    /// Share of samples that remained below the adaptive threshold.
-    pub sparsity: f32,
+pub enum ResidualReason {
+    /// Magnitude exceeded the configured residual threshold.
+    OverThreshold,
+    /// Tempered sequence failed to converge under the configured tolerance.
+    NonConvergent,
+}
+
+/// Metadata attached to a residual bin.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Residual {
+    /// Frequency bin responsible for the residual.
+    pub bin: usize,
+    /// Magnitude that overflowed.
+    pub magnitude: f32,
+    /// Reason why the magnitude was routed to the monad biome.
+    pub reason: ResidualReason,
 }
 
 /// Cached projector state that can be reused across multiple RealGrad invocations.
@@ -227,31 +416,14 @@ impl RealGradProjection {
         self.z_space.iter().map(|value| value.abs()).sum()
     }
 
-    /// Produces a lightweight summary of the projected gradient.
-    pub fn gradient_summary(&self) -> GradientSummary {
-        let norm = self.lebesgue_measure.max(0.0);
-        if self.realgrad.is_empty() {
-            return GradientSummary {
-                norm,
-                sparsity: 1.0,
-            };
-        }
-        let len = self.realgrad.len() as f32;
-        let threshold = if norm > 0.0 {
-            (norm / len).max(1.0e-6)
-        } else {
-            1.0e-6
-        };
-        let sparse = self
-            .realgrad
-            .iter()
-            .filter(|&&value| value.abs() <= threshold)
-            .count() as f32
-            / len;
-        GradientSummary {
-            norm,
-            sparsity: sparse.clamp(0.0, 1.0),
-        }
+    /// Clears the projection buffers while keeping the allocated capacity.
+    pub fn clear(&mut self) {
+        self.realgrad.clear();
+        self.z_space.clear();
+        self.spectrum.clear();
+        self.monad_biome.clear();
+        self.lebesgue_measure = 0.0;
+        self.ramanujan_pi = 0.0;
     }
 }
 
@@ -312,19 +484,15 @@ impl RealGradKernel {
         self.spectrum.resize(len, (0.0, 0.0));
         self.engine.dft(values, &mut self.spectrum);
 
-        let scale = self.config.spectrum_norm.scale(len);
-        if (scale - 1.0).abs() > f64::EPSILON {
-            for (re, im) in &mut self.spectrum {
-                *re = (*re as f64 * scale) as f32;
-                *im = (*im as f64 * scale) as f32;
-            }
-        }
+        self.config.spectrum_norm.apply(&mut self.spectrum);
 
         self.z_buf.resize(len, 0.0);
         self.residuals.clear();
         let projection = out.as_projection_mut();
         projection.realgrad.resize(len, 0.0);
         projection.z_space.resize(len, 0.0);
+        projection.spectrum.resize(len, (0.0, 0.0));
+        projection.spectrum.copy_from_slice(&self.spectrum[..len]);
         for (idx, &(re, im)) in self.spectrum.iter().enumerate() {
             let magnitude = (re * re + im * im).sqrt();
             if magnitude > self.residual_threshold() {
@@ -442,15 +610,46 @@ pub enum SpectrumNorm {
     Forward,
     /// Applies a `1/N²` scaling matching the backward transform convention.
     Backward,
+    /// Energy-preserving rescaling (alias for [`SpectrumNorm::Unitary`]).
+    EnergyPreserving,
+    /// Emphasises the Lebesgue-style L¹ projection (alias for [`SpectrumNorm::Backward`]).
+    LebesgueL1,
+    /// Whitens the spectrum by dampening dominant magnitudes.
+    Whitened,
 }
 
 impl SpectrumNorm {
-    fn scale(self, len: usize) -> f64 {
-        let n = len.max(1) as f64;
+    fn apply(self, spectrum: &mut [(f32, f32)]) {
+        if spectrum.is_empty() {
+            return;
+        }
         match self {
-            SpectrumNorm::Unitary => n.sqrt(),
-            SpectrumNorm::Forward => n,
-            SpectrumNorm::Backward => 1.0,
+            SpectrumNorm::Unitary | SpectrumNorm::EnergyPreserving => {
+                let scale = (spectrum.len().max(1) as f64).sqrt();
+                for (re, im) in spectrum.iter_mut() {
+                    *re = (*re as f64 * scale) as f32;
+                    *im = (*im as f64 * scale) as f32;
+                }
+            }
+            SpectrumNorm::Forward => {
+                let scale = spectrum.len().max(1) as f64;
+                for (re, im) in spectrum.iter_mut() {
+                    *re = (*re as f64 * scale) as f32;
+                    *im = (*im as f64 * scale) as f32;
+                }
+            }
+            SpectrumNorm::Backward | SpectrumNorm::LebesgueL1 => {}
+            SpectrumNorm::Whitened => {
+                let epsilon = 1.0e-6f64;
+                for (re, im) in spectrum.iter_mut() {
+                    let re_f = *re as f64;
+                    let im_f = *im as f64;
+                    let energy = re_f * re_f + im_f * im_f;
+                    let denom = (energy + epsilon).sqrt();
+                    *re = (re_f / denom) as f32;
+                    *im = (im_f / denom) as f32;
+                }
+            }
         }
     }
 }
@@ -617,6 +816,8 @@ pub struct RealGradZProjector {
     projector: LeechProjector,
     bias_gain: f32,
     min_energy: f32,
+    band: std::ops::Range<usize>,
+    quality_floor: f32,
 }
 
 impl RealGradZProjector {
@@ -626,7 +827,21 @@ impl RealGradZProjector {
             projector,
             bias_gain,
             min_energy: min_energy.max(0.0),
+            band: 0..usize::MAX,
+            quality_floor: 0.0,
         }
+    }
+
+    /// Restricts the quality metric to the provided spectral band.
+    pub fn with_band(mut self, band: std::ops::Range<usize>) -> Self {
+        self.band = band;
+        self
+    }
+
+    /// Ensures the emitted quality never falls below the configured floor.
+    pub fn with_quality_floor(mut self, floor: f32) -> Self {
+        self.quality_floor = floor.clamp(0.0, 1.0);
+        self
     }
 
     /// Converts a [`RealGradProjection`] into a Z-space pulse compatible with the conductor.
@@ -651,6 +866,12 @@ impl RealGradZProjector {
             0.0
         };
 
+        let len = projection.spectrum.len();
+        let start = self.band.start.min(len);
+        let end = self.band.end.min(len);
+        let band = start..end;
+        let quality = spectral_quality(&projection.spectrum, band).max(self.quality_floor);
+
         ZPulse {
             source: ZSource::Other("RealGrad"),
             ts: 0,
@@ -658,11 +879,40 @@ impl RealGradZProjector {
             drift,
             z_bias,
             support: z_energy,
-            quality: 0.0,
+            quality,
             stderr: 0.0,
             latency_ms: 0.0,
         }
     }
+}
+
+fn spectral_quality(spectrum: &[(f32, f32)], band: std::ops::Range<usize>) -> f32 {
+    if spectrum.is_empty() {
+        return 0.0;
+    }
+    let len = spectrum.len();
+    let start = band.start.min(len);
+    let end = band.end.min(len);
+    let mut total = 0.0f64;
+    let mut in_band = 0.0f64;
+    let mut log_sum = 0.0f64;
+    for (idx, &(re, im)) in spectrum.iter().enumerate() {
+        let energy = (re as f64 * re as f64 + im as f64 * im as f64).max(1.0e-12);
+        total += energy;
+        if idx >= start && idx < end {
+            in_band += energy;
+        }
+        log_sum += energy.ln();
+    }
+    if total <= f64::EPSILON {
+        return 0.0;
+    }
+    let n = spectrum.len() as f64;
+    let mean = total / n;
+    let flatness = ((log_sum / n).exp() / (mean + 1.0e-12)).clamp(0.0, 1.0);
+    let band_ratio = (in_band / (total + 1.0e-12)).clamp(0.0, 1.0);
+    let quality = 0.7 * band_ratio + 0.3 * (1.0 - flatness);
+    quality.clamp(0.0, 1.0) as f32
 }
 
 /// Adaptive residual threshold tuner built on an exponential moving average.
@@ -670,6 +920,10 @@ impl RealGradZProjector {
 pub struct RealGradAutoTuner {
     ema_ratio: f32,
     ema_alpha: f32,
+    history: Vec<f32>,
+    history_cap: usize,
+    gain: f32,
+    last_adjustment: f32,
 }
 
 impl RealGradAutoTuner {
@@ -678,7 +932,23 @@ impl RealGradAutoTuner {
         Self {
             ema_ratio: 0.0,
             ema_alpha: ema_alpha.clamp(0.0, 1.0),
+            history: Vec::new(),
+            history_cap: 64,
+            gain: 1.0,
+            last_adjustment: 1.0,
         }
+    }
+
+    /// Sets the maximum number of residual magnitudes tracked when estimating quantiles.
+    pub fn with_history_capacity(mut self, capacity: usize) -> Self {
+        self.history_cap = capacity.max(1);
+        self
+    }
+
+    /// Sets the gain applied when mixing EMA and percentile feedback.
+    pub fn with_gain(mut self, gain: f32) -> Self {
+        self.gain = gain.max(0.0);
+        self
     }
 
     /// Returns the current EMA coefficient.
@@ -691,6 +961,31 @@ impl RealGradAutoTuner {
         self.ema_ratio
     }
 
+    /// Returns the last adjustment multiplier that was applied to the threshold.
+    pub fn last_adjustment(&self) -> f32 {
+        self.last_adjustment
+    }
+
+    fn push_history(&mut self, value: f32) {
+        if !value.is_finite() {
+            return;
+        }
+        if self.history.len() == self.history_cap {
+            self.history.remove(0);
+        }
+        self.history.push(value);
+    }
+
+    fn percentile(&self, q: f32) -> f32 {
+        if self.history.is_empty() {
+            return 0.0;
+        }
+        let mut scratch = self.history.clone();
+        scratch.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+        let pos = ((scratch.len() - 1) as f32 * q.clamp(0.0, 1.0)).round() as usize;
+        scratch[pos.min(scratch.len() - 1)]
+    }
+
     /// Updates the residual threshold based on the projection statistics.
     pub fn update(&mut self, projection: &RealGradProjection, config: &mut RealGradConfig) {
         let monad = projection.residual_energy();
@@ -701,8 +996,21 @@ impl RealGradAutoTuner {
         let complement = 1.0 - alpha;
         self.ema_ratio = self.ema_ratio * complement + ratio * alpha;
 
+        for residual in &projection.monad_biome {
+            self.push_history(residual.magnitude);
+        }
+        let p95 = self.percentile(0.95);
+        let p95_ratio = if total > 0.0 {
+            (p95 / total).min(1.0)
+        } else {
+            0.0
+        };
+
+        let blended = 0.6 * self.ema_ratio + 0.4 * p95_ratio;
         let target = 0.1f32;
-        let adjustment = (1.0 + (self.ema_ratio - target)).clamp(0.5, 1.5);
+        let raw = 1.0 + (blended - target);
+        let adjustment = (self.gain * raw).clamp(0.4, 1.6);
+        self.last_adjustment = adjustment;
         config.residual_threshold = (config.residual_threshold * adjustment).max(0.0);
     }
 }
@@ -741,9 +1049,9 @@ pub fn project_tempered_realgrad(
 #[cfg(test)]
 mod tests {
     use super::{
-        project_realgrad, project_tempered_realgrad, RealGradAutoTuner, RealGradConfig,
-        RealGradKernel, RealGradProjectionScratch, RealGradZProjector, SchwartzSequence,
-        SpectrumNorm, DEFAULT_THRESHOLD,
+        project_realgrad, project_tempered_realgrad, CpuChirpZ, CpuRustFft, RealGradAutoTuner,
+        RealGradConfig, RealGradKernel, RealGradProjectionScratch, RealGradZProjector,
+        SchwartzSequence, SpectralEngine, SpectrumNorm, DEFAULT_THRESHOLD,
     };
     use crate::theory::zpulse::ZSource;
     use crate::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
@@ -753,6 +1061,7 @@ mod tests {
         let projection = project_realgrad(&[], RealGradConfig::default());
         assert!(projection.realgrad.is_empty());
         assert!(projection.z_space.is_empty());
+        assert!(projection.spectrum.is_empty());
         assert!(projection.monad_biome.is_empty());
         assert_eq!(projection.lebesgue_measure, 0.0);
         assert!(projection.ramanujan_pi > 3.14);
@@ -776,10 +1085,15 @@ mod tests {
         let mut scratch = RealGradProjectionScratch::new();
         kernel.project_into(&[0.25f32, -0.5], &mut scratch);
         let initial_capacity = scratch.as_projection().realgrad.capacity();
+        let initial_spectrum_capacity = scratch.as_projection().spectrum.capacity();
         kernel.project_into(&[0.5, -0.75], &mut scratch);
         assert_eq!(
             initial_capacity,
             scratch.as_projection().realgrad.capacity()
+        );
+        assert_eq!(
+            initial_spectrum_capacity,
+            scratch.as_projection().spectrum.capacity()
         );
         assert_eq!(scratch.as_projection().ramanujan_pi, kernel.ramanujan_pi());
     }
@@ -791,6 +1105,7 @@ mod tests {
         assert_eq!(projection.lebesgue_measure, 10.0);
         assert_eq!(projection.realgrad.len(), data.len());
         assert_eq!(projection.z_space.len(), data.len());
+        assert_eq!(projection.spectrum.len(), data.len());
         assert!(projection.monad_biome.len() <= data.len());
         assert!(projection.realgrad.iter().any(|v| *v > 0.0));
     }
@@ -802,6 +1117,55 @@ mod tests {
         let projection = project_realgrad(&data, RealGradConfig::default());
         assert!(projection.has_residuals());
         assert!(!projection.monad_biome.is_empty());
+    }
+
+    #[test]
+    fn rustfft_engine_matches_naive() {
+        let data: Vec<f32> = (0..32)
+            .map(|idx| ((idx as f32) * core::f32::consts::TAU / 7.0).sin())
+            .collect();
+        let mut naive = RealGradKernel::new(RealGradConfig::default());
+        let mut fft = RealGradKernel::new(RealGradConfig::default())
+            .with_engine(Box::new(CpuRustFft::default()));
+
+        let naive_proj = naive.project(&data);
+        let fft_proj = fft.project(&data);
+        assert_eq!(naive_proj.spectrum.len(), fft_proj.spectrum.len());
+
+        let mut num = 0.0f64;
+        let mut denom = 0.0f64;
+        for ((a_re, a_im), (b_re, b_im)) in naive_proj.spectrum.iter().zip(fft_proj.spectrum.iter())
+        {
+            let dr = *a_re as f64 - *b_re as f64;
+            let di = *a_im as f64 - *b_im as f64;
+            num += dr * dr + di * di;
+            denom += (*a_re as f64 * *a_re as f64) + (*a_im as f64 * *a_im as f64);
+        }
+        let rel = (num / denom.max(1.0e-12)).sqrt();
+        assert!(rel < 1.0e-5, "rel={rel}");
+    }
+
+    #[test]
+    fn chirpz_focuses_requested_band() {
+        let mut engine = CpuChirpZ::new(2..6, 3);
+        let mut output = vec![(0.0f32, 0.0f32); 16];
+        let samples: Vec<f32> = (0..16)
+            .map(|n| ((n as f32) * core::f32::consts::TAU * 3.0 / 16.0).sin())
+            .collect();
+        engine.dft(&samples, &mut output);
+
+        let band_energy: f32 = output[2..6]
+            .iter()
+            .map(|(re, im)| (re * re + im * im).sqrt())
+            .sum();
+        let outside_energy: f32 = output
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| *idx < 2 || *idx >= 6)
+            .map(|(_, &(re, im))| (re * re + im * im).sqrt())
+            .sum();
+        assert!(band_energy > 0.0);
+        assert!(outside_energy <= 1.0e-6);
     }
 
     #[test]
@@ -945,11 +1309,14 @@ mod tests {
             LeechProjector::new(config.z_rank, config.z_weight),
             1.0,
             0.0,
-        );
+        )
+        .with_band(0..projection.spectrum.len());
         let pulse = projector.project(&projection);
         assert!(matches!(pulse.source, ZSource::Other("RealGrad")));
         assert!(pulse.support >= 0.0);
         assert!(pulse.band_energy.0 >= 0.0);
+        assert!(pulse.quality >= 0.0);
+        assert!(pulse.quality <= 1.0);
     }
 
     #[test]
@@ -961,5 +1328,31 @@ mod tests {
         tuner.update(&projection, &mut config);
         assert!(tuner.residual_ratio() > 0.0);
         assert!(config.residual_threshold > previous);
+        assert!(tuner.last_adjustment() >= 1.0);
+    }
+
+    #[test]
+    fn spectral_quality_tracks_band_activity() {
+        let config = RealGradConfig::default();
+        let mut kernel = RealGradKernel::new(config);
+        let tone: Vec<f32> = (0..32)
+            .map(|n| ((n as f32) * core::f32::consts::TAU * 4.0 / 32.0).cos())
+            .collect();
+        let projection = kernel.project(&tone);
+        let projector_on = RealGradZProjector::new(
+            LeechProjector::new(config.z_rank, config.z_weight),
+            1.0,
+            0.0,
+        )
+        .with_band(3..6);
+        let projector_off = RealGradZProjector::new(
+            LeechProjector::new(config.z_rank, config.z_weight),
+            1.0,
+            0.0,
+        )
+        .with_band(0..2);
+        let pulse_on = projector_on.project(&projection);
+        let pulse_off = projector_off.project(&projection);
+        assert!(pulse_on.quality >= pulse_off.quality);
     }
 }
