@@ -957,6 +957,51 @@ impl BudgetPolicy {
     }
 }
 
+#[derive(Clone, Default)]
+struct MicrolocalEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
+}
+
+impl MicrolocalEmitter {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn extend<I>(&self, pulses: I)
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.extend(pulses);
+    }
+}
+
+impl ZEmitter for MicrolocalEmitter {
+    fn name(&self) -> ZSource {
+        ZSource::Microlocal
+    }
+
+    fn tick(&mut self, now: u64) -> Option<ZPulse> {
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("microlocal emitter queue poisoned");
+        queue.pop_front().map(|mut pulse| {
+            if pulse.ts == 0 {
+                pulse.ts = now;
+            }
+            pulse
+        })
+    }
+
+    fn quality_hint(&self) -> Option<f32> {
+        None
+    }
+}
+
 /// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
 /// smoothed control signal suitable for Softlogic feedback.
 #[derive(Clone)]
@@ -1628,12 +1673,26 @@ mod tests {
         assert!(second.budget_scale > 0.0);
     }
 
-    #[derive(Debug)]
-    struct HalfPolicy;
-
-    impl ZSourcePolicy for HalfPolicy {
-        fn quality(&self, _: &InterfaceZPulse) -> f32 {
-            0.5
+        let second_z = second.fused_z.z;
+        let mut saw_flip_hold = second.fused_z.events.iter().any(|e| e == "flip-held");
+        let mut saw_flip = false;
+        let mut went_negative = false;
+        let mut last_report = second;
+        for _ in 0..8 {
+            let report = conductor.step(&flipped, Some(&c_prime_neg), None, None);
+            if report.fused_z.events.iter().any(|e| e == "flip-held") {
+                saw_flip_hold = true;
+            }
+            if report.fused_z.events.iter().any(|e| e == "sign-flip") {
+                saw_flip = true;
+            }
+            if report.fused_z.z < 0.0 {
+                assert!(report.fused_z.z <= second_z);
+                went_negative = true;
+                last_report = report;
+                break;
+            }
+            last_report = report;
         }
     }
 

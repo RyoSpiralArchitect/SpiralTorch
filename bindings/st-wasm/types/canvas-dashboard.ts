@@ -7,6 +7,7 @@ import {
     type CanvasFrameEvent,
     type CanvasPointerEvent,
 } from "./canvas-view";
+import { SpiralCanvasRecorder, type SpiralCanvasRecorderOptions } from "./canvas-recorder";
 
 /** Options used to configure {@link SpiralCanvasDashboard}. */
 export interface SpiralCanvasDashboardOptions {
@@ -18,6 +19,26 @@ export interface SpiralCanvasDashboardOptions {
     showPointerToggle?: boolean;
     /** Whether to render the reset view button. Defaults to `true`. */
     showResetView?: boolean;
+    /** Whether to expose snapshot and recording buttons. Defaults to `true`. */
+    showSnapshot?: boolean;
+    /** Optional file name used when downloading snapshots. */
+    snapshotFilename?: string;
+    /** MIME type forwarded to {@link SpiralCanvasView#toBlob}. Defaults to PNG. */
+    snapshotMimeType?: string;
+    /** Quality forwarded to {@link SpiralCanvasView#toBlob}. */
+    snapshotQuality?: number;
+    /** Callback invoked with the captured snapshot {@link Blob}. */
+    onSnapshot?: (blob: Blob) => void | Promise<void>;
+    /** Callback invoked when snapshot capture fails. */
+    onSnapshotError?: (error: unknown) => void;
+    /** Whether to expose a recording toggle. Disabled when unsupported. */
+    showRecorder?: boolean;
+    /** Options forwarded to {@link SpiralCanvasRecorder}. */
+    recorderOptions?: SpiralCanvasRecorderOptions;
+    /** Callback invoked once a recording blob has been assembled. */
+    onRecordingComplete?: (blob: Blob) => void | Promise<void>;
+    /** Callback invoked when recording fails to start or stop. */
+    onRecordingError?: (error: unknown) => void;
     /** Minimum curvature value exposed by the slider. Defaults to `0.1`. */
     curvatureMin?: number;
     /** Maximum curvature value exposed by the slider. Defaults to `4`. */
@@ -107,6 +128,26 @@ const DEFAULT_STYLES = `
     flex: 0 0 auto;
 }
 
+.spiraltorch-dashboard .actions-row {
+    display: flex;
+    gap: 8px;
+}
+
+.spiraltorch-dashboard .actions-row button {
+    flex: 1 1 auto;
+}
+
+.spiraltorch-dashboard .actions-row button.recording-active {
+    background: #ef4444;
+    color: #fff;
+}
+
+.spiraltorch-dashboard .actions-row .recording-indicator {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+}
+
 .spiraltorch-dashboard .slider-row {
     display: flex;
     align-items: center;
@@ -193,11 +234,15 @@ export class SpiralCanvasDashboard {
     readonly #customPalettes = new Map<string, CustomPalette>();
     readonly #customPaletteLookup = new WeakMap<object, string>();
     readonly #statsDigits: number;
+    readonly #options: SpiralCanvasDashboardOptions;
 
     #paletteSelect?: HTMLSelectElement;
     #curvatureSlider?: HTMLInputElement;
     #curvatureLabel?: HTMLSpanElement;
     #pointerToggle?: HTMLInputElement;
+    #snapshotButton?: HTMLButtonElement;
+    #recordButton?: HTMLButtonElement;
+    #recordingIndicator?: HTMLElement;
     #fpsField: HTMLElement;
     #zoomField: HTMLElement;
     #offsetField: HTMLElement;
@@ -207,6 +252,8 @@ export class SpiralCanvasDashboard {
     #frameHandler: (event: CanvasFrameEvent) => void;
     #statsHandler: (event: CanvasStatsEvent) => void;
     #pointerHandler: (event: CanvasPointerEvent) => void;
+    #recorder: SpiralCanvasRecorder | null = null;
+    #recordingStart = 0;
 
     constructor(container: HTMLElement, view: SpiralCanvasView, options: SpiralCanvasDashboardOptions = {}) {
         if (!container) {
@@ -216,6 +263,7 @@ export class SpiralCanvasDashboard {
             throw new Error("Dashboard container must be attached to a document");
         }
         this.#view = view;
+        this.#options = options;
         const digits = options.statsDigits ?? 3;
         this.#statsDigits = Number.isFinite(digits) ? Math.max(0, Math.round(digits)) : 3;
 
@@ -265,6 +313,14 @@ export class SpiralCanvasDashboard {
         this.#view.off("frame", this.#frameHandler);
         this.#view.off("stats", this.#statsHandler);
         this.#view.off("pointer", this.#pointerHandler);
+        if (this.#recorder?.recording) {
+            this.#recorder.cancel();
+        }
+        this.#recorder = null;
+        this.#recordButton?.classList.remove("recording-active");
+        if (this.#recordingIndicator) {
+            this.#recordingIndicator.textContent = "";
+        }
         this.#root.remove();
     }
 
@@ -352,6 +408,52 @@ export class SpiralCanvasDashboard {
             this.#pointerToggle = toggle;
             row.appendChild(label);
             row.appendChild(toggle);
+            controls.appendChild(row);
+        }
+
+        const snapshotEnabled = options.showSnapshot ?? true;
+        const recorderRequested = options.showRecorder ?? false;
+        const recorderSupported =
+            recorderRequested &&
+            SpiralCanvasRecorder.isSupported() &&
+            typeof this.#view.element.captureStream === "function";
+
+        if (snapshotEnabled || recorderRequested) {
+            const row = this.#root.ownerDocument!.createElement("div");
+            row.className = "control-row actions-row";
+
+            if (snapshotEnabled) {
+                const button = this.#root.ownerDocument!.createElement("button");
+                button.type = "button";
+                button.textContent = "Snapshot";
+                button.addEventListener("click", () => {
+                    void this.#handleSnapshot();
+                });
+                this.#snapshotButton = button;
+                row.appendChild(button);
+            }
+
+            if (recorderRequested) {
+                const button = this.#root.ownerDocument!.createElement("button");
+                button.type = "button";
+                button.textContent = "Start recording";
+                if (recorderSupported) {
+                    button.addEventListener("click", () => {
+                        void this.#toggleRecording();
+                    });
+                } else {
+                    button.disabled = true;
+                    button.title = "MediaRecorder API is not available";
+                }
+                this.#recordButton = button;
+                row.appendChild(button);
+
+                const indicator = this.#root.ownerDocument!.createElement("span");
+                indicator.className = "recording-indicator";
+                this.#recordingIndicator = indicator;
+                row.appendChild(indicator);
+            }
+
             controls.appendChild(row);
         }
 
@@ -504,6 +606,9 @@ export class SpiralCanvasDashboard {
         this.#zoomField.textContent = formatNumber(event.zoom, this.#statsDigits);
         this.#setOffsetReadout(event.offset.x, event.offset.y);
         this.#syncPointerToggle();
+        if (this.#recorder?.recording) {
+            this.#updateRecordingIndicator(event.time);
+        }
     }
 
     #updateStats(event: CanvasStatsEvent): void {
@@ -533,5 +638,135 @@ export class SpiralCanvasDashboard {
 
     #setOffsetReadout(x: number, y: number): void {
         this.#offsetField.textContent = `${formatNumber(x, this.#statsDigits)}, ${formatNumber(y, this.#statsDigits)}`;
+    }
+
+    async #handleSnapshot(): Promise<void> {
+        if (!this.#snapshotButton) {
+            return;
+        }
+        this.#snapshotButton.disabled = true;
+        try {
+            const blob = await this.#view.toBlob(
+                this.#options.snapshotMimeType ?? "image/png",
+                this.#options.snapshotQuality,
+            );
+            if (this.#options.onSnapshot) {
+                await this.#options.onSnapshot(blob);
+            } else {
+                const name = this.#options.snapshotFilename ?? "spiraltorch-canvas.png";
+                this.#downloadBlob(blob, name);
+            }
+        } catch (error) {
+            this.#options.onSnapshotError?.(error);
+            if (typeof console !== "undefined" && typeof console.error === "function") {
+                console.error("Failed to capture snapshot", error);
+            }
+        } finally {
+            this.#snapshotButton.disabled = false;
+        }
+    }
+
+    async #toggleRecording(): Promise<void> {
+        if (!this.#recordButton) {
+            return;
+        }
+        if (!this.#recorder) {
+            this.#recorder = new SpiralCanvasRecorder(
+                this.#view,
+                this.#options.recorderOptions ?? {},
+            );
+        }
+        const button = this.#recordButton;
+        const indicator = this.#recordingIndicator;
+
+        if (!this.#recorder.recording) {
+            try {
+                this.#recorder.start();
+                this.#recordingStart =
+                    typeof performance !== "undefined" && typeof performance.now === "function"
+                        ? performance.now()
+                        : Date.now();
+                button.textContent = "Stop recording";
+                button.classList.add("recording-active");
+                if (indicator) {
+                    indicator.textContent = "Rec 0.0s";
+                }
+            } catch (error) {
+                button.textContent = "Start recording";
+                button.classList.remove("recording-active");
+                if (indicator) {
+                    indicator.textContent = "";
+                }
+                this.#options.onRecordingError?.(error);
+                if (typeof console !== "undefined" && typeof console.error === "function") {
+                    console.error("Failed to start recording", error);
+                }
+            }
+            return;
+        }
+
+        button.disabled = true;
+        try {
+            const blob = await this.#recorder.stop();
+            button.textContent = "Start recording";
+            button.classList.remove("recording-active");
+            button.disabled = false;
+            this.#recordingStart = 0;
+            if (indicator) {
+                indicator.textContent = "";
+            }
+            if (this.#options.onRecordingComplete) {
+                await this.#options.onRecordingComplete(blob);
+            } else {
+                const filename = this.#resolveRecordingFilename(blob.type);
+                this.#downloadBlob(blob, filename);
+            }
+        } catch (error) {
+            button.disabled = false;
+            button.classList.remove("recording-active");
+            if (indicator) {
+                indicator.textContent = "";
+            }
+            this.#options.onRecordingError?.(error);
+            if (typeof console !== "undefined" && typeof console.error === "function") {
+                console.error("Failed to stop recording", error);
+            }
+        }
+    }
+
+    #updateRecordingIndicator(now?: number): void {
+        if (!this.#recordingIndicator || !this.#recorder?.recording) {
+            return;
+        }
+        const current =
+            typeof now === "number"
+                ? now
+                : typeof performance !== "undefined" && typeof performance.now === "function"
+                  ? performance.now()
+                  : Date.now();
+        const elapsed = Math.max(0, current - this.#recordingStart);
+        this.#recordingIndicator.textContent = `Rec ${(elapsed / 1000).toFixed(1)}s`;
+    }
+
+    #downloadBlob(blob: Blob, filename: string): void {
+        const doc = this.#root.ownerDocument!;
+        const url = URL.createObjectURL(blob);
+        const link = doc.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.style.display = "none";
+        const parent = doc.body ?? this.#root;
+        parent.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    #resolveRecordingFilename(type?: string): string {
+        const fallback = this.#options.recorderOptions?.mimeType ?? "video/webm";
+        const mime = type && type.length > 0 ? type : fallback;
+        const extension = mime.includes("/") ? mime.split("/").pop() ?? "webm" : mime;
+        const clean = extension.split(";")[0] || "webm";
+        return `spiraltorch-canvas.${clean}`;
     }
 }

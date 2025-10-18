@@ -72,6 +72,12 @@ const dashboard = new SpiralCanvasDashboard(hudContainer, view, {
             gamma: 0.85,
         },
     },
+    showRecorder: true,
+    snapshotFilename: "latest-frame.png",
+    onRecordingComplete: async (clip) => {
+        // implement uploadBlobToS3 to push the recording to your backend
+        await uploadBlobToS3(clip);
+    },
 });
 
 view.start();
@@ -81,3 +87,37 @@ The dashboard ships lightweight glassmorphism-inspired defaults, can be embedded
 layout, and exposes options for supplying custom palette presets or toggling controls on
 and off. Since it only depends on `SpiralCanvasView`, it can be further wrapped inside
 framework components as needed.
+
+### Frame capture and recording
+
+`SpiralCanvasView` now exposes helpers for exporting the currently rendered frame:
+
+```ts
+const pixels = view.capturePixels({ applyPalette: true }); // Uint8ClampedArray copy
+const pngBlob = await view.toBlob("image/png");
+const dataUrl = view.toDataURL("image/webp", 0.9);
+const bitmap = await view.toImageBitmap();
+const stream = view.createCaptureStream(60); // MediaStream for WebRTC/recording
+```
+
+For time-based captures hook the new `types/canvas-recorder.ts` helper. It wraps the
+browser's `MediaRecorder` and automatically wires it to the canvas capture stream:
+
+```ts
+import { SpiralCanvasRecorder } from "./canvas-recorder";
+
+const recorder = new SpiralCanvasRecorder(view, {
+    mimeType: "video/webm;codecs=vp9",
+    videoBitsPerSecond: 6_000_000,
+});
+
+recorder.start();
+
+// ... wait for a few seconds ...
+const clip = await recorder.stop();
+```
+
+The vanilla dashboard exposes snapshot/recording buttons out of the box. Provide
+`snapshotFilename`, `onSnapshot`, or `onRecordingComplete` callbacks to integrate the
+capture workflow with your own UX (e.g. uploading to a backend or pushing into a React
+state store).
