@@ -120,7 +120,7 @@ fn base_score_amg(c: &Choice, alpha: f32) -> f32 {
 }
 
 // Placeholder SoftRule source (replace with project-specific SpiralK wiring).
-fn soft_rules_from_spiralk(_rows: usize, _cols: usize, _nnz: usize, _sg: bool) -> Vec<st_logic::SoftRule> {
+fn soft_rules_from_spiralk(rows: usize, cols: usize, nnz: usize, subgroup: bool) -> Vec<st_logic::SoftRule> {
     use st_logic::SoftRule;
     const WG128: &str = "wg=128";
     const WG256: &str = "wg=256";
@@ -264,7 +264,7 @@ pub fn choose(rows: usize, cols: usize, nnz: usize, subgroup: bool) -> Choice {
     let beam_k = std::env::var("SPIRAL_BEAM_K").ok().and_then(|s| s.parse::<usize>().ok());
     let cfg = SolveCfg { noise: 0.02, seed: 0x5u64, beam: beam_k, soft_mode: soft_mode };
 
-    let mut soft = soft_rules_from_spiralk(rows, cols, nnz, subgroup);
+    let soft = soft_rules_from_spiralk(rows, cols, nnz, subgroup);
     
     // Blend in bandit weights when the feature is enabled.
     #[cfg(feature = "learn_store")]

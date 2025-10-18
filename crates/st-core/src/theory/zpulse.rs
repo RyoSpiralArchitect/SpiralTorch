@@ -6,6 +6,7 @@
 //! Canonical Z-space pulse and a minimal, test-complete conductor.
 
 use rustc_hash::FxHashMap;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -20,6 +21,157 @@ pub enum ZSource {
     RealGrad,
     Other(&'static str),
 }
+
+impl ZSupport {
+    /// Creates a new support triplet, clamping each component to be finite and non-negative.
+    pub fn new(leading: f32, central: f32, trailing: f32) -> Self {
+        Self {
+            leading: leading.max(0.0).finite_or_zero(),
+            central: central.max(0.0).finite_or_zero(),
+            trailing: trailing.max(0.0).finite_or_zero(),
+        }
+    }
+
+    /// Builds a support triplet straight from an Above/Here/Beneath energy tuple.
+    pub fn from_band_energy(bands: (f32, f32, f32)) -> Self {
+        Self::new(bands.0, bands.1, bands.2)
+    }
+
+    /// Returns the total perimeter mass supporting the pulse.
+    pub fn total(&self) -> f32 {
+        self.leading + self.central + self.trailing
+    }
+
+    /// Returns `true` when all support components vanish.
+    pub fn is_empty(&self) -> bool {
+        self.leading <= f32::EPSILON
+            && self.central <= f32::EPSILON
+            && self.trailing <= f32::EPSILON
+    }
+}
+
+impl Default for ZSupport {
+    fn default() -> Self {
+        Self {
+            leading: 0.0,
+            central: 0.0,
+            trailing: 0.0,
+        }
+    }
+}
+
+/// Identifies the physical radius and its logarithmic coordinate backing a
+/// Z-space probe.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZScale {
+    /// Physical probe radius measured in the same units as the lattice spacing.
+    pub physical_radius: f32,
+    /// Logarithmic scale coordinate `z = log(physical_radius)`.
+    pub log_radius: f32,
+}
+
+impl ZScale {
+    /// Creates a scale tag from a physical radius, rejecting non-finite or
+    /// non-positive values.
+    pub fn new(physical_radius: f32) -> Option<Self> {
+        if !physical_radius.is_finite() || physical_radius <= 0.0 {
+            return None;
+        }
+        Some(Self {
+            physical_radius,
+            log_radius: physical_radius.ln(),
+        })
+    }
+
+    /// Creates a scale tag from a logarithmic radius.
+    pub fn from_log(log_radius: f32) -> Option<Self> {
+        let physical_radius = log_radius.exp();
+        if !physical_radius.is_finite() || physical_radius <= 0.0 {
+            return None;
+        }
+        Some(Self {
+            physical_radius,
+            log_radius,
+        })
+    }
+
+    /// Computes the support-weighted average of the provided scales.
+    pub fn weighted_average<I>(iter: I) -> Option<Self>
+    where
+        I: IntoIterator<Item = (ZScale, f32)>,
+    {
+        let mut physical_sum = 0.0f32;
+        let mut log_sum = 0.0f32;
+        let mut weight_sum = 0.0f32;
+        for (scale, weight) in iter.into_iter() {
+            if !weight.is_finite() || weight <= 0.0 {
+                continue;
+            }
+            physical_sum += scale.physical_radius * weight;
+            log_sum += scale.log_radius * weight;
+            weight_sum += weight;
+        }
+        if weight_sum <= f32::EPSILON {
+            return None;
+        }
+        Some(Self {
+            physical_radius: physical_sum / weight_sum,
+            log_radius: log_sum / weight_sum,
+        })
+    }
+
+    /// Linearly interpolates between two scale tags.
+    pub fn lerp(self, other: ZScale, alpha: f32) -> ZScale {
+        let alpha = alpha.clamp(0.0, 1.0);
+        if alpha <= f32::EPSILON {
+            return self;
+        }
+        if (1.0 - alpha) <= f32::EPSILON {
+            return other;
+        }
+        let beta = 1.0 - alpha;
+        ZScale {
+            physical_radius: self.physical_radius * beta + other.physical_radius * alpha,
+            log_radius: self.log_radius * beta + other.log_radius * alpha,
+        }
+    }
+}
+
+trait FiniteClamp {
+    fn finite_or_zero(self) -> f32;
+}
+
+impl FiniteClamp for f32 {
+    fn finite_or_zero(self) -> f32 {
+        if self.is_finite() {
+            self
+        } else {
+            0.0
+        }
+    }
+}
+
+fn source_lookup_key(source: &ZSource) -> Cow<'static, str> {
+    match source {
+        ZSource::Microlocal => Cow::Borrowed("microlocal"),
+        ZSource::Maxwell => Cow::Borrowed("maxwell"),
+        ZSource::RealGrad => Cow::Borrowed("realgrad"),
+        ZSource::Desire => Cow::Borrowed("desire"),
+        ZSource::External(name) | ZSource::Other(name) => Cow::Borrowed(name),
+    }
+}
+
+/// Identifies a source capable of emitting [`ZPulse`] records.
+pub trait ZEmitter {
+    /// Returns the canonical source identifier for pulses emitted by this
+    /// implementation.
+    fn name(&self) -> ZSource;
+
+    /// Advances the emitter one step and returns the next available pulse, if
+    /// any. Implementations may return more than one pulse per call by keeping
+    /// an internal queue; [`ZRegistry::gather`] will keep polling the emitter
+    /// until it reports `None`.
+    fn tick(&mut self, now: u64) -> Option<ZPulse>;
 
 impl Default for ZSource {
     fn default() -> Self {
@@ -76,6 +228,7 @@ pub struct ZPulse {
     pub drift: f32,
     pub z_bias: f32,
     pub support: ZSupport,
+    pub scale: Option<ZScale>,
     pub quality: f32,
     pub stderr: f32,
     pub latency_ms: f32,
@@ -112,6 +265,7 @@ impl Default for ZPulse {
             drift: 0.0,
             z_bias: 0.0,
             support: ZSupport::default(),
+            scale: None,
             quality: 0.0,
             stderr: 0.0,
             latency_ms: 0.0,

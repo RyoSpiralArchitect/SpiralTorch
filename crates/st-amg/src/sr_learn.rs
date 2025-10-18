@@ -87,7 +87,7 @@ pub fn maybe_append_soft(rule_expr: &str) {
 }
 
 fn label_for(idx: usize) -> char {
-    ((b'A' + (idx as u8)) as char)
+    (b'A' + (idx as u8)) as char
 }
 
 fn log_roundtable(

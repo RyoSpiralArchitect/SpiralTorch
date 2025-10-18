@@ -36,8 +36,8 @@
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZRegistry, ZSource,
-    ZSupport,
+    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZRegistry, ZScale,
+    ZSource, ZSupport,
 };
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
@@ -417,6 +417,7 @@ impl InterfaceZLift {
             support: boundary_mass,
             interface_cells,
             band_energy: (above, here, beneath),
+            scale: ZScale::new(signature.physical_radius),
             drift,
             z_bias,
             source: ZSource::Microlocal,
@@ -440,6 +441,8 @@ pub struct InterfaceZPulse {
     pub interface_cells: f32,
     /// Above/Here/Beneath energy split produced during projection.
     pub band_energy: (f32, f32, f32),
+    /// Log-scale tag describing the physical radius backing the pulse.
+    pub scale: Option<ZScale>,
     /// Signed drift between Above and Beneath energy.
     pub drift: f32,
     /// Signed Z bias generated after enriching the drift.
@@ -564,10 +567,18 @@ impl InterfaceZPulse {
             None
         };
 
+        let scale = ZScale::weighted_average(pulses.iter().filter_map(|pulse| {
+            pulse.scale.map(|scale| {
+                let weight = pulse.support.max(pulse.total_energy()).max(f32::EPSILON);
+                (scale, weight)
+            })
+        }));
+
         InterfaceZPulse {
             support,
             interface_cells,
             band_energy: (above, here, beneath),
+            scale,
             drift,
             z_bias,
             source,
@@ -599,6 +610,12 @@ impl InterfaceZPulse {
             (None, Some(b)) => Some(b),
             (None, None) => None,
         };
+        let scale = match (current.scale, next.scale) {
+            (Some(a), Some(b)) => Some(a.lerp(b, alpha)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
         InterfaceZPulse {
             support: current.support * beta + next.support * alpha,
             interface_cells: current.interface_cells * beta + next.interface_cells * alpha,
@@ -607,6 +624,7 @@ impl InterfaceZPulse {
                 cur_here * beta + next_here * alpha,
                 cur_beneath * beta + next_beneath * alpha,
             ),
+            scale,
             drift: current.drift * beta + next.drift * alpha,
             z_bias: current.z_bias * beta + next.z_bias * alpha,
             source: if alpha >= 0.5 {
@@ -662,6 +680,7 @@ impl InterfaceZPulse {
             support: self.support * gain,
             interface_cells: self.interface_cells * gain,
             band_energy: (above * gain, here * gain, beneath * gain),
+            scale: self.scale,
             drift: self.drift * gain,
             z_bias: self.z_bias * gain,
             source: self.source,
@@ -682,6 +701,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
+            scale: None,
             drift: 0.0,
             z_bias: 0.0,
             source: ZSource::Microlocal,
@@ -1208,6 +1228,7 @@ impl InterfaceZConductor {
                 drift: fused.drift,
                 z_bias: z_fused.z,
                 support: ZSupport::from_band_energy(fused.band_energy),
+                scale: fused.scale,
                 quality: z_fused.quality,
                 stderr: 0.0,
                 latency_ms: 0.0,
@@ -1248,6 +1269,7 @@ impl InterfaceZConductor {
             drift: fused.drift,
             z_bias: fused.z_bias,
             support,
+            scale: fused.scale,
             band_energy: fused.band_energy,
             quality,
             stderr: fused.standard_error.unwrap_or_default(),
