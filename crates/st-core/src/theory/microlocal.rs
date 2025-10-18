@@ -35,7 +35,10 @@
 //! field together with signed curvature when a phase label is supplied.
 
 use crate::telemetry::hub::SoftlogicZFeedback;
-use crate::theory::zpulse::{ZConductor, ZEmitter, ZPulse, ZRegistry, ZSource, ZSupport};
+use crate::theory::zpulse::{
+    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZRegistry, ZSource,
+    ZSupport,
+};
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
@@ -692,17 +695,21 @@ impl Default for InterfaceZPulse {
     }
 }
 
-/// Z-space fusion summary combining the conductor output with a canonical pulse.
-#[derive(Debug, Clone)]
+/// Fused Z-space report emitted by the conductor.
+#[derive(Clone, Debug)]
 pub struct InterfaceZFused {
-    pub pulse: ZPulse,
+    pub ts: u64,
     pub z: f32,
-    pub attributions: Vec<(ZSource, f32)>,
+    pub support: f32,
+    pub drift: f32,
+    pub quality: f32,
     pub events: Vec<String>,
+    pub attributions: Vec<(ZSource, f32)>,
+    pub pulse: ZPulse,
 }
 
-/// Result emitted after executing one conductor step.
-#[derive(Debug, Clone)]
+/// Aggregate outcome of a full conductor step across all gauges.
+#[derive(Clone, Debug)]
 pub struct InterfaceZReport {
     pub pulses: Vec<InterfaceZPulse>,
     pub qualities: Vec<f32>,
@@ -713,9 +720,14 @@ pub struct InterfaceZReport {
 }
 
 impl InterfaceZReport {
-    /// Returns `true` when any of the contributing gauges detected an interface.
+    /// Returns `true` when at least one contributing pulse carried interface mass.
     pub fn has_interface(&self) -> bool {
-        self.pulses.iter().any(|pulse| !pulse.is_empty())
+        if self.fused_pulse.support > 0.0 {
+            return true;
+        }
+        self.pulses
+            .iter()
+            .any(|pulse| pulse.support > 0.0 || pulse.interface_cells > 0.0)
     }
 }
 
@@ -981,16 +993,19 @@ impl BudgetPolicy {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Default)]
 struct MicrolocalEmitter {
     queue: Arc<Mutex<VecDeque<ZPulse>>>,
 }
 
 impl MicrolocalEmitter {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self::default()
     }
 
+    #[allow(dead_code)]
     fn extend<I>(&self, pulses: I)
     where
         I: IntoIterator<Item = ZPulse>,
@@ -1034,6 +1049,12 @@ pub struct InterfaceZConductor {
     lift: InterfaceZLift,
     conductor: ZConductor,
     clock: u64,
+    smoothing: f32,
+    policy: Arc<dyn ZSourcePolicy>,
+    band_policy: Option<BandPolicy>,
+    budget_policy: Option<BudgetPolicy>,
+    previous: Option<InterfaceZPulse>,
+    carry: Option<InterfaceZPulse>,
     emitter: MicrolocalEmitter,
     smoothing: f32,
     policy: Arc<dyn ZSourcePolicy>,
@@ -1048,11 +1069,18 @@ impl InterfaceZConductor {
     pub fn new(gauges: Vec<InterfaceGauge>, lift: InterfaceZLift) -> Self {
         assert!(!gauges.is_empty(), "at least one gauge must be supplied");
         let emitter = MicrolocalEmitter::new();
+        let policy: Arc<dyn ZSourcePolicy> = Arc::new(DefaultZSourcePolicy::new());
         InterfaceZConductor {
             gauges,
             lift,
             conductor: ZConductor::default(),
             clock: 0,
+            smoothing: 0.0,
+            policy,
+            band_policy: None,
+            budget_policy: None,
+            previous: None,
+            carry: None,
             emitter,
             smoothing: 0.0,
             policy: Arc::new(DefaultZSourcePolicy::new()),
@@ -1122,16 +1150,31 @@ impl InterfaceZConductor {
         }
 
         let mut fused = InterfaceZPulse::aggregate(&weighted);
-        let mut events = Vec::new();
+        let mut smoothing_events = Vec::new();
         if let (Some(previous), smoothing) = (self.previous.as_ref(), self.smoothing) {
             if smoothing > 0.0 {
                 fused = InterfaceZPulse::lerp(previous, &fused, smoothing);
-                events.push("smoothing.applied".to_string());
+                smoothing_events.push("smoothing.applied".to_string());
             }
         }
 
         let now = ts.unwrap_or(self.clock);
         self.clock = now.wrapping_add(1);
+        let now = if let Some(ts) = ts {
+            self.clock = ts.wrapping_add(1);
+            ts
+        } else {
+            let current = self.clock;
+            self.clock = self.clock.wrapping_add(1);
+            current
+        };
+        if fused_raw.z_bias.abs() > f32::EPSILON
+            && fused.z_bias.signum() != fused_raw.z_bias.signum()
+        {
+            fused.z_bias = fused_raw.z_bias * self.smoothing;
+        }
+        let now = self.clock;
+        self.clock = self.clock.wrapping_add(1);
 
         let zpulses: Vec<ZPulse> = pulses
             .iter()
@@ -1139,6 +1182,10 @@ impl InterfaceZConductor {
                 source: pulse.source,
                 ts: now,
                 tempo: tempo.unwrap_or(pulse.total_energy()),
+                band_energy: pulse.band_energy,
+                drift: pulse.drift,
+                z_bias: pulse.z_bias,
+                support: ZSupport::from_band_energy(pulse.band_energy),
                 band_energy: pulse.band_energy,
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
@@ -1166,7 +1213,34 @@ impl InterfaceZConductor {
 
         let mut fused_events = events;
         fused_events.extend(z_fused.events.clone());
+        let feedback = fused.clone().into_softlogic_feedback();
+        self.carry = Some(fused.clone());
+        self.previous = Some(fused.clone());
 
+        let mut fused_events = events;
+        fused_events.extend(z_fused.events.clone());
+
+        let avg_quality = if qualities.is_empty() {
+            0.0
+        } else {
+            qualities.iter().copied().sum::<f32>() / qualities.len() as f32
+        };
+
+        let z_pulse = ZPulse {
+            source: ZSource::Microlocal,
+            ts: now,
+            tempo: tempo_hint,
+            band_energy: fused.band_energy,
+            drift: fused.drift,
+            z_bias: fused.z_bias,
+            support: ZSupport::from(fused.band_energy),
+            quality: avg_quality,
+            stderr: fused.standard_error.unwrap_or(0.0),
+            latency_ms: 0.0,
+        };
+
+        let mut events = fused_state.events.clone();
+        events.extend(smoothing_events);
         let fused_z = InterfaceZFused {
             pulse: ZPulse {
                 source: ZSource::Microlocal,
@@ -1199,6 +1273,32 @@ impl InterfaceZConductor {
     pub fn last_fused_pulse(&self) -> InterfaceZPulse {
         self.carry.clone().unwrap_or_else(InterfaceZPulse::default)
     }
+
+    fn into_zpulse(fused: &InterfaceZPulse, now: u64, qualities: &[f32]) -> ZPulse {
+        let (above, here, beneath) = fused.band_energy;
+        let support = ZSupport {
+            leading: above,
+            central: here,
+            trailing: beneath,
+        };
+        let quality = if qualities.is_empty() {
+            1.0
+        } else {
+            qualities.iter().copied().sum::<f32>() / qualities.len() as f32
+        };
+        ZPulse {
+            source: fused.source,
+            ts: now,
+            tempo: fused.total_energy(),
+            drift: fused.drift,
+            z_bias: fused.z_bias,
+            support,
+            band_energy: fused.band_energy,
+            quality,
+            stderr: fused.standard_error.unwrap_or_default(),
+            latency_ms: 0.0,
+        }
+    }
 }
 
 impl fmt::Debug for InterfaceZConductor {
@@ -1207,6 +1307,7 @@ impl fmt::Debug for InterfaceZConductor {
             .field("gauges", &self.gauges)
             .field("lift", &self.lift)
             .field("smoothing", &self.smoothing)
+            .field("clock", &self.clock)
             .field("band_policy", &self.band_policy)
             .field("budget_policy", &self.budget_policy)
             .field("previous", &self.previous)

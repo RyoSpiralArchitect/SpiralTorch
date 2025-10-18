@@ -147,6 +147,11 @@ const session = new SpiralCanvasCollabSession(view, {
     pointerRateHz: 30,
     telemetry: (event) => console.debug("collab", event),
     attributionSink: (sample) => conductor.step(sample), // pipe into your ZConductor
+    rolePolicies: {
+        trainer: { canPatch: true, canState: true, rateLimitHz: 30, gain: 1.2 },
+        model: { canPatch: false, canState: true, gain: 0.4 },
+    },
+    defaultRolePolicy: { canPatch: true, canState: true, rateLimitHz: 10, gain: 0.7 },
 });
 
 // Surface shared presence, last input timestamps, and pointer motions inside the HUD.
@@ -169,5 +174,9 @@ wire it into dashboards without special casing. The session emits presence heart
 1 Hz, records join/leave/suppression events via the optional `telemetry` hook, and pipes
 every patch (local or remote) through the `attributionSink` so it can be fused straight
 into your `ZConductor` dashboards. Each message carries schema version tags, participant
-metadata, and size guards, making it straightforward to colour-code the HUD or enforce
-your own policies on top of the symmetric default.
+metadata (including the resolved `gain` for each participant), and size guards, making it
+straightforward to colour-code the HUD or enforce your own policies on top of the
+symmetric default. Declarative `rolePolicies` let you switch individual roles between
+read-only, bursty, or high-authority modes: the token bucket honours the narrowest
+`rateLimitHz`, the optional `gain` flows through to attribution samples, and the telemetry
+hook reports `policy-blocked` events whenever a disallowed patch/state arrives.

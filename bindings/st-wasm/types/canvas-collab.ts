@@ -50,6 +50,7 @@ export interface CanvasCollabParticipantState extends CanvasCollabParticipant {
     state: CanvasCollabState;
     lastSeen: number;
     lastPointer?: CanvasPointerEvent;
+    gain?: number | null;
 }
 
 export interface CanvasCollabEventMap {
@@ -73,6 +74,7 @@ export type CollabTelemetryEvent =
     | { type: "latency-suppressed"; participantId: string; clock: number }
     | { type: "budget-suppressed"; participantId: string; remainingBudget: number }
     | { type: "conflict-resolved"; participantId: string; field: keyof CanvasCollabState }
+    | { type: "policy-blocked"; participantId: string; reason: string }
     | { type: "degraded"; reason: string }
     | { type: "presence"; participants: number }
     | { type: "pointer"; participantId: string }
@@ -86,6 +88,14 @@ export interface CollabPatchAttributionEvent {
     patch: Partial<CanvasCollabState>;
     origin: "local" | "remote";
     clock: number;
+    gain?: number | null;
+}
+
+export interface CollabRolePolicy {
+    canPatch?: boolean;
+    canState?: boolean;
+    rateLimitHz?: number | null;
+    gain?: number | null;
 }
 
 type CollabTransportKind = "broadcast" | "storage";
@@ -107,6 +117,8 @@ export interface SpiralCanvasCollabOptions {
     maxMessageBytes?: number;
     telemetry?: CollabTelemetrySink;
     attributionSink?: (event: CollabPatchAttributionEvent) => void;
+    rolePolicies?: Partial<Record<CanvasCollabRole, CollabRolePolicy>>;
+    defaultRolePolicy?: CollabRolePolicy;
 }
 
 interface CollabMessageBase {
@@ -159,6 +171,36 @@ interface CollabEnvelope {
 
 type EventHandler<T> = (event: T) => void;
 
+interface ResolvedRolePolicy {
+    canPatch: boolean;
+    canState: boolean;
+    rateLimitHz: number | null;
+    gain: number | null;
+}
+
+const DEFAULT_ROLE_POLICY: ResolvedRolePolicy = {
+    canPatch: true,
+    canState: true,
+    rateLimitHz: null,
+    gain: null,
+};
+
+function normalizeRolePolicy(policy?: CollabRolePolicy | null): ResolvedRolePolicy {
+    if (!policy) {
+        return { ...DEFAULT_ROLE_POLICY };
+    }
+    const rate =
+        typeof policy.rateLimitHz === "number" && Number.isFinite(policy.rateLimitHz) && policy.rateLimitHz > 0
+            ? policy.rateLimitHz
+            : null;
+    return {
+        canPatch: policy.canPatch ?? true,
+        canState: policy.canState ?? true,
+        rateLimitHz: rate,
+        gain: typeof policy.gain === "number" && Number.isFinite(policy.gain) ? policy.gain : null,
+    };
+}
+
 class EventDispatcher<Events extends Record<string, unknown>> {
     readonly #listeners = new Map<keyof Events, Set<EventHandler<any>>>();
 
@@ -185,6 +227,7 @@ class EventDispatcher<Events extends Record<string, unknown>> {
 interface ParticipantRecord {
     info: CanvasCollabParticipantState;
     clock: number;
+    policy: ResolvedRolePolicy;
 }
 
 function generateId(): string {
@@ -539,6 +582,7 @@ export class SpiralCanvasCollabSession {
     #pendingFullSync = false;
     #batchTimer: ReturnType<typeof setTimeout> | null = null;
 
+    #basePatchRateHz: number;
     #patchRateHz: number;
     #patchAllowance: number;
     #lastPatchRefill: number;
@@ -549,6 +593,8 @@ export class SpiralCanvasCollabSession {
     #maxMessageBytes: number;
     #telemetry?: CollabTelemetrySink;
     #attributionSink?: (event: CollabPatchAttributionEvent) => void;
+    #rolePolicyByRole = new Map<string, ResolvedRolePolicy>();
+    #defaultRolePolicy: ResolvedRolePolicy = { ...DEFAULT_ROLE_POLICY };
 
     constructor(view: SpiralCanvasView, options: SpiralCanvasCollabOptions) {
         this.#view = view;
@@ -556,9 +602,21 @@ export class SpiralCanvasCollabSession {
         this.#sharePointer = options.sharePointer ?? true;
         this.#telemetry = options.telemetry;
         this.#attributionSink = options.attributionSink;
+        if (options.defaultRolePolicy) {
+            this.#defaultRolePolicy = normalizeRolePolicy(options.defaultRolePolicy);
+        }
+        if (options.rolePolicies) {
+            for (const [role, policy] of Object.entries(options.rolePolicies)) {
+                if (!policy) {
+                    continue;
+                }
+                this.#rolePolicyByRole.set(role, normalizeRolePolicy(policy));
+            }
+        }
         const pointerRateHz = Math.max(options.pointerRateHz ?? COLLAB_DEFAULT_POINTER_RATE_HZ, 1);
         this.#pointerMinInterval = 1_000 / pointerRateHz;
-        this.#patchRateHz = Math.max(options.patchRateHz ?? COLLAB_DEFAULT_PATCH_RATE_HZ, 0);
+        this.#basePatchRateHz = Math.max(options.patchRateHz ?? COLLAB_DEFAULT_PATCH_RATE_HZ, 0);
+        this.#patchRateHz = this.#basePatchRateHz;
         this.#patchAllowance = this.#patchRateHz;
         this.#lastPatchRefill = nowMillis();
         this.#presenceIntervalMs = Math.max(options.presenceIntervalMs ?? COLLAB_DEFAULT_PRESENCE_INTERVAL_MS, 250);
@@ -577,7 +635,10 @@ export class SpiralCanvasCollabSession {
             state: initialState,
             lastSeen: Date.now(),
         };
-        this.#participants.set(participantId, { info: participantState, clock: 0 });
+        const localPolicy = this.#resolvePolicyForRole(participantState.role);
+        participantState.gain = localPolicy.gain;
+        this.#participants.set(participantId, { info: participantState, clock: 0, policy: localPolicy });
+        this.#applyLocalPolicy(localPolicy);
         this.#emitTelemetry({ type: "join", participant: this.#cloneParticipant(participantState) });
 
         this.#wrapViewMethod("setZoom");
@@ -722,8 +783,40 @@ export class SpiralCanvasCollabSession {
             color: participant.color,
             state: cloneState(participant.state),
             lastSeen: participant.lastSeen,
+            gain: participant.gain ?? null,
             lastPointer: participant.lastPointer ? { ...participant.lastPointer, offset: { ...participant.lastPointer.offset } } : undefined,
         };
+    }
+
+    #resolvePolicyForRole(role: CanvasCollabRole): ResolvedRolePolicy {
+        const template = this.#rolePolicyByRole.get(role) ?? this.#defaultRolePolicy;
+        return { ...template };
+    }
+
+    #refreshRecordPolicy(record: ParticipantRecord, role: CanvasCollabRole): void {
+        record.policy = this.#resolvePolicyForRole(role);
+        record.info.gain = record.policy.gain;
+        if (record.info.id === this.#participantId) {
+            this.#applyLocalPolicy(record.policy);
+        }
+    }
+
+    #applyLocalPolicy(policy: ResolvedRolePolicy): void {
+        const limit = policy.rateLimitHz;
+        const nextRate = limit !== null ? Math.max(0, Math.min(this.#basePatchRateHz, limit)) : this.#basePatchRateHz;
+        this.#patchRateHz = nextRate;
+        if (this.#patchRateHz <= 0) {
+            this.#patchAllowance = 0;
+        } else if (!Number.isFinite(this.#patchAllowance) || this.#patchAllowance > this.#patchRateHz) {
+            this.#patchAllowance = this.#patchRateHz;
+        }
+        this.#lastPatchRefill = nowMillis();
+        if (!policy.canPatch) {
+            this.#pendingPatch = null;
+        }
+        if (!policy.canState) {
+            this.#pendingFullSync = false;
+        }
     }
 
     #channelName(): string {
@@ -809,6 +902,18 @@ export class SpiralCanvasCollabSession {
         if (this.#destroyed) {
             return;
         }
+        const record = this.#participants.get(this.#participantId);
+        if (!record) {
+            return;
+        }
+        if (patch && !record.policy.canPatch) {
+            this.#emitTelemetry({ type: "policy-blocked", participantId: this.#participantId, reason: "patch-disabled" });
+            return;
+        }
+        if (!patch && !record.policy.canState) {
+            this.#emitTelemetry({ type: "policy-blocked", participantId: this.#participantId, reason: "state-disabled" });
+            return;
+        }
         const base = this.#lastState ?? this.#snapshotState();
         const next = patch ? mergeState(base, patch) : this.#snapshotState();
         if (statesEqual(this.#lastState, next)) {
@@ -816,15 +921,10 @@ export class SpiralCanvasCollabSession {
         }
         const clonedNext = cloneState(next);
         this.#lastState = clonedNext;
-        const record = this.#participants.get(this.#participantId);
-        if (record) {
-            record.info.state = cloneState(clonedNext);
-            record.info.lastSeen = Date.now();
-        }
+        record.info.state = cloneState(clonedNext);
+        record.info.lastSeen = Date.now();
         const clock = this.#tick();
-        if (record) {
-            record.clock = clock;
-        }
+        record.clock = clock;
         const diff: Partial<CanvasCollabState> = patch ? mergePatches(null, patch) : cloneState(clonedNext);
         if (this.#transport) {
             this.#postMessage({
@@ -836,12 +936,8 @@ export class SpiralCanvasCollabSession {
                 full: !patch,
             });
         }
-        if (record) {
-            this.#recordAttribution("local", record.info, diff, clock);
-        }
-        if (record) {
-            this.#emitState("local", record.info);
-        }
+        this.#recordAttribution("local", record.info, diff, clock, record.policy);
+        this.#emitState("local", record.info);
         this.#emitParticipants();
     }
 
@@ -939,12 +1035,22 @@ export class SpiralCanvasCollabSession {
         if (this.#destroyed) {
             return;
         }
+        const record = this.#participants.get(this.#participantId);
+        if (!record || !record.policy.canPatch) {
+            this.#emitTelemetry({ type: "policy-blocked", participantId: this.#participantId, reason: "patch-disabled" });
+            return;
+        }
         this.#pendingPatch = mergePatches(this.#pendingPatch, patch);
         this.#scheduleBatch();
     }
 
     #enqueueFullSync(): void {
         if (this.#destroyed) {
+            return;
+        }
+        const record = this.#participants.get(this.#participantId);
+        if (!record || !record.policy.canState) {
+            this.#emitTelemetry({ type: "policy-blocked", participantId: this.#participantId, reason: "state-disabled" });
             return;
         }
         this.#pendingFullSync = true;
@@ -1042,6 +1148,7 @@ export class SpiralCanvasCollabSession {
         participant: CanvasCollabParticipantState,
         patch: Partial<CanvasCollabState>,
         clock: number,
+        policy: ResolvedRolePolicy,
     ): void {
         if (!this.#attributionSink) {
             return;
@@ -1052,6 +1159,7 @@ export class SpiralCanvasCollabSession {
             patch: clonedPatch,
             origin,
             clock,
+            gain: policy.gain,
         });
     }
 
@@ -1082,17 +1190,30 @@ export class SpiralCanvasCollabSession {
         const { record } = result;
         switch (message.type) {
             case "hello": {
+                if (!record.policy.canState) {
+                    record.clock = Math.max(record.clock, message.clock);
+                    record.info.lastSeen = Date.now();
+                    this.#emitTelemetry({ type: "policy-blocked", participantId: record.info.id, reason: "state-disabled" });
+                    this.#enqueueFullSync();
+                    break;
+                }
                 if (message.clock > record.clock) {
                     record.clock = message.clock;
                     record.info.state = cloneState(message.state);
                     this.#applyRemoteState(record, message.state);
-                    this.#recordAttribution("remote", record.info, message.state, message.clock);
+                    this.#recordAttribution("remote", record.info, message.state, message.clock, record.policy);
                     this.#emitState("remote", record.info);
                 }
                 this.#enqueueFullSync();
                 break;
             }
             case "state": {
+                if (!record.policy.canPatch) {
+                    record.clock = Math.max(record.clock, message.clock);
+                    record.info.lastSeen = Date.now();
+                    this.#emitTelemetry({ type: "policy-blocked", participantId: record.info.id, reason: "patch-disabled" });
+                    break;
+                }
                 if (message.clock <= record.clock) {
                     this.#emitTelemetry({ type: "latency-suppressed", participantId: record.info.id, clock: message.clock });
                     break;
@@ -1110,7 +1231,7 @@ export class SpiralCanvasCollabSession {
                     };
                 }
                 this.#applyRemoteState(record, merged);
-                this.#recordAttribution("remote", record.info, message.state, message.clock);
+                this.#recordAttribution("remote", record.info, message.state, message.clock, record.policy);
                 this.#emitState("remote", record.info);
                 break;
             }
@@ -1153,6 +1274,7 @@ export class SpiralCanvasCollabSession {
             if (existing) {
                 existing.info.role = entry.role;
                 existing.info.lastSeen = entry.lastSeen ?? now;
+                this.#refreshRecordPolicy(existing, entry.role);
             } else {
                 const placeholderState = this.#lastState ? cloneState(this.#lastState) : this.#snapshotState();
                 const info: CanvasCollabParticipantState = {
@@ -1161,7 +1283,9 @@ export class SpiralCanvasCollabSession {
                     state: placeholderState,
                     lastSeen: entry.lastSeen ?? now,
                 };
-                this.#participants.set(entry.id, { info, clock: 0 });
+                const policy = this.#resolvePolicyForRole(entry.role);
+                info.gain = policy.gain;
+                this.#participants.set(entry.id, { info, clock: 0, policy });
                 this.#emitTelemetry({ type: "join", participant: this.#cloneParticipant(info) });
             }
         });
@@ -1201,6 +1325,8 @@ export class SpiralCanvasCollabSession {
             existing.info.label = message.participant.label;
             existing.info.color = message.participant.color;
             existing.info.lastSeen = now;
+            this.#refreshRecordPolicy(existing, message.participant.role);
+            existing.info.gain = existing.policy.gain;
             return { record: existing, created: false };
         }
         const placeholderState = this.#lastState ? cloneState(this.#lastState) : this.#snapshotState();
@@ -1212,7 +1338,9 @@ export class SpiralCanvasCollabSession {
             state: placeholderState,
             lastSeen: now,
         };
-        const record: ParticipantRecord = { info, clock: message.clock };
+        const policy = this.#resolvePolicyForRole(info.role);
+        info.gain = policy.gain;
+        const record: ParticipantRecord = { info, clock: message.clock, policy };
         this.#participants.set(message.id, record);
         this.#emitTelemetry({ type: "join", participant: this.#cloneParticipant(info) });
         return { record, created: true };
