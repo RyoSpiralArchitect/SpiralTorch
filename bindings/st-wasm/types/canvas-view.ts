@@ -248,6 +248,7 @@ export class SpiralCanvasView {
     #destroyed = false;
 
     #pointerActive = false;
+    #pointerCleanup: (() => void) | null = null;
 
     constructor(canvas: HTMLCanvasElement, fractal: FractalCanvas, options: SpiralCanvasViewOptions = {}) {
         if (!canvas) {
@@ -321,6 +322,36 @@ export class SpiralCanvasView {
         return this.#offset;
     }
 
+    /** Returns the minimum zoom constraint. */
+    get minZoom(): number {
+        return this.#minZoom;
+    }
+
+    /** Returns the maximum zoom constraint. */
+    get maxZoom(): number {
+        return this.#maxZoom;
+    }
+
+    /** Returns the device pixel ratio applied when sizing the canvas backing store. */
+    get devicePixelRatio(): number {
+        return this.#devicePixelRatio;
+    }
+
+    /** Returns the curvature used when sampling statistics. */
+    get statsCurvature(): number {
+        return this.#statsCurvature;
+    }
+
+    /** Returns the sampling interval (in milliseconds) for statistics events. */
+    get statsInterval(): number {
+        return this.#statsInterval;
+    }
+
+    /** Indicates whether pointer navigation is enabled. */
+    get pointerNavigationEnabled(): boolean {
+        return this.#pointerNavigation;
+    }
+
     on<K extends keyof CanvasViewEventMap>(type: K, handler: EventHandler<CanvasViewEventMap[K]>): void {
         this.#events.on(type, handler);
     }
@@ -384,6 +415,58 @@ export class SpiralCanvasView {
      */
     setPalette(palette: CanvasPaletteName | CustomPalette): void {
         this.#palette = this.#resolvePalette(palette);
+        this.invalidate();
+    }
+
+    /** Adjusts the curvature used when sampling statistics. */
+    setStatsCurvature(curvature: number): void {
+        if (!Number.isFinite(curvature)) {
+            throw new Error("stats curvature must be a finite number");
+        }
+        if (curvature === this.#statsCurvature) {
+            return;
+        }
+        this.#statsCurvature = curvature;
+        this.#lastStatsTime = 0;
+    }
+
+    /** Updates the stats sampling interval (milliseconds). */
+    setStatsInterval(interval: number): void {
+        if (!Number.isFinite(interval)) {
+            throw new Error("stats interval must be a finite number");
+        }
+        const clamped = Math.max(0, interval);
+        if (clamped === this.#statsInterval) {
+            return;
+        }
+        this.#statsInterval = clamped;
+        this.#lastStatsTime = 0;
+    }
+
+    /** Enables or disables pointer navigation support. */
+    setPointerNavigation(enabled: boolean): void {
+        if (enabled === this.#pointerNavigation) {
+            return;
+        }
+        this.#pointerNavigation = enabled;
+        if (enabled) {
+            this.#attachPointerNavigation();
+        } else {
+            this.#pointerActive = false;
+            this.#detachPointerNavigation();
+        }
+    }
+
+    /** Overrides the device pixel ratio and resizes the backing canvas. */
+    setDevicePixelRatio(value: number): void {
+        if (!Number.isFinite(value) || value <= 0) {
+            throw new Error("devicePixelRatio must be a positive finite number");
+        }
+        if (value === this.#devicePixelRatio) {
+            return;
+        }
+        this.#devicePixelRatio = value;
+        this.#configureCanvasSizing();
         this.invalidate();
     }
 
@@ -533,7 +616,7 @@ export class SpiralCanvasView {
     }
 
     #attachPointerNavigation(): void {
-        if (!this.#pointerNavigation || typeof window === "undefined") {
+        if (!this.#pointerNavigation || typeof window === "undefined" || this.#pointerCleanup) {
             return;
         }
         const onPointerDown = (event: PointerEvent) => {
@@ -604,8 +687,6 @@ export class SpiralCanvasView {
             this.#canvas.removeEventListener("wheel", onWheel);
         };
     }
-
-    #pointerCleanup: (() => void) | null = null;
 
     #detachPointerNavigation(): void {
         this.#pointerCleanup?.();
