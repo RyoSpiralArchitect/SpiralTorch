@@ -1051,21 +1051,21 @@ mod tests {
         let second = conductor.step(&flipped, Some(&c_prime_neg), None, None);
         let raw_second = InterfaceZPulse::aggregate(&second.pulses);
         assert!(raw_second.z_bias < 0.0);
-        assert!(second.fused_z.events.iter().any(|e| *e == "flip-held"));
+        assert!(second.fused_z.events.iter().any(|e| e == "flip-held"));
         assert!(second.fused_z.z > raw_second.z_bias);
         assert_eq!(second.feedback.band_energy, second.fused_pulse.band_energy);
 
         let second_z = second.fused_z.z;
-        let mut saw_flip_hold = second.fused_z.events.iter().any(|e| *e == "flip-held");
+        let mut saw_flip_hold = second.fused_z.events.iter().any(|e| e == "flip-held");
         let mut saw_flip = false;
         let mut went_negative = false;
         let mut last_report = second;
         for _ in 0..8 {
             let report = conductor.step(&flipped, Some(&c_prime_neg), None, None);
-            if report.fused_z.events.iter().any(|e| *e == "flip-held") {
+            if report.fused_z.events.iter().any(|e| e == "flip-held") {
                 saw_flip_hold = true;
             }
-            if report.fused_z.events.iter().any(|e| *e == "sign-flip") {
+            if report.fused_z.events.iter().any(|e| e == "sign-flip") {
                 saw_flip = true;
             }
             if report.fused_z.z < 0.0 {
