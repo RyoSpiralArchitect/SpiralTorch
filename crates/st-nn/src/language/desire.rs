@@ -4,10 +4,12 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::geometry::{ConceptHint, RepressionField, SemanticBridge, SymbolGeometry};
+use super::maxwell::NarrativeHint;
 use super::schrodinger::schrodinger_boost;
 use super::temperature::{entropy, TemperatureController};
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
+use st_core::telemetry::hub;
 use st_tensor::{
     DesireGradientControl, DesireGradientInterpretation, GradientSummary, TensorError,
 };
@@ -110,6 +112,7 @@ pub struct DesireSolution {
     pub gradient_control: DesireGradientControl,
     #[serde(default)]
     pub control_events: Vec<String>,
+    pub narrative: Option<NarrativeHint>,
 }
 
 pub struct DesireLagrangian {
@@ -132,6 +135,7 @@ pub struct DesireLagrangian {
     desire_bias: Vec<f32>,
     gradient_interpretation: DesireGradientInterpretation,
     gradient_control: DesireGradientControl,
+    active_narrative: Option<NarrativeHint>,
 }
 
 impl DesireLagrangian {
@@ -172,6 +176,7 @@ impl DesireLagrangian {
             desire_bias: vec![0.0; vocab],
             gradient_interpretation: DesireGradientInterpretation::default(),
             gradient_control: DesireGradientControl::default(),
+            active_narrative: None,
         })
     }
 
@@ -255,6 +260,22 @@ impl DesireLagrangian {
 
     pub fn phase(&self) -> DesirePhase {
         self.phase
+    }
+
+    pub fn narrative_hint(&self) -> Option<&NarrativeHint> {
+        self.active_narrative.as_ref()
+    }
+
+    pub fn set_narrative_hint(&mut self, hint: NarrativeHint) {
+        self.active_narrative = Some(hint);
+    }
+
+    pub fn set_narrative_hint_opt(&mut self, hint: Option<NarrativeHint>) {
+        self.active_narrative = hint;
+    }
+
+    pub fn clear_narrative_hint(&mut self) {
+        self.active_narrative = None;
     }
 
     pub fn step_with_scheduler(
@@ -354,7 +375,8 @@ impl DesireLagrangian {
         stabilise(&mut scores);
         let distribution = softmax(&scores);
         let entropy = entropy(&distribution);
-        let temperature = self.controller.update(&distribution);
+        let z_feedback = hub::get_softlogic_z();
+        let temperature = self.controller.update(&distribution, z_feedback.as_ref());
         self.update_tracking(phase, &active, &distribution);
         let hypergrad_penalty = self.hypergrad_penalty(phase, &active, &offsets, &distribution);
         let avoidance = self.build_report(phase);
@@ -378,6 +400,7 @@ impl DesireLagrangian {
             hypergrad_penalty,
             gradient_control: self.gradient_control,
             control_events,
+            narrative: self.active_narrative.clone(),
         })
     }
 
@@ -664,6 +687,7 @@ mod tests {
         assert_eq!(result.weights.alpha, weights.alpha);
         assert_eq!(result.phase, DesirePhase::Injection);
         assert!(result.hypergrad_penalty >= 0.0);
+        assert!(result.narrative.is_none());
     }
 
     #[test]
@@ -701,6 +725,7 @@ mod tests {
                     assert!(result.hypergrad_penalty >= 0.0);
                 }
             }
+            assert!(result.narrative.is_none());
         }
         assert!(phases.contains(&DesirePhase::Observation));
         assert!(phases.contains(&DesirePhase::Injection));

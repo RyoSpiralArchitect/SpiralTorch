@@ -34,7 +34,11 @@
 //! survives the gauge quotient, and optionally reconstructs the oriented normal
 //! field together with signed curvature when a phase label is supplied.
 
-use crate::telemetry::hub::SoftlogicZFeedback;
+use crate::coop::ai::{CoopAgent, CoopProposal};
+use crate::telemetry::hub::{self, SoftlogicZFeedback};
+use crate::theory::zpulse::{
+    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZRegistry, ZSource,
+};
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
@@ -323,6 +327,26 @@ impl InterfaceZLift {
     pub fn with_orientation_floor(mut self, floor: f32) -> Self {
         self.orientation_floor = floor.max(0.0);
         self
+    }
+
+    /// Returns the current bias gain multiplier applied to the enriched drift.
+    pub fn bias_gain(&self) -> f32 {
+        self.bias_gain
+    }
+
+    /// Overrides the bias gain used during projection.
+    pub fn set_bias_gain(&mut self, gain: f32) {
+        self.bias_gain = gain.max(0.0);
+    }
+
+    /// Returns the minimum oriented drift required before emitting bias.
+    pub fn orientation_floor(&self) -> f32 {
+        self.orientation_floor
+    }
+
+    /// Adjusts the oriented drift floor that guards the bias emission.
+    pub fn set_orientation_floor(&mut self, floor: f32) {
+        self.orientation_floor = floor.clamp(0.0, 1.0);
     }
 
     /// Returns the normalised axis used during projection.
@@ -959,6 +983,9 @@ pub struct InterfaceZConductor {
     policy: Arc<dyn ZSourcePolicy>,
     band_policy: Option<BandPolicy>,
     budget_policy: Option<BudgetPolicy>,
+    conductor: ZConductor,
+    clock: u64,
+    emitter: MicrolocalEmitter,
 }
 
 impl InterfaceZConductor {
@@ -967,6 +994,7 @@ impl InterfaceZConductor {
     /// latest measurement unless [`with_smoothing`] is invoked.
     pub fn new(gauges: Vec<InterfaceGauge>, lift: InterfaceZLift) -> Self {
         assert!(!gauges.is_empty(), "at least one gauge must be supplied");
+        let emitter = MicrolocalEmitter::new();
         InterfaceZConductor {
             gauges,
             lift,
@@ -975,7 +1003,28 @@ impl InterfaceZConductor {
             policy: Arc::new(DefaultZSourcePolicy::new()),
             band_policy: None,
             budget_policy: None,
+            conductor: ZConductor::default(),
+            clock: 0,
+            emitter,
         }
+    }
+
+    /// Enables frequency-domain fusion with the provided configuration.
+    pub fn with_frequency(mut self, cfg: ZFrequencyConfig) -> Self {
+        self.conductor.set_frequency_config(Some(cfg));
+        self
+    }
+
+    /// Enables adaptive gain tuning with the supplied configuration.
+    pub fn with_adaptive_gain(mut self, cfg: ZAdaptiveGainCfg) -> Self {
+        self.conductor.set_adaptive_gain_config(Some(cfg));
+        self
+    }
+
+    /// Disables frequency-domain fusion.
+    pub fn without_frequency(mut self) -> Self {
+        self.conductor.set_frequency_config(None);
+        self
     }
 
     /// Configures the exponential smoothing factor `alpha` applied when fusing
@@ -983,7 +1032,10 @@ impl InterfaceZConductor {
     /// the latest measurement; `1` disables smoothing while `0` keeps the
     /// previous fused pulse unchanged.
     pub fn with_smoothing(mut self, alpha: f32) -> Self {
-        self.smoothing = alpha.clamp(0.0, 1.0);
+        let alpha = alpha.clamp(0.0, 1.0);
+        let cfg = self.conductor.cfg_mut();
+        cfg.alpha_slow = alpha;
+        cfg.alpha_fast = alpha.max(0.4);
         self
     }
 
@@ -1058,9 +1110,16 @@ impl InterfaceZConductor {
         {
             fused.z_bias = fused_raw.z_bias * self.smoothing;
         }
-        if fused_raw.drift.abs() > f32::EPSILON && fused.drift.signum() != fused_raw.drift.signum()
-        {
-            fused.drift = fused_raw.drift * self.smoothing;
+        self.emitter.extend(z_pulses);
+        let mut registry = ZRegistry::with_capacity(1);
+        registry.register(self.emitter.clone());
+        let fused_z = self.conductor.step_from_registry(&mut registry, now);
+
+        self.policy.late_fuse(&mut fused, &pulses, &qualities);
+
+        let mut budget_scale = 1.0;
+        if let Some(budget) = &self.budget_policy {
+            budget_scale = budget.apply(&mut fused);
         }
 
         self.policy.late_fuse(&mut fused, &pulses, &qualities);
@@ -1080,10 +1139,28 @@ impl InterfaceZConductor {
             signatures,
             pulses,
             fused_pulse: fused,
+            fused_z,
             feedback,
             qualities,
             budget_scale,
         }
+    }
+
+    /// Returns the most recent fused pulse emitted by the conductor.
+    pub fn last_fused_pulse(&self) -> InterfaceZPulse {
+        self.last_pulse
+    }
+}
+
+impl fmt::Debug for InterfaceZConductor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InterfaceZConductor")
+            .field("gauges", &self.gauges.len())
+            .field("smoothing", &self.smoothing)
+            .field("carry", &self.carry)
+            .field("band_policy", &self.band_policy)
+            .field("budget_policy", &self.budget_policy)
+            .finish()
     }
 }
 
@@ -1109,12 +1186,48 @@ pub struct InterfaceZReport {
     pub pulses: Vec<InterfaceZPulse>,
     /// Smoothed aggregate pulse after applying fusion and smoothing.
     pub fused_pulse: InterfaceZPulse,
+    /// Canonical fused pulse shared with the global Z conductor.
+    pub fused_z: ZFused,
     /// Ready-to-store Softlogic feedback record.
     pub feedback: SoftlogicZFeedback,
     /// Quality weights assigned to each pulse prior to fusion.
     pub qualities: Vec<f32>,
     /// Scale factor applied by the budget policy (1.0 when unclamped).
     pub budget_scale: f32,
+}
+
+impl CoopAgent for InterfaceZConductor {
+    fn propose(&mut self) -> CoopProposal {
+        let fused = self.last_fused_pulse();
+        let (above, here, beneath) = fused.band_energy;
+        let there = (above + beneath).max(1e-6);
+        let here_ratio = here / there;
+        if fused.total_energy() <= f32::EPSILON {
+            return CoopProposal::neutral();
+        }
+        let weight = (fused.support + there).max(1e-3) * here_ratio.max(0.0);
+        CoopProposal::new(fused.z_bias, weight)
+    }
+
+    fn observe(&mut self, team_reward: f32, credit: f32) {
+        let fused = self.last_fused_pulse();
+        let (above, here, beneath) = fused.band_energy;
+        let there = (above + beneath).max(1e-3);
+        let curvature_ratio = here / there;
+        let imbalance = (above - beneath) / there;
+
+        let mut bias_gain = self.lift.bias_gain();
+        let credit_push = (credit * (1.0 - curvature_ratio)).clamp(-1.0, 1.0);
+        bias_gain = (bias_gain + 0.08 * credit_push).clamp(0.05, 8.0);
+        self.lift.set_bias_gain(bias_gain);
+
+        let mut floor = self.lift.orientation_floor();
+        let reward_push = team_reward.tanh();
+        floor = (floor * (1.0 - 0.05 * reward_push)).clamp(0.01, 0.6);
+        let drift_adjust = (imbalance * credit).clamp(-1.0, 1.0);
+        floor = (floor - 0.015 * drift_adjust).clamp(0.01, 0.6);
+        self.lift.set_orientation_floor(floor);
+    }
 }
 
 impl InterfaceZReport {
@@ -1507,8 +1620,8 @@ mod tests {
         let second = conductor.step(&flipped, Some(&c_prime_neg), None, None);
         let raw_second = InterfaceZPulse::aggregate(&second.pulses);
         assert!(raw_second.z_bias < 0.0);
-        assert!(second.fused_pulse.z_bias < 0.0);
-        assert!(second.fused_pulse.z_bias > raw_second.z_bias);
+        assert!(second.fused_z.events.iter().any(|e| e == "flip-held"));
+        assert!(second.fused_z.z > raw_second.z_bias);
         assert_eq!(second.feedback.band_energy, second.fused_pulse.band_energy);
         assert_eq!(second.qualities.len(), second.pulses.len());
         assert!(second.budget_scale > 0.0);

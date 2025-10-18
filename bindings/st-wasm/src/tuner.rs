@@ -70,6 +70,33 @@ impl WasmTuner {
         self.table.len()
     }
 
+    /// Retrieve a record by index. Returns `undefined` when the index is out of bounds.
+    #[wasm_bindgen(js_name = recordAt)]
+    pub fn record_at(&self, index: u32) -> Result<JsValue, JsValue> {
+        match self.table.get(index as usize) {
+            Some(record) => record_to_js(record),
+            None => Ok(JsValue::UNDEFINED),
+        }
+    }
+
+    /// Locate the first record matching the provided workload. Returns `undefined` when nothing matches.
+    #[wasm_bindgen(js_name = findRecord)]
+    pub fn find_record(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> Result<JsValue, JsValue> {
+        match self
+            .table
+            .find_record(rows as usize, cols as usize, k as usize, subgroup)
+        {
+            Some(record) => record_to_js(record),
+            None => Ok(JsValue::UNDEFINED),
+        }
+    }
+
     /// Returns `true` when no overrides are stored.
     #[wasm_bindgen(js_name = isEmpty)]
     pub fn is_empty(&self) -> bool {
@@ -86,6 +113,46 @@ impl WasmTuner {
         let record = parse_record(record)?;
         self.table.push_sorted(record);
         Ok(())
+    }
+
+    /// Replace the record at the provided index. Returns `true` when the index existed.
+    #[wasm_bindgen(js_name = replaceIndex)]
+    pub fn replace_index(&mut self, index: u32, record: JsValue) -> Result<bool, JsValue> {
+        let record = parse_record(record)?;
+        Ok(self.table.replace(index as usize, record))
+    }
+
+    /// Remove the record at the provided index and return it. Returns `undefined` when the index was invalid.
+    #[wasm_bindgen(js_name = removeIndex)]
+    pub fn remove_index(&mut self, index: u32) -> Result<JsValue, JsValue> {
+        match self.table.remove(index as usize) {
+            Some(record) => {
+                let js = record_to_js(&record)?;
+                Ok(js)
+            }
+            None => Ok(JsValue::UNDEFINED),
+        }
+    }
+
+    /// Remove the first record matching the workload. Returns `undefined` when nothing matched.
+    #[wasm_bindgen(js_name = removeRecord)]
+    pub fn remove_record(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> Result<JsValue, JsValue> {
+        match self
+            .table
+            .remove_matching(rows as usize, cols as usize, k as usize, subgroup)
+        {
+            Some(record) => {
+                let js = record_to_js(&record)?;
+                Ok(js)
+            }
+            None => Ok(JsValue::UNDEFINED),
+        }
     }
 
     /// Return the internal dataset as a JSON string.
