@@ -16,6 +16,4 @@ pub mod util;
 
 pub mod telemetry;
 
-pub mod maxwell {
-    pub use crate::theory::maxwell::*;
-}
+pub use theory::maxwell;

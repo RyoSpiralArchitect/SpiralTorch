@@ -79,3 +79,20 @@ pub fn entropy(distribution: &[f32]) -> f32 {
     }
     h
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn controller_tracks_gradient_pressure() {
+        let mut controller = TemperatureController::new(1.0, 0.8, 0.4, 0.4, 2.0);
+        let baseline = controller.update(&[0.6, 0.4]);
+        controller.observe_grad(32.0, 0.15);
+        let warmed = controller.update_with_gradient(&[0.6, 0.4], 1.5);
+        assert!(warmed >= baseline);
+        controller.observe_grad(0.0, 0.95);
+        let cooled = controller.update_with_gradient(&[0.6, 0.4], 1.5);
+        assert!(cooled >= warmed);
+    }
+}
