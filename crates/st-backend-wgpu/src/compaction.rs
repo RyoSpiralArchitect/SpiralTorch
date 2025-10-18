@@ -7,8 +7,6 @@ use wgpu::{ComputePipeline, Device};
 
 use crate::util::{load_compute_pipeline, ShaderLoadError};
 
-use crate::util::{load_compute_pipeline, ShaderLoadError};
-
 pub struct CompactionPipelines {
     pub p_1ce: ComputePipeline,
 }
