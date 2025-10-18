@@ -4,10 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::wasm_tuner::{WasmTunerRecord, WasmTunerTable};
-use crate::backend::unison_heuristics::RankKind;
-use crate::ecosystem::{
-    EcosystemReport, HeuristicDecision, HeuristicSource, RankPlanSummary, RoundtableSummary,
-};
+use crate::ecosystem::{EcosystemReport, HeuristicDecision, RankPlanSummary, RoundtableSummary};
 use std::collections::{BTreeMap, HashMap};
 
 /// Adaptive builder that aggregates heuristic telemetry and produces
@@ -394,7 +391,8 @@ fn decode_midbottom_mode(hint: Option<&str>) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecosystem::{HeuristicChoiceSummary, RoundtableConfigSummary};
+    use crate::backend::unison_heuristics::RankKind;
+    use crate::ecosystem::{HeuristicChoiceSummary, HeuristicSource, RoundtableConfigSummary};
     use std::time::SystemTime;
 
     fn plan_summary(kind: RankKind, rows: u32, cols: u32, k: u32) -> RankPlanSummary {
