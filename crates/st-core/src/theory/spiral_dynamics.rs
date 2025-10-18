@@ -134,7 +134,7 @@ pub fn soft_barrier_margin_satisfied(
     mu0: f64,
     gamma: f64,
     c_base: f64,
-    kappa_b: f64,
+    _kappa_b: f64,
     margin: f64,
 ) -> bool {
     if margin < 0.0 {
@@ -160,9 +160,7 @@ pub fn cbf_boundary_projection(
     s: f64,
     rho: f64,
 ) -> f64 {
-    kappa * (alpha * re_z - beta * im_z - theta)
-        - tau * u
-        + sigma_s * lambda * s
+    kappa * (alpha * re_z - beta * im_z - theta) - tau * u + sigma_s * lambda * s
         - sigma_s * rho * im_z
 }
 
@@ -251,8 +249,7 @@ pub fn gershgorin_contraction_bound(
 ) -> f64 {
     let term1 = a - 0.5 * (gamma - kappa * alpha).abs();
     let term2 = a - 0.5 * ((kappa * beta).abs() + (sigma_s - rho).abs());
-    let term3 = tau
-        - 0.5 * ((gamma - kappa * alpha).abs() + (kappa * beta).abs() + sigma_s.abs());
+    let term3 = tau - 0.5 * ((gamma - kappa * alpha).abs() + (kappa * beta).abs() + sigma_s.abs());
     let term4 = lambda - 0.5 * ((sigma_s - rho).abs() + sigma_s.abs());
     term1.min(term2).min(term3).min(term4)
 }
@@ -290,7 +287,9 @@ mod tests {
         let gamma = 0.5;
         let c_base = 0.3;
         let kappa_b = 0.6;
-        assert!(soft_barrier_margin_satisfied(mu0, gamma, c_base, kappa_b, 0.05));
+        assert!(soft_barrier_margin_satisfied(
+            mu0, gamma, c_base, kappa_b, 0.05
+        ));
         let at_zero = soft_barrier_mu_eff(mu0, gamma, c_base, kappa_b, 0.0);
         assert_abs_diff_eq!(at_zero, -0.05, epsilon = 1e-12);
         let at_large = soft_barrier_mu_eff(mu0, gamma, c_base, kappa_b, 2.0);
@@ -300,7 +299,8 @@ mod tests {
     #[test]
     fn cbf_condition_produces_non_negative_dot_h() {
         let force = LogisticForce::evaluate(0.4, 0.3, 0.3, 0.7);
-        let proj = cbf_boundary_projection(0.2, 1.0, 0.3, 0.1, 0.05, 0.02, 0.5, 0.4, 0.7, 0.6, 0.3, 0.1);
+        let proj =
+            cbf_boundary_projection(0.2, 1.0, 0.3, 0.1, 0.05, 0.02, 0.5, 0.4, 0.7, 0.6, 0.3, 0.1);
         assert!(proj <= 0.0);
         let dot_h = cbf_dot_h(0.5, &force, proj);
         assert!(dot_h >= 0.0);
@@ -312,7 +312,8 @@ mod tests {
         assert!(y > 0.0);
         let r = steady_radius(0.4, 0.1, 0.6, 0.8, 0.4, 0.5, 0.2, 0.5).unwrap();
         assert_abs_diff_eq!(r * r, y, epsilon = 1e-12);
-        let sensitivity = steady_radius_sensitivity(0.4, 0.1, 0.6, 0.8, 0.4, 0.5, 0.2, 0.5).unwrap();
+        let sensitivity =
+            steady_radius_sensitivity(0.4, 0.1, 0.6, 0.8, 0.4, 0.5, 0.2, 0.5).unwrap();
         assert!(sensitivity < 0.0);
     }
 

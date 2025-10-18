@@ -17,17 +17,18 @@ fn main() {
 
         let hipcc = env::var("HIPCC").unwrap_or_else(|_| "hipcc".into());
         let kernels = [
-            // existing (must already exist in tree)
             "src/hip_kernels/topk_pass1.cu",
             "src/hip_kernels/hip_kway_merge_bitonic_f32.cu",
-            "src/hip_kernels/pack_vals_idx_u64.cu",
             "src/hip_kernels/hip_kway_merge_bitonic_u64.cu",
-            "src/hip_kernels/hip_topk_tile_bitonic_u64.cu",
-            // new keep‑k variants
-            "src/hip_kernels/hip_kway_merge_shared_heap_keepk_u64.cu",
-            "src/hip_kernels/hip_kway_merge_warp_heap_keepk_u64.cu",
             "src/hip_kernels/hip_kway_merge_shared_heap_real_keepk_u64.cu",
             "src/hip_kernels/hip_kway_merge_warp_coop_keepk_u64.cu",
+            "src/hip_kernels/hip_topk_tile_bitonic_u64.cu",
+            "src/hip_kernels/pack_vals_idx_u64.cu",
+            "src/hip_kernels/hip_compaction_1ce.cu",
+            "src/hip_kernels/hip_compaction_scan.cu",
+            "src/hip_kernels/hip_compaction_scan_pass.cu",
+            "src/hip_kernels/hip_compaction_apply.cu",
+            "src/hip_kernels/hip_compaction_apply_pass.cu",
         ];
         let mut objs = Vec::new();
         for src in kernels {
