@@ -34,7 +34,6 @@
 //! survives the gauge quotient, and optionally reconstructs the oriented normal
 //! field together with signed curvature when a phase label is supplied.
 
-use crate::coop::ai::{CoopAgent, CoopProposal};
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
     ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZRegistry, ZSource,
@@ -1190,7 +1189,7 @@ impl InterfaceZConductor {
                 band_energy: pulse.band_energy,
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
-                support: pulse.support,
+                support: ZSupport::from_band_energy(pulse.band_energy),
                 quality: pulse.quality_hint.unwrap_or(1.0),
                 stderr: pulse.standard_error.unwrap_or(0.0),
                 latency_ms: 0.0,
@@ -1208,7 +1207,12 @@ impl InterfaceZConductor {
             budget_scale = budget.apply(&mut fused);
         }
 
+        let feedback = fused.clone().into_softlogic_feedback();
         self.carry = Some(fused.clone());
+        self.previous = Some(fused.clone());
+
+        let mut fused_events = events;
+        fused_events.extend(z_fused.events.clone());
         let feedback = fused.clone().into_softlogic_feedback();
         self.carry = Some(fused.clone());
         self.previous = Some(fused.clone());

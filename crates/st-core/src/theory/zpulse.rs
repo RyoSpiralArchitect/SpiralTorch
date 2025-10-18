@@ -10,6 +10,12 @@ use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
+/// Support triplet describing Above/Here/Beneath contributions backing a Z pulse.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZSupport {
+    pub leading: f32,
+    pub central: f32,
+    pub trailing: f32,
 /// Identifies the origin of a [`ZPulse`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ZSource {
@@ -660,6 +666,52 @@ impl ZConductor {
         self.latency = self.cfg.latency.map(LatencyAlignerState::new);
     }
 
+    pub fn step<I>(&mut self, pulses: I, now: u64) -> ZFused
+    where
+        I: IntoIterator<Item = ZPulse>,
+    {
+        let mut fused = ZFused::default();
+        fused.ts = now;
+
+        let mut total_support = 0.0f32;
+        let mut weighted_z = 0.0f32;
+        let mut weighted_quality = 0.0f32;
+        let mut total_quality_weight = 0.0f32;
+
+        let mut had_pulse = false;
+
+        for pulse in pulses {
+            had_pulse = true;
+            let support = pulse.support.total().max(0.0);
+            total_support += support;
+            fused.drift += pulse.drift;
+            let key = source_lookup_key(&pulse.source);
+            let gain = self
+                .source_gains
+                .get(key.as_ref())
+                .copied()
+                .unwrap_or(1.0)
+                .max(0.0);
+            let limit = self
+                .source_limits
+                .get(key.as_ref())
+                .copied()
+                .unwrap_or(f32::INFINITY)
+                .max(0.0);
+            let mut z_bias = pulse.z_bias * gain;
+            if limit.is_finite() {
+                if limit == 0.0 {
+                    z_bias = 0.0;
+                } else {
+                    z_bias = z_bias.clamp(-limit, limit);
+                }
+            }
+            weighted_z += z_bias * support;
+            let weight = support.max(1e-6);
+            weighted_quality += pulse.quality * weight;
+            total_quality_weight += weight;
+            fused.attributions.push((pulse.source, support));
+        }
     pub fn latency_for(&self, source: &ZSource) -> Option<f32> {
         self.latency
             .as_ref()
@@ -1144,7 +1196,8 @@ mod tests {
 
         let mut pulse = ZPulse {
             source: ZSource::Microlocal,
-            support: 0.4,
+            tempo: 0.0,
+            support: ZSupport::new(0.2, 0.1, 0.1),
             drift: 0.1,
             ..ZPulse::default()
         };
