@@ -2415,6 +2415,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "st-bench"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "rand",
+ "serde",
+ "serde_json",
+ "st-core",
+ "st-nn",
+ "st-tensor",
+]
+
+[[package]]
 name = "st-core"
 version = "1.9.2"
 dependencies = [
@@ -2532,6 +2545,7 @@ dependencies = [
  "pollster",
  "rand",
  "rand_distr",
+ "serde",
  "st-frac",
  "wgpu",
 ]

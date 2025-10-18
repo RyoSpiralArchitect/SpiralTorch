@@ -11,7 +11,9 @@ use crate::language::DesireGradientInterpretation;
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
 use st_core::telemetry::hub;
-use st_tensor::{GradientSummary, TensorError};
+use st_tensor::{
+    DesireGradientControl, DesireGradientInterpretation, GradientSummary, TensorError,
+};
 
 const REPORT_SIZE: usize = 8;
 const BIAS_UPDATE_INJECTION: f32 = 0.05;
@@ -108,6 +110,9 @@ pub struct DesireSolution {
     pub phase: DesirePhase,
     pub avoidance: Option<DesireAvoidanceReport>,
     pub hypergrad_penalty: f32,
+    pub gradient_control: DesireGradientControl,
+    #[serde(default)]
+    pub control_events: Vec<String>,
     pub narrative: Option<NarrativeHint>,
 }
 
@@ -130,6 +135,7 @@ pub struct DesireLagrangian {
     avoidance_accumulator: Vec<f32>,
     desire_bias: Vec<f32>,
     gradient_interpretation: DesireGradientInterpretation,
+    gradient_control: DesireGradientControl,
     active_narrative: Option<NarrativeHint>,
 }
 
@@ -170,6 +176,7 @@ impl DesireLagrangian {
             avoidance_accumulator: vec![0.0; vocab],
             desire_bias: vec![0.0; vocab],
             gradient_interpretation: DesireGradientInterpretation::default(),
+            gradient_control: DesireGradientControl::default(),
             active_narrative: None,
         })
     }
@@ -231,10 +238,17 @@ impl DesireLagrangian {
         self.gradient_interpretation
     }
 
+    /// Latest gradient control packet derived from the interpretation layer.
+    pub fn gradient_control(&self) -> DesireGradientControl {
+        self.gradient_control
+    }
+
     /// Update the interpretation using a precomputed feedback structure.
     pub fn interpret_gradients(&mut self, interpretation: DesireGradientInterpretation) {
         self.gradient_interpretation = interpretation;
-        let damping = interpretation.damping().max(0.1);
+        let control = interpretation.control();
+        self.gradient_control = control;
+        let damping = control.damping().max(0.1);
         self.epsilon = (self.epsilon * 0.9) + 0.1 * (EPSILON_BASE * damping);
     }
 
@@ -368,6 +382,13 @@ impl DesireLagrangian {
         let hypergrad_penalty = self.hypergrad_penalty(phase, &active, &offsets, &distribution);
         let avoidance = self.build_report(phase);
         self.step_index = self.step_index.saturating_add(1);
+        let control_events = self
+            .gradient_control
+            .events()
+            .labels()
+            .into_iter()
+            .map(|label| label.to_string())
+            .collect();
         Ok(DesireSolution {
             indices: active,
             probabilities: distribution,
@@ -378,6 +399,8 @@ impl DesireLagrangian {
             phase,
             avoidance,
             hypergrad_penalty,
+            gradient_control: self.gradient_control,
+            control_events,
             narrative: self.active_narrative.clone(),
         })
     }
@@ -452,7 +475,7 @@ impl DesireLagrangian {
     fn update_tracking(&mut self, phase: DesirePhase, active: &[usize], distribution: &[f32]) {
         match phase {
             DesirePhase::Observation => {
-                let gain = self.gradient_interpretation.observation_gain();
+                let gain = self.gradient_control.observation_gain();
                 for (&token, &prob) in active.iter().zip(distribution) {
                     let avoid = (1.0 - prob).max(0.0) * gain;
                     if let Some(value) = self.avoidance_accumulator.get_mut(token) {
@@ -473,7 +496,7 @@ impl DesireLagrangian {
         if self.desire_bias.is_empty() {
             return;
         }
-        let rate = (rate * self.gradient_interpretation.bias_mix()).clamp(0.0, 1.0);
+        let rate = (rate * self.gradient_control.bias_mix()).clamp(0.0, 1.0);
         for (&token, &prob) in active.iter().zip(distribution) {
             if let Some(value) = self.desire_bias.get_mut(token) {
                 let target = (1.0 - prob).max(0.0);
@@ -508,7 +531,7 @@ impl DesireLagrangian {
             bias_center += weight * offset;
         }
         let penalty = (bias_center - barycenter).abs();
-        penalty * self.gradient_interpretation.penalty_gain()
+        penalty * self.gradient_control.penalty_gain()
     }
 
     fn build_report(&self, phase: DesirePhase) -> Option<DesireAvoidanceReport> {
@@ -741,12 +764,14 @@ mod tests {
         stable.interpret_gradients(stable_interp);
         stable.update_bias(&active, &distribution, 0.1);
         let stable_bias = stable.desire_bias.clone();
+        let stable_control = stable.gradient_control();
 
         let mut cautious = build_lagrangian();
         cautious.desire_bias = vec![0.9, 0.1];
         cautious.interpret_gradients(imbalance);
         cautious.update_bias(&active, &distribution, 0.1);
         assert!(stable_bias[0] < cautious.desire_bias[0]);
+        assert!(cautious.gradient_control().bias_mix() < stable_control.bias_mix());
     }
 
     #[test]
@@ -758,5 +783,8 @@ mod tests {
         let interpretation = lagrangian.gradient_interpretation();
         assert!((interpretation.hyper_pressure() - hyper.mean_abs()).abs() < 1e-6);
         assert!(interpretation.penalty_gain() >= 1.0);
+        let control = lagrangian.gradient_control();
+        assert!((control.penalty_gain() - interpretation.penalty_gain()).abs() < 1e-6);
+        assert!(control.hyper_rate_scale().is_finite());
     }
 }
