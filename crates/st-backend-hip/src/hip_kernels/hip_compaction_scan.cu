@@ -42,3 +42,34 @@ void hip_compaction_scan_kernel(const float* __restrict__ vin, int rows, int col
     if (tile*256 + tid < cols) flags[base + tid] = s[tid];
     if (tid == 255) tilecnt[r*tiles_per_row + tile] = s[255] + f;
 }
+
+extern "C"
+hipError_t st_compaction_scan(const float* vin,
+                              int rows,
+                              int cols,
+                              float low,
+                              float high,
+                              unsigned* flags,
+                              unsigned* tilecnt,
+                              int tiles_per_row,
+                              hipStream_t stream)
+{
+    if (rows <= 0 || cols <= 0) {
+        return hipSuccess;
+    }
+
+    if (tiles_per_row <= 0) {
+        tiles_per_row = (cols + 255) / 256;
+    }
+
+    const int total_tiles = rows * tiles_per_row;
+    if (total_tiles <= 0) {
+        return hipSuccess;
+    }
+
+    dim3 grid(total_tiles);
+    dim3 block(256);
+    hipLaunchKernelGGL(hip_compaction_scan_kernel, grid, block, 0, stream,
+                       vin, rows, cols, low, high, flags, tilecnt, tiles_per_row);
+    return hipGetLastError();
+}

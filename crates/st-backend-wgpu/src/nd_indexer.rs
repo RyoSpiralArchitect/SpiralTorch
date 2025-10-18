@@ -7,6 +7,8 @@ use wgpu::{ComputePipeline, Device};
 
 use crate::util::{load_compute_pipeline, ShaderLoadError};
 
+use crate::util::{load_compute_pipeline, ShaderLoadError};
+
 /// Loads the ND indexer shader that materialises strided indices and segment ids.
 pub fn create_pipeline(
     device: &Device,
