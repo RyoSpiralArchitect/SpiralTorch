@@ -12,14 +12,28 @@ const COLLAB_DEFAULT_PATCH_RATE_HZ = 20;
 const COLLAB_DEFAULT_PRESENCE_INTERVAL_MS = 1_000;
 const COLLAB_MAX_MESSAGE_BYTES_DEFAULT = 256 * 1024;
 const COLLAB_STORAGE_POLL_INTERVAL_MS = 750;
+const COLLAB_CAPABILITY_KEY_MAX_LENGTH = 64;
+const COLLAB_CAPABILITY_MAX_ENTRIES_DEFAULT = 16;
+const COLLAB_CAPABILITY_MAX_ENTRIES_HARD_LIMIT = 64;
+const COLLAB_CAPABILITY_MAX_SCAN = 128;
+const COLLAB_CAPABILITY_VALUE_MAX_BYTES_DEFAULT = 512;
+const COLLAB_CAPABILITY_VALUE_MAX_BYTES_HARD_LIMIT = 4_096;
+
+const TEXT_ENCODER =
+    typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
 
 export type CanvasCollabRole = "trainer" | "model" | "human" | (string & {});
+
+export type CollabCapabilityValue = boolean | number | string | null;
+
+export type CollabCapabilities = Record<string, CollabCapabilityValue>;
 
 export interface CanvasCollabParticipant {
     id?: string;
     role: CanvasCollabRole;
     label?: string;
     color?: string;
+    capabilities?: CollabCapabilities;
 }
 
 interface SerializedPaletteBuiltin {
@@ -96,6 +110,10 @@ export interface CollabRolePolicy {
     canState?: boolean;
     rateLimitHz?: number | null;
     gain?: number | null;
+    allowedCapabilities?: ReadonlyArray<string> | null;
+    blockedCapabilities?: ReadonlyArray<string> | null;
+    maxCapabilityEntries?: number;
+    maxCapabilityValueBytes?: number;
 }
 
 type CollabTransportKind = "broadcast" | "storage";
@@ -128,6 +146,7 @@ interface CollabMessageBase {
         role: CanvasCollabRole;
         label?: string;
         color?: string;
+        capabilities?: CollabCapabilities | null;
     };
     clock: number;
 }
@@ -154,7 +173,12 @@ interface CollabLeaveMessage extends CollabMessageBase {
 
 interface CollabPresenceMessage extends CollabMessageBase {
     type: "presence";
-    roster: Array<{ id: string; role: CanvasCollabRole; lastSeen: number }>;
+    roster: Array<{
+        id: string;
+        role: CanvasCollabRole;
+        lastSeen: number;
+        capabilities?: CollabCapabilities | null;
+    }>;
 }
 
 type CollabMessage =
@@ -176,29 +200,108 @@ interface ResolvedRolePolicy {
     canState: boolean;
     rateLimitHz: number | null;
     gain: number | null;
+    allowedCapabilities: Set<string> | null;
+    blockedCapabilities: Set<string>;
+    maxCapabilityEntries: number;
+    maxCapabilityValueBytes: number;
 }
 
-const DEFAULT_ROLE_POLICY: ResolvedRolePolicy = {
-    canPatch: true,
-    canState: true,
-    rateLimitHz: null,
-    gain: null,
-};
+function createDefaultResolvedRolePolicy(): ResolvedRolePolicy {
+    return {
+        canPatch: true,
+        canState: true,
+        rateLimitHz: null,
+        gain: null,
+        allowedCapabilities: null,
+        blockedCapabilities: new Set<string>(),
+        maxCapabilityEntries: COLLAB_CAPABILITY_MAX_ENTRIES_DEFAULT,
+        maxCapabilityValueBytes: COLLAB_CAPABILITY_VALUE_MAX_BYTES_DEFAULT,
+    };
+}
+
+function cloneResolvedRolePolicy(policy: ResolvedRolePolicy): ResolvedRolePolicy {
+    return {
+        canPatch: policy.canPatch,
+        canState: policy.canState,
+        rateLimitHz: policy.rateLimitHz,
+        gain: policy.gain,
+        allowedCapabilities: policy.allowedCapabilities ? new Set(policy.allowedCapabilities) : null,
+        blockedCapabilities: new Set(policy.blockedCapabilities),
+        maxCapabilityEntries: policy.maxCapabilityEntries,
+        maxCapabilityValueBytes: policy.maxCapabilityValueBytes,
+    };
+}
 
 function normalizeRolePolicy(policy?: CollabRolePolicy | null): ResolvedRolePolicy {
+    const resolved = createDefaultResolvedRolePolicy();
     if (!policy) {
-        return { ...DEFAULT_ROLE_POLICY };
+        return resolved;
     }
     const rate =
         typeof policy.rateLimitHz === "number" && Number.isFinite(policy.rateLimitHz) && policy.rateLimitHz > 0
             ? policy.rateLimitHz
             : null;
-    return {
-        canPatch: policy.canPatch ?? true,
-        canState: policy.canState ?? true,
-        rateLimitHz: rate,
-        gain: typeof policy.gain === "number" && Number.isFinite(policy.gain) ? policy.gain : null,
-    };
+    resolved.canPatch = policy.canPatch ?? true;
+    resolved.canState = policy.canState ?? true;
+    resolved.rateLimitHz = rate;
+    resolved.gain = typeof policy.gain === "number" && Number.isFinite(policy.gain) ? policy.gain : null;
+    resolved.allowedCapabilities = normalizeCapabilityKeySet(policy.allowedCapabilities);
+    resolved.blockedCapabilities = normalizeCapabilityKeySet(policy.blockedCapabilities) ?? new Set<string>();
+    resolved.maxCapabilityEntries = normalizeCapabilityBudget(
+        policy.maxCapabilityEntries,
+        COLLAB_CAPABILITY_MAX_ENTRIES_DEFAULT,
+        COLLAB_CAPABILITY_MAX_ENTRIES_HARD_LIMIT,
+    );
+    resolved.maxCapabilityValueBytes = normalizeCapabilityBudget(
+        policy.maxCapabilityValueBytes,
+        COLLAB_CAPABILITY_VALUE_MAX_BYTES_DEFAULT,
+        COLLAB_CAPABILITY_VALUE_MAX_BYTES_HARD_LIMIT,
+    );
+    return resolved;
+}
+
+function normalizeCapabilityKey(value: unknown): string | null {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.length > COLLAB_CAPABILITY_KEY_MAX_LENGTH) {
+        return null;
+    }
+    return trimmed;
+}
+
+function normalizeCapabilityKeySet(values?: ReadonlyArray<string> | null): Set<string> | null {
+    if (!values) {
+        return null;
+    }
+    const set = new Set<string>();
+    for (const value of values) {
+        const key = normalizeCapabilityKey(value);
+        if (!key) {
+            continue;
+        }
+        set.add(key);
+        if (set.size >= COLLAB_CAPABILITY_MAX_ENTRIES_HARD_LIMIT) {
+            break;
+        }
+    }
+    return set;
+}
+
+function normalizeCapabilityBudget(
+    value: number | null | undefined,
+    fallback: number,
+    hardLimit: number,
+): number {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+        return fallback;
+    }
+    const clamped = Math.max(0, Math.floor(value));
+    if (hardLimit >= 0) {
+        return Math.min(clamped, hardLimit);
+    }
+    return clamped;
 }
 
 class EventDispatcher<Events extends Record<string, unknown>> {
@@ -285,6 +388,40 @@ function mergeState(target: CanvasCollabState, patch: Partial<CanvasCollabState>
     return merged;
 }
 
+function cloneCapabilities(capabilities?: CollabCapabilities | null): CollabCapabilities | undefined {
+    if (!capabilities) {
+        return undefined;
+    }
+    const clone: CollabCapabilities = {};
+    for (const [key, value] of Object.entries(capabilities)) {
+        clone[key] = value;
+    }
+    return clone;
+}
+
+function capabilitiesEqual(a?: CollabCapabilities | null, b?: CollabCapabilities | null): boolean {
+    if (!a && !b) {
+        return true;
+    }
+    if (!a || !b) {
+        return false;
+    }
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) {
+        return false;
+    }
+    for (const key of keysA) {
+        if (!Object.prototype.hasOwnProperty.call(b, key)) {
+            return false;
+        }
+        if (a[key] !== b[key]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 function mergePatches(
     target: Partial<CanvasCollabState> | null,
     patch: Partial<CanvasCollabState>,
@@ -367,6 +504,112 @@ function statesEqual(a: CanvasCollabState | null, b: CanvasCollabState): boolean
         a.devicePixelRatio === b.devicePixelRatio &&
         a.running === b.running
     );
+}
+
+interface CapabilityFilterResult {
+    allowed: CollabCapabilities;
+    blocked: Array<{ key: string; reason: string }>;
+}
+
+function measureByteLength(value: string): number {
+    if (TEXT_ENCODER) {
+        return TEXT_ENCODER.encode(value).byteLength;
+    }
+    return value.length;
+}
+
+function truncateStringByBytes(value: string, maxBytes: number): string {
+    if (maxBytes <= 0) {
+        return "";
+    }
+    if (measureByteLength(value) <= maxBytes) {
+        return value;
+    }
+    if (!TEXT_ENCODER) {
+        return value.slice(0, maxBytes);
+    }
+    let result = "";
+    let total = 0;
+    for (const char of value) {
+        const encoded = TEXT_ENCODER.encode(char);
+        if (total + encoded.byteLength > maxBytes) {
+            break;
+        }
+        result += char;
+        total += encoded.byteLength;
+    }
+    return result;
+}
+
+function sanitizeCapabilityValue(
+    raw: unknown,
+    maxBytes: number,
+): CollabCapabilityValue | undefined {
+    if (raw === null) {
+        return null;
+    }
+    switch (typeof raw) {
+        case "boolean":
+            return raw;
+        case "number":
+            return Number.isFinite(raw) ? raw : undefined;
+        case "string": {
+            const limited = truncateStringByBytes(raw, maxBytes);
+            return limited;
+        }
+        default:
+            return undefined;
+    }
+}
+
+function filterCapabilities(source: unknown, policy: ResolvedRolePolicy): CapabilityFilterResult {
+    const allowed: CollabCapabilities = {};
+    const blocked: Array<{ key: string; reason: string }> = [];
+    if (source === undefined) {
+        return { allowed, blocked };
+    }
+    if (source === null) {
+        return { allowed, blocked };
+    }
+    if (typeof source !== "object") {
+        blocked.push({ key: "*", reason: "invalid-structure" });
+        return { allowed, blocked };
+    }
+    const entries = Object.entries(source as Record<string, unknown>);
+    const inspectLimit = Math.min(entries.length, COLLAB_CAPABILITY_MAX_SCAN);
+    const maxEntries = Math.max(0, Math.min(policy.maxCapabilityEntries, COLLAB_CAPABILITY_MAX_ENTRIES_HARD_LIMIT));
+    let count = 0;
+    for (let i = 0; i < inspectLimit; i += 1) {
+        const [rawKey, rawValue] = entries[i];
+        const key = normalizeCapabilityKey(rawKey);
+        if (!key) {
+            blocked.push({ key: String(rawKey), reason: "invalid-key" });
+            continue;
+        }
+        if (policy.allowedCapabilities && !policy.allowedCapabilities.has(key)) {
+            blocked.push({ key, reason: "not-allowed" });
+            continue;
+        }
+        if (policy.blockedCapabilities.has(key)) {
+            blocked.push({ key, reason: "blocked" });
+            continue;
+        }
+        if (count >= maxEntries) {
+            blocked.push({ key, reason: "budget-exhausted" });
+            continue;
+        }
+        const value = sanitizeCapabilityValue(rawValue, policy.maxCapabilityValueBytes);
+        if (value === undefined) {
+            blocked.push({ key, reason: "invalid-value" });
+            continue;
+        }
+        allowed[key] = value;
+        count += 1;
+    }
+    if (entries.length > inspectLimit) {
+        blocked.push({ key: "*", reason: "overflow" });
+    }
+    return { allowed, blocked };
 }
 
 function deserializePalette(payload: SerializedPalette): CanvasPaletteCanonicalName | CustomPalette {
@@ -594,7 +837,7 @@ export class SpiralCanvasCollabSession {
     #telemetry?: CollabTelemetrySink;
     #attributionSink?: (event: CollabPatchAttributionEvent) => void;
     #rolePolicyByRole = new Map<string, ResolvedRolePolicy>();
-    #defaultRolePolicy: ResolvedRolePolicy = { ...DEFAULT_ROLE_POLICY };
+    #defaultRolePolicy: ResolvedRolePolicy = createDefaultResolvedRolePolicy();
 
     constructor(view: SpiralCanvasView, options: SpiralCanvasCollabOptions) {
         this.#view = view;
@@ -637,7 +880,13 @@ export class SpiralCanvasCollabSession {
         };
         const localPolicy = this.#resolvePolicyForRole(participantState.role);
         participantState.gain = localPolicy.gain;
-        this.#participants.set(participantId, { info: participantState, clock: 0, policy: localPolicy });
+        const participantRecord: ParticipantRecord = {
+            info: participantState,
+            clock: 0,
+            policy: localPolicy,
+        };
+        this.#participants.set(participantId, participantRecord);
+        this.#applyCapabilities(participantRecord, options.participant.capabilities, "local-init");
         this.#applyLocalPolicy(localPolicy);
         this.#emitTelemetry({ type: "join", participant: this.#cloneParticipant(participantState) });
 
@@ -730,6 +979,26 @@ export class SpiralCanvasCollabSession {
         this.#enqueueFullSync();
     }
 
+    /**
+     * Updates the advertised capability surface for the local participant and
+     * broadcasts a presence heartbeat so peers can observe the change without
+     * waiting for the scheduled interval.
+     */
+    setCapabilities(capabilities: CollabCapabilities | null): void {
+        if (this.#destroyed) {
+            return;
+        }
+        const record = this.#participants.get(this.#participantId);
+        if (!record) {
+            return;
+        }
+        const changed = this.#applyCapabilities(record, capabilities, "local-update");
+        if (changed) {
+            this.#emitParticipants();
+        }
+        this.#sendPresence();
+    }
+
     /** Tears down the collaboration session and restores patched methods. */
     destroy(): void {
         if (this.#destroyed) {
@@ -764,11 +1033,26 @@ export class SpiralCanvasCollabSession {
         }
     }
 
-    #participantEnvelope(): { role: CanvasCollabRole; label?: string; color?: string } {
+    #participantEnvelope(): {
+        role: CanvasCollabRole;
+        label?: string;
+        color?: string;
+        capabilities?: CollabCapabilities | null;
+    } {
         const record = this.#participants.get(this.#participantId);
         if (record) {
-            const { role, label, color } = record.info;
-            return { role, label, color };
+            const { role, label, color, capabilities } = record.info;
+            const envelope: {
+                role: CanvasCollabRole;
+                label?: string;
+                color?: string;
+                capabilities?: CollabCapabilities | null;
+            } = { role, label, color };
+            const clonedCapabilities = cloneCapabilities(capabilities);
+            if (clonedCapabilities && Object.keys(clonedCapabilities).length > 0) {
+                envelope.capabilities = clonedCapabilities;
+            }
+            return envelope;
         }
         return {
             role: "human",
@@ -784,13 +1068,14 @@ export class SpiralCanvasCollabSession {
             state: cloneState(participant.state),
             lastSeen: participant.lastSeen,
             gain: participant.gain ?? null,
+            capabilities: cloneCapabilities(participant.capabilities) ?? undefined,
             lastPointer: participant.lastPointer ? { ...participant.lastPointer, offset: { ...participant.lastPointer.offset } } : undefined,
         };
     }
 
     #resolvePolicyForRole(role: CanvasCollabRole): ResolvedRolePolicy {
         const template = this.#rolePolicyByRole.get(role) ?? this.#defaultRolePolicy;
-        return { ...template };
+        return cloneResolvedRolePolicy(template);
     }
 
     #refreshRecordPolicy(record: ParticipantRecord, role: CanvasCollabRole): void {
@@ -798,6 +1083,12 @@ export class SpiralCanvasCollabSession {
         record.info.gain = record.policy.gain;
         if (record.info.id === this.#participantId) {
             this.#applyLocalPolicy(record.policy);
+        } else {
+            const currentCaps = cloneCapabilities(record.info.capabilities) ?? {};
+            const capsChanged = this.#applyCapabilities(record, currentCaps, "policy-update");
+            if (capsChanged) {
+                this.#emitParticipants();
+            }
         }
     }
 
@@ -817,6 +1108,37 @@ export class SpiralCanvasCollabSession {
         if (!policy.canState) {
             this.#pendingFullSync = false;
         }
+        const localRecord = this.#participants.get(this.#participantId);
+        if (localRecord) {
+            const currentCaps = cloneCapabilities(localRecord.info.capabilities) ?? {};
+            const capsChanged = this.#applyCapabilities(localRecord, currentCaps, "local-policy");
+            if (capsChanged) {
+                this.#emitParticipants();
+            }
+        }
+    }
+
+    #applyCapabilities(record: ParticipantRecord, candidate: unknown, context: string): boolean {
+        if (candidate === undefined) {
+            return false;
+        }
+        const { allowed, blocked } = filterCapabilities(candidate, record.policy);
+        const sanitized = Object.keys(allowed).length > 0 ? allowed : undefined;
+        const changed = !capabilitiesEqual(record.info.capabilities, sanitized);
+        if (sanitized) {
+            record.info.capabilities = sanitized;
+        } else {
+            delete (record.info as Partial<CanvasCollabParticipantState>).capabilities;
+        }
+        if (blocked.length) {
+            for (const entry of blocked) {
+                const keyTag = entry.key === "*" ? "aggregate" : entry.key;
+                const reason = `capability:${context}:${entry.reason}:${keyTag}`;
+                const trimmedReason = reason.length > 128 ? `${reason.slice(0, 125)}...` : reason;
+                this.#emitTelemetry({ type: "policy-blocked", participantId: record.info.id, reason: trimmedReason });
+            }
+        }
+        return changed;
     }
 
     #channelName(): string {
@@ -1262,6 +1584,24 @@ export class SpiralCanvasCollabSession {
                 break;
             }
         }
+        const selfRecord = this.#participants.get(this.#participantId);
+        if (selfRecord) {
+            selfRecord.info.lastSeen = Date.now();
+            this.#emitParticipants();
+        }
+        const roster = Array.from(this.#participants.values()).map((entry) => ({
+            id: entry.info.id,
+            role: entry.info.role,
+            lastSeen: entry.info.lastSeen,
+        }));
+        this.#postMessage({
+            type: "presence",
+            id: this.#participantId,
+            participant: this.#participantEnvelope(),
+            clock: this.#tick(),
+            roster,
+        });
+        this.#emitTelemetry({ type: "presence", participants: roster.length });
     }
 
     #applyPresence(message: CollabPresenceMessage): void {
@@ -1275,6 +1615,7 @@ export class SpiralCanvasCollabSession {
                 existing.info.role = entry.role;
                 existing.info.lastSeen = entry.lastSeen ?? now;
                 this.#refreshRecordPolicy(existing, entry.role);
+                this.#applyCapabilities(existing, entry.capabilities, "presence");
             } else {
                 const placeholderState = this.#lastState ? cloneState(this.#lastState) : this.#snapshotState();
                 const info: CanvasCollabParticipantState = {
@@ -1285,7 +1626,9 @@ export class SpiralCanvasCollabSession {
                 };
                 const policy = this.#resolvePolicyForRole(entry.role);
                 info.gain = policy.gain;
-                this.#participants.set(entry.id, { info, clock: 0, policy });
+                const record: ParticipantRecord = { info, clock: 0, policy };
+                this.#participants.set(entry.id, record);
+                this.#applyCapabilities(record, entry.capabilities, "presence");
                 this.#emitTelemetry({ type: "join", participant: this.#cloneParticipant(info) });
             }
         });
@@ -1306,6 +1649,7 @@ export class SpiralCanvasCollabSession {
             id: entry.info.id,
             role: entry.info.role,
             lastSeen: entry.info.lastSeen,
+            capabilities: cloneCapabilities(entry.info.capabilities) ?? null,
         }));
         this.#postMessage({
             type: "presence",
@@ -1327,6 +1671,7 @@ export class SpiralCanvasCollabSession {
             existing.info.lastSeen = now;
             this.#refreshRecordPolicy(existing, message.participant.role);
             existing.info.gain = existing.policy.gain;
+            this.#applyCapabilities(existing, message.participant.capabilities, "message");
             return { record: existing, created: false };
         }
         const placeholderState = this.#lastState ? cloneState(this.#lastState) : this.#snapshotState();
@@ -1342,6 +1687,7 @@ export class SpiralCanvasCollabSession {
         info.gain = policy.gain;
         const record: ParticipantRecord = { info, clock: message.clock, policy };
         this.#participants.set(message.id, record);
+        this.#applyCapabilities(record, message.participant.capabilities, "message");
         this.#emitTelemetry({ type: "join", participant: this.#cloneParticipant(info) });
         return { record, created: true };
     }
