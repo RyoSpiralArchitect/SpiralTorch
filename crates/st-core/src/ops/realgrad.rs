@@ -1246,6 +1246,15 @@ mod tests {
     }
 
     #[test]
+    fn projection_reports_gradient_summary() {
+        let data = [0.5f32, 0.0, -0.5, 0.25];
+        let projection = project_realgrad(&data, RealGradConfig::default());
+        let summary = projection.gradient_summary();
+        assert!(summary.norm >= 0.0);
+        assert!(summary.sparsity >= 0.0 && summary.sparsity <= 1.0);
+    }
+
+    #[test]
     fn projection_respects_classical_constant_transform() {
         let config = RealGradConfig {
             residual_threshold: 2.0,

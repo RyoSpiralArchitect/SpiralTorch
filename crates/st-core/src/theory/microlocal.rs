@@ -34,8 +34,10 @@
 //! survives the gauge quotient, and optionally reconstructs the oriented normal
 //! field together with signed curvature when a phase label is supplied.
 
-use crate::telemetry::hub::SoftlogicZFeedback;
-use crate::theory::zpulse::{ZConductor, ZFused, ZPulse, ZSource};
+use crate::telemetry::hub::{self, SoftlogicZFeedback};
+use crate::theory::zpulse::{
+    ZAdaptiveGainCfg, ZConductor, ZFrequencyConfig, ZFused, ZPulse, ZSource,
+};
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use statrs::function::gamma::gamma;
@@ -578,6 +580,24 @@ impl InterfaceZConductor {
         }
     }
 
+    /// Enables frequency-domain fusion with the provided configuration.
+    pub fn with_frequency(mut self, cfg: ZFrequencyConfig) -> Self {
+        self.conductor.set_frequency_config(Some(cfg));
+        self
+    }
+
+    /// Enables adaptive gain tuning with the supplied configuration.
+    pub fn with_adaptive_gain(mut self, cfg: ZAdaptiveGainCfg) -> Self {
+        self.conductor.set_adaptive_gain_config(Some(cfg));
+        self
+    }
+
+    /// Disables frequency-domain fusion.
+    pub fn without_frequency(mut self) -> Self {
+        self.conductor.set_frequency_config(None);
+        self
+    }
+
     /// Configures the exponential smoothing factor `alpha` applied when fusing
     /// subsequent pulses. Values in `[0,1]` blend the previous fused pulse with
     /// the latest measurement; `1` disables smoothing while `0` keeps the
@@ -636,6 +656,7 @@ impl InterfaceZConductor {
         let psi = psi_total.unwrap_or(fused.support);
         let loss = weighted_loss.unwrap_or(fused.total_energy());
         let feedback = fused.into_softlogic_feedback_with(psi, loss);
+        hub::set_softlogic_z(feedback);
 
         InterfaceZReport {
             signatures,
