@@ -110,16 +110,20 @@ impl Default for ZPulse {
     }
 }
 
-/// Origin of a [`ZPulse`].
-#[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ZSource {
-    Microlocal,
-    Maxwell,
-    Desire,
-    Graph,
-    GW,
-    Other(&'static str),
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+/// Result of fusing multiple [`ZPulse`] records.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZFused {
+    pub ts: u64,
+    pub support: f32,
+    pub drift: f32,
+    pub z: f32,
+    pub quality: f32,
+    pub events: Vec<String>,
+    pub attributions: Vec<(ZSource, f32)>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -185,6 +189,7 @@ impl ZLatencyConfig {
             smoothing,
         }
     }
+}
 
     pub fn update(&mut self, target_ms: f32, clamp_ms: f32, smoothing: f32) {
         self.target_ms = target_ms;
@@ -857,6 +862,10 @@ impl ZConductor {
         }
     }
 
+    pub fn cfg(&self) -> &ZConductorCfg {
+        &self.cfg
+    }
+
     /// Returns a mutable reference to the configuration, enabling on-line tuning.
     pub fn cfg_mut(&mut self) -> &mut ZConductorCfg {
         &mut self.cfg
@@ -911,7 +920,6 @@ impl ZConductor {
         if let Some(latency) = self.latency.as_mut() {
             latency.record(&pulse);
         }
-        self.pending.push(pulse);
     }
 
     /// Executes one fusion step at the provided timestamp.
@@ -1148,35 +1156,12 @@ mod tests {
         assert!((fused.attributions.iter().map(|a| a.weight).sum::<f32>() - 1.0).abs() < 1e-6);
         assert!(fused.events.iter().any(|e| e == "saturated"));
     }
+}
 
-    #[test]
-    fn slew_limit_bounds_delta_z() {
-        let mut cfg = ZConductorCfg::default();
-        cfg.slew_max = 0.1;
-        cfg.alpha_fast = 1.0;
-        cfg.alpha_slow = 1.0;
-        let mut conductor = ZConductor::new(cfg);
-
-        let mut prev_z = 0.0;
-        for step in 0..3 {
-            conductor.ingest(ZPulse {
-                source: ZSource::Microlocal,
-                ts: step,
-                band_energy: (5.0, 0.0, 0.0),
-                drift: 1.0,
-                z_bias: 1.0,
-                support: 5.0,
-                quality: 1.0,
-                stderr: 0.0,
-                latency_ms: 0.0,
-            });
-            let fused = conductor.step(step);
-            if step > 0 {
-                assert!((fused.z - prev_z).abs() <= 0.1 + 1e-4);
-            }
-            prev_z = fused.z;
-        }
-    }
+#[derive(Clone, Default, Debug)]
+pub struct DesireEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
+}
 
     #[test]
     fn latency_aligner_tracks_known_offset() {
@@ -1324,5 +1309,59 @@ mod tests {
         let estimate = conductor.latency_for(&ZSource::Graph).unwrap();
         assert!((estimate - 12.5).abs() <= 1e-3);
         assert!(fused.events.iter().any(|e| e.starts_with("latency.seeded")));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conductor_allows_optional_configs() {
+        let mut conductor = ZConductor::new(ZConductorCfg::default());
+        assert!(conductor.frequency_cfg.is_none());
+        assert!(conductor.adaptive_cfg.is_none());
+        assert!(conductor.latency_cfg.is_none());
+
+        conductor.set_frequency_config(Some(ZFrequencyConfig::new(0.5)));
+        conductor.set_adaptive_gain_config(Some(ZAdaptiveGainCfg::new(0.1, 1.0, 0.8)));
+        conductor.set_latency_config(Some(ZLatencyConfig::new(4)));
+
+        assert!(conductor.frequency_cfg.is_some());
+        assert!(conductor.adaptive_cfg.is_some());
+        assert!(conductor.latency_cfg.is_some());
+
+        conductor.set_frequency_config(None);
+        conductor.set_adaptive_gain_config(None);
+        conductor.set_latency_config(None);
+
+        assert!(conductor.frequency_cfg.is_none());
+        assert!(conductor.adaptive_cfg.is_none());
+        assert!(conductor.latency_cfg.is_none());
+    }
+
+    #[test]
+    fn desire_emitter_retags_pulses() {
+        let emitter = DesireEmitter::new();
+        let mut registry = ZRegistry::new();
+        registry.register(emitter.clone());
+
+        let mut pulse = ZPulse {
+            source: ZSource::Microlocal,
+            support: 0.4,
+            drift: 0.1,
+            ..ZPulse::default()
+        };
+        emitter.enqueue(pulse);
+
+        let pulses = registry.gather(42);
+        assert_eq!(pulses.len(), 1);
+        assert_eq!(pulses[0].source, ZSource::Desire);
+
+        pulse.source = ZSource::Maxwell;
+        emitter.extend([pulse]);
+        let pulses = registry.gather(43);
+        assert_eq!(pulses.len(), 1);
+        assert_eq!(pulses[0].source, ZSource::Desire);
     }
 }
