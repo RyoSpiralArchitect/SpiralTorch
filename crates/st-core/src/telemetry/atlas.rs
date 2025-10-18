@@ -28,6 +28,91 @@ use super::maintainer::MaintainerStatus;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
+/// Conceptual framing attached to atlas fragments so downstream consumers can
+/// keep philosophical language—especially around qualia—in the declared scope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ConceptSense {
+    /// C. I. Lewis' "given" — pre-conceptual sensory texture anchoring epistemic work.
+    QualiaLewisGiven,
+    /// Thomas Nagel's subjectivity — the "what it is like" perspective gap.
+    QualiaNagelSubjectivity,
+    /// Frank Jackson's knowledge argument — phenomenal facts beyond the physical story.
+    QualiaJacksonKnowledge,
+    /// David Chalmers' hard problem — phenomenal experience resisting reduction.
+    QualiaChalmersHardProblem,
+    /// Giulio Tononi's IIT identity — qualia as maximally irreducible causal structure.
+    QualiaTononiIit,
+    /// General discourse drift — colloquial qualia as a fuzzy stand-in for feeling.
+    QualiaGeneralDiscourse,
+}
+
+impl ConceptSense {
+    /// Returns a short label usable in telemetry dashboards.
+    pub fn label(&self) -> &'static str {
+        match self {
+            ConceptSense::QualiaLewisGiven => "qualia.lewis_given",
+            ConceptSense::QualiaNagelSubjectivity => "qualia.nagel_subjectivity",
+            ConceptSense::QualiaJacksonKnowledge => "qualia.jackson_knowledge",
+            ConceptSense::QualiaChalmersHardProblem => "qualia.chalmers_hard",
+            ConceptSense::QualiaTononiIit => "qualia.tononi_iit",
+            ConceptSense::QualiaGeneralDiscourse => "qualia.general_discourse",
+        }
+    }
+
+    /// Returns a prose description summarising the sense.
+    pub fn description(&self) -> &'static str {
+        match self {
+            ConceptSense::QualiaLewisGiven =>
+                "Lewis: qualia as pre-conceptual givens underwriting epistemic grounding.",
+            ConceptSense::QualiaNagelSubjectivity =>
+                "Nagel: qualia as the irreducibly subjective 'what it is like' perspective.",
+            ConceptSense::QualiaJacksonKnowledge =>
+                "Jackson: qualia as phenomenal knowledge unattainable from physical facts alone.",
+            ConceptSense::QualiaChalmersHardProblem =>
+                "Chalmers: qualia as the hard problem's phenomenal core resisting reduction.",
+            ConceptSense::QualiaTononiIit =>
+                "Tononi: qualia identified with IIT's maximally irreducible conceptual structures.",
+            ConceptSense::QualiaGeneralDiscourse =>
+                "General discourse: qualia as a loose synonym for feeling or consciousness.",
+        }
+    }
+}
+
+/// Annotation capturing how a fragment is framing sensitive philosophical vocabulary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConceptAnnotation {
+    /// Target term receiving the annotation (for example, "qualia").
+    pub term: String,
+    /// Conceptual sense claimed by the producer.
+    pub sense: ConceptSense,
+    /// Optional free-form note documenting the rationale.
+    pub rationale: Option<String>,
+}
+
+impl ConceptAnnotation {
+    /// Creates a bare annotation for the provided term and sense.
+    pub fn new(term: impl Into<String>, sense: ConceptSense) -> Self {
+        Self {
+            term: term.into(),
+            sense,
+            rationale: None,
+        }
+    }
+
+    /// Creates an annotation with an explicit rationale.
+    pub fn with_rationale(
+        term: impl Into<String>,
+        sense: ConceptSense,
+        rationale: impl Into<String>,
+    ) -> Self {
+        Self {
+            term: term.into(),
+            sense,
+            rationale: Some(rationale.into()),
+        }
+    }
+}
+
 /// Named scalar surfaced through the atlas projection.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AtlasMetric {
@@ -105,6 +190,8 @@ pub struct AtlasFragment {
     pub metrics: Vec<AtlasMetric>,
     /// Free-form notes describing the fragment provenance.
     pub notes: Vec<String>,
+    /// Conceptual annotations describing how sensitive terms are being framed.
+    pub concepts: Vec<ConceptAnnotation>,
 }
 
 impl AtlasFragment {
@@ -128,6 +215,7 @@ impl AtlasFragment {
             && self.suggested_pressure.is_none()
             && self.metrics.is_empty()
             && self.notes.is_empty()
+            && self.concepts.is_empty()
     }
 
     /// Pushes a metric onto the fragment when the value is finite.
@@ -152,6 +240,24 @@ impl AtlasFragment {
     /// Appends a note to the fragment provenance trail.
     pub fn push_note(&mut self, note: impl Into<String>) {
         self.notes.push(note.into());
+    }
+
+    /// Appends a conceptual annotation to the fragment.
+    pub fn push_concept(&mut self, annotation: ConceptAnnotation) {
+        self.concepts.push(annotation);
+    }
+
+    /// Convenience helper to attach a qualia annotation with optional rationale.
+    pub fn annotate_qualia(
+        &mut self,
+        sense: ConceptSense,
+        rationale: Option<impl Into<String>>,
+    ) {
+        let mut annotation = ConceptAnnotation::new("qualia", sense);
+        if let Some(rationale) = rationale {
+            annotation.rationale = Some(rationale.into());
+        }
+        self.push_concept(annotation);
     }
 }
 
@@ -184,6 +290,8 @@ pub struct AtlasFrame {
     pub metrics: Vec<AtlasMetric>,
     /// Provenance notes collected from fragments.
     pub notes: Vec<String>,
+    /// Conceptual annotations aggregated across fragments.
+    pub concepts: Vec<ConceptAnnotation>,
 }
 
 impl AtlasFrame {
@@ -284,6 +392,12 @@ impl AtlasFrame {
         if !fragment.notes.is_empty() {
             self.notes.extend(fragment.notes.into_iter());
         }
+        if !fragment.concepts.is_empty() {
+            self.concepts.extend(fragment.concepts.into_iter());
+        }
+        if self.timestamp <= 0.0 && !self.concepts.is_empty() {
+            self.timestamp = f32::EPSILON;
+        }
     }
 
     /// Groups metrics into named districts following the SpiralTorch atlas map.
@@ -363,6 +477,8 @@ impl AtlasRoute {
         let mut loop_sq_total = 0.0;
         let mut loop_samples = 0usize;
         let mut district_map: BTreeMap<String, DistrictAccumulator> = BTreeMap::new();
+        let mut concept_map: BTreeMap<(String, ConceptSense), ConceptAccumulator> =
+            BTreeMap::new();
         let mut first_collapse = None;
         let mut first_z_signal = None;
         for frame in &self.frames {
@@ -409,6 +525,16 @@ impl AtlasRoute {
                     summary.script_hint = Some(script.clone());
                 }
             }
+            if !frame.concepts.is_empty() {
+                for concept in &frame.concepts {
+                    let key = (concept.term.clone(), concept.sense);
+                    let entry = concept_map.entry(key).or_insert_with(ConceptAccumulator::new);
+                    entry.mentions += 1;
+                    if let Some(rationale) = concept.rationale.as_ref() {
+                        entry.last_rationale = Some(rationale.clone());
+                    }
+                }
+            }
             for district in frame.districts() {
                 let entry = district_map
                     .entry(district.name.clone())
@@ -439,6 +565,22 @@ impl AtlasRoute {
             b.coverage
                 .cmp(&a.coverage)
                 .then_with(|| a.name.cmp(&b.name))
+        });
+        summary.concept_pulses = concept_map
+            .into_iter()
+            .map(|((term, sense), accumulator)| ConceptPulse {
+                term,
+                sense,
+                mentions: accumulator.mentions,
+                last_rationale: accumulator.last_rationale,
+            })
+            .filter(|pulse| pulse.mentions > 0)
+            .collect();
+        summary.concept_pulses.sort_by(|a, b| {
+            b.mentions
+                .cmp(&a.mentions)
+                .then_with(|| a.term.cmp(&b.term))
+                .then_with(|| a.sense.label().cmp(b.sense.label()))
         });
         summary
     }
@@ -474,6 +616,8 @@ pub struct AtlasRouteSummary {
     pub script_hint: Option<String>,
     /// District activity summaries accumulated across the route.
     pub districts: Vec<AtlasDistrictSummary>,
+    /// Conceptual pulses aggregated across the retained frames.
+    pub concept_pulses: Vec<ConceptPulse>,
 }
 
 impl AtlasRouteSummary {
@@ -953,6 +1097,79 @@ impl DistrictAccumulator {
             std_dev: variance.max(0.0).sqrt(),
             focus,
         }
+    }
+}
+
+/// Aggregated pulse describing how a concept has been invoked across frames.
+#[derive(Clone, Debug)]
+pub struct ConceptPulse {
+    /// Term that was annotated (for example, "qualia").
+    pub term: String,
+    /// Conceptual sense associated with the annotations.
+    pub sense: ConceptSense,
+    /// Number of annotations encountered for the pair.
+    pub mentions: usize,
+    /// Most recent rationale that accompanied the annotations, when present.
+    pub last_rationale: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ConceptAccumulator {
+    mentions: usize,
+    last_rationale: Option<String>,
+}
+
+impl ConceptAccumulator {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn concept_annotations_keep_fragment_alive() {
+        let mut fragment = AtlasFragment::new();
+        fragment.annotate_qualia(
+            ConceptSense::QualiaNagelSubjectivity,
+            Some("subjective vantage guard"),
+        );
+        let frame = AtlasFrame::from_fragment(fragment).expect("frame");
+        assert!(frame.timestamp > 0.0);
+        assert_eq!(frame.concepts.len(), 1);
+        assert_eq!(frame.concepts[0].sense, ConceptSense::QualiaNagelSubjectivity);
+        assert_eq!(
+            frame.concepts[0].rationale.as_deref(),
+            Some("subjective vantage guard")
+        );
+    }
+
+    #[test]
+    fn summary_accumulates_concept_pulses() {
+        let mut fragment = AtlasFragment::new();
+        fragment.timestamp = Some(1.0);
+        fragment.push_concept(ConceptAnnotation::with_rationale(
+            "qualia",
+            ConceptSense::QualiaChalmersHardProblem,
+            "charting the hard problem",
+        ));
+        let frame = AtlasFrame::from_fragment(fragment).unwrap();
+        let mut route = AtlasRoute::new();
+        route.push_bounded(frame, 8);
+        let summary = route.summary();
+        assert_eq!(summary.concept_pulses.len(), 1);
+        let pulse = &summary.concept_pulses[0];
+        assert_eq!(pulse.term, "qualia");
+        assert_eq!(pulse.sense, ConceptSense::QualiaChalmersHardProblem);
+        assert_eq!(pulse.mentions, 1);
+        assert_eq!(
+            pulse.last_rationale.as_deref(),
+            Some("charting the hard problem")
+        );
+        assert_eq!(pulse.sense.label(), "qualia.chalmers_hard");
+        assert!(pulse.sense.description().contains("hard problem"));
     }
 }
 
