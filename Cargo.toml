@@ -2,6 +2,7 @@
 members = [
   "crates/st-core",
   "crates/st-backend-hip",
+  "crates/st-backend-wgpu",
   "crates/st-kdsl",
   "crates/st-logic",
   "crates/st-kv",
