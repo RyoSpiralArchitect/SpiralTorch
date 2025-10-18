@@ -29,9 +29,9 @@ use st_core::telemetry::hub::{
     self, DesireAvoidanceTelemetry, DesirePhaseTelemetry, DesireStepTelemetry, DesireTriggerTelemetry,
     DesireWeightsTelemetry, SoftlogicZFeedback,
 };
+use st_core::telemetry::psi::PsiEvent;
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::DriveCmd;
-use st_core::ops::rank_entry::{plan_rank, RankPlan};
 use st_core::telemetry::atlas::{
     AtlasDistrict, AtlasDistrictSummary, AtlasFrame, AtlasMetric, AtlasMetricFocus,
     AtlasPerspective, AtlasRoute, AtlasRouteSummary,
