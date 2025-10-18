@@ -357,6 +357,26 @@ if let Some(event) = trigger {
 }
 ```
 
+`read_cfg()` now pulls from layered configuration files so operators can
+separate defaults, site overrides, and run-time experiments without rebuilding
+or touching environment variables. By default the loader merges
+`~/.spiraltorch/config/base.toml`, `site.toml`, and `run.json` (in that order),
+falling back to `~/.spiraltorch` when the `config/` directory is absent. Each
+layer is optional—missing files are ignored—and environment variables such as
+`SPIRAL_CONFIG_ROOT`, `SPIRAL_CONFIG_BASE`, `SPIRAL_CONFIG_SITE`, and
+`SPIRAL_CONFIG_RUN` can redirect the loader to alternate locations. Per-run
+JSON overrides make it easy to script experiments (for example via
+`run.json` produced by an orchestrator) while keeping persistent defaults in
+TOML. Every merge emits a diff event that records which keys changed and their
+before/after values.
+
+Python callers can retrieve the same diff stream via
+`spiraltorch.get_config_events()`, which returns dictionaries of
+`{"layer": "run", "path": "desire.self_rewrite.score_thresh", "previous": 0.02, "current": 0.05}`.
+Point the module at alternate config roots (for example when replaying a site
+profile) by exporting the environment variables before importing
+`spiraltorch` so the layered loader observes the overrides.【F:crates/st-core/src/config/layered.rs†L14-L153】【F:crates/st-core/src/config/self_rewrite.rs†L1-L49】【F:bindings/st-py/src/lib.rs†L346-L397】【F:bindings/st-py/src/lib.rs†L20460-L20504】
+
 Persist the stream to disk with `DesireLogbook` so the observation/injection/
 integration cadence can be replayed later or shared with SpiralK rewrite
 automation. The logbook writes line-delimited JSON records that contain the

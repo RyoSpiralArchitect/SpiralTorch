@@ -9,10 +9,10 @@ use super::schrodinger::schrodinger_boost;
 use super::temperature::{entropy, TemperatureController};
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
-use st_core::telemetry::hub;
 use st_tensor::{
     DesireGradientControl, DesireGradientInterpretation, GradientSummary, TensorError,
 };
+use st_core::telemetry::hub;
 
 const REPORT_SIZE: usize = 8;
 const BIAS_UPDATE_INJECTION: f32 = 0.05;
