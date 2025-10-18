@@ -1046,6 +1046,30 @@ report = policy.finish_episode()
 print(report.steps, report.hypergrad_applied)
 ```
 
+Python bindings mirror the geometry controller as well. Pass a dictionary of
+overrides to `PolicyGradient.attach_geometry_feedback` to customise the
+observability parameters and smoothing ranges without leaving Python.
+
+```python
+from spiraltorch import SpiralSession
+from spiraltorch.rl import PolicyGradient
+
+session = SpiralSession(device="wgpu", curvature=-1.0)
+policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
+policy.attach_geometry_feedback({"z_space_rank": 24, "slot_symmetry": "cyclic"})
+
+resonance = session.trace(state).resonate()
+policy.record_transition(state, action, reward=0.8)
+
+report, signal = policy.finish_episode_with_geometry(resonance)
+if signal:
+    print(f"η̄={signal['averaged_efficiency']:.3f} scale={signal['learning_rate_scale']:.2f}")
+
+telemetry = policy.geometry_telemetry()
+if telemetry:
+    print("loop gain", telemetry["loop_gain"], "script", telemetry["loop_script"])
+```
+
 Rust projects can pair the policy with the new geometric feedback module to
 ground the update scale in observability measurements. Feed a
 `DifferentialResonance` snapshot into `GeometryFeedback` and the learner will
@@ -1310,6 +1334,9 @@ print("updated weights", weights.tolist())
 - `FractalCanvas::vectorFieldFftUniform(false)` packages the `CanvasFftParams`
   uniform (width, height, inverse flag, padding) as a `Uint32Array` so the WGSL
   kernel can be dispatched without manual byte packing.
+- `FractalCanvas::vectorFieldFftLayout()` reports the byte lengths and strides
+  for the `FieldSample`/`SpectrumSample` storage buffers plus the uniform block
+  so WebGPU callers can allocate resources without hard-coding struct sizes.
 - `FractalCanvas::vectorFieldFftDispatch(true)` computes the workgroup triplet
   for the generated WGSL so callers can hand the counts directly to
   `computePass.dispatchWorkgroups(...)` (or the Rust equivalent) without
@@ -1703,6 +1730,8 @@ const kernel = fractal.vectorFieldFftKernel(true);
 console.log(kernel.split("\n")[0]);
 const uniform = fractal.vectorFieldFftUniform(false);
 console.log(`fft uniform=${uniform.join(',')}`);
+const layout = fractal.vectorFieldFftLayout();
+console.log(`fft field bytes=${layout.fieldBytes} stride=${layout.fieldStride}`);
 const dispatch = fractal.vectorFieldFftDispatch(true);
 console.log(`fft dispatch=${dispatch.join('x')}`);
 </script>
@@ -1722,9 +1751,10 @@ matching `SpectrumSample` buffer, and provide the canvas dimensions plus an
 inverse flag through a `CanvasFftParams` uniform struct. The
 `vectorFieldFftUniform` helper yields the `[width, height, inverse, padding]`
 `Uint32Array` so you can upload the uniform buffer directly without worrying
-about alignment, while `vectorFieldFftDispatch` returns the `[x, y, z]`
-workgroup counts that correspond to the generated WGSL (respecting subgroup or
-full wave execution).
+about alignment, `vectorFieldFftLayout` reports the byte lengths and strides for
+the field/spectrum storage buffers, and `vectorFieldFftDispatch` returns the
+`[x, y, z]` workgroup counts that correspond to the generated WGSL (respecting
+subgroup or full wave execution).
 
 Need FFT heuristics alongside the canvas?  WebAssembly exports now ship auto
 planning helpers and CPU fallbacks:
