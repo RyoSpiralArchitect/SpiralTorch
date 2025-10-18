@@ -3,21 +3,21 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use wgpu::*;
+use wgpu::{ComputePipeline, Device};
+
+use crate::util::{load_compute_pipeline, ShaderLoadError};
 
 pub struct CompactionPipelines {
     pub p_1ce: ComputePipeline,
 }
 
-pub fn create(device:&Device, shader_dir:&str)->CompactionPipelines{
-    let src = std::fs::read_to_string(format!("{shader_dir}/wgpu_compaction_1ce.wgsl")).unwrap();
-    let sm = device.create_shader_module(ShaderModuleDescriptor{
-        label: Some("compaction_1ce"),
-        source: ShaderSource::Wgsl(src.into())
-    });
-    let p = device.create_compute_pipeline(&ComputePipelineDescriptor{
-        label: Some("compaction_1ce"),
-        layout: None, module:&sm, entry_point:"main_cs"
-    });
-    CompactionPipelines{ p_1ce: p }
+pub fn create(device: &Device, shader_dir: &str) -> Result<CompactionPipelines, ShaderLoadError> {
+    let pipeline = load_compute_pipeline(
+        device,
+        shader_dir,
+        "wgpu_compaction_1ce.wgsl",
+        "compaction_1ce",
+        "main_cs",
+    )?;
+    Ok(CompactionPipelines { p_1ce: pipeline })
 }

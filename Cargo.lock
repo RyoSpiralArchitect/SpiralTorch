@@ -2432,6 +2432,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "st-backend-wgpu"
+version = "0.1.0"
+dependencies = [
+ "thiserror 1.0.69",
+ "wgpu",
+]
+
+[[package]]
 name = "st-bench"
 version = "0.1.0"
 dependencies = [
