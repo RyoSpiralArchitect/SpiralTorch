@@ -57,3 +57,21 @@ void hip_compaction_1ce_kernel(const float* __restrict__ vin,
         }
     }
 }
+
+extern "C"
+hipError_t st_compaction_1ce(const float* vin,
+                             const int32_t* iin,
+                             int rows,
+                             int cols,
+                             float low,
+                             float high,
+                             float* vout,
+                             int32_t* iout,
+                             hipStream_t stream)
+{
+    dim3 grid(rows);
+    dim3 block(256);
+    hipLaunchKernelGGL(hip_compaction_1ce_kernel, grid, block, 0, stream,
+                       vin, iin, rows, cols, low, high, vout, iout);
+    return hipGetLastError();
+}
