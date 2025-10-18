@@ -153,8 +153,27 @@ multi-radius sweeps and a conductor that fuses their Z pulses with exponential
 smoothing. `InterfaceGauge::analyze_multiradius` probes the same mask at
 different blow-up scales (and reuses an optional `c′` label when supplied),
 while `InterfaceZConductor` drives any number of gauges, aggregates the
-resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
-ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
+resulting pulses, and hands back a `ZFused` packet with attribution weights and
+event tags alongside the smoothed `SoftlogicZFeedback` record so runtime loops
+can see which layer dominated the decision.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L515】【F:crates/st-core/src/theory/zpulse.rs†L22-L344】
+
+The conductor can now blend the pulses in both time and frequency: `set_frequency_config`
+installs a power-of-two FFT window and per-source spectral gains so high-frequency
+microlocal gradients or low-frequency desire trends can be emphasised without a
+second pass, while `set_adaptive_gain_config` keeps a per-source reliability
+score and nudges their gains on-line until the fused drift stabilises. A new
+`set_latency_config` alpha–beta aligner adjusts timestamps using the reported
+latency and emits `latency-*` events whenever the offsets are learnt or
+corrected, keeping Maxwell’s block pulses in lockstep with microlocal frames.
+Tests cover the spectral weighting, the adaptive loop, and the latency alignment
+so the new knobs keep their invariants.【F:crates/st-core/src/theory/zpulse.rs†L121-L233】【F:crates/st-core/src/theory/zpulse.rs†L244-L405】【F:crates/st-core/src/theory/zpulse.rs†L407-L683】【F:crates/st-core/src/theory/zpulse.rs†L900-L1036】
+
+Desire loops pick up the fused Z feedback straight from the hub: the conductor
+stores the latest `SoftlogicZFeedback`, and the temperature controller now
+accepts that pulse to raise exploration when the drift jitters and cool the
+distribution when the Z-bias settles. The default controller keeps a short
+memory of recent flips and exposes `with_feedback` so runtimes can tweak the
+feedback gain without rebuilding the desire machinery.【F:crates/st-core/src/theory/microlocal.rs†L488-L559】【F:crates/st-nn/src/language/temperature.rs†L1-L81】【F:crates/st-nn/src/language/desire.rs†L318-L352】
 
 ### Maxwell-coded envelopes meet SpiralK
 
@@ -272,6 +291,29 @@ observation, while the integration phase emits the barycentric drift so a
 hypergrad or self-rewrite scheduler can keep desire centred without collapse.
 The schedules default to zeroed observation and grow-only ramps, so existing
 callers can continue to provide manual `DesireWeights` without opt-in changes.【F:crates/st-nn/src/language/desire.rs†L1-L388】【F:crates/st-nn/src/language/desire.rs†L389-L487】
+
+Every step now ships a `DesireGradientControl` alongside the interpretation so
+automation layers can react without recomputing heuristics. Grab it via
+`DesireLagrangian::gradient_control()` (or directly from the streamed
+`DesireSolution`) to inspect the recommended hyper/Realgrad learning-rate
+scales, penalty gains, and WGSL operator mix/gain before issuing GPU updates.
+The control packet also captures Desire's “feel-good” tuning: exponential
+learning-rate gains driven by entropy deltas (with min/max bounds and slew
+limits), EMA-smoothed clipping windows anchored at the 95th percentile, Z-space
+temperature coupling (`κ`) guidance, and sigmoid quality scaling hooks so
+Maxwell/Microlocal evidence can raise the step size only when the gradients look
+clean. Each packet carries a telemetry bitmask plus string labels (e.g.
+`lr_increase`, `clip_adjust`) so PSI dashboards can log _why_ the controller
+nudged Desire in a given direction, and the new `control_events` field on
+`DesireSolution` keeps historical replays compatible with older logs via the
+serde default.
+
+For GPU loops, call `CanvasProjector::desire_control_uniform` (or the WASM
+`FractalCanvas.desireControlUniform`) to obtain a 16-float, 64-byte-aligned
+uniform buffer containing the target entropy, learning-rate envelopes, clipping
+window, Z coupling, quality gains, and rate scales. This keeps WGSL kernels hot
+without serialising structs on every dispatch while satisfying WebGPU's 16-byte
+alignment rules.
 
 To automate the “unconscious” loop, wrap the lagrangian with
 `DesireAutomation`. It samples the `SelfRewriteCfg` thresholds, tracks
@@ -1320,6 +1362,11 @@ tape.apply(weights)
 print("updated weights", weights.tolist())
 ```
 
+Prefer flat-space optimisation? Reach for the new Rust-side
+`st_tensor::AmegaRealgrad` tape to mirror the same API without the Poincaré
+projection step—handy when Canvas Transformer energy needs to feed classical
+optimisers alongside its hypergradient updates.
+
 ### Canvas Pixel Transformer → Z-space feedback
 
 - `CanvasProjector::refresh_with_vectors` now returns both the RGBA buffer and
@@ -1328,9 +1375,40 @@ print("updated weights", weights.tolist())
 - `FractalCanvas::vectorFieldFft(false)` surfaces the per-row FFT spectrum as
   interleaved energy/chroma pairs so Canvas Transformer pipelines can ingest
   frequency features without leaving Rust.
+- `CanvasProjector::accumulate_hypergrad` and
+  `CanvasProjector::accumulate_realgrad` stream the refreshed canvas tensor
+  directly into SpiralTorch's Riemannian or Euclidean optimisers without
+  additional copies.
+- `FractalCanvas::relation()` mirrors the projector's tensor output as a
+  `Float32Array` so browser call-sites can feed the raw relation into custom
+  pipelines or training loops.
+- `FractalCanvas::hypergradWave(curvature)` and `FractalCanvas::realgradWave()`
+  surface curvature-aware hypergrad updates alongside Euclidean gradients so the
+  Canvas Transformer can keep hypergrad/Realgrad buffers in sync by default.
+- `FractalCanvas::gradientSummary(curvature)` condenses both tapes into shared
+  L1/L2/∞ norms plus RMS/mean-absolute magnitudes so monitoring dashboards can
+  watch gradient health without shipping the full relation buffers across the
+  WASM boundary.
+- `FractalCanvas::desireInterpretation(curvature)` lifts the paired gradient
+  summaries into Desire-ready feedback metrics (pressure, balance, stability)
+  so automation layers can steer the Desire Lagrangian without leaving WASM.
+- `FractalCanvas::desireControl(curvature)` extends that pipeline with
+  ready-to-apply Desire gradient control packets—penalty gains, bias/observation
+  mixers, and tuned hyper/Realgrad learning-rate scales—mirroring the Rust
+  automation layer on the browser side.
+- `FractalCanvas::hypergradOperatorUniformFromControl(control)` and
+  `FractalCanvas::hypergradOperatorUniformAuto(curvature)` map those Desire
+  control packets directly into the WGSL uniform payload, saving JavaScript
+  callers from recomputing the blend/gain heuristics before dispatching the
+  GPU hypergrad operator.
 - `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
   WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
   the vector field and accumulate the spectrum fully on-GPU.
+- `FractalCanvas::hypergradOperatorKernel(false)` emits the complementary WGSL
+  pass that accumulates relation tensors into hypergradient buffers directly on
+  the GPU, with `hypergradOperatorUniform(mix, gain)` +
+  `hypergradOperatorDispatch(subgroup)` mirroring the uniform payload and
+  workgroup math for WebGPU callers.
 - `FractalCanvas::vectorFieldFftUniform(false)` packages the `CanvasFftParams`
   uniform (width, height, inverse flag, padding) as a `Uint32Array` so the WGSL
   kernel can be dispatched without manual byte packing.

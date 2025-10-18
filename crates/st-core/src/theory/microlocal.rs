@@ -34,7 +34,10 @@
 //! survives the gauge quotient, and optionally reconstructs the oriented normal
 //! field together with signed curvature when a phase label is supplied.
 
-use crate::telemetry::hub::SoftlogicZFeedback;
+use crate::telemetry::hub::{self, SoftlogicZFeedback};
+use crate::theory::zpulse::{
+    ZAdaptiveGainCfg, ZConductor, ZFrequencyConfig, ZFused, ZPulse, ZSource,
+};
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use statrs::function::gamma::gamma;
@@ -524,14 +527,43 @@ impl Default for InterfaceZPulse {
     }
 }
 
+impl From<InterfaceZPulse> for ZPulse {
+    fn from(pulse: InterfaceZPulse) -> Self {
+        let quality = microlocal_quality(&pulse);
+        ZPulse {
+            source: ZSource::Microlocal,
+            ts: 0,
+            band_energy: pulse.band_energy,
+            drift: pulse.drift,
+            z_bias: pulse.z_bias,
+            support: pulse.support,
+            quality,
+            stderr: 0.0,
+            latency_ms: 0.0,
+        }
+    }
+}
+
+fn microlocal_quality(pulse: &InterfaceZPulse) -> f32 {
+    if pulse.interface_cells <= f32::EPSILON {
+        return 0.0;
+    }
+    let density = (pulse.support / pulse.interface_cells.max(1.0)).clamp(0.0, 8.0);
+    let contrast = (pulse.drift.abs() / pulse.support.max(1e-6)).clamp(0.0, 8.0);
+    let amplitude = pulse.z_bias.abs().tanh();
+    let density_score = 1.0 / (1.0 + (-2.2 * density).exp());
+    let contrast_score = 1.0 / (1.0 + (-1.6 * contrast).exp());
+    (0.55 * density_score + 0.25 * contrast_score + 0.2 * amplitude).clamp(0.0, 1.0)
+}
+
 /// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
 /// smoothed control signal suitable for Softlogic feedback.
 #[derive(Debug, Clone)]
 pub struct InterfaceZConductor {
     gauges: Vec<InterfaceGauge>,
     lift: InterfaceZLift,
-    smoothing: f32,
-    carry: Option<InterfaceZPulse>,
+    conductor: ZConductor,
+    clock: u64,
 }
 
 impl InterfaceZConductor {
@@ -543,9 +575,27 @@ impl InterfaceZConductor {
         InterfaceZConductor {
             gauges,
             lift,
-            smoothing: 1.0,
-            carry: None,
+            conductor: ZConductor::default(),
+            clock: 0,
         }
+    }
+
+    /// Enables frequency-domain fusion with the provided configuration.
+    pub fn with_frequency(mut self, cfg: ZFrequencyConfig) -> Self {
+        self.conductor.set_frequency_config(Some(cfg));
+        self
+    }
+
+    /// Enables adaptive gain tuning with the supplied configuration.
+    pub fn with_adaptive_gain(mut self, cfg: ZAdaptiveGainCfg) -> Self {
+        self.conductor.set_adaptive_gain_config(Some(cfg));
+        self
+    }
+
+    /// Disables frequency-domain fusion.
+    pub fn without_frequency(mut self) -> Self {
+        self.conductor.set_frequency_config(None);
+        self
     }
 
     /// Configures the exponential smoothing factor `alpha` applied when fusing
@@ -553,7 +603,10 @@ impl InterfaceZConductor {
     /// the latest measurement; `1` disables smoothing while `0` keeps the
     /// previous fused pulse unchanged.
     pub fn with_smoothing(mut self, alpha: f32) -> Self {
-        self.smoothing = alpha.clamp(0.0, 1.0);
+        let alpha = alpha.clamp(0.0, 1.0);
+        let cfg = self.conductor.cfg_mut();
+        cfg.alpha_slow = alpha;
+        cfg.alpha_fast = alpha.max(0.4);
         self
     }
 
@@ -583,32 +636,33 @@ impl InterfaceZConductor {
             pulses.push(pulse);
         }
 
-        let fused_raw = InterfaceZPulse::aggregate(&pulses);
-        let mut fused = if let Some(prev) = &self.carry {
-            InterfaceZPulse::lerp(prev, &fused_raw, self.smoothing)
-        } else {
-            fused_raw
-        };
-        if fused_raw.z_bias.abs() > f32::EPSILON
-            && fused.z_bias.signum() != fused_raw.z_bias.signum()
-        {
-            fused.z_bias = fused_raw.z_bias * self.smoothing;
-        }
-        if fused_raw.drift.abs() > f32::EPSILON && fused.drift.signum() != fused_raw.drift.signum()
-        {
-            fused.drift = fused_raw.drift * self.smoothing;
-        }
+        let now = self.clock;
+        self.clock = self.clock.wrapping_add(1);
 
-        self.carry = Some(fused);
+        let fused_raw = InterfaceZPulse::aggregate(&pulses);
+        let mut z_pulses: Vec<ZPulse> = pulses.iter().copied().map(ZPulse::from).collect();
+        for pulse in &mut z_pulses {
+            pulse.ts = now;
+        }
+        for pulse in z_pulses {
+            self.conductor.ingest(pulse);
+        }
+        let fused_z = self.conductor.step(now);
+
+        let mut fused = fused_raw;
+        fused.drift = fused_z.drift;
+        fused.z_bias = fused_z.z;
 
         let psi = psi_total.unwrap_or(fused.support);
         let loss = weighted_loss.unwrap_or(fused.total_energy());
         let feedback = fused.into_softlogic_feedback_with(psi, loss);
+        hub::set_softlogic_z(feedback);
 
         InterfaceZReport {
             signatures,
             pulses,
             fused_pulse: fused,
+            fused_z,
             feedback,
         }
     }
@@ -624,6 +678,8 @@ pub struct InterfaceZReport {
     pub pulses: Vec<InterfaceZPulse>,
     /// Smoothed aggregate pulse after applying fusion and smoothing.
     pub fused_pulse: InterfaceZPulse,
+    /// Canonical fused pulse shared with the global Z conductor.
+    pub fused_z: ZFused,
     /// Ready-to-store Softlogic feedback record.
     pub feedback: SoftlogicZFeedback,
 }
@@ -1011,13 +1067,42 @@ mod tests {
 
         let first = conductor.step(&mask, Some(&c_prime), None, None);
         assert!(first.has_interface());
-        assert!(first.fused_pulse.z_bias > 0.0);
+        assert!(first.fused_z.z > 0.0);
 
         let second = conductor.step(&flipped, Some(&c_prime_neg), None, None);
         let raw_second = InterfaceZPulse::aggregate(&second.pulses);
         assert!(raw_second.z_bias < 0.0);
-        assert!(second.fused_pulse.z_bias < 0.0);
-        assert!(second.fused_pulse.z_bias > raw_second.z_bias);
+        assert!(second.fused_z.events.iter().any(|e| e == "flip-held"));
+        assert!(second.fused_z.z > raw_second.z_bias);
         assert_eq!(second.feedback.band_energy, second.fused_pulse.band_energy);
+
+        let second_z = second.fused_z.z;
+        let mut saw_flip_hold = second.fused_z.events.iter().any(|e| e == "flip-held");
+        let mut saw_flip = false;
+        let mut went_negative = false;
+        let mut last_report = second;
+        for _ in 0..8 {
+            let report = conductor.step(&flipped, Some(&c_prime_neg), None, None);
+            if report.fused_z.events.iter().any(|e| e == "flip-held") {
+                saw_flip_hold = true;
+            }
+            if report.fused_z.events.iter().any(|e| e == "sign-flip") {
+                saw_flip = true;
+            }
+            if report.fused_z.z < 0.0 {
+                assert!(report.fused_z.z <= second_z);
+                went_negative = true;
+                last_report = report;
+                break;
+            }
+            last_report = report;
+        }
+        assert!(saw_flip_hold);
+        assert!(saw_flip);
+        assert!(went_negative);
+        assert_eq!(
+            last_report.feedback.band_energy,
+            last_report.fused_pulse.band_energy
+        );
     }
 }

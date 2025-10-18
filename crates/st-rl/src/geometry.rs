@@ -117,6 +117,7 @@ pub struct GeometryFeedback {
     leech_weight: f64,
     leech_projector: LeechProjector,
     ramanujan_pi: f64,
+    pressure_baseline: f64,
     softening_beta: f32,
     base_softening_beta: f32,
     rank_history: VecDeque<f64>,
@@ -158,9 +159,10 @@ impl GeometryFeedback {
         min_scale = min_scale.min(clamped_max - f32::EPSILON).max(f32::EPSILON);
         let z_rank = config.z_space_rank.max(1);
         let leech_weight = config.leech_density_weight.max(0.0);
-        let ramanujan_pi = Self::ramanujan_pi(config.ramanujan_iterations.max(1));
+        let ramanujan_pi = shared_ramanujan_pi(config.ramanujan_iterations.max(1));
         let softening_beta = config.softening_beta.max(0.0);
         let leech_projector = LeechProjector::new(z_rank, leech_weight);
+        let pressure_baseline = LEECH_PACKING_DENSITY * (z_rank.max(1) as f64).sqrt();
 
         Self {
             coalgebra: ObservationalCoalgebra::new(config.observability),
@@ -173,6 +175,7 @@ impl GeometryFeedback {
             leech_weight,
             leech_projector,
             ramanujan_pi,
+            pressure_baseline,
             softening_beta,
             base_softening_beta: softening_beta,
             rank_history: VecDeque::with_capacity(window),
