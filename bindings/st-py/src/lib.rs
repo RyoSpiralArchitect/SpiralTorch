@@ -1391,7 +1391,6 @@ impl PyDifferentialResonance {
         Ok("DifferentialResonance(...)".to_string())
     }
 }
-
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {
@@ -2771,6 +2770,49 @@ impl PyModuleTrainer {
     #[pyo3(signature = (threshold, participants=2))]
     fn install_meta_conductor(&mut self, threshold: f32, participants: usize) {
         self.inner.install_meta_conductor(threshold, participants);
+    }
+
+    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
+    fn maintainer(
+        &mut self,
+        jitter_threshold: Option<f32>,
+        growth_threshold: Option<f32>,
+        energy_floor: Option<f32>,
+        clamp_min: Option<f32>,
+        clamp_max: Option<f32>,
+        pressure_step: Option<f32>,
+        window: Option<usize>,
+    ) -> PyResult<()> {
+        let builder = self.ensure_builder()?;
+        let mut config = builder.maintainer_config().clone();
+        if let Some(value) = jitter_threshold {
+            config.jitter_threshold = value;
+        }
+        if let Some(value) = growth_threshold {
+            config.growth_threshold = value;
+        }
+        if let Some(value) = energy_floor {
+            config.energy_floor = value;
+        }
+        if let Some(value) = clamp_min {
+            config.clamp_min = value;
+        }
+        if let Some(value) = clamp_max {
+            config.clamp_max = value;
+        }
+        if let Some(value) = pressure_step {
+            config.pressure_step = value;
+        }
+        if let Some(value) = window {
+            config.window = value;
+        }
+        builder.set_maintainer_config(config);
+        Ok(())
+    }
+
+    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
+        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
+        Ok(())
     }
 }
 
@@ -4373,48 +4415,8 @@ impl PyCollapsePulse {
     }
 }
 
-    #[pyo3(signature = (jitter_threshold=None, growth_threshold=None, energy_floor=None, clamp_min=None, clamp_max=None, pressure_step=None, window=None))]
-    fn maintainer(
-        &mut self,
-        jitter_threshold: Option<f32>,
-        growth_threshold: Option<f32>,
-        energy_floor: Option<f32>,
-        clamp_min: Option<f32>,
-        clamp_max: Option<f32>,
-        pressure_step: Option<f32>,
-        window: Option<usize>,
-    ) -> PyResult<()> {
-        let builder = self.ensure_builder()?;
-        let mut config = builder.maintainer_config().clone();
-        if let Some(value) = jitter_threshold {
-            config.jitter_threshold = value;
-        }
-        if let Some(value) = growth_threshold {
-            config.growth_threshold = value;
-        }
-        if let Some(value) = energy_floor {
-            config.energy_floor = value;
-        }
-        if let Some(value) = clamp_min {
-            config.clamp_min = value;
-        }
-        if let Some(value) = clamp_max {
-            config.clamp_max = value;
-        }
-        if let Some(value) = pressure_step {
-            config.pressure_step = value;
-        }
-        if let Some(value) = window {
-            config.window = value;
-        }
-        builder.set_maintainer_config(config);
-        Ok(())
-    }
+}
 
-    fn topos_guard(&mut self, topos: &PyOpenTopos) -> PyResult<()> {
-        self.ensure_builder()?.set_topos(Some(topos.inner.clone()));
-        Ok(())
-    }
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {
