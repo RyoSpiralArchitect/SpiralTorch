@@ -26,9 +26,12 @@ use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
 use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::{OnceLock, RwLock};
 #[cfg(feature = "psi")]
 use std::time::SystemTime;
+
+use serde_json::Value;
 
 use super::chrono::ChronoLoopSignal;
 #[cfg(feature = "psi")]
@@ -45,6 +48,39 @@ static LAST_PSI: Lazy<RwLock<Option<PsiReading>>> = Lazy::new(|| RwLock::new(Non
 
 #[cfg(feature = "psi")]
 static LAST_PSI_EVENTS: Lazy<RwLock<Vec<PsiEvent>>> = Lazy::new(|| RwLock::new(Vec::new()));
+
+static CONFIG_DIFF_EVENTS: OnceLock<RwLock<Vec<ConfigDiffEvent>>> = OnceLock::new();
+
+fn config_events_cell() -> &'static RwLock<Vec<ConfigDiffEvent>> {
+    CONFIG_DIFF_EVENTS.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+/// Configuration layer that produced a diff event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigLayer {
+    Base,
+    Site,
+    Run,
+}
+
+impl fmt::Display for ConfigLayer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigLayer::Base => write!(f, "base"),
+            ConfigLayer::Site => write!(f, "site"),
+            ConfigLayer::Run => write!(f, "run"),
+        }
+    }
+}
+
+/// Diff emitted while applying layered configuration files.
+#[derive(Clone, Debug)]
+pub struct ConfigDiffEvent {
+    pub layer: ConfigLayer,
+    pub path: String,
+    pub previous: Option<Value>,
+    pub current: Option<Value>,
+}
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi(reading: &PsiReading) {
@@ -72,6 +108,23 @@ pub fn set_last_psi_events(events: &[PsiEvent]) {
 #[cfg(feature = "psi")]
 pub fn get_last_psi_events() -> Vec<PsiEvent> {
     LAST_PSI_EVENTS
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
+}
+
+/// Records the most recent configuration diff events produced when loading
+/// layered configuration files.
+pub fn record_config_events(events: &[ConfigDiffEvent]) {
+    if let Ok(mut guard) = config_events_cell().write() {
+        guard.clear();
+        guard.extend(events.iter().cloned());
+    }
+}
+
+/// Returns the last recorded configuration diff events.
+pub fn get_config_events() -> Vec<ConfigDiffEvent> {
+    config_events_cell()
         .read()
         .map(|guard| guard.clone())
         .unwrap_or_default()
