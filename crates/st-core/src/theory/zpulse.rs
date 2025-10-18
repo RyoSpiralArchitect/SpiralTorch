@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
-// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 //! Canonical representation of Z pulses together with a lightweight
 //! conductor that fuses multiple sources into a single control signal.
@@ -193,7 +192,6 @@ impl ZLatencyConfig {
             history: history.max(1),
         }
     }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZConductorCfg {
@@ -256,6 +254,13 @@ impl ZConductor {
             source_gains: HashMap::new(),
             source_limits: HashMap::new(),
         }
+
+    pub fn cfg(&self) -> &ZConductorCfg {
+        &self.cfg
+    }
+
+    pub fn cfg_mut(&mut self) -> &mut ZConductorCfg {
+        &mut self.cfg
     }
 
     pub fn cfg(&self) -> &ZConductorCfg {
@@ -279,7 +284,6 @@ impl ZConductor {
         if let Some(cfg) = cfg {
             self.latency_events.truncate(cfg.history);
         }
-    }
 
     pub fn set_source_gains(&mut self, gains: HashMap<String, f32>) {
         self.source_gains = sanitize_tuning_map(gains);
@@ -457,10 +461,24 @@ impl ZConductor {
         self.fused.clone()
     }
 
-    pub fn drain_latency_events(&mut self) -> Vec<String> {
-        self.latency_events.drain(..).collect()
+        assert!(conductor.cfg.freq.is_some());
+        assert!(conductor.cfg.adaptive_gain.is_some());
+        assert!(conductor.cfg.latency.is_some());
+
+        let cfg = conductor.cfg_mut();
+        cfg.freq = None;
+        assert!(conductor.cfg.freq.is_none());
     }
 }
+#[derive(Clone, Default, Debug)]
+pub struct DesireEmitter {
+    queue: Arc<Mutex<VecDeque<ZPulse>>>,
+}
+
+impl DesireEmitter {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
 fn source_lookup_key(source: &ZSource) -> Cow<'_, str> {
     match source {
