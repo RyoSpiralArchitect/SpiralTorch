@@ -508,7 +508,7 @@ impl GeometryFeedback {
             self.max_scale = recommended.max(self.min_scale + f32::EPSILON);
         }
 
-        let max_pressure = CORE_LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
+        let max_pressure = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
         if max_pressure > 0.0 {
             let pressure_ratio = (pressure / max_pressure).clamp(0.0, 4.0);
             if pressure_ratio > 1.2 {
