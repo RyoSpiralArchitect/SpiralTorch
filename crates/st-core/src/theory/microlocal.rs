@@ -35,6 +35,7 @@
 //! field together with signed curvature when a phase label is supplied.
 
 use crate::telemetry::hub::SoftlogicZFeedback;
+use crate::theory::zpulse::{PulseSource, ZConductor, ZPulse};
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use statrs::function::gamma::gamma;
@@ -524,14 +525,27 @@ impl Default for InterfaceZPulse {
     }
 }
 
+impl From<InterfaceZPulse> for ZPulse {
+    fn from(pulse: InterfaceZPulse) -> Self {
+        ZPulse {
+            source: PulseSource::Microlocal,
+            support: pulse.support,
+            band_energy: pulse.band_energy,
+            drift: pulse.drift,
+            z_bias: pulse.z_bias,
+            latency_ms: 0.0,
+            scale: pulse.interface_cells.max(1.0),
+        }
+    }
+}
+
 /// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
 /// smoothed control signal suitable for Softlogic feedback.
 #[derive(Debug, Clone)]
 pub struct InterfaceZConductor {
     gauges: Vec<InterfaceGauge>,
     lift: InterfaceZLift,
-    smoothing: f32,
-    carry: Option<InterfaceZPulse>,
+    conductor: ZConductor,
 }
 
 impl InterfaceZConductor {
@@ -543,8 +557,7 @@ impl InterfaceZConductor {
         InterfaceZConductor {
             gauges,
             lift,
-            smoothing: 1.0,
-            carry: None,
+            conductor: ZConductor::default(),
         }
     }
 
@@ -553,7 +566,7 @@ impl InterfaceZConductor {
     /// the latest measurement; `1` disables smoothing while `0` keeps the
     /// previous fused pulse unchanged.
     pub fn with_smoothing(mut self, alpha: f32) -> Self {
-        self.smoothing = alpha.clamp(0.0, 1.0);
+        self.conductor.set_alpha(alpha);
         self
     }
 
@@ -584,22 +597,13 @@ impl InterfaceZConductor {
         }
 
         let fused_raw = InterfaceZPulse::aggregate(&pulses);
-        let mut fused = if let Some(prev) = &self.carry {
-            InterfaceZPulse::lerp(prev, &fused_raw, self.smoothing)
-        } else {
-            fused_raw
-        };
-        if fused_raw.z_bias.abs() > f32::EPSILON
-            && fused.z_bias.signum() != fused_raw.z_bias.signum()
-        {
-            fused.z_bias = fused_raw.z_bias * self.smoothing;
-        }
-        if fused_raw.drift.abs() > f32::EPSILON && fused.drift.signum() != fused_raw.drift.signum()
-        {
-            fused.drift = fused_raw.drift * self.smoothing;
-        }
+        let z_pulses: Vec<ZPulse> = pulses.iter().copied().map(ZPulse::from).collect();
+        let fused_z = self.conductor.fuse(&z_pulses);
 
-        self.carry = Some(fused);
+        let mut fused = fused_raw;
+        fused.band_energy = fused_z.band_energy;
+        fused.drift = fused_z.drift;
+        fused.z_bias = fused_z.z_bias;
 
         let psi = psi_total.unwrap_or(fused.support);
         let loss = weighted_loss.unwrap_or(fused.total_energy());
@@ -609,6 +613,7 @@ impl InterfaceZConductor {
             signatures,
             pulses,
             fused_pulse: fused,
+            fused_z_pulse: fused_z,
             feedback,
         }
     }
@@ -624,6 +629,8 @@ pub struct InterfaceZReport {
     pub pulses: Vec<InterfaceZPulse>,
     /// Smoothed aggregate pulse after applying fusion and smoothing.
     pub fused_pulse: InterfaceZPulse,
+    /// Canonical fused pulse shared with the global Z conductor.
+    pub fused_z_pulse: ZPulse,
     /// Ready-to-store Softlogic feedback record.
     pub feedback: SoftlogicZFeedback,
 }
@@ -1016,8 +1023,13 @@ mod tests {
         let second = conductor.step(&flipped, Some(&c_prime_neg), None, None);
         let raw_second = InterfaceZPulse::aggregate(&second.pulses);
         assert!(raw_second.z_bias < 0.0);
-        assert!(second.fused_pulse.z_bias < 0.0);
+        assert!(second.fused_pulse.z_bias < first.fused_pulse.z_bias);
         assert!(second.fused_pulse.z_bias > raw_second.z_bias);
         assert_eq!(second.feedback.band_energy, second.fused_pulse.band_energy);
+
+        let third = conductor.step(&flipped, Some(&c_prime_neg), None, None);
+        assert!(third.fused_pulse.z_bias < 0.0);
+        assert!(third.fused_pulse.z_bias <= second.fused_pulse.z_bias);
+        assert_eq!(third.feedback.band_energy, third.fused_pulse.band_energy);
     }
 }
