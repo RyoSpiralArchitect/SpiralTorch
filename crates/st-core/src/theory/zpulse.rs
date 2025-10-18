@@ -816,6 +816,7 @@ impl DesireEmitter {
         q.extend(pulses);
     }
 }
+
 impl ZEmitter for DesireEmitter {
     fn name(&self) -> ZSource {
         ZSource::Desire
