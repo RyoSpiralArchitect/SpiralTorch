@@ -10,7 +10,9 @@ use st_core::telemetry::hub::LoopbackEnvelope;
 use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
-use st_core::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
+use st_core::util::math::{
+    ramanujan_pi as shared_ramanujan_pi, LeechProjector, LEECH_PACKING_DENSITY,
+};
 use st_tensor::{DifferentialResonance, Tensor};
 
 /// Configuration describing how geometric observability is converted into
@@ -115,6 +117,7 @@ pub struct GeometryFeedback {
     leech_weight: f64,
     leech_projector: LeechProjector,
     ramanujan_pi: f64,
+    pressure_baseline: f64,
     softening_beta: f32,
     base_softening_beta: f32,
     rank_history: VecDeque<f64>,
@@ -128,6 +131,7 @@ pub struct GeometryFeedback {
     loop_fresh: bool,
     loop_support: f32,
     loop_script: Option<String>,
+    last_loop_signal: Option<ChronoLoopSignal>,
 }
 
 impl GeometryFeedback {
@@ -155,9 +159,10 @@ impl GeometryFeedback {
         min_scale = min_scale.min(clamped_max - f32::EPSILON).max(f32::EPSILON);
         let z_rank = config.z_space_rank.max(1);
         let leech_weight = config.leech_density_weight.max(0.0);
-        let ramanujan_pi = Self::ramanujan_pi(config.ramanujan_iterations.max(1));
+        let ramanujan_pi = shared_ramanujan_pi(config.ramanujan_iterations.max(1));
         let softening_beta = config.softening_beta.max(0.0);
         let leech_projector = LeechProjector::new(z_rank, leech_weight);
+        let pressure_baseline = LEECH_PACKING_DENSITY * (z_rank.max(1) as f64).sqrt();
 
         Self {
             coalgebra: ObservationalCoalgebra::new(config.observability),
@@ -170,6 +175,7 @@ impl GeometryFeedback {
             leech_weight,
             leech_projector,
             ramanujan_pi,
+            pressure_baseline,
             softening_beta,
             base_softening_beta: softening_beta,
             rank_history: VecDeque::with_capacity(window),
@@ -183,6 +189,7 @@ impl GeometryFeedback {
             loop_fresh: false,
             loop_support: 0.0,
             loop_script: None,
+            last_loop_signal: None,
         }
     }
 
@@ -220,6 +227,7 @@ impl GeometryFeedback {
         if let Some(script) = Self::signal_script(signal) {
             self.loop_script = Some(script);
         }
+        self.last_loop_signal = Some(signal.clone());
         let normalized = (self.loop_gain / 12.0).clamp(0.0, 1.0);
         let target_beta = 0.6 + normalized * 1.4;
         self.softening_beta = (self.softening_beta * 0.7 + target_beta * 0.3).clamp(0.3, 4.0);
@@ -352,6 +360,90 @@ impl GeometryFeedback {
         }
     }
 
+    /// Synthesises a loopback envelope capturing the most recent feedback
+    /// signal so other nodes can replay the learning loop modulation.
+    pub fn emit_loopback_envelope(
+        &mut self,
+        signal: &GeometryFeedbackSignal,
+        source: Option<&str>,
+    ) -> LoopbackEnvelope {
+        let loop_signal = self.prepare_loop_signal(signal);
+        let support = if self.loop_support > f32::EPSILON {
+            self.loop_support
+        } else {
+            signal.smoothed_rank.max(1.0) as f32
+        };
+        let collapse_total = if self.collapse_bias > f32::EPSILON {
+            Some(self.collapse_bias)
+        } else {
+            None
+        };
+        let z_signal = (signal.learning_rate_scale - 1.0).clamp(-3.0, 3.0);
+        let mut envelope = LoopbackEnvelope::new(loop_signal).with_support(support);
+        if let Some(src) = source {
+            envelope = envelope.with_source(src);
+        }
+        let mut script_hint = self.telemetry.loop_script.clone();
+        if script_hint.is_none() {
+            script_hint = Some(format!(
+                "rl.policy(scale={:.3},rank={:.2},pressure={:.2})",
+                signal.learning_rate_scale, signal.smoothed_rank, signal.smoothed_pressure,
+            ));
+        }
+        envelope
+            .with_collapse_total(collapse_total)
+            .with_z_signal(Some(z_signal))
+            .with_script_hint(script_hint)
+    }
+
+    fn prepare_loop_signal(&mut self, signal: &GeometryFeedbackSignal) -> ChronoLoopSignal {
+        let drift = (signal.learning_rate_scale - 1.0).clamp(-2.0, 2.0);
+        let drift_abs = signal.learning_rate_scale.abs().min(6.0);
+        let drift_std = (signal.averaged_efficiency - 1.0).abs().min(4.0) as f32;
+        let pressure = signal.smoothed_pressure as f32;
+        let rank = signal.smoothed_rank as f32;
+        if let Some(existing) = &self.last_loop_signal {
+            let mut enriched = existing.clone();
+            enriched.summary.frames = enriched.summary.frames.max(1);
+            enriched.summary.duration = enriched.summary.duration.max(f32::EPSILON);
+            enriched.summary.latest_timestamp =
+                enriched.summary.latest_timestamp.max(self.loop_timestamp);
+            enriched.summary.mean_drift =
+                (enriched.summary.mean_drift * 0.7 + drift * 0.3).clamp(-2.0, 2.0);
+            enriched.summary.mean_abs_drift = enriched.summary.mean_abs_drift.max(drift_abs);
+            enriched.summary.drift_std =
+                (enriched.summary.drift_std * 0.8 + drift_std * 0.2).max(0.0);
+            enriched.summary.mean_energy =
+                (enriched.summary.mean_energy * 0.6 + pressure * 0.4).max(0.0);
+            enriched.summary.energy_std =
+                (enriched.summary.energy_std * 0.6 + rank.abs() * 0.2).max(0.0);
+            enriched.summary.mean_decay =
+                (enriched.summary.mean_decay * 0.8 - self.collapse_bias * 0.2).min(0.0);
+            enriched.summary.min_energy = enriched.summary.min_energy.min(pressure);
+            enriched.summary.max_energy = enriched.summary.max_energy.max(pressure);
+            self.last_loop_signal = Some(enriched.clone());
+            enriched
+        } else {
+            let frames = signal.assessment.expected.len().max(1);
+            let summary = ChronoSummary {
+                frames,
+                duration: self.loop_support.max(1.0),
+                latest_timestamp: self.loop_timestamp,
+                mean_drift: drift,
+                mean_abs_drift: drift_abs,
+                drift_std,
+                mean_energy: pressure.max(0.0),
+                energy_std: rank.abs(),
+                mean_decay: -self.collapse_bias,
+                min_energy: pressure.max(0.0),
+                max_energy: pressure.max(0.0),
+            };
+            let generated = ChronoLoopSignal::new(summary, None);
+            self.last_loop_signal = Some(generated.clone());
+            generated
+        }
+    }
+
     /// Injects collapse drive pressure so the Leech weighting can respond to
     /// structural emergencies even when no loop signal is available.
     pub fn inject_collapse_bias(&mut self, intensity: f32) {
@@ -383,8 +475,8 @@ impl GeometryFeedback {
         }
         let averaged = self.history.iter().copied().sum::<f64>() / self.history.len() as f64;
         let geodesic = self.geodesic_projection(resonance);
-        let densified =
-            self.leech_weight * LEECH_PACKING_DENSITY * geodesic * (self.z_rank as f64).sqrt();
+        let pressure_baseline = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
+        let densified = self.leech_projector.enrich(geodesic) + pressure_baseline;
         let normalized = ((averaged + densified) / self.ramanujan_pi).clamp(0.0, 1.0);
         let softened = self.soft_project(normalized as f32);
         let mut scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
@@ -508,7 +600,8 @@ impl GeometryFeedback {
             self.max_scale = recommended.max(self.min_scale + f32::EPSILON);
         }
 
-        let max_pressure = CORE_LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
+        let pressure_baseline = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
+        let max_pressure = pressure_baseline + LeechProjector::new(self.z_rank, 1.0).enrich(1.0);
         if max_pressure > 0.0 {
             let pressure_ratio = (pressure / max_pressure).clamp(0.0, 4.0);
             if pressure_ratio > 1.2 {
@@ -564,19 +657,7 @@ impl GeometryFeedback {
     }
 
     fn ramanujan_pi(iterations: usize) -> f64 {
-        let mut sum = 0.0;
-        let mut factor = 1.0;
-        let base = 396_f64.powi(4);
-        for k in 0..iterations {
-            sum += factor * (1103.0 + 26390.0 * k as f64);
-            let k1 = k + 1;
-            let numerator =
-                (4 * k1 - 3) as f64 * (4 * k1 - 2) as f64 * (4 * k1 - 1) as f64 * (4 * k1) as f64;
-            let denominator = (k1 as f64).powi(4) * base;
-            factor *= numerator / denominator;
-        }
-        let prefactor = (2.0 * 2.0_f64.sqrt()) / 9801.0;
-        (prefactor * sum).recip()
+        shared_ramanujan_pi(iterations)
     }
 }
 
@@ -784,6 +865,18 @@ mod tests {
         assert!(telemetry.loop_support > 1.0);
         assert!(telemetry.softening_beta > 0.6 - f32::EPSILON);
         assert!(telemetry.loop_script.is_some());
+    }
+
+    #[test]
+    fn emit_loopback_envelope_generates_signal() {
+        let mut feedback = GeometryFeedback::new(GeometryFeedbackConfig::default_policy());
+        let resonance = resonance_from(&[0.6, -0.4, 0.2, -0.1, 0.3]);
+        let signal = feedback.process_resonance(&resonance);
+        let envelope = feedback.emit_loopback_envelope(&signal, Some("test.rl"));
+        assert_eq!(envelope.source.as_deref(), Some("test.rl"));
+        assert!(envelope.z_signal.is_some());
+        assert!(envelope.loop_signal.summary.frames >= 1);
+        assert!(envelope.support >= 1.0);
     }
 }
 

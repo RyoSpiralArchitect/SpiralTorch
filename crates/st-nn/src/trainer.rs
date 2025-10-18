@@ -1633,12 +1633,12 @@ mod tests {
     use crate::loss::MeanSquaredError;
     use crate::roundtable::{HeurOp, HeurOpKind};
     use crate::schedule::RoundtableConfig;
-    use st_tensor::pure::topos::OpenCartesianTopos;
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
+    use st_tensor::pure::topos::OpenCartesianTopos;
     use st_tensor::topos::OpenCartesianTopos;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::time::{Duration, Instant, SystemTime};
 
     fn build_language_geometry() -> SymbolGeometry {

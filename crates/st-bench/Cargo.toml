@@ -1,0 +1,20 @@
+[package]
+name = "st-bench"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[dependencies]
+st-core = { path = "../st-core" }
+st-tensor = { path = "../st-tensor" }
+st-nn = { path = "../st-nn" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "linear_epoch"
+harness = false
