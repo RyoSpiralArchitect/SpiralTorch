@@ -153,8 +153,9 @@ multi-radius sweeps and a conductor that fuses their Z pulses with exponential
 smoothing. `InterfaceGauge::analyze_multiradius` probes the same mask at
 different blow-up scales (and reuses an optional `c′` label when supplied),
 while `InterfaceZConductor` drives any number of gauges, aggregates the
-resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
-ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
+resulting pulses, and hands back a `ZFused` packet with attribution weights and
+event tags alongside the smoothed `SoftlogicZFeedback` record so runtime loops
+can see which layer dominated the decision.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L515】【F:crates/st-core/src/theory/zpulse.rs†L22-L344】
 
 ### Maxwell-coded envelopes meet SpiralK
 
