@@ -209,20 +209,14 @@ impl ZSpaceGraphConvolution {
     }
 
     /// Switches the neighbourhood aggregation strategy used by the layer.
-    pub fn set_aggregation(
-        &mut self,
-        aggregation: NeighborhoodAggregation,
-    ) -> PureResult<()> {
+    pub fn set_aggregation(&mut self, aggregation: NeighborhoodAggregation) -> PureResult<()> {
         aggregation.validate()?;
         self.aggregation = aggregation;
         Ok(())
     }
 
     /// Returns a new layer adopting the provided aggregation strategy.
-    pub fn with_aggregation(
-        mut self,
-        aggregation: NeighborhoodAggregation,
-    ) -> PureResult<Self> {
+    pub fn with_aggregation(mut self, aggregation: NeighborhoodAggregation) -> PureResult<Self> {
         self.set_aggregation(aggregation)?;
         Ok(self)
     }
@@ -413,12 +407,8 @@ mod tests {
 
     #[test]
     fn graph_convolution_supports_multi_hop_sum() {
-        let adjacency = Tensor::from_vec(
-            3,
-            3,
-            vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
-        )
-        .unwrap();
+        let adjacency =
+            Tensor::from_vec(3, 3, vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0]).unwrap();
         let context = GraphContext::from_adjacency(adjacency).unwrap();
         let aggregation = NeighborhoodAggregation::multi_hop_sum(NonZeroUsize::new(2).unwrap())
             .with_include_self(true)
@@ -457,12 +447,8 @@ mod tests {
             ],
         )
         .unwrap();
-        let grad_output = Tensor::from_vec(
-            4,
-            2,
-            vec![0.1, -0.2, 0.05, 0.15, -0.1, 0.2, 0.075, -0.05],
-        )
-        .unwrap();
+        let grad_output =
+            Tensor::from_vec(4, 2, vec![0.1, -0.2, 0.05, 0.15, -0.1, 0.2, 0.075, -0.05]).unwrap();
         let grad_input = layer.backward(&input, &grad_output).unwrap();
         assert_eq!(grad_input.shape(), (4, 3));
         assert!(grad_input.data().iter().all(|v| v.is_finite()));
