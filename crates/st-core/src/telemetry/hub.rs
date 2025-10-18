@@ -22,7 +22,7 @@
 // ============================================================================
 
 use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
-use super::dashboard::{DashboardFrame, DashboardRing, DashboardSummary};
+use super::dashboard::{DashboardFrame, DashboardRing};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
