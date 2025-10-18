@@ -7,12 +7,11 @@ use super::geometry::{ConceptHint, RepressionField, SemanticBridge, SymbolGeomet
 use super::maxwell::NarrativeHint;
 use super::schrodinger::schrodinger_boost;
 use super::temperature::{entropy, TemperatureController};
+use crate::language::DesireGradientInterpretation;
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
-use st_tensor::{
-    DesireGradientControl, DesireGradientInterpretation, GradientSummary, TensorError,
-};
 use st_core::telemetry::hub;
+use st_tensor::{GradientSummary, TensorError};
 
 const REPORT_SIZE: usize = 8;
 const BIAS_UPDATE_INJECTION: f32 = 0.05;
@@ -134,7 +133,6 @@ pub struct DesireLagrangian {
     avoidance_accumulator: Vec<f32>,
     desire_bias: Vec<f32>,
     gradient_interpretation: DesireGradientInterpretation,
-    gradient_control: DesireGradientControl,
     active_narrative: Option<NarrativeHint>,
 }
 
@@ -175,7 +173,6 @@ impl DesireLagrangian {
             avoidance_accumulator: vec![0.0; vocab],
             desire_bias: vec![0.0; vocab],
             gradient_interpretation: DesireGradientInterpretation::default(),
-            gradient_control: DesireGradientControl::default(),
             active_narrative: None,
         })
     }

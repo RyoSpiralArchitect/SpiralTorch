@@ -9,6 +9,10 @@ use std::fmt;
 use st_kdsl::query::QueryPlan;
 use st_tensor::{topos::OpenCartesianTopos, Tensor, TensorError};
 
+pub mod rl_bridge;
+
+pub use rl_bridge::{RecBanditController, RecBanditDecision, RecRlError, RecRlResult};
+
 /// Errors surfaced by the recommender harness.
 #[derive(Debug)]
 pub enum SpiralRecError {

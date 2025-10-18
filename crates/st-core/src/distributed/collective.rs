@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 
 /// Simple collective communication fabric that operates on in-memory buffers.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct CollectiveArena {
     buffer: Arc<Mutex<Vec<f32>>>,
 }
