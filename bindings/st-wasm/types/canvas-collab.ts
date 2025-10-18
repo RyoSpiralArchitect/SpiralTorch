@@ -445,7 +445,7 @@ class StorageEventTransport implements CollabTransport {
         }
         const nonce = randomNonce();
         const payload = JSON.stringify({ nonce, envelope: serialized });
-        this.#seen.add(nonce);
+        this.#rememberNonce(nonce);
         try {
             localStorage.setItem(this.#key, payload);
         } catch {
@@ -453,10 +453,6 @@ class StorageEventTransport implements CollabTransport {
             return;
         }
         this.#dispatch(payload, true);
-        if (this.#seen.size > 256) {
-            const entries = Array.from(this.#seen);
-            this.#seen = new Set(entries.slice(entries.length - 128));
-        }
     }
 
     subscribe(handler: (envelope: CollabEnvelope) => void): void {
@@ -485,10 +481,13 @@ class StorageEventTransport implements CollabTransport {
             return;
         }
         const nonce = parsed.nonce;
-        if (nonce && this.#seen.has(nonce)) {
-            this.#seen.delete(nonce);
-            if (!local) {
-                return;
+        if (nonce) {
+            if (this.#seen.has(nonce)) {
+                if (!local) {
+                    return;
+                }
+            } else if (!local) {
+                this.#rememberNonce(nonce);
             }
         }
         try {
@@ -496,6 +495,14 @@ class StorageEventTransport implements CollabTransport {
             this.#handler?.(envelope);
         } catch {
             // ignore malformed payloads
+        }
+    }
+
+    #rememberNonce(nonce: string): void {
+        this.#seen.add(nonce);
+        if (this.#seen.size > 256) {
+            const entries = Array.from(this.#seen);
+            this.#seen = new Set(entries.slice(entries.length - 128));
         }
     }
 }

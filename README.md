@@ -809,7 +809,9 @@ if atlas:
 `AtlasFrame` exposes the latest `ChronoSummary`, optional harmonics, maintainer
 status, and any SpiralK hints captured along the way. Metrics from auxiliary
 nodes (collapse totals, Z-bias pushes) ride alongside free-form notes so you can
-route the atlas straight into dashboards or back into SpiralK planners. Each
+route the atlas straight into dashboards or back into SpiralK planners. Even
+fragments that arrive without explicit timestamps now stay alive, so stray
+Z-space nudges or maintainer notes still land on the shared map. Each
 frame also clusters its metrics into **districts** — Surface, Concourse, and
 Substrate — so you can see which layer of the SpiralTorch “city” is lighting up
 at a glance:
@@ -823,7 +825,11 @@ If you want more than a snapshot, call `session.atlas_route(limit=12)` to pull a
 bounded history of frames. It’s perfect for feeding notebooks with sliding
 windows of atlas metrics or piping the loop into other SpiralTorch nodes. When
 you just need a quick **district-level synopsis**, `session.atlas_route_summary`
-condenses the same window into aggregate trends and maintainer hints:
+condenses the same window into aggregate trends, maintainer hints, and now the
+qualia-focused **concept pulses** mandated by our language stewardship memo. The
+summary keeps a rolling count of how each fragment annotated qualia—Lewis,
+Nagel, Jackson, Chalmers, Tononi, or the generic drift—so dashboards can surface
+where Z-space narratives might be sliding into conceptual entropy:
 
 ```python
 summary = session.atlas_route_summary(limit=12)
@@ -834,6 +840,8 @@ print(
     summary.collapse_trend,
     summary.z_signal_trend,
 )
+for pulse in summary.concept_pulses:
+    print(pulse.term, pulse.sense.label(), pulse.mentions, pulse.last_rationale)
 for district in summary.districts():
     print(district.name, district.coverage, district.delta, district.std_dev)
 print(summary.frames, summary.mean_loop_support)
