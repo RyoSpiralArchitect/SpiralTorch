@@ -885,10 +885,9 @@ impl InterfaceZConductor {
                 band_energy: pulse.band_energy,
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
-                support,
-                scale: pulse.scale,
-                quality,
-                stderr,
+                support: ZSupport::from_band_energy(pulse.band_energy),
+                quality: pulse.quality_hint.unwrap_or(1.0),
+                stderr: pulse.standard_error.unwrap_or(0.0),
                 latency_ms: 0.0,
             });
         }

@@ -854,11 +854,6 @@ impl ZRegistry {
             emitters: Vec::with_capacity(capacity),
         }
     }
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            emitters: Vec::with_capacity(capacity),
-        }
-    }
 
     pub fn register<E>(&mut self, emitter: E)
     where
@@ -981,7 +976,6 @@ mod conductor_tests {
             drift,
             z_bias: drift,
             support,
-            scale: None,
             quality,
             stderr: 0.0,
             latency_ms: 0.0,

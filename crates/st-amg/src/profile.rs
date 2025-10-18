@@ -37,6 +37,8 @@ pub struct ProblemProfile {
     mean_row_nnz: f32,
     max_row_nnz: u32,
     bandwidth_hint: u32,
+    bandwidth_peak: u32,
+    bandwidth_stddev: f32,
     row_nnz_stddev: f32,
 }
 
@@ -59,6 +61,8 @@ impl ProblemProfile {
         let row_nnz_stddev = mean_row_nnz.sqrt().max(0.5);
         let max_row_nnz = mean_row_nnz.ceil() as u32;
         let bandwidth_hint = cols.min(rows).max(1) as u32;
+        let bandwidth_peak = bandwidth_hint;
+        let bandwidth_stddev = (bandwidth_hint as f32 * 0.35).max(1.0);
 
         Self {
             rows,
@@ -72,6 +76,8 @@ impl ProblemProfile {
             mean_row_nnz,
             max_row_nnz,
             bandwidth_hint,
+            bandwidth_peak,
+            bandwidth_stddev,
             row_nnz_stddev,
         }
     }
@@ -121,6 +127,26 @@ impl ProblemProfile {
     /// Estimated half-bandwidth used to bias tile/workgroup selection.
     pub fn bandwidth_hint(&self) -> u32 {
         self.bandwidth_hint
+    }
+
+    /// Maximum observed (or assumed) half-bandwidth across sampled rows.
+    pub fn bandwidth_peak(&self) -> u32 {
+        self.bandwidth_peak
+    }
+
+    /// Standard deviation of bandwidth observations captured during profiling.
+    pub fn bandwidth_stddev(&self) -> f32 {
+        self.bandwidth_stddev
+    }
+
+    /// Relative spread of the bandwidth distribution.
+    pub fn bandwidth_spread(&self) -> f32 {
+        let denom = self.bandwidth_peak.max(1) as f32;
+        if denom <= f32::EPSILON {
+            0.0
+        } else {
+            (self.bandwidth_stddev / denom).clamp(0.0, 2.5)
+        }
     }
 
     /// Standard deviation of row densities captured during profiling.
@@ -173,10 +199,16 @@ impl ProblemProfile {
 
     /// Preferred WGPU workgroup lanes given the input footprint.
     pub fn lane_hint(&self) -> u32 {
-        if self.bandwidth_hint >= 8_000 {
+        let bandwidth_spread = self.bandwidth_spread();
+        let bandwidth_peak = self.bandwidth_peak();
+        if bandwidth_peak >= 14_000 {
+            512
+        } else if self.bandwidth_hint >= 8_000 {
             512
         } else if self.bandwidth_hint <= 2_000 && self.mean_row_nnz < 12.0 {
             128
+        } else if bandwidth_spread > 0.4 {
+            512
         } else if self.subgroup {
             if self.cols >= 8192 {
                 512
@@ -195,7 +227,9 @@ impl ProblemProfile {
     /// Preferred tile width heuristic matching the SpiralK kernels.
     pub fn tile_hint(&self) -> u32 {
         let bandwidth = self.bandwidth_hint;
-        match (self.cols, self.subgroup, bandwidth) {
+        let bandwidth_spread = self.bandwidth_spread();
+        let bandwidth_peak = self.bandwidth_peak();
+        let mut tile = match (self.cols, self.subgroup, bandwidth) {
             (..=4096, true, ..=4096) => 4_096,
             (..=4096, false, ..=4096) => 2_048,
             (4097..=16384, true, ..=8192) => 8_192,
@@ -203,7 +237,16 @@ impl ProblemProfile {
             (_, _, 0..=4096) => 8_192,
             (16385..=65536, _, ..=12_000) => 8_192,
             _ => 16_384,
+        };
+        if bandwidth_peak >= 14_000 {
+            tile = tile.max(8_192);
         }
+        if bandwidth_spread > 0.4 {
+            tile = tile.max(8_192);
+        } else if bandwidth_spread < 0.25 && bandwidth_peak < 4_000 {
+            tile = tile.min(8_192).max(4_096);
+        }
+        tile
     }
 
     /// Wilson-style alpha for blending fractional energy metrics.
@@ -228,6 +271,7 @@ pub struct ProfileBuilder {
     bandwidth_sum: f64,
     bandwidth_max: usize,
     bandwidth_samples: usize,
+    bandwidth_sq_sum: f64,
 }
 
 impl ProfileBuilder {
@@ -259,6 +303,7 @@ impl ProfileBuilder {
             self.bandwidth_sum += bw as f64;
             self.bandwidth_samples += 1;
             self.bandwidth_max = self.bandwidth_max.max(bw);
+            self.bandwidth_sq_sum += (bw * bw) as f64;
         }
     }
 
@@ -299,6 +344,25 @@ impl ProfileBuilder {
         }
     }
 
+    fn bandwidth_peak(&self) -> u32 {
+        if self.bandwidth_samples == 0 {
+            self.bandwidth_hint()
+        } else {
+            self.bandwidth_max.max(1) as u32
+        }
+    }
+
+    fn bandwidth_stddev(&self) -> f32 {
+        if self.bandwidth_samples <= 1 {
+            (self.bandwidth_peak() as f32 * 0.35).max(1.0)
+        } else {
+            let mean = self.bandwidth_sum / self.bandwidth_samples as f64;
+            let mean_sq = self.bandwidth_sq_sum / self.bandwidth_samples as f64;
+            let variance = (mean_sq - mean * mean).max(0.0);
+            variance.sqrt() as f32
+        }
+    }
+
     /// Finalize the builder into a [`ProblemProfile`].
     pub fn build(self) -> ProblemProfile {
         let nnz = if self.nnz_acc == 0 { 1 } else { self.nnz_acc };
@@ -307,6 +371,8 @@ impl ProfileBuilder {
         profile.mean_row_nnz = self.mean_row_nnz().max(profile.mean_row_nnz);
         profile.max_row_nnz = self.max_row_nnz.max(profile.max_row_nnz as usize) as u32;
         profile.bandwidth_hint = self.bandwidth_hint().max(profile.bandwidth_hint);
+        profile.bandwidth_peak = self.bandwidth_peak().max(profile.bandwidth_peak);
+        profile.bandwidth_stddev = self.bandwidth_stddev().max(profile.bandwidth_stddev);
         profile.row_nnz_stddev = self.row_stddev().max(profile.row_nnz_stddev);
         profile
     }
@@ -369,6 +435,8 @@ mod tests {
         assert_eq!(profile.max_row_nnz(), 6);
         assert!(profile.bandwidth_hint() >= 5);
         assert!(profile.row_nnz_stddev() >= 1.0);
+        assert!(profile.bandwidth_peak() >= 6);
+        assert!(profile.bandwidth_stddev() >= 1.0);
     }
 
     #[test]
@@ -380,5 +448,17 @@ mod tests {
         let profile = builder.build();
         let spread = profile.row_nnz_spread();
         assert!(spread > 0.25);
+    }
+
+    #[test]
+    fn builder_bandwidth_stats() {
+        let mut builder = ProfileBuilder::new(64, 256, false);
+        for bw in [8, 12, 30, 20, 40, 16, 24, 32] {
+            builder.observe_row(6, true, Some(bw));
+        }
+        let profile = builder.build();
+        assert!(profile.bandwidth_peak() >= 40);
+        assert!(profile.bandwidth_stddev() > 8.0);
+        assert!(profile.bandwidth_spread() > 0.2);
     }
 }
