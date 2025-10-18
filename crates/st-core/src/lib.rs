@@ -14,6 +14,7 @@ pub mod runtime;
 pub mod theory;
 pub mod util;
 
+pub mod coop;
 pub mod telemetry;
 
 pub use theory::maxwell;
