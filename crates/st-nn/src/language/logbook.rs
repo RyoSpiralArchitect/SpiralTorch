@@ -345,6 +345,7 @@ mod tests {
             phase: DesirePhase::Observation,
             avoidance: None,
             hypergrad_penalty: 0.1,
+            narrative: None,
         };
         for ordinal in 0..3 {
             solution.phase = match ordinal {

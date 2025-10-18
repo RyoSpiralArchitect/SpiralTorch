@@ -1,12 +1,69 @@
 use js_sys::{Array, Float32Array, Uint32Array, Uint8Array};
 use st_tensor::fractal::{FractalPatch, UringFractalScheduler};
-use st_tensor::wasm_canvas::{CanvasPalette, CanvasProjector};
+use st_tensor::wasm_canvas::{
+    CanvasFftLayout as ProjectorCanvasFftLayout, CanvasPalette, CanvasProjector,
+};
 use st_tensor::{Tensor, TensorError};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 
 use crate::utils::js_error;
+
+#[wasm_bindgen]
+pub struct CanvasFftLayout {
+    field_bytes: u32,
+    field_stride: u32,
+    spectrum_bytes: u32,
+    spectrum_stride: u32,
+    uniform_bytes: u32,
+}
+
+impl From<ProjectorCanvasFftLayout> for CanvasFftLayout {
+    fn from(layout: ProjectorCanvasFftLayout) -> Self {
+        let clamp = |value: usize| -> u32 { value.min(u32::MAX as usize) as u32 };
+        Self {
+            field_bytes: clamp(layout.field_bytes()),
+            field_stride: clamp(layout.field_stride()),
+            spectrum_bytes: clamp(layout.spectrum_bytes()),
+            spectrum_stride: clamp(layout.spectrum_stride()),
+            uniform_bytes: clamp(layout.uniform_bytes()),
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl CanvasFftLayout {
+    /// Total byte length required for the `FieldSample` storage buffer.
+    #[wasm_bindgen(getter, js_name = fieldBytes)]
+    pub fn field_bytes(&self) -> u32 {
+        self.field_bytes
+    }
+
+    /// Size in bytes of each vector field sample.
+    #[wasm_bindgen(getter, js_name = fieldStride)]
+    pub fn field_stride(&self) -> u32 {
+        self.field_stride
+    }
+
+    /// Total byte length required for the FFT spectrum storage buffer.
+    #[wasm_bindgen(getter, js_name = spectrumBytes)]
+    pub fn spectrum_bytes(&self) -> u32 {
+        self.spectrum_bytes
+    }
+
+    /// Size in bytes of each FFT spectrum sample.
+    #[wasm_bindgen(getter, js_name = spectrumStride)]
+    pub fn spectrum_stride(&self) -> u32 {
+        self.spectrum_stride
+    }
+
+    /// Byte length of the `CanvasFftParams` uniform buffer.
+    #[wasm_bindgen(getter, js_name = uniformBytes)]
+    pub fn uniform_bytes(&self) -> u32 {
+        self.uniform_bytes
+    }
+}
 
 #[wasm_bindgen]
 pub struct FractalCanvas {
@@ -131,6 +188,23 @@ impl FractalCanvas {
     pub fn vector_field_fft_uniform(&self, inverse: bool) -> Uint32Array {
         let params = self.projector.vector_fft_uniform(inverse);
         Uint32Array::from(params.as_slice())
+    }
+
+    /// Compute the workgroup dispatch dimensions that pair with
+    /// [`vector_field_fft_kernel`]. The returned `[x, y, z]` triplet already
+    /// accounts for the workgroup size when toggling subgroup execution.
+    #[wasm_bindgen(js_name = vectorFieldFftDispatch)]
+    pub fn vector_field_fft_dispatch(&self, subgroup: bool) -> Uint32Array {
+        let dispatch = self.projector.vector_fft_dispatch(subgroup);
+        Uint32Array::from(dispatch.as_slice())
+    }
+
+    /// Byte layout metadata mirroring the WGSL `FieldSample`, `SpectrumSample`
+    /// and uniform structs so WebGPU callers can size buffers without manual
+    /// calculations.
+    #[wasm_bindgen(js_name = vectorFieldFftLayout)]
+    pub fn vector_field_fft_layout(&self) -> CanvasFftLayout {
+        self.projector.vector_fft_layout().into()
     }
 
     /// Reset the internal normaliser so the next frame recomputes brightness ranges.

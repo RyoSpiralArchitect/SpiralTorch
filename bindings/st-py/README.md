@@ -288,6 +288,34 @@ print(f"reward={report.total_reward:.2f} baseline={report.mean_return:.2f} hyper
 print("weights", policy.weights().tolist())
 ```
 
+Geometry-aware updates are available straight from Python. Provide an optional
+dictionary of overrides when calling `attach_geometry_feedback` and pass a
+`DifferentialResonance` snapshot to steer the learning rate with the same
+coalgebra used on the Rust side. The binding returns both the episode report and
+an optional geometry dictionary so notebooks can react to rank/pressure drift.
+
+```python
+from spiraltorch import SpiralSession, Tensor
+from spiraltorch.rl import PolicyGradient
+
+session = SpiralSession(device="cpu", curvature=-1.0)
+policy = PolicyGradient(state_dim=4, action_dim=2, learning_rate=0.02)
+policy.attach_geometry_feedback({"min_learning_rate_scale": 0.7, "slot_symmetry": "dihedral"})
+
+state = Tensor(1, 4, [0.2, 0.1, -0.3, 0.4])
+resonance = session.trace(state).resonate()
+policy.record_transition(state, 0, reward=0.5)
+
+report, signal = policy.finish_episode_with_geometry(resonance)
+print(report.steps, report.total_reward)
+if signal:
+    print("scale", signal["learning_rate_scale"], "rank", signal["smoothed_rank"])
+
+telemetry = policy.geometry_telemetry()
+if telemetry:
+    print("loop gain", telemetry["loop_gain"], "script", telemetry["loop_script"])
+```
+
 Chrono telemetry is shared through the global hub, so recording resonance
 histories on the session side automatically feeds loop signals back into the
 policy geometry. Call `session.resonate_over_time(...)`/`session.timeline(...)`
