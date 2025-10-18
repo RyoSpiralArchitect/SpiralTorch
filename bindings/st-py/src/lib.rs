@@ -63,6 +63,7 @@ use st_nn::{
     DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport, DesireLagrangian, DesireLogbook,
     DesirePhase, DesirePipeline, DesirePipelineBuilder, DesireRewriteTrigger,
     DesireRoundtableBridge, DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireWeights,
+    NarrativeHint,
     DifferentialTrace, DistConfig, DistMode, EpochStats, LightningConfig as NnLightningConfig,
     Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer, Relu as NnRelu,
     RepressionField, RoundtableConfig, RoundtableSchedule, SemanticBridge,
@@ -243,6 +244,14 @@ fn avoidance_report_to_py(py: Python<'_>, report: &DesireAvoidanceReport) -> PyR
     Ok(dict.into())
 }
 
+fn narrative_hint_to_py(py: Python<'_>, hint: &NarrativeHint) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("channel", hint.channel().to_string())?;
+    dict.set_item("tags", hint.tags().to_vec())?;
+    dict.set_item("intensity", hint.intensity())?;
+    Ok(dict.into())
+}
+
 fn desire_weights_to_py(py: Python<'_>, weights: &DesireWeights) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
     dict.set_item("alpha", weights.alpha)?;
@@ -266,6 +275,11 @@ fn desire_solution_to_py(py: Python<'_>, solution: &DesireSolution) -> PyResult<
         dict.set_item("avoidance", avoidance_report_to_py(py, report)?)?;
     } else {
         dict.set_item("avoidance", py.None())?;
+    }
+    if let Some(narrative) = &solution.narrative {
+        dict.set_item("narrative", narrative_hint_to_py(py, narrative)?)?;
+    } else {
+        dict.set_item("narrative", py.None())?;
     }
     Ok(dict.into())
 }

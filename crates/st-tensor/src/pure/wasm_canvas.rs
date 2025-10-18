@@ -566,6 +566,24 @@ impl CanvasProjector {
         ]
     }
 
+    /// Suggested dispatch dimensions for [`vector_fft_wgsl`]. The kernel
+    /// operates over the full canvas grid, so we pack the height into the
+    /// `y`-dimension while the `x`-dimension is chunked by the workgroup size.
+    /// Consumers can feed the returned triplet directly into
+    /// `queue.write_buffer` / `compute_pass.dispatch_workgroups` without
+    /// recomputing the ceil division in JavaScript.
+    pub fn vector_fft_dispatch(&self, subgroup: bool) -> [u32; 3] {
+        let width = self.surface.width() as u32;
+        let height = self.surface.height() as u32;
+        let workgroup = if subgroup { 32 } else { 64 };
+        let groups_x = if width == 0 {
+            0
+        } else {
+            (width + workgroup - 1) / workgroup
+        };
+        [groups_x, height, 1]
+    }
+
     /// Emit a WGSL kernel that mirrors [`refresh_vector_fft`] so GPU/WebGPU
     /// callers can reproduce the spectrum without leaving the browser. The
     /// shader expects the following bindings:
@@ -800,6 +818,17 @@ mod tests {
         let projector = CanvasProjector::new(scheduler, 3, 5).unwrap();
         let params = projector.vector_fft_uniform(true);
         assert_eq!(params, [3, 5, 1, 0]);
+    }
+
+    #[test]
+    fn vector_fft_dispatch_respects_workgroup_chunks() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let projector = CanvasProjector::new(scheduler, 130, 4).unwrap();
+        assert_eq!(projector.vector_fft_dispatch(false), [3, 4, 1]);
+        assert_eq!(projector.vector_fft_dispatch(true), [5, 4, 1]);
     }
 
     #[test]
