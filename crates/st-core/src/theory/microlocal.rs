@@ -1669,12 +1669,26 @@ mod tests {
         assert!(second.budget_scale > 0.0);
     }
 
-    #[derive(Debug)]
-    struct HalfPolicy;
-
-    impl ZSourcePolicy for HalfPolicy {
-        fn quality(&self, _: &InterfaceZPulse) -> f32 {
-            0.5
+        let second_z = second.fused_z.z;
+        let mut saw_flip_hold = second.fused_z.events.iter().any(|e| e == "flip-held");
+        let mut saw_flip = false;
+        let mut went_negative = false;
+        let mut last_report = second;
+        for _ in 0..8 {
+            let report = conductor.step(&flipped, Some(&c_prime_neg), None, None);
+            if report.fused_z.events.iter().any(|e| e == "flip-held") {
+                saw_flip_hold = true;
+            }
+            if report.fused_z.events.iter().any(|e| e == "sign-flip") {
+                saw_flip = true;
+            }
+            if report.fused_z.z < 0.0 {
+                assert!(report.fused_z.z <= second_z);
+                went_negative = true;
+                last_report = report;
+                break;
+            }
+            last_report = report;
         }
     }
 

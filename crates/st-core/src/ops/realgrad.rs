@@ -949,7 +949,7 @@ impl RealGradZProjector {
         let quality = spectral_quality(&projection.spectrum, band).max(self.quality_floor);
 
         ZPulse {
-            source: ZSource::RealGrad,
+            source: ZSource::Other("RealGrad"),
             ts: 0,
             band_energy: (above, here, beneath),
             drift,
@@ -1141,14 +1141,12 @@ pub fn project_tempered_realgrad(
 #[cfg(test)]
 mod tests {
     use super::{
-        project_realgrad, project_tempered_realgrad, CpuChirpZ, CpuRustFft, GradientSummary,
-        RealGradAutoTuner, RealGradConfig, RealGradKernel, RealGradProjection,
-        RealGradProjectionScratch, RealGradZProjector, SchwartzSequence, SpectralEngine,
-        SpectrumNorm, TemperedRealGradProjection, DEFAULT_THRESHOLD,
+        project_realgrad, project_tempered_realgrad, CpuChirpZ, CpuRustFft, RealGradAutoTuner,
+        RealGradConfig, RealGradKernel, RealGradProjectionScratch, RealGradZProjector,
+        SchwartzSequence, SpectralEngine, SpectrumNorm, DEFAULT_THRESHOLD,
     };
     use crate::theory::zpulse::ZSource;
     use crate::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
-    use approx::assert_abs_diff_eq;
 
     #[test]
     fn projection_handles_empty_input() {
@@ -1554,7 +1552,7 @@ mod tests {
         )
         .with_band(0..projection.spectrum.len());
         let pulse = projector.project(&projection);
-        assert!(matches!(pulse.source, ZSource::RealGrad));
+        assert!(matches!(pulse.source, ZSource::Other("RealGrad")));
         assert!(pulse.support >= 0.0);
         assert!(pulse.band_energy.0 >= 0.0);
         assert!(pulse.quality >= 0.0);
