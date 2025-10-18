@@ -594,6 +594,7 @@ impl<'a> RankScenario<'a> {
         let mut window = latency_ctile_window_with_slack(
             self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
         );
+        let baseline_window = window;
         if let (Some(fusion), Some(pulse)) = (
             TemporalSpectralFusion::analyse(&window, self.rows, self.cols, self.k, self.lanes),
             hub::get_last_realgrad(),
@@ -602,6 +603,18 @@ impl<'a> RankScenario<'a> {
             if summary.norm > 0.0 {
                 let mut tuner = AdaptiveWindowTuner::new(self.lanes);
                 window = tuner.tune(window, min_ctile, max_ctile, &fusion, Some(summary));
+                if window.slack < baseline_window.slack {
+                    let target = window.target;
+                    let lower = target
+                        .saturating_sub(baseline_window.slack)
+                        .max(window.min_lane);
+                    let upper = target
+                        .saturating_add(baseline_window.slack)
+                        .min(window.max_lane);
+                    window.lower = lower;
+                    window.upper = upper;
+                    window.slack = target.abs_diff(lower).max(target.abs_diff(upper));
+                }
             }
         }
         window
