@@ -38,6 +38,7 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 #[allow(unused_imports)]
 use rand_distr::StandardNormal;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::f32::consts::PI;
 
@@ -1021,6 +1022,843 @@ pub struct AmegaHypergrad {
     topos: topos::OpenCartesianTopos,
 }
 
+/// Euclidean gradient accumulator that mirrors the hypergradient API while
+/// staying entirely within flat-space optimisation loops.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GradientSummary {
+    l1: f32,
+    l2: f32,
+    linf: f32,
+    count: usize,
+}
+
+impl GradientSummary {
+    #[inline]
+    pub fn from_slice(values: &[f32]) -> Self {
+        let mut l1 = 0.0f32;
+        let mut sum_squares = 0.0f32;
+        let mut linf = 0.0f32;
+        let mut count = 0usize;
+        for &value in values {
+            if !value.is_finite() {
+                continue;
+            }
+            let abs = value.abs();
+            l1 += abs;
+            sum_squares += value * value;
+            linf = linf.max(abs);
+            count += 1;
+        }
+        let l2 = sum_squares.sqrt();
+        Self {
+            l1,
+            l2,
+            linf,
+            count,
+        }
+    }
+
+    #[inline]
+    pub fn l1(&self) -> f32 {
+        self.l1
+    }
+
+    #[inline]
+    pub fn l2(&self) -> f32 {
+        self.l2
+    }
+
+    #[inline]
+    pub fn linf(&self) -> f32 {
+        self.linf
+    }
+
+    #[inline]
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    #[inline]
+    pub fn mean_abs(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.l1 / self.count as f32
+        }
+    }
+
+    #[inline]
+    pub fn rms(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.l2 / (self.count as f32).sqrt()
+        }
+    }
+}
+
+impl Default for GradientSummary {
+    fn default() -> Self {
+        Self {
+            l1: 0.0,
+            l2: 0.0,
+            linf: 0.0,
+            count: 0,
+        }
+    }
+}
+
+/// Interprets paired gradient summaries into high-level signals that can drive
+/// Desire Lagrangian feedback loops.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DesireGradientInterpretation {
+    hyper_pressure: f32,
+    real_pressure: f32,
+    balance: f32,
+    stability: f32,
+    saturation: f32,
+}
+
+impl DesireGradientInterpretation {
+    const EPS: f32 = 1e-6;
+
+    /// Analyse the hypergradient and Euclidean summaries returning a compact
+    /// interpretation of their relative magnitudes and stability.
+    #[inline]
+    pub fn from_summaries(hyper: GradientSummary, real: GradientSummary) -> Self {
+        let hyper_pressure = hyper.mean_abs();
+        let real_pressure = real.mean_abs();
+        let hyper_rms = hyper.rms();
+        let real_rms = real.rms();
+        let balance = if real_rms > Self::EPS {
+            (hyper_rms / real_rms).clamp(0.0, 16.0)
+        } else if hyper_rms > Self::EPS {
+            16.0
+        } else {
+            1.0
+        };
+        let stability_raw = 1.0
+            - (hyper_pressure - real_pressure).abs() / (hyper_pressure + real_pressure + Self::EPS);
+        let stability = stability_raw.clamp(0.0, 1.0);
+        let saturation = hyper.linf().max(real.linf());
+        Self {
+            hyper_pressure,
+            real_pressure,
+            balance,
+            stability,
+            saturation,
+        }
+    }
+
+    /// Mean absolute magnitude of the hypergradient summary.
+    #[inline]
+    pub fn hyper_pressure(&self) -> f32 {
+        self.hyper_pressure
+    }
+
+    /// Mean absolute magnitude of the Euclidean gradient summary.
+    #[inline]
+    pub fn real_pressure(&self) -> f32 {
+        self.real_pressure
+    }
+
+    /// Ratio between the hypergradient and Euclidean RMS magnitudes.
+    #[inline]
+    pub fn balance(&self) -> f32 {
+        self.balance
+    }
+
+    /// Stability score where `1` indicates matching mean-absolute gradients and
+    /// `0` indicates divergent magnitudes.
+    #[inline]
+    pub fn stability(&self) -> f32 {
+        self.stability
+    }
+
+    /// Maximum absolute value observed across both summaries.
+    #[inline]
+    pub fn saturation(&self) -> f32 {
+        self.saturation
+    }
+
+    /// Gain factor for hypergradient penalties when the two tapes disagree.
+    #[inline]
+    pub fn penalty_gain(&self) -> f32 {
+        let imbalance = (self.balance - 1.0).abs().min(2.0);
+        let instability = (1.0 - self.stability).min(1.0);
+        (1.0 + 0.5 * imbalance + 0.5 * instability).clamp(1.0, 2.5)
+    }
+
+    /// Mixing factor used when blending Desire bias updates – drops towards zero
+    /// when the gradients disagree so the automation can tread lightly.
+    #[inline]
+    pub fn bias_mix(&self) -> f32 {
+        (0.25 + 0.75 * self.stability).clamp(0.1, 1.0)
+    }
+
+    /// Gain used when accumulating avoidance reports during the observation
+    /// phase. High saturation dampens the contribution to avoid runaway spikes.
+    #[inline]
+    pub fn observation_gain(&self) -> f32 {
+        let saturation = self.saturation.tanh().clamp(0.0, 1.0);
+        (0.5 + 0.5 * (1.0 - saturation)).clamp(0.25, 1.0)
+    }
+
+    /// Damping factor that can shrink epsilon-like tolerances when gradients
+    /// spike.
+    #[inline]
+    pub fn damping(&self) -> f32 {
+        (0.5 + 0.5 * self.saturation.tanh()).clamp(0.1, 1.0)
+    }
+
+    /// Collapse the interpretation into ready-to-apply control signals for
+    /// Desire's automation layers. The returned structure encodes the tuned
+    /// penalty, mixing, and learning-rate factors so downstream consumers can
+    /// steer both the CPU and GPU loops without reimplementing the heuristics.
+    #[inline]
+    pub fn control(&self) -> DesireGradientControl {
+        self.control_with_gain(1.0)
+    }
+
+    /// Collapse the interpretation into a control packet while scaling the
+    /// adaptive heuristics by `gain`. Passing `0.0` retains the legacy neutral
+    /// behaviour whereas `1.0` enables the full tuning guidance.
+    #[inline]
+    pub fn control_with_gain(&self, gain: f32) -> DesireGradientControl {
+        DesireGradientControl::from_interpretation_with_gain(*self, gain)
+    }
+}
+
+impl Default for DesireGradientInterpretation {
+    fn default() -> Self {
+        Self {
+            hyper_pressure: 0.0,
+            real_pressure: 0.0,
+            balance: 1.0,
+            stability: 1.0,
+            saturation: 0.0,
+        }
+    }
+}
+
+/// Event bitflags describing notable actions suggested by
+/// [`DesireGradientControl`]. The bitmask can be surfaced directly to telemetry
+/// systems without additional allocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DesireControlEvents {
+    bits: u32,
+}
+
+impl DesireControlEvents {
+    pub const NONE: Self = Self { bits: 0 };
+    pub const LR_INCREASE: Self = Self { bits: 1 << 0 };
+    pub const LR_DECREASE: Self = Self { bits: 1 << 1 };
+    pub const LR_CLIPPED: Self = Self { bits: 1 << 2 };
+    pub const TEMPERATURE_SUPPRESS: Self = Self { bits: 1 << 3 };
+    pub const QUALITY_BOOST: Self = Self { bits: 1 << 4 };
+    pub const QUALITY_SUPPRESS: Self = Self { bits: 1 << 5 };
+    pub const Z_SUPPRESS: Self = Self { bits: 1 << 6 };
+    pub const SLEW_LIMIT: Self = Self { bits: 1 << 7 };
+
+    #[inline]
+    pub const fn new(bits: u32) -> Self {
+        Self { bits }
+    }
+
+    #[inline]
+    pub const fn bits(self) -> u32 {
+        self.bits
+    }
+
+    #[inline]
+    pub const fn is_empty(self) -> bool {
+        self.bits == 0
+    }
+
+    #[inline]
+    pub const fn contains(self, other: Self) -> bool {
+        (self.bits & other.bits) == other.bits
+    }
+
+    #[inline]
+    pub const fn insert(self, other: Self) -> Self {
+        Self {
+            bits: self.bits | other.bits,
+        }
+    }
+
+    pub fn labels(self) -> Vec<&'static str> {
+        let mut labels = Vec::new();
+        if self.contains(Self::LR_INCREASE) {
+            labels.push("lr_increase");
+        }
+        if self.contains(Self::LR_DECREASE) {
+            labels.push("lr_decrease");
+        }
+        if self.contains(Self::LR_CLIPPED) {
+            labels.push("lr_clipped");
+        }
+        if self.contains(Self::TEMPERATURE_SUPPRESS) {
+            labels.push("temperature_suppress");
+        }
+        if self.contains(Self::QUALITY_BOOST) {
+            labels.push("quality_weight");
+        }
+        if self.contains(Self::QUALITY_SUPPRESS) {
+            labels.push("quality_suppress");
+        }
+        if self.contains(Self::Z_SUPPRESS) {
+            labels.push("z_suppress");
+        }
+        if self.contains(Self::SLEW_LIMIT) {
+            labels.push("lr_slew_limit");
+        }
+        labels
+    }
+}
+
+impl Default for DesireControlEvents {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+/// Packaged feedback parameters derived from [`DesireGradientInterpretation`]
+/// that automation layers can apply directly to gradient tapes, WGSL kernels,
+/// and Desire's avoidance/bias mixers.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DesireGradientControl {
+    penalty_gain: f32,
+    bias_mix: f32,
+    observation_gain: f32,
+    damping: f32,
+    hyper_rate_scale: f32,
+    real_rate_scale: f32,
+    operator_mix: f32,
+    operator_gain: f32,
+    #[serde(default = "DesireGradientControl::default_tuning_gain")]
+    tuning_gain: f32,
+    #[serde(default = "DesireGradientControl::default_target_entropy")]
+    target_entropy: f32,
+    #[serde(default = "DesireGradientControl::default_lr_eta")]
+    learning_rate_eta: f32,
+    #[serde(default = "DesireGradientControl::default_lr_min")]
+    learning_rate_min: f32,
+    #[serde(default = "DesireGradientControl::default_lr_max")]
+    learning_rate_max: f32,
+    #[serde(default = "DesireGradientControl::default_lr_slew")]
+    learning_rate_slew: f32,
+    #[serde(default = "DesireGradientControl::default_clip_norm")]
+    clip_norm: f32,
+    #[serde(default = "DesireGradientControl::default_clip_floor")]
+    clip_floor: f32,
+    #[serde(default = "DesireGradientControl::default_clip_ceiling")]
+    clip_ceiling: f32,
+    #[serde(default = "DesireGradientControl::default_clip_ema")]
+    clip_ema: f32,
+    #[serde(default = "DesireGradientControl::default_temperature_kappa")]
+    temperature_kappa: f32,
+    #[serde(default = "DesireGradientControl::default_temperature_slew")]
+    temperature_slew: f32,
+    #[serde(default = "DesireGradientControl::default_quality_gain")]
+    quality_gain: f32,
+    #[serde(default = "DesireGradientControl::default_quality_bias")]
+    quality_bias: f32,
+    #[serde(default = "DesireGradientControl::default_events")]
+    events: DesireControlEvents,
+}
+
+impl DesireGradientControl {
+    const fn default_tuning_gain() -> f32 {
+        0.0
+    }
+
+    const fn default_target_entropy() -> f32 {
+        3.5
+    }
+
+    const fn default_lr_eta() -> f32 {
+        1.0
+    }
+
+    const fn default_lr_min() -> f32 {
+        1e-4
+    }
+
+    const fn default_lr_max() -> f32 {
+        3e-3
+    }
+
+    const fn default_lr_slew() -> f32 {
+        0.2
+    }
+
+    const fn default_clip_norm() -> f32 {
+        1.0
+    }
+
+    const fn default_clip_floor() -> f32 {
+        0.1
+    }
+
+    const fn default_clip_ceiling() -> f32 {
+        8.0
+    }
+
+    const fn default_clip_ema() -> f32 {
+        0.5
+    }
+
+    const fn default_temperature_kappa() -> f32 {
+        0.0
+    }
+
+    const fn default_temperature_slew() -> f32 {
+        0.15
+    }
+
+    const fn default_quality_gain() -> f32 {
+        4.0
+    }
+
+    const fn default_quality_bias() -> f32 {
+        0.1
+    }
+
+    const fn default_events() -> DesireControlEvents {
+        DesireControlEvents::NONE
+    }
+
+    /// Build a control packet from an interpretation, collapsing the
+    /// higher-level descriptors into concrete gains and learning-rate scales.
+    pub fn from_interpretation(interpretation: DesireGradientInterpretation) -> Self {
+        Self::from_interpretation_with_gain(interpretation, 1.0)
+    }
+
+    /// Build a control packet while scaling the adaptive heuristics by `gain`.
+    pub fn from_interpretation_with_gain(
+        interpretation: DesireGradientInterpretation,
+        gain: f32,
+    ) -> Self {
+        DesireControlBuilder::new()
+            .with_interpretation(interpretation)
+            .with_gain(gain)
+            .finalise()
+    }
+
+    /// Hypergradient penalty amplification factor mirrored from the
+    /// interpretation stage.
+    pub fn penalty_gain(&self) -> f32 {
+        self.penalty_gain
+    }
+
+    /// Desire bias blending factor for integration phases.
+    pub fn bias_mix(&self) -> f32 {
+        self.bias_mix
+    }
+
+    /// Observation accumulation gain applied to avoidance tracking.
+    pub fn observation_gain(&self) -> f32 {
+        self.observation_gain
+    }
+
+    /// Recommended damping factor for epsilon / tolerance schedules.
+    pub fn damping(&self) -> f32 {
+        self.damping
+    }
+
+    /// Multiplicative scale applied to the hypergradient learning rate.
+    pub fn hyper_rate_scale(&self) -> f32 {
+        self.hyper_rate_scale
+    }
+
+    /// Multiplicative scale applied to the Euclidean learning rate.
+    pub fn real_rate_scale(&self) -> f32 {
+        self.real_rate_scale
+    }
+
+    /// Suggested blend factor for GPU hypergradient kernels.
+    pub fn operator_mix(&self) -> f32 {
+        self.operator_mix
+    }
+
+    /// Suggested gain for GPU hypergradient kernels.
+    pub fn operator_gain(&self) -> f32 {
+        self.operator_gain
+    }
+
+    /// Strength applied to the adaptive heuristics. `0.0` disables the tuning
+    /// feedback while `1.0` enables the recommended behaviour.
+    pub fn tuning_gain(&self) -> f32 {
+        self.tuning_gain
+    }
+
+    /// Target entropy that the learning-rate controller should chase.
+    pub fn target_entropy(&self) -> f32 {
+        self.target_entropy
+    }
+
+    /// Exponential learning-rate update coefficient.
+    pub fn learning_rate_eta(&self) -> f32 {
+        self.learning_rate_eta
+    }
+
+    /// Lower bound for the adaptive learning rate.
+    pub fn learning_rate_min(&self) -> f32 {
+        self.learning_rate_min
+    }
+
+    /// Upper bound for the adaptive learning rate.
+    pub fn learning_rate_max(&self) -> f32 {
+        self.learning_rate_max
+    }
+
+    /// Maximum relative change permitted between learning-rate updates.
+    pub fn learning_rate_slew(&self) -> f32 {
+        self.learning_rate_slew
+    }
+
+    /// Recommended gradient clipping norm.
+    pub fn clip_norm(&self) -> f32 {
+        self.clip_norm
+    }
+
+    /// Floor applied when smoothing the clipping window.
+    pub fn clip_floor(&self) -> f32 {
+        self.clip_floor
+    }
+
+    /// Ceiling applied when smoothing the clipping window.
+    pub fn clip_ceiling(&self) -> f32 {
+        self.clip_ceiling
+    }
+
+    /// Exponential moving-average factor for the clipping window.
+    pub fn clip_ema(&self) -> f32 {
+        self.clip_ema
+    }
+
+    /// Coupling factor applied when adjusting Desire temperature against the
+    /// Z-order magnitude.
+    pub fn temperature_kappa(&self) -> f32 {
+        self.temperature_kappa
+    }
+
+    /// Maximum allowed change in Desire temperature per step.
+    pub fn temperature_slew(&self) -> f32 {
+        self.temperature_slew
+    }
+
+    /// Gain applied when incorporating external quality metrics.
+    pub fn quality_gain(&self) -> f32 {
+        self.quality_gain
+    }
+
+    /// Baseline offset for external quality metrics.
+    pub fn quality_bias(&self) -> f32 {
+        self.quality_bias
+    }
+
+    /// Event bitmask describing the adjustments suggested by the control.
+    pub fn events(&self) -> DesireControlEvents {
+        self.events
+    }
+}
+
+impl Default for DesireGradientControl {
+    fn default() -> Self {
+        Self {
+            penalty_gain: 1.0,
+            bias_mix: 1.0,
+            observation_gain: 1.0,
+            damping: 1.0,
+            hyper_rate_scale: 1.0,
+            real_rate_scale: 1.0,
+            operator_mix: 1.0,
+            operator_gain: 1.0,
+            tuning_gain: Self::default_tuning_gain(),
+            target_entropy: Self::default_target_entropy(),
+            learning_rate_eta: Self::default_lr_eta(),
+            learning_rate_min: Self::default_lr_min(),
+            learning_rate_max: Self::default_lr_max(),
+            learning_rate_slew: Self::default_lr_slew(),
+            clip_norm: Self::default_clip_norm(),
+            clip_floor: Self::default_clip_floor(),
+            clip_ceiling: Self::default_clip_ceiling(),
+            clip_ema: Self::default_clip_ema(),
+            temperature_kappa: Self::default_temperature_kappa(),
+            temperature_slew: Self::default_temperature_slew(),
+            quality_gain: Self::default_quality_gain(),
+            quality_bias: Self::default_quality_bias(),
+            events: Self::default_events(),
+        }
+    }
+}
+
+impl From<DesireGradientInterpretation> for DesireGradientControl {
+    fn from(value: DesireGradientInterpretation) -> Self {
+        Self::from_interpretation(value)
+    }
+}
+
+/// Builder that assembles a [`DesireGradientControl`] packet from
+/// interpretation metrics and live telemetry (entropy, Z magnitude, quality
+/// estimates, etc.).
+#[derive(Clone, Debug)]
+pub struct DesireControlBuilder {
+    control: DesireGradientControl,
+    gain: f32,
+    entropy: f32,
+    target_entropy: f32,
+    entropy_eta: f32,
+    lr_min: f32,
+    lr_max: f32,
+    lr_slew: f32,
+    hyper_base: f32,
+    real_base: f32,
+    operator_mix: f32,
+    operator_gain: f32,
+    clip_hint: f32,
+    clip_floor: f32,
+    clip_ceiling: f32,
+    clip_ema: f32,
+    z_magnitude: f32,
+    z_kappa: f32,
+    z_slew: f32,
+    quality: f32,
+    quality_bias: f32,
+    quality_gain: f32,
+    events: DesireControlEvents,
+}
+
+impl DesireControlBuilder {
+    fn new() -> Self {
+        Self {
+            control: DesireGradientControl::default(),
+            gain: 1.0,
+            entropy: 0.8,
+            target_entropy: DesireGradientControl::default_target_entropy(),
+            entropy_eta: DesireGradientControl::default_lr_eta(),
+            lr_min: DesireGradientControl::default_lr_min(),
+            lr_max: DesireGradientControl::default_lr_max(),
+            lr_slew: DesireGradientControl::default_lr_slew(),
+            hyper_base: 1.0,
+            real_base: 1.0,
+            operator_mix: 1.0,
+            operator_gain: 1.0,
+            clip_hint: DesireGradientControl::default_clip_norm(),
+            clip_floor: DesireGradientControl::default_clip_floor(),
+            clip_ceiling: DesireGradientControl::default_clip_ceiling(),
+            clip_ema: DesireGradientControl::default_clip_ema(),
+            z_magnitude: 0.0,
+            z_kappa: DesireGradientControl::default_temperature_kappa(),
+            z_slew: DesireGradientControl::default_temperature_slew(),
+            quality: 1.0,
+            quality_bias: DesireGradientControl::default_quality_bias(),
+            quality_gain: DesireGradientControl::default_quality_gain(),
+            events: DesireControlEvents::NONE,
+        }
+    }
+
+    pub fn with_interpretation(mut self, interpretation: DesireGradientInterpretation) -> Self {
+        self.control.penalty_gain = interpretation.penalty_gain();
+        self.control.bias_mix = interpretation.bias_mix();
+        self.control.observation_gain = interpretation.observation_gain();
+        self.control.damping = interpretation.damping();
+
+        let imbalance = (interpretation.balance() - 1.0).clamp(-4.0, 4.0);
+        let saturation = interpretation.saturation().tanh().clamp(0.0, 1.0);
+        let stability = interpretation.stability().clamp(0.0, 1.0);
+        let caution = (1.0 - stability).clamp(0.0, 1.0);
+
+        let (hyper_base, real_base) = if imbalance >= 0.0 {
+            (
+                (1.0 / (1.0 + imbalance)).clamp(0.25, 1.0),
+                (1.0 + 0.5 * imbalance).clamp(1.0, 1.8),
+            )
+        } else {
+            (
+                (1.0 - 0.5 * imbalance).clamp(1.0, 1.8),
+                (1.0 / (1.0 - imbalance)).clamp(0.25, 1.0),
+            )
+        };
+
+        let hyper_guard = (1.0 - 0.6 * caution - 0.4 * saturation).clamp(0.25, 1.0);
+        let real_guard = (1.0 - 0.4 * caution - 0.25 * saturation).clamp(0.3, 1.0);
+        self.hyper_base = (hyper_base * hyper_guard).clamp(0.25, 1.8);
+        self.real_base = (real_base * real_guard).clamp(0.25, 1.8);
+
+        self.operator_mix = (0.4 + 0.6 * stability).clamp(0.25, 1.0);
+        self.operator_gain =
+            (self.control.penalty_gain * (1.0 - 0.35 * saturation)).clamp(0.5, 1.5);
+
+        self.target_entropy = 3.5 + 0.8 * caution;
+        self.entropy_eta = 0.08 + 0.14 * caution;
+        self.lr_slew = (0.25 - 0.15 * caution).clamp(0.05, 0.25);
+
+        let clip_floor = (0.18 + 0.12 * caution).clamp(0.15, 0.3);
+        let clip_target = interpretation
+            .saturation()
+            .max(interpretation.hyper_pressure() * 2.5)
+            .max(interpretation.real_pressure() * 3.0);
+        self.clip_floor = clip_floor;
+        self.clip_hint = (clip_target * (0.6 + 0.4 * self.gain)).clamp(clip_floor, 32.0);
+        self.clip_ceiling = (self.clip_hint * 1.6).max(self.clip_hint + 0.05);
+        self.clip_ema = (0.25 + 0.35 * caution).clamp(0.2, 0.6);
+
+        self.z_kappa = (0.02 + 0.08 * (1.0 - stability)).clamp(0.0, 0.12);
+        self.z_slew = (0.22 - 0.1 * caution).clamp(0.05, 0.22);
+
+        self.quality_gain = (0.6 + 0.4 * (1.0 - caution)).clamp(0.4, 1.0);
+
+        self
+    }
+
+    pub fn with_gain(mut self, gain: f32) -> Self {
+        self.gain = gain.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_entropy(mut self, entropy: f32) -> Self {
+        self.entropy = entropy.max(0.0);
+        self
+    }
+
+    pub fn with_target_entropy(mut self, target: f32) -> Self {
+        self.target_entropy = target.max(0.0);
+        self
+    }
+
+    pub fn with_entropy_eta(mut self, eta: f32) -> Self {
+        self.entropy_eta = eta.max(0.0);
+        self
+    }
+
+    pub fn with_bounds(mut self, min: f32, max: f32) -> Self {
+        self.lr_min = min.min(max).max(1e-8);
+        self.lr_max = max.max(self.lr_min + 1e-8);
+        self
+    }
+
+    pub fn with_slew_limit(mut self, slew: f32) -> Self {
+        self.lr_slew = slew.max(0.0);
+        self
+    }
+
+    pub fn with_clip_p95_hint(mut self, p95: f32) -> Self {
+        self.clip_hint = p95.max(0.0);
+        self
+    }
+
+    pub fn with_clip_parameters(mut self, floor: f32, ceiling: f32, ema: f32) -> Self {
+        self.clip_floor = floor.max(0.0);
+        self.clip_ceiling = ceiling.max(self.clip_floor + 1e-6);
+        self.clip_ema = ema.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_z_coupling(mut self, magnitude: f32) -> Self {
+        self.z_magnitude = magnitude.abs();
+        self
+    }
+
+    pub fn with_z_strength(mut self, kappa: f32) -> Self {
+        self.z_kappa = kappa.max(0.0);
+        self
+    }
+
+    pub fn with_quality(mut self, quality: f32) -> Self {
+        self.quality = quality.max(0.0);
+        self
+    }
+
+    pub fn with_quality_parameters(mut self, gain: f32, bias: f32) -> Self {
+        self.quality_gain = gain.max(0.0);
+        self.quality_bias = bias.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn finalise(mut self) -> DesireGradientControl {
+        self.control.tuning_gain = self.gain;
+        self.control.target_entropy = self.target_entropy;
+        self.control.learning_rate_eta = self.entropy_eta * self.gain;
+        self.control.learning_rate_min = self.lr_min;
+        self.control.learning_rate_max = self.lr_max;
+        self.control.learning_rate_slew = self.lr_slew;
+
+        self.control.clip_floor = self.clip_floor;
+        self.control.clip_ceiling = self.clip_ceiling.max(self.clip_floor + 1e-6);
+        self.control.clip_ema = self.clip_ema;
+        let clip_norm = self
+            .clip_hint
+            .clamp(self.control.clip_floor, self.control.clip_ceiling);
+        self.control.clip_norm = clip_norm;
+
+        let z_kappa = self.z_kappa * self.gain;
+        self.control.temperature_kappa = z_kappa;
+        self.control.temperature_slew = self.z_slew;
+        let z_suppress = (-z_kappa * self.z_magnitude).exp().clamp(0.05, 1.0);
+        if z_kappa > 0.0 && self.z_magnitude > 1e-3 {
+            self.events = self.events.insert(DesireControlEvents::Z_SUPPRESS);
+            self.events = self
+                .events
+                .insert(DesireControlEvents::TEMPERATURE_SUPPRESS);
+        }
+
+        let entropy_error = (self.target_entropy - self.entropy).clamp(-8.0, 8.0);
+        if entropy_error > 0.05 {
+            self.events = self.events.insert(DesireControlEvents::LR_INCREASE);
+        } else if entropy_error < -0.05 {
+            self.events = self.events.insert(DesireControlEvents::LR_DECREASE);
+        }
+
+        if (clip_norm - self.control.clip_floor).abs() < 1e-4 {
+            self.events = self.events.insert(DesireControlEvents::LR_CLIPPED);
+        }
+
+        if self.lr_slew < 0.1 {
+            self.events = self.events.insert(DesireControlEvents::SLEW_LIMIT);
+        }
+
+        let quality_bias = self.quality_bias;
+        self.control.quality_bias = quality_bias;
+        let quality_gain = (self.quality_gain * self.gain).max(0.0);
+        self.control.quality_gain = quality_gain;
+        let q_delta = (self.quality - quality_bias).clamp(-4.0, 4.0);
+        let quality_weight = 1.0 / (1.0 + (-quality_gain * q_delta).exp());
+        if quality_weight > 0.55 {
+            self.events = self.events.insert(DesireControlEvents::QUALITY_BOOST);
+        } else if quality_weight < 0.45 {
+            self.events = self.events.insert(DesireControlEvents::QUALITY_SUPPRESS);
+        }
+
+        let quality_scale = 0.4 + 0.9 * quality_weight;
+        self.control.hyper_rate_scale =
+            (self.hyper_base * z_suppress * quality_scale).clamp(0.1, 2.0);
+        self.control.real_rate_scale =
+            (self.real_base * z_suppress * quality_scale).clamp(0.1, 2.0);
+
+        self.control.operator_mix = self.operator_mix;
+        self.control.operator_gain = self.operator_gain;
+        self.control.events = self.events;
+        self.control
+    }
+}
+
+impl DesireGradientControl {
+    pub fn control_with_gain() -> DesireControlBuilder {
+        DesireControlBuilder::new()
+    }
+}
+
+pub struct AmegaRealgrad {
+    learning_rate: f32,
+    rows: usize,
+    cols: usize,
+    gradient: Vec<f32>,
+}
+
 impl AmegaHypergrad {
     /// Create a new hypergradient tape with the provided curvature and step size.
     pub fn new(curvature: f32, learning_rate: f32, rows: usize, cols: usize) -> PureResult<Self> {
@@ -1111,6 +1949,11 @@ impl AmegaHypergrad {
     /// Provides mutable access to the accumulated gradient buffer.
     pub fn gradient_mut(&mut self) -> &mut [f32] {
         &mut self.gradient
+    }
+
+    /// Summarise the accumulated gradient using basic norm statistics.
+    pub fn summary(&self) -> GradientSummary {
+        GradientSummary::from_slice(&self.gradient)
     }
 
     /// Returns the guard topos enforcing open-cartesian safety constraints.
@@ -1243,6 +2086,126 @@ impl AmegaHypergrad {
             self.accumulate_pair(&stage.density, previous)?;
             previous = &stage.density;
         }
+        Ok(())
+    }
+}
+
+impl AmegaRealgrad {
+    /// Create a new Euclidean gradient tape with the provided step size.
+    pub fn new(learning_rate: f32, rows: usize, cols: usize) -> PureResult<Self> {
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        if learning_rate <= 0.0 || !learning_rate.is_finite() {
+            return Err(TensorError::NonPositiveLearningRate {
+                rate: learning_rate,
+            });
+        }
+        Ok(Self {
+            learning_rate,
+            rows,
+            cols,
+            gradient: vec![0.0; rows * cols],
+        })
+    }
+
+    /// Returns the learning rate applied during [`apply`].
+    pub fn learning_rate(&self) -> f32 {
+        self.learning_rate
+    }
+
+    /// Adjust the learning rate used for subsequent updates.
+    pub fn scale_learning_rate(&mut self, factor: f32) {
+        if factor.is_finite() && factor > 0.0 {
+            self.learning_rate *= factor;
+        }
+    }
+
+    /// Dimensions of the gradient buffer.
+    pub fn shape(&self) -> (usize, usize) {
+        (self.rows, self.cols)
+    }
+
+    /// Read-only view into the accumulated gradient.
+    pub fn gradient(&self) -> &[f32] {
+        &self.gradient
+    }
+
+    /// Mutable access to the gradient buffer.
+    pub fn gradient_mut(&mut self) -> &mut [f32] {
+        &mut self.gradient
+    }
+
+    /// Summarise the accumulated gradient using basic norm statistics.
+    pub fn summary(&self) -> GradientSummary {
+        GradientSummary::from_slice(&self.gradient)
+    }
+
+    fn assert_tensor_shape(&self, tensor: &Tensor) -> PureResult<()> {
+        if tensor.shape() != (self.rows, self.cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: tensor.shape(),
+                right: (self.rows, self.cols),
+            });
+        }
+        Ok(())
+    }
+
+    /// Reset the accumulated gradient to zero.
+    pub fn reset(&mut self) {
+        for value in &mut self.gradient {
+            *value = 0.0;
+        }
+    }
+
+    /// Accumulate an Euclidean tensor into the tape.
+    pub fn accumulate_wave(&mut self, tensor: &Tensor) -> PureResult<()> {
+        self.assert_tensor_shape(tensor)?;
+        for (grad, value) in self.gradient.iter_mut().zip(tensor.data().iter()) {
+            *grad += *value;
+        }
+        Ok(())
+    }
+
+    /// Accumulate a complex wave by flattening it into real/imag lanes.
+    pub fn accumulate_complex_wave(&mut self, wave: &ComplexTensor) -> PureResult<()> {
+        let tensor = wave.to_tensor()?;
+        self.accumulate_wave(&tensor)
+    }
+
+    /// Encode text into Z-space and accumulate the resulting tensor.
+    pub fn absorb_text(&mut self, encoder: &LanguageWaveEncoder, text: &str) -> PureResult<()> {
+        let tensor = encoder.encode_z_space(text)?;
+        self.accumulate_wave(&tensor)
+    }
+
+    /// Integrate a prediction/target pair as a residual update.
+    pub fn accumulate_pair(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<()> {
+        self.assert_tensor_shape(prediction)?;
+        if prediction.shape() != target.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: prediction.shape(),
+                right: target.shape(),
+            });
+        }
+        for ((grad, pred), tgt) in self
+            .gradient
+            .iter_mut()
+            .zip(prediction.data().iter())
+            .zip(target.data().iter())
+        {
+            *grad += pred - tgt;
+        }
+        Ok(())
+    }
+
+    /// Apply the accumulated gradient to the provided weights and clear it.
+    pub fn apply(&mut self, weights: &mut Tensor) -> PureResult<()> {
+        self.assert_tensor_shape(weights)?;
+        for (value, grad) in weights.data_mut().iter_mut().zip(self.gradient.iter()) {
+            *value -= self.learning_rate * *grad;
+        }
+        self.reset();
         Ok(())
     }
 }
@@ -1386,6 +2349,100 @@ mod tests {
     }
 
     #[test]
+    fn desire_gradient_control_respects_balance() {
+        let hyper = GradientSummary::from_slice(&[0.8, -0.6, 0.4, -0.2]);
+        let real = GradientSummary::from_slice(&[0.1, -0.05, 0.02, -0.01]);
+        let interpretation = DesireGradientInterpretation::from_summaries(hyper, real);
+        let control = interpretation.control();
+        assert!(control.penalty_gain() >= interpretation.penalty_gain());
+        assert!(control.hyper_rate_scale() >= 0.1);
+        assert!(control.hyper_rate_scale() <= 2.0);
+        assert!(control.real_rate_scale() >= 0.1);
+        assert!(control.real_rate_scale() <= 2.0);
+        assert!(control.operator_mix() <= 1.0);
+        assert!(control.clip_norm() >= control.clip_floor());
+        assert!(control.clip_ceiling() >= control.clip_norm());
+        assert!(control.learning_rate_min() >= 0.0);
+        assert!(control.learning_rate_max() >= control.learning_rate_min());
+        assert!(control.temperature_kappa() >= 0.0);
+        assert!(control.events().bits() != 0);
+    }
+
+    #[test]
+    fn desire_gradient_control_scales_with_gain() {
+        let hyper = GradientSummary::from_slice(&[0.2, -0.1, 0.05, -0.02]);
+        let real = GradientSummary::from_slice(&[0.2, -0.1, 0.05, -0.02]);
+        let interpretation = DesireGradientInterpretation::from_summaries(hyper, real);
+        let neutral = interpretation.control_with_gain(0.0);
+        let tuned = interpretation.control_with_gain(1.0);
+        assert!(neutral.learning_rate_eta() <= tuned.learning_rate_eta());
+        assert!(neutral.temperature_kappa() <= tuned.temperature_kappa());
+        assert!(neutral.quality_gain() <= tuned.quality_gain());
+        assert!(tuned.events().bits() >= neutral.events().bits());
+    }
+
+    #[test]
+    fn desire_control_events_report_labels() {
+        let events = DesireControlEvents::LR_INCREASE
+            .insert(DesireControlEvents::LR_CLIPPED)
+            .insert(DesireControlEvents::QUALITY_SUPPRESS)
+            .insert(DesireControlEvents::SLEW_LIMIT);
+        let labels = events.labels();
+        assert!(labels.contains(&"lr_increase"));
+        assert!(labels.contains(&"lr_clipped"));
+        assert!(labels.contains(&"quality_suppress"));
+        assert!(labels.contains(&"lr_slew_limit"));
+    }
+
+    #[test]
+    fn desire_control_builder_tracks_entropy_and_bounds() {
+        let control = DesireGradientControl::control_with_gain()
+            .with_entropy(0.5)
+            .with_target_entropy(3.0)
+            .with_bounds(1e-4, 5e-3)
+            .with_slew_limit(0.05)
+            .finalise();
+        assert!(control.learning_rate_min() >= 1e-4);
+        assert!((control.learning_rate_max() - 5e-3).abs() < 1e-8);
+        assert!(control.events().contains(DesireControlEvents::LR_INCREASE));
+        assert!(control.events().contains(DesireControlEvents::SLEW_LIMIT));
+    }
+
+    #[test]
+    fn desire_control_builder_marks_z_suppression() {
+        let control = DesireGradientControl::control_with_gain()
+            .with_z_strength(0.6)
+            .with_z_coupling(2.0)
+            .finalise();
+        assert!(control.temperature_kappa() > 0.0);
+        assert!(control.hyper_rate_scale() < 1.0);
+        assert!(control.events().contains(DesireControlEvents::Z_SUPPRESS));
+        assert!(control
+            .events()
+            .contains(DesireControlEvents::TEMPERATURE_SUPPRESS));
+    }
+
+    #[test]
+    fn desire_control_builder_quality_events() {
+        let boosted = DesireGradientControl::control_with_gain()
+            .with_quality_parameters(2.0, 0.1)
+            .with_quality(0.9)
+            .finalise();
+        assert!(boosted
+            .events()
+            .contains(DesireControlEvents::QUALITY_BOOST));
+
+        let suppressed = DesireGradientControl::control_with_gain()
+            .with_quality_parameters(2.0, 0.6)
+            .with_quality(0.05)
+            .finalise();
+        assert!(suppressed
+            .events()
+            .contains(DesireControlEvents::QUALITY_SUPPRESS));
+        assert!(suppressed.real_rate_scale() <= boosted.real_rate_scale());
+    }
+
+    #[test]
     fn amega_hypergrad_tracks_barycenter_curve() {
         use crate::pure::measure::z_space_barycenter;
 
@@ -1400,6 +2457,83 @@ mod tests {
             .unwrap();
         let gradient = tape.gradient();
         assert!(gradient.iter().any(|value| value.abs() > 0.0));
+    }
+
+    #[test]
+    fn amega_realgrad_accumulates_and_applies() {
+        let mut tape = AmegaRealgrad::new(0.1, 1, 3).unwrap();
+        let tensor = Tensor::from_vec(1, 3, vec![1.0, -2.0, 0.5]).unwrap();
+        tape.accumulate_wave(&tensor).unwrap();
+        let mut weights = Tensor::from_vec(1, 3, vec![0.0, 0.0, 0.0]).unwrap();
+        tape.apply(&mut weights).unwrap();
+        assert!((weights.data()[0] + 0.1).abs() < 1e-6);
+        assert!((weights.data()[1] - 0.2).abs() < 1e-6);
+        assert!((weights.data()[2] + 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn amega_realgrad_absorbs_text() {
+        let encoder = LanguageWaveEncoder::new(-1.0, 0.6).unwrap();
+        let z = encoder.encode_z_space("spiral torch realgrad").unwrap();
+        let mut tape = AmegaRealgrad::new(0.05, z.shape().0, z.shape().1).unwrap();
+        tape.absorb_text(&encoder, "spiral torch realgrad").unwrap();
+        assert!(tape
+            .gradient()
+            .iter()
+            .any(|value| value.abs() > f32::EPSILON));
+    }
+
+    #[test]
+    fn gradient_summary_reports_norms() {
+        let summary = GradientSummary::from_slice(&[1.0, -2.0, 0.0, 3.0]);
+        assert_eq!(summary.count(), 4);
+        assert!((summary.l1() - 6.0).abs() < 1e-6);
+        let expected_l2 = (1.0f32 + 4.0 + 0.0 + 9.0).sqrt();
+        assert!((summary.l2() - expected_l2).abs() < 1e-6);
+        assert!((summary.mean_abs() - 1.5).abs() < 1e-6);
+        let expected_rms = expected_l2 / (4.0f32).sqrt();
+        assert!((summary.rms() - expected_rms).abs() < 1e-6);
+        assert_eq!(summary.linf(), 3.0);
+    }
+
+    #[test]
+    fn desire_gradient_interpretation_balances_metrics() {
+        let hyper = GradientSummary::from_slice(&[1.0, -0.5, 0.25, 0.75]);
+        let real = GradientSummary::from_slice(&[0.05, -0.1, 0.0, 0.1]);
+        let interpretation = DesireGradientInterpretation::from_summaries(hyper, real);
+        assert!(interpretation.balance() > 1.0);
+        assert!(interpretation.penalty_gain() > 1.0);
+        let stable = DesireGradientInterpretation::from_summaries(hyper, hyper);
+        assert!(stable.stability() > interpretation.stability());
+        assert!(stable.bias_mix() > interpretation.bias_mix());
+        assert!(stable.observation_gain() >= interpretation.observation_gain());
+    }
+
+    #[test]
+    fn gradient_tapes_surface_summary_metrics() {
+        let tensor = Tensor::from_vec(1, 3, vec![1.0, -2.0, 4.0]).unwrap();
+        let mut hypergrad = AmegaHypergrad::new(-1.0, 0.1, 1, 3).unwrap();
+        hypergrad.accumulate_wave(&tensor).unwrap();
+        let hyper_summary = hypergrad.summary();
+        assert_eq!(hyper_summary.count(), 3);
+        assert!(hyper_summary.l2() > 0.0);
+
+        let mut realgrad = AmegaRealgrad::new(0.1, 1, 3).unwrap();
+        realgrad.accumulate_wave(&tensor).unwrap();
+        let real_summary = realgrad.summary();
+        assert_eq!(real_summary.count(), 3);
+        let expected_l1: f32 = tensor.data().iter().map(|value| value.abs()).sum();
+        assert!((real_summary.l1() - expected_l1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn amega_realgrad_accumulates_pair() {
+        let mut tape = AmegaRealgrad::new(0.01, 1, 2).unwrap();
+        let prediction = Tensor::from_vec(1, 2, vec![0.5, -0.5]).unwrap();
+        let target = Tensor::from_vec(1, 2, vec![0.25, -0.75]).unwrap();
+        tape.accumulate_pair(&prediction, &target).unwrap();
+        assert!((tape.gradient()[0] - 0.25).abs() < 1e-6);
+        assert!((tape.gradient()[1] - 0.25).abs() < 1e-6);
     }
 
     #[test]

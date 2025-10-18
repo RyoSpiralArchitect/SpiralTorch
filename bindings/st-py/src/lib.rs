@@ -25,7 +25,10 @@ use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::config::self_rewrite::SelfRewriteCfg;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
-use st_core::telemetry::hub::{self, DesirePhaseTelemetry, DesireStepTelemetry};
+use serde_json::Value as JsonValue;
+use st_core::telemetry::hub::{
+    self, ConfigDiffEvent, ConfigLayer, DesirePhaseTelemetry, DesireStepTelemetry,
+};
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::DriveCmd;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
@@ -46,7 +49,6 @@ use st_core::ecosystem::{
     MetricSample as CoreMetricSample, RankPlanSummary as CoreRankPlanSummary,
     RoundtableConfigSummary as CoreRoundtableConfigSummary,
     RoundtableSummary as CoreRoundtableSummary,
-};
 };
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::runtime::blackcat::BlackcatRuntimeStats;
@@ -372,6 +374,54 @@ fn desire_telemetry_to_py<'py>(
     weights.set_item("lambda", sample.lambda)?;
     dict.set_item("weights", weights)?;
 
+    Ok(dict.into_py(py))
+}
+
+fn serde_json_value_to_py(py: Python<'_>, value: &JsonValue) -> PyResult<PyObject> {
+    Ok(match value {
+        JsonValue::Null => py.None(),
+        JsonValue::Bool(flag) => (*flag).into_py(py),
+        JsonValue::Number(number) => {
+            if let Some(v) = number.as_i64() {
+                v.into_py(py)
+            } else if let Some(v) = number.as_u64() {
+                v.into_py(py)
+            } else if let Some(v) = number.as_f64() {
+                v.into_py(py)
+            } else {
+                py.None()
+            }
+        }
+        JsonValue::String(s) => s.clone().into_py(py),
+        JsonValue::Array(items) => {
+            let list = PyList::empty_bound(py);
+            for item in items {
+                list.append(serde_json_value_to_py(py, item)?)?;
+            }
+            list.into_py(py)
+        }
+        JsonValue::Object(map) => {
+            let dict = PyDict::new_bound(py);
+            for (key, val) in map {
+                dict.set_item(key, serde_json_value_to_py(py, val)?)?;
+            }
+            dict.into_py(py)
+        }
+    })
+}
+
+fn config_event_to_py(py: Python<'_>, event: &ConfigDiffEvent) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("layer", event.layer.to_string())?;
+    dict.set_item("path", &event.path)?;
+    match event.previous.as_ref() {
+        Some(value) => dict.set_item("previous", serde_json_value_to_py(py, value)?)?,
+        None => dict.set_item("previous", py.None())?,
+    }
+    match event.current.as_ref() {
+        Some(value) => dict.set_item("current", serde_json_value_to_py(py, value)?)?,
+        None => dict.set_item("current", py.None())?,
+    }
     Ok(dict.into_py(py))
 }
 
@@ -20565,6 +20615,14 @@ fn get_desire_telemetry(py: Python<'_>) -> PyResult<Option<PyObject>> {
 }
 
 #[pyfunction]
+fn get_config_events(py: Python<'_>) -> PyResult<Vec<PyObject>> {
+    hub::get_config_events()
+        .iter()
+        .map(|event| config_event_to_py(py, event))
+        .collect()
+}
+
+#[pyfunction]
 fn get_psychoid_stats(py: Python<'_>) -> PyResult<Option<PyObject>> {
     #[cfg(feature = "psychoid")]
     {
@@ -20918,6 +20976,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
+    m.add_function(wrap_pyfunction!(get_config_events, m)?)?;
     m.add_function(wrap_pyfunction!(get_desire_telemetry, m)?)?;
     m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
     m.add_function(wrap_pyfunction!(ecosystem_snapshot, m)?)?;
@@ -21012,6 +21071,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "z_space_barycenter",
             "hip_probe",
             "describe_device",
+            "get_config_events",
             "get_desire_telemetry",
             "get_psychoid_stats",
             "describe_resonance",
@@ -21076,6 +21136,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "z_space_barycenter",
         "hip_probe",
         "describe_device",
+        "get_config_events",
+        "get_desire_telemetry",
         "get_psychoid_stats",
         "describe_resonance",
         "describe_frame",
