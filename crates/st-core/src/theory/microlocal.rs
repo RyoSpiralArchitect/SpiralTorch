@@ -43,9 +43,10 @@ use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
-use std::fmt;
+use std::collections::VecDeque;
 use std::f64::consts::PI;
-use std::sync::Arc;
+use std::fmt;
+use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
 #[derive(Debug, Clone)]
@@ -1399,6 +1400,27 @@ impl InterfaceZConductor {
         {
             fused.z_bias = fused_raw.z_bias * self.smoothing;
         }
+        let now = self.clock;
+        self.clock = self.clock.wrapping_add(1);
+
+        let zpulses: Vec<ZPulse> = pulses
+            .iter()
+            .map(|pulse| ZPulse {
+                source: pulse.source,
+                ts: now,
+                band_energy: pulse.band_energy,
+                drift: pulse.drift,
+                z_bias: pulse.z_bias,
+                support: pulse.support,
+                quality: pulse.quality_hint.unwrap_or(1.0),
+                stderr: pulse.standard_error.unwrap_or(0.0),
+                latency_ms: 0.0,
+            })
+            .collect();
+        self.emitter.extend(zpulses);
+        let mut registry = ZRegistry::with_capacity(1);
+        registry.register(self.emitter.clone());
+        let fused_z = self.conductor.step_from_registry(&mut registry, now);
 
         self.policy.late_fuse(&mut fused, &pulses, &qualities);
 
@@ -1435,36 +1457,7 @@ impl InterfaceZConductor {
 
     /// Returns the most recent fused pulse emitted by the conductor.
     pub fn last_fused_pulse(&self) -> InterfaceZPulse {
-        self.carry
-            .clone()
-            .unwrap_or_else(InterfaceZPulse::default)
-    }
-
-    fn into_zpulse(fused: &InterfaceZPulse, now: u64, qualities: &[f32]) -> ZPulse {
-        let (above, here, beneath) = fused.band_energy;
-        let support = ZSupport {
-            leading: above,
-            central: here,
-            trailing: beneath,
-        };
-        let quality = if qualities.is_empty() {
-            1.0
-        } else {
-            qualities.iter().copied().sum::<f32>()
-                / qualities.len() as f32
-        };
-        ZPulse {
-            source: fused.source,
-            ts: now,
-            tempo: fused.total_energy(),
-            drift: fused.drift,
-            z_bias: fused.z_bias,
-            support,
-            band_energy: fused.band_energy,
-            quality,
-            stderr: fused.standard_error.unwrap_or_default(),
-            latency_ms: 0.0,
-        }
+        self.carry.clone().unwrap_or_else(InterfaceZPulse::default)
     }
 }
 
