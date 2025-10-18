@@ -6,7 +6,7 @@
 use super::geometry::ConceptHint;
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
-use st_core::theory::maxwell::MaxwellZPulse;
+use st_core::maxwell::MaxwellZPulse;
 use st_tensor::TensorError;
 use std::collections::HashMap;
 

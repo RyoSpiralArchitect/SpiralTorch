@@ -6,7 +6,10 @@
 pub mod consensus;
 pub mod device_caps;
 pub mod kdsl_bridge;
+pub mod rankk_launch;
+pub mod rankk_software;
 pub mod spiralk_fft;
+pub mod temporal_fusion;
 pub mod unison_heuristics;
 pub mod wasm_tuner;
 pub mod wgpu_heuristics;
