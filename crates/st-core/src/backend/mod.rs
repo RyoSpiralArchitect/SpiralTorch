@@ -6,6 +6,8 @@
 pub mod consensus;
 #[cfg(feature = "cuda")]
 pub mod cuda_runtime;
+#[cfg(feature = "hip-real")]
+pub mod hip_runtime;
 pub mod device_caps;
 pub mod kdsl_bridge;
 pub mod rankk_launch;
