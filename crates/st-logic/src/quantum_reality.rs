@@ -173,7 +173,7 @@ impl TaxicabLayout {
         self.coordinates
             .get(index)
             .copied()
-            .unwrap_or_else(|| GridCoordinate {
+            .unwrap_or(GridCoordinate {
                 x: index as i32,
                 y: 0,
             })
@@ -571,8 +571,7 @@ pub fn superposed_drift(
 ) -> Vec<DriftVector> {
     lambda
         .iter()
-        .enumerate()
-        .map(|(_m, row)| {
+        .map(|row| {
             let mut theta_component = 0.0;
             let mut phi_component = 0.0;
             for (n, &weight) in row.iter().enumerate() {
@@ -849,6 +848,7 @@ fn build_interference_matrix(
     matrix
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn interference_atlas(
     states: &[QubitState],
     t: f64,
@@ -904,6 +904,7 @@ pub fn interference_atlas(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn auto_tune_collapse_drive(
     states: &[QubitState],
     t: f64,
