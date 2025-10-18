@@ -5,6 +5,14 @@ import {
     type CanvasPointerEvent,
 } from "./canvas-view";
 
+const COLLAB_SCHEMA_VERSION = 1;
+const COLLAB_BATCH_INTERVAL_MS = 16;
+const COLLAB_DEFAULT_POINTER_RATE_HZ = 30;
+const COLLAB_DEFAULT_PATCH_RATE_HZ = 20;
+const COLLAB_DEFAULT_PRESENCE_INTERVAL_MS = 1_000;
+const COLLAB_MAX_MESSAGE_BYTES_DEFAULT = 256 * 1024;
+const COLLAB_STORAGE_POLL_INTERVAL_MS = 750;
+
 export type CanvasCollabRole = "trainer" | "model" | "human" | (string & {});
 
 export interface CanvasCollabParticipant {
@@ -58,14 +66,51 @@ export interface CanvasCollabEventMap {
     };
 }
 
+export type CollabTelemetryEvent =
+    | { type: "join"; participant: CanvasCollabParticipantState }
+    | { type: "leave"; participantId: string }
+    | { type: "transport-change"; transport: CollabTransportKind | "none" }
+    | { type: "latency-suppressed"; participantId: string; clock: number }
+    | { type: "budget-suppressed"; participantId: string; remainingBudget: number }
+    | { type: "conflict-resolved"; participantId: string; field: keyof CanvasCollabState }
+    | { type: "degraded"; reason: string }
+    | { type: "presence"; participants: number }
+    | { type: "pointer"; participantId: string }
+    | { type: "unknown-schema"; version: number }
+    | { type: "message-dropped"; reason: string };
+
+export type CollabTelemetrySink = (event: CollabTelemetryEvent) => void;
+
+export interface CollabPatchAttributionEvent {
+    participant: CanvasCollabParticipantState;
+    patch: Partial<CanvasCollabState>;
+    origin: "local" | "remote";
+    clock: number;
+}
+
+type CollabTransportKind = "broadcast" | "storage";
+
+interface CollabTransport {
+    readonly kind: CollabTransportKind;
+    post(envelope: CollabEnvelope, serialized: string): void;
+    subscribe(handler: (envelope: CollabEnvelope) => void): void;
+    destroy(): void;
+}
+
 export interface SpiralCanvasCollabOptions {
     sessionId?: string;
     participant: CanvasCollabParticipant;
     sharePointer?: boolean;
+    pointerRateHz?: number;
+    patchRateHz?: number;
+    presenceIntervalMs?: number;
+    maxMessageBytes?: number;
+    telemetry?: CollabTelemetrySink;
+    attributionSink?: (event: CollabPatchAttributionEvent) => void;
 }
 
 interface CollabMessageBase {
-    type: "hello" | "state" | "pointer" | "leave";
+    type: "hello" | "state" | "pointer" | "leave" | "presence";
     id: string;
     participant: {
         role: CanvasCollabRole;
@@ -95,7 +140,22 @@ interface CollabLeaveMessage extends CollabMessageBase {
     type: "leave";
 }
 
-type CollabMessage = CollabHelloMessage | CollabStateMessage | CollabPointerMessage | CollabLeaveMessage;
+interface CollabPresenceMessage extends CollabMessageBase {
+    type: "presence";
+    roster: Array<{ id: string; role: CanvasCollabRole; lastSeen: number }>;
+}
+
+type CollabMessage =
+    | CollabHelloMessage
+    | CollabStateMessage
+    | CollabPointerMessage
+    | CollabLeaveMessage
+    | CollabPresenceMessage;
+
+interface CollabEnvelope {
+    v: number;
+    message: CollabMessage;
+}
 
 type EventHandler<T> = (event: T) => void;
 
@@ -182,6 +242,41 @@ function mergeState(target: CanvasCollabState, patch: Partial<CanvasCollabState>
     return merged;
 }
 
+function mergePatches(
+    target: Partial<CanvasCollabState> | null,
+    patch: Partial<CanvasCollabState>,
+): Partial<CanvasCollabState> {
+    const next: Partial<CanvasCollabState> = target ? { ...target } : {};
+    if (patch.zoom !== undefined) {
+        next.zoom = patch.zoom;
+    }
+    if (patch.offset) {
+        next.offset = { x: patch.offset.x, y: patch.offset.y };
+    }
+    if (patch.palette) {
+        next.palette =
+            patch.palette.kind === "builtin"
+                ? { kind: "builtin", name: patch.palette.name }
+                : { kind: "custom", palette: clonePalette(patch.palette.palette) };
+    }
+    if (patch.pointerNavigation !== undefined) {
+        next.pointerNavigation = patch.pointerNavigation;
+    }
+    if (patch.statsCurvature !== undefined) {
+        next.statsCurvature = patch.statsCurvature;
+    }
+    if (patch.statsInterval !== undefined) {
+        next.statsInterval = patch.statsInterval;
+    }
+    if (patch.devicePixelRatio !== undefined) {
+        next.devicePixelRatio = patch.devicePixelRatio;
+    }
+    if (patch.running !== undefined) {
+        next.running = patch.running;
+    }
+    return next;
+}
+
 function paletteEquals(a: SerializedPalette, b: SerializedPalette): boolean {
     if (a.kind !== b.kind) {
         return false;
@@ -238,6 +333,173 @@ function deserializePalette(payload: SerializedPalette): CanvasPaletteCanonicalN
     return clonePalette(payload.palette);
 }
 
+function serializeEnvelope(envelope: CollabEnvelope): { serialized: string; bytes: number } {
+    const serialized = JSON.stringify(envelope);
+    if (typeof TextEncoder !== "undefined") {
+        const encoder = new TextEncoder();
+        return { serialized, bytes: encoder.encode(serialized).byteLength };
+    }
+    return { serialized, bytes: serialized.length };
+}
+
+function nowMillis(): number {
+    if (typeof performance !== "undefined" && typeof performance.now === "function") {
+        return performance.now();
+    }
+    return Date.now();
+}
+
+function rolePriority(role: CanvasCollabRole): number {
+    switch (role) {
+        case "trainer":
+            return 3;
+        case "model":
+            return 2;
+        case "human":
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+function hasLocalStorage(): boolean {
+    try {
+        return typeof localStorage !== "undefined";
+    } catch {
+        return false;
+    }
+}
+
+function randomNonce(): string {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID();
+    }
+    return Math.random().toString(36).slice(2, 10);
+}
+
+class BroadcastChannelTransport implements CollabTransport {
+    readonly kind: CollabTransportKind = "broadcast";
+
+    #channel: BroadcastChannel;
+
+    constructor(name: string) {
+        this.#channel = new BroadcastChannel(name);
+    }
+
+    post(envelope: CollabEnvelope): void;
+    post(envelope: CollabEnvelope, serialized: string): void;
+    post(envelope: CollabEnvelope, _serialized: string): void {
+        this.#channel.postMessage(envelope);
+    }
+
+    subscribe(handler: (envelope: CollabEnvelope) => void): void {
+        this.#channel.onmessage = (event) => {
+            const data = event.data as CollabEnvelope;
+            if (data && typeof data === "object") {
+                handler(data);
+            }
+        };
+    }
+
+    destroy(): void {
+        this.#channel.onmessage = null;
+        this.#channel.close();
+    }
+}
+
+class StorageEventTransport implements CollabTransport {
+    readonly kind: CollabTransportKind = "storage";
+
+    #key: string;
+    #handler: ((envelope: CollabEnvelope) => void) | null = null;
+    #seen = new Set<string>();
+    #listener = (event: StorageEvent) => {
+        if (event.key !== this.#key || !event.newValue) {
+            return;
+        }
+        this.#dispatch(event.newValue, false);
+    };
+    #pollHandle: ReturnType<typeof setInterval> | null = null;
+
+    constructor(key: string) {
+        this.#key = key;
+        if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+            window.addEventListener("storage", this.#listener);
+        }
+        if (typeof setInterval === "function") {
+            this.#pollHandle = setInterval(() => {
+                if (!hasLocalStorage()) {
+                    return;
+                }
+                const value = localStorage.getItem(this.#key);
+                if (value) {
+                    this.#dispatch(value, false);
+                }
+            }, COLLAB_STORAGE_POLL_INTERVAL_MS);
+        }
+    }
+
+    post(_envelope: CollabEnvelope, serialized: string): void {
+        if (!hasLocalStorage()) {
+            return;
+        }
+        const nonce = randomNonce();
+        const payload = JSON.stringify({ nonce, envelope: serialized });
+        this.#seen.add(nonce);
+        try {
+            localStorage.setItem(this.#key, payload);
+        } catch {
+            this.#seen.delete(nonce);
+            return;
+        }
+        this.#dispatch(payload, true);
+        if (this.#seen.size > 256) {
+            const entries = Array.from(this.#seen);
+            this.#seen = new Set(entries.slice(entries.length - 128));
+        }
+    }
+
+    subscribe(handler: (envelope: CollabEnvelope) => void): void {
+        this.#handler = handler;
+    }
+
+    destroy(): void {
+        if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+            window.removeEventListener("storage", this.#listener);
+        }
+        if (this.#pollHandle) {
+            clearInterval(this.#pollHandle);
+            this.#pollHandle = null;
+        }
+        this.#handler = null;
+    }
+
+    #dispatch(raw: string, local: boolean): void {
+        let parsed: { nonce?: string; envelope?: string };
+        try {
+            parsed = JSON.parse(raw);
+        } catch {
+            return;
+        }
+        if (!parsed || !parsed.envelope) {
+            return;
+        }
+        const nonce = parsed.nonce;
+        if (nonce && this.#seen.has(nonce)) {
+            this.#seen.delete(nonce);
+            if (!local) {
+                return;
+            }
+        }
+        try {
+            const envelope = JSON.parse(parsed.envelope) as CollabEnvelope;
+            this.#handler?.(envelope);
+        } catch {
+            // ignore malformed payloads
+        }
+    }
+}
+
 /**
  * Creates a peer-to-peer collaboration session that synchronizes a single
  * {@link SpiralCanvasView} across multiple browser contexts using
@@ -252,7 +514,8 @@ export class SpiralCanvasCollabSession {
     readonly #sessionId: string;
     readonly #sharePointer: boolean;
 
-    #channel: BroadcastChannel | null = null;
+    #transport: CollabTransport | null = null;
+    #transportKind: CollabTransportKind | "none" = "none";
     #clock = 0;
     #applyingRemote = false;
     #destroyed = false;
@@ -262,11 +525,37 @@ export class SpiralCanvasCollabSession {
 
     #pointerHandler: ((event: CanvasPointerEvent) => void) | null = null;
     readonly #restoreStack: Array<() => void> = [];
+    #pointerMinInterval: number;
+    #lastPointerSentAt = 0;
+
+    #pendingPatch: Partial<CanvasCollabState> | null = null;
+    #pendingFullSync = false;
+    #batchTimer: ReturnType<typeof setTimeout> | null = null;
+
+    #patchRateHz: number;
+    #patchAllowance: number;
+    #lastPatchRefill: number;
+
+    #presenceIntervalMs: number;
+    #presenceTimer: ReturnType<typeof setInterval> | null = null;
+
+    #maxMessageBytes: number;
+    #telemetry?: CollabTelemetrySink;
+    #attributionSink?: (event: CollabPatchAttributionEvent) => void;
 
     constructor(view: SpiralCanvasView, options: SpiralCanvasCollabOptions) {
         this.#view = view;
         this.#sessionId = options.sessionId ?? "spiraltorch";
         this.#sharePointer = options.sharePointer ?? true;
+        this.#telemetry = options.telemetry;
+        this.#attributionSink = options.attributionSink;
+        const pointerRateHz = Math.max(options.pointerRateHz ?? COLLAB_DEFAULT_POINTER_RATE_HZ, 1);
+        this.#pointerMinInterval = 1_000 / pointerRateHz;
+        this.#patchRateHz = Math.max(options.patchRateHz ?? COLLAB_DEFAULT_PATCH_RATE_HZ, 0);
+        this.#patchAllowance = this.#patchRateHz;
+        this.#lastPatchRefill = nowMillis();
+        this.#presenceIntervalMs = Math.max(options.presenceIntervalMs ?? COLLAB_DEFAULT_PRESENCE_INTERVAL_MS, 250);
+        this.#maxMessageBytes = options.maxMessageBytes ?? COLLAB_MAX_MESSAGE_BYTES_DEFAULT;
 
         const participantId = options.participant.id ?? generateId();
         this.#participantId = participantId;
@@ -282,6 +571,7 @@ export class SpiralCanvasCollabSession {
             lastSeen: Date.now(),
         };
         this.#participants.set(participantId, { info: participantState, clock: 0 });
+        this.#emitTelemetry({ type: "join", participant: this.#cloneParticipant(participantState) });
 
         this.#wrapViewMethod("setZoom");
         this.#wrapViewMethod("setOffset");
@@ -297,6 +587,7 @@ export class SpiralCanvasCollabSession {
             if (this.#applyingRemote) {
                 return;
             }
+            const now = nowMillis();
             const record = this.#participants.get(this.#participantId);
             if (record) {
                 record.info.lastPointer = event;
@@ -304,8 +595,10 @@ export class SpiralCanvasCollabSession {
                 record.info.state = this.#snapshotState();
                 this.#emitState("local", record.info);
             }
-            this.#broadcastState({ zoom: event.zoom, offset: event.offset });
-            if (this.#sharePointer) {
+            this.#enqueuePatch({ zoom: event.zoom, offset: event.offset });
+            const allowPointer = now - this.#lastPointerSentAt >= this.#pointerMinInterval;
+            if (this.#sharePointer && allowPointer) {
+                this.#lastPointerSentAt = now;
                 this.#postMessage({
                     type: "pointer",
                     id: this.#participantId,
@@ -313,6 +606,7 @@ export class SpiralCanvasCollabSession {
                     clock: this.#tick(),
                     event,
                 });
+                this.#emitTelemetry({ type: "pointer", participantId: this.#participantId });
                 if (record) {
                     this.#events.emit("pointer", { participant: this.#cloneParticipant(record.info), event });
                 }
@@ -320,21 +614,15 @@ export class SpiralCanvasCollabSession {
         };
         this.#view.on("pointer", this.#pointerHandler);
 
-        if (typeof BroadcastChannel !== "undefined") {
-            try {
-                this.#channel = new BroadcastChannel(this.#channelName());
-                this.#channel.onmessage = (event) => {
-                    this.#handleMessage(event.data as CollabMessage);
-                };
-            } catch {
-                this.#channel = null;
-            }
+        this.#initTransport();
+        if (this.#transport && typeof setInterval === "function") {
+            this.#presenceTimer = setInterval(() => this.#sendPresence(), this.#presenceIntervalMs);
         }
 
         this.#emitParticipants();
         this.#emitState("local", participantState);
 
-        if (this.#channel) {
+        if (this.#transport) {
             this.#postMessage({
                 type: "hello",
                 id: this.#participantId,
@@ -342,6 +630,7 @@ export class SpiralCanvasCollabSession {
                 clock: this.#tick(),
                 state: this.#snapshotState(),
             });
+            this.#sendPresence();
         }
     }
 
@@ -370,7 +659,7 @@ export class SpiralCanvasCollabSession {
 
     /** Broadcasts an updated view state to collaborators. */
     sync(): void {
-        this.#broadcastState();
+        this.#enqueueFullSync();
     }
 
     /** Tears down the collaboration session and restores patched methods. */
@@ -379,15 +668,23 @@ export class SpiralCanvasCollabSession {
             return;
         }
         this.#destroyed = true;
-        if (this.#channel) {
+        if (this.#transport) {
             this.#postMessage({
                 type: "leave",
                 id: this.#participantId,
                 participant: this.#participantEnvelope(),
                 clock: this.#tick(),
             });
-            this.#channel.close();
-            this.#channel = null;
+            this.#transport.destroy();
+            this.#transport = null;
+        }
+        if (this.#presenceTimer) {
+            clearInterval(this.#presenceTimer);
+            this.#presenceTimer = null;
+        }
+        if (this.#batchTimer) {
+            clearTimeout(this.#batchTimer);
+            this.#batchTimer = null;
         }
         if (this.#pointerHandler) {
             this.#view.off("pointer", this.#pointerHandler);
@@ -426,6 +723,39 @@ export class SpiralCanvasCollabSession {
         return `spiraltorch-canvas-${this.#sessionId}`;
     }
 
+    #initTransport(): void {
+        const name = this.#channelName();
+        if (typeof BroadcastChannel !== "undefined") {
+            try {
+                this.#transport = new BroadcastChannelTransport(name);
+                this.#transportKind = "broadcast";
+            } catch {
+                this.#transport = null;
+            }
+        }
+        if (!this.#transport && hasLocalStorage()) {
+            try {
+                this.#transport = new StorageEventTransport(name);
+                this.#transportKind = "storage";
+            } catch {
+                this.#transport = null;
+            }
+        }
+        if (!this.#transport) {
+            this.#transportKind = "none";
+            this.#emitTelemetry({ type: "transport-change", transport: "none" });
+            this.#emitTelemetry({ type: "degraded", reason: "no-transport" });
+            return;
+        }
+        this.#transport.subscribe((envelope) => {
+            this.#handleEnvelope(envelope);
+        });
+        this.#emitTelemetry({ type: "transport-change", transport: this.#transportKind });
+        if (this.#transportKind === "storage") {
+            this.#emitTelemetry({ type: "degraded", reason: "storage-fallback" });
+        }
+    }
+
     #tick(): number {
         this.#clock += 1;
         return this.#clock;
@@ -459,7 +789,7 @@ export class SpiralCanvasCollabSession {
         (this.#view as any)[method] = function (...args: unknown[]) {
             const result = original.apply(this, args);
             if (!session.#applyingRemote) {
-                session.#broadcastState();
+                session.#enqueueFullSync();
             }
             return result;
         };
@@ -469,26 +799,38 @@ export class SpiralCanvasCollabSession {
     }
 
     #broadcastState(patch?: Partial<CanvasCollabState>): void {
+        if (this.#destroyed) {
+            return;
+        }
         const base = this.#lastState ?? this.#snapshotState();
         const next = patch ? mergeState(base, patch) : this.#snapshotState();
         if (statesEqual(this.#lastState, next)) {
             return;
         }
-        this.#lastState = next;
+        const clonedNext = cloneState(next);
+        this.#lastState = clonedNext;
         const record = this.#participants.get(this.#participantId);
         if (record) {
-            record.info.state = cloneState(next);
+            record.info.state = cloneState(clonedNext);
             record.info.lastSeen = Date.now();
         }
-        if (this.#channel) {
+        const clock = this.#tick();
+        if (record) {
+            record.clock = clock;
+        }
+        const diff: Partial<CanvasCollabState> = patch ? mergePatches(null, patch) : cloneState(clonedNext);
+        if (this.#transport) {
             this.#postMessage({
                 type: "state",
                 id: this.#participantId,
                 participant: this.#participantEnvelope(),
-                clock: this.#tick(),
-                state: patch ?? next,
+                clock,
+                state: diff,
                 full: !patch,
             });
+        }
+        if (record) {
+            this.#recordAttribution("local", record.info, diff, clock);
         }
         if (record) {
             this.#emitState("local", record.info);
@@ -496,17 +838,18 @@ export class SpiralCanvasCollabSession {
         this.#emitParticipants();
     }
 
-    #applyRemoteState(state: CanvasCollabState): void {
+    #applyRemoteState(record: ParticipantRecord, state: CanvasCollabState): void {
+        const resolved = this.#resolveConflicts(record.info, state);
         this.#applyingRemote = true;
         try {
-            this.#view.setPointerNavigation(state.pointerNavigation);
-            this.#view.setStatsCurvature(state.statsCurvature);
-            this.#view.setStatsInterval(state.statsInterval);
-            this.#view.setDevicePixelRatio(state.devicePixelRatio);
-            this.#view.setPalette(deserializePalette(state.palette));
-            this.#view.setZoom(state.zoom);
-            this.#view.setOffset(state.offset.x, state.offset.y);
-            const shouldRun = state.running;
+            this.#view.setPointerNavigation(resolved.pointerNavigation);
+            this.#view.setStatsCurvature(resolved.statsCurvature);
+            this.#view.setStatsInterval(resolved.statsInterval);
+            this.#view.setDevicePixelRatio(resolved.devicePixelRatio);
+            this.#view.setPalette(deserializePalette(resolved.palette));
+            this.#view.setZoom(resolved.zoom);
+            this.#view.setOffset(resolved.offset.x, resolved.offset.y);
+            const shouldRun = resolved.running;
             if (shouldRun && !this.#view.running) {
                 this.#view.start();
             } else if (!shouldRun && this.#view.running) {
@@ -518,41 +861,237 @@ export class SpiralCanvasCollabSession {
         } finally {
             this.#applyingRemote = false;
         }
-        const cloned = cloneState(state);
+        const cloned = cloneState(resolved);
         this.#lastState = cloned;
         const selfRecord = this.#participants.get(this.#participantId);
         if (selfRecord) {
-            selfRecord.info.state = cloneState(state);
+            selfRecord.info.state = cloneState(resolved);
             selfRecord.info.lastSeen = Date.now();
         }
+        record.info.state = cloneState(resolved);
+        record.info.lastSeen = Date.now();
         this.#emitParticipants();
+    }
+
+    #resolveConflicts(participant: CanvasCollabParticipantState, candidate: CanvasCollabState): CanvasCollabState {
+        const localRecord = this.#participants.get(this.#participantId);
+        const localPriority = localRecord ? rolePriority(localRecord.info.role) : rolePriority("human");
+        const remotePriority = rolePriority(participant.role);
+        const preferRemote =
+            remotePriority > localPriority ||
+            (remotePriority === localPriority && participant.id < this.#participantId);
+        if (preferRemote) {
+            return candidate;
+        }
+        const current = this.#snapshotState();
+        const resolved = cloneState(candidate);
+        const conflicts: (keyof CanvasCollabState)[] = [];
+        if (candidate.zoom !== current.zoom) {
+            resolved.zoom = current.zoom;
+            conflicts.push("zoom");
+        }
+        if (candidate.offset.x !== current.offset.x || candidate.offset.y !== current.offset.y) {
+            resolved.offset = { ...current.offset };
+            conflicts.push("offset");
+        }
+        if (!paletteEquals(candidate.palette, current.palette)) {
+            if (current.palette.kind === "builtin") {
+                resolved.palette = { kind: "builtin", name: current.palette.name };
+            } else {
+                resolved.palette = { kind: "custom", palette: clonePalette(current.palette.palette) };
+            }
+            conflicts.push("palette");
+        }
+        if (candidate.pointerNavigation !== current.pointerNavigation) {
+            resolved.pointerNavigation = current.pointerNavigation;
+            conflicts.push("pointerNavigation");
+        }
+        if (candidate.statsCurvature !== current.statsCurvature) {
+            resolved.statsCurvature = current.statsCurvature;
+            conflicts.push("statsCurvature");
+        }
+        if (candidate.statsInterval !== current.statsInterval) {
+            resolved.statsInterval = current.statsInterval;
+            conflicts.push("statsInterval");
+        }
+        if (candidate.devicePixelRatio !== current.devicePixelRatio) {
+            resolved.devicePixelRatio = current.devicePixelRatio;
+            conflicts.push("devicePixelRatio");
+        }
+        if (candidate.running !== current.running) {
+            resolved.running = current.running;
+            conflicts.push("running");
+        }
+        conflicts.forEach((field) => {
+            this.#emitTelemetry({ type: "conflict-resolved", participantId: participant.id, field });
+        });
+        return resolved;
+    }
+
+    #enqueuePatch(patch: Partial<CanvasCollabState>): void {
+        if (this.#destroyed) {
+            return;
+        }
+        this.#pendingPatch = mergePatches(this.#pendingPatch, patch);
+        this.#scheduleBatch();
+    }
+
+    #enqueueFullSync(): void {
+        if (this.#destroyed) {
+            return;
+        }
+        this.#pendingFullSync = true;
+        this.#scheduleBatch();
+    }
+
+    #scheduleBatch(delay: number = COLLAB_BATCH_INTERVAL_MS): void {
+        if (this.#batchTimer) {
+            return;
+        }
+        this.#batchTimer = setTimeout(() => {
+            this.#batchTimer = null;
+            this.#flushPendingState();
+        }, delay);
+    }
+
+    #flushPendingState(): void {
+        if (this.#destroyed) {
+            return;
+        }
+        if (this.#pendingFullSync) {
+            if (!this.#consumePatchBudget(1)) {
+                this.#emitTelemetry({
+                    type: "budget-suppressed",
+                    participantId: this.#participantId,
+                    remainingBudget: this.#patchAllowance,
+                });
+                this.#scheduleBatch(this.#timeUntilPatchBudget());
+                return;
+            }
+            this.#pendingFullSync = false;
+            this.#pendingPatch = null;
+            this.#broadcastState();
+            return;
+        }
+        if (this.#pendingPatch) {
+            if (!this.#consumePatchBudget(1)) {
+                this.#emitTelemetry({
+                    type: "budget-suppressed",
+                    participantId: this.#participantId,
+                    remainingBudget: this.#patchAllowance,
+                });
+                this.#scheduleBatch(this.#timeUntilPatchBudget());
+                return;
+            }
+            const patch = this.#pendingPatch;
+            this.#pendingPatch = null;
+            this.#broadcastState(patch);
+        }
+    }
+
+    #consumePatchBudget(weight = 1): boolean {
+        if (this.#patchRateHz <= 0) {
+            return true;
+        }
+        this.#refillPatchBudget();
+        if (this.#patchAllowance >= weight) {
+            this.#patchAllowance -= weight;
+            return true;
+        }
+        return false;
+    }
+
+    #refillPatchBudget(): void {
+        if (this.#patchRateHz <= 0) {
+            this.#patchAllowance = this.#patchRateHz;
+            return;
+        }
+        const now = nowMillis();
+        const elapsed = Math.max(0, now - this.#lastPatchRefill) / 1_000;
+        if (elapsed > 0) {
+            this.#patchAllowance = Math.min(
+                this.#patchRateHz,
+                this.#patchAllowance + elapsed * this.#patchRateHz,
+            );
+            this.#lastPatchRefill = now;
+        }
+    }
+
+    #timeUntilPatchBudget(weight = 1): number {
+        if (this.#patchRateHz <= 0) {
+            return COLLAB_BATCH_INTERVAL_MS;
+        }
+        this.#refillPatchBudget();
+        if (this.#patchAllowance >= weight) {
+            return COLLAB_BATCH_INTERVAL_MS;
+        }
+        const deficit = weight - this.#patchAllowance;
+        const seconds = deficit / this.#patchRateHz;
+        return Math.max(COLLAB_BATCH_INTERVAL_MS, seconds * 1_000);
+    }
+
+    #recordAttribution(
+        origin: "local" | "remote",
+        participant: CanvasCollabParticipantState,
+        patch: Partial<CanvasCollabState>,
+        clock: number,
+    ): void {
+        if (!this.#attributionSink) {
+            return;
+        }
+        const clonedPatch = mergePatches(null, patch);
+        this.#attributionSink({
+            participant: this.#cloneParticipant(participant),
+            patch: clonedPatch,
+            origin,
+            clock,
+        });
+    }
+
+    #handleEnvelope(envelope: CollabEnvelope): void {
+        if (!envelope || typeof envelope !== "object") {
+            return;
+        }
+        if (typeof envelope.v !== "number" || envelope.v !== COLLAB_SCHEMA_VERSION) {
+            const version = typeof envelope.v === "number" ? envelope.v : -1;
+            this.#emitTelemetry({ type: "unknown-schema", version });
+            return;
+        }
+        const message = envelope.message;
+        if (!message || typeof message !== "object") {
+            return;
+        }
+        this.#handleMessage(message);
     }
 
     #handleMessage(message: CollabMessage): void {
         if (message.id === this.#participantId) {
             return;
         }
-        const record = this.#upsertParticipant(message);
-        if (!record) {
+        const result = this.#upsertParticipant(message);
+        if (!result) {
             return;
         }
+        const { record } = result;
         switch (message.type) {
             case "hello": {
                 if (message.clock > record.clock) {
                     record.clock = message.clock;
                     record.info.state = cloneState(message.state);
-                    this.#applyRemoteState(message.state);
+                    this.#applyRemoteState(record, message.state);
+                    this.#recordAttribution("remote", record.info, message.state, message.clock);
                     this.#emitState("remote", record.info);
                 }
-                this.#broadcastState();
+                this.#enqueueFullSync();
                 break;
             }
             case "state": {
                 if (message.clock <= record.clock) {
+                    this.#emitTelemetry({ type: "latency-suppressed", participantId: record.info.id, clock: message.clock });
                     break;
                 }
                 record.clock = message.clock;
-                const merged = message.full ? mergeState(record.info.state, message.state) : mergeState(record.info.state, message.state);
+                const merged = mergeState(record.info.state, message.state);
                 record.info.state = cloneState(merged);
                 record.info.lastSeen = Date.now();
                 if (message.state.offset) {
@@ -563,7 +1102,8 @@ export class SpiralCanvasCollabSession {
                         offset: { ...merged.offset },
                     };
                 }
-                this.#applyRemoteState(merged);
+                this.#applyRemoteState(record, merged);
+                this.#recordAttribution("remote", record.info, message.state, message.clock);
                 this.#emitState("remote", record.info);
                 break;
             }
@@ -579,18 +1119,74 @@ export class SpiralCanvasCollabSession {
                     participant: this.#cloneParticipant(record.info),
                     event: message.event,
                 });
+                this.#emitTelemetry({ type: "pointer", participantId: record.info.id });
                 this.#emitParticipants();
                 break;
             }
             case "leave": {
                 this.#participants.delete(record.info.id);
+                this.#emitTelemetry({ type: "leave", participantId: record.info.id });
                 this.#emitParticipants();
+                break;
+            }
+            case "presence": {
+                this.#applyPresence(message);
                 break;
             }
         }
     }
 
-    #upsertParticipant(message: CollabMessage): ParticipantRecord | null {
+    #applyPresence(message: CollabPresenceMessage): void {
+        const now = Date.now();
+        message.roster.forEach((entry) => {
+            if (entry.id === this.#participantId) {
+                return;
+            }
+            const existing = this.#participants.get(entry.id);
+            if (existing) {
+                existing.info.role = entry.role;
+                existing.info.lastSeen = entry.lastSeen ?? now;
+            } else {
+                const placeholderState = this.#lastState ? cloneState(this.#lastState) : this.#snapshotState();
+                const info: CanvasCollabParticipantState = {
+                    id: entry.id,
+                    role: entry.role,
+                    state: placeholderState,
+                    lastSeen: entry.lastSeen ?? now,
+                };
+                this.#participants.set(entry.id, { info, clock: 0 });
+                this.#emitTelemetry({ type: "join", participant: this.#cloneParticipant(info) });
+            }
+        });
+        this.#emitTelemetry({ type: "presence", participants: this.#participants.size });
+        this.#emitParticipants();
+    }
+
+    #sendPresence(): void {
+        if (!this.#transport || this.#destroyed) {
+            return;
+        }
+        const selfRecord = this.#participants.get(this.#participantId);
+        if (selfRecord) {
+            selfRecord.info.lastSeen = Date.now();
+            this.#emitParticipants();
+        }
+        const roster = Array.from(this.#participants.values()).map((entry) => ({
+            id: entry.info.id,
+            role: entry.info.role,
+            lastSeen: entry.info.lastSeen,
+        }));
+        this.#postMessage({
+            type: "presence",
+            id: this.#participantId,
+            participant: this.#participantEnvelope(),
+            clock: this.#tick(),
+            roster,
+        });
+        this.#emitTelemetry({ type: "presence", participants: roster.length });
+    }
+
+    #upsertParticipant(message: CollabMessage): { record: ParticipantRecord; created: boolean } | null {
         const existing = this.#participants.get(message.id);
         const now = Date.now();
         if (existing) {
@@ -598,7 +1194,7 @@ export class SpiralCanvasCollabSession {
             existing.info.label = message.participant.label;
             existing.info.color = message.participant.color;
             existing.info.lastSeen = now;
-            return existing;
+            return { record: existing, created: false };
         }
         const placeholderState = this.#lastState ? cloneState(this.#lastState) : this.#snapshotState();
         const info: CanvasCollabParticipantState = {
@@ -611,17 +1207,24 @@ export class SpiralCanvasCollabSession {
         };
         const record: ParticipantRecord = { info, clock: message.clock };
         this.#participants.set(message.id, record);
-        return record;
+        this.#emitTelemetry({ type: "join", participant: this.#cloneParticipant(info) });
+        return { record, created: true };
     }
 
     #postMessage(message: CollabMessage): void {
-        if (!this.#channel) {
+        if (!this.#transport) {
+            return;
+        }
+        const envelope: CollabEnvelope = { v: COLLAB_SCHEMA_VERSION, message };
+        const { serialized, bytes } = serializeEnvelope(envelope);
+        if (bytes > this.#maxMessageBytes) {
+            this.#emitTelemetry({ type: "message-dropped", reason: "oversize" });
             return;
         }
         try {
-            this.#channel.postMessage(message);
+            this.#transport.post(envelope, serialized);
         } catch {
-            // Ignore transport errors.
+            this.#emitTelemetry({ type: "message-dropped", reason: "transport-error" });
         }
     }
 
@@ -634,6 +1237,10 @@ export class SpiralCanvasCollabSession {
             participant: this.#cloneParticipant(participant),
             origin,
         });
+    }
+
+    #emitTelemetry(event: CollabTelemetryEvent): void {
+        this.#telemetry?.(event);
     }
 }
 
