@@ -9,59 +9,18 @@
 //!   SPIRAL_SOFT_MODE = {Sum|Normalize|Softmax|Prob}
 //!   SPIRAL_BEAM_K = <usize>
 //!   SPIRAL_SOFT_BANDIT_BLEND = <0..1>  (mixing weight for bandit feedback)
+use crate::profile::{DensityClass, ProblemProfile};
+
 use st_logic::{SoftMode, SolveCfg};
 
 use st_tensor::fractional::gl_coeffs;
 
-fn estimated_density(rows: usize, cols: usize, nnz: usize) -> f32 {
-    let volume = (rows.max(1) * cols.max(1)) as f32;
-    (nnz as f32 / volume).clamp(1e-6, 1.0)
-}
-
-fn lane_pref(subgroup: bool, rows: usize, cols: usize) -> u32 {
-    if subgroup {
-        if cols >= 8192 { 512 } else { 256 }
-    } else if rows <= 16 {
-        128
-    } else if cols <= 4096 {
-        256
-    } else {
-        512
-    }
-}
-
-fn tile_pref(cols: usize, subgroup: bool) -> u32 {
-    match (cols, subgroup) {
-        (..=4096, true) => 4_096,
-        (..=4096, false) => 2_048,
-        (4097..=16384, true) => 8_192,
-        (4097..=16384, false) => 4_096,
-        (16385..=65536, _) => 8_192,
-        _ => 16_384,
-    }
-}
-
-fn jacobi_pref(density: f32) -> u32 {
-    if density < 0.05 {
-        0
-    } else if density < 0.12 {
-        1
-    } else if density < 0.30 {
-        2
-    } else {
-        3
-    }
-}
-
 fn emphasize(hit: bool, on_hit: f32, on_miss: f32) -> f32 {
-    if hit { on_hit } else { on_miss }
-}
-
-fn fractional_alpha(rows: usize, cols: usize, nnz: usize) -> f32 {
-    let density = estimated_density(rows, cols, nnz);
-    let curvature = (rows.max(cols) as f32).log2().max(1.0);
-    let alpha = (density.sqrt() * 0.65 + 0.25) * (1.0 - 0.05 / curvature);
-    alpha.clamp(0.15, 0.95)
+    if hit {
+        on_hit
+    } else {
+        on_miss
+    }
 }
 
 fn fractional_energy(alpha: f32) -> f32 {
@@ -83,20 +42,68 @@ pub struct Choice {
     pub score: f32,
 }
 
-fn initial_choice(rows: usize, cols: usize, nnz: usize, subgroup: bool) -> Choice {
-    let density = estimated_density(rows, cols, nnz);
-    let wg = lane_pref(subgroup, rows, cols);
-    let tile_cols = tile_pref(cols, subgroup);
-    let jacobi_passes = jacobi_pref(density);
-    let use_2ce = density < 0.25 || cols >= 16_384;
+impl Choice {
+    /// Provide a short human-readable rationale that can be surfaced in logs or debug UI.
+    pub fn explain(&self, profile: &ProblemProfile) -> String {
+        let mut reasons = Vec::new();
+        reasons.push(format!(
+            "density={:.4} ({:?})",
+            profile.density(),
+            profile.density_class()
+        ));
+        reasons.push(format!("wg {}→{}", profile.lane_hint(), self.wg));
+        reasons.push(format!("tile {}→{}", profile.tile_hint(), self.tile_cols));
+        reasons.push(format!("jacobi {}", self.jacobi_passes));
+        if self.use_2ce {
+            reasons.push("2CE enabled".to_string());
+        }
+        format!(
+            "wgpu-amg choice: wg={} tile={} jacobi={} score={:.3} [{}]",
+            self.wg,
+            self.tile_cols,
+            self.jacobi_passes,
+            self.score,
+            reasons.join(", ")
+        )
+    }
+}
 
-    Choice { use_2ce, wg, tile_cols, jacobi_passes, score: 0.0 }
+fn initial_choice(profile: &ProblemProfile) -> Choice {
+    let wg = profile.lane_hint();
+    let tile_cols = profile.tile_hint();
+    let mut jacobi_passes = profile.jacobi_hint() as i32;
+    let diag_ratio = profile.diag_ratio();
+    if diag_ratio < 0.45 {
+        jacobi_passes -= 1;
+    } else if diag_ratio > 0.9 && profile.mean_row_nnz() > 48.0 {
+        jacobi_passes += 1;
+    }
+    jacobi_passes = jacobi_passes.clamp(0, 5);
+
+    let density_class = profile.density_class();
+    let mut use_2ce = matches!(density_class, DensityClass::UltraSparse | DensityClass::Sparse)
+        || profile.cols() >= 16_384;
+    if diag_ratio > 0.88 && !matches!(density_class, DensityClass::UltraSparse) {
+        use_2ce = false;
+    }
+
+    Choice {
+        use_2ce,
+        wg,
+        tile_cols,
+        jacobi_passes: jacobi_passes as u32,
+        score: 0.0,
+    }
 }
 
 // Placeholder base score (replace with project-specific version).
 fn base_score_amg(c: &Choice, alpha: f32) -> f32 {
     let mut s = 0.0f32;
-    if c.use_2ce { s += 0.12; } else { s -= 0.07; }
+    if c.use_2ce {
+        s += 0.12;
+    } else {
+        s -= 0.07;
+    }
 
     let wg = c.wg.max(64) as f32;
     let wg_focus = (wg / 512.0).min(1.0);
@@ -120,7 +127,7 @@ fn base_score_amg(c: &Choice, alpha: f32) -> f32 {
 }
 
 // Placeholder SoftRule source (replace with project-specific SpiralK wiring).
-fn soft_rules_from_spiralk(_rows: usize, _cols: usize, _nnz: usize, _sg: bool) -> Vec<st_logic::SoftRule> {
+fn soft_rules_from_spiralk(profile: &ProblemProfile) -> Vec<st_logic::SoftRule> {
     use st_logic::SoftRule;
     const WG128: &str = "wg=128";
     const WG256: &str = "wg=256";
@@ -134,41 +141,107 @@ fn soft_rules_from_spiralk(_rows: usize, _cols: usize, _nnz: usize, _sg: bool) -
     const JACOBI3: &str = "jacobi=3";
     const JACOBI0: &str = "jacobi=0";
 
-    let density = estimated_density(rows, cols, nnz);
-    let tile_hint = tile_pref(cols, subgroup);
-    let wg_hint = lane_pref(subgroup, rows, cols);
-    let jacobi_hint = jacobi_pref(density);
+    let density = profile.density();
+    let subgroup = profile.subgroup();
+    let tile_hint = profile.tile_hint();
+    let wg_hint = profile.lane_hint();
+    let jacobi_hint = profile.jacobi_hint();
 
     let mut rules = Vec::with_capacity(11);
 
     let wg_bias = if subgroup { 0.35 } else { 0.55 };
-    rules.push(SoftRule { name: WG128, weight: emphasize(wg_hint == 128, 0.57, 0.45), score: 0.85 });
-    rules.push(SoftRule { name: WG256, weight: emphasize(wg_hint == 256, 0.55 + wg_bias, 0.55), score: 1.35 });
-    rules.push(SoftRule { name: WG512, weight: emphasize(wg_hint == 512, 0.65, 0.40), score: 1.10 });
+    rules.push(SoftRule {
+        name: WG128,
+        weight: emphasize(wg_hint == 128, 0.57, 0.40 + (1.0 - density) * 0.2),
+        score: 0.85,
+    });
+    rules.push(SoftRule {
+        name: WG256,
+        weight: emphasize(
+            wg_hint == 256,
+            0.55 + wg_bias,
+            0.50 + (profile.bandwidth_hint() as f32 / 16_384.0).min(0.08),
+        ),
+        score: 1.35,
+    });
+    rules.push(SoftRule {
+        name: WG512,
+        weight: emphasize(
+            wg_hint == 512,
+            0.65 + (profile.bandwidth_hint() as f32 / 16_384.0).min(0.1),
+            0.35 + (profile.bandwidth_hint() as f32 / 12_000.0).min(0.25),
+        ),
+        score: 1.10,
+    });
 
-    let two_ce_weight = if density < 0.18 { 0.78 } else { 0.48 };
-    rules.push(SoftRule { name: SOFT_2CE, weight: two_ce_weight, score: if density < 0.30 { 1.35 } else { 1.05 } });
+    let diag_ratio = profile.diag_ratio();
+    let two_ce_weight = if density < 0.18 {
+        0.78 + (1.0 - diag_ratio).max(0.0) * 0.25
+    } else if diag_ratio < 0.55 {
+        0.60
+    } else {
+        (0.48 * (1.0 - (diag_ratio - 0.55).max(0.0) * 0.6)).clamp(0.18, 0.48)
+    };
+    rules.push(SoftRule {
+        name: SOFT_2CE,
+        weight: two_ce_weight,
+        score: if density < 0.30 { 1.35 } else { 1.05 },
+    });
 
     let tile_base = match tile_hint {
         2_048 => (0.74, 0.28),
-        4_096 => (0.80, 0.30),
-        8_192 => (0.82, 0.32),
-        _ => (0.86, 0.34),
+        4_096 => (0.80, 0.30 + (profile.bandwidth_hint() as f32 / 8192.0) * 0.05),
+        8_192 => (0.82, 0.32 + (profile.bandwidth_hint() as f32 / 10_000.0) * 0.05),
+        _ => (0.86, 0.34 + (profile.bandwidth_hint() as f32 / 12_000.0) * 0.04),
     };
-    rules.push(SoftRule { name: TILE4K, weight: emphasize(tile_hint == 4_096, tile_base.0, tile_base.1), score: 0.88 });
-    rules.push(SoftRule { name: TILE8K, weight: emphasize(tile_hint == 8_192, tile_base.0, tile_base.1 + 0.02), score: 0.97 });
-    rules.push(SoftRule { name: TILE16K, weight: emphasize(tile_hint == 16_384, tile_base.0 + 0.04, tile_base.1 + 0.04), score: 0.92 });
+    rules.push(SoftRule {
+        name: TILE4K,
+        weight: emphasize(tile_hint == 4_096, tile_base.0, tile_base.1),
+        score: 0.88,
+    });
+    rules.push(SoftRule {
+        name: TILE8K,
+        weight: emphasize(tile_hint == 8_192, tile_base.0, tile_base.1 + 0.02),
+        score: 0.97,
+    });
+    rules.push(SoftRule {
+        name: TILE16K,
+        weight: emphasize(tile_hint == 16_384, tile_base.0 + 0.04, tile_base.1 + 0.04),
+        score: 0.92,
+    });
 
-    rules.push(SoftRule { name: JACOBI0, weight: emphasize(jacobi_hint == 0, 0.65, 0.25), score: 0.55 });
-    rules.push(SoftRule { name: JACOBI1, weight: emphasize(jacobi_hint == 1, 0.85, 0.50), score: 1.15 });
-    rules.push(SoftRule { name: JACOBI2, weight: emphasize(jacobi_hint == 2, 0.70, 0.35), score: 0.95 });
-    rules.push(SoftRule { name: JACOBI3, weight: emphasize(jacobi_hint >= 3, 0.55, 0.20), score: 0.75 });
+    rules.push(SoftRule {
+        name: JACOBI0,
+        weight: emphasize(jacobi_hint == 0, 0.65, 0.25),
+        score: 0.55,
+    });
+    rules.push(SoftRule {
+        name: JACOBI1,
+        weight: emphasize(jacobi_hint == 1, 0.85, 0.50),
+        score: 1.15,
+    });
+    rules.push(SoftRule {
+        name: JACOBI2,
+        weight: emphasize(jacobi_hint == 2, 0.70, 0.35),
+        score: 0.95,
+    });
+    rules.push(SoftRule {
+        name: JACOBI3,
+        weight: emphasize(jacobi_hint >= 3, 0.55, 0.20),
+        score: 0.75,
+    });
 
     rules
 }
 
-fn instantiate_soft_rules(c: &Choice, base: &[st_logic::SoftRule]) -> Vec<st_logic::SoftRule> {
+fn instantiate_soft_rules(
+    profile: &ProblemProfile,
+    c: &Choice,
+    base: &[st_logic::SoftRule],
+) -> Vec<st_logic::SoftRule> {
     let mut out = Vec::with_capacity(base.len());
+    let diag_ratio = profile.diag_ratio();
+    let mean_row = profile.mean_row_nnz();
     for rule in base {
         let mut weight = rule.weight;
         let mut score = rule.score;
@@ -186,7 +259,12 @@ fn instantiate_soft_rules(c: &Choice, base: &[st_logic::SoftRule]) -> Vec<st_log
                 score *= focus_gain(c.wg, 512);
             }
             "use-2ce" => {
-                if c.use_2ce { score *= 1.4; } else { score *= -0.6; weight *= 0.35; }
+                if c.use_2ce {
+                    score *= 1.4;
+                } else {
+                    score *= -0.6;
+                    weight *= 0.35;
+                }
             }
             "tile=4k" => {
                 weight *= alignment(c.tile_cols, 4_096);
@@ -201,21 +279,49 @@ fn instantiate_soft_rules(c: &Choice, base: &[st_logic::SoftRule]) -> Vec<st_log
                 score *= focus_gain(c.tile_cols, 16_384);
             }
             "jacobi=0" => {
-                if c.jacobi_passes == 0 { score *= 1.2; weight *= 1.1; }
-                else { weight *= 0.5; score *= 0.3; }
+                if c.jacobi_passes == 0 {
+                    score *= 1.2 + (0.5 - diag_ratio).max(0.0) * 0.4;
+                    weight *= 1.1 + (0.5 - diag_ratio).max(0.0) * 0.3;
+                } else {
+                    weight *= 0.5;
+                    score *= 0.3;
+                }
             }
             "jacobi=1" => {
-                if c.jacobi_passes == 1 { score *= 1.3; } else { weight *= 0.4; score *= 0.4; }
+                if c.jacobi_passes == 1 {
+                    score *= 1.3 + (0.6 - diag_ratio).max(0.0) * 0.2;
+                } else {
+                    weight *= 0.4;
+                    score *= 0.4;
+                }
             }
             "jacobi=2" => {
-                if c.jacobi_passes == 2 { score *= 1.1; } else { weight *= 0.3; score *= 0.2; }
+                if c.jacobi_passes == 2 {
+                    score *= 1.1 + (diag_ratio - 0.6).max(0.0) * 0.2;
+                    if mean_row > 40.0 {
+                        weight *= 1.1;
+                    }
+                } else {
+                    weight *= 0.3;
+                    score *= 0.2;
+                }
             }
             "jacobi=3" => {
-                if c.jacobi_passes >= 3 { score *= 1.05; weight *= 1.05; } else { weight *= 0.2; score *= 0.2; }
+                if c.jacobi_passes >= 3 {
+                    score *= 1.05 + (diag_ratio - 0.7).max(0.0) * 0.3;
+                    weight *= 1.05 + (diag_ratio - 0.7).max(0.0) * 0.2;
+                } else {
+                    weight *= 0.2;
+                    score *= 0.2;
+                }
             }
             _ => {}
         }
-        out.push(st_logic::SoftRule { name: rule.name, weight, score });
+        out.push(st_logic::SoftRule {
+            name: rule.name,
+            weight,
+            score,
+        });
     }
     out
 }
@@ -231,8 +337,14 @@ fn focus_gain(actual: u32, target: u32) -> f32 {
     1.0 - (diff / target.max(1) as f32).min(0.9)
 }
 
-fn score_choice(c: &Choice, base_soft: &[st_logic::SoftRule], mode: SoftMode, alpha: f32) -> f32 {
-    let dyn_rules = instantiate_soft_rules(c, base_soft);
+fn score_choice(
+    profile: &ProblemProfile,
+    c: &Choice,
+    base_soft: &[st_logic::SoftRule],
+    mode: SoftMode,
+    alpha: f32,
+) -> f32 {
+    let dyn_rules = instantiate_soft_rules(profile, c, base_soft);
     let soft = st_logic::apply_softmode(&dyn_rules, mode);
     base_score_amg(c, alpha) + soft
 }
@@ -240,38 +352,61 @@ fn score_choice(c: &Choice, base_soft: &[st_logic::SoftRule], mode: SoftMode, al
 fn neighbors_amg(c: &Choice) -> Vec<Choice> {
     let mut v = Vec::new();
     for &wg in &[128u32, 256, 512] {
-        let mut n = c.clone(); n.wg = wg; v.push(n);
+        let mut n = c.clone();
+        n.wg = wg;
+        v.push(n);
     }
     for &tc in &[4096u32, 8192, 16384] {
-        let mut n = c.clone(); n.tile_cols = tc; v.push(n);
+        let mut n = c.clone();
+        n.tile_cols = tc;
+        v.push(n);
     }
     for &jp in &[1u32, 2] {
-        let mut n = c.clone(); n.jacobi_passes = jp; v.push(n);
+        let mut n = c.clone();
+        n.jacobi_passes = jp;
+        v.push(n);
     }
     {
-        let mut n = c.clone(); n.use_2ce = !c.use_2ce; v.push(n);
+        let mut n = c.clone();
+        n.use_2ce = !c.use_2ce;
+        v.push(n);
     }
     v
 }
 
 pub fn choose(rows: usize, cols: usize, nnz: usize, subgroup: bool) -> Choice {
+    let profile = ProblemProfile::new(rows, cols, nnz, subgroup);
+    choose_with_profile(&profile)
+}
+
+pub fn choose_with_profile(profile: &ProblemProfile) -> Choice {
     let soft_mode = match std::env::var("SPIRAL_SOFT_MODE").as_deref() {
         Ok("Normalize") => SoftMode::Normalize,
-        Ok("Softmax")   => SoftMode::Softmax,
-        Ok("Prob")      => SoftMode::Prob,
-        _               => SoftMode::Sum,
+        Ok("Softmax") => SoftMode::Softmax,
+        Ok("Prob") => SoftMode::Prob,
+        _ => SoftMode::Sum,
     };
-    let beam_k = std::env::var("SPIRAL_BEAM_K").ok().and_then(|s| s.parse::<usize>().ok());
-    let cfg = SolveCfg { noise: 0.02, seed: 0x5u64, beam: beam_k, soft_mode: soft_mode };
+    let beam_k = std::env::var("SPIRAL_BEAM_K")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok());
+    let cfg = SolveCfg {
+        noise: 0.02,
+        seed: 0x5u64,
+        beam: beam_k,
+        soft_mode: soft_mode,
+    };
 
-    let mut soft = soft_rules_from_spiralk(rows, cols, nnz, subgroup);
-    
+    #[allow(unused_mut)]
+    let mut soft = soft_rules_from_spiralk(profile);
+
     // Blend in bandit weights when the feature is enabled.
     #[cfg(feature = "learn_store")]
     {
         let sw = load();
         let lambda = std::env::var("SPIRAL_SOFT_BANDIT_BLEND")
-            .ok().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.35);
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(0.35);
         for r in &mut soft {
             let bw = weight_from_bandit(&sw, r.name);
             r.weight = (1.0 - lambda) * r.weight + lambda * bw;
@@ -279,16 +414,59 @@ pub fn choose(rows: usize, cols: usize, nnz: usize, subgroup: bool) -> Choice {
     }
 
     // Single pass scoring; enable beam search via beam_select when desired.
-    let alpha = fractional_alpha(rows, cols, nnz);
-    let mut choice = initial_choice(rows, cols, nnz, subgroup);
-    let score = score_choice(&choice, &soft, cfg.soft_mode, alpha);
+    let alpha = profile.fractional_alpha();
+    let mut choice = initial_choice(profile);
+    let score = score_choice(profile, &choice, &soft, cfg.soft_mode, alpha);
     choice.score = score;
 
     if let Some(k) = cfg.beam {
         let max_depth = 3usize;
-        choice = st_logic::beam_select(choice, |c| neighbors_amg(c),
-            |c| score_choice(c, &soft, cfg.soft_mode, alpha),
-            k, max_depth);
+        choice = st_logic::beam_select(
+            choice,
+            |c| neighbors_amg(c),
+            |c| score_choice(profile, c, &soft, cfg.soft_mode, alpha),
+            k,
+            max_depth,
+        );
     }
     choice
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explain_includes_density_bucket() {
+        std::env::remove_var("SPIRAL_SOFT_MODE");
+        std::env::remove_var("SPIRAL_BEAM_K");
+        let profile = ProblemProfile::new(4096, 4096, 2_000_000, false);
+        let choice = choose_with_profile(&profile);
+        let summary = choice.explain(&profile);
+        assert!(summary.contains("density="));
+        assert!(summary.contains("wg=512") || summary.contains("wg=256"));
+    }
+
+    #[test]
+    fn sparse_profile_prefers_two_ce() {
+        std::env::remove_var("SPIRAL_SOFT_MODE");
+        std::env::remove_var("SPIRAL_BEAM_K");
+        let profile = ProblemProfile::new(4096, 1024, 10_000, false);
+        let choice = choose_with_profile(&profile);
+        assert!(choice.use_2ce);
+    }
+
+    #[test]
+    fn builder_integration_prefers_wide_bandwidth() {
+        use crate::profile::ProfileBuilder;
+
+        let mut builder = ProfileBuilder::new(4096, 4096, false);
+        for _ in 0..4096 {
+            builder.observe_row(48, true, Some(9000));
+        }
+        let profile = builder.build();
+        let choice = choose_with_profile(&profile);
+        assert_eq!(choice.wg, 512);
+        assert!(choice.tile_cols >= 8_192);
+    }
 }
