@@ -36,15 +36,164 @@ pub struct JuliaSpan {
     pub end: u32,
 }
 
+#[derive(Debug, Clone)]
+pub struct JuliaSpanBuf {
+    bytes: [u8; JuliaSpan::MAX_RENDERED_LEN],
+    len: usize,
+}
+
+impl Default for JuliaSpanBuf {
+    fn default() -> Self {
+        Self {
+            bytes: [0; JuliaSpan::MAX_RENDERED_LEN],
+            len: 0,
+        }
+    }
+}
+
+impl JuliaSpanBuf {
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    fn clear(&mut self) {
+        self.len = 0;
+    }
+
+    #[inline]
+    fn ensure_capacity(&self, additional: usize) {
+        debug_assert!(self.len + additional <= self.bytes.len());
+    }
+
+    #[inline]
+    fn push_colon(&mut self) {
+        self.ensure_capacity(1);
+        self.bytes[self.len] = b':';
+        self.len += 1;
+    }
+
+    #[inline]
+    fn push_number(&mut self, mut value: u32) {
+        let digits = JuliaSpan::decimal_len(value);
+        self.ensure_capacity(digits);
+        let mut idx = self.len + digits;
+        self.len = idx;
+        loop {
+            idx -= 1;
+            self.bytes[idx] = (value % 10) as u8 + b'0';
+            value /= 10;
+            if value == 0 {
+                break;
+            }
+        }
+    }
+
+    #[inline]
+    pub fn render_span<'a>(&'a mut self, span: &JuliaSpan) -> &'a str {
+        self.clear();
+        self.push_number(span.start);
+        self.push_colon();
+        self.push_number(span.step);
+        self.push_colon();
+        self.push_number(span.end);
+        self.as_str()
+    }
+
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        // SAFETY: we only ever populate ASCII digits and ':' characters.
+        unsafe { std::str::from_utf8_unchecked(&self.bytes[..self.len]) }
+    }
+
+    #[inline]
+    pub fn to_owned(&self) -> String {
+        self.as_str().to_owned()
+    }
+}
+
 impl JuliaSpan {
+    const MAX_DIGITS: usize = 10; // u32::MAX has 10 decimal digits.
+    const MAX_RENDERED_LEN: usize = Self::MAX_DIGITS * 3 + 2;
+
+    #[inline(always)]
+    const fn decimal_len(value: u32) -> usize {
+        if value >= 1_000_000_000 {
+            10
+        } else if value >= 100_000_000 {
+            9
+        } else if value >= 10_000_000 {
+            8
+        } else if value >= 1_000_000 {
+            7
+        } else if value >= 100_000 {
+            6
+        } else if value >= 10_000 {
+            5
+        } else if value >= 1_000 {
+            4
+        } else if value >= 100 {
+            3
+        } else if value >= 10 {
+            2
+        } else {
+            1
+        }
+    }
+
+    #[inline]
     pub fn new(start: u32, step: u32, end: u32) -> Self {
         Self { start, step, end }
+    }
+
+    #[inline]
+    pub fn as_tuple(&self) -> (u32, u32, u32) {
+        (self.start, self.step, self.end)
+    }
+
+    #[inline]
+    pub fn render_into<'a>(&self, buf: &'a mut JuliaSpanBuf) -> &'a str {
+        buf.render_span(self)
+    }
+
+    #[inline]
+    pub fn write_into<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
+        fn write_number<W: std::fmt::Write>(out: &mut W, mut value: u32) -> std::fmt::Result {
+            let mut buf = [0u8; JuliaSpan::MAX_DIGITS];
+            let mut idx = JuliaSpan::MAX_DIGITS;
+            loop {
+                idx -= 1;
+                buf[idx] = (value % 10) as u8 + b'0';
+                value /= 10;
+                if value == 0 {
+                    break;
+                }
+            }
+            // SAFETY: buf is populated solely with ASCII digits.
+            unsafe { out.write_str(std::str::from_utf8_unchecked(&buf[idx..])) }
+        }
+
+        write_number(out, self.start)?;
+        out.write_char(':')?;
+        write_number(out, self.step)?;
+        out.write_char(':')?;
+        write_number(out, self.end)
+    }
+
+    #[inline]
+    pub fn to_string_fast(&self) -> String {
+        let mut out = String::with_capacity(Self::MAX_RENDERED_LEN);
+        self
+            .write_into(&mut out)
+            .expect("writing into String should not fail");
+        out
     }
 }
 
 impl std::fmt::Display for JuliaSpan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}:{}", self.start, self.step, self.end)
+        self.write_into(f)
     }
 }
 
@@ -64,12 +213,43 @@ impl LaneWindow {
         JuliaSpan::new(self.lower, self.stride, self.upper)
     }
 
+    pub fn julia_span_into<'a>(&self, buf: &'a mut JuliaSpanBuf) -> &'a str {
+        self.julia_span().render_into(buf)
+    }
+
     pub fn clamp(&self, value: u32) -> u32 {
         value.max(self.lower).min(self.upper)
     }
 
     pub fn snapped(&self, value: u32) -> u32 {
         closest_lane_multiple(value, self.stride, self.min_lane, self.max_lane)
+    }
+
+    pub fn snapshot(&self) -> LaneWindowSnapshot {
+        LaneWindowSnapshot {
+            target: self.target,
+            lower: self.lower,
+            upper: self.upper,
+            min_lane: self.min_lane,
+            max_lane: self.max_lane,
+            slack: self.slack,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LaneWindowSnapshot {
+    pub target: u32,
+    pub lower: u32,
+    pub upper: u32,
+    pub min_lane: u32,
+    pub max_lane: u32,
+    pub slack: u32,
+}
+
+impl From<LaneWindow> for LaneWindowSnapshot {
+    fn from(window: LaneWindow) -> Self {
+        window.snapshot()
     }
 }
 
@@ -154,10 +334,38 @@ impl Choice {
         out
     }
 
+    /// Returns the latency window expressed as a Julia span without allocating.
+    pub fn ctile_julia_span_components(&self) -> Option<JuliaSpan> {
+        self.latency_window.map(|window| window.julia_span())
+    }
+
     /// Returns the latency window expressed in Julia-style span syntax.
+    /// Prefer [`Self::ctile_julia_span_components`] when you only need the numeric values.
     pub fn ctile_julia_span(&self) -> Option<String> {
+        self.ctile_julia_span_components()
+            .map(|span| span.to_string_fast())
+    }
+
+    /// Writes the latency window span into a reusable scratch buffer.
+    #[inline]
+    pub fn ctile_julia_span_into<'a>(
+        &self,
+        buf: &'a mut JuliaSpanBuf,
+    ) -> Option<&'a str> {
         self.latency_window
-            .map(|window| window.julia_span().to_string())
+            .map(|window| window.julia_span().render_into(buf))
+    }
+
+    /// Writes the latency window span into the provided formatter.
+    /// Returns `Ok(())` even when the latency window is absent.
+    pub fn write_ctile_julia_span<W: std::fmt::Write>(
+        &self,
+        mut out: W,
+    ) -> std::fmt::Result {
+        if let Some(span) = self.ctile_julia_span_components() {
+            span.write_into(&mut out)?;
+        }
+        Ok(())
     }
 }
 
@@ -254,14 +462,7 @@ fn latency_ctile_bounds(cols: u32, lanes: u32) -> (u32, u32) {
     (min_latency.max(lanes), aligned_cap.max(lanes))
 }
 
-fn latency_ctile_target(
-    rows: u32,
-    cols: u32,
-    k: u32,
-    lanes: u32,
-    min_ctile: u32,
-    max_ctile: u32,
-) -> u32 {
+fn latency_ctile_core_target(rows: u32, k: u32, lanes: u32) -> u32 {
     let lanes = lanes.max(1);
 
     let row_bucket = if rows <= lanes.saturating_mul(2) {
@@ -284,6 +485,21 @@ fn latency_ctile_target(
         lanes.saturating_mul(10)
     };
 
+    row_bucket.max(k_bucket)
+}
+
+fn latency_ctile_target(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+) -> u32 {
+    let lanes = lanes.max(1);
+
+    let base = latency_ctile_core_target(rows, k, lanes);
+
     let column_bias = if cols <= 4_096 {
         lanes.saturating_mul(3)
     } else if cols <= 16_384 {
@@ -294,12 +510,22 @@ fn latency_ctile_target(
         lanes.saturating_mul(8)
     };
 
-    let desired = row_bucket
-        .max(k_bucket)
-        .max(column_bias)
-        .clamp(min_ctile, max_ctile);
+    let desired = base.max(column_bias).clamp(min_ctile, max_ctile);
     let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
     closest_lane_multiple(desired, lanes, min_lane, max_lane)
+}
+
+fn latency_ctile_target_legacy(
+    rows: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+) -> u32 {
+    let lanes = lanes.max(1);
+    let base = latency_ctile_core_target(rows, k, lanes).clamp(min_ctile, max_ctile);
+    let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
+    closest_lane_multiple(base, lanes, min_lane, max_lane)
 }
 
 fn latency_ctile_column_slack_range(cols: u32, lanes: u32) -> (u32, u32) {
@@ -412,200 +638,18 @@ fn snap_latency_ctile(
     (candidate, window)
 }
 
-fn latency_sensitive(rows: u32, cols: u32, k: u32, caps: &DeviceCaps) -> bool {
-    if rows == 0 {
-        return false;
-    }
-
-    let lanes = caps.lane_width.max(1);
-    let small_rows = rows <= lanes.saturating_mul(4).max(64);
-    let modest_cols = cols <= 131_072;
-    let modest_k = k <= lanes.saturating_mul(8);
-
-    small_rows && modest_cols && modest_k
-}
-
-fn align_to_lanes(value: u32, lanes: u32) -> u32 {
-    if lanes <= 1 {
-        return value.max(1);
-    }
-    ((value + lanes - 1) / lanes) * lanes
-}
-
-fn align_down_to_lanes(value: u32, lanes: u32) -> u32 {
-    if lanes <= 1 {
-        return value.max(1);
-    }
-    let aligned = (value / lanes) * lanes;
-    if aligned == 0 {
-        lanes
-    } else {
-        aligned
-    }
-}
-
-fn lane_range(min: u32, max: u32, lanes: u32) -> (u32, u32) {
-    if lanes <= 1 {
-        let floor = min.max(1);
-        return (floor, max.max(floor));
-    }
-    let lanes = lanes.max(1);
-    let min_lane = align_to_lanes(min.max(lanes), lanes);
-    let max_lane = align_down_to_lanes(max.max(lanes), lanes);
-    if max_lane < min_lane {
-        (min_lane, min_lane)
-    } else {
-        (min_lane, max_lane)
-    }
-}
-
-fn closest_lane_multiple(value: u32, lanes: u32, min: u32, max: u32) -> u32 {
-    if lanes <= 1 {
-        return value.clamp(min.max(1), max.max(min.max(1)));
-    }
-
-    let (min_lane, max_lane) = lane_range(min, max, lanes);
-    let mut base = align_down_to_lanes(value.max(min_lane), lanes);
-    if base < min_lane {
-        base = min_lane;
-    }
-    if base > max_lane {
-        base = max_lane;
-    }
-
-    let mut best = base;
-    let mut best_diff = best.abs_diff(value);
-    for step in 1..=4 {
-        let offsets = [step as i32, -(step as i32)];
-        for offset in offsets {
-            let candidate_i64 = base as i64 + offset as i64 * lanes as i64;
-            if candidate_i64 < min_lane as i64 || candidate_i64 > max_lane as i64 {
-                continue;
-            }
-            let candidate = candidate_i64 as u32;
-            let diff = candidate.abs_diff(value);
-            if diff < best_diff || (diff == best_diff && candidate < best) {
-                best = candidate;
-                best_diff = diff;
-            }
-        }
-    }
-
-    best
-}
-
-fn latency_ctile_bounds(cols: u32, lanes: u32) -> (u32, u32) {
-    let latency_cap = if cols <= 16_384 {
-        lanes.saturating_mul(8)
-    } else {
-        lanes.saturating_mul(16)
-    };
-    let aligned_cap = align_to_lanes(latency_cap, lanes);
-    let min_latency = align_to_lanes(64, lanes);
-    (min_latency.max(lanes), aligned_cap.max(lanes))
-}
-
-fn latency_ctile_target(rows: u32, k: u32, lanes: u32, min_ctile: u32, max_ctile: u32) -> u32 {
-    let lanes = lanes.max(1);
-
-    let row_bucket = if rows <= lanes.saturating_mul(2) {
-        lanes.saturating_mul(4)
-    } else if rows <= lanes.saturating_mul(4) {
-        lanes.saturating_mul(6)
-    } else {
-        lanes.saturating_mul(8)
-    };
-
-    let k_bucket = if k <= lanes.saturating_mul(2) {
-        lanes.saturating_mul(4)
-    } else if k <= lanes.saturating_mul(4) {
-        lanes.saturating_mul(6)
-    } else {
-        lanes.saturating_mul(8)
-    };
-
-    let desired = row_bucket.max(k_bucket).clamp(min_ctile, max_ctile);
-    let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
-    closest_lane_multiple(desired, lanes, min_lane, max_lane)
-}
-
-fn latency_ctile_column_slack_range(cols: u32, lanes: u32) -> (u32, u32) {
-    let lanes = lanes.max(1);
-    if cols <= 4_096 {
-        (lanes, lanes.saturating_mul(2))
-    } else if cols <= 16_384 {
-        (
-            lanes.saturating_mul(1),
-            lanes.saturating_mul(3).max(lanes.saturating_mul(1)),
-        )
-    } else if cols <= 65_536 {
-        (
-            lanes.saturating_mul(2),
-            lanes.saturating_mul(4).max(lanes.saturating_mul(2)),
-        )
-    } else {
-        (
-            lanes.saturating_mul(3),
-            lanes.saturating_mul(5).max(lanes.saturating_mul(3)),
-        )
-    }
-}
-
-fn latency_ctile_slack(rows: u32, cols: u32, k: u32, lanes: u32) -> u32 {
-    let lanes = lanes.max(1);
-    let tight_rows = rows <= lanes.saturating_mul(2);
-    let tight_k = k <= lanes.saturating_mul(2);
-    if tight_rows && tight_k {
-        let (floor, _) = latency_ctile_column_slack_range(cols, lanes);
-        return floor;
-    }
-
-    let medium_rows = rows <= lanes.saturating_mul(6);
-    let medium_k = k <= lanes.saturating_mul(6);
-    let mut slack = if medium_rows && medium_k {
-        lanes.saturating_mul(2)
-    } else {
-        lanes.saturating_mul(3).max(lanes)
-    };
-
-    let (floor, ceil) = latency_ctile_column_slack_range(cols, lanes);
-    if slack < floor {
-        slack = floor;
-    }
-    if slack > ceil {
-        slack = ceil;
-    }
-
-    slack
-}
-
-fn latency_ctile_window(
+fn latency_ctile_window_snapshot(
     rows: u32,
     cols: u32,
     k: u32,
     lanes: u32,
     min_ctile: u32,
     max_ctile: u32,
-) -> (u32, u32, u32, u32, u32, u32) {
-    let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
-    let target = latency_ctile_target(rows, k, lanes, min_lane, max_lane);
-    let slack = latency_ctile_slack(rows, cols, k, lanes);
-    let mut lower = align_down_to_lanes(target.saturating_sub(slack), lanes);
-    if lower < min_lane {
-        lower = min_lane;
-    }
-    let mut upper = align_to_lanes(target.saturating_add(slack), lanes);
-    if upper > max_lane {
-        upper = max_lane;
-    }
-    if lower > upper {
-        lower = min_lane;
-        upper = min_lane;
-    }
-    (target, lower, upper, min_lane, max_lane, slack)
+) -> LaneWindowSnapshot {
+    latency_ctile_window(rows, cols, k, lanes, min_ctile, max_ctile).snapshot()
 }
 
-fn snap_latency_ctile(
+fn snap_latency_ctile_snapshot(
     current: u32,
     rows: u32,
     cols: u32,
@@ -613,20 +657,10 @@ fn snap_latency_ctile(
     lanes: u32,
     min_ctile: u32,
     max_ctile: u32,
-) -> (u32, u32) {
-    let (target, lower, upper, min_lane, max_lane, slack) =
-        latency_ctile_window(rows, cols, k, lanes, min_ctile, max_ctile);
-    let mut candidate = closest_lane_multiple(current, lanes, min_lane, max_lane);
-    if candidate < lower || candidate > upper || candidate.abs_diff(target) >= slack {
-        candidate = closest_lane_multiple(target, lanes, min_lane, max_lane);
-    }
-    if candidate < lower {
-        candidate = lower;
-    }
-    if candidate > upper {
-        candidate = upper;
-    }
-    (candidate, target)
+) -> (u32, LaneWindowSnapshot) {
+    let (candidate, window) =
+        snap_latency_ctile(current, rows, cols, k, lanes, min_ctile, max_ctile);
+    (candidate, window.snapshot())
 }
 
 fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> Choice {
@@ -648,6 +682,14 @@ fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> 
             let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
             let (snapped, window) =
                 snap_latency_ctile(ctile, rows, cols, k, lanes, min_ctile, max_ctile);
+            debug_assert_eq!(
+                window.snapshot(),
+                latency_ctile_window_snapshot(rows, cols, k, lanes, min_ctile, max_ctile)
+            );
+            let (legacy_snapped, legacy_window) =
+                snap_latency_ctile_snapshot(ctile, rows, cols, k, lanes, min_ctile, max_ctile);
+            debug_assert_eq!(legacy_snapped, snapped);
+            debug_assert_eq!(legacy_window.target, window.target);
             ctile = snapped;
             latency_window = Some(window);
         }
@@ -678,6 +720,28 @@ fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> 
                 min_ctile,
                 lane_cap.max(min_ctile),
             );
+            debug_assert_eq!(
+                window.snapshot(),
+                latency_ctile_window_snapshot(
+                    rows,
+                    cols,
+                    k,
+                    lanes,
+                    min_ctile,
+                    lane_cap.max(min_ctile)
+                )
+            );
+            let (legacy_snapped, legacy_window) = snap_latency_ctile_snapshot(
+                ctile.min(lane_cap).max(min_ctile),
+                rows,
+                cols,
+                k,
+                lanes,
+                min_ctile,
+                lane_cap.max(min_ctile),
+            );
+            debug_assert_eq!(legacy_snapped, snapped);
+            debug_assert_eq!(legacy_window.target, window.target);
             ctile = snapped;
             latency_window = Some(window);
         }
@@ -967,6 +1031,8 @@ fn score_choice(
             } else {
                 score -= 0.015;
             }
+            let legacy_target = latency_ctile_target_legacy(rows, k, lanes, min_ctile, max_ctile);
+            score += closeness(choice.ctile, legacy_target) * 0.02;
         }
     }
 
@@ -1114,14 +1180,55 @@ mod tests {
     fn latency_span_uses_julia_notation() {
         let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
         let choice = fallback(96, 8_192, 64, &caps, RankKind::MidK);
-        let span = choice
-            .ctile_julia_span()
+        let window = choice
+            .latency_window
+            .expect("latency window should be captured in fallback");
+        let span_components = choice
+            .ctile_julia_span_components()
             .expect("latency span should be available");
+        let mut scratch = JuliaSpanBuf::new();
+        let rendered = span_components.render_into(&mut scratch);
+        let span = rendered.to_owned();
         assert!(span.matches(':').count() >= 2);
         assert!(span.split(':').all(|part| !part.is_empty()));
+        assert_eq!(span_components.as_tuple().0, window.lower);
         let script = choice.to_unison_script(RankKind::MidK);
         assert!(script.contains("#= latency window"));
         assert!(script.contains(&span));
+        let mut buf = String::new();
+        choice
+            .write_ctile_julia_span(&mut buf)
+            .expect("writing julia span should succeed");
+        assert_eq!(buf, span);
+        assert!(!buf.is_empty());
+        let mut window_scratch = JuliaSpanBuf::new();
+        let reused = window
+            .julia_span_into(&mut window_scratch)
+            .to_owned();
+        assert_eq!(reused, span);
+        let mut choice_scratch = JuliaSpanBuf::new();
+        let from_choice = choice
+            .ctile_julia_span_into(&mut choice_scratch)
+            .expect("span should be renderable into scratch");
+        assert_eq!(from_choice, span);
+    }
+
+    #[test]
+    fn julia_span_buffer_matches_display() {
+        let span = JuliaSpan::new(128, 32, 640);
+        let mut buf = JuliaSpanBuf::new();
+        let rendered = span.render_into(&mut buf).to_owned();
+        assert_eq!(rendered, "128:32:640");
+        assert_eq!(rendered, span.to_string());
+        let mut second = JuliaSpanBuf::new();
+        let reused = span.render_into(&mut second).to_owned();
+        assert_eq!(rendered, reused);
+        assert_eq!(buf.as_str(), rendered);
+        let mut direct = String::new();
+        span
+            .write_into(&mut direct)
+            .expect("writing into a String should succeed");
+        assert_eq!(direct, rendered);
     }
 
     #[test]
@@ -1269,5 +1376,59 @@ mod tests {
             score_choice(&aligned, &caps, 64, 8_192, 48, &baseline, RankKind::BottomK);
         let off_score = score_choice(&off, &caps, 64, 8_192, 48, &baseline, RankKind::BottomK);
         assert!(aligned_score > off_score);
+    }
+
+    #[test]
+    fn legacy_target_matches_precolumn_formula() {
+        let lanes = 32;
+        let (min_ctile, max_ctile) = latency_ctile_bounds(8_192, lanes);
+        let legacy = latency_ctile_target_legacy(96, 64, lanes, min_ctile, max_ctile);
+
+        let row_bucket = if 96 <= lanes.saturating_mul(2) {
+            lanes.saturating_mul(4)
+        } else if 96 <= lanes.saturating_mul(4) {
+            lanes.saturating_mul(6)
+        } else if 96 <= lanes.saturating_mul(8) {
+            lanes.saturating_mul(8)
+        } else {
+            lanes.saturating_mul(10)
+        };
+
+        let k_bucket = if 64 <= lanes.saturating_mul(2) {
+            lanes.saturating_mul(4)
+        } else if 64 <= lanes.saturating_mul(4) {
+            lanes.saturating_mul(6)
+        } else if 64 <= lanes.saturating_mul(8) {
+            lanes.saturating_mul(8)
+        } else {
+            lanes.saturating_mul(10)
+        };
+
+        let desired = row_bucket.max(k_bucket).clamp(min_ctile, max_ctile);
+        let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
+        let expected = closest_lane_multiple(desired, lanes, min_lane, max_lane);
+        assert_eq!(legacy, expected);
+    }
+
+    #[test]
+    fn lane_window_snapshot_round_trips() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        let lanes = caps.lane_width.max(1);
+        let (min_ctile, max_ctile) = latency_ctile_bounds(8_192, lanes);
+        let window = latency_ctile_window(96, 8_192, 64, lanes, min_ctile, max_ctile);
+        let snapshot = latency_ctile_window_snapshot(96, 8_192, 64, lanes, min_ctile, max_ctile);
+        assert_eq!(snapshot.target, window.target);
+        assert_eq!(snapshot.lower, window.lower);
+        assert_eq!(snapshot.upper, window.upper);
+        assert_eq!(snapshot.min_lane, window.min_lane);
+        assert_eq!(snapshot.max_lane, window.max_lane);
+        assert_eq!(snapshot.slack, window.slack);
+
+        let (snapped, snap_snapshot) =
+            snap_latency_ctile_snapshot(window.target, 96, 8_192, 64, lanes, min_ctile, max_ctile);
+        assert_eq!(snapped, window.target);
+        assert_eq!(snap_snapshot.target, window.target);
+        assert_eq!(snap_snapshot.lower, window.lower);
+        assert_eq!(snap_snapshot.upper, window.upper);
     }
 }
