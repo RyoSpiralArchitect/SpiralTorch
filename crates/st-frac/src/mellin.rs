@@ -5,7 +5,10 @@
 
 use num_complex::Complex32;
 
-use crate::zspace::{mellin_log_lattice_prefactor, trapezoidal_weights, weighted_z_transform};
+use crate::zspace::{
+    mellin_log_lattice_prefactor, trapezoidal_weights, weighted_z_transform,
+    weighted_z_transform_many,
+};
 
 /// Change-of-variable helper for Mellin integrals.
 ///
@@ -22,6 +25,130 @@ fn map_range_to_log(range: (f32, f32)) -> (f32, f32) {
     assert!(a > 0.0 && b > 0.0, "integration bounds must be positive");
     assert!(a < b, "integration bounds must be ordered");
     (a.ln(), b.ln())
+}
+
+/// Sample a function on a log-uniform lattice.
+///
+/// The returned samples correspond to `x_k = exp(log_start + k * log_step)` for
+/// `k = 0..len-1`.
+pub fn sample_log_uniform<F>(log_start: f32, log_step: f32, len: usize, f: F) -> Vec<Complex32>
+where
+    F: Fn(f32) -> Complex32,
+{
+    assert!(len > 0, "len must be positive");
+    assert!(
+        log_step.is_finite() && log_step > 0.0,
+        "log_step must be positive"
+    );
+    assert!(log_start.is_finite(), "log_start must be finite");
+
+    let mut samples = Vec::with_capacity(len);
+    for idx in 0..len {
+        let t = log_start + log_step * idx as f32;
+        let x = t.exp();
+        let val = f(x);
+        if !(val.re.is_finite() && val.im.is_finite()) {
+            panic!("sample {} produced non-finite value", idx);
+        }
+        samples.push(val);
+    }
+    samples
+}
+
+/// Pre-sampled log lattice with helpers for Mellin/Hilbert evaluations.
+#[derive(Clone, Debug)]
+pub struct MellinLogGrid {
+    log_start: f32,
+    log_step: f32,
+    samples: Vec<Complex32>,
+    weights: Vec<f32>,
+}
+
+impl MellinLogGrid {
+    /// Construct a grid from existing log-uniform samples.
+    pub fn new(log_start: f32, log_step: f32, samples: Vec<Complex32>) -> Self {
+        assert!(!samples.is_empty(), "samples must not be empty");
+        assert!(
+            log_step.is_finite() && log_step > 0.0,
+            "log_step must be positive"
+        );
+        assert!(log_start.is_finite(), "log_start must be finite");
+        let weights = trapezoidal_weights(samples.len());
+        Self {
+            log_start,
+            log_step,
+            samples,
+            weights,
+        }
+    }
+
+    /// Sample a function over a log-uniform lattice and build the grid.
+    pub fn from_function<F>(log_start: f32, log_step: f32, len: usize, f: F) -> Self
+    where
+        F: Fn(f32) -> Complex32,
+    {
+        let samples = sample_log_uniform(log_start, log_step, len, f);
+        Self::new(log_start, log_step, samples)
+    }
+
+    /// Evaluate the Mellin transform using the pre-sampled lattice.
+    pub fn evaluate(&self, s: Complex32) -> Complex32 {
+        let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s);
+        let series = weighted_z_transform(&self.samples, &self.weights, z);
+        prefactor * series
+    }
+
+    /// Evaluate the Mellin transform at multiple points sharing the same samples.
+    pub fn evaluate_many(&self, s_values: &[Complex32]) -> Vec<Complex32> {
+        if s_values.is_empty() {
+            return Vec::new();
+        }
+        let mut prefactors = Vec::with_capacity(s_values.len());
+        let mut z_points = Vec::with_capacity(s_values.len());
+        for &s in s_values {
+            let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s);
+            prefactors.push(prefactor);
+            z_points.push(z);
+        }
+        let series = weighted_z_transform_many(&self.samples, &self.weights, &z_points);
+        series
+            .into_iter()
+            .zip(prefactors.into_iter())
+            .map(|(series, prefactor)| prefactor * series)
+            .collect()
+    }
+
+    /// Return the number of log-uniform samples stored in the grid.
+    pub fn len(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// Expose the logarithmic start coordinate.
+    pub fn log_start(&self) -> f32 {
+        self.log_start
+    }
+
+    /// Expose the logarithmic step between samples.
+    pub fn log_step(&self) -> f32 {
+        self.log_step
+    }
+
+    /// Access the raw log-uniform samples.
+    pub fn samples(&self) -> &[Complex32] {
+        &self.samples
+    }
+
+    /// Access the trapezoidal weights associated with the grid.
+    pub fn weights(&self) -> &[f32] {
+        &self.weights
+    }
+
+    /// Report the truncated support in the original domain.
+    pub fn support(&self) -> (f32, f32) {
+        let start = self.log_start;
+        let end = self.log_start + self.log_step * (self.samples.len() - 1) as f32;
+        (start.exp(), end.exp())
+    }
 }
 
 /// Numerically integrate a locally integrable function over `(0, ∞)` to obtain
@@ -212,6 +339,54 @@ mod tests {
             via_direct,
             via_z
         );
+    }
+
+    #[test]
+    fn sample_log_uniform_matches_manual_sampling() {
+        let log_start = -3.0f32;
+        let log_step = 0.2f32;
+        let len = 8usize;
+        let samples = sample_log_uniform(log_start, log_step, len, exp_decay);
+        for (idx, sample) in samples.iter().enumerate() {
+            let t = log_start + log_step * idx as f32;
+            let x = t.exp();
+            let expected = exp_decay(x);
+            let diff = (*sample - expected).norm();
+            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
+    }
+
+    #[test]
+    fn mellin_log_grid_matches_free_function_path() {
+        let log_start = -4.0f32;
+        let log_step = 0.05f32;
+        let len = 256usize;
+        let grid = MellinLogGrid::from_function(log_start, log_step, len, exp_decay);
+        let s = Complex32::new(1.1, 0.2);
+        let via_grid = grid.evaluate(s);
+        let via_function = mellin_transform_log_samples(log_start, log_step, grid.samples(), s);
+        let diff = (via_grid - via_function).norm();
+        assert!(diff < 1e-6, "diff={}", diff);
+    }
+
+    #[test]
+    fn mellin_log_grid_many_reuses_samples() {
+        let log_start = -3.5f32;
+        let log_step = 0.07f32;
+        let len = 128usize;
+        let grid = MellinLogGrid::from_function(log_start, log_step, len, exp_decay);
+        let s_values = vec![
+            Complex32::new(0.8, 0.3),
+            Complex32::new(1.2, -0.1),
+            Complex32::new(1.6, 0.4),
+        ];
+        let batch = grid.evaluate_many(&s_values);
+        assert_eq!(batch.len(), s_values.len());
+        for (idx, &s) in s_values.iter().enumerate() {
+            let single = grid.evaluate(s);
+            let diff = (batch[idx] - single).norm();
+            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
     }
 
     #[test]

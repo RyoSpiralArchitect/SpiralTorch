@@ -68,6 +68,40 @@ pub fn weighted_z_transform(samples: &[Complex32], weights: &[f32], z: Complex32
     acc
 }
 
+/// Evaluate the weighted Z-transform at multiple `z` points.
+///
+/// This helper shares the preweighted samples across all evaluation points,
+/// avoiding repeated weight application when sweeping an entire vertical line in
+/// the Mellin domain.
+pub fn weighted_z_transform_many(
+    samples: &[Complex32],
+    weights: &[f32],
+    z_values: &[Complex32],
+) -> Vec<Complex32> {
+    assert!(!samples.is_empty(), "samples must not be empty");
+    assert_eq!(samples.len(), weights.len(), "weights must match samples");
+    assert!(!z_values.is_empty(), "z_values must not be empty");
+
+    let weighted: Vec<Complex32> = samples
+        .iter()
+        .zip(weights.iter())
+        .map(|(sample, &w)| *sample * Complex32::new(w, 0.0))
+        .collect();
+
+    z_values
+        .iter()
+        .map(|&z| {
+            let mut acc = Complex32::new(0.0, 0.0);
+            let mut power = Complex32::new(1.0, 0.0);
+            for coeff in weighted.iter() {
+                acc += *coeff * power;
+                power *= z;
+            }
+            acc
+        })
+        .collect()
+}
+
 /// Evaluate the Mellin transform on a log-uniform grid by routing the computation
 /// through its Z-plane power-series form.
 ///
@@ -143,5 +177,27 @@ mod tests {
         let via_z = mellin_transform_via_z(log_start, log_step, &samples, s);
         let diff = (direct - via_z).norm();
         assert!(diff < 1e-6, "diff={}", diff);
+    }
+
+    #[test]
+    fn weighted_z_transform_many_matches_single_path() {
+        let samples = vec![
+            Complex32::new(0.2, 0.1),
+            Complex32::new(-0.4, 0.3),
+            Complex32::new(0.1, -0.2),
+        ];
+        let weights = trapezoidal_weights(samples.len());
+        let zs = vec![
+            Complex32::new(0.7, 0.0),
+            Complex32::new(0.4, -0.3),
+            Complex32::new(-0.2, 0.5),
+        ];
+
+        let batch = weighted_z_transform_many(&samples, &weights, &zs);
+        for (idx, &z) in zs.iter().enumerate() {
+            let single = weighted_z_transform(&samples, &weights, z);
+            let diff = (batch[idx] - single).norm();
+            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
     }
 }

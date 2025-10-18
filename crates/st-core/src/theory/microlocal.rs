@@ -831,7 +831,6 @@ impl InterfaceZConductor {
         tempo_hint: Option<f32>,
         stderr_hint: Option<f32>,
     ) -> InterfaceZReport {
-        // 1) lift → InterfaceZPulse 群
         let mut pulses = Vec::with_capacity(self.gauges.len());
         for gauge in &self.gauges {
             let signature = gauge.analyze_with_label(mask, c_prime);
@@ -842,7 +841,6 @@ impl InterfaceZConductor {
             pulses.push(pulse);
         }
 
-        // 2) 品質重み付け
         let mut qualities = Vec::with_capacity(pulses.len());
         let mut weighted = Vec::with_capacity(pulses.len());
         for pulse in &pulses {
@@ -854,7 +852,6 @@ impl InterfaceZConductor {
             weighted.push(pulse.scaled(quality));
         }
 
-        // 3) 集約 + 平滑化イベント
         let mut fused = InterfaceZPulse::aggregate(&weighted);
         if let Some(previous) = &self.previous {
             if self.smoothing > 0.0 {

@@ -104,6 +104,16 @@ extern "C" {
         out_idx: *mut i32,
         stream: hipStream_t,
     ) -> hipError_t;
+    fn st_kway_merge_bitonic_f32(
+        cand_vals: *const f32,
+        cand_idx: *const i32,
+        rows: i32,
+        total: i32,
+        k_final: i32,
+        out_vals: *mut f32,
+        out_idx: *mut i32,
+        stream: hipStream_t,
+    ) -> hipError_t;
     fn st_kway_merge_bitonic_u64(
         cand_packed: *const u64,
         rows: i32,
@@ -119,6 +129,16 @@ extern "C" {
         total: i32,
         k_final: i32,
         out: *mut u64,
+        stream: hipStream_t,
+    ) -> hipError_t;
+    fn st_topk_pass1_f32(
+        input: *const f32,
+        rows: i32,
+        cols: i32,
+        stride: i32,
+        k: i32,
+        out_vals: *mut f32,
+        out_idx: *mut i32,
         stream: hipStream_t,
     ) -> hipError_t;
 }
@@ -250,6 +270,24 @@ pub unsafe fn memcpy_d2h_async(
             stream.raw(),
         ),
         "hipMemcpyAsync(D2H)",
+    )
+}
+
+pub unsafe fn memcpy_d2d_async(
+    dst: HipPtr,
+    src: HipPtr,
+    size: usize,
+    stream: &HipStream,
+) -> Result<(), HipErr> {
+    hip_result(
+        hipMemcpyAsync(
+            dst,
+            src as *const c_void,
+            size,
+            HipMemcpyKind::DeviceToDevice,
+            stream.raw(),
+        ),
+        "hipMemcpyAsync(D2D)",
     )
 }
 
@@ -422,6 +460,36 @@ pub fn kway_merge_bitonic_u64(
     )
 }
 
+pub fn kway_merge_bitonic_f32(
+    cand_vals: *const f32,
+    cand_idx: *const i32,
+    rows: i32,
+    total: i32,
+    k_final: i32,
+    out_vals: *mut f32,
+    out_idx: *mut i32,
+    stream: &HipStream,
+) -> Result<(), HipErr> {
+    if rows <= 0 || total <= 0 || k_final <= 0 {
+        return Ok(());
+    }
+    hip_result(
+        unsafe {
+            st_kway_merge_bitonic_f32(
+                cand_vals,
+                cand_idx,
+                rows,
+                total,
+                k_final,
+                out_vals,
+                out_idx,
+                stream.raw(),
+            )
+        },
+        "st_kway_merge_bitonic_f32",
+    )
+}
+
 pub fn topk_tile_bitonic_u64(
     cand_packed: *const u64,
     rows: i32,
@@ -433,6 +501,37 @@ pub fn topk_tile_bitonic_u64(
     hip_result(
         unsafe { st_topk_tile_bitonic_u64(cand_packed, rows, total, k_final, out, stream.raw()) },
         "st_topk_tile_bitonic_u64",
+    )
+}
+
+pub fn topk_pass1_f32(
+    input: *const f32,
+    rows: i32,
+    cols: i32,
+    stride: i32,
+    k: i32,
+    out_vals: *mut f32,
+    out_idx: *mut i32,
+    stream: &HipStream,
+) -> Result<(), HipErr> {
+    if rows <= 0 || cols <= 0 || k <= 0 {
+        return Ok(());
+    }
+    let stride = if stride > 0 { stride } else { cols };
+    hip_result(
+        unsafe {
+            st_topk_pass1_f32(
+                input,
+                rows,
+                cols,
+                stride,
+                k,
+                out_vals,
+                out_idx,
+                stream.raw(),
+            )
+        },
+        "st_topk_pass1_f32",
     )
 }
 

@@ -11,6 +11,11 @@ pub mod topk_keepk;
 
 mod util;
 
+pub use midk_bottomk::{
+    dispatch as dispatch_midk_bottomk, ApplyStrategy as MidkBottomkApplyStrategy,
+    DispatchArgs as MidkBottomkDispatchArgs, Kind as MidkBottomkKind,
+};
+
 pub use util::{
     load_compute_pipeline, load_compute_pipeline_with_layout, read_wgsl, ShaderCache,
     ShaderLoadError,
