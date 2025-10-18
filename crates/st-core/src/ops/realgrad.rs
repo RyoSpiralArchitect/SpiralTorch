@@ -1141,12 +1141,14 @@ pub fn project_tempered_realgrad(
 #[cfg(test)]
 mod tests {
     use super::{
-        project_realgrad, project_tempered_realgrad, CpuChirpZ, CpuRustFft, RealGradAutoTuner,
-        RealGradConfig, RealGradKernel, RealGradProjectionScratch, RealGradZProjector,
-        SchwartzSequence, SpectralEngine, SpectrumNorm, DEFAULT_THRESHOLD,
+        project_realgrad, project_tempered_realgrad, CpuChirpZ, CpuRustFft, GradientSummary,
+        RealGradAutoTuner, RealGradConfig, RealGradKernel, RealGradProjection,
+        RealGradProjectionScratch, RealGradZProjector, SchwartzSequence, SpectralEngine,
+        SpectrumNorm, TemperedRealGradProjection, DEFAULT_THRESHOLD,
     };
     use crate::theory::zpulse::ZSource;
     use crate::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
+    use approx::assert_abs_diff_eq;
 
     #[test]
     fn projection_handles_empty_input() {
