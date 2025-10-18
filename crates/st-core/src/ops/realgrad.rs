@@ -404,6 +404,11 @@ impl RealGradProjection {
         !self.monad_biome.is_empty()
     }
 
+    /// Returns the gradient summary describing the projected field.
+    pub fn gradient_summary(&self) -> GradientSummary {
+        GradientSummary::from_realgrad(&self.realgrad)
+    }
+
     /// Returns the total magnitude routed to the monad biome.
     pub fn residual_energy(&self) -> f32 {
         self.monad_biome
@@ -1243,6 +1248,15 @@ mod tests {
                 .map(|residual| residual.magnitude)
                 .sum::<f32>()
         );
+    }
+
+    #[test]
+    fn projection_reports_gradient_summary() {
+        let data = [0.5f32, 0.0, -0.5, 0.25];
+        let projection = project_realgrad(&data, RealGradConfig::default());
+        let summary = projection.gradient_summary();
+        assert!(summary.norm >= 0.0);
+        assert!(summary.sparsity >= 0.0 && summary.sparsity <= 1.0);
     }
 
     #[test]

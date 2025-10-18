@@ -11,6 +11,9 @@
 use super::device_caps::{BackendKind, DeviceCaps};
 use super::kdsl_bridge;
 use super::wgpu_heuristics;
+use crate::backend::temporal_fusion::TemporalSpectralFusion;
+use crate::ops::realgrad::GradientSummary;
+use crate::telemetry::hub;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RankKind {
@@ -542,12 +545,20 @@ impl<'a> RankScenario<'a> {
         min_ctile: u32,
         max_ctile: u32,
     ) -> (u32, LaneWindow) {
-        let slack = self
-            .latency_slack()
-            .unwrap_or_else(|| latency_ctile_slack(self.rows, self.cols, self.k, self.lanes));
-        snap_latency_ctile_with_slack(
-            current, self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
-        )
+        let window = self.tuned_latency_window(min_ctile, max_ctile);
+        let mut candidate = window.snapped(current);
+        if candidate < window.lower
+            || candidate > window.upper
+            || candidate.abs_diff(window.target) >= window.slack
+        {
+            candidate = window.snapped(window.target);
+        }
+        if candidate < window.lower {
+            candidate = window.lower;
+        } else if candidate > window.upper {
+            candidate = window.upper;
+        }
+        (candidate, window)
     }
 
     #[inline]
@@ -557,37 +568,43 @@ impl<'a> RankScenario<'a> {
         min_ctile: u32,
         max_ctile: u32,
     ) -> (u32, LaneWindowSnapshot) {
-        let slack = self
-            .latency_slack()
-            .unwrap_or_else(|| latency_ctile_slack(self.rows, self.cols, self.k, self.lanes));
-        snap_latency_ctile_snapshot_with_slack(
-            current, self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
-        )
+        let (candidate, window) = self.snap_latency_ctile(current, min_ctile, max_ctile);
+        (candidate, window.snapshot())
     }
 
     #[inline]
     fn latency_window(&self, min_ctile: u32, max_ctile: u32) -> LaneWindow {
-        let slack = self
-            .latency_slack()
-            .unwrap_or_else(|| latency_ctile_slack(self.rows, self.cols, self.k, self.lanes));
-        latency_ctile_window_with_slack(
-            self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
-        )
+        self.tuned_latency_window(min_ctile, max_ctile)
     }
 
     #[inline]
     fn latency_window_snapshot(&self, min_ctile: u32, max_ctile: u32) -> LaneWindowSnapshot {
-        let slack = self
-            .latency_slack()
-            .unwrap_or_else(|| latency_ctile_slack(self.rows, self.cols, self.k, self.lanes));
-        latency_ctile_window_snapshot_with_slack(
-            self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
-        )
+        self.tuned_latency_window(min_ctile, max_ctile).snapshot()
     }
 
     #[inline]
     fn legacy_latency_target(&self, min_ctile: u32, max_ctile: u32) -> u32 {
         latency_ctile_target_legacy(self.rows, self.k, self.lanes, min_ctile, max_ctile)
+    }
+
+    fn tuned_latency_window(&self, min_ctile: u32, max_ctile: u32) -> LaneWindow {
+        let slack = self
+            .latency_slack()
+            .unwrap_or_else(|| latency_ctile_slack(self.rows, self.cols, self.k, self.lanes));
+        let mut window = latency_ctile_window_with_slack(
+            self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
+        );
+        if let (Some(fusion), Some(pulse)) = (
+            TemporalSpectralFusion::analyse(&window, self.rows, self.cols, self.k, self.lanes),
+            hub::get_last_realgrad(),
+        ) {
+            let summary = pulse.gradient_summary();
+            if summary.norm > 0.0 {
+                let mut tuner = AdaptiveWindowTuner::new(self.lanes);
+                window = tuner.tune(window, min_ctile, max_ctile, &fusion, Some(summary));
+            }
+        }
+        window
     }
 
     #[inline]
@@ -606,6 +623,129 @@ impl<'a> RankScenario<'a> {
         } else {
             1
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct TempoLearner {
+    avg: f32,
+    jitter: f32,
+}
+
+impl TempoLearner {
+    fn new() -> Self {
+        Self {
+            avg: 0.0,
+            jitter: 0.0,
+        }
+    }
+
+    fn observe(&mut self, tempo: f32) {
+        let tempo = tempo.clamp(0.0, 1.0);
+        let alpha = 0.35;
+        let prev = self.avg;
+        self.avg = (1.0 - alpha) * self.avg + alpha * tempo;
+        self.jitter = 0.5 * self.jitter + 0.5 * (tempo - prev).abs();
+    }
+
+    fn tempo(&self) -> f32 {
+        self.avg
+    }
+
+    fn jitter(&self) -> f32 {
+        self.jitter
+    }
+
+    #[allow(dead_code)]
+    fn reset(&mut self) {
+        self.avg = 0.0;
+        self.jitter = 0.0;
+    }
+}
+
+#[derive(Clone, Debug)]
+struct AdaptiveWindowTuner {
+    lanes: u32,
+    tempo: TempoLearner,
+    energy_state: f32,
+}
+
+impl AdaptiveWindowTuner {
+    fn new(lanes: u32) -> Self {
+        Self {
+            lanes: lanes.max(1),
+            tempo: TempoLearner::new(),
+            energy_state: 0.0,
+        }
+    }
+
+    fn tune(
+        &mut self,
+        mut window: LaneWindow,
+        min_ctile: u32,
+        max_ctile: u32,
+        fusion: &TemporalSpectralFusion,
+        gradient: Option<GradientSummary>,
+    ) -> LaneWindow {
+        self.tempo.observe(fusion.tempo_hint());
+        if let Some(summary) = gradient {
+            let norm_pressure = (summary.norm / (summary.norm + 1.0)).clamp(0.0, 1.0);
+            self.tempo.observe(norm_pressure);
+        }
+        let tempo = self.tempo.tempo();
+        let jitter = self.tempo.jitter();
+        let temporal_density = fusion.temporal().iter().copied().sum::<f32>()
+            / (fusion.temporal().len() as f32).max(1.0);
+        self.energy_state = 0.6 * self.energy_state
+            + 0.4 * (fusion.spectral_energy() / (fusion.temporal().len() as f32).max(1.0));
+
+        let grad_norm = gradient.map(|g| g.norm).unwrap_or(0.0);
+        let grad_sparsity = gradient.map(|g| g.sparsity).unwrap_or(0.5);
+        let grad_pressure = (grad_norm / (grad_norm + 1.0)).clamp(0.0, 1.0);
+
+        let stride_scale =
+            1.0 + tempo * 0.6 + self.energy_state * 0.15 + jitter * 0.25 + grad_pressure * 0.2;
+        let base_stride = window.stride.max(1);
+        let mut stride = ((base_stride as f32) / stride_scale).round().max(1.0) as u32;
+        stride = stride.max(1);
+        stride = stride.min(self.lanes.max(1));
+        window.stride = stride.max(1);
+
+        let mut slack = ((window.slack.max(1) as f32)
+            * (1.0 + tempo * 0.4 + temporal_density * 0.2 - (grad_sparsity - 0.5) * 0.6))
+            .round() as u32;
+        slack = slack.max(self.lanes);
+        slack = align_to_lanes(slack, self.lanes);
+        let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, self.lanes);
+        let max_span = max_lane.saturating_sub(min_lane).max(self.lanes);
+        if slack > max_span {
+            slack = align_down_to_lanes(max_span, self.lanes);
+        }
+        if slack == 0 {
+            slack = self.lanes.max(1);
+        }
+
+        let gradient_bias = ((max_span as f32) * grad_pressure * 0.3) as u32;
+        let mut target = closest_lane_multiple(window.target, self.lanes, min_lane, max_lane);
+        if gradient_bias > 0 {
+            let desired = target.saturating_add(gradient_bias).min(max_lane);
+            target = closest_lane_multiple(desired, self.lanes, min_lane, max_lane);
+        }
+
+        let mut lower = target.saturating_sub(slack).max(min_lane);
+        let mut upper = target.saturating_add(slack).min(max_lane);
+        if lower > upper {
+            lower = min_lane;
+            upper = min_lane;
+        }
+        window.target = target;
+        window.lower = lower;
+        window.upper = upper;
+        window.min_lane = min_lane;
+        window.max_lane = max_lane;
+        window.slack = target.abs_diff(lower).max(target.abs_diff(upper));
+
+        window
     }
 }
 
@@ -1376,6 +1516,23 @@ pub fn choose_unified_rank(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::telemetry::hub;
+
+    #[test]
+    fn tuned_latency_window_responds_to_gradient_feedback() {
+        hub::clear_last_realgrad_for_test();
+        let mut pulse = hub::RealGradPulse::default();
+        pulse.gradient_norm = 64.0;
+        pulse.gradient_sparsity = 0.1;
+        hub::set_last_realgrad(&pulse);
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let scenario = RankScenario::new(64, 4_096, 48, &caps, RankKind::MidK);
+        let (min_ctile, max_ctile) = scenario.latency_bounds().expect("latency bounds available");
+        let window = scenario.latency_window(min_ctile, max_ctile);
+        let baseline_slack = scenario.latency_slack().expect("latency slack available");
+        assert!(window.slack >= baseline_slack);
+        hub::clear_last_realgrad_for_test();
+    }
 
     #[derive(Default)]
     struct CountingWriter {
