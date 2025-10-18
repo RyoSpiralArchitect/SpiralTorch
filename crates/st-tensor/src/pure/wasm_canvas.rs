@@ -14,7 +14,7 @@
 
 use super::{
     fractal::{FractalPatch, UringFractalScheduler},
-    PureResult, Tensor, TensorError,
+    AmegaHypergrad, AmegaRealgrad, GradientSummary, PureResult, Tensor, TensorError,
 };
 use core::f32::consts::PI;
 use st_frac::fft::{self, Complex32};
@@ -300,6 +300,52 @@ impl ColorVectorField {
     }
 }
 
+/// Byte layout metadata for the WGSL canvas FFT pipeline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CanvasFftLayout {
+    field_bytes: usize,
+    field_stride: usize,
+    spectrum_bytes: usize,
+    spectrum_stride: usize,
+    uniform_bytes: usize,
+}
+
+impl CanvasFftLayout {
+    /// Total byte length required for the vector field storage buffer.
+    pub fn field_bytes(&self) -> usize {
+        self.field_bytes
+    }
+
+    /// Size in bytes of each vector field sample.
+    pub fn field_stride(&self) -> usize {
+        self.field_stride
+    }
+
+    /// Total byte length required for the FFT spectrum storage buffer.
+    pub fn spectrum_bytes(&self) -> usize {
+        self.spectrum_bytes
+    }
+
+    /// Size in bytes of each FFT spectrum sample.
+    pub fn spectrum_stride(&self) -> usize {
+        self.spectrum_stride
+    }
+
+    /// Byte length of the uniform buffer used by the WGSL kernel.
+    pub fn uniform_bytes(&self) -> usize {
+        self.uniform_bytes
+    }
+
+    /// Number of pixels captured by the layout.
+    pub fn pixel_count(&self) -> usize {
+        if self.field_stride == 0 {
+            0
+        } else {
+            self.field_bytes / self.field_stride
+        }
+    }
+}
+
 /// RGBA pixel surface that mirrors a HTML canvas.
 #[derive(Clone, Debug)]
 pub struct CanvasSurface {
@@ -508,6 +554,17 @@ impl CanvasProjector {
         Ok(self.surface.as_rgba())
     }
 
+    /// Refresh the canvas and expose the latest relation tensor.
+    pub fn refresh_tensor(&mut self) -> PureResult<&Tensor> {
+        self.render()?;
+        Ok(&self.workspace)
+    }
+
+    /// Returns the last relation tensor without forcing a refresh.
+    pub fn tensor(&self) -> &Tensor {
+        &self.workspace
+    }
+
     fn render(&mut self) -> PureResult<()> {
         let relation = self.scheduler.fold_coherence()?;
         if relation.shape() != self.workspace.shape() {
@@ -549,6 +606,34 @@ impl CanvasProjector {
         self.vectors.fft_rows_interleaved(inverse)
     }
 
+    /// Accumulate the refreshed tensor into the provided hypergradient tape.
+    pub fn accumulate_hypergrad(&mut self, tape: &mut AmegaHypergrad) -> PureResult<()> {
+        let tensor = self.refresh_tensor()?;
+        tape.accumulate_wave(tensor)
+    }
+
+    /// Accumulate the refreshed tensor into the provided Euclidean gradient tape.
+    pub fn accumulate_realgrad(&mut self, tape: &mut AmegaRealgrad) -> PureResult<()> {
+        let tensor = self.refresh_tensor()?;
+        tape.accumulate_wave(tensor)
+    }
+
+    /// Refresh the canvas and return gradient summary statistics for both the
+    /// hypergradient and Euclidean tapes. The returned tuple packs
+    /// `(hypergrad_summary, realgrad_summary)`.
+    pub fn gradient_summary(
+        &mut self,
+        curvature: f32,
+    ) -> PureResult<(GradientSummary, GradientSummary)> {
+        let tensor = self.refresh_tensor()?;
+        let (rows, cols) = tensor.shape();
+        let mut hypergrad = AmegaHypergrad::new(curvature, 1.0, rows, cols)?;
+        hypergrad.accumulate_wave(tensor)?;
+        let mut realgrad = AmegaRealgrad::new(1.0, rows, cols)?;
+        realgrad.accumulate_wave(tensor)?;
+        Ok((hypergrad.summary(), realgrad.summary()))
+    }
+
     /// Access the last computed FFT spectrum without forcing a refresh.
     pub fn vector_fft(&self, inverse: bool) -> PureResult<Vec<f32>> {
         self.vectors.fft_rows_interleaved(inverse)
@@ -564,6 +649,25 @@ impl CanvasProjector {
             inverse as u32,
             0,
         ]
+    }
+
+    /// Byte layout metadata that mirrors the WGSL buffers emitted by
+    /// [`vector_fft_wgsl`]. Callers can size storage/uniform buffers directly
+    /// from the returned values without hard-coding struct sizes.
+    pub fn vector_fft_layout(&self) -> CanvasFftLayout {
+        const FIELD_STRIDE: usize = 4 * core::mem::size_of::<f32>();
+        const SPECTRUM_STRIDE: usize = 8 * core::mem::size_of::<f32>();
+        const UNIFORM_BYTES: usize = 4 * core::mem::size_of::<u32>();
+
+        let width = self.surface.width();
+        let height = self.surface.height();
+        CanvasFftLayout {
+            field_bytes: width * height * FIELD_STRIDE,
+            field_stride: FIELD_STRIDE,
+            spectrum_bytes: width * height * SPECTRUM_STRIDE,
+            spectrum_stride: SPECTRUM_STRIDE,
+            uniform_bytes: UNIFORM_BYTES,
+        }
     }
 
     /// Suggested dispatch dimensions for [`vector_fft_wgsl`]. The kernel
@@ -832,6 +936,19 @@ mod tests {
     }
 
     #[test]
+    fn vector_fft_layout_matches_wgsl_structs() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        let projector = CanvasProjector::new(scheduler, 64, 3).unwrap();
+        let layout = projector.vector_fft_layout();
+        assert_eq!(layout.field_stride(), 16);
+        assert_eq!(layout.spectrum_stride(), 32);
+        assert_eq!(layout.uniform_bytes(), 16);
+        assert_eq!(layout.field_bytes(), 64 * 3 * 16);
+        assert_eq!(layout.spectrum_bytes(), 64 * 3 * 32);
+        assert_eq!(layout.pixel_count(), 64 * 3);
+    }
+
+    #[test]
     fn vector_field_fft_emits_interleaved_channels() {
         let mut field = ColorVectorField::new(4, 1);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
@@ -855,6 +972,54 @@ mod tests {
         for value in spectrum {
             assert!(value.is_finite());
         }
+    }
+
+    #[test]
+    fn projector_refresh_tensor_exposes_workspace() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let tensor = projector.refresh_tensor().unwrap();
+        assert_eq!(tensor.shape(), (2, 2));
+        assert!(tensor.data().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn projector_accumulates_into_gradients() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let mut hypergrad = AmegaHypergrad::new(-1.0, 0.05, 2, 2).unwrap();
+        let mut realgrad = AmegaRealgrad::new(0.05, 2, 2).unwrap();
+        projector.accumulate_hypergrad(&mut hypergrad).unwrap();
+        projector.accumulate_realgrad(&mut realgrad).unwrap();
+        assert!(hypergrad.gradient().iter().all(|value| value.is_finite()));
+        assert_eq!(realgrad.gradient().len(), 4);
+    }
+
+    #[test]
+    fn projector_surfaces_gradient_summary() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(
+                FractalPatch::new(tensor_with_shape(2, 2, &[1.0, -2.0, 0.5, 0.0]), 1.0, 1.0, 0)
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let (hyper, real) = projector.gradient_summary(-1.0).unwrap();
+        assert_eq!(hyper.count(), 4);
+        assert_eq!(real.count(), 4);
+        assert!(hyper.l2() > 0.0);
+        assert!(real.l1() > 0.0);
+        let mean_identity = real.mean_abs() * real.count() as f32;
+        assert!((mean_identity - real.l1()).abs() < 1e-6);
+        let rms_identity = real.rms() * (real.count() as f32).sqrt();
+        assert!((rms_identity - real.l2()).abs() < 1e-6);
     }
 
     #[test]

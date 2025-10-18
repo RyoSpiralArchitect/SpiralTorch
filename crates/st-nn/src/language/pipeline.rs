@@ -189,16 +189,37 @@ impl DesireTelemetrySink {
     pub(crate) fn with_psi_context(
         mut sample: DesireStepTelemetry,
         reading: Option<&PsiReading>,
-        events: &[PsiEvent],
+        events: Vec<PsiEvent>,
         z_feedback: Option<SoftlogicZFeedback>,
     ) -> DesireStepTelemetry {
         sample.psi_total = reading.map(|value| value.total);
         sample.psi_breakdown = reading
             .map(|value| value.breakdown.clone())
             .unwrap_or_default();
-        sample.psi_events = events.to_vec();
+        sample.psi_events = events;
         sample.z_feedback = z_feedback;
         sample
+    }
+
+    pub(crate) fn record_with_psi(
+        step: &DesireAutomatedStep,
+        timestamp: SystemTime,
+    ) -> (
+        DesireStepTelemetry,
+        Option<PsiReading>,
+        Option<SoftlogicZFeedback>,
+    ) {
+        let reading = hub::get_last_psi();
+        let events = hub::get_last_psi_events();
+        let z_feedback = hub::get_softlogic_z();
+        let sample = Self::with_psi_context(
+            Self::base_sample(step, timestamp),
+            reading.as_ref(),
+            events,
+            z_feedback,
+        );
+        hub::set_last_desire_step(sample.clone());
+        (sample, reading, z_feedback)
     }
 
     fn phase_to_telemetry(phase: DesirePhase) -> DesirePhaseTelemetry {
@@ -225,7 +246,7 @@ impl DesireTelemetrySink {
 #[cfg(feature = "psi")]
 impl DesirePipelineSink for DesireTelemetrySink {
     fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
-        hub::set_last_desire_step(Self::base_sample(step, timestamp));
+        Self::record_with_psi(step, timestamp);
         Ok(())
     }
 }
@@ -1038,6 +1059,7 @@ pub struct DesirePsiEvent {
     pub timestamp: SystemTime,
     pub solution: DesireSolution,
     pub trigger: Option<DesireRewriteTrigger>,
+    pub telemetry: DesireStepTelemetry,
     pub reading: Option<PsiReading>,
     pub z_feedback: Option<SoftlogicZFeedback>,
     pub events: Vec<PsiEvent>,
@@ -1087,16 +1109,9 @@ impl DesirePsiBridge {
 #[cfg(feature = "psi")]
 impl DesirePipelineSink for DesirePsiBridge {
     fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
-        let reading = hub::get_last_psi();
-        let events = hub::get_last_psi_events();
-        let z_feedback = hub::get_softlogic_z();
-        let sample = DesireTelemetrySink::with_psi_context(
-            DesireTelemetrySink::base_sample(step, timestamp),
-            reading.as_ref(),
-            &events,
-            z_feedback,
-        );
-        hub::set_last_desire_step(sample);
+        let (telemetry, reading, z_feedback) =
+            DesireTelemetrySink::record_with_psi(step, timestamp);
+        let events = telemetry.psi_events.clone();
         let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
             label: "desire psi bridge poisoned",
         })?;
@@ -1104,6 +1119,7 @@ impl DesirePipelineSink for DesirePsiBridge {
             timestamp,
             solution: step.solution.clone(),
             trigger: step.trigger.clone(),
+            telemetry,
             reading,
             z_feedback,
             events,
@@ -1148,16 +1164,17 @@ impl DesirePsiSummary {
             if event.trigger.is_some() {
                 triggers += 1;
             }
-            entropy_sum += event.solution.entropy;
-            temperature_sum += event.solution.temperature;
-            penalty_sum += event.solution.hypergrad_penalty.max(0.0);
+            let telemetry = &event.telemetry;
+            entropy_sum += telemetry.entropy;
+            temperature_sum += telemetry.temperature;
+            penalty_sum += telemetry.hypergrad_penalty.max(0.0);
             if event.timestamp > last_timestamp {
                 last_timestamp = event.timestamp;
             }
-            if let Some(reading) = &event.reading {
+            if let Some(total) = telemetry.psi_total {
                 psi_samples = psi_samples.saturating_add(1);
-                psi_total += reading.total;
-                for (component, value) in reading.breakdown.iter() {
+                psi_total += total;
+                for (component, value) in telemetry.psi_breakdown.iter() {
                     *component_totals.entry(*component).or_insert(0.0) += *value;
                     *component_counts.entry(*component).or_insert(0) += 1;
                 }
@@ -1166,7 +1183,7 @@ impl DesirePsiSummary {
                 z_samples = z_samples.saturating_add(1);
                 z_sum += feedback.z_signal;
             }
-            for PsiEvent::ThresholdCross { component, up, .. } in &event.events {
+            for PsiEvent::ThresholdCross { component, up, .. } in &telemetry.psi_events {
                 let entry = threshold_crossings.entry(*component).or_insert((0, 0));
                 if *up {
                     entry.0 = entry.0.saturating_add(1);

@@ -153,8 +153,9 @@ multi-radius sweeps and a conductor that fuses their Z pulses with exponential
 smoothing. `InterfaceGauge::analyze_multiradius` probes the same mask at
 different blow-up scales (and reuses an optional `c′` label when supplied),
 while `InterfaceZConductor` drives any number of gauges, aggregates the
-resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
-ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
+resulting pulses, and hands back a `ZFused` packet with attribution weights and
+event tags alongside the smoothed `SoftlogicZFeedback` record so runtime loops
+can see which layer dominated the decision.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L515】【F:crates/st-core/src/theory/zpulse.rs†L22-L344】
 
 ### Maxwell-coded envelopes meet SpiralK
 
@@ -1046,6 +1047,30 @@ report = policy.finish_episode()
 print(report.steps, report.hypergrad_applied)
 ```
 
+Python bindings mirror the geometry controller as well. Pass a dictionary of
+overrides to `PolicyGradient.attach_geometry_feedback` to customise the
+observability parameters and smoothing ranges without leaving Python.
+
+```python
+from spiraltorch import SpiralSession
+from spiraltorch.rl import PolicyGradient
+
+session = SpiralSession(device="wgpu", curvature=-1.0)
+policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
+policy.attach_geometry_feedback({"z_space_rank": 24, "slot_symmetry": "cyclic"})
+
+resonance = session.trace(state).resonate()
+policy.record_transition(state, action, reward=0.8)
+
+report, signal = policy.finish_episode_with_geometry(resonance)
+if signal:
+    print(f"η̄={signal['averaged_efficiency']:.3f} scale={signal['learning_rate_scale']:.2f}")
+
+telemetry = policy.geometry_telemetry()
+if telemetry:
+    print("loop gain", telemetry["loop_gain"], "script", telemetry["loop_script"])
+```
+
 Rust projects can pair the policy with the new geometric feedback module to
 ground the update scale in observability measurements. Feed a
 `DifferentialResonance` snapshot into `GeometryFeedback` and the learner will
@@ -1296,6 +1321,11 @@ tape.apply(weights)
 print("updated weights", weights.tolist())
 ```
 
+Prefer flat-space optimisation? Reach for the new Rust-side
+`st_tensor::AmegaRealgrad` tape to mirror the same API without the Poincaré
+projection step—handy when Canvas Transformer energy needs to feed classical
+optimisers alongside its hypergradient updates.
+
 ### Canvas Pixel Transformer → Z-space feedback
 
 - `CanvasProjector::refresh_with_vectors` now returns both the RGBA buffer and
@@ -1304,12 +1334,29 @@ print("updated weights", weights.tolist())
 - `FractalCanvas::vectorFieldFft(false)` surfaces the per-row FFT spectrum as
   interleaved energy/chroma pairs so Canvas Transformer pipelines can ingest
   frequency features without leaving Rust.
+- `CanvasProjector::accumulate_hypergrad` and
+  `CanvasProjector::accumulate_realgrad` stream the refreshed canvas tensor
+  directly into SpiralTorch's Riemannian or Euclidean optimisers without
+  additional copies.
+- `FractalCanvas::relation()` mirrors the projector's tensor output as a
+  `Float32Array` so browser call-sites can feed the raw relation into custom
+  pipelines or training loops.
+- `FractalCanvas::hypergradWave(curvature)` and `FractalCanvas::realgradWave()`
+  surface curvature-aware hypergrad updates alongside Euclidean gradients so the
+  Canvas Transformer can keep hypergrad/Realgrad buffers in sync by default.
+- `FractalCanvas::gradientSummary(curvature)` condenses both tapes into shared
+  L1/L2/∞ norms plus RMS/mean-absolute magnitudes so monitoring dashboards can
+  watch gradient health without shipping the full relation buffers across the
+  WASM boundary.
 - `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
   WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
   the vector field and accumulate the spectrum fully on-GPU.
 - `FractalCanvas::vectorFieldFftUniform(false)` packages the `CanvasFftParams`
   uniform (width, height, inverse flag, padding) as a `Uint32Array` so the WGSL
   kernel can be dispatched without manual byte packing.
+- `FractalCanvas::vectorFieldFftLayout()` reports the byte lengths and strides
+  for the `FieldSample`/`SpectrumSample` storage buffers plus the uniform block
+  so WebGPU callers can allocate resources without hard-coding struct sizes.
 - `FractalCanvas::vectorFieldFftDispatch(true)` computes the workgroup triplet
   for the generated WGSL so callers can hand the counts directly to
   `computePass.dispatchWorkgroups(...)` (or the Rust equivalent) without
@@ -1703,6 +1750,8 @@ const kernel = fractal.vectorFieldFftKernel(true);
 console.log(kernel.split("\n")[0]);
 const uniform = fractal.vectorFieldFftUniform(false);
 console.log(`fft uniform=${uniform.join(',')}`);
+const layout = fractal.vectorFieldFftLayout();
+console.log(`fft field bytes=${layout.fieldBytes} stride=${layout.fieldStride}`);
 const dispatch = fractal.vectorFieldFftDispatch(true);
 console.log(`fft dispatch=${dispatch.join('x')}`);
 </script>
@@ -1722,9 +1771,10 @@ matching `SpectrumSample` buffer, and provide the canvas dimensions plus an
 inverse flag through a `CanvasFftParams` uniform struct. The
 `vectorFieldFftUniform` helper yields the `[width, height, inverse, padding]`
 `Uint32Array` so you can upload the uniform buffer directly without worrying
-about alignment, while `vectorFieldFftDispatch` returns the `[x, y, z]`
-workgroup counts that correspond to the generated WGSL (respecting subgroup or
-full wave execution).
+about alignment, `vectorFieldFftLayout` reports the byte lengths and strides for
+the field/spectrum storage buffers, and `vectorFieldFftDispatch` returns the
+`[x, y, z]` workgroup counts that correspond to the generated WGSL (respecting
+subgroup or full wave execution).
 
 Need FFT heuristics alongside the canvas?  WebAssembly exports now ship auto
 planning helpers and CPU fallbacks:
