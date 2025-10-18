@@ -348,6 +348,7 @@ mod tests {
             avoidance: None,
             hypergrad_penalty: 0.1,
             gradient_control: DesireGradientControl::default(),
+            narrative: None,
         };
         for ordinal in 0..3 {
             solution.phase = match ordinal {

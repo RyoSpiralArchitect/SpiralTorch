@@ -195,7 +195,6 @@ mod tests {
             .unwrap_or_else(|poison| poison.into_inner())
             .layers()
             .to_vec();
-        let reports = tracer.lock().unwrap().layers().to_vec();
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].layer, "gnn");
         assert!(reports[0].weight_update_magnitude.is_some());

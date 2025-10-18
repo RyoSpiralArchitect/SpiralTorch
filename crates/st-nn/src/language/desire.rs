@@ -9,6 +9,7 @@ use super::schrodinger::schrodinger_boost;
 use super::temperature::{entropy, TemperatureController};
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
+use st_core::telemetry::hub;
 use st_tensor::{
     DesireGradientControl, DesireGradientInterpretation, GradientSummary, TensorError,
 };
@@ -109,6 +110,7 @@ pub struct DesireSolution {
     pub avoidance: Option<DesireAvoidanceReport>,
     pub hypergrad_penalty: f32,
     pub gradient_control: DesireGradientControl,
+    pub narrative: Option<NarrativeHint>,
 }
 
 pub struct DesireLagrangian {
@@ -131,6 +133,7 @@ pub struct DesireLagrangian {
     desire_bias: Vec<f32>,
     gradient_interpretation: DesireGradientInterpretation,
     gradient_control: DesireGradientControl,
+    active_narrative: Option<NarrativeHint>,
 }
 
 impl DesireLagrangian {
@@ -171,6 +174,7 @@ impl DesireLagrangian {
             desire_bias: vec![0.0; vocab],
             gradient_interpretation: DesireGradientInterpretation::default(),
             gradient_control: DesireGradientControl::default(),
+            active_narrative: None,
         })
     }
 
@@ -386,6 +390,7 @@ impl DesireLagrangian {
             avoidance,
             hypergrad_penalty,
             gradient_control: self.gradient_control,
+            narrative: self.active_narrative.clone(),
         })
     }
 
@@ -606,7 +611,6 @@ mod tests {
     use super::super::geometry::{
         ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
     };
-    use super::super::maxwell::NarrativeHint;
     use super::*;
     use st_tensor::{DesireGradientInterpretation, GradientSummary};
     use std::collections::HashSet;
