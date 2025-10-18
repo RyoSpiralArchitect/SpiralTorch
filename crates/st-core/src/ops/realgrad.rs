@@ -34,6 +34,14 @@ pub struct RealGradProjection {
     pub ramanujan_pi: f32,
 }
 
+/// Cached projector state that can be reused across multiple RealGrad invocations.
+#[derive(Debug, Clone)]
+pub struct RealGradKernel {
+    config: RealGradConfig,
+    projector: LeechProjector,
+    ramanujan_pi: f32,
+}
+
 /// Projection outcome for a tempered (distribution-like) RealGrad sequence.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TemperedRealGradProjection {
@@ -68,6 +76,166 @@ impl RealGradProjection {
     /// Returns the accumulated energy of the Z-space field.
     pub fn z_energy(&self) -> f32 {
         self.z_space.iter().map(|value| value.abs()).sum()
+    }
+}
+
+impl RealGradKernel {
+    /// Creates a reusable RealGrad kernel with a sanitised configuration and cached state.
+    pub fn new(config: RealGradConfig) -> Self {
+        let config = config.sanitised();
+        let projector = LeechProjector::new(config.z_rank, config.z_weight);
+        let ramanujan_pi = ramanujan_pi(config.ramanujan_iterations) as f32;
+        Self {
+            config,
+            projector,
+            ramanujan_pi,
+        }
+    }
+
+    /// Returns the effective configuration used by the kernel.
+    pub fn config(&self) -> RealGradConfig {
+        self.config
+    }
+
+    /// Returns the cached Ramanujan π estimate used by the kernel.
+    pub fn ramanujan_pi(&self) -> f32 {
+        self.ramanujan_pi
+    }
+
+    fn residual_threshold(&self) -> f32 {
+        self.config.residual_threshold
+    }
+
+    /// Projects the provided samples into the RealGrad field using the cached projector.
+    pub fn project(&self, values: &[f32]) -> RealGradProjection {
+        if values.is_empty() {
+            return RealGradProjection {
+                realgrad: Vec::new(),
+                z_space: Vec::new(),
+                monad_biome: Vec::new(),
+                lebesgue_measure: 0.0,
+                ramanujan_pi: self.ramanujan_pi,
+            };
+        }
+
+        let len = values.len();
+        let delta_x = 1.0f32 / len as f32;
+        let mut spectrum: Vec<(f32, f32)> = vec![(0.0, 0.0); len];
+
+        for (xi_idx, slot) in spectrum.iter_mut().enumerate() {
+            let mut acc_re = 0.0f32;
+            let mut acc_im = 0.0f32;
+            let xi = xi_idx as f32;
+            for (n_idx, &value) in values.iter().enumerate() {
+                let x = n_idx as f32 * delta_x;
+                let angle = -2.0 * self.ramanujan_pi * x * xi;
+                let (sin, cos) = angle.sin_cos();
+                acc_re += value * cos * delta_x;
+                acc_im -= value * sin * delta_x;
+            }
+            *slot = (acc_re, acc_im);
+        }
+
+        let mut z_space = Vec::with_capacity(len);
+        let mut monad_biome = Vec::new();
+        for &(re, im) in &spectrum {
+            let magnitude = (re * re + im * im).sqrt();
+            if magnitude > self.residual_threshold() {
+                monad_biome.push(magnitude);
+            }
+            let enriched = self.projector.enrich(magnitude as f64) as f32;
+            z_space.push(enriched);
+        }
+
+        let lebesgue_measure = values.iter().map(|v| v.abs()).sum::<f32>();
+        let normaliser = if lebesgue_measure > 0.0 {
+            self.ramanujan_pi / lebesgue_measure
+        } else {
+            0.0
+        };
+
+        let realgrad = values
+            .iter()
+            .zip(z_space.iter())
+            .map(|(&value, &z)| value * normaliser + z)
+            .collect();
+
+        RealGradProjection {
+            realgrad,
+            z_space,
+            monad_biome,
+            lebesgue_measure,
+            ramanujan_pi: self.ramanujan_pi,
+        }
+    }
+
+    /// Projects a Schwartz sequence using the cached projector and returns the tempered outcome.
+    pub fn project_tempered(
+        &self,
+        sequence: &SchwartzSequence,
+        tolerance: f32,
+    ) -> TemperedRealGradProjection {
+        let tolerance = tolerance.max(0.0);
+
+        if sequence.is_empty() {
+            return TemperedRealGradProjection {
+                projection: self.project(&[]),
+                dominated: true,
+                convergence_error: 0.0,
+                iterations: 0,
+            };
+        }
+
+        if !sequence.lengths_consistent() {
+            return TemperedRealGradProjection {
+                projection: self.project(&[]),
+                dominated: false,
+                convergence_error: f32::INFINITY,
+                iterations: 0,
+            };
+        }
+
+        let dominated = sequence.is_dominated();
+        let mut previous: Option<RealGradProjection> = None;
+        let mut overflow_residuals: Vec<f32> = Vec::new();
+        let mut convergence_error = f32::INFINITY;
+        let mut iterations = 0usize;
+
+        for member in sequence.iter() {
+            iterations += 1;
+            let projection = self.project(member);
+            if let Some(prev) = &previous {
+                let diff = projection
+                    .realgrad
+                    .iter()
+                    .zip(prev.realgrad.iter())
+                    .map(|(a, b)| (a - b).abs())
+                    .sum::<f32>()
+                    + (projection.lebesgue_measure - prev.lebesgue_measure).abs();
+                convergence_error = diff;
+                if diff > tolerance {
+                    overflow_residuals.push(diff - tolerance);
+                }
+            } else {
+                convergence_error = 0.0;
+            }
+            previous = Some(projection);
+        }
+
+        let mut projection = previous.unwrap_or_else(|| self.project(&[]));
+        if !overflow_residuals.is_empty() {
+            projection.monad_biome.extend(overflow_residuals);
+        }
+        if !dominated && convergence_error.is_finite() && convergence_error > 0.0 {
+            projection.monad_biome.push(convergence_error);
+        }
+
+        TemperedRealGradProjection {
+            projection,
+            dominated,
+            convergence_error,
+            iterations,
+        }
     }
 }
 
@@ -237,69 +405,7 @@ pub struct RealGradTuning {
 /// Ramanujan π approximation, and accumulating the real and imaginary channels
 /// accordingly.
 pub fn project_realgrad(values: &[f32], config: RealGradConfig) -> RealGradProjection {
-    let len = values.len();
-    let config = config.sanitised();
-    if len == 0 {
-        let ramanujan_pi = ramanujan_pi(config.ramanujan_iterations) as f32;
-        return RealGradProjection {
-            realgrad: Vec::new(),
-            z_space: Vec::new(),
-            monad_biome: Vec::new(),
-            lebesgue_measure: 0.0,
-            ramanujan_pi,
-        };
-    }
-
-    let ramanujan_pi = ramanujan_pi(config.ramanujan_iterations) as f32;
-    let projector = LeechProjector::new(config.z_rank, config.z_weight);
-    let delta_x = 1.0f32 / len as f32;
-    let mut spectrum: Vec<(f32, f32)> = vec![(0.0, 0.0); len];
-
-    for (xi_idx, slot) in spectrum.iter_mut().enumerate() {
-        let mut acc_re = 0.0f32;
-        let mut acc_im = 0.0f32;
-        let xi = xi_idx as f32;
-        for (n_idx, &value) in values.iter().enumerate() {
-            let x = n_idx as f32 * delta_x;
-            let angle = -2.0 * ramanujan_pi * x * xi;
-            let (sin, cos) = angle.sin_cos();
-            acc_re += value * cos * delta_x;
-            acc_im -= value * sin * delta_x;
-        }
-        *slot = (acc_re, acc_im);
-    }
-
-    let mut z_space = Vec::with_capacity(len);
-    let mut monad_biome = Vec::new();
-    for &(re, im) in &spectrum {
-        let magnitude = (re * re + im * im).sqrt();
-        if magnitude > config.residual_threshold {
-            monad_biome.push(magnitude);
-        }
-        let enriched = projector.enrich(magnitude as f64) as f32;
-        z_space.push(enriched);
-    }
-
-    let lebesgue_measure = values.iter().map(|v| v.abs()).sum::<f32>();
-    let normaliser = if lebesgue_measure > 0.0 {
-        ramanujan_pi / lebesgue_measure
-    } else {
-        0.0
-    };
-
-    let realgrad = values
-        .iter()
-        .zip(z_space.iter())
-        .map(|(&value, &z)| value * normaliser + z)
-        .collect();
-
-    RealGradProjection {
-        realgrad,
-        z_space,
-        monad_biome,
-        lebesgue_measure,
-        ramanujan_pi,
-    }
+    RealGradKernel::new(config).project(values)
 }
 
 /// Projects a Schwartz sequence that approximates a tempered distribution.
@@ -313,74 +419,14 @@ pub fn project_tempered_realgrad(
     config: RealGradConfig,
     tolerance: f32,
 ) -> TemperedRealGradProjection {
-    let tolerance = tolerance.max(0.0);
-
-    if sequence.is_empty() {
-        return TemperedRealGradProjection {
-            projection: project_realgrad(&[], config),
-            dominated: true,
-            convergence_error: 0.0,
-            iterations: 0,
-        };
-    }
-
-    if !sequence.lengths_consistent() {
-        return TemperedRealGradProjection {
-            projection: project_realgrad(&[], config),
-            dominated: false,
-            convergence_error: f32::INFINITY,
-            iterations: 0,
-        };
-    }
-
-    let dominated = sequence.is_dominated();
-    let mut previous: Option<RealGradProjection> = None;
-    let mut overflow_residuals: Vec<f32> = Vec::new();
-    let mut convergence_error = f32::INFINITY;
-    let mut iterations = 0usize;
-
-    for member in sequence.iter() {
-        iterations += 1;
-        let projection = project_realgrad(member, config);
-        if let Some(prev) = &previous {
-            let diff = projection
-                .realgrad
-                .iter()
-                .zip(prev.realgrad.iter())
-                .map(|(a, b)| (a - b).abs())
-                .sum::<f32>()
-                + (projection.lebesgue_measure - prev.lebesgue_measure).abs();
-            convergence_error = diff;
-            if diff > tolerance {
-                overflow_residuals.push(diff - tolerance);
-            }
-        } else {
-            convergence_error = 0.0;
-        }
-        previous = Some(projection);
-    }
-
-    let mut projection = previous.unwrap_or_else(|| project_realgrad(&[], config));
-    if !overflow_residuals.is_empty() {
-        projection.monad_biome.extend(overflow_residuals);
-    }
-    if !dominated && convergence_error.is_finite() && convergence_error > 0.0 {
-        projection.monad_biome.push(convergence_error);
-    }
-
-    TemperedRealGradProjection {
-        projection,
-        dominated,
-        convergence_error,
-        iterations,
-    }
+    RealGradKernel::new(config).project_tempered(sequence, tolerance)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        project_realgrad, project_tempered_realgrad, RealGradConfig, SchwartzSequence,
-        DEFAULT_THRESHOLD,
+        project_realgrad, project_tempered_realgrad, RealGradConfig, RealGradKernel,
+        SchwartzSequence, DEFAULT_THRESHOLD,
     };
     use crate::util::math::LEECH_PACKING_DENSITY;
 
@@ -392,6 +438,18 @@ mod tests {
         assert!(projection.monad_biome.is_empty());
         assert_eq!(projection.lebesgue_measure, 0.0);
         assert!(projection.ramanujan_pi > 3.14);
+    }
+
+    #[test]
+    fn kernel_caches_ramanujan_series() {
+        let config = RealGradConfig::default();
+        let kernel = RealGradKernel::new(config);
+        assert!(kernel.ramanujan_pi() > 3.14);
+        let empty = kernel.project(&[]);
+        assert_eq!(empty.ramanujan_pi, kernel.ramanujan_pi());
+        let data = [0.5f32, -0.25];
+        let projection = kernel.project(&data);
+        assert_eq!(projection.ramanujan_pi, kernel.ramanujan_pi());
     }
 
     #[test]
