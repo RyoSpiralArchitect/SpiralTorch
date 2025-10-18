@@ -640,12 +640,12 @@ impl<'a> RankScenario<'a> {
 }
 
 #[derive(Clone, Debug)]
-struct TempoLearner {
+struct TempoSmoother {
     avg: f32,
     jitter: f32,
 }
 
-impl TempoLearner {
+impl TempoSmoother {
     fn new() -> Self {
         Self {
             avg: 0.0,
@@ -679,7 +679,7 @@ impl TempoLearner {
 #[derive(Clone, Debug)]
 struct AdaptiveWindowTuner {
     lanes: u32,
-    tempo: TempoLearner,
+    tempo: TempoSmoother,
     energy_state: f32,
 }
 
@@ -687,7 +687,7 @@ impl AdaptiveWindowTuner {
     fn new(lanes: u32) -> Self {
         Self {
             lanes: lanes.max(1),
-            tempo: TempoLearner::new(),
+            tempo: TempoSmoother::new(),
             energy_state: 0.0,
         }
     }
@@ -1454,15 +1454,8 @@ fn intersect_latency(a: LaneWindow, b: LaneWindow) -> LaneWindow {
     }
 }
 
-fn refine_choice(
-    mut choice: Choice,
-    baseline: Choice,
-    caps: &DeviceCaps,
-    rows: u32,
-    cols: u32,
-    k: u32,
-    kind: RankKind,
-) -> Choice {
+fn refine_choice(mut choice: Choice, baseline: Choice, scenario: RankScenario<'_>) -> Choice {
+    let caps = scenario.caps();
     if choice.wg == 0 {
         choice.wg = baseline.wg;
     }
@@ -2278,116 +2271,6 @@ mod tests {
         }
     }
 
-    fn sample_window(target: u32, lower: u32, upper: u32, stride: u32) -> LaneWindow {
-        LaneWindow {
-            target,
-            lower,
-            upper,
-            min_lane: lower,
-            max_lane: upper,
-            slack: upper.saturating_sub(lower),
-            stride,
-        }
-    }
-
-    fn sample_choice() -> Choice {
-        Choice {
-            use_2ce: false,
-            wg: 128,
-            kl: 32,
-            ch: 0,
-            mk: 2,
-            mkd: 4,
-            tile: 1024,
-            ctile: 256,
-            subgroup: true,
-            fft_tile: 1024,
-            fft_radix: 4,
-            fft_segments: 1,
-            latency_window: Some(sample_window(256, 128, 512, 32)),
-        }
-    }
-
-    #[test]
-    fn tempo_learner_averages_weighted_feedback() {
-        let baseline = sample_choice();
-        let mut learner = TempoLearner::new(baseline);
-
-        let mut rich = baseline;
-        rich.use_2ce = true;
-        rich.wg = 256;
-        rich.tile = 2048;
-        rich.ctile = 384;
-        rich.fft_tile = 2048;
-        rich.fft_radix = 2;
-        rich.fft_segments = 2;
-        rich.latency_window = Some(sample_window(384, 256, 640, 64));
-
-        learner.observe(
-            TempoFeedback::new(rich)
-                .with_latency(rich.latency_window)
-                .with_weight(2.0),
-        );
-
-        let mut lean = baseline;
-        lean.wg = 96;
-        lean.tile = 768;
-        lean.ctile = 192;
-        lean.fft_tile = 768;
-        lean.fft_segments = 1;
-
-        learner.observe(TempoFeedback::new(lean).with_weight(1.0));
-
-        let choice = learner.into_choice();
-
-        assert!(choice.use_2ce);
-        assert_eq!(choice.subgroup, true);
-        assert_eq!(choice.wg, 203);
-        assert_eq!(choice.tile, 1621);
-        assert_eq!(choice.ctile, 320);
-        assert_eq!(choice.fft_tile, 1621);
-        assert_eq!(choice.fft_radix, 3);
-        assert_eq!(choice.fft_segments, 2);
-
-        let window = choice.latency_window.expect("latency window retained");
-        assert!(window.lower >= 256);
-        assert!(window.upper <= 640);
-        assert!(choice.ctile >= window.lower && choice.ctile <= window.upper);
-    }
-
-    #[test]
-    fn tempo_learner_merge_combines_observations() {
-        let baseline = sample_choice();
-        let mut left = TempoLearner::new(baseline);
-        let mut right = TempoLearner::new(baseline);
-
-        let mut lhs_choice = baseline;
-        lhs_choice.wg = 256;
-        lhs_choice.tile = 1536;
-        lhs_choice.ctile = 320;
-        lhs_choice.latency_window = Some(sample_window(320, 192, 448, 32));
-
-        left.observe(TempoFeedback::new(lhs_choice).with_weight(1.0));
-
-        let mut rhs_choice = baseline;
-        rhs_choice.use_2ce = true;
-        rhs_choice.wg = 64;
-        rhs_choice.tile = 896;
-        rhs_choice.ctile = 224;
-        rhs_choice.latency_window = Some(sample_window(224, 160, 320, 32));
-
-        right.observe(TempoFeedback::new(rhs_choice).with_weight(3.0));
-
-        left.merge(&right);
-
-        let merged = left.into_choice();
-        assert!(merged.use_2ce);
-        assert!(merged.wg < baseline.wg);
-        assert!(merged.tile < lhs_choice.tile);
-        let window = merged.latency_window.expect("latency window merged");
-        assert_eq!(merged.ctile, 248);
-        assert!(merged.ctile >= window.lower && merged.ctile <= window.upper);
-    }
 
     fn sample_window(target: u32, lower: u32, upper: u32, stride: u32) -> LaneWindow {
         LaneWindow {
