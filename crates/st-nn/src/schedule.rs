@@ -123,9 +123,15 @@ pub struct RoundtableSchedule {
 impl RoundtableSchedule {
     /// Builds a schedule for the provided output shape.
     pub fn new(planner: &RankPlanner, rows: u32, cols: u32, config: RoundtableConfig) -> Self {
-        let above = planner.topk(rows, cols, config.top_k);
-        let here = planner.midk(rows, cols, config.mid_k);
-        let beneath = planner.bottomk(rows, cols, config.bottom_k);
+        let limit = cols.max(1);
+        let clamp_k = |k: u32| -> u32 {
+            let capped = k.max(1).min(limit);
+            debug_assert!(capped >= 1 && capped <= limit);
+            capped
+        };
+        let above = planner.topk(rows, cols, clamp_k(config.top_k));
+        let here = planner.midk(rows, cols, clamp_k(config.mid_k));
+        let beneath = planner.bottomk(rows, cols, clamp_k(config.bottom_k));
         Self {
             above,
             here,
