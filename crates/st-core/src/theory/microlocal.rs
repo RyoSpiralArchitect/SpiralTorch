@@ -35,14 +35,17 @@
 //! field together with signed curvature when a phase label is supplied.
 
 use crate::telemetry::hub::SoftlogicZFeedback;
-use crate::theory::zpulse::{ZConductor, ZEmitter, ZPulse, ZRegistry, ZSource, ZSupport};
+use crate::theory::zpulse::{
+    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZSource,
+    ZSupport,
+};
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
-use std::fmt;
 use std::f64::consts::PI;
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
@@ -955,50 +958,19 @@ impl BudgetPolicy {
     }
 }
 
-/// Aggregated Z-space state derived from the conductor.
-#[derive(Debug, Clone)]
-pub struct InterfaceZFused {
-    pub ts: u64,
-    pub z: f32,
-    pub support: f32,
-    pub drift: f32,
-    pub quality: f32,
-    pub events: Vec<String>,
-    pub attributions: Vec<(ZSource, f32)>,
-    pub pulse: ZPulse,
-}
-
-/// Report produced after fusing the microlocal gauges.
-#[derive(Debug, Clone)]
-pub struct InterfaceZReport {
-    pub pulses: Vec<InterfaceZPulse>,
-    pub qualities: Vec<f32>,
-    pub fused_pulse: InterfaceZPulse,
-    pub fused_z: InterfaceZFused,
-    pub feedback: SoftlogicZFeedback,
-    pub budget_scale: f32,
-}
-
-impl InterfaceZReport {
-    /// Returns `true` when any fused pulse retains interface support.
-    pub fn has_interface(&self) -> bool {
-        if self.fused_pulse.support > 0.0 {
-            return true;
-        }
-        self.pulses.iter().any(|pulse| pulse.support > 0.0)
-    }
-}
-
+#[allow(dead_code)]
 #[derive(Clone, Default)]
 struct MicrolocalEmitter {
     queue: Arc<Mutex<VecDeque<ZPulse>>>,
 }
 
 impl MicrolocalEmitter {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self::default()
     }
 
+    #[allow(dead_code)]
     fn extend<I>(&self, pulses: I)
     where
         I: IntoIterator<Item = ZPulse>,
@@ -1226,6 +1198,32 @@ impl InterfaceZConductor {
     /// Returns the most recent fused pulse emitted by the conductor.
     pub fn last_fused_pulse(&self) -> InterfaceZPulse {
         self.carry.clone().unwrap_or_else(InterfaceZPulse::default)
+    }
+
+    fn into_zpulse(fused: &InterfaceZPulse, now: u64, qualities: &[f32]) -> ZPulse {
+        let (above, here, beneath) = fused.band_energy;
+        let support = ZSupport {
+            leading: above,
+            central: here,
+            trailing: beneath,
+        };
+        let quality = if qualities.is_empty() {
+            1.0
+        } else {
+            qualities.iter().copied().sum::<f32>() / qualities.len() as f32
+        };
+        ZPulse {
+            source: fused.source,
+            ts: now,
+            tempo: fused.total_energy(),
+            drift: fused.drift,
+            z_bias: fused.z_bias,
+            support,
+            band_energy: fused.band_energy,
+            quality,
+            stderr: fused.standard_error.unwrap_or_default(),
+            latency_ms: 0.0,
+        }
     }
 }
 

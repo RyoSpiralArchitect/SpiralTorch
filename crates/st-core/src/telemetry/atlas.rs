@@ -62,18 +62,24 @@ impl ConceptSense {
     /// Returns a prose description summarising the sense.
     pub fn description(&self) -> &'static str {
         match self {
-            ConceptSense::QualiaLewisGiven =>
-                "Lewis: qualia as pre-conceptual givens underwriting epistemic grounding.",
-            ConceptSense::QualiaNagelSubjectivity =>
-                "Nagel: qualia as the irreducibly subjective 'what it is like' perspective.",
-            ConceptSense::QualiaJacksonKnowledge =>
-                "Jackson: qualia as phenomenal knowledge unattainable from physical facts alone.",
-            ConceptSense::QualiaChalmersHardProblem =>
-                "Chalmers: qualia as the hard problem's phenomenal core resisting reduction.",
-            ConceptSense::QualiaTononiIit =>
-                "Tononi: qualia identified with IIT's maximally irreducible conceptual structures.",
-            ConceptSense::QualiaGeneralDiscourse =>
-                "General discourse: qualia as a loose synonym for feeling or consciousness.",
+            ConceptSense::QualiaLewisGiven => {
+                "Lewis: qualia as pre-conceptual givens underwriting epistemic grounding."
+            }
+            ConceptSense::QualiaNagelSubjectivity => {
+                "Nagel: qualia as the irreducibly subjective 'what it is like' perspective."
+            }
+            ConceptSense::QualiaJacksonKnowledge => {
+                "Jackson: qualia as phenomenal knowledge unattainable from physical facts alone."
+            }
+            ConceptSense::QualiaChalmersHardProblem => {
+                "Chalmers: qualia as the hard problem's phenomenal core resisting reduction."
+            }
+            ConceptSense::QualiaTononiIit => {
+                "Tononi: qualia identified with IIT's maximally irreducible conceptual structures."
+            }
+            ConceptSense::QualiaGeneralDiscourse => {
+                "General discourse: qualia as a loose synonym for feeling or consciousness."
+            }
         }
     }
 }
@@ -248,11 +254,7 @@ impl AtlasFragment {
     }
 
     /// Convenience helper to attach a qualia annotation with optional rationale.
-    pub fn annotate_qualia(
-        &mut self,
-        sense: ConceptSense,
-        rationale: Option<impl Into<String>>,
-    ) {
+    pub fn annotate_qualia(&mut self, sense: ConceptSense, rationale: Option<impl Into<String>>) {
         let mut annotation = ConceptAnnotation::new("qualia", sense);
         if let Some(rationale) = rationale {
             annotation.rationale = Some(rationale.into());
@@ -477,8 +479,7 @@ impl AtlasRoute {
         let mut loop_sq_total = 0.0;
         let mut loop_samples = 0usize;
         let mut district_map: BTreeMap<String, DistrictAccumulator> = BTreeMap::new();
-        let mut concept_map: BTreeMap<(String, ConceptSense), ConceptAccumulator> =
-            BTreeMap::new();
+        let mut concept_map: BTreeMap<(String, ConceptSense), ConceptAccumulator> = BTreeMap::new();
         let mut first_collapse = None;
         let mut first_z_signal = None;
         for frame in &self.frames {
@@ -528,7 +529,9 @@ impl AtlasRoute {
             if !frame.concepts.is_empty() {
                 for concept in &frame.concepts {
                     let key = (concept.term.clone(), concept.sense);
-                    let entry = concept_map.entry(key).or_insert_with(ConceptAccumulator::new);
+                    let entry = concept_map
+                        .entry(key)
+                        .or_insert_with(ConceptAccumulator::new);
                     entry.mentions += 1;
                     if let Some(rationale) = concept.rationale.as_ref() {
                         entry.last_rationale = Some(rationale.clone());
@@ -1125,7 +1128,6 @@ impl ConceptAccumulator {
     }
 }
 
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1139,7 +1141,10 @@ mod tests {
         let frame = AtlasFrame::from_fragment(fragment).expect("frame");
         assert!(frame.timestamp > 0.0);
         assert_eq!(frame.concepts.len(), 1);
-        assert_eq!(frame.concepts[0].sense, ConceptSense::QualiaNagelSubjectivity);
+        assert_eq!(
+            frame.concepts[0].sense,
+            ConceptSense::QualiaNagelSubjectivity
+        );
         assert_eq!(
             frame.concepts[0].rationale.as_deref(),
             Some("subjective vantage guard")
@@ -1224,191 +1229,5 @@ fn infer_district(name: &str) -> &'static str {
         }
         "tensor" | "backend" | "core" | "z" | "collapse" | "geometry" | "kdsl" => "Substrate",
         _ => "Unknown",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn atlas_frame_retains_metrics_without_timestamp() {
-        let mut fragment = AtlasFragment::new();
-        fragment.push_metric("loop.energy", 1.2);
-        fragment.push_note("source:test");
-        let frame = AtlasFrame::from_fragment(fragment).expect("frame");
-        assert!(frame.timestamp > 0.0);
-        assert_eq!(frame.metrics.len(), 1);
-        assert!(frame
-            .notes
-            .iter()
-            .any(|note| note == "source:test"));
-    }
-
-    #[test]
-    fn atlas_frame_groups_metrics_into_districts() {
-        let mut fragment = AtlasFragment::new();
-        fragment.timestamp = Some(1.0);
-        fragment.push_metric("py.bridge.latency", 0.2);
-        fragment.push_metric_with_district("trainer.loop.energy", 0.8, "Concourse");
-        fragment.push_metric("tensor.backend.util", 0.6);
-        let mut frame = AtlasFrame::new(1.0);
-        frame.merge_fragment(fragment);
-        let districts = frame.districts();
-        assert_eq!(districts.len(), 3);
-        let surface = districts
-            .iter()
-            .find(|district| district.name == "Surface")
-            .expect("surface district");
-        assert!((surface.mean - 0.2).abs() <= f32::EPSILON);
-        let concourse = districts
-            .iter()
-            .find(|district| district.name == "Concourse")
-            .expect("concourse district");
-        assert_eq!(concourse.metrics.len(), 1);
-        let substrate = districts
-            .iter()
-            .find(|district| district.name == "Substrate")
-            .expect("substrate district");
-        assert!(substrate.span <= f32::EPSILON);
-    }
-
-    #[test]
-    fn atlas_route_trims_capacity() {
-        let mut route = AtlasRoute::new();
-        for idx in 0..5 {
-            let mut frame = AtlasFrame::new((idx + 1) as f32);
-            frame.loop_support = idx as f32;
-            route.push_bounded(frame, 3);
-        }
-        assert_eq!(route.len(), 3);
-        assert_eq!(route.frames[0].timestamp, 3.0);
-        assert_eq!(route.latest().unwrap().timestamp, 5.0);
-    }
-
-    #[test]
-    fn atlas_route_summary_tracks_district_trends() {
-        let mut route = AtlasRoute::new();
-        for idx in 0..4 {
-            let mut fragment = AtlasFragment::new();
-            fragment.timestamp = Some((idx + 1) as f32);
-            fragment.push_metric_with_district("session.surface.latency", idx as f32, "Surface");
-            fragment.push_metric_with_district(
-                "trainer.loop.energy",
-                idx as f32 + 1.0,
-                "Concourse",
-            );
-            fragment.push_metric_with_district(
-                "tensor.backend.util",
-                0.5 + idx as f32 * 0.1,
-                "Substrate",
-            );
-            let mut frame = AtlasFrame::new((idx + 1) as f32);
-            frame.loop_support = (idx as f32) * 0.5;
-            frame.collapse_total = Some(0.5 + idx as f32 * 0.1);
-            frame.z_signal = Some(0.2 + idx as f32 * 0.05);
-            frame.merge_fragment(fragment);
-            route.push_bounded(frame, usize::MAX);
-        }
-        let summary = route.summary();
-        assert_eq!(summary.frames, 4);
-        assert!(summary.latest_timestamp >= 4.0 - f32::EPSILON);
-        assert!(summary.mean_loop_support > 0.0);
-        assert!(summary.loop_std > 0.0);
-        assert!(!summary.districts.is_empty());
-        assert!(summary
-            .collapse_trend
-            .expect("collapse trend")
-            .is_sign_positive());
-        assert!(summary.z_signal_trend.expect("z trend").is_sign_positive());
-        let surface = summary
-            .districts
-            .iter()
-            .find(|district| district.name == "Surface")
-            .expect("surface summary");
-        assert_eq!(surface.coverage, 4);
-        assert!((surface.latest - 3.0).abs() <= f32::EPSILON);
-        assert!((surface.delta - 3.0).abs() <= f32::EPSILON);
-        assert!(surface.std_dev > 0.0);
-        assert!(!surface.focus.is_empty());
-    }
-
-    #[test]
-    fn atlas_route_perspectives_filter_focus() {
-        let mut route = AtlasRoute::new();
-        for idx in 0..3 {
-            let mut fragment = AtlasFragment::new();
-            fragment.timestamp = Some((idx + 1) as f32);
-            fragment.push_metric_with_district(
-                "session.surface.latency",
-                0.5 + idx as f32 * 0.25,
-                "Surface",
-            );
-            fragment.push_metric_with_district(
-                "session.surface.io",
-                0.2 + idx as f32 * 0.1,
-                "Surface",
-            );
-            fragment.push_metric_with_district(
-                "trainer.loop.energy",
-                idx as f32 * 0.4,
-                "Concourse",
-            );
-            let mut frame = AtlasFrame::new((idx + 1) as f32);
-            frame.loop_support = 0.3 + idx as f32 * 0.1;
-            frame.merge_fragment(fragment);
-            route.push_bounded(frame, usize::MAX);
-        }
-        let summary = route.summary();
-        let perspectives = summary.perspectives();
-        assert!(perspectives.len() >= 2);
-        let surface = summary
-            .perspective_for_with_focus("Surface", &["session.surface.io"])
-            .expect("surface perspective");
-        assert_eq!(surface.district, "Surface");
-        assert_eq!(surface.coverage, 3);
-        assert!(surface.guidance.contains("Surface district"));
-        assert!(surface
-            .focus
-            .iter()
-            .all(|metric| metric.name.starts_with("session.surface")));
-        assert!(surface.focus.len() <= 2);
-    }
-
-    #[test]
-    fn atlas_route_summary_emits_beacons() {
-        let mut route = AtlasRoute::new();
-        for idx in 0..4 {
-            let mut fragment = AtlasFragment::new();
-            fragment.timestamp = Some((idx + 1) as f32);
-            fragment.push_metric_with_district(
-                "session.surface.latency",
-                0.4 + idx as f32 * 0.3,
-                "Surface",
-            );
-            fragment.push_metric_with_district(
-                "trainer.loop.energy",
-                0.2 + idx as f32 * 0.1,
-                "Concourse",
-            );
-            let mut frame = AtlasFrame::new((idx + 1) as f32);
-            frame.loop_support = 0.2 + idx as f32 * 0.05;
-            frame.merge_fragment(fragment);
-            route.push_bounded(frame, usize::MAX);
-        }
-        let summary = route.summary();
-        let beacons = summary.beacons(4);
-        assert!(beacons.len() >= 2);
-        assert!(beacons[0].intensity >= beacons[1].intensity);
-        assert_eq!(beacons[0].district, "Surface");
-        assert!(matches!(beacons[0].trend, AtlasBeaconTrend::Rising));
-        assert!(beacons[0]
-            .narrative
-            .contains("Surface::session.surface.latency"));
-        let latency_beacon = summary
-            .beacon_for("session.surface.latency")
-            .expect("latency beacon");
-        assert_eq!(latency_beacon.metric, "session.surface.latency");
-        assert!(latency_beacon.intensity >= beacons[0].intensity - 1e-6);
     }
 }

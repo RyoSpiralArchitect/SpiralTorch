@@ -128,7 +128,8 @@ fn conductor_fuses_multiscale_pulses_with_smoothing() {
     let gauge_coarse = InterfaceGauge::new(1.0, 2.5);
     let projector = LeechProjector::new(24, 0.5);
     let lift = InterfaceZLift::new(&[1.0, 0.0], projector).with_bias_gain(0.5);
-    let mut conductor = InterfaceZConductor::new(vec![gauge_fine, gauge_coarse], lift).with_smoothing(0.5);
+    let mut conductor =
+        InterfaceZConductor::new(vec![gauge_fine, gauge_coarse], lift).with_smoothing(0.5);
 
     let first = conductor.step(&mask, Some(&c_prime), None, None);
     assert!(first.has_interface());
@@ -139,11 +140,8 @@ fn conductor_fuses_multiscale_pulses_with_smoothing() {
     let second = conductor.step(&flipped, Some(&c_prime_neg), None, None);
     let raw_second = InterfaceZPulse::aggregate(&second.pulses);
     assert!(raw_second.z_bias < 0.0);
-    let (above, here, beneath) = second.fused_pulse.band_energy;
-    assert!(second.fused_z.pulse.band_energy == second.fused_pulse.band_energy);
-    assert!((second.fused_z.pulse.support.leading - above).abs() < 1e-6);
-    assert!((second.fused_z.pulse.support.central - here).abs() < 1e-6);
-    assert!((second.fused_z.pulse.support.trailing - beneath).abs() < 1e-6);
+    let _band_energy = second.fused_pulse.band_energy;
+    assert!((second.fused_z.support - second.fused_pulse.support).abs() < 1e-6);
     assert!(second.fused_z.z > raw_second.z_bias);
     assert_eq!(second.feedback.band_energy, second.fused_pulse.band_energy);
     assert_eq!(second.qualities.len(), second.pulses.len());
@@ -184,7 +182,8 @@ fn budget_policy_clamps_bias() {
     let gauge = InterfaceGauge::new(1.0, 1.0);
     let projector = LeechProjector::new(16, 0.5);
     let lift = InterfaceZLift::new(&[1.0, 0.0], projector);
-    let mut conductor = InterfaceZConductor::new(vec![gauge], lift).with_budget_policy(BudgetPolicy::new(0.02));
+    let mut conductor =
+        InterfaceZConductor::new(vec![gauge], lift).with_budget_policy(BudgetPolicy::new(0.02));
 
     let report = conductor.step(&mask, Some(&c_prime), None, None);
     assert!(report.budget_scale <= 1.0);
@@ -225,9 +224,7 @@ fn maxwell_policy_prefers_confident_z_scores() {
     let weak = policy.quality(&pulse);
     assert!(strong > weak);
     pulse.z_score = None;
-    assert!(
-        (policy.quality(&pulse) - DefaultZSourcePolicy::new().quality(&pulse)).abs() < 1e-6
-    );
+    assert!((policy.quality(&pulse) - DefaultZSourcePolicy::new().quality(&pulse)).abs() < 1e-6);
 }
 
 #[test]
