@@ -8,6 +8,7 @@
 //! by microlocal/realgrad/maxwell, with a simple conductor and latency aligner.
 
 use rustc_hash::FxHashMap;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -57,6 +58,83 @@ impl Default for ZSupport {
             leading: 0.0,
             central: 0.0,
             trailing: 0.0,
+        }
+    }
+}
+
+/// Identifies the physical radius and its logarithmic coordinate backing a
+/// Z-space probe.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZScale {
+    /// Physical probe radius measured in the same units as the lattice spacing.
+    pub physical_radius: f32,
+    /// Logarithmic scale coordinate `z = log(physical_radius)`.
+    pub log_radius: f32,
+}
+
+impl ZScale {
+    /// Creates a scale tag from a physical radius, rejecting non-finite or
+    /// non-positive values.
+    pub fn new(physical_radius: f32) -> Option<Self> {
+        if !physical_radius.is_finite() || physical_radius <= 0.0 {
+            return None;
+        }
+        Some(Self {
+            physical_radius,
+            log_radius: physical_radius.ln(),
+        })
+    }
+
+    /// Creates a scale tag from a logarithmic radius.
+    pub fn from_log(log_radius: f32) -> Option<Self> {
+        let physical_radius = log_radius.exp();
+        if !physical_radius.is_finite() || physical_radius <= 0.0 {
+            return None;
+        }
+        Some(Self {
+            physical_radius,
+            log_radius,
+        })
+    }
+
+    /// Computes the support-weighted average of the provided scales.
+    pub fn weighted_average<I>(iter: I) -> Option<Self>
+    where
+        I: IntoIterator<Item = (ZScale, f32)>,
+    {
+        let mut physical_sum = 0.0f32;
+        let mut log_sum = 0.0f32;
+        let mut weight_sum = 0.0f32;
+        for (scale, weight) in iter.into_iter() {
+            if !weight.is_finite() || weight <= 0.0 {
+                continue;
+            }
+            physical_sum += scale.physical_radius * weight;
+            log_sum += scale.log_radius * weight;
+            weight_sum += weight;
+        }
+        if weight_sum <= f32::EPSILON {
+            return None;
+        }
+        Some(Self {
+            physical_radius: physical_sum / weight_sum,
+            log_radius: log_sum / weight_sum,
+        })
+    }
+
+    /// Linearly interpolates between two scale tags.
+    pub fn lerp(self, other: ZScale, alpha: f32) -> ZScale {
+        let alpha = alpha.clamp(0.0, 1.0);
+        if alpha <= f32::EPSILON {
+            return self;
+        }
+        if (1.0 - alpha) <= f32::EPSILON {
+            return other;
+        }
+        let beta = 1.0 - alpha;
+        ZScale {
+            physical_radius: self.physical_radius * beta + other.physical_radius * alpha,
+            log_radius: self.log_radius * beta + other.log_radius * alpha,
         }
     }
 }
@@ -156,6 +234,7 @@ pub struct ZPulse {
     pub drift: f32,
     pub z_bias: f32,
     pub support: ZSupport,
+    pub scale: Option<ZScale>,
     pub quality: f32,
     pub stderr: f32,
     pub latency_ms: f32,
@@ -202,6 +281,7 @@ impl Default for ZPulse {
             drift: 0.0,
             z_bias: 0.0,
             support: ZSupport::default(),
+            scale: None,
             quality: 0.0,
             stderr: 0.0,
             latency_ms: 0.0,
@@ -871,6 +951,7 @@ mod conductor_tests {
             drift,
             z_bias: drift,
             support,
+            scale: None,
             quality,
             stderr: 0.0,
             latency_ms: 0.0,

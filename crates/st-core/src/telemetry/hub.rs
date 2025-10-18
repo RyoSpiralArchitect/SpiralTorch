@@ -34,6 +34,8 @@ use std::time::SystemTime;
 
 use serde_json::Value;
 
+use crate::theory::zpulse::ZScale;
+
 use super::chrono::ChronoLoopSignal;
 #[cfg(feature = "psi")]
 use super::psi::{PsiComponent, PsiEvent, PsiReading};
@@ -162,6 +164,8 @@ pub struct SoftlogicZFeedback {
     pub drift: f32,
     /// Normalized control signal in the Z space. Positive values bias Above, negative bias Beneath.
     pub z_signal: f32,
+    /// Optional log-scale tag attached to the fused pulse that produced the feedback.
+    pub scale: Option<ZScale>,
 }
 
 static LAST_SOFTLOGIC_Z: OnceLock<RwLock<Option<SoftlogicZFeedback>>> = OnceLock::new();
