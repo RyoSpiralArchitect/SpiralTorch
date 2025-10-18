@@ -1636,6 +1636,7 @@ mod tests {
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
+    use st_tensor::pure::topos::OpenCartesianTopos;
     use st_tensor::topos::OpenCartesianTopos;
     use std::collections::HashMap;
     use std::time::{Duration, Instant, SystemTime};

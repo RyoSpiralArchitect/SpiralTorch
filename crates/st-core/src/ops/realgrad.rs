@@ -11,12 +11,101 @@
 //! and Leech density projector that already live inside the repository.
 
 use core::f32::consts::PI;
+use core::fmt;
 
+use crate::theory::zpulse::{ZPulse, ZSource};
 use crate::util::math::{ramanujan_pi, LeechProjector};
 
 const DEFAULT_RANK: usize = 24;
 const DEFAULT_WEIGHT: f64 = 1.0;
 const DEFAULT_THRESHOLD: f32 = 0.005;
+
+/// Discrete Fourier transform backend used by [`RealGradKernel`].
+pub trait SpectralEngine {
+    /// Computes the complex DFT of the provided real input.
+    ///
+    /// The output slice must have the same length as `input`. Each entry is
+    /// expressed as `(re, im)`.
+    fn dft(&mut self, input: &[f32], out: &mut [(f32, f32)]);
+
+    /// Returns the length supported by the cached plan.
+    fn len(&self) -> usize;
+}
+
+/// Naive O(N²) reference implementation of [`SpectralEngine`].
+#[derive(Debug, Default, Clone)]
+pub struct CpuNaive {
+    len: usize,
+    twiddle_cos: Vec<f32>,
+    twiddle_sin: Vec<f32>,
+}
+
+impl CpuNaive {
+    fn ensure_capacity(&mut self, len: usize) {
+        if self.len == len {
+            return;
+        }
+        self.len = len;
+        self.twiddle_cos.resize(len, 0.0);
+        self.twiddle_sin.resize(len, 0.0);
+        if len == 0 {
+            return;
+        }
+        let base = -2.0f64 * core::f64::consts::PI / len as f64;
+        for idx in 0..len {
+            let angle = base * idx as f64;
+            let (sin, cos) = angle.sin_cos();
+            self.twiddle_cos[idx] = cos as f32;
+            self.twiddle_sin[idx] = sin as f32;
+        }
+    }
+}
+
+impl SpectralEngine for CpuNaive {
+    fn dft(&mut self, input: &[f32], out: &mut [(f32, f32)]) {
+        let len = input.len();
+        assert_eq!(out.len(), len, "output length must match input length");
+        self.ensure_capacity(len);
+        if len == 0 {
+            return;
+        }
+
+        let delta_x = 1.0f64 / len as f64;
+        for (xi_idx, slot) in out.iter_mut().enumerate() {
+            let mut acc_re = 0.0f64;
+            let mut acc_im = 0.0f64;
+            let step_idx = xi_idx % self.len;
+            let cos_step = if step_idx == 0 {
+                1.0f64
+            } else {
+                self.twiddle_cos[step_idx] as f64
+            };
+            let sin_step = if step_idx == 0 {
+                0.0f64
+            } else {
+                self.twiddle_sin[step_idx] as f64
+            };
+            let mut cos = 1.0f64;
+            let mut sin = 0.0f64;
+            for &value in input {
+                let value = value as f64;
+                acc_re = f64::mul_add(value * cos, delta_x, acc_re);
+                acc_im = f64::mul_add(-value * sin, delta_x, acc_im);
+                if step_idx != 0 {
+                    let next_cos = cos * cos_step - sin * sin_step;
+                    let next_sin = cos * sin_step + sin * cos_step;
+                    cos = next_cos;
+                    sin = next_sin;
+                }
+            }
+            *slot = (acc_re as f32, acc_im as f32);
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+}
 
 /// Result emitted by [`project_realgrad`].
 #[derive(Debug, Clone, PartialEq)]
@@ -27,7 +116,7 @@ pub struct RealGradProjection {
     pub z_space: Vec<f32>,
     /// Residual magnitudes that were too large to keep and were therefore sent
     /// to the "monad biome" side channel for dedicated treatment.
-    pub monad_biome: Vec<f32>,
+    pub monad_biome: Vec<Residual>,
     /// Lebesgue-style integral (L¹ norm) used to stabilise the projection.
     pub lebesgue_measure: f32,
     /// Ramanujan π estimate used for the projection.
@@ -44,11 +133,59 @@ pub struct GradientSummary {
 }
 
 /// Cached projector state that can be reused across multiple RealGrad invocations.
-#[derive(Debug, Clone)]
 pub struct RealGradKernel {
     config: RealGradConfig,
     projector: LeechProjector,
     ramanujan_pi: f32,
+    engine: Box<dyn SpectralEngine + Send>,
+    spectrum: Vec<(f32, f32)>,
+    z_buf: Vec<f32>,
+    residuals: Vec<Residual>,
+}
+
+impl fmt::Debug for RealGradKernel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RealGradKernel")
+            .field("config", &self.config)
+            .field("projector", &self.projector)
+            .field("ramanujan_pi", &self.ramanujan_pi)
+            .field("engine_len", &self.engine.len())
+            .field("spectrum_len", &self.spectrum.len())
+            .finish()
+    }
+}
+
+/// Scratch buffers that can be reused across RealGrad projections.
+#[derive(Debug, Clone, Default)]
+pub struct RealGradProjectionScratch {
+    projection: RealGradProjection,
+}
+
+impl RealGradProjectionScratch {
+    /// Creates an empty scratch projection.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns an immutable view over the projection stored in the scratch buffers.
+    pub fn as_projection(&self) -> &RealGradProjection {
+        &self.projection
+    }
+
+    /// Returns a mutable view over the projection stored in the scratch buffers.
+    pub fn as_projection_mut(&mut self) -> &mut RealGradProjection {
+        &mut self.projection
+    }
+
+    /// Consumes the scratch buffers, yielding the owned projection.
+    pub fn into_projection(self) -> RealGradProjection {
+        self.projection
+    }
+
+    /// Clears the projection contents while preserving the allocated capacity.
+    pub fn clear(&mut self) {
+        self.projection.clear();
+    }
 }
 
 /// Projection outcome for a tempered (distribution-like) RealGrad sequence.
@@ -79,7 +216,10 @@ impl RealGradProjection {
 
     /// Returns the total magnitude routed to the monad biome.
     pub fn residual_energy(&self) -> f32 {
-        self.monad_biome.iter().copied().sum()
+        self.monad_biome
+            .iter()
+            .map(|residual| residual.magnitude)
+            .sum()
     }
 
     /// Returns the accumulated energy of the Z-space field.
@@ -125,7 +265,17 @@ impl RealGradKernel {
             config,
             projector,
             ramanujan_pi,
+            engine: Box::new(CpuNaive::default()),
+            spectrum: Vec::new(),
+            z_buf: Vec::new(),
+            residuals: Vec::new(),
         }
+    }
+
+    /// Replaces the spectral engine used by the kernel.
+    pub fn with_engine(mut self, engine: Box<dyn SpectralEngine + Send>) -> Self {
+        self.engine = engine;
+        self
     }
 
     /// Returns the effective configuration used by the kernel.
@@ -143,44 +293,50 @@ impl RealGradKernel {
     }
 
     /// Projects the provided samples into the RealGrad field using the cached projector.
-    pub fn project(&self, values: &[f32]) -> RealGradProjection {
+    pub fn project(&mut self, values: &[f32]) -> RealGradProjection {
+        let mut scratch = RealGradProjectionScratch::default();
+        self.project_into(values, &mut scratch);
+        scratch.into_projection()
+    }
+
+    /// Projects the provided samples into the RealGrad field using the cached projector,
+    /// storing the results inside the supplied scratch buffers.
+    pub fn project_into(&mut self, values: &[f32], out: &mut RealGradProjectionScratch) {
+        out.clear();
         if values.is_empty() {
-            return RealGradProjection {
-                realgrad: Vec::new(),
-                z_space: Vec::new(),
-                monad_biome: Vec::new(),
-                lebesgue_measure: 0.0,
-                ramanujan_pi: self.ramanujan_pi,
-            };
+            out.as_projection_mut().ramanujan_pi = self.ramanujan_pi;
+            return;
         }
 
         let len = values.len();
-        let delta_x = 1.0f32 / len as f32;
-        let mut spectrum: Vec<(f32, f32)> = vec![(0.0, 0.0); len];
+        self.spectrum.resize(len, (0.0, 0.0));
+        self.engine.dft(values, &mut self.spectrum);
 
-        for (xi_idx, slot) in spectrum.iter_mut().enumerate() {
-            let mut acc_re = 0.0f32;
-            let mut acc_im = 0.0f32;
-            let xi = xi_idx as f32;
-            for (n_idx, &value) in values.iter().enumerate() {
-                let x = n_idx as f32 * delta_x;
-                let angle = -2.0 * self.ramanujan_pi * x * xi;
-                let (sin, cos) = angle.sin_cos();
-                acc_re += value * cos * delta_x;
-                acc_im -= value * sin * delta_x;
+        let scale = self.config.spectrum_norm.scale(len);
+        if (scale - 1.0).abs() > f64::EPSILON {
+            for (re, im) in &mut self.spectrum {
+                *re = (*re as f64 * scale) as f32;
+                *im = (*im as f64 * scale) as f32;
             }
-            *slot = (acc_re, acc_im);
         }
 
-        let mut z_space = Vec::with_capacity(len);
-        let mut monad_biome = Vec::new();
-        for &(re, im) in &spectrum {
+        self.z_buf.resize(len, 0.0);
+        self.residuals.clear();
+        let projection = out.as_projection_mut();
+        projection.realgrad.resize(len, 0.0);
+        projection.z_space.resize(len, 0.0);
+        for (idx, &(re, im)) in self.spectrum.iter().enumerate() {
             let magnitude = (re * re + im * im).sqrt();
             if magnitude > self.residual_threshold() {
-                monad_biome.push(magnitude);
+                self.residuals.push(Residual {
+                    bin: idx,
+                    magnitude,
+                    reason: ResidualReason::OverThreshold,
+                });
             }
             let enriched = self.projector.enrich(magnitude as f64) as f32;
-            z_space.push(enriched);
+            self.z_buf[idx] = enriched;
+            projection.z_space[idx] = enriched;
         }
 
         let lebesgue_measure = values.iter().map(|v| v.abs()).sum::<f32>();
@@ -190,24 +346,18 @@ impl RealGradKernel {
             0.0
         };
 
-        let realgrad = values
-            .iter()
-            .zip(z_space.iter())
-            .map(|(&value, &z)| value * normaliser + z)
-            .collect();
-
-        RealGradProjection {
-            realgrad,
-            z_space,
-            monad_biome,
-            lebesgue_measure,
-            ramanujan_pi: self.ramanujan_pi,
+        for idx in 0..len {
+            projection.realgrad[idx] = values[idx] * normaliser + self.z_buf[idx];
         }
+
+        projection.monad_biome.extend_from_slice(&self.residuals);
+        projection.lebesgue_measure = lebesgue_measure;
+        projection.ramanujan_pi = self.ramanujan_pi;
     }
 
     /// Projects a Schwartz sequence using the cached projector and returns the tempered outcome.
     pub fn project_tempered(
-        &self,
+        &mut self,
         sequence: &SchwartzSequence,
         tolerance: f32,
     ) -> TemperedRealGradProjection {
@@ -233,7 +383,7 @@ impl RealGradKernel {
 
         let dominated = sequence.is_dominated();
         let mut previous: Option<RealGradProjection> = None;
-        let mut overflow_residuals: Vec<f32> = Vec::new();
+        let mut overflow_residuals: Vec<Residual> = Vec::new();
         let mut convergence_error = f32::INFINITY;
         let mut iterations = 0usize;
 
@@ -250,7 +400,11 @@ impl RealGradKernel {
                     + (projection.lebesgue_measure - prev.lebesgue_measure).abs();
                 convergence_error = diff;
                 if diff > tolerance {
-                    overflow_residuals.push(diff - tolerance);
+                    overflow_residuals.push(Residual {
+                        bin: 0,
+                        magnitude: diff - tolerance,
+                        reason: ResidualReason::NonConvergent,
+                    });
                 }
             } else {
                 convergence_error = 0.0;
@@ -263,7 +417,11 @@ impl RealGradKernel {
             projection.monad_biome.extend(overflow_residuals);
         }
         if !dominated && convergence_error.is_finite() && convergence_error > 0.0 {
-            projection.monad_biome.push(convergence_error);
+            projection.monad_biome.push(Residual {
+                bin: 0,
+                magnitude: convergence_error,
+                reason: ResidualReason::NonConvergent,
+            });
         }
 
         TemperedRealGradProjection {
@@ -271,6 +429,28 @@ impl RealGradKernel {
             dominated,
             convergence_error,
             iterations,
+        }
+    }
+}
+
+/// Normalisation applied to the DFT spectrum prior to enrichment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpectrumNorm {
+    /// Applies a `1/√N` scaling to preserve Parseval symmetry.
+    Unitary,
+    /// Leaves the forward transform in its natural `1/N` scaling.
+    Forward,
+    /// Applies a `1/N²` scaling matching the backward transform convention.
+    Backward,
+}
+
+impl SpectrumNorm {
+    fn scale(self, len: usize) -> f64 {
+        let n = len.max(1) as f64;
+        match self {
+            SpectrumNorm::Unitary => n.sqrt(),
+            SpectrumNorm::Forward => n,
+            SpectrumNorm::Backward => 1.0,
         }
     }
 }
@@ -286,6 +466,8 @@ pub struct RealGradConfig {
     pub z_weight: f64,
     /// Threshold beyond which magnitudes are routed to the monad biome.
     pub residual_threshold: f32,
+    /// Normalisation applied to the DFT spectrum.
+    pub spectrum_norm: SpectrumNorm,
 }
 
 /// Discrete representation of a Schwartz sequence used to approximate a tempered function.
@@ -354,6 +536,7 @@ impl Default for RealGradConfig {
             z_rank: DEFAULT_RANK,
             z_weight: DEFAULT_WEIGHT,
             residual_threshold: DEFAULT_THRESHOLD,
+            spectrum_norm: SpectrumNorm::Backward,
         }
     }
 }
@@ -366,6 +549,7 @@ impl RealGradConfig {
             z_rank: self.z_rank.max(1),
             z_weight: self.z_weight.max(0.0),
             residual_threshold: self.residual_threshold.max(0.0),
+            spectrum_norm: self.spectrum_norm,
         }
     }
 
@@ -427,6 +611,102 @@ pub struct RealGradTuning {
     pub suggested_threshold: f32,
 }
 
+/// Projects RealGrad output into a canonical [`ZPulse`].
+#[derive(Clone, Debug)]
+pub struct RealGradZProjector {
+    projector: LeechProjector,
+    bias_gain: f32,
+    min_energy: f32,
+}
+
+impl RealGradZProjector {
+    /// Creates a new projector with the provided enrichment parameters.
+    pub fn new(projector: LeechProjector, bias_gain: f32, min_energy: f32) -> Self {
+        Self {
+            projector,
+            bias_gain,
+            min_energy: min_energy.max(0.0),
+        }
+    }
+
+    /// Converts a [`RealGradProjection`] into a Z-space pulse compatible with the conductor.
+    pub fn project(&self, projection: &RealGradProjection) -> ZPulse {
+        let here = projection.lebesgue_measure.max(0.0);
+        let mut above = 0.0f32;
+        let mut beneath = 0.0f32;
+        for &value in &projection.z_space {
+            if value >= 0.0 {
+                above += value.abs();
+            } else {
+                beneath += value.abs();
+            }
+        }
+        let drift = above - beneath;
+        let z_energy = projection.z_energy();
+        let magnitude = drift.abs() as f64;
+        let enriched = self.projector.enrich(magnitude) as f32;
+        let z_bias = if z_energy >= self.min_energy {
+            enriched.copysign(drift) * self.bias_gain
+        } else {
+            0.0
+        };
+
+        ZPulse {
+            source: ZSource::Other("RealGrad"),
+            ts: 0,
+            band_energy: (above, here, beneath),
+            drift,
+            z_bias,
+            support: z_energy,
+            quality: 0.0,
+            stderr: 0.0,
+            latency_ms: 0.0,
+        }
+    }
+}
+
+/// Adaptive residual threshold tuner built on an exponential moving average.
+#[derive(Clone, Debug)]
+pub struct RealGradAutoTuner {
+    ema_ratio: f32,
+    ema_alpha: f32,
+}
+
+impl RealGradAutoTuner {
+    /// Creates a new auto tuner using the provided EMA coefficient.
+    pub fn new(ema_alpha: f32) -> Self {
+        Self {
+            ema_ratio: 0.0,
+            ema_alpha: ema_alpha.clamp(0.0, 1.0),
+        }
+    }
+
+    /// Returns the current EMA coefficient.
+    pub fn ema_alpha(&self) -> f32 {
+        self.ema_alpha
+    }
+
+    /// Returns the tracked residual ratio.
+    pub fn residual_ratio(&self) -> f32 {
+        self.ema_ratio
+    }
+
+    /// Updates the residual threshold based on the projection statistics.
+    pub fn update(&mut self, projection: &RealGradProjection, config: &mut RealGradConfig) {
+        let monad = projection.residual_energy();
+        let z_energy = projection.z_energy();
+        let total = (monad + z_energy).max(1.0e-9);
+        let ratio = monad / total;
+        let alpha = self.ema_alpha.clamp(0.0, 1.0);
+        let complement = 1.0 - alpha;
+        self.ema_ratio = self.ema_ratio * complement + ratio * alpha;
+
+        let target = 0.1f32;
+        let adjustment = (1.0 + (self.ema_ratio - target)).clamp(0.5, 1.5);
+        config.residual_threshold = (config.residual_threshold * adjustment).max(0.0);
+    }
+}
+
 /// Projects a Euclidean gradient into the Reach lattice "Realgrad" tape.
 ///
 /// The routine performs a discrete Fourier transform so that harmonics can be
@@ -461,10 +741,12 @@ pub fn project_tempered_realgrad(
 #[cfg(test)]
 mod tests {
     use super::{
-        project_realgrad, project_tempered_realgrad, RealGradConfig, RealGradKernel,
-        SchwartzSequence, DEFAULT_THRESHOLD,
+        project_realgrad, project_tempered_realgrad, RealGradAutoTuner, RealGradConfig,
+        RealGradKernel, RealGradProjectionScratch, RealGradZProjector, SchwartzSequence,
+        SpectrumNorm, DEFAULT_THRESHOLD,
     };
-    use crate::util::math::LEECH_PACKING_DENSITY;
+    use crate::theory::zpulse::ZSource;
+    use crate::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
 
     #[test]
     fn projection_handles_empty_input() {
@@ -479,13 +761,27 @@ mod tests {
     #[test]
     fn kernel_caches_ramanujan_series() {
         let config = RealGradConfig::default();
-        let kernel = RealGradKernel::new(config);
+        let mut kernel = RealGradKernel::new(config);
         assert!(kernel.ramanujan_pi() > 3.14);
         let empty = kernel.project(&[]);
         assert_eq!(empty.ramanujan_pi, kernel.ramanujan_pi());
         let data = [0.5f32, -0.25];
         let projection = kernel.project(&data);
         assert_eq!(projection.ramanujan_pi, kernel.ramanujan_pi());
+    }
+
+    #[test]
+    fn project_into_reuses_scratch_buffers() {
+        let mut kernel = RealGradKernel::new(RealGradConfig::default());
+        let mut scratch = RealGradProjectionScratch::new();
+        kernel.project_into(&[0.25f32, -0.5], &mut scratch);
+        let initial_capacity = scratch.as_projection().realgrad.capacity();
+        kernel.project_into(&[0.5, -0.75], &mut scratch);
+        assert_eq!(
+            initial_capacity,
+            scratch.as_projection().realgrad.capacity()
+        );
+        assert_eq!(scratch.as_projection().ramanujan_pi, kernel.ramanujan_pi());
     }
 
     #[test]
@@ -515,7 +811,11 @@ mod tests {
         assert!(projection.z_energy() > 0.0);
         assert_eq!(
             projection.residual_energy(),
-            projection.monad_biome.iter().sum::<f32>()
+            projection
+                .monad_biome
+                .iter()
+                .map(|residual| residual.magnitude)
+                .sum::<f32>()
         );
     }
 
@@ -563,6 +863,20 @@ mod tests {
         let (tuned_small, tuning_small) = config.calibrate(&small_projection);
         assert!(tuning_small.adjustment_factor < 1.0);
         assert!(tuned_small.residual_threshold < config.residual_threshold);
+    }
+
+    #[test]
+    fn spectrum_norm_variants_affect_scaling() {
+        let mut config = RealGradConfig::default();
+        config.spectrum_norm = SpectrumNorm::Backward;
+        let mut backward = RealGradKernel::new(config);
+        let backward_proj = backward.project(&[1.0f32, 0.0, 0.0, 0.0]);
+
+        config.spectrum_norm = SpectrumNorm::Forward;
+        let mut forward = RealGradKernel::new(config);
+        let forward_proj = forward.project(&[1.0f32, 0.0, 0.0, 0.0]);
+
+        assert_ne!(backward_proj.z_space[0], forward_proj.z_space[0]);
     }
 
     #[test]
@@ -614,11 +928,38 @@ mod tests {
             .projection
             .monad_biome
             .iter()
-            .all(|value| value.is_finite()));
+            .all(|value| value.magnitude.is_finite()));
         assert!(
             tempered.converged(4.0),
             "err {}",
             tempered.convergence_error
         );
+    }
+
+    #[test]
+    fn z_projector_emits_realgrad_pulse() {
+        let config = RealGradConfig::default();
+        let mut kernel = RealGradKernel::new(config);
+        let projection = kernel.project(&[0.5f32, -0.25, 0.75, -0.5]);
+        let projector = RealGradZProjector::new(
+            LeechProjector::new(config.z_rank, config.z_weight),
+            1.0,
+            0.0,
+        );
+        let pulse = projector.project(&projection);
+        assert!(matches!(pulse.source, ZSource::Other("RealGrad")));
+        assert!(pulse.support >= 0.0);
+        assert!(pulse.band_energy.0 >= 0.0);
+    }
+
+    #[test]
+    fn auto_tuner_tracks_residual_ratio() {
+        let mut tuner = RealGradAutoTuner::new(0.2);
+        let mut config = RealGradConfig::default();
+        let projection = project_realgrad(&vec![DEFAULT_THRESHOLD * 64.0; 8], config);
+        let previous = config.residual_threshold;
+        tuner.update(&projection, &mut config);
+        assert!(tuner.residual_ratio() > 0.0);
+        assert!(config.residual_threshold > previous);
     }
 }

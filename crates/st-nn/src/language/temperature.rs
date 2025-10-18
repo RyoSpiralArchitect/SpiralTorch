@@ -3,6 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use st_core::telemetry::hub::SoftlogicZFeedback;
+
 #[derive(Clone, Debug)]
 pub struct TemperatureController {
     value: f32,
@@ -35,6 +37,12 @@ impl TemperatureController {
             controller.value = controller.min;
         }
         controller
+    }
+
+    pub fn with_feedback(mut self, kappa: f32, relax: f32) -> Self {
+        self.z_kappa = kappa.max(0.0);
+        self.z_relax = relax.clamp(0.0, 1.0);
+        self
     }
 
     pub fn value(&self) -> f32 {

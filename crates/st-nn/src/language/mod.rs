@@ -13,6 +13,8 @@ mod pipeline;
 mod schrodinger;
 mod temperature;
 
+use self::pipeline as pipeline_exports;
+
 pub use automation::{DesireAutomatedStep, DesireAutomation, DesireRewriteTrigger};
 pub use desire::{
     constant, warmup, DesireAvoidanceReport, DesireLagrangian, DesirePhase, DesireSchedule,
@@ -21,14 +23,17 @@ pub use desire::{
 pub use geometry::{ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry};
 pub use gw::{DistanceMatrix, EntropicGwSolver};
 pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
-pub use maxwell::{MaxwellDesireBridge, NarrativeHint};
+pub use maxwell::MaxwellDesireBridge;
 pub use pipeline::{
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesirePipeline,
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRoundtableBridge,
     DesireRoundtableEvent, DesireRoundtableImpulse, DesireRoundtableSummary, DesireTelemetrySink,
     DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
-    DesireTriggerEvent, LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
+    DesireTriggerEvent,
 };
 #[cfg(feature = "psi")]
-pub use pipeline::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
+pub use pipeline_exports::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
+pub use pipeline_exports::{
+    LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
+};
 pub use temperature::{entropy, TemperatureController};
