@@ -1,0 +1,54 @@
+# .github/workflows/repo-stats.yml
+name: repo-stats
+
+on:
+  push:
+    branches: [ main, master ]
+  schedule:
+    - cron: "17 */6 * * *"  # 6時間ごと（UTC、毎時:17）
+  workflow_dispatch: {}
+
+permissions:
+  contents: write  # 生成物をコミット/プッシュするため
+
+concurrency:
+  group: repo-stats
+  cancel-in-progress: false
+
+jobs:
+  stats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (for tokei and cargo metadata)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo install
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-${{ runner.os }}-tokei-12
+
+      - name: Install tokei
+        run: |
+          if ! command -v tokei >/dev/null; then
+            cargo install tokei --version 12.1.2
+          fi
+          tokei --version
+
+      - name: Generate badges & update README
+        run: |
+          python3 tools/gen_repo_stats.py
+
+      # ループ防止: 定期 or 手動のときだけコミットする
+      - name: Commit changes (if any)
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        run: |
+          if ! git diff --quiet; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore(stats): update LOC/deps badges [skip ci]"
+            git push
+          fi
