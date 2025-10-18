@@ -1,0 +1,3 @@
+ignore = [
+    "bindings/st-py/src/lib.rs",
+]

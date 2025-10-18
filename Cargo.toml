@@ -11,7 +11,23 @@ members = [
   "crates/st-text",
   "crates/st-rl",
   "crates/st-rec",
+  "crates/st-bench",
   "bindings/st-py",
+  "bindings/st-wasm"
+]
+default-members = [
+  "crates/st-core",
+  "crates/st-backend-hip",
+  "crates/st-kdsl",
+  "crates/st-logic",
+  "crates/st-kv",
+  "crates/st-tensor",
+  "crates/st-nn",
+  "crates/st-qr-studio",
+  "crates/st-text",
+  "crates/st-rl",
+  "crates/st-rec",
+  "crates/st-bench",
   "bindings/st-wasm"
 ]
 resolver = "2"

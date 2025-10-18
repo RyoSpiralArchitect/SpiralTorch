@@ -145,20 +145,30 @@ pub fn classify_roundtable(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::device_caps::DeviceCaps;
-    use crate::backend::unison_heuristics::RankKind;
-    use crate::telemetry::hub;
+    use crate::backend::unison_heuristics::{Choice, RankKind};
 
     fn plan(kind: RankKind, k: u32) -> RankPlan {
-        hub::clear_last_realgrad_for_test();
-        let mut pulse = hub::RealGradPulse::default();
-        pulse.gradient_norm = 48.0;
-        pulse.gradient_sparsity = 0.2;
-        hub::set_last_realgrad(&pulse);
-        let plan =
-            crate::ops::rank_entry::plan_rank(kind, 1, 8, k, DeviceCaps::wgpu(32, true, 256));
-        hub::clear_last_realgrad_for_test();
-        plan
+        RankPlan {
+            kind,
+            rows: 1,
+            cols: 1,
+            k,
+            choice: Choice {
+                use_2ce: false,
+                wg: 32,
+                kl: 32,
+                ch: 0,
+                mk: 0,
+                mkd: 0,
+                tile: 0,
+                ctile: 0,
+                subgroup: false,
+                fft_tile: 0,
+                fft_radix: 2,
+                fft_segments: 1,
+                latency_window: None,
+            },
+        }
     }
 
     #[test]
