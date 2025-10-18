@@ -2192,6 +2192,20 @@ impl PyTemperatureController {
     fn value(&self) -> f32 {
         self.inner.value()
     }
+
+    fn observe_grad(&mut self, norm: f32, sparsity: f32) {
+        self.inner.observe_grad(norm, sparsity);
+    }
+
+    fn update(&mut self, distribution: Vec<f32>) -> f32 {
+        self.inner.update(&distribution)
+    }
+
+    #[pyo3(signature = (distribution, gradient_gain=1.0))]
+    fn update_with_gradient(&mut self, distribution: Vec<f32>, gradient_gain: f32) -> f32 {
+        self.inner
+            .update_with_gradient(&distribution, gradient_gain)
+    }
 }
 
 #[pyclass(module = "spiraltorch", name = "DesireSchedule")]

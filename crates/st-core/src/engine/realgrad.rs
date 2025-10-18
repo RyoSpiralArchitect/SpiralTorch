@@ -93,6 +93,7 @@ impl RealGradEngine {
         } else {
             0.0
         };
+        let gradient_summary = projection.gradient_summary();
         let (iterations, convergence_error, dominated, converged) = if let Some(tempered) = tempered
         {
             (
@@ -117,6 +118,8 @@ impl RealGradEngine {
             iterations,
             dominated,
             converged,
+            gradient_norm: gradient_summary.norm,
+            gradient_sparsity: gradient_summary.sparsity,
         };
         set_last_realgrad(&pulse);
     }
@@ -162,6 +165,8 @@ mod tests {
         let pulse = crate::telemetry::hub::get_last_realgrad().expect("pulse recorded");
         assert!(pulse.lebesgue_measure > 0.0);
         assert!(pulse.iterations >= 1);
+        assert!(pulse.gradient_norm >= 0.0);
+        assert!(pulse.gradient_sparsity >= 0.0 && pulse.gradient_sparsity <= 1.0);
     }
 
     #[test]
@@ -180,5 +185,7 @@ mod tests {
         let pulse = crate::telemetry::hub::get_last_realgrad().expect("tempered pulse");
         assert_eq!(pulse.iterations as usize, tempered.iterations);
         assert_eq!(pulse.dominated, tempered.dominated);
+        assert!(pulse.gradient_norm >= 0.0);
+        assert!(pulse.gradient_sparsity >= 0.0 && pulse.gradient_sparsity <= 1.0);
     }
 }

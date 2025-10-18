@@ -37,6 +37,7 @@ use super::psi::{PsiComponent, PsiEvent, PsiReading};
 use super::psychoid::PsychoidReading;
 #[cfg(feature = "collapse")]
 use crate::engine::collapse_drive::DriveCmd;
+use crate::ops::realgrad::GradientSummary;
 use std::collections::VecDeque;
 
 #[cfg(feature = "psi")]
@@ -291,7 +292,7 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
 }
 
 /// Snapshot summarising the latest RealGrad projection applied by the system.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct RealGradPulse {
     /// L¹ magnitude of the input signal.
     pub lebesgue_measure: f32,
@@ -315,6 +316,40 @@ pub struct RealGradPulse {
     pub dominated: bool,
     /// Whether the sequence satisfied the configured tolerance.
     pub converged: bool,
+    /// Cached gradient norm reported by the RealGrad projection.
+    pub gradient_norm: f32,
+    /// Ratio of near-zero gradient entries observed by the projection.
+    pub gradient_sparsity: f32,
+}
+
+impl Default for RealGradPulse {
+    fn default() -> Self {
+        Self {
+            lebesgue_measure: 0.0,
+            monad_energy: 0.0,
+            z_energy: 0.0,
+            residual_ratio: 0.0,
+            lebesgue_ratio: 0.0,
+            ramanujan_pi: 0.0,
+            tolerance: 0.0,
+            convergence_error: 0.0,
+            iterations: 0,
+            dominated: false,
+            converged: false,
+            gradient_norm: 0.0,
+            gradient_sparsity: 1.0,
+        }
+    }
+}
+
+impl RealGradPulse {
+    /// Returns the gradient summary captured by the pulse.
+    pub fn gradient_summary(&self) -> GradientSummary {
+        GradientSummary {
+            norm: self.gradient_norm.max(0.0),
+            sparsity: self.gradient_sparsity.clamp(0.0, 1.0),
+        }
+    }
 }
 
 static LAST_REALGRAD: OnceLock<RwLock<Option<RealGradPulse>>> = OnceLock::new();
@@ -345,7 +380,10 @@ pub(crate) fn clear_last_realgrad_for_test() {
     }
 }
 
-#[cfg_attr(feature = "psi", doc = "Stores the latest desire step telemetry snapshot for downstream consumers.")]
+#[cfg_attr(
+    feature = "psi",
+    doc = "Stores the latest desire step telemetry snapshot for downstream consumers."
+)]
 #[cfg(feature = "psi")]
 pub fn set_last_desire_step(step: DesireStepTelemetry) {
     if let Ok(mut guard) = desire_step_cell().write() {
@@ -353,7 +391,10 @@ pub fn set_last_desire_step(step: DesireStepTelemetry) {
     }
 }
 
-#[cfg_attr(feature = "psi", doc = "Clears the cached desire step telemetry snapshot.")]
+#[cfg_attr(
+    feature = "psi",
+    doc = "Clears the cached desire step telemetry snapshot."
+)]
 #[cfg(feature = "psi")]
 pub fn clear_last_desire_step() {
     if let Ok(mut guard) = desire_step_cell().write() {
@@ -361,7 +402,10 @@ pub fn clear_last_desire_step() {
     }
 }
 
-#[cfg_attr(feature = "psi", doc = "Returns the latest desire step telemetry snapshot, if one has been recorded.")]
+#[cfg_attr(
+    feature = "psi",
+    doc = "Returns the latest desire step telemetry snapshot, if one has been recorded."
+)]
 #[cfg(feature = "psi")]
 pub fn get_last_desire_step() -> Option<DesireStepTelemetry> {
     desire_step_cell()
@@ -720,11 +764,18 @@ mod tests {
         pulse.iterations = 3;
         pulse.dominated = true;
         pulse.converged = true;
+        pulse.gradient_norm = 2.5;
+        pulse.gradient_sparsity = 0.75;
         set_last_realgrad(&pulse);
         let stored = get_last_realgrad().expect("pulse stored");
         assert_eq!(stored.iterations, 3);
         assert!(stored.converged);
         assert!((stored.residual_ratio - 0.25).abs() < f32::EPSILON);
+        assert!((stored.gradient_norm - 2.5).abs() < f32::EPSILON);
+        assert!((stored.gradient_sparsity - 0.75).abs() < f32::EPSILON);
+        let summary = stored.gradient_summary();
+        assert!((summary.norm - 2.5).abs() < f32::EPSILON);
+        assert!((summary.sparsity - 0.75).abs() < f32::EPSILON);
         clear_last_realgrad_for_test();
         assert!(get_last_realgrad().is_none());
     }

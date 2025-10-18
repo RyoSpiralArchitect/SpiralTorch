@@ -34,6 +34,15 @@ pub struct RealGradProjection {
     pub ramanujan_pi: f32,
 }
 
+/// Summary statistics derived from a RealGrad projection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GradientSummary {
+    /// L¹ norm of the projected gradient.
+    pub norm: f32,
+    /// Share of samples that remained below the adaptive threshold.
+    pub sparsity: f32,
+}
+
 /// Cached projector state that can be reused across multiple RealGrad invocations.
 #[derive(Debug, Clone)]
 pub struct RealGradKernel {
@@ -76,6 +85,33 @@ impl RealGradProjection {
     /// Returns the accumulated energy of the Z-space field.
     pub fn z_energy(&self) -> f32 {
         self.z_space.iter().map(|value| value.abs()).sum()
+    }
+
+    /// Produces a lightweight summary of the projected gradient.
+    pub fn gradient_summary(&self) -> GradientSummary {
+        let norm = self.lebesgue_measure.max(0.0);
+        if self.realgrad.is_empty() {
+            return GradientSummary {
+                norm,
+                sparsity: 1.0,
+            };
+        }
+        let len = self.realgrad.len() as f32;
+        let threshold = if norm > 0.0 {
+            (norm / len).max(1.0e-6)
+        } else {
+            1.0e-6
+        };
+        let sparse = self
+            .realgrad
+            .iter()
+            .filter(|&&value| value.abs() <= threshold)
+            .count() as f32
+            / len;
+        GradientSummary {
+            norm,
+            sparsity: sparse.clamp(0.0, 1.0),
+        }
     }
 }
 
@@ -481,6 +517,15 @@ mod tests {
             projection.residual_energy(),
             projection.monad_biome.iter().sum::<f32>()
         );
+    }
+
+    #[test]
+    fn projection_reports_gradient_summary() {
+        let data = [0.5f32, 0.0, -0.5, 0.25];
+        let projection = project_realgrad(&data, RealGradConfig::default());
+        let summary = projection.gradient_summary();
+        assert!(summary.norm >= 0.0);
+        assert!(summary.sparsity >= 0.0 && summary.sparsity <= 1.0);
     }
 
     #[test]
