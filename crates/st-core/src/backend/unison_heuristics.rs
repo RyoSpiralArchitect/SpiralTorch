@@ -75,19 +75,13 @@ impl JuliaSpanBuf {
     }
 
     #[inline]
-    fn push_number(&mut self, mut value: u32) {
+    fn push_number(&mut self, value: u32) {
         let digits = JuliaSpan::decimal_len(value);
         self.ensure_capacity(digits);
-        let mut idx = self.len + digits;
-        self.len = idx;
-        loop {
-            idx -= 1;
-            self.bytes[idx] = (value % 10) as u8 + b'0';
-            value /= 10;
-            if value == 0 {
-                break;
-            }
-        }
+        let end = self.len + digits;
+        let start = encode_decimal(value, &mut self.bytes[..], end);
+        debug_assert_eq!(start, self.len);
+        self.len = end;
     }
 
     #[inline]
@@ -111,6 +105,20 @@ impl JuliaSpanBuf {
     pub fn to_owned(&self) -> String {
         self.as_str().to_owned()
     }
+}
+
+#[inline(always)]
+fn encode_decimal(mut value: u32, buf: &mut [u8], end: usize) -> usize {
+    let mut idx = end;
+    loop {
+        idx -= 1;
+        buf[idx] = (value % 10) as u8 + b'0';
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    idx
 }
 
 impl JuliaSpan {
@@ -159,26 +167,33 @@ impl JuliaSpan {
 
     #[inline]
     pub fn write_into<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
-        fn write_number<W: std::fmt::Write>(out: &mut W, mut value: u32) -> std::fmt::Result {
-            let mut buf = [0u8; JuliaSpan::MAX_DIGITS];
-            let mut idx = JuliaSpan::MAX_DIGITS;
-            loop {
-                idx -= 1;
-                buf[idx] = (value % 10) as u8 + b'0';
-                value /= 10;
-                if value == 0 {
-                    break;
-                }
-            }
-            // SAFETY: buf is populated solely with ASCII digits.
-            unsafe { out.write_str(std::str::from_utf8_unchecked(&buf[idx..])) }
-        }
+        let mut buf = [0u8; Self::MAX_RENDERED_LEN];
+        let mut cursor = 0usize;
 
-        write_number(out, self.start)?;
-        out.write_char(':')?;
-        write_number(out, self.step)?;
-        out.write_char(':')?;
-        write_number(out, self.end)
+        let start_digits = Self::decimal_len(self.start);
+        let start_end = cursor + start_digits;
+        let start_idx = encode_decimal(self.start, &mut buf[..], start_end);
+        debug_assert_eq!(start_idx, cursor);
+        cursor = start_end;
+        buf[cursor] = b':';
+        cursor += 1;
+
+        let step_digits = Self::decimal_len(self.step);
+        let step_end = cursor + step_digits;
+        let step_idx = encode_decimal(self.step, &mut buf[..], step_end);
+        debug_assert_eq!(step_idx, cursor);
+        cursor = step_end;
+        buf[cursor] = b':';
+        cursor += 1;
+
+        let end_digits = Self::decimal_len(self.end);
+        let end_end = cursor + end_digits;
+        let end_idx = encode_decimal(self.end, &mut buf[..], end_end);
+        debug_assert_eq!(end_idx, cursor);
+        cursor = end_end;
+
+        // SAFETY: the buffer only contains ASCII digits and ':' characters.
+        unsafe { out.write_str(std::str::from_utf8_unchecked(&buf[..cursor])) }
     }
 
     #[inline]
@@ -232,6 +247,7 @@ impl LaneWindow {
             min_lane: self.min_lane,
             max_lane: self.max_lane,
             slack: self.slack,
+            stride: self.stride,
         }
     }
 }
@@ -244,11 +260,27 @@ pub struct LaneWindowSnapshot {
     pub min_lane: u32,
     pub max_lane: u32,
     pub slack: u32,
+    pub stride: u32,
 }
 
 impl From<LaneWindow> for LaneWindowSnapshot {
     fn from(window: LaneWindow) -> Self {
         window.snapshot()
+    }
+}
+
+impl LaneWindowSnapshot {
+    #[inline]
+    pub fn into_window(self) -> LaneWindow {
+        LaneWindow {
+            target: self.target,
+            lower: self.lower,
+            upper: self.upper,
+            min_lane: self.min_lane,
+            max_lane: self.max_lane,
+            slack: self.slack,
+            stride: self.stride.max(1),
+        }
     }
 }
 
@@ -363,6 +395,13 @@ impl Choice {
 }
 
 #[derive(Clone, Copy)]
+struct LatencyCache {
+    min_ctile: u32,
+    max_ctile: u32,
+    slack: u32,
+}
+
+#[derive(Clone, Copy)]
 struct RankScenario<'a> {
     caps: &'a DeviceCaps,
     rows: u32,
@@ -372,7 +411,9 @@ struct RankScenario<'a> {
     lanes: u32,
     low_latency: bool,
     expected_two_stage: bool,
-    latency_bounds: Option<(u32, u32)>,
+    latency_tile_caps: Option<(u32, u32)>,
+    latency: Option<LatencyCache>,
+    cols_log2: u32,
 }
 
 impl<'a> RankScenario<'a> {
@@ -380,10 +421,29 @@ impl<'a> RankScenario<'a> {
         let lanes = caps.lane_width.max(1);
         let low_latency = latency_sensitive(rows, cols, k, caps);
         let expected_two_stage = caps.prefers_two_stage_with_rows(rows, cols, k);
-        let latency_bounds = if matches!(kind, RankKind::MidK | RankKind::BottomK) {
-            Some(latency_ctile_bounds(cols, lanes))
+        let latency_tile_caps = if low_latency {
+            let latency_cap = if cols <= 16_384 { 512 } else { 1024 };
+            let aligned_cap = align_to_lanes(latency_cap, lanes);
+            let min_cap = align_to_lanes(128, lanes);
+            Some((aligned_cap.max(lanes), min_cap.max(lanes)))
         } else {
             None
+        };
+        let latency = if matches!(kind, RankKind::MidK | RankKind::BottomK) {
+            let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
+            let slack = latency_ctile_slack(rows, cols, k, lanes);
+            Some(LatencyCache {
+                min_ctile,
+                max_ctile,
+                slack,
+            })
+        } else {
+            None
+        };
+        let cols_log2 = if cols <= 1 {
+            0
+        } else {
+            (u32::BITS - 1).saturating_sub(cols.leading_zeros())
         };
         Self {
             caps,
@@ -394,7 +454,9 @@ impl<'a> RankScenario<'a> {
             lanes,
             low_latency,
             expected_two_stage,
-            latency_bounds,
+            latency_tile_caps,
+            latency,
+            cols_log2,
         }
     }
 
@@ -450,17 +512,18 @@ impl<'a> RankScenario<'a> {
 
     #[inline]
     fn latency_bounds(&self) -> Option<(u32, u32)> {
-        self.latency_bounds
+        self.latency.map(|cache| (cache.min_ctile, cache.max_ctile))
+    }
+
+    #[inline]
+    fn latency_slack(&self) -> Option<u32> {
+        self.latency.map(|cache| cache.slack)
     }
 
     #[inline]
     fn latency_tile_caps(&self) -> (u32, u32) {
-        debug_assert!(self.low_latency);
-        let lanes = self.lanes;
-        let latency_cap = if self.cols <= 16_384 { 512 } else { 1024 };
-        let aligned_cap = align_to_lanes(latency_cap, lanes);
-        let min_cap = align_to_lanes(128, lanes);
-        (aligned_cap.max(lanes), min_cap.max(lanes))
+        self.latency_tile_caps
+            .expect("latency tile caps only available in low-latency scenarios")
     }
 
     #[inline]
@@ -479,8 +542,11 @@ impl<'a> RankScenario<'a> {
         min_ctile: u32,
         max_ctile: u32,
     ) -> (u32, LaneWindow) {
-        snap_latency_ctile(
-            current, self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile,
+        let slack = self
+            .latency_slack()
+            .unwrap_or_else(|| latency_ctile_slack(self.rows, self.cols, self.k, self.lanes));
+        snap_latency_ctile_with_slack(
+            current, self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
         )
     }
 
@@ -491,28 +557,55 @@ impl<'a> RankScenario<'a> {
         min_ctile: u32,
         max_ctile: u32,
     ) -> (u32, LaneWindowSnapshot) {
-        snap_latency_ctile_snapshot(
-            current, self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile,
+        let slack = self
+            .latency_slack()
+            .unwrap_or_else(|| latency_ctile_slack(self.rows, self.cols, self.k, self.lanes));
+        snap_latency_ctile_snapshot_with_slack(
+            current, self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
         )
     }
 
     #[inline]
     fn latency_window(&self, min_ctile: u32, max_ctile: u32) -> LaneWindow {
-        latency_ctile_window(
-            self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile,
+        let slack = self
+            .latency_slack()
+            .unwrap_or_else(|| latency_ctile_slack(self.rows, self.cols, self.k, self.lanes));
+        latency_ctile_window_with_slack(
+            self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
         )
     }
 
     #[inline]
     fn latency_window_snapshot(&self, min_ctile: u32, max_ctile: u32) -> LaneWindowSnapshot {
-        latency_ctile_window_snapshot(
-            self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile,
+        let slack = self
+            .latency_slack()
+            .unwrap_or_else(|| latency_ctile_slack(self.rows, self.cols, self.k, self.lanes));
+        latency_ctile_window_snapshot_with_slack(
+            self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
         )
     }
 
     #[inline]
     fn legacy_latency_target(&self, min_ctile: u32, max_ctile: u32) -> u32 {
         latency_ctile_target_legacy(self.rows, self.k, self.lanes, min_ctile, max_ctile)
+    }
+
+    #[inline]
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn cols_log2(&self) -> u32 {
+        self.cols_log2
+    }
+
+    #[inline]
+    fn fft_segments_hint(&self) -> u32 {
+        let cols_log2 = self.cols_log2();
+        if cols_log2 > 17 || (cols_log2 == 17 && self.cols > 131_072) {
+            4
+        } else if cols_log2 > 15 || (cols_log2 == 15 && self.cols > 32_768) {
+            2
+        } else {
+            1
+        }
     }
 }
 
@@ -725,6 +818,7 @@ fn latency_ctile_slack(rows: u32, cols: u32, k: u32, lanes: u32) -> u32 {
     slack
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn latency_ctile_window(
     rows: u32,
     cols: u32,
@@ -733,9 +827,21 @@ fn latency_ctile_window(
     min_ctile: u32,
     max_ctile: u32,
 ) -> LaneWindow {
+    let slack = latency_ctile_slack(rows, cols, k, lanes);
+    latency_ctile_window_with_slack(rows, cols, k, lanes, min_ctile, max_ctile, slack)
+}
+
+fn latency_ctile_window_with_slack(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+    slack: u32,
+) -> LaneWindow {
     let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
     let target = latency_ctile_target(rows, cols, k, lanes, min_lane, max_lane);
-    let slack = latency_ctile_slack(rows, cols, k, lanes);
     let mut lower = align_down_to_lanes(target.saturating_sub(slack), lanes);
     if lower < min_lane {
         lower = min_lane;
@@ -759,6 +865,7 @@ fn latency_ctile_window(
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn snap_latency_ctile(
     current: u32,
     rows: u32,
@@ -768,7 +875,21 @@ fn snap_latency_ctile(
     min_ctile: u32,
     max_ctile: u32,
 ) -> (u32, LaneWindow) {
-    let window = latency_ctile_window(rows, cols, k, lanes, min_ctile, max_ctile);
+    let slack = latency_ctile_slack(rows, cols, k, lanes);
+    snap_latency_ctile_with_slack(current, rows, cols, k, lanes, min_ctile, max_ctile, slack)
+}
+
+fn snap_latency_ctile_with_slack(
+    current: u32,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+    slack: u32,
+) -> (u32, LaneWindow) {
+    let window = latency_ctile_window_with_slack(rows, cols, k, lanes, min_ctile, max_ctile, slack);
     let mut candidate = window.snapped(current);
     if candidate < window.lower
         || candidate > window.upper
@@ -785,6 +906,7 @@ fn snap_latency_ctile(
     (candidate, window)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn latency_ctile_window_snapshot(
     rows: u32,
     cols: u32,
@@ -793,9 +915,23 @@ fn latency_ctile_window_snapshot(
     min_ctile: u32,
     max_ctile: u32,
 ) -> LaneWindowSnapshot {
-    latency_ctile_window(rows, cols, k, lanes, min_ctile, max_ctile).snapshot()
+    let slack = latency_ctile_slack(rows, cols, k, lanes);
+    latency_ctile_window_snapshot_with_slack(rows, cols, k, lanes, min_ctile, max_ctile, slack)
 }
 
+fn latency_ctile_window_snapshot_with_slack(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+    slack: u32,
+) -> LaneWindowSnapshot {
+    latency_ctile_window_with_slack(rows, cols, k, lanes, min_ctile, max_ctile, slack).snapshot()
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 fn snap_latency_ctile_snapshot(
     current: u32,
     rows: u32,
@@ -805,8 +941,24 @@ fn snap_latency_ctile_snapshot(
     min_ctile: u32,
     max_ctile: u32,
 ) -> (u32, LaneWindowSnapshot) {
+    let slack = latency_ctile_slack(rows, cols, k, lanes);
+    snap_latency_ctile_snapshot_with_slack(
+        current, rows, cols, k, lanes, min_ctile, max_ctile, slack,
+    )
+}
+
+fn snap_latency_ctile_snapshot_with_slack(
+    current: u32,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+    slack: u32,
+) -> (u32, LaneWindowSnapshot) {
     let (candidate, window) =
-        snap_latency_ctile(current, rows, cols, k, lanes, min_ctile, max_ctile);
+        snap_latency_ctile_with_slack(current, rows, cols, k, lanes, min_ctile, max_ctile, slack);
     (candidate, window.snapshot())
 }
 
@@ -890,15 +1042,9 @@ fn fallback_with_scenario(scenario: RankScenario<'_>) -> Choice {
         use_2ce = false;
     }
 
-    let fft_tile = ((scenario.cols().max(1) + 1023) / 1024) as u32 * 1024;
+    let fft_tile = align_to_lanes(scenario.cols().max(1), 1024);
     let fft_radix = if scenario.k().is_power_of_two() { 4 } else { 2 };
-    let fft_segments = if scenario.cols() > 131_072 {
-        4
-    } else if scenario.cols() > 32_768 {
-        2
-    } else {
-        1
-    };
+    let fft_segments = scenario.fft_segments_hint();
 
     Choice {
         use_2ce,
@@ -1231,6 +1377,111 @@ pub fn choose_unified_rank(
 mod tests {
     use super::*;
 
+    #[derive(Default)]
+    struct CountingWriter {
+        writes: usize,
+        chars: usize,
+        buf: String,
+    }
+
+    impl std::fmt::Write for CountingWriter {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            self.writes += 1;
+            self.buf.push_str(s);
+            Ok(())
+        }
+
+        fn write_char(&mut self, c: char) -> std::fmt::Result {
+            self.chars += 1;
+            self.buf.push(c);
+            Ok(())
+        }
+    }
+
+    fn legacy_score_choice(choice: &Choice, baseline: &Choice, scenario: RankScenario<'_>) -> f32 {
+        let caps = scenario.caps();
+        let mut score = 0.0;
+
+        let expected_two_stage = scenario.expected_two_stage();
+        if choice.use_2ce == expected_two_stage {
+            score += 0.25;
+        } else {
+            score -= 0.1;
+        }
+
+        score += closeness(choice.wg, baseline.wg) * 0.2;
+        score += caps.occupancy_score(choice.wg) * 0.2;
+
+        score += closeness(choice.kl, baseline.kl) * 0.15;
+        score += closeness(choice.tile, baseline.tile) * 0.1;
+
+        if scenario.requires_compaction() {
+            score += closeness(choice.ctile, baseline.ctile) * 0.1;
+        }
+
+        score += closeness(choice.fft_tile, baseline.fft_tile) * 0.05;
+        if choice.fft_radix == baseline.fft_radix {
+            score += 0.025;
+        }
+        if choice.fft_segments == baseline.fft_segments {
+            score += 0.025;
+        }
+
+        if choice.mk == caps.preferred_merge_kind(scenario.k()) {
+            score += 0.1;
+        }
+        if choice.mkd == caps.preferred_substrategy(choice.mk, scenario.k()) {
+            score += 0.1;
+        }
+
+        if scenario.low_latency() {
+            if !choice.use_2ce {
+                score += 0.05;
+            } else {
+                score -= 0.05;
+            }
+            if choice.ch == 0 {
+                score += 0.025;
+            } else {
+                score -= 0.025;
+            }
+            let lanes = scenario.lanes();
+            let latency_cap = if scenario.cols() <= 16_384 { 512 } else { 1024 };
+            let aligned_cap = align_to_lanes(latency_cap, lanes);
+            score += closeness(choice.tile, aligned_cap) * 0.05;
+            if choice.mk == 2 {
+                score += 0.025;
+            }
+            if scenario.requires_compaction() {
+                let (min_ctile, max_ctile) = scenario
+                    .latency_bounds()
+                    .expect("latency bounds should exist for compaction");
+                let window = choice
+                    .latency_window
+                    .unwrap_or_else(|| scenario.latency_window(min_ctile, max_ctile));
+                score += closeness(choice.ctile, window.target) * 0.05;
+                let snapped = window.snapped(choice.ctile);
+                if snapped == choice.ctile {
+                    score += 0.02;
+                } else {
+                    score -= 0.02;
+                }
+                if choice.ctile >= window.lower && choice.ctile <= window.upper {
+                    score += 0.015;
+                } else {
+                    score -= 0.03;
+                }
+                if choice.ctile.abs_diff(window.target) as u32 <= window.slack {
+                    score += 0.01;
+                } else {
+                    score -= 0.015;
+                }
+            }
+        }
+
+        score
+    }
+
     #[test]
     fn fallback_tracks_backend_expectations() {
         let caps = DeviceCaps::wgpu(32, true, 256);
@@ -1314,6 +1565,24 @@ mod tests {
         span.write_into(&mut direct)
             .expect("writing into a String should succeed");
         assert_eq!(direct, rendered);
+    }
+
+    #[test]
+    fn julia_span_write_into_is_single_chunk() {
+        let span = JuliaSpan::new(1_024, 16, 8_192);
+        let mut writer = CountingWriter::default();
+        span.write_into(&mut writer)
+            .expect("writing into counting writer should succeed");
+        assert_eq!(writer.writes, 1);
+        assert_eq!(writer.chars, 0);
+        assert_eq!(writer.buf, "1024:16:8192");
+
+        // Ensure reusing the stack buffer does not allocate by rendering twice.
+        span.write_into(&mut writer)
+            .expect("rewriting into counting writer should succeed");
+        assert_eq!(writer.writes, 2);
+        assert_eq!(writer.chars, 0);
+        assert_eq!(writer.buf, "1024:16:81921024:16:8192");
     }
 
     #[test]
@@ -1503,6 +1772,10 @@ mod tests {
         assert_eq!(snapshot.min_lane, window.min_lane);
         assert_eq!(snapshot.max_lane, window.max_lane);
         assert_eq!(snapshot.slack, window.slack);
+        assert_eq!(snapshot.stride, window.stride);
+
+        let restored = snapshot.into_window();
+        assert_eq!(restored, window);
 
         let (snapped, snap_snapshot) =
             snap_latency_ctile_snapshot(window.target, 96, 8_192, 64, lanes, min_ctile, max_ctile);
@@ -1510,5 +1783,99 @@ mod tests {
         assert_eq!(snap_snapshot.target, window.target);
         assert_eq!(snap_snapshot.lower, window.lower);
         assert_eq!(snap_snapshot.upper, window.upper);
+        assert_eq!(snap_snapshot.stride, window.stride);
+        assert_eq!(snap_snapshot.into_window(), window);
+    }
+
+    #[test]
+    fn lane_window_snapshot_identity_extremes() {
+        let windows = [
+            LaneWindow {
+                target: 0,
+                lower: 0,
+                upper: 0,
+                min_lane: 0,
+                max_lane: 0,
+                slack: 0,
+                stride: 1,
+            },
+            LaneWindow {
+                target: 256,
+                lower: 256,
+                upper: 256,
+                min_lane: 256,
+                max_lane: 256,
+                slack: 0,
+                stride: 32,
+            },
+            LaneWindow {
+                target: 2_048,
+                lower: 1_024,
+                upper: 3_072,
+                min_lane: 1_024,
+                max_lane: 3_072,
+                slack: 1_024,
+                stride: 64,
+            },
+        ];
+
+        for window in windows {
+            let snapshot = window.snapshot();
+            assert_eq!(snapshot.into_window(), window);
+            assert_eq!(snapshot.stride, window.stride);
+        }
+    }
+
+    #[test]
+    fn lane_window_snapshot_zero_stride_promotes_to_one() {
+        let snapshot = LaneWindowSnapshot {
+            target: 512,
+            lower: 512,
+            upper: 512,
+            min_lane: 512,
+            max_lane: 512,
+            slack: 0,
+            stride: 0,
+        };
+        let restored = snapshot.into_window();
+        assert_eq!(restored.stride, 1);
+        assert_eq!(restored.target, 512);
+        assert_eq!(restored.lower, 512);
+        assert_eq!(restored.upper, 512);
+    }
+
+    #[test]
+    fn scenario_score_tracks_legacy_within_expected_band() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        let scenarios = [
+            (RankKind::TopK, 64, 4_096, 64),
+            (RankKind::MidK, 80, 16_384, 96),
+            (RankKind::BottomK, 48, 8_192, 32),
+        ];
+        const EPS: f32 = 1e-3;
+
+        for (kind, rows, cols, k) in scenarios {
+            let scenario = RankScenario::new(rows, cols, k, &caps, kind);
+            let baseline = fallback_with_scenario(scenario);
+            let lanes = scenario.lanes();
+            assert!(scenario.cols_log2() <= 31);
+
+            let mut variations = [baseline; 6];
+            variations[1].wg = baseline.wg.saturating_add(32);
+            variations[2].tile = baseline.tile.saturating_add(lanes);
+            variations[3].use_2ce = !baseline.use_2ce;
+            variations[4].fft_tile = baseline.fft_tile.saturating_add(1024);
+            if scenario.requires_compaction() {
+                variations[5].ctile = baseline.ctile.saturating_add(lanes);
+            }
+
+            for choice in variations {
+                let new_score = score_choice(&choice, &baseline, scenario);
+                let legacy_score = legacy_score_choice(&choice, &baseline, scenario);
+                assert!(new_score.is_finite() && legacy_score.is_finite());
+                assert!(new_score + EPS >= legacy_score);
+                assert!((new_score - legacy_score).abs() <= 0.020001 + EPS);
+            }
+        }
     }
 }
