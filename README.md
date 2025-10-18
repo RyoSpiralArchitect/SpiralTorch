@@ -38,6 +38,7 @@ Automated scraping, traffic mirroring, or idle star-farming will not receive att
 <img src="docs/badges/deps.svg" alt="crates" />
 </p>
 <!-- STATS:END -->
+
 ---
 
 SpiralTorch is a Compact. Safe. Rust-native.
