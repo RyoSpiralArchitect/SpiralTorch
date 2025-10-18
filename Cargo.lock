@@ -2533,6 +2533,7 @@ name = "st-rec"
 version = "0.1.0"
 dependencies = [
  "st-kdsl",
+ "st-rl",
  "st-tensor",
 ]
 

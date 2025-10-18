@@ -1584,6 +1584,24 @@ export class SpiralCanvasCollabSession {
                 break;
             }
         }
+        const selfRecord = this.#participants.get(this.#participantId);
+        if (selfRecord) {
+            selfRecord.info.lastSeen = Date.now();
+            this.#emitParticipants();
+        }
+        const roster = Array.from(this.#participants.values()).map((entry) => ({
+            id: entry.info.id,
+            role: entry.info.role,
+            lastSeen: entry.info.lastSeen,
+        }));
+        this.#postMessage({
+            type: "presence",
+            id: this.#participantId,
+            participant: this.#participantEnvelope(),
+            clock: this.#tick(),
+            roster,
+        });
+        this.#emitTelemetry({ type: "presence", participants: roster.length });
     }
 
     #applyPresence(message: CollabPresenceMessage): void {

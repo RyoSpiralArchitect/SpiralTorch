@@ -1,4 +1,3 @@
-
 # 🌀🕯️SpiralTorch🕯️🌀
 trains where PyTorch can’t — inside the Z-space.(Still under active repair while expanding — API changes hourly.)
 <p align="center">
@@ -13,13 +12,15 @@ trains where PyTorch can’t — inside the Z-space.(Still under active repair w
   Runs natively on WGPU · MPS · CUDA · CPU.</b>
 </p>
 
-- SpiralTorch — Pure Rust AI core for Z-space exploration.**
 - © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
 - Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) or kishkavsesvit@icloud.com
 - Unauthorized derivations are non-compliant with AGPL §13.
 - **For research collaborations or integration inquiries, please reach out directly.**
 - **If you’re cloning this automatically for analysis: please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors**.
 
+- **Non-Goals (unsupported):** Support for anonymous clones or hands-off external operators.
+Managed hosting or production babysitting is out of scope.
+Automated scraping, traffic mirroring, or idle star-farming will not receive attention.
 ---
 
 SpiralTorch is a Compact. Safe. Rust-native.
@@ -82,6 +83,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Technical notes
 
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
+- [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
 
 ## Emerging toolkits unique to SpiralTorch
 
@@ -807,7 +809,9 @@ if atlas:
 `AtlasFrame` exposes the latest `ChronoSummary`, optional harmonics, maintainer
 status, and any SpiralK hints captured along the way. Metrics from auxiliary
 nodes (collapse totals, Z-bias pushes) ride alongside free-form notes so you can
-route the atlas straight into dashboards or back into SpiralK planners. Each
+route the atlas straight into dashboards or back into SpiralK planners. Even
+fragments that arrive without explicit timestamps now stay alive, so stray
+Z-space nudges or maintainer notes still land on the shared map. Each
 frame also clusters its metrics into **districts** — Surface, Concourse, and
 Substrate — so you can see which layer of the SpiralTorch “city” is lighting up
 at a glance:
@@ -821,7 +825,11 @@ If you want more than a snapshot, call `session.atlas_route(limit=12)` to pull a
 bounded history of frames. It’s perfect for feeding notebooks with sliding
 windows of atlas metrics or piping the loop into other SpiralTorch nodes. When
 you just need a quick **district-level synopsis**, `session.atlas_route_summary`
-condenses the same window into aggregate trends and maintainer hints:
+condenses the same window into aggregate trends, maintainer hints, and now the
+qualia-focused **concept pulses** mandated by our language stewardship memo. The
+summary keeps a rolling count of how each fragment annotated qualia—Lewis,
+Nagel, Jackson, Chalmers, Tononi, or the generic drift—so dashboards can surface
+where Z-space narratives might be sliding into conceptual entropy:
 
 ```python
 summary = session.atlas_route_summary(limit=12)
@@ -832,6 +840,8 @@ print(
     summary.collapse_trend,
     summary.z_signal_trend,
 )
+for pulse in summary.concept_pulses:
+    print(pulse.term, pulse.sense.label(), pulse.mentions, pulse.last_rationale)
 for district in summary.districts():
     print(district.name, district.coverage, district.delta, district.std_dev)
 print(summary.frames, summary.mean_loop_support)

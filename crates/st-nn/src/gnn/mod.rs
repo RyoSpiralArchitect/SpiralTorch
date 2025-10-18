@@ -7,6 +7,7 @@ pub mod context;
 pub mod handoff;
 pub mod layer;
 pub mod spiralk;
+pub mod stack;
 
 pub use context::{GraphContext, GraphContextBuilder, GraphNormalization};
 pub use handoff::{
@@ -15,3 +16,4 @@ pub use handoff::{
 };
 pub use layer::{AggregationReducer, NeighborhoodAggregation, ZSpaceGraphConvolution};
 pub use spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+pub use stack::{GraphActivation, GraphLayerSpec, ZSpaceGraphNetwork, ZSpaceGraphNetworkBuilder};

@@ -1939,19 +1939,24 @@ mod language_pipeline {
 
     #[cfg(all(test, feature = "psi"))]
     mod tests {
-        use super::super::automation::DesireAutomation;
-        use super::super::desire::{constant, warmup, DesireLagrangian};
-        use super::super::geometry::{
-            ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
-        };
-        use super::super::temperature::TemperatureController;
+        use super::*;
         use crate::gnn::spiralk::GraphConsensusBridge;
+        #[cfg(feature = "psi")]
+        use crate::language::DesirePsiBridge;
+        use crate::language::{
+            constant, warmup, ConceptHint, DesireAutomation, DesireGraphBridge, DesireLagrangian,
+            DesireLogReplay, DesireLogbook, DesirePhase, DesirePipeline, DesirePipelineEvent,
+            DesireRoundtableBridge, DesireTrainerBridge, DesireTriggerBuffer, RepressionField,
+            SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
+        };
         use crate::plan::RankPlanner;
-        use crate::schedule::BandEnergy;
+        use crate::schedule::{BandEnergy, RoundtableConfig, RoundtableSchedule};
         use st_core::backend::device_caps::DeviceCaps;
         use st_core::config::self_rewrite::SelfRewriteCfg;
+        use st_core::ecosystem::EcosystemRegistry;
         use st_core::telemetry::hub::{self, DesirePhaseTelemetry};
         use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
+        use st_tensor::LanguageWaveEncoder;
         #[cfg(feature = "psi")]
         use std::collections::HashMap;
         use std::collections::HashSet;
@@ -2388,13 +2393,13 @@ mod language_pipeline {
 
             match step.solution.phase {
                 DesirePhase::Observation => {
-                    assert_eq!(sample.phase, DesirePhaseTelemetry::Observation);
+                    assert!(matches!(sample.phase, DesirePhaseTelemetry::Observation));
                 }
                 DesirePhase::Injection => {
-                    assert_eq!(sample.phase, DesirePhaseTelemetry::Injection);
+                    assert!(matches!(sample.phase, DesirePhaseTelemetry::Injection));
                 }
                 DesirePhase::Integration => {
-                    assert_eq!(sample.phase, DesirePhaseTelemetry::Integration);
+                    assert!(matches!(sample.phase, DesirePhaseTelemetry::Integration));
                 }
             }
 
