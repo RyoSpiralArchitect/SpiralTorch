@@ -147,9 +147,18 @@ mod tests {
     use super::*;
     use crate::backend::device_caps::DeviceCaps;
     use crate::backend::unison_heuristics::RankKind;
+    use crate::telemetry::hub;
 
     fn plan(kind: RankKind, k: u32) -> RankPlan {
-        crate::ops::rank_entry::plan_rank(kind, 1, 8, k, DeviceCaps::wgpu(32, true, 256))
+        hub::clear_last_realgrad_for_test();
+        let mut pulse = hub::RealGradPulse::default();
+        pulse.gradient_norm = 48.0;
+        pulse.gradient_sparsity = 0.2;
+        hub::set_last_realgrad(&pulse);
+        let plan =
+            crate::ops::rank_entry::plan_rank(kind, 1, 8, k, DeviceCaps::wgpu(32, true, 256));
+        hub::clear_last_realgrad_for_test();
+        plan
     }
 
     #[test]
