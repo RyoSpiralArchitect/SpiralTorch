@@ -3,14 +3,11 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-//! Microlocal pulse fusion utilities shared between observability backends and
-//! telemetry exporters. The module exposes a canonical [`ZPulse`] structure
-//! together with a conductor that fuses heterogeneous sources while keeping
-//! track of latency, robust statistics, and optional adaptive gain stages.
+//! Canonical representation of Z pulses together with a lightweight
+//! conductor that fuses multiple sources into a single control signal.
 
-use rustc_hash::FxHashMap;
-use std::cmp::Ordering;
-use std::collections::VecDeque;
+use std::borrow::Cow;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 /// Identifies the origin of a [`ZPulse`].
@@ -24,6 +21,80 @@ pub enum ZSource {
     RealGrad,
     Other(&'static str),
 }
+
+impl ZSupport {
+    /// Creates a new support triplet, clamping each component to be finite and non-negative.
+    pub fn new(leading: f32, central: f32, trailing: f32) -> Self {
+        Self {
+            leading: leading.max(0.0).finite_or_zero(),
+            central: central.max(0.0).finite_or_zero(),
+            trailing: trailing.max(0.0).finite_or_zero(),
+        }
+    }
+
+    /// Builds a support triplet straight from an Above/Here/Beneath energy tuple.
+    pub fn from_band_energy(bands: (f32, f32, f32)) -> Self {
+        Self::new(bands.0, bands.1, bands.2)
+    }
+
+    /// Returns the total perimeter mass supporting the pulse.
+    pub fn total(&self) -> f32 {
+        self.leading + self.central + self.trailing
+    }
+
+    /// Returns `true` when all support components vanish.
+    pub fn is_empty(&self) -> bool {
+        self.leading <= f32::EPSILON
+            && self.central <= f32::EPSILON
+            && self.trailing <= f32::EPSILON
+    }
+}
+
+impl Default for ZSupport {
+    fn default() -> Self {
+        Self {
+            leading: 0.0,
+            central: 0.0,
+            trailing: 0.0,
+        }
+    }
+}
+
+trait FiniteClamp {
+    fn finite_or_zero(self) -> f32;
+}
+
+impl FiniteClamp for f32 {
+    fn finite_or_zero(self) -> f32 {
+        if self.is_finite() {
+            self
+        } else {
+            0.0
+        }
+    }
+}
+
+fn source_lookup_key(source: &ZSource) -> Cow<'static, str> {
+    match source {
+        ZSource::Microlocal => Cow::Borrowed("microlocal"),
+        ZSource::Maxwell => Cow::Borrowed("maxwell"),
+        ZSource::RealGrad => Cow::Borrowed("realgrad"),
+        ZSource::Desire => Cow::Borrowed("desire"),
+        ZSource::External(name) | ZSource::Other(name) => Cow::Borrowed(name),
+    }
+}
+
+/// Identifies a source capable of emitting [`ZPulse`] records.
+pub trait ZEmitter {
+    /// Returns the canonical source identifier for pulses emitted by this
+    /// implementation.
+    fn name(&self) -> ZSource;
+
+    /// Advances the emitter one step and returns the next available pulse, if
+    /// any. Implementations may return more than one pulse per call by keeping
+    /// an internal queue; [`ZRegistry::gather`] will keep polling the emitter
+    /// until it reports `None`.
+    fn tick(&mut self, now: u64) -> Option<ZPulse>;
 
 impl Default for ZSource {
     fn default() -> Self {
@@ -738,6 +809,9 @@ impl ZRegistry {
             emitters: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Default, Debug)]
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -1015,15 +1089,66 @@ mod conductor_tests {
 
         let mut pulse = ZPulse {
             source: ZSource::Microlocal,
-            support: ZSupport {
-                leading: 0.4,
-                central: 0.4,
-                trailing: 0.4,
-            },
+            tempo: 0.0,
+            support: ZSupport::new(0.2, 0.1, 0.1),
             drift: 0.1,
             ..ZPulse::default()
         };
         emitter.enqueue(pulse.clone());
+
+        let pulses = registry.gather(42);
+        assert_eq!(pulses.len(), 1);
+        assert_eq!(pulses[0].source, ZSource::Desire);
+
+        pulse.source = ZSource::Maxwell;
+        emitter.extend([pulse]);
+        let pulses = registry.gather(43);
+        assert_eq!(pulses.len(), 1);
+        assert_eq!(pulses[0].source, ZSource::Desire);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conductor_allows_optional_configs() {
+        let mut conductor = ZConductor::new(ZConductorCfg::default());
+        assert!(conductor.frequency_cfg.is_none());
+        assert!(conductor.adaptive_cfg.is_none());
+        assert!(conductor.latency_cfg.is_none());
+
+        conductor.set_frequency_config(Some(ZFrequencyConfig::new(0.5)));
+        conductor.set_adaptive_gain_config(Some(ZAdaptiveGainCfg::new(0.1, 1.0, 0.8)));
+        conductor.set_latency_config(Some(ZLatencyConfig::new(4)));
+
+        assert!(conductor.frequency_cfg.is_some());
+        assert!(conductor.adaptive_cfg.is_some());
+        assert!(conductor.latency_cfg.is_some());
+
+        conductor.set_frequency_config(None);
+        conductor.set_adaptive_gain_config(None);
+        conductor.set_latency_config(None);
+
+        assert!(conductor.frequency_cfg.is_none());
+        assert!(conductor.adaptive_cfg.is_none());
+        assert!(conductor.latency_cfg.is_none());
+    }
+
+    #[test]
+    fn desire_emitter_retags_pulses() {
+        let emitter = DesireEmitter::new();
+        let mut registry = ZRegistry::new();
+        registry.register(emitter.clone());
+
+        let mut pulse = ZPulse {
+            source: ZSource::Microlocal,
+            support: 0.4,
+            drift: 0.1,
+            ..ZPulse::default()
+        };
+        emitter.enqueue(pulse);
 
         let pulses = registry.gather(42);
         assert_eq!(pulses.len(), 1);
