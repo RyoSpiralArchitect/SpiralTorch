@@ -6,6 +6,28 @@ use st_core::coop::ai::{CoopAgent, CoopProposal};
 use st_core::coop::mixer::{team_reward, DifferenceRewardMixer, TeamTelemetry};
 use st_core::coop::r#loop::CoopLoop;
 
+/// Synthetic backend identifier used by the benchmark harness.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BackendProbe<'a> {
+    pub name: &'a str,
+    pub base_throughput: f32,
+    pub latency_ms: f32,
+}
+
+/// Aggregated benchmark metrics for a backend run.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BenchmarkSample {
+    pub backend: String,
+    pub throughput: f32,
+    pub latency_ms: f32,
+}
+
+/// Report summarising all simulated backend runs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BenchmarkReport {
+    pub samples: Vec<BenchmarkSample>,
+}
+
 struct BenchAgent {
     rng: StdRng,
 }
@@ -36,7 +58,7 @@ pub fn simulate_linear_epoch(seed: u64, steps: usize) -> f32 {
         .map(|idx| Box::new(BenchAgent::with_seed(seed + idx as u64)) as Box<dyn CoopAgent>)
         .collect();
 
-    let mut mixer = DifferenceRewardMixer::new(|z, telemetry: &TeamTelemetry| {
+    let mixer = DifferenceRewardMixer::new(|z, telemetry: &TeamTelemetry| {
         team_reward(z, telemetry.flip_rate, telemetry.here_ratio)
     });
 
@@ -54,4 +76,45 @@ pub fn simulate_linear_epoch(seed: u64, steps: usize) -> f32 {
     }
 
     total_reward
+}
+
+/// Benchmarks backend probes using a stochastic throughput model.
+pub fn benchmark_backends(probes: &[BackendProbe<'_>], steps: usize) -> BenchmarkReport {
+    let mut rng = StdRng::seed_from_u64(steps as u64 + 0x5A5A);
+    let samples = probes
+        .iter()
+        .map(|probe| {
+            let jitter = rng.gen_range(0.9..=1.1);
+            BenchmarkSample {
+                backend: probe.name.to_string(),
+                throughput: probe.base_throughput * jitter * steps as f32,
+                latency_ms: (probe.latency_ms / jitter).max(0.1),
+            }
+        })
+        .collect();
+    BenchmarkReport { samples }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_benchmark_reports_all_probes() {
+        let probes = [
+            BackendProbe {
+                name: "wgpu",
+                base_throughput: 1.25,
+                latency_ms: 9.0,
+            },
+            BackendProbe {
+                name: "cuda",
+                base_throughput: 2.75,
+                latency_ms: 4.0,
+            },
+        ];
+        let report = benchmark_backends(&probes, 8);
+        assert_eq!(report.samples.len(), 2);
+        assert!(report.samples.iter().any(|sample| sample.backend == "cuda"));
+    }
 }
