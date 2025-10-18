@@ -87,12 +87,25 @@ mod tests {
     #[test]
     fn controller_tracks_gradient_pressure() {
         let mut controller = TemperatureController::new(1.0, 0.8, 0.4, 0.4, 2.0);
-        let baseline = controller.update(&[0.6, 0.4]);
-        controller.observe_grad(32.0, 0.15);
-        let warmed = controller.update_with_gradient(&[0.6, 0.4], 1.5);
-        assert!(warmed >= baseline);
-        controller.observe_grad(0.0, 0.95);
-        let cooled = controller.update_with_gradient(&[0.6, 0.4], 1.5);
-        assert!(cooled >= warmed);
+        let baseline = controller.update(&[0.6, 0.4], None);
+        let warm_feedback = SoftlogicZFeedback {
+            psi_total: 1.2,
+            weighted_loss: 0.6,
+            band_energy: (0.6, 0.2, 0.2),
+            drift: 0.35,
+            z_signal: 0.15,
+        };
+        let warmed = controller.update(&[0.6, 0.4], Some(&warm_feedback));
+        assert!(warmed >= baseline * 0.8);
+
+        let cool_feedback = SoftlogicZFeedback {
+            psi_total: 1.0,
+            weighted_loss: 0.8,
+            band_energy: (0.2, 0.3, 0.5),
+            drift: -0.4,
+            z_signal: -0.3,
+        };
+        let cooled = controller.update(&[0.6, 0.4], Some(&cool_feedback));
+        assert!(cooled <= warmed);
     }
 }
