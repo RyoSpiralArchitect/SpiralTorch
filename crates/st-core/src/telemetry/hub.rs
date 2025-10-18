@@ -345,7 +345,10 @@ pub(crate) fn clear_last_realgrad_for_test() {
     }
 }
 
-#[cfg_attr(feature = "psi", doc = "Stores the latest desire step telemetry snapshot for downstream consumers.")]
+#[cfg_attr(
+    feature = "psi",
+    doc = "Stores the latest desire step telemetry snapshot for downstream consumers."
+)]
 #[cfg(feature = "psi")]
 pub fn set_last_desire_step(step: DesireStepTelemetry) {
     if let Ok(mut guard) = desire_step_cell().write() {
@@ -353,7 +356,10 @@ pub fn set_last_desire_step(step: DesireStepTelemetry) {
     }
 }
 
-#[cfg_attr(feature = "psi", doc = "Clears the cached desire step telemetry snapshot.")]
+#[cfg_attr(
+    feature = "psi",
+    doc = "Clears the cached desire step telemetry snapshot."
+)]
 #[cfg(feature = "psi")]
 pub fn clear_last_desire_step() {
     if let Ok(mut guard) = desire_step_cell().write() {
@@ -361,7 +367,10 @@ pub fn clear_last_desire_step() {
     }
 }
 
-#[cfg_attr(feature = "psi", doc = "Returns the latest desire step telemetry snapshot, if one has been recorded.")]
+#[cfg_attr(
+    feature = "psi",
+    doc = "Returns the latest desire step telemetry snapshot, if one has been recorded."
+)]
 #[cfg(feature = "psi")]
 pub fn get_last_desire_step() -> Option<DesireStepTelemetry> {
     desire_step_cell()
