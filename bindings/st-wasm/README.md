@@ -126,10 +126,12 @@ state store).
 
 Real-time co-creation becomes much easier with `types/canvas-collab.ts`. The new
 `SpiralCanvasCollabSession` peers a `SpiralCanvasView` across any number of browser tabs
-or devices using the `BroadcastChannel` API. Every participant – whether they're a human
-artist, a trainer supervising gradients, or the training run itself – has the same
-authority to steer palettes, zoom levels, navigation toggles, stats sampling, and render
-loop state.
+or devices using the `BroadcastChannel` API with automatic fallbacks. Every participant –
+whether they're a human artist, a trainer supervising gradients, or the training run
+itself – has the same authority to steer palettes, zoom levels, navigation toggles,
+stats sampling, and render loop state. Updates are batched into 16 ms micro-windows,
+governed by a 20 diff/s token bucket, and pointer broadcasts are throttled to 30 Hz so
+the UI keeps a steady 60 fps even under heavy interaction.
 
 ```ts
 import { SpiralCanvasCollabSession } from "./canvas-collab";
@@ -141,6 +143,10 @@ const session = new SpiralCanvasCollabSession(view, {
         label: "Curator A",
         color: "#facc15",
     },
+    patchRateHz: 20,
+    pointerRateHz: 30,
+    telemetry: (event) => console.debug("collab", event),
+    attributionSink: (sample) => conductor.step(sample), // pipe into your ZConductor
 });
 
 // Surface shared presence, last input timestamps, and pointer motions inside the HUD.
@@ -157,7 +163,11 @@ session.on("pointer", ({ participant, event }) => {
 });
 ```
 
-When `BroadcastChannel` is unavailable the helper gracefully degrades to single-client
-behavior, so you can still wire it into dashboards without special casing. Each message
-includes participant metadata, making it straightforward to colour-code the dashboard or
-enforce your own policies on top of the symmetric default.
+When `BroadcastChannel` is unavailable the helper degrades to a
+`localStorage`/`storage`-event transport with a safety-net polling loop, so you can still
+wire it into dashboards without special casing. The session emits presence heartbeats at
+1 Hz, records join/leave/suppression events via the optional `telemetry` hook, and pipes
+every patch (local or remote) through the `attributionSink` so it can be fused straight
+into your `ZConductor` dashboards. Each message carries schema version tags, participant
+metadata, and size guards, making it straightforward to colour-code the HUD or enforce
+your own policies on top of the symmetric default.

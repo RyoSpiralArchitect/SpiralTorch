@@ -103,7 +103,7 @@ impl DashboardRing {
         self.frames.back()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &DashboardFrame> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &DashboardFrame> + ExactSizeIterator {
         self.frames.iter()
     }
 }
