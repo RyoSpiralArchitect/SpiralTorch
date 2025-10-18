@@ -956,6 +956,7 @@ impl RealGradZProjector {
             drift,
             z_bias,
             support,
+            scale: None,
             band_energy: (above, here, beneath),
             quality,
             stderr: 0.0,

@@ -4474,8 +4474,6 @@ impl PyCollapsePulse {
     }
 }
 
-}
-
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {

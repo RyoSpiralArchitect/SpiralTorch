@@ -1,5 +1,7 @@
-# 🌀🕯️SpiralTorch🕯️🌀
-trains where PyTorch can’t — inside the Z-space.(Still under active repair while expanding — API changes hourly.)
+# 🌀🕯️ SpiralTorch 🕯️🌀
+**trains where PyTorch can’t — inside the Z-space.**  
+_(Still under active repair while expanding — API changes hourly.)_
+
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
   <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
@@ -7,20 +9,36 @@ trains where PyTorch can’t — inside the Z-space.(Still under active repair w
   <img src="https://img.shields.io/badge/CUDA-enabled-lightblue.svg" alt="CUDA enabled">
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="AGPL-3.0">
 </p>
+
 <p align="center">
   <b>SpiralTorch — a Rust-first learning framework for Z-space.<br>
   Runs natively on WGPU · MPS · CUDA · CPU.</b>
 </p>
 
-- © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
-- Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) or kishkavsesvit@icloud.com
-- Unauthorized derivations are non-compliant with AGPL §13.
+- © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later  
+- Contact: [Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) · <mailto:kishkavsesvit@icloud.com>  
+- Unauthorized derivations are non-compliant with AGPL §13  
 - **For research collaborations or integration inquiries, please reach out directly.**
-- **If you’re cloning this automatically for analysis: please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors**.
+- **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors.
+- **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
-- **Non-Goals (unsupported):** Support for anonymous clones or hands-off external operators.
-Managed hosting or production babysitting is out of scope.
-Automated scraping, traffic mirroring, or idle star-farming will not receive attention.
+<!-- STATS:START -->
+> _auto-generated: 2025-10-18 21:39 UTC_
+
+| Metric | Value |
+|---|---:|
+| Rust code LOC | **71,317** |
+| Rust files | 197 |
+| Total code LOC (all langs) | 76,480 |
+| Workspace+deps crates | 241 |
+
+<p>
+<img src="docs/badges/rust-loc.svg" alt="rust loc" />
+<img src="docs/badges/total-code.svg" alt="total code" />
+<img src="docs/badges/deps.svg" alt="crates" />
+</p>
+<!-- STATS:END -->
+
 ---
 
 SpiralTorch is a Compact. Safe. Rust-native.
