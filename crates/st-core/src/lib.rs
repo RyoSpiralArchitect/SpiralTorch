@@ -15,3 +15,5 @@ pub mod theory;
 pub mod util;
 
 pub mod telemetry;
+
+pub use theory::maxwell;
