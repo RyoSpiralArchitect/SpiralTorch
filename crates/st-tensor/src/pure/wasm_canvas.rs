@@ -300,6 +300,52 @@ impl ColorVectorField {
     }
 }
 
+/// Byte layout metadata for the WGSL canvas FFT pipeline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CanvasFftLayout {
+    field_bytes: usize,
+    field_stride: usize,
+    spectrum_bytes: usize,
+    spectrum_stride: usize,
+    uniform_bytes: usize,
+}
+
+impl CanvasFftLayout {
+    /// Total byte length required for the vector field storage buffer.
+    pub fn field_bytes(&self) -> usize {
+        self.field_bytes
+    }
+
+    /// Size in bytes of each vector field sample.
+    pub fn field_stride(&self) -> usize {
+        self.field_stride
+    }
+
+    /// Total byte length required for the FFT spectrum storage buffer.
+    pub fn spectrum_bytes(&self) -> usize {
+        self.spectrum_bytes
+    }
+
+    /// Size in bytes of each FFT spectrum sample.
+    pub fn spectrum_stride(&self) -> usize {
+        self.spectrum_stride
+    }
+
+    /// Byte length of the uniform buffer used by the WGSL kernel.
+    pub fn uniform_bytes(&self) -> usize {
+        self.uniform_bytes
+    }
+
+    /// Number of pixels captured by the layout.
+    pub fn pixel_count(&self) -> usize {
+        if self.field_stride == 0 {
+            0
+        } else {
+            self.field_bytes / self.field_stride
+        }
+    }
+}
+
 /// RGBA pixel surface that mirrors a HTML canvas.
 #[derive(Clone, Debug)]
 pub struct CanvasSurface {
@@ -566,6 +612,25 @@ impl CanvasProjector {
         ]
     }
 
+    /// Byte layout metadata that mirrors the WGSL buffers emitted by
+    /// [`vector_fft_wgsl`]. Callers can size storage/uniform buffers directly
+    /// from the returned values without hard-coding struct sizes.
+    pub fn vector_fft_layout(&self) -> CanvasFftLayout {
+        const FIELD_STRIDE: usize = 4 * core::mem::size_of::<f32>();
+        const SPECTRUM_STRIDE: usize = 8 * core::mem::size_of::<f32>();
+        const UNIFORM_BYTES: usize = 4 * core::mem::size_of::<u32>();
+
+        let width = self.surface.width();
+        let height = self.surface.height();
+        CanvasFftLayout {
+            field_bytes: width * height * FIELD_STRIDE,
+            field_stride: FIELD_STRIDE,
+            spectrum_bytes: width * height * SPECTRUM_STRIDE,
+            spectrum_stride: SPECTRUM_STRIDE,
+            uniform_bytes: UNIFORM_BYTES,
+        }
+    }
+
     /// Suggested dispatch dimensions for [`vector_fft_wgsl`]. The kernel
     /// operates over the full canvas grid, so we pack the height into the
     /// `y`-dimension while the `x`-dimension is chunked by the workgroup size.
@@ -829,6 +894,19 @@ mod tests {
         let projector = CanvasProjector::new(scheduler, 130, 4).unwrap();
         assert_eq!(projector.vector_fft_dispatch(false), [3, 4, 1]);
         assert_eq!(projector.vector_fft_dispatch(true), [5, 4, 1]);
+    }
+
+    #[test]
+    fn vector_fft_layout_matches_wgsl_structs() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        let projector = CanvasProjector::new(scheduler, 64, 3).unwrap();
+        let layout = projector.vector_fft_layout();
+        assert_eq!(layout.field_stride(), 16);
+        assert_eq!(layout.spectrum_stride(), 32);
+        assert_eq!(layout.uniform_bytes(), 16);
+        assert_eq!(layout.field_bytes(), 64 * 3 * 16);
+        assert_eq!(layout.spectrum_bytes(), 64 * 3 * 32);
+        assert_eq!(layout.pixel_count(), 64 * 3);
     }
 
     #[test]
