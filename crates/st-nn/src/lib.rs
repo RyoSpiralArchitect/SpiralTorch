@@ -29,9 +29,9 @@ pub mod trainer;
 pub use dataset::{from_vec as dataset_from_vec, BatchIter, DataLoader, Dataset};
 pub use gnn::{
     embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,
-    fold_into_roundtable, fold_with_band_energy, GraphConsensusBridge, GraphConsensusDigest,
-    GraphContext, GraphContextBuilder, GraphMonadExport, GraphNormalization, QuadBandEnergy,
-    ZSpaceGraphConvolution,
+    fold_into_roundtable, fold_with_band_energy, AggregationReducer, GraphConsensusBridge,
+    GraphConsensusDigest, GraphContext, GraphContextBuilder, GraphMonadExport, GraphNormalization,
+    NeighborhoodAggregation, QuadBandEnergy, ZSpaceGraphConvolution,
 };
 #[cfg(feature = "golden")]
 pub use golden::{
@@ -52,8 +52,8 @@ pub use language::{
     DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireTelemetrySink,
     DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
     DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, LanguagePipeline,
-    LanguagePipelineBuilder, MaxwellDesireBridge, PipelineError, PipelineResult, RepressionField,
-    SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
+    LanguagePipelineBuilder, MaxwellDesireBridge, NarrativeHint, PipelineError, PipelineResult,
+    RepressionField, SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
 };
 #[cfg(feature = "psi")]
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};

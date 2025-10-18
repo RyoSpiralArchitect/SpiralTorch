@@ -153,8 +153,27 @@ multi-radius sweeps and a conductor that fuses their Z pulses with exponential
 smoothing. `InterfaceGauge::analyze_multiradius` probes the same mask at
 different blow-up scales (and reuses an optional `c′` label when supplied),
 while `InterfaceZConductor` drives any number of gauges, aggregates the
-resulting pulses, and hands back a smoothed `SoftlogicZFeedback` record that is
-ready to store alongside ψ totals or weighted losses.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L487】
+resulting pulses, and hands back a `ZFused` packet with attribution weights and
+event tags alongside the smoothed `SoftlogicZFeedback` record so runtime loops
+can see which layer dominated the decision.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L515】【F:crates/st-core/src/theory/zpulse.rs†L22-L344】
+
+The conductor can now blend the pulses in both time and frequency: `set_frequency_config`
+installs a power-of-two FFT window and per-source spectral gains so high-frequency
+microlocal gradients or low-frequency desire trends can be emphasised without a
+second pass, while `set_adaptive_gain_config` keeps a per-source reliability
+score and nudges their gains on-line until the fused drift stabilises. A new
+`set_latency_config` alpha–beta aligner adjusts timestamps using the reported
+latency and emits `latency-*` events whenever the offsets are learnt or
+corrected, keeping Maxwell’s block pulses in lockstep with microlocal frames.
+Tests cover the spectral weighting, the adaptive loop, and the latency alignment
+so the new knobs keep their invariants.【F:crates/st-core/src/theory/zpulse.rs†L121-L233】【F:crates/st-core/src/theory/zpulse.rs†L244-L405】【F:crates/st-core/src/theory/zpulse.rs†L407-L683】【F:crates/st-core/src/theory/zpulse.rs†L900-L1036】
+
+Desire loops pick up the fused Z feedback straight from the hub: the conductor
+stores the latest `SoftlogicZFeedback`, and the temperature controller now
+accepts that pulse to raise exploration when the drift jitters and cool the
+distribution when the Z-bias settles. The default controller keeps a short
+memory of recent flips and exposes `with_feedback` so runtimes can tweak the
+feedback gain without rebuilding the desire machinery.【F:crates/st-core/src/theory/microlocal.rs†L488-L559】【F:crates/st-nn/src/language/temperature.rs†L1-L81】【F:crates/st-nn/src/language/desire.rs†L318-L352】
 
 ### Maxwell-coded envelopes meet SpiralK
 
@@ -198,7 +217,20 @@ sample so `DesirePsiBridge` captures the Z drift alongside ψ totals without
 hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:crates/st-core/src/theory/maxwell.rs†L666-L714】
 Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
 concept window that the `DesireLagrangian` can consume, aligning coded-envelope
-channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L132】
+channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L214】
+
+### Quantum Reality Studio overlays
+
+The new `st-qr-studio` crate spins up a **QuantumRealityStudio** that records
+Maxwell pulses, emits concept windows, and stitches narrative tags into VR/AR
+overlays. Signal capture sessions enforce which laboratory rigs may publish
+pulses, semantic taggers mirror the `MaxwellDesireBridge` lexicon, and overlay
+frames surface glyph/intensity pairs for immersive projection.【F:crates/st-qr-studio/src/lib.rs†L1-L234】 Storyboard exports drop
+directly into `tools/qr_storyboard.py`, which converts JSON/NDJSON captures into
+Markdown decks grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The
+companion [Quantum Reality Playbook](docs/qr_playbook/README.md) provides
+rituals, collaboration tips, and art-direction cues so research and cultural
+teams stay synchronised.【F:docs/qr_playbook/README.md†L1-L49】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
@@ -1096,6 +1128,30 @@ report = policy.finish_episode()
 print(report.steps, report.hypergrad_applied)
 ```
 
+Python bindings mirror the geometry controller as well. Pass a dictionary of
+overrides to `PolicyGradient.attach_geometry_feedback` to customise the
+observability parameters and smoothing ranges without leaving Python.
+
+```python
+from spiraltorch import SpiralSession
+from spiraltorch.rl import PolicyGradient
+
+session = SpiralSession(device="wgpu", curvature=-1.0)
+policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
+policy.attach_geometry_feedback({"z_space_rank": 24, "slot_symmetry": "cyclic"})
+
+resonance = session.trace(state).resonate()
+policy.record_transition(state, action, reward=0.8)
+
+report, signal = policy.finish_episode_with_geometry(resonance)
+if signal:
+    print(f"η̄={signal['averaged_efficiency']:.3f} scale={signal['learning_rate_scale']:.2f}")
+
+telemetry = policy.geometry_telemetry()
+if telemetry:
+    print("loop gain", telemetry["loop_gain"], "script", telemetry["loop_script"])
+```
+
 Rust projects can pair the policy with the new geometric feedback module to
 ground the update scale in observability measurements. Feed a
 `DifferentialResonance` snapshot into `GeometryFeedback` and the learner will
@@ -1656,6 +1712,10 @@ print(plan["choice"])  # unified merge-kind, tiles, and workgroup sizing
 Need a bootstrap-friendly learning loop without heavyweight dependencies?
 `st-nn` layers sit directly on top of the `st-tensor::pure` stack so you can
 train, schedule, and log every A/B/C decision entirely in Rust.
+
+Geometry-aware policy loops now broadcast their feedback as loopback envelopes,
+so reinforcement learners automatically feed their learning-rate modulation
+into the global telemetry hub for other SpiralTorch nodes to replay.
 
 ```rust
 use st_core::backend::device_caps::DeviceCaps;

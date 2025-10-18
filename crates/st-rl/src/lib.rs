@@ -8,8 +8,10 @@ use std::fmt;
 use st_core::telemetry::hub;
 use st_tensor::{AmegaHypergrad, DifferentialResonance, Tensor, TensorError};
 
+pub mod algorithms;
 mod geometry;
 
+pub use algorithms::{DqnAgent, PpoAgent, SacAgent};
 pub use geometry::{
     GeometryFeedback, GeometryFeedbackConfig, GeometryFeedbackSignal, GeometryTelemetry,
 };
@@ -322,6 +324,8 @@ impl SpiralPolicyGradient {
                 }
             }
             let signal = controller.process_resonance(resonance);
+            let envelope = controller.emit_loopback_envelope(&signal, Some("st-rl.policy"));
+            hub::push_loopback_envelope(envelope);
             (signal.learning_rate_scale.max(f32::EPSILON), Some(signal))
         } else {
             (1.0, None)
@@ -404,6 +408,7 @@ impl SpiralPolicyGradient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use st_core::telemetry::hub;
     use st_core::theory::observability::{ObservabilityConfig, SlotSymmetry};
 
     fn resonance_from(values: &[f32]) -> DifferentialResonance {
@@ -419,6 +424,7 @@ mod tests {
 
     #[test]
     fn telemetry_surfaces_geometry_feedback() -> Result<(), SpiralRlError> {
+        let _ = hub::drain_loopback_envelopes(usize::MAX);
         let mut policy = SpiralPolicyGradient::new(2, 2, 0.01, 0.9)?;
         let snapshot = policy.telemetry();
         assert_eq!(snapshot.buffered_steps, 0);
@@ -444,6 +450,11 @@ mod tests {
         assert!(geo.max_scale <= 3.0);
         assert!(geo.loop_gain >= 0.0);
         assert!(geo.softening_beta >= 0.3);
+        let drained = hub::drain_loopback_envelopes(8);
+        assert!(!drained.is_empty());
+        let broadcast = drained.last().unwrap();
+        assert_eq!(broadcast.source.as_deref(), Some("st-rl.policy"));
+        assert!(broadcast.z_signal.is_some());
         Ok(())
     }
 }

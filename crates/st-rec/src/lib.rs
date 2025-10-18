@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 use st_tensor::{topos::OpenCartesianTopos, Tensor, TensorError};
 
@@ -67,6 +67,258 @@ pub struct RecEpochReport {
     pub rmse: f32,
     pub samples: usize,
     pub regularization_penalty: f32,
+}
+
+/// Ranked item recommendation for a specific user.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recommendation {
+    pub item: usize,
+    pub score: f32,
+}
+
+/// Lightweight user-neighbourhood recommender derived from explicit ratings.
+pub struct NeighborhoodModel {
+    users: usize,
+    items: usize,
+    rating_matrix: Vec<f32>,
+    smoothing: f32,
+}
+
+impl NeighborhoodModel {
+    pub fn fit(
+        users: usize,
+        items: usize,
+        ratings: &[RatingTriple],
+        smoothing: f32,
+    ) -> RecResult<Self> {
+        if users == 0 || items == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: users,
+                cols: items,
+            }
+            .into());
+        }
+        if smoothing < 0.0 {
+            return Err(TensorError::NonPositiveTension { tension: smoothing }.into());
+        }
+
+        let mut matrix = vec![0.0f32; users * items];
+        let mut counts = vec![0usize; users * items];
+        for rating in ratings {
+            if rating.user >= users || rating.item >= items {
+                return Err(SpiralRecError::OutOfBoundsRating {
+                    user: rating.user,
+                    item: rating.item,
+                });
+            }
+            let offset = rating.user * items + rating.item;
+            matrix[offset] += rating.rating;
+            counts[offset] += 1;
+        }
+
+        for idx in 0..matrix.len() {
+            if counts[idx] > 0 {
+                matrix[idx] /= counts[idx] as f32;
+            }
+        }
+
+        Ok(Self {
+            users,
+            items,
+            rating_matrix: matrix,
+            smoothing: smoothing.max(1e-5),
+        })
+    }
+
+    fn rating(&self, user: usize, item: usize) -> f32 {
+        self.rating_matrix[user * self.items + item]
+    }
+
+    pub fn recommend(&self, user: usize, k: usize) -> RecResult<Vec<Recommendation>> {
+        if user >= self.users {
+            return Err(SpiralRecError::OutOfBoundsRating { user, item: 0 });
+        }
+        if k == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut similarities = vec![0.0f32; self.users];
+        let target = &self.rating_matrix[user * self.items..(user + 1) * self.items];
+        let mut target_norm = 0.0f32;
+        for &value in target {
+            target_norm += value * value;
+        }
+        target_norm = target_norm.sqrt() + self.smoothing;
+
+        for other in 0..self.users {
+            if other == user {
+                continue;
+            }
+            let other_row = &self.rating_matrix[other * self.items..(other + 1) * self.items];
+            let mut dot = 0.0f32;
+            let mut other_norm = 0.0f32;
+            for idx in 0..self.items {
+                let lhs = target[idx];
+                let rhs = other_row[idx];
+                dot += lhs * rhs;
+                other_norm += rhs * rhs;
+            }
+            similarities[other] =
+                dot / ((other_norm.sqrt() + self.smoothing) * target_norm).max(self.smoothing);
+        }
+
+        let mut scores = vec![0.0f32; self.items];
+        for other in 0..self.users {
+            if other == user {
+                continue;
+            }
+            let weight = similarities[other];
+            if weight.abs() <= f32::EPSILON {
+                continue;
+            }
+            for item in 0..self.items {
+                scores[item] += weight * self.rating(other, item);
+            }
+        }
+
+        let mut recs: Vec<Recommendation> = scores
+            .into_iter()
+            .enumerate()
+            .map(|(item, score)| Recommendation { item, score })
+            .collect();
+        recs.sort_by(|a, b| b.score.total_cmp(&a.score));
+        recs.truncate(k);
+        Ok(recs)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum KnowledgeEdge {
+    UserItem {
+        user: usize,
+        item: usize,
+        weight: f32,
+    },
+    ItemItem {
+        source: usize,
+        target: usize,
+        weight: f32,
+    },
+}
+
+pub struct KnowledgeGraphRecommender {
+    users: usize,
+    items: usize,
+    damping: f32,
+    user_to_item: Vec<Vec<(usize, f32)>>,
+    item_to_item: Vec<Vec<(usize, f32)>>,
+}
+
+impl KnowledgeGraphRecommender {
+    pub fn new(users: usize, items: usize, damping: f32) -> RecResult<Self> {
+        if users == 0 || items == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: users,
+                cols: items,
+            }
+            .into());
+        }
+        if !(0.0..=1.0).contains(&damping) {
+            return Err(TensorError::NonPositiveTension { tension: damping }.into());
+        }
+        Ok(Self {
+            users,
+            items,
+            damping,
+            user_to_item: vec![Vec::new(); users],
+            item_to_item: vec![Vec::new(); items],
+        })
+    }
+
+    pub fn from_edges(
+        users: usize,
+        items: usize,
+        damping: f32,
+        edges: &[KnowledgeEdge],
+    ) -> RecResult<Self> {
+        let mut graph = Self::new(users, items, damping)?;
+        for edge in edges {
+            graph.add_edge(edge.clone())?;
+        }
+        Ok(graph)
+    }
+
+    pub fn add_edge(&mut self, edge: KnowledgeEdge) -> RecResult<()> {
+        match edge {
+            KnowledgeEdge::UserItem { user, item, weight } => {
+                if user >= self.users || item >= self.items {
+                    return Err(SpiralRecError::OutOfBoundsRating { user, item });
+                }
+                self.user_to_item[user].push((item, weight));
+            }
+            KnowledgeEdge::ItemItem {
+                source,
+                target,
+                weight,
+            } => {
+                if source >= self.items || target >= self.items {
+                    return Err(SpiralRecError::OutOfBoundsRating {
+                        user: source.min(target),
+                        item: source.max(target),
+                    });
+                }
+                self.item_to_item[source].push((target, weight));
+            }
+        }
+        Ok(())
+    }
+
+    fn propagate(&self, user: usize, hops: usize) -> Vec<f32> {
+        let mut scores = vec![0.0f32; self.items];
+        for &(item, weight) in &self.user_to_item[user] {
+            scores[item] += weight;
+        }
+        let mut current = scores.clone();
+        for _ in 0..hops {
+            let mut next = current.clone();
+            for item in 0..self.items {
+                let score = current[item];
+                if score.abs() <= f32::EPSILON {
+                    continue;
+                }
+                for &(target, weight) in &self.item_to_item[item] {
+                    next[target] += score * weight * self.damping;
+                }
+            }
+            current = next;
+        }
+        current
+    }
+
+    pub fn recommend(&self, user: usize, k: usize, hops: usize) -> RecResult<Vec<Recommendation>> {
+        if user >= self.users {
+            return Err(SpiralRecError::OutOfBoundsRating { user, item: 0 });
+        }
+        if k == 0 {
+            return Ok(Vec::new());
+        }
+        let scores = self.propagate(user, hops);
+        let mut recs: Vec<Recommendation> = scores
+            .into_iter()
+            .enumerate()
+            .map(|(item, score)| Recommendation { item, score })
+            .collect();
+        recs.sort_by(|a, b| b.score.total_cmp(&a.score));
+        recs.truncate(k);
+        Ok(recs)
+    }
+
+    pub fn item_degree(&self, item: usize) -> RecResult<usize> {
+        if item >= self.items {
+            return Err(SpiralRecError::OutOfBoundsRating { user: 0, item });
+        }
+        Ok(self.item_to_item[item].len())
+    }
 }
 
 /// Matrix factorisation harness backed by SpiralTorch tensors and open topos guards.
@@ -239,5 +491,125 @@ impl SpiralRecommender {
     /// Returns the latent factor dimensionality.
     pub fn factors(&self) -> usize {
         self.factors
+    }
+
+    /// Produces the top-K ranked items for a user while respecting optional exclusions.
+    pub fn recommend_top_k(
+        &self,
+        user: usize,
+        k: usize,
+        exclude: Option<&[usize]>,
+    ) -> RecResult<Vec<Recommendation>> {
+        if k == 0 {
+            return Ok(Vec::new());
+        }
+
+        self.guard_indices(user, 0)?;
+        let user_slice = &self.user_factors.data()[user * self.factors..(user + 1) * self.factors];
+
+        let skip = exclude.map(|items| {
+            let mut set = HashSet::with_capacity(items.len());
+            set.extend(items.iter().copied());
+            set
+        });
+
+        let mut recommendations = Vec::with_capacity(self.items);
+        for item in 0..self.items {
+            if skip.as_ref().is_some_and(|set| set.contains(&item)) {
+                continue;
+            }
+
+            let item_slice =
+                &self.item_factors.data()[item * self.factors..(item + 1) * self.factors];
+            let score = user_slice
+                .iter()
+                .zip(item_slice.iter())
+                .map(|(u, i)| u * i)
+                .sum();
+            recommendations.push(Recommendation { item, score });
+        }
+
+        recommendations.sort_by(|a, b| b.score.total_cmp(&a.score));
+        if recommendations.len() > k {
+            recommendations.truncate(k);
+        }
+
+        Ok(recommendations)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_basic_recommender() -> SpiralRecommender {
+        let mut rec = SpiralRecommender::new(2, 5, 3, 0.05, 0.01, -1.0).unwrap();
+        let ratings = vec![
+            RatingTriple::new(0, 0, 5.0),
+            RatingTriple::new(0, 1, 3.0),
+            RatingTriple::new(0, 2, 1.0),
+            RatingTriple::new(1, 2, 4.0),
+            RatingTriple::new(1, 3, 2.0),
+        ];
+
+        for _ in 0..8 {
+            rec.train_epoch(&ratings).unwrap();
+        }
+        rec
+    }
+
+    #[test]
+    fn recommend_top_k_orders_scores_descending() {
+        let rec = build_basic_recommender();
+        let results = rec.recommend_top_k(0, 3, None).unwrap();
+        assert!(results.len() <= 3);
+        for window in results.windows(2) {
+            assert!(window[0].score >= window[1].score - f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn recommend_top_k_respects_exclusions_and_limits() {
+        let rec = build_basic_recommender();
+        let exclude = vec![0, 3];
+        let results = rec.recommend_top_k(0, 10, Some(&exclude)).unwrap();
+        assert!(results.iter().all(|rec| !exclude.contains(&rec.item)));
+        assert!(results.len() <= rec.items() - exclude.len());
+        assert!(rec.recommend_top_k(0, 0, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn neighborhood_model_surfaces_peers() {
+        let ratings = vec![
+            RatingTriple::new(0, 0, 5.0),
+            RatingTriple::new(0, 1, 1.0),
+            RatingTriple::new(1, 0, 4.5),
+            RatingTriple::new(1, 2, 4.0),
+            RatingTriple::new(2, 2, 5.0),
+        ];
+        let model = NeighborhoodModel::fit(3, 3, &ratings, 1e-2).unwrap();
+        let recs = model.recommend(0, 2).unwrap();
+        assert!(!recs.is_empty());
+        assert!(recs.iter().any(|rec| rec.item == 2));
+    }
+
+    #[test]
+    fn knowledge_graph_propagates_scores() {
+        let edges = vec![
+            KnowledgeEdge::UserItem {
+                user: 0,
+                item: 0,
+                weight: 1.0,
+            },
+            KnowledgeEdge::ItemItem {
+                source: 0,
+                target: 1,
+                weight: 0.5,
+            },
+        ];
+        let graph = KnowledgeGraphRecommender::from_edges(1, 3, 0.9, &edges).unwrap();
+        let recs = graph.recommend(0, 2, 2).unwrap();
+        assert!(recs.iter().any(|rec| rec.item == 1));
+        assert!(graph.item_degree(0).unwrap() > 0);
     }
 }
