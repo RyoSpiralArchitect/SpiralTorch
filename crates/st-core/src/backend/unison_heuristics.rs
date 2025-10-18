@@ -115,15 +115,45 @@ fn latency_sensitive(rows: u32, cols: u32, k: u32, caps: &DeviceCaps) -> bool {
     small_rows && modest_cols && modest_k
 }
 
+fn align_to_lanes(value: u32, lanes: u32) -> u32 {
+    if lanes <= 1 {
+        return value.max(1);
+    }
+    ((value + lanes - 1) / lanes) * lanes
+}
+
 fn latency_ctile_bounds(cols: u32, lanes: u32) -> (u32, u32) {
     let latency_cap = if cols <= 16_384 {
         lanes.saturating_mul(8)
     } else {
         lanes.saturating_mul(16)
     };
-    let aligned_cap = ((latency_cap + lanes - 1) / lanes) * lanes;
-    let min_latency = ((64 + lanes - 1) / lanes) * lanes;
+    let aligned_cap = align_to_lanes(latency_cap, lanes);
+    let min_latency = align_to_lanes(64, lanes);
     (min_latency.max(lanes), aligned_cap.max(lanes))
+}
+
+fn latency_ctile_target(rows: u32, k: u32, lanes: u32, min_ctile: u32, max_ctile: u32) -> u32 {
+    let lanes = lanes.max(1);
+
+    let row_bucket = if rows <= lanes.saturating_mul(2) {
+        lanes.saturating_mul(4)
+    } else if rows <= lanes.saturating_mul(4) {
+        lanes.saturating_mul(6)
+    } else {
+        lanes.saturating_mul(8)
+    };
+
+    let k_bucket = if k <= lanes.saturating_mul(2) {
+        lanes.saturating_mul(4)
+    } else if k <= lanes.saturating_mul(4) {
+        lanes.saturating_mul(6)
+    } else {
+        lanes.saturating_mul(8)
+    };
+
+    let desired = row_bucket.max(k_bucket).clamp(min_ctile, max_ctile);
+    align_to_lanes(desired, lanes).clamp(min_ctile, max_ctile)
 }
 
 fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> Choice {
@@ -137,12 +167,16 @@ fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> 
         ch = 0;
         let lanes = caps.lane_width.max(1);
         let latency_cap = if cols <= 16_384 { 512 } else { 1024 };
-        let aligned_cap = ((latency_cap + lanes - 1) / lanes) * lanes;
-        let min_cap = ((128 + lanes - 1) / lanes) * lanes;
+        let aligned_cap = align_to_lanes(latency_cap, lanes);
+        let min_cap = align_to_lanes(128, lanes);
         tile = tile.min(aligned_cap.max(lanes)).max(min_cap.max(lanes));
         if matches!(kind, RankKind::MidK | RankKind::BottomK) {
             let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
+            let target = latency_ctile_target(rows, k, lanes, min_ctile, max_ctile);
             ctile = ctile.min(max_ctile).max(min_ctile);
+            if ctile > target || target.saturating_sub(ctile) >= lanes {
+                ctile = target;
+            }
         }
     }
 
@@ -155,10 +189,13 @@ fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> 
             let lane_aligned = if half_tile == 0 {
                 min_ctile
             } else {
-                let aligned = ((half_tile + lanes - 1) / lanes) * lanes;
-                aligned.max(lanes)
+                align_to_lanes(half_tile, lanes).max(lanes)
             };
+            let target = latency_ctile_target(rows, k, lanes, min_ctile, lane_aligned);
             ctile = ctile.min(lane_aligned.max(min_ctile)).max(min_ctile);
+            if ctile > target || target.saturating_sub(ctile) >= lanes {
+                ctile = target;
+            }
         }
     }
 
@@ -270,15 +307,23 @@ fn refine_choice(
         if low_latency {
             let lanes = caps.lane_width.max(1);
             let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
+            let target = latency_ctile_target(rows, k, lanes, min_ctile, max_ctile);
             if choice.ctile > baseline.ctile {
                 choice.ctile = baseline.ctile;
             }
             choice.ctile = choice.ctile.min(max_ctile).max(min_ctile);
+            if choice.ctile > target || target.saturating_sub(choice.ctile) >= lanes {
+                choice.ctile = target;
+            }
             if matches!(kind, RankKind::BottomK) {
                 let half_tile = choice.tile / 2;
                 if half_tile > 0 {
-                    let aligned = ((half_tile + lanes - 1) / lanes) * lanes;
-                    choice.ctile = choice.ctile.min(aligned.max(min_ctile)).max(min_ctile);
+                    let aligned = align_to_lanes(half_tile, lanes).max(min_ctile);
+                    let target = latency_ctile_target(rows, k, lanes, min_ctile, aligned);
+                    choice.ctile = choice.ctile.min(aligned).max(min_ctile);
+                    if choice.ctile > target || target.saturating_sub(choice.ctile) >= lanes {
+                        choice.ctile = target;
+                    }
                 }
             }
         }
@@ -388,14 +433,14 @@ fn score_choice(
         }
         let lanes = caps.lane_width.max(1);
         let latency_cap = if cols <= 16_384 { 512 } else { 1024 };
-        let aligned_cap = ((latency_cap + lanes - 1) / lanes) * lanes;
+        let aligned_cap = align_to_lanes(latency_cap, lanes);
         score += closeness(choice.tile, aligned_cap) * 0.05;
         if choice.mk == 2 {
             score += 0.025;
         }
         if matches!(kind, RankKind::MidK | RankKind::BottomK) {
             let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
-            let target = (min_ctile + max_ctile) / 2;
+            let target = latency_ctile_target(rows, k, lanes, min_ctile, max_ctile);
             score += closeness(choice.ctile, target) * 0.05;
         }
     }
@@ -555,8 +600,10 @@ mod tests {
         let choice = fallback(96, 8_192, 64, &caps, RankKind::MidK);
         assert!(!choice.use_2ce);
         assert_eq!(choice.ch, 0);
-        assert!(choice.ctile >= 64);
-        assert!(choice.ctile <= 512);
+        let lanes = caps.lane_width.max(1);
+        let (min_ctile, max_ctile) = latency_ctile_bounds(8_192, lanes);
+        let expected = latency_ctile_target(96, 64, lanes, min_ctile, max_ctile);
+        assert_eq!(choice.ctile, expected);
     }
 
     #[test]
@@ -565,9 +612,25 @@ mod tests {
         let choice = fallback(96, 8_192, 64, &caps, RankKind::BottomK);
         assert!(!choice.use_2ce);
         assert_eq!(choice.ch, 0);
-        assert!(choice.ctile >= 64);
-        if choice.tile > 0 {
-            assert!(choice.ctile <= ((choice.tile / 2 + 31) / 32) * 32);
-        }
+        let lanes = caps.lane_width.max(1);
+        let (min_ctile, _) = latency_ctile_bounds(8_192, lanes);
+        let half_tile = choice.tile / 2;
+        let aligned_half = if half_tile == 0 {
+            min_ctile
+        } else {
+            align_to_lanes(half_tile, lanes).max(lanes)
+        };
+        let expected = latency_ctile_target(96, 64, lanes, min_ctile, aligned_half);
+        assert_eq!(choice.ctile, expected);
+    }
+
+    #[test]
+    fn latency_sensitive_midk_refine_nudges_back_to_target() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        let baseline = fallback(64, 4_096, 48, &caps, RankKind::MidK);
+        let mut candidate = baseline;
+        candidate.ctile = align_to_lanes(baseline.ctile.saturating_mul(2), caps.lane_width);
+        let refined = refine_choice(candidate, baseline, &caps, 64, 4_096, 48, RankKind::MidK);
+        assert_eq!(refined.ctile, baseline.ctile);
     }
 }
