@@ -71,6 +71,33 @@ impl LaneWindow {
     pub fn snapped(&self, value: u32) -> u32 {
         closest_lane_multiple(value, self.stride, self.min_lane, self.max_lane)
     }
+
+    pub fn snapshot(&self) -> LaneWindowSnapshot {
+        LaneWindowSnapshot {
+            target: self.target,
+            lower: self.lower,
+            upper: self.upper,
+            min_lane: self.min_lane,
+            max_lane: self.max_lane,
+            slack: self.slack,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LaneWindowSnapshot {
+    pub target: u32,
+    pub lower: u32,
+    pub upper: u32,
+    pub min_lane: u32,
+    pub max_lane: u32,
+    pub slack: u32,
+}
+
+impl From<LaneWindow> for LaneWindowSnapshot {
+    fn from(window: LaneWindow) -> Self {
+        window.snapshot()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -254,14 +281,7 @@ fn latency_ctile_bounds(cols: u32, lanes: u32) -> (u32, u32) {
     (min_latency.max(lanes), aligned_cap.max(lanes))
 }
 
-fn latency_ctile_target(
-    rows: u32,
-    cols: u32,
-    k: u32,
-    lanes: u32,
-    min_ctile: u32,
-    max_ctile: u32,
-) -> u32 {
+fn latency_ctile_core_target(rows: u32, k: u32, lanes: u32) -> u32 {
     let lanes = lanes.max(1);
 
     let row_bucket = if rows <= lanes.saturating_mul(2) {
@@ -284,6 +304,21 @@ fn latency_ctile_target(
         lanes.saturating_mul(10)
     };
 
+    row_bucket.max(k_bucket)
+}
+
+fn latency_ctile_target(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+) -> u32 {
+    let lanes = lanes.max(1);
+
+    let base = latency_ctile_core_target(rows, k, lanes);
+
     let column_bias = if cols <= 4_096 {
         lanes.saturating_mul(3)
     } else if cols <= 16_384 {
@@ -294,12 +329,22 @@ fn latency_ctile_target(
         lanes.saturating_mul(8)
     };
 
-    let desired = row_bucket
-        .max(k_bucket)
-        .max(column_bias)
-        .clamp(min_ctile, max_ctile);
+    let desired = base.max(column_bias).clamp(min_ctile, max_ctile);
     let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
     closest_lane_multiple(desired, lanes, min_lane, max_lane)
+}
+
+fn latency_ctile_target_legacy(
+    rows: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+) -> u32 {
+    let lanes = lanes.max(1);
+    let base = latency_ctile_core_target(rows, k, lanes).clamp(min_ctile, max_ctile);
+    let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
+    closest_lane_multiple(base, lanes, min_lane, max_lane)
 }
 
 fn latency_ctile_column_slack_range(cols: u32, lanes: u32) -> (u32, u32) {
@@ -412,6 +457,31 @@ fn snap_latency_ctile(
     (candidate, window)
 }
 
+fn latency_ctile_window_snapshot(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+) -> LaneWindowSnapshot {
+    latency_ctile_window(rows, cols, k, lanes, min_ctile, max_ctile).snapshot()
+}
+
+fn snap_latency_ctile_snapshot(
+    current: u32,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    lanes: u32,
+    min_ctile: u32,
+    max_ctile: u32,
+) -> (u32, LaneWindowSnapshot) {
+    let (candidate, window) =
+        snap_latency_ctile(current, rows, cols, k, lanes, min_ctile, max_ctile);
+    (candidate, window.snapshot())
+}
+
 fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> Choice {
     let wg = caps.recommended_workgroup(rows);
     let kl = caps.recommended_kl(k);
@@ -431,6 +501,14 @@ fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> 
             let (min_ctile, max_ctile) = latency_ctile_bounds(cols, lanes);
             let (snapped, window) =
                 snap_latency_ctile(ctile, rows, cols, k, lanes, min_ctile, max_ctile);
+            debug_assert_eq!(
+                window.snapshot(),
+                latency_ctile_window_snapshot(rows, cols, k, lanes, min_ctile, max_ctile)
+            );
+            let (legacy_snapped, legacy_window) =
+                snap_latency_ctile_snapshot(ctile, rows, cols, k, lanes, min_ctile, max_ctile);
+            debug_assert_eq!(legacy_snapped, snapped);
+            debug_assert_eq!(legacy_window.target, window.target);
             ctile = snapped;
             latency_window = Some(window);
         }
@@ -461,6 +539,28 @@ fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> 
                 min_ctile,
                 lane_cap.max(min_ctile),
             );
+            debug_assert_eq!(
+                window.snapshot(),
+                latency_ctile_window_snapshot(
+                    rows,
+                    cols,
+                    k,
+                    lanes,
+                    min_ctile,
+                    lane_cap.max(min_ctile)
+                )
+            );
+            let (legacy_snapped, legacy_window) = snap_latency_ctile_snapshot(
+                ctile.min(lane_cap).max(min_ctile),
+                rows,
+                cols,
+                k,
+                lanes,
+                min_ctile,
+                lane_cap.max(min_ctile),
+            );
+            debug_assert_eq!(legacy_snapped, snapped);
+            debug_assert_eq!(legacy_window.target, window.target);
             ctile = snapped;
             latency_window = Some(window);
         }
@@ -750,6 +850,8 @@ fn score_choice(
             } else {
                 score -= 0.015;
             }
+            let legacy_target = latency_ctile_target_legacy(rows, k, lanes, min_ctile, max_ctile);
+            score += closeness(choice.ctile, legacy_target) * 0.02;
         }
     }
 
@@ -1052,5 +1154,59 @@ mod tests {
             score_choice(&aligned, &caps, 64, 8_192, 48, &baseline, RankKind::BottomK);
         let off_score = score_choice(&off, &caps, 64, 8_192, 48, &baseline, RankKind::BottomK);
         assert!(aligned_score > off_score);
+    }
+
+    #[test]
+    fn legacy_target_matches_precolumn_formula() {
+        let lanes = 32;
+        let (min_ctile, max_ctile) = latency_ctile_bounds(8_192, lanes);
+        let legacy = latency_ctile_target_legacy(96, 64, lanes, min_ctile, max_ctile);
+
+        let row_bucket = if 96 <= lanes.saturating_mul(2) {
+            lanes.saturating_mul(4)
+        } else if 96 <= lanes.saturating_mul(4) {
+            lanes.saturating_mul(6)
+        } else if 96 <= lanes.saturating_mul(8) {
+            lanes.saturating_mul(8)
+        } else {
+            lanes.saturating_mul(10)
+        };
+
+        let k_bucket = if 64 <= lanes.saturating_mul(2) {
+            lanes.saturating_mul(4)
+        } else if 64 <= lanes.saturating_mul(4) {
+            lanes.saturating_mul(6)
+        } else if 64 <= lanes.saturating_mul(8) {
+            lanes.saturating_mul(8)
+        } else {
+            lanes.saturating_mul(10)
+        };
+
+        let desired = row_bucket.max(k_bucket).clamp(min_ctile, max_ctile);
+        let (min_lane, max_lane) = lane_range(min_ctile, max_ctile, lanes);
+        let expected = closest_lane_multiple(desired, lanes, min_lane, max_lane);
+        assert_eq!(legacy, expected);
+    }
+
+    #[test]
+    fn lane_window_snapshot_round_trips() {
+        let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
+        let lanes = caps.lane_width.max(1);
+        let (min_ctile, max_ctile) = latency_ctile_bounds(8_192, lanes);
+        let window = latency_ctile_window(96, 8_192, 64, lanes, min_ctile, max_ctile);
+        let snapshot = latency_ctile_window_snapshot(96, 8_192, 64, lanes, min_ctile, max_ctile);
+        assert_eq!(snapshot.target, window.target);
+        assert_eq!(snapshot.lower, window.lower);
+        assert_eq!(snapshot.upper, window.upper);
+        assert_eq!(snapshot.min_lane, window.min_lane);
+        assert_eq!(snapshot.max_lane, window.max_lane);
+        assert_eq!(snapshot.slack, window.slack);
+
+        let (snapped, snap_snapshot) =
+            snap_latency_ctile_snapshot(window.target, 96, 8_192, 64, lanes, min_ctile, max_ctile);
+        assert_eq!(snapped, window.target);
+        assert_eq!(snap_snapshot.target, window.target);
+        assert_eq!(snap_snapshot.lower, window.lower);
+        assert_eq!(snap_snapshot.upper, window.upper);
     }
 }
