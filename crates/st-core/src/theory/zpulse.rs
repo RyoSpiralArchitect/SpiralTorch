@@ -9,16 +9,18 @@
 use std::collections::VecDeque;
 
 /// Origin marker for a captured pulse.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ZSource {
     Microlocal,
     Maxwell,
-    Other(String),
+    RealGrad,
+    Desire,
+    Custom(u8),
 }
 
 impl Default for ZSource {
     fn default() -> Self {
-        Self::Other("unspecified".to_string())
+        Self::Custom(0)
     }
 }
 
@@ -60,6 +62,15 @@ impl Default for ZPulse {
             latency_ms: 0.0,
         }
     }
+}
+
+/// Trait implemented by pulse emitters that can feed the conductor.
+pub trait ZEmitter: Send {
+    /// Identifies the emitter source backing the generated pulses.
+    fn name(&self) -> ZSource;
+
+    /// Produces the next available pulse for the provided timestamp.
+    fn tick(&mut self, now: u64) -> Option<ZPulse>;
 }
 
 /// Configuration for the conductor frequency tracker.
@@ -241,6 +252,12 @@ impl ZConductor {
             self.fused.ts = now;
         }
         self.fused.clone()
+    }
+}
+
+impl Default for ZConductor {
+    fn default() -> Self {
+        ZConductor::new(ZConductorCfg::default())
     }
 }
 
