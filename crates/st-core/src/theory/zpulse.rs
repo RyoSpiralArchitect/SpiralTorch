@@ -171,13 +171,29 @@ pub struct ZAdaptiveGainCfg {
     pub responsiveness: f32,
 }
 
+impl Default for ZAdaptiveGainCfg {
+    fn default() -> Self {
+        Self {
+            gain_floor: 0.0,
+            gain_ceil: 1.0,
+            responsiveness: 0.0,
+        }
+    }
+}
+
 impl ZAdaptiveGainCfg {
     pub fn new(gain_floor: f32, gain_ceil: f32, responsiveness: f32) -> Self {
+        let floor = gain_floor.max(0.0);
+        let ceil = gain_ceil.max(floor);
         Self {
-            gain_floor: gain_floor.max(0.0),
-            gain_ceil: gain_ceil.max(gain_floor),
+            gain_floor: floor,
+            gain_ceil: ceil,
             responsiveness: responsiveness.clamp(0.0, 1.0),
         }
+    }
+
+    pub fn update(&mut self, gain_floor: f32, gain_ceil: f32, responsiveness: f32) {
+        *self = Self::new(gain_floor, gain_ceil, responsiveness);
     }
 }
 
@@ -282,6 +298,7 @@ impl ZConductor {
             self.latency_events.truncate(cfg.history);
         }
     }
+}
 
     fn record_config_event(&mut self, event: String) {
         const MAX_CONFIG_EVENTS: usize = 128;
@@ -885,6 +902,103 @@ impl ZConductorCfgPartial {
         if other.latency_align.is_some() {
             self.latency_align = other.latency_align;
         }
+        self.pending = retained;
+
+        let mut drift = 0.0;
+        let mut attributions = Vec::new();
+        let mut total_support = 0.0;
+
+        if !ready.is_empty() {
+            total_support = ready
+                .iter()
+                .filter(|p| !p.is_empty())
+                .map(|pulse| pulse.support_mass().max(0.0))
+                .sum();
+            let mut contributions: Vec<(ZSource, f32, f32)> = ready
+                .iter()
+                .filter(|p| !p.is_empty())
+                .map(|pulse| {
+                    let gain = *self.cfg.gain.get(&pulse.source).unwrap_or(&1.0);
+                    let base_w = (pulse.quality * gain).max(1e-6);
+                    (pulse.source.clone(), base_w, pulse.normalised_drift())
+                })
+                .collect();
+
+            if !contributions.is_empty() {
+                let mut drifts: Vec<f32> = contributions.iter().map(|(_, _, d)| *d).collect();
+                let median = median(&mut drifts);
+                let mut weight_sum = 0.0f32;
+                let mut numerator = 0.0f32;
+                for (source, weight, drift_norm) in contributions.iter_mut() {
+                    let robust = huber_weight(*drift_norm - median, self.cfg.robust_delta);
+                    *weight *= robust;
+                    weight_sum += *weight;
+                    numerator += *weight * *drift_norm;
+                    attributions.push((source.clone(), *weight));
+                }
+                if weight_sum > 0.0 {
+                    drift = numerator / weight_sum;
+                    let inv = 1.0 / weight_sum;
+                    for attrib in &mut attributions {
+                        attrib.1 *= inv;
+                    }
+                }
+            }
+        }
+
+        if attributions.is_empty() {
+            attributions.push((ZSource::Microlocal, 0.0));
+        }
+
+        let filtered = self.apply_temporal_filters(drift, &mut events);
+        let mut z = filtered * self.mag_hat.abs().max(1e-6);
+        if filtered.abs() <= f32::EPSILON {
+            z = 0.0;
+        }
+
+        let z_before_limits = z;
+        let limited = slew_limit(self.last_z, z, self.cfg.slew_max);
+        if (limited - z).abs() > 1e-5 {
+            events.push("slew-limited".to_string());
+            z = limited;
+        }
+
+        let budget = self.cfg.z_budget.max(f32::EPSILON);
+        if z.abs() > budget {
+            let clamped = z.signum() * budget;
+            if self.cfg.back_calculation > 0.0 {
+                let correction = self.cfg.back_calculation * (clamped - z_before_limits);
+                self.mag_hat = (self.mag_hat + correction).max(0.0);
+            }
+            z = clamped;
+            events.push("saturated".to_string());
+        }
+
+        let attributions: Vec<ZAttribution> = attributions
+            .into_iter()
+            .map(|(source, weight)| ZAttribution { source, weight })
+            .collect();
+
+        let mut fused = ZFused {
+            z,
+            drift,
+            support: total_support,
+            z_bias: z_before_limits,
+            attributions,
+            events,
+        };
+
+        if let Some(state) = self.freq.as_mut() {
+            state.fuse(&mut fused);
+        }
+        if let Some(state) = self.adaptive.as_mut() {
+            state.adapt(&mut fused);
+        }
+
+        self.last_z = fused.z;
+        self.last_step_ts = Some(now);
+
+        fused
     }
 }
 

@@ -457,6 +457,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
+name = "cudarc"
+version = "0.11.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a5bd4d1eee570c3b2ac64ed114125517dd1e541d88dd28fc259f1de4dba8d60"
+dependencies = [
+ "libloading 0.8.9",
+]
+
+[[package]]
 name = "d3d12"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2434,6 +2443,7 @@ dependencies = [
  "approx",
  "bitflags 2.9.4",
  "bytemuck",
+ "cudarc",
  "dirs 5.0.1",
  "ndarray",
  "once_cell",
@@ -2522,6 +2532,8 @@ dependencies = [
 name = "st-rec"
 version = "0.1.0"
 dependencies = [
+ "st-kdsl",
+ "st-rl",
  "st-tensor",
 ]
 
@@ -2529,6 +2541,7 @@ dependencies = [
 name = "st-rl"
 version = "0.1.0"
 dependencies = [
+ "rand",
  "st-core",
  "st-tensor",
 ]

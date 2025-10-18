@@ -948,13 +948,19 @@ impl RealGradZProjector {
         let band = start..end;
         let quality = spectral_quality(&projection.spectrum, band).max(self.quality_floor);
 
+        let support = ZSupport {
+            leading: above,
+            central: here,
+            trailing: beneath,
+        };
         ZPulse {
             source: ZSource::RealGrad,
             ts: 0,
-            band_energy: (above, here, beneath),
+            tempo: z_energy,
             drift,
             z_bias,
-            support: z_energy,
+            support,
+            band_energy: (above, here, beneath),
             quality,
             stderr: 0.0,
             latency_ms: 0.0,

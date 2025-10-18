@@ -5,6 +5,8 @@
 
 use crate::backend::rankk_launch::with_registered_buffers_cuda;
 use crate::backend::rankk_software::{run_selection, Selection};
+#[cfg(feature = "cuda")]
+use crate::backend::cuda_runtime;
 use crate::ops::rank_entry::{RankKExecutor, RankPlan};
 
 #[cfg(test)]
@@ -46,7 +48,26 @@ fn dispatch_bottomk(plan: &RankPlan) -> Result<(), String> {
 }
 
 fn run_cuda_selection(plan: &RankPlan, selection: Selection) -> Result<(), String> {
-    with_registered_buffers_cuda(|buffers| run_selection(selection, plan, buffers))
+    with_registered_buffers_cuda(|buffers| {
+        #[cfg(feature = "cuda")]
+        {
+            match cuda_runtime::run_selection(selection, plan, buffers) {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    return run_selection(selection, plan, buffers).map_err(|soft_err| {
+                        format!(
+                            "cuda launch failed ({err}); software fallback also failed: {soft_err}"
+                        )
+                    });
+                }
+            }
+        }
+
+        #[cfg(not(feature = "cuda"))]
+        {
+            return run_selection(selection, plan, buffers);
+        }
+    })
 }
 
 #[cfg(test)]

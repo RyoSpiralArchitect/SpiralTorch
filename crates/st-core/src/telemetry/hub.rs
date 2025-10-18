@@ -22,13 +22,17 @@
 // ============================================================================
 
 use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
+use super::dashboard::{DashboardFrame, DashboardRing};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::{OnceLock, RwLock};
 #[cfg(feature = "psi")]
 use std::time::SystemTime;
+
+use serde_json::Value;
 
 use super::chrono::ChronoLoopSignal;
 #[cfg(feature = "psi")]
@@ -45,6 +49,39 @@ static LAST_PSI: Lazy<RwLock<Option<PsiReading>>> = Lazy::new(|| RwLock::new(Non
 
 #[cfg(feature = "psi")]
 static LAST_PSI_EVENTS: Lazy<RwLock<Vec<PsiEvent>>> = Lazy::new(|| RwLock::new(Vec::new()));
+
+static CONFIG_DIFF_EVENTS: OnceLock<RwLock<Vec<ConfigDiffEvent>>> = OnceLock::new();
+
+fn config_events_cell() -> &'static RwLock<Vec<ConfigDiffEvent>> {
+    CONFIG_DIFF_EVENTS.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+/// Configuration layer that produced a diff event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigLayer {
+    Base,
+    Site,
+    Run,
+}
+
+impl fmt::Display for ConfigLayer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigLayer::Base => write!(f, "base"),
+            ConfigLayer::Site => write!(f, "site"),
+            ConfigLayer::Run => write!(f, "run"),
+        }
+    }
+}
+
+/// Diff emitted while applying layered configuration files.
+#[derive(Clone, Debug)]
+pub struct ConfigDiffEvent {
+    pub layer: ConfigLayer,
+    pub path: String,
+    pub previous: Option<Value>,
+    pub current: Option<Value>,
+}
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi(reading: &PsiReading) {
@@ -72,6 +109,23 @@ pub fn set_last_psi_events(events: &[PsiEvent]) {
 #[cfg(feature = "psi")]
 pub fn get_last_psi_events() -> Vec<PsiEvent> {
     LAST_PSI_EVENTS
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
+}
+
+/// Records the most recent configuration diff events produced when loading
+/// layered configuration files.
+pub fn record_config_events(events: &[ConfigDiffEvent]) {
+    if let Ok(mut guard) = config_events_cell().write() {
+        guard.clear();
+        guard.extend(events.iter().cloned());
+    }
+}
+
+/// Returns the last recorded configuration diff events.
+pub fn get_config_events() -> Vec<ConfigDiffEvent> {
+    config_events_cell()
         .read()
         .map(|guard| guard.clone())
         .unwrap_or_default()
@@ -183,6 +237,7 @@ fn desire_step_cell() -> &'static RwLock<Option<DesireStepTelemetry>> {
 
 static ATLAS_FRAME: OnceLock<RwLock<Option<AtlasFrame>>> = OnceLock::new();
 static ATLAS_ROUTE: OnceLock<RwLock<VecDeque<AtlasFrame>>> = OnceLock::new();
+static DASHBOARD_FRAMES: OnceLock<RwLock<DashboardRing>> = OnceLock::new();
 
 fn atlas_cell() -> &'static RwLock<Option<AtlasFrame>> {
     ATLAS_FRAME.get_or_init(|| RwLock::new(None))
@@ -193,6 +248,43 @@ fn atlas_route_cell() -> &'static RwLock<VecDeque<AtlasFrame>> {
 }
 
 const ATLAS_ROUTE_CAPACITY: usize = 24;
+
+fn dashboard_ring() -> &'static RwLock<DashboardRing> {
+    DASHBOARD_FRAMES.get_or_init(|| RwLock::new(DashboardRing::new(64)))
+}
+
+/// Pushes a dashboard frame onto the rolling ring buffer.
+pub fn push_dashboard_frame(frame: DashboardFrame) {
+    if let Ok(mut guard) = dashboard_ring().write() {
+        guard.push(frame);
+    }
+}
+
+/// Returns the latest dashboard frame if one has been recorded.
+pub fn latest_dashboard_frame() -> Option<DashboardFrame> {
+    dashboard_ring()
+        .read()
+        .ok()
+        .and_then(|guard| guard.latest().cloned())
+}
+
+/// Returns up to `limit` frames from the ring, newest first.
+pub fn snapshot_dashboard_frames(limit: usize) -> Vec<DashboardFrame> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    dashboard_ring()
+        .read()
+        .map(|guard| {
+            guard
+                .iter()
+                .rev()
+                .take(limit)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 fn push_atlas_route(frame: &AtlasFrame) {
     if frame.timestamp <= 0.0 {
@@ -615,6 +707,8 @@ pub fn get_collapse_pulse() -> Option<CollapsePulse> {
 mod tests {
     use super::*;
     use crate::telemetry::chrono::{ChronoHarmonics, ChronoPeak, ChronoSummary};
+    use crate::telemetry::dashboard::DashboardMetric;
+    use std::time::SystemTime;
 
     fn sample_summary(timestamp: f32) -> ChronoSummary {
         ChronoSummary {
@@ -778,5 +872,31 @@ mod tests {
         assert!((summary.sparsity - 0.75).abs() < f32::EPSILON);
         clear_last_realgrad_for_test();
         assert!(get_last_realgrad().is_none());
+    }
+
+    #[test]
+    fn dashboard_ring_records_frames() {
+        let baseline = snapshot_dashboard_frames(usize::MAX).len();
+
+        let mut frame_a = DashboardFrame::new(SystemTime::now());
+        frame_a.push_metric(DashboardMetric::new("loss", 1.0));
+        push_dashboard_frame(frame_a.clone());
+
+        let mut frame_b = DashboardFrame::new(SystemTime::now());
+        frame_b.push_metric(DashboardMetric::new("loss", 0.5));
+        push_dashboard_frame(frame_b.clone());
+
+        let latest = latest_dashboard_frame().expect("latest dashboard frame");
+        assert_eq!(latest.metrics.len(), 1);
+        assert!((latest.metrics[0].value - 0.5).abs() <= f64::EPSILON);
+
+        let snapshot = snapshot_dashboard_frames(2);
+        assert!(snapshot.len() >= 2);
+        assert!((snapshot[0].metrics[0].value - 0.5).abs() <= f64::EPSILON);
+        assert!((snapshot[1].metrics[0].value - 1.0).abs() <= f64::EPSILON);
+
+        let expanded = snapshot_dashboard_frames(baseline + 2);
+        assert!(expanded.len() >= baseline + 2);
+        assert!(snapshot_dashboard_frames(0).is_empty());
     }
 }

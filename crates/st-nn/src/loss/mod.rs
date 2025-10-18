@@ -3,13 +3,19 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+mod contrastive_loss;
+mod focal_loss;
 mod hyperbolic_cross_entropy;
 mod mean_squared_error;
+mod triplet_loss;
 
 use crate::{PureResult, Tensor};
 
+pub use contrastive_loss::ContrastiveLoss;
+pub use focal_loss::FocalLoss;
 pub use hyperbolic_cross_entropy::HyperbolicCrossEntropy;
 pub use mean_squared_error::MeanSquaredError;
+pub use triplet_loss::TripletLoss;
 
 /// Trait implemented by differentiable losses that operate directly on
 /// SpiralTorch tensors.
