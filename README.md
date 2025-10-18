@@ -198,7 +198,20 @@ sample so `DesirePsiBridge` captures the Z drift alongside ψ totals without
 hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:crates/st-core/src/theory/maxwell.rs†L666-L714】
 Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
 concept window that the `DesireLagrangian` can consume, aligning coded-envelope
-channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L132】
+channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L214】
+
+### Quantum Reality Studio overlays
+
+The new `st-qr-studio` crate spins up a **QuantumRealityStudio** that records
+Maxwell pulses, emits concept windows, and stitches narrative tags into VR/AR
+overlays. Signal capture sessions enforce which laboratory rigs may publish
+pulses, semantic taggers mirror the `MaxwellDesireBridge` lexicon, and overlay
+frames surface glyph/intensity pairs for immersive projection.【F:crates/st-qr-studio/src/lib.rs†L1-L234】 Storyboard exports drop
+directly into `tools/qr_storyboard.py`, which converts JSON/NDJSON captures into
+Markdown decks grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The
+companion [Quantum Reality Playbook](docs/qr_playbook/README.md) provides
+rituals, collaboration tips, and art-direction cues so research and cultural
+teams stay synchronised.【F:docs/qr_playbook/README.md†L1-L49】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
