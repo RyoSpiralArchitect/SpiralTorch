@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use crate::HipErr;
+use crate::{DeviceInfo, HipErr};
 use std::ffi::{c_char, c_void, CStr};
 
 pub type HipPtr = *mut c_void;
@@ -13,6 +13,9 @@ pub type hipStream_t = *mut c_void;
 const HIP_SUCCESS: hipError_t = 0;
 const RCCL_SUCCESS: i32 = 0;
 const RCCL_UINT64: i32 = 5;
+const HIP_DEVICE_NAME_MAX: usize = 256;
+
+const HIP_HOST_MALLOC_DEFAULT: u32 = 0;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -46,9 +49,22 @@ extern "C" {
         kind: HipMemcpyKind,
         stream: hipStream_t,
     ) -> hipError_t;
+    fn hipMemsetAsync(
+        dst: HipPtr,
+        value: i32,
+        size_bytes: usize,
+        stream: hipStream_t,
+    ) -> hipError_t;
+    fn hipGetDevice(device: *mut i32) -> hipError_t;
+    fn hipSetDevice(device: i32) -> hipError_t;
+    fn hipGetDeviceCount(count: *mut i32) -> hipError_t;
+    fn hipDeviceGetName(name: *mut c_char, len: i32, device: i32) -> hipError_t;
+    fn hipStreamSynchronize(stream: hipStream_t) -> hipError_t;
     fn hipDeviceSynchronize() -> hipError_t;
     fn hipStreamCreate(stream: *mut hipStream_t) -> hipError_t;
     fn hipStreamDestroy(stream: hipStream_t) -> hipError_t;
+    fn hipHostMalloc(ptr: *mut HipPtr, size: usize, flags: u32) -> hipError_t;
+    fn hipHostFree(ptr: HipPtr) -> hipError_t;
     fn hipGetErrorName(error: hipError_t) -> *const c_char;
     fn hipGetErrorString(error: hipError_t) -> *const c_char;
 
@@ -173,6 +189,22 @@ pub fn free(ptr: HipPtr) -> Result<(), HipErr> {
     hip_result(unsafe { hipFree(ptr) }, "hipFree")
 }
 
+pub fn host_malloc(size: usize) -> Result<HipPtr, HipErr> {
+    let mut ptr: HipPtr = std::ptr::null_mut();
+    hip_result(
+        unsafe { hipHostMalloc(&mut ptr, size, HIP_HOST_MALLOC_DEFAULT) },
+        "hipHostMalloc",
+    )?;
+    Ok(ptr)
+}
+
+pub fn host_free(ptr: HipPtr) -> Result<(), HipErr> {
+    if ptr.is_null() {
+        return Ok(());
+    }
+    hip_result(unsafe { hipHostFree(ptr) }, "hipHostFree")
+}
+
 pub unsafe fn memcpy_h2d_async(
     dst: HipPtr,
     src: *const u8,
@@ -188,6 +220,18 @@ pub unsafe fn memcpy_h2d_async(
             stream.raw(),
         ),
         "hipMemcpyAsync(H2D)",
+    )
+}
+
+pub unsafe fn memset_async(
+    dst: HipPtr,
+    value: u8,
+    size: usize,
+    stream: &HipStream,
+) -> Result<(), HipErr> {
+    hip_result(
+        hipMemsetAsync(dst, value as i32, size, stream.raw()),
+        "hipMemsetAsync",
     )
 }
 
@@ -211,6 +255,51 @@ pub unsafe fn memcpy_d2h_async(
 
 pub fn device_synchronize() -> Result<(), HipErr> {
     hip_result(unsafe { hipDeviceSynchronize() }, "hipDeviceSynchronize")
+}
+
+pub fn stream_synchronize(stream: &HipStream) -> Result<(), HipErr> {
+    hip_result(
+        unsafe { hipStreamSynchronize(stream.raw()) },
+        "hipStreamSynchronize",
+    )
+}
+
+pub fn get_device() -> Result<i32, HipErr> {
+    let mut device = 0i32;
+    hip_result(unsafe { hipGetDevice(&mut device) }, "hipGetDevice")?;
+    Ok(device)
+}
+
+pub fn set_device(device: i32) -> Result<(), HipErr> {
+    hip_result(unsafe { hipSetDevice(device) }, "hipSetDevice")
+}
+
+pub fn device_count() -> Result<i32, HipErr> {
+    let mut count = 0i32;
+    hip_result(
+        unsafe { hipGetDeviceCount(&mut count) },
+        "hipGetDeviceCount",
+    )?;
+    Ok(count)
+}
+
+fn device_name(device: i32) -> Result<String, HipErr> {
+    let mut buf = [0i8; HIP_DEVICE_NAME_MAX];
+    hip_result(
+        unsafe { hipDeviceGetName(buf.as_mut_ptr(), HIP_DEVICE_NAME_MAX as i32, device) },
+        "hipDeviceGetName",
+    )?;
+    Ok(read_cstring(buf.as_ptr()))
+}
+
+pub fn enumerate_devices() -> Result<Vec<DeviceInfo>, HipErr> {
+    let total = device_count()?;
+    let mut devices = Vec::new();
+    for device in 0..total {
+        let name = device_name(device)?;
+        devices.push(DeviceInfo::new(device as u32, name, total > 1));
+    }
+    Ok(devices)
 }
 
 pub fn pack_vals_idx_u64(
