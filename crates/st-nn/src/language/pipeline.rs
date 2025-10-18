@@ -10,6 +10,7 @@ use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::schedule::BandEnergy;
 use crate::PureResult;
+use st_core::coop::ai::{CoopAgent, CoopProposal};
 use st_tensor::TensorError;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -742,6 +743,33 @@ pub struct DesireRoundtableBridge {
     latest: Arc<Mutex<Option<DesireRoundtableImpulse>>>,
 }
 
+#[cfg(test)]
+mod coop_tests {
+    use super::*;
+
+    #[test]
+    fn desire_roundtable_coop_agent_reacts_to_credit() {
+        let mut bridge = DesireRoundtableBridge::new();
+        {
+            let mut guard = bridge.latest.lock().unwrap();
+            *guard = Some(DesireRoundtableImpulse {
+                multipliers: (1.1, 0.9, 1.0),
+                drift: 0.3,
+                timestamp: SystemTime::now(),
+            });
+        }
+
+        let proposal = CoopAgent::propose(&mut bridge);
+        assert!(proposal.weight > 0.0);
+
+        let before_blend = bridge.blend;
+        let before_gain = bridge.drift_gain;
+        CoopAgent::observe(&mut bridge, -0.2, -0.6);
+        assert!(bridge.blend >= before_blend);
+        assert!(bridge.drift_gain > before_gain);
+    }
+}
+
 impl DesireRoundtableBridge {
     pub fn new() -> Self {
         Self {
@@ -757,9 +785,25 @@ impl DesireRoundtableBridge {
         self
     }
 
+    pub fn blend(&self) -> f32 {
+        self.blend
+    }
+
+    pub fn set_blend(&mut self, blend: f32) {
+        self.blend = blend.clamp(0.0, 1.0);
+    }
+
     pub fn with_drift_gain(mut self, gain: f32) -> Self {
         self.drift_gain = gain.clamp(0.0, 1.0);
         self
+    }
+
+    pub fn drift_gain(&self) -> f32 {
+        self.drift_gain
+    }
+
+    pub fn set_drift_gain(&mut self, gain: f32) {
+        self.drift_gain = gain.clamp(0.0, 1.0);
     }
 
     pub fn len(&self) -> usize {
@@ -817,6 +861,46 @@ impl DesireRoundtableBridge {
             drift,
             timestamp: SystemTime::now(),
         }
+    }
+}
+
+impl CoopAgent for DesireRoundtableBridge {
+    fn propose(&mut self) -> CoopProposal {
+        let impulse = match self.impulse() {
+            Ok(Some(impulse)) => impulse,
+            _ => return CoopProposal::neutral(),
+        };
+        let (above, here, beneath) = impulse.multipliers;
+        let avg = (above + here + beneath) / 3.0;
+        let weight = avg.clamp(0.05, 2.0);
+        CoopProposal::new(impulse.drift, weight)
+    }
+
+    fn observe(&mut self, team_reward: f32, credit: f32) {
+        let reward_push = team_reward.tanh();
+        let credit_push = credit.tanh();
+
+        let mut blend = self.blend;
+        if reward_push < 0.0 {
+            blend += (-reward_push) * 0.05;
+        } else {
+            blend -= reward_push * 0.03;
+        }
+        if credit_push < 0.0 {
+            blend += (-credit_push) * 0.04;
+        } else {
+            blend -= credit_push * 0.02;
+        }
+        self.blend = blend.clamp(0.05, 0.95);
+
+        let mut drift_gain = self.drift_gain;
+        if credit_push > 0.0 {
+            drift_gain *= 1.0 - 0.08 * credit_push;
+        } else {
+            drift_gain *= 1.0 + 0.05 * (-credit_push);
+        }
+        drift_gain = (drift_gain * (1.0 - 0.03 * reward_push.abs())).clamp(0.1, 1.2);
+        self.drift_gain = drift_gain;
     }
 }
 

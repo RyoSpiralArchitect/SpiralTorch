@@ -38,10 +38,12 @@ use crate::telemetry::{
     psi::{PsiComponent, PsiEvent, PsiReading},
 };
 use crate::{
+    coop::ai::{CoopAgent, CoopProposal},
     telemetry::hub::SoftlogicZFeedback,
     theory::zpulse::{ZEmitter, ZPulse, ZSource},
     util::math::LeechProjector,
 };
+use std::cell::RefCell;
 #[cfg(feature = "psi")]
 use std::collections::HashMap;
 use std::{
@@ -280,6 +282,7 @@ pub struct MaxwellZProjector {
     bias_gain: f32,
     min_blocks: u64,
     min_z_magnitude: f64,
+    last_pulse: RefCell<Option<MaxwellZPulse>>,
 }
 
 impl MaxwellZProjector {
@@ -290,6 +293,7 @@ impl MaxwellZProjector {
             bias_gain: 1.0,
             min_blocks: 2,
             min_z_magnitude: 0.0,
+            last_pulse: RefCell::new(None),
         }
     }
 
@@ -334,14 +338,21 @@ impl MaxwellZProjector {
         let beneath = (-mean).max(0.0) as f32;
         let here = stderr.max(0.0) as f32;
 
-        Some(MaxwellZPulse {
+        let pulse = MaxwellZPulse {
             blocks: tracker.len(),
             mean,
             standard_error: stderr,
             z_score,
             band_energy: (above, here, beneath),
             z_bias,
-        })
+        };
+        self.last_pulse.replace(Some(pulse.clone()));
+        Some(pulse)
+    }
+
+    /// Returns the most recent pulse emitted after enrichment.
+    pub fn last_pulse(&self) -> Option<MaxwellZPulse> {
+        self.last_pulse.borrow().clone()
     }
 }
 
@@ -406,6 +417,31 @@ impl From<MaxwellZPulse> for ZPulse {
             stderr,
             latency_ms,
         }
+    }
+}
+
+impl CoopAgent for MaxwellZProjector {
+    fn propose(&mut self) -> CoopProposal {
+        match self.last_pulse() {
+            Some(pulse) => {
+                let magnitude = pulse.magnitude() as f32;
+                let weight = (magnitude.max(1e-3) + pulse.band_energy.1).max(1e-3);
+                CoopProposal::new(pulse.z_bias, weight)
+            }
+            None => CoopProposal::neutral(),
+        }
+    }
+
+    fn observe(&mut self, team_reward: f32, credit: f32) {
+        let magnitude = self
+            .last_pulse()
+            .map(|pulse| pulse.magnitude() as f32)
+            .unwrap_or(0.0);
+        let credit_push = (credit / (1.0 + magnitude)).clamp(-1.0, 1.0);
+        self.bias_gain = (self.bias_gain + 0.15 * credit_push).clamp(0.1, 10.0);
+
+        let reward_push = team_reward.tanh() as f64;
+        self.min_z_magnitude = (self.min_z_magnitude * (1.0 - 0.05 * reward_push)).clamp(0.0, 6.0);
     }
 }
 
@@ -748,6 +784,27 @@ mod tests {
         assert_eq!(feedback.psi_total, 12.0);
         assert_eq!(feedback.weighted_loss, 4.0);
         assert!(feedback.z_signal.abs() > 0.0);
+    }
+
+    #[test]
+    fn maxwell_projector_coop_agent_adjusts_bias_gain() {
+        let mut tracker = SequentialZ::new();
+        for sample in [1.2, 0.95, 1.1, 0.88, 1.3, 1.05] {
+            tracker.push(sample);
+        }
+
+        let mut projector = MaxwellZProjector::new(16, 0.4)
+            .with_bias_gain(1.5)
+            .with_min_blocks(3)
+            .with_min_z(0.4);
+
+        assert!(projector.project(&tracker).is_some());
+        let proposal = CoopAgent::propose(&mut projector);
+        assert!(proposal.weight > 0.0);
+
+        let before_gain = projector.bias_gain;
+        CoopAgent::observe(&mut projector, 0.25, 0.75);
+        assert!(projector.bias_gain >= before_gain);
     }
 
     #[test]

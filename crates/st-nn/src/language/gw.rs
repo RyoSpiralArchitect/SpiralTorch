@@ -5,6 +5,7 @@
 
 use super::geometry::{SemanticBridge, SparseKernel};
 use crate::PureResult;
+use st_core::coop::ai::{CoopAgent, CoopProposal};
 use st_tensor::TensorError;
 use std::collections::HashSet;
 
@@ -146,6 +147,53 @@ impl EntropicGwSolver {
             concept_kernel,
         )?;
         Ok(bridge)
+    }
+}
+
+impl CoopAgent for EntropicGwSolver {
+    fn propose(&mut self) -> CoopProposal {
+        let z_bias = (self.anchor_strength - self.epsilon).tanh();
+        let weight = (self.anchor_strength + self.epsilon).max(1e-3);
+        CoopProposal::new(z_bias, weight)
+    }
+
+    fn observe(&mut self, team_reward: f32, credit: f32) {
+        let credit_push = credit.tanh();
+        let reward_push = team_reward.tanh();
+
+        if credit_push >= 0.0 {
+            self.anchor_strength =
+                (self.anchor_strength * (1.0 + 0.12 * credit_push)).clamp(0.5, 24.0);
+            self.epsilon = (self.epsilon * (1.0 - 0.04 * credit_push)).clamp(1e-3, 8.0);
+        } else {
+            let neg = -credit_push;
+            self.anchor_strength = (self.anchor_strength * (1.0 - 0.05 * neg)).clamp(0.5, 24.0);
+            self.epsilon = (self.epsilon * (1.0 + 0.1 * neg)).clamp(1e-3, 8.0);
+        }
+
+        self.epsilon = (self.epsilon * (1.0 + (-0.03 * reward_push))).clamp(1e-3, 8.0);
+    }
+}
+
+#[cfg(test)]
+mod coop_tests {
+    use super::*;
+
+    #[test]
+    fn gw_solver_coop_agent_balances_parameters() {
+        let mut solver = EntropicGwSolver::default();
+        let proposal = CoopAgent::propose(&mut solver);
+        assert!(proposal.weight > 0.0);
+
+        let before_anchor = solver.anchor_strength;
+        let before_eps = solver.epsilon;
+        CoopAgent::observe(&mut solver, -0.4, 0.6);
+        assert!(solver.anchor_strength >= before_anchor);
+        let mid_eps = solver.epsilon;
+        assert!(mid_eps <= before_eps);
+
+        CoopAgent::observe(&mut solver, 0.2, -0.7);
+        assert!(solver.epsilon >= mid_eps);
     }
 }
 

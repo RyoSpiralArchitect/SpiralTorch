@@ -3,6 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#[cfg(feature = "hip-real")]
+use crate::backend::hip_runtime;
 use crate::backend::rankk_launch::with_registered_buffers_hip;
 use crate::backend::rankk_software::{run_selection, Selection};
 use crate::ops::rank_entry::{RankKExecutor, RankPlan};
@@ -46,7 +48,26 @@ fn dispatch_bottomk(plan: &RankPlan) -> Result<(), String> {
 }
 
 fn run_hip_selection(plan: &RankPlan, selection: Selection) -> Result<(), String> {
-    with_registered_buffers_hip(|buffers| run_selection(selection, plan, buffers))
+    with_registered_buffers_hip(|buffers| {
+        #[cfg(feature = "hip-real")]
+        {
+            match hip_runtime::run_selection(selection, plan, buffers) {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    return run_selection(selection, plan, buffers).map_err(|soft_err| {
+                        format!(
+                            "hip launch failed ({err}); software fallback also failed: {soft_err}"
+                        )
+                    });
+                }
+            }
+        }
+
+        #[cfg(not(feature = "hip-real"))]
+        {
+            return run_selection(selection, plan, buffers);
+        }
+    })
 }
 
 #[cfg(test)]
@@ -69,10 +90,7 @@ mod tests {
     }
 
     fn sample_input() -> Vec<f32> {
-        vec![
-            1.0, 3.5, -2.0, 0.5, 7.0,
-            -1.0, 4.0, 0.25, -3.0, 2.0,
-        ]
+        vec![1.0, 3.5, -2.0, 0.5, 7.0, -1.0, 4.0, 0.25, -3.0, 2.0]
     }
 
     fn launch_buffers<'a>(
@@ -84,7 +102,6 @@ mod tests {
         LaunchBuffers::new(input, ROWS, COLS, k, out_vals, out_idx).expect("valid launch buffers")
     }
 
-
     #[test]
     fn hip_topk_selects_largest_values() {
         let plan = plan(RankKind::TopK, 2);
@@ -92,9 +109,12 @@ mod tests {
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        with_launch_buffers_hip(launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k), || {
-            HipExecutor::default().launch_topk(&plan).unwrap();
-        });
+        with_launch_buffers_hip(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || {
+                HipExecutor::default().launch_topk(&plan).unwrap();
+            },
+        );
 
         assert_eq!(out_vals, vec![7.0, 3.5, 4.0, 2.0]);
         assert_eq!(out_idx, vec![4, 1, 1, 4]);
@@ -107,9 +127,12 @@ mod tests {
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        with_launch_buffers_hip(launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k), || {
-            HipExecutor::default().launch_midk(&plan).unwrap();
-        });
+        with_launch_buffers_hip(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || {
+                HipExecutor::default().launch_midk(&plan).unwrap();
+            },
+        );
 
         assert_eq!(out_vals, vec![0.5, 1.0, -1.0, 0.25]);
         assert_eq!(out_idx, vec![3, 0, 0, 2]);
@@ -122,9 +145,12 @@ mod tests {
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        with_launch_buffers_hip(launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k), || {
-            HipExecutor::default().launch_bottomk(&plan).unwrap();
-        });
+        with_launch_buffers_hip(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || {
+                HipExecutor::default().launch_bottomk(&plan).unwrap();
+            },
+        );
 
         assert_eq!(out_vals, vec![-2.0, 0.5, -3.0, -1.0]);
         assert_eq!(out_idx, vec![2, 3, 3, 0]);

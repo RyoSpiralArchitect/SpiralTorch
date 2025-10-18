@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
-// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 //! Canonical representation of Z pulses together with a lightweight
 //! conductor that fuses multiple sources into a single control signal.
@@ -187,7 +186,6 @@ impl ZLatencyConfig {
             history: history.max(1),
         }
     }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZConductorCfg {
@@ -246,7 +244,6 @@ impl ZConductor {
             latency_cfg: None,
             latency_events: VecDeque::new(),
         }
-    }
 
     pub fn cfg(&self) -> &ZConductorCfg {
         &self.cfg
@@ -269,7 +266,6 @@ impl ZConductor {
         if let Some(cfg) = cfg {
             self.latency_events.truncate(cfg.history);
         }
-    }
 
     pub fn step<I>(&mut self, pulses: I, now: u64) -> ZFused
     where
@@ -419,14 +415,14 @@ impl ZConductor {
         self.fused.clone()
     }
 
-    pub fn drain_latency_events(&mut self) -> Vec<String> {
-        self.latency_events.drain(..).collect()
-    }
-}
+        assert!(conductor.cfg.freq.is_some());
+        assert!(conductor.cfg.adaptive_gain.is_some());
+        assert!(conductor.cfg.latency.is_some());
 
-fn lerp(current: f32, target: f32, alpha: f32) -> f32 {
-    let alpha = alpha.clamp(0.0, 1.0);
-    (1.0 - alpha) * current + alpha * target
+        let cfg = conductor.cfg_mut();
+        cfg.freq = None;
+        assert!(conductor.cfg.freq.is_none());
+    }
 }
 #[derive(Clone, Default, Debug)]
 pub struct DesireEmitter {
