@@ -198,7 +198,20 @@ sample so `DesirePsiBridge` captures the Z drift alongside ψ totals without
 hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:crates/st-core/src/theory/maxwell.rs†L666-L714】
 Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
 concept window that the `DesireLagrangian` can consume, aligning coded-envelope
-channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L132】
+channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L214】
+
+### Quantum Reality Studio overlays
+
+The new `st-qr-studio` crate spins up a **QuantumRealityStudio** that records
+Maxwell pulses, emits concept windows, and stitches narrative tags into VR/AR
+overlays. Signal capture sessions enforce which laboratory rigs may publish
+pulses, semantic taggers mirror the `MaxwellDesireBridge` lexicon, and overlay
+frames surface glyph/intensity pairs for immersive projection.【F:crates/st-qr-studio/src/lib.rs†L1-L234】 Storyboard exports drop
+directly into `tools/qr_storyboard.py`, which converts JSON/NDJSON captures into
+Markdown decks grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The
+companion [Quantum Reality Playbook](docs/qr_playbook/README.md) provides
+rituals, collaboration tips, and art-direction cues so research and cultural
+teams stay synchronised.【F:docs/qr_playbook/README.md†L1-L49】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
@@ -1033,6 +1046,30 @@ report = policy.finish_episode()
 print(report.steps, report.hypergrad_applied)
 ```
 
+Python bindings mirror the geometry controller as well. Pass a dictionary of
+overrides to `PolicyGradient.attach_geometry_feedback` to customise the
+observability parameters and smoothing ranges without leaving Python.
+
+```python
+from spiraltorch import SpiralSession
+from spiraltorch.rl import PolicyGradient
+
+session = SpiralSession(device="wgpu", curvature=-1.0)
+policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
+policy.attach_geometry_feedback({"z_space_rank": 24, "slot_symmetry": "cyclic"})
+
+resonance = session.trace(state).resonate()
+policy.record_transition(state, action, reward=0.8)
+
+report, signal = policy.finish_episode_with_geometry(resonance)
+if signal:
+    print(f"η̄={signal['averaged_efficiency']:.3f} scale={signal['learning_rate_scale']:.2f}")
+
+telemetry = policy.geometry_telemetry()
+if telemetry:
+    print("loop gain", telemetry["loop_gain"], "script", telemetry["loop_script"])
+```
+
 Rust projects can pair the policy with the new geometric feedback module to
 ground the update scale in observability measurements. Feed a
 `DifferentialResonance` snapshot into `GeometryFeedback` and the learner will
@@ -1283,6 +1320,11 @@ tape.apply(weights)
 print("updated weights", weights.tolist())
 ```
 
+Prefer flat-space optimisation? Reach for the new Rust-side
+`st_tensor::AmegaRealgrad` tape to mirror the same API without the Poincaré
+projection step—handy when Canvas Transformer energy needs to feed classical
+optimisers alongside its hypergradient updates.
+
 ### Canvas Pixel Transformer → Z-space feedback
 
 - `CanvasProjector::refresh_with_vectors` now returns both the RGBA buffer and
@@ -1291,12 +1333,33 @@ print("updated weights", weights.tolist())
 - `FractalCanvas::vectorFieldFft(false)` surfaces the per-row FFT spectrum as
   interleaved energy/chroma pairs so Canvas Transformer pipelines can ingest
   frequency features without leaving Rust.
+- `CanvasProjector::accumulate_hypergrad` and
+  `CanvasProjector::accumulate_realgrad` stream the refreshed canvas tensor
+  directly into SpiralTorch's Riemannian or Euclidean optimisers without
+  additional copies.
+- `FractalCanvas::relation()` mirrors the projector's tensor output as a
+  `Float32Array` so browser call-sites can feed the raw relation into custom
+  pipelines or training loops.
+- `FractalCanvas::hypergradWave(curvature)` and `FractalCanvas::realgradWave()`
+  surface curvature-aware hypergrad updates alongside Euclidean gradients so the
+  Canvas Transformer can keep hypergrad/Realgrad buffers in sync by default.
+- `FractalCanvas::gradientSummary(curvature)` condenses both tapes into shared
+  L1/L2/∞ norms plus RMS/mean-absolute magnitudes so monitoring dashboards can
+  watch gradient health without shipping the full relation buffers across the
+  WASM boundary.
 - `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
   WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
   the vector field and accumulate the spectrum fully on-GPU.
 - `FractalCanvas::vectorFieldFftUniform(false)` packages the `CanvasFftParams`
   uniform (width, height, inverse flag, padding) as a `Uint32Array` so the WGSL
   kernel can be dispatched without manual byte packing.
+- `FractalCanvas::vectorFieldFftLayout()` reports the byte lengths and strides
+  for the `FieldSample`/`SpectrumSample` storage buffers plus the uniform block
+  so WebGPU callers can allocate resources without hard-coding struct sizes.
+- `FractalCanvas::vectorFieldFftDispatch(true)` computes the workgroup triplet
+  for the generated WGSL so callers can hand the counts directly to
+  `computePass.dispatchWorkgroups(...)` (or the Rust equivalent) without
+  duplicating the ceil division logic.
 - Use `CanvasProjector::emit_zspace_patch` to fold the canvas state back into
   the fractal scheduler without leaving Rust or allocating intermediate
   buffers.
@@ -1551,6 +1614,10 @@ Need a bootstrap-friendly learning loop without heavyweight dependencies?
 `st-nn` layers sit directly on top of the `st-tensor::pure` stack so you can
 train, schedule, and log every A/B/C decision entirely in Rust.
 
+Geometry-aware policy loops now broadcast their feedback as loopback envelopes,
+so reinforcement learners automatically feed their learning-rate modulation
+into the global telemetry hub for other SpiralTorch nodes to replay.
+
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{
@@ -1682,6 +1749,10 @@ const kernel = fractal.vectorFieldFftKernel(true);
 console.log(kernel.split("\n")[0]);
 const uniform = fractal.vectorFieldFftUniform(false);
 console.log(`fft uniform=${uniform.join(',')}`);
+const layout = fractal.vectorFieldFftLayout();
+console.log(`fft field bytes=${layout.fieldBytes} stride=${layout.fieldStride}`);
+const dispatch = fractal.vectorFieldFftDispatch(true);
+console.log(`fft dispatch=${dispatch.join('x')}`);
 </script>
 ```
 
@@ -1699,7 +1770,10 @@ matching `SpectrumSample` buffer, and provide the canvas dimensions plus an
 inverse flag through a `CanvasFftParams` uniform struct. The
 `vectorFieldFftUniform` helper yields the `[width, height, inverse, padding]`
 `Uint32Array` so you can upload the uniform buffer directly without worrying
-about alignment.
+about alignment, `vectorFieldFftLayout` reports the byte lengths and strides for
+the field/spectrum storage buffers, and `vectorFieldFftDispatch` returns the
+`[x, y, z]` workgroup counts that correspond to the generated WGSL (respecting
+subgroup or full wave execution).
 
 Need FFT heuristics alongside the canvas?  WebAssembly exports now ship auto
 planning helpers and CPU fallbacks:
