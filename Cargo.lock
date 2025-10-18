@@ -2394,6 +2394,7 @@ dependencies = [
  "once_cell",
  "pollster",
  "rand",
+ "rustc-hash",
  "serde",
  "serde_json",
  "st-backend-hip",
@@ -2457,6 +2458,17 @@ dependencies = [
  "st-tensor",
  "st-text",
  "tempfile",
+]
+
+[[package]]
+name = "st-qr-studio"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "st-core",
+ "st-nn",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

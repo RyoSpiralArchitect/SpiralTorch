@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::geometry::{ConceptHint, RepressionField, SemanticBridge, SymbolGeometry};
+use super::maxwell::NarrativeHint;
 use super::schrodinger::schrodinger_boost;
 use super::temperature::{entropy, TemperatureController};
 use crate::PureResult;
@@ -105,6 +106,7 @@ pub struct DesireSolution {
     pub phase: DesirePhase,
     pub avoidance: Option<DesireAvoidanceReport>,
     pub hypergrad_penalty: f32,
+    pub narrative: Option<NarrativeHint>,
 }
 
 pub struct DesireLagrangian {
@@ -243,6 +245,22 @@ impl DesireLagrangian {
         self.phase
     }
 
+    pub fn narrative_hint(&self) -> Option<&NarrativeHint> {
+        self.active_narrative.as_ref()
+    }
+
+    pub fn set_narrative_hint(&mut self, hint: NarrativeHint) {
+        self.active_narrative = Some(hint);
+    }
+
+    pub fn set_narrative_hint_opt(&mut self, hint: Option<NarrativeHint>) {
+        self.active_narrative = hint;
+    }
+
+    pub fn clear_narrative_hint(&mut self) {
+        self.active_narrative = None;
+    }
+
     pub fn step_with_scheduler(
         &mut self,
         lm_logits: &[f32],
@@ -340,7 +358,18 @@ impl DesireLagrangian {
         stabilise(&mut scores);
         let distribution = softmax(&scores);
         let entropy = entropy(&distribution);
-        let temperature = self.controller.update(&distribution);
+        let gradient_gain = match phase {
+            DesirePhase::Observation => 1.25,
+            DesirePhase::Injection => 1.0,
+            DesirePhase::Integration => 0.7,
+        };
+        if let Some(pulse) = hub::get_last_realgrad() {
+            let summary = pulse.gradient_summary();
+            self.controller.observe_grad(summary.norm, summary.sparsity);
+        }
+        let temperature = self
+            .controller
+            .update_with_gradient(&distribution, gradient_gain);
         self.update_tracking(phase, &active, &distribution);
         let hypergrad_penalty = self.hypergrad_penalty(phase, &active, &offsets, &distribution);
         let avoidance = self.build_report(phase);
@@ -355,6 +384,7 @@ impl DesireLagrangian {
             phase,
             avoidance,
             hypergrad_penalty,
+            narrative: self.active_narrative.clone(),
         })
     }
 
@@ -575,6 +605,7 @@ mod tests {
     use super::super::geometry::{
         ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
     };
+    use super::super::maxwell::NarrativeHint;
     use super::*;
     use st_tensor::{DesireGradientInterpretation, GradientSummary};
     use std::collections::HashSet;
@@ -641,6 +672,7 @@ mod tests {
         assert_eq!(result.weights.alpha, weights.alpha);
         assert_eq!(result.phase, DesirePhase::Injection);
         assert!(result.hypergrad_penalty >= 0.0);
+        assert!(result.narrative.is_none());
     }
 
     #[test]
@@ -678,6 +710,7 @@ mod tests {
                     assert!(result.hypergrad_penalty >= 0.0);
                 }
             }
+            assert!(result.narrative.is_none());
         }
         assert!(phases.contains(&DesirePhase::Observation));
         assert!(phases.contains(&DesirePhase::Injection));

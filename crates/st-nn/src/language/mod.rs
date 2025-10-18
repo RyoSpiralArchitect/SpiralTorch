@@ -14,6 +14,8 @@ mod pipeline;
 mod schrodinger;
 mod temperature;
 
+use self::pipeline as pipeline_exports;
+
 pub use automation::{DesireAutomatedStep, DesireAutomation, DesireRewriteTrigger};
 pub use desire::{
     constant, warmup, DesireAvoidanceReport, DesireLagrangian, DesirePhase, DesireSchedule,
