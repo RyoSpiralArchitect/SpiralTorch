@@ -161,9 +161,12 @@ The conductor can now blend the pulses in both time and frequency: `set_frequenc
 installs a power-of-two FFT window and per-source spectral gains so high-frequency
 microlocal gradients or low-frequency desire trends can be emphasised without a
 second pass, while `set_adaptive_gain_config` keeps a per-source reliability
-score and nudges their gains on-line until the fused drift stabilises. Tests
-cover both the spectral weighting and the adaptive loop so the new knobs keep
-their invariants.【F:crates/st-core/src/theory/zpulse.rs†L121-L233】【F:crates/st-core/src/theory/zpulse.rs†L244-L405】【F:crates/st-core/src/theory/zpulse.rs†L458-L557】
+score and nudges their gains on-line until the fused drift stabilises. A new
+`set_latency_config` alpha–beta aligner adjusts timestamps using the reported
+latency and emits `latency-*` events whenever the offsets are learnt or
+corrected, keeping Maxwell’s block pulses in lockstep with microlocal frames.
+Tests cover the spectral weighting, the adaptive loop, and the latency alignment
+so the new knobs keep their invariants.【F:crates/st-core/src/theory/zpulse.rs†L121-L233】【F:crates/st-core/src/theory/zpulse.rs†L244-L405】【F:crates/st-core/src/theory/zpulse.rs†L407-L683】【F:crates/st-core/src/theory/zpulse.rs†L900-L1036】
 
 Desire loops pick up the fused Z feedback straight from the hub: the conductor
 stores the latest `SoftlogicZFeedback`, and the temperature controller now

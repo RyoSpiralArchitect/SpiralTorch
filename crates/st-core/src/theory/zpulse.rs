@@ -121,6 +121,8 @@ pub struct ZConductorCfg {
     pub freq: Option<ZFrequencyConfig>,
     /// Optional adaptive gain tuning configuration.
     pub adaptive_gain: Option<ZAdaptiveGainCfg>,
+    /// Optional latency alignment configuration.
+    pub latency: Option<ZLatencyConfig>,
 }
 
 impl Default for ZConductorCfg {
@@ -136,6 +138,7 @@ impl Default for ZConductorCfg {
             back_calculation: 0.5,
             freq: None,
             adaptive_gain: None,
+            latency: None,
         }
     }
 }
@@ -224,6 +227,8 @@ pub struct ZConductor {
     last_step_ts: Option<u64>,
     freq: Option<FrequencyFusionState>,
     adaptive: Option<AdaptiveGainState>,
+    latency: Option<LatencyAligner>,
+    latency_events: Vec<&'static str>,
 }
 
 impl Default for ZConductor {
@@ -240,6 +245,7 @@ impl ZConductor {
             .clone()
             .and_then(|cfg| FrequencyFusionState::new(cfg).ok());
         let adaptive = cfg.adaptive_gain.clone().map(AdaptiveGainState::new);
+        let latency = cfg.latency.clone().map(LatencyAligner::new);
         ZConductor {
             cfg,
             pending: Vec::new(),
@@ -251,6 +257,8 @@ impl ZConductor {
             last_step_ts: None,
             freq,
             adaptive,
+            latency,
+            latency_events: Vec::new(),
         }
     }
 
@@ -275,6 +283,12 @@ impl ZConductor {
         self.adaptive = self.cfg.adaptive_gain.clone().map(AdaptiveGainState::new);
     }
 
+    /// Replaces the latency alignment configuration and rebuilds the aligner.
+    pub fn set_latency_config(&mut self, cfg: Option<ZLatencyConfig>) {
+        self.cfg.latency = cfg;
+        self.latency = self.cfg.latency.clone().map(LatencyAligner::new);
+    }
+
     /// Enqueues a pulse to be considered during the next [`step`](Self::step).
     pub fn ingest(&mut self, mut pulse: ZPulse) {
         self.reconcile_states();
@@ -282,6 +296,11 @@ impl ZConductor {
             pulse.quality = derive_quality(&pulse);
         } else {
             pulse.quality = pulse.quality.clamp(0.0, 1.0);
+        }
+        if let Some(latency) = self.latency.as_mut() {
+            let aligned = latency.align(&pulse);
+            pulse.ts = aligned;
+            self.latency_events.extend(latency.drain_events());
         }
         self.pending.push(pulse);
     }
@@ -399,6 +418,10 @@ impl ZConductor {
             .map(|(source, weight)| ZAttribution { source, weight })
             .collect();
 
+        if !self.latency_events.is_empty() {
+            events.extend(self.latency_events.drain(..));
+        }
+
         ZFused {
             z,
             drift,
@@ -483,6 +506,41 @@ impl ZConductor {
             }
         } else {
             self.adaptive = None;
+        }
+
+        if let Some(latency_cfg) = self.cfg.latency.clone() {
+            match self.latency.as_mut() {
+                Some(state) => state.update_config(latency_cfg),
+                None => {
+                    self.latency = Some(LatencyAligner::new(latency_cfg));
+                }
+            }
+        } else {
+            self.latency = None;
+        }
+    }
+}
+
+/// Configuration for the latency alignment filter.
+#[derive(Clone, Debug)]
+pub struct ZLatencyConfig {
+    /// Smoothing applied to the latency offset estimate.
+    pub alpha: f32,
+    /// Smoothing applied to the latency rate estimate.
+    pub beta: f32,
+    /// Maximum latency (in milliseconds) tolerated for any source.
+    pub max_latency_ms: f32,
+    /// Threshold (in milliseconds) to emit a correction event.
+    pub event_threshold_ms: f32,
+}
+
+impl Default for ZLatencyConfig {
+    fn default() -> Self {
+        Self {
+            alpha: 0.45,
+            beta: 0.1,
+            max_latency_ms: 120.0,
+            event_threshold_ms: 2.5,
         }
     }
 }
@@ -693,6 +751,100 @@ impl AdaptiveGainState {
     }
 }
 
+#[derive(Clone, Debug)]
+struct LatencyAligner {
+    cfg: ZLatencyConfig,
+    states: FxHashMap<ZSource, LatencyState>,
+    events: Vec<&'static str>,
+}
+
+impl LatencyAligner {
+    fn new(cfg: ZLatencyConfig) -> Self {
+        Self {
+            cfg,
+            states: FxHashMap::default(),
+            events: Vec::new(),
+        }
+    }
+
+    fn update_config(&mut self, cfg: ZLatencyConfig) {
+        self.cfg = cfg;
+    }
+
+    fn align(&mut self, pulse: &ZPulse) -> u64 {
+        let sample = if pulse.latency_ms.is_finite() && pulse.latency_ms > 0.0 {
+            Some(pulse.latency_ms.min(self.cfg.max_latency_ms))
+        } else {
+            None
+        };
+
+        let state = self
+            .states
+            .entry(pulse.source.clone())
+            .or_insert_with(LatencyState::default);
+
+        let ts = pulse.ts;
+        let dt = state
+            .last_ts
+            .map(|last| ts.saturating_sub(last) as f32)
+            .unwrap_or(0.0);
+        let predicted = state.offset + state.rate * dt;
+        let mut offset = state.offset;
+        let mut rate = state.rate;
+        let mut initialised = state.initialised;
+        let mut event: Option<&'static str> = None;
+
+        if let Some(sample) = sample {
+            let residual = sample - predicted;
+            let alpha = self.cfg.alpha.clamp(0.0, 1.0);
+            let beta = self.cfg.beta.clamp(0.0, 1.0);
+            offset = predicted + alpha * residual;
+            if dt > f32::EPSILON {
+                let norm_dt = dt.max(1.0);
+                rate = rate + beta * residual / norm_dt;
+            }
+            if !initialised {
+                event = Some("latency-init");
+                initialised = true;
+            } else if residual.abs() > self.cfg.event_threshold_ms {
+                event = Some("latency-corrected");
+            }
+        }
+
+        state.offset = offset.clamp(0.0, self.cfg.max_latency_ms);
+        state.rate = rate.clamp(-self.cfg.max_latency_ms, self.cfg.max_latency_ms);
+        state.last_ts = Some(ts);
+        state.initialised = initialised;
+
+        if let Some(event) = event {
+            self.events.push(event);
+        }
+
+        let adjust = state.offset.max(0.0);
+        if adjust <= f32::EPSILON {
+            return ts;
+        }
+
+        if adjust >= ts as f32 {
+            0
+        } else {
+            ts - adjust.round() as u64
+        }
+    }
+
+    fn drain_events(&mut self) -> Vec<&'static str> {
+        std::mem::take(&mut self.events)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct LatencyState {
+    offset: f32,
+    rate: f32,
+    last_ts: Option<u64>,
+    initialised: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -822,6 +974,55 @@ mod tests {
             mic_gain > desire_gain,
             "consistent source should acquire larger gain"
         );
+    }
+
+    #[test]
+    fn latency_alignment_lets_delayed_pulses_participate() {
+        let mut cfg = ZConductorCfg::default();
+        cfg.alpha_fast = 1.0;
+        cfg.alpha_slow = 1.0;
+        let mut latency_cfg = ZLatencyConfig::default();
+        latency_cfg.alpha = 1.0;
+        latency_cfg.beta = 0.0;
+        latency_cfg.max_latency_ms = 64.0;
+        latency_cfg.event_threshold_ms = 0.1;
+        cfg.latency = Some(latency_cfg);
+        let mut conductor = ZConductor::new(cfg);
+
+        conductor.ingest(ZPulse {
+            source: ZSource::Microlocal,
+            ts: 0,
+            band_energy: (2.0, 0.0, 0.0),
+            drift: 1.0,
+            z_bias: 1.0,
+            support: 1.0,
+            quality: 1.0,
+            stderr: 0.0,
+            latency_ms: 0.0,
+        });
+
+        conductor.ingest(ZPulse {
+            source: ZSource::Maxwell,
+            ts: 20,
+            band_energy: (0.0, 0.0, 2.0),
+            drift: -1.0,
+            z_bias: -1.0,
+            support: 1.0,
+            quality: 1.0,
+            stderr: 0.0,
+            latency_ms: 20.0,
+        });
+
+        let fused = conductor.step(0);
+        let maxwell_weight = fused
+            .attributions
+            .iter()
+            .find(|a| a.source == ZSource::Maxwell)
+            .map(|a| a.weight)
+            .unwrap_or_default();
+        assert!(fused.drift < 0.99);
+        assert!(maxwell_weight > 0.05);
+        assert!(fused.events.contains(&"latency-init"));
     }
 
     #[test]

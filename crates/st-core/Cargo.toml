@@ -36,7 +36,6 @@ dirs        = "5"
 statrs      = "0.16"
 ndarray     = "0.15"
 rustc-hash  = "1.1"
-rustfft     = "6"
 
 once_cell   = { version = "1.19", optional = true }
 bytemuck    = { version = "1.16", optional = true, features = ["derive"] }

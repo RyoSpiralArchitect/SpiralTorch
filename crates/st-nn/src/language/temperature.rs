@@ -12,11 +12,9 @@ pub struct TemperatureController {
     eta: f32,
     min: f32,
     max: f32,
-    grad_norm_avg: f32,
-    grad_sparsity_avg: f32,
-    grad_alpha: f32,
-    grad_norm_weight: f32,
-    grad_sparsity_weight: f32,
+    z_kappa: f32,
+    z_relax: f32,
+    z_memory: f32,
 }
 
 impl TemperatureController {
@@ -27,11 +25,9 @@ impl TemperatureController {
             eta: eta.max(0.0),
             min: min.max(1e-3),
             max: max.max(min.max(1e-3)),
-            grad_norm_avg: 0.0,
-            grad_sparsity_avg: 0.5,
-            grad_alpha: 0.25,
-            grad_norm_weight: 0.05,
-            grad_sparsity_weight: 0.04,
+            z_kappa: 0.35,
+            z_relax: 0.2,
+            z_memory: 0.0,
         };
         if controller.value < controller.min {
             controller.value = controller.min;
@@ -49,25 +45,27 @@ impl TemperatureController {
         self.value
     }
 
-    pub fn update(&mut self, distribution: &[f32]) -> f32 {
-        self.update_with_gradient(distribution, 1.0)
-    }
-
-    pub fn observe_grad(&mut self, norm: f32, sparsity: f32) {
-        let norm = norm.max(0.0);
-        let sparsity = sparsity.clamp(0.0, 1.0);
-        let alpha = self.grad_alpha.clamp(0.0, 1.0);
-        self.grad_norm_avg = (1.0 - alpha) * self.grad_norm_avg + alpha * norm;
-        self.grad_sparsity_avg = (1.0 - alpha) * self.grad_sparsity_avg + alpha * sparsity;
-    }
-
-    pub fn update_with_gradient(&mut self, distribution: &[f32], gradient_gain: f32) -> f32 {
+    pub fn update(&mut self, distribution: &[f32], z_feedback: Option<&SoftlogicZFeedback>) -> f32 {
         let entropy = entropy(distribution);
         let delta = entropy - self.target_entropy;
-        let grad_term = gradient_gain
-            * (self.grad_norm_avg * self.grad_norm_weight
-                - (self.grad_sparsity_avg - 0.5) * self.grad_sparsity_weight);
-        self.value = (self.value + self.eta * delta + grad_term).clamp(self.min, self.max);
+        self.value = (self.value + self.eta * delta).clamp(self.min, self.max);
+
+        if let Some(feedback) = z_feedback {
+            let total_band =
+                feedback.band_energy.0 + feedback.band_energy.1 + feedback.band_energy.2;
+            let snr = (total_band + feedback.psi_total.abs()).max(1e-3);
+            let drift_norm = (feedback.drift / snr).abs().min(4.0);
+            let magnitude = feedback.z_signal.abs().min(4.0);
+            let explore = (drift_norm - magnitude).max(0.0);
+            let settle = (magnitude - drift_norm).max(0.0);
+            self.z_memory =
+                (1.0 - self.z_relax) * self.z_memory + self.z_relax * (explore - settle);
+            let bias = (-self.z_kappa * magnitude).exp();
+            let roam = 1.0 + self.z_kappa * (explore + self.z_memory.max(0.0));
+            let anchor = 1.0 / (1.0 + self.z_kappa * (settle + (-self.z_memory).max(0.0)));
+            self.value = (self.value * bias * roam * anchor).clamp(self.min, self.max);
+        }
+
         self.value
     }
 }

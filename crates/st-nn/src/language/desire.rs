@@ -9,7 +9,8 @@ use super::schrodinger::schrodinger_boost;
 use super::temperature::{entropy, TemperatureController};
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
-use st_tensor::{DesireGradientInterpretation, GradientSummary, TensorError};
+use st_core::telemetry::hub;
+use st_tensor::TensorError;
 
 const REPORT_SIZE: usize = 8;
 const BIAS_UPDATE_INJECTION: f32 = 0.05;
@@ -358,18 +359,8 @@ impl DesireLagrangian {
         stabilise(&mut scores);
         let distribution = softmax(&scores);
         let entropy = entropy(&distribution);
-        let gradient_gain = match phase {
-            DesirePhase::Observation => 1.25,
-            DesirePhase::Injection => 1.0,
-            DesirePhase::Integration => 0.7,
-        };
-        if let Some(pulse) = hub::get_last_realgrad() {
-            let summary = pulse.gradient_summary();
-            self.controller.observe_grad(summary.norm, summary.sparsity);
-        }
-        let temperature = self
-            .controller
-            .update_with_gradient(&distribution, gradient_gain);
+        let z_feedback = hub::get_softlogic_z();
+        let temperature = self.controller.update(&distribution, z_feedback.as_ref());
         self.update_tracking(phase, &active, &distribution);
         let hypergrad_penalty = self.hypergrad_penalty(phase, &active, &offsets, &distribution);
         let avoidance = self.build_report(phase);
