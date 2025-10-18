@@ -48,3 +48,28 @@ void hip_compaction_scan_pass(const float* __restrict__ vin,
         __syncthreads();
     }
 }
+
+extern "C"
+hipError_t st_compaction_scan_pass(const float* vin,
+                                   unsigned int* pos,
+                                   int rows,
+                                   int cols,
+                                   float low,
+                                   float high,
+                                   int tile,
+                                   hipStream_t stream)
+{
+    if (rows <= 0 || cols <= 0) {
+        return hipSuccess;
+    }
+
+    if (tile <= 0) {
+        tile = 256;
+    }
+
+    dim3 grid(rows);
+    dim3 block(256);
+    hipLaunchKernelGGL(hip_compaction_scan_pass, grid, block, 0, stream,
+                       vin, pos, rows, cols, low, high, tile);
+    return hipGetLastError();
+}
