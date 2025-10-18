@@ -198,7 +198,20 @@ sample so `DesirePsiBridge` captures the Z drift alongside ψ totals without
 hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:crates/st-core/src/theory/maxwell.rs†L666-L714】
 Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
 concept window that the `DesireLagrangian` can consume, aligning coded-envelope
-channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L132】
+channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L214】
+
+### Quantum Reality Studio overlays
+
+The new `st-qr-studio` crate spins up a **QuantumRealityStudio** that records
+Maxwell pulses, emits concept windows, and stitches narrative tags into VR/AR
+overlays. Signal capture sessions enforce which laboratory rigs may publish
+pulses, semantic taggers mirror the `MaxwellDesireBridge` lexicon, and overlay
+frames surface glyph/intensity pairs for immersive projection.【F:crates/st-qr-studio/src/lib.rs†L1-L234】 Storyboard exports drop
+directly into `tools/qr_storyboard.py`, which converts JSON/NDJSON captures into
+Markdown decks grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The
+companion [Quantum Reality Playbook](docs/qr_playbook/README.md) provides
+rituals, collaboration tips, and art-direction cues so research and cultural
+teams stay synchronised.【F:docs/qr_playbook/README.md†L1-L49】
 
 ### Semiotic suturing, desire control, and EGW bridges
 
@@ -1297,6 +1310,13 @@ print("updated weights", weights.tolist())
 - `FractalCanvas::vectorFieldFftUniform(false)` packages the `CanvasFftParams`
   uniform (width, height, inverse flag, padding) as a `Uint32Array` so the WGSL
   kernel can be dispatched without manual byte packing.
+- `FractalCanvas::vectorFieldFftLayout()` reports the byte lengths and strides
+  for the `FieldSample`/`SpectrumSample` storage buffers plus the uniform block
+  so WebGPU callers can allocate resources without hard-coding struct sizes.
+- `FractalCanvas::vectorFieldFftDispatch(true)` computes the workgroup triplet
+  for the generated WGSL so callers can hand the counts directly to
+  `computePass.dispatchWorkgroups(...)` (or the Rust equivalent) without
+  duplicating the ceil division logic.
 - Use `CanvasProjector::emit_zspace_patch` to fold the canvas state back into
   the fractal scheduler without leaving Rust or allocating intermediate
   buffers.
@@ -1551,6 +1571,10 @@ Need a bootstrap-friendly learning loop without heavyweight dependencies?
 `st-nn` layers sit directly on top of the `st-tensor::pure` stack so you can
 train, schedule, and log every A/B/C decision entirely in Rust.
 
+Geometry-aware policy loops now broadcast their feedback as loopback envelopes,
+so reinforcement learners automatically feed their learning-rate modulation
+into the global telemetry hub for other SpiralTorch nodes to replay.
+
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{
@@ -1682,6 +1706,10 @@ const kernel = fractal.vectorFieldFftKernel(true);
 console.log(kernel.split("\n")[0]);
 const uniform = fractal.vectorFieldFftUniform(false);
 console.log(`fft uniform=${uniform.join(',')}`);
+const layout = fractal.vectorFieldFftLayout();
+console.log(`fft field bytes=${layout.fieldBytes} stride=${layout.fieldStride}`);
+const dispatch = fractal.vectorFieldFftDispatch(true);
+console.log(`fft dispatch=${dispatch.join('x')}`);
 </script>
 ```
 
@@ -1699,7 +1727,10 @@ matching `SpectrumSample` buffer, and provide the canvas dimensions plus an
 inverse flag through a `CanvasFftParams` uniform struct. The
 `vectorFieldFftUniform` helper yields the `[width, height, inverse, padding]`
 `Uint32Array` so you can upload the uniform buffer directly without worrying
-about alignment.
+about alignment, `vectorFieldFftLayout` reports the byte lengths and strides for
+the field/spectrum storage buffers, and `vectorFieldFftDispatch` returns the
+`[x, y, z]` workgroup counts that correspond to the generated WGSL (respecting
+subgroup or full wave execution).
 
 Need FFT heuristics alongside the canvas?  WebAssembly exports now ship auto
 planning helpers and CPU fallbacks:
