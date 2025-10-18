@@ -36,7 +36,7 @@
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZSource,
+    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZRegistry, ZSource,
     ZSupport,
 };
 use crate::util::math::LeechProjector;
@@ -693,6 +693,42 @@ impl Default for InterfaceZPulse {
             has_mid_band: false,
             has_high_band: false,
         }
+    }
+}
+
+/// Fused Z-space report emitted by the conductor.
+#[derive(Clone, Debug)]
+pub struct InterfaceZFused {
+    pub ts: u64,
+    pub z: f32,
+    pub support: f32,
+    pub drift: f32,
+    pub quality: f32,
+    pub events: Vec<String>,
+    pub attributions: Vec<(ZSource, f32)>,
+    pub pulse: ZPulse,
+}
+
+/// Aggregate outcome of a full conductor step across all gauges.
+#[derive(Clone, Debug)]
+pub struct InterfaceZReport {
+    pub pulses: Vec<InterfaceZPulse>,
+    pub qualities: Vec<f32>,
+    pub fused_pulse: InterfaceZPulse,
+    pub fused_z: InterfaceZFused,
+    pub feedback: SoftlogicZFeedback,
+    pub budget_scale: f32,
+}
+
+impl InterfaceZReport {
+    /// Returns `true` when at least one contributing pulse carried interface mass.
+    pub fn has_interface(&self) -> bool {
+        if self.fused_pulse.support > 0.0 {
+            return true;
+        }
+        self.pulses
+            .iter()
+            .any(|pulse| pulse.support > 0.0 || pulse.interface_cells > 0.0)
     }
 }
 
