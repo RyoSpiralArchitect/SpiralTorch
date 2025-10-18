@@ -1,0 +1,14 @@
+[package]
+name = "st-backend-wgpu"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
+license = "AGPL-3.0-or-later"
+description = "WGPU backend kernels and pipeline loaders for SpiralTorch"
+
+[dependencies]
+wgpu = { version = "0.19", default-features = false, features = ["wgsl"] }
+thiserror = "1"
+
+[package.metadata.spiraltorch]
+copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
