@@ -10,9 +10,7 @@ use st_core::telemetry::hub::LoopbackEnvelope;
 use st_core::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra, SlotSymmetry,
 };
-use st_core::util::math::{
-    ramanujan_pi as shared_ramanujan_pi, LeechProjector, LEECH_PACKING_DENSITY,
-};
+use st_core::util::math::LeechProjector;
 use st_tensor::{DifferentialResonance, Tensor};
 
 /// Configuration describing how geometric observability is converted into
@@ -599,7 +597,7 @@ impl GeometryFeedback {
             self.max_scale = recommended.max(self.min_scale + f32::EPSILON);
         }
 
-        let max_pressure = self.pressure_baseline;
+        let max_pressure = LeechProjector::new(self.z_rank, 1.0).enrich(1.0);
         if max_pressure > 0.0 {
             let pressure_ratio = (pressure / max_pressure).clamp(0.0, 4.0);
             if pressure_ratio > 1.2 {

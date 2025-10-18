@@ -21,13 +21,13 @@ pub use desire::{
 pub use geometry::{ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry};
 pub use gw::{DistanceMatrix, EntropicGwSolver};
 pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
-pub use maxwell::{MaxwellDesireBridge, NarrativeHint};
+pub use maxwell::MaxwellDesireBridge;
 pub use pipeline::{
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesirePipeline,
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRoundtableBridge,
     DesireRoundtableEvent, DesireRoundtableImpulse, DesireRoundtableSummary, DesireTelemetrySink,
     DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
-    DesireTriggerEvent,
+    DesireTriggerEvent, LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult,
 };
 #[cfg(feature = "psi")]
 pub use pipeline::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
