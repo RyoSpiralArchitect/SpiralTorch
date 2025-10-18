@@ -31,7 +31,7 @@ pub use gnn::{
     embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,
     fold_into_roundtable, fold_with_band_energy, GraphConsensusBridge, GraphConsensusDigest,
     GraphContext, GraphContextBuilder, GraphMonadExport, GraphNormalization, QuadBandEnergy,
-    ZSpaceGraphConvolution,
+    AggregationReducer, NeighborhoodAggregation, ZSpaceGraphConvolution,
 };
 #[cfg(feature = "golden")]
 pub use golden::{

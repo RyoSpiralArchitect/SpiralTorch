@@ -7,7 +7,155 @@ use super::GraphContext;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
+use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
+
+/// Reduction applied when combining multi-hop neighbourhood features.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AggregationReducer {
+    /// Sum all contributions respecting the configured attenuation factors.
+    Sum,
+    /// Average the contributions (normalising by the absolute weight mass).
+    Mean,
+}
+
+/// Strategy used to mix neighbour features before applying the learnable kernel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NeighborhoodAggregation {
+    /// Single-hop propagation identical to the historic implementation.
+    Single,
+    /// Multi-hop aggregation with optional self-inclusion and attenuation.
+    MultiHop {
+        hops: NonZeroUsize,
+        include_self: bool,
+        attenuation: f32,
+        reducer: AggregationReducer,
+    },
+}
+
+impl NeighborhoodAggregation {
+    /// Builds a multi-hop aggregation that sums contributions without attenuation.
+    pub fn multi_hop_sum(hops: NonZeroUsize) -> Self {
+        NeighborhoodAggregation::MultiHop {
+            hops,
+            include_self: true,
+            attenuation: 1.0,
+            reducer: AggregationReducer::Sum,
+        }
+    }
+
+    /// Builds a multi-hop aggregation that averages the hop contributions.
+    pub fn multi_hop_mean(hops: NonZeroUsize) -> Self {
+        NeighborhoodAggregation::MultiHop {
+            hops,
+            include_self: true,
+            attenuation: 1.0,
+            reducer: AggregationReducer::Mean,
+        }
+    }
+
+    /// Overrides whether the original node features participate in the mix.
+    pub fn with_include_self(mut self, include_self: bool) -> Self {
+        if let NeighborhoodAggregation::MultiHop {
+            include_self: ref mut flag,
+            ..
+        } = self
+        {
+            *flag = include_self;
+        }
+        self
+    }
+
+    /// Adjusts the attenuation factor applied to successive hops.
+    pub fn with_attenuation(mut self, attenuation: f32) -> Self {
+        if let NeighborhoodAggregation::MultiHop {
+            attenuation: ref mut factor,
+            ..
+        } = self
+        {
+            *factor = attenuation;
+        }
+        self
+    }
+
+    /// Selects the reducer applied to the aggregated neighbourhood.
+    pub fn with_reducer(mut self, reducer: AggregationReducer) -> Self {
+        if let NeighborhoodAggregation::MultiHop {
+            reducer: ref mut current,
+            ..
+        } = self
+        {
+            *current = reducer;
+        }
+        self
+    }
+
+    fn validate(self) -> PureResult<()> {
+        if let NeighborhoodAggregation::MultiHop { attenuation, .. } = self {
+            if !attenuation.is_finite() || attenuation <= 0.0 {
+                return Err(TensorError::InvalidValue {
+                    label: "aggregation_attenuation",
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn weights(self) -> PureResult<Vec<f32>> {
+        match self {
+            NeighborhoodAggregation::Single => Ok(vec![0.0, 1.0]),
+            NeighborhoodAggregation::MultiHop {
+                hops,
+                include_self,
+                attenuation,
+                reducer,
+            } => {
+                let hop_count = hops.get();
+                let mut weights = Vec::with_capacity(hop_count + 1);
+                weights.push(if include_self { 1.0 } else { 0.0 });
+                for hop in 1..=hop_count {
+                    weights.push(attenuation.powi(hop as i32));
+                }
+                if matches!(reducer, AggregationReducer::Mean) {
+                    let norm: f32 = weights.iter().map(|w| w.abs()).sum();
+                    if norm > f32::EPSILON {
+                        for weight in &mut weights {
+                            *weight /= norm;
+                        }
+                    }
+                }
+                if weights.iter().all(|w| w.abs() <= f32::EPSILON) {
+                    return Err(TensorError::InvalidValue {
+                        label: "aggregation_weights",
+                    });
+                }
+                Ok(weights)
+            }
+        }
+    }
+}
+
+impl Default for NeighborhoodAggregation {
+    fn default() -> Self {
+        NeighborhoodAggregation::Single
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AggregatedSupport {
+    support: Tensor,
+    weights: Vec<f32>,
+}
+
+impl AggregatedSupport {
+    fn support(&self) -> &Tensor {
+        &self.support
+    }
+
+    fn into_weights(self) -> Vec<f32> {
+        self.weights
+    }
+}
 
 /// Hyperbolic graph convolution that keeps gradient flows in the Z-space tape.
 #[derive(Debug)]
@@ -17,6 +165,7 @@ pub struct ZSpaceGraphConvolution {
     weight: Parameter,
     bias: Parameter,
     curvature: f32,
+    aggregation: NeighborhoodAggregation,
     tracer: Option<Arc<Mutex<GraphFlowTracer>>>,
 }
 
@@ -54,8 +203,28 @@ impl ZSpaceGraphConvolution {
             weight: weight_param,
             bias: bias_param,
             curvature,
+            aggregation: NeighborhoodAggregation::default(),
             tracer: None,
         })
+    }
+
+    /// Switches the neighbourhood aggregation strategy used by the layer.
+    pub fn set_aggregation(
+        &mut self,
+        aggregation: NeighborhoodAggregation,
+    ) -> PureResult<()> {
+        aggregation.validate()?;
+        self.aggregation = aggregation;
+        Ok(())
+    }
+
+    /// Returns a new layer adopting the provided aggregation strategy.
+    pub fn with_aggregation(
+        mut self,
+        aggregation: NeighborhoodAggregation,
+    ) -> PureResult<Self> {
+        self.set_aggregation(aggregation)?;
+        Ok(self)
     }
 
     /// Attaches a shared flow tracer for interpretability tooling.
@@ -83,19 +252,59 @@ impl ZSpaceGraphConvolution {
             }
         }
     }
+
+    fn aggregate_support(&self, input: &Tensor) -> PureResult<AggregatedSupport> {
+        let weights = self.aggregation.weights()?;
+        let (rows, cols) = input.shape();
+        let mut support = Tensor::zeros(rows, cols)?;
+        let mut current = input.clone();
+        for (idx, weight) in weights.iter().enumerate() {
+            if idx > 0 {
+                current = self.context.propagate(&current)?;
+            }
+            if weight.abs() > f32::EPSILON {
+                support.add_scaled(&current, *weight)?;
+            }
+        }
+        Ok(AggregatedSupport { support, weights })
+    }
+
+    fn backpropagate_through_aggregation(
+        &self,
+        grad_support: &Tensor,
+        weights: &[f32],
+    ) -> PureResult<Tensor> {
+        let (rows, cols) = grad_support.shape();
+        let mut grad_states = Vec::with_capacity(weights.len());
+        for _ in 0..weights.len() {
+            grad_states.push(Tensor::zeros(rows, cols)?);
+        }
+        for (state, &weight) in grad_states.iter_mut().zip(weights.iter()) {
+            if weight.abs() > f32::EPSILON {
+                state.add_scaled(grad_support, weight)?;
+            }
+        }
+        for idx in (1..grad_states.len()).rev() {
+            let propagated = self.context.propagate_transpose(&grad_states[idx])?;
+            grad_states[idx - 1].add_scaled(&propagated, 1.0)?;
+        }
+        Ok(grad_states
+            .into_iter()
+            .next()
+            .expect("aggregation must produce at least one state"))
+    }
 }
 
 impl Module for ZSpaceGraphConvolution {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
-        let (support, flows) = if self.tracer.is_some() {
-            self.context.propagate_with_trace(input)?
-        } else {
-            (self.context.propagate(input)?, Vec::new())
-        };
-        if !flows.is_empty() {
-            self.record_forward_flows(flows);
+        let aggregated = self.aggregate_support(input)?;
+        if self.tracer.is_some() {
+            let flows = self.context.measure_flows(aggregated.support())?;
+            if !flows.is_empty() {
+                self.record_forward_flows(flows);
+            }
         }
-        let mut out = support.matmul(self.weight.value())?;
+        let mut out = aggregated.support().matmul(self.weight.value())?;
         out.add_row_inplace(self.bias.value().data())?;
         Ok(out)
     }
@@ -107,7 +316,8 @@ impl Module for ZSpaceGraphConvolution {
                 right: input.shape(),
             });
         }
-        let support = self.context.propagate(input)?;
+        let aggregated = self.aggregate_support(input)?;
+        let support = aggregated.support();
         let batch = input.shape().0 as f32;
         let grad_w = support
             .transpose()
@@ -126,8 +336,8 @@ impl Module for ZSpaceGraphConvolution {
         }
 
         let grad_support = grad_output.matmul(&self.weight.value().transpose())?;
-        let grad_input = self.context.propagate_transpose(&grad_support)?;
-        Ok(grad_input)
+        let weights = aggregated.into_weights();
+        self.backpropagate_through_aggregation(&grad_support, &weights)
     }
 
     fn visit_parameters(
@@ -156,6 +366,7 @@ fn l2_norm(data: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::num::NonZeroUsize;
 
     #[test]
     fn graph_convolution_forward_runs() {
@@ -198,5 +409,62 @@ mod tests {
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].layer, "gnn");
         assert!(reports[0].weight_update_magnitude.is_some());
+    }
+
+    #[test]
+    fn graph_convolution_supports_multi_hop_sum() {
+        let adjacency = Tensor::from_vec(
+            3,
+            3,
+            vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
+        )
+        .unwrap();
+        let context = GraphContext::from_adjacency(adjacency).unwrap();
+        let aggregation = NeighborhoodAggregation::multi_hop_sum(NonZeroUsize::new(2).unwrap())
+            .with_include_self(true)
+            .with_attenuation(0.5);
+        let layer = ZSpaceGraphConvolution::new("multi", context, 2, 2, -1.0, 0.05)
+            .unwrap()
+            .with_aggregation(aggregation)
+            .unwrap();
+        let input = Tensor::from_vec(3, 2, vec![1.0, 0.0, 0.5, 1.0, -0.5, 0.5]).unwrap();
+        let output = layer.forward(&input).unwrap();
+        assert_eq!(output.shape(), (3, 2));
+        assert!(output.data().iter().any(|v| v.abs() > 0.0));
+    }
+
+    #[test]
+    fn graph_convolution_multi_hop_backward_is_stable() {
+        let adjacency = Tensor::from_vec(
+            4,
+            4,
+            vec![
+                0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0,
+            ],
+        )
+        .unwrap();
+        let context = GraphContext::from_adjacency(adjacency).unwrap();
+        let mut layer = ZSpaceGraphConvolution::new("stable", context, 3, 2, -1.0, 0.05).unwrap();
+        let aggregation = NeighborhoodAggregation::multi_hop_mean(NonZeroUsize::new(3).unwrap())
+            .with_include_self(false)
+            .with_attenuation(0.75);
+        layer.set_aggregation(aggregation).unwrap();
+        let input = Tensor::from_vec(
+            4,
+            3,
+            vec![
+                1.0, 0.5, -0.5, 0.5, 1.0, 0.5, -1.0, 0.25, 0.75, 0.75, -0.25, 1.25,
+            ],
+        )
+        .unwrap();
+        let grad_output = Tensor::from_vec(
+            4,
+            2,
+            vec![0.1, -0.2, 0.05, 0.15, -0.1, 0.2, 0.075, -0.05],
+        )
+        .unwrap();
+        let grad_input = layer.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), (4, 3));
+        assert!(grad_input.data().iter().all(|v| v.is_finite()));
     }
 }
