@@ -196,10 +196,9 @@ mod extras {
 // PyO3 modules (空の器 + extras)
 // =======================
 
-// 1) ルート拡張モジュール（crate名に合わせるのが無難）
-//   - Cargo.toml の [lib] name = "spiraltorch_py" などに合わせて変更可能。
+// 1) ルート拡張モジュール
 #[pymodule]
-fn spiraltorch_py(py: Python, m: &Bound<PyModule>) -> PyResult<()> {
+fn spiraltorch(py: Python, m: &Bound<PyModule>) -> PyResult<()> {
     extras::register(py, m)?;
     Ok(())
 }
