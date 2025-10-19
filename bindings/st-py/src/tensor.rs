@@ -115,7 +115,7 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-fn tensor_err_to_py(err: TensorError) -> PyErr {
+pub(crate) fn tensor_err_to_py(err: TensorError) -> PyErr {
     match err {
         TensorError::InvalidDimensions { .. }
         | TensorError::DataLength { .. }
