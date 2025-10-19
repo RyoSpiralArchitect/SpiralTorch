@@ -11,20 +11,15 @@ use std::cell::RefCell;
 struct SpiralRnnStepCache {
     input: Tensor,
     state_before: Tensor,
-    drive_pre: Tensor,
     drive_act: Tensor,
-    reset_pre: Tensor,
     reset_tanh: Tensor,
-    gate_pre: Tensor,
     gate: Tensor,
-    state_phase: Tensor,
     anchor: Tensor,
 }
 
 #[derive(Clone, Debug)]
 struct SpiralRnnCache {
     steps: Vec<SpiralRnnStepCache>,
-    final_state: Tensor,
     batch: usize,
     steps_count: usize,
     input_dim: usize,
@@ -216,13 +211,9 @@ impl Module for SpiralRnn {
             caches.push(SpiralRnnStepCache {
                 input: input_step,
                 state_before: state.clone(),
-                drive_pre,
                 drive_act,
-                reset_pre,
                 reset_tanh,
-                gate_pre,
                 gate,
-                state_phase,
                 anchor: anchor.clone(),
             });
             state = new_state;
@@ -230,7 +221,6 @@ impl Module for SpiralRnn {
         let output = state.clone();
         *self.cache.borrow_mut() = Some(SpiralRnnCache {
             steps: caches,
-            final_state: state,
             batch,
             steps_count: self.steps,
             input_dim: self.input_dim,
