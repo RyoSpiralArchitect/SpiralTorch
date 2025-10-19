@@ -16,6 +16,25 @@ use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
+// [SCALE-TODO] Compatibility shim: ZScale
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[expect(dead_code, reason = "staged rollout of scale")]
+pub struct ZScale(pub f32);
+
+impl ZScale {
+    pub const ONE: ZScale = ZScale(1.0);
+
+    #[inline]
+    pub fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    #[inline]
+    pub fn value(self) -> f32 {
+        self.0
+    }
+}
+
 /// Support triplet describing Above/Here/Beneath contributions backing a Z pulse.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZSupport {

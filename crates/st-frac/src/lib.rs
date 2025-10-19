@@ -137,7 +137,7 @@ fn fracdiff_gl_1d_forward(
     alpha: f32,
     kernel_len: usize,
     pad: Pad,
-    scale: Option<f32>,
+    scale: bool,
 ) -> Result<Vec<f32>, FracErr> {
     fracdiff_gl_1d_impl(x, alpha, kernel_len, pad, scale)
 }
@@ -148,13 +148,18 @@ fn fracdiff_gl_1d_impl(
     alpha: f32,
     kernel_len: usize,
     pad: Pad,
-    scale: Option<f32>,
+    scale: bool,
 ) -> Result<Vec<f32>, FracErr> {
     if kernel_len == 0 {
         return Err(FracErr::Kernel);
     }
     let coeff = gl_coeffs(alpha, kernel_len);
-    Ok(fracdiff_gl_1d_with_coeffs_impl(x, &coeff, pad, scale))
+    Ok(fracdiff_gl_1d_with_coeffs_impl(
+        x,
+        &coeff,
+        pad,
+        scale.then_some(1.0),
+    ))
 }
 
 /// Apply a fractional difference along a 1-D slice using precomputed coefficients.
@@ -196,8 +201,8 @@ pub fn fracdiff_gl_1d(
     fracdiff_gl_1d_forward(x, alpha, kernel_len, pad, scale)
 }
 
-/// Apply a fractional difference along a 1-D slice using precomputed coefficients.
-pub fn fracdiff_gl_1d_with_coeffs(
+#[inline]
+fn fracdiff_gl_1d_with_coeffs_impl(
     x: &[f32],
     coeff: &[f32],
     pad: Pad,
@@ -304,7 +309,7 @@ mod tests {
     fn fracdiff_1d_matches_nd() {
         let x = vec![0., 1., 2., 3.];
         let coeff = gl_coeffs(0.7, 4);
-        let line = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Zero, Some(1.0));
+        let line = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Zero, true).unwrap();
 
         let arr = ArrayD::from_shape_vec(IxDyn(&[1, 4]), x.clone()).unwrap();
         let nd = fracdiff_gl_nd(&arr, 0.7, 1, 4, Pad::Zero, Some(1.0)).unwrap();
@@ -319,7 +324,7 @@ mod tests {
     fn constant_pad_behaves() {
         let x = vec![1.0, 2.0];
         let coeff = gl_coeffs(0.4, 3);
-        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Constant(5.0), None);
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Constant(5.0), false).unwrap();
         assert_eq!(y.len(), 2);
         // When padding with 5, the first element should only see the padded value
         // except for the zeroth coefficient which stays 1.
@@ -330,7 +335,7 @@ mod tests {
     fn reflect_pad_mirrors_left_edge() {
         let x = vec![10.0, 20.0, 30.0];
         let coeff = vec![1.0, 1.0, 1.0, 1.0];
-        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Reflect, Some(1.0));
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Reflect, true).unwrap();
 
         assert_eq!(y[0], 10.0 + 10.0 + 20.0 + 30.0);
         assert_eq!(y[1], 20.0 + 10.0 + 10.0 + 20.0);
@@ -340,7 +345,7 @@ mod tests {
     fn constant_pad_applies_to_right_edge() {
         let x = vec![1.0, 2.0];
         let coeff = vec![1.0, 0.5, 0.25];
-        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Constant(5.0), Some(1.0));
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Constant(5.0), true).unwrap();
 
         assert_eq!(y[1], 2.0 * 1.0 + 1.0 * 0.5 + 5.0 * 0.25);
     }

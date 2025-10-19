@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+message: "If you use SpiralTorch in research, software, or demos, please cite it."
+title: "SpiralTorch: a WGPU-first, Rust-native Z-space ML/geometry runtime"
+abstract: >
+  SpiralTorch fuses spectral operators, microlocal tools, and cooperative schedulers
+  into a single Rust-first stack. It targets portable GPUs (WGPU/Metal/Vulkan/DX12)
+  and CUDA, exports Python wheels, and keeps Z-space geometry and training loops in
+  the same conversation.
+authors:
+  - name: "Ryo ∴ SpiralArchitect"
+    email: "kishkavsesvit@icloud.com"
+license: "AGPL-3.0-or-later"
+repository-code: "https://github.com/RyoSpiralArchitect/SpiralTorch"
+url: "https://github.com/RyoSpiralArchitect/SpiralTorch"
+keywords:
+  - machine learning
+  - Rust
+  - WGPU
+  - CUDA
+  - hyperbolic geometry
+  - Z-space
+  - spectral methods
+  - deep learning runtime
+date-released: "2025-10-19"
+
+preferred-citation:
+  type: software
+  title: "SpiralTorch"
+  authors:
+    - name: "Ryo ∴ SpiralArchitect"
+  year: 2025
+  notes: "AGPL-3.0-or-later"
+  url: "https://github.com/RyoSpiralArchitect/SpiralTorch"
+
+# After minting a DOI on Zenodo, uncomment and fill:
+# identifiers:
+#   - type: doi
+#     value: 10.5281/zenodo.XXXXXXX
+# preferred-citation:
+#   doi: 10.5281/zenodo.XXXXXXX

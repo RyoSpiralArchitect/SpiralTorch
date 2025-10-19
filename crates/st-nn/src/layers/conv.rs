@@ -251,6 +251,7 @@ impl Conv2d {
         kernel: (usize, usize),
         stride: (usize, usize),
         padding: (usize, usize),
+        dilation: (usize, usize),
         input_hw: (usize, usize),
     ) -> PureResult<Self> {
         validate_positive(in_channels, "in_channels")?;
@@ -259,6 +260,8 @@ impl Conv2d {
         validate_positive(kernel.1, "kernel_w")?;
         validate_positive(stride.0, "stride_h")?;
         validate_positive(stride.1, "stride_w")?;
+        validate_positive(dilation.0, "dilation_h")?;
+        validate_positive(dilation.1, "dilation_w")?;
         validate_positive(input_hw.0, "input_height")?;
         validate_positive(input_hw.1, "input_width")?;
         let name = name.into();
@@ -317,14 +320,17 @@ impl Conv2d {
         let (kh, kw) = self.dilated_kernel()?;
         let (ph, pw) = self.padding;
         let (sh, sw) = self.stride;
-        if h + 2 * ph < kh || w + 2 * pw < kw {
+        let (dh, dw) = self.dilation;
+        let effective_kh = dh * (kh.saturating_sub(1)) + 1;
+        let effective_kw = dw * (kw.saturating_sub(1)) + 1;
+        if h + 2 * ph < effective_kh || w + 2 * pw < effective_kw {
             return Err(TensorError::InvalidDimensions {
                 rows: h + 2 * ph,
-                cols: kh.max(kw),
+                cols: effective_kh.max(effective_kw),
             });
         }
-        let oh = (h + 2 * ph - kh) / sh + 1;
-        let ow = (w + 2 * pw - kw) / sw + 1;
+        let oh = (h + 2 * ph - effective_kh) / sh + 1;
+        let ow = (w + 2 * pw - effective_kw) / sw + 1;
         Ok((oh, ow))
     }
 
@@ -620,6 +626,58 @@ impl Module for Conv2d {
     fn backward_bands(&mut self, input: &Tensor, bands: &GradientBands) -> PureResult<Tensor> {
         let volume = self.backward_band_volume(input, bands)?;
         volume.combine()
+    }
+
+    fn backward_bands(&mut self, input: &Tensor, bands: &GradientBands) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        let expected_cols = self.in_channels * self.input_hw.0 * self.input_hw.1;
+        if cols != expected_cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (1, cols),
+                right: (1, expected_cols),
+            });
+        }
+        let (oh, ow) = self.output_hw()?;
+        let expected_grad = (batch, self.out_channels * oh * ow);
+        let mut has_work = false;
+        for grad in bands.iter() {
+            if grad.shape() != expected_grad {
+                return Err(TensorError::ShapeMismatch {
+                    left: grad.shape(),
+                    right: expected_grad,
+                });
+            }
+            if !has_work && grad.squared_l2_norm() > 0.0 {
+                has_work = true;
+            }
+        }
+        if !has_work {
+            return Tensor::zeros(batch, cols);
+        }
+        let patches = self.im2col(input, batch, oh, ow)?;
+        let span = self.in_channels * self.kernel.0 * self.kernel.1;
+        let mut grad_weight_acc = Tensor::zeros(self.out_channels, span)?;
+        let mut bias_acc = Tensor::zeros(1, self.out_channels)?;
+        let mut grad_input_total = Tensor::zeros(batch, cols)?;
+        for grad in bands.iter() {
+            if grad.squared_l2_norm() == 0.0 {
+                continue;
+            }
+            let grad_matrix = self.grad_output_to_matrix(grad, batch, oh, ow)?;
+            let grad_weight = grad_matrix.transpose().matmul(&patches)?;
+            let grad_weight = grad_weight.scale(1.0 / batch as f32)?;
+            grad_weight_acc.add_scaled(&grad_weight, 1.0)?;
+            let bias_sums = grad_matrix.sum_axis0();
+            let mut bias_tensor = Tensor::from_vec(1, self.out_channels, bias_sums)?;
+            bias_tensor = bias_tensor.scale(1.0 / batch as f32)?;
+            bias_acc.add_scaled(&bias_tensor, 1.0)?;
+            let grad_patches = grad_matrix.matmul(self.weight.value())?;
+            let grad_input = self.col2im(&grad_patches, batch, oh, ow)?;
+            grad_input_total.add_scaled(&grad_input, 1.0)?;
+        }
+        self.weight.accumulate_euclidean(&grad_weight_acc)?;
+        self.bias.accumulate_euclidean(&bias_acc)?;
+        Ok(grad_input_total)
     }
 
     fn visit_parameters(
@@ -964,6 +1022,7 @@ impl Module for AvgPool2d {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schedule::GradientBands;
 
     #[test]
     fn conv1d_forward_matches_manual() {
