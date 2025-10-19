@@ -107,16 +107,112 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
-## Quick Start
+## Install
 
-### 1) Clone
+### From PyPI (recommended)
+
+> Requires Python ≥ 3.8
+
+```bash
+# fresh venv (recommended)
+python3 -m venv .venv && source .venv/bin/activate
+python -m pip install -U pip
+
+# install Spiraltorch
+pip install spiraltorch==0.1.1
+```
+
+#### Quick smoke test
+
+```bash
+python - <<'PY'
+import spiraltorch as st, importlib.metadata as im
+print("spiraltorch:", im.version("spiraltorch"))
+print("phi =", st.golden_ratio(), "theta =", st.golden_angle())
+print("extras ok:", all(hasattr(st, n) for n in [
+    "set_global_seed","fibonacci_pacing","pack_nacci_chunks",
+    "pack_tribonacci_chunks","pack_tetranacci_chunks","generate_plan_batch_ex",
+]))
+PY
+```
+
+---
+
+## Build from source
+
+You’ll need Rust and `maturin`.
+
+```bash
+# 1) install maturin
+python -m pip install -U maturin
+
+# 2) build a wheel (pick one backend; macOS can use wgpu or mps)
+maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
+
+# 3) install the built wheel
+pip install ./target/wheels/spiraltorch-*.whl
+```
+
+> For Metal via Apple’s MPS, you can also use `--features mps` instead of `wgpu`.
+
+---
+
+## Usage
+
+Top-level convenience functions are exported (extras). Submodules like `spiraltorch.nn` are currently placeholders for future public APIs.
+
+```python
+import spiraltorch as st
+
+# extras
+print(st.golden_ratio())   # 1.6180...
+print(st.golden_angle())   # 2.39996...
+
+# pacing utilities
+print(st.fibonacci_pacing(12))
+print(st.pack_tribonacci_chunks(20))
+
+# global seed for batch helpers / future generators
+st.set_global_seed(42)
+
+# (wire-up pending) batch plan API—connect to your existing generate_plan()
+# st.generate_plan_batch_ex(
+#     n=3, total_steps=256,
+#     base_radius=1.2, radial_growth=0.01,
+#     base_height=0.5, meso_gain=0.8, micro_gain=0.2,
+#     seed=None
+# )
+```
+
+Submodules import (placeholders for now):
+
+```python
+import spiraltorch.nn, spiraltorch.frac, spiraltorch.linalg
+```
+
+---
+
+## Troubleshooting
+
+- **`No matching distribution found`**  
+  Your platform may not have a prebuilt wheel yet. Build from source (see above).
+
+- **Backend errors**  
+  Set `WGPU_BACKEND` explicitly (`metal` on macOS, `vulkan` on Linux, `dx12` on Windows).
+
+---
+
+## Versioning
+
+- **0.1.x**: PyO3 **abi3** single-binary packaging; stable `extras` surface.  
+- Future minor releases will gradually expose public APIs under `spiraltorch.*` (e.g., `nn`, `frac`).
+
+### 2) Build from source (Rust)
+
 ```bash
 git clone https://github.com/RyoSpiralArchitect/SpiralTorch.git
 cd SpiralTorch
 ```
-
-### 2) Build from source (Rust)
-
 **CPU (default; no GPU deps)**
 ```bash
 cargo build -p st-core --release
@@ -271,10 +367,11 @@ optimisers alongside its hypergradient updates.
 SpiralTorchVision reinterprets the Z-axis as a perceptual frequency domain,
 collapsing it with spectral-window-aware projectors into tensor spaces that any
 TorchVision model can consume. Temporal resonance buffers now let `ZSpaceVolume`
-perform exponential moving averages across frames so the projector can weight
-both depth and time before collapsing. The roadmap spans multi-view fusion and
-generative feedback loops between SpiralRNN conductors and vision modules. Read
-the full guide in [docs/spiraltorchvision.md](docs/spiraltorchvision.md).ion.md).
+perform exponential moving averages across frames, while `MultiViewFusion`
+registers camera descriptors so the projector can weight view-specific Z slices
+before collapse. The roadmap now leans into generative feedback loops between
+SpiralRNN conductors and vision modules. Read the full guide in
+[docs/spiraltorchvision.md](docs/spiraltorchvision.md).).
 
 
 ## Why it’s different

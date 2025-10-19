@@ -474,6 +474,174 @@ impl TemporalResonanceBuffer {
     }
 }
 
+/// Metadata describing a registered camera/view that contributes to a Z-space volume.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewDescriptor {
+    id: Arc<str>,
+    origin: [f32; 3],
+    forward: [f32; 3],
+    baseline_weight: f32,
+}
+
+impl ViewDescriptor {
+    /// Creates a new view descriptor with the provided identifier, origin, and forward vector.
+    pub fn new(id: impl Into<String>, origin: [f32; 3], forward: [f32; 3]) -> Self {
+        let id: Arc<str> = Arc::from(id.into());
+        let mut descriptor = Self {
+            id,
+            origin,
+            forward: normalise_direction(forward),
+            baseline_weight: 1.0,
+        };
+        if !descriptor.forward.iter().any(|value| value.abs() > 0.0) {
+            descriptor.forward = [0.0, 0.0, 1.0];
+        }
+        descriptor
+    }
+
+    /// Sets a baseline importance weight for the view during fusion.
+    pub fn with_baseline_weight(mut self, weight: f32) -> Self {
+        self.baseline_weight = weight.max(0.0);
+        self
+    }
+
+    /// Returns the identifier of the view.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns the origin of the camera in world coordinates.
+    pub fn origin(&self) -> [f32; 3] {
+        self.origin
+    }
+
+    /// Updates the origin of the camera in world coordinates.
+    pub fn set_origin(&mut self, origin: [f32; 3]) {
+        self.origin = origin;
+    }
+
+    /// Returns the forward direction of the camera.
+    pub fn forward(&self) -> [f32; 3] {
+        self.forward
+    }
+
+    /// Updates the forward direction (normalised) of the camera.
+    pub fn set_forward(&mut self, forward: [f32; 3]) {
+        self.forward = normalise_direction(forward);
+    }
+
+    /// Returns the baseline fusion weight associated with this view.
+    pub fn baseline_weight(&self) -> f32 {
+        self.baseline_weight.max(0.0)
+    }
+
+    fn alignment(&self, focus: [f32; 3]) -> f32 {
+        let focus = normalise_direction(focus);
+        let dot =
+            self.forward[0] * focus[0] + self.forward[1] * focus[1] + self.forward[2] * focus[2];
+        dot.max(0.0)
+    }
+}
+
+/// Helper that fuses multi-view registrations into Z-space attention profiles.
+#[derive(Clone, Debug)]
+pub struct MultiViewFusion {
+    views: Vec<ViewDescriptor>,
+    focus_direction: [f32; 3],
+    alignment_gamma: f32,
+}
+
+impl MultiViewFusion {
+    /// Builds a new fusion helper from the provided view descriptors.
+    pub fn new(views: Vec<ViewDescriptor>) -> PureResult<Self> {
+        if views.is_empty() {
+            return Err(TensorError::EmptyInput("multi_view_fusion"));
+        }
+        Ok(Self {
+            views,
+            focus_direction: [0.0, 0.0, 1.0],
+            alignment_gamma: 1.0,
+        })
+    }
+
+    /// Returns the registered views.
+    pub fn views(&self) -> &[ViewDescriptor] {
+        &self.views
+    }
+
+    /// Returns the number of registered views.
+    pub fn view_count(&self) -> usize {
+        self.views.len()
+    }
+
+    /// Updates the focus direction used when modulating view weights.
+    pub fn with_focus_direction(mut self, focus_direction: [f32; 3]) -> Self {
+        self.focus_direction = normalise_direction(focus_direction);
+        self
+    }
+
+    /// Updates the alignment gamma used to sharpen or soften orientation bias.
+    pub fn with_alignment_gamma(mut self, gamma: f32) -> Self {
+        self.alignment_gamma = if gamma.is_finite() {
+            gamma.clamp(0.25, 8.0)
+        } else {
+            1.0
+        };
+        self
+    }
+
+    /// Returns the current focus direction.
+    pub fn focus_direction(&self) -> [f32; 3] {
+        self.focus_direction
+    }
+
+    /// Returns the alignment gamma used for orientation bias.
+    pub fn alignment_gamma(&self) -> f32 {
+        self.alignment_gamma
+    }
+
+    /// Returns the current normalised bias profile applied during fusion.
+    pub fn view_bias_profile(&self) -> Vec<f32> {
+        self.normalised_biases()
+    }
+
+    fn raw_biases(&self) -> Vec<f32> {
+        let focus = self.focus_direction;
+        let gamma = self.alignment_gamma.max(1e-3);
+        self.views
+            .iter()
+            .map(|view| {
+                let alignment = view.alignment(focus).max(1e-3).powf(gamma);
+                alignment * view.baseline_weight().max(1e-3)
+            })
+            .collect()
+    }
+
+    fn normalised_biases(&self) -> Vec<f32> {
+        let mut biases = self.raw_biases();
+        if biases.is_empty() {
+            return biases;
+        }
+        ZSpaceVolume::normalise_weights(&mut biases);
+        biases
+    }
+}
+
+fn normalise_direction(direction: [f32; 3]) -> [f32; 3] {
+    let norm =
+        (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
+            .sqrt();
+    if norm <= 1e-6 || !norm.is_finite() {
+        [0.0, 0.0, 1.0]
+    } else {
+        [
+            direction[0] / norm,
+            direction[1] / norm,
+            direction[2] / norm,
+        ]
+    }
+}
+
 /// Adaptive projector that fuses resonance telemetry with chrono summaries.
 #[derive(Clone, Debug)]
 pub struct VisionProjector {
@@ -520,7 +688,13 @@ impl VisionProjector {
             spread /= 1.0 + summary.mean_abs_drift.abs();
         }
         let energy_bias = summary.mean_decay;
-        Self::new(focus, spread, energy_bias)
+        let mut projector = Self::new(focus, spread, energy_bias);
+        if summary.mean_abs_drift.is_finite() {
+            projector.temporal_decay =
+                (1.0 / (1.0 + summary.mean_abs_drift.abs())).clamp(0.05, 1.0);
+        }
+        projector.temporal_focus = 1.0;
+        projector
     }
 
     /// Updates the projector using live atlas telemetry.
@@ -539,6 +713,24 @@ impl VisionProjector {
         if let Some(total) = frame.collapse_total {
             if total.is_finite() {
                 self.energy_bias = total.tanh();
+            }
+        }
+        for metric in &frame.metrics {
+            match metric.name.as_str() {
+                "temporal_focus" | "z_temporal_focus" => {
+                    self.temporal_focus = metric.value.clamp(0.0, 1.0);
+                }
+                "temporal_decay" | "z_temporal_decay" => {
+                    if metric.value.is_finite() {
+                        self.temporal_decay = metric.value.abs().clamp(0.05, 1.0);
+                    }
+                }
+                _ => {}
+            }
+            if let Some(district) = metric.district() {
+                if district.eq_ignore_ascii_case("temporal") && metric.value.is_finite() {
+                    self.temporal_decay = metric.value.abs().clamp(0.05, 1.0);
+                }
             }
         }
     }
@@ -594,6 +786,64 @@ impl VisionProjector {
         Ok(weights)
     }
 
+    fn compute_temporal_weights(&self, frames: usize) -> Vec<f32> {
+        if frames == 0 {
+            return Vec::new();
+        }
+        if frames == 1 {
+            return vec![1.0];
+        }
+        let focus = self.temporal_focus.clamp(0.0, 1.0);
+        let decay = self.temporal_decay.max(1e-3);
+        let denom = (frames - 1) as f32;
+        let mut weights = Vec::with_capacity(frames);
+        for idx in 0..frames {
+            let position = if denom > 0.0 { idx as f32 / denom } else { 0.0 };
+            let delta = position - focus;
+            let gaussian = (-0.5 * (delta / decay).powi(2)).exp();
+            weights.push(gaussian.max(1e-6));
+        }
+        let mut total = 0.0f32;
+        for weight in &weights {
+            total += *weight;
+        }
+        if total <= f32::EPSILON || !total.is_finite() {
+            let uniform = 1.0 / frames as f32;
+            weights.iter_mut().for_each(|w| *w = uniform);
+        } else {
+            weights.iter_mut().for_each(|w| *w /= total);
+        }
+        weights
+    }
+
+    /// Returns the temporal weights applied when fusing a sequence of frames.
+    pub fn temporal_weights(&self, frames: usize) -> Vec<f32> {
+        self.compute_temporal_weights(frames)
+    }
+
+    fn streaming_alpha(&self) -> f32 {
+        (1.0 - self.temporal_decay.clamp(0.0, 0.99)).clamp(0.05, 0.95)
+    }
+
+    /// Applies the projector's streaming temporal preference as an EMA update.
+    pub fn accumulate_temporal(
+        &self,
+        state: &mut ZSpaceVolume,
+        next: &ZSpaceVolume,
+    ) -> PureResult<()> {
+        let alpha = self.streaming_alpha();
+        state.accumulate(next, alpha)
+    }
+
+    /// Fuses a temporal sequence of volumes into a single blended volume.
+    pub fn fuse_sequence(&self, sequence: &[ZSpaceVolume]) -> PureResult<ZSpaceVolume> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        let weights = self.compute_temporal_weights(sequence.len());
+        ZSpaceVolume::blend_sequence(sequence, &weights)
+    }
+
     /// Produces the final depth weights as a tensor.
     pub fn depth_weights(
         &self,
@@ -640,6 +890,119 @@ impl VisionProjector {
         buffer: &mut TemporalResonanceBuffer,
     ) -> PureResult<Tensor> {
         let weights = self.compute_depth_weights(volume, resonance)?;
+        let smoothed = buffer.apply(&weights)?;
+        if !smoothed.is_empty() && smoothed.len() != weights.len() {
+            return Err(TensorError::ShapeMismatch {
+                left: (weights.len(), 1),
+                right: (smoothed.len(), 1),
+            });
+        }
+        volume.collapse_with_weights(&smoothed)
+    }
+
+    fn apply_multi_view_biases(
+        &self,
+        weights: &mut Vec<f32>,
+        fusion: &MultiViewFusion,
+    ) -> PureResult<()> {
+        if weights.len() != fusion.view_count() {
+            return Err(TensorError::ShapeMismatch {
+                left: (weights.len(), 1),
+                right: (fusion.view_count(), 1),
+            });
+        }
+        let biases = fusion.normalised_biases();
+        if biases.len() != weights.len() {
+            return Err(TensorError::ShapeMismatch {
+                left: (weights.len(), 1),
+                right: (biases.len(), 1),
+            });
+        }
+        for (weight, bias) in weights.iter_mut().zip(biases.iter()) {
+            *weight *= bias.max(1e-6);
+        }
+        ZSpaceVolume::normalise_weights(weights);
+        Ok(())
+    }
+
+    /// Produces per-view weights for a multi-camera fusion configuration.
+    pub fn depth_weights_multi_view(
+        &self,
+        fusion: &MultiViewFusion,
+        volume: &ZSpaceVolume,
+        resonance: &DifferentialResonance,
+    ) -> PureResult<Tensor> {
+        if fusion.view_count() != volume.depth() {
+            return Err(TensorError::ShapeMismatch {
+                left: (fusion.view_count(), volume.height() * volume.width()),
+                right: (volume.depth(), volume.height() * volume.width()),
+            });
+        }
+        let mut weights = self.compute_depth_weights(volume, resonance)?;
+        self.apply_multi_view_biases(&mut weights, fusion)?;
+        Tensor::from_vec(1, weights.len(), weights)
+    }
+
+    /// Produces temporally smoothed per-view weights for a multi-camera fusion configuration.
+    pub fn depth_weights_multi_view_with_temporal(
+        &self,
+        fusion: &MultiViewFusion,
+        volume: &ZSpaceVolume,
+        resonance: &DifferentialResonance,
+        buffer: &mut TemporalResonanceBuffer,
+    ) -> PureResult<Tensor> {
+        if fusion.view_count() != volume.depth() {
+            return Err(TensorError::ShapeMismatch {
+                left: (fusion.view_count(), volume.height() * volume.width()),
+                right: (volume.depth(), volume.height() * volume.width()),
+            });
+        }
+        let mut weights = self.compute_depth_weights(volume, resonance)?;
+        self.apply_multi_view_biases(&mut weights, fusion)?;
+        let smoothed = buffer.apply(&weights)?;
+        if !smoothed.is_empty() && smoothed.len() != weights.len() {
+            return Err(TensorError::ShapeMismatch {
+                left: (weights.len(), 1),
+                right: (smoothed.len(), 1),
+            });
+        }
+        Tensor::from_vec(1, smoothed.len(), smoothed)
+    }
+
+    /// Projects a multi-view Z-space volume into a fused 2D representation using calibrated weights.
+    pub fn project_multi_view(
+        &self,
+        fusion: &MultiViewFusion,
+        volume: &ZSpaceVolume,
+        resonance: &DifferentialResonance,
+    ) -> PureResult<Tensor> {
+        if fusion.view_count() != volume.depth() {
+            return Err(TensorError::ShapeMismatch {
+                left: (fusion.view_count(), volume.height() * volume.width()),
+                right: (volume.depth(), volume.height() * volume.width()),
+            });
+        }
+        let mut weights = self.compute_depth_weights(volume, resonance)?;
+        self.apply_multi_view_biases(&mut weights, fusion)?;
+        volume.collapse_with_weights(&weights)
+    }
+
+    /// Projects a multi-view Z-space volume while applying temporal smoothing of the view weights.
+    pub fn project_multi_view_with_temporal(
+        &self,
+        fusion: &MultiViewFusion,
+        volume: &ZSpaceVolume,
+        resonance: &DifferentialResonance,
+        buffer: &mut TemporalResonanceBuffer,
+    ) -> PureResult<Tensor> {
+        if fusion.view_count() != volume.depth() {
+            return Err(TensorError::ShapeMismatch {
+                left: (fusion.view_count(), volume.height() * volume.width()),
+                right: (volume.depth(), volume.height() * volume.width()),
+            });
+        }
+        let mut weights = self.compute_depth_weights(volume, resonance)?;
+        self.apply_multi_view_biases(&mut weights, fusion)?;
         let smoothed = buffer.apply(&weights)?;
         if !smoothed.is_empty() && smoothed.len() != weights.len() {
             return Err(TensorError::ShapeMismatch {
@@ -2040,7 +2403,13 @@ mod tests {
             tensor_from(&[3.0, 4.0, 5.0, 6.0], 2, 2),
         ];
         let volume = ZSpaceVolume::from_slices(&slices).unwrap();
-        let resonance = toy_resonance(3);
+        let resonance = DifferentialResonance {
+            homotopy_flow: tensor_from(&[0.0, 0.0, 0.0], 1, 3),
+            functor_linearisation: tensor_from(&[0.0, 0.0, 0.0], 1, 3),
+            recursive_objective: tensor_from(&[0.0, 0.0, 0.0], 1, 3),
+            infinity_projection: tensor_from(&[0.0, 0.0, 0.0], 1, 3),
+            infinity_energy: tensor_from(&[1.0, 1.0, 1.0], 1, 3),
+        };
         let weights = volume.resonance_weights(&resonance).unwrap();
         assert!((weights.iter().sum::<f32>() - 1.0).abs() < 1e-4);
         let projected = volume.project_resonance(&resonance).unwrap();
@@ -2132,7 +2501,8 @@ mod tests {
         let mut resonance_b = toy_resonance(2);
         resonance_b.infinity_energy = tensor_from(&[6.0, 0.2], 1, 2);
         resonance_b.recursive_objective = tensor_from(&[0.5, -0.8], 1, 2);
-        let projector = VisionProjector::default();
+        let projector =
+            VisionProjector::new(0.9, 0.6, 0.0).with_spectral_window(SpectralWindow::rectangular());
 
         let mut buffer_weights = TemporalResonanceBuffer::new(0.25);
         let first_temporal = projector
@@ -2198,6 +2568,114 @@ mod tests {
         assert!((weights_after.data()[0] - weights_before.data()[0]).abs() > 1e-3);
         let projection = projector.project(&volume, &resonance).unwrap();
         assert_eq!(projection.shape(), (2, 2));
+    }
+
+    #[test]
+    fn multi_view_biases_respect_orientation_and_baseline() {
+        let descriptors = vec![
+            ViewDescriptor::new("front", [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            ViewDescriptor::new("right", [0.0, 0.0, 0.0], [1.0, 0.0, 0.1])
+                .with_baseline_weight(0.5),
+            ViewDescriptor::new("sky", [0.0, 0.0, 0.0], [0.0, 1.0, 1.0]).with_baseline_weight(2.0),
+        ];
+        let fusion = MultiViewFusion::new(descriptors)
+            .unwrap()
+            .with_focus_direction([0.1, 0.2, 1.0])
+            .with_alignment_gamma(2.0);
+        let slices = vec![
+            tensor_from(&[1.0, 1.0, 1.0, 1.0], 2, 2),
+            tensor_from(&[0.5, 0.5, 0.5, 0.5], 2, 2),
+            tensor_from(&[0.25, 0.25, 0.25, 0.25], 2, 2),
+        ];
+        let volume = ZSpaceVolume::from_slices(&slices).unwrap();
+        let resonance = toy_resonance(3);
+        let projector = VisionProjector::default();
+        let baseline = projector.depth_weights(&volume, &resonance).unwrap();
+        let weights = projector
+            .depth_weights_multi_view(&fusion, &volume, &resonance)
+            .unwrap();
+        let base = baseline.data();
+        let data = weights.data();
+        assert_eq!(data.len(), 3);
+        assert!((data.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        assert!(data[2] > base[2]);
+        assert!(data[1] < base[1]);
+    }
+
+    #[test]
+    fn projector_multi_view_temporal_projection_matches_manual_smoothing() {
+        let descriptors = vec![
+            ViewDescriptor::new("front", [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            ViewDescriptor::new("right", [0.0, 0.0, 0.0], [1.0, 0.0, 0.5])
+                .with_baseline_weight(1.5),
+        ];
+        let fusion = MultiViewFusion::new(descriptors)
+            .unwrap()
+            .with_focus_direction([0.4, 0.0, 1.0])
+            .with_alignment_gamma(1.5);
+        let slices = vec![
+            tensor_from(&[1.0, 0.0, 0.0, 1.0], 2, 2),
+            tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2),
+        ];
+        let volume = ZSpaceVolume::from_slices(&slices).unwrap();
+        let resonance_a = toy_resonance(2);
+        let mut resonance_b = toy_resonance(2);
+        resonance_b.infinity_energy = tensor_from(&[3.0, 6.0], 1, 2);
+        resonance_b.recursive_objective = tensor_from(&[0.1, 0.9], 1, 2);
+        let projector = VisionProjector::default();
+
+        let mut buffer_weights = TemporalResonanceBuffer::new(0.3);
+        let first_temporal = projector
+            .depth_weights_multi_view_with_temporal(
+                &fusion,
+                &volume,
+                &resonance_a,
+                &mut buffer_weights,
+            )
+            .unwrap();
+        let second_direct = projector
+            .depth_weights_multi_view(&fusion, &volume, &resonance_b)
+            .unwrap();
+        let expected: Vec<f32> = first_temporal
+            .data()
+            .iter()
+            .zip(second_direct.data().iter())
+            .map(|(prev, next)| prev * 0.7 + next * 0.3)
+            .collect();
+        let second_temporal = projector
+            .depth_weights_multi_view_with_temporal(
+                &fusion,
+                &volume,
+                &resonance_b,
+                &mut buffer_weights,
+            )
+            .unwrap();
+        for (observed, anticipated) in second_temporal.data().iter().zip(expected.iter()) {
+            assert!((observed - anticipated).abs() < 1e-6);
+        }
+
+        let mut buffer_projection = TemporalResonanceBuffer::new(0.3);
+        projector
+            .project_multi_view_with_temporal(
+                &fusion,
+                &volume,
+                &resonance_a,
+                &mut buffer_projection,
+            )
+            .unwrap();
+        let second_projection = projector
+            .project_multi_view_with_temporal(
+                &fusion,
+                &volume,
+                &resonance_b,
+                &mut buffer_projection,
+            )
+            .unwrap();
+        let manual = volume.collapse_with_weights(&expected).unwrap();
+        assert_eq!(manual.shape(), second_projection.shape());
+        for (lhs, rhs) in second_projection.data().iter().zip(manual.data().iter()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
     }
 
     #[test]

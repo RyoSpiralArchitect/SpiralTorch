@@ -186,9 +186,7 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     compat::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
-    let nn = PyModule::new_bound(py, "nn")?;
-    nn.add("__doc__", "SpiralTorch neural network primitives")?;
-    m.add_submodule(&nn)?;
+    nn::register(py, m)?;
 
     let frac = PyModule::new_bound(py, "frac")?;
     frac_bindings::register(py, &frac)?; // 実APIを公開
@@ -220,7 +218,7 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
 
     // 3) __all__
     m.add("__all__", vec![
-        "Tensor","from_dlpack","to_dlpack",
+        "Tensor","from_dlpack","to_dlpack","compat","capture","share",
         "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",

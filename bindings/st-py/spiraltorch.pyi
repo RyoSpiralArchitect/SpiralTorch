@@ -43,6 +43,8 @@ class _CompatTorch(ModuleType):
         copy: bool | None = ...,
         require_contiguous: bool | None = ...,
     ) -> Tensor: ...
+    def to_torch(tensor: Tensor) -> object: ...
+    def from_torch(tensor: object) -> Tensor: ...
 
 class _CompatJax(ModuleType):
     def to_jax(tensor: Tensor) -> object: ...
@@ -58,6 +60,122 @@ class _CompatNamespace(ModuleType):
     tensorflow: _CompatTensorFlow
 
 compat: _CompatNamespace
+
+    def capture(value: object, /) -> Tensor: ...
+    def share(value: object, target: str, /) -> object: ...
+
+compat: _CompatNamespace
+
+def set_global_seed(seed: int) -> None: ...
+
+def golden_ratio() -> float: ...
+
+def golden_angle() -> float: ...
+
+def fibonacci_pacing(total_steps: int) -> List[int]: ...
+
+def pack_nacci_chunks(order: int, total_steps: int) -> List[int]: ...
+
+def pack_tribonacci_chunks(total_steps: int) -> List[int]: ...
+
+def pack_tetranacci_chunks(total_steps: int) -> List[int]: ...
+
+def generate_plan_batch_ex(
+    n: int,
+    total_steps: int,
+    base_radius: float,
+    radial_growth: float,
+    base_height: float,
+    meso_gain: float,
+    micro_gain: float,
+    seed: Optional[int] = ...,
+) -> List[object]: ...
+
+
+class _NnDataset:
+    def __init__(self) -> None: ...
+
+    @staticmethod
+    def from_pairs(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataset: ...
+
+    def push(self, input: Tensor, target: Tensor) -> None: ...
+
+    def len(self) -> int: ...
+
+    def is_empty(self) -> bool: ...
+
+    def loader(self) -> _NnDataLoader: ...
+
+    def __len__(self) -> int: ...
+
+
+class _NnDataLoader:
+    def len(self) -> int: ...
+
+    def __len__(self) -> int: ...
+
+    def is_empty(self) -> bool: ...
+
+    def batch_size(self) -> int: ...
+
+    def prefetch_depth(self) -> int: ...
+
+    def shuffle(self, seed: int) -> _NnDataLoader: ...
+
+    def batched(self, batch_size: int) -> _NnDataLoader: ...
+
+    def dynamic_batch_by_rows(self, max_rows: int) -> _NnDataLoader: ...
+
+    def prefetch(self, depth: int) -> _NnDataLoader: ...
+
+    def iter(self) -> _NnDataLoaderIter: ...
+
+    def __iter__(self) -> _NnDataLoaderIter: ...
+
+
+class _NnDataLoaderIter(Iterable[Tuple[Tensor, Tensor]]):
+    def __iter__(self) -> _NnDataLoaderIter: ...
+
+    def __next__(self) -> Tuple[Tensor, Tensor]: ...
+
+
+class _NnModule(ModuleType):
+    Dataset: type[_NnDataset]
+    DataLoader: type[_NnDataLoader]
+    DataLoaderIter: type[_NnDataLoaderIter]
+
+    def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...
+
+
+nn: _NnModule
+
+
+class _FracModule(ModuleType):
+    def gl_coeffs_adaptive(alpha: float, tol: float = ..., max_len: int = ...) -> List[float]: ...
+
+    def fracdiff_gl_1d(
+        x: Sequence[float],
+        alpha: float,
+        kernel_len: int,
+        pad: str = ...,
+        pad_constant: Optional[float] = ...,
+        scale: Optional[float] = ...,
+    ) -> List[float]: ...
+
+
+frac: _FracModule
+
+dataset: ModuleType
+
+linalg: ModuleType
+
+rl: ModuleType
+
+rec: ModuleType
+
+telemetry: ModuleType
+
+ecosystem: ModuleType
 
 class QueryPlan:
     def __init__(self, query: str) -> None: ...
@@ -130,8 +248,29 @@ class DashboardRing:
 __all__ = [
     "Tensor",
     "compat",
+    "capture",
+    "share",
     "from_dlpack",
     "to_dlpack",
+    "nn",
+    "frac",
+    "dataset",
+    "linalg",
+    "rl",
+    "rec",
+    "telemetry",
+    "ecosystem",
+    "compat",
+    "set_global_seed",
+    "golden_ratio",
+    "golden_angle",
+    "fibonacci_pacing",
+    "pack_nacci_chunks",
+    "pack_tribonacci_chunks",
+    "pack_tetranacci_chunks",
+    "generate_plan_batch_ex",
+    "gl_coeffs_adaptive",
+    "fracdiff_gl_1d",
     "QueryPlan",
     "RecEpochReport",
     "Recommender",
