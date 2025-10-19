@@ -113,7 +113,7 @@ cargo build -p st-core --features mps --release
 cargo build -p st-core --features cuda --release
 ```
 
-**HIP / ROCm (optional; real backend is feature-gated)**
+**HIP / ROCm (optional)**
 ```bash
 export HIPCC=/opt/rocm/bin/hipcc
 export ROCM_PATH=/opt/rocm
