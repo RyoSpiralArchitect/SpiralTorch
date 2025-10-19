@@ -250,6 +250,7 @@ impl Conv2d {
         kernel: (usize, usize),
         stride: (usize, usize),
         padding: (usize, usize),
+        dilation: (usize, usize),
         input_hw: (usize, usize),
     ) -> PureResult<Self> {
         validate_positive(in_channels, "in_channels")?;
@@ -258,6 +259,8 @@ impl Conv2d {
         validate_positive(kernel.1, "kernel_w")?;
         validate_positive(stride.0, "stride_h")?;
         validate_positive(stride.1, "stride_w")?;
+        validate_positive(dilation.0, "dilation_h")?;
+        validate_positive(dilation.1, "dilation_w")?;
         validate_positive(input_hw.0, "input_height")?;
         validate_positive(input_hw.1, "input_width")?;
         let name = name.into();
@@ -316,14 +319,17 @@ impl Conv2d {
         let (kh, kw) = self.dilated_kernel()?;
         let (ph, pw) = self.padding;
         let (sh, sw) = self.stride;
-        if h + 2 * ph < kh || w + 2 * pw < kw {
+        let (dh, dw) = self.dilation;
+        let effective_kh = dh * (kh.saturating_sub(1)) + 1;
+        let effective_kw = dw * (kw.saturating_sub(1)) + 1;
+        if h + 2 * ph < effective_kh || w + 2 * pw < effective_kw {
             return Err(TensorError::InvalidDimensions {
                 rows: h + 2 * ph,
-                cols: kh.max(kw),
+                cols: effective_kh.max(effective_kw),
             });
         }
-        let oh = (h + 2 * ph - kh) / sh + 1;
-        let ow = (w + 2 * pw - kw) / sw + 1;
+        let oh = (h + 2 * ph - effective_kh) / sh + 1;
+        let ow = (w + 2 * pw - effective_kw) / sw + 1;
         Ok((oh, ow))
     }
 
