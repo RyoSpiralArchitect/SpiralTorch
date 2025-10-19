@@ -8,6 +8,7 @@
 //! caching tuned kernels across driver updates and store dispatch metrics that
 //! downstream schedulers can analyse.
 
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 
 use crate::tile::TileConfig;
@@ -156,18 +157,29 @@ pub struct TelemetrySummary {
 /// Rolling log of telemetry samples.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TelemetryLog {
-    entries: Vec<TelemetrySample>,
+    entries: VecDeque<TelemetrySample>,
 }
 
 impl TelemetryLog {
     pub fn new() -> Self {
         Self {
-            entries: Vec::new(),
+            entries: VecDeque::new(),
         }
     }
 
     pub fn push(&mut self, sample: TelemetrySample) {
-        self.entries.push(sample);
+        self.entries.push_back(sample);
+    }
+
+    pub fn push_bounded(&mut self, sample: TelemetrySample, max_len: usize) {
+        if max_len == 0 {
+            self.entries.clear();
+            return;
+        }
+        self.entries.push_back(sample);
+        while self.entries.len() > max_len {
+            self.entries.pop_front();
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -188,6 +200,10 @@ impl TelemetryLog {
                 .partial_cmp(&b.tflops)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
+    }
+
+    pub fn best_tile(&self) -> Option<TileConfig> {
+        self.best_by_tflops().and_then(|sample| sample.tile)
     }
 
     pub fn summary(&self) -> Option<TelemetrySummary> {
@@ -213,6 +229,83 @@ impl TelemetryLog {
             avg_occupancy: total_occ / count,
             regression_rate: regressions as f32 / count,
         })
+    }
+
+    pub fn regression_rate(&self) -> Option<f32> {
+        self.summary().map(|summary| summary.regression_rate)
+    }
+}
+
+/// In-memory store of telemetry logs keyed by the autotuning identifier.
+#[derive(Clone, Debug)]
+pub struct AutotuneRegistry {
+    logs: HashMap<AutotuneKey, TelemetryLog>,
+    capacity: usize,
+}
+
+impl Default for AutotuneRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AutotuneRegistry {
+    const DEFAULT_CAPACITY: usize = 64;
+
+    pub fn new() -> Self {
+        Self::with_capacity(Self::DEFAULT_CAPACITY)
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        let capacity = capacity.max(1);
+        Self {
+            logs: HashMap::new(),
+            capacity,
+        }
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    pub fn set_capacity(&mut self, capacity: usize) {
+        self.capacity = capacity.max(1);
+        let cap = self.capacity;
+        for log in self.logs.values_mut() {
+            while log.len() > cap {
+                log.entries.pop_front();
+            }
+        }
+    }
+
+    pub fn record(&mut self, key: AutotuneKey, sample: TelemetrySample) {
+        let cap = self.capacity;
+        let log = self.logs.entry(key).or_insert_with(TelemetryLog::new);
+        log.push_bounded(sample, cap);
+    }
+
+    pub fn log(&self, key: &AutotuneKey) -> Option<&TelemetryLog> {
+        self.logs.get(key)
+    }
+
+    pub fn log_mut(&mut self, key: &AutotuneKey) -> Option<&mut TelemetryLog> {
+        self.logs.get_mut(key)
+    }
+
+    pub fn summary(&self, key: &AutotuneKey) -> Option<TelemetrySummary> {
+        self.log(key).and_then(|log| log.summary())
+    }
+
+    pub fn best_tile(&self, key: &AutotuneKey) -> Option<TileConfig> {
+        self.log(key).and_then(|log| log.best_tile())
+    }
+
+    pub fn regression_rate(&self, key: &AutotuneKey) -> Option<f32> {
+        self.log(key).and_then(|log| log.regression_rate())
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&AutotuneKey, &TelemetryLog)> {
+        self.logs.iter()
     }
 }
 
@@ -259,5 +352,55 @@ mod tests {
         let best = log.best_by_tflops().unwrap();
         assert_eq!(best.tflops, 85.0);
         assert_eq!(best.tile.unwrap().tile_m, 128);
+    }
+
+    #[test]
+    fn bounded_log_drops_oldest() {
+        let mut log = TelemetryLog::new();
+        for idx in 0..4 {
+            log.push_bounded(
+                TelemetrySample::new(10.0 + idx as f32, 100.0, 0.5, None, false),
+                3,
+            );
+        }
+        assert_eq!(log.len(), 3);
+        let mut iter = log.iter();
+        assert_eq!(iter.next().unwrap().tflops, 11.0);
+        assert_eq!(iter.next().unwrap().tflops, 12.0);
+        assert_eq!(iter.next().unwrap().tflops, 13.0);
+        assert!(log.best_tile().is_none());
+    }
+
+    #[test]
+    fn registry_tracks_entries() {
+        let device = DeviceProfile::new("AMD", 0x1234, 64, 128, "24.3");
+        let kernel = KernelProfile::new(9, "reduce_f32_tile64");
+        let key = AutotuneKey::new(device, kernel);
+        let tile = TileConfig {
+            workgroup: (128, 1),
+            tile_m: 256,
+            tile_n: 64,
+            tile_k: 32,
+            vector: 4,
+            stages: 2,
+        };
+        let mut registry = AutotuneRegistry::with_capacity(2);
+        registry.record(
+            key.clone(),
+            TelemetrySample::new(60.0, 700.0, 0.8, Some(tile), false),
+        );
+        registry.record(
+            key.clone(),
+            TelemetrySample::new(58.0, 680.0, 0.78, None, true),
+        );
+        registry.record(
+            key.clone(),
+            TelemetrySample::new(61.0, 705.0, 0.82, Some(tile), false),
+        );
+        let summary = registry.summary(&key).expect("summary");
+        assert_eq!(registry.log(&key).unwrap().len(), 2);
+        assert!(registry.best_tile(&key).is_some());
+        assert!(registry.regression_rate(&key).is_some());
+        assert!((summary.avg_tflops - 59.5).abs() < 1e-3);
     }
 }
