@@ -23,7 +23,8 @@ pub use self::differential::{
     RecursiveDifferential, SpiralDifferential,
 };
 pub use self::measure::{
-    z_space_barycenter, z_space_barycenter_guarded, BarycenterIntermediate, ZSpaceBarycenter,
+    nirt_weight_update, tesla_tail_spectrum, z_space_barycenter, z_space_barycenter_guarded,
+    BarycenterIntermediate, TeslaTail, TeslaTailLine, ZSpaceBarycenter,
 };
 pub use self::topos::{
     LawvereTierneyGuard, OpenCartesianTopos, RewriteMonad, TensorBiome, ToposAtlas, ZBox, ZBoxSite,
@@ -919,7 +920,7 @@ impl Tensor {
         }
         let mut data = Vec::with_capacity(total_rows * cols);
         for tensor in tensors {
-            data.extend_from_slice(&tensor.data);
+            data.extend_from_slice(tensor.data.as_slice());
         }
         Tensor::from_vec(total_rows, cols, data)
     }
@@ -1192,7 +1193,11 @@ impl ComplexTensor {
                 got: data.len(),
             });
         }
-        Ok(Self { data, rows, cols })
+        Ok(Self {
+            data: data.into(),
+            rows,
+            cols,
+        })
     }
 
     pub fn shape(&self) -> (usize, usize) {
