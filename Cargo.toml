@@ -2,6 +2,7 @@
 members = [
   "crates/st-core",
   "crates/st-backend-hip",
+  "crates/st-backend-wgpu",
   "crates/st-kdsl",
   "crates/st-logic",
   "crates/st-kv",
@@ -12,6 +13,7 @@ members = [
   "crates/st-rl",
   "crates/st-rec",
   "crates/st-bench",
+  "crates/st-amg",
   "bindings/st-py",
   "bindings/st-wasm"
 ]
@@ -28,6 +30,7 @@ default-members = [
   "crates/st-rl",
   "crates/st-rec",
   "crates/st-bench",
+  "crates/st-amg",
   "bindings/st-wasm"
 ]
 resolver = "2"

@@ -40,6 +40,9 @@ pub mod microlocal_impl;
 #[doc(inline)]
 pub use microlocal_impl as microlocal;
 
+#[cfg(feature = "experimental_zpulse")]
+pub mod microlocal_experimental;
+
 #[path = "maxwell.rs"]
 #[doc(hidden)]
 pub mod maxwell_impl;

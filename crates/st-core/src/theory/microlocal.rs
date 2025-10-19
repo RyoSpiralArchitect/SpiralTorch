@@ -461,6 +461,7 @@ impl InterfaceZPulse {
             band_energy: self.band_energy,
             drift: self.drift,
             z_signal: self.z_bias,
+            scale: self.scale,
         }
     }
 
@@ -476,6 +477,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
+            scale: ZScale::new(1.0),
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,

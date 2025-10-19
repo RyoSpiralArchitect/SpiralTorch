@@ -56,6 +56,7 @@ use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter, PsychoidReading};
+use st_core::theory::zpulse::ZScale;
 use st_tensor::{topos::OpenCartesianTopos, GradientSummary};
 use std::collections::HashMap;
 use std::env;
@@ -275,6 +276,7 @@ struct SoftLogicFlex {
     psi_gain: f32,
     loss_gain: f32,
     floor: f32,
+    scale_gain: f32,
     last_weights: (f32, f32, f32),
     last_z: f32,
     last_feedback: Option<SoftlogicZFeedback>,
@@ -308,6 +310,11 @@ impl SoftLogicFlex {
                 .and_then(|value| value.parse::<f32>().ok())
                 .map(|v| v.clamp(0.05, 1.0))
                 .unwrap_or(0.25),
+            scale_gain: env::var("SPIRAL_SOFTLOGIC_SCALE_GAIN")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|v| v.clamp(0.0, 1.5))
+                .unwrap_or(0.2),
             last_weights: (1.0, 1.0, 1.0),
             last_z: 0.0,
             last_feedback: None,
@@ -328,11 +335,22 @@ impl SoftLogicFlex {
             .as_ref()
             .map(|feedback| feedback.z_signal)
             .unwrap_or(self.last_z);
-        let target_above = 1.0 + (asymmetry * self.drift_gain) + (z_bias * self.psi_gain);
-        let target_here =
+        let mut target_above = 1.0 + (asymmetry * self.drift_gain) + (z_bias * self.psi_gain);
+        let mut target_here =
             1.0 + ((band_energy.here / norm) - (band_energy.drift.abs() / norm)) * self.loss_gain;
-        let target_beneath = 1.0 - (asymmetry * self.drift_gain) - (z_bias * self.psi_gain)
+        let mut target_beneath = 1.0 - (asymmetry * self.drift_gain) - (z_bias * self.psi_gain)
             + (-drift_term * self.drift_gain * 0.5);
+
+        if self.scale_gain > 0.0 {
+            if let Some(scale) = self.last_feedback.and_then(|feedback| feedback.scale) {
+                let bias = (-scale.log_radius).tanh();
+                let explore = bias.max(0.0);
+                let settle = (-bias).max(0.0);
+                target_above *= 1.0 + self.scale_gain * explore;
+                target_here *= 1.0 + self.scale_gain * 0.5 * (explore - settle);
+                target_beneath *= 1.0 + self.scale_gain * settle;
+            }
+        }
 
         let target = (
             target_above.clamp(self.floor, 3.0),
@@ -352,6 +370,7 @@ impl SoftLogicFlex {
         band_energy: &BandEnergy,
         weighted_loss: f32,
         psi_total: Option<f32>,
+        scale_hint: Option<ZScale>,
     ) -> SoftlogicZFeedback {
         let psi_total = psi_total.unwrap_or(0.0);
         let total = (band_energy.above + band_energy.here + band_energy.beneath).max(1e-4);
@@ -366,6 +385,7 @@ impl SoftLogicFlex {
             band_energy: (band_energy.above, band_energy.here, band_energy.beneath),
             drift,
             z_signal: self.last_z,
+            scale: scale_hint,
         };
         self.last_feedback = Some(feedback);
         feedback
@@ -1325,9 +1345,10 @@ impl ModuleTrainer {
                     None
                 }
             };
-            let z_feedback = self
-                .softlogic
-                .observe(&band_energy, weighted_loss, psi_total_opt);
+            let scale_hint = hub::get_softlogic_z().and_then(|feedback| feedback.scale);
+            let z_feedback =
+                self.softlogic
+                    .observe(&band_energy, weighted_loss, psi_total_opt, scale_hint);
             hub::set_softlogic_z(z_feedback);
             extra.insert("softlogic_z".to_string(), z_feedback.z_signal as f64);
             let mut loop_broadcasted = false;

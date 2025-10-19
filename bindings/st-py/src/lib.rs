@@ -5,7 +5,7 @@
 
 mod sot;
 
-use crate::sot::{PySoT3DPlan, Sot3DParams};
+use crate::sot::{plan_from_py_config, PyMacroSummary, PySoT3DPlan, PySoT3DStep};
 
 use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
@@ -3241,8 +3241,6 @@ impl PyCollapsePulse {
             self.command_kind()
         ))
     }
-}
-
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {
@@ -4472,8 +4470,6 @@ impl PyCollapsePulse {
             self.command_kind()
         ))
     }
-}
-
 }
 
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
@@ -12650,34 +12646,11 @@ impl PyChronoSummary {
             Some(0) | None => 1,
             Some(value) => value.max(1),
         };
-        let mut plan_steps = default_steps;
-        let mut params = Sot3DParams {
-            base_radius: 1.0,
-            radial_growth: 0.05,
-            base_height: 1.0,
-            meso_gain: 0.2,
-            micro_gain: 0.05,
-        };
-        if let Some(cfg) = sot {
-            if let Some(value) = cfg.get_item("steps")? {
-                plan_steps = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("base_radius")? {
-                params.base_radius = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("radial_growth")? {
-                params.radial_growth = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("base_height")? {
-                params.base_height = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("meso_gain")? {
-                params.meso_gain = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("micro_gain")? {
-                params.micro_gain = value.extract()?;
-            }
-        }
+        let plan = plan_from_py_config(default_steps, sot)?;
+        let trace = convert(self.inner.trace(seed.as_tensor().clone()))?;
+        Ok(PySpiralDifferentialTrace::from_trace_with_plan(trace, plan))
+    }
+
     #[getter]
     fn duration(&self) -> f32 {
         self.summary.duration
@@ -13306,6 +13279,11 @@ impl PySpiralDifferentialTrace {
         self.sot_plan.clone()
     }
 
+    #[getter]
+    fn sot_total_steps(&self) -> Option<usize> {
+        self.sot_plan.as_ref().map(|plan| plan.total_steps())
+    }
+
     fn set_sot_plan(&mut self, plan: Option<&PySoT3DPlan>) -> PyResult<()> {
         self.sot_plan = plan.cloned();
         Ok(())
@@ -13341,6 +13319,93 @@ impl PySpiralDifferentialTrace {
         } else {
             Ok(false)
         }
+    }
+
+    fn sot_positions_tensor(&self) -> PyResult<Option<PyTensor>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.as_tensor())
+            .transpose()
+    }
+
+    fn sot_feature_tensor(&self) -> PyResult<Option<PyTensor>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.feature_tensor())
+            .transpose()
+    }
+
+    fn sot_role_tensor(&self) -> PyResult<Option<PyTensor>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.role_tensor())
+            .transpose()
+    }
+
+    fn sot_reflection_tensor(&self) -> PyResult<Option<PyTensor>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.reflection_tensor())
+            .transpose()
+    }
+
+    fn sot_macro_summary_tensor(&self) -> PyResult<Option<PyTensor>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.macro_summary_tensor())
+            .transpose()
+    }
+
+    fn sot_steps(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<Option<Vec<Py<PySoT3DStep>>>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.steps(py))
+            .transpose()
+    }
+
+    fn sot_step_dicts(&self, py: Python<'_>) -> PyResult<Option<Vec<PyObject>>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.as_dicts(py))
+            .transpose()
+    }
+
+    fn sot_macro_summaries(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<Option<Vec<Py<PyMacroSummary>>>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.macro_summaries(py))
+            .transpose()
+    }
+
+    fn sot_macro_dicts(&self, py: Python<'_>) -> PyResult<Option<Vec<PyObject>>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| {
+                let summaries = plan.macro_summaries(py)?;
+                let mut out = Vec::with_capacity(summaries.len());
+                for summary in summaries {
+                    let dict = summary.bind(py).call_method0("as_dict")?;
+                    out.push(dict.into_py(py));
+                }
+                Ok(out)
+            })
+            .transpose()
+    }
+
+    fn sot_polyline(&self) -> Option<Vec<(f64, f64, f64)>> {
+        self.sot_plan.as_ref().map(|plan| plan.polyline())
+    }
+
+    fn sot_reflection_points(&self) -> Option<Vec<(usize, &'static str)>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.reflection_points())
     }
 
     fn deform(&mut self, generator: &PyTensor, direction: &PyTensor) -> PyResult<()> {
@@ -15908,41 +15973,8 @@ impl PySpiralSession {
             Some(0) | None => 1,
             Some(value) => value.max(1),
         };
-        let mut plan_steps = default_steps;
-        let mut params = Sot3DParams {
-            base_radius: 1.0,
-            radial_growth: 0.05,
-            base_height: 1.0,
-            meso_gain: 0.2,
-            micro_gain: 0.05,
-        };
-        if let Some(cfg) = sot {
-            if let Some(value) = cfg.get_item("steps")? {
-                plan_steps = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("base_radius")? {
-                params.base_radius = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("radial_growth")? {
-                params.radial_growth = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("base_height")? {
-                params.base_height = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("meso_gain")? {
-                params.meso_gain = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("micro_gain")? {
-                params.micro_gain = value.extract()?;
-            }
-        }
-
+        let plan = plan_from_py_config(default_steps, sot)?;
         let trace = convert(self.inner.trace(seed.as_tensor().clone()))?;
-        let plan = if plan_steps == 0 {
-            None
-        } else {
-            Some(crate::sot::generate_plan_with_params(plan_steps, params)?)
-        };
         Ok(PySpiralDifferentialTrace::from_trace_with_plan(trace, plan))
     }
 
