@@ -23,7 +23,8 @@ pub use self::differential::{
     RecursiveDifferential, SpiralDifferential,
 };
 pub use self::measure::{
-    z_space_barycenter, z_space_barycenter_guarded, BarycenterIntermediate, ZSpaceBarycenter,
+    nirt_weight_update, tesla_tail_spectrum, z_space_barycenter, z_space_barycenter_guarded,
+    BarycenterIntermediate, TeslaTail, TeslaTailLine, ZSpaceBarycenter,
 };
 pub use self::topos::{
     LawvereTierneyGuard, OpenCartesianTopos, RewriteMonad, TensorBiome, ToposAtlas, ZBox, ZBoxSite,

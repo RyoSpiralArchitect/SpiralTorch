@@ -101,7 +101,13 @@ use st_tensor::backend::faer_dense;
 use st_tensor::backend::wgpu_dense as tensor_wgpu_dense;
 use st_tensor::{
     measure::{
-        z_space_barycenter as rust_z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter,
+        nirt_weight_update as rust_nirt_weight_update,
+        tesla_tail_spectrum as rust_tesla_tail_spectrum,
+        z_space_barycenter as rust_z_space_barycenter,
+        BarycenterIntermediate,
+        TeslaTail,
+        TeslaTailLine,
+        ZSpaceBarycenter,
     },
     topos::OpenCartesianTopos,
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
@@ -1245,6 +1251,98 @@ struct PyBarycenterIntermediate {
 impl PyBarycenterIntermediate {
     fn from_stage(stage: BarycenterIntermediate) -> Self {
         Self { inner: stage }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "TeslaTailLine")]
+#[derive(Clone, Debug)]
+struct PyTeslaTailLine {
+    inner: TeslaTailLine,
+}
+
+impl PyTeslaTailLine {
+    fn from_line(line: TeslaTailLine) -> Self {
+        Self { inner: line }
+    }
+}
+
+#[pymethods]
+impl PyTeslaTailLine {
+    #[getter]
+    fn frequency(&self) -> f32 {
+        self.inner.frequency
+    }
+
+    #[getter]
+    fn amplitude(&self) -> f32 {
+        self.inner.amplitude
+    }
+
+    #[getter]
+    fn weight(&self) -> f32 {
+        self.inner.weight
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frequency", self.inner.frequency)?;
+        dict.set_item("amplitude", self.inner.amplitude)?;
+        dict.set_item("weight", self.inner.weight)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "TeslaTailLine(freq={:.4}, amp={:.4}, weight={:.4})",
+            self.inner.frequency, self.inner.amplitude, self.inner.weight
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "TeslaTail")]
+#[derive(Clone, Debug)]
+struct PyTeslaTail {
+    inner: TeslaTail,
+}
+
+impl PyTeslaTail {
+    fn from_tail(tail: TeslaTail) -> Self {
+        Self { inner: tail }
+    }
+}
+
+#[pymethods]
+impl PyTeslaTail {
+    #[getter]
+    fn coherence_rate(&self) -> f32 {
+        self.inner.coherence_rate
+    }
+
+    fn lines(&self, py: Python<'_>) -> PyResult<Vec<Py<PyTeslaTailLine>>> {
+        let mut out = Vec::with_capacity(self.inner.lines.len());
+        for line in &self.inner.lines {
+            out.push(Py::new(py, PyTeslaTailLine::from_line(line.clone()))?);
+        }
+        Ok(out)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("coherence_rate", self.inner.coherence_rate)?;
+        let py_lines = PyList::empty_bound(py);
+        for line in &self.inner.lines {
+            py_lines.append(PyTeslaTailLine::from_line(line.clone()).into_py(py))?;
+        }
+        dict.set_item("lines", py_lines.into_py(py))?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "TeslaTail(coherence_rate={:.4}, lines={})",
+            self.inner.coherence_rate,
+            self.inner.lines.len()
+        ))
     }
 }
 
@@ -17964,6 +18062,36 @@ fn z_space_barycenter_py(
     PyZSpaceBarycenter::from_result(barycenter).as_dict(py)
 }
 
+#[pyfunction(name = "tesla_tail_spectrum")]
+#[pyo3(signature = (radii, frequencies, weights, kappa))]
+fn tesla_tail_spectrum_py(
+    py: Python<'_>,
+    radii: Vec<f32>,
+    frequencies: Vec<f32>,
+    weights: Vec<f32>,
+    kappa: f32,
+) -> PyResult<PyObject> {
+    let tail = convert(rust_tesla_tail_spectrum(&radii, &frequencies, &weights, kappa))?;
+    PyTeslaTail::from_tail(tail).as_dict(py)
+}
+
+#[pyfunction(name = "nirt_weight_update")]
+#[pyo3(signature = (weights, similarities, coherence_rate, eta))]
+fn nirt_weight_update_py(
+    mut weights: Vec<f32>,
+    similarities: Vec<f32>,
+    coherence_rate: f32,
+    eta: f32,
+) -> PyResult<Vec<f32>> {
+    convert(rust_nirt_weight_update(
+        &mut weights,
+        &similarities,
+        coherence_rate,
+        eta,
+    ))?;
+    Ok(weights)
+}
+
 fn parse_frac_pad(pad: &str) -> PyResult<FracPad> {
     match pad.to_ascii_lowercase().as_str() {
         "zero" => Ok(FracPad::Zero),
@@ -19413,6 +19541,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(topk2d_tensor_py, m)?)?;
     m.add_function(wrap_pyfunction!(topk2d_py, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
+    m.add_function(wrap_pyfunction!(tesla_tail_spectrum_py, m)?)?;
+    m.add_function(wrap_pyfunction!(nirt_weight_update_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_function(wrap_pyfunction!(get_config_events, m)?)?;
@@ -19438,6 +19568,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTensor>()?;
     m.add_class::<PyComplexTensor>()?;
     m.add_class::<PyBarycenterIntermediate>()?;
+    m.add_class::<PyTeslaTailLine>()?;
+    m.add_class::<PyTeslaTail>()?;
     m.add_class::<PyZSpaceBarycenter>()?;
     m.add_class::<PyDifferentialResonance>()?;
     m.add_class::<PyAtlasMetric>()?;
