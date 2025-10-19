@@ -385,6 +385,7 @@ impl InterfaceZPulse {
         let mut drift_weight = 0.0f32;
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
+        let mut scale_weights = Vec::new();
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
@@ -396,7 +397,16 @@ impl InterfaceZPulse {
             drift_weight += weight;
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
+            if let Some(scale) = pulse.scale {
+                scale_weights.push((scale, weight));
+            }
         }
+        let scale = if scale_weights.is_empty() {
+            pulses.iter().find_map(|pulse| pulse.scale)
+        } else {
+            ZScale::weighted_average(scale_weights.into_iter())
+                .or_else(|| pulses.iter().find_map(|pulse| pulse.scale))
+        };
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
