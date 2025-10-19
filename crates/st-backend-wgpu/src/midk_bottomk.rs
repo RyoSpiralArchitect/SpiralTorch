@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 
 use bytemuck::{Pod, Zeroable};
+use thiserror::Error;
 use wgpu::{
     util::DeviceExt, BindGroupDescriptor, BindGroupEntry, CommandEncoderDescriptor,
     ComputePassDescriptor, ComputePipeline, Device, Queue,
@@ -88,8 +89,23 @@ pub struct DispatchArgs<'a> {
 }
 
 impl<'a> DispatchArgs<'a> {
+    /// Ensure the dispatch arguments describe a valid tensor layout.
+    pub fn validate(&self) -> Result<(), DispatchValidationError> {
+        validate_geometry(self.cols, self.row_stride)
+    }
+
+    /// Return `true` when there is no work to execute.
+    pub fn is_empty(&self) -> bool {
+        self.rows == 0 || self.cols == 0
+    }
+
     fn tiles_x(&self) -> u32 {
         tiles_for_cols(self.cols)
+    }
+
+    /// Calculate the number of elements each buffer must contain.
+    pub fn element_counts(&self) -> ElementCounts {
+        element_counts_for_dims(self.rows, self.row_stride, self.tiles_x())
     }
 }
 
@@ -110,59 +126,57 @@ pub fn dispatch(
     pipelines: &Pipelines,
     args: DispatchArgs<'_>,
     strategy: ApplyStrategy,
-) {
-    let tiles_x = args.tiles_x();
-    if args.rows == 0 || tiles_x == 0 {
-        return;
+) -> Result<(), DispatchValidationError> {
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+        label: Some(encoder_label(args.kind)),
+    });
+
+    if encode_into(device, &mut encoder, pipelines, args, strategy)? {
+        queue.submit(Some(encoder.finish()));
     }
 
-    let params = ParamsUniform {
-        rows: args.rows,
-        cols: args.cols,
-        row_stride: args.row_stride,
-        kind: args.kind.as_uniform(),
-        tiles_x,
-        _pad0: 0,
-        _pad1: 0,
-        _pad2: 0,
-    };
+    Ok(())
+}
 
-    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("st.midk_bottomk.compaction.params"),
-        contents: bytemuck::bytes_of(&params),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-
-    let select_apply = |strategy: ApplyStrategy| match strategy {
-        ApplyStrategy::Fallback => &pipelines.apply_fallback,
-        ApplyStrategy::Subgroup => pipelines
-            .apply_subgroup
-            .as_ref()
-            .unwrap_or(&pipelines.apply_fallback),
-        ApplyStrategy::SubgroupV2 => pipelines
-            .apply_subgroup_v2
-            .as_ref()
-            .or(pipelines.apply_subgroup.as_ref())
-            .unwrap_or(&pipelines.apply_fallback),
-        ApplyStrategy::Auto => pipelines
-            .best_subgroup()
-            .unwrap_or(&pipelines.apply_fallback),
-    };
-
-    let apply_pipeline = select_apply(strategy);
-
-    let encoder_label = match args.kind {
-        Kind::MidK => "st.midk.compaction",
-        Kind::BottomK => "st.bottomk.compaction",
-    };
-
+/// Encode the MidK/BottomK compaction passes into a new command buffer.
+pub fn encode(
+    device: &Device,
+    pipelines: &Pipelines,
+    args: DispatchArgs<'_>,
+    strategy: ApplyStrategy,
+) -> Result<Option<wgpu::CommandBuffer>, DispatchValidationError> {
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
-        label: Some(encoder_label),
+        label: Some(encoder_label(args.kind)),
     });
+
+    if encode_into(device, &mut encoder, pipelines, args, strategy)? {
+        Ok(Some(encoder.finish()))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Encode the MidK/BottomK passes using an existing command encoder.
+pub fn encode_into(
+    device: &Device,
+    encoder: &mut wgpu::CommandEncoder,
+    pipelines: &Pipelines,
+    args: DispatchArgs<'_>,
+    strategy: ApplyStrategy,
+) -> Result<bool, DispatchValidationError> {
+    args.validate()?;
+
+    let tiles_x = args.tiles_x();
+    if args.is_empty() || tiles_x == 0 {
+        return Ok(false);
+    }
+
+    let params_buffer = create_params_buffer(device, &args, tiles_x);
+    let apply_pipeline = select_apply_pipeline(pipelines, strategy);
 
     encode_stage(
         device,
-        &mut encoder,
+        encoder,
         &pipelines.scan_tiles,
         &params_buffer,
         &args,
@@ -171,7 +185,7 @@ pub fn dispatch(
     );
     encode_stage(
         device,
-        &mut encoder,
+        encoder,
         &pipelines.row_prefix,
         &params_buffer,
         &args,
@@ -180,7 +194,7 @@ pub fn dispatch(
     );
     encode_stage(
         device,
-        &mut encoder,
+        encoder,
         apply_pipeline,
         &params_buffer,
         &args,
@@ -188,7 +202,7 @@ pub fn dispatch(
         "apply",
     );
 
-    queue.submit(Some(encoder.finish()));
+    Ok(true)
 }
 
 fn encode_stage(
@@ -281,9 +295,104 @@ fn tiles_for_cols(cols: u32) -> u32 {
     }
 }
 
+fn select_apply_pipeline<'a>(
+    pipelines: &'a Pipelines,
+    strategy: ApplyStrategy,
+) -> &'a ComputePipeline {
+    match strategy {
+        ApplyStrategy::Fallback => &pipelines.apply_fallback,
+        ApplyStrategy::Subgroup => pipelines
+            .apply_subgroup
+            .as_ref()
+            .unwrap_or(&pipelines.apply_fallback),
+        ApplyStrategy::SubgroupV2 => pipelines
+            .apply_subgroup_v2
+            .as_ref()
+            .or(pipelines.apply_subgroup.as_ref())
+            .unwrap_or(&pipelines.apply_fallback),
+        ApplyStrategy::Auto => pipelines
+            .best_subgroup()
+            .unwrap_or(&pipelines.apply_fallback),
+    }
+}
+
+fn encoder_label(kind: Kind) -> &'static str {
+    match kind {
+        Kind::MidK => "st.midk.compaction",
+        Kind::BottomK => "st.bottomk.compaction",
+    }
+}
+
+fn create_params_buffer(device: &Device, args: &DispatchArgs<'_>, tiles_x: u32) -> wgpu::Buffer {
+    let params = ParamsUniform {
+        rows: args.rows,
+        cols: args.cols,
+        row_stride: args.row_stride,
+        kind: args.kind.as_uniform(),
+        tiles_x,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+    };
+
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.midk_bottomk.compaction.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    })
+}
+
+fn validate_geometry(cols: u32, row_stride: u32) -> Result<(), DispatchValidationError> {
+    if row_stride < cols {
+        Err(DispatchValidationError::RowStrideTooSmall { row_stride, cols })
+    } else {
+        Ok(())
+    }
+}
+
+fn element_counts_for_dims(rows: u32, row_stride: u32, tiles_x: u32) -> ElementCounts {
+    ElementCounts {
+        values: rows as u64 * row_stride as u64,
+        mask: rows as u64 * row_stride as u64,
+        out_positions: rows as u64,
+        out_values: rows as u64 * row_stride as u64,
+        prefix: rows as u64 * tiles_x as u64,
+    }
+}
+
+/// Validation errors that may occur when preparing a compaction dispatch.
+#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
+pub enum DispatchValidationError {
+    /// The provided row stride is smaller than the number of columns.
+    #[error("row_stride ({row_stride}) must be greater than or equal to cols ({cols})")]
+    RowStrideTooSmall {
+        /// Number of elements between adjacent rows in the buffers.
+        row_stride: u32,
+        /// Number of logical columns to process per row.
+        cols: u32,
+    },
+}
+
+/// Element counts required by each MidK/BottomK buffer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ElementCounts {
+    /// Number of elements consumed from `values` and `out_values`.
+    pub values: u64,
+    /// Number of predicate entries read from `mask`.
+    pub mask: u64,
+    /// Number of per-row counters written to `out_positions`.
+    pub out_positions: u64,
+    /// Number of compacted elements emitted to `out_values`.
+    pub out_values: u64,
+    /// Number of prefix tiles stored in `prefix`.
+    pub prefix: u64,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::tiles_for_cols;
+    use super::{
+        element_counts_for_dims, tiles_for_cols, validate_geometry, DispatchValidationError,
+    };
 
     #[test]
     fn tiles_for_cols_rounds_up() {
@@ -295,6 +404,34 @@ mod tests {
     #[test]
     fn tiles_for_cols_handles_zero() {
         assert_eq!(tiles_for_cols(0), 0);
+    }
+
+    #[test]
+    fn geometry_validation_flags_small_stride() {
+        let err = validate_geometry(256, 128).unwrap_err();
+        assert_eq!(
+            err,
+            DispatchValidationError::RowStrideTooSmall {
+                row_stride: 128,
+                cols: 256
+            }
+        );
+    }
+
+    #[test]
+    fn geometry_validation_accepts_valid_stride() {
+        assert!(validate_geometry(256, 256).is_ok());
+        assert!(validate_geometry(128, 1024).is_ok());
+    }
+
+    #[test]
+    fn element_counts_match_expected_values() {
+        let counts = element_counts_for_dims(3, 512, 2);
+        assert_eq!(counts.values, 3 * 512);
+        assert_eq!(counts.mask, 3 * 512);
+        assert_eq!(counts.out_positions, 3);
+        assert_eq!(counts.out_values, 3 * 512);
+        assert_eq!(counts.prefix, 3 * 2);
     }
 }
 

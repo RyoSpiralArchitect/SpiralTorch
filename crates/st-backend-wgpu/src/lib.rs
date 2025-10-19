@@ -12,8 +12,11 @@ pub mod topk_keepk;
 mod util;
 
 pub use midk_bottomk::{
-    dispatch as dispatch_midk_bottomk, ApplyStrategy as MidkBottomkApplyStrategy,
-    DispatchArgs as MidkBottomkDispatchArgs, Kind as MidkBottomkKind,
+    dispatch as dispatch_midk_bottomk, encode as encode_midk_bottomk,
+    encode_into as encode_midk_bottomk_into, ApplyStrategy as MidkBottomkApplyStrategy,
+    DispatchArgs as MidkBottomkDispatchArgs,
+    DispatchValidationError as MidkBottomkDispatchValidationError,
+    ElementCounts as MidkBottomkElementCounts, Kind as MidkBottomkKind,
 };
 
 pub use util::{
