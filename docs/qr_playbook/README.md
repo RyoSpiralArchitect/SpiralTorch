@@ -18,6 +18,9 @@ studio tooling introduced in this iteration.
   for asynchronous review.
 - Feed the resulting deck into Desire roundtables so remote moderators can
   replay the exact glyph, intensity, and Z-bias sequence.
+- Register at least one `StudioSink` on every remote session so live frames can
+  stream outside the sandbox. Rotate between telemetry mirrors and file-drop
+  sinks depending on who needs the signal downstream.
 
 ### Ethics & Consent
 - Log narrative tags in the gratitude log before sharing externally. If a tag
@@ -31,6 +34,19 @@ studio tooling introduced in this iteration.
   order to match the desired sensory arc (e.g., *glimmer → braid → tunnel*).
 - `NarrativeHint::intensity` doubles as a lighting cue inside immersive rooms;
   map it onto brightness curves for projection-mapped environments.
+
+### Field Links
+- Use `QuantumRealityStudio::with_sink` to attach partner channels before a
+  roam or installation begins. Shared sinks keep civic collaborators aligned
+  while respecting consent rules from the ethics module.
+- Call `flush_sinks` at the end of each run so buffered transmissions land in
+  external archives before teardown.
+- For partners working inside Z-space tooling, attach a
+  `ZSpaceSink::vertical_line` and collect its projections after
+  `flush_sinks()`—the Mellin-line samples travel cleanly into the
+  `st-frac::zspace` orchestrations. When the field team needs SpiralTorch
+  logic signatures, use `ZSpaceSink::take_logic_signatures()` to hand the
+  projections straight into `st_logic::quantum_reality::ZSpace` analyses.
 
 ## Ritual Snippets
 ```

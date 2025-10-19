@@ -2546,6 +2546,8 @@ dependencies = [
  "serde",
  "serde_json",
  "st-core",
+ "st-frac",
+ "st-logic",
  "st-nn",
  "thiserror 1.0.69",
 ]

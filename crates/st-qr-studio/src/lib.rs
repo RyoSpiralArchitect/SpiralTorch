@@ -7,8 +7,15 @@
 
 use serde::{Deserialize, Serialize};
 use st_core::maxwell::MaxwellZPulse;
+use st_frac::mellin_types::ComplexScalar;
+use st_frac::zspace::{
+    evaluate_weighted_series, mellin_log_lattice_prefactor, prepare_weighted_series,
+    trapezoidal_weights,
+};
+use st_logic::quantum_reality::ZSpace as LogicZSpace;
 use st_nn::{ConceptHint, MaxwellDesireBridge, NarrativeHint};
 use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
@@ -18,6 +25,8 @@ const DEFAULT_HISTORY: usize = 512;
 pub enum StudioError {
     #[error("channel `{0}` is not registered in the capture config")]
     UnknownChannel(String),
+    #[error(transparent)]
+    Outlet(#[from] StudioSinkError),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -218,10 +227,278 @@ impl OverlayComposer {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum StudioSinkError {
+    #[error("sink `{sink}` failed: {reason}")]
+    Transmission { sink: String, reason: String },
+    #[error("multiple sinks failed: {summary}")]
+    Aggregate { summary: String },
+}
+
+pub trait StudioSink: Send {
+    fn name(&self) -> &str;
+    fn send(&mut self, frame: &StudioFrame) -> Result<(), StudioSinkError>;
+    fn flush(&mut self) -> Result<(), StudioSinkError> {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ZSpaceEvaluation {
+    pub s: (f32, f32),
+    pub z: (f32, f32),
+    pub value: (f32, f32),
+}
+
+#[derive(Clone, Debug)]
+pub struct ZSpaceProjection {
+    pub channel: String,
+    pub lattice_len: usize,
+    pub evaluations: Vec<ZSpaceEvaluation>,
+}
+
+impl ZSpaceProjection {
+    fn signature_components(&self) -> Vec<f64> {
+        let mut signature = Vec::with_capacity(self.evaluations.len() * 6);
+        for eval in &self.evaluations {
+            signature.push(eval.s.0 as f64);
+            signature.push(eval.s.1 as f64);
+            signature.push(eval.z.0 as f64);
+            signature.push(eval.z.1 as f64);
+            signature.push(eval.value.0 as f64);
+            signature.push(eval.value.1 as f64);
+        }
+        signature
+    }
+}
+
+impl From<&ZSpaceProjection> for LogicZSpace {
+    fn from(projection: &ZSpaceProjection) -> Self {
+        LogicZSpace {
+            signature: projection.signature_components(),
+        }
+    }
+}
+
+impl From<ZSpaceProjection> for LogicZSpace {
+    fn from(projection: ZSpaceProjection) -> Self {
+        LogicZSpace::from(&projection)
+    }
+}
+
+#[derive(Clone)]
+pub struct ZSpaceSink {
+    name: String,
+    inner: Arc<Mutex<ZSpaceSinkState>>,
+}
+
+#[derive(Default)]
+struct ZSpaceSinkState {
+    log_start: f32,
+    log_step: f32,
+    s_values: Vec<ComplexScalar>,
+    samples: HashMap<String, Vec<ComplexScalar>>,
+    projections: Vec<ZSpaceProjection>,
+}
+
+impl ZSpaceSink {
+    pub fn new(
+        name: impl Into<String>,
+        log_start: f32,
+        log_step: f32,
+        s_values: Vec<ComplexScalar>,
+    ) -> Self {
+        let state = ZSpaceSinkState {
+            log_start,
+            log_step,
+            s_values,
+            samples: HashMap::new(),
+            projections: Vec::new(),
+        };
+        Self {
+            name: name.into(),
+            inner: Arc::new(Mutex::new(state)),
+        }
+    }
+
+    pub fn vertical_line(
+        name: impl Into<String>,
+        log_start: f32,
+        log_step: f32,
+        sigma: f32,
+        tau_samples: &[f32],
+    ) -> Self {
+        let s_values = tau_samples
+            .iter()
+            .map(|&tau| ComplexScalar::new(sigma, tau))
+            .collect();
+        Self::new(name, log_start, log_step, s_values)
+    }
+
+    pub fn take_projections(&self) -> Vec<ZSpaceProjection> {
+        let mut guard = self.inner.lock().expect("ZSpaceSink mutex poisoned");
+        std::mem::take(&mut guard.projections)
+    }
+
+    pub fn take_logic_signatures(&self) -> Vec<(String, LogicZSpace)> {
+        self
+            .take_projections()
+            .into_iter()
+            .map(|projection| {
+                let channel = projection.channel.clone();
+                let signature = LogicZSpace::from(projection);
+                (channel, signature)
+            })
+            .collect()
+    }
+
+    fn failure(&self, reason: impl Into<String>) -> StudioSinkError {
+        StudioSinkError::Transmission {
+            sink: self.name.clone(),
+            reason: reason.into(),
+        }
+    }
+}
+
+fn encode_snapshot_for_zspace(snapshot: &PulseSnapshot) -> ComplexScalar {
+    let amplitude = snapshot.band_energy.0 + snapshot.band_energy.1 + snapshot.band_energy.2;
+    let asymmetry = snapshot.band_energy.0 - snapshot.band_energy.2;
+    let real = (snapshot.z_score as f32) * amplitude.max(1e-6);
+    let imag = snapshot.z_bias + asymmetry;
+    ComplexScalar::new(real, imag)
+}
+
+impl StudioSink for ZSpaceSink {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn send(&mut self, frame: &StudioFrame) -> Result<(), StudioSinkError> {
+        let sample = encode_snapshot_for_zspace(&frame.record.pulse);
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| self.failure("state mutex poisoned"))?;
+        guard
+            .samples
+            .entry(frame.record.channel.clone())
+            .or_default()
+            .push(sample);
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), StudioSinkError> {
+        let (log_start, log_step, s_values) = {
+            let guard = self
+                .inner
+                .lock()
+                .map_err(|_| self.failure("state mutex poisoned"))?;
+            (guard.log_start, guard.log_step, guard.s_values.clone())
+        };
+        let drained = {
+            let mut guard = self
+                .inner
+                .lock()
+                .map_err(|_| self.failure("state mutex poisoned"))?;
+            guard.samples.drain().collect::<Vec<_>>()
+        };
+        if drained.is_empty() {
+            return Ok(());
+        }
+
+        let mut projections = Vec::new();
+        for (channel, samples) in drained {
+            if samples.is_empty() {
+                continue;
+            }
+            let weights =
+                trapezoidal_weights(samples.len()).map_err(|err| self.failure(err.to_string()))?;
+            let weighted = prepare_weighted_series(&samples, &weights)
+                .map_err(|err| self.failure(err.to_string()))?;
+            let mut evaluations = Vec::new();
+            for &s in &s_values {
+                let (prefactor, z) = mellin_log_lattice_prefactor(log_start, log_step, s)
+                    .map_err(|err| self.failure(err.to_string()))?;
+                let series = evaluate_weighted_series(&weighted, z)
+                    .map_err(|err| self.failure(err.to_string()))?;
+                let value = prefactor * series;
+                evaluations.push(ZSpaceEvaluation {
+                    s: (s.re, s.im),
+                    z: (z.re, z.im),
+                    value: (value.re, value.im),
+                });
+            }
+            projections.push(ZSpaceProjection {
+                channel,
+                lattice_len: samples.len(),
+                evaluations,
+            });
+        }
+
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| self.failure("state mutex poisoned"))?;
+        guard.projections.extend(projections);
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct StudioOutlet {
+    sinks: Vec<Box<dyn StudioSink>>,
+}
+
+impl StudioOutlet {
+    fn register<S: StudioSink + 'static>(&mut self, sink: S) {
+        self.sinks.push(Box::new(sink));
+    }
+
+    fn len(&self) -> usize {
+        self.sinks.len()
+    }
+
+    fn broadcast(&mut self, frame: &StudioFrame) -> Result<(), StudioSinkError> {
+        let mut failures: Vec<StudioSinkError> = Vec::new();
+        for sink in &mut self.sinks {
+            if let Err(err) = sink.send(frame) {
+                failures.push(err);
+            }
+        }
+        Self::reduce_failures(failures)
+    }
+
+    fn flush(&mut self) -> Result<(), StudioSinkError> {
+        let mut failures: Vec<StudioSinkError> = Vec::new();
+        for sink in &mut self.sinks {
+            if let Err(err) = sink.flush() {
+                failures.push(err);
+            }
+        }
+        Self::reduce_failures(failures)
+    }
+
+    fn reduce_failures(mut failures: Vec<StudioSinkError>) -> Result<(), StudioSinkError> {
+        match failures.len() {
+            0 => Ok(()),
+            1 => Err(failures.pop().unwrap()),
+            _ => {
+                let summary = failures
+                    .into_iter()
+                    .map(|err| err.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                Err(StudioSinkError::Aggregate { summary })
+            }
+        }
+    }
+}
+
 pub struct QuantumRealityStudio {
     capture: SignalCaptureSession,
     tagger: SemanticTagger,
     overlay: OverlayComposer,
+    outlet: StudioOutlet,
 }
 
 impl QuantumRealityStudio {
@@ -230,7 +507,25 @@ impl QuantumRealityStudio {
             capture: SignalCaptureSession::new(config),
             tagger: SemanticTagger::from_bridge(bridge),
             overlay: OverlayComposer::default(),
+            outlet: StudioOutlet::default(),
         }
+    }
+
+    pub fn with_sink<S: StudioSink + 'static>(mut self, sink: S) -> Self {
+        self.outlet.register(sink);
+        self
+    }
+
+    pub fn register_sink<S: StudioSink + 'static>(&mut self, sink: S) {
+        self.outlet.register(sink);
+    }
+
+    pub fn sink_count(&self) -> usize {
+        self.outlet.len()
+    }
+
+    pub fn flush_sinks(&mut self) -> Result<(), StudioError> {
+        self.outlet.flush().map_err(StudioError::from)
     }
 
     pub fn ingest(
@@ -256,12 +551,14 @@ impl QuantumRealityStudio {
             narrative.as_ref(),
             self.tagger.fallback_for(channel),
         );
-        Ok(StudioFrame {
+        let frame = StudioFrame {
             record,
             concept,
             narrative,
             overlay,
-        })
+        };
+        self.outlet.broadcast(&frame)?;
+        Ok(frame)
     }
 
     pub fn records(&self) -> impl Iterator<Item = &RecordedPulse> {
@@ -295,6 +592,7 @@ impl QuantumRealityStudio {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     fn sample_pulse() -> MaxwellZPulse {
         MaxwellZPulse {
@@ -335,5 +633,173 @@ mod tests {
         assert!(frame.narrative.is_some());
         assert_eq!(frame.overlay.glyph, "braid");
         assert!(frame.overlay.intensity > 0.0);
+    }
+
+    struct SharedSink {
+        name: String,
+        frames: Arc<Mutex<Vec<StudioFrame>>>,
+    }
+
+    impl SharedSink {
+        fn new(name: impl Into<String>, frames: Arc<Mutex<Vec<StudioFrame>>>) -> Self {
+            Self {
+                name: name.into(),
+                frames,
+            }
+        }
+    }
+
+    impl StudioSink for SharedSink {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn send(&mut self, frame: &StudioFrame) -> Result<(), StudioSinkError> {
+            self.frames
+                .lock()
+                .expect("mutex poisoned")
+                .push(frame.clone());
+            Ok(())
+        }
+    }
+
+    struct FailingSink {
+        name: String,
+    }
+
+    impl FailingSink {
+        fn new(name: impl Into<String>) -> Self {
+            Self { name: name.into() }
+        }
+    }
+
+    impl StudioSink for FailingSink {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn send(&mut self, _frame: &StudioFrame) -> Result<(), StudioSinkError> {
+            Err(StudioSinkError::Transmission {
+                sink: self.name.clone(),
+                reason: "simulated failure".into(),
+            })
+        }
+    }
+
+    #[test]
+    fn studio_broadcasts_frames_to_registered_sinks() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(0, 1.0)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let frames = Arc::new(Mutex::new(Vec::new()));
+        let sink = SharedSink::new("shared", Arc::clone(&frames));
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio.register_sink(sink);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest");
+        assert_eq!(studio.sink_count(), 1);
+        assert_eq!(frame.overlay.glyph, "braid");
+        let stored = frames.lock().expect("mutex poisoned");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].overlay.glyph, "braid");
+    }
+
+    #[test]
+    fn sink_failures_are_reported() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(0, 1.0)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
+            .with_sink(FailingSink::new("fail"));
+        let err = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .unwrap_err();
+        match err {
+            StudioError::Outlet(StudioSinkError::Transmission { sink, reason }) => {
+                assert_eq!(sink, "fail");
+                assert!(reason.contains("failure"));
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn zspace_sink_collects_mellin_projections() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(0, 1.0)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let sink = ZSpaceSink::vertical_line("zspace", -2.0, 0.5, 0.0, &[-1.5, 0.0, 1.5]);
+        let mirror = sink.clone();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio.register_sink(sink);
+
+        let mut pulse_a = sample_pulse();
+        pulse_a.z_score = 3.0;
+        pulse_a.band_energy = (0.6, 0.3, 0.1);
+        studio
+            .ingest(&bridge, "alpha", pulse_a, None)
+            .expect("ingest pulse a");
+
+        let mut pulse_b = sample_pulse();
+        pulse_b.z_score = -2.2;
+        pulse_b.z_bias = 0.4;
+        pulse_b.band_energy = (0.2, 0.5, 0.3);
+        studio
+            .ingest(&bridge, "alpha", pulse_b, None)
+            .expect("ingest pulse b");
+
+        studio.flush_sinks().expect("flush zspace sink");
+
+        let projections = mirror.take_projections();
+        assert_eq!(projections.len(), 1);
+        let projection = &projections[0];
+        assert_eq!(projection.channel, "alpha");
+        assert_eq!(projection.lattice_len, 2);
+        assert_eq!(projection.evaluations.len(), 3);
+        assert!(projection
+            .evaluations
+            .iter()
+            .any(|eval| eval.value.0.abs() > 0.0 || eval.value.1.abs() > 0.0));
+    }
+
+    #[test]
+    fn zspace_signatures_flatten_evaluations() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(0, 1.0)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let sink = ZSpaceSink::vertical_line("zspace", -1.0, 0.25, 0.5, &[-2.0, 0.0, 2.0, 3.0]);
+        let mirror = sink.clone();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio.register_sink(sink);
+
+        studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest pulse");
+
+        studio.flush_sinks().expect("flush zspace sink");
+
+        let signatures = mirror.take_logic_signatures();
+        assert_eq!(signatures.len(), 1);
+        let (channel, signature) = &signatures[0];
+        assert_eq!(channel, "alpha");
+        assert_eq!(signature.signature.len(), 24);
+        assert!(signature.signature.iter().any(|value| value.abs() > 0.0));
     }
 }
