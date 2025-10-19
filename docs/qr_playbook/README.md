@@ -41,6 +41,10 @@ studio tooling introduced in this iteration.
   while respecting consent rules from the ethics module.
 - Call `flush_sinks` at the end of each run so buffered transmissions land in
   external archives before teardown.
+- For partners working inside Z-space tooling, attach a
+  `ZSpaceSink::vertical_line` and collect its projections after
+  `flush_sinks()`—the Mellin-line samples travel cleanly into the
+  `st-frac::zspace` orchestrations.
 
 ## Ritual Snippets
 ```

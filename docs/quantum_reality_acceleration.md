@@ -66,6 +66,9 @@ Quantum reality, as we imagine it inside SpiralTorch, is not a single experiment
 - Ship `StudioSink` adapters inside `spiraltorch-qr-studio` so Quantum Reality Studio frames can stream to field teams, not just the local playground rigs.
 - Prototype starter sinks—file drop, realtime relay, telemetry mirror—and document how external partners can extend them safely.
 - Bake `QuantumRealityStudio::register_sink` hooks into lab templates so every run can broadcast both concept vectors and overlays to the wider SpiralTorch mesh.
+- Publish a Z-space bridge by default: the new `ZSpaceSink` turns captured
+  pulses into Mellin-line projections that `st-frac::zspace` rigs can ingest
+  without extra glue.
 - Extend the QR salons with "outside playground" residencies where visiting teams bring their own sinks, stress-test the adapters, and contribute patches upstream.
 
 ---

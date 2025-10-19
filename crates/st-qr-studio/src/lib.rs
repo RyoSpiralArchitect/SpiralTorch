@@ -7,8 +7,14 @@
 
 use serde::{Deserialize, Serialize};
 use st_core::maxwell::MaxwellZPulse;
+use st_frac::mellin_types::ComplexScalar;
+use st_frac::zspace::{
+    evaluate_weighted_series, mellin_log_lattice_prefactor, prepare_weighted_series,
+    trapezoidal_weights,
+};
 use st_nn::{ConceptHint, MaxwellDesireBridge, NarrativeHint};
 use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
@@ -232,6 +238,166 @@ pub trait StudioSink: Send {
     fn name(&self) -> &str;
     fn send(&mut self, frame: &StudioFrame) -> Result<(), StudioSinkError>;
     fn flush(&mut self) -> Result<(), StudioSinkError> {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ZSpaceEvaluation {
+    pub s: (f32, f32),
+    pub z: (f32, f32),
+    pub value: (f32, f32),
+}
+
+#[derive(Clone, Debug)]
+pub struct ZSpaceProjection {
+    pub channel: String,
+    pub lattice_len: usize,
+    pub evaluations: Vec<ZSpaceEvaluation>,
+}
+
+#[derive(Clone)]
+pub struct ZSpaceSink {
+    name: String,
+    inner: Arc<Mutex<ZSpaceSinkState>>,
+}
+
+#[derive(Default)]
+struct ZSpaceSinkState {
+    log_start: f32,
+    log_step: f32,
+    s_values: Vec<ComplexScalar>,
+    samples: HashMap<String, Vec<ComplexScalar>>,
+    projections: Vec<ZSpaceProjection>,
+}
+
+impl ZSpaceSink {
+    pub fn new(
+        name: impl Into<String>,
+        log_start: f32,
+        log_step: f32,
+        s_values: Vec<ComplexScalar>,
+    ) -> Self {
+        let state = ZSpaceSinkState {
+            log_start,
+            log_step,
+            s_values,
+            samples: HashMap::new(),
+            projections: Vec::new(),
+        };
+        Self {
+            name: name.into(),
+            inner: Arc::new(Mutex::new(state)),
+        }
+    }
+
+    pub fn vertical_line(
+        name: impl Into<String>,
+        log_start: f32,
+        log_step: f32,
+        sigma: f32,
+        tau_samples: &[f32],
+    ) -> Self {
+        let s_values = tau_samples
+            .iter()
+            .map(|&tau| ComplexScalar::new(sigma, tau))
+            .collect();
+        Self::new(name, log_start, log_step, s_values)
+    }
+
+    pub fn take_projections(&self) -> Vec<ZSpaceProjection> {
+        let mut guard = self.inner.lock().expect("ZSpaceSink mutex poisoned");
+        std::mem::take(&mut guard.projections)
+    }
+
+    fn failure(&self, reason: impl Into<String>) -> StudioSinkError {
+        StudioSinkError::Transmission {
+            sink: self.name.clone(),
+            reason: reason.into(),
+        }
+    }
+}
+
+fn encode_snapshot_for_zspace(snapshot: &PulseSnapshot) -> ComplexScalar {
+    let amplitude = snapshot.band_energy.0 + snapshot.band_energy.1 + snapshot.band_energy.2;
+    let asymmetry = snapshot.band_energy.0 - snapshot.band_energy.2;
+    let real = (snapshot.z_score as f32) * amplitude.max(1e-6);
+    let imag = snapshot.z_bias + asymmetry;
+    ComplexScalar::new(real, imag)
+}
+
+impl StudioSink for ZSpaceSink {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn send(&mut self, frame: &StudioFrame) -> Result<(), StudioSinkError> {
+        let sample = encode_snapshot_for_zspace(&frame.record.pulse);
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| self.failure("state mutex poisoned"))?;
+        guard
+            .samples
+            .entry(frame.record.channel.clone())
+            .or_default()
+            .push(sample);
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), StudioSinkError> {
+        let (log_start, log_step, s_values) = {
+            let guard = self
+                .inner
+                .lock()
+                .map_err(|_| self.failure("state mutex poisoned"))?;
+            (guard.log_start, guard.log_step, guard.s_values.clone())
+        };
+        let drained = {
+            let mut guard = self
+                .inner
+                .lock()
+                .map_err(|_| self.failure("state mutex poisoned"))?;
+            guard.samples.drain().collect::<Vec<_>>()
+        };
+        if drained.is_empty() {
+            return Ok(());
+        }
+
+        let mut projections = Vec::new();
+        for (channel, samples) in drained {
+            if samples.is_empty() {
+                continue;
+            }
+            let weights =
+                trapezoidal_weights(samples.len()).map_err(|err| self.failure(err.to_string()))?;
+            let weighted = prepare_weighted_series(&samples, &weights)
+                .map_err(|err| self.failure(err.to_string()))?;
+            let mut evaluations = Vec::new();
+            for &s in &s_values {
+                let (prefactor, z) = mellin_log_lattice_prefactor(log_start, log_step, s)
+                    .map_err(|err| self.failure(err.to_string()))?;
+                let series = evaluate_weighted_series(&weighted, z)
+                    .map_err(|err| self.failure(err.to_string()))?;
+                let value = prefactor * series;
+                evaluations.push(ZSpaceEvaluation {
+                    s: (s.re, s.im),
+                    z: (z.re, z.im),
+                    value: (value.re, value.im),
+                });
+            }
+            projections.push(ZSpaceProjection {
+                channel,
+                lattice_len: samples.len(),
+                evaluations,
+            });
+        }
+
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| self.failure("state mutex poisoned"))?;
+        guard.projections.extend(projections);
         Ok(())
     }
 }
@@ -522,5 +688,48 @@ mod tests {
             }
             other => panic!("unexpected error variant: {other:?}"),
         }
+    }
+
+    #[test]
+    fn zspace_sink_collects_mellin_projections() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(0, 1.0)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let sink = ZSpaceSink::vertical_line("zspace", -2.0, 0.5, 0.0, &[-1.5, 0.0, 1.5]);
+        let mirror = sink.clone();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio.register_sink(sink);
+
+        let mut pulse_a = sample_pulse();
+        pulse_a.z_score = 3.0;
+        pulse_a.band_energy = (0.6, 0.3, 0.1);
+        studio
+            .ingest(&bridge, "alpha", pulse_a, None)
+            .expect("ingest pulse a");
+
+        let mut pulse_b = sample_pulse();
+        pulse_b.z_score = -2.2;
+        pulse_b.z_bias = 0.4;
+        pulse_b.band_energy = (0.2, 0.5, 0.3);
+        studio
+            .ingest(&bridge, "alpha", pulse_b, None)
+            .expect("ingest pulse b");
+
+        studio.flush_sinks().expect("flush zspace sink");
+
+        let projections = mirror.take_projections();
+        assert_eq!(projections.len(), 1);
+        let projection = &projections[0];
+        assert_eq!(projection.channel, "alpha");
+        assert_eq!(projection.lattice_len, 2);
+        assert_eq!(projection.evaluations.len(), 3);
+        assert!(projection
+            .evaluations
+            .iter()
+            .any(|eval| eval.value.0.abs() > 0.0 || eval.value.1.abs() > 0.0));
     }
 }
