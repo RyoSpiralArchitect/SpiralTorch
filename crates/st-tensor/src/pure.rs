@@ -382,7 +382,11 @@ impl Tensor {
                 data.push(f(r, c));
             }
         }
-        Self::from_vec(rows, cols, data)
+        Ok(Self {
+            data: data.into(),
+            rows,
+            cols,
+        })
     }
 
     /// Returns the `(rows, cols)` pair of the tensor.
@@ -776,7 +780,7 @@ impl Tensor {
         }
         let mut data = Vec::with_capacity(total_rows * cols);
         for tensor in tensors {
-            data.extend_from_slice(&tensor.data);
+            data.extend_from_slice(tensor.data.as_slice());
         }
         Tensor::from_vec(total_rows, cols, data)
     }
@@ -1049,7 +1053,11 @@ impl ComplexTensor {
                 got: data.len(),
             });
         }
-        Ok(Self { data, rows, cols })
+        Ok(Self {
+            data: data.into(),
+            rows,
+            cols,
+        })
     }
 
     pub fn shape(&self) -> (usize, usize) {
