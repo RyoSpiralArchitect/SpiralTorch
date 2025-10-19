@@ -35,7 +35,7 @@ use crate::backend::faer_dense;
 use crate::backend::wgpu_dense;
 use crate::dlpack::{
     call_managed_deleter, drop_exported_state, DLDataType, DLDataTypeCode, DLDevice, DLDeviceType,
-    DLManagedTensor, DLTensor, ManagedTensorState,
+    DLManagedTensor, DLTensor, ExportData, ForeignTensor, ManagedTensorState,
 };
 use core::fmt;
 use rand::distributions::{Distribution, Uniform};
@@ -49,6 +49,8 @@ use std::error::Error;
 use std::f32::consts::PI;
 use std::ffi::c_void;
 use std::mem;
+use std::ops::{Deref, DerefMut};
+use std::ptr::NonNull;
 use std::slice;
 use std::sync::Arc;
 
@@ -265,12 +267,92 @@ impl fmt::Display for MatmulBackend {
     }
 }
 
-/// A simple row-major 2D tensor backed by a reference-counted `Vec<f32>`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
+enum TensorBacking {
+    Owned(Arc<Vec<f32>>),
+    Foreign(ForeignTensor),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TensorBuffer {
+    backing: TensorBacking,
+}
+
+impl TensorBuffer {
+    fn from_vec(data: Vec<f32>) -> Self {
+        Self {
+            backing: TensorBacking::Owned(Arc::new(data)),
+        }
+    }
+
+    fn from_foreign(foreign: ForeignTensor) -> Self {
+        Self {
+            backing: TensorBacking::Foreign(foreign),
+        }
+    }
+
+    fn as_slice(&self) -> &[f32] {
+        match &self.backing {
+            TensorBacking::Owned(vec) => vec.as_slice(),
+            TensorBacking::Foreign(foreign) => foreign.as_slice(),
+        }
+    }
+
+    fn make_mut_slice(&mut self) -> &mut [f32] {
+        if let TensorBacking::Foreign(foreign) = &self.backing {
+            let owned = foreign.to_vec();
+            self.backing = TensorBacking::Owned(Arc::new(owned));
+        }
+
+        if let TensorBacking::Owned(vec) = &mut self.backing {
+            Arc::make_mut(vec).as_mut_slice()
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn export_handle(&self) -> ExportData {
+        match &self.backing {
+            TensorBacking::Owned(vec) => ExportData::Owned(Arc::clone(vec)),
+            TensorBacking::Foreign(foreign) => ExportData::Foreign(foreign.clone()),
+        }
+    }
+}
+
+impl Deref for TensorBuffer {
+    type Target = [f32];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl DerefMut for TensorBuffer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.make_mut_slice()
+    }
+}
+
+impl PartialEq for TensorBuffer {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+/// A simple row-major 2D tensor backed by a reference-counted buffer.
+#[derive(Clone, Debug)]
 pub struct Tensor {
-    data: Arc<Vec<f32>>,
+    data: Arc<TensorBuffer>,
     rows: usize,
     cols: usize,
+}
+
+impl PartialEq for Tensor {
+    fn eq(&self, other: &Self) -> bool {
+        self.rows == other.rows
+            && self.cols == other.cols
+            && self.data.as_slice() == other.data.as_slice()
+    }
 }
 
 impl Tensor {
@@ -287,7 +369,7 @@ impl Tensor {
             return Err(TensorError::InvalidDimensions { rows, cols });
         }
         Ok(Self {
-            data: Arc::new(vec![0.0; rows * cols]),
+            data: Arc::new(TensorBuffer::from_vec(vec![0.0; rows * cols])),
             rows,
             cols,
         })
@@ -307,7 +389,7 @@ impl Tensor {
             });
         }
         Ok(Self {
-            data: Arc::new(data),
+            data: Arc::new(TensorBuffer::from_vec(data)),
             rows,
             cols,
         })
@@ -382,11 +464,7 @@ impl Tensor {
                 data.push(f(r, c));
             }
         }
-        Ok(Self {
-            data: data.into(),
-            rows,
-            cols,
-        })
+        Self::from_vec(rows, cols, data)
     }
 
     /// Returns the `(rows, cols)` pair of the tensor.
@@ -401,7 +479,7 @@ impl Tensor {
 
     /// Returns a mutable view of the underlying buffer.
     pub fn data_mut(&mut self) -> &mut [f32] {
-        Arc::make_mut(&mut self.data).as_mut_slice()
+        Arc::make_mut(&mut self.data).make_mut_slice()
     }
 
     /// Export the tensor as a managed DLPack tensor.
@@ -413,9 +491,9 @@ impl Tensor {
             message: "tensor cols exceed i64 range".to_string(),
         })?;
 
-        let data = Arc::clone(&self.data);
+        let export = self.data.export_handle();
         let mut state = Box::new(ManagedTensorState::new(
-            data,
+            export,
             vec![rows_i64, cols_i64].into_boxed_slice(),
             vec![cols_i64, 1].into_boxed_slice(),
         ));
@@ -452,40 +530,86 @@ impl Tensor {
     /// # Safety
     /// The caller must ensure `managed` points to a valid `DLManagedTensor`.
     pub unsafe fn from_dlpack(managed: *mut DLManagedTensor) -> PureResult<Self> {
-        if managed.is_null() {
-            return Err(TensorError::EmptyInput("dlpack tensor"));
+        struct ManagedGuard {
+            ptr: Option<NonNull<DLManagedTensor>>,
         }
 
-        let tensor = &(*managed).dl_tensor;
-        if tensor.ndim != 2 {
+        impl ManagedGuard {
+            unsafe fn new(ptr: NonNull<DLManagedTensor>) -> Self {
+                Self { ptr: Some(ptr) }
+            }
+
+            fn tensor(&self) -> &DLManagedTensor {
+                unsafe { self.ptr.unwrap().as_ref() }
+            }
+
+            fn into_inner(mut self) -> NonNull<DLManagedTensor> {
+                self.ptr.take().unwrap()
+            }
+        }
+
+        impl Drop for ManagedGuard {
+            fn drop(&mut self) {
+                if let Some(ptr) = self.ptr.take() {
+                    unsafe {
+                        call_managed_deleter(ptr.as_ptr());
+                    }
+                }
+            }
+        }
+
+        let managed_ptr = match NonNull::new(managed) {
+            Some(ptr) => ptr,
+            None => {
+                return Err(TensorError::EmptyInput("dlpack tensor"));
+            }
+        };
+
+        let guard = ManagedGuard::new(managed_ptr);
+        let tensor = guard.tensor();
+        let dl_tensor = &tensor.dl_tensor;
+
+        if dl_tensor.ndim != 2 {
             return Err(TensorError::DlpackError {
-                message: format!("expected 2 dimensions, got {}", tensor.ndim),
+                message: format!("expected 2 dimensions, got {}", dl_tensor.ndim),
             });
         }
 
-        if tensor.device.device_type != DLDeviceType::Cpu as i32 {
+        if dl_tensor.device.device_type != DLDeviceType::Cpu as i32 {
             return Err(TensorError::DlpackError {
                 message: format!(
                     "unsupported device type {}; only CPU tensors are accepted",
-                    tensor.device.device_type
+                    dl_tensor.device.device_type
                 ),
             });
         }
 
-        if tensor.dtype.code != DLDataTypeCode::Float as u8
-            || tensor.dtype.bits != 32
-            || tensor.dtype.lanes != 1
+        if dl_tensor.dtype.code != DLDataTypeCode::Float as u8
+            || dl_tensor.dtype.bits != 32
+            || dl_tensor.dtype.lanes != 1
         {
             return Err(TensorError::DlpackError {
                 message: "only f32 tensors are supported".to_string(),
             });
         }
 
-        let ndim = usize::try_from(tensor.ndim).map_err(|_| TensorError::DlpackError {
-            message: format!("invalid ndim {}", tensor.ndim),
+        if dl_tensor.shape.is_null() {
+            return Err(TensorError::DlpackError {
+                message: "dlpack tensor provided a null shape pointer".to_string(),
+            });
+        }
+
+        if tensor.deleter.is_none() {
+            return Err(TensorError::DlpackError {
+                message: "dlpack tensor is missing a deleter".to_string(),
+            });
+        }
+
+        let ndim = usize::try_from(dl_tensor.ndim).map_err(|_| TensorError::DlpackError {
+            message: format!("invalid ndim {}", dl_tensor.ndim),
         })?;
 
-        let shape = slice::from_raw_parts(tensor.shape, ndim);
+        let shape = slice::from_raw_parts(dl_tensor.shape, ndim);
         let (rows_i64, cols_i64) = match *shape {
             [rows, cols] => (rows, cols),
             _ => {
@@ -515,21 +639,31 @@ impl Tensor {
                 message: "tensor volume overflow".to_string(),
             })?;
 
-        if tensor.byte_offset % mem::size_of::<f32>() != 0 {
+        if dl_tensor.byte_offset % mem::size_of::<f32>() != 0 {
             return Err(TensorError::DlpackError {
                 message: format!(
                     "byte offset {} is not aligned to f32 elements",
-                    tensor.byte_offset
+                    dl_tensor.byte_offset
                 ),
             });
         }
 
-        if tensor.data.is_null() {
-            return Err(TensorError::EmptyInput("dlpack tensor data"));
+        let offset = dl_tensor.byte_offset / mem::size_of::<f32>();
+        if offset > expected_len {
+            return Err(TensorError::DlpackError {
+                message: format!("byte offset {offset} exceeds tensor length {expected_len}",),
+            });
         }
 
-        if !tensor.strides.is_null() {
-            let strides = slice::from_raw_parts(tensor.strides, ndim);
+        let base_ptr = match NonNull::new(dl_tensor.data as *mut f32) {
+            Some(ptr) => ptr,
+            None => {
+                return Err(TensorError::EmptyInput("dlpack tensor data"));
+            }
+        };
+
+        if !dl_tensor.strides.is_null() {
+            let strides = slice::from_raw_parts(dl_tensor.strides, ndim);
             let expected_row = i64::try_from(cols).map_err(|_| TensorError::DlpackError {
                 message: format!("cols {cols} exceed i64 range"),
             })?;
@@ -543,15 +677,21 @@ impl Tensor {
             }
         }
 
-        let offset = tensor.byte_offset / mem::size_of::<f32>();
-        let base_ptr = tensor.data as *mut f32;
-        let data_ptr = base_ptr.add(offset);
-        let slice = slice::from_raw_parts(data_ptr, expected_len);
-        let data = slice.to_vec();
+        let data_ptr = unsafe { base_ptr.as_ptr().add(offset) };
+        let data_ptr = match NonNull::new(data_ptr) {
+            Some(ptr) => ptr,
+            None => {
+                return Err(TensorError::EmptyInput("dlpack tensor data"));
+            }
+        };
 
-        call_managed_deleter(managed);
+        let foreign = unsafe { ForeignTensor::new(guard.into_inner(), data_ptr, expected_len) };
 
-        Tensor::from_vec(rows, cols, data)
+        Ok(Self {
+            data: Arc::new(TensorBuffer::from_foreign(foreign)),
+            rows,
+            cols,
+        })
     }
 
     /// Matrix multiply (`self @ other`).
@@ -726,7 +866,7 @@ impl Tensor {
             }
         }
         Tensor {
-            data: Arc::new(data),
+            data: Arc::new(TensorBuffer::from_vec(data)),
             rows: self.cols,
             cols: self.rows,
         }
@@ -2494,6 +2634,7 @@ mod tests {
         let managed = tensor.to_dlpack().unwrap();
         let restored = unsafe { Tensor::from_dlpack(managed).unwrap() };
         assert_eq!(tensor, restored);
+        assert_eq!(tensor.data().as_ptr(), restored.data().as_ptr());
     }
 
     #[test]
