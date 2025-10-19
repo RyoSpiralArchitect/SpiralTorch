@@ -7,11 +7,18 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 description = "SpiralTorch fractional calculus (Grünwald–Letnikov) operators for tensors."
 
+[features]
+default = []
+wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+
 [dependencies]
 ndarray = "0.15"
 thiserror = "1"
 num-complex = "0.4"
 libm = "0.2"
+bytemuck = { version = "1", optional = true, features = ["derive"] }
+pollster = { version = "0.3", optional = true }
+wgpu = { version = "0.19", optional = true, features = ["wgsl"] }
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
