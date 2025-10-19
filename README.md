@@ -160,6 +160,14 @@ tape.apply(weights)
 print("updated weights", weights.tolist())
 ```
 
+---
+
+## Planning the Ecosystem
+
+- Explore the [Ecosystem Roadmap](docs/ecosystem_roadmap.md) for high-level priorities around documentation, samples, and community building.
+- Review the [Backend Feature Matrix](docs/backend_matrix.md) when validating device support or filing bugs that touch accelerators.
+
+
 Prefer flat-space optimisation? Reach for the new Rust-side
 `st_tensor::AmegaRealgrad` tape to mirror the same API without the Poincaré
 projection step—handy when Canvas Transformer energy needs to feed classical
