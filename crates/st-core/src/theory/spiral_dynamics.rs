@@ -86,6 +86,72 @@ pub struct LogisticForce {
     pub ds: f64,
 }
 
+/// Balance summary between the audit channel and the container feedback.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AuditContainerBalance {
+    /// Gain contributed by the audit feedback `κ a / τ`.
+    pub audit_gain: f64,
+    /// Gain contributed by the container feedback `σ_s ρ / λ`.
+    pub container_gain: f64,
+    /// Net imbalance `audit_gain - container_gain`.
+    pub difference: f64,
+}
+
+impl AuditContainerBalance {
+    fn new(kappa: f64, a: f64, tau: f64, sigma_s: f64, rho: f64, lambda: f64) -> Option<Self> {
+        if tau <= 0.0 || lambda <= 0.0 {
+            return None;
+        }
+        let audit_gain = kappa * a / tau;
+        let container_gain = sigma_s * rho / lambda;
+        Some(Self {
+            audit_gain,
+            container_gain,
+            difference: audit_gain - container_gain,
+        })
+    }
+}
+
+/// Hopf regime classification for the Spiral dynamics at the origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HopfRegime {
+    /// Supercritical Hopf: stable small-amplitude limit cycle emerges when
+    /// `μ_eff,0` crosses zero from negative to positive values.
+    Supercritical,
+    /// Subcritical Hopf: unstable limit cycle; trajectories jump to large
+    /// excursions when `μ_eff,0` becomes positive.
+    Subcritical,
+    /// Degenerate case where the cubic coefficient vanishes.
+    Degenerate,
+}
+
+/// First-order Hopf normal-form coefficients around the origin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HopfNormalForm {
+    /// Equilibrium forcing `\hat c(u*, 0)`.
+    pub forcing: LogisticForce,
+    /// Effective linear growth rate `μ_eff,0` at the origin.
+    pub mu_eff0: f64,
+    /// Quadratic correction from the center-manifold lift `C`.
+    pub center_manifold_c: f64,
+    /// Cubic coefficient `α₃ = ν - γ C` in the radial equation.
+    pub alpha3: f64,
+    /// Regime classification derived from `α₃`.
+    pub regime: HopfRegime,
+}
+
+impl HopfNormalForm {
+    fn classify(alpha3: f64) -> HopfRegime {
+        if alpha3 > 0.0 {
+            HopfRegime::Supercritical
+        } else if alpha3 < 0.0 {
+            HopfRegime::Subcritical
+        } else {
+            HopfRegime::Degenerate
+        }
+    }
+}
+
 impl LogisticForce {
     /// Evaluates `\hat c(u, s) = c_max / (1 + e^{-[u - σ_s s]})` and its
     /// partial derivatives.
@@ -235,6 +301,127 @@ pub fn steady_radius_sensitivity(
     }
 }
 
+/// Evaluates the audit/container balance `κ a / τ - σ_s ρ / λ`.
+pub fn audit_container_balance(
+    kappa: f64,
+    a: f64,
+    tau: f64,
+    sigma_s: f64,
+    rho: f64,
+    lambda: f64,
+) -> Option<AuditContainerBalance> {
+    AuditContainerBalance::new(kappa, a, tau, sigma_s, rho, lambda)
+}
+
+/// Computes the Hopf normal-form coefficients near the origin using the
+/// quasi-static center manifold approximation from the design memo. Returns
+/// `None` when the logistic gate or the feedback gains are ill-defined.
+pub fn hopf_normal_form(
+    mu0: f64,
+    gamma: f64,
+    nu: f64,
+    _omega: f64,
+    kappa: f64,
+    a: f64,
+    tau: f64,
+    theta: f64,
+    sigma_s: f64,
+    rho: f64,
+    lambda: f64,
+    c_max: f64,
+) -> Option<HopfNormalForm> {
+    if !nu.is_finite()
+        || nu <= 0.0
+        || !lambda.is_finite()
+        || lambda <= 0.0
+        || !tau.is_finite()
+        || tau <= 0.0
+    {
+        return None;
+    }
+    let balance = AuditContainerBalance::new(kappa, a, tau, sigma_s, rho, lambda)?;
+    let u_star = -kappa * theta / tau;
+    let force = LogisticForce::evaluate(u_star, 0.0, c_max, sigma_s);
+    let mu_eff0 = mu0 + gamma * force.value;
+    let c_correction = force.du * balance.difference;
+    let alpha3 = nu - gamma * c_correction;
+    let regime = HopfNormalForm::classify(alpha3);
+    Some(HopfNormalForm {
+        forcing: force,
+        mu_eff0,
+        center_manifold_c: c_correction,
+        alpha3,
+        regime,
+    })
+}
+
+/// Upper bound on the stationary mean-square amplitude under additive complex
+/// Itô noise `Σ_z dW_t` in the Z-plane.
+pub fn ito_mean_square_bound(mu_eff: f64, nu: f64, noise_power: f64) -> Option<f64> {
+    if !nu.is_finite() || nu <= 0.0 || !noise_power.is_finite() || noise_power < 0.0 {
+        return None;
+    }
+    if !mu_eff.is_finite() {
+        return None;
+    }
+    let disc = mu_eff * mu_eff + 2.0 * nu * noise_power;
+    Some((mu_eff + disc.sqrt()) / (2.0 * nu))
+}
+
+/// Dimensionless parameter reduction following the memo's scaling.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DimensionlessParameters {
+    /// `\bar μ = μ_0 / ν`.
+    pub mu_bar: f64,
+    /// `\bar γ = γ / ν`.
+    pub gamma_bar: f64,
+    /// `\bar ω = ω / ν`.
+    pub omega_bar: f64,
+    /// Aggregate audit gain `κ a / (τ ν)`.
+    pub audit_cluster: f64,
+    /// Aggregate container gain `σ_s ρ / (λ ν)`.
+    pub container_cluster: f64,
+}
+
+/// Computes the reduced dimensionless combinations highlighted in the design
+/// memo. The return value condenses the parameter space explored in phase
+/// diagrams to a handful of ratios. Returns `None` if any denominator is
+/// non-positive.
+pub fn dimensionless_parameters(
+    mu0: f64,
+    gamma: f64,
+    omega: f64,
+    nu: f64,
+    kappa: f64,
+    a: f64,
+    tau: f64,
+    sigma_s: f64,
+    rho: f64,
+    lambda: f64,
+) -> Option<DimensionlessParameters> {
+    if !nu.is_finite()
+        || nu <= 0.0
+        || !tau.is_finite()
+        || tau <= 0.0
+        || !lambda.is_finite()
+        || lambda <= 0.0
+    {
+        return None;
+    }
+    let mu_bar = mu0 / nu;
+    let gamma_bar = gamma / nu;
+    let omega_bar = omega / nu;
+    let audit_cluster = kappa * a / (tau * nu);
+    let container_cluster = sigma_s * rho / (lambda * nu);
+    Some(DimensionlessParameters {
+        mu_bar,
+        gamma_bar,
+        omega_bar,
+        audit_cluster,
+        container_cluster,
+    })
+}
+
 /// Gershgorin lower bound on the contraction rate ε of the C-system.
 pub fn gershgorin_contraction_bound(
     a: f64,
@@ -323,5 +510,43 @@ mod tests {
         assert_abs_diff_eq!(eps, 0.375, epsilon = 1e-12);
         let actual = contraction_with_cubic(eps, 0.3, 0.4);
         assert_abs_diff_eq!(actual, 0.423, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn audit_container_balance_tracks_ratios() {
+        let balance = audit_container_balance(0.6, 0.7, 1.2, 0.4, 0.5, 1.1).unwrap();
+        assert_abs_diff_eq!(balance.audit_gain, 0.35, epsilon = 1e-12);
+        assert_abs_diff_eq!(balance.container_gain, 0.1818181818, epsilon = 1e-10);
+        assert!(balance.difference > 0.0);
+        assert!(audit_container_balance(0.6, 0.7, 0.0, 0.4, 0.5, 1.1).is_none());
+    }
+
+    #[test]
+    fn hopf_normal_form_classifies_regimes() {
+        let data =
+            hopf_normal_form(-0.1, 0.5, 0.8, 1.2, 0.6, 0.7, 1.2, 0.2, 0.3, 0.5, 1.1, 0.4).unwrap();
+        assert!(data.mu_eff0 < 0.0);
+        assert!(matches!(data.regime, HopfRegime::Supercritical));
+        let flipped =
+            hopf_normal_form(-0.1, 0.5, 0.8, 1.2, 0.6, 0.7, 1.2, 0.2, 1.2, 0.5, 0.3, 0.4).unwrap();
+        assert!(matches!(flipped.regime, HopfRegime::Subcritical));
+    }
+
+    #[test]
+    fn ito_noise_bound_matches_closed_form() {
+        let bound = ito_mean_square_bound(-0.2, 0.5, 0.04).unwrap();
+        assert_abs_diff_eq!(bound, 0.0632455532, epsilon = 1e-9);
+        assert!(ito_mean_square_bound(-0.2, -0.5, 0.04).is_none());
+    }
+
+    #[test]
+    fn dimensionless_parameters_reduce_ratios() {
+        let params =
+            dimensionless_parameters(0.3, 0.5, 1.2, 0.8, 0.6, 0.7, 1.1, 0.4, 0.5, 1.3).unwrap();
+        assert_abs_diff_eq!(params.mu_bar, 0.375, epsilon = 1e-12);
+        assert_abs_diff_eq!(params.gamma_bar, 0.625, epsilon = 1e-12);
+        assert_abs_diff_eq!(params.omega_bar, 1.5, epsilon = 1e-12);
+        assert_abs_diff_eq!(params.audit_cluster, 0.4772727272, epsilon = 1e-9);
+        assert_abs_diff_eq!(params.container_cluster, 0.1538461538, epsilon = 1e-9);
     }
 }
