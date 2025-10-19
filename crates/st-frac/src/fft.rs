@@ -33,6 +33,10 @@ impl Complex32 {
     }
 
     #[inline]
+    #[allow(
+        clippy::should_implement_trait,
+        reason = "Minimal complex helper keeps explicit method names for clarity"
+    )]
     pub fn mul(self, rhs: Self) -> Self {
         Self::new(
             self.re * rhs.re - self.im * rhs.im,
@@ -41,11 +45,19 @@ impl Complex32 {
     }
 
     #[inline]
+    #[allow(
+        clippy::should_implement_trait,
+        reason = "Minimal complex helper keeps explicit method names for clarity"
+    )]
     pub fn add(self, rhs: Self) -> Self {
         Self::new(self.re + rhs.re, self.im + rhs.im)
     }
 
     #[inline]
+    #[allow(
+        clippy::should_implement_trait,
+        reason = "Minimal complex helper keeps explicit method names for clarity"
+    )]
     pub fn sub(self, rhs: Self) -> Self {
         Self::new(self.re - rhs.re, self.im - rhs.im)
     }
@@ -189,8 +201,8 @@ fn bit_reverse_permute(buf: &mut [Complex32]) {
     let bits = n.trailing_zeros();
     for i in 0..n {
         let rev = i.reverse_bits() >> (usize::BITS - bits);
-        if i < rev as usize {
-            buf.swap(i, rev as usize);
+        if i < rev {
+            buf.swap(i, rev);
         }
     }
 }

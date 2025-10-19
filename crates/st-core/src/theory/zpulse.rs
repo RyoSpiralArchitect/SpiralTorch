@@ -16,6 +16,24 @@ use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
+// [SCALE-TODO] Compatibility shim: ZScale
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct ZScale(pub f32);
+
+impl ZScale {
+    pub const ONE: ZScale = ZScale(1.0);
+
+    #[inline]
+    pub fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    #[inline]
+    pub fn value(self) -> f32 {
+        self.0
+    }
+}
+
 /// Support triplet describing Above/Here/Beneath contributions backing a Z pulse.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZSupport {
@@ -80,8 +98,9 @@ fn clamp_non_negative(value: f32) -> f32 {
 }
 
 /// Identifies the origin of a [`ZPulse`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum ZSource {
+    #[default]
     Microlocal,
     Maxwell,
     Graph,
@@ -89,12 +108,6 @@ pub enum ZSource {
     GW,
     RealGrad,
     Other(&'static str),
-}
-
-impl Default for ZSource {
-    fn default() -> Self {
-        ZSource::Microlocal
-    }
 }
 
 /// Snapshot of a single Z-space pulse observation.
@@ -329,10 +342,7 @@ impl LatencyAlignerState {
             },
         );
         if pulse.latency_ms.is_finite() && pulse.latency_ms.abs() > f32::EPSILON {
-            let entry = self
-                .lags
-                .entry(pulse.source)
-                .or_insert_with(LagEstimate::default);
+            let entry = self.lags.entry(pulse.source).or_default();
             entry.lag = pulse.latency_ms;
             entry.frames_since_update = 0;
             self.pending_events.push(format!(
@@ -351,7 +361,7 @@ impl LatencyAlignerState {
     }
 
     fn prepare(&mut self, now: u64, events: &mut Vec<String>) {
-        events.extend(self.pending_events.drain(..));
+        events.append(&mut self.pending_events);
         let Some(anchor) = self.last.get(&ZSource::Microlocal).cloned() else {
             self.increment_all();
             return;
@@ -372,7 +382,7 @@ impl LatencyAlignerState {
             if source == ZSource::Microlocal {
                 continue;
             }
-            let entry = self.lags.entry(source).or_insert_with(LagEstimate::default);
+            let entry = self.lags.entry(source).or_default();
             if entry.frames_since_update != u32::MAX
                 && entry.frames_since_update < self.cfg.hold_steps
             {

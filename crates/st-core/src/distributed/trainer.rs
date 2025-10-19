@@ -131,7 +131,7 @@ impl DistributedTrainer {
             return Ok(false);
         }
         let total = self.total_params();
-        if self.async_buffer.len() % total != 0 {
+        if !self.async_buffer.len().is_multiple_of(total) {
             return Err(DistributedTrainerError::AsyncPayload {
                 expected: total,
                 got: self.async_buffer.len(),

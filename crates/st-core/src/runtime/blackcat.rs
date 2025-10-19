@@ -150,6 +150,10 @@ impl BlackCatRuntime {
     }
 
     /// Build a contextual feature vector from runtime metrics.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Context vector requires these inputs for bandit feature parity"
+    )]
     pub fn make_context(
         &self,
         batches: u32,
@@ -610,10 +614,9 @@ pub mod zmeta {
             }
         }
 
+        #[cfg(not(feature = "blackcat_v2"))]
         fn ingest_structural(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
-            let Some(raw) = structural else {
-                return None;
-            };
+            let raw = structural?;
             if self.params.dim == 0 {
                 return None;
             }
@@ -651,6 +654,7 @@ pub mod zmeta {
             )
         }
 
+        #[cfg(not(feature = "blackcat_v2"))]
         fn apply_structural_drive(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
             if delta_reward.abs() <= 1e-9 {
                 return;
@@ -672,6 +676,7 @@ pub mod zmeta {
             self.logistic_project_step(&delta);
         }
 
+        #[cfg(not(feature = "blackcat_v2"))]
         fn logistic_project_step(&mut self, drive: &[f64]) {
             if self.dir.is_empty() {
                 return;
@@ -714,6 +719,7 @@ pub mod zmeta {
             normalize(&mut self.dir);
         }
 
+        #[cfg(feature = "blackcat_v2")]
         fn ingest_structural(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
             let Some(raw) = structural else {
                 return None;
@@ -755,6 +761,7 @@ pub mod zmeta {
             )
         }
 
+        #[cfg(feature = "blackcat_v2")]
         fn apply_structural_drive(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
             if delta_reward.abs() <= 1e-9 {
                 return;
@@ -776,6 +783,7 @@ pub mod zmeta {
             self.logistic_project_step(&delta);
         }
 
+        #[cfg(feature = "blackcat_v2")]
         fn logistic_project_step(&mut self, drive: &[f64]) {
             if self.dir.is_empty() {
                 return;

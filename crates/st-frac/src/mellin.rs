@@ -24,11 +24,7 @@ fn map_range_to_log(range: (Scalar, Scalar)) -> MellinResult<(Scalar, Scalar)> {
 }
 
 fn float_bits(value: Scalar) -> u128 {
-    if std::mem::size_of::<Scalar>() == 4 {
-        value.to_bits() as u128
-    } else {
-        value.to_bits() as u128
-    }
+    value.to_bits() as u128
 }
 
 /// Sample a function on a log-uniform lattice.
@@ -186,7 +182,7 @@ impl MellinLogGrid {
         let series = evaluate_weighted_series_many(weighted, &z_points)?;
         Ok(series
             .into_iter()
-            .zip(prefactors.into_iter())
+            .zip(prefactors)
             .map(|(series, prefactor)| prefactor * series)
             .collect())
     }
@@ -213,6 +209,11 @@ impl MellinLogGrid {
     /// Return the number of log-uniform samples stored in the grid.
     pub fn len(&self) -> usize {
         self.samples.len()
+    }
+
+    /// Check whether the grid has no samples.
+    pub fn is_empty(&self) -> bool {
+        self.samples.is_empty()
     }
 
     /// Expose the logarithmic start coordinate.
@@ -288,7 +289,7 @@ impl MellinLogGrid {
         let series = weighted_z_transform_many(&self.samples, &self.weights, &z_points)?;
         Ok(series
             .into_iter()
-            .zip(prefactors.into_iter())
+            .zip(prefactors)
             .map(|(series, prefactor)| prefactor * series)
             .collect())
     }
@@ -310,7 +311,7 @@ impl MellinLogGrid {
         let series = evaluate_weighted_series_many(&weighted, &z_points)?;
         Ok(series
             .into_iter()
-            .zip(prefactors.into_iter())
+            .zip(prefactors)
             .map(|(series, prefactor)| prefactor * series)
             .collect())
     }
@@ -328,7 +329,7 @@ impl MellinLogGrid {
         let series = crate::mellin_wgpu::evaluate_weighted_series_many_gpu(&weighted, &z_points)?;
         Ok(series
             .into_iter()
-            .zip(prefactors.into_iter())
+            .zip(prefactors)
             .map(|(series, prefactor)| prefactor * series)
             .collect())
     }
@@ -351,7 +352,7 @@ impl MellinLogGrid {
         let series = crate::mellin_wgpu::evaluate_weighted_series_many_gpu(&weighted, &z_points)?;
         Ok(series
             .into_iter()
-            .zip(prefactors.into_iter())
+            .zip(prefactors)
             .map(|(series, prefactor)| prefactor * series)
             .collect())
     }

@@ -779,7 +779,7 @@ fn align_to_lanes(value: u32, lanes: u32) -> u32 {
     if lanes <= 1 {
         return value.max(1);
     }
-    ((value + lanes - 1) / lanes) * lanes
+    value.div_ceil(lanes) * lanes
 }
 
 fn align_down_to_lanes(value: u32, lanes: u32) -> u32 {
@@ -825,8 +825,8 @@ fn closest_lane_multiple(value: u32, lanes: u32, min: u32, max: u32) -> u32 {
 
     let mut best = base;
     let mut best_diff = best.abs_diff(value);
-    for step in 1..=4 {
-        let offsets = [step as i32, -(step as i32)];
+    for step in 1i32..=4 {
+        let offsets = [step, -step];
         for offset in offsets {
             let candidate_i64 = base as i64 + offset as i64 * lanes as i64;
             if candidate_i64 < min_lane as i64 || candidate_i64 > max_lane as i64 {
@@ -1042,6 +1042,10 @@ fn snap_latency_ctile(
     snap_latency_ctile_with_slack(current, rows, cols, k, lanes, min_ctile, max_ctile, slack)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Heuristics signature is stable; refactor is out-of-scope for clippy sweep"
+)]
 fn snap_latency_ctile_with_slack(
     current: u32,
     rows: u32,
@@ -1110,6 +1114,10 @@ fn snap_latency_ctile_snapshot(
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Heuristics snapshot helper mirrors runtime signature for consistency"
+)]
 fn snap_latency_ctile_snapshot_with_slack(
     current: u32,
     rows: u32,
@@ -1194,11 +1202,13 @@ fn fallback_with_scenario(scenario: RankScenario<'_>) -> Choice {
 
     let mut mk = caps.preferred_merge_kind(scenario.k());
     let mut mkd = caps.preferred_substrategy(mk, scenario.k());
-    if scenario.low_latency() && caps.subgroup && matches!(scenario.kind(), RankKind::TopK) {
-        if scenario.k() <= scenario.lanes().saturating_mul(8) {
-            mk = 2;
-            mkd = if scenario.k() <= 128 { 4 } else { 5 };
-        }
+    if scenario.low_latency()
+        && caps.subgroup
+        && matches!(scenario.kind(), RankKind::TopK)
+        && scenario.k() <= scenario.lanes().saturating_mul(8)
+    {
+        mk = 2;
+        mkd = if scenario.k() <= 128 { 4 } else { 5 };
     }
     let mut use_2ce = scenario.expected_two_stage();
     if scenario.low_latency() {
@@ -1654,7 +1664,7 @@ fn score_choice(choice: &Choice, baseline: &Choice, scenario: RankScenario<'_>) 
             } else {
                 score -= 0.03;
             }
-            if choice.ctile.abs_diff(window.target) as u32 <= window.slack {
+            if choice.ctile.abs_diff(window.target) <= window.slack {
                 score += 0.01;
             } else {
                 score -= 0.015;
