@@ -160,85 +160,6 @@ impl From<(f32, f32, f32)> for ZSupport {
     }
 }
 
-/// Encodes the physical and logarithmic radius of a Z pulse.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ZScale {
-    pub physical_radius: f32,
-    pub log_radius: f32,
-}
-
-impl ZScale {
-    /// Creates a new scale from a physical radius, rejecting non-positive or
-    /// non-finite values.
-    pub fn new(physical_radius: f32) -> Option<Self> {
-        if physical_radius.is_finite() && physical_radius > 0.0 {
-            Some(Self {
-                physical_radius,
-                log_radius: physical_radius.ln(),
-            })
-        } else {
-            None
-        }
-    }
-
-    /// Reconstructs a scale from its logarithmic radius.
-    pub fn from_log(log_radius: f32) -> Option<Self> {
-        if log_radius.is_finite() {
-            let physical = log_radius.exp();
-            if physical.is_finite() && physical > 0.0 {
-                return Some(Self {
-                    physical_radius: physical,
-                    log_radius,
-                });
-            }
-        }
-        None
-    }
-
-    /// Builds a scale directly from precomputed components, enforcing the
-    /// invariants required by the other constructors.
-    pub fn from_components(physical_radius: f32, log_radius: f32) -> Option<Self> {
-        if physical_radius.is_finite() && physical_radius > 0.0 && log_radius.is_finite() {
-            Some(Self {
-                physical_radius,
-                log_radius,
-            })
-        } else {
-            None
-        }
-    }
-
-    /// Linearly interpolates between two scales.
-    pub fn lerp(a: ZScale, b: ZScale, t: f32) -> ZScale {
-        let clamped = t.clamp(0.0, 1.0);
-        let physical = a.physical_radius + (b.physical_radius - a.physical_radius) * clamped;
-        let log = a.log_radius + (b.log_radius - a.log_radius) * clamped;
-        Self::from_components(physical, log).unwrap_or_else(|| if clamped < 0.5 { a } else { b })
-    }
-
-    /// Computes the weighted centroid of a collection of scales.
-    pub fn weighted_average<I>(weights: I) -> Option<Self>
-    where
-        I: IntoIterator<Item = (ZScale, f32)>,
-    {
-        let mut total = 0.0f32;
-        let mut physical = 0.0f32;
-        let mut log = 0.0f32;
-        for (scale, weight) in weights {
-            if weight.is_finite() && weight > 0.0 {
-                total += weight;
-                physical += scale.physical_radius * weight;
-                log += scale.log_radius * weight;
-            }
-        }
-        if total > 0.0 {
-            Self::from_components(physical / total, log / total)
-        } else {
-            None
-        }
-    }
-}
-
 /// Identifies a source capable of emitting [`ZPulse`] records.
 pub trait ZEmitter: Send {
     /// Returns the canonical source identifier for pulses emitted by this implementation.
@@ -558,18 +479,12 @@ impl Default for ZConductor {
 
 impl ZConductor {
     pub fn new(cfg: ZConductorCfg) -> Self {
-        let latency_cfg = if cfg.latency_align {
-            cfg.latency
-                .clone()
-                .or_else(|| Some(LatencyAlignerCfg::balanced()))
-        } else {
-            None
-        };
+        let latency = cfg.latency.unwrap_or_else(LatencyAlignerCfg::balanced);
         Self {
             cfg,
             freq: None,
             adaptive: None,
-            latency: latency_cfg.map(LatencyAlignerState::new),
+            latency: Some(LatencyAlignerState::new(latency)),
             pending: VecDeque::new(),
             last_step: None,
             last_z: 0.0,
@@ -595,8 +510,6 @@ impl ZConductor {
     }
 
     pub fn set_latency_aligner(&mut self, cfg: Option<LatencyAlignerCfg>) {
-        self.cfg.latency = cfg.clone();
-        self.cfg.latency_align = cfg.is_some();
         self.latency = cfg.map(LatencyAlignerState::new);
     }
 

@@ -55,9 +55,6 @@ pub mod zpulse_impl;
 #[doc(inline)]
 pub use zpulse_impl as zpulse;
 
-#[cfg(feature = "experimental_zpulse")]
-pub mod zpulse_experimental;
-
 #[path = "spiral_dynamics.rs"]
 #[doc(hidden)]
 pub mod spiral_dynamics_impl;

@@ -53,19 +53,64 @@ pub fn mellin_log_lattice_prefactor(
 /// measure induced by the Mellin transform. The returned value corresponds to the
 /// discrete power series `sum_k w_k x_k z^k`.
 pub fn weighted_z_transform(samples: &[Complex32], weights: &[f32], z: Complex32) -> Complex32 {
+    let weighted = prepare_weighted_series(samples, weights);
+    evaluate_weighted_series(&weighted, z)
+}
+
+/// Evaluate the weighted Z-transform at multiple `z` points.
+///
+/// This helper shares the preweighted samples across all evaluation points,
+/// avoiding repeated weight application when sweeping an entire vertical line in
+/// the Mellin domain.
+pub fn weighted_z_transform_many(
+    samples: &[Complex32],
+    weights: &[f32],
+    z_values: &[Complex32],
+) -> Vec<Complex32> {
+    let weighted = prepare_weighted_series(samples, weights);
+    evaluate_weighted_series_many(&weighted, z_values)
+}
+
+/// Precompute the weighted power-series coefficients for Z-plane evaluations.
+#[inline]
+pub fn prepare_weighted_series(samples: &[Complex32], weights: &[f32]) -> Vec<Complex32> {
     assert!(!samples.is_empty(), "samples must not be empty");
     assert_eq!(samples.len(), weights.len(), "weights must match samples");
+
+    samples
+        .iter()
+        .zip(weights.iter())
+        .map(|(sample, &w)| *sample * Complex32::new(w, 0.0))
+        .collect()
+}
+
+/// Evaluate a weighted power series using the precomputed coefficients.
+pub fn evaluate_weighted_series(weighted: &[Complex32], z: Complex32) -> Complex32 {
+    assert!(!weighted.is_empty(), "series must not be empty");
 
     let mut acc = Complex32::new(0.0, 0.0);
     let mut power = Complex32::new(1.0, 0.0);
 
-    for (sample, &w) in samples.iter().zip(weights.iter()) {
-        let weight = Complex32::new(w, 0.0);
-        acc += *sample * weight * power;
+    for coeff in weighted.iter() {
+        acc += *coeff * power;
         power *= z;
     }
 
     acc
+}
+
+/// Evaluate the weighted power series at multiple `z` values.
+pub fn evaluate_weighted_series_many(
+    weighted: &[Complex32],
+    z_values: &[Complex32],
+) -> Vec<Complex32> {
+    assert!(!weighted.is_empty(), "series must not be empty");
+    assert!(!z_values.is_empty(), "z_values must not be empty");
+
+    z_values
+        .iter()
+        .map(|&z| evaluate_weighted_series(weighted, z))
+        .collect()
 }
 
 /// Evaluate the Mellin transform on a log-uniform grid by routing the computation
@@ -143,5 +188,64 @@ mod tests {
         let via_z = mellin_transform_via_z(log_start, log_step, &samples, s);
         let diff = (direct - via_z).norm();
         assert!(diff < 1e-6, "diff={}", diff);
+    }
+
+    #[test]
+    fn weighted_z_transform_many_matches_single_path() {
+        let samples = vec![
+            Complex32::new(0.2, 0.1),
+            Complex32::new(-0.4, 0.3),
+            Complex32::new(0.1, -0.2),
+        ];
+        let weights = trapezoidal_weights(samples.len());
+        let zs = vec![
+            Complex32::new(0.7, 0.0),
+            Complex32::new(0.4, -0.3),
+            Complex32::new(-0.2, 0.5),
+        ];
+
+        let batch = weighted_z_transform_many(&samples, &weights, &zs);
+        for (idx, &z) in zs.iter().enumerate() {
+            let single = weighted_z_transform(&samples, &weights, z);
+            let diff = (batch[idx] - single).norm();
+            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
+    }
+
+    #[test]
+    fn prepared_series_matches_direct_weighting() {
+        let samples = vec![
+            Complex32::new(1.0, -0.5),
+            Complex32::new(-0.7, 0.2),
+            Complex32::new(0.3, 0.9),
+        ];
+        let weights = vec![0.5, 1.0, 0.5];
+        let weighted = prepare_weighted_series(&samples, &weights);
+        for (idx, coeff) in weighted.iter().enumerate() {
+            let manual = samples[idx] * Complex32::new(weights[idx], 0.0);
+            let diff = (*coeff - manual).norm();
+            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
+    }
+
+    #[test]
+    fn evaluate_weighted_series_many_shares_coefficients() {
+        let samples = vec![
+            Complex32::new(0.4, -0.2),
+            Complex32::new(-0.1, 0.7),
+            Complex32::new(0.3, 0.1),
+            Complex32::new(-0.2, -0.5),
+        ];
+        let weights = trapezoidal_weights(samples.len());
+        let weighted = prepare_weighted_series(&samples, &weights);
+        let zs = [Complex32::new(0.9, 0.1), Complex32::new(-0.3, 0.4)];
+
+        let via_prepare = evaluate_weighted_series_many(&weighted, &zs);
+        let via_api = weighted_z_transform_many(&samples, &weights, &zs);
+
+        for (idx, (lhs, rhs)) in via_prepare.iter().zip(via_api.iter()).enumerate() {
+            let diff = (*lhs - *rhs).norm();
+            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
     }
 }

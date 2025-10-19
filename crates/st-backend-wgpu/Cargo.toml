@@ -9,6 +9,7 @@ description = "WGPU backend kernels and pipeline loaders for SpiralTorch"
 [dependencies]
 wgpu = { version = "0.19", default-features = false, features = ["wgsl"] }
 thiserror = "1"
+bytemuck = { version = "1", features = ["derive"] }
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
