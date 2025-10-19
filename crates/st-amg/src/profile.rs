@@ -36,6 +36,7 @@ pub struct ProblemProfile {
     diag_ratio: f32,
     mean_row_nnz: f32,
     max_row_nnz: u32,
+    min_row_nnz: u32,
     bandwidth_hint: u32,
     bandwidth_peak: u32,
     bandwidth_stddev: f32,
@@ -60,6 +61,7 @@ impl ProblemProfile {
         let mean_row_nnz = (nnz as f32 / rows as f32).max(1.0);
         let row_nnz_stddev = mean_row_nnz.sqrt().max(0.5);
         let max_row_nnz = mean_row_nnz.ceil() as u32;
+        let min_row_nnz = mean_row_nnz.floor().max(1.0) as u32;
         let bandwidth_hint = cols.min(rows).max(1) as u32;
         let bandwidth_peak = bandwidth_hint;
         let bandwidth_stddev = (bandwidth_hint as f32 * 0.35).max(1.0);
@@ -75,6 +77,7 @@ impl ProblemProfile {
             diag_ratio: 1.0,
             mean_row_nnz,
             max_row_nnz,
+            min_row_nnz,
             bandwidth_hint,
             bandwidth_peak,
             bandwidth_stddev,
@@ -122,6 +125,23 @@ impl ProblemProfile {
     /// Largest observed row density expressed as non-zeros per row.
     pub fn max_row_nnz(&self) -> u32 {
         self.max_row_nnz
+    }
+
+    /// Smallest observed row density expressed as non-zeros per row.
+    pub fn min_row_nnz(&self) -> u32 {
+        self.min_row_nnz
+    }
+
+    /// Difference between the densest and sparsest rows seen.
+    pub fn row_nnz_range(&self) -> u32 {
+        self.max_row_nnz.saturating_sub(self.min_row_nnz)
+    }
+
+    /// Ratio between densest and sparsest rows; highlights imbalance.
+    pub fn row_nnz_imbalance(&self) -> f32 {
+        let numerator = self.max_row_nnz.max(1) as f32;
+        let denominator = self.min_row_nnz.max(1) as f32;
+        (numerator / denominator).clamp(1.0, 32.0)
     }
 
     /// Estimated half-bandwidth used to bias tile/workgroup selection.
@@ -257,7 +277,7 @@ impl ProblemProfile {
 }
 
 /// Incrementally build a [`ProblemProfile`] from sparse row samples.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ProfileBuilder {
     rows: usize,
     cols: usize,
@@ -268,6 +288,7 @@ pub struct ProfileBuilder {
     row_nnz_sum: f64,
     row_nnz_sq_sum: f64,
     max_row_nnz: usize,
+    min_row_nnz: usize,
     bandwidth_sum: f64,
     bandwidth_max: usize,
     bandwidth_samples: usize,
@@ -277,12 +298,12 @@ pub struct ProfileBuilder {
 impl ProfileBuilder {
     /// Create a builder for the given system dimensions.
     pub fn new(rows: usize, cols: usize, subgroup: bool) -> Self {
-        Self {
-            rows,
-            cols,
-            subgroup,
-            ..Self::default()
-        }
+        let mut builder = Self::default();
+        builder.rows = rows;
+        builder.cols = cols;
+        builder.subgroup = subgroup;
+        builder.min_row_nnz = usize::MAX;
+        builder
     }
 
     /// Push statistics for a single row.
@@ -296,6 +317,10 @@ impl ProfileBuilder {
         self.row_nnz_sum += nnz_in_row as f64;
         self.row_nnz_sq_sum += (nnz_in_row * nnz_in_row) as f64;
         self.max_row_nnz = self.max_row_nnz.max(nnz_in_row.max(1));
+        if self.min_row_nnz == 0 {
+            self.min_row_nnz = usize::MAX;
+        }
+        self.min_row_nnz = self.min_row_nnz.min(nnz_in_row.max(1));
         if diag_hit {
             self.diag_hits += 1;
         }
@@ -370,11 +395,38 @@ impl ProfileBuilder {
         profile.diag_ratio = self.diag_ratio();
         profile.mean_row_nnz = self.mean_row_nnz().max(profile.mean_row_nnz);
         profile.max_row_nnz = self.max_row_nnz.max(profile.max_row_nnz as usize) as u32;
+        let min_row_nnz = if self.min_row_nnz == 0 || self.min_row_nnz == usize::MAX {
+            self.max_row_nnz.max(1)
+        } else {
+            self.min_row_nnz
+        };
+        profile.min_row_nnz = min_row_nnz.min(profile.min_row_nnz as usize).max(1) as u32;
         profile.bandwidth_hint = self.bandwidth_hint().max(profile.bandwidth_hint);
         profile.bandwidth_peak = self.bandwidth_peak().max(profile.bandwidth_peak);
         profile.bandwidth_stddev = self.bandwidth_stddev().max(profile.bandwidth_stddev);
         profile.row_nnz_stddev = self.row_stddev().max(profile.row_nnz_stddev);
         profile
+    }
+}
+
+impl Default for ProfileBuilder {
+    fn default() -> Self {
+        Self {
+            rows: 0,
+            cols: 0,
+            subgroup: false,
+            row_samples: 0,
+            nnz_acc: 0,
+            diag_hits: 0,
+            row_nnz_sum: 0.0,
+            row_nnz_sq_sum: 0.0,
+            max_row_nnz: 0,
+            min_row_nnz: usize::MAX,
+            bandwidth_sum: 0.0,
+            bandwidth_max: 0,
+            bandwidth_samples: 0,
+            bandwidth_sq_sum: 0.0,
+        }
     }
 }
 
@@ -460,5 +512,23 @@ mod tests {
         assert!(profile.bandwidth_peak() >= 40);
         assert!(profile.bandwidth_stddev() > 8.0);
         assert!(profile.bandwidth_spread() > 0.2);
+    }
+
+    #[test]
+    fn builder_tracks_row_extrema() {
+        let mut builder = ProfileBuilder::new(512, 1024, false);
+        for i in 0..512 {
+            let nnz = if i % 17 == 0 {
+                4
+            } else {
+                36 + (i % 9) as usize
+            };
+            builder.observe_row(nnz, true, Some(512 + (i % 5) as usize));
+        }
+        let profile = builder.build();
+        assert!(profile.max_row_nnz() >= 40);
+        assert!(profile.min_row_nnz() <= 5);
+        assert!(profile.row_nnz_imbalance() > 6.0);
+        assert!(profile.row_nnz_range() >= 30);
     }
 }

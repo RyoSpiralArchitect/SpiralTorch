@@ -53,6 +53,12 @@ impl Choice {
         ));
         reasons.push(format!("aspect={:?}", profile.aspect_class()));
         reasons.push(format!("spread={:.3}", profile.row_nnz_spread()));
+        reasons.push(format!(
+            "row-imbalance={:.2} ({}/{})",
+            profile.row_nnz_imbalance(),
+            profile.max_row_nnz(),
+            profile.min_row_nnz()
+        ));
         reasons.push(format!("bw-spread={:.3}", profile.bandwidth_spread()));
         reasons.push(format!("bw-peak={}", profile.bandwidth_peak()));
         reasons.push(format!("wg {}→{}", profile.lane_hint(), self.wg));
@@ -96,6 +102,8 @@ fn initial_choice(profile: &ProblemProfile) -> Choice {
     let mut jacobi_passes = profile.jacobi_hint() as i32;
     let diag_ratio = profile.diag_ratio();
     let spread = profile.row_nnz_spread();
+    let imbalance = profile.row_nnz_imbalance();
+    let min_row = profile.min_row_nnz();
     let aspect = profile.aspect_class();
     let bandwidth_spread = profile.bandwidth_spread();
     let bandwidth_peak = profile.bandwidth_peak();
@@ -116,6 +124,19 @@ fn initial_choice(profile: &ProblemProfile) -> Choice {
         jacobi_passes += 1;
     } else if spread < 0.25 && diag_ratio > 0.65 && jacobi_passes > 0 {
         jacobi_passes -= 1;
+    }
+
+    if imbalance > 4.0 {
+        jacobi_passes += 1;
+        if bandwidth_peak > 10_000 {
+            tile_cols = promote_tile(tile_cols);
+        }
+    } else if imbalance < 1.5 && jacobi_passes > 0 && bandwidth_spread < 0.2 {
+        jacobi_passes -= 1;
+    }
+
+    if min_row <= 2 && profile.mean_row_nnz() > 24.0 {
+        jacobi_passes += 1;
     }
 
     if bandwidth_spread > 0.35 && bandwidth_peak > 12_000 {
@@ -143,6 +164,11 @@ fn initial_choice(profile: &ProblemProfile) -> Choice {
     }
     if bandwidth_spread > 0.35 && density_class != DensityClass::Dense {
         use_2ce = true;
+    }
+    if imbalance > 5.5 {
+        use_2ce = true;
+    } else if imbalance < 1.4 && diag_ratio > 0.75 && bandwidth_spread < 0.25 {
+        use_2ce = false;
     }
 
     Choice {
