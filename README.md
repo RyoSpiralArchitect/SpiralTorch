@@ -56,20 +56,15 @@ tensor shims, no translation layers, and no tracebacks.
 # SpiralTorch Architecture(Overview)
 
 
-```
-
-## ASCII Diagram 
-
-```
           ┌────────────── Higher Stacks / Domain APIs ───────────────┐
           │  st-nn     st-rl     st-rec     CanvasTransformer (CT)   │
           └───────────────▲────────▲────────▲──────────────▲─────────┘
                           │        │        │              │
                           └────────┴────────┴──────────────┴──────┐
-                                             APIs / Bindings       │
-                      Python API  |  TypeScript/WASM API (UI)      │
-                                  │                                 │
-                                  ▼                                 ▼ (Live Canvas)
+                                             APIs / Bindings      │
+                      Python API   |  TypeScript/WASM API (UI)    │
+                                   │                              │
+                                   ▼                              ▼ (Live Canvas)
                         ┌──────────────────── st-core ─────────────────────┐
                         │ Ops / IR / Optimizer / Registry / Scheduler      │
                         │ Runtime (async/queues/events)                    │
