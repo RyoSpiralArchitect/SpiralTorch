@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 //! Read hypergradient solver from SpiralK (`sv` field) or env fallback.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Solver { Neumann, Cg }
 pub fn choose_solver() -> Solver {
     if let Ok(s) = std::env::var("SPIRAL_HEUR_K") {
