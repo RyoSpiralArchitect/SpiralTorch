@@ -1,0 +1,49 @@
+name: CI
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-test:
+    name: build & test (${{ matrix.os }} / ${{ matrix.toolchain }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        toolchain: [stable, nightly]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt (workspace)
+        run: cargo fmt --all -- --check
+      - name: clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: build + test core
+        run: |
+          cargo build -p st-core --release
+          cargo test  -p st-core --release -- --nocapture
+      - name: build upper stack
+        run: |
+          cargo build -p st-nn --release
+          cargo build -p st-rl --release
+          cargo build -p st-rec --release
+  wgpu-macos:
+    name: st-tensor (wgpu / macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: build tensor + wgpu
+        run: cargo build -p st-tensor --features wgpu --release

@@ -8,10 +8,14 @@ use thiserror::Error;
 pub mod auto;
 pub mod ir;
 pub mod query;
+pub mod registry;
 pub mod tile;
 
 pub use ir::{Expr, ScalarType, SubgroupModule, SubgroupOp, SubgroupStmt};
 pub use query::{compile as compile_query, Filter, OrderDirection, QueryPlan};
+pub use registry::{
+    AutotuneKey, DeviceProfile, KernelProfile, TelemetryLog, TelemetrySample, TelemetrySummary,
+};
 pub use tile::{TileConfig, TileIter, TileTemplate};
 
 #[derive(Clone, Copy, Debug, Default)]
