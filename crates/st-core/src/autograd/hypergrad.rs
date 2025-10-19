@@ -16,11 +16,24 @@ pub struct UnrolledOut {
     pub dval_dhyper: Tensor,
 }
 
+/// How to approximate Jacobian-vector products with finite differences.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FiniteDiffMode {
+    Forward,
+    Central,
+}
+
+impl Default for FiniteDiffMode {
+    fn default() -> Self { Self::Forward }
+}
+
 /// Diagnostics for implicit solvers (e.g. CG residuals).
 #[derive(Clone, Debug)]
 pub struct ImplicitDiagnostics {
+    pub solver: Solver,
     pub iterations: usize,
     pub residual: f32,
+    pub finite_diff_mode: FiniteDiffMode,
 }
 
 /// Output of the implicit hypergradient computation.
@@ -36,6 +49,7 @@ pub struct ImplicitOptions {
     pub max_iters: usize,
     pub tolerance: f32,
     pub finite_diff_eps: f32,
+    pub finite_diff_mode: FiniteDiffMode,
     pub zero_existing_grads: bool,
 }
 
@@ -46,6 +60,7 @@ impl Default for ImplicitOptions {
             max_iters: 8,
             tolerance: 1e-6,
             finite_diff_eps: 1e-3,
+            finite_diff_mode: FiniteDiffMode::Forward,
             zero_existing_grads: true,
         }
     }
@@ -56,6 +71,10 @@ impl ImplicitOptions {
     pub fn with_max_iters(mut self, iters: usize) -> Self { self.max_iters = iters; self }
     pub fn with_tolerance(mut self, tol: f32) -> Self { self.tolerance = tol; self }
     pub fn with_finite_diff_eps(mut self, eps: f32) -> Self { self.finite_diff_eps = eps; self }
+    pub fn with_finite_diff_mode(mut self, mode: FiniteDiffMode) -> Self {
+        self.finite_diff_mode = mode;
+        self
+    }
     pub fn keep_existing_grads(mut self) -> Self { self.zero_existing_grads = false; self }
 }
 
@@ -169,29 +188,98 @@ where
     }
 }
 
-fn jvp_approx<F>(step_fn:F, w0:&Tensor, hyper:&Tensor, batch:&Tensor, base:&Tensor, x:&Tensor, eps: f32) -> Tensor
-where F: Fn(&Tensor, &Tensor, &Tensor)->Tensor {
-    let w_eps = w0.add(&x.mul_scalar(eps));
-    let s_eps = step_fn(&w_eps, hyper, batch);
-    s_eps.sub(base).mul_scalar(1.0/eps)
+fn jvp_approx<F>(
+    step_fn: F,
+    w0: &Tensor,
+    hyper: &Tensor,
+    batch: &Tensor,
+    base: &Tensor,
+    x: &Tensor,
+    eps: f32,
+    mode: FiniteDiffMode,
+) -> Tensor
+where
+    F: Fn(&Tensor, &Tensor, &Tensor) -> Tensor,
+{
+    match mode {
+        FiniteDiffMode::Forward => {
+            let w_eps = w0.add(&x.mul_scalar(eps));
+            let s_eps = step_fn(&w_eps, hyper, batch);
+            s_eps.sub(base).mul_scalar(1.0 / eps)
+        }
+        FiniteDiffMode::Central => {
+            let offset = x.mul_scalar(eps);
+            let w_plus = w0.add(&offset);
+            let w_minus = w0.sub(&offset);
+            let s_plus = step_fn(&w_plus, hyper, batch);
+            let s_minus = step_fn(&w_minus, hyper, batch);
+            s_plus.sub(&s_minus).mul_scalar(0.5 / eps)
+        }
+    }
 }
 
-fn implicit_neumann<F>(step_fn:F, w0:Tensor, mut hyper:Tensor, batch:Tensor, base:Tensor, g:Tensor, opts:&ImplicitOptions) -> Result<ImplicitOut, HypergradError>
-where F: Fn(&Tensor, &Tensor, &Tensor)->Tensor + Copy {
+fn implicit_neumann<F>(
+    step_fn: F,
+    w0: Tensor,
+    mut hyper: Tensor,
+    batch: Tensor,
+    base: Tensor,
+    g: Tensor,
+    opts: &ImplicitOptions,
+) -> Result<ImplicitOut, HypergradError>
+where
+    F: Fn(&Tensor, &Tensor, &Tensor) -> Tensor + Copy,
+{
     let mut v = g.clone();
     let mut jt = g.clone();
+    let mut iterations = 0usize;
+    let mut residual = jt.dot(&jt).item_f32().sqrt();
+
     for _ in 0..opts.max_iters {
-        jt = jvp_approx(step_fn, &w0, &hyper, &batch, &base, &jt, opts.finite_diff_eps);
-        v  = v.add(&jt);
+        iterations += 1;
+        jt = jvp_approx(
+            step_fn,
+            &w0,
+            &hyper,
+            &batch,
+            &base,
+            &jt,
+            opts.finite_diff_eps,
+            opts.finite_diff_mode,
+        );
+        residual = jt.dot(&jt).item_f32().sqrt();
+        v = v.add(&jt);
+        if residual < opts.tolerance {
+            break;
+        }
     }
     // seed backward on base with v to pick up ∂ step / ∂ hyper contribution
+    base.zero_grad();
     base.backward_with_grad(&v).ok();
     let dh = hyper.grad().ok_or(HypergradError::MissingGrad("hyper"))?;
-    Ok(ImplicitOut{ dval_dhyper: dh, diagnostics: None })
+    Ok(ImplicitOut {
+        dval_dhyper: dh,
+        diagnostics: Some(ImplicitDiagnostics {
+            solver: opts.solver,
+            iterations,
+            residual,
+            finite_diff_mode: opts.finite_diff_mode,
+        }),
+    })
 }
 
-fn implicit_cg<F>(step_fn:F, w0:Tensor, mut hyper:Tensor, batch:Tensor, base:Tensor, g:Tensor, opts:&ImplicitOptions) -> Result<ImplicitOut, HypergradError>
-where F: Fn(&Tensor, &Tensor, &Tensor)->Tensor + Copy {
+fn implicit_cg<F>(
+    step_fn: F,
+    w0: Tensor,
+    mut hyper: Tensor,
+    batch: Tensor,
+    base: Tensor,
+    g: Tensor,
+    opts: &ImplicitOptions,
+) -> Result<ImplicitOut, HypergradError>
+where
+    F: Fn(&Tensor, &Tensor, &Tensor) -> Tensor + Copy,
+{
     // Solve (I - J)^T v = g  via CG on normal equations A = (I - J)(I - J)^T (symmetric PSD approx)
     // We approximate Av with: A x ≈ x - J x - J^T x + J J^T x.
     // Approximate J x with jvp; approximate J^T x by recomputing grad via backward seed trick.
@@ -205,13 +293,31 @@ where F: Fn(&Tensor, &Tensor, &Tensor)->Tensor + Copy {
     for _ in 0..opts.max_iters {
         iterations += 1;
         // A p ≈ p - J p - J^T p + J J^T p
-        let jp  = jvp_approx(step_fn, &w0, &hyper, &batch, &base, &p, opts.finite_diff_eps);
+        let jp = jvp_approx(
+            step_fn,
+            &w0,
+            &hyper,
+            &batch,
+            &base,
+            &p,
+            opts.finite_diff_eps,
+            opts.finite_diff_mode,
+        );
         // J^T p via backward seed: seed base with jp, read grad at base
         base.zero_grad();
         base.backward_with_grad(&jp).ok();
         let jtp = base.grad().ok_or(HypergradError::MissingGrad("base"))?;
         // J J^T p via J applied to (J^T p)
-        let j_jtp = jvp_approx(step_fn, &w0, &hyper, &batch, &base, &jtp, opts.finite_diff_eps);
+        let j_jtp = jvp_approx(
+            step_fn,
+            &w0,
+            &hyper,
+            &batch,
+            &base,
+            &jtp,
+            opts.finite_diff_eps,
+            opts.finite_diff_mode,
+        );
         let ap = p.sub(&jp).sub(&jtp).add(&j_jtp);
 
         let denom = p.dot(&ap).item_f32();
@@ -231,8 +337,13 @@ where F: Fn(&Tensor, &Tensor, &Tensor)->Tensor + Copy {
     base.zero_grad();
     base.backward_with_grad(&v).ok();
     let dh = hyper.grad().ok_or(HypergradError::MissingGrad("hyper"))?;
-    Ok(ImplicitOut{
+    Ok(ImplicitOut {
         dval_dhyper: dh,
-        diagnostics: Some(ImplicitDiagnostics{ iterations, residual }),
+        diagnostics: Some(ImplicitDiagnostics {
+            solver: opts.solver,
+            iterations,
+            residual,
+            finite_diff_mode: opts.finite_diff_mode,
+        }),
     })
 }
