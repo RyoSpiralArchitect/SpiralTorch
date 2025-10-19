@@ -21,6 +21,7 @@ SpiralTorch already offers a rich Rust-first runtime, a shared hypergrad tape fo
 - **ONNX/interop matrix.** Document the current ONNX export/ingest path and enumerate the missing operators for parity with PyTorch 2.x. Track the maturity per backend for both forward and backward passes.
 - **Model hub prototype.** Sketch a minimal artifact registry backed by object storage. Ensure AGPL license metadata and reproducibility manifests are embedded.
 - **Tuning pipelines.** Bundle sample configurations for Optuna and Ray Tune. Show how the hypergrad tape and planner can be wired in without Python-side tensor copying.
+- **Compatibility playbook.** Maintain the [Compatibility Strategy](compatibility_strategy.md) as a living guide for PyTorch/TensorFlow migrations, including API diff tables, operator coverage, and hybrid deployment recipes.
 
 ## Measuring Progress
 - Establish a living changelog that calls out which roadmap items advanced in each release.
