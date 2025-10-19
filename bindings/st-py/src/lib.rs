@@ -4,7 +4,7 @@
 //! - extras はトップレベルに直登録（UX良し）
 
 use pyo3::prelude::*;
-use pyo3::wrap_pyfunction;
+use pyo3::types::PyModule;
 
 //
 // =======================
@@ -13,6 +13,7 @@ use pyo3::wrap_pyfunction;
 //
 mod extras {
     use super::*;
+    use pyo3::wrap_pyfunction;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_894_8_f64;
@@ -151,48 +152,45 @@ mod extras {
 //
 #[pymodule]
 fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
-    // 1) トップレベル：extras を直登録（from spiraltorch import golden_ratio など）
+    // 1) トップレベル：extras を直登録
     extras::register(py, m)?;
 
-    // 2) サブモジュールを空でも作っておく（将来ここで各 crate の register を呼ぶ）
-    //    これで `import spiraltorch.nn` などが今から可能になる。
-    let nn = PyModule::new(py, "nn")?;
-    // st_nn::py::register(py, &nn)?;  // ← 実装が出来次第ここで配線
+    // 2) サブモジュールを Bound API で作る
+    let nn        = PyModule::new_bound(py, "nn")?;
     nn.add("__doc__", "SpiralTorch neural network primitives")?;
     m.add_submodule(&nn)?;
 
-    let frac = PyModule::new(py, "frac")?;
+    let frac      = PyModule::new_bound(py, "frac")?;
     frac.add("__doc__", "Fractal & fractional tools")?;
     m.add_submodule(&frac)?;
 
-    let dataset = PyModule::new(py, "dataset")?;
+    let dataset   = PyModule::new_bound(py, "dataset")?;
     dataset.add("__doc__", "Datasets & loaders")?;
     m.add_submodule(&dataset)?;
 
-    let linalg = PyModule::new(py, "linalg")?;
+    let linalg    = PyModule::new_bound(py, "linalg")?;
     linalg.add("__doc__", "Linear algebra utilities")?;
     m.add_submodule(&linalg)?;
 
-    let rl = PyModule::new(py, "rl")?;
+    let rl        = PyModule::new_bound(py, "rl")?;
     rl.add("__doc__", "Reinforcement learning components")?;
     m.add_submodule(&rl)?;
 
-    let rec = PyModule::new(py, "rec")?;
+    let rec       = PyModule::new_bound(py, "rec")?;
     rec.add("__doc__", "Reconstruction / signal processing")?;
     m.add_submodule(&rec)?;
 
-    let telemetry = PyModule::new(py, "telemetry")?;
+    let telemetry = PyModule::new_bound(py, "telemetry")?;
     telemetry.add("__doc__", "Telemetry / dashboards / metrics")?;
     m.add_submodule(&telemetry)?;
 
-    let ecosystem = PyModule::new(py, "ecosystem")?;
+    let ecosystem = PyModule::new_bound(py, "ecosystem")?;
     ecosystem.add("__doc__", "Integrations & ecosystem glue")?;
     m.add_submodule(&ecosystem)?;
 
     // 3) 見栄え
     m.add("__all__", vec![
         "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
-        // ルート直下の関数/クラスを列挙したければここに追加
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",
