@@ -52,116 +52,13 @@ the kernels, the hypergrad tape streams Z-space meaning, and the high-level
 The stack is comfortable living entirely in Rust—yet the Python wheel remains a
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
-# SpiralTorch Architecture
 
-## Overview (Mermaid)
+# SpiralTorch Architecture(Overview)
 
-```mermaid
-flowchart TB
-  %% ======== Domain / Higher stacks ========
-  subgraph Domain[Higher Stacks / Domain APIs]
-    STNN[st-nn (tensor/numerical DSL)]
-    STRL[st-rl (control/RL)]
-    STREC[st-rec (recsys)]
-    CT[CanvasTransformer (model/pipeline)]
-  end
 
-  %% ======== Bindings ========
-  subgraph Bindings[APIs / Bindings]
-    PY[Python API]
-    TS[TypeScript / WASM API]
-  end
-
-  %% ======== Core ========
-  subgraph Core[st-core]
-    OPS[Ops (realgrad / projection / fft ...)]
-    IR[Graph IR + type/shape inference]
-    OPT[Optimization passes (fusion / tiling / vectorization / layout / const-fold)]
-    REG[Op registry + dispatch]
-    SCH[Scheduler]
-    RT[Runtime (async / queues / events)]
-    MEM[Memory & layout (allocator / pools / transfers)]
-    KV[KV-Cache Manager (paged / tensorized)]
-    TLM[Telemetry / XAI hooks]
-  end
-
-  %% ======== Tensor layer ========
-  subgraph Tensor[st-tensor]
-    TENSOR[Tensor abstraction & layouts]
-    CAP[Device capability detection]
-  end
-
-  %% ======== Codegen / DSL ========
-  subgraph KD[st-kdsl]
-    KDSL[Kernel DSL]
-    CGEN[Codegen: WGSL / CUDA]
-    AT[Autotune + Perf DB]
-    KC[Kernel cache]
-  end
-
-  %% ======== Backends ========
-  subgraph BE[Execution backends]
-    WGPU[WGPU / WGSL executor]
-    CUDA[CUDA executor (cuBLAS / cuDNN / FlashAttn / FFT)]
-    CPU[CPU fallback]
-  end
-
-  %% ======== Telemetry / XAI ========
-  subgraph Telemetry[Telemetry / XAI]
-    METRICS[Metrics & traces]
-    VIZ[Dashboard (TS UI) incl. Live Canvas]
-    LOGS[Structured logs]
-  end
-
-  %% ======== CanvasTransformer internals (conceptual) ========
-  subgraph CTI[CanvasTransformer Internals]
-    PCH[Canvas patchify / tokenizer]
-    ENCDEC[Encoder/Decoder (ViT/UT-like blocks)]
-    ATTN[Attention blocks (Flash/Block-sparse/Windowed)]
-    POS[Positional encoding (RoPE/Relative Bias)]
-    NORM[Norms (LayerNorm/RMSNorm)]
-    LOSSES[Losses (xent/LPIPS/perceptual/-diffusion-ready)]
-  end
-
-  %% Domain to APIs
-  STNN --> Bindings
-  STRL --> Bindings
-  STREC --> Bindings
-  CT --> Bindings
-
-  %% APIs into Core
-  Bindings --> OPS
-  OPS --> IR --> OPT --> REG --> SCH --> RT --> MEM --> TENSOR -->|calls| BE
-
-  %% CT internals use Core Ops
-  CTI --> OPS
-  ATTN --> REG
-  POS --> REG
-  NORM --> REG
-  PCH --> OPS
-  ENCDEC --> OPS
-  LOSSES --> OPS
-
-  %% KV-Cache for CT inference
-  CTI -. KV/KV-Cache .-> Core
-  KV --> MEM
-
-  %% Codegen path
-  REG --> KD --> BE
-  CAP --> REG
-  AT <--> KD
-  KC <--> KD
-
-  %% Telemetry taps
-  IR -.-> TLM
-  RT -.-> TLM
-  BE -.-> TLM
-  TLM --> METRICS --> VIZ
-  TLM --> LOGS
-  TS --> VIZ
 ```
 
-## ASCII Diagram (Mermaid fallback)
+## ASCII Diagram 
 
 ```
           ┌────────────── Higher Stacks / Domain APIs ───────────────┐
