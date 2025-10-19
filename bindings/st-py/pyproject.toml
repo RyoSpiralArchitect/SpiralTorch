@@ -17,6 +17,9 @@ classifiers = [
   "Operating System :: OS Independent"
 ]
 
+[tool.maturin]
+python-source = "python"
+
 [project.urls]
 Homepage = "https://github.com/RyoSpiralArchitect/SpiralTorch"
 Source = "https://github.com/RyoSpiralArchitect/SpiralTorch"
