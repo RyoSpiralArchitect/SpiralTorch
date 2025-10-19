@@ -4,6 +4,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
 mod tensor;
+mod compat;
 
 // =======================
 // extras（安全・自己完結）
@@ -182,6 +183,7 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     // 1) トップレベル（そのまま import できる）
     extras::register(py, m)?;
     tensor::register(py, m)?;
+    compat::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     let nn = PyModule::new_bound(py, "nn")?;
