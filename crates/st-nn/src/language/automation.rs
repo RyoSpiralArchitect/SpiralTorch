@@ -73,7 +73,7 @@ impl DesireAutomation {
     }
 
     pub fn gradient_control(&self) -> DesireGradientControl {
-        self.desire.gradient_control()
+        *self.desire.gradient_control()
     }
 
     pub fn trigger_count(&self) -> u64 {

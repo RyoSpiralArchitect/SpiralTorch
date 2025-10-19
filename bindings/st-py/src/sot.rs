@@ -300,7 +300,7 @@ pub(crate) fn build_plan(total_steps: usize, params: Sot3DParams) -> PyResult<Py
 }
 
 #[pyclass(module = "spiraltorch.sot", name = "SoT3DStep")]
-struct PySoT3DStep {
+pub(crate) struct PySoT3DStep {
     step: Sot3DStep,
 }
 
@@ -498,7 +498,7 @@ impl PySoT3DStep {
 }
 
 #[pyclass(module = "spiraltorch.sot", name = "MacroSummary")]
-struct PyMacroSummary {
+pub(crate) struct PyMacroSummary {
     summary: MacroSummary,
 }
 
@@ -870,6 +870,47 @@ pub(crate) fn generate_plan_with_params(
     params: Sot3DParams,
 ) -> PyResult<PySoT3DPlan> {
     build_plan(total_steps, params)
+}
+
+pub(crate) fn plan_from_py_config(
+    default_steps: usize,
+    cfg: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Option<PySoT3DPlan>> {
+    let mut plan_steps = default_steps;
+    let mut params = Sot3DParams {
+        base_radius: 1.0,
+        radial_growth: 0.05,
+        base_height: 1.0,
+        meso_gain: 0.2,
+        micro_gain: 0.05,
+    };
+
+    if let Some(cfg) = cfg {
+        if let Some(value) = cfg.get_item("steps")? {
+            plan_steps = value.extract()?;
+        }
+        if let Some(value) = cfg.get_item("base_radius")? {
+            params.base_radius = value.extract()?;
+        }
+        if let Some(value) = cfg.get_item("radial_growth")? {
+            params.radial_growth = value.extract()?;
+        }
+        if let Some(value) = cfg.get_item("base_height")? {
+            params.base_height = value.extract()?;
+        }
+        if let Some(value) = cfg.get_item("meso_gain")? {
+            params.meso_gain = value.extract()?;
+        }
+        if let Some(value) = cfg.get_item("micro_gain")? {
+            params.micro_gain = value.extract()?;
+        }
+    }
+
+    if plan_steps == 0 {
+        Ok(None)
+    } else {
+        generate_plan_with_params(plan_steps, params).map(Some)
+    }
 }
 
 #[pyfunction]
