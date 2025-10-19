@@ -12,7 +12,8 @@
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
+    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource,
+    ZSupport,
 };
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
@@ -340,7 +341,7 @@ impl InterfaceZLift {
             support: total_support,
             interface_cells,
             band_energy,
-            // [SCALE-TODO] Patch 0 default
+            // [SCALE-TODO] Stage scale metadata without applying it.
             scale: ZScale::ONE,
             drift,
             z_bias: bias,
@@ -357,6 +358,7 @@ pub struct InterfaceZPulse {
     pub support: f32,
     pub interface_cells: f32,
     pub band_energy: (f32, f32, f32),
+    // [SCALE-TODO] Restore scale metadata for staged rollout.
     pub scale: ZScale,
     pub drift: f32,
     pub z_bias: f32,
@@ -402,7 +404,7 @@ impl InterfaceZPulse {
             support,
             interface_cells,
             band_energy: band,
-            // [SCALE-TODO] Patch 0 aggregate placeholder
+            // [SCALE-TODO] Aggregation keeps scale at unity for now.
             scale: ZScale::ONE,
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
@@ -430,7 +432,7 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            // [SCALE-TODO] Patch 0 lerp placeholder
+            // [SCALE-TODO] Pending interpolation strategy for scale.
             scale: ZScale::ONE,
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
@@ -450,6 +452,7 @@ impl InterfaceZPulse {
                 self.band_energy.1 * gain,
                 self.band_energy.2 * gain,
             ),
+            // [SCALE-TODO] Scaling does not yet touch scale metadata.
             scale: self.scale,
             drift: self.drift * gain,
             z_bias: self.z_bias * gain,
@@ -469,7 +472,7 @@ impl InterfaceZPulse {
             band_energy: self.band_energy,
             drift: self.drift,
             z_signal: self.z_bias,
-            // [SCALE-TODO] Patch 0 optional tagging
+            // [SCALE-TODO] Surface scale metadata to telemetry without applying it yet.
             scale: Some(self.scale),
         }
     }
@@ -486,6 +489,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
+            // [SCALE-TODO] Default to unity scaling during staged rollout.
             scale: ZScale::ONE,
             drift: 0.0,
             z_bias: 0.0,
