@@ -10,6 +10,8 @@ description = "SpiralTorch fractional calculus (Grünwald–Letnikov) operators 
 [dependencies]
 ndarray = "0.15"
 thiserror = "1"
+num-complex = "0.4"
+libm = "0.2"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
