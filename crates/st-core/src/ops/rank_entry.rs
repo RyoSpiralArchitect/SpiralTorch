@@ -26,7 +26,7 @@ impl RankPlan {
     /// Build a SpiralK FFT plan that mirrors the heuristic choice associated with this rank plan.
     pub fn fft_plan(&self) -> SpiralKFftPlan {
         SpiralKFftPlan {
-            radix: self.choice.fft_radix.max(2).min(4),
+            radix: self.choice.fft_radix.clamp(2, 4),
             tile_cols: self.choice.fft_tile.max(1),
             segments: self.choice.fft_segments.max(1),
             subgroup: self.choice.subgroup,

@@ -7,6 +7,7 @@
 pub mod fractional;
 
 pub mod backend;
+pub mod dlpack;
 
 #[cfg(feature = "wgpu_frac")]
 mod util;

@@ -8,7 +8,7 @@ use super::collective::CollectiveArena;
 /// Errors emitted by the [`DistributedTrainer`].
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum DistributedTrainerError {
-    #[error("trainer requires at least one shard and positive dimension")] 
+    #[error("trainer requires at least one shard and positive dimension")]
     EmptyTopology,
     #[error("learning rate must be positive, got {0}")]
     NonPositiveLearningRate(f32),
@@ -30,12 +30,18 @@ pub struct DistributedTrainer {
 
 impl DistributedTrainer {
     /// Builds a trainer with the provided shard configuration.
-    pub fn new(shards: usize, shard_dim: usize, learning_rate: f32) -> Result<Self, DistributedTrainerError> {
+    pub fn new(
+        shards: usize,
+        shard_dim: usize,
+        learning_rate: f32,
+    ) -> Result<Self, DistributedTrainerError> {
         if shards == 0 || shard_dim == 0 {
             return Err(DistributedTrainerError::EmptyTopology);
         }
         if learning_rate <= 0.0 {
-            return Err(DistributedTrainerError::NonPositiveLearningRate(learning_rate));
+            return Err(DistributedTrainerError::NonPositiveLearningRate(
+                learning_rate,
+            ));
         }
         Ok(Self {
             arena: CollectiveArena::new(),
@@ -75,7 +81,10 @@ impl DistributedTrainer {
     }
 
     /// Applies a synchronous gradient step after performing an all-reduce sum.
-    pub fn apply_step(&mut self, gradients: &mut [Vec<f32>]) -> Result<(), DistributedTrainerError> {
+    pub fn apply_step(
+        &mut self,
+        gradients: &mut [Vec<f32>],
+    ) -> Result<(), DistributedTrainerError> {
         if gradients.len() != self.parameters.len() {
             return Err(DistributedTrainerError::GradientDimension {
                 expected: self.parameters.len(),
@@ -122,7 +131,7 @@ impl DistributedTrainer {
             return Ok(false);
         }
         let total = self.total_params();
-        if self.async_buffer.len() % total != 0 {
+        if !self.async_buffer.len().is_multiple_of(total) {
             return Err(DistributedTrainerError::AsyncPayload {
                 expected: total,
                 got: self.async_buffer.len(),

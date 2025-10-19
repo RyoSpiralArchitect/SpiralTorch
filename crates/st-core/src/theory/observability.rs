@@ -289,7 +289,7 @@ impl ObservationalCoalgebra {
             } else {
                 (*obs as f64) / (*bound as f64)
             };
-            efficiency.push(eta.min(1.0).max(0.0));
+            efficiency.push(eta.clamp(0.0, 1.0));
         }
         ObservabilityAssessment {
             expected,
@@ -327,7 +327,7 @@ fn polya_dihedral(child_signatures: u128, branching: u32) -> u128 {
         let g = gcd_u32(branching, j);
         base_sum = base_sum.saturating_add(child_signatures.saturating_pow(g));
     }
-    let additional = if branching % 2 == 0 {
+    let additional = if branching.is_multiple_of(2) {
         // even: include two reflection families
         let half = branching / 2;
         let term_a = child_signatures.saturating_pow(half + 1);
@@ -335,7 +335,7 @@ fn polya_dihedral(child_signatures: u128, branching: u32) -> u128 {
         u128::from(half) * (term_a + term_b)
     } else {
         // odd: a single family with (b+1)/2 cycles
-        let power = (branching + 1) / 2;
+        let power = branching.div_ceil(2);
         u128::from(branching) * child_signatures.saturating_pow(power)
     };
     (base_sum + additional) / (2 * u128::from(branching))

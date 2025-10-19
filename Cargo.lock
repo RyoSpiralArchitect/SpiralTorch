@@ -2380,6 +2380,7 @@ dependencies = [
  "ndarray",
  "num-complex",
  "pyo3",
+ "pyo3-build-config",
  "st-backend-hip",
  "st-core",
  "st-frac",
@@ -2432,6 +2433,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "st-backend-wgpu"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "thiserror 1.0.69",
+ "wgpu",
+]
+
+[[package]]
 name = "st-bench"
 version = "0.1.0"
 dependencies = [
@@ -2476,8 +2486,13 @@ dependencies = [
 name = "st-frac"
 version = "0.1.1"
 dependencies = [
+ "bytemuck",
+ "libm",
  "ndarray",
+ "num-complex",
+ "pollster",
  "thiserror 1.0.69",
+ "wgpu",
 ]
 
 [[package]]
@@ -2532,6 +2547,8 @@ dependencies = [
  "serde",
  "serde_json",
  "st-core",
+ "st-frac",
+ "st-logic",
  "st-nn",
  "thiserror 1.0.69",
 ]
@@ -2540,6 +2557,7 @@ dependencies = [
 name = "st-rec"
 version = "0.1.0"
 dependencies = [
+ "rand",
  "st-kdsl",
  "st-rl",
  "st-tensor",

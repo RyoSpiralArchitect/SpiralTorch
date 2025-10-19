@@ -7,8 +7,14 @@ license = "AGPL-3.0-or-later"
 authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 
 [lib]
-name = "spiraltorch"
+# ← Rust 側ビルド成果物の内部名（任意・Pythonには見えない）
+name = "spiraltorch_native"
 crate-type = ["cdylib"]
+
+[package.metadata.pyo3]
+extension-module = true
+abi3 = true
+abi3-py38 = true
 
 [features]
 default = ["extension-module", "psi", "psychoid", "collapse"]
@@ -19,7 +25,7 @@ collapse = ["psi"]
 
 # Backend selection (mirrors the CLI surface expected by maturin builds)
 cpu = []
-wgpu = ["st-core/wgpu", "st-tensor/wgpu"]
+wgpu = ["st-core/wgpu", "st-tensor/wgpu_frac"]
 "wgp" = ["wgpu"]
 "wgpu-rt" = ["st-core/wgpu-rt", "wgpu"]
 mps = ["st-core/mps", "st-tensor/mps"]
@@ -30,7 +36,10 @@ logic = ["st-core/logic"]
 "logic-learn" = ["st-core/logic-learn"]
 kdsl = ["st-core/kdsl", "st-nn/kdsl", "st-rl/kdsl"]
 "kv-redis" = ["st-core/kv-redis"]
-"wgpu-frac" = ["st-tensor/wgpu_frac"]
+"wgpu-frac" = ["wgpu"]
+
+[build-dependencies]
+pyo3-build-config = "0.22"
 
 [dependencies]
 pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", "gil-refs", "num-complex"] }
@@ -46,7 +55,9 @@ ndarray = { version = "0.15", default-features = false, features = ["std"] }
 num-complex = { version = "0.4" }
 
 [package.metadata.maturin]
-name = "spiraltorch"
+# ← Python から見える拡張モジュール名（import 時のサブモジュール名）
+#    これで `spiraltorch._native` が生成される
+name = "spiraltorch._native"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

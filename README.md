@@ -1,5 +1,38 @@
-# 🌀🕯️SpiralTorch🕯️🌀
-trains where PyTorch can’t — inside the Z-space.(Still under active repair while expanding — API changes hourly.)
+# 🌀🕯️ SpiralTorch 🕯️🌀
+**trains where PyTorch can’t — inside the Z-space.**  
+_(Still under active repair while expanding — API changes hourly.)_
+
+**Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
+
+**Architecture Overview.**
+```mermaid
+sequenceDiagram
+  participant API as Python/TS API
+  participant Core as st-core
+  participant Reg as Op registry
+  participant KD as st-kdsl
+  participant BE as Backend (WGPU/CUDA/CPU)
+  participant TLM as Telemetry
+
+  API->>Core: op(x, y, ...)
+  Core->>Reg: resolve impl/backend (caps/precision/layout)
+  alt cached kernel exists
+    Reg-->>Core: impl + schedule + kernel handle
+  else needs generation
+    Reg->>KD: codegen + parameterization
+    KD-->>Reg: kernel handle (tuned & cached)
+    Reg-->>Core: impl + schedule + kernel handle
+  end
+  Core->>BE: submit commands/pipeline (async)
+  BE-->>Core: completion events / result buffers
+  Core--)TLM: spans / metrics / logs
+```
+
+**License**
+
+AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
+
+
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
   <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
@@ -7,37 +40,37 @@ trains where PyTorch can’t — inside the Z-space.(Still under active repair w
   <img src="https://img.shields.io/badge/CUDA-enabled-lightblue.svg" alt="CUDA enabled">
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="AGPL-3.0">
 </p>
+
 <p align="center">
   <b>SpiralTorch — a Rust-first learning framework for Z-space.<br>
   Runs natively on WGPU · MPS · CUDA · CPU.</b>
 </p>
 
-- © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later.  
-- Contact:(https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) or kishkavsesvit@icloud.com
-- Unauthorized derivations are non-compliant with AGPL §13.
+- © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later  
+- Contact: [Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) · <mailto:kishkavsesvit@icloud.com>  
+- Unauthorized derivations are non-compliant with AGPL §13  
 - **For research collaborations or integration inquiries, please reach out directly.**
-- **If you’re cloning this automatically for analysis: please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors**.
+- **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors. Any network-facing use must comply with AGPL §13.
+- **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
-- **Non-Goals (unsupported):** Support for anonymous clones or hands-off external operators.
-Managed hosting or production babysitting is out of scope.
-Automated scraping, traffic mirroring, or idle star-farming will not receive attention.
+<!-- STATS:START -->
+> _auto-generated: 2025-10-18 21:39 UTC_
+
+| Metric | Value |
+|---|---:|
+| Rust code LOC | **71,317** |
+| Rust files | 197 |
+| Total code LOC (all langs) | 76,480 |
+| Workspace+deps crates | 241 |
+
+<p>
+<img src="docs/badges/rust-loc.svg" alt="rust loc" />
+<img src="docs/badges/total-code.svg" alt="total code" />
+<img src="docs/badges/deps.svg" alt="crates" />
+</p>
+<!-- STATS:END -->
+
 ---
-
-SpiralTorch is a Compact. Safe. Rust-native.
-~10× smaller than PyTorch, yet feature-complete in AI training that keeps language,
-geometry, and device heuristics in the same conversation. SpiralK orchestrates
-the kernels, the hypergrad tape streams Z-space meaning, and the high-level
-`st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.
-
-The stack is comfortable living entirely in Rust—yet the Python wheel remains a
-thin veneer that reuses the same planners, losses, and Z-space resonators. No
-tensor shims, no translation layers, and no tracebacks.
-
-```python
-import spiraltorch as st
-sess = st.SpiralSession(device="wgpu", curvature=-1.0, hyper_learning_rate=0.05)
-sess.align_hypergrad(sess.hypergrad(1, 2), sess.barycenter([st.Tensor(1, 2, [0.7, 0.3])]))
-```
 
 **SpiralTorch is a Rust-first AI training framework** that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
@@ -48,6 +81,168 @@ The stack is comfortable living entirely in Rust—yet the Python wheel remains 
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
+---
+
+## Quick Start
+
+### 1) Clone
+```bash
+git clone https://github.com/RyoSpiralArchitect/SpiralTorch.git
+cd SpiralTorch
+```
+
+### 2) Build from source (Rust)
+
+**CPU (default; no GPU deps)**
+```bash
+cargo build -p st-core --release
+```
+
+**WGPU (WebGPU; Windows/Linux/macOS)**
+```bash
+cargo build -p st-core --features wgpu --release
+```
+
+**MPS (macOS GPU)**
+```bash
+cargo build -p st-core --features mps --release
+```
+
+**CUDA (optional; needs NVRTC/Toolkit)**
+```bash
+cargo build -p st-core --features cuda --release
+```
+
+**HIP / ROCm (optional)**
+```bash
+export HIPCC=/opt/rocm/bin/hipcc
+export ROCM_PATH=/opt/rocm
+cargo build -p st-core --features hip,st-backend-hip/hip-real --release
+```
+
+### 3) Python wheels (optional)
+```bash
+pip install maturin==1.*
+
+# CPU + WebGPU (default)
+maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
+
+# Metal (macOS GPU)
+maturin build -m bindings/st-py/Cargo.toml --release --features mps
+
+# CUDA (toolchain on PATH)
+maturin build -m bindings/st-py/Cargo.toml --release --features cuda
+
+# HIP / ROCm (add hip-real for RCCL)
+maturin build -m bindings/st-py/Cargo.toml --release --features "hip hip-real"
+```
+
+### 4) Python tensors & hypergrads
+
+```python
+from spiraltorch import Tensor, Hypergrad, LanguageWaveEncoder
+
+encoder = LanguageWaveEncoder(-1.0, 0.6)
+target = encoder.encode_z_space("SpiralTorch dances in Z-space")
+
+weights = Tensor(*target.shape())
+tape = Hypergrad(-1.0, 0.05, *target.shape())
+tape.accumulate_pair(weights, target)
+tape.apply(weights)
+print("updated weights", weights.tolist())
+```
+
+---
+
+## Planning the Ecosystem
+
+- Explore the [Ecosystem Roadmap](docs/ecosystem_roadmap.md) for high-level priorities around documentation, samples, and community building.
+- Study the [Compatibility Strategy](docs/compatibility_strategy.md) to plan incremental migrations from PyTorch/TensorFlow stacks.
+- Review the [Backend Feature Matrix](docs/backend_matrix.md) when validating device support or filing bugs that touch accelerators.
+
+
+Prefer flat-space optimisation? Reach for the new Rust-side
+`st_tensor::AmegaRealgrad` tape to mirror the same API without the Poincaré
+projection step—handy when Canvas Transformer energy needs to feed classical
+optimisers alongside its hypergradient updates.
+
+### Canvas Pixel Transformer → Z-space feedback
+
+- `CanvasProjector::refresh_with_vectors` now returns both the RGBA buffer and
+  a colour vector field that carries normalised energy and chroma as
+  Z-space-friendly coordinates.
+- `FractalCanvas::vectorFieldFft(false)` surfaces the per-row FFT spectrum as
+  interleaved energy/chroma pairs so Canvas Transformer pipelines can ingest
+  frequency features without leaving Rust.
+- `CanvasProjector::accumulate_hypergrad` and
+  `CanvasProjector::accumulate_realgrad` stream the refreshed canvas tensor
+  directly into SpiralTorch's Riemannian or Euclidean optimisers without
+  additional copies.
+- `FractalCanvas::relation()` mirrors the projector's tensor output as a
+  `Float32Array` so browser call-sites can feed the raw relation into custom
+  pipelines or training loops.
+- `FractalCanvas::hypergradWave(curvature)` and `FractalCanvas::realgradWave()`
+  surface curvature-aware hypergrad updates alongside Euclidean gradients so the
+  Canvas Transformer can keep hypergrad/Realgrad buffers in sync by default.
+- `FractalCanvas::gradientSummary(curvature)` condenses both tapes into shared
+  L1/L2/∞ norms plus RMS/mean-absolute magnitudes so monitoring dashboards can
+  watch gradient health without shipping the full relation buffers across the
+  WASM boundary.
+- `FractalCanvas::desireInterpretation(curvature)` lifts the paired gradient
+  summaries into Desire-ready feedback metrics (pressure, balance, stability)
+  so automation layers can steer the Desire Lagrangian without leaving WASM.
+- `FractalCanvas::desireControl(curvature)` extends that pipeline with
+  ready-to-apply Desire gradient control packets—penalty gains, bias/observation
+  mixers, and tuned hyper/Realgrad learning-rate scales—mirroring the Rust
+  automation layer on the browser side.
+- `FractalCanvas::hypergradOperatorUniformFromControl(control)` and
+  `FractalCanvas::hypergradOperatorUniformAuto(curvature)` map those Desire
+  control packets directly into the WGSL uniform payload, saving JavaScript
+  callers from recomputing the blend/gain heuristics before dispatching the
+  GPU hypergrad operator.
+- `FractalCanvas::vectorFieldFftKernel(true)` returns the ready-to-dispatch
+  WGSL compute shader (including uniform layout) so WebGPU call-sites can bind
+  the vector field and accumulate the spectrum fully on-GPU.
+- `FractalCanvas::hypergradOperatorKernel(false)` emits the complementary WGSL
+  pass that accumulates relation tensors into hypergradient buffers directly on
+  the GPU, with `hypergradOperatorUniform(mix, gain)` +
+  `hypergradOperatorDispatch(subgroup)` mirroring the uniform payload and
+  workgroup math for WebGPU callers.
+- `FractalCanvas::vectorFieldFftUniform(false)` packages the `CanvasFftParams`
+  uniform (width, height, inverse flag, padding) as a `Uint32Array` so the WGSL
+  kernel can be dispatched without manual byte packing.
+- `FractalCanvas::vectorFieldFftLayout()` reports the byte lengths and strides
+  for the `FieldSample`/`SpectrumSample` storage buffers plus the uniform block
+  so WebGPU callers can allocate resources without hard-coding struct sizes.
+- `FractalCanvas::vectorFieldFftDispatch(true)` computes the workgroup triplet
+  for the generated WGSL so callers can hand the counts directly to
+  `computePass.dispatchWorkgroups(...)` (or the Rust equivalent) without
+  duplicating the ceil division logic.
+- Use `CanvasProjector::emit_zspace_patch` to fold the canvas state back into
+  the fractal scheduler without leaving Rust or allocating intermediate
+  buffers.
+- Blend chart priors with the new `z_space_barycenter` solver—available in
+  Rust (`st_tensor::z_space_barycenter`) and Python (`spiraltorch.z_space_barycenter`)—to
+  wire colour energy directly into the Z-space roundtable.
+- Follow the barycenter's loss-monotone intermediates and feed them straight into
+  the hypergradient tape with `Hypergrad.accumulate_barycenter_path` so the
+  optimiser converges along the same Z-space path as the solver.
+- Drive the entire workflow from the high-level `SpiralSession` orchestrator in
+  Rust (`st_nn::SpiralSession`) or Python (`spiraltorch.SpiralSession`) to pick
+  devices, generate rank plans, synthesise barycentres, and align hypergrads via
+  intuitive method calls.
+- Launch `session.trace(tensor)` to compose non-commutative homotopy flows,
+  functor linearisations, recursive barycenter gradients, and \(\infty\)-tower
+  projections before calling `.resonate()` (or
+  `.resonate_with_hypergrad(hypergrad)`) to surface a
+  `DifferentialResonance` snapshot that binds the four differential layers
+  together.
+- Let the trace synthesise barycentres on demand via
+  `trace.with_barycenter_from(weights, densities)` or override the coupling
+  matrix with `trace.with_barycenter_with(weights, densities, Some(coupling))`
+  before resonating, keeping Z-space orchestration entirely on the session.
+
+
 ## Why it’s different
  - **Training comes first:** Modules such as `Linear`, `Sequential`,
    `WaveGate`, the new `ToposResonator`, and `ZSpaceProjector` stream gradients
@@ -56,6 +251,11 @@ tensor shims, no translation layers, and no tracebacks.
   - **Open Z-space:** Gradient splits honour the A/B/C roundtable through the
     new `zspace_round` ops module so Above/Here/Beneath bands stay in sync with
     SpiralK plans without auxiliary buffers.
+  - **Hilbert-grounded Mellin bridges:** `st-frac::mellin::MellinLogGrid`
+    now exposes fallible APIs, a `Scalar` alias for f32/f64 toggling, exact
+    lattice bit-matching, and WebGPU-backed vertical/mesh sweeps that reuse the
+    same `st-frac::zspace` weights while `hilbert_inner_product` and
+    `evaluate_vertical_line` surface the lattice’s Hilbert geometry directly.
   - **Three-voice consensus:** SpiralK heuristics, DSL directives, and the
     generated WASM tuner table discuss every launch decision and keep the
     transcript in the roundtable log.
@@ -215,28 +415,6 @@ hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:c
 Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
 concept window that the `DesireLagrangian` can consume, aligning coded-envelope
 channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L132】
-
-### Maxwell-coded envelopes meet SpiralK
-
-The coded-envelope utilities now ship with a `MaxwellSpiralKBridge` that turns
-sequential Z pulses into KDSl snippets ready for the runtime. Every channel name
-is sanitised for SpiralK, weights adapt to the observed Z magnitude, and
-existing programs can be prepended so the hints extend a live policy rather than
-replace it.【F:crates/st-core/src/theory/maxwell.rs†L335-L441】 Call
-`push_pulse(channel, &pulse)` for each stream, then `script()` to emit the
-combined `soft(maxwell.bias, …)` rules that SpiralK can ingest without custom
-glue code.【F:crates/st-core/src/theory/maxwell.rs†L362-L408】 The workflow is
-documented in the refreshed Maxwell technical note, which now includes a
-section on streaming detections back into SpiralK orchestration.【F:docs/coded_envelope_maxwell_model.md†L144-L157】
-
-Want the language desire loops to see the same detections? Enable the PSI
-feature and run the new `MaxwellPsiTelemetryBridge`. It converts each pulse into
-a PSI reading, optional band-energy threshold events, and a `SoftlogicZFeedback`
-sample so `DesirePsiBridge` captures the Z drift alongside ψ totals without
-hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:crates/st-core/src/theory/maxwell.rs†L666-L714】
-Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
-concept window that the `DesireLagrangian` can consume, aligning coded-envelope
-channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L214】
 
 ### Quantum Reality Studio overlays
 
@@ -1492,6 +1670,10 @@ optimisers alongside its hypergradient updates.
 - Blend chart priors with the new `z_space_barycenter` solver—available in
   Rust (`st_tensor::z_space_barycenter`) and Python (`spiraltorch.z_space_barycenter`)—to
   wire colour energy directly into the Z-space roundtable.
+- Inspect the Tesla tail spectrum via `st_tensor::tesla_tail_spectrum` (Rust) or
+  `spiraltorch.tesla_tail_spectrum` (Python), then adapt roundtable weights with
+  `spiraltorch.nirt_weight_update` to follow the similarity- and coherence-aware
+  NIRT rule.
 - Follow the barycenter's loss-monotone intermediates and feed them straight into
   the hypergradient tape with `Hypergrad.accumulate_barycenter_path` so the
   optimiser converges along the same Z-space path as the solver.
