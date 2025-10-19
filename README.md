@@ -53,8 +53,6 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 - **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
-> **Fresh in st-frac:** the Mellin/Hilbert toolkit now returns `Result` everywhere, promotes a crate-wide `Scalar` alias so you can flip between `f32`/`f64`, and ships WebGPU-backed vertical-line/mesh sweeps that reuse the same log-lattice weights without ever touching the pulse primitives.
-
 <!-- STATS:START -->
 > _auto-generated: 2025-10-18 21:39 UTC_
 
