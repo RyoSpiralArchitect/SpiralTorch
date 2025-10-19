@@ -22,8 +22,6 @@ _(Still under active repair while expanding — API changes hourly.)_
 - **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
-> **Fresh in st-frac:** the Mellin/Hilbert toolkit now exposes `MellinLogGrid` log-lattices, reusable Z-plane series sweeps, and batch-friendly integration weights so logarithmic quadrature can flow straight into Z-space without touching the pulse primitives.
-
 <!-- STATS:START -->
 > _auto-generated: 2025-10-18 21:39 UTC_
 
@@ -253,7 +251,8 @@ optimisers alongside its hypergradient updates.
   - **Hilbert-grounded Mellin bridges:** `st-frac::mellin::MellinLogGrid` keeps
     log-uniform quadrature aligned with reusable `st-frac::zspace` weights so
     Mellin sweeps across vertical lines reuse the same energy checks in
-    L^2((0, ∞), dx/x).
+    L^2((0, ∞), dx/x) while `hilbert_inner_product` and `evaluate_vertical_line`
+    surface the lattice’s Hilbert geometry directly.
   - **Three-voice consensus:** SpiralK heuristics, DSL directives, and the
     generated WASM tuner table discuss every launch decision and keep the
     transcript in the roundtable log.

@@ -6,8 +6,8 @@
 use num_complex::Complex32;
 
 use crate::zspace::{
-    mellin_log_lattice_prefactor, trapezoidal_weights, weighted_z_transform,
-    weighted_z_transform_many,
+    evaluate_weighted_series, evaluate_weighted_series_many, mellin_log_lattice_prefactor,
+    prepare_weighted_series, trapezoidal_weights, weighted_z_transform, weighted_z_transform_many,
 };
 
 /// Change-of-variable helper for Mellin integrals.
@@ -118,6 +118,74 @@ impl MellinLogGrid {
             .collect()
     }
 
+    /// Precompute the Z-plane weighted series associated with the grid samples.
+    pub fn weighted_series(&self) -> Vec<Complex32> {
+        prepare_weighted_series(&self.samples, &self.weights)
+    }
+
+    /// Evaluate the Mellin transform using pre-weighted Z-series coefficients.
+    pub fn evaluate_with_series(&self, s: Complex32, weighted: &[Complex32]) -> Complex32 {
+        assert_eq!(
+            weighted.len(),
+            self.samples.len(),
+            "weighted series must match lattice length",
+        );
+        let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s);
+        let series = evaluate_weighted_series(weighted, z);
+        prefactor * series
+    }
+
+    /// Evaluate the Mellin transform at multiple points using pre-weighted coefficients.
+    pub fn evaluate_many_with_series(
+        &self,
+        s_values: &[Complex32],
+        weighted: &[Complex32],
+    ) -> Vec<Complex32> {
+        assert_eq!(
+            weighted.len(),
+            self.samples.len(),
+            "weighted series must match lattice length",
+        );
+        if s_values.is_empty() {
+            return Vec::new();
+        }
+        let mut prefactors = Vec::with_capacity(s_values.len());
+        let mut z_points = Vec::with_capacity(s_values.len());
+        for &s in s_values {
+            let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s);
+            prefactors.push(prefactor);
+            z_points.push(z);
+        }
+        let series = evaluate_weighted_series_many(weighted, &z_points);
+        series
+            .into_iter()
+            .zip(prefactors.into_iter())
+            .map(|(series, prefactor)| prefactor * series)
+            .collect()
+    }
+
+    /// Sweep the Mellin transform along a vertical line `s = real + i * t`.
+    pub fn evaluate_vertical_line(&self, real: f32, imag_values: &[f32]) -> Vec<Complex32> {
+        if imag_values.is_empty() {
+            return Vec::new();
+        }
+        let weighted = self.weighted_series();
+        let mut prefactors = Vec::with_capacity(imag_values.len());
+        let mut z_points = Vec::with_capacity(imag_values.len());
+        for &imag in imag_values {
+            let s = Complex32::new(real, imag);
+            let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s);
+            prefactors.push(prefactor);
+            z_points.push(z);
+        }
+        let series = evaluate_weighted_series_many(&weighted, &z_points);
+        series
+            .into_iter()
+            .zip(prefactors.into_iter())
+            .map(|(series, prefactor)| prefactor * series)
+            .collect()
+    }
+
     /// Return the number of log-uniform samples stored in the grid.
     pub fn len(&self) -> usize {
         self.samples.len()
@@ -148,6 +216,42 @@ impl MellinLogGrid {
         let start = self.log_start;
         let end = self.log_start + self.log_step * (self.samples.len() - 1) as f32;
         (start.exp(), end.exp())
+    }
+
+    fn assert_same_lattice(&self, other: &Self) {
+        assert!(
+            self.len() == other.len()
+                && self.log_start.to_bits() == other.log_start.to_bits()
+                && self.log_step.to_bits() == other.log_step.to_bits(),
+            "grids must share the same log lattice",
+        );
+    }
+
+    /// Hilbert-space inner product approximated on the log-uniform lattice.
+    pub fn hilbert_inner_product(&self, other: &Self) -> Complex32 {
+        self.assert_same_lattice(other);
+
+        let mut acc = Complex32::new(0.0, 0.0);
+        for ((lhs, rhs), &w) in self
+            .samples
+            .iter()
+            .zip(other.samples.iter())
+            .zip(self.weights.iter())
+        {
+            acc += lhs.conj() * *rhs * Complex32::new(w, 0.0);
+        }
+        acc * Complex32::new(self.log_step, 0.0)
+    }
+
+    /// Hilbert-space norm induced by the Mellin lattice.
+    pub fn hilbert_norm(&self) -> f32 {
+        let ip = self.hilbert_inner_product(self);
+        assert!(
+            ip.re >= -1e-6,
+            "inner product must be non-negative real, got {}",
+            ip
+        );
+        ip.re.max(0.0).sqrt()
     }
 }
 
@@ -402,5 +506,87 @@ mod tests {
         let gf = mellin_l2_inner_product(g, exp_decay, range, 8_192);
         let diff = (fg - gf.conj()).norm();
         assert!(diff < 1e-4, "diff={} fg={} gf={} ", diff, fg, gf);
+    }
+
+    #[test]
+    fn mellin_log_grid_vertical_line_matches_batch() {
+        let log_start = -4.0f32;
+        let log_step = 0.05f32;
+        let len = 160usize;
+        let grid = MellinLogGrid::from_function(log_start, log_step, len, exp_decay);
+
+        let real = 1.1f32;
+        let imag_values = [-1.0f32, -0.25, 0.0, 0.75, 1.3];
+        let vertical = grid.evaluate_vertical_line(real, &imag_values);
+        let s_values: Vec<Complex32> = imag_values
+            .iter()
+            .map(|&im| Complex32::new(real, im))
+            .collect();
+        let batch = grid.evaluate_many(&s_values);
+
+        assert_eq!(vertical.len(), batch.len());
+        for (idx, (lhs, rhs)) in vertical.iter().zip(batch.iter()).enumerate() {
+            let diff = (*lhs - *rhs).norm();
+            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
+    }
+
+    #[test]
+    fn mellin_log_grid_weighted_series_matches_api() {
+        let log_start = -3.0f32;
+        let log_step = 0.08f32;
+        let len = 120usize;
+        let grid = MellinLogGrid::from_function(log_start, log_step, len, exp_decay);
+        let weighted = grid.weighted_series();
+
+        let s = Complex32::new(0.9, 0.4);
+        let single_weighted = grid.evaluate_with_series(s, &weighted);
+        let single_api = grid.evaluate(s);
+        assert!((single_weighted - single_api).norm() < 1e-6);
+
+        let s_values = vec![
+            Complex32::new(0.7, -0.3),
+            Complex32::new(1.0, 0.1),
+            Complex32::new(1.2, 0.6),
+        ];
+        let many_weighted = grid.evaluate_many_with_series(&s_values, &weighted);
+        let many_api = grid.evaluate_many(&s_values);
+        for (idx, (lhs, rhs)) in many_weighted.iter().zip(many_api.iter()).enumerate() {
+            let diff = (*lhs - *rhs).norm();
+            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
+    }
+
+    #[test]
+    fn mellin_log_grid_hilbert_inner_product_matches_closed_form() {
+        let log_start = -1.0f32;
+        let log_step = 0.01f32;
+        let len = 201usize; // covers [-1, 1] in the log domain
+        let p = 0.3f32;
+        let q = -0.1f32;
+
+        let f_grid = MellinLogGrid::from_function(log_start, log_step, len, |x| {
+            Complex32::new(x.powf(p), 0.0)
+        });
+        let g_grid = MellinLogGrid::from_function(log_start, log_step, len, |x| {
+            Complex32::new(x.powf(q), 0.0)
+        });
+
+        let ip = f_grid.hilbert_inner_product(&g_grid);
+        let (a, b) = f_grid.support();
+        let exponent = p + q;
+        let expected = (b.powf(exponent) - a.powf(exponent)) / exponent;
+        let diff = (ip - Complex32::new(expected, 0.0)).norm();
+        assert!(diff < 5e-3, "diff={} ip={} expected={}", diff, ip, expected);
+
+        let norm = f_grid.hilbert_norm();
+        let norm_sq = (b.powf(2.0 * p) - a.powf(2.0 * p)) / (2.0 * p);
+        let expected_norm = norm_sq.sqrt();
+        assert!(
+            (norm - expected_norm).abs() < 5e-3,
+            "norm={} expected={}",
+            norm,
+            expected_norm
+        );
     }
 }
