@@ -386,7 +386,9 @@ impl InterfaceZPulse {
         let mut drift_weight = 0.0f32;
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
-        let mut scale_weights = Vec::new();
+        let mut scale_phys = 0.0f32;
+        let mut scale_log = 0.0f32;
+        let mut scale_weight = 0.0f32;
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
@@ -399,7 +401,10 @@ impl InterfaceZPulse {
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
             if let Some(scale) = pulse.scale {
-                scale_weights.push((scale, weight));
+                let w = scale_weight_for(pulse);
+                scale_phys += scale.physical_radius * w;
+                scale_log += scale.log_radius * w;
+                scale_weight += w;
             }
         }
         let scale = if scale_weights.is_empty() {
@@ -413,8 +418,11 @@ impl InterfaceZPulse {
             support,
             interface_cells,
             band_energy: band,
-            // [SCALE-TODO] Patch 0 aggregate placeholder
-            scale: ZScale::ONE,
+            scale: if scale_weight > 0.0 {
+                ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
+            } else {
+                None
+            },
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -501,13 +509,17 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: ZScale::ONE,
+            scale: None,
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
             standard_error: None,
         }
     }
+}
+
+fn scale_weight_for(pulse: &InterfaceZPulse) -> f32 {
+    pulse.support.max(pulse.total_energy()).max(f32::EPSILON)
 }
 
 /// Result emitted after fusing the microlocal pulses through [`ZConductor`].
@@ -859,6 +871,7 @@ impl InterfaceZConductor {
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
                 support,
+                scale: pulse.scale,
                 quality,
                 stderr,
                 latency_ms: 0.0,
@@ -913,6 +926,7 @@ impl InterfaceZConductor {
             drift: fused.drift,
             z_bias: fused.z_bias,
             support,
+            scale: fused.scale,
             quality: avg_quality,
             stderr: fused.standard_error.unwrap_or(0.0),
             latency_ms: 0.0,
@@ -959,6 +973,8 @@ mod tests {
         let orient = sig.orientation.expect("orientation missing");
         let normal_y = orient[IxDyn(&[0, 1, 1])];
         let normal_x = orient[IxDyn(&[1, 1, 1])];
+        let norm = (normal_x * normal_x + normal_y * normal_y).sqrt();
+        assert!((norm - 1.0).abs() < 1e-3);
         assert!(normal_y.abs() > 0.5);
         assert!((normal_x.abs() - normal_y.abs()).abs() < 1e-6); // [SCALE-TODO] diagonal orientation persists with neutral scale
         assert!(normal_x.is_sign_negative());
