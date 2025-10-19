@@ -12,6 +12,7 @@ use st_frac::zspace::{
     evaluate_weighted_series, mellin_log_lattice_prefactor, prepare_weighted_series,
     trapezoidal_weights,
 };
+use st_logic::quantum_reality::ZSpace as LogicZSpace;
 use st_nn::{ConceptHint, MaxwellDesireBridge, NarrativeHint};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -256,56 +257,67 @@ pub struct ZSpaceProjection {
     pub evaluations: Vec<ZSpaceEvaluation>,
 }
 
-#[derive(Clone, Debug)]
-pub struct ZSpaceSinkConfig {
-    pub log_start: f32,
-    pub log_step: f32,
-    pub s_values: Vec<ComplexScalar>,
+impl ZSpaceProjection {
+    fn signature_components(&self) -> Vec<f64> {
+        let mut signature = Vec::with_capacity(self.evaluations.len() * 6);
+        for eval in &self.evaluations {
+            signature.push(eval.s.0 as f64);
+            signature.push(eval.s.1 as f64);
+            signature.push(eval.z.0 as f64);
+            signature.push(eval.z.1 as f64);
+            signature.push(eval.value.0 as f64);
+            signature.push(eval.value.1 as f64);
+        }
+        signature
+    }
 }
 
-impl ZSpaceSinkConfig {
-    pub fn vertical_line(log_start: f32, log_step: f32, sigma: f32, tau_samples: &[f32]) -> Self {
-        let s_values = tau_samples
-            .iter()
-            .map(|&tau| ComplexScalar::new(sigma, tau))
-            .collect();
-        Self {
-            log_start,
-            log_step,
-            s_values,
+impl From<&ZSpaceProjection> for LogicZSpace {
+    fn from(projection: &ZSpaceProjection) -> Self {
+        LogicZSpace {
+            signature: projection.signature_components(),
         }
+    }
+}
+
+impl From<ZSpaceProjection> for LogicZSpace {
+    fn from(projection: ZSpaceProjection) -> Self {
+        LogicZSpace::from(&projection)
     }
 }
 
 #[derive(Clone)]
 pub struct ZSpaceSink {
-    shared: Arc<ZSpaceShared>,
-}
-
-struct ZSpaceShared {
     name: String,
-    config: ZSpaceSinkConfig,
-    state: Mutex<ZSpaceSinkState>,
+    inner: Arc<Mutex<ZSpaceSinkState>>,
 }
 
 #[derive(Default)]
 struct ZSpaceSinkState {
+    log_start: f32,
+    log_step: f32,
+    s_values: Vec<ComplexScalar>,
     samples: HashMap<String, Vec<ComplexScalar>>,
     projections: Vec<ZSpaceProjection>,
 }
 
-pub struct ZSpaceSinkHandle {
-    shared: Arc<ZSpaceShared>,
-}
-
 impl ZSpaceSink {
-    pub fn new(name: impl Into<String>, config: ZSpaceSinkConfig) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        log_start: f32,
+        log_step: f32,
+        s_values: Vec<ComplexScalar>,
+    ) -> Self {
+        let state = ZSpaceSinkState {
+            log_start,
+            log_step,
+            s_values,
+            samples: HashMap::new(),
+            projections: Vec::new(),
+        };
         Self {
-            shared: Arc::new(ZSpaceShared {
-                name: name.into(),
-                config,
-                state: Mutex::new(ZSpaceSinkState::default()),
-            }),
+            name: name.into(),
+            inner: Arc::new(Mutex::new(state)),
         }
     }
 
@@ -316,47 +328,55 @@ impl ZSpaceSink {
         sigma: f32,
         tau_samples: &[f32],
     ) -> Self {
-        Self::new(
-            name,
-            ZSpaceSinkConfig::vertical_line(log_start, log_step, sigma, tau_samples),
-        )
+        let s_values = tau_samples
+            .iter()
+            .map(|&tau| ComplexScalar::new(sigma, tau))
+            .collect();
+        Self::new(name, log_start, log_step, s_values)
     }
 
-    pub fn handle(&self) -> ZSpaceSinkHandle {
-        ZSpaceSinkHandle {
-            shared: Arc::clone(&self.shared),
-        }
+    pub fn take_projections(&self) -> Vec<ZSpaceProjection> {
+        let mut guard = self.inner.lock().expect("ZSpaceSink mutex poisoned");
+        std::mem::take(&mut guard.projections)
+    }
+
+    pub fn take_logic_signatures(&self) -> Vec<(String, LogicZSpace)> {
+        self
+            .take_projections()
+            .into_iter()
+            .map(|projection| {
+                let channel = projection.channel.clone();
+                let signature = LogicZSpace::from(projection);
+                (channel, signature)
+            })
+            .collect()
     }
 
     fn failure(&self, reason: impl Into<String>) -> StudioSinkError {
         StudioSinkError::Transmission {
-            sink: self.shared.name.clone(),
+            sink: self.name.clone(),
             reason: reason.into(),
         }
     }
 }
 
-impl ZSpaceSinkHandle {
-    pub fn take_projections(&self) -> Vec<ZSpaceProjection> {
-        let mut guard = self.shared.state.lock().expect("ZSpaceSink mutex poisoned");
-        std::mem::take(&mut guard.projections)
-    }
-}
-
 fn encode_snapshot_for_zspace(snapshot: &PulseSnapshot) -> ComplexScalar {
-    ComplexScalar::new(snapshot.mean as f32, snapshot.z_bias)
+    let amplitude = snapshot.band_energy.0 + snapshot.band_energy.1 + snapshot.band_energy.2;
+    let asymmetry = snapshot.band_energy.0 - snapshot.band_energy.2;
+    let real = (snapshot.z_score as f32) * amplitude.max(1e-6);
+    let imag = snapshot.z_bias + asymmetry;
+    ComplexScalar::new(real, imag)
 }
 
 impl StudioSink for ZSpaceSink {
     fn name(&self) -> &str {
-        &self.shared.name
+        &self.name
     }
 
     fn send(&mut self, frame: &StudioFrame) -> Result<(), StudioSinkError> {
         let sample = encode_snapshot_for_zspace(&frame.record.pulse);
         let mut guard = self
-            .shared
-            .state
+            .inner
             .lock()
             .map_err(|_| self.failure("state mutex poisoned"))?;
         guard
@@ -368,16 +388,20 @@ impl StudioSink for ZSpaceSink {
     }
 
     fn flush(&mut self) -> Result<(), StudioSinkError> {
-        let config = self.shared.config.clone();
+        let (log_start, log_step, s_values) = {
+            let guard = self
+                .inner
+                .lock()
+                .map_err(|_| self.failure("state mutex poisoned"))?;
+            (guard.log_start, guard.log_step, guard.s_values.clone())
+        };
         let drained = {
             let mut guard = self
-                .shared
-                .state
+                .inner
                 .lock()
                 .map_err(|_| self.failure("state mutex poisoned"))?;
             guard.samples.drain().collect::<Vec<_>>()
         };
-
         if drained.is_empty() {
             return Ok(());
         }
@@ -391,11 +415,10 @@ impl StudioSink for ZSpaceSink {
                 trapezoidal_weights(samples.len()).map_err(|err| self.failure(err.to_string()))?;
             let weighted = prepare_weighted_series(&samples, &weights)
                 .map_err(|err| self.failure(err.to_string()))?;
-            let mut evaluations = Vec::with_capacity(config.s_values.len());
-            for &s in &config.s_values {
-                let (prefactor, z) =
-                    mellin_log_lattice_prefactor(config.log_start, config.log_step, s)
-                        .map_err(|err| self.failure(err.to_string()))?;
+            let mut evaluations = Vec::new();
+            for &s in &s_values {
+                let (prefactor, z) = mellin_log_lattice_prefactor(log_start, log_step, s)
+                    .map_err(|err| self.failure(err.to_string()))?;
                 let series = evaluate_weighted_series(&weighted, z)
                     .map_err(|err| self.failure(err.to_string()))?;
                 let value = prefactor * series;
@@ -413,8 +436,7 @@ impl StudioSink for ZSpaceSink {
         }
 
         let mut guard = self
-            .shared
-            .state
+            .inner
             .lock()
             .map_err(|_| self.failure("state mutex poisoned"))?;
         guard.projections.extend(projections);
@@ -720,7 +742,7 @@ mod tests {
             )
             .unwrap();
         let sink = ZSpaceSink::vertical_line("zspace", -2.0, 0.5, 0.0, &[-1.5, 0.0, 1.5]);
-        let mirror = sink.handle();
+        let mirror = sink.clone();
         let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
         studio.register_sink(sink);
 
@@ -751,5 +773,33 @@ mod tests {
             .evaluations
             .iter()
             .any(|eval| eval.value.0.abs() > 0.0 || eval.value.1.abs() > 0.0));
+    }
+
+    #[test]
+    fn zspace_signatures_flatten_evaluations() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(0, 1.0)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let sink = ZSpaceSink::vertical_line("zspace", -1.0, 0.25, 0.5, &[-2.0, 0.0, 2.0, 3.0]);
+        let mirror = sink.clone();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio.register_sink(sink);
+
+        studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest pulse");
+
+        studio.flush_sinks().expect("flush zspace sink");
+
+        let signatures = mirror.take_logic_signatures();
+        assert_eq!(signatures.len(), 1);
+        let (channel, signature) = &signatures[0];
+        assert_eq!(channel, "alpha");
+        assert_eq!(signature.signature.len(), 24);
+        assert!(signature.signature.iter().any(|value| value.abs() > 0.0));
     }
 }
