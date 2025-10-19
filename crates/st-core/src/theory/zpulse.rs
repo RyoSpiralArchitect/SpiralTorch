@@ -16,6 +16,67 @@ use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
+/// Encodes the physical and logarithmic radius of a Z pulse.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZScale {
+    pub physical_radius: f32,
+    pub log_radius: f32,
+}
+
+impl ZScale {
+    /// Creates a new scale from a physical radius, rejecting non-positive or
+    /// non-finite values.
+    pub fn new(physical_radius: f32) -> Option<Self> {
+        if physical_radius.is_finite() && physical_radius > 0.0 {
+            Some(Self {
+                physical_radius,
+                log_radius: physical_radius.ln(),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Reconstructs a scale from its logarithmic radius.
+    pub fn from_log(log_radius: f32) -> Option<Self> {
+        if log_radius.is_finite() {
+            let physical = log_radius.exp();
+            if physical.is_finite() && physical > 0.0 {
+                return Some(Self {
+                    physical_radius: physical,
+                    log_radius,
+                });
+            }
+        }
+        None
+    }
+
+    /// Builds a scale directly from precomputed components, enforcing the
+    /// invariants required by the other constructors.
+    pub fn from_components(physical_radius: f32, log_radius: f32) -> Option<Self> {
+        if physical_radius.is_finite() && physical_radius > 0.0 && log_radius.is_finite() {
+            Some(Self {
+                physical_radius,
+                log_radius,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Interpolates between two scales, blending both the physical and
+    /// logarithmic radii for numerical stability.
+    pub fn lerp(a: ZScale, b: ZScale, t: f32) -> ZScale {
+        let t = t.clamp(0.0, 1.0);
+        let physical = a.physical_radius + (b.physical_radius - a.physical_radius) * t;
+        let log = a.log_radius + (b.log_radius - a.log_radius) * t;
+        ZScale {
+            physical_radius: physical,
+            log_radius: log,
+        }
+    }
+}
+
 /// Support triplet describing Above/Here/Beneath contributions backing a Z pulse.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZSupport {
