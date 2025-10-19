@@ -12,90 +12,85 @@ use st_frac::FracBackend;
 use wilson::wilson_lower;
 use zmeta::{ZMetaES, ZMetaParams};
 
-// ... (unchanged code above) ...
-
-impl BlackCatRuntime {
-    // ... (unchanged methods) ...
+/// Metrics reported by a training loop back into the runtime.
+#[derive(Clone, Debug, Default)]
+pub struct StepMetrics {
+    pub step_time_ms: f64,
+    pub mem_peak_mb: f64,
+    pub retry_rate: f64,
+    pub extra: HashMap<String, f64>,
 }
 
-// =================== zmeta.rs ===================
-pub mod zmeta {
-    use super::FracBackend;
-    use randless::{Rng, StdRng};
+/// Reward shaping configuration that blends timing, memory, and stability.
+#[derive(Clone, Debug)]
+pub struct RewardCfg {
+    pub lam_speed: f64,
+    pub lam_mem: f64,
+    pub lam_stab: f64,
+    pub scale_speed: f64,
+    pub scale_mem: f64,
+    pub scale_stab: f64,
+}
 
-    // ... (unchanged structs) ...
-
-    impl ZMetaES {
-        // ... (unchanged methods above) ...
-
-        #[cfg(not(feature = "blackcat_v2"))]
-        fn apply_structural_drive(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
-            if delta_reward.abs() <= 1e-9 {
-                return;
-            }
-            let gain = delta_reward.tanh();
-            if !gain.is_finite() || gain.abs() <= 1e-6 {
-                return;
-            }
-
-            let delta_norm = (delta.iter().map(|v| v * v).sum::<f64>()).sqrt();
-            if delta_norm <= 1e-9 {
-                return;
-            }
-
-            for value in delta.iter_mut() {
-                *value *= gain;
-            }
-
-            // was: self.logistic_project_step_legacy(&delta);
-            self.logistic_project_step(&delta);
+impl Default for RewardCfg {
+    fn default() -> Self {
+        Self {
+            lam_speed: 0.5,
+            lam_mem: 0.3,
+            lam_stab: 0.2,
+            scale_speed: 10.0,
+            scale_mem: 1024.0,
+            scale_stab: 1.0,
         }
+    }
+}
 
-        #[cfg(not(feature = "blackcat_v2"))]
-        fn logistic_project_step(&mut self, drive: &[f64]) {
-            if self.dir.is_empty() {
-                return;
-            }
+impl RewardCfg {
+    pub fn score(&self, metrics: &StepMetrics, frac_penalty: f64) -> f64 {
+        let mut s = 0.0;
+        s -= self.lam_speed * (metrics.step_time_ms / self.scale_speed.max(1e-9));
+        s -= self.lam_mem * (metrics.mem_peak_mb / self.scale_mem.max(1e-9));
+        s -= self.lam_stab * (metrics.retry_rate / self.scale_stab.max(1e-9));
+        s -= frac_penalty;
+        s
+    }
+}
 
-            let structural_norm_sq = self.structural.iter().map(|v| v * v).sum::<f64>();
-            if structural_norm_sq <= 1e-12 {
-                return;
-            }
+/// Named groups of candidate choices (tile, merge strategy, etc.).
+#[derive(Clone, Debug)]
+pub struct ChoiceGroups {
+    pub groups: HashMap<String, Vec<String>>,
+}
 
-            let mut projected = Vec::with_capacity(self.dir.len());
-            let dot_nd = dot(&self.dir, drive);
-            for (n, d) in self.dir.iter().zip(drive.iter()) {
-                projected.push(d - dot_nd * n);
-            }
+/// Multi-armed contextual bandit that operates over named groups.
+pub struct MultiBandit {
+    arms: HashMap<String, SoftBandit>,
+}
 
-            let proj_norm_sq = projected.iter().map(|v| v * v).sum::<f64>();
-            if proj_norm_sq <= 1e-12 {
-                return;
-            }
-
-            // Silence unused warning without semantic change.
-            let _proj_norm = proj_norm_sq.sqrt();
-
-            let dot_nr = self
-                .dir
-                .iter()
-                .zip(self.structural.iter())
-                .map(|(n, r)| n * r)
-                .sum::<f64>()
-                .clamp(-1.0, 1.0);
-            let p_t = 0.5 * (1.0 + dot_nr);
-            let eps = self.params.orientation_eps.max(1e-6);
-            let denom = 2.0 * p_t * (1.0 - p_t) + eps;
-            let eta = self.params.orientation_eta.max(0.0);
-            if eta <= 0.0 {
-                return;
-            }
-
-            for (n, proj) in self.dir.iter_mut().zip(projected.iter()) {
-                *n += eta * (*proj) / denom;
-            }
-            normalize(&mut self.dir);
+impl MultiBandit {
+    pub fn new(groups: &ChoiceGroups, feat_dim: usize, mode: SoftBanditMode) -> Self {
+        let mut arms = HashMap::new();
+        for (name, opts) in &groups.groups {
+            arms.insert(name.clone(), SoftBandit::new(opts.clone(), feat_dim, mode));
         }
+        Self { arms }
+    }
+
+    pub fn select_all(&mut self, context: &[f64]) -> HashMap<String, String> {
+        let mut picks = HashMap::new();
+        for (name, bandit) in self.arms.iter_mut() {
+            let choice = bandit.select(context);
+            picks.insert(name.clone(), choice);
+        }
+        picks
+    }
+
+    pub fn update_all(&mut self, context: &[f64], reward: f64) {
+        for bandit in self.arms.values_mut() {
+            bandit.update_last(context, reward);
+        }
+    }
+}
 
 /// BlackCat orchestrator that joins ES search with contextual bandits.
 pub struct BlackCatRuntime {
@@ -678,7 +673,8 @@ pub mod zmeta {
                 *value *= gain;
             }
 
-            self.logistic_project_step_legacy(&delta);
+            // legacy名を参照せず、現行の投影ステップを使う
+            self.logistic_project_step(&delta);
         }
 
         #[cfg(not(feature = "blackcat_v2"))]
@@ -703,7 +699,9 @@ pub mod zmeta {
                 return;
             }
 
-            let proj_norm = proj_norm_sq.sqrt();
+            // unused 警告を抑制（意味は変えない）
+            let _proj_norm = proj_norm_sq.sqrt();
+
             let dot_nr = self
                 .dir
                 .iter()
@@ -796,7 +794,7 @@ pub mod zmeta {
             }
 
             let structural_norm_sq = self.structural.iter().map(|v| v * v).sum::<f64>();
-            if structural_norm_sq <= 1e-12 {
+            if structural_norm_sq <= 1.0e-12 {
                 return;
             }
 
@@ -807,7 +805,7 @@ pub mod zmeta {
             }
 
             let proj_norm = (projected.iter().map(|v| v * v).sum::<f64>()).sqrt();
-            if proj_norm <= 1e-12 {
+            if proj_norm <= 1.0e-12 {
                 return;
             }
 
@@ -839,7 +837,7 @@ pub mod zmeta {
     }
 
     fn normalize(vec: &mut [f64]) {
-        let norm = (vec.iter().map(|v| v * v).sum::<f64>()).sqrt().max(1e-12);
+        let norm = (vec.iter().map(|v| v * v).sum::<f64>()).sqrt().max(1.0e-12);
         for v in vec.iter_mut() {
             *v /= norm;
         }
