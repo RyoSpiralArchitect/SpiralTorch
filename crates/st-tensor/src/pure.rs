@@ -32,6 +32,10 @@ pub use self::topos::{
 use crate::backend::faer_dense;
 #[cfg(feature = "wgpu")]
 use crate::backend::wgpu_dense;
+use crate::dlpack::{
+    call_managed_deleter, drop_exported_state, DLDataType, DLDataTypeCode, DLDevice, DLDeviceType,
+    DLManagedTensor, DLTensor, ManagedTensorState,
+};
 use core::fmt;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::StdRng;
@@ -39,8 +43,13 @@ use rand::SeedableRng;
 #[allow(unused_imports)]
 use rand_distr::StandardNormal;
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
 use std::error::Error;
 use std::f32::consts::PI;
+use std::ffi::c_void;
+use std::mem;
+use std::slice;
+use std::sync::Arc;
 
 /// Result alias used throughout the pure module.
 pub type PureResult<T> = Result<T, TensorError>;
@@ -100,6 +109,8 @@ pub enum TensorError {
     },
     /// Generic configuration violation for pure-language helpers.
     InvalidValue { label: &'static str },
+    /// Interoperability bridge encountered an unsupported or malformed DLPack tensor.
+    DlpackError { message: String },
 }
 
 impl fmt::Display for TensorError {
@@ -211,6 +222,9 @@ impl fmt::Display for TensorError {
             TensorError::InvalidValue { label } => {
                 write!(f, "invalid value: {label}")
             }
+            TensorError::DlpackError { message } => {
+                write!(f, "dlpack error: {message}")
+            }
         }
     }
 }
@@ -250,10 +264,10 @@ impl fmt::Display for MatmulBackend {
     }
 }
 
-/// A simple row-major 2D tensor backed by a `Vec<f32>`.
+/// A simple row-major 2D tensor backed by a reference-counted `Vec<f32>`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tensor {
-    data: Vec<f32>,
+    data: Arc<Vec<f32>>,
     rows: usize,
     cols: usize,
 }
@@ -272,7 +286,7 @@ impl Tensor {
             return Err(TensorError::InvalidDimensions { rows, cols });
         }
         Ok(Self {
-            data: vec![0.0; rows * cols],
+            data: Arc::new(vec![0.0; rows * cols]),
             rows,
             cols,
         })
@@ -291,7 +305,11 @@ impl Tensor {
                 got: data.len(),
             });
         }
-        Ok(Self { data, rows, cols })
+        Ok(Self {
+            data: Arc::new(data),
+            rows,
+            cols,
+        })
     }
 
     /// Construct a tensor by sampling a uniform distribution in `[min, max)`.
@@ -373,12 +391,162 @@ impl Tensor {
 
     /// Returns a read-only view of the underlying buffer.
     pub fn data(&self) -> &[f32] {
-        &self.data
+        self.data.as_slice()
     }
 
     /// Returns a mutable view of the underlying buffer.
     pub fn data_mut(&mut self) -> &mut [f32] {
-        &mut self.data
+        Arc::make_mut(&mut self.data).as_mut_slice()
+    }
+
+    /// Export the tensor as a managed DLPack tensor.
+    pub fn to_dlpack(&self) -> PureResult<*mut DLManagedTensor> {
+        let rows_i64 = i64::try_from(self.rows).map_err(|_| TensorError::DlpackError {
+            message: "tensor rows exceed i64 range".to_string(),
+        })?;
+        let cols_i64 = i64::try_from(self.cols).map_err(|_| TensorError::DlpackError {
+            message: "tensor cols exceed i64 range".to_string(),
+        })?;
+
+        let data = Arc::clone(&self.data);
+        let mut state = Box::new(ManagedTensorState::new(
+            data,
+            vec![rows_i64, cols_i64].into_boxed_slice(),
+            vec![cols_i64, 1].into_boxed_slice(),
+        ));
+
+        let dl_tensor = DLTensor {
+            data: state.data.as_ptr() as *mut c_void,
+            device: DLDevice {
+                device_type: DLDeviceType::Cpu as i32,
+                device_id: 0,
+            },
+            ndim: 2,
+            dtype: DLDataType {
+                code: DLDataTypeCode::Float as u8,
+                bits: 32,
+                lanes: 1,
+            },
+            shape: state.shape.as_mut_ptr(),
+            strides: state.strides.as_mut_ptr(),
+            byte_offset: 0,
+        };
+
+        let manager_ctx = Box::into_raw(state) as *mut ManagedTensorState as *mut c_void;
+        let managed = Box::new(DLManagedTensor {
+            dl_tensor,
+            manager_ctx,
+            deleter: Some(drop_exported_state),
+        });
+
+        Ok(Box::into_raw(managed))
+    }
+
+    /// Construct a tensor from a managed DLPack tensor. The managed tensor is consumed.
+    ///
+    /// # Safety
+    /// The caller must ensure `managed` points to a valid `DLManagedTensor`.
+    pub unsafe fn from_dlpack(managed: *mut DLManagedTensor) -> PureResult<Self> {
+        if managed.is_null() {
+            return Err(TensorError::EmptyInput("dlpack tensor"));
+        }
+
+        let tensor = &(*managed).dl_tensor;
+        if tensor.ndim != 2 {
+            return Err(TensorError::DlpackError {
+                message: format!("expected 2 dimensions, got {}", tensor.ndim),
+            });
+        }
+
+        if tensor.device.device_type != DLDeviceType::Cpu as i32 {
+            return Err(TensorError::DlpackError {
+                message: format!(
+                    "unsupported device type {}; only CPU tensors are accepted",
+                    tensor.device.device_type
+                ),
+            });
+        }
+
+        if tensor.dtype.code != DLDataTypeCode::Float as u8
+            || tensor.dtype.bits != 32
+            || tensor.dtype.lanes != 1
+        {
+            return Err(TensorError::DlpackError {
+                message: "only f32 tensors are supported".to_string(),
+            });
+        }
+
+        let ndim = usize::try_from(tensor.ndim).map_err(|_| TensorError::DlpackError {
+            message: format!("invalid ndim {}", tensor.ndim),
+        })?;
+
+        let shape = slice::from_raw_parts(tensor.shape, ndim);
+        let (rows_i64, cols_i64) = match *shape {
+            [rows, cols] => (rows, cols),
+            _ => {
+                return Err(TensorError::DlpackError {
+                    message: "shape must contain exactly two dimensions".to_string(),
+                })
+            }
+        };
+
+        if rows_i64 <= 0 || cols_i64 <= 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: rows_i64.max(0) as usize,
+                cols: cols_i64.max(0) as usize,
+            });
+        }
+
+        let rows = usize::try_from(rows_i64).map_err(|_| TensorError::DlpackError {
+            message: format!("rows {rows_i64} exceed usize range"),
+        })?;
+        let cols = usize::try_from(cols_i64).map_err(|_| TensorError::DlpackError {
+            message: format!("cols {cols_i64} exceed usize range"),
+        })?;
+
+        let expected_len = rows
+            .checked_mul(cols)
+            .ok_or_else(|| TensorError::DlpackError {
+                message: "tensor volume overflow".to_string(),
+            })?;
+
+        if tensor.byte_offset % mem::size_of::<f32>() != 0 {
+            return Err(TensorError::DlpackError {
+                message: format!(
+                    "byte offset {} is not aligned to f32 elements",
+                    tensor.byte_offset
+                ),
+            });
+        }
+
+        if tensor.data.is_null() {
+            return Err(TensorError::EmptyInput("dlpack tensor data"));
+        }
+
+        if !tensor.strides.is_null() {
+            let strides = slice::from_raw_parts(tensor.strides, ndim);
+            let expected_row = i64::try_from(cols).map_err(|_| TensorError::DlpackError {
+                message: format!("cols {cols} exceed i64 range"),
+            })?;
+            if strides != [expected_row, 1] {
+                return Err(TensorError::DlpackError {
+                    message: format!(
+                        "only contiguous row-major tensors are supported; received strides {:?}",
+                        strides
+                    ),
+                });
+            }
+        }
+
+        let offset = tensor.byte_offset / mem::size_of::<f32>();
+        let base_ptr = tensor.data as *mut f32;
+        let data_ptr = base_ptr.add(offset);
+        let slice = slice::from_raw_parts(data_ptr, expected_len);
+        let data = slice.to_vec();
+
+        call_managed_deleter(managed);
+
+        Tensor::from_vec(rows, cols, data)
     }
 
     /// Matrix multiply (`self @ other`).
@@ -519,7 +687,8 @@ impl Tensor {
                 right: other.shape(),
             });
         }
-        for (a, b) in self.data.iter_mut().zip(other.data.iter()) {
+        let data = Arc::make_mut(&mut self.data);
+        for (a, b) in data.iter_mut().zip(other.data.iter()) {
             *a += scale * b;
         }
         Ok(())
@@ -533,10 +702,11 @@ impl Tensor {
                 got: bias.len(),
             });
         }
+        let data = Arc::make_mut(&mut self.data);
         for r in 0..self.rows {
             let offset = r * self.cols;
             for c in 0..self.cols {
-                self.data[offset + c] += bias[c];
+                data[offset + c] += bias[c];
             }
         }
         Ok(())
@@ -544,17 +714,17 @@ impl Tensor {
 
     /// Returns the transpose of the tensor.
     pub fn transpose(&self) -> Tensor {
-        let mut out = Tensor {
-            data: vec![0.0; self.rows * self.cols],
-            rows: self.cols,
-            cols: self.rows,
-        };
+        let mut data = vec![0.0; self.rows * self.cols];
         for r in 0..self.rows {
             for c in 0..self.cols {
-                out.data[c * self.rows + r] = self.data[r * self.cols + c];
+                data[c * self.rows + r] = self.data[r * self.cols + c];
             }
         }
-        out
+        Tensor {
+            data: Arc::new(data),
+            rows: self.cols,
+            cols: self.rows,
+        }
     }
 
     /// Returns a reshaped copy of the tensor when the requested dimensions are compatible.
@@ -568,7 +738,7 @@ impl Tensor {
                 got: self.data.len(),
             });
         }
-        Tensor::from_vec(rows, cols, self.data.clone())
+        Tensor::from_vec(rows, cols, self.data().to_vec())
     }
 
     /// Returns the sum over rows for each column.
@@ -2308,6 +2478,28 @@ fn matmul_wgpu(
 mod tests {
     use super::*;
     use ndarray::Array2;
+
+    #[test]
+    fn tensor_roundtrip_dlpack_preserves_contents() {
+        let tensor = Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+        let managed = tensor.to_dlpack().unwrap();
+        let restored = unsafe { Tensor::from_dlpack(managed).unwrap() };
+        assert_eq!(tensor, restored);
+    }
+
+    #[test]
+    fn tensor_to_dlpack_shares_underlying_buffer() {
+        let tensor = Tensor::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let ptr = tensor.data.as_ptr();
+        let managed = tensor.to_dlpack().unwrap();
+        unsafe {
+            let dl_tensor = &(*managed).dl_tensor;
+            assert_eq!(dl_tensor.data as *mut f32, ptr as *mut f32);
+        }
+        unsafe {
+            drop_exported_state(managed);
+        }
+    }
 
     #[test]
     fn tensor_matmul_and_add_work_without_panicking() {
