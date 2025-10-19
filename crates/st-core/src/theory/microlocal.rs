@@ -12,7 +12,8 @@
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
+    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZSource,
+    ZSupport,
 };
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
@@ -20,6 +21,7 @@ use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
 use std::fmt;
+use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
@@ -384,7 +386,9 @@ impl InterfaceZPulse {
         let mut drift_weight = 0.0f32;
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
-        let mut scale_weights = Vec::new();
+        let mut scale_phys = 0.0f32;
+        let mut scale_log = 0.0f32;
+        let mut scale_weight = 0.0f32;
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
@@ -397,7 +401,10 @@ impl InterfaceZPulse {
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
             if let Some(scale) = pulse.scale {
-                scale_weights.push((scale, weight));
+                let w = scale_weight_for(pulse);
+                scale_phys += scale.physical_radius * w;
+                scale_log += scale.log_radius * w;
+                scale_weight += w;
             }
         }
         let scale = if scale_weights.is_empty() {
@@ -506,6 +513,10 @@ impl Default for InterfaceZPulse {
             standard_error: None,
         }
     }
+}
+
+fn scale_weight_for(pulse: &InterfaceZPulse) -> f32 {
+    pulse.support.max(pulse.total_energy()).max(f32::EPSILON)
 }
 
 /// Result emitted after fusing the microlocal pulses through [`ZConductor`].
@@ -732,9 +743,15 @@ impl ZEmitter for MicrolocalEmitter {
     fn tick(&mut self, _now: u64) -> Option<ZPulse> {
         self.queue
             .lock()
-            .expect("microlocal queue poisoned")
-            .pop_front()
+            .expect("microlocal emitter queue poisoned");
+        queue.pop_front().map(|mut pulse| {
+            if pulse.ts == 0 {
+                pulse.ts = now;
+            }
+            pulse
+        })
     }
+
 }
 
 /// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
@@ -743,15 +760,13 @@ impl ZEmitter for MicrolocalEmitter {
 pub struct InterfaceZConductor {
     gauges: Vec<InterfaceGauge>,
     lift: InterfaceZLift,
-    conductor: ZConductor,
-    clock: u64,
     smoothing: f32,
+    carry: Option<InterfaceZPulse>,
     policy: Arc<dyn ZSourcePolicy>,
     band_policy: Option<BandPolicy>,
     budget_policy: Option<BudgetPolicy>,
-    previous: Option<InterfaceZPulse>,
-    carry: Option<InterfaceZPulse>,
-    emitter: MicrolocalEmitter,
+    conductor: ZConductor,
+    clock: u64,
 }
 
 impl InterfaceZConductor {
@@ -853,6 +868,7 @@ impl InterfaceZConductor {
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
                 support,
+                scale: pulse.scale,
                 quality,
                 stderr,
                 latency_ms: 0.0,
@@ -907,6 +923,7 @@ impl InterfaceZConductor {
             drift: fused.drift,
             z_bias: fused.z_bias,
             support,
+            scale: fused.scale,
             quality: avg_quality,
             stderr: fused.standard_error.unwrap_or(0.0),
             latency_ms: 0.0,
@@ -953,6 +970,8 @@ mod tests {
         let orient = sig.orientation.expect("orientation missing");
         let normal_y = orient[IxDyn(&[0, 1, 1])];
         let normal_x = orient[IxDyn(&[1, 1, 1])];
+        let norm = (normal_x * normal_x + normal_y * normal_y).sqrt();
+        assert!((norm - 1.0).abs() < 1e-3);
         assert!(normal_y.abs() > 0.5);
         assert!((normal_x.abs() - normal_y.abs()).abs() < 1e-6); // [SCALE-TODO] diagonal orientation persists with neutral scale
         assert!(normal_x.is_sign_negative());

@@ -758,6 +758,7 @@ pub mod zmeta {
                 return;
             }
 
+            let proj_norm = proj_norm_sq.sqrt();
             let dot_nr = self
                 .dir
                 .iter()
