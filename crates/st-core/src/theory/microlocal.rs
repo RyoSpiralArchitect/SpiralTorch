@@ -12,7 +12,7 @@
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZSource, ZSupport,
+    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
 };
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
@@ -340,6 +340,8 @@ impl InterfaceZLift {
             support: total_support,
             interface_cells,
             band_energy,
+            // [SCALE-TODO] Patch 0 default
+            scale: ZScale::ONE,
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -355,6 +357,7 @@ pub struct InterfaceZPulse {
     pub support: f32,
     pub interface_cells: f32,
     pub band_energy: (f32, f32, f32),
+    pub scale: ZScale,
     pub drift: f32,
     pub z_bias: f32,
     pub quality_hint: Option<f32>,
@@ -399,6 +402,8 @@ impl InterfaceZPulse {
             support,
             interface_cells,
             band_energy: band,
+            // [SCALE-TODO] Patch 0 aggregate placeholder
+            scale: ZScale::ONE,
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -425,6 +430,8 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
+            // [SCALE-TODO] Patch 0 lerp placeholder
+            scale: ZScale::ONE,
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -443,6 +450,7 @@ impl InterfaceZPulse {
                 self.band_energy.1 * gain,
                 self.band_energy.2 * gain,
             ),
+            scale: self.scale,
             drift: self.drift * gain,
             z_bias: self.z_bias * gain,
             quality_hint: self.quality_hint,
@@ -461,7 +469,8 @@ impl InterfaceZPulse {
             band_energy: self.band_energy,
             drift: self.drift,
             z_signal: self.z_bias,
-            scale: self.scale,
+            // [SCALE-TODO] Patch 0 optional tagging
+            scale: Some(self.scale),
         }
     }
 
@@ -477,7 +486,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: ZScale::new(1.0),
+            scale: ZScale::ONE,
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
