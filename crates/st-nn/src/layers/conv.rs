@@ -273,7 +273,7 @@ impl Conv2d {
             value
         })?;
         let bias = Tensor::zeros(1, out_channels)?;
-        let mut conv = Self {
+        let conv = Self {
             weight: Parameter::new(format!("{name}::weight"), weight),
             bias: Parameter::new(format!("{name}::bias"), bias),
             in_channels,
@@ -412,6 +412,72 @@ impl Conv2d {
         Ok(matrix)
     }
 
+    fn accumulate_from_grad_matrix(
+        &mut self,
+        grad_matrix: &Tensor,
+        patches: &Tensor,
+        batch: usize,
+        oh: usize,
+        ow: usize,
+    ) -> PureResult<Tensor> {
+        let grad_weight = grad_matrix.transpose().matmul(patches)?;
+        let grad_weight = grad_weight.scale(1.0 / batch as f32)?;
+        let bias_sums = grad_matrix.sum_axis0();
+        let mut bias_tensor = Tensor::from_vec(1, self.out_channels, bias_sums)?;
+        bias_tensor = bias_tensor.scale(1.0 / batch as f32)?;
+        let grad_patches = grad_matrix.matmul(self.weight.value())?;
+        let grad_input = self.col2im(&grad_patches, batch, oh, ow)?;
+        self.weight.accumulate_euclidean(&grad_weight)?;
+        self.bias.accumulate_euclidean(&bias_tensor)?;
+        Ok(grad_input)
+    }
+
+    /// Propagates Above/Here/Beneath gradients individually, returning the
+    /// corresponding input gradients stacked as a [`GradientBands`] volume.
+    pub fn backward_band_volume(
+        &mut self,
+        input: &Tensor,
+        bands: &GradientBands,
+    ) -> PureResult<GradientBands> {
+        let (batch, cols) = input.shape();
+        let expected_cols = self.in_channels * self.input_hw.0 * self.input_hw.1;
+        if cols != expected_cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (1, cols),
+                right: (1, expected_cols),
+            });
+        }
+        let (oh, ow) = self.output_hw()?;
+        let patches = self.im2col(input, batch, oh, ow)?;
+        let mut outputs: [Option<Tensor>; 3] = [None, None, None];
+        for (idx, grad) in bands.iter().iter().enumerate() {
+            if grad.shape() != (batch, self.out_channels * oh * ow) {
+                return Err(TensorError::ShapeMismatch {
+                    left: grad.shape(),
+                    right: (batch, self.out_channels * oh * ow),
+                });
+            }
+            if grad.squared_l2_norm() == 0.0 {
+                outputs[idx] = Some(Tensor::zeros(batch, expected_cols)?);
+                continue;
+            }
+            let grad_matrix = self.grad_output_to_matrix(grad, batch, oh, ow)?;
+            let grad_input =
+                self.accumulate_from_grad_matrix(&grad_matrix, &patches, batch, oh, ow)?;
+            outputs[idx] = Some(grad_input);
+        }
+        let take_or_zero = |slot: Option<Tensor>| -> PureResult<Tensor> {
+            match slot {
+                Some(tensor) => Ok(tensor),
+                None => Tensor::zeros(batch, expected_cols),
+            }
+        };
+        let above = take_or_zero(outputs[0].take())?;
+        let here = take_or_zero(outputs[1].take())?;
+        let beneath = take_or_zero(outputs[2].take())?;
+        GradientBands::from_components(above, here, beneath)
+    }
+
     fn col2im(&self, cols: &Tensor, batch: usize, oh: usize, ow: usize) -> PureResult<Tensor> {
         let expected_rows = batch * oh * ow;
         let kernel_elems = self.in_channels * self.kernel.0 * self.kernel.1;
@@ -428,11 +494,12 @@ impl Conv2d {
         let pad_h = self.padding.0 as isize;
         let pad_w = self.padding.1 as isize;
         let spatial = oh * ow;
+        let output_cols = output.shape().1;
         {
             let cols_data = cols.data();
             let output_data = output.data_mut();
             for b in 0..batch {
-                let (start, end) = (b * output.shape().1, (b + 1) * output.shape().1);
+                let (start, end) = (b * output_cols, (b + 1) * output_cols);
                 let grad_in_row = &mut output_data[start..end];
                 for oh_idx in 0..oh {
                     for ow_idx in 0..ow {
@@ -553,16 +620,12 @@ impl Module for Conv2d {
         }
         let patches = self.im2col(input, batch, oh, ow)?;
         let grad_matrix = self.grad_output_to_matrix(grad_output, batch, oh, ow)?;
-        let grad_weight = grad_matrix.transpose().matmul(&patches)?;
-        let grad_weight = grad_weight.scale(1.0 / batch as f32)?;
-        let bias_sums = grad_matrix.sum_axis0();
-        let mut bias_tensor = Tensor::from_vec(1, self.out_channels, bias_sums)?;
-        bias_tensor = bias_tensor.scale(1.0 / batch as f32)?;
-        let grad_patches = grad_matrix.matmul(self.weight.value())?;
-        let grad_input = self.col2im(&grad_patches, batch, oh, ow)?;
-        self.weight.accumulate_euclidean(&grad_weight)?;
-        self.bias.accumulate_euclidean(&bias_tensor)?;
-        Ok(grad_input)
+        self.accumulate_from_grad_matrix(&grad_matrix, &patches, batch, oh, ow)
+    }
+
+    fn backward_bands(&mut self, input: &Tensor, bands: &GradientBands) -> PureResult<Tensor> {
+        let volume = self.backward_band_volume(input, bands)?;
+        volume.combine()
     }
 
     fn backward_bands(&mut self, input: &Tensor, bands: &GradientBands) -> PureResult<Tensor> {
@@ -996,49 +1059,148 @@ mod tests {
     }
 
     #[test]
-    fn conv2d_backward_bands_matches_single_backward() {
-        let mut conv_band = Conv2d::new("conv", 1, 1, (3, 3), (1, 1), (1, 1), (3, 3)).unwrap();
-        let mut conv_single =
-            Conv2d::new("conv_ref", 1, 1, (3, 3), (1, 1), (1, 1), (3, 3)).unwrap();
-        conv_band.weight.value_mut().data_mut()[0] = 0.7;
-        conv_single.weight.value_mut().data_mut()[0] = 0.7;
-        conv_band.bias.value_mut().data_mut()[0] = -0.2;
-        conv_single.bias.value_mut().data_mut()[0] = -0.2;
-        let input =
-            Tensor::from_vec(1, 9, vec![1.0, 0.5, -0.5, 2.0, -1.0, 1.5, 0.25, -0.75, 0.9]).unwrap();
-        let above =
-            Tensor::from_vec(1, 9, vec![1.0, -0.5, 0.25, 0.0, 1.5, -1.25, 0.3, -0.8, 2.0]).unwrap();
-        let here =
-            Tensor::from_vec(1, 9, vec![0.4, 0.2, -0.6, 0.1, -0.3, 0.5, -0.2, 0.9, -1.1]).unwrap();
-        let beneath =
-            Tensor::from_vec(1, 9, vec![-0.3, 0.7, 0.0, -0.4, 0.6, -0.2, 0.8, -0.1, 0.3]).unwrap();
-        let bands =
-            GradientBands::from_bands(above.clone(), here.clone(), beneath.clone()).unwrap();
-        let mut combined = above.clone();
-        combined.add_scaled(&here, 1.0).unwrap();
-        combined.add_scaled(&beneath, 1.0).unwrap();
-        let grad_input_band = conv_band.backward_bands(&input, &bands).unwrap();
-        let grad_input_single = conv_single.backward(&input, &combined).unwrap();
-        assert_eq!(grad_input_band.shape(), grad_input_single.shape());
-        for (a, b) in grad_input_band.data().iter().zip(grad_input_single.data()) {
-            assert!((a - b).abs() < 1e-5);
-        }
-        let weight_band = conv_band.weight.gradient().unwrap();
-        let weight_single = conv_single.weight.gradient().unwrap();
-        for (a, b) in weight_band.data().iter().zip(weight_single.data().iter()) {
-            assert!((a - b).abs() < 1e-6);
-        }
-        let bias_band = conv_band.bias.gradient().unwrap();
-        let bias_single = conv_single.bias.gradient().unwrap();
-        for (a, b) in bias_band.data().iter().zip(bias_single.data().iter()) {
-            assert!((a - b).abs() < 1e-6);
-        }
-    }
-
-    #[test]
     fn conv2d_respects_dilation_configuration() {
         let mut conv = Conv2d::new("conv", 1, 1, (3, 3), (1, 1), (0, 0), (5, 5)).unwrap();
         conv.set_dilation((2, 2)).unwrap();
         assert_eq!(conv.output_hw().unwrap(), (1, 1));
+    }
+
+    #[test]
+    fn conv2d_backward_bands_matches_backward() {
+        use crate::plan::RankPlanner;
+        use crate::schedule::{RoundtableConfig, RoundtableSchedule};
+        use st_core::backend::device_caps::DeviceCaps;
+
+        let mut conv = Conv2d::new("conv_a", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3)).unwrap();
+        let mut conv_bands = Conv2d::new("conv_b", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3)).unwrap();
+
+        for (idx, value) in conv.weight.value_mut().data_mut().iter_mut().enumerate() {
+            *value = idx as f32 + 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.5;
+        conv_bands.weight.load_value(conv.weight.value()).unwrap();
+        conv_bands.bias.load_value(conv.bias.value()).unwrap();
+
+        let input =
+            Tensor::from_vec(1, 9, vec![0.5, -1.0, 2.0, 1.5, 0.0, -0.5, 2.5, 1.0, -1.5]).unwrap();
+        let grad_output = Tensor::from_vec(1, 4, vec![0.8, -0.4, 1.2, -0.6]).unwrap();
+
+        let standard = conv.backward(&input, &grad_output).unwrap();
+        let (oh, ow) = conv_bands.output_hw().unwrap();
+        let planner = RankPlanner::new(DeviceCaps::cpu());
+        let schedule = RoundtableSchedule::new(
+            &planner,
+            1,
+            (conv_bands.out_channels * oh * ow) as u32,
+            RoundtableConfig::default(),
+        );
+        let bands = schedule.split(&grad_output).unwrap();
+        let combined = conv_bands.backward_bands(&input, &bands).unwrap();
+
+        assert_eq!(standard.shape(), combined.shape());
+        for (&a, &b) in standard.data().iter().zip(combined.data().iter()) {
+            assert!((a - b).abs() < 1e-5);
+        }
+
+        let grad_weight = conv.weight.gradient().unwrap();
+        let grad_weight_bands = conv_bands.weight.gradient().unwrap();
+        for (&a, &b) in grad_weight
+            .data()
+            .iter()
+            .zip(grad_weight_bands.data().iter())
+        {
+            assert!((a - b).abs() < 1e-5);
+        }
+
+        let grad_bias = conv.bias.gradient().unwrap();
+        let grad_bias_bands = conv_bands.bias.gradient().unwrap();
+        for (&a, &b) in grad_bias.data().iter().zip(grad_bias_bands.data().iter()) {
+            assert!((a - b).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn conv2d_backward_band_volume_exposes_components() {
+        use crate::plan::RankPlanner;
+        use crate::schedule::{RoundtableConfig, RoundtableSchedule};
+        use st_core::backend::device_caps::DeviceCaps;
+
+        let mut conv_seq = Conv2d::new("conv_seq", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3)).unwrap();
+        let mut conv_volume =
+            Conv2d::new("conv_vol", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3)).unwrap();
+
+        for (idx, value) in conv_seq
+            .weight
+            .value_mut()
+            .data_mut()
+            .iter_mut()
+            .enumerate()
+        {
+            *value = (idx + 1) as f32;
+        }
+        conv_seq.bias.value_mut().data_mut()[0] = -0.3;
+        conv_volume
+            .weight
+            .load_value(conv_seq.weight.value())
+            .unwrap();
+        conv_volume.bias.load_value(conv_seq.bias.value()).unwrap();
+
+        let input = Tensor::from_vec(
+            1,
+            9,
+            vec![0.75, -0.5, 1.0, 0.25, -1.25, 0.0, 1.5, 0.8, -0.4],
+        )
+        .unwrap();
+        let grad_output = Tensor::from_vec(1, 4, vec![1.0, -0.5, 0.25, 0.75]).unwrap();
+
+        let (oh, ow) = conv_seq.output_hw().unwrap();
+        let planner = RankPlanner::new(DeviceCaps::cpu());
+        let schedule = RoundtableSchedule::new(
+            &planner,
+            1,
+            (conv_seq.out_channels * oh * ow) as u32,
+            RoundtableConfig::default(),
+        );
+        let bands = schedule.split(&grad_output).unwrap();
+
+        let grad_above = conv_seq.backward(&input, bands.above()).unwrap();
+        let grad_here = conv_seq.backward(&input, bands.here()).unwrap();
+        let grad_beneath = conv_seq.backward(&input, bands.beneath()).unwrap();
+
+        let volume = conv_volume.backward_band_volume(&input, &bands).unwrap();
+
+        for (&a, &b) in grad_above.data().iter().zip(volume.above().data().iter()) {
+            assert!((a - b).abs() < 1e-5);
+        }
+        for (&a, &b) in grad_here.data().iter().zip(volume.here().data().iter()) {
+            assert!((a - b).abs() < 1e-5);
+        }
+        for (&a, &b) in grad_beneath
+            .data()
+            .iter()
+            .zip(volume.beneath().data().iter())
+        {
+            assert!((a - b).abs() < 1e-5);
+        }
+
+        let mut expected_sum = grad_above.clone();
+        expected_sum.add_scaled(&grad_here, 1.0).unwrap();
+        expected_sum.add_scaled(&grad_beneath, 1.0).unwrap();
+        let combined = volume.combine().unwrap();
+        for (&a, &b) in expected_sum.data().iter().zip(combined.data().iter()) {
+            assert!((a - b).abs() < 1e-5);
+        }
+
+        let seq_weight = conv_seq.weight.gradient().unwrap();
+        let vol_weight = conv_volume.weight.gradient().unwrap();
+        for (&a, &b) in seq_weight.data().iter().zip(vol_weight.data().iter()) {
+            assert!((a - b).abs() < 1e-5);
+        }
+
+        let seq_bias = conv_seq.bias.gradient().unwrap();
+        let vol_bias = conv_volume.bias.gradient().unwrap();
+        for (&a, &b) in seq_bias.data().iter().zip(vol_bias.data().iter()) {
+            assert!((a - b).abs() < 1e-5);
+        }
     }
 }

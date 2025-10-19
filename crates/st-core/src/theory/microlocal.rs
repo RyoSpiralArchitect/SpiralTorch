@@ -12,8 +12,7 @@
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource,
-    ZSupport,
+    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
 };
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
@@ -341,8 +340,7 @@ impl InterfaceZLift {
             support: total_support,
             interface_cells,
             band_energy,
-            // [SCALE-TODO] Stage scale metadata without applying it.
-            scale: ZScale::ONE,
+            scale: ZScale::new(signature.physical_radius),
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -358,8 +356,7 @@ pub struct InterfaceZPulse {
     pub support: f32,
     pub interface_cells: f32,
     pub band_energy: (f32, f32, f32),
-    // [SCALE-TODO] Restore scale metadata for staged rollout.
-    pub scale: ZScale,
+    pub scale: Option<ZScale>,
     pub drift: f32,
     pub z_bias: f32,
     pub quality_hint: Option<f32>,
@@ -387,6 +384,7 @@ impl InterfaceZPulse {
         let mut drift_weight = 0.0f32;
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
+        let mut scale_weights = Vec::new();
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
@@ -398,14 +396,22 @@ impl InterfaceZPulse {
             drift_weight += weight;
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
+            if let Some(scale) = pulse.scale {
+                scale_weights.push((scale, weight));
+            }
         }
+        let scale = if scale_weights.is_empty() {
+            pulses.iter().find_map(|pulse| pulse.scale)
+        } else {
+            ZScale::weighted_average(scale_weights.into_iter())
+                .or_else(|| pulses.iter().find_map(|pulse| pulse.scale))
+        };
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
             interface_cells,
             band_energy: band,
-            // [SCALE-TODO] Aggregation keeps scale at unity for now.
-            scale: ZScale::ONE,
+            scale,
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -432,8 +438,12 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            // [SCALE-TODO] Pending interpolation strategy for scale.
-            scale: ZScale::ONE,
+            scale: match (current.scale, next.scale) {
+                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -452,7 +462,6 @@ impl InterfaceZPulse {
                 self.band_energy.1 * gain,
                 self.band_energy.2 * gain,
             ),
-            // [SCALE-TODO] Scaling does not yet touch scale metadata.
             scale: self.scale,
             drift: self.drift * gain,
             z_bias: self.z_bias * gain,

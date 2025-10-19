@@ -106,7 +106,7 @@ fn conv1d_gl_line(x: &[f32], y: &mut [f32], coeff: &[f32], pad: Pad, scale: f32)
 
 /// Generate Grünwald–Letnikov coefficients until their magnitude drops below `tol`
 /// or until `max_len` coefficients have been produced.
-pub fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
+fn gl_coeffs_adaptive_forward(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
     gl_coeffs_adaptive_impl(alpha, tol, max_len)
 }
 
@@ -132,13 +132,7 @@ fn gl_coeffs_adaptive_impl(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
 }
 
 /// Apply a fractional difference along a 1-D slice.
-///
-/// The `scale` flag preserves the historic API where callers toggled the
-/// normalisation knob explicitly.  At the moment the public entry point maps
-/// this flag to a unity factor, keeping behaviour identical to the pre-refactor
-/// implementation while reserving the option to introduce a meaningful scaling
-/// mode in the future.
-pub fn fracdiff_gl_1d(
+fn fracdiff_gl_1d_forward(
     x: &[f32],
     alpha: f32,
     kernel_len: usize,
@@ -169,23 +163,13 @@ fn fracdiff_gl_1d_impl(
 }
 
 /// Apply a fractional difference along a 1-D slice using precomputed coefficients.
-///
-/// See [`fracdiff_gl_1d`] for details on the `scale` flag semantics.
-pub fn fracdiff_gl_1d_with_coeffs(
+fn fracdiff_gl_1d_with_coeffs_forward(
     x: &[f32],
     coeff: &[f32],
     pad: Pad,
-    scale: bool,
-) -> Result<Vec<f32>, FracErr> {
-    if coeff.is_empty() {
-        return Err(FracErr::Kernel);
-    }
-    Ok(fracdiff_gl_1d_with_coeffs_impl(
-        x,
-        coeff,
-        pad,
-        scale.then_some(1.0),
-    ))
+    scale: Option<f32>,
+) -> Vec<f32> {
+    fracdiff_gl_1d_with_coeffs_impl(x, coeff, pad, scale)
 }
 
 #[inline]
@@ -198,6 +182,33 @@ fn fracdiff_gl_1d_with_coeffs_impl(
     let mut y = vec![0.0f32; x.len()];
     conv1d_gl_line(x, &mut y, coeff, pad, scale.unwrap_or(1.0));
     y
+}
+
+/// Generate Grünwald–Letnikov coefficients until their magnitude drops below `tol`
+/// or until `max_len` coefficients have been produced.
+pub fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
+    gl_coeffs_adaptive_forward(alpha, tol, max_len)
+}
+
+/// Apply a fractional difference along a 1-D slice.
+pub fn fracdiff_gl_1d(
+    x: &[f32],
+    alpha: f32,
+    kernel_len: usize,
+    pad: Pad,
+    scale: Option<f32>,
+) -> Result<Vec<f32>, FracErr> {
+    fracdiff_gl_1d_forward(x, alpha, kernel_len, pad, scale)
+}
+
+#[inline]
+fn fracdiff_gl_1d_with_coeffs_impl(
+    x: &[f32],
+    coeff: &[f32],
+    pad: Pad,
+    scale: Option<f32>,
+) -> Vec<f32> {
+    fracdiff_gl_1d_with_coeffs_forward(x, coeff, pad, scale)
 }
 
 pub fn fracdiff_gl_nd(
