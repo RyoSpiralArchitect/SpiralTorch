@@ -93,39 +93,7 @@ CT specifics (conceptual, implemented via Core Ops + new kernels):
   - Canvas patchify/tokenizer, encoder/decoder blocks
   - Attention (Flash/Block-sparse/Windowed), RoPE/RelBias, Norms
   - Losses (xent/perceptual), KV-Cache for streaming inference
-```
 
-## Integration points for CanvasTransformer
-
-- Domain layer:
-  - Expose CT as a first-class model/pipeline under Higher Stacks (e.g., st-vision or st-gen), callable via Python and TS/WASM APIs.
-  - Provide a live Canvas UI in the TS dashboard for interactive generation/edits.
-
-- Core ops and runtime:
-  - Add/enable kernels for attention (Flash-style QK^T softmax V fusion, block/window sparsity), RoPE/relative bias, LayerNorm/RMSNorm, MLP/SwiGLU, patchify/unpatchify.
-  - Introduce a KV-Cache manager (paged tensors, eviction, multi-stream reuse) for fast autoregressive/streaming inference.
-  - Support activation checkpointing and mixed precision (FP16/BF16/FP8) if training.
-
-- Codegen and autotuning:
-  - st-kdsl emits specialized WGSL/CUDA variants for attention and norms; autotune tile sizes, block sizes, and memory layouts.
-  - Cache tuned kernels per device/shape; warm-start from Perf DB.
-
-- Backends:
-  - CUDA: integrate vendor libs when helpful (e.g., cuBLAS, FlashAttention), fall back to generated kernels.
-  - WGPU/WGSL: provide portable kernels with subgroup-aware paths; CPU fallback for tests/dev.
-
-- Telemetry / UI:
-  - Add “Live Canvas” and attention maps visualizers; record per-layer latency, memory, and cache hit rates.
-  - Surface KV-Cache stats and throughput tokens/s.
-
-- Data I/O:
-  - Patch/token pipelines for canvas; optional palette/quantization utilities.
-
-## Optional module naming
-
-- st-ct (CanvasTransformer): domain package wrapping model, training, and serving.
-- st-ct-ui: TS/WASM components for interactive canvas + telemetry views.
-- st-attn: attention/norm kernels if you prefer separating kernel packages.
 
 ```python
 import spiraltorch as st
