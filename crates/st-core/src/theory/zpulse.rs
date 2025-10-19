@@ -107,7 +107,6 @@ pub struct ZPulse {
     pub drift: f32,
     pub z_bias: f32,
     pub support: ZSupport,
-    pub scale: Option<ZScale>,
     pub quality: f32,
     pub stderr: f32,
     pub latency_ms: f32,
@@ -148,7 +147,6 @@ impl Default for ZPulse {
             drift: 0.0,
             z_bias: 0.0,
             support: ZSupport::default(),
-            scale: None,
             quality: 0.0,
             stderr: 0.0,
             latency_ms: 0.0,
@@ -622,6 +620,14 @@ impl ZConductor {
 
     pub fn step(&mut self, now: u64) -> ZFused {
         let mut events = Vec::new();
+        if let Some(previous) = self.last_step {
+            if now < previous {
+                events.push("time-regressed".to_string());
+            } else if now.saturating_sub(previous) > 1 {
+                events.push(format!("step-gap-{}", now - previous));
+            }
+        }
+        self.last_step = Some(now);
         if let Some(latency) = self.latency.as_mut() {
             latency.prepare(now, &mut events);
         }

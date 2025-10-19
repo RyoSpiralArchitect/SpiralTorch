@@ -4,7 +4,6 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use st_core::telemetry::hub::SoftlogicZFeedback;
-use st_core::theory::zpulse::ZScale;
 
 #[derive(Clone, Debug)]
 pub struct TemperatureController {
@@ -123,6 +122,7 @@ pub fn entropy(distribution: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use st_core::theory::zpulse::ZScale;
 
     #[test]
     fn controller_tracks_gradient_pressure() {
