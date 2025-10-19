@@ -115,7 +115,7 @@ use st_tensor::{
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
     MatmulBackend, PureResult, Tensor, TensorBiome, TensorError,
 };
-use st_tensor::dlpack::{self, DLManagedTensor};
+use st_tensor::dlpack::{self, DLDeviceType, DLManagedTensor};
 use std::cell::RefCell;
 use st_text::{
     describe_atlas as text_describe_atlas, describe_frame as text_describe_frame,
@@ -301,6 +301,14 @@ fn extract_dlpack_managed(
         return Err(PyErr::fetch(py));
     }
 
+    if unsafe { ffi::PyCapsule_SetDestructor(capsule_ptr, None) } != 0 {
+        return Err(PyErr::fetch(py));
+    }
+
+    if unsafe { ffi::PyCapsule_SetPointer(capsule_ptr, std::ptr::null_mut()) } != 0 {
+        return Err(PyErr::fetch(py));
+    }
+
     Ok((managed, capsule_obj))
 }
 
@@ -320,6 +328,49 @@ unsafe extern "C" fn dlpack_capsule_destructor(capsule: *mut ffi::PyObject) {
     }
     unsafe {
         dlpack::call_managed_deleter(managed);
+    }
+}
+
+fn make_dlpack_capsule(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
+    let managed = convert(tensor.to_dlpack())?;
+    let capsule = unsafe {
+        PyCapsule::new(
+            py,
+            managed as *mut c_void,
+            Some(dlpack::DLPACK_CAPSULE_NAME),
+            Some(dlpack_capsule_destructor),
+        )?
+    };
+    Ok(capsule.into_py(py))
+}
+
+#[cfg(test)]
+mod dlpack_tests {
+    use super::*;
+    use pyo3::prelude::*;
+
+    #[test]
+    fn py_tensor_implements_dlpack_protocol() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let base = Tensor::from_vec(1, 2, vec![1.0, 2.0]).unwrap();
+            let source_ptr = base.data().as_ptr();
+            let py_tensor = Py::new(py, PyTensor::from_tensor(base)).unwrap();
+
+            let capsule = py_tensor.call_method0(py, "__dlpack__").unwrap();
+            let device = py_tensor
+                .call_method0(py, "__dlpack_device__")
+                .unwrap()
+                .extract::<(i32, i32)>(py)
+                .unwrap();
+            assert_eq!(device, (DLDeviceType::Cpu as i32, 0));
+
+            let (managed, guard) = extract_dlpack_managed(py, capsule.as_ref(py)).unwrap();
+            let restored = unsafe { Tensor::from_dlpack(managed).unwrap() };
+            assert_eq!(restored.data(), &[1.0, 2.0]);
+            assert_eq!(source_ptr, restored.data().as_ptr());
+            drop(guard);
+        });
     }
 }
 
@@ -1111,16 +1162,28 @@ impl PyTensor {
     }
 
     fn to_dlpack(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let managed = convert(self.inner.to_dlpack())?;
-        let capsule = unsafe {
-            PyCapsule::new(
-                py,
-                managed as *mut c_void,
-                Some(dlpack::DLPACK_CAPSULE_NAME),
-                Some(dlpack_capsule_destructor),
-            )?
-        };
-        Ok(capsule.into_py(py))
+        make_dlpack_capsule(py, &self.inner)
+    }
+
+    #[pyo3(name = "__dlpack__")]
+    #[pyo3(signature = (*, stream=None))]
+    fn py_dlpack(&self, py: Python<'_>, stream: Option<&PyAny>) -> PyResult<PyObject> {
+        if let Some(hint) = stream {
+            if !hint.is_none() {
+                let is_zero = hint.extract::<usize>().map(|value| value == 0).unwrap_or(false);
+                if !is_zero {
+                    return Err(PyValueError::new_err(
+                        "SpiralTorch CPU tensors do not support __dlpack__ stream hints",
+                    ));
+                }
+            }
+        }
+        make_dlpack_capsule(py, &self.inner)
+    }
+
+    #[pyo3(name = "__dlpack_device__")]
+    fn py_dlpack_device(&self) -> (i32, i32) {
+        (DLDeviceType::Cpu as i32, 0)
     }
 
     fn tolist(&self) -> Vec<Vec<f32>> {

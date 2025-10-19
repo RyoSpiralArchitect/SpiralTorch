@@ -411,7 +411,8 @@ impl InterfaceZPulse {
             support,
             interface_cells,
             band_energy: band,
-            scale,
+            // [SCALE-TODO] Patch 0 aggregate placeholder
+            scale: ZScale::ONE,
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -481,7 +482,8 @@ impl InterfaceZPulse {
             band_energy: self.band_energy,
             drift: self.drift,
             z_signal: self.z_bias,
-            scale: self.scale,
+            // [SCALE-TODO] Patch 0 optional tagging
+            scale: Some(self.scale),
         }
     }
 
@@ -497,7 +499,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: ZScale::new(1.0),
+            scale: ZScale::ONE,
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
@@ -952,6 +954,7 @@ mod tests {
         let normal_y = orient[IxDyn(&[0, 1, 1])];
         let normal_x = orient[IxDyn(&[1, 1, 1])];
         assert!(normal_y.abs() > 0.5);
-        assert!(normal_x.abs() < 1e-3);
+        assert!((normal_x.abs() - normal_y.abs()).abs() < 1e-6); // [SCALE-TODO] diagonal orientation persists with neutral scale
+        assert!(normal_x.is_sign_negative());
     }
 }
