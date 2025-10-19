@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
+/// Result alias specialised for key-value helper routines.
+pub type KvResult<T> = std::result::Result<T, KvErr>;
+
 #[derive(Error, Debug)]
 pub enum KvErr {
     #[error("redis error: {0}")]

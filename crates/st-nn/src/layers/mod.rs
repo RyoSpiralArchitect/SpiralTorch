@@ -5,7 +5,9 @@
 
 pub mod activation;
 pub mod conv;
+pub mod gelu;
 pub mod linear;
+pub mod normalization;
 pub mod sequential;
 pub mod softmax;
 pub mod topos_resonator;
@@ -15,6 +17,8 @@ pub mod zspace_mixer;
 pub mod zspace_projector;
 
 pub use activation::Relu;
+pub use gelu::Gelu;
+pub use normalization::LayerNorm;
 pub use softmax::ZSpaceSoftmax;
 pub use topos_resonator::ToposResonator;
 pub use zspace_mixer::ZSpaceMixer;

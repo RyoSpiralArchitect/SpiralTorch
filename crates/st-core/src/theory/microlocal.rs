@@ -303,20 +303,20 @@ impl InterfaceZLift {
                     continue;
                 }
                 weight_total += weight;
-                for axis in 0..orient.shape()[0] {
+                for (axis, accum) in weighted.iter_mut().enumerate() {
                     let mut orient_idx = Vec::with_capacity(orient.ndim());
                     orient_idx.push(axis);
                     orient_idx.extend_from_slice(idx.slice());
-                    weighted[axis] += orient[IxDyn(&orient_idx)] * weight;
+                    *accum += orient[IxDyn(&orient_idx)] * weight;
                 }
             }
             if weight_total > 0.0 {
-                for axis in 0..weighted.len() {
-                    weighted[axis] /= weight_total;
+                for value in &mut weighted {
+                    *value /= weight_total;
                 }
             }
-            let weight0 = self.weights.get(0).copied().unwrap_or(1.0);
-            let primary = weighted.get(0).copied().unwrap_or(0.0) * weight0;
+            let weight0 = self.weights.first().copied().unwrap_or(1.0);
+            let primary = weighted.first().copied().unwrap_or(0.0) * weight0;
             let enriched = self.projector.enrich(primary.abs() as f64) as f32;
             bias = enriched * primary.signum() * self.bias_gain;
             above = (primary.max(0.0)) * here;
@@ -340,7 +340,8 @@ impl InterfaceZLift {
             support: total_support,
             interface_cells,
             band_energy,
-            scale: ZScale::new(signature.physical_radius),
+            // [SCALE-TODO] Patch 0 default
+            scale: ZScale::ONE,
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -410,11 +411,8 @@ impl InterfaceZPulse {
             support,
             interface_cells,
             band_energy: band,
-            scale: if scale_weight > 0.0 {
-                ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
-            } else {
-                None
-            },
+            // [SCALE-TODO] Patch 0 aggregate placeholder
+            scale: ZScale::ONE,
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -441,12 +439,8 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            scale: match (current.scale, next.scale) {
-                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            },
+            // [SCALE-TODO] Patch 0 lerp placeholder
+            scale: ZScale::ONE,
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -500,7 +494,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: None,
+            scale: ZScale::ONE,
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
@@ -559,6 +553,12 @@ pub struct DefaultZSourcePolicy;
 impl DefaultZSourcePolicy {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for DefaultZSourcePolicy {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -895,7 +895,7 @@ impl InterfaceZConductor {
     }
 
     pub fn last_fused_pulse(&self) -> InterfaceZPulse {
-        self.carry.clone().unwrap_or_else(InterfaceZPulse::default)
+        self.carry.clone().unwrap_or_default()
     }
 
     fn into_zpulse(fused: &InterfaceZPulse, now: u64, qualities: &[f32]) -> ZPulse {

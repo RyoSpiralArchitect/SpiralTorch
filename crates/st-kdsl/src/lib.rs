@@ -14,7 +14,8 @@ pub mod tile;
 pub use ir::{Expr, ScalarType, SubgroupModule, SubgroupOp, SubgroupStmt};
 pub use query::{compile as compile_query, Filter, OrderDirection, QueryPlan};
 pub use registry::{
-    AutotuneKey, DeviceProfile, KernelProfile, TelemetryLog, TelemetrySample, TelemetrySummary,
+    AutotuneKey, AutotuneRegistry, DeviceProfile, KernelProfile, TelemetryLog, TelemetrySample,
+    TelemetrySummary,
 };
 pub use tile::{TileConfig, TileIter, TileTemplate};
 

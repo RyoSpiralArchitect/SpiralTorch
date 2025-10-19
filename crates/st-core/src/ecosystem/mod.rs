@@ -41,6 +41,10 @@ pub struct HeuristicChoiceSummary {
 }
 
 impl HeuristicChoiceSummary {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Telemetry summary retains explicit fields for downstream consumers"
+    )]
     pub fn new(
         use_two_stage: bool,
         workgroup: u32,

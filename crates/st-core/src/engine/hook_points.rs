@@ -31,7 +31,6 @@ pub fn call_onebit_allreduce(grad: &mut [f32], world: u32) {
     if let Some(guard) = GRAD_HOOK.get() {
         if let Some(h) = *guard.lock().unwrap() {
             (h)(grad, world);
-            return;
         }
     }
     // no-op

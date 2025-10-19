@@ -30,7 +30,7 @@ impl SpiralKFftPlan {
     /// Construct a plan from a heuristic `Choice`.
     pub fn from_choice(choice: &Choice, subgroup: bool) -> Self {
         Self {
-            radix: choice.radix.max(2).min(4),
+            radix: choice.radix.clamp(2, 4),
             tile_cols: choice.tile_cols.max(1),
             segments: choice.segments.max(1),
             subgroup,

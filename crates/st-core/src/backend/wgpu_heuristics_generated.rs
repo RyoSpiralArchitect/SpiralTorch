@@ -26,7 +26,7 @@ fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> GenChoice 
         ctile,
         mode_midk: 0,
         mode_bottomk: 0,
-        tile_cols: ((cols.max(1) + 1023) / 1024) as u32 * 1024,
+        tile_cols: (cols.max(1).div_ceil(1024) * 1024) as u32,
         radix: if k.is_power_of_two() { 4 } else { 2 },
         segments: if cols > 131_072 {
             4

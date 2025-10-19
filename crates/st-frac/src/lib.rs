@@ -49,7 +49,7 @@ pub fn gl_coeffs(alpha: f32, len: usize) -> Vec<f32> {
     for k in 1..len {
         let prev = c[k - 1];
         let num = alpha - (k as f32 - 1.0);
-        c[k] = prev * (num / (k as f32)) * -1.0;
+        c[k] = -(prev * (num / k as f32));
     }
     c
 }
@@ -121,7 +121,7 @@ fn gl_coeffs_adaptive_impl(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
 
     for k in 1..max_len {
         let num = alpha - (k as f32 - 1.0);
-        prev *= (num / k as f32) * -1.0;
+        prev *= -(num / k as f32);
         coeffs.push(prev);
         if prev.abs() < tol {
             break;
@@ -201,8 +201,8 @@ pub fn fracdiff_gl_1d_with_coeffs(
     coeff: &[f32],
     pad: Pad,
     scale: Option<f32>,
-) -> Result<Vec<f32>, FracErr> {
-    Ok(fracdiff_gl_1d_with_coeffs_forward(x, coeff, pad, scale))
+) -> Vec<f32> {
+    fracdiff_gl_1d_with_coeffs_forward(x, coeff, pad, scale)
 }
 
 pub fn fracdiff_gl_nd(
