@@ -739,8 +739,8 @@ pub mod zmeta {
             self.logistic_project_step(&delta);
         }
 
-        #[cfg(not(feature = "blackcat_v2"))]
-        fn logistic_project_step(&mut self, drive: &[f64]) {
+        #[allow(dead_code)]
+        fn logistic_project_step_legacy(&mut self, drive: &[f64]) {
             if self.dir.is_empty() {
                 return;
             }

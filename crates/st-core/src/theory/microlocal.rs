@@ -340,8 +340,7 @@ impl InterfaceZLift {
             support: total_support,
             interface_cells,
             band_energy,
-            // [SCALE-TODO] Patch 0 default
-            scale: ZScale::ONE,
+            scale: ZScale::new(signature.physical_radius),
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -357,7 +356,7 @@ pub struct InterfaceZPulse {
     pub support: f32,
     pub interface_cells: f32,
     pub band_energy: (f32, f32, f32),
-    pub scale: ZScale,
+    pub scale: Option<ZScale>,
     pub drift: f32,
     pub z_bias: f32,
     pub quality_hint: Option<f32>,
@@ -440,8 +439,12 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            // [SCALE-TODO] Patch 0 lerp placeholder
-            scale: ZScale::ONE,
+            scale: match (current.scale, next.scale) {
+                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
