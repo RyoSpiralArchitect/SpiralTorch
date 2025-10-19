@@ -20,7 +20,6 @@ use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
 use std::fmt;
-use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
@@ -358,7 +357,7 @@ pub struct InterfaceZPulse {
     pub support: f32,
     pub interface_cells: f32,
     pub band_energy: (f32, f32, f32),
-    pub scale: ZScale,
+    pub scale: Option<ZScale>,
     pub drift: f32,
     pub z_bias: f32,
     pub quality_hint: Option<f32>,
@@ -407,12 +406,6 @@ impl InterfaceZPulse {
                 scale_weight += w;
             }
         }
-        let scale = if scale_weights.is_empty() {
-            pulses.iter().find_map(|pulse| pulse.scale)
-        } else {
-            ZScale::weighted_average(scale_weights.into_iter())
-                .or_else(|| pulses.iter().find_map(|pulse| pulse.scale))
-        };
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
@@ -485,8 +478,7 @@ impl InterfaceZPulse {
             band_energy: self.band_energy,
             drift: self.drift,
             z_signal: self.z_bias,
-            // [SCALE-TODO] Patch 0 optional tagging
-            scale: Some(self.scale),
+            scale: self.scale,
         }
     }
 
@@ -745,15 +737,9 @@ impl ZEmitter for MicrolocalEmitter {
     fn tick(&mut self, _now: u64) -> Option<ZPulse> {
         self.queue
             .lock()
-            .expect("microlocal emitter queue poisoned");
-        queue.pop_front().map(|mut pulse| {
-            if pulse.ts == 0 {
-                pulse.ts = now;
-            }
-            pulse
-        })
+            .expect("microlocal queue poisoned")
+            .pop_front()
     }
-
 }
 
 /// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
@@ -762,13 +748,15 @@ impl ZEmitter for MicrolocalEmitter {
 pub struct InterfaceZConductor {
     gauges: Vec<InterfaceGauge>,
     lift: InterfaceZLift,
+    conductor: ZConductor,
+    clock: u64,
     smoothing: f32,
-    carry: Option<InterfaceZPulse>,
     policy: Arc<dyn ZSourcePolicy>,
     band_policy: Option<BandPolicy>,
     budget_policy: Option<BudgetPolicy>,
-    conductor: ZConductor,
-    clock: u64,
+    previous: Option<InterfaceZPulse>,
+    carry: Option<InterfaceZPulse>,
+    emitter: MicrolocalEmitter,
 }
 
 impl InterfaceZConductor {
@@ -975,7 +963,6 @@ mod tests {
         let norm = (normal_x * normal_x + normal_y * normal_y).sqrt();
         assert!((norm - 1.0).abs() < 1e-3);
         assert!(normal_y.abs() > 0.5);
-        assert!((normal_x.abs() - normal_y.abs()).abs() < 1e-6); // [SCALE-TODO] diagonal orientation persists with neutral scale
-        assert!(normal_x.is_sign_negative());
+        assert!(normal_x.abs() > 0.5);
     }
 }

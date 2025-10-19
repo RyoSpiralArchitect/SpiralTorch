@@ -117,7 +117,6 @@ pub fn redis_rpush<V: ToRedisArgs>(url: &str, key: &str, values: V) -> KvResult<
     with_redis(url, |kv| kv.rpush(key, values))
 }
 
-/// Push new values onto the tail of a list.
 #[cfg(feature = "redis")]
 pub fn redis_lpush_json<T: Serialize>(url: &str, key: &str, value: &T) -> KvResult<usize> {
     with_redis(url, |kv| kv.lpush_json(key, value))
