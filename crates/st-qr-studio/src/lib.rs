@@ -256,38 +256,56 @@ pub struct ZSpaceProjection {
     pub evaluations: Vec<ZSpaceEvaluation>,
 }
 
+#[derive(Clone, Debug)]
+pub struct ZSpaceSinkConfig {
+    pub log_start: f32,
+    pub log_step: f32,
+    pub s_values: Vec<ComplexScalar>,
+}
+
+impl ZSpaceSinkConfig {
+    pub fn vertical_line(log_start: f32, log_step: f32, sigma: f32, tau_samples: &[f32]) -> Self {
+        let s_values = tau_samples
+            .iter()
+            .map(|&tau| ComplexScalar::new(sigma, tau))
+            .collect();
+        Self {
+            log_start,
+            log_step,
+            s_values,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ZSpaceSink {
+    shared: Arc<ZSpaceShared>,
+}
+
+struct ZSpaceShared {
     name: String,
-    inner: Arc<Mutex<ZSpaceSinkState>>,
+    config: ZSpaceSinkConfig,
+    state: Mutex<ZSpaceSinkState>,
 }
 
 #[derive(Default)]
 struct ZSpaceSinkState {
-    log_start: f32,
-    log_step: f32,
-    s_values: Vec<ComplexScalar>,
     samples: HashMap<String, Vec<ComplexScalar>>,
     projections: Vec<ZSpaceProjection>,
 }
 
+pub struct ZSpaceSinkHandle {
+    shared: Arc<ZSpaceShared>,
+}
+
 impl ZSpaceSink {
-    pub fn new(
-        name: impl Into<String>,
-        log_start: f32,
-        log_step: f32,
-        s_values: Vec<ComplexScalar>,
-    ) -> Self {
-        let state = ZSpaceSinkState {
-            log_start,
-            log_step,
-            s_values,
-            samples: HashMap::new(),
-            projections: Vec::new(),
-        };
+    pub fn new(name: impl Into<String>, config: ZSpaceSinkConfig) -> Self {
         Self {
-            name: name.into(),
-            inner: Arc::new(Mutex::new(state)),
+            shared: Arc::new(ZSpaceShared {
+                name: name.into(),
+                config,
+                state: Mutex::new(ZSpaceSinkState::default()),
+            }),
         }
     }
 
@@ -298,43 +316,47 @@ impl ZSpaceSink {
         sigma: f32,
         tau_samples: &[f32],
     ) -> Self {
-        let s_values = tau_samples
-            .iter()
-            .map(|&tau| ComplexScalar::new(sigma, tau))
-            .collect();
-        Self::new(name, log_start, log_step, s_values)
+        Self::new(
+            name,
+            ZSpaceSinkConfig::vertical_line(log_start, log_step, sigma, tau_samples),
+        )
     }
 
-    pub fn take_projections(&self) -> Vec<ZSpaceProjection> {
-        let mut guard = self.inner.lock().expect("ZSpaceSink mutex poisoned");
-        std::mem::take(&mut guard.projections)
+    pub fn handle(&self) -> ZSpaceSinkHandle {
+        ZSpaceSinkHandle {
+            shared: Arc::clone(&self.shared),
+        }
     }
 
     fn failure(&self, reason: impl Into<String>) -> StudioSinkError {
         StudioSinkError::Transmission {
-            sink: self.name.clone(),
+            sink: self.shared.name.clone(),
             reason: reason.into(),
         }
     }
 }
 
+impl ZSpaceSinkHandle {
+    pub fn take_projections(&self) -> Vec<ZSpaceProjection> {
+        let mut guard = self.shared.state.lock().expect("ZSpaceSink mutex poisoned");
+        std::mem::take(&mut guard.projections)
+    }
+}
+
 fn encode_snapshot_for_zspace(snapshot: &PulseSnapshot) -> ComplexScalar {
-    let amplitude = snapshot.band_energy.0 + snapshot.band_energy.1 + snapshot.band_energy.2;
-    let asymmetry = snapshot.band_energy.0 - snapshot.band_energy.2;
-    let real = (snapshot.z_score as f32) * amplitude.max(1e-6);
-    let imag = snapshot.z_bias + asymmetry;
-    ComplexScalar::new(real, imag)
+    ComplexScalar::new(snapshot.mean as f32, snapshot.z_bias)
 }
 
 impl StudioSink for ZSpaceSink {
     fn name(&self) -> &str {
-        &self.name
+        &self.shared.name
     }
 
     fn send(&mut self, frame: &StudioFrame) -> Result<(), StudioSinkError> {
         let sample = encode_snapshot_for_zspace(&frame.record.pulse);
         let mut guard = self
-            .inner
+            .shared
+            .state
             .lock()
             .map_err(|_| self.failure("state mutex poisoned"))?;
         guard
@@ -346,20 +368,16 @@ impl StudioSink for ZSpaceSink {
     }
 
     fn flush(&mut self) -> Result<(), StudioSinkError> {
-        let (log_start, log_step, s_values) = {
-            let guard = self
-                .inner
-                .lock()
-                .map_err(|_| self.failure("state mutex poisoned"))?;
-            (guard.log_start, guard.log_step, guard.s_values.clone())
-        };
+        let config = self.shared.config.clone();
         let drained = {
             let mut guard = self
-                .inner
+                .shared
+                .state
                 .lock()
                 .map_err(|_| self.failure("state mutex poisoned"))?;
             guard.samples.drain().collect::<Vec<_>>()
         };
+
         if drained.is_empty() {
             return Ok(());
         }
@@ -373,10 +391,11 @@ impl StudioSink for ZSpaceSink {
                 trapezoidal_weights(samples.len()).map_err(|err| self.failure(err.to_string()))?;
             let weighted = prepare_weighted_series(&samples, &weights)
                 .map_err(|err| self.failure(err.to_string()))?;
-            let mut evaluations = Vec::new();
-            for &s in &s_values {
-                let (prefactor, z) = mellin_log_lattice_prefactor(log_start, log_step, s)
-                    .map_err(|err| self.failure(err.to_string()))?;
+            let mut evaluations = Vec::with_capacity(config.s_values.len());
+            for &s in &config.s_values {
+                let (prefactor, z) =
+                    mellin_log_lattice_prefactor(config.log_start, config.log_step, s)
+                        .map_err(|err| self.failure(err.to_string()))?;
                 let series = evaluate_weighted_series(&weighted, z)
                     .map_err(|err| self.failure(err.to_string()))?;
                 let value = prefactor * series;
@@ -394,7 +413,8 @@ impl StudioSink for ZSpaceSink {
         }
 
         let mut guard = self
-            .inner
+            .shared
+            .state
             .lock()
             .map_err(|_| self.failure("state mutex poisoned"))?;
         guard.projections.extend(projections);
@@ -700,7 +720,7 @@ mod tests {
             )
             .unwrap();
         let sink = ZSpaceSink::vertical_line("zspace", -2.0, 0.5, 0.0, &[-1.5, 0.0, 1.5]);
-        let mirror = sink.clone();
+        let mirror = sink.handle();
         let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
         studio.register_sink(sink);
 
