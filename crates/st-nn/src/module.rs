@@ -26,8 +26,8 @@ use st_core::backend::device_caps::DeviceCaps;
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::PsychoidSample;
 use st_tensor::{
-    topos::OpenCartesianTopos, AmegaHypergrad, ComplexTensor, LanguageWaveEncoder, PureResult,
-    Tensor, TensorError,
+    topos::OpenCartesianTopos, AmegaHypergrad, AmegaRealgrad, ComplexTensor, LanguageWaveEncoder,
+    PureResult, Tensor, TensorError,
 };
 use std::collections::HashMap;
 
@@ -38,6 +38,7 @@ pub struct Parameter {
     value: Tensor,
     gradient: Option<Tensor>,
     hypergrad: Option<AmegaHypergrad>,
+    realgrad: Option<AmegaRealgrad>,
 }
 
 impl core::fmt::Debug for Parameter {
@@ -45,12 +46,13 @@ impl core::fmt::Debug for Parameter {
         let (rows, cols) = self.value.shape();
         write!(
             f,
-            "Parameter(name={},shape=({},{}),has_grad={},has_hypergrad={})",
+            "Parameter(name={},shape=({},{}),has_grad={},has_hypergrad={},has_realgrad={})",
             self.name,
             rows,
             cols,
             self.gradient.is_some(),
-            self.hypergrad.is_some()
+            self.hypergrad.is_some(),
+            self.realgrad.is_some()
         )
     }
 }
@@ -63,6 +65,7 @@ impl Parameter {
             value,
             gradient: None,
             hypergrad: None,
+            realgrad: None,
         }
     }
 
@@ -124,6 +127,27 @@ impl Parameter {
         self.hypergrad.as_mut()
     }
 
+    /// Attaches an Euclidean realgrad tape to the parameter.
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PureResult<()> {
+        let (rows, cols) = self.value.shape();
+        let tape = AmegaRealgrad::new(learning_rate, rows, cols)?;
+        self.realgrad = Some(tape);
+        if self.hypergrad.is_none() {
+            self.gradient = None;
+        }
+        Ok(())
+    }
+
+    /// Provides direct access to the realgrad tape when attached.
+    pub fn realgrad(&self) -> Option<&AmegaRealgrad> {
+        self.realgrad.as_ref()
+    }
+
+    /// Provides mutable access to the realgrad tape when attached.
+    pub fn realgrad_mut(&mut self) -> Option<&mut AmegaRealgrad> {
+        self.realgrad.as_mut()
+    }
+
     fn assert_shape(&self, tensor: &Tensor) -> PureResult<()> {
         if self.value.shape() != tensor.shape() {
             return Err(TensorError::ShapeMismatch {
@@ -141,7 +165,11 @@ impl Parameter {
         self.assert_shape(update)?;
         if let Some(tape) = self.hypergrad.as_mut() {
             tape.accumulate_wave(update)?;
-        } else {
+        }
+        if let Some(tape) = self.realgrad.as_mut() {
+            tape.accumulate_wave(update)?;
+        }
+        if self.hypergrad.is_none() && self.realgrad.is_none() {
             match self.gradient.as_mut() {
                 Some(existing) => existing.add_scaled(update, 1.0)?,
                 None => {
@@ -160,14 +188,22 @@ impl Parameter {
         if let Some(tape) = self.hypergrad.as_mut() {
             tape.accumulate_complex_wave(wave)
         } else {
-            match self.gradient.as_mut() {
-                Some(existing) => existing.add_scaled(&tensor, 1.0)?,
-                None => {
-                    self.gradient = Some(tensor);
+            Ok(())
+        }
+        .and_then(|_| {
+            if let Some(tape) = self.realgrad.as_mut() {
+                tape.accumulate_complex_wave(wave)?;
+            }
+            if self.hypergrad.is_none() && self.realgrad.is_none() {
+                match self.gradient.as_mut() {
+                    Some(existing) => existing.add_scaled(&tensor, 1.0)?,
+                    None => {
+                        self.gradient = Some(tensor);
+                    }
                 }
             }
             Ok(())
-        }
+        })
     }
 
     /// Absorbs free-form text directly into the parameter's accumulator by
@@ -178,19 +214,30 @@ impl Parameter {
         if let Some(tape) = self.hypergrad.as_mut() {
             tape.absorb_text(encoder, text)
         } else {
-            match self.gradient.as_mut() {
-                Some(existing) => existing.add_scaled(&tensor, 1.0)?,
-                None => {
-                    self.gradient = Some(tensor);
+            Ok(())
+        }
+        .and_then(|_| {
+            if let Some(tape) = self.realgrad.as_mut() {
+                tape.absorb_text(encoder, text)?;
+            }
+            if self.hypergrad.is_none() && self.realgrad.is_none() {
+                match self.gradient.as_mut() {
+                    Some(existing) => existing.add_scaled(&tensor, 1.0)?,
+                    None => {
+                        self.gradient = Some(tensor);
+                    }
                 }
             }
             Ok(())
-        }
+        })
     }
 
     /// Clears the cached gradient or resets the hypergrad tape accumulator.
     pub fn zero_gradient(&mut self) {
         if let Some(tape) = self.hypergrad.as_mut() {
+            tape.reset();
+        }
+        if let Some(tape) = self.realgrad.as_mut() {
             tape.reset();
         }
         if let Some(grad) = self.gradient.as_mut() {
@@ -203,12 +250,21 @@ impl Parameter {
     /// Applies the accumulated update either via the hypergrad tape or by using
     /// the supplied fallback learning rate.
     pub fn apply_step(&mut self, fallback_lr: f32) -> PureResult<()> {
+        let mut applied = false;
         if let Some(tape) = self.hypergrad.as_mut() {
             tape.apply(&mut self.value)?;
-        } else if let Some(grad) = self.gradient.as_mut() {
-            self.value.add_scaled(grad, -fallback_lr)?;
-            for value in grad.data_mut() {
-                *value = 0.0;
+            applied = true;
+        }
+        if let Some(tape) = self.realgrad.as_mut() {
+            tape.apply(&mut self.value)?;
+            applied = true;
+        }
+        if !applied {
+            if let Some(grad) = self.gradient.as_mut() {
+                self.value.add_scaled(grad, -fallback_lr)?;
+                for value in grad.data_mut() {
+                    *value = 0.0;
+                }
             }
         }
         Ok(())
@@ -224,6 +280,11 @@ impl Parameter {
                 *grad *= factor;
             }
         }
+        if let Some(tape) = self.realgrad.as_mut() {
+            for grad in tape.gradient_mut() {
+                *grad *= factor;
+            }
+        }
         if let Some(grad) = self.gradient.as_mut() {
             for value in grad.data_mut() {
                 *value *= factor;
@@ -233,30 +294,48 @@ impl Parameter {
 
     /// Returns the squared L2 norm of any accumulated gradients.
     pub fn accumulators_norm_sq(&self) -> f64 {
+        let mut total = 0.0;
         if let Some(tape) = self.hypergrad.as_ref() {
-            tape.gradient()
+            total += tape
+                .gradient()
                 .iter()
                 .map(|&value| {
                     let v = value as f64;
                     v * v
                 })
-                .sum()
-        } else if let Some(grad) = self.gradient.as_ref() {
-            grad.data()
-                .iter()
-                .map(|&value| {
-                    let v = value as f64;
-                    v * v
-                })
-                .sum()
-        } else {
-            0.0
+                .sum::<f64>();
         }
+        if let Some(tape) = self.realgrad.as_ref() {
+            total += tape
+                .gradient()
+                .iter()
+                .map(|&value| {
+                    let v = value as f64;
+                    v * v
+                })
+                .sum::<f64>();
+        }
+        if self.hypergrad.is_none() && self.realgrad.is_none() {
+            if let Some(grad) = self.gradient.as_ref() {
+                total += grad
+                    .data()
+                    .iter()
+                    .map(|&value| {
+                        let v = value as f64;
+                        v * v
+                    })
+                    .sum::<f64>();
+            }
+        }
+        total
     }
 
     /// Scales the learning rate inside the attached hypergrad tape, if present.
     pub fn scale_learning_rate(&mut self, factor: f32) {
         if let Some(tape) = self.hypergrad.as_mut() {
+            tape.scale_learning_rate(factor);
+        }
+        if let Some(tape) = self.realgrad.as_mut() {
             tape.scale_learning_rate(factor);
         }
     }
@@ -321,6 +400,11 @@ pub trait Module {
         self.visit_parameters_mut(&mut |param| {
             param.attach_hypergrad_with_topos(curvature, learning_rate, topos.clone())
         })
+    }
+
+    /// Attaches a realgrad tape to every parameter.
+    fn attach_realgrad(&mut self, learning_rate: f32) -> PureResult<()> {
+        self.visit_parameters_mut(&mut |param| param.attach_realgrad(learning_rate))
     }
 
     /// Applies every parameter update.
@@ -407,5 +491,18 @@ mod tests {
         param.absorb_text(&encoder, "spiral").unwrap();
         assert!(param.hypergrad().is_some());
         param.apply_step(0.01).unwrap();
+    }
+
+    #[test]
+    fn parameter_streams_wave_through_realgrad() {
+        let encoder = LanguageWaveEncoder::new(-0.9, 0.7).unwrap();
+        let wave = encoder.encode_wave("realgrad").unwrap();
+        let tensor = wave.to_tensor().unwrap();
+        let mut param = Parameter::new("gate", Tensor::zeros(1, tensor.shape().1).unwrap());
+        param.attach_realgrad(0.02).unwrap();
+        param.accumulate_complex_wave(&wave).unwrap();
+        param.absorb_text(&encoder, "realgrad").unwrap();
+        assert!(param.realgrad().is_some());
+        param.apply_step(0.05).unwrap();
     }
 }
