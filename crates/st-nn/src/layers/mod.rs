@@ -13,6 +13,7 @@ pub mod softmax;
 pub mod topos_resonator;
 pub mod wave_gate;
 pub mod wave_rnn;
+pub mod spiral_rnn;
 pub mod zspace_mixer;
 pub mod zspace_projector;
 
