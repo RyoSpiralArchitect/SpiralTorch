@@ -158,6 +158,13 @@ impl PsiConfig {
         cfg
     }
 
+    /// Applies the Spiral advisory by first converting it into a tuning plan
+    /// and then forwarding to [`apply_spiral_tuning`].
+    pub fn apply_spiral_advisory(&mut self, advisory: &PsiSpiralAdvisory) {
+        let tuning = advisory.tuning();
+        self.apply_spiral_tuning(&tuning);
+    }
+
     /// Applies the Spiral-derived tuning adjustments to the configuration.
     pub fn apply_spiral_tuning(&mut self, tuning: &PsiSpiralTuning) {
         if tuning.required_components.is_empty() {
@@ -183,6 +190,15 @@ impl PsiConfig {
         } else {
             self.sample_rate = self.sample_rate.max(3);
         }
+    }
+
+    /// Synthesises an automated configuration and immediately folds in the
+    /// Spiral advisory so downstream PSI meters start with the recommended
+    /// container reinforcements.
+    pub fn automated_with_spiral(hint: PsiAutomationHint, advisory: &PsiSpiralAdvisory) -> Self {
+        let mut cfg = Self::automated(hint);
+        cfg.apply_spiral_advisory(advisory);
+        cfg
     }
 }
 
@@ -625,6 +641,44 @@ mod tests {
         match &events[0] {
             PsiEvent::ThresholdCross { up, .. } => assert!(!*up),
         }
+    }
+
+    #[test]
+    fn spiral_advisory_blends_into_automated_configs() {
+        let metrics = crate::theory::spiral_dynamics::psi_spiral_metrics(
+            -0.03, 2.2, 1.1, 0.8, 1.4, 1.2, 0.9, 0.25, 0.55, 0.18, 0.7, 0.42,
+        )
+        .unwrap();
+        let advisory = PsiSpiralAdvisory::from_metrics(&metrics);
+        assert_eq!(advisory.regime, HopfRegime::Subcritical);
+
+        let hint = PsiAutomationHint {
+            above: 24,
+            here: 28,
+            beneath: 20,
+            band_focus: 1.5,
+            drift_weight: 0.32,
+        };
+
+        let mut cfg_manual = PsiConfig::automated(hint);
+        let base_sample = cfg_manual.sample_rate;
+        cfg_manual.apply_spiral_advisory(&advisory);
+
+        assert!(cfg_manual.components.contains(PsiComponent::ATTN_ENTROPY));
+        assert!(cfg_manual
+            .weights
+            .get(&PsiComponent::ATTN_ENTROPY)
+            .is_some());
+        assert!(cfg_manual.thresholds.get(&PsiComponent::LOSS).is_some());
+        assert!(cfg_manual.sample_rate >= base_sample);
+
+        let cfg_auto = PsiConfig::automated_with_spiral(hint, &advisory);
+        assert_eq!(cfg_manual.components, cfg_auto.components);
+        assert_eq!(cfg_manual.weights, cfg_auto.weights);
+        assert_eq!(cfg_manual.thresholds, cfg_auto.thresholds);
+        assert_eq!(cfg_manual.sample_rate, cfg_auto.sample_rate);
+        assert_eq!(cfg_manual.enabled, cfg_auto.enabled);
+        assert_eq!(cfg_manual.ema_alpha, cfg_auto.ema_alpha);
     }
 
     #[test]

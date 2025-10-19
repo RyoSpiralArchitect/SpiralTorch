@@ -418,8 +418,11 @@ impl InterfaceZPulse {
             support,
             interface_cells,
             band_energy: band,
-            // [SCALE-TODO] Patch 0 aggregate placeholder
-            scale: scale.or(Some(ZScale::ONE)),
+            scale: if scale_weight > 0.0 {
+                ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
+            } else {
+                None
+            },
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -446,8 +449,12 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            // [SCALE-TODO] Patch 0 lerp placeholder
-            scale: ZScale::ONE,
+            scale: match (current.scale, next.scale) {
+                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -502,7 +509,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: Some(ZScale::ONE),
+            scale: None,
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
