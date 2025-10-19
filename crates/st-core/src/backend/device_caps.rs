@@ -251,8 +251,7 @@ impl DeviceCaps {
         let lanes = self.lane_width.max(1);
         let mut tile = TILE_OPTIONS
             .into_iter()
-            .rev()
-            .find(|opt| cols >= *opt)
+            .rfind(|opt| cols >= *opt)
             .unwrap_or(256);
 
         // Respect the lane width and workgroup limits.

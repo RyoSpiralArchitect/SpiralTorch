@@ -292,6 +292,10 @@ impl ChronoSummary {
     }
 
     /// Computes a summary from the provided iterator of frames.
+    #[allow(
+        clippy::should_implement_trait,
+        reason = "ChronoSummary offers domain-specific FromIterator without altering public API"
+    )]
     pub fn from_iter<'a, I>(frames: I) -> Option<Self>
     where
         I: IntoIterator<Item = &'a ChronoFrame>,

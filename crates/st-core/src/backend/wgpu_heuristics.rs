@@ -133,7 +133,7 @@ fn fallback(rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
         ctile,
         mode_midk: 0,
         mode_bottomk: 0,
-        tile_cols: ((cols.max(1) + 1023) / 1024) as u32 * 1024,
+        tile_cols: cols.max(1).div_ceil(1024) * 1024,
         radix: if k.is_power_of_two() { 4 } else { 2 },
         segments: if cols > 131_072 {
             4
@@ -206,6 +206,10 @@ fn describe_midbottom_mode(mode: u8) -> &'static str {
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Heuristic finalizer mirrors existing call signature for staged rollout"
+)]
 fn finalize_choice(
     kind: &'static str,
     rows: u32,
