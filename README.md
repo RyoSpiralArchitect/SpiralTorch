@@ -341,12 +341,6 @@ tracks throughput, bandwidth, occupancy, chosen tile, and regression fallbacks
 while evicting the oldest samples once the per-key capacity is reached, keeping
 the cache warm without unbounded growth.【F:crates/st-kdsl/src/registry.rs†L92-L229】【F:crates/st-kdsl/src/registry.rs†L248-L334】
 
-**Guardrails we stick to:**
-- 🚫 時刻・PID・PCIバス番号といった揮発的な情報をキーに混ぜない（毎回別物になる）。
-- 🚫 GPU名の文字列そのものをキーの中心に据えない（地域・ドライバ差で揺れる）。
-- 🚫 cold/warm 計測を混在させた分位点評価をしない（ウォームアップは別途弾く）。
-- 🚫 ログの無限成長を放置しない（常に上限を設け、古いサンプルから捨てる）。
-
 ### Microlocal interface gauges
 
 SpiralTorch’s theory core now hosts a microlocal boundary gauge that translates
