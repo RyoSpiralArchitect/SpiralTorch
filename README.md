@@ -84,6 +84,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
 - [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
+- [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Japanese design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
 
 ## Emerging toolkits unique to SpiralTorch
 
@@ -1491,6 +1492,10 @@ optimisers alongside its hypergradient updates.
 - Blend chart priors with the new `z_space_barycenter` solver—available in
   Rust (`st_tensor::z_space_barycenter`) and Python (`spiraltorch.z_space_barycenter`)—to
   wire colour energy directly into the Z-space roundtable.
+- Inspect the Tesla tail spectrum via `st_tensor::tesla_tail_spectrum` (Rust) or
+  `spiraltorch.tesla_tail_spectrum` (Python), then adapt roundtable weights with
+  `spiraltorch.nirt_weight_update` to follow the similarity- and coherence-aware
+  NIRT rule.
 - Follow the barycenter's loss-monotone intermediates and feed them straight into
   the hypergradient tape with `Hypergrad.accumulate_barycenter_path` so the
   optimiser converges along the same Z-space path as the solver.
