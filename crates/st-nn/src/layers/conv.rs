@@ -227,6 +227,7 @@ pub struct Conv2d {
     kernel: (usize, usize),
     stride: (usize, usize),
     padding: (usize, usize),
+    dilation: (usize, usize),
     input_hw: (usize, usize),
 }
 
@@ -239,6 +240,7 @@ impl Conv2d {
         kernel: (usize, usize),
         stride: (usize, usize),
         padding: (usize, usize),
+        dilation: (usize, usize),
         input_hw: (usize, usize),
     ) -> PureResult<Self> {
         validate_positive(in_channels, "in_channels")?;
@@ -247,6 +249,8 @@ impl Conv2d {
         validate_positive(kernel.1, "kernel_w")?;
         validate_positive(stride.0, "stride_h")?;
         validate_positive(stride.1, "stride_w")?;
+        validate_positive(dilation.0, "dilation_h")?;
+        validate_positive(dilation.1, "dilation_w")?;
         validate_positive(input_hw.0, "input_height")?;
         validate_positive(input_hw.1, "input_width")?;
         let name = name.into();
@@ -266,6 +270,7 @@ impl Conv2d {
             kernel,
             stride,
             padding,
+            dilation,
             input_hw,
         })
     }
@@ -275,14 +280,17 @@ impl Conv2d {
         let (kh, kw) = self.kernel;
         let (ph, pw) = self.padding;
         let (sh, sw) = self.stride;
-        if h + 2 * ph < kh || w + 2 * pw < kw {
+        let (dh, dw) = self.dilation;
+        let effective_kh = dh * (kh.saturating_sub(1)) + 1;
+        let effective_kw = dw * (kw.saturating_sub(1)) + 1;
+        if h + 2 * ph < effective_kh || w + 2 * pw < effective_kw {
             return Err(TensorError::InvalidDimensions {
                 rows: h + 2 * ph,
-                cols: kh.max(kw),
+                cols: effective_kh.max(effective_kw),
             });
         }
-        let oh = (h + 2 * ph - kh) / sh + 1;
-        let ow = (w + 2 * pw - kw) / sw + 1;
+        let oh = (h + 2 * ph - effective_kh) / sh + 1;
+        let ow = (w + 2 * pw - effective_kw) / sw + 1;
         Ok((oh, ow))
     }
 }
@@ -322,8 +330,8 @@ impl Module for Conv2d {
                                 let channel_offset = ic * h * w;
                                 for kh in 0..self.kernel.0 {
                                     for kw in 0..self.kernel.1 {
-                                        let pos_h = oh_idx * self.stride.0 + kh;
-                                        let pos_w = ow_idx * self.stride.1 + kw;
+                                        let pos_h = oh_idx * self.stride.0 + kh * self.dilation.0;
+                                        let pos_w = ow_idx * self.stride.1 + kw * self.dilation.1;
                                         if pos_h < self.padding.0 || pos_w < self.padding.1 {
                                             continue;
                                         }
@@ -392,8 +400,8 @@ impl Module for Conv2d {
                                 let channel_offset = ic * h * w;
                                 for kh in 0..self.kernel.0 {
                                     for kw in 0..self.kernel.1 {
-                                        let pos_h = oh_idx * self.stride.0 + kh;
-                                        let pos_w = ow_idx * self.stride.1 + kw;
+                                        let pos_h = oh_idx * self.stride.0 + kh * self.dilation.0;
+                                        let pos_w = ow_idx * self.stride.1 + kw * self.dilation.1;
                                         if pos_h < self.padding.0 || pos_w < self.padding.1 {
                                             continue;
                                         }
@@ -785,5 +793,157 @@ mod tests {
         let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
         let out = pool.forward(&input).unwrap();
         assert_eq!(out.data(), &[4.0]);
+    }
+
+    #[test]
+    fn conv2d_backward_supports_dilation() {
+        let mut conv =
+            Conv2d::new("conv", 1, 1, (2, 2), (1, 1), (1, 1), (3, 3)).expect("conv init");
+        {
+            let weight_data = conv.weight.value_mut().data_mut();
+            weight_data.copy_from_slice(&[0.2, -0.1, 0.05, 0.3]);
+        }
+        {
+            let bias_data = conv.bias.value_mut().data_mut();
+            bias_data.copy_from_slice(&[0.05]);
+        }
+
+        let input = Tensor::from_vec(1, 9, vec![0.5, -0.3, 1.2, 0.7, -1.1, 0.4, 0.9, -0.2, 0.6])
+            .expect("input tensor");
+        let output = conv.forward(&input).expect("forward");
+        let out_len = output.shape().1;
+        let grad_output = Tensor::from_vec(1, out_len, vec![1.0; out_len]).expect("grad out");
+
+        let grad_input = conv
+            .backward(&input, &grad_output)
+            .expect("conv backward computes grads");
+
+        let weight_grad = conv
+            .weight
+            .gradient()
+            .expect("weight grad available")
+            .data()
+            .to_vec();
+        let bias_grad = conv
+            .bias
+            .gradient()
+            .expect("bias grad available")
+            .data()
+            .to_vec();
+
+        let eps = 1e-3f32;
+        let mut numeric_weight_grad = vec![0.0f32; weight_grad.len()];
+        for (idx, numeric) in numeric_weight_grad.iter_mut().enumerate() {
+            let base = conv.weight.value().data()[idx];
+            let mut weight_data = conv.weight.value_mut().data_mut();
+            weight_data[idx] = base + eps;
+            drop(weight_data);
+            let out_pos = conv.forward(&input).expect("forward +eps");
+            let loss_pos: f32 = out_pos
+                .data()
+                .iter()
+                .zip(grad_output.data())
+                .map(|(o, go)| o * go)
+                .sum();
+            let mut weight_data = conv.weight.value_mut().data_mut();
+            weight_data[idx] = base - eps;
+            drop(weight_data);
+            let out_neg = conv.forward(&input).expect("forward -eps");
+            let loss_neg: f32 = out_neg
+                .data()
+                .iter()
+                .zip(grad_output.data())
+                .map(|(o, go)| o * go)
+                .sum();
+            let mut weight_data = conv.weight.value_mut().data_mut();
+            weight_data[idx] = base;
+            drop(weight_data);
+            *numeric = (loss_pos - loss_neg) / (2.0 * eps);
+        }
+
+        let mut numeric_bias_grad = vec![0.0f32; bias_grad.len()];
+        for (idx, numeric) in numeric_bias_grad.iter_mut().enumerate() {
+            let base = conv.bias.value().data()[idx];
+            let mut bias_data = conv.bias.value_mut().data_mut();
+            bias_data[idx] = base + eps;
+            drop(bias_data);
+            let out_pos = conv.forward(&input).expect("forward bias +eps");
+            let loss_pos: f32 = out_pos
+                .data()
+                .iter()
+                .zip(grad_output.data())
+                .map(|(o, go)| o * go)
+                .sum();
+            let mut bias_data = conv.bias.value_mut().data_mut();
+            bias_data[idx] = base - eps;
+            drop(bias_data);
+            let out_neg = conv.forward(&input).expect("forward bias -eps");
+            let loss_neg: f32 = out_neg
+                .data()
+                .iter()
+                .zip(grad_output.data())
+                .map(|(o, go)| o * go)
+                .sum();
+            let mut bias_data = conv.bias.value_mut().data_mut();
+            bias_data[idx] = base;
+            drop(bias_data);
+            *numeric = (loss_pos - loss_neg) / (2.0 * eps);
+        }
+
+        let input_len = input.shape().1;
+        let mut numeric_input_grad = vec![0.0f32; input_len];
+        let base_input = input.data().to_vec();
+        for i in 0..input_len {
+            let mut input_pos = base_input.clone();
+            input_pos[i] += eps;
+            let input_pos_tensor = Tensor::from_vec(1, input_len, input_pos).expect("input +eps");
+            let out_pos = conv.forward(&input_pos_tensor).expect("forward input +eps");
+            let loss_pos: f32 = out_pos
+                .data()
+                .iter()
+                .zip(grad_output.data())
+                .map(|(o, go)| o * go)
+                .sum();
+
+            let mut input_neg = base_input.clone();
+            input_neg[i] -= eps;
+            let input_neg_tensor = Tensor::from_vec(1, input_len, input_neg).expect("input -eps");
+            let out_neg = conv.forward(&input_neg_tensor).expect("forward input -eps");
+            let loss_neg: f32 = out_neg
+                .data()
+                .iter()
+                .zip(grad_output.data())
+                .map(|(o, go)| o * go)
+                .sum();
+
+            numeric_input_grad[i] = (loss_pos - loss_neg) / (2.0 * eps);
+        }
+
+        for (analytic, numeric) in weight_grad.iter().zip(numeric_weight_grad.iter()) {
+            assert!(
+                (analytic - numeric).abs() < 1e-2,
+                "weight grad mismatch: analytic={} numeric={}",
+                analytic,
+                numeric
+            );
+        }
+
+        for (analytic, numeric) in bias_grad.iter().zip(numeric_bias_grad.iter()) {
+            assert!(
+                (analytic - numeric).abs() < 1e-3,
+                "bias grad mismatch: analytic={} numeric={}",
+                analytic,
+                numeric
+            );
+        }
+
+        for (analytic, numeric) in grad_input.data().iter().zip(numeric_input_grad.iter()) {
+            assert!(
+                (analytic - numeric).abs() < 1e-2,
+                "input grad mismatch: analytic={} numeric={}",
+                analytic,
+                numeric
+            );
+        }
     }
 }
