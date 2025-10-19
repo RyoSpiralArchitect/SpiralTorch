@@ -201,8 +201,8 @@ pub fn fracdiff_gl_1d_with_coeffs(
     coeff: &[f32],
     pad: Pad,
     scale: Option<f32>,
-) -> Result<Vec<f32>, FracErr> {
-    Ok(fracdiff_gl_1d_with_coeffs_forward(x, coeff, pad, scale))
+) -> Vec<f32> {
+    fracdiff_gl_1d_with_coeffs_forward(x, coeff, pad, scale)
 }
 
 pub fn fracdiff_gl_nd(
