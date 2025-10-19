@@ -28,19 +28,6 @@ sequenceDiagram
   Core--)TLM: spans / metrics / logs
 ```
 
-**Quickstart**
-
-```
-just all          # fmt + clippy + core build/test + stack build
-just wgpu         # macOS (Metal) wgpu build of st-tensor
-```
-
-**Crates**
-- st-core: spectral/ops/telemetry runtime (+ tests)
-- st-tensor: tensor core, WGPU backend
-- st-nn, st-rl, st-rec: higher-level stacks
-- st-frac: fractional calculus helpers (GL kernels, Mellin tools)
-
 **License**
 
 AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
@@ -95,43 +82,6 @@ the kernels, the hypergrad tape streams Z-space meaning, and the high-level
 The stack is comfortable living entirely in Rust—yet the Python wheel remains a
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
-
-# SpiralTorch Architecture(Overview)
-
-
-          ┌────────────── Higher Stacks / Domain APIs ───────────────┐
-          │  st-nn     st-rl     st-rec     CanvasTransformer (CT)   │
-          └───────────────▲────────▲────────▲──────────────▲─────────┘
-                          │        │        │              │
-                          └────────┴────────┴──────────────┴──────┐
-                                             APIs / Bindings      │
-                      Python API   |  TypeScript/WASM API (UI)    │
-                                   │                              │
-                                   ▼                              ▼ (Live Canvas)
-                        ┌──────────────────── st-core ─────────────────────┐
-                        │ Ops / IR / Optimizer / Registry / Scheduler      │
-                        │ Runtime (async/queues/events)                    │
-                        │ Memory & Layout (alloc/pools/transfers)          │
-                        │ KV-Cache Manager (paged / tensorized)            │
-                        │ Telemetry / XAI hooks                            │
-                        └───────────────▲──────────────────────────────────┘
-                                        │
-                                        │ calls/dispatch
-                        ┌──────────────────────── st-tensor ───────────────┐
-                        │ Tensor abstraction & layouts / Device caps        │
-                        └───────────────▲───────────────────────────────────┘
-                                        │
-                          ┌─────────────┴─────────────┐
-                          │        st-kdsl            │
-                          │  DSL | Codegen | Autotune │
-                          └─────────────▲─────────────┘
-                                        │ kernels / tuning
-                        ┌───────────────┴──────────────────────────────────┐
-                        │     Backends: WGPU/WGSL | CUDA | CPU fallback    │
-                        └───────▲──────────────────────────▲───────────────┘
-                                │                          │
-                                └── Telemetry (metrics/traces/logs) ──▶ UI
-
 
 ---
 
