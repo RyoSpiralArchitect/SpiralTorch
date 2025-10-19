@@ -12,7 +12,7 @@
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
+    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZSource, ZSupport,
 };
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
@@ -188,33 +188,12 @@ impl InterfaceGauge {
                 }
                 if magnitude > 0.0 {
                     let scale = magnitude.sqrt().max(1e-6);
-                    let mut components = vec![0.0f32; dim];
                     for axis in 0..dim {
                         let mut orient_idx = Vec::with_capacity(dim + 1);
                         orient_idx.push(axis);
                         orient_idx.extend_from_slice(idx.slice());
                         let value = orient[IxDyn(&orient_idx)] / scale;
                         orient[IxDyn(&orient_idx)] = value;
-                        components[axis] = value;
-                    }
-                    let mut dominant_axis = 0usize;
-                    let mut dominant_value = 0.0f32;
-                    for (axis, &value) in components.iter().enumerate() {
-                        let abs = value.abs();
-                        if abs > dominant_value {
-                            dominant_axis = axis;
-                            dominant_value = abs;
-                        }
-                    }
-                    for axis in 0..dim {
-                        let mut orient_idx = Vec::with_capacity(dim + 1);
-                        orient_idx.push(axis);
-                        orient_idx.extend_from_slice(idx.slice());
-                        if axis == dominant_axis {
-                            orient[IxDyn(&orient_idx)] = components[axis];
-                        } else {
-                            orient[IxDyn(&orient_idx)] = 0.0;
-                        }
                     }
                 }
             }
@@ -361,7 +340,6 @@ impl InterfaceZLift {
             support: total_support,
             interface_cells,
             band_energy,
-            scale: ZScale::new(signature.physical_radius),
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -377,7 +355,6 @@ pub struct InterfaceZPulse {
     pub support: f32,
     pub interface_cells: f32,
     pub band_energy: (f32, f32, f32),
-    pub scale: Option<ZScale>,
     pub drift: f32,
     pub z_bias: f32,
     pub quality_hint: Option<f32>,
@@ -405,9 +382,6 @@ impl InterfaceZPulse {
         let mut drift_weight = 0.0f32;
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
-        let mut scale_weighted_physical = 0.0f32;
-        let mut scale_weighted_log = 0.0f32;
-        let mut scale_weight_total = 0.0f32;
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
@@ -419,26 +393,12 @@ impl InterfaceZPulse {
             drift_weight += weight;
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
-            if let Some(scale) = pulse.scale {
-                let w = scale_weight(pulse);
-                scale_weight_total += w;
-                scale_weighted_physical += scale.physical_radius * w;
-                scale_weighted_log += scale.log_radius * w;
-            }
         }
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
             interface_cells,
             band_energy: band,
-            scale: if scale_weight_total > 0.0 {
-                ZScale::from_components(
-                    scale_weighted_physical / scale_weight_total,
-                    scale_weighted_log / scale_weight_total,
-                )
-            } else {
-                None
-            },
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -465,12 +425,6 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            scale: match (current.scale, next.scale) {
-                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            },
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -489,7 +443,6 @@ impl InterfaceZPulse {
                 self.band_energy.1 * gain,
                 self.band_energy.2 * gain,
             ),
-            scale: self.scale,
             drift: self.drift * gain,
             z_bias: self.z_bias * gain,
             quality_hint: self.quality_hint,
@@ -515,10 +468,6 @@ impl InterfaceZPulse {
     pub fn into_softlogic_feedback(self) -> SoftlogicZFeedback {
         self.into_softlogic_feedback_with(0.0, 0.0)
     }
-}
-
-fn scale_weight(pulse: &InterfaceZPulse) -> f32 {
-    pulse.support.max(pulse.total_energy()).max(f32::EPSILON)
 }
 
 impl Default for InterfaceZPulse {

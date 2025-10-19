@@ -47,10 +47,30 @@ pub struct ZSpaceBarycenter {
     pub coupling_energy: f32,
     /// Total objective value at the minimiser.
     pub objective: f32,
-    /// Aggregated KL weight after subtracting the entropy regulariser.
+    /// Total weight temperature \(\sum_u W_u + \gamma_S\) that scales the barycenter mode.
     pub effective_weight: f32,
     /// Intermediate densities describing the loss curve towards the barycenter.
     pub intermediates: Vec<BarycenterIntermediate>,
+}
+
+/// Spectral line emitted by the Tesla tail diagnostic.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TeslaTailLine {
+    /// Spectral frequency \(\omega_k\).
+    pub frequency: f32,
+    /// Weighted magnitude \(w_k r_k\).
+    pub amplitude: f32,
+    /// Line weight \(w_k\) recovered from the left eigenvectors.
+    pub weight: f32,
+}
+
+/// Aggregated Tesla tail spectrum and coherence indicator.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TeslaTail {
+    /// Discrete spectral lines \(\mathcal{T}(\omega) = \sum_k w_k r_k \delta(\omega - \omega_k)\).
+    pub lines: Vec<TeslaTailLine>,
+    /// Coherence retention rate \(\mathrm{CR} = 1 - \kappa \sum_k w_k (1 - r_k)\).
+    pub coherence_rate: f32,
 }
 
 const LOG_FLOOR: f32 = 1.0e-12;
@@ -129,18 +149,16 @@ fn barycenter_objective(
     normalised: &[Vec<f32>],
     entropy_weight: f32,
     coupling_energy: f32,
-    kl_min: f32,
 ) -> PureResult<(f32, f32, f32)> {
-    let mut raw_kl = 0.0f32;
+    let mut kl_energy = 0.0f32;
     for (weight, dist) in weights.iter().zip(normalised.iter()) {
-        raw_kl += *weight * kl_divergence(candidate, dist)?;
+        kl_energy += *weight * kl_divergence(candidate, dist)?;
     }
-    let kl_energy = (raw_kl - kl_min).max(0.0);
     let entropy_value = entropy(candidate);
     Ok((
         kl_energy,
         entropy_value,
-        kl_energy + entropy_weight * entropy_value + coupling_energy,
+        kl_energy + coupling_energy - entropy_weight * entropy_value,
     ))
 }
 
@@ -182,7 +200,6 @@ fn barycenter_intermediates(
     normalised: &[Vec<f32>],
     entropy_weight: f32,
     coupling_energy: f32,
-    kl_min: f32,
     rows: usize,
     cols: usize,
 ) -> PureResult<Vec<BarycenterIntermediate>> {
@@ -208,14 +225,8 @@ fn barycenter_intermediates(
             *value /= total;
         }
         guard_probability_slice_with(guard, "barycenter intermediate", &mut mix)?;
-        let (kl_energy, entropy_value, objective) = barycenter_objective(
-            &mix,
-            weights,
-            normalised,
-            entropy_weight,
-            coupling_energy,
-            kl_min,
-        )?;
+        let (kl_energy, entropy_value, objective) =
+            barycenter_objective(&mix, weights, normalised, entropy_weight, coupling_energy)?;
         intermediates.push(BarycenterIntermediate {
             interpolation: alpha,
             density: Tensor::from_vec(rows, cols, mix.clone())?,
@@ -327,7 +338,7 @@ fn z_space_barycenter_inner(
         });
     }
 
-    let effective_weight = weight_sum - entropy_weight;
+    let effective_weight = weight_sum + entropy_weight;
     if effective_weight <= 0.0 {
         return Err(TensorError::DegenerateBarycenter { effective_weight });
     }
@@ -347,14 +358,6 @@ fn z_space_barycenter_inner(
     let baseline = weighted_baseline(guard, weights, &normalised, weight_sum)?;
     let bary = barycenter_mode(guard, weights, &normalised, effective_weight)?;
     let bary_tensor = Tensor::from_vec(rows, cols, bary.clone())?;
-    let kl_min = {
-        let mut acc = 0.0f32;
-        for (weight, dist) in weights.iter().zip(normalised.iter()) {
-            acc += *weight * kl_divergence(&bary, dist)?;
-        }
-        acc
-    };
-    let entropy_value = entropy(&bary);
 
     let coupling_energy = if let Some(coupling_tensor) = coupling {
         let (c_rows, c_cols) = coupling_tensor.shape();
@@ -380,6 +383,8 @@ fn z_space_barycenter_inner(
         0.0
     };
 
+    let (kl_energy, entropy_value, objective) =
+        barycenter_objective(&bary, weights, &normalised, entropy_weight, coupling_energy)?;
     let intermediates = barycenter_intermediates(
         guard,
         &baseline,
@@ -388,15 +393,14 @@ fn z_space_barycenter_inner(
         &normalised,
         entropy_weight,
         coupling_energy,
-        kl_min,
         rows,
         cols,
     )?;
 
     Ok(ZSpaceBarycenter {
-        objective: entropy_weight * entropy_value + coupling_energy,
+        objective,
         density: bary_tensor,
-        kl_energy: 0.0,
+        kl_energy,
         entropy: entropy_value,
         coupling_energy,
         effective_weight,
@@ -430,6 +434,134 @@ pub fn z_space_barycenter(
     coupling: Option<&Tensor>,
 ) -> PureResult<ZSpaceBarycenter> {
     z_space_barycenter_inner(None, weights, densities, entropy_weight, beta_j, coupling)
+}
+
+/// Builds the Tesla tail spectrum and coherence indicator from the dominant eigenpairs.
+pub fn tesla_tail_spectrum(
+    radii: &[f32],
+    frequencies: &[f32],
+    weights: &[f32],
+    kappa: f32,
+) -> PureResult<TeslaTail> {
+    if radii.is_empty() {
+        return Err(TensorError::EmptyInput("tesla_tail_spectrum"));
+    }
+    if radii.len() != frequencies.len() {
+        return Err(TensorError::DataLength {
+            expected: radii.len(),
+            got: frequencies.len(),
+        });
+    }
+    if radii.len() != weights.len() {
+        return Err(TensorError::DataLength {
+            expected: radii.len(),
+            got: weights.len(),
+        });
+    }
+    if !kappa.is_finite() || kappa < 0.0 {
+        return Err(TensorError::NonPositiveWeight { weight: kappa });
+    }
+
+    let mut lines = Vec::with_capacity(radii.len());
+    let mut penalty = 0.0f32;
+    for idx in 0..radii.len() {
+        let r = radii[idx];
+        if !r.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "tesla_tail_radius",
+                value: r,
+            });
+        }
+        if r < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "tesla_tail_radius",
+            });
+        }
+        let omega = frequencies[idx];
+        if !omega.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "tesla_tail_frequency",
+                value: omega,
+            });
+        }
+        let weight = weights[idx];
+        if !weight.is_finite() || weight < 0.0 {
+            return Err(TensorError::NonPositiveWeight { weight });
+        }
+        let amplitude = weight * r;
+        lines.push(TeslaTailLine {
+            frequency: omega,
+            amplitude,
+            weight,
+        });
+        penalty += weight * (1.0 - r);
+    }
+
+    let coherence_rate = 1.0 - kappa * penalty;
+    Ok(TeslaTail {
+        lines,
+        coherence_rate,
+    })
+}
+
+/// Applies the NIRT weight update \(W_{t+1} = W_t + \eta\, \mathrm{Sim}(\rho^*, \tilde\rho)\, \mathrm{CR}\).
+pub fn nirt_weight_update(
+    weights: &mut [f32],
+    similarities: &[f32],
+    coherence_rate: f32,
+    eta: f32,
+) -> PureResult<()> {
+    if weights.is_empty() {
+        return Err(TensorError::EmptyInput("nirt_weight_update_weights"));
+    }
+    if weights.len() != similarities.len() {
+        return Err(TensorError::DataLength {
+            expected: weights.len(),
+            got: similarities.len(),
+        });
+    }
+    if !eta.is_finite() || eta <= 0.0 {
+        return Err(TensorError::NonPositiveLearningRate { rate: eta });
+    }
+    if !coherence_rate.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label: "nirt_coherence_rate",
+            value: coherence_rate,
+        });
+    }
+
+    let mut total = 0.0f32;
+    for (weight, similarity) in weights.iter_mut().zip(similarities.iter()) {
+        if !weight.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "nirt_weight",
+                value: *weight,
+            });
+        }
+        if *weight < 0.0 {
+            return Err(TensorError::NonPositiveWeight { weight: *weight });
+        }
+        if !similarity.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "nirt_similarity",
+                value: *similarity,
+            });
+        }
+        let updated = *weight + eta * coherence_rate * *similarity;
+        *weight = updated.max(0.0);
+        total += *weight;
+    }
+
+    if total <= 0.0 {
+        return Err(TensorError::DegenerateBarycenter {
+            effective_weight: total,
+        });
+    }
+
+    for weight in weights.iter_mut() {
+        *weight /= total;
+    }
+    Ok(())
 }
 
 /// Trait describing how a group element acts on a tensor through the associated
@@ -552,16 +684,17 @@ mod tests {
         let result = z_space_barycenter(&weights, &densities, 0.25, 0.0, None).unwrap();
         let data = result.density.data();
         assert!((data[0] - data[1]).abs() < 1e-6);
-        assert!((result.kl_energy - 0.0).abs() < 1e-6);
+        assert!(result.kl_energy > 0.0);
         assert!(result.entropy > 0.0);
         assert_eq!(result.coupling_energy, 0.0);
+        assert!(result.objective <= result.kl_energy);
     }
 
     #[test]
     fn barycenter_degeneracy_detected() {
         let densities = vec![Tensor::from_vec(1, 2, vec![0.6, 0.4]).unwrap()];
         let weights = vec![1.0];
-        let err = z_space_barycenter(&weights, &densities, 1.0, 0.0, None).unwrap_err();
+        let err = z_space_barycenter(&weights, &densities, -1.5, 0.0, None).unwrap_err();
         assert!(matches!(
             err,
             TensorError::DegenerateBarycenter { effective_weight } if effective_weight <= 0.0
@@ -578,7 +711,7 @@ mod tests {
         let coupling = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
         let result = z_space_barycenter(&weights, &densities, 0.1, 2.0, Some(&coupling)).unwrap();
         assert!(result.coupling_energy > 0.0);
-        assert!(result.objective > result.kl_energy);
+        assert!(result.objective < result.kl_energy + result.coupling_energy);
         assert!(!result.intermediates.is_empty());
     }
 
@@ -625,5 +758,34 @@ mod tests {
         let sum: f32 = data.iter().sum();
         assert!((sum - 1.0).abs() < 1e-5);
         assert!(data.iter().all(|value| value.is_finite() && *value >= 0.0));
+    }
+
+    #[test]
+    fn tesla_tail_reports_spectrum_and_coherence() {
+        let radii = [0.9, 0.75, 0.5];
+        let freqs = [1.0, 2.0, 3.5];
+        let weights = [0.4, 0.35, 0.25];
+        let tail = tesla_tail_spectrum(&radii, &freqs, &weights, 0.6).unwrap();
+        assert_eq!(tail.lines.len(), radii.len());
+        assert!(tail.lines.iter().all(|line| line.amplitude >= 0.0));
+        let expected = 1.0
+            - 0.6
+                * weights
+                    .iter()
+                    .zip(radii.iter())
+                    .map(|(w, r)| *w * (1.0 - *r))
+                    .sum::<f32>();
+        assert!((tail.coherence_rate - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn nirt_weight_update_shifts_mass_towards_similar_modes() {
+        let mut weights = vec![0.3, 0.4, 0.3];
+        let similarities = vec![0.9, 0.1, 0.4];
+        nirt_weight_update(&mut weights, &similarities, 0.8, 0.2).unwrap();
+        let sum = weights.iter().sum::<f32>();
+        assert!((sum - 1.0).abs() < 1e-6);
+        assert!(weights[0] > weights[1]);
+        assert!(weights[0] > 0.3);
     }
 }
