@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use std::ffi::c_void;
+use std::sync::Arc;
 
 /// Minimal subset of the DLPack data type codes required for CPU `f32` tensors.
 #[repr(u8)]
@@ -77,13 +78,13 @@ pub struct DLManagedTensor {
 /// Internal state retained while exporting a tensor to a DLPack capsule.
 #[derive(Debug)]
 pub struct ManagedTensorState {
-    pub data: Box<[f32]>,
+    pub data: Arc<Vec<f32>>,
     pub shape: Box<[i64]>,
     pub strides: Box<[i64]>,
 }
 
 impl ManagedTensorState {
-    pub fn new(data: Box<[f32]>, shape: Box<[i64]>, strides: Box<[i64]>) -> Self {
+    pub fn new(data: Arc<Vec<f32>>, shape: Box<[i64]>, strides: Box<[i64]>) -> Self {
         Self {
             data,
             shape,
@@ -94,6 +95,9 @@ impl ManagedTensorState {
 
 /// Calls the deleter associated with a managed tensor, if one exists.
 pub unsafe fn call_managed_deleter(ptr: *mut DLManagedTensor) {
+    if ptr.is_null() {
+        return;
+    }
     if let Some(deleter) = (*ptr).deleter {
         deleter(ptr);
     }
