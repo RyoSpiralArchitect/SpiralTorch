@@ -1,0 +1,18 @@
+[package]
+name = "st-amg"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
+description = "Algebraic multigrid heuristics and roundtable learning hooks for SpiralTorch"
+license = "AGPL-3.0-or-later"
+
+[features]
+default = []
+learn_store = ["st-logic/learn_store"]
+
+[dependencies]
+st-logic = { path = "../st-logic" }
+st-tensor = { path = "../st-tensor" }
+
+[package.metadata.spiraltorch]
+copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

@@ -42,11 +42,13 @@ struct Sot3DStep {
     meso_position: usize,
     meso_phase: f64,
     meso_role: &'static str,
+    meso_role_index: usize,
     micro_index: usize,
     micro_length: usize,
     micro_position: usize,
     micro_phase: f64,
     micro_role: &'static str,
+    micro_role_index: usize,
     macro_reflection: bool,
     meso_reflection: bool,
     micro_reflection: bool,
@@ -182,12 +184,14 @@ pub(crate) fn build_plan(total_steps: usize, params: Sot3DParams) -> PyResult<Py
         for meso_length in meso_chunks {
             let meso_index = global_meso_index;
             let meso_role = MESO_ROLES[meso_index % MESO_ROLES.len()];
+            let meso_role_index = meso_index % MESO_ROLES.len();
             let mut meso_step_position = 0usize;
             let micro_chunks = pack_tetranacci(meso_length);
 
             for micro_length in micro_chunks {
                 let micro_index = global_micro_index;
                 let micro_role = MICRO_ROLES[micro_index % MICRO_ROLES.len()];
+                let micro_role_index = micro_index % MICRO_ROLES.len();
 
                 for micro_step in 0..micro_length {
                     let step_index = global_step_index;
@@ -245,11 +249,13 @@ pub(crate) fn build_plan(total_steps: usize, params: Sot3DParams) -> PyResult<Py
                         meso_position: meso_step_position,
                         meso_phase,
                         meso_role,
+                        meso_role_index,
                         micro_index,
                         micro_length,
                         micro_position: micro_step,
                         micro_phase,
                         micro_role,
+                        micro_role_index,
                         macro_reflection: macro_step_position + 1 == macro_length,
                         meso_reflection: meso_step_position + 1 == meso_length,
                         micro_reflection: micro_step + 1 == micro_length,
@@ -294,7 +300,7 @@ pub(crate) fn build_plan(total_steps: usize, params: Sot3DParams) -> PyResult<Py
 }
 
 #[pyclass(module = "spiraltorch.sot", name = "SoT3DStep")]
-struct PySoT3DStep {
+pub(crate) struct PySoT3DStep {
     step: Sot3DStep,
 }
 
@@ -386,6 +392,11 @@ impl PySoT3DStep {
     }
 
     #[getter]
+    fn meso_role_index(&self) -> usize {
+        self.step.meso_role_index
+    }
+
+    #[getter]
     fn micro_index(&self) -> usize {
         self.step.micro_index
     }
@@ -408,6 +419,11 @@ impl PySoT3DStep {
     #[getter]
     fn micro_role(&self) -> &'static str {
         self.step.micro_role
+    }
+
+    #[getter]
+    fn micro_role_index(&self) -> usize {
+        self.step.micro_role_index
     }
 
     #[getter]
@@ -452,6 +468,7 @@ impl PySoT3DStep {
         meso_info.set_item("position", self.step.meso_position)?;
         meso_info.set_item("phase", self.step.meso_phase)?;
         meso_info.set_item("role", self.step.meso_role)?;
+        meso_info.set_item("role_index", self.step.meso_role_index)?;
         meso_info.set_item("reflection", self.step.meso_reflection)?;
         dict.set_item("meso", meso_info)?;
         let micro_info = PyDict::new_bound(py);
@@ -460,6 +477,7 @@ impl PySoT3DStep {
         micro_info.set_item("position", self.step.micro_position)?;
         micro_info.set_item("phase", self.step.micro_phase)?;
         micro_info.set_item("role", self.step.micro_role)?;
+        micro_info.set_item("role_index", self.step.micro_role_index)?;
         micro_info.set_item("reflection", self.step.micro_reflection)?;
         dict.set_item("micro", micro_info)?;
         Ok(dict.into_py(py))
@@ -480,7 +498,7 @@ impl PySoT3DStep {
 }
 
 #[pyclass(module = "spiraltorch.sot", name = "MacroSummary")]
-struct PyMacroSummary {
+pub(crate) struct PyMacroSummary {
     summary: MacroSummary,
 }
 
@@ -563,6 +581,118 @@ impl PySoT3DPlan {
         }
         Tensor::from_vec(self.steps.len(), 3, data)
     }
+
+    fn feature_tensor_internal(&self) -> Result<Tensor, st_tensor::TensorError> {
+        if self.steps.is_empty() {
+            return Tensor::from_vec(0, 9, Vec::new());
+        }
+        let mut feature_data = Vec::with_capacity(self.steps.len() * 9);
+        for step in &self.steps {
+            feature_data.push(step.radius as f32);
+            feature_data.push(step.angle as f32);
+            feature_data.push(step.height as f32);
+            feature_data.push(step.curvature as f32);
+            feature_data.push(step.macro_phase as f32);
+            feature_data.push(step.meso_phase as f32);
+            feature_data.push(step.micro_phase as f32);
+            feature_data.push(self.params.meso_gain as f32);
+            feature_data.push(self.params.micro_gain as f32);
+        }
+        Tensor::from_vec(self.steps.len(), 9, feature_data)
+    }
+
+    fn reflection_tensor_internal(&self) -> Result<Tensor, st_tensor::TensorError> {
+        if self.steps.is_empty() {
+            return Tensor::from_vec(0, 3, Vec::new());
+        }
+        let mut reflection_data = Vec::with_capacity(self.steps.len() * 3);
+        for step in &self.steps {
+            reflection_data.push(if step.macro_reflection { 1.0 } else { 0.0 });
+            reflection_data.push(if step.meso_reflection { 1.0 } else { 0.0 });
+            reflection_data.push(if step.micro_reflection { 1.0 } else { 0.0 });
+        }
+        Tensor::from_vec(self.steps.len(), 3, reflection_data)
+    }
+
+    fn role_tensor_internal(&self) -> Result<Tensor, st_tensor::TensorError> {
+        if self.steps.is_empty() {
+            return Tensor::from_vec(0, 2, Vec::new());
+        }
+        let mut role_data = Vec::with_capacity(self.steps.len() * 2);
+        for step in &self.steps {
+            role_data.push(step.meso_role_index as f32);
+            role_data.push(step.micro_role_index as f32);
+        }
+        Tensor::from_vec(self.steps.len(), 2, role_data)
+    }
+
+    fn macro_summary_tensor_internal(&self) -> Result<Tensor, st_tensor::TensorError> {
+        if self.macros.is_empty() {
+            return Tensor::from_vec(0, 6, Vec::new());
+        }
+        let mut macro_data = Vec::with_capacity(self.macros.len() * 6);
+        for summary in &self.macros {
+            macro_data.push(summary.index as f32);
+            macro_data.push(summary.length as f32);
+            macro_data.push(summary.ideal_length as f32);
+            macro_data.push(summary.height_gain as f32);
+            macro_data.push(summary.mean_curvature as f32);
+            macro_data.push(
+                summary
+                    .reflection_step
+                    .map(|idx| idx as f32)
+                    .unwrap_or(-1.0),
+            );
+        }
+        Tensor::from_vec(self.macros.len(), 6, macro_data)
+    }
+
+    fn deposit_into_biome(
+        &self,
+        biome: &mut TensorBiome,
+        prefix: &str,
+        include_reflections: bool,
+        include_roles: bool,
+    ) -> PyResult<()> {
+        if self.steps.is_empty() {
+            return Ok(());
+        }
+        let positions = convert(self.positions_tensor())?;
+        convert(biome.absorb(intern_label(&format!("{}_positions", prefix)), positions))?;
+
+        let features = convert(self.feature_tensor_internal())?;
+        let feature_weight = (1.0 + self.params.meso_gain + self.params.micro_gain) as f32;
+        convert(biome.absorb_weighted(
+            intern_label(&format!("{}_features", prefix)),
+            features,
+            feature_weight,
+        ))?;
+
+        if include_roles {
+            let roles = convert(self.role_tensor_internal())?;
+            convert(biome.absorb(intern_label(&format!("{}_roles", prefix)), roles))?;
+        }
+
+        if include_reflections {
+            let reflections = convert(self.reflection_tensor_internal())?;
+            convert(biome.absorb(
+                intern_label(&format!("{}_reflections", prefix)),
+                reflections,
+            ))?;
+        }
+
+        if !self.macros.is_empty() {
+            let macros_tensor = convert(self.macro_summary_tensor_internal())?;
+            let macro_weight = (self.macros.len() as f32).max(1.0);
+            convert(biome.absorb_weighted(
+                intern_label(&format!("{}_macro_summary", prefix)),
+                macros_tensor,
+                macro_weight,
+            ))?;
+        }
+
+        Ok(())
+    }
 }
 
 #[pymethods]
@@ -622,6 +752,34 @@ impl PySoT3DPlan {
         Ok(PyTensor::from_tensor(tensor))
     }
 
+    fn feature_tensor(&self) -> PyResult<PyTensor> {
+        let tensor = self
+            .feature_tensor_internal()
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        Ok(PyTensor::from_tensor(tensor))
+    }
+
+    fn role_tensor(&self) -> PyResult<PyTensor> {
+        let tensor = self
+            .role_tensor_internal()
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        Ok(PyTensor::from_tensor(tensor))
+    }
+
+    fn reflection_tensor(&self) -> PyResult<PyTensor> {
+        let tensor = self
+            .reflection_tensor_internal()
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        Ok(PyTensor::from_tensor(tensor))
+    }
+
+    fn macro_summary_tensor(&self) -> PyResult<PyTensor> {
+        let tensor = self
+            .macro_summary_tensor_internal()
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        Ok(PyTensor::from_tensor(tensor))
+    }
+
     fn macro_summaries(&self, py: Python<'_>) -> PyResult<Vec<Py<PyMacroSummary>>> {
         self.macros
             .iter()
@@ -653,80 +811,30 @@ impl PySoT3DPlan {
         points
     }
 
-    #[pyo3(signature = (topos, label_prefix=None, include_reflections=true))]
+    #[pyo3(signature = (topos, label_prefix=None, include_reflections=true, include_roles=true))]
     fn grow_biome(
         &self,
         topos: &PyOpenTopos,
         label_prefix: Option<&str>,
         include_reflections: bool,
+        include_roles: bool,
     ) -> PyResult<PyTensorBiome> {
         let prefix = label_prefix.unwrap_or("sot");
         let mut biome = TensorBiome::new(topos.inner.clone());
-        if self.steps.is_empty() {
-            return Ok(PyTensorBiome::from_biome(biome));
-        }
-        let positions = convert(self.positions_tensor())?;
-        convert(biome.absorb(intern_label(&format!("{}_positions", prefix)), positions))?;
-
-        let mut feature_data = Vec::with_capacity(self.steps.len() * 9);
-        for step in &self.steps {
-            feature_data.push(step.radius as f32);
-            feature_data.push(step.angle as f32);
-            feature_data.push(step.height as f32);
-            feature_data.push(step.curvature as f32);
-            feature_data.push(step.macro_phase as f32);
-            feature_data.push(step.meso_phase as f32);
-            feature_data.push(step.micro_phase as f32);
-            feature_data.push(self.params.meso_gain as f32);
-            feature_data.push(self.params.micro_gain as f32);
-        }
-        let features = convert(Tensor::from_vec(self.steps.len(), 9, feature_data))?;
-        let feature_weight = (1.0 + self.params.meso_gain + self.params.micro_gain) as f32;
-        convert(biome.absorb_weighted(
-            intern_label(&format!("{}_features", prefix)),
-            features,
-            feature_weight,
-        ))?;
-
-        if include_reflections {
-            let mut reflection_data = Vec::with_capacity(self.steps.len() * 3);
-            for step in &self.steps {
-                reflection_data.push(if step.macro_reflection { 1.0 } else { 0.0 });
-                reflection_data.push(if step.meso_reflection { 1.0 } else { 0.0 });
-                reflection_data.push(if step.micro_reflection { 1.0 } else { 0.0 });
-            }
-            let reflections = convert(Tensor::from_vec(self.steps.len(), 3, reflection_data))?;
-            convert(biome.absorb(
-                intern_label(&format!("{}_reflections", prefix)),
-                reflections,
-            ))?;
-        }
-
-        if !self.macros.is_empty() {
-            let mut macro_data = Vec::with_capacity(self.macros.len() * 6);
-            for summary in &self.macros {
-                macro_data.push(summary.index as f32);
-                macro_data.push(summary.length as f32);
-                macro_data.push(summary.ideal_length as f32);
-                macro_data.push(summary.height_gain as f32);
-                macro_data.push(summary.mean_curvature as f32);
-                macro_data.push(
-                    summary
-                        .reflection_step
-                        .map(|idx| idx as f32)
-                        .unwrap_or(-1.0),
-                );
-            }
-            let macros_tensor = convert(Tensor::from_vec(self.macros.len(), 6, macro_data))?;
-            let macro_weight = (self.macros.len() as f32).max(1.0);
-            convert(biome.absorb_weighted(
-                intern_label(&format!("{}_macro_summary", prefix)),
-                macros_tensor,
-                macro_weight,
-            ))?;
-        }
-
+        self.deposit_into_biome(&mut biome, prefix, include_reflections, include_roles)?;
         Ok(PyTensorBiome::from_biome(biome))
+    }
+
+    #[pyo3(signature = (biome, label_prefix=None, include_reflections=true, include_roles=true))]
+    fn infuse_biome(
+        &self,
+        biome: &mut PyTensorBiome,
+        label_prefix: Option<&str>,
+        include_reflections: bool,
+        include_roles: bool,
+    ) -> PyResult<()> {
+        let prefix = label_prefix.unwrap_or("sot");
+        self.deposit_into_biome(&mut biome.inner, prefix, include_reflections, include_roles)
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -762,6 +870,47 @@ pub(crate) fn generate_plan_with_params(
     params: Sot3DParams,
 ) -> PyResult<PySoT3DPlan> {
     build_plan(total_steps, params)
+}
+
+pub(crate) fn plan_from_py_config(
+    default_steps: usize,
+    cfg: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Option<PySoT3DPlan>> {
+    let mut plan_steps = default_steps;
+    let mut params = Sot3DParams {
+        base_radius: 1.0,
+        radial_growth: 0.05,
+        base_height: 1.0,
+        meso_gain: 0.2,
+        micro_gain: 0.05,
+    };
+
+    if let Some(cfg) = cfg {
+        if let Some(value) = cfg.get_item("steps")? {
+            plan_steps = value.extract()?;
+        }
+        if let Some(value) = cfg.get_item("base_radius")? {
+            params.base_radius = value.extract()?;
+        }
+        if let Some(value) = cfg.get_item("radial_growth")? {
+            params.radial_growth = value.extract()?;
+        }
+        if let Some(value) = cfg.get_item("base_height")? {
+            params.base_height = value.extract()?;
+        }
+        if let Some(value) = cfg.get_item("meso_gain")? {
+            params.meso_gain = value.extract()?;
+        }
+        if let Some(value) = cfg.get_item("micro_gain")? {
+            params.micro_gain = value.extract()?;
+        }
+    }
+
+    if plan_steps == 0 {
+        Ok(None)
+    } else {
+        generate_plan_with_params(plan_steps, params).map(Some)
+    }
 }
 
 #[pyfunction]

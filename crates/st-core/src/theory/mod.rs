@@ -40,6 +40,9 @@ pub mod microlocal_impl;
 #[doc(inline)]
 pub use microlocal_impl as microlocal;
 
+#[cfg(feature = "experimental_zpulse")]
+pub mod microlocal_experimental;
+
 #[path = "maxwell.rs"]
 #[doc(hidden)]
 pub mod maxwell_impl;
@@ -51,3 +54,9 @@ pub use maxwell_impl as maxwell;
 pub mod zpulse_impl;
 #[doc(inline)]
 pub use zpulse_impl as zpulse;
+
+#[path = "spiral_dynamics.rs"]
+#[doc(hidden)]
+pub mod spiral_dynamics_impl;
+#[doc(inline)]
+pub use spiral_dynamics_impl as spiral_dynamics;

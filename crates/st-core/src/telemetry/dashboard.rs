@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::time::{Duration, SystemTime};
 
 /// Lightweight metric captured by the dashboard runtime.
@@ -44,7 +44,7 @@ pub struct DashboardEvent {
     pub severity: EventSeverity,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EventSeverity {
     Info,
     Warning,
@@ -76,6 +76,57 @@ impl DashboardFrame {
         self.events.push(event);
     }
 }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MetricAggregate {
+    pub name: String,
+    pub mean: f64,
+    pub min: f64,
+    pub max: f64,
+    pub latest: f64,
+    pub samples: usize,
+}
+
+impl MetricAggregate {
+    fn from_accumulator(name: String, acc: MetricAccumulator) -> Self {
+        let mean = if acc.count == 0 {
+            0.0
+        } else {
+            acc.sum / acc.count as f64
+        };
+        Self {
+            name,
+            mean,
+            min: acc.min,
+            max: acc.max,
+            latest: acc.latest,
+            samples: acc.count,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DashboardSummary {
+    pub frame_count: usize,
+    /// Time span between the oldest and newest frame included in the summary (seconds).
+    pub span_seconds: f64,
+    pub metrics: Vec<MetricAggregate>,
+    pub events: BTreeMap<EventSeverity, usize>,
+}
+
+impl DashboardSummary {
+    pub fn is_empty(&self) -> bool {
+        self.frame_count == 0
+    }
+}
+
+#[derive(Clone, Debug)]
+struct MetricAccumulator {
+    latest: f64,
+    sum: f64,
+    min: f64,
+    max: f64,
+    count: usize,
+}
 
 /// Rolling dashboard state that retains recent frames for quick inspection.
 #[derive(Debug)]
@@ -103,8 +154,78 @@ impl DashboardRing {
         self.frames.back()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &DashboardFrame> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &DashboardFrame> + ExactSizeIterator {
         self.frames.iter()
+    }
+
+    /// Builds an aggregate summary across the most recent `limit` frames. When `limit` is `None`
+    /// the entire ring is considered. Returns `None` if the ring is empty.
+    pub fn summarize(&self, limit: Option<usize>) -> Option<DashboardSummary> {
+        if self.frames.is_empty() {
+            return None;
+        }
+
+        let limit = limit.unwrap_or(usize::MAX).max(1);
+        let mut accumulators: BTreeMap<String, MetricAccumulator> = BTreeMap::new();
+        let mut events: BTreeMap<EventSeverity, usize> = BTreeMap::new();
+        let mut frame_count = 0usize;
+        let mut latest_ts: Option<SystemTime> = None;
+        let mut earliest_ts: Option<SystemTime> = None;
+
+        for frame in self.frames.iter().rev().take(limit) {
+            frame_count += 1;
+            let ts = frame.timestamp;
+            if latest_ts.is_none() {
+                latest_ts = Some(ts);
+            }
+            earliest_ts = Some(ts);
+
+            for metric in &frame.metrics {
+                let entry =
+                    accumulators
+                        .entry(metric.name.clone())
+                        .or_insert_with(|| MetricAccumulator {
+                            latest: metric.value,
+                            sum: 0.0,
+                            min: metric.value,
+                            max: metric.value,
+                            count: 0,
+                        });
+                entry.sum += metric.value;
+                entry.count += 1;
+                entry.min = entry.min.min(metric.value);
+                entry.max = entry.max.max(metric.value);
+            }
+
+            for event in &frame.events {
+                *events.entry(event.severity).or_insert(0) += 1;
+            }
+        }
+
+        if frame_count == 0 {
+            return None;
+        }
+
+        let span_seconds = match (earliest_ts, latest_ts) {
+            (Some(start), Some(end)) => end
+                .duration_since(start)
+                .or_else(|_| start.duration_since(end))
+                .map(|duration| duration.as_secs_f64())
+                .unwrap_or(0.0),
+            _ => 0.0,
+        };
+
+        let metrics = accumulators
+            .into_iter()
+            .map(|(name, acc)| MetricAggregate::from_accumulator(name, acc))
+            .collect();
+
+        Some(DashboardSummary {
+            frame_count,
+            span_seconds,
+            metrics,
+            events,
+        })
     }
 }
 
@@ -172,6 +293,57 @@ mod tests {
         frame.push_metric(DashboardMetric::new("energy", 1.0));
         ring.push(frame);
         assert!(ring.latest().is_some());
+    }
+
+    #[test]
+    fn ring_summarises_recent_frames() {
+        let mut ring = DashboardRing::new(8);
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
+
+        let mut first = DashboardFrame::new(base);
+        first.push_metric(DashboardMetric::new("energy", 1.0));
+        first.push_metric(DashboardMetric::new("latency_ms", 10.0));
+        first.push_event(DashboardEvent {
+            message: "warmup".to_string(),
+            severity: EventSeverity::Info,
+        });
+        ring.push(first);
+
+        let mut second = DashboardFrame::new(base + Duration::from_millis(500));
+        second.push_metric(DashboardMetric::new("energy", 3.0));
+        second.push_metric(DashboardMetric::new("latency_ms", 30.0));
+        second.push_event(DashboardEvent {
+            message: "lag".to_string(),
+            severity: EventSeverity::Warning,
+        });
+        ring.push(second);
+
+        let summary = ring.summarize(None).expect("summary should exist");
+        assert_eq!(summary.frame_count, 2);
+        assert!(summary.span_seconds >= 0.5);
+        assert_eq!(summary.events.get(&EventSeverity::Info), Some(&1));
+        assert_eq!(summary.events.get(&EventSeverity::Warning), Some(&1));
+
+        let energy = summary
+            .metrics
+            .iter()
+            .find(|metric| metric.name == "energy")
+            .expect("energy metric present");
+        assert_eq!(energy.samples, 2);
+        assert!((energy.mean - 2.0).abs() < 1e-6);
+        assert_eq!(energy.latest, 3.0);
+
+        let latency_latest_only = ring
+            .summarize(Some(1))
+            .expect("summary should exist")
+            .metrics
+            .into_iter()
+            .find(|metric| metric.name == "latency_ms")
+            .expect("latency metric present");
+        assert_eq!(latency_latest_only.samples, 1);
+        assert_eq!(latency_latest_only.latest, 30.0);
+        assert_eq!(latency_latest_only.min, 30.0);
+        assert_eq!(latency_latest_only.max, 30.0);
     }
 
     #[test]

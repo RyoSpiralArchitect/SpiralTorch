@@ -11,7 +11,8 @@ use st_tensor::TensorError;
 /// Discrete-action Deep Q Network agent implemented with a lightweight Q-table.
 #[derive(Clone, Debug)]
 pub struct DqnAgent {
-    state_dim: usize,
+    /// Dimensionality expected from each state vector fed into the agent.
+    pub state_dim: usize,
     action_dim: usize,
     discount: f32,
     learning_rate: f32,
@@ -76,6 +77,19 @@ impl DqnAgent {
             (0..self.action_dim)
                 .max_by(|&lhs, &rhs| self.q(state, lhs).total_cmp(&self.q(state, rhs)))
                 .unwrap_or(0)
+        }
+    }
+
+    /// Validates that the provided state observation matches the configured dimensionality.
+    pub fn validate_state<'a, T>(&self, state: &'a [T]) -> Result<&'a [T], SpiralRlError> {
+        if state.len() == self.state_dim {
+            Ok(state)
+        } else {
+            Err(SpiralRlError::InvalidStateShape {
+                expected: self.state_dim,
+                rows: 1,
+                cols: state.len(),
+            })
         }
     }
 
