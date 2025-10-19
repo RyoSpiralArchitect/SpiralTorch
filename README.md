@@ -22,6 +22,8 @@ _(Still under active repair while expanding — API changes hourly.)_
 - **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
+> **Fresh in st-frac:** the Mellin/Hilbert toolkit now returns `Result` everywhere, promotes a crate-wide `Scalar` alias so you can flip between `f32`/`f64`, and ships WebGPU-backed vertical-line/mesh sweeps that reuse the same log-lattice weights without ever touching the pulse primitives.
+
 <!-- STATS:START -->
 > _auto-generated: 2025-10-18 21:39 UTC_
 
@@ -74,6 +76,11 @@ tensor shims, no translation layers, and no tracebacks.
   - **Open Z-space:** Gradient splits honour the A/B/C roundtable through the
     new `zspace_round` ops module so Above/Here/Beneath bands stay in sync with
     SpiralK plans without auxiliary buffers.
+  - **Hilbert-grounded Mellin bridges:** `st-frac::mellin::MellinLogGrid`
+    now exposes fallible APIs, a `Scalar` alias for f32/f64 toggling, exact
+    lattice bit-matching, and WebGPU-backed vertical/mesh sweeps that reuse the
+    same `st-frac::zspace` weights while `hilbert_inner_product` and
+    `evaluate_vertical_line` surface the lattice’s Hilbert geometry directly.
   - **Three-voice consensus:** SpiralK heuristics, DSL directives, and the
     generated WASM tuner table discuss every launch decision and keep the
     transcript in the roundtable log.
