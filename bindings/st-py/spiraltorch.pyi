@@ -39,6 +39,14 @@ class _CompatNamespace(ModuleType):
     torch: _CompatTorch
     jax: _CompatJax
     tensorflow: _CompatTensorFlow
+    def capture(value: object, /) -> Tensor: ...
+    def share(value: object, target: str, /) -> object: ...
+
+compat: _CompatNamespace
+
+def capture(value: object, /) -> Tensor: ...
+
+def share(value: object, target: str, /) -> object: ...
 
 compat: _CompatNamespace
 
@@ -223,6 +231,9 @@ class DashboardRing:
 
 __all__ = [
     "Tensor",
+    "compat",
+    "capture",
+    "share",
     "from_dlpack",
     "to_dlpack",
     "nn",

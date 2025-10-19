@@ -47,10 +47,11 @@ performance, memory safety, and collaborative tooling.
   Python `PyTensor.__dlpack__`/`__dlpack_device__` hooks, and show how to profile the
   boundary overhead. Ship ready-to-import helpers in the Python binding (`spiraltorch.Tensor`
   plus module-level `from_dlpack`/`to_dlpack`) so that PyTorch, TensorFlow, JAX, and NumPy
-  callers can swap tensors without writing glue code. The new `spiraltorch.compat`
-  namespace wraps these bridges with `compat.torch`, `compat.jax`, and
-  `compat.tensorflow` helpers that import the respective frameworks and call their
-  DLPack shims directly.
+  callers can swap tensors without writing glue code. The `spiraltorch.compat`
+  namespace layers higher-level `compat.capture` / `compat.share` shims on top of
+  the framework-specific bridges (`compat.torch`, `compat.jax`, and
+  `compat.tensorflow`), letting callers turn any DLPack-capable tensor into the
+  format they need with a single import.
 - **Telemetry bridges.** Map SpiralTorch's observability events to tensorboard, Weights &
   Biases, JAX's `jax.profiler`, and OpenTelemetry spans so teams can keep their existing dashboards.
 

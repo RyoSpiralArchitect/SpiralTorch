@@ -1,6 +1,7 @@
-use pyo3::exceptions::PyImportError;
+use pyo3::exceptions::{PyImportError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
+use pyo3::types::{PyAny, PyModule};
+use pyo3::wrap_pyfunction;
 
 use crate::tensor::PyTensor;
 
@@ -10,6 +11,12 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
         "__doc__",
         "Zero-copy bridges into Torch, JAX, and TensorFlow via DLPack.",
     )?;
+
+    compat.add_function(wrap_pyfunction!(capture, &compat)?)?;
+    compat.add_function(wrap_pyfunction!(share, &compat)?)?;
+
+    parent.add_function(wrap_pyfunction!(capture, parent)?)?;
+    parent.add_function(wrap_pyfunction!(share, parent)?)?;
 
     torch::register(py, &compat)?;
     jax::register(py, &compat)?;
@@ -36,6 +43,112 @@ fn import_with_hint<'py>(
             }
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Source {
+    SpiralTorch,
+    Torch,
+    Jax,
+    TensorFlow,
+    Dlpack,
+}
+
+fn detect_source(value: &Bound<PyAny>) -> Source {
+    if value.is_instance_of::<PyTensor>() {
+        return Source::SpiralTorch;
+    }
+
+    let ty = value.get_type();
+    let module = ty
+        .getattr("__module__")
+        .ok()
+        .and_then(|name| name.extract::<String>().ok())
+        .unwrap_or_default();
+
+    if module.starts_with("torch") {
+        return Source::Torch;
+    }
+
+    if module.starts_with("jax") || module.contains("jaxlib") {
+        return Source::Jax;
+    }
+
+    if module.starts_with("tensorflow") {
+        return Source::TensorFlow;
+    }
+
+    Source::Dlpack
+}
+
+fn capture_impl(py: Python<'_>, value: &Bound<PyAny>) -> PyResult<PyTensor> {
+    match detect_source(value) {
+        Source::SpiralTorch => {
+            let py_tensor: Py<PyTensor> = value.extract()?;
+            Ok(py_tensor.bind(py).borrow().clone())
+        }
+        Source::Torch => torch::from_torch(py, value),
+        Source::Jax => jax::from_jax(py, value),
+        Source::TensorFlow => tensorflow::from_tensorflow(py, value),
+        Source::Dlpack => PyTensor::from_dlpack(py, value.clone().unbind().into_py(py)),
+    }
+}
+
+fn share_impl(py: Python<'_>, value: &Bound<PyAny>, target: &str) -> PyResult<PyObject> {
+    let normalized = target.to_ascii_lowercase();
+    let ty = value.get_type();
+    let module = ty
+        .getattr("__module__")
+        .ok()
+        .and_then(|name| name.extract::<String>().ok())
+        .unwrap_or_default();
+    match normalized.as_str() {
+        "spiraltorch" | "spiral" | "st" | "tensor" => {
+            if value.is_instance_of::<PyTensor>() {
+                return Ok(value.clone().unbind().into_py(py));
+            }
+            let tensor = capture_impl(py, value)?;
+            Py::new(py, tensor).map(|py_tensor| py_tensor.into_py(py))
+        }
+        "torch" | "pytorch" => {
+            if module.starts_with("torch") {
+                return Ok(value.clone().unbind().into_py(py));
+            }
+            let tensor = capture_impl(py, value)?;
+            torch::to_torch(py, &tensor)
+        }
+        "jax" => {
+            if module.starts_with("jax") || module.contains("jaxlib") {
+                return Ok(value.clone().unbind().into_py(py));
+            }
+            let tensor = capture_impl(py, value)?;
+            jax::to_jax(py, &tensor)
+        }
+        "tensorflow" | "tf" => {
+            if module.starts_with("tensorflow") {
+                return Ok(value.clone().unbind().into_py(py));
+            }
+            let tensor = capture_impl(py, value)?;
+            tensorflow::to_tensorflow(py, &tensor)
+        }
+        _ => Err(PyValueError::new_err(format!(
+            "unknown target '{target}'; choose 'spiraltorch', 'torch', 'jax', or 'tensorflow'"
+        ))),
+    }
+}
+
+/// Convert any DLPack-capable tensor into a SpiralTorch tensor.
+#[pyfunction]
+#[pyo3(text_signature = "(value, /)")]
+fn capture(py: Python<'_>, value: &Bound<PyAny>) -> PyResult<PyTensor> {
+    capture_impl(py, value)
+}
+
+/// Share a tensor with another framework without copying the underlying buffer.
+#[pyfunction]
+#[pyo3(text_signature = "(value, target, /)")]
+fn share(py: Python<'_>, value: &Bound<PyAny>, target: &str) -> PyResult<PyObject> {
+    share_impl(py, value, target)
 }
 
 mod torch {

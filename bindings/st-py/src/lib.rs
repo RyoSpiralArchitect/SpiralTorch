@@ -5,7 +5,6 @@ use pyo3::types::PyModule;
 
 mod tensor;
 mod compat;
-mod nn;
 
 // =======================
 // extras（安全・自己完結）
@@ -219,7 +218,7 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
 
     // 3) __all__
     m.add("__all__", vec![
-        "Tensor","from_dlpack","to_dlpack",
+        "Tensor","from_dlpack","to_dlpack","compat","capture","share",
         "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
