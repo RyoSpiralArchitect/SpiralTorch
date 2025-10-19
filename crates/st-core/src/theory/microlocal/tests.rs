@@ -200,7 +200,7 @@ fn band_policy_demotes_unbalanced_energy() {
         band_energy: (0.9, 0.05, 0.05),
         drift: 0.4,
         z_bias: 0.3,
-        scale: ZScale::ONE, // [SCALE-TODO] ensure scale stays neutral during rollout
+        scale: Some(ZScale::ONE), // [SCALE-TODO] ensure scale stays neutral during rollout
         ..InterfaceZPulse::default()
     };
     let policy = BandPolicy::new([0.2, 0.2, 0.2]);
@@ -219,7 +219,7 @@ fn maxwell_policy_prefers_confident_z_scores() {
         source: ZSource::Maxwell,
         z_score: Some(2.5),
         standard_error: Some(0.05),
-        scale: ZScale::ONE, // [SCALE-TODO] ensure scale stays neutral during rollout
+        scale: Some(ZScale::ONE), // [SCALE-TODO] ensure scale stays neutral during rollout
         ..InterfaceZPulse::default()
     };
     let policy = MaxwellPolicy::default();
@@ -243,7 +243,7 @@ fn realgrad_policy_scales_with_residual_and_band() {
         residual_p90: Some(0.05),
         quality_hint: Some(0.8),
         has_low_band: true,
-        scale: ZScale::ONE, // [SCALE-TODO] ensure scale stays neutral during rollout
+        scale: Some(ZScale::ONE), // [SCALE-TODO] ensure scale stays neutral during rollout
         ..InterfaceZPulse::default()
     };
     let policy = RealGradPolicy::default();
@@ -275,7 +275,7 @@ fn composite_policy_routes_per_source() {
         band_energy: (0.3, 0.3, 0.4),
         drift: 0.2,
         z_bias: 0.1,
-        scale: ZScale::ONE, // [SCALE-TODO] ensure scale stays neutral during rollout
+        scale: Some(ZScale::ONE), // [SCALE-TODO] ensure scale stays neutral during rollout
         ..InterfaceZPulse::default()
     };
     assert!((composite.quality(&pulse) - 0.5).abs() < 1e-6);

@@ -16,24 +16,6 @@ use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
-// [SCALE-TODO] Compatibility shim: ZScale
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub struct ZScale(pub f32);
-
-impl ZScale {
-    pub const ONE: ZScale = ZScale(1.0);
-
-    #[inline]
-    pub fn new(v: f32) -> Self {
-        Self(v)
-    }
-
-    #[inline]
-    pub fn value(self) -> f32 {
-        self.0
-    }
-}
-
 /// Support triplet describing Above/Here/Beneath contributions backing a Z pulse.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZSupport {
@@ -105,6 +87,11 @@ pub struct ZScale {
 }
 
 impl ZScale {
+    pub const ONE: ZScale = ZScale {
+        physical_radius: 1.0,
+        log_radius: 0.0,
+    };
+
     /// Creates a new scale from a physical radius, rejecting non-positive or non-finite values.
     pub fn new(physical_radius: f32) -> Option<Self> {
         if physical_radius.is_finite() && physical_radius > 0.0 {
