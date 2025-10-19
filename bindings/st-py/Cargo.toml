@@ -7,8 +7,7 @@ license = "AGPL-3.0-or-later"
 authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 
 [lib]
-# ← Rust 側ビルド成果物の内部名（任意・Pythonには見えない）
-name = "spiraltorch_native"
+name = "spiraltorch"
 crate-type = ["cdylib"]
 
 [package.metadata.pyo3]
@@ -55,9 +54,7 @@ ndarray = { version = "0.15", default-features = false, features = ["std"] }
 num-complex = { version = "0.4" }
 
 [package.metadata.maturin]
-# ← Python から見える拡張モジュール名（import 時のサブモジュール名）
-#    これで `spiraltorch._native` が生成される
-name = "spiraltorch._native"
+name = "spiraltorch"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
