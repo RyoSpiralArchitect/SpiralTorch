@@ -2546,6 +2546,8 @@ dependencies = [
  "serde",
  "serde_json",
  "st-core",
+ "st-frac",
+ "st-logic",
  "st-nn",
  "thiserror 1.0.69",
 ]
@@ -2554,6 +2556,7 @@ dependencies = [
 name = "st-rec"
 version = "0.1.0"
 dependencies = [
+ "rand",
  "st-kdsl",
  "st-rl",
  "st-tensor",

@@ -115,8 +115,8 @@ pub struct LaunchSlices<'a> {
 }
 
 thread_local! {
-    static CUDA_CTX: RefCell<Option<LaunchContext>> = RefCell::new(None);
-    static HIP_CTX: RefCell<Option<LaunchContext>> = RefCell::new(None);
+    static CUDA_CTX: RefCell<Option<LaunchContext>> = const { RefCell::new(None) };
+    static HIP_CTX: RefCell<Option<LaunchContext>> = const { RefCell::new(None) };
 }
 
 pub fn with_launch_buffers_cuda<'a, F, R>(buffers: LaunchBuffers<'a>, f: F) -> R
@@ -175,7 +175,7 @@ where
     key.with(|cell| {
         let previous = {
             let mut slot = cell.borrow_mut();
-            std::mem::replace(&mut *slot, Some(ctx))
+            (*slot).replace(ctx)
         };
         let guard = Guard {
             key,

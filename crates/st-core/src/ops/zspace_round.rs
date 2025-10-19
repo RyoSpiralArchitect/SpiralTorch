@@ -46,6 +46,10 @@ impl RoundtableAssignment {
         self.bands.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.bands.is_empty()
+    }
+
     pub fn band(&self, index: usize) -> RoundtableBand {
         self.bands[index]
     }

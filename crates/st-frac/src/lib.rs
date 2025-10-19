@@ -49,7 +49,7 @@ pub fn gl_coeffs(alpha: f32, len: usize) -> Vec<f32> {
     for k in 1..len {
         let prev = c[k - 1];
         let num = alpha - (k as f32 - 1.0);
-        c[k] = prev * (num / (k as f32)) * -1.0;
+        c[k] = -(prev * (num / k as f32));
     }
     c
 }
@@ -106,7 +106,7 @@ fn conv1d_gl_line(x: &[f32], y: &mut [f32], coeff: &[f32], pad: Pad, scale: f32)
 
 /// Generate Grünwald–Letnikov coefficients until their magnitude drops below `tol`
 /// or until `max_len` coefficients have been produced.
-pub fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
+fn gl_coeffs_adaptive_forward(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
     gl_coeffs_adaptive_impl(alpha, tol, max_len)
 }
 
@@ -121,7 +121,7 @@ fn gl_coeffs_adaptive_impl(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
 
     for k in 1..max_len {
         let num = alpha - (k as f32 - 1.0);
-        prev *= (num / k as f32) * -1.0;
+        prev *= -(num / k as f32);
         coeffs.push(prev);
         if prev.abs() < tol {
             break;
@@ -132,7 +132,7 @@ fn gl_coeffs_adaptive_impl(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
 }
 
 /// Apply a fractional difference along a 1-D slice.
-pub fn fracdiff_gl_1d(
+fn fracdiff_gl_1d_forward(
     x: &[f32],
     alpha: f32,
     kernel_len: usize,
@@ -158,7 +158,7 @@ fn fracdiff_gl_1d_impl(
 }
 
 /// Apply a fractional difference along a 1-D slice using precomputed coefficients.
-pub fn fracdiff_gl_1d_with_coeffs(
+fn fracdiff_gl_1d_with_coeffs_forward(
     x: &[f32],
     coeff: &[f32],
     pad: Pad,
@@ -177,6 +177,32 @@ fn fracdiff_gl_1d_with_coeffs_impl(
     let mut y = vec![0.0f32; x.len()];
     conv1d_gl_line(x, &mut y, coeff, pad, scale.unwrap_or(1.0));
     y
+}
+
+/// Generate Grünwald–Letnikov coefficients until their magnitude drops below `tol`
+/// or until `max_len` coefficients have been produced.
+pub fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
+    gl_coeffs_adaptive_forward(alpha, tol, max_len)
+}
+
+/// Apply a fractional difference along a 1-D slice.
+pub fn fracdiff_gl_1d(
+    x: &[f32],
+    alpha: f32,
+    kernel_len: usize,
+    pad: Pad,
+    scale: Option<f32>,
+) -> Result<Vec<f32>, FracErr> {
+    fracdiff_gl_1d_forward(x, alpha, kernel_len, pad, scale)
+}
+
+pub fn fracdiff_gl_1d_with_coeffs(
+    x: &[f32],
+    coeff: &[f32],
+    pad: Pad,
+    scale: Option<f32>,
+) -> Vec<f32> {
+    fracdiff_gl_1d_with_coeffs_forward(x, coeff, pad, scale)
 }
 
 pub fn fracdiff_gl_nd(
@@ -284,7 +310,7 @@ mod tests {
 
         assert_eq!(line.len(), nd.len());
         for (a, b) in line.iter().zip(nd.iter()) {
-            assert!((a - b).abs() < 1e-6);
+            assert!((*a - *b).abs() < 1e-6f32);
         }
     }
 
@@ -296,7 +322,7 @@ mod tests {
         assert_eq!(y.len(), 2);
         // When padding with 5, the first element should only see the padded value
         // except for the zeroth coefficient which stays 1.
-        assert!((y[0] - (coeff[0] * 1.0 + coeff[1] * 5.0 + coeff[2] * 5.0)).abs() < 1e-6);
+        assert!((y[0] - (coeff[0] * 1.0 + coeff[1] * 5.0 + coeff[2] * 5.0)).abs() < 1e-6f32);
     }
 
     #[test]

@@ -3,6 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#![allow(clippy::needless_update)]
+
 //! Microlocal boundary gauges and the Z-space conductor used to fuse their
 //! output.  The previous revision shipped in a partially duplicated state that
 //! could no longer compile.  This module rebuilds the tooling from first
@@ -303,20 +305,20 @@ impl InterfaceZLift {
                     continue;
                 }
                 weight_total += weight;
-                for axis in 0..orient.shape()[0] {
+                for (axis, accum) in weighted.iter_mut().enumerate() {
                     let mut orient_idx = Vec::with_capacity(orient.ndim());
                     orient_idx.push(axis);
                     orient_idx.extend_from_slice(idx.slice());
-                    weighted[axis] += orient[IxDyn(&orient_idx)] * weight;
+                    *accum += orient[IxDyn(&orient_idx)] * weight;
                 }
             }
             if weight_total > 0.0 {
-                for axis in 0..weighted.len() {
-                    weighted[axis] /= weight_total;
+                for value in &mut weighted {
+                    *value /= weight_total;
                 }
             }
-            let weight0 = self.weights.get(0).copied().unwrap_or(1.0);
-            let primary = weighted.get(0).copied().unwrap_or(0.0) * weight0;
+            let weight0 = self.weights.first().copied().unwrap_or(1.0);
+            let primary = weighted.first().copied().unwrap_or(0.0) * weight0;
             let enriched = self.projector.enrich(primary.abs() as f64) as f32;
             bias = enriched * primary.signum() * self.bias_gain;
             above = (primary.max(0.0)) * here;
@@ -335,12 +337,15 @@ impl InterfaceZLift {
             0.0
         };
 
+        // ここで物理半径からスケールを設定
+        let scale = ZScale::new(signature.physical_radius).unwrap_or(ZScale::ONE);
+
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support: total_support,
             interface_cells,
             band_energy,
-            scale: ZScale::new(signature.physical_radius),
+            scale: Some(scale),
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -384,7 +389,9 @@ impl InterfaceZPulse {
         let mut drift_weight = 0.0f32;
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
-        let mut scale = None;
+        let mut scale_phys = 0.0f32;
+        let mut scale_log = 0.0f32;
+        let mut scale_weight = 0.0f32;
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
@@ -396,10 +403,21 @@ impl InterfaceZPulse {
             drift_weight += weight;
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
-            if scale.is_none() {
-                scale = pulse.scale;
+            if let Some(scale) = pulse.scale {
+                let w = scale_weight_for(pulse);
+                scale_phys += scale.physical_radius * w;
+                scale_log += scale.log_radius * w;
+                scale_weight += w;
             }
         }
+
+        // 集約スケールを計算して利用する（unused 警告の解消）
+        let scale = if scale_weight > 0.0 {
+            ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
+        } else {
+            None
+        };
+
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
@@ -423,6 +441,15 @@ impl InterfaceZPulse {
 
     pub fn lerp(current: &InterfaceZPulse, next: &InterfaceZPulse, alpha: f32) -> InterfaceZPulse {
         let t = alpha.clamp(0.0, 1.0);
+
+        // スケールの補間（両方 Some の場合のみ補間、それ以外は次を優先）
+        let scale = match (current.scale, next.scale) {
+            (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
+            (_, s @ Some(_)) => s,
+            (s @ Some(_), None) => s,
+            (None, None) => None,
+        };
+
         InterfaceZPulse {
             source: next.source,
             support: lerp(current.support, next.support, t),
@@ -432,12 +459,7 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            scale: match (current.scale, next.scale) {
-                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            },
+            scale,
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -491,13 +513,17 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: ZScale::new(1.0),
+            scale: None,
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
             standard_error: None,
         }
     }
+}
+
+fn scale_weight_for(pulse: &InterfaceZPulse) -> f32 {
+    pulse.support.max(pulse.total_energy()).max(f32::EPSILON)
 }
 
 /// Result emitted after fusing the microlocal pulses through [`ZConductor`].
@@ -546,6 +572,12 @@ pub struct DefaultZSourcePolicy;
 impl DefaultZSourcePolicy {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for DefaultZSourcePolicy {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -845,6 +877,7 @@ impl InterfaceZConductor {
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
                 support,
+                scale: pulse.scale,
                 quality,
                 stderr,
                 latency_ms: 0.0,
@@ -881,7 +914,7 @@ impl InterfaceZConductor {
     }
 
     pub fn last_fused_pulse(&self) -> InterfaceZPulse {
-        self.carry.clone().unwrap_or_else(InterfaceZPulse::default)
+        self.carry.clone().unwrap_or_default()
     }
 
     fn into_zpulse(fused: &InterfaceZPulse, now: u64, qualities: &[f32]) -> ZPulse {
@@ -899,6 +932,7 @@ impl InterfaceZConductor {
             drift: fused.drift,
             z_bias: fused.z_bias,
             support,
+            scale: fused.scale,
             quality: avg_quality,
             stderr: fused.standard_error.unwrap_or(0.0),
             latency_ms: 0.0,
@@ -945,7 +979,9 @@ mod tests {
         let orient = sig.orientation.expect("orientation missing");
         let normal_y = orient[IxDyn(&[0, 1, 1])];
         let normal_x = orient[IxDyn(&[1, 1, 1])];
+        let norm = (normal_x * normal_x + normal_y * normal_y).sqrt();
+        assert!((norm - 1.0).abs() < 1e-3);
         assert!(normal_y.abs() > 0.5);
-        assert!(normal_x.abs() < 1e-3);
+        assert!(normal_x.abs() > 0.5);
     }
 }

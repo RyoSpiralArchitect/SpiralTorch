@@ -16,6 +16,10 @@ use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
+// -----------------------------------------------------------------------------
+// ZScale (single definition)
+// -----------------------------------------------------------------------------
+
 /// Encodes the physical and logarithmic radius of a Z pulse.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZScale {
@@ -24,6 +28,18 @@ pub struct ZScale {
 }
 
 impl ZScale {
+    /// Unity scale constant (physical radius = 1.0, log radius = 0.0).
+    pub const ONE: ZScale = ZScale {
+        physical_radius: 1.0,
+        log_radius: 0.0,
+    };
+
+    /// Compatibility helper returning the physical radius (for legacy callers).
+    #[inline]
+    pub fn value(self) -> f32 {
+        self.physical_radius
+    }
+
     /// Creates a new scale from a physical radius, rejecting non-positive or
     /// non-finite values.
     pub fn new(physical_radius: f32) -> Option<Self> {
@@ -64,18 +80,41 @@ impl ZScale {
         }
     }
 
-    /// Interpolates between two scales, blending both the physical and
-    /// logarithmic radii for numerical stability.
+    /// Linearly interpolates between two scales.
     pub fn lerp(a: ZScale, b: ZScale, t: f32) -> ZScale {
-        let t = t.clamp(0.0, 1.0);
-        let physical = a.physical_radius + (b.physical_radius - a.physical_radius) * t;
-        let log = a.log_radius + (b.log_radius - a.log_radius) * t;
-        ZScale {
-            physical_radius: physical,
-            log_radius: log,
+        let clamped = t.clamp(0.0, 1.0);
+        let physical = a.physical_radius + (b.physical_radius - a.physical_radius) * clamped;
+        let log = a.log_radius + (b.log_radius - a.log_radius) * clamped;
+        Self::from_components(physical, log).unwrap_or_else(|| if clamped < 0.5 { a } else { b })
+    }
+
+    /// Computes the weighted centroid of a collection of scales.
+    pub fn weighted_average<I>(weights: I) -> Option<Self>
+    where
+        I: IntoIterator<Item = (ZScale, f32)>,
+    {
+        let mut sum_phys = 0.0f32;
+        let mut sum_log = 0.0f32;
+        let mut total = 0.0f32;
+        for (scale, weight) in weights {
+            if !weight.is_finite() || weight <= 0.0 {
+                continue;
+            }
+            sum_phys += scale.physical_radius * weight;
+            sum_log += scale.log_radius * weight;
+            total += weight;
+        }
+        if total > 0.0 {
+            ZScale::from_components(sum_phys / total, sum_log / total)
+        } else {
+            None
         }
     }
 }
+
+// -----------------------------------------------------------------------------
+// ZSupport, ZPulse, conductor, latency aligner, etc.
+// -----------------------------------------------------------------------------
 
 /// Support triplet describing Above/Here/Beneath contributions backing a Z pulse.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -141,8 +180,9 @@ fn clamp_non_negative(value: f32) -> f32 {
 }
 
 /// Identifies the origin of a [`ZPulse`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum ZSource {
+    #[default]
     Microlocal,
     Maxwell,
     Graph,
@@ -150,12 +190,6 @@ pub enum ZSource {
     GW,
     RealGrad,
     Other(&'static str),
-}
-
-impl Default for ZSource {
-    fn default() -> Self {
-        ZSource::Microlocal
-    }
 }
 
 /// Snapshot of a single Z-space pulse observation.
@@ -168,6 +202,7 @@ pub struct ZPulse {
     pub drift: f32,
     pub z_bias: f32,
     pub support: ZSupport,
+    pub scale: Option<ZScale>,
     pub quality: f32,
     pub stderr: f32,
     pub latency_ms: f32,
@@ -208,6 +243,7 @@ impl Default for ZPulse {
             drift: 0.0,
             z_bias: 0.0,
             support: ZSupport::default(),
+            scale: None,
             quality: 0.0,
             stderr: 0.0,
             latency_ms: 0.0,
@@ -221,6 +257,8 @@ impl From<(f32, f32, f32)> for ZSupport {
     }
 }
 
+// (rest of the file unchanged from your current version: ZEmitter, ZFrequencyConfig,
+// ZAdaptiveGainCfg, LatencyAligner*, ZConductor*, helpers, ZRegistry, etc.)
 /// Identifies a source capable of emitting [`ZPulse`] records.
 pub trait ZEmitter: Send {
     /// Returns the canonical source identifier for pulses emitted by this implementation.
@@ -390,10 +428,7 @@ impl LatencyAlignerState {
             },
         );
         if pulse.latency_ms.is_finite() && pulse.latency_ms.abs() > f32::EPSILON {
-            let entry = self
-                .lags
-                .entry(pulse.source)
-                .or_insert_with(LagEstimate::default);
+            let entry = self.lags.entry(pulse.source).or_default();
             entry.lag = pulse.latency_ms;
             entry.frames_since_update = 0;
             self.pending_events.push(format!(
@@ -412,7 +447,7 @@ impl LatencyAlignerState {
     }
 
     fn prepare(&mut self, now: u64, events: &mut Vec<String>) {
-        events.extend(self.pending_events.drain(..));
+        events.append(&mut self.pending_events);
         let Some(anchor) = self.last.get(&ZSource::Microlocal).cloned() else {
             self.increment_all();
             return;
@@ -433,7 +468,7 @@ impl LatencyAlignerState {
             if source == ZSource::Microlocal {
                 continue;
             }
-            let entry = self.lags.entry(source).or_insert_with(LagEstimate::default);
+            let entry = self.lags.entry(source).or_default();
             if entry.frames_since_update != u32::MAX
                 && entry.frames_since_update < self.cfg.hold_steps
             {

@@ -275,6 +275,28 @@ pub struct GradientBands {
 }
 
 impl GradientBands {
+    /// Builds a gradient triplet from explicit Above/Here/Beneath tensors.
+    pub fn from_components(above: Tensor, here: Tensor, beneath: Tensor) -> PureResult<Self> {
+        let shape = above.shape();
+        if here.shape() != shape {
+            return Err(TensorError::ShapeMismatch {
+                left: here.shape(),
+                right: shape,
+            });
+        }
+        if beneath.shape() != shape {
+            return Err(TensorError::ShapeMismatch {
+                left: beneath.shape(),
+                right: shape,
+            });
+        }
+        Ok(Self {
+            above,
+            here,
+            beneath,
+        })
+    }
+
     /// Returns the gradient for the Above (TopK/A) band.
     pub fn above(&self) -> &Tensor {
         &self.above
@@ -304,6 +326,17 @@ impl GradientBands {
             data.push(value);
         }
         Tensor::from_vec(rows, cols, data)
+    }
+
+    /// Stacks the Above/Here/Beneath tensors along a new depth axis represented
+    /// by contiguous row blocks.
+    pub fn stack_depth(&self) -> PureResult<Tensor> {
+        let (rows, cols) = self.above.shape();
+        let mut data = Vec::with_capacity(rows * cols * 3);
+        data.extend_from_slice(self.above.data());
+        data.extend_from_slice(self.here.data());
+        data.extend_from_slice(self.beneath.data());
+        Tensor::from_vec(rows * 3, cols, data)
     }
 
     /// Applies per-band scaling factors in-place.
