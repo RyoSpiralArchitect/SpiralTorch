@@ -51,7 +51,7 @@ impl PyTensor {
     #[staticmethod]
     pub fn from_dlpack(py: Python<'_>, capsule: PyObject) -> PyResult<Self> {
         let capsule = capsule.bind(py);
-        from_dlpack_impl(py, &capsule)
+        from_dlpack_capsule(py, &capsule)
     }
 
     pub fn to_dlpack(&self, py: Python<'_>) -> PyResult<PyObject> {
@@ -152,7 +152,7 @@ fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
     }
 }
 
-fn from_dlpack_impl(py: Python<'_>, capsule: &Bound<PyAny>) -> PyResult<PyTensor> {
+pub(crate) fn from_dlpack_capsule(py: Python<'_>, capsule: &Bound<PyAny>) -> PyResult<PyTensor> {
     let owned_capsule = ensure_dlpack_capsule(py, capsule)?;
     let capsule_ref = owned_capsule.bind(py);
 
@@ -176,7 +176,10 @@ fn from_dlpack_impl(py: Python<'_>, capsule: &Bound<PyAny>) -> PyResult<PyTensor
     }
 }
 
-fn ensure_dlpack_capsule(py: Python<'_>, candidate: &Bound<PyAny>) -> PyResult<Py<PyAny>> {
+pub(crate) fn ensure_dlpack_capsule(
+    py: Python<'_>,
+    candidate: &Bound<PyAny>,
+) -> PyResult<Py<PyAny>> {
     unsafe {
         if ffi::PyCapsule_CheckExact(candidate.as_ptr()) == 1 {
             return Ok(candidate.clone().unbind());

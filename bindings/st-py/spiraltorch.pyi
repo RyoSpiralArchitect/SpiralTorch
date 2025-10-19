@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from types import ModuleType
 
 class Tensor:
     def __init__(self, rows: int, cols: int, data: Optional[Sequence[float]] = ...) -> None: ...
@@ -21,6 +22,37 @@ class Tensor:
 def from_dlpack(capsule: object) -> Tensor: ...
 
 def to_dlpack(tensor: Tensor) -> object: ...
+
+class _CompatTorch(ModuleType):
+    def to_torch(tensor: Tensor) -> object: ...
+    def from_torch(tensor: object) -> Tensor: ...
+
+class _CompatJax(ModuleType):
+    def to_jax(tensor: Tensor) -> object: ...
+    def from_jax(array: object) -> Tensor: ...
+
+class _CompatTensorFlow(ModuleType):
+    def to_tensorflow(tensor: Tensor) -> object: ...
+    def from_tensorflow(value: object) -> Tensor: ...
+
+class _CompatNumPy(ModuleType):
+    def to_numpy(tensor: Tensor) -> object: ...
+    def from_numpy(array: object) -> Tensor: ...
+
+class _CompatAuto(ModuleType):
+    def from_any(value: object) -> Tensor: ...
+    def describe(value: object) -> str: ...
+    def available_backends() -> List[str]: ...
+    def require_backend(name: str) -> None: ...
+
+class _CompatNamespace(ModuleType):
+    torch: _CompatTorch
+    jax: _CompatJax
+    tensorflow: _CompatTensorFlow
+    numpy: _CompatNumPy
+    auto: _CompatAuto
+
+compat: _CompatNamespace
 
 class QueryPlan:
     def __init__(self, query: str) -> None: ...
@@ -92,6 +124,7 @@ class DashboardRing:
 
 __all__ = [
     "Tensor",
+    "compat",
     "from_dlpack",
     "to_dlpack",
     "QueryPlan",
