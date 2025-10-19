@@ -43,8 +43,7 @@ _(Still under active repair while expanding — API changes hourly.)_
 
 ---
 
-SpiralTorch is a Compact. Safe. Rust-native.
-~10× smaller than PyTorch, yet feature-complete in AI training that keeps language,
+**SpiralTorch is a Rust-first AI training framework** that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
 the kernels, the hypergrad tape streams Z-space meaning, and the high-level
 `st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.
@@ -242,15 +241,6 @@ optimisers alongside its hypergradient updates.
   matrix with `trace.with_barycenter_with(weights, densities, Some(coupling))`
   before resonating, keeping Z-space orchestration entirely on the session.
 
-
-**SpiralTorch is a Rust-first AI training framework** that keeps language,
-geometry, and device heuristics in the same conversation. SpiralK orchestrates
-the kernels, the hypergrad tape streams Z-space meaning, and the high-level
-`st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.
-
-The stack is comfortable living entirely in Rust—yet the Python wheel remains a
-thin veneer that reuses the same planners, losses, and Z-space resonators. No
-tensor shims, no translation layers, and no tracebacks.
 
 ## Why it’s different
  - **Training comes first:** Modules such as `Linear`, `Sequential`,
