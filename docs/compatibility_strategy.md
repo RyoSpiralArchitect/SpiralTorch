@@ -34,7 +34,9 @@ performance, memory safety, and collaborative tooling.
   dataloaders while running forward/backward passes in SpiralTorch. Document the
   zero-copy `Tensor::to_dlpack`/`Tensor::from_dlpack` exchange path, surface the
   Python `PyTensor.__dlpack__`/`__dlpack_device__` hooks, and show how to profile the
-  boundary overhead.
+  boundary overhead. Ship ready-to-import helpers in the Python binding (`spiraltorch.Tensor`
+  plus module-level `from_dlpack`/`to_dlpack`) so that PyTorch, TensorFlow, and NumPy callers can
+  swap tensors without writing glue code.
 - **Telemetry bridges.** Map SpiralTorch's observability events to tensorboard, Weights &
   Biases, and OpenTelemetry spans so teams can keep their existing dashboards.
 
