@@ -12,7 +12,8 @@
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
+    ZAdaptiveGainCfg, ZConductor, ZEmitter, ZFrequencyConfig, ZFused, ZPulse, ZSource,
+    ZSupport,
 };
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
@@ -20,6 +21,7 @@ use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
 use std::fmt;
+use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
@@ -732,9 +734,15 @@ impl ZEmitter for MicrolocalEmitter {
     fn tick(&mut self, _now: u64) -> Option<ZPulse> {
         self.queue
             .lock()
-            .expect("microlocal queue poisoned")
-            .pop_front()
+            .expect("microlocal emitter queue poisoned");
+        queue.pop_front().map(|mut pulse| {
+            if pulse.ts == 0 {
+                pulse.ts = now;
+            }
+            pulse
+        })
     }
+
 }
 
 /// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
@@ -743,15 +751,13 @@ impl ZEmitter for MicrolocalEmitter {
 pub struct InterfaceZConductor {
     gauges: Vec<InterfaceGauge>,
     lift: InterfaceZLift,
-    conductor: ZConductor,
-    clock: u64,
     smoothing: f32,
+    carry: Option<InterfaceZPulse>,
     policy: Arc<dyn ZSourcePolicy>,
     band_policy: Option<BandPolicy>,
     budget_policy: Option<BudgetPolicy>,
-    previous: Option<InterfaceZPulse>,
-    carry: Option<InterfaceZPulse>,
-    emitter: MicrolocalEmitter,
+    conductor: ZConductor,
+    clock: u64,
 }
 
 impl InterfaceZConductor {
