@@ -527,6 +527,7 @@ pub mod experimental {
                 band_energy: self.band_energy,
                 drift: self.drift,
                 z_signal: self.z_bias,
+                scale: self.scale,
             }
         }
 

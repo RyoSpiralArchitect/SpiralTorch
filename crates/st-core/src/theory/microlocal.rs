@@ -418,11 +418,8 @@ impl InterfaceZPulse {
             support,
             interface_cells,
             band_energy: band,
-            scale: if scale_weight > 0.0 {
-                ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
-            } else {
-                None
-            },
+            // [SCALE-TODO] Patch 0 aggregate placeholder
+            scale: scale.or(Some(ZScale::ONE)),
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -493,7 +490,7 @@ impl InterfaceZPulse {
             drift: self.drift,
             z_signal: self.z_bias,
             // [SCALE-TODO] Patch 0 optional tagging
-            scale: Some(self.scale),
+            scale: self.scale,
         }
     }
 
@@ -509,7 +506,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: None,
+            scale: Some(ZScale::ONE),
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,

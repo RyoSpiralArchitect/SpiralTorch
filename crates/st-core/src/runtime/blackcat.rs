@@ -611,10 +611,7 @@ pub mod zmeta {
         }
 
         #[allow(dead_code)]
-        fn ingest_structural_legacy(
-            &mut self,
-            structural: Option<&[f64]>,
-        ) -> Option<Vec<f64>> {
+        fn ingest_structural_legacy(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
             let Some(raw) = structural else {
                 return None;
             };
@@ -736,7 +733,7 @@ pub mod zmeta {
                 *value *= gain;
             }
 
-            self.logistic_project_step(&delta);
+            self.logistic_project_step_legacy(&delta);
         }
 
         #[allow(dead_code)]
