@@ -429,7 +429,7 @@ impl LatencyAlignerState {
                 .entry(pulse.source)
                 .or_insert_with(LagEstimate::default);
             entry.lag = pulse.latency_ms;
-            entry.frames_since_update = 0;
+            entry.frames_since_update = if self.cfg.hold_steps > 0 { 1 } else { 0 };
             self.pending_events.push(format!(
                 "latency.seeded:{:?}:{:.2}",
                 pulse.source, entry.lag
