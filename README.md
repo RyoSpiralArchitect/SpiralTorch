@@ -52,6 +52,188 @@ the kernels, the hypergrad tape streams Z-space meaning, and the high-level
 The stack is comfortable living entirely in Rust—yet the Python wheel remains a
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
+# SpiralTorch Architecture
+
+## Overview (Mermaid)
+
+```mermaid
+flowchart TB
+  %% ======== Domain / Higher stacks ========
+  subgraph Domain[Higher Stacks / Domain APIs]
+    STNN[st-nn (tensor/numerical DSL)]
+    STRL[st-rl (control/RL)]
+    STREC[st-rec (recsys)]
+    CT[CanvasTransformer (model/pipeline)]
+  end
+
+  %% ======== Bindings ========
+  subgraph Bindings[APIs / Bindings]
+    PY[Python API]
+    TS[TypeScript / WASM API]
+  end
+
+  %% ======== Core ========
+  subgraph Core[st-core]
+    OPS[Ops (realgrad / projection / fft ...)]
+    IR[Graph IR + type/shape inference]
+    OPT[Optimization passes (fusion / tiling / vectorization / layout / const-fold)]
+    REG[Op registry + dispatch]
+    SCH[Scheduler]
+    RT[Runtime (async / queues / events)]
+    MEM[Memory & layout (allocator / pools / transfers)]
+    KV[KV-Cache Manager (paged / tensorized)]
+    TLM[Telemetry / XAI hooks]
+  end
+
+  %% ======== Tensor layer ========
+  subgraph Tensor[st-tensor]
+    TENSOR[Tensor abstraction & layouts]
+    CAP[Device capability detection]
+  end
+
+  %% ======== Codegen / DSL ========
+  subgraph KD[st-kdsl]
+    KDSL[Kernel DSL]
+    CGEN[Codegen: WGSL / CUDA]
+    AT[Autotune + Perf DB]
+    KC[Kernel cache]
+  end
+
+  %% ======== Backends ========
+  subgraph BE[Execution backends]
+    WGPU[WGPU / WGSL executor]
+    CUDA[CUDA executor (cuBLAS / cuDNN / FlashAttn / FFT)]
+    CPU[CPU fallback]
+  end
+
+  %% ======== Telemetry / XAI ========
+  subgraph Telemetry[Telemetry / XAI]
+    METRICS[Metrics & traces]
+    VIZ[Dashboard (TS UI) incl. Live Canvas]
+    LOGS[Structured logs]
+  end
+
+  %% ======== CanvasTransformer internals (conceptual) ========
+  subgraph CTI[CanvasTransformer Internals]
+    PCH[Canvas patchify / tokenizer]
+    ENCDEC[Encoder/Decoder (ViT/UT-like blocks)]
+    ATTN[Attention blocks (Flash/Block-sparse/Windowed)]
+    POS[Positional encoding (RoPE/Relative Bias)]
+    NORM[Norms (LayerNorm/RMSNorm)]
+    LOSSES[Losses (xent/LPIPS/perceptual/-diffusion-ready)]
+  end
+
+  %% Domain to APIs
+  STNN --> Bindings
+  STRL --> Bindings
+  STREC --> Bindings
+  CT --> Bindings
+
+  %% APIs into Core
+  Bindings --> OPS
+  OPS --> IR --> OPT --> REG --> SCH --> RT --> MEM --> TENSOR -->|calls| BE
+
+  %% CT internals use Core Ops
+  CTI --> OPS
+  ATTN --> REG
+  POS --> REG
+  NORM --> REG
+  PCH --> OPS
+  ENCDEC --> OPS
+  LOSSES --> OPS
+
+  %% KV-Cache for CT inference
+  CTI -. KV/KV-Cache .-> Core
+  KV --> MEM
+
+  %% Codegen path
+  REG --> KD --> BE
+  CAP --> REG
+  AT <--> KD
+  KC <--> KD
+
+  %% Telemetry taps
+  IR -.-> TLM
+  RT -.-> TLM
+  BE -.-> TLM
+  TLM --> METRICS --> VIZ
+  TLM --> LOGS
+  TS --> VIZ
+```
+
+## ASCII Diagram (Mermaid fallback)
+
+```
+          ┌────────────── Higher Stacks / Domain APIs ───────────────┐
+          │  st-nn     st-rl     st-rec     CanvasTransformer (CT)   │
+          └───────────────▲────────▲────────▲──────────────▲─────────┘
+                          │        │        │              │
+                          └────────┴────────┴──────────────┴──────┐
+                                             APIs / Bindings       │
+                      Python API  |  TypeScript/WASM API (UI)      │
+                                  │                                 │
+                                  ▼                                 ▼ (Live Canvas)
+                        ┌──────────────────── st-core ─────────────────────┐
+                        │ Ops / IR / Optimizer / Registry / Scheduler      │
+                        │ Runtime (async/queues/events)                    │
+                        │ Memory & Layout (alloc/pools/transfers)          │
+                        │ KV-Cache Manager (paged / tensorized)            │
+                        │ Telemetry / XAI hooks                            │
+                        └───────────────▲──────────────────────────────────┘
+                                        │
+                                        │ calls/dispatch
+                        ┌──────────────────────── st-tensor ───────────────┐
+                        │ Tensor abstraction & layouts / Device caps        │
+                        └───────────────▲───────────────────────────────────┘
+                                        │
+                          ┌─────────────┴─────────────┐
+                          │        st-kdsl            │
+                          │  DSL | Codegen | Autotune │
+                          └─────────────▲─────────────┘
+                                        │ kernels / tuning
+                        ┌───────────────┴──────────────────────────────────┐
+                        │     Backends: WGPU/WGSL | CUDA | CPU fallback    │
+                        └───────▲──────────────────────────▲───────────────┘
+                                │                          │
+                                └── Telemetry (metrics/traces/logs) ──▶ UI
+
+CT specifics (conceptual, implemented via Core Ops + new kernels):
+  - Canvas patchify/tokenizer, encoder/decoder blocks
+  - Attention (Flash/Block-sparse/Windowed), RoPE/RelBias, Norms
+  - Losses (xent/perceptual), KV-Cache for streaming inference
+```
+
+## Integration points for CanvasTransformer
+
+- Domain layer:
+  - Expose CT as a first-class model/pipeline under Higher Stacks (e.g., st-vision or st-gen), callable via Python and TS/WASM APIs.
+  - Provide a live Canvas UI in the TS dashboard for interactive generation/edits.
+
+- Core ops and runtime:
+  - Add/enable kernels for attention (Flash-style QK^T softmax V fusion, block/window sparsity), RoPE/relative bias, LayerNorm/RMSNorm, MLP/SwiGLU, patchify/unpatchify.
+  - Introduce a KV-Cache manager (paged tensors, eviction, multi-stream reuse) for fast autoregressive/streaming inference.
+  - Support activation checkpointing and mixed precision (FP16/BF16/FP8) if training.
+
+- Codegen and autotuning:
+  - st-kdsl emits specialized WGSL/CUDA variants for attention and norms; autotune tile sizes, block sizes, and memory layouts.
+  - Cache tuned kernels per device/shape; warm-start from Perf DB.
+
+- Backends:
+  - CUDA: integrate vendor libs when helpful (e.g., cuBLAS, FlashAttention), fall back to generated kernels.
+  - WGPU/WGSL: provide portable kernels with subgroup-aware paths; CPU fallback for tests/dev.
+
+- Telemetry / UI:
+  - Add “Live Canvas” and attention maps visualizers; record per-layer latency, memory, and cache hit rates.
+  - Surface KV-Cache stats and throughput tokens/s.
+
+- Data I/O:
+  - Patch/token pipelines for canvas; optional palette/quantization utilities.
+
+## Optional module naming
+
+- st-ct (CanvasTransformer): domain package wrapping model, training, and serving.
+- st-ct-ui: TS/WASM components for interactive canvas + telemetry views.
+- st-attn: attention/norm kernels if you prefer separating kernel packages.
 
 ```python
 import spiraltorch as st
