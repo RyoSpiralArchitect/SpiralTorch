@@ -16,7 +16,8 @@ mod extras {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     // ---- constants (局所定義。将来コア側の定義に寄せるならここを差し替え) ----
-    pub const GOLDEN_RATIO: f64 = (1.0 + 5.0_f64.sqrt()) / 2.0;
+    // sqrt は const で使えないため、定数値を埋め込みます。
+    pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_894_8_f64;
     pub const GOLDEN_ANGLE: f64 = 2.0 * std::f64::consts::PI / (GOLDEN_RATIO * GOLDEN_RATIO);
 
     // グローバルシード（明示指定がなければこれを使う）
