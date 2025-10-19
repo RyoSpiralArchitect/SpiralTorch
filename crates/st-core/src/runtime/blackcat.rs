@@ -739,8 +739,8 @@ pub mod zmeta {
             self.logistic_project_step(&delta);
         }
 
-        #[allow(dead_code)]
-        fn logistic_project_step_legacy(&mut self, drive: &[f64]) {
+        #[cfg(not(feature = "blackcat_v2"))]
+        fn logistic_project_step(&mut self, drive: &[f64]) {
             if self.dir.is_empty() {
                 return;
             }
@@ -782,6 +782,71 @@ pub mod zmeta {
             normalize(&mut self.dir);
         }
 
+        #[cfg(feature = "blackcat_v2")]
+        fn ingest_structural(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
+            let Some(raw) = structural else {
+                return None;
+            };
+            if self.params.dim == 0 {
+                return None;
+            }
+
+            let mut new_vec = vec![0.0f64; self.params.dim];
+            let mut any = false;
+            for (idx, slot) in new_vec.iter_mut().enumerate() {
+                if let Some(value) = raw.get(idx).copied() {
+                    if value.is_finite() {
+                        *slot = value;
+                        any |= value.abs() > 1e-12;
+                    }
+                }
+            }
+            if !any {
+                return None;
+            }
+
+            let norm = (new_vec.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            if norm <= 1e-9 {
+                return None;
+            }
+            for value in new_vec.iter_mut() {
+                *value /= norm;
+            }
+
+            let prev = self.structural.clone();
+            self.structural = new_vec;
+            Some(
+                self.structural
+                    .iter()
+                    .zip(prev.iter())
+                    .map(|(new, old)| new - old)
+                    .collect(),
+            )
+        }
+
+        #[cfg(feature = "blackcat_v2")]
+        fn apply_structural_drive(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
+            if delta_reward.abs() <= 1e-9 {
+                return;
+            }
+            let gain = delta_reward.tanh();
+            if !gain.is_finite() || gain.abs() <= 1e-6 {
+                return;
+            }
+
+            let delta_norm = (delta.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            if delta_norm <= 1e-9 {
+                return;
+            }
+
+            for value in delta.iter_mut() {
+                *value *= gain;
+            }
+
+            self.logistic_project_step(&delta);
+        }
+
+        #[cfg(feature = "blackcat_v2")]
         fn logistic_project_step(&mut self, drive: &[f64]) {
             if self.dir.is_empty() {
                 return;

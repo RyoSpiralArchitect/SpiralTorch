@@ -18,7 +18,6 @@ use std::collections::VecDeque;
 
 // [SCALE-TODO] Compatibility shim: ZScale
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
-#[expect(dead_code, reason = "staged rollout of scale")]
 pub struct ZScale(pub f32);
 
 impl ZScale {

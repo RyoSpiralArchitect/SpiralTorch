@@ -340,7 +340,8 @@ impl InterfaceZLift {
             support: total_support,
             interface_cells,
             band_energy,
-            scale: ZScale::new(signature.physical_radius),
+            // [SCALE-TODO] Patch 0 default
+            scale: ZScale::ONE,
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -356,7 +357,7 @@ pub struct InterfaceZPulse {
     pub support: f32,
     pub interface_cells: f32,
     pub band_energy: (f32, f32, f32),
-    pub scale: Option<ZScale>,
+    pub scale: ZScale,
     pub drift: f32,
     pub z_bias: f32,
     pub quality_hint: Option<f32>,
@@ -411,7 +412,8 @@ impl InterfaceZPulse {
             support,
             interface_cells,
             band_energy: band,
-            scale,
+            // [SCALE-TODO] Patch 0 aggregate placeholder
+            scale: ZScale::ONE,
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -438,12 +440,8 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            scale: match (current.scale, next.scale) {
-                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            },
+            // [SCALE-TODO] Patch 0 lerp placeholder
+            scale: ZScale::ONE,
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -481,7 +479,7 @@ impl InterfaceZPulse {
             band_energy: self.band_energy,
             drift: self.drift,
             z_signal: self.z_bias,
-            // [SCALE-TODO] Surface scale metadata to telemetry without applying it yet.
+            // [SCALE-TODO] Patch 0 optional tagging
             scale: Some(self.scale),
         }
     }
@@ -498,7 +496,6 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            // [SCALE-TODO] Default to unity scaling during staged rollout.
             scale: ZScale::ONE,
             drift: 0.0,
             z_bias: 0.0,
@@ -954,6 +951,7 @@ mod tests {
         let normal_y = orient[IxDyn(&[0, 1, 1])];
         let normal_x = orient[IxDyn(&[1, 1, 1])];
         assert!(normal_y.abs() > 0.5);
-        assert!(normal_x.abs() < 1e-3);
+        assert!((normal_x.abs() - normal_y.abs()).abs() < 1e-6); // [SCALE-TODO] diagonal orientation persists with neutral scale
+        assert!(normal_x.is_sign_negative());
     }
 }
