@@ -1524,10 +1524,19 @@ impl ModuleTrainer {
     fn collect_gradient_summary<M: Module>(module: &M) -> PureResult<GradientSummary> {
         let mut accumulator = CurvatureGradientAccumulator::default();
         module.visit_parameters(&mut |param| {
+            let mut accounted = false;
             if let Some(tape) = param.hypergrad() {
                 accumulator.accumulate(tape.summary());
-            } else if let Some(grad) = param.gradient() {
-                accumulator.accumulate(GradientSummary::from_slice(grad.data()));
+                accounted = true;
+            }
+            if let Some(tape) = param.realgrad() {
+                accumulator.accumulate(tape.summary());
+                accounted = true;
+            }
+            if !accounted {
+                if let Some(grad) = param.gradient() {
+                    accumulator.accumulate(GradientSummary::from_slice(grad.data()));
+                }
             }
             Ok(())
         })?;
