@@ -14,45 +14,68 @@ SpiralTorchVision extends SpiralTorch's native Z-space capabilities while stayin
 
 ## SpiralTorchVision expansion points
 - **Spectral Z-attention**: `SpectralWindow` functions (Hann, Hamming, Blackman, Gaussian) now modulate how `VisionProjector` collapses `ZSpaceVolume` slices, letting you pre-emphasize perceptual frequencies before feeding tensors to TorchVision models.
-- **Temporal resonance accumulation**: `ZSpaceVolume::accumulate`, `ZSpaceVolume::blend_sequence`, and `VisionProjector::project_sequence` blend multi-frame sequences with Gaussian temporal attention, enabling video/timeseries perception before collapse.
 - **ZSpaceVolume / VisionProjector**: A volumetric representation that accumulates resonant features along the Z-axis and collapses them into tensors. It ingests intermediate activations from TorchVision models and bridges them into SpiralTorch's Z-space analyzers.
 - **Differential Resonance integration**: Combining with `st_tensor::DifferentialResonance` to reproject spatiotemporal features gathered from TorchVision networks back into SpiralTorch's resonant frames.
+- **Temporal resonance accumulation**: `ZSpaceVolume::accumulate` and `TemporalResonanceBuffer` perform exponential moving averages across frames so `VisionProjector::project_with_temporal` can mix historical attention with new resonance in real time.
+- **Multi-view Z-fusion**: Register camera descriptors with `MultiViewFusion` so `VisionProjector::project_multi_view` can weight Z slices as viewpoints, modulating attention with orientation-aware biases before collapse.
 - **Long-term integrations**: Leveraging TorchVision datasets/transforms as inputs while adding Z-space-native losses, visualization tools, and SpiralTorch-specific model heads.
 
 ### Temporal resonance accumulation
 
-Temporal resonance treats each volume in a sequence as a waypoint along a perceptual trajectory. The combination of EMA updates and Gaussian-temporal fusion keeps the sequence coherent while still respecting depth attention.
+Temporal continuity lets SpiralTorchVision respond to motion and lingering cues without reprocessing an entire video buffer. Each frame updates a `ZSpaceVolume` in-place with `accumulate`, applying an exponential moving average (`alpha` near `0.2` preserves the past, `alpha` near `1.0` chases the latest frame). The resulting volume feeds a `TemporalResonanceBuffer`, which smooths the depth attention profile before collapse:
 
 ```rust
-use st_vision::{VisionProjector, ZSpaceVolume};
-use st_tensor::DifferentialResonance;
+let mut ema_volume = ZSpaceVolume::from_slices(&frame_zero_slices)?;
+let mut temporal = TemporalResonanceBuffer::new(0.25);
 
-fn collapse_sequence(
-    projector: &VisionProjector,
-    resonance: &DifferentialResonance,
-    frames: &[ZSpaceVolume],
-) -> st_tensor::PureResult<st_tensor::Tensor> {
-    // Streaming EMA to keep a running latent ready for low-latency consumers.
-    let mut state = frames
-        .first()
-        .cloned()
-        .ok_or_else(|| st_tensor::TensorError::EmptyInput("z_space_sequence"))?;
-    for frame in &frames[1..] {
-        projector.accumulate_temporal(&mut state, frame)?;
-    }
+for frame in sequence {
+    let next_volume = ZSpaceVolume::from_slices(&frame.slices)?;
+    ema_volume.accumulate(&next_volume, 0.25)?;
 
-    // Full-sequence fusion before Z collapse for high-quality output.
-    let fused = projector.fuse_sequence(frames)?;
-    projector.project(&fused, resonance)
+    let projection = projector.project_with_temporal(
+        &ema_volume,
+        &frame.resonance,
+        &mut temporal,
+    )?;
+    // feed projection into downstream TorchVision modules here
 }
 ```
 
-`VisionProjector::with_temporal_attention` lets you steer the Gaussian center (0 = oldest frame, 1 = most recent) and the decay width. The same parameters drive both the streaming EMA and the offline fusion so your temporal footprint stays consistent across inference modes.
+`TemporalResonanceBuffer::apply` keeps track of how many frames influenced the profile, so you can reset when a scene cut happens or when sensors disagree. Pairing it with spectral windows gives a dual attention sweep—frequency over Z, inertia over time.
+
+### Multi-view Z-fusion
+
+Multi-camera rigs treat the Z-axis as a viewpoint stack. Describe each camera with a `ViewDescriptor`, build a `MultiViewFusion`, and project the stacked volume with view-aware weights. The fusion helper normalises alignment biases (dot product between a view's forward vector and the configured focus direction) and combines them with baseline weights so attention favours cameras that cover the region of interest:
+
+```rust
+let views = vec![
+    ViewDescriptor::new("front", [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+    ViewDescriptor::new("right", [0.0, 0.0, 0.0], [1.0, 0.0, 0.25]).with_baseline_weight(1.2),
+    ViewDescriptor::new("up", [0.0, 0.0, 0.0], [0.0, 1.0, 0.8]),
+];
+let fusion = MultiViewFusion::new(views)?
+    .with_focus_direction([0.2, 0.1, 1.0])
+    .with_alignment_gamma(1.5);
+
+let multi_view_volume = ZSpaceVolume::from_slices(&view_slices)?; // Z = view index
+let weights = projector.depth_weights_multi_view(&fusion, &multi_view_volume, &resonance)?;
+let fused_projection = projector.project_multi_view(&fusion, &multi_view_volume, &resonance)?;
+
+let mut temporal = TemporalResonanceBuffer::new(0.35);
+let fused_temporal = projector.project_multi_view_with_temporal(
+    &fusion,
+    &multi_view_volume,
+    &resonance,
+    &mut temporal,
+)?;
+```
+
+Multi-view temporal buffers reuse the same decay logic, so you can smooth viewpoint attention as sensors hand off dominance (e.g., during turns or occlusions). Downstream TorchVision modules receive a fused 2D tensor while retaining inspectable per-view weights.
 
 ## Resonant roadmap
 - **Z-space as a perceptual frequency domain**: Use the new spectral windows and `ZSpaceVolume::spectral_response` helper to treat collapse as a frequency-aware attention sweep that preconditions downstream ConvNets.
-- **Temporal resonance evolution**: Build on the EMA/Gaussian stack with learned temporal kernels from SpiralRNN so attention shifts can be predicted rather than hand-tuned.
-- **Multi-camera Z-fusion**: Treat each Z slice as a distinct viewpoint index, fuse multi-perspective tensors inside `ZSpaceVolume::from_slices`, and drive viewpoint-specific attention maps for stereo and birds-eye tasks.
+- **Temporal resonance layering**: Extend the new `TemporalResonanceBuffer` into multi-scale stacks that model short- and long-term attention simultaneously.
+- **Dynamic multi-camera orchestration**: Extend `MultiViewFusion` with calibration from SLAM/IMU pipelines and learnable alignment gammas so attention follows moving rigs in autonomous capture setups.
 - **Generative resonance coupling**: Feed resonance fields generated by SpiralRNN or future ZConductors back into the projector, creating a closed-loop "generative visual consciousness" cycle.
 - **Super-resolution and synthesis in Z**: Add interpolation, upscaling, diffusion, and decoding helpers so Z-aware GAN/VAE stacks can both enhance and generate volumetric inputs.
 
