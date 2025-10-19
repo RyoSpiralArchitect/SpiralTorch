@@ -259,8 +259,6 @@ impl From<(f32, f32, f32)> for ZSupport {
 
 // (rest of the file unchanged from your current version: ZEmitter, ZFrequencyConfig,
 // ZAdaptiveGainCfg, LatencyAligner*, ZConductor*, helpers, ZRegistry, etc.)
-
-use std::fmt::Write as _;
 /// Identifies a source capable of emitting [`ZPulse`] records.
 pub trait ZEmitter: Send {
     /// Returns the canonical source identifier for pulses emitted by this implementation.
