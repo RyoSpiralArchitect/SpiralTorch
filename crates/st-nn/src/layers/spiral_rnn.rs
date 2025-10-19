@@ -5,6 +5,7 @@
 
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
+use st_tensor::topos::OpenCartesianTopos;
 use std::cell::RefCell;
 
 #[derive(Clone, Debug)]
@@ -89,6 +90,55 @@ fn concat_columns(left: &Tensor, right: &Tensor) -> PureResult<Tensor> {
         data.extend_from_slice(&right.data()[offset..offset + cols]);
     }
     Tensor::from_vec(rows, cols * 2, data)
+}
+
+const FALLBACK_SATURATION: f32 = 1e6;
+
+fn saturate_slice(values: &mut [f32], topos: Option<&OpenCartesianTopos>) {
+    if let Some(topos) = topos {
+        topos.saturate_slice(values);
+    } else {
+        for value in values.iter_mut() {
+            if !value.is_finite() {
+                *value = 0.0;
+                continue;
+            }
+            if *value > FALLBACK_SATURATION {
+                *value = FALLBACK_SATURATION;
+            } else if *value < -FALLBACK_SATURATION {
+                *value = -FALLBACK_SATURATION;
+            }
+        }
+    }
+}
+
+fn guard_slice(
+    label: &'static str,
+    values: &[f32],
+    topos: Option<&OpenCartesianTopos>,
+) -> PureResult<()> {
+    if let Some(topos) = topos {
+        topos.guard_slice(label, values)
+    } else {
+        for &value in values {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue { label, value });
+            }
+        }
+        Ok(())
+    }
+}
+
+fn stabilise_tensor(
+    label: &'static str,
+    tensor: &mut Tensor,
+    topos: Option<&OpenCartesianTopos>,
+) -> PureResult<()> {
+    {
+        let data = tensor.data_mut();
+        saturate_slice(data, topos);
+    }
+    guard_slice(label, tensor.data(), topos)
 }
 
 fn broadcast_row(row: &Tensor, rows: usize) -> PureResult<Tensor> {
@@ -181,33 +231,56 @@ impl Module for SpiralRnn {
                 right: (batch, self.input_dim * self.steps),
             });
         }
-        let anchor = broadcast_row(self.anchor.value(), batch)?;
+        let anchor_topos_owned = self.anchor.hypergrad().map(|hyper| hyper.topos().clone());
+        let anchor_topos = anchor_topos_owned.as_ref();
+        let mut anchor = broadcast_row(self.anchor.value(), batch)?;
+        stabilise_tensor("spiral_rnn_anchor", &mut anchor, anchor_topos)?;
         let mut state = anchor.clone();
+        stabilise_tensor("spiral_rnn_state_initial", &mut state, anchor_topos)?;
+        guard_slice("spiral_rnn_input", input.data(), anchor_topos)?;
         let mut caches = Vec::with_capacity(self.steps);
         for step in 0..self.steps {
+            stabilise_tensor("spiral_rnn_state_loop", &mut state, anchor_topos)?;
             let mut step_input = Vec::with_capacity(batch * self.input_dim);
             for b in 0..batch {
                 let offset = b * cols + step * self.input_dim;
                 step_input.extend_from_slice(&input.data()[offset..offset + self.input_dim]);
             }
-            let input_step = Tensor::from_vec(batch, self.input_dim, step_input)?;
-            let input_proj = input_step.matmul(self.input_kernel.value())?;
-            let state_proj = state.matmul(self.state_kernel.value())?;
+            let mut input_step = Tensor::from_vec(batch, self.input_dim, step_input)?;
+            stabilise_tensor("spiral_rnn_input_step", &mut input_step, anchor_topos)?;
+            let mut input_proj = input_step.matmul(self.input_kernel.value())?;
+            stabilise_tensor("spiral_rnn_input_proj", &mut input_proj, anchor_topos)?;
+            let mut state_proj = state.matmul(self.state_kernel.value())?;
+            stabilise_tensor("spiral_rnn_state_proj", &mut state_proj, anchor_topos)?;
             let mut combined = input_proj.add(&state_proj)?;
             combined.add_row_inplace(self.bias.value().data())?;
-            let (drive_pre, reset_pre) = split_columns(&combined, self.hidden_dim)?;
-            let drive_act = tanh_tensor(&drive_pre)?;
-            let state_phase = state.matmul(self.phase_kernel.value())?;
+            stabilise_tensor("spiral_rnn_combined", &mut combined, anchor_topos)?;
+            let (mut drive_pre, mut reset_pre) = split_columns(&combined, self.hidden_dim)?;
+            stabilise_tensor("spiral_rnn_drive_pre", &mut drive_pre, anchor_topos)?;
+            stabilise_tensor("spiral_rnn_reset_pre", &mut reset_pre, anchor_topos)?;
+            let mut drive_act = tanh_tensor(&drive_pre)?;
+            stabilise_tensor("spiral_rnn_drive_act", &mut drive_act, anchor_topos)?;
+            let mut state_phase = state.matmul(self.phase_kernel.value())?;
+            stabilise_tensor("spiral_rnn_state_phase", &mut state_phase, anchor_topos)?;
             let mut gate_pre = state_phase.add(&reset_pre)?;
             gate_pre.add_row_inplace(self.phase_bias.value().data())?;
-            let gate = sigmoid_tensor(&gate_pre)?;
-            let one_minus = one_minus_tensor(&gate)?;
-            let retained = state.hadamard(&gate)?;
-            let injected = drive_act.hadamard(&one_minus)?;
-            let reset_tanh = tanh_tensor(&reset_pre)?;
-            let anchor_mix = anchor.hadamard(&reset_tanh)?;
+            stabilise_tensor("spiral_rnn_gate_pre", &mut gate_pre, anchor_topos)?;
+            let mut gate = sigmoid_tensor(&gate_pre)?;
+            stabilise_tensor("spiral_rnn_gate", &mut gate, anchor_topos)?;
+            let mut one_minus = one_minus_tensor(&gate)?;
+            stabilise_tensor("spiral_rnn_one_minus", &mut one_minus, anchor_topos)?;
+            let mut retained = state.hadamard(&gate)?;
+            stabilise_tensor("spiral_rnn_retained", &mut retained, anchor_topos)?;
+            let mut injected = drive_act.hadamard(&one_minus)?;
+            stabilise_tensor("spiral_rnn_injected", &mut injected, anchor_topos)?;
+            let mut reset_tanh = tanh_tensor(&reset_pre)?;
+            stabilise_tensor("spiral_rnn_reset_tanh", &mut reset_tanh, anchor_topos)?;
+            let mut anchor_mix = anchor.hadamard(&reset_tanh)?;
+            stabilise_tensor("spiral_rnn_anchor_mix", &mut anchor_mix, anchor_topos)?;
             let mut new_state = retained.add(&injected)?;
-            new_state = new_state.add(&anchor_mix)?;
+            stabilise_tensor("spiral_rnn_state_pre_anchor", &mut new_state, anchor_topos)?;
+            new_state.add_scaled(&anchor_mix, 1.0)?;
+            stabilise_tensor("spiral_rnn_state_post_anchor", &mut new_state, anchor_topos)?;
             caches.push(SpiralRnnStepCache {
                 input: input_step,
                 state_before: state.clone(),
@@ -218,7 +291,9 @@ impl Module for SpiralRnn {
             });
             state = new_state;
         }
-        let output = state.clone();
+        stabilise_tensor("spiral_rnn_state_final", &mut state, anchor_topos)?;
+        let mut output = state.clone();
+        stabilise_tensor("spiral_rnn_output", &mut output, anchor_topos)?;
         *self.cache.borrow_mut() = Some(SpiralRnnCache {
             steps: caches,
             batch,
@@ -241,7 +316,11 @@ impl Module for SpiralRnn {
                 right: (cache.batch, cache.hidden_dim),
             });
         }
+        let anchor_topos_owned = self.anchor.hypergrad().map(|hyper| hyper.topos().clone());
+        let anchor_topos = anchor_topos_owned.as_ref();
         let mut grad_state = grad_output.clone();
+        stabilise_tensor("spiral_rnn_grad_state_init", &mut grad_state, anchor_topos)?;
+        guard_slice("spiral_rnn_grad_output", grad_output.data(), anchor_topos)?;
         let mut grad_input_data = vec![0.0f32; cache.batch * cache.input_dim * cache.steps_count];
         let mut grad_input_kernel = Tensor::zeros(self.input_dim, self.hidden_dim * 2)?;
         let mut grad_state_kernel = Tensor::zeros(self.hidden_dim, self.hidden_dim * 2)?;
@@ -251,25 +330,78 @@ impl Module for SpiralRnn {
         let mut grad_anchor = Tensor::zeros(1, self.hidden_dim)?;
         for step_idx in (0..cache.steps_count).rev() {
             let step = &cache.steps[step_idx];
-            let one_minus = one_minus_tensor(&step.gate)?;
-            let grad_retained = grad_state.clone();
-            let grad_injected = grad_state.clone();
-            let grad_anchor_mix = grad_state.clone();
+            let mut one_minus = one_minus_tensor(&step.gate)?;
+            stabilise_tensor("spiral_rnn_one_minus_back", &mut one_minus, anchor_topos)?;
+            let mut grad_retained = grad_state.clone();
+            stabilise_tensor("spiral_rnn_grad_retained", &mut grad_retained, anchor_topos)?;
+            let mut grad_injected = grad_state.clone();
+            stabilise_tensor("spiral_rnn_grad_injected", &mut grad_injected, anchor_topos)?;
+            let mut grad_anchor_mix = grad_state.clone();
+            stabilise_tensor(
+                "spiral_rnn_grad_anchor_mix",
+                &mut grad_anchor_mix,
+                anchor_topos,
+            )?;
 
-            let grad_state_from_retained = grad_retained.hadamard(&step.gate)?;
-            let grad_gate_from_retained = grad_retained.hadamard(&step.state_before)?;
+            let mut grad_state_from_retained = grad_retained.hadamard(&step.gate)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_state_from_retained",
+                &mut grad_state_from_retained,
+                anchor_topos,
+            )?;
+            let mut grad_gate_from_retained = grad_retained.hadamard(&step.state_before)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_gate_retained",
+                &mut grad_gate_from_retained,
+                anchor_topos,
+            )?;
 
-            let grad_drive_act = grad_injected.hadamard(&one_minus)?;
-            let grad_one_minus = grad_injected.hadamard(&step.drive_act)?;
-            let grad_gate_from_injected = grad_one_minus.scale(-1.0)?;
+            let mut grad_drive_act = grad_injected.hadamard(&one_minus)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_drive_act",
+                &mut grad_drive_act,
+                anchor_topos,
+            )?;
+            let mut grad_one_minus = grad_injected.hadamard(&step.drive_act)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_one_minus",
+                &mut grad_one_minus,
+                anchor_topos,
+            )?;
+            let mut grad_gate_from_injected = grad_one_minus.scale(-1.0)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_gate_injected",
+                &mut grad_gate_from_injected,
+                anchor_topos,
+            )?;
 
-            let grad_anchor_broadcast = grad_anchor_mix.hadamard(&step.reset_tanh)?;
-            let grad_reset_tanh = grad_anchor_mix.hadamard(&step.anchor)?;
-            let grad_anchor_step =
+            let mut grad_anchor_broadcast = grad_anchor_mix.hadamard(&step.reset_tanh)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_anchor_broadcast",
+                &mut grad_anchor_broadcast,
+                anchor_topos,
+            )?;
+            let mut grad_reset_tanh = grad_anchor_mix.hadamard(&step.anchor)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_reset_tanh",
+                &mut grad_reset_tanh,
+                anchor_topos,
+            )?;
+            let mut grad_anchor_step =
                 Tensor::from_vec(1, self.hidden_dim, grad_anchor_broadcast.sum_axis0())?;
+            stabilise_tensor(
+                "spiral_rnn_grad_anchor_step",
+                &mut grad_anchor_step,
+                anchor_topos,
+            )?;
             grad_anchor.add_scaled(&grad_anchor_step, 1.0)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_anchor_total",
+                &mut grad_anchor,
+                anchor_topos,
+            )?;
 
-            let grad_drive_pre = {
+            let mut grad_drive_pre = {
                 let mut factor = Vec::with_capacity(step.drive_act.data().len());
                 for &v in step.drive_act.data() {
                     factor.push(1.0 - v * v);
@@ -277,8 +409,13 @@ impl Module for SpiralRnn {
                 Tensor::from_vec(step.drive_act.shape().0, step.drive_act.shape().1, factor)?
                     .hadamard(&grad_drive_act)?
             };
+            stabilise_tensor(
+                "spiral_rnn_grad_drive_pre",
+                &mut grad_drive_pre,
+                anchor_topos,
+            )?;
 
-            let grad_reset_from_anchor = {
+            let mut grad_reset_from_anchor = {
                 let mut factor = Vec::with_capacity(step.reset_tanh.data().len());
                 for &v in step.reset_tanh.data() {
                     factor.push(1.0 - v * v);
@@ -286,47 +423,139 @@ impl Module for SpiralRnn {
                 Tensor::from_vec(step.reset_tanh.shape().0, step.reset_tanh.shape().1, factor)?
                     .hadamard(&grad_reset_tanh)?
             };
+            stabilise_tensor(
+                "spiral_rnn_grad_reset_from_anchor",
+                &mut grad_reset_from_anchor,
+                anchor_topos,
+            )?;
 
-            let grad_gate_total = grad_gate_from_retained.add(&grad_gate_from_injected)?;
-            let grad_gate_pre = {
+            let mut grad_gate_total = grad_gate_from_retained.add(&grad_gate_from_injected)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_gate_total",
+                &mut grad_gate_total,
+                anchor_topos,
+            )?;
+            let mut grad_gate_pre = {
                 let gate = step.gate.clone();
                 let slope = gate.hadamard(&one_minus)?;
                 slope.hadamard(&grad_gate_total)?
             };
+            stabilise_tensor("spiral_rnn_grad_gate_pre", &mut grad_gate_pre, anchor_topos)?;
 
-            let grad_reset_pre = grad_gate_pre.add(&grad_reset_from_anchor)?;
-            let grad_state_phase = grad_gate_pre.clone();
+            let mut grad_reset_pre = grad_gate_pre.add(&grad_reset_from_anchor)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_reset_pre",
+                &mut grad_reset_pre,
+                anchor_topos,
+            )?;
+            let mut grad_state_phase = grad_gate_pre.clone();
+            stabilise_tensor(
+                "spiral_rnn_grad_state_phase",
+                &mut grad_state_phase,
+                anchor_topos,
+            )?;
 
-            let grad_combined_left = grad_drive_pre;
-            let grad_combined_right = grad_reset_pre;
-            let grad_combined = concat_columns(&grad_combined_left, &grad_combined_right)?;
+            let grad_combined_left = grad_drive_pre.clone();
+            let grad_combined_right = grad_reset_pre.clone();
+            let mut grad_combined = concat_columns(&grad_combined_left, &grad_combined_right)?;
+            stabilise_tensor("spiral_rnn_grad_combined", &mut grad_combined, anchor_topos)?;
 
-            let grad_bias_step =
+            let mut grad_bias_step =
                 Tensor::from_vec(1, self.hidden_dim * 2, grad_combined.sum_axis0())?;
+            stabilise_tensor(
+                "spiral_rnn_grad_bias_step",
+                &mut grad_bias_step,
+                anchor_topos,
+            )?;
             grad_bias.add_scaled(&grad_bias_step, 1.0)?;
+            stabilise_tensor("spiral_rnn_grad_bias", &mut grad_bias, anchor_topos)?;
 
-            let grad_input_proj = grad_combined.matmul(&self.input_kernel.value().transpose())?;
-            let grad_state_proj = grad_combined.matmul(&self.state_kernel.value().transpose())?;
+            let mut grad_input_proj =
+                grad_combined.matmul(&self.input_kernel.value().transpose())?;
+            stabilise_tensor(
+                "spiral_rnn_grad_input_proj",
+                &mut grad_input_proj,
+                anchor_topos,
+            )?;
+            let mut grad_state_proj =
+                grad_combined.matmul(&self.state_kernel.value().transpose())?;
+            stabilise_tensor(
+                "spiral_rnn_grad_state_proj",
+                &mut grad_state_proj,
+                anchor_topos,
+            )?;
 
-            let grad_input_kernel_step = step.input.transpose().matmul(&grad_combined)?;
+            let mut grad_input_kernel_step = step.input.transpose().matmul(&grad_combined)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_input_kernel_step",
+                &mut grad_input_kernel_step,
+                anchor_topos,
+            )?;
             grad_input_kernel.add_scaled(&grad_input_kernel_step, 1.0)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_input_kernel",
+                &mut grad_input_kernel,
+                anchor_topos,
+            )?;
 
-            let grad_state_kernel_step = step.state_before.transpose().matmul(&grad_combined)?;
+            let mut grad_state_kernel_step =
+                step.state_before.transpose().matmul(&grad_combined)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_state_kernel_step",
+                &mut grad_state_kernel_step,
+                anchor_topos,
+            )?;
             grad_state_kernel.add_scaled(&grad_state_kernel_step, 1.0)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_state_kernel",
+                &mut grad_state_kernel,
+                anchor_topos,
+            )?;
 
-            let grad_phase_kernel_step = step.state_before.transpose().matmul(&grad_state_phase)?;
+            let mut grad_phase_kernel_step =
+                step.state_before.transpose().matmul(&grad_state_phase)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_phase_kernel_step",
+                &mut grad_phase_kernel_step,
+                anchor_topos,
+            )?;
             grad_phase_kernel.add_scaled(&grad_phase_kernel_step, 1.0)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_phase_kernel",
+                &mut grad_phase_kernel,
+                anchor_topos,
+            )?;
 
-            let grad_phase_bias_step =
+            let mut grad_phase_bias_step =
                 Tensor::from_vec(1, self.hidden_dim, grad_state_phase.sum_axis0())?;
+            stabilise_tensor(
+                "spiral_rnn_grad_phase_bias_step",
+                &mut grad_phase_bias_step,
+                anchor_topos,
+            )?;
             grad_phase_bias.add_scaled(&grad_phase_bias_step, 1.0)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_phase_bias",
+                &mut grad_phase_bias,
+                anchor_topos,
+            )?;
 
-            let grad_state_from_phase =
+            let mut grad_state_from_phase =
                 grad_state_phase.matmul(&self.phase_kernel.value().transpose())?;
+            stabilise_tensor(
+                "spiral_rnn_grad_state_from_phase",
+                &mut grad_state_from_phase,
+                anchor_topos,
+            )?;
 
             let mut grad_state_before = grad_state_from_retained;
             grad_state_before.add_scaled(&grad_state_proj, 1.0)?;
             grad_state_before.add_scaled(&grad_state_from_phase, 1.0)?;
+            stabilise_tensor(
+                "spiral_rnn_grad_state_before",
+                &mut grad_state_before,
+                anchor_topos,
+            )?;
 
             let grad_input_step = grad_input_proj;
             let grad_input_slice = grad_input_step.data();
@@ -341,18 +570,46 @@ impl Module for SpiralRnn {
             grad_state = grad_state_before;
         }
         let inv_batch = 1.0 / cache.batch as f32;
+        stabilise_tensor(
+            "spiral_rnn_grad_input_kernel_final",
+            &mut grad_input_kernel,
+            anchor_topos,
+        )?;
         self.input_kernel
             .accumulate_euclidean(&grad_input_kernel.scale(inv_batch)?)?;
+        stabilise_tensor(
+            "spiral_rnn_grad_state_kernel_final",
+            &mut grad_state_kernel,
+            anchor_topos,
+        )?;
         self.state_kernel
             .accumulate_euclidean(&grad_state_kernel.scale(inv_batch)?)?;
+        stabilise_tensor(
+            "spiral_rnn_grad_phase_kernel_final",
+            &mut grad_phase_kernel,
+            anchor_topos,
+        )?;
         self.phase_kernel
             .accumulate_euclidean(&grad_phase_kernel.scale(inv_batch)?)?;
+        stabilise_tensor("spiral_rnn_grad_bias_final", &mut grad_bias, anchor_topos)?;
         self.bias
             .accumulate_euclidean(&grad_bias.scale(inv_batch)?)?;
+        stabilise_tensor(
+            "spiral_rnn_grad_phase_bias_final",
+            &mut grad_phase_bias,
+            anchor_topos,
+        )?;
         self.phase_bias
             .accumulate_euclidean(&grad_phase_bias.scale(inv_batch)?)?;
+        stabilise_tensor(
+            "spiral_rnn_grad_anchor_final",
+            &mut grad_anchor,
+            anchor_topos,
+        )?;
         self.anchor
             .accumulate_euclidean(&grad_anchor.scale(inv_batch)?)?;
+        saturate_slice(&mut grad_input_data, anchor_topos);
+        guard_slice("spiral_rnn_grad_input", &grad_input_data, anchor_topos)?;
         Tensor::from_vec(
             cache.batch,
             cache.input_dim * cache.steps_count,
