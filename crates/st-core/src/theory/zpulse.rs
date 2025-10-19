@@ -621,6 +621,14 @@ impl ZConductor {
     pub fn step(&mut self, now: u64) -> ZFused {
         self.last_step = Some(now);
         let mut events = Vec::new();
+        if let Some(previous) = self.last_step {
+            if now < previous {
+                events.push("time-regressed".to_string());
+            } else if now.saturating_sub(previous) > 1 {
+                events.push(format!("step-gap-{}", now - previous));
+            }
+        }
+        self.last_step = Some(now);
         if let Some(latency) = self.latency.as_mut() {
             latency.prepare(now, &mut events);
         }
