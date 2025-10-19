@@ -16,26 +16,6 @@ use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
-// Microlocal pulse fusion utilities shared between the observability
-// backends and telemetry exporters.
-// [SCALE-TODO] Compatibility shim: ZScale
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub struct ZScale(pub f32);
-
-impl ZScale {
-    pub const ONE: ZScale = ZScale(1.0);
-
-    #[inline]
-    pub fn new(v: f32) -> Self {
-        Self(v)
-    }
-
-    #[inline]
-    pub fn value(self) -> f32 {
-        self.0
-    }
-}
-
 /// Support triplet describing Above/Here/Beneath contributions backing a Z pulse.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZSupport {
@@ -1299,5 +1279,109 @@ mod conductor_config_tests {
         let pulses = registry.gather(43);
         assert_eq!(pulses.len(), 1);
         assert_eq!(pulses[0].source, ZSource::Desire);
+    }
+}
+
+#[cfg(test)]
+mod latency_tests {
+    use super::*;
+
+    fn conductor_with_latency(cfg: LatencyAlignerCfg) -> ZConductor {
+        let mut base = ZConductorCfg::default();
+        base.latency = Some(cfg);
+        base.latency_align = true;
+        ZConductor::new(base)
+    }
+
+    fn pulse(source: ZSource, ts: u64, drift: f32) -> ZPulse {
+        ZPulse {
+            source,
+            ts,
+            tempo: 0.0,
+            band_energy: (drift.abs(), 0.0, 0.0),
+            drift,
+            z_bias: drift,
+            support: ZSupport::new(drift.abs(), drift.abs(), 0.0),
+            quality: 1.0,
+            stderr: 0.0,
+            latency_ms: 0.0,
+        }
+    }
+
+    #[test]
+    fn latency_aligner_tracks_known_offset() {
+        let align_cfg = LatencyAlignerCfg {
+            window: 96,
+            hop: 1,
+            max_lag_steps: 64,
+            alpha: 0.35,
+            coherence_min: 0.0,
+            hold_steps: 0,
+            fractional: false,
+        };
+        let mut conductor = conductor_with_latency(align_cfg);
+        let lag = 6u64;
+
+        for step in 0..96u64 {
+            conductor.ingest(pulse(ZSource::Microlocal, step, 0.8));
+            conductor.ingest(pulse(ZSource::Maxwell, step + lag, 0.8));
+            conductor.step(step);
+        }
+
+        let estimate = conductor.latency_for(&ZSource::Maxwell).unwrap();
+        assert!((estimate - lag as f32).abs() <= 1.5);
+    }
+
+    #[test]
+    fn latency_aligner_honours_hold_steps() {
+        let align_cfg = LatencyAlignerCfg {
+            window: 64,
+            hop: 1,
+            max_lag_steps: 48,
+            alpha: 1.0,
+            coherence_min: 0.0,
+            hold_steps: 3,
+            fractional: false,
+        };
+        let mut conductor = conductor_with_latency(align_cfg);
+        let mut last_update = None;
+
+        for step in 0..48u64 {
+            conductor.ingest(pulse(ZSource::Microlocal, step, 1.0));
+            conductor.ingest(pulse(ZSource::Graph, step + 5, 1.0));
+            let fused = conductor.step(step);
+
+            if fused
+                .events
+                .iter()
+                .any(|event| event.starts_with("latency.adjusted"))
+            {
+                if let Some(prev) = last_update {
+                    assert!(step.saturating_sub(prev) >= 3);
+                }
+                last_update = Some(step);
+            }
+        }
+
+        assert!(last_update.is_some());
+    }
+
+    #[test]
+    fn latency_hint_seeds_initial_estimate() {
+        let align_cfg = LatencyAlignerCfg::balanced();
+        let mut conductor = conductor_with_latency(align_cfg);
+
+        let mut hinted = pulse(ZSource::Graph, 0, 0.6);
+        hinted.latency_ms = 12.0;
+        conductor.ingest(pulse(ZSource::Microlocal, 0, 0.6));
+        conductor.ingest(hinted);
+        let fused = conductor.step(0);
+
+        assert!(fused
+            .events
+            .iter()
+            .any(|event| event.starts_with("latency.seeded")));
+        let estimate = conductor.latency_for(&ZSource::Graph).unwrap();
+        assert!((estimate - 12.0).abs() <= 1e-3);
     }
 }
