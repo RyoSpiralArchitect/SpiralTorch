@@ -26,6 +26,8 @@ use core::fmt;
 use std::collections::HashMap;
 use std::str::FromStr;
 
+use crate::theory::spiral_dynamics::{HopfRegime, PsiSpiralMetrics};
+
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct PsiComponent: u32 {
@@ -155,6 +157,33 @@ impl PsiConfig {
         );
         cfg
     }
+
+    /// Applies the Spiral-derived tuning adjustments to the configuration.
+    pub fn apply_spiral_tuning(&mut self, tuning: &PsiSpiralTuning) {
+        if tuning.required_components.is_empty() {
+            // Nothing to extend in the component mask; continue with weight updates.
+        } else {
+            self.components |= tuning.required_components;
+        }
+
+        for (component, delta) in &tuning.weight_increments {
+            let entry = self.weights.entry(*component).or_insert(0.0);
+            *entry = (*entry + *delta).clamp(0.0, 10.0);
+        }
+
+        for (component, shift) in &tuning.threshold_shifts {
+            let entry = self.thresholds.entry(*component).or_insert(0.0);
+            *entry += *shift;
+        }
+
+        if tuning.stability_score < 0.25 {
+            self.sample_rate = self.sample_rate.max(1);
+        } else if tuning.stability_score < 0.6 {
+            self.sample_rate = self.sample_rate.max(2);
+        } else {
+            self.sample_rate = self.sample_rate.max(3);
+        }
+    }
 }
 
 impl Default for PsiConfig {
@@ -196,6 +225,175 @@ pub enum PsiEvent {
         up: bool,
         step: u64,
     },
+}
+
+/// Advisory emitted when projecting Spiral dynamics health into PSI channels.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PsiSpiralAdvisory {
+    /// Hopf regime classification derived from the cubic coefficient.
+    pub regime: HopfRegime,
+    /// Linear growth rate at the origin.
+    pub mu_eff0: f32,
+    /// Cubic coefficient α₃ after the center-manifold correction.
+    pub alpha3: f32,
+    /// Signed audit/container gap κa/τ − σ_s ρ / λ.
+    pub audit_container_gap: f32,
+    /// Dimensionless audit gain cluster κ a / (τ ν).
+    pub audit_cluster: f32,
+    /// Dimensionless container cluster σ_s ρ / (λ ν).
+    pub container_cluster: f32,
+}
+
+impl PsiSpiralAdvisory {
+    /// Builds an advisory from the Spiral dynamics metrics.
+    pub fn from_metrics(metrics: &PsiSpiralMetrics) -> Self {
+        Self {
+            regime: metrics.hopf.regime,
+            mu_eff0: metrics.hopf.mu_eff0 as f32,
+            alpha3: metrics.hopf.alpha3 as f32,
+            audit_container_gap: metrics.balance.difference as f32,
+            audit_cluster: metrics.dimensionless.audit_cluster as f32,
+            container_cluster: metrics.dimensionless.container_cluster as f32,
+        }
+    }
+
+    /// Normalised stability score in \([0, 1]\) derived from the Hopf data.
+    pub fn stability_score(&self) -> f32 {
+        let linear_margin = (-self.mu_eff0).max(0.0);
+        let cubic_margin = self.alpha3.max(0.0);
+        let base = (linear_margin + 0.5 * cubic_margin).tanh();
+        let regime_penalty = match self.regime {
+            HopfRegime::Supercritical => 0.0,
+            HopfRegime::Degenerate => 0.2,
+            HopfRegime::Subcritical => 0.4,
+        };
+        let audit_penalty = (self.audit_container_gap.max(0.0)).tanh() * 0.5;
+        (base * (1.0 - regime_penalty) - audit_penalty).clamp(0.0, 1.0)
+    }
+
+    /// Returns `true` when the advisory flags a destabilising audit surplus.
+    pub fn audit_overbias(&self) -> bool {
+        self.regime == HopfRegime::Subcritical || self.audit_container_gap > 0.0
+    }
+
+    /// Magnitude of the recommended container reinforcement in PSI weights.
+    pub fn container_reinforcement(&self) -> f32 {
+        (self.audit_container_gap.max(0.0) + (-self.mu_eff0).max(0.0))
+            .tanh()
+            .clamp(0.0, 1.0)
+    }
+
+    /// Produces a telemetry tuning plan matching the Spiral health advisory.
+    pub fn tuning(&self) -> PsiSpiralTuning {
+        let mut required_components = PsiComponent::empty();
+        let mut weight_increments = HashMap::new();
+        let mut threshold_shifts = HashMap::new();
+
+        let reinforcement = self.container_reinforcement();
+        if reinforcement > 0.0 {
+            required_components |= PsiComponent::ACT_DRIFT | PsiComponent::BAND_ENERGY;
+            weight_increments.insert(PsiComponent::ACT_DRIFT, 0.2 * reinforcement);
+            weight_increments.insert(PsiComponent::BAND_ENERGY, 0.15 * reinforcement);
+        }
+
+        let audit_bias = self.audit_container_gap.max(0.0);
+        if audit_bias > 0.0 {
+            required_components |= PsiComponent::UPDATE_RATIO | PsiComponent::GRAD_NORM;
+            weight_increments
+                .entry(PsiComponent::UPDATE_RATIO)
+                .and_modify(|w| *w += 0.1 * audit_bias)
+                .or_insert(0.1 * audit_bias);
+            threshold_shifts.insert(
+                PsiComponent::GRAD_NORM,
+                -0.08 * (audit_bias + reinforcement),
+            );
+        }
+
+        if self.regime == HopfRegime::Subcritical {
+            required_components |= PsiComponent::LOSS | PsiComponent::ATTN_ENTROPY;
+            threshold_shifts
+                .entry(PsiComponent::LOSS)
+                .and_modify(|v| *v -= 0.1)
+                .or_insert(-0.1 - 0.1 * reinforcement);
+            weight_increments
+                .entry(PsiComponent::ATTN_ENTROPY)
+                .and_modify(|v| *v += 0.12)
+                .or_insert(0.12 + 0.1 * reinforcement);
+        }
+
+        PsiSpiralTuning {
+            stability_score: self.stability_score(),
+            required_components,
+            weight_increments,
+            threshold_shifts,
+        }
+    }
+}
+
+/// Convenience helper that derives a Spiral advisory directly from the
+/// parameter tuple used in `psi_spiral_metrics`.
+pub fn psi_spiral_advisory_from_params(
+    mu0: f64,
+    gamma: f64,
+    omega: f64,
+    nu: f64,
+    kappa: f64,
+    a: f64,
+    tau: f64,
+    theta: f64,
+    sigma_s: f64,
+    rho: f64,
+    lambda: f64,
+    c_max: f64,
+) -> Option<PsiSpiralAdvisory> {
+    let metrics = crate::theory::spiral_dynamics::psi_spiral_metrics(
+        mu0, gamma, omega, nu, kappa, a, tau, theta, sigma_s, rho, lambda, c_max,
+    )?;
+    Some(PsiSpiralAdvisory::from_metrics(&metrics))
+}
+
+/// Computes the PSI tuning prescription derived from the Spiral parameters.
+pub fn psi_spiral_tuning_from_params(
+    mu0: f64,
+    gamma: f64,
+    omega: f64,
+    nu: f64,
+    kappa: f64,
+    a: f64,
+    tau: f64,
+    theta: f64,
+    sigma_s: f64,
+    rho: f64,
+    lambda: f64,
+    c_max: f64,
+) -> Option<PsiSpiralTuning> {
+    psi_spiral_advisory_from_params(
+        mu0, gamma, omega, nu, kappa, a, tau, theta, sigma_s, rho, lambda, c_max,
+    )
+    .map(|advisory| advisory.tuning())
+}
+
+/// Bundle of PSI telemetry adjustments derived from a Spiral advisory.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PsiSpiralTuning {
+    pub stability_score: f32,
+    pub required_components: PsiComponent,
+    pub weight_increments: HashMap<PsiComponent, f32>,
+    pub threshold_shifts: HashMap<PsiComponent, f32>,
+}
+
+impl PsiSpiralTuning {
+    pub fn is_neutral(&self) -> bool {
+        self.required_components.is_empty()
+            && self
+                .weight_increments
+                .values()
+                .all(|delta| delta.abs() < f32::EPSILON)
+            && self
+                .threshold_shifts
+                .values()
+                .all(|delta| delta.abs() < f32::EPSILON)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -340,6 +538,40 @@ impl PsiAutomationHint {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spiral_advisory_tracks_audit_bias() {
+        let metrics = crate::theory::spiral_dynamics::psi_spiral_metrics(
+            -0.05, 0.6, 1.0, 0.9, 0.7, 0.8, 1.2, 0.2, 0.5, 0.4, 1.1, 0.35,
+        )
+        .unwrap();
+        let advisory = PsiSpiralAdvisory::from_metrics(&metrics);
+        assert!(advisory.audit_overbias());
+        assert!(advisory.container_reinforcement() > 0.0);
+    }
+
+    #[test]
+    fn spiral_tuning_biases_weights_and_components() {
+        let advisory = psi_spiral_advisory_from_params(
+            -0.05, 0.6, 1.0, 0.9, 0.7, 0.8, 1.2, 0.2, 0.5, 0.4, 1.1, 0.35,
+        )
+        .unwrap();
+        let tuning = advisory.tuning();
+        assert!(tuning.stability_score >= 0.0 && tuning.stability_score <= 1.0);
+        assert!(tuning.required_components.contains(PsiComponent::ACT_DRIFT));
+        assert!(tuning
+            .weight_increments
+            .get(&PsiComponent::ACT_DRIFT)
+            .is_some());
+        let mut cfg = PsiConfig::default();
+        cfg.enabled = true;
+        cfg.components = PsiComponent::LOSS;
+        cfg.weights.insert(PsiComponent::LOSS, 1.0);
+        cfg.apply_spiral_tuning(&tuning);
+        assert!(cfg.components.contains(PsiComponent::ACT_DRIFT));
+        assert!(cfg.weights.get(&PsiComponent::ACT_DRIFT).is_some());
+        assert!(cfg.sample_rate >= 1);
+    }
 
     #[test]
     fn ema_basic() {

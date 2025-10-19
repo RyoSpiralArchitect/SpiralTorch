@@ -175,3 +175,18 @@ with \\(r^2 = \\psi^2 + \\phi^2\\). Even small oscillations therefore accelerate
 * **Contraction**
   * Maintain a positive margin in the minimum from the Gershgorin bound.
   * Leverage the cubic damping \\(\\nu r^2\\) to widen the contraction basin when designing experiments.
+* **Hopf bookkeeping**
+  * The equilibrium sits at \(z^\ast = 0,\; u^\ast = -\kappa\theta/\tau,\; s^\ast = 0\).
+  * Use `hopf_normal_form` to recover \(\mu_{\mathrm{eff},0}\), the center-manifold correction \(C\), and the cubic coefficient \(\alpha_3 = \nu - \gamma C\).
+  * `HopfRegime::Supercritical` iff \(\alpha_3 > 0\); strengthen the container (raise \(\sigma_s\), \(\rho\), or lower \(\lambda\)) if the routine flags a subcritical branch.
+* **Dimensionless combos**
+  * `dimensionless_parameters` maps the tuning set to \((\bar\mu, \bar\gamma, \bar\omega)\) and the two gain clusters \(\kappa a/(\tau\nu)\), \(\sigma_s\rho/(\lambda\nu)\).
+  * These ratios index phase plots and reduce sweeping experiments to a handful of axes.
+* **Noise tolerance**
+  * `ito_mean_square_bound` yields the closed form upper bound on \(\mathbb{E}|z|^2\) for additive complex noise.
+  * Keep \(\mu_{\mathrm{eff}} \le 0\); the bound contracts to zero as the noise power \(\sigma^2 \rightarrow 0\).
+* **Audit vs. container gain**
+  * `audit_container_balance` reports \(\kappa a/\tau - \sigma_s\rho/\lambda\).
+  * A positive gap pushes the Hopf coefficient toward the subcritical side; tighten container feedback to cancel the excess.
+  * `psi_spiral_metrics` bundles the Hopf, balance, and dimensionless combos so PSI dashboards can render `PsiSpiralAdvisory` notices when the audit side overpowers the container feedback.
+  * `psi_spiral_tuning_from_params` pushes those notices into concrete PSI weight and threshold adjustments so monitoring stays aligned with Spiral health.
