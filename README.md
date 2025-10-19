@@ -4,7 +4,7 @@ _(Still under active repair while expanding — API changes hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
-**Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.capture` / `share` shims and `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules.
+**Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
 
 **Architecture Overview.**
 ```mermaid

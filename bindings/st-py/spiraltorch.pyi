@@ -24,6 +24,25 @@ def from_dlpack(capsule: object) -> Tensor: ...
 def to_dlpack(tensor: Tensor) -> object: ...
 
 class _CompatTorch(ModuleType):
+    def to_torch(
+        tensor: Tensor,
+        *,
+        dtype: object | None = ...,
+        device: object | None = ...,
+        requires_grad: bool | None = ...,
+        copy: bool | None = ...,
+        memory_format: object | None = ...,
+    ) -> object: ...
+
+    def from_torch(
+        tensor: object,
+        *,
+        dtype: object | None = ...,
+        device: object | None = ...,
+        ensure_cpu: bool | None = ...,
+        copy: bool | None = ...,
+        require_contiguous: bool | None = ...,
+    ) -> Tensor: ...
     def to_torch(tensor: Tensor) -> object: ...
     def from_torch(tensor: object) -> Tensor: ...
 
@@ -39,14 +58,11 @@ class _CompatNamespace(ModuleType):
     torch: _CompatTorch
     jax: _CompatJax
     tensorflow: _CompatTensorFlow
-    def capture(value: object, /) -> Tensor: ...
-    def share(value: object, target: str, /) -> object: ...
 
 compat: _CompatNamespace
 
-def capture(value: object, /) -> Tensor: ...
-
-def share(value: object, target: str, /) -> object: ...
+    def capture(value: object, /) -> Tensor: ...
+    def share(value: object, target: str, /) -> object: ...
 
 compat: _CompatNamespace
 
