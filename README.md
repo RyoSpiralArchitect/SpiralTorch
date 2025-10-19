@@ -63,9 +63,6 @@ _Last updated: 2025-10-19 00:00 UTC_
 - Total code LOC: **276,472**
 - Rust files: **866** (Rust code LOC: **255,611**)
 
-<details>
-<summary>tokei breakdown (click to expand)</summary>
-
 ```text
 ===============================================================================
  Language            Files        Lines         Code     Comments       Blanks
