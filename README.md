@@ -53,23 +53,45 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 - **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors. Any network-facing use must comply with AGPL §13.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
-<!-- STATS:START -->
-> _auto-generated: 2025-10-18 21:39 UTC_
+## Code stats
 
-| Metric | Value |
-|---|---:|
-| Rust code LOC | **71,317** |
-| Rust files | 197 |
-| Total code LOC (all langs) | 76,480 |
-| Workspace+deps crates | 241 |
+<!-- AUTOGEN: CODESTATS BEGIN -->
+_Last updated: 2025-10-19 00:00 UTC_
 
-<p>
-<img src="docs/badges/rust-loc.svg" alt="rust loc" />
-<img src="docs/badges/total-code.svg" alt="total code" />
-<img src="docs/badges/deps.svg" alt="crates" />
-</p>
-<!-- STATS:END -->
+**Workspace summary**
+- Total files: **1109**
+- Total code LOC: **276,472**
+- Rust files: **866** (Rust code LOC: **255,611**)
 
+```text
+===============================================================================
+ Language            Files        Lines         Code     Comments       Blanks
+===============================================================================
+ BASH                    4          216          208            4            4
+ C++                     4          664          560           12           92
+ JSON                    4           44           44            0            0
+ Python                 28         3564         2964          136          464
+ SVG                    12          240          240            0            0
+ Plain Text              4         2644            0         2176          468
+ TOML                   90         2193         1849           78          266
+ TypeScript             20        17096        14996          700         1400
+-------------------------------------------------------------------------------
+ Markdown               77        11409            0         9291         2118
+ |- BASH                 8          336          240           48           48
+ |- HTML                 4           72           72            0            0
+ |- JavaScript           4          104           92            4            8
+ |- JSON                 4           44           44            0            0
+ |- Python              12         2040         1724           44          272
+ |- Rust                 4         2104         1824           56          224
+ (Total)                          16109         3996         9443         2670
+-------------------------------------------------------------------------------
+ Rust                  866       288342       255611         5433        27298
+ |- Markdown           573        13023            0        12700          323
+ (Total)                         301365       255611        18133        27621
+===============================================================================
+ Total                1109       326412       276472        17830        32110
+===============================================================================
+```
 ---
 
 **SpiralTorch is a Rust-first AI training framework** that keeps language,
@@ -80,16 +102,6 @@ the kernels, the hypergrad tape streams Z-space meaning, and the high-level
 The stack is comfortable living entirely in Rust—yet the Python wheel remains a
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
-
-## SpiralTorchVision overview
-
-SpiralTorchVision reinterprets the Z-axis as a perceptual frequency domain,
-collapsing it with spectral-window-aware projectors into tensor spaces that any
-TorchVision model can consume. Temporal resonance buffers now let `ZSpaceVolume`
-perform exponential moving averages across frames so the projector can weight
-both depth and time before collapsing. The roadmap spans multi-view fusion and
-generative feedback loops between SpiralRNN conductors and vision modules. Read
-the full guide in [docs/spiraltorchvision.md](docs/spiraltorchvision.md).
 
 ---
 
@@ -252,6 +264,16 @@ optimisers alongside its hypergradient updates.
   matrix with `trace.with_barycenter_with(weights, densities, Some(coupling))`
   before resonating, keeping Z-space orchestration entirely on the session.
 
+## SpiralTorchVision overview
+
+SpiralTorchVision reinterprets the Z-axis as a perceptual frequency domain,
+collapsing it with spectral-window-aware projectors into tensor spaces that any
+TorchVision model can consume. Temporal resonance buffers now let `ZSpaceVolume`
+perform exponential moving averages across frames so the projector can weight
+both depth and time before collapsing. The roadmap spans multi-view fusion and
+generative feedback loops between SpiralRNN conductors and vision modules. Read
+the full guide in [docs/spiraltorchvision.md](docs/spiraltorchvision.md).ion.md).
+
 
 ## Why it’s different
  - **Training comes first:** Modules such as `Linear`, `Sequential`,
@@ -350,12 +372,6 @@ process details required.【F:crates/st-kdsl/src/registry.rs†L15-L89】 The sa
 tracks throughput, bandwidth, occupancy, chosen tile, and regression fallbacks
 while evicting the oldest samples once the per-key capacity is reached, keeping
 the cache warm without unbounded growth.【F:crates/st-kdsl/src/registry.rs†L92-L229】【F:crates/st-kdsl/src/registry.rs†L248-L334】
-
-**Guardrails we stick to:**
-- 🚫 時刻・PID・PCIバス番号といった揮発的な情報をキーに混ぜない（毎回別物になる）。
-- 🚫 GPU名の文字列そのものをキーの中心に据えない（地域・ドライバ差で揺れる）。
-- 🚫 cold/warm 計測を混在させた分位点評価をしない（ウォームアップは別途弾く）。
-- 🚫 ログの無限成長を放置しない（常に上限を設け、古いサンプルから捨てる）。
 
 ### Microlocal interface gauges
 
