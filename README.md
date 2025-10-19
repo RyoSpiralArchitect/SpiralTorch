@@ -2,6 +2,50 @@
 **trains where PyTorch can’t — inside the Z-space.**  
 _(Still under active repair while expanding — API changes hourly.)_
 
+**Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
+
+**Architecture Overview.**
+```mermaid
+sequenceDiagram
+  participant API as Python/TS API
+  participant Core as st-core
+  participant Reg as Op registry
+  participant KD as st-kdsl
+  participant BE as Backend (WGPU/CUDA/CPU)
+  participant TLM as Telemetry
+
+  API->>Core: op(x, y, ...)
+  Core->>Reg: resolve impl/backend (caps/precision/layout)
+  alt cached kernel exists
+    Reg-->>Core: impl + schedule + kernel handle
+  else needs generation
+    Reg->>KD: codegen + parameterization
+    KD-->>Reg: kernel handle (tuned & cached)
+    Reg-->>Core: impl + schedule + kernel handle
+  end
+  Core->>BE: submit commands/pipeline (async)
+  BE-->>Core: completion events / result buffers
+  Core--)TLM: spans / metrics / logs
+```
+
+**Quickstart**
+
+```
+just all          # fmt + clippy + core build/test + stack build
+just wgpu         # macOS (Metal) wgpu build of st-tensor
+```
+
+**Crates**
+- st-core: spectral/ops/telemetry runtime (+ tests)
+- st-tensor: tensor core, WGPU backend
+- st-nn, st-rl, st-rec: higher-level stacks
+- st-frac: fractional calculus helpers (GL kernels, Mellin tools)
+
+**License**
+
+AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
+
+
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
   <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
