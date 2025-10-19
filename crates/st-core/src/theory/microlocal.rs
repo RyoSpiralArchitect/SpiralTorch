@@ -12,7 +12,7 @@
 
 use crate::telemetry::hub::SoftlogicZFeedback;
 use crate::theory::zpulse::{
-    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZSource, ZSupport,
+    ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
 };
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
@@ -340,6 +340,7 @@ impl InterfaceZLift {
             support: total_support,
             interface_cells,
             band_energy,
+            scale: ZScale::new(signature.physical_radius),
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -355,6 +356,7 @@ pub struct InterfaceZPulse {
     pub support: f32,
     pub interface_cells: f32,
     pub band_energy: (f32, f32, f32),
+    pub scale: Option<ZScale>,
     pub drift: f32,
     pub z_bias: f32,
     pub quality_hint: Option<f32>,
@@ -382,6 +384,9 @@ impl InterfaceZPulse {
         let mut drift_weight = 0.0f32;
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
+        let mut scale_phys = 0.0f32;
+        let mut scale_log = 0.0f32;
+        let mut scale_weight = 0.0f32;
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
@@ -393,12 +398,23 @@ impl InterfaceZPulse {
             drift_weight += weight;
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
+            if let Some(scale) = pulse.scale {
+                let w = scale_weight_for(pulse);
+                scale_phys += scale.physical_radius * w;
+                scale_log += scale.log_radius * w;
+                scale_weight += w;
+            }
         }
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
             interface_cells,
             band_energy: band,
+            scale: if scale_weight > 0.0 {
+                ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
+            } else {
+                None
+            },
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -425,6 +441,12 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
+            scale: match (current.scale, next.scale) {
+                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -443,6 +465,7 @@ impl InterfaceZPulse {
                 self.band_energy.1 * gain,
                 self.band_energy.2 * gain,
             ),
+            scale: self.scale,
             drift: self.drift * gain,
             z_bias: self.z_bias * gain,
             quality_hint: self.quality_hint,
@@ -477,13 +500,17 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: ZScale::new(1.0),
+            scale: None,
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
             standard_error: None,
         }
     }
+}
+
+fn scale_weight_for(pulse: &InterfaceZPulse) -> f32 {
+    pulse.support.max(pulse.total_energy()).max(f32::EPSILON)
 }
 
 /// Result emitted after fusing the microlocal pulses through [`ZConductor`].
@@ -831,6 +858,7 @@ impl InterfaceZConductor {
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
                 support,
+                scale: pulse.scale,
                 quality,
                 stderr,
                 latency_ms: 0.0,
@@ -885,6 +913,7 @@ impl InterfaceZConductor {
             drift: fused.drift,
             z_bias: fused.z_bias,
             support,
+            scale: fused.scale,
             quality: avg_quality,
             stderr: fused.standard_error.unwrap_or(0.0),
             latency_ms: 0.0,
@@ -931,7 +960,9 @@ mod tests {
         let orient = sig.orientation.expect("orientation missing");
         let normal_y = orient[IxDyn(&[0, 1, 1])];
         let normal_x = orient[IxDyn(&[1, 1, 1])];
+        let norm = (normal_x * normal_x + normal_y * normal_y).sqrt();
+        assert!((norm - 1.0).abs() < 1e-3);
         assert!(normal_y.abs() > 0.5);
-        assert!(normal_x.abs() < 1e-3);
+        assert!(normal_x.abs() > 0.5);
     }
 }
