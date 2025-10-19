@@ -11,12 +11,14 @@ use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
 use pyo3::exceptions::{PyImportError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule, PySequence, PyTuple};
+use pyo3::types::{PyAny, PyCapsule, PyDict, PyList, PyModule, PySequence, PyTuple};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use pyo3::Py;
+use pyo3::PyObject;
 use pyo3::PyRef;
 use pyo3::PyRefMut;
+use pyo3::{ffi, PyErr};
 use st_backend_hip::{
     device_info as hip_device_info, hip_available as hip_runtime_available,
     DeviceInfo as HipDeviceInfo,
@@ -107,6 +109,7 @@ use st_tensor::{
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
     MatmulBackend, PureResult, Tensor, TensorBiome, TensorError,
 };
+use st_tensor::dlpack::{self, DLManagedTensor};
 use std::cell::RefCell;
 use st_text::{
     describe_atlas as text_describe_atlas, describe_frame as text_describe_frame,
@@ -116,6 +119,7 @@ use st_text::{
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::ffi::c_void;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -245,6 +249,72 @@ fn tensor_err(err: TensorError) -> PyErr {
 
 fn convert<T>(value: PureResult<T>) -> PyResult<T> {
     value.map_err(tensor_err)
+}
+
+fn dlpack_err(message: impl Into<String>) -> PyErr {
+    PyValueError::new_err(message.into())
+}
+
+fn extract_dlpack_managed(
+    py: Python<'_>,
+    source: &PyAny,
+) -> PyResult<(*mut DLManagedTensor, PyObject)> {
+    let capsule_obj = if source.hasattr("__dlpack__")? {
+        let callable = source.getattr("__dlpack__")?;
+        callable.call0()?.into_py(py)
+    } else {
+        source.into_py(py)
+    };
+
+    let capsule_ref = capsule_obj.as_ref(py);
+    let capsule_ptr = capsule_ref.as_ptr();
+
+    if unsafe { ffi::PyCapsule_CheckExact(capsule_ptr) } == 0 {
+        return Err(dlpack_err(
+            "expected a DLPack capsule or object implementing __dlpack__",
+        ));
+    }
+
+    if unsafe { ffi::PyCapsule_IsValid(capsule_ptr, dlpack::DLPACK_CAPSULE_NAME.as_ptr()) } == 0 {
+        return Err(dlpack_err("capsule is not a valid DLPack tensor"));
+    }
+
+    let managed = unsafe {
+        ffi::PyCapsule_GetPointer(capsule_ptr, dlpack::DLPACK_CAPSULE_NAME.as_ptr())
+            as *mut DLManagedTensor
+    };
+
+    if managed.is_null() {
+        return Err(dlpack_err("DLPack capsule returned a null tensor pointer"));
+    }
+
+    if unsafe {
+        ffi::PyCapsule_SetName(capsule_ptr, dlpack::USED_DLPACK_CAPSULE_NAME.as_ptr())
+    } != 0
+    {
+        return Err(PyErr::fetch(py));
+    }
+
+    Ok((managed, capsule_obj))
+}
+
+unsafe extern "C" fn dlpack_capsule_destructor(capsule: *mut ffi::PyObject) {
+    if capsule.is_null() {
+        return;
+    }
+    if unsafe { ffi::PyCapsule_IsValid(capsule, dlpack::DLPACK_CAPSULE_NAME.as_ptr()) } == 0 {
+        return;
+    }
+    let managed = unsafe {
+        ffi::PyCapsule_GetPointer(capsule, dlpack::DLPACK_CAPSULE_NAME.as_ptr())
+            as *mut DLManagedTensor
+    };
+    if managed.is_null() {
+        return;
+    }
+    unsafe {
+        dlpack::call_managed_deleter(managed);
+    }
 }
 
 fn desire_phase_name(phase: DesirePhase) -> &'static str {
@@ -1001,6 +1071,14 @@ impl PyTensor {
         Ok(Self::from_tensor(convert(Tensor::zeros(rows, cols))?))
     }
 
+    #[staticmethod]
+    fn from_dlpack(py: Python<'_>, capsule: &PyAny) -> PyResult<Self> {
+        let (managed, guard) = extract_dlpack_managed(py, capsule)?;
+        let tensor = unsafe { convert(Tensor::from_dlpack(managed))? };
+        drop(guard);
+        Ok(Self::from_tensor(tensor))
+    }
+
     #[pyo3(name = "clone")]
     fn clone_py(&self) -> Self {
         Self {
@@ -1024,6 +1102,19 @@ impl PyTensor {
 
     fn data(&self) -> Vec<f32> {
         self.inner.data().to_vec()
+    }
+
+    fn to_dlpack(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let managed = convert(self.inner.to_dlpack())?;
+        let capsule = unsafe {
+            PyCapsule::new(
+                py,
+                managed as *mut c_void,
+                Some(dlpack::DLPACK_CAPSULE_NAME),
+                Some(dlpack_capsule_destructor),
+            )?
+        };
+        Ok(capsule.into_py(py))
     }
 
     fn tolist(&self) -> Vec<Vec<f32>> {
