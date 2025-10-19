@@ -81,6 +81,16 @@ The stack is comfortable living entirely in Rust—yet the Python wheel remains 
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
+## SpiralTorchVision overview
+
+SpiralTorchVision reinterprets the Z-axis as a perceptual frequency domain,
+collapsing it with spectral-window-aware projectors into tensor spaces that any
+TorchVision model can consume. Temporal resonance buffers now let `ZSpaceVolume`
+perform exponential moving averages across frames so the projector can weight
+both depth and time before collapsing. The roadmap spans multi-view fusion and
+generative feedback loops between SpiralRNN conductors and vision modules. Read
+the full guide in [docs/spiraltorchvision.md](docs/spiraltorchvision.md).
+
 ---
 
 ## Quick Start
