@@ -75,7 +75,7 @@ pub enum TensorError {
     NonPositiveWeight { weight: f32 },
     /// Computation received an empty input which would otherwise trigger a panic.
     EmptyInput(&'static str),
-    /// Weighted Z-space barycenter collapsed because the entropy weight cancelled the KL pull.
+    /// Weighted Z-space barycenter collapsed because the total KL + entropy temperature vanished.
     DegenerateBarycenter { effective_weight: f32 },
     /// Attempted to load or update a parameter that was missing from the state dict.
     MissingParameter { name: String },
@@ -157,7 +157,7 @@ impl fmt::Display for TensorError {
             TensorError::DegenerateBarycenter { effective_weight } => {
                 write!(
                     f,
-                    "z-space barycenter degenerates when the effective weight {effective_weight} vanishes"
+                    "z-space barycenter degenerates when the total weight temperature ({effective_weight}) is non-positive"
                 )
             }
             TensorError::CurvatureMismatch { expected, got } => {

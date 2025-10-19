@@ -26,6 +26,7 @@ psi      = ["dep:bitflags", "dep:once_cell"]
 psychoid = ["dep:once_cell"]
 collapse = ["psi"]
 golden   = []
+experimental_zpulse = []
 
 [dependencies]
 thiserror   = "1"

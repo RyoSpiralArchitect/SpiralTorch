@@ -2485,8 +2485,13 @@ dependencies = [
 name = "st-frac"
 version = "0.1.1"
 dependencies = [
+ "bytemuck",
+ "libm",
  "ndarray",
+ "num-complex",
+ "pollster",
  "thiserror 1.0.69",
+ "wgpu",
 ]
 
 [[package]]
