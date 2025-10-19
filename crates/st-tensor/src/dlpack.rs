@@ -104,7 +104,7 @@ pub unsafe fn call_managed_deleter(ptr: *mut DLManagedTensor) {
 }
 
 /// Restores the managed tensor state allocated during export.
-pub unsafe fn drop_exported_state(ptr: *mut DLManagedTensor) {
+pub unsafe extern "C" fn drop_exported_state(ptr: *mut DLManagedTensor) {
     if ptr.is_null() {
         return;
     }

@@ -382,7 +382,7 @@ impl Tensor {
                 data.push(f(r, c));
             }
         }
-        Ok(Self { data, rows, cols })
+        Self::from_vec(rows, cols, data)
     }
 
     /// Returns the `(rows, cols)` pair of the tensor.
@@ -430,154 +430,6 @@ impl Tensor {
             },
             shape: state.shape.as_mut_ptr(),
             strides: state.strides.as_mut_ptr(),
-            byte_offset: 0,
-        };
-
-        let manager_ctx = Box::into_raw(state) as *mut ManagedTensorState as *mut c_void;
-        let managed = Box::new(DLManagedTensor {
-            dl_tensor,
-            manager_ctx,
-            deleter: Some(drop_exported_state),
-        });
-
-        Ok(Box::into_raw(managed))
-    }
-
-    /// Construct a tensor from a managed DLPack tensor. The managed tensor is consumed.
-    ///
-    /// # Safety
-    /// The caller must ensure `managed` points to a valid `DLManagedTensor`.
-    pub unsafe fn from_dlpack(managed: *mut DLManagedTensor) -> PureResult<Self> {
-        if managed.is_null() {
-            return Err(TensorError::EmptyInput("dlpack tensor"));
-        }
-
-        let tensor = &(*managed).dl_tensor;
-        if tensor.ndim != 2 {
-            return Err(TensorError::DlpackError {
-                message: format!("expected 2 dimensions, got {}", tensor.ndim),
-            });
-        }
-
-        if tensor.device.device_type != DLDeviceType::Cpu as i32 {
-            return Err(TensorError::DlpackError {
-                message: format!(
-                    "unsupported device type {}; only CPU tensors are accepted",
-                    tensor.device.device_type
-                ),
-            });
-        }
-
-        if tensor.dtype.code != DLDataTypeCode::Float as u8
-            || tensor.dtype.bits != 32
-            || tensor.dtype.lanes != 1
-        {
-            return Err(TensorError::DlpackError {
-                message: "only f32 tensors are supported".to_string(),
-            });
-        }
-
-        let ndim = usize::try_from(tensor.ndim).map_err(|_| TensorError::DlpackError {
-            message: format!("invalid ndim {}", tensor.ndim),
-        })?;
-
-        let shape = slice::from_raw_parts(tensor.shape, ndim);
-        let (rows_i64, cols_i64) = match *shape {
-            [rows, cols] => (rows, cols),
-            _ => {
-                return Err(TensorError::DlpackError {
-                    message: "shape must contain exactly two dimensions".to_string(),
-                })
-            }
-        };
-
-        if rows_i64 <= 0 || cols_i64 <= 0 {
-            return Err(TensorError::InvalidDimensions {
-                rows: rows_i64.max(0) as usize,
-                cols: cols_i64.max(0) as usize,
-            });
-        }
-
-        let rows = usize::try_from(rows_i64).map_err(|_| TensorError::DlpackError {
-            message: format!("rows {rows_i64} exceed usize range"),
-        })?;
-        let cols = usize::try_from(cols_i64).map_err(|_| TensorError::DlpackError {
-            message: format!("cols {cols_i64} exceed usize range"),
-        })?;
-
-        let expected_len = rows
-            .checked_mul(cols)
-            .ok_or_else(|| TensorError::DlpackError {
-                message: "tensor volume overflow".to_string(),
-            })?;
-
-        if tensor.byte_offset % mem::size_of::<f32>() != 0 {
-            return Err(TensorError::DlpackError {
-                message: format!(
-                    "byte offset {} is not aligned to f32 elements",
-                    tensor.byte_offset
-                ),
-            });
-        }
-
-        if tensor.data.is_null() {
-            return Err(TensorError::EmptyInput("dlpack tensor data"));
-        }
-
-        if !tensor.strides.is_null() {
-            let strides = slice::from_raw_parts(tensor.strides, ndim);
-            let expected_row = i64::try_from(cols).map_err(|_| TensorError::DlpackError {
-                message: format!("cols {cols} exceed i64 range"),
-            })?;
-            if strides != [expected_row, 1] {
-                return Err(TensorError::DlpackError {
-                    message: format!(
-                        "only contiguous row-major tensors are supported; received strides {:?}",
-                        strides
-                    ),
-                });
-            }
-        }
-
-        let offset = tensor.byte_offset / mem::size_of::<f32>();
-        let base_ptr = tensor.data as *mut f32;
-        let data_ptr = base_ptr.add(offset);
-        let slice = slice::from_raw_parts(data_ptr, expected_len);
-        let data = slice.to_vec();
-
-        call_managed_deleter(managed);
-
-        Tensor::from_vec(rows, cols, data)
-    }
-
-    /// Export the tensor as a managed DLPack tensor.
-    pub fn to_dlpack(&self) -> PureResult<*mut DLManagedTensor> {
-        let rows_i64 = i64::try_from(self.rows).map_err(|_| TensorError::DlpackError {
-            message: "tensor rows exceed i64 range".to_string(),
-        })?;
-        let cols_i64 = i64::try_from(self.cols).map_err(|_| TensorError::DlpackError {
-            message: "tensor cols exceed i64 range".to_string(),
-        })?;
-
-        let data = self.data.clone().into_boxed_slice();
-        let shape = vec![rows_i64, cols_i64].into_boxed_slice();
-        let strides = vec![cols_i64, 1].into_boxed_slice();
-        let state = Box::new(ManagedTensorState::new(data, shape, strides));
-
-        let dl_tensor = DLTensor {
-            data: state.data.as_ptr() as *mut c_void,
-            device: DLDevice {
-                device_type: DLDeviceType::Cpu as i32,
-                device_id: 0,
-            },
-            ndim: 2,
-            dtype: DLDataType {
-                code: DLDataTypeCode::Float as u8,
-                bits: 32,
-                lanes: 1,
-            },
-            shape: state.shape.as_ptr() as *mut i64,
-            strides: state.strides.as_ptr() as *mut i64,
             byte_offset: 0,
         };
 
@@ -807,7 +659,7 @@ impl Tensor {
     /// Returns a new tensor where every element is scaled by `value`.
     pub fn scale(&self, value: f32) -> PureResult<Tensor> {
         let mut data = Vec::with_capacity(self.data.len());
-        for a in &self.data {
+        for &a in self.data.iter() {
             data.push(a * value);
         }
         Tensor::from_vec(self.rows, self.cols, data)
