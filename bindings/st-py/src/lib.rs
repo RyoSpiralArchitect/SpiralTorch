@@ -5,6 +5,7 @@ use pyo3::types::PyModule;
 
 mod tensor;
 mod compat;
+mod nn;
 
 // =======================
 // extras（安全・自己完結）
@@ -186,9 +187,7 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     compat::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
-    let nn = PyModule::new_bound(py, "nn")?;
-    nn.add("__doc__", "SpiralTorch neural network primitives")?;
-    m.add_submodule(&nn)?;
+    nn::register(py, m)?;
 
     let frac = PyModule::new_bound(py, "frac")?;
     frac_bindings::register(py, &frac)?; // 実APIを公開
