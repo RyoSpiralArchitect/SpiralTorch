@@ -68,7 +68,9 @@ Quantum reality, as we imagine it inside SpiralTorch, is not a single experiment
 - Bake `QuantumRealityStudio::register_sink` hooks into lab templates so every run can broadcast both concept vectors and overlays to the wider SpiralTorch mesh.
 - Publish a Z-space bridge by default: the new `ZSpaceSink` turns captured
   pulses into Mellin-line projections that `st-frac::zspace` rigs can ingest
-  without extra glue.
+  without extra glue. The sink now exports ready-made
+  `st_logic::quantum_reality::ZSpace` signatures so theory teams can plug
+  them into collapse analyses immediately after a field run.
 - Extend the QR salons with "outside playground" residencies where visiting teams bring their own sinks, stress-test the adapters, and contribute patches upstream.
 
 ---

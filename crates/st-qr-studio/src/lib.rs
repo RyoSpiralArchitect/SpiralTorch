@@ -12,6 +12,7 @@ use st_frac::zspace::{
     evaluate_weighted_series, mellin_log_lattice_prefactor, prepare_weighted_series,
     trapezoidal_weights,
 };
+use st_logic::quantum_reality::ZSpace as LogicZSpace;
 use st_nn::{ConceptHint, MaxwellDesireBridge, NarrativeHint};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -256,6 +257,35 @@ pub struct ZSpaceProjection {
     pub evaluations: Vec<ZSpaceEvaluation>,
 }
 
+impl ZSpaceProjection {
+    fn signature_components(&self) -> Vec<f64> {
+        let mut signature = Vec::with_capacity(self.evaluations.len() * 6);
+        for eval in &self.evaluations {
+            signature.push(eval.s.0 as f64);
+            signature.push(eval.s.1 as f64);
+            signature.push(eval.z.0 as f64);
+            signature.push(eval.z.1 as f64);
+            signature.push(eval.value.0 as f64);
+            signature.push(eval.value.1 as f64);
+        }
+        signature
+    }
+}
+
+impl From<&ZSpaceProjection> for LogicZSpace {
+    fn from(projection: &ZSpaceProjection) -> Self {
+        LogicZSpace {
+            signature: projection.signature_components(),
+        }
+    }
+}
+
+impl From<ZSpaceProjection> for LogicZSpace {
+    fn from(projection: ZSpaceProjection) -> Self {
+        LogicZSpace::from(&projection)
+    }
+}
+
 #[derive(Clone)]
 pub struct ZSpaceSink {
     name: String,
@@ -308,6 +338,18 @@ impl ZSpaceSink {
     pub fn take_projections(&self) -> Vec<ZSpaceProjection> {
         let mut guard = self.inner.lock().expect("ZSpaceSink mutex poisoned");
         std::mem::take(&mut guard.projections)
+    }
+
+    pub fn take_logic_signatures(&self) -> Vec<(String, LogicZSpace)> {
+        self
+            .take_projections()
+            .into_iter()
+            .map(|projection| {
+                let channel = projection.channel.clone();
+                let signature = LogicZSpace::from(projection);
+                (channel, signature)
+            })
+            .collect()
     }
 
     fn failure(&self, reason: impl Into<String>) -> StudioSinkError {
@@ -731,5 +773,33 @@ mod tests {
             .evaluations
             .iter()
             .any(|eval| eval.value.0.abs() > 0.0 || eval.value.1.abs() > 0.0));
+    }
+
+    #[test]
+    fn zspace_signatures_flatten_evaluations() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(0, 1.0)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let sink = ZSpaceSink::vertical_line("zspace", -1.0, 0.25, 0.5, &[-2.0, 0.0, 2.0, 3.0]);
+        let mirror = sink.clone();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio.register_sink(sink);
+
+        studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest pulse");
+
+        studio.flush_sinks().expect("flush zspace sink");
+
+        let signatures = mirror.take_logic_signatures();
+        assert_eq!(signatures.len(), 1);
+        let (channel, signature) = &signatures[0];
+        assert_eq!(channel, "alpha");
+        assert_eq!(signature.signature.len(), 24);
+        assert!(signature.signature.iter().any(|value| value.abs() > 0.0));
     }
 }

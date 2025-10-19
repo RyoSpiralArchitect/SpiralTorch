@@ -11,6 +11,11 @@ authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 name = "spiraltorch_native"
 crate-type = ["cdylib"]
 
+[package.metadata.pyo3]
+extension-module = true
+abi3 = true
+abi3-py38 = true
+
 [features]
 default = ["extension-module", "psi", "psychoid", "collapse"]
 extension-module = ["pyo3/extension-module"]

@@ -44,7 +44,9 @@ studio tooling introduced in this iteration.
 - For partners working inside Z-space tooling, attach a
   `ZSpaceSink::vertical_line` and collect its projections after
   `flush_sinks()`—the Mellin-line samples travel cleanly into the
-  `st-frac::zspace` orchestrations.
+  `st-frac::zspace` orchestrations. When the field team needs SpiralTorch
+  logic signatures, use `ZSpaceSink::take_logic_signatures()` to hand the
+  projections straight into `st_logic::quantum_reality::ZSpace` analyses.
 
 ## Ritual Snippets
 ```
