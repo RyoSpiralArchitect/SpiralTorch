@@ -25,8 +25,6 @@ pub enum KvErr {
     Serde(String),
 }
 
-pub type KvResult<T> = Result<T, KvErr>;
-
 #[cfg(feature = "redis")]
 impl From<redis::RedisError> for KvErr {
     fn from(err: redis::RedisError) -> Self {
