@@ -587,6 +587,7 @@ mod tests {
         assert_abs_diff_eq!(params.gamma_bar, 0.625, epsilon = 1e-12);
         assert_abs_diff_eq!(params.omega_bar, 1.5, epsilon = 1e-12);
         assert_abs_diff_eq!(params.audit_cluster, 0.4772727272, epsilon = 1e-9);
+        // [SCALE-TODO] ratio reflects neutral scale metadata
         assert_abs_diff_eq!(params.container_cluster, 0.1923076923, epsilon = 1e-9);
     }
 
