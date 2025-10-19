@@ -1,7 +1,7 @@
-//! Minimal PyO3 bindings scaffold + extras
-//! - No `mod xxx;` declarations (E0583/E0428回避)
-//! - 既存の実装に段階的に繋げられるよう、まずは空モジュールで公開
-//! - "extras" はここで登録（seed/golden/fibonacci/n-bonacci/chunk/plan-batch）
+//! Minimal one-binary PyO3 module: `import spiraltorch`
+//! - ルート1つだけ（#[pymodule] fn spiraltorch）
+//! - サブモジュールは動的生成（nn/frac/... は空でも import 可）
+//! - extras はトップレベルに直登録（UX良し）
 
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
@@ -15,12 +15,9 @@ mod extras {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    // ---- constants (局所定義。将来コア側の定義に寄せるならここを差し替え) ----
-    // sqrt は const で使えないため、定数値を埋め込みます。
     pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_894_8_f64;
     pub const GOLDEN_ANGLE: f64 = 2.0 * std::f64::consts::PI / (GOLDEN_RATIO * GOLDEN_RATIO);
 
-    // グローバルシード（明示指定がなければこれを使う）
     static GLOBAL_SEED: AtomicU64 = AtomicU64::new(0);
 
     #[pyfunction]
@@ -29,29 +26,18 @@ mod extras {
     }
 
     #[pyfunction]
-    pub fn golden_angle() -> f64 {
-        GOLDEN_ANGLE
-    }
+    pub fn golden_angle() -> f64 { GOLDEN_ANGLE }
 
     #[pyfunction]
-    pub fn golden_ratio() -> f64 {
-        GOLDEN_RATIO
-    }
+    pub fn golden_ratio() -> f64 { GOLDEN_RATIO }
 
-    // ---- orbit utilities ----
     #[derive(Clone, Copy, Debug)]
-    struct OrbitLength {
-        pub actual: usize,
-        #[allow(dead_code)]
-        pub ideal: usize,
-    }
+    struct OrbitLength { pub actual: usize, #[allow(dead_code)] pub ideal: usize }
 
-    // フィボナッチ系列のパッキング（F(1)=1, F(2)=1…）
     fn fibonacci_orbits(total_steps: usize) -> Vec<OrbitLength> {
         nacci_orbits(2, &[1, 1], total_steps)
     }
 
-    // n-bonacci の理想長を生成しつつ、総ステップに収まるように実長(actual)を切り出す
     fn nacci_orbits(order: usize, seeds: &[usize], total_steps: usize) -> Vec<OrbitLength> {
         use std::collections::VecDeque;
         assert!(order > 0, "order must be >= 1");
@@ -68,14 +54,11 @@ mod extras {
         let mut out = Vec::new();
 
         while remaining > 0 {
-            // 現在の理想長は window の合計
-            let ideal: usize = window.iter().sum();
-            let ideal = ideal.max(1); // 0 を避ける
+            let ideal: usize = window.iter().sum::<usize>().max(1);
             let take = ideal.min(remaining);
             out.push(OrbitLength { actual: take, ideal });
             remaining -= take;
 
-            // 次の項 = 直近 order 個の合計
             window.pop_front();
             window.push_back(ideal);
         }
@@ -84,45 +67,28 @@ mod extras {
 
     #[pyfunction]
     pub fn fibonacci_pacing(total_steps: usize) -> Vec<usize> {
-        fibonacci_orbits(total_steps)
-            .into_iter()
-            .map(|o| o.actual)
-            .collect()
+        fibonacci_orbits(total_steps).into_iter().map(|o| o.actual).collect()
     }
 
     #[pyfunction]
     pub fn pack_nacci_chunks(order: usize, total_steps: usize) -> Vec<usize> {
-        // デフォルトシード: [1, 1, ..., 2]（order-1 個の 1 と末尾 2）
         let mut seeds = vec![1usize; order.saturating_sub(1)];
-        if order > 0 {
-            seeds.push(2);
-        }
-        nacci_orbits(order, &seeds, total_steps)
-            .into_iter()
-            .map(|o| o.actual)
-            .collect()
+        if order > 0 { seeds.push(2); }
+        nacci_orbits(order, &seeds, total_steps).into_iter().map(|o| o.actual).collect()
     }
 
     #[pyfunction]
     pub fn pack_tribonacci_chunks(total_steps: usize) -> Vec<usize> {
         let seeds = [1usize, 1, 2];
-        nacci_orbits(3, &seeds, total_steps)
-            .into_iter()
-            .map(|o| o.actual)
-            .collect()
+        nacci_orbits(3, &seeds, total_steps).into_iter().map(|o| o.actual).collect()
     }
 
     #[pyfunction]
     pub fn pack_tetranacci_chunks(total_steps: usize) -> Vec<usize> {
         let seeds = [1usize, 1, 2, 4];
-        nacci_orbits(4, &seeds, total_steps)
-            .into_iter()
-            .map(|o| o.actual)
-            .collect()
+        nacci_orbits(4, &seeds, total_steps).into_iter().map(|o| o.actual).collect()
     }
 
-    // 既存の generate_plan を n 回呼ぶ軽量バッチ API。
-    // 既存 generate_plan に seed 引数が無い場合でも、下の call_generate_plan を編集すればOK。
     #[pyfunction]
     #[pyo3(signature = (n, total_steps, base_radius, radial_growth, base_height, meso_gain, micro_gain, seed=None))]
     pub fn generate_plan_batch_ex(
@@ -146,7 +112,6 @@ mod extras {
             _micro_gain: f64,
             _seed: Option<u64>,
         ) -> PyResult<PyObject> {
-            // TODO: ここを既存の Rust/Python 実装に接続してください。
             Err(pyo3::exceptions::PyNotImplementedError::new_err(
                 "wire generate_plan_batch_ex() to your existing generate_plan()",
             ))
@@ -157,22 +122,14 @@ mod extras {
         for i in 0..n {
             let s = base_seed.wrapping_add(i as u64);
             let plan_obj = call_generate_plan(
-                py,
-                total_steps,
-                base_radius,
-                radial_growth,
-                base_height,
-                meso_gain,
-                micro_gain,
-                Some(s),
+                py, total_steps, base_radius, radial_growth, base_height, meso_gain, micro_gain, Some(s)
             )?;
             out.push(plan_obj);
         }
         Ok(out)
     }
 
-    // モジュール登録ヘルパ
-    pub fn register(py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
+    pub fn register(py: Python<'_>, m: &Bound<pyo3::types::PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(set_global_seed, m)?)?;
         m.add_function(wrap_pyfunction!(golden_angle, m)?)?;
         m.add_function(wrap_pyfunction!(golden_ratio, m)?)?;
@@ -181,44 +138,64 @@ mod extras {
         m.add_function(wrap_pyfunction!(pack_tribonacci_chunks, m)?)?;
         m.add_function(wrap_pyfunction!(pack_tetranacci_chunks, m)?)?;
         m.add_function(wrap_pyfunction!(generate_plan_batch_ex, m)?)?;
-
         m.add("__doc__", "SpiralTorch extras: seeds/golden/n-bonacci/chunking/plan-batch")?;
         let _ = py;
         Ok(())
     }
 }
 
+//
 // =======================
-// PyO3 modules (空の器 + extras)
+// ルート拡張モジュール（唯一の #[pymodule]）
 // =======================
-
-// ルート拡張モジュール名は maturin の name = "spiraltorch._native" に合わせて "_native"
+//
 #[pymodule]
-fn _native(py: Python, m: &Bound<PyModule>) -> PyResult<()> {
+fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+    // 1) トップレベル：extras を直登録（from spiraltorch import golden_ratio など）
     extras::register(py, m)?;
+
+    // 2) サブモジュールを空でも作っておく（将来ここで各 crate の register を呼ぶ）
+    //    これで `import spiraltorch.nn` などが今から可能になる。
+    let nn = PyModule::new(py, "nn")?;
+    // st_nn::py::register(py, &nn)?;  // ← 実装が出来次第ここで配線
+    nn.add("__doc__", "SpiralTorch neural network primitives")?;
+    m.add_submodule(&nn)?;
+
+    let frac = PyModule::new(py, "frac")?;
+    frac.add("__doc__", "Fractal & fractional tools")?;
+    m.add_submodule(&frac)?;
+
+    let dataset = PyModule::new(py, "dataset")?;
+    dataset.add("__doc__", "Datasets & loaders")?;
+    m.add_submodule(&dataset)?;
+
+    let linalg = PyModule::new(py, "linalg")?;
+    linalg.add("__doc__", "Linear algebra utilities")?;
+    m.add_submodule(&linalg)?;
+
+    let rl = PyModule::new(py, "rl")?;
+    rl.add("__doc__", "Reinforcement learning components")?;
+    m.add_submodule(&rl)?;
+
+    let rec = PyModule::new(py, "rec")?;
+    rec.add("__doc__", "Reconstruction / signal processing")?;
+    m.add_submodule(&rec)?;
+
+    let telemetry = PyModule::new(py, "telemetry")?;
+    telemetry.add("__doc__", "Telemetry / dashboards / metrics")?;
+    m.add_submodule(&telemetry)?;
+
+    let ecosystem = PyModule::new(py, "ecosystem")?;
+    ecosystem.add("__doc__", "Integrations & ecosystem glue")?;
+    m.add_submodule(&ecosystem)?;
+
+    // 3) 見栄え
+    m.add("__all__", vec![
+        "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
+        // ルート直下の関数/クラスを列挙したければここに追加
+        "golden_ratio","golden_angle","set_global_seed",
+        "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
+        "generate_plan_batch_ex",
+    ])?;
     Ok(())
 }
-
-#[pymodule]
-fn nn(_py: Python, _m: &Bound<PyModule>) -> PyResult<()> { Ok(()) }
-
-#[pymodule]
-fn frac(_py: Python, _m: &Bound<PyModule>) -> PyResult<()> { Ok(()) }
-
-#[pymodule]
-fn dataset(_py: Python, _m: &Bound<PyModule>) -> PyResult<()> { Ok(()) }
-
-#[pymodule]
-fn linalg(_py: Python, _m: &Bound<PyModule>) -> PyResult<()> { Ok(()) }
-
-#[pymodule]
-fn rl(_py: Python, _m: &Bound<PyModule>) -> PyResult<()> { Ok(()) }
-
-#[pymodule]
-fn rec(_py: Python, _m: &Bound<PyModule>) -> PyResult<()> { Ok(()) }
-
-#[pymodule]
-fn telemetry(_py: Python, _m: &Bound<PyModule>) -> PyResult<()> { Ok(()) }
-
-#[pymodule]
-fn ecosystem(_py: Python, _m: &Bound<PyModule>) -> PyResult<()> { Ok(()) }
