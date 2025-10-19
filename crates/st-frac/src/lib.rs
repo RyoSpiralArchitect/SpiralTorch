@@ -107,6 +107,11 @@ fn conv1d_gl_line(x: &[f32], y: &mut [f32], coeff: &[f32], pad: Pad, scale: f32)
 /// Generate Grünwald–Letnikov coefficients until their magnitude drops below `tol`
 /// or until `max_len` coefficients have been produced.
 pub fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
+    gl_coeffs_adaptive_impl(alpha, tol, max_len)
+}
+
+#[inline]
+fn gl_coeffs_adaptive_impl(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
     assert!(max_len > 0);
     assert!(tol > 0.0);
 
@@ -134,15 +139,36 @@ pub fn fracdiff_gl_1d(
     pad: Pad,
     scale: Option<f32>,
 ) -> Result<Vec<f32>, FracErr> {
+    fracdiff_gl_1d_impl(x, alpha, kernel_len, pad, scale)
+}
+
+#[inline]
+fn fracdiff_gl_1d_impl(
+    x: &[f32],
+    alpha: f32,
+    kernel_len: usize,
+    pad: Pad,
+    scale: Option<f32>,
+) -> Result<Vec<f32>, FracErr> {
     if kernel_len == 0 {
         return Err(FracErr::Kernel);
     }
     let coeff = gl_coeffs(alpha, kernel_len);
-    Ok(fracdiff_gl_1d_with_coeffs(x, &coeff, pad, scale))
+    Ok(fracdiff_gl_1d_with_coeffs_impl(x, &coeff, pad, scale))
 }
 
 /// Apply a fractional difference along a 1-D slice using precomputed coefficients.
 pub fn fracdiff_gl_1d_with_coeffs(
+    x: &[f32],
+    coeff: &[f32],
+    pad: Pad,
+    scale: Option<f32>,
+) -> Vec<f32> {
+    fracdiff_gl_1d_with_coeffs_impl(x, coeff, pad, scale)
+}
+
+#[inline]
+fn fracdiff_gl_1d_with_coeffs_impl(
     x: &[f32],
     coeff: &[f32],
     pad: Pad,
