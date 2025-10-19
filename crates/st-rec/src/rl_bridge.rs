@@ -5,6 +5,8 @@
 
 use std::fmt;
 
+use rand::distributions::{Distribution, WeightedIndex};
+use rand::thread_rng;
 use st_rl::{
     EpisodeReport, GeometryFeedback, GeometryFeedbackSignal, PolicyTelemetry, SpiralPolicyGradient,
     SpiralRlError,
@@ -22,6 +24,10 @@ pub enum RecRlError {
     Reinforcement(SpiralRlError),
     /// Candidate list must match the configured action space.
     CandidateMismatch { expected: usize, provided: usize },
+    /// Policy probabilities could not be sampled into an action.
+    InvalidProbabilityDistribution { reason: String },
+    /// Policy selected an action outside the available candidate list.
+    ActionOutOfBounds { actions: usize, selected: usize },
 }
 
 impl fmt::Display for RecRlError {
@@ -33,6 +39,13 @@ impl fmt::Display for RecRlError {
                 f,
                 "candidate list length {provided} does not match policy action space {expected}",
             ),
+            RecRlError::InvalidProbabilityDistribution { reason } => {
+                write!(f, "invalid policy probability distribution: {reason}")
+            }
+            RecRlError::ActionOutOfBounds { actions, selected } => write!(
+                f,
+                "selected action index {selected} is outside candidate list of length {actions}",
+            ),
         }
     }
 }
@@ -43,6 +56,8 @@ impl std::error::Error for RecRlError {
             RecRlError::Recommendation(err) => Some(err),
             RecRlError::Reinforcement(err) => Some(err),
             RecRlError::CandidateMismatch { .. } => None,
+            RecRlError::InvalidProbabilityDistribution { .. } => None,
+            RecRlError::ActionOutOfBounds { .. } => None,
         }
     }
 }
@@ -56,6 +71,14 @@ impl From<SpiralRecError> for RecRlError {
 impl From<SpiralRlError> for RecRlError {
     fn from(value: SpiralRlError) -> Self {
         RecRlError::Reinforcement(value)
+    }
+}
+
+impl From<rand::distributions::weighted::WeightedError> for RecRlError {
+    fn from(value: rand::distributions::weighted::WeightedError) -> Self {
+        RecRlError::InvalidProbabilityDistribution {
+            reason: value.to_string(),
+        }
     }
 }
 
@@ -164,19 +187,9 @@ impl RecBanditController {
         user: usize,
         candidates: &[usize],
     ) -> RecRlResult<RecBanditDecision> {
-        if candidates.len() != self.action_dim {
-            return Err(RecRlError::CandidateMismatch {
-                expected: self.action_dim,
-                provided: candidates.len(),
-            });
-        }
-        let state = recommender.user_embedding(user)?;
-        let mut recs = Vec::with_capacity(candidates.len());
-        for &item in candidates {
-            let score = recommender.predict(user, item)?;
-            recs.push(Recommendation { item, score });
-        }
-        self.make_decision(user, state, recs)
+        let state = self.load_user_state(recommender, user)?;
+        let recs = self.score_candidates(recommender, user, candidates)?;
+        self.make_decision_with(user, state, recs, |probs| Ok(Self::greedy_action(probs)))
     }
 
     /// Pulls the recommender's top-k slate and routes it through the policy.
@@ -193,17 +206,52 @@ impl RecBanditController {
                 provided: k,
             });
         }
-        let state = recommender.user_embedding(user)?;
+        let state = self.load_user_state(recommender, user)?;
         let recs = recommender.recommend_top_k(user, k, exclude)?;
-        self.make_decision(user, state, recs)
+        self.make_decision_with(user, state, recs, |probs| Ok(Self::greedy_action(probs)))
     }
 
-    fn make_decision(
+    /// Builds the recommendation state and samples an item from the policy distribution.
+    pub fn sample_recommendation(
+        &self,
+        recommender: &SpiralRecommender,
+        user: usize,
+        candidates: &[usize],
+    ) -> RecRlResult<RecBanditDecision> {
+        let state = self.load_user_state(recommender, user)?;
+        let recs = self.score_candidates(recommender, user, candidates)?;
+        self.make_decision_with(user, state, recs, |probs| Self::sample_action(probs))
+    }
+
+    /// Samples a top-k slate from the recommender and draws an action from the policy.
+    pub fn sample_top_k(
+        &self,
+        recommender: &SpiralRecommender,
+        user: usize,
+        k: usize,
+        exclude: Option<&[usize]>,
+    ) -> RecRlResult<RecBanditDecision> {
+        if k != self.action_dim {
+            return Err(RecRlError::CandidateMismatch {
+                expected: self.action_dim,
+                provided: k,
+            });
+        }
+        let state = self.load_user_state(recommender, user)?;
+        let recs = recommender.recommend_top_k(user, k, exclude)?;
+        self.make_decision_with(user, state, recs, |probs| Self::sample_action(probs))
+    }
+
+    fn make_decision_with<F>(
         &self,
         user: usize,
         state: Tensor,
         candidates: Vec<Recommendation>,
-    ) -> RecRlResult<RecBanditDecision> {
+        select_action: F,
+    ) -> RecRlResult<RecBanditDecision>
+    where
+        F: FnOnce(&[f32]) -> RecRlResult<usize>,
+    {
         if candidates.len() != self.action_dim {
             return Err(RecRlError::CandidateMismatch {
                 expected: self.action_dim,
@@ -218,11 +266,13 @@ impl RecBanditController {
                 provided: probabilities.len(),
             });
         }
-        let (action_index, _) = probabilities
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.total_cmp(b))
-            .unwrap();
+        let action_index = select_action(&probabilities)?;
+        if action_index >= candidates.len() {
+            return Err(RecRlError::ActionOutOfBounds {
+                actions: candidates.len(),
+                selected: action_index,
+            });
+        }
         let chosen_item = candidates[action_index].item;
 
         Ok(RecBanditDecision {
@@ -233,6 +283,45 @@ impl RecBanditController {
             state,
             probabilities,
         })
+    }
+
+    fn load_user_state(&self, recommender: &SpiralRecommender, user: usize) -> RecRlResult<Tensor> {
+        Ok(recommender.user_embedding(user)?)
+    }
+
+    fn score_candidates(
+        &self,
+        recommender: &SpiralRecommender,
+        user: usize,
+        candidates: &[usize],
+    ) -> RecRlResult<Vec<Recommendation>> {
+        if candidates.len() != self.action_dim {
+            return Err(RecRlError::CandidateMismatch {
+                expected: self.action_dim,
+                provided: candidates.len(),
+            });
+        }
+        let mut recs = Vec::with_capacity(candidates.len());
+        for &item in candidates {
+            let score = recommender.predict(user, item)?;
+            recs.push(Recommendation { item, score });
+        }
+        Ok(recs)
+    }
+
+    fn greedy_action(probabilities: &[f32]) -> usize {
+        probabilities
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(index, _)| index)
+            .unwrap_or(0)
+    }
+
+    fn sample_action(probabilities: &[f32]) -> RecRlResult<usize> {
+        let distribution = WeightedIndex::new(probabilities)?;
+        let mut rng = thread_rng();
+        Ok(distribution.sample(&mut rng))
     }
 
     /// Records the observed reward for the provided transition.
@@ -328,6 +417,18 @@ mod tests {
     }
 
     #[test]
+    fn sampled_candidate_selection_respects_action_space() {
+        let rec = build_basic_recommender();
+        let controller = RecBanditController::new(&rec, 3, 0.01, 0.9).unwrap();
+        let decision = controller
+            .sample_recommendation(&rec, 0, &[0, 1, 2])
+            .expect("sampled decision");
+        assert_eq!(decision.candidates.len(), 3);
+        assert_eq!(decision.probabilities.len(), 3);
+        assert!(decision.action_index < 3);
+    }
+
+    #[test]
     fn top_k_selection_routes_through_policy() {
         let rec = build_basic_recommender();
         let mut controller = RecBanditController::new(&rec, 3, 0.01, 0.9).unwrap();
@@ -349,6 +450,33 @@ mod tests {
         let err = controller
             .select_top_k(&rec, 0, 3, None)
             .expect_err("mismatched top-k should error");
+        match err {
+            RecRlError::CandidateMismatch { expected, provided } => {
+                assert_eq!(expected, 4);
+                assert_eq!(provided, 3);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sampled_top_k_routes_through_policy() {
+        let rec = build_basic_recommender();
+        let controller = RecBanditController::new(&rec, 3, 0.01, 0.9).unwrap();
+        let decision = controller
+            .sample_top_k(&rec, 0, 3, None)
+            .expect("sampled top-k decision");
+        assert_eq!(decision.candidates.len(), 3);
+        assert!(decision.action_index < 3);
+    }
+
+    #[test]
+    fn sampled_top_k_mismatch_surfaces_error() {
+        let rec = build_basic_recommender();
+        let controller = RecBanditController::new(&rec, 4, 0.01, 0.9).unwrap();
+        let err = controller
+            .sample_top_k(&rec, 0, 3, None)
+            .expect_err("mismatched sample top-k should error");
         match err {
             RecRlError::CandidateMismatch { expected, provided } => {
                 assert_eq!(expected, 4);

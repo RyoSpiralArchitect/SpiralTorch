@@ -38,7 +38,7 @@ use crate::theory::zpulse::ZScale;
 
 use super::chrono::ChronoLoopSignal;
 #[cfg(feature = "psi")]
-use super::psi::{PsiComponent, PsiEvent, PsiReading};
+use super::psi::{PsiComponent, PsiEvent, PsiReading, PsiSpiralAdvisory, PsiSpiralTuning};
 #[cfg(feature = "psychoid")]
 use super::psychoid::PsychoidReading;
 #[cfg(feature = "collapse")]
@@ -51,6 +51,13 @@ static LAST_PSI: Lazy<RwLock<Option<PsiReading>>> = Lazy::new(|| RwLock::new(Non
 
 #[cfg(feature = "psi")]
 static LAST_PSI_EVENTS: Lazy<RwLock<Vec<PsiEvent>>> = Lazy::new(|| RwLock::new(Vec::new()));
+
+#[cfg(feature = "psi")]
+static LAST_PSI_SPIRAL: Lazy<RwLock<Option<PsiSpiralAdvisory>>> = Lazy::new(|| RwLock::new(None));
+
+#[cfg(feature = "psi")]
+static LAST_PSI_SPIRAL_TUNING: Lazy<RwLock<Option<PsiSpiralTuning>>> =
+    Lazy::new(|| RwLock::new(None));
 
 static CONFIG_DIFF_EVENTS: OnceLock<RwLock<Vec<ConfigDiffEvent>>> = OnceLock::new();
 
@@ -114,6 +121,36 @@ pub fn get_last_psi_events() -> Vec<PsiEvent> {
         .read()
         .map(|guard| guard.clone())
         .unwrap_or_default()
+}
+
+#[cfg(feature = "psi")]
+pub fn set_last_psi_spiral(advisory: &PsiSpiralAdvisory) {
+    if let Ok(mut guard) = LAST_PSI_SPIRAL.write() {
+        *guard = Some(advisory.clone());
+    }
+}
+
+#[cfg(feature = "psi")]
+pub fn get_last_psi_spiral() -> Option<PsiSpiralAdvisory> {
+    LAST_PSI_SPIRAL
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
+#[cfg(feature = "psi")]
+pub fn set_last_psi_spiral_tuning(tuning: &PsiSpiralTuning) {
+    if let Ok(mut guard) = LAST_PSI_SPIRAL_TUNING.write() {
+        *guard = Some(tuning.clone());
+    }
+}
+
+#[cfg(feature = "psi")]
+pub fn get_last_psi_spiral_tuning() -> Option<PsiSpiralTuning> {
+    LAST_PSI_SPIRAL_TUNING
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
 }
 
 /// Records the most recent configuration diff events produced when loading

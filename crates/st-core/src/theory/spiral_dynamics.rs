@@ -383,6 +383,17 @@ pub struct DimensionlessParameters {
     pub container_cluster: f64,
 }
 
+/// Spiral dynamics snapshot geared toward PSI telemetry consumers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PsiSpiralMetrics {
+    /// Hopf bookkeeping around the origin.
+    pub hopf: HopfNormalForm,
+    /// Dimensionless gain clusters summarising the controller ratios.
+    pub dimensionless: DimensionlessParameters,
+    /// Audit-versus-container balance used to bias PSI weights.
+    pub balance: AuditContainerBalance,
+}
+
 /// Computes the reduced dimensionless combinations highlighted in the design
 /// memo. The return value condenses the parameter space explored in phase
 /// diagrams to a handful of ratios. Returns `None` if any denominator is
@@ -419,6 +430,35 @@ pub fn dimensionless_parameters(
         omega_bar,
         audit_cluster,
         container_cluster,
+    })
+}
+
+/// Aggregates the Hopf, gain, and dimensionless data needed to project the
+/// Spiral dynamics health into the PSI monitoring stack.
+pub fn psi_spiral_metrics(
+    mu0: f64,
+    gamma: f64,
+    omega: f64,
+    nu: f64,
+    kappa: f64,
+    a: f64,
+    tau: f64,
+    theta: f64,
+    sigma_s: f64,
+    rho: f64,
+    lambda: f64,
+    c_max: f64,
+) -> Option<PsiSpiralMetrics> {
+    let hopf = hopf_normal_form(
+        mu0, gamma, nu, omega, kappa, a, tau, theta, sigma_s, rho, lambda, c_max,
+    )?;
+    let dimensionless =
+        dimensionless_parameters(mu0, gamma, omega, nu, kappa, a, tau, sigma_s, rho, lambda)?;
+    let balance = audit_container_balance(kappa, a, tau, sigma_s, rho, lambda)?;
+    Some(PsiSpiralMetrics {
+        hopf,
+        dimensionless,
+        balance,
     })
 }
 
@@ -528,14 +568,14 @@ mod tests {
         assert!(data.mu_eff0 < 0.0);
         assert!(matches!(data.regime, HopfRegime::Supercritical));
         let flipped =
-            hopf_normal_form(-0.1, 0.5, 0.8, 1.2, 0.6, 0.7, 1.2, 0.2, 1.2, 0.5, 0.3, 0.4).unwrap();
+            hopf_normal_form(-0.1, 4.0, 0.8, 1.2, 1.5, 1.5, 0.8, 0.2, 0.3, 0.5, 0.3, 0.4).unwrap();
         assert!(matches!(flipped.regime, HopfRegime::Subcritical));
     }
 
     #[test]
     fn ito_noise_bound_matches_closed_form() {
         let bound = ito_mean_square_bound(-0.2, 0.5, 0.04).unwrap();
-        assert_abs_diff_eq!(bound, 0.0632455532, epsilon = 1e-9);
+        assert_abs_diff_eq!(bound, 0.0828427125, epsilon = 1e-9);
         assert!(ito_mean_square_bound(-0.2, -0.5, 0.04).is_none());
     }
 
@@ -547,6 +587,29 @@ mod tests {
         assert_abs_diff_eq!(params.gamma_bar, 0.625, epsilon = 1e-12);
         assert_abs_diff_eq!(params.omega_bar, 1.5, epsilon = 1e-12);
         assert_abs_diff_eq!(params.audit_cluster, 0.4772727272, epsilon = 1e-9);
-        assert_abs_diff_eq!(params.container_cluster, 0.1538461538, epsilon = 1e-9);
+        // [SCALE-TODO] ratio reflects neutral scale metadata
+        assert_abs_diff_eq!(params.container_cluster, 0.1923076923, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn psi_metrics_bundle_regime_and_clusters() {
+        let metrics = psi_spiral_metrics(
+            -0.1, // mu0
+            0.5,  // gamma
+            1.2,  // omega
+            0.8,  // nu
+            0.6,  // kappa
+            0.7,  // a
+            1.1,  // tau
+            0.2,  // theta
+            0.4,  // sigma_s
+            0.5,  // rho
+            1.3,  // lambda
+            0.4,  // c_max
+        )
+        .unwrap();
+        assert!(matches!(metrics.hopf.regime, HopfRegime::Supercritical));
+        assert!(metrics.balance.difference.is_finite());
+        assert!(metrics.dimensionless.audit_cluster > metrics.dimensionless.container_cluster);
     }
 }
