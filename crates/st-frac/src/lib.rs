@@ -303,14 +303,14 @@ mod tests {
     fn fracdiff_1d_matches_nd() {
         let x = vec![0., 1., 2., 3.];
         let coeff = gl_coeffs(0.7, 4);
-        let line = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Zero, Some(1.0)).unwrap();
+        let line = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Zero, Some(1.0));
 
         let arr = ArrayD::from_shape_vec(IxDyn(&[1, 4]), x.clone()).unwrap();
         let nd = fracdiff_gl_nd(&arr, 0.7, 1, 4, Pad::Zero, Some(1.0)).unwrap();
 
         assert_eq!(line.len(), nd.len());
         for (a, b) in line.iter().zip(nd.iter()) {
-            assert!((a - b).abs() < 1e-6);
+            assert!((*a - *b).abs() < 1e-6f32);
         }
     }
 
@@ -318,18 +318,18 @@ mod tests {
     fn constant_pad_behaves() {
         let x = vec![1.0, 2.0];
         let coeff = gl_coeffs(0.4, 3);
-        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Constant(5.0), None).unwrap();
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Constant(5.0), None);
         assert_eq!(y.len(), 2);
         // When padding with 5, the first element should only see the padded value
         // except for the zeroth coefficient which stays 1.
-        assert!((y[0] - (coeff[0] * 1.0 + coeff[1] * 5.0 + coeff[2] * 5.0)).abs() < 1e-6);
+        assert!((y[0] - (coeff[0] * 1.0 + coeff[1] * 5.0 + coeff[2] * 5.0)).abs() < 1e-6f32);
     }
 
     #[test]
     fn reflect_pad_mirrors_left_edge() {
         let x = vec![10.0, 20.0, 30.0];
         let coeff = vec![1.0, 1.0, 1.0, 1.0];
-        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Reflect, Some(1.0)).unwrap();
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Reflect, Some(1.0));
 
         assert_eq!(y[0], 10.0 + 10.0 + 20.0 + 30.0);
         assert_eq!(y[1], 20.0 + 10.0 + 10.0 + 20.0);
@@ -339,7 +339,7 @@ mod tests {
     fn constant_pad_applies_to_right_edge() {
         let x = vec![1.0, 2.0];
         let coeff = vec![1.0, 0.5, 0.25];
-        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Constant(5.0), Some(1.0)).unwrap();
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Constant(5.0), Some(1.0));
 
         assert_eq!(y[1], 2.0 * 1.0 + 1.0 * 0.5 + 5.0 * 0.25);
     }
