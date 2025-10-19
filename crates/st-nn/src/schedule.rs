@@ -275,6 +275,29 @@ pub struct GradientBands {
 }
 
 impl GradientBands {
+    /// Constructs a new set of gradient bands from explicit tensors, ensuring
+    /// that each component shares an identical shape.
+    pub fn from_bands(above: Tensor, here: Tensor, beneath: Tensor) -> PureResult<Self> {
+        let shape = above.shape();
+        if here.shape() != shape {
+            return Err(TensorError::ShapeMismatch {
+                left: here.shape(),
+                right: shape,
+            });
+        }
+        if beneath.shape() != shape {
+            return Err(TensorError::ShapeMismatch {
+                left: beneath.shape(),
+                right: shape,
+            });
+        }
+        Ok(Self {
+            above,
+            here,
+            beneath,
+        })
+    }
+
     /// Returns the gradient for the Above (TopK/A) band.
     pub fn above(&self) -> &Tensor {
         &self.above
