@@ -15,6 +15,9 @@ use st_core::util::math::{
 };
 use st_tensor::{DifferentialResonance, Tensor};
 
+/// Ramanujan π approximation using three iterations, exposed for lightweight consumers.
+pub const RAMANUJAN_PI_3: f64 = 3.141_592_653_589_793_238_46_f64;
+
 /// Configuration describing how geometric observability is converted into
 /// feedback for the learning loop.
 #[derive(Clone, Debug)]
@@ -117,7 +120,8 @@ pub struct GeometryFeedback {
     leech_weight: f64,
     leech_projector: LeechProjector,
     ramanujan_pi: f64,
-    pressure_baseline: f64,
+    /// Baseline Leech packing pressure used to normalise observations.
+    pub pressure_baseline: f64,
     softening_beta: f32,
     base_softening_beta: f32,
     rank_history: VecDeque<f64>,
@@ -159,7 +163,12 @@ impl GeometryFeedback {
         min_scale = min_scale.min(clamped_max - f32::EPSILON).max(f32::EPSILON);
         let z_rank = config.z_space_rank.max(1);
         let leech_weight = config.leech_density_weight.max(0.0);
-        let ramanujan_pi = shared_ramanujan_pi(config.ramanujan_iterations.max(1));
+        let iterations = config.ramanujan_iterations.max(1);
+        let ramanujan_pi = if iterations == 3 {
+            RAMANUJAN_PI_3
+        } else {
+            Self::ramanujan_pi(iterations)
+        };
         let softening_beta = config.softening_beta.max(0.0);
         let leech_projector = LeechProjector::new(z_rank, leech_weight);
         let pressure_baseline = LEECH_PACKING_DENSITY * (z_rank.max(1) as f64).sqrt();
@@ -475,8 +484,8 @@ impl GeometryFeedback {
         }
         let averaged = self.history.iter().copied().sum::<f64>() / self.history.len() as f64;
         let geodesic = self.geodesic_projection(resonance);
-        let pressure_baseline = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
-        let densified = self.leech_projector.enrich(geodesic) + pressure_baseline;
+        let densified = self.leech_projector.enrich(geodesic) + self.pressure_baseline;
+        let corrected_pressure = self.normalised_pressure(densified);
         let normalized = ((averaged + densified) / self.ramanujan_pi).clamp(0.0, 1.0);
         let softened = self.soft_project(normalized as f32);
         let mut scale = self.min_scale + (self.max_scale - self.min_scale) * softened;
@@ -489,7 +498,7 @@ impl GeometryFeedback {
         let smoothed_rank =
             self.rank_history.iter().copied().sum::<f64>() / self.rank_history.len() as f64;
 
-        self.pressure_history.push_back(densified);
+        self.pressure_history.push_back(corrected_pressure);
         while self.pressure_history.len() > self.window {
             self.pressure_history.pop_front();
         }
@@ -503,7 +512,7 @@ impl GeometryFeedback {
         let mut rolling_scale =
             self.scale_history.iter().copied().sum::<f32>() / self.scale_history.len() as f32;
 
-        self.auto_tune(smoothed_rank, smoothed_pressure, rolling_scale);
+        self.auto_tune(smoothed_rank, densified, rolling_scale);
 
         scale = scale.clamp(self.min_scale, self.max_scale);
         if let Some(last) = self.scale_history.back_mut() {
@@ -600,8 +609,8 @@ impl GeometryFeedback {
             self.max_scale = recommended.max(self.min_scale + f32::EPSILON);
         }
 
-        let pressure_baseline = LEECH_PACKING_DENSITY * (self.z_rank as f64).sqrt();
-        let max_pressure = pressure_baseline + LeechProjector::new(self.z_rank, 1.0).enrich(1.0);
+        let max_pressure =
+            self.pressure_baseline + LeechProjector::new(self.z_rank, 1.0).enrich(1.0);
         if max_pressure > 0.0 {
             let pressure_ratio = (pressure / max_pressure).clamp(0.0, 4.0);
             if pressure_ratio > 1.2 {
@@ -656,8 +665,15 @@ impl GeometryFeedback {
         self.leech_projector = LeechProjector::new(self.z_rank, self.leech_weight);
     }
 
-    fn ramanujan_pi(iterations: usize) -> f64 {
+    /// Returns the Ramanujan π approximation leveraged by the feedback loop.
+    pub(crate) fn ramanujan_pi(iterations: usize) -> f64 {
         shared_ramanujan_pi(iterations)
+    }
+
+    /// Normalises a pressure observation by subtracting the configured baseline.
+    #[inline]
+    pub fn normalised_pressure(&self, observed: f64) -> f64 {
+        observed - self.pressure_baseline
     }
 }
 
