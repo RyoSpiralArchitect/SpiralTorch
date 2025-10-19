@@ -970,7 +970,6 @@ impl Module for AvgPool2d {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schedule::GradientBands;
 
     #[test]
     fn conv1d_forward_matches_manual() {
@@ -990,7 +989,7 @@ mod tests {
 
     #[test]
     fn conv2d_backward_matches_manual_kernel11() {
-        let mut conv = Conv2d::new("conv", 1, 1, (1, 1), (1, 1), (0, 0), (2, 2)).unwrap();
+        let mut conv = Conv2d::new("conv", 1, 1, (1, 1), (1, 1), (0, 0), (2, 2), (2, 2)).unwrap();
         conv.weight.value_mut().data_mut()[0] = 1.5;
         conv.bias.value_mut().data_mut()[0] = 0.0;
         let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
@@ -1008,7 +1007,7 @@ mod tests {
 
     #[test]
     fn conv2d_respects_dilation_configuration() {
-        let mut conv = Conv2d::new("conv", 1, 1, (3, 3), (1, 1), (0, 0), (5, 5)).unwrap();
+        let mut conv = Conv2d::new("conv", 1, 1, (3, 3), (1, 1), (0, 0), (5, 5), (9, 9)).unwrap();
         conv.set_dilation((2, 2)).unwrap();
         assert_eq!(conv.output_hw().unwrap(), (1, 1));
     }
@@ -1019,8 +1018,9 @@ mod tests {
         use crate::schedule::{RoundtableConfig, RoundtableSchedule};
         use st_core::backend::device_caps::DeviceCaps;
 
-        let mut conv = Conv2d::new("conv_a", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3)).unwrap();
-        let mut conv_bands = Conv2d::new("conv_b", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3)).unwrap();
+        let mut conv = Conv2d::new("conv_a", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3), (3, 3)).unwrap();
+        let mut conv_bands =
+            Conv2d::new("conv_b", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3), (3, 3)).unwrap();
 
         for (idx, value) in conv.weight.value_mut().data_mut().iter_mut().enumerate() {
             *value = idx as f32 + 1.0;
@@ -1073,9 +1073,10 @@ mod tests {
         use crate::schedule::{RoundtableConfig, RoundtableSchedule};
         use st_core::backend::device_caps::DeviceCaps;
 
-        let mut conv_seq = Conv2d::new("conv_seq", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3)).unwrap();
+        let mut conv_seq =
+            Conv2d::new("conv_seq", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3), (3, 3)).unwrap();
         let mut conv_volume =
-            Conv2d::new("conv_vol", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3)).unwrap();
+            Conv2d::new("conv_vol", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3), (3, 3)).unwrap();
 
         for (idx, value) in conv_seq
             .weight

@@ -341,8 +341,7 @@ impl ZSpaceSink {
     }
 
     pub fn take_logic_signatures(&self) -> Vec<(String, LogicZSpace)> {
-        self
-            .take_projections()
+        self.take_projections()
             .into_iter()
             .map(|projection| {
                 let channel = projection.channel.clone();
