@@ -2601,6 +2601,7 @@ dependencies = [
 name = "st-vision"
 version = "0.1.0"
 dependencies = [
+ "rand",
  "st-core",
  "st-tensor",
 ]
