@@ -403,6 +403,17 @@ pub struct DimensionlessParameters {
     pub container_cluster: f64,
 }
 
+/// Spiral dynamics snapshot geared toward PSI telemetry consumers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PsiSpiralMetrics {
+    /// Hopf bookkeeping around the origin.
+    pub hopf: HopfNormalForm,
+    /// Dimensionless gain clusters summarising the controller ratios.
+    pub dimensionless: DimensionlessParameters,
+    /// Audit-versus-container balance used to bias PSI weights.
+    pub balance: AuditContainerBalance,
+}
+
 /// Computes the reduced dimensionless combinations highlighted in the design
 /// memo. The return value condenses the parameter space explored in phase
 /// diagrams to a handful of ratios. Returns `None` if any denominator is
@@ -443,6 +454,35 @@ pub fn dimensionless_parameters(
         omega_bar,
         audit_cluster,
         container_cluster,
+    })
+}
+
+/// Aggregates the Hopf, gain, and dimensionless data needed to project the
+/// Spiral dynamics health into the PSI monitoring stack.
+pub fn psi_spiral_metrics(
+    mu0: f64,
+    gamma: f64,
+    omega: f64,
+    nu: f64,
+    kappa: f64,
+    a: f64,
+    tau: f64,
+    theta: f64,
+    sigma_s: f64,
+    rho: f64,
+    lambda: f64,
+    c_max: f64,
+) -> Option<PsiSpiralMetrics> {
+    let hopf = hopf_normal_form(
+        mu0, gamma, nu, omega, kappa, a, tau, theta, sigma_s, rho, lambda, c_max,
+    )?;
+    let dimensionless =
+        dimensionless_parameters(mu0, gamma, omega, nu, kappa, a, tau, sigma_s, rho, lambda)?;
+    let balance = audit_container_balance(kappa, a, tau, sigma_s, rho, lambda)?;
+    Some(PsiSpiralMetrics {
+        hopf,
+        dimensionless,
+        balance,
     })
 }
 

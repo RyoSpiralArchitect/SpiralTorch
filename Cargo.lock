@@ -2554,6 +2554,7 @@ dependencies = [
 name = "st-rec"
 version = "0.1.0"
 dependencies = [
+ "rand",
  "st-kdsl",
  "st-rl",
  "st-tensor",

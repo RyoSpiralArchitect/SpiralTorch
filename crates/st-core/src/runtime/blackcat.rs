@@ -673,7 +673,7 @@ pub mod zmeta {
                 *value *= gain;
             }
 
-            self.logistic_project_step(&delta);
+            self.logistic_project_step_legacy(&delta);
         }
 
         #[cfg(not(feature = "blackcat_v2"))]
@@ -698,6 +698,7 @@ pub mod zmeta {
                 return;
             }
 
+            let proj_norm = proj_norm_sq.sqrt();
             let dot_nr = self
                 .dir
                 .iter()
