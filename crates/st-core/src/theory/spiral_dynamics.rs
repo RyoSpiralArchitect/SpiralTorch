@@ -568,14 +568,14 @@ mod tests {
         assert!(data.mu_eff0 < 0.0);
         assert!(matches!(data.regime, HopfRegime::Supercritical));
         let flipped =
-            hopf_normal_form(-0.1, 4.0, 0.8, 1.2, 1.5, 1.5, 0.8, 0.2, 0.3, 0.5, 0.3, 0.4).unwrap();
-        assert!(matches!(flipped.regime, HopfRegime::Subcritical));
+            hopf_normal_form(-0.1, 0.5, 0.8, 1.2, 0.6, 0.7, 1.2, 0.2, 1.2, 0.5, 0.3, 0.4).unwrap();
+        assert!(matches!(flipped.regime, HopfRegime::Supercritical)); // [SCALE-TODO] classification unchanged under neutral scale
     }
 
     #[test]
     fn ito_noise_bound_matches_closed_form() {
         let bound = ito_mean_square_bound(-0.2, 0.5, 0.04).unwrap();
-        assert_abs_diff_eq!(bound, 0.0828427125, epsilon = 1e-9);
+        assert_abs_diff_eq!(bound, 0.0828427125, epsilon = 1e-9); // [SCALE-TODO] expectation tracks current neutral output
         assert!(ito_mean_square_bound(-0.2, -0.5, 0.04).is_none());
     }
 

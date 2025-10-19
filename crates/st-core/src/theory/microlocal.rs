@@ -358,7 +358,7 @@ pub struct InterfaceZPulse {
     pub support: f32,
     pub interface_cells: f32,
     pub band_energy: (f32, f32, f32),
-    pub scale: Option<ZScale>,
+    pub scale: ZScale,
     pub drift: f32,
     pub z_bias: f32,
     pub quality_hint: Option<f32>,
@@ -446,12 +446,8 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            scale: match (current.scale, next.scale) {
-                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            },
+            // [SCALE-TODO] Patch 0 lerp placeholder
+            scale: ZScale::ONE,
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -490,7 +486,7 @@ impl InterfaceZPulse {
             drift: self.drift,
             z_signal: self.z_bias,
             // [SCALE-TODO] Patch 0 optional tagging
-            scale: self.scale,
+            scale: Some(self.scale),
         }
     }
 
@@ -506,7 +502,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: Some(ZScale::ONE),
+            scale: ZScale::ONE,
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
