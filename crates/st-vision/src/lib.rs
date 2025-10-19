@@ -23,11 +23,46 @@
 
 //! Z-space native vision utilities for SpiralTorch.
 //!
+//! In addition to the SpiralTorch-specific data structures, this crate keeps a
+//! concise index of **TorchVision**'s representative functionality so that
+//! downstream consumers can quickly align their expectations when porting
+//! workflows.
+//!
+//! ### TorchVision standard capabilities
+//! - **Datasets** &mdash; canonical image classification, detection, segmentation,
+//!   optical flow, stereo matching, paired-image, captioning, and video
+//!   collections are exposed through ready-to-use `torchvision.datasets`
+//!   classes.
+//! - **Models** &mdash; reference architectures for classification (from AlexNet to
+//!   modern ViT variants), quantized classifiers, semantic segmentation,
+//!   detection/instance segmentation/keypoint estimation, video classification,
+//!   and optical flow provide drop-in baselines.
+//! - **Transforms v2** &mdash; unified augmentation pipelines (`torchvision.transforms.v2`)
+//!   handle images, videos, bounding boxes, masks, and keypoints while
+//!   remaining compatible with the v1 API.
+//! - **TVTensors** &mdash; tensor subclasses (Image, Video, BoundingBoxes, etc.)
+//!   enable automatic dispatch and metadata propagation inside the v2 pipeline.
+//! - **Utilities** &mdash; rendering helpers such as `draw_bounding_boxes`,
+//!   `draw_segmentation_masks`, `make_grid`, and `save_image` simplify rapid
+//!   inspection.
+//! - **Custom ops** &mdash; `torchvision.ops` implements NMS, RoI operators, box
+//!   algebra, detection-friendly losses, and common vision blocks that remain
+//!   TorchScript compatible.
+//! - **IO** &mdash; accelerated codecs (JPEG/PNG/WEBP/GIF/AVIF/HEIC) with tensor
+//!   interop plus video read/write utilities support efficient pipelines.
+//! - **Feature extraction** &mdash; helpers like `create_feature_extractor` expose
+//!   intermediate activations for transfer learning, visualization, and FPN
+//!   style integration.
+//!
 //! The [`ZSpaceVolume`] acts as a volumetric canvas capable of storing
 //! resonant feature slices along the Z axis. Coupled with a
 //! [`VisionProjector`], the volume can be collapsed back into 2D feature maps
 //! while respecting Z-space curvature, resonance energy and the live telemetry
 //! streamed through [`AtlasFrame`] snapshots.
+
+use rand::{rngs::StdRng, Rng, SeedableRng};
+use std::cmp::min;
+use std::sync::Arc;
 
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
@@ -333,9 +368,1346 @@ impl Default for VisionProjector {
     }
 }
 
+/// Lightweight 3D tensor storing an image or feature map in `CHW` layout.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImageTensor {
+    channels: usize,
+    height: usize,
+    width: usize,
+    data: Vec<f32>,
+}
+
+impl ImageTensor {
+    /// Creates a new image tensor from raw data in `CHW` order.
+    pub fn new(channels: usize, height: usize, width: usize, data: Vec<f32>) -> PureResult<Self> {
+        if channels == 0 || height == 0 || width == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: channels.max(1),
+                cols: height.saturating_mul(width),
+            });
+        }
+        let expected = channels
+            .checked_mul(height)
+            .and_then(|v| v.checked_mul(width))
+            .ok_or_else(|| TensorError::InvalidDimensions {
+                rows: channels,
+                cols: height.saturating_mul(width),
+            })?;
+        if expected != data.len() {
+            return Err(TensorError::DataLength {
+                expected,
+                got: data.len(),
+            });
+        }
+        Ok(Self {
+            channels,
+            height,
+            width,
+            data,
+        })
+    }
+
+    /// Creates an image tensor filled with zeros.
+    pub fn zeros(channels: usize, height: usize, width: usize) -> PureResult<Self> {
+        let volume = channels
+            .checked_mul(height)
+            .and_then(|v| v.checked_mul(width))
+            .ok_or_else(|| TensorError::InvalidDimensions {
+                rows: channels,
+                cols: height.saturating_mul(width),
+            })?;
+        Ok(Self {
+            channels,
+            height,
+            width,
+            data: vec![0.0; volume],
+        })
+    }
+
+    /// Builds an image tensor from a matrix-shaped tensor interpreted as `C x (H * W)`.
+    pub fn from_tensor(
+        tensor: &Tensor,
+        channels: usize,
+        height: usize,
+        width: usize,
+    ) -> PureResult<Self> {
+        let (rows, cols) = tensor.shape();
+        if rows != channels || cols != height.saturating_mul(width) {
+            return Err(TensorError::ShapeMismatch {
+                left: (rows, cols),
+                right: (channels, height.saturating_mul(width)),
+            });
+        }
+        Self::new(channels, height, width, tensor.data().to_vec())
+    }
+
+    /// Converts the image tensor back into a `Tensor` with shape `C x (H * W)`.
+    pub fn into_tensor(&self) -> PureResult<Tensor> {
+        Tensor::from_vec(self.channels, self.height * self.width, self.data.clone())
+    }
+
+    /// Returns the number of channels.
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
+    /// Returns the image height.
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    /// Returns the image width.
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    /// Returns `(channels, height, width)` describing the tensor.
+    pub fn shape(&self) -> (usize, usize, usize) {
+        (self.channels, self.height, self.width)
+    }
+
+    /// Immutable view of the underlying data buffer in `CHW` order.
+    pub fn as_slice(&self) -> &[f32] {
+        &self.data
+    }
+
+    /// Mutable view of the underlying data buffer in `CHW` order.
+    pub fn as_mut_slice(&mut self) -> &mut [f32] {
+        &mut self.data
+    }
+
+    fn offset(&self, channel: usize, y: usize, x: usize) -> PureResult<usize> {
+        if channel >= self.channels || y >= self.height || x >= self.width {
+            return Err(TensorError::InvalidValue {
+                label: "image_tensor_coordinate",
+            });
+        }
+        Ok(((channel * self.height) + y) * self.width + x)
+    }
+
+    /// Reads a pixel at the specified coordinate.
+    pub fn pixel(&self, channel: usize, y: usize, x: usize) -> PureResult<f32> {
+        let idx = self.offset(channel, y, x)?;
+        Ok(self.data[idx])
+    }
+
+    /// Updates a pixel at the specified coordinate.
+    pub fn set_pixel(&mut self, channel: usize, y: usize, x: usize, value: f32) -> PureResult<()> {
+        let idx = self.offset(channel, y, x)?;
+        self.data[idx] = value;
+        Ok(())
+    }
+
+    /// Applies an element-wise transform to the image data in-place.
+    pub fn map_inplace<F>(&mut self, mut f: F)
+    where
+        F: FnMut(f32) -> f32,
+    {
+        for value in self.data.iter_mut() {
+            *value = f(*value);
+        }
+    }
+
+    /// Applies a ReLU non-linearity in-place.
+    pub fn relu_inplace(&mut self) {
+        for value in self.data.iter_mut() {
+            if *value < 0.0 {
+                *value = 0.0;
+            }
+        }
+    }
+
+    /// Returns a flattened copy of the image data suitable for dense layers.
+    pub fn flatten(&self) -> Vec<f32> {
+        self.data.clone()
+    }
+
+    /// Builds an image tensor from a [`ZSpaceVolume`], treating depth slices as channels.
+    pub fn from_volume(volume: &ZSpaceVolume) -> PureResult<Self> {
+        Self::new(
+            volume.depth(),
+            volume.height(),
+            volume.width(),
+            volume.voxels().to_vec(),
+        )
+    }
+}
+
+impl ZSpaceVolume {
+    /// Creates a volume by interpreting each channel of the provided image as a Z slice.
+    pub fn from_image_tensor(image: &ImageTensor) -> PureResult<Self> {
+        Ok(Self {
+            depth: image.channels(),
+            height: image.height(),
+            width: image.width(),
+            voxels: image.as_slice().to_vec(),
+        })
+    }
+
+    /// Converts the volume back into an [`ImageTensor`].
+    pub fn to_image_tensor(&self) -> PureResult<ImageTensor> {
+        ImageTensor::new(self.depth, self.height, self.width, self.voxels.clone())
+    }
+}
+
+/// Canonical computer-vision task categories inspired by TorchVision's taxonomy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VisionTask {
+    Classification,
+    Segmentation,
+    Detection,
+    Keypoint,
+    Video,
+    OpticalFlow,
+    Depth,
+    MultiLabel,
+}
+
+/// Metadata describing a well-known dataset within the TorchVision ecosystem.
+#[derive(Clone, Debug)]
+pub struct DatasetDescriptor {
+    pub name: &'static str,
+    pub task: VisionTask,
+    pub description: &'static str,
+    pub supports_download: bool,
+    pub homepage: &'static str,
+    pub paper_url: Option<&'static str>,
+}
+
+const DATASET_CATALOG: &[DatasetDescriptor] = &[
+    DatasetDescriptor {
+        name: "MNIST",
+        task: VisionTask::Classification,
+        description: "手書き数字 28x28 の画像分類タスク",
+        supports_download: true,
+        homepage: "http://yann.lecun.com/exdb/mnist/",
+        paper_url: Some("http://yann.lecun.com/exdb/publis/pdf/lecun-98.pdf"),
+    },
+    DatasetDescriptor {
+        name: "FashionMNIST",
+        task: VisionTask::Classification,
+        description: "Zalando ファッション画像の 10 クラス分類",
+        supports_download: true,
+        homepage: "https://github.com/zalandoresearch/fashion-mnist",
+        paper_url: None,
+    },
+    DatasetDescriptor {
+        name: "CIFAR10",
+        task: VisionTask::Classification,
+        description: "32x32 カラー画像の 10 クラス分類",
+        supports_download: true,
+        homepage: "https://www.cs.toronto.edu/~kriz/cifar.html",
+        paper_url: None,
+    },
+    DatasetDescriptor {
+        name: "CIFAR100",
+        task: VisionTask::Classification,
+        description: "CIFAR10 と同条件で 100 クラス分類",
+        supports_download: true,
+        homepage: "https://www.cs.toronto.edu/~kriz/cifar.html",
+        paper_url: None,
+    },
+    DatasetDescriptor {
+        name: "ImageNet-1K",
+        task: VisionTask::Classification,
+        description: "ILSVRC 1K クラス大規模分類ベンチマーク",
+        supports_download: false,
+        homepage: "https://image-net.org/",
+        paper_url: Some("https://arxiv.org/abs/1409.0575"),
+    },
+    DatasetDescriptor {
+        name: "COCO-2017",
+        task: VisionTask::Detection,
+        description: "Common Objects in Context の検出/セグメンテーション",
+        supports_download: true,
+        homepage: "https://cocodataset.org/",
+        paper_url: Some("https://arxiv.org/abs/1405.0312"),
+    },
+    DatasetDescriptor {
+        name: "Cityscapes",
+        task: VisionTask::Segmentation,
+        description: "自動運転向け都市シーンの高解像度セマンティックセグメンテーション",
+        supports_download: false,
+        homepage: "https://www.cityscapes-dataset.com/",
+        paper_url: Some("https://www.cv-foundation.org/openaccess/content_cvpr_2016/papers/Cordts_The_Cityscapes_Dataset_CVPR_2016_paper.pdf"),
+    },
+    DatasetDescriptor {
+        name: "VOC-2012",
+        task: VisionTask::Detection,
+        description: "PASCAL VOC 検出/セグメンテーション競技用データセット",
+        supports_download: true,
+        homepage: "http://host.robots.ox.ac.uk/pascal/VOC/voc2012/",
+        paper_url: None,
+    },
+    DatasetDescriptor {
+        name: "Kinetics-400",
+        task: VisionTask::Video,
+        description: "400 クラスの人間行動動画分類",
+        supports_download: false,
+        homepage: "https://deepmind.com/research/open-source/kinetics",
+        paper_url: Some("https://arxiv.org/abs/1705.06950"),
+    },
+    DatasetDescriptor {
+        name: "FlyingChairs",
+        task: VisionTask::OpticalFlow,
+        description: "光学フロー合成データセット",
+        supports_download: true,
+        homepage: "https://lmb.informatik.uni-freiburg.de/resources/datasets/FlyingChairs.en.html",
+        paper_url: Some("https://lmb.informatik.uni-freiburg.de/Publications/2015/DFIB15/"),
+    },
+];
+
+/// Returns the static catalog of datasets aligned with TorchVision.
+pub fn dataset_catalog() -> &'static [DatasetDescriptor] {
+    DATASET_CATALOG
+}
+
+/// Finds a dataset descriptor by name (case-insensitive).
+pub fn find_dataset_descriptor(name: &str) -> Option<&'static DatasetDescriptor> {
+    DATASET_CATALOG
+        .iter()
+        .find(|descriptor| descriptor.name.eq_ignore_ascii_case(name))
+}
+
+/// Sample item returned by a [`VisionDataset`].
+#[derive(Clone, Debug)]
+pub struct DatasetSample {
+    pub image: ImageTensor,
+    pub target: Option<Tensor>,
+    pub label: Option<String>,
+    pub boxes: Option<Vec<[f32; 4]>>,
+    pub masks: Option<Vec<ImageTensor>>,
+}
+
+impl DatasetSample {
+    pub fn new(image: ImageTensor) -> Self {
+        Self {
+            image,
+            target: None,
+            label: None,
+            boxes: None,
+            masks: None,
+        }
+    }
+
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    pub fn with_target(mut self, target: Tensor) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    pub fn with_boxes(mut self, boxes: Vec<[f32; 4]>) -> Self {
+        self.boxes = Some(boxes);
+        self
+    }
+
+    pub fn with_masks(mut self, masks: Vec<ImageTensor>) -> Self {
+        self.masks = Some(masks);
+        self
+    }
+}
+
+/// Unified dataset trait mirroring TorchVision's pythonic interfaces.
+pub trait VisionDataset: Send + Sync {
+    fn descriptor(&self) -> &DatasetDescriptor;
+    fn len(&self) -> usize;
+    fn get(&self, index: usize) -> PureResult<DatasetSample>;
+}
+
+/// Simple in-memory dataset backed by vectors of samples.
+#[derive(Clone, Debug)]
+pub struct TensorVisionDataset {
+    descriptor: DatasetDescriptor,
+    expected_shape: Option<(usize, usize, usize)>,
+    samples: Vec<DatasetSample>,
+}
+
+impl TensorVisionDataset {
+    pub fn new(descriptor: DatasetDescriptor) -> Self {
+        Self {
+            descriptor,
+            expected_shape: None,
+            samples: Vec::new(),
+        }
+    }
+
+    pub fn from_samples(
+        descriptor: DatasetDescriptor,
+        samples: Vec<DatasetSample>,
+    ) -> PureResult<Self> {
+        let mut dataset = Self::new(descriptor);
+        for sample in samples {
+            dataset.push_sample(sample)?;
+        }
+        Ok(dataset)
+    }
+
+    pub fn push_sample(&mut self, sample: DatasetSample) -> PureResult<()> {
+        if let Some(shape) = self.expected_shape {
+            if sample.image.shape() != shape {
+                let left = sample.image.shape();
+                let right = shape;
+                return Err(TensorError::ShapeMismatch {
+                    left: (left.0, left.1 * left.2),
+                    right: (right.0, right.1 * right.2),
+                });
+            }
+        } else {
+            self.expected_shape = Some(sample.image.shape());
+        }
+        self.samples.push(sample);
+        Ok(())
+    }
+}
+
+impl VisionDataset for TensorVisionDataset {
+    fn descriptor(&self) -> &DatasetDescriptor {
+        &self.descriptor
+    }
+
+    fn len(&self) -> usize {
+        self.samples.len()
+    }
+
+    fn get(&self, index: usize) -> PureResult<DatasetSample> {
+        self.samples
+            .get(index)
+            .cloned()
+            .ok_or(TensorError::InvalidValue {
+                label: "tensor_dataset_index",
+            })
+    }
+}
+
+/// A batch of dataset samples produced by a [`DataLoader`].
+#[derive(Clone, Debug)]
+pub struct VisionBatch {
+    pub images: Vec<ImageTensor>,
+    pub targets: Vec<Option<Tensor>>,
+    pub labels: Vec<Option<String>>,
+    pub boxes: Vec<Option<Vec<[f32; 4]>>>,
+    pub masks: Vec<Option<Vec<ImageTensor>>>,
+}
+
+impl VisionBatch {
+    pub fn len(&self) -> usize {
+        self.images.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.images.is_empty()
+    }
+
+    /// Stacks the batch into a `(N, C*H*W)` matrix.
+    pub fn stack(&self) -> PureResult<Tensor> {
+        if self.images.is_empty() {
+            return Err(TensorError::EmptyInput("vision_batch"));
+        }
+        let (channels, height, width) = self.images[0].shape();
+        let mut data = Vec::with_capacity(self.images.len() * channels * height * width);
+        for image in &self.images {
+            if image.shape() != (channels, height, width) {
+                let left = image.shape();
+                return Err(TensorError::ShapeMismatch {
+                    left: (left.0, left.1 * left.2),
+                    right: (channels, height * width),
+                });
+            }
+            data.extend_from_slice(image.as_slice());
+        }
+        Tensor::from_vec(self.images.len(), channels * height * width, data)
+    }
+}
+
+/// Iterator over dataset samples with optional transforms and shuffling.
+pub struct DataLoader<D: VisionDataset> {
+    dataset: Arc<D>,
+    batch_size: usize,
+    order: Vec<usize>,
+    position: usize,
+    shuffle: bool,
+    shuffle_rng: StdRng,
+    pipeline: Option<TransformPipeline>,
+}
+
+impl<D: VisionDataset> DataLoader<D> {
+    pub fn new(dataset: Arc<D>, batch_size: usize, seed: Option<u64>) -> PureResult<Self> {
+        if batch_size == 0 {
+            return Err(TensorError::InvalidValue {
+                label: "dataloader_batch_size",
+            });
+        }
+        let len = dataset.len();
+        let order: Vec<usize> = (0..len).collect();
+        let shuffle_rng = match seed {
+            Some(value) => StdRng::seed_from_u64(value),
+            None => StdRng::from_entropy(),
+        };
+        Ok(Self {
+            dataset,
+            batch_size,
+            order,
+            position: 0,
+            shuffle: false,
+            shuffle_rng,
+            pipeline: None,
+        })
+    }
+
+    pub fn with_pipeline(mut self, pipeline: TransformPipeline) -> Self {
+        self.pipeline = Some(pipeline);
+        self
+    }
+
+    pub fn enable_shuffle(&mut self, shuffle: bool) {
+        self.shuffle = shuffle;
+        if self.shuffle {
+            self.shuffle_order();
+        } else {
+            self.order = (0..self.dataset.len()).collect();
+            self.position = 0;
+        }
+    }
+
+    fn shuffle_order(&mut self) {
+        self.order = (0..self.dataset.len()).collect();
+        // Fisher-Yates shuffle
+        for i in (1..self.order.len()).rev() {
+            let j = self.shuffle_rng.gen_range(0..=i);
+            self.order.swap(i, j);
+        }
+        self.position = 0;
+    }
+
+    pub fn reset(&mut self) {
+        self.position = 0;
+        if self.shuffle {
+            self.shuffle_order();
+        }
+    }
+
+    pub fn next_batch(&mut self) -> PureResult<Option<VisionBatch>> {
+        if self.position >= self.order.len() {
+            return Ok(None);
+        }
+        let end = min(self.position + self.batch_size, self.order.len());
+        let mut images = Vec::with_capacity(end - self.position);
+        let mut targets = Vec::with_capacity(end - self.position);
+        let mut labels = Vec::with_capacity(end - self.position);
+        let mut boxes = Vec::with_capacity(end - self.position);
+        let mut masks = Vec::with_capacity(end - self.position);
+        for &idx in &self.order[self.position..end] {
+            let mut sample = self.dataset.get(idx)?;
+            if let Some(pipeline) = self.pipeline.as_mut() {
+                pipeline.apply(&mut sample.image)?;
+            }
+            targets.push(sample.target.clone());
+            labels.push(sample.label.clone());
+            boxes.push(sample.boxes.clone());
+            masks.push(sample.masks.clone());
+            images.push(sample.image);
+        }
+        self.position = end;
+        Ok(Some(VisionBatch {
+            images,
+            targets,
+            labels,
+            boxes,
+            masks,
+        }))
+    }
+}
+
+/// Transform operations that mimic `torchvision.transforms` behaviour.
+#[derive(Clone, Debug)]
+pub enum TransformOperation {
+    Normalize(Normalize),
+    Resize(Resize),
+    CenterCrop(CenterCrop),
+    RandomHorizontalFlip(RandomHorizontalFlip),
+}
+
+impl TransformOperation {
+    pub fn name(&self) -> &'static str {
+        match self {
+            TransformOperation::Normalize(_) => "Normalize",
+            TransformOperation::Resize(_) => "Resize",
+            TransformOperation::CenterCrop(_) => "CenterCrop",
+            TransformOperation::RandomHorizontalFlip(_) => "RandomHorizontalFlip",
+        }
+    }
+
+    fn apply(&self, image: &mut ImageTensor, rng: &mut StdRng) -> PureResult<()> {
+        match self {
+            TransformOperation::Normalize(op) => op.apply(image),
+            TransformOperation::Resize(op) => op.apply(image),
+            TransformOperation::CenterCrop(op) => op.apply(image),
+            TransformOperation::RandomHorizontalFlip(op) => op.apply(image, rng),
+        }
+    }
+}
+
+/// Sequential container for image transforms.
+#[derive(Clone, Debug)]
+pub struct TransformPipeline {
+    ops: Vec<TransformOperation>,
+    rng: StdRng,
+}
+
+impl TransformPipeline {
+    pub fn new() -> Self {
+        Self {
+            ops: Vec::new(),
+            rng: StdRng::from_entropy(),
+        }
+    }
+
+    pub fn with_seed(seed: u64) -> Self {
+        Self {
+            ops: Vec::new(),
+            rng: StdRng::seed_from_u64(seed),
+        }
+    }
+
+    pub fn add(&mut self, op: TransformOperation) -> &mut Self {
+        self.ops.push(op);
+        self
+    }
+
+    pub fn apply(&mut self, image: &mut ImageTensor) -> PureResult<()> {
+        for op in &self.ops {
+            op.apply(image, &mut self.rng)?;
+        }
+        Ok(())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ops.is_empty()
+    }
+}
+
+/// Per-channel normalization.
+#[derive(Clone, Debug)]
+pub struct Normalize {
+    means: Vec<f32>,
+    stds: Vec<f32>,
+}
+
+impl Normalize {
+    pub fn new(means: Vec<f32>, stds: Vec<f32>) -> PureResult<Self> {
+        if means.is_empty() || stds.is_empty() {
+            return Err(TensorError::EmptyInput("normalize_stats"));
+        }
+        if means.len() != stds.len() {
+            return Err(TensorError::DataLength {
+                expected: means.len(),
+                got: stds.len(),
+            });
+        }
+        for &std in &stds {
+            if std <= 0.0 {
+                return Err(TensorError::InvalidValue {
+                    label: "normalize_std",
+                });
+            }
+        }
+        Ok(Self { means, stds })
+    }
+
+    fn channel_value(values: &[f32], channel: usize) -> f32 {
+        if values.len() == 1 {
+            values[0]
+        } else {
+            values[channel.min(values.len() - 1)]
+        }
+    }
+
+    pub fn apply(&self, image: &mut ImageTensor) -> PureResult<()> {
+        let channels = image.channels();
+        let spatial = image.height() * image.width();
+        for c in 0..channels {
+            let mean = Self::channel_value(&self.means, c);
+            let std = Self::channel_value(&self.stds, c);
+            for idx in 0..spatial {
+                let offset = c * spatial + idx;
+                image.as_mut_slice()[offset] = (image.as_slice()[offset] - mean) / std;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Bilinear resize matching TorchVision's default interpolation.
+#[derive(Clone, Debug)]
+pub struct Resize {
+    height: usize,
+    width: usize,
+}
+
+impl Resize {
+    pub fn new(height: usize, width: usize) -> PureResult<Self> {
+        if height == 0 || width == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: height,
+                cols: width,
+            });
+        }
+        Ok(Self { height, width })
+    }
+
+    pub fn apply(&self, image: &mut ImageTensor) -> PureResult<()> {
+        let channels = image.channels();
+        let in_h = image.height();
+        let in_w = image.width();
+        if in_h == self.height && in_w == self.width {
+            return Ok(());
+        }
+        let mut output = vec![0.0f32; channels * self.height * self.width];
+        let scale_y = in_h as f32 / self.height as f32;
+        let scale_x = in_w as f32 / self.width as f32;
+        for c in 0..channels {
+            for y in 0..self.height {
+                let src_y = (y as f32 + 0.5) * scale_y - 0.5;
+                let y0 = src_y.floor().clamp(0.0, (in_h - 1) as f32) as usize;
+                let y1 = min(y0 + 1, in_h - 1);
+                let ly = src_y - y0 as f32;
+                for x in 0..self.width {
+                    let src_x = (x as f32 + 0.5) * scale_x - 0.5;
+                    let x0 = src_x.floor().clamp(0.0, (in_w - 1) as f32) as usize;
+                    let x1 = min(x0 + 1, in_w - 1);
+                    let lx = src_x - x0 as f32;
+                    let top_left = image.pixel(c, y0, x0)?;
+                    let top_right = image.pixel(c, y0, x1)?;
+                    let bottom_left = image.pixel(c, y1, x0)?;
+                    let bottom_right = image.pixel(c, y1, x1)?;
+                    let top = top_left * (1.0 - lx) + top_right * lx;
+                    let bottom = bottom_left * (1.0 - lx) + bottom_right * lx;
+                    let value = top * (1.0 - ly) + bottom * ly;
+                    let offset = ((c * self.height) + y) * self.width + x;
+                    output[offset] = value;
+                }
+            }
+        }
+        *image = ImageTensor::new(channels, self.height, self.width, output)?;
+        Ok(())
+    }
+}
+
+/// Crops the spatial center of the image.
+#[derive(Clone, Debug)]
+pub struct CenterCrop {
+    height: usize,
+    width: usize,
+}
+
+impl CenterCrop {
+    pub fn new(height: usize, width: usize) -> PureResult<Self> {
+        if height == 0 || width == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: height,
+                cols: width,
+            });
+        }
+        Ok(Self { height, width })
+    }
+
+    pub fn apply(&self, image: &mut ImageTensor) -> PureResult<()> {
+        if self.height > image.height() || self.width > image.width() {
+            return Err(TensorError::InvalidValue {
+                label: "center_crop_size",
+            });
+        }
+        let top = (image.height() - self.height) / 2;
+        let left = (image.width() - self.width) / 2;
+        let channels = image.channels();
+        let mut output = vec![0.0f32; channels * self.height * self.width];
+        for c in 0..channels {
+            for y in 0..self.height {
+                for x in 0..self.width {
+                    let value = image.pixel(c, top + y, left + x)?;
+                    let offset = ((c * self.height) + y) * self.width + x;
+                    output[offset] = value;
+                }
+            }
+        }
+        *image = ImageTensor::new(channels, self.height, self.width, output)?;
+        Ok(())
+    }
+}
+
+/// Randomly flips the image horizontally.
+#[derive(Clone, Debug)]
+pub struct RandomHorizontalFlip {
+    probability: f32,
+}
+
+impl RandomHorizontalFlip {
+    pub fn new(probability: f32) -> PureResult<Self> {
+        if !(0.0..=1.0).contains(&probability) {
+            return Err(TensorError::InvalidValue {
+                label: "horizontal_flip_probability",
+            });
+        }
+        Ok(Self { probability })
+    }
+
+    pub fn apply(&self, image: &mut ImageTensor, rng: &mut StdRng) -> PureResult<()> {
+        if rng.gen::<f32>() >= self.probability {
+            return Ok(());
+        }
+        let channels = image.channels();
+        let height = image.height();
+        let width = image.width();
+        let data = image.as_mut_slice();
+        let stride_c = height * width;
+        for c in 0..channels {
+            for y in 0..height {
+                for x in 0..width / 2 {
+                    let left = c * stride_c + y * width + x;
+                    let right = c * stride_c + y * width + (width - 1 - x);
+                    data.swap(left, right);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Helper that reproduces TorchVision の ImageNet 分類向け前処理パイプライン。
+pub fn standard_classification_pipeline(
+    image_size: usize,
+    seed: Option<u64>,
+) -> PureResult<TransformPipeline> {
+    let mut pipeline = match seed {
+        Some(value) => TransformPipeline::with_seed(value),
+        None => TransformPipeline::new(),
+    };
+    pipeline
+        .add(TransformOperation::Resize(Resize::new(
+            image_size + 32,
+            image_size + 32,
+        )?))
+        .add(TransformOperation::CenterCrop(CenterCrop::new(
+            image_size, image_size,
+        )?))
+        .add(TransformOperation::RandomHorizontalFlip(
+            RandomHorizontalFlip::new(0.5)?,
+        ))
+        .add(TransformOperation::Normalize(Normalize::new(
+            vec![0.485, 0.456, 0.406],
+            vec![0.229, 0.224, 0.225],
+        )?));
+    Ok(pipeline)
+}
+
+/// TorchVision モデルの主要カテゴリ。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ModelKind {
+    ResNet18,
+    ResNet50,
+    MobileNetV3Small,
+    MobileNetV3Large,
+    EfficientNetB0,
+    ConvNeXtTiny,
+}
+
+/// 静的なモデル記述。
+#[derive(Clone, Debug)]
+pub struct ModelDescriptor {
+    pub kind: ModelKind,
+    pub name: &'static str,
+    pub task: VisionTask,
+    pub default_input_channels: usize,
+    pub default_image_size: (usize, usize),
+    pub has_pretrained: bool,
+}
+
+const MODEL_CATALOG: &[ModelDescriptor] = &[
+    ModelDescriptor {
+        kind: ModelKind::ResNet18,
+        name: "resnet18",
+        task: VisionTask::Classification,
+        default_input_channels: 3,
+        default_image_size: (224, 224),
+        has_pretrained: true,
+    },
+    ModelDescriptor {
+        kind: ModelKind::ResNet50,
+        name: "resnet50",
+        task: VisionTask::Classification,
+        default_input_channels: 3,
+        default_image_size: (224, 224),
+        has_pretrained: true,
+    },
+    ModelDescriptor {
+        kind: ModelKind::MobileNetV3Small,
+        name: "mobilenet_v3_small",
+        task: VisionTask::Classification,
+        default_input_channels: 3,
+        default_image_size: (224, 224),
+        has_pretrained: true,
+    },
+    ModelDescriptor {
+        kind: ModelKind::MobileNetV3Large,
+        name: "mobilenet_v3_large",
+        task: VisionTask::Classification,
+        default_input_channels: 3,
+        default_image_size: (224, 224),
+        has_pretrained: true,
+    },
+    ModelDescriptor {
+        kind: ModelKind::EfficientNetB0,
+        name: "efficientnet_b0",
+        task: VisionTask::Classification,
+        default_input_channels: 3,
+        default_image_size: (224, 224),
+        has_pretrained: true,
+    },
+    ModelDescriptor {
+        kind: ModelKind::ConvNeXtTiny,
+        name: "convnext_tiny",
+        task: VisionTask::Classification,
+        default_input_channels: 3,
+        default_image_size: (224, 224),
+        has_pretrained: true,
+    },
+];
+
+pub fn model_catalog() -> &'static [ModelDescriptor] {
+    MODEL_CATALOG
+}
+
+pub fn find_model_descriptor(name: &str) -> Option<&'static ModelDescriptor> {
+    MODEL_CATALOG
+        .iter()
+        .find(|descriptor| descriptor.name.eq_ignore_ascii_case(name))
+}
+
+/// ランタイムのモデルメタデータ。
+#[derive(Clone, Debug)]
+pub struct ModelMetadata {
+    pub kind: ModelKind,
+    pub name: &'static str,
+    pub task: VisionTask,
+    pub input_channels: usize,
+    pub image_size: (usize, usize),
+    pub num_classes: usize,
+    pub has_pretrained: bool,
+}
+
+impl ModelMetadata {
+    fn from_descriptor(descriptor: &ModelDescriptor, num_classes: usize) -> Self {
+        Self {
+            kind: descriptor.kind,
+            name: descriptor.name,
+            task: descriptor.task,
+            input_channels: descriptor.default_input_channels,
+            image_size: descriptor.default_image_size,
+            num_classes,
+            has_pretrained: descriptor.has_pretrained,
+        }
+    }
+}
+
+/// 特徴抽出段を制御するステージ。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FeatureStage {
+    Stem,
+    Head,
+    Logits,
+}
+
+/// 共通インターフェース (TorchVision の `nn.Module`)。
+pub trait VisionModel: Send + Sync {
+    fn metadata(&self) -> &ModelMetadata;
+    fn forward(&self, batch: &[ImageTensor]) -> PureResult<Tensor>;
+    fn extract_features(&self, stage: FeatureStage, image: &ImageTensor) -> PureResult<Tensor>;
+}
+
+fn random_weight(rng: &mut StdRng, scale: f32) -> f32 {
+    rng.gen_range(-scale..scale)
+}
+
+struct Conv2d {
+    in_channels: usize,
+    out_channels: usize,
+    kernel_size: usize,
+    stride: usize,
+    padding: usize,
+    weights: Vec<f32>,
+    bias: Vec<f32>,
+}
+
+impl Conv2d {
+    fn new(
+        in_channels: usize,
+        out_channels: usize,
+        kernel_size: usize,
+        stride: usize,
+        padding: usize,
+        rng: &mut StdRng,
+    ) -> PureResult<Self> {
+        if kernel_size == 0 {
+            return Err(TensorError::InvalidValue {
+                label: "conv_kernel_size",
+            });
+        }
+        let weight_count = out_channels
+            .checked_mul(in_channels)
+            .and_then(|v| v.checked_mul(kernel_size * kernel_size))
+            .ok_or(TensorError::InvalidDimensions {
+                rows: out_channels,
+                cols: in_channels * kernel_size * kernel_size,
+            })?;
+        let mut weights = Vec::with_capacity(weight_count);
+        for _ in 0..weight_count {
+            weights.push(random_weight(rng, 0.05));
+        }
+        let mut bias = Vec::with_capacity(out_channels);
+        for _ in 0..out_channels {
+            bias.push(random_weight(rng, 0.01));
+        }
+        Ok(Self {
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            weights,
+            bias,
+        })
+    }
+
+    fn output_dims(&self, input: &ImageTensor) -> PureResult<(usize, usize)> {
+        let padded_h = input.height() + 2 * self.padding;
+        let padded_w = input.width() + 2 * self.padding;
+        if padded_h < self.kernel_size || padded_w < self.kernel_size {
+            return Err(TensorError::InvalidValue {
+                label: "conv_output_dims",
+            });
+        }
+        let out_h = (padded_h - self.kernel_size) / self.stride + 1;
+        let out_w = (padded_w - self.kernel_size) / self.stride + 1;
+        Ok((out_h, out_w))
+    }
+
+    fn apply(&self, input: &ImageTensor) -> PureResult<ImageTensor> {
+        if input.channels() != self.in_channels {
+            return Err(TensorError::ShapeMismatch {
+                left: (input.channels(), input.height() * input.width()),
+                right: (self.in_channels, input.height() * input.width()),
+            });
+        }
+        let (out_h, out_w) = self.output_dims(input)?;
+        let mut output = vec![0.0f32; self.out_channels * out_h * out_w];
+        let kernel = self.kernel_size;
+        for oc in 0..self.out_channels {
+            for oy in 0..out_h {
+                for ox in 0..out_w {
+                    let mut acc = self.bias[oc];
+                    for ic in 0..self.in_channels {
+                        for ky in 0..kernel {
+                            for kx in 0..kernel {
+                                let iy = oy * self.stride + ky;
+                                let ix = ox * self.stride + kx;
+                                let in_y = iy as isize - self.padding as isize;
+                                let in_x = ix as isize - self.padding as isize;
+                                if in_y >= 0
+                                    && in_y < input.height() as isize
+                                    && in_x >= 0
+                                    && in_x < input.width() as isize
+                                {
+                                    let input_value =
+                                        input.pixel(ic, in_y as usize, in_x as usize)?;
+                                    let w_index = (((oc * self.in_channels + ic) * kernel + ky)
+                                        * kernel)
+                                        + kx;
+                                    acc += input_value * self.weights[w_index];
+                                }
+                            }
+                        }
+                    }
+                    let offset = ((oc * out_h) + oy) * out_w + ox;
+                    output[offset] = acc;
+                }
+            }
+        }
+        ImageTensor::new(self.out_channels, out_h, out_w, output)
+    }
+}
+
+struct MaxPool2d {
+    kernel_size: usize,
+    stride: usize,
+}
+
+impl MaxPool2d {
+    fn new(kernel_size: usize, stride: usize) -> PureResult<Self> {
+        if kernel_size == 0 || stride == 0 {
+            return Err(TensorError::InvalidValue {
+                label: "maxpool_params",
+            });
+        }
+        Ok(Self {
+            kernel_size,
+            stride,
+        })
+    }
+
+    fn apply(&self, input: &ImageTensor) -> PureResult<ImageTensor> {
+        let channels = input.channels();
+        let out_h = (input.height() - self.kernel_size) / self.stride + 1;
+        let out_w = (input.width() - self.kernel_size) / self.stride + 1;
+        if out_h == 0 || out_w == 0 {
+            return Err(TensorError::InvalidValue {
+                label: "maxpool_output",
+            });
+        }
+        let mut output = vec![0.0f32; channels * out_h * out_w];
+        for c in 0..channels {
+            for oy in 0..out_h {
+                for ox in 0..out_w {
+                    let mut max_value = f32::MIN;
+                    for ky in 0..self.kernel_size {
+                        for kx in 0..self.kernel_size {
+                            let value =
+                                input.pixel(c, oy * self.stride + ky, ox * self.stride + kx)?;
+                            if value > max_value {
+                                max_value = value;
+                            }
+                        }
+                    }
+                    let offset = ((c * out_h) + oy) * out_w + ox;
+                    output[offset] = max_value;
+                }
+            }
+        }
+        ImageTensor::new(channels, out_h, out_w, output)
+    }
+}
+
+struct LinearLayer {
+    in_features: usize,
+    out_features: usize,
+    weights: Vec<f32>,
+    bias: Vec<f32>,
+}
+
+impl LinearLayer {
+    fn new(in_features: usize, out_features: usize, rng: &mut StdRng) -> PureResult<Self> {
+        if in_features == 0 || out_features == 0 {
+            return Err(TensorError::InvalidValue {
+                label: "linear_features",
+            });
+        }
+        let mut weights = Vec::with_capacity(out_features * in_features);
+        for _ in 0..out_features * in_features {
+            weights.push(random_weight(rng, 0.05));
+        }
+        let mut bias = Vec::with_capacity(out_features);
+        for _ in 0..out_features {
+            bias.push(random_weight(rng, 0.01));
+        }
+        Ok(Self {
+            in_features,
+            out_features,
+            weights,
+            bias,
+        })
+    }
+
+    fn forward(&self, input: &[f32]) -> PureResult<Vec<f32>> {
+        if input.len() != self.in_features {
+            return Err(TensorError::DataLength {
+                expected: self.in_features,
+                got: input.len(),
+            });
+        }
+        let mut output = vec![0.0f32; self.out_features];
+        for o in 0..self.out_features {
+            let mut acc = self.bias[o];
+            let row_offset = o * self.in_features;
+            for i in 0..self.in_features {
+                acc += self.weights[row_offset + i] * input[i];
+            }
+            output[o] = acc;
+        }
+        Ok(output)
+    }
+}
+
+/// シンプルな CNN を用いた TorchVision 互換モデルのラッパー。
+pub struct SimpleCnn {
+    metadata: ModelMetadata,
+    conv1: Conv2d,
+    conv2: Conv2d,
+    pool1: MaxPool2d,
+    pool2: MaxPool2d,
+    fc1: LinearLayer,
+    fc2: LinearLayer,
+}
+
+impl SimpleCnn {
+    pub fn with_seed(kind: ModelKind, num_classes: usize, seed: Option<u64>) -> PureResult<Self> {
+        let descriptor = MODEL_CATALOG.iter().find(|item| item.kind == kind).ok_or(
+            TensorError::InvalidValue {
+                label: "model_kind",
+            },
+        )?;
+        let mut rng = match seed {
+            Some(value) => StdRng::seed_from_u64(value),
+            None => StdRng::from_entropy(),
+        };
+        let metadata = ModelMetadata::from_descriptor(descriptor, num_classes);
+        let (conv1_out, conv2_out, hidden) = match kind {
+            ModelKind::ResNet18 | ModelKind::ResNet50 => (32, 64, 128),
+            ModelKind::MobileNetV3Small => (16, 32, 64),
+            ModelKind::MobileNetV3Large => (24, 48, 96),
+            ModelKind::EfficientNetB0 => (24, 56, 112),
+            ModelKind::ConvNeXtTiny => (32, 64, 128),
+        };
+        let conv1 = Conv2d::new(metadata.input_channels, conv1_out, 3, 2, 1, &mut rng)?;
+        let conv2 = Conv2d::new(conv1_out, conv2_out, 3, 2, 1, &mut rng)?;
+        let pool1 = MaxPool2d::new(2, 2)?;
+        let pool2 = MaxPool2d::new(2, 2)?;
+
+        // compute spatial dims after conv/pool pipeline
+        let dummy = ImageTensor::zeros(
+            metadata.input_channels,
+            metadata.image_size.0,
+            metadata.image_size.1,
+        )?;
+        let stem = conv1.apply(&dummy)?;
+        let stem_pooled = pool1.apply(&stem)?;
+        let head = conv2.apply(&stem_pooled)?;
+        let pooled = pool2.apply(&head)?;
+        let flattened_len = pooled.flatten().len();
+
+        let fc1 = LinearLayer::new(flattened_len, hidden, &mut rng)?;
+        let fc2 = LinearLayer::new(hidden, num_classes, &mut rng)?;
+
+        Ok(Self {
+            metadata,
+            conv1,
+            conv2,
+            pool1,
+            pool2,
+            fc1,
+            fc2,
+        })
+    }
+
+    fn validate_input(&self, image: &ImageTensor) -> PureResult<()> {
+        if image.channels() != self.metadata.input_channels
+            || image.height() != self.metadata.image_size.0
+            || image.width() != self.metadata.image_size.1
+        {
+            return Err(TensorError::ShapeMismatch {
+                left: (image.channels(), image.height() * image.width()),
+                right: (
+                    self.metadata.input_channels,
+                    self.metadata.image_size.0 * self.metadata.image_size.1,
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    fn forward_logits(&self, image: &ImageTensor) -> PureResult<Vec<f32>> {
+        self.validate_input(image)?;
+        let mut stem = self.conv1.apply(image)?;
+        stem.relu_inplace();
+        let stem_pooled = self.pool1.apply(&stem)?;
+        let mut head = self.conv2.apply(&stem_pooled)?;
+        head.relu_inplace();
+        let head_pooled = self.pool2.apply(&head)?;
+        let mut hidden = self.fc1.forward(&head_pooled.flatten())?;
+        for value in hidden.iter_mut() {
+            if *value < 0.0 {
+                *value = 0.0;
+            }
+        }
+        self.fc2.forward(&hidden)
+    }
+}
+
+impl VisionModel for SimpleCnn {
+    fn metadata(&self) -> &ModelMetadata {
+        &self.metadata
+    }
+
+    fn forward(&self, batch: &[ImageTensor]) -> PureResult<Tensor> {
+        if batch.is_empty() {
+            return Err(TensorError::EmptyInput("vision_batch_forward"));
+        }
+        let mut logits = Vec::with_capacity(batch.len() * self.metadata.num_classes);
+        for image in batch {
+            let mut scores = self.forward_logits(image)?;
+            logits.append(&mut scores);
+        }
+        Tensor::from_vec(batch.len(), self.metadata.num_classes, logits)
+    }
+
+    fn extract_features(&self, stage: FeatureStage, image: &ImageTensor) -> PureResult<Tensor> {
+        self.validate_input(image)?;
+        match stage {
+            FeatureStage::Stem => {
+                let mut stem = self.conv1.apply(image)?;
+                stem.relu_inplace();
+                stem.into_tensor()
+            }
+            FeatureStage::Head => {
+                let mut stem = self.conv1.apply(image)?;
+                stem.relu_inplace();
+                let stem_pooled = self.pool1.apply(&stem)?;
+                let mut head = self.conv2.apply(&stem_pooled)?;
+                head.relu_inplace();
+                let pooled = self.pool2.apply(&head)?;
+                let flat = pooled.flatten();
+                Tensor::from_vec(1, flat.len(), flat)
+            }
+            FeatureStage::Logits => {
+                let logits = self.forward_logits(image)?;
+                Tensor::from_vec(1, logits.len(), logits)
+            }
+        }
+    }
+}
+
+/// Feature extractor mirroring `torchvision.models.feature_extraction`.
+pub struct FeatureExtractor {
+    model: Arc<dyn VisionModel>,
+    stage: FeatureStage,
+}
+
+impl FeatureExtractor {
+    pub fn new(model: Arc<dyn VisionModel>, stage: FeatureStage) -> Self {
+        Self { model, stage }
+    }
+
+    pub fn extract(&self, image: &ImageTensor) -> PureResult<Tensor> {
+        self.model.extract_features(self.stage, image)
+    }
+}
+
+/// Instantiates a simplified TorchVision モデル。
+pub fn create_classification_model(
+    kind: ModelKind,
+    num_classes: usize,
+    seed: Option<u64>,
+) -> PureResult<Arc<dyn VisionModel>> {
+    let model = SimpleCnn::with_seed(kind, num_classes, seed)?;
+    Ok(Arc::new(model))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     fn tensor_from(values: &[f32], rows: usize, cols: usize) -> Tensor {
         Tensor::from_vec(rows, cols, values.to_vec()).unwrap()
@@ -427,5 +1799,89 @@ mod tests {
         assert!((weights_after.data()[0] - weights_before.data()[0]).abs() > 1e-3);
         let projection = projector.project(&volume, &resonance).unwrap();
         assert_eq!(projection.shape(), (2, 2));
+    }
+
+    #[test]
+    fn image_tensor_volume_roundtrip() {
+        let image = ImageTensor::new(
+            3,
+            2,
+            2,
+            vec![
+                0.0, 1.0, 2.0, 3.0, // channel 0
+                4.0, 5.0, 6.0, 7.0, // channel 1
+                8.0, 9.0, 10.0, 11.0, // channel 2
+            ],
+        )
+        .unwrap();
+        let volume = ZSpaceVolume::from_image_tensor(&image).unwrap();
+        let restored = volume.to_image_tensor().unwrap();
+        assert_eq!(image, restored);
+        let tensor = image.into_tensor().unwrap();
+        let rebuilt = ImageTensor::from_tensor(&tensor, 3, 2, 2).unwrap();
+        assert_eq!(rebuilt.shape(), (3, 2, 2));
+    }
+
+    #[test]
+    fn transform_pipeline_matches_torchvision_basics() {
+        let mut pipeline = standard_classification_pipeline(64, Some(7)).unwrap();
+        let mut image = ImageTensor::new(3, 96, 96, vec![0.5; 3 * 96 * 96]).unwrap();
+        pipeline.apply(&mut image).unwrap();
+        assert_eq!(image.shape(), (3, 64, 64));
+        let data = image.as_slice();
+        let area = 64 * 64;
+        let expected = [
+            (0.5 - 0.485) / 0.229,
+            (0.5 - 0.456) / 0.224,
+            (0.5 - 0.406) / 0.225,
+        ];
+        for (channel, &value) in expected.iter().enumerate() {
+            let idx = channel * area;
+            assert!((data[idx] - value).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn dataloader_produces_batches() {
+        let descriptor = dataset_catalog()[0].clone();
+        let mut dataset = TensorVisionDataset::new(descriptor);
+        for idx in 0..8 {
+            let image = ImageTensor::new(3, 64, 64, vec![idx as f32; 3 * 64 * 64]).unwrap();
+            dataset
+                .push_sample(DatasetSample::new(image).with_label(format!("label-{idx}")))
+                .unwrap();
+        }
+        let dataset = Arc::new(dataset);
+        let mut loader = DataLoader::new(dataset, 3, Some(42)).unwrap();
+        loader.enable_shuffle(true);
+        let mut seen = 0;
+        while let Some(batch) = loader.next_batch().unwrap() {
+            assert!(!batch.is_empty());
+            let tensor = batch.stack().unwrap();
+            assert_eq!(tensor.shape().0, batch.len());
+            seen += batch.len();
+        }
+        assert_eq!(seen, 8);
+    }
+
+    #[test]
+    fn simple_cnn_forward_produces_logits() {
+        let model = create_classification_model(ModelKind::ResNet18, 10, Some(99)).unwrap();
+        let metadata = model.metadata().clone();
+        let image = ImageTensor::new(
+            metadata.input_channels,
+            metadata.image_size.0,
+            metadata.image_size.1,
+            vec![0.25; metadata.input_channels * metadata.image_size.0 * metadata.image_size.1],
+        )
+        .unwrap();
+        let logits = model.forward(&[image.clone()]).unwrap();
+        assert_eq!(logits.shape(), (1, metadata.num_classes));
+        let extractor = FeatureExtractor::new(model.clone(), FeatureStage::Stem);
+        let stem = extractor.extract(&image).unwrap();
+        assert_eq!(
+            stem.shape().1,
+            (metadata.image_size.0 / 2) * (metadata.image_size.1 / 2)
+        );
     }
 }
