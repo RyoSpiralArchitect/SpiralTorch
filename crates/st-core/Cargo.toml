@@ -27,6 +27,7 @@ psychoid = ["dep:once_cell"]
 collapse = ["psi"]
 golden   = []
 experimental_zpulse = []
+blackcat_v2 = []
 
 [dependencies]
 thiserror   = "1"
