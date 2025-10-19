@@ -54,11 +54,6 @@ st-frac = { path = "../../crates/st-frac" }
 ndarray = { version = "0.15", default-features = false, features = ["std"] }
 num-complex = { version = "0.4" }
 
-[package.metadata.pyo3]
-extension-module = true
-abi3 = true
-abi3-py38 = true
-
 [package.metadata.maturin]
 # ← Python から見える拡張モジュール名（import 時のサブモジュール名）
 #    これで `spiraltorch._native` が生成される
