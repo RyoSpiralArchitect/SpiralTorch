@@ -18,6 +18,8 @@ const DEFAULT_HISTORY: usize = 512;
 pub enum StudioError {
     #[error("channel `{0}` is not registered in the capture config")]
     UnknownChannel(String),
+    #[error(transparent)]
+    Outlet(#[from] StudioSinkError),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -218,10 +220,77 @@ impl OverlayComposer {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum StudioSinkError {
+    #[error("sink `{sink}` failed: {reason}")]
+    Transmission { sink: String, reason: String },
+    #[error("multiple sinks failed: {summary}")]
+    Aggregate { summary: String },
+}
+
+pub trait StudioSink: Send {
+    fn name(&self) -> &str;
+    fn send(&mut self, frame: &StudioFrame) -> Result<(), StudioSinkError>;
+    fn flush(&mut self) -> Result<(), StudioSinkError> {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct StudioOutlet {
+    sinks: Vec<Box<dyn StudioSink>>,
+}
+
+impl StudioOutlet {
+    fn register<S: StudioSink + 'static>(&mut self, sink: S) {
+        self.sinks.push(Box::new(sink));
+    }
+
+    fn len(&self) -> usize {
+        self.sinks.len()
+    }
+
+    fn broadcast(&mut self, frame: &StudioFrame) -> Result<(), StudioSinkError> {
+        let mut failures: Vec<StudioSinkError> = Vec::new();
+        for sink in &mut self.sinks {
+            if let Err(err) = sink.send(frame) {
+                failures.push(err);
+            }
+        }
+        Self::reduce_failures(failures)
+    }
+
+    fn flush(&mut self) -> Result<(), StudioSinkError> {
+        let mut failures: Vec<StudioSinkError> = Vec::new();
+        for sink in &mut self.sinks {
+            if let Err(err) = sink.flush() {
+                failures.push(err);
+            }
+        }
+        Self::reduce_failures(failures)
+    }
+
+    fn reduce_failures(mut failures: Vec<StudioSinkError>) -> Result<(), StudioSinkError> {
+        match failures.len() {
+            0 => Ok(()),
+            1 => Err(failures.pop().unwrap()),
+            _ => {
+                let summary = failures
+                    .into_iter()
+                    .map(|err| err.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                Err(StudioSinkError::Aggregate { summary })
+            }
+        }
+    }
+}
+
 pub struct QuantumRealityStudio {
     capture: SignalCaptureSession,
     tagger: SemanticTagger,
     overlay: OverlayComposer,
+    outlet: StudioOutlet,
 }
 
 impl QuantumRealityStudio {
@@ -230,7 +299,25 @@ impl QuantumRealityStudio {
             capture: SignalCaptureSession::new(config),
             tagger: SemanticTagger::from_bridge(bridge),
             overlay: OverlayComposer::default(),
+            outlet: StudioOutlet::default(),
         }
+    }
+
+    pub fn with_sink<S: StudioSink + 'static>(mut self, sink: S) -> Self {
+        self.outlet.register(sink);
+        self
+    }
+
+    pub fn register_sink<S: StudioSink + 'static>(&mut self, sink: S) {
+        self.outlet.register(sink);
+    }
+
+    pub fn sink_count(&self) -> usize {
+        self.outlet.len()
+    }
+
+    pub fn flush_sinks(&mut self) -> Result<(), StudioError> {
+        self.outlet.flush().map_err(StudioError::from)
     }
 
     pub fn ingest(
@@ -256,12 +343,14 @@ impl QuantumRealityStudio {
             narrative.as_ref(),
             self.tagger.fallback_for(channel),
         );
-        Ok(StudioFrame {
+        let frame = StudioFrame {
             record,
             concept,
             narrative,
             overlay,
-        })
+        };
+        self.outlet.broadcast(&frame)?;
+        Ok(frame)
     }
 
     pub fn records(&self) -> impl Iterator<Item = &RecordedPulse> {
@@ -295,6 +384,7 @@ impl QuantumRealityStudio {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     fn sample_pulse() -> MaxwellZPulse {
         MaxwellZPulse {
@@ -335,5 +425,102 @@ mod tests {
         assert!(frame.narrative.is_some());
         assert_eq!(frame.overlay.glyph, "braid");
         assert!(frame.overlay.intensity > 0.0);
+    }
+
+    struct SharedSink {
+        name: String,
+        frames: Arc<Mutex<Vec<StudioFrame>>>,
+    }
+
+    impl SharedSink {
+        fn new(name: impl Into<String>, frames: Arc<Mutex<Vec<StudioFrame>>>) -> Self {
+            Self {
+                name: name.into(),
+                frames,
+            }
+        }
+    }
+
+    impl StudioSink for SharedSink {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn send(&mut self, frame: &StudioFrame) -> Result<(), StudioSinkError> {
+            self.frames
+                .lock()
+                .expect("mutex poisoned")
+                .push(frame.clone());
+            Ok(())
+        }
+    }
+
+    struct FailingSink {
+        name: String,
+    }
+
+    impl FailingSink {
+        fn new(name: impl Into<String>) -> Self {
+            Self { name: name.into() }
+        }
+    }
+
+    impl StudioSink for FailingSink {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn send(&mut self, _frame: &StudioFrame) -> Result<(), StudioSinkError> {
+            Err(StudioSinkError::Transmission {
+                sink: self.name.clone(),
+                reason: "simulated failure".into(),
+            })
+        }
+    }
+
+    #[test]
+    fn studio_broadcasts_frames_to_registered_sinks() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(0, 1.0)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let frames = Arc::new(Mutex::new(Vec::new()));
+        let sink = SharedSink::new("shared", Arc::clone(&frames));
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio.register_sink(sink);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest");
+        assert_eq!(studio.sink_count(), 1);
+        assert_eq!(frame.overlay.glyph, "braid");
+        let stored = frames.lock().expect("mutex poisoned");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].overlay.glyph, "braid");
+    }
+
+    #[test]
+    fn sink_failures_are_reported() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(0, 1.0)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
+            .with_sink(FailingSink::new("fail"));
+        let err = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .unwrap_err();
+        match err {
+            StudioError::Outlet(StudioSinkError::Transmission { sink, reason }) => {
+                assert_eq!(sink, "fail");
+                assert!(reason.contains("failure"));
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
     }
 }
