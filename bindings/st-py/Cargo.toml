@@ -20,7 +20,7 @@ collapse = ["psi"]
 
 # Backend selection (mirrors the CLI surface expected by maturin builds)
 cpu = []
-wgpu = ["st-core/wgpu", "st-tensor/wgpu"]
+wgpu = ["st-core/wgpu", "st-tensor/wgpu_frac"]
 "wgp" = ["wgpu"]
 "wgpu-rt" = ["st-core/wgpu-rt", "wgpu"]
 mps = ["st-core/mps", "st-tensor/mps"]
@@ -31,7 +31,7 @@ logic = ["st-core/logic"]
 "logic-learn" = ["st-core/logic-learn"]
 kdsl = ["st-core/kdsl", "st-nn/kdsl", "st-rl/kdsl"]
 "kv-redis" = ["st-core/kv-redis"]
-"wgpu-frac" = ["st-tensor/wgpu_frac"]
+"wgpu-frac" = ["wgpu"]
 
 [dependencies]
 pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", "gil-refs", "num-complex"] }
