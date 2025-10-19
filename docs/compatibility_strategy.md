@@ -31,8 +31,9 @@ performance, memory safety, and collaborative tooling.
   and common parquet/csv formats directly from Rust and Python. Reuse Polars and
   Arrow-based pipelines where possible to avoid double buffering.
 - **Mixed runtime workflows.** Publish examples that delegate preprocessing to PyTorch
-  dataloaders while running forward/backward passes in SpiralTorch. Provide guidance on
-  zero-copy tensor exchange via DLPack and how to profile the boundary overhead.
+  dataloaders while running forward/backward passes in SpiralTorch. Document the
+  zero-copy `Tensor::to_dlpack`/`Tensor::from_dlpack` exchange path and how to profile
+  the boundary overhead.
 - **Telemetry bridges.** Map SpiralTorch's observability events to tensorboard, Weights &
   Biases, and OpenTelemetry spans so teams can keep their existing dashboards.
 
