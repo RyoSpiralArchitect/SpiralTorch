@@ -10,3 +10,4 @@ authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 st-tensor = { path = "../st-tensor" }
 st-kdsl = { path = "../st-kdsl" }
 st-rl    = { path = "../st-rl" }
+rand     = { version = "0.8", default-features = false, features = ["std"] }

@@ -5,18 +5,20 @@
 
 mod sot;
 
-use crate::sot::{PySoT3DPlan, Sot3DParams};
+use crate::sot::{plan_from_py_config, PyMacroSummary, PySoT3DPlan, PySoT3DStep};
 
 use ndarray::{Array2, ArrayD, Ix2};
 use num_complex::Complex64;
 use pyo3::exceptions::{PyImportError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule, PySequence, PyTuple};
+use pyo3::types::{PyAny, PyCapsule, PyDict, PyList, PyModule, PySequence, PyTuple};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use pyo3::Py;
+use pyo3::PyObject;
 use pyo3::PyRef;
 use pyo3::PyRefMut;
+use pyo3::{ffi, PyErr};
 use st_backend_hip::{
     device_info as hip_device_info, hip_available as hip_runtime_available,
     DeviceInfo as HipDeviceInfo,
@@ -101,12 +103,19 @@ use st_tensor::backend::faer_dense;
 use st_tensor::backend::wgpu_dense as tensor_wgpu_dense;
 use st_tensor::{
     measure::{
-        z_space_barycenter as rust_z_space_barycenter, BarycenterIntermediate, ZSpaceBarycenter,
+        nirt_weight_update as rust_nirt_weight_update,
+        tesla_tail_spectrum as rust_tesla_tail_spectrum,
+        z_space_barycenter as rust_z_space_barycenter,
+        BarycenterIntermediate,
+        TeslaTail,
+        TeslaTailLine,
+        ZSpaceBarycenter,
     },
     topos::OpenCartesianTopos,
     AmegaHypergrad, Complex32, ComplexTensor, DifferentialResonance, LanguageWaveEncoder,
     MatmulBackend, PureResult, Tensor, TensorBiome, TensorError,
 };
+use st_tensor::dlpack::{self, DLDeviceType, DLManagedTensor};
 use std::cell::RefCell;
 use st_text::{
     describe_atlas as text_describe_atlas, describe_frame as text_describe_frame,
@@ -116,6 +125,7 @@ use st_text::{
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::ffi::c_void;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -245,6 +255,123 @@ fn tensor_err(err: TensorError) -> PyErr {
 
 fn convert<T>(value: PureResult<T>) -> PyResult<T> {
     value.map_err(tensor_err)
+}
+
+fn dlpack_err(message: impl Into<String>) -> PyErr {
+    PyValueError::new_err(message.into())
+}
+
+fn extract_dlpack_managed(
+    py: Python<'_>,
+    source: &PyAny,
+) -> PyResult<(*mut DLManagedTensor, PyObject)> {
+    let capsule_obj = if source.hasattr("__dlpack__")? {
+        let callable = source.getattr("__dlpack__")?;
+        callable.call0()?.into_py(py)
+    } else {
+        source.into_py(py)
+    };
+
+    let capsule_ref = capsule_obj.as_ref(py);
+    let capsule_ptr = capsule_ref.as_ptr();
+
+    if unsafe { ffi::PyCapsule_CheckExact(capsule_ptr) } == 0 {
+        return Err(dlpack_err(
+            "expected a DLPack capsule or object implementing __dlpack__",
+        ));
+    }
+
+    if unsafe { ffi::PyCapsule_IsValid(capsule_ptr, dlpack::DLPACK_CAPSULE_NAME.as_ptr()) } == 0 {
+        return Err(dlpack_err("capsule is not a valid DLPack tensor"));
+    }
+
+    let managed = unsafe {
+        ffi::PyCapsule_GetPointer(capsule_ptr, dlpack::DLPACK_CAPSULE_NAME.as_ptr())
+            as *mut DLManagedTensor
+    };
+
+    if managed.is_null() {
+        return Err(dlpack_err("DLPack capsule returned a null tensor pointer"));
+    }
+
+    if unsafe {
+        ffi::PyCapsule_SetName(capsule_ptr, dlpack::USED_DLPACK_CAPSULE_NAME.as_ptr())
+    } != 0
+    {
+        return Err(PyErr::fetch(py));
+    }
+
+    if unsafe { ffi::PyCapsule_SetDestructor(capsule_ptr, None) } != 0 {
+        return Err(PyErr::fetch(py));
+    }
+
+    if unsafe { ffi::PyCapsule_SetPointer(capsule_ptr, std::ptr::null_mut()) } != 0 {
+        return Err(PyErr::fetch(py));
+    }
+
+    Ok((managed, capsule_obj))
+}
+
+unsafe extern "C" fn dlpack_capsule_destructor(capsule: *mut ffi::PyObject) {
+    if capsule.is_null() {
+        return;
+    }
+    if unsafe { ffi::PyCapsule_IsValid(capsule, dlpack::DLPACK_CAPSULE_NAME.as_ptr()) } == 0 {
+        return;
+    }
+    let managed = unsafe {
+        ffi::PyCapsule_GetPointer(capsule, dlpack::DLPACK_CAPSULE_NAME.as_ptr())
+            as *mut DLManagedTensor
+    };
+    if managed.is_null() {
+        return;
+    }
+    unsafe {
+        dlpack::call_managed_deleter(managed);
+    }
+}
+
+fn make_dlpack_capsule(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
+    let managed = convert(tensor.to_dlpack())?;
+    let capsule = unsafe {
+        PyCapsule::new(
+            py,
+            managed as *mut c_void,
+            Some(dlpack::DLPACK_CAPSULE_NAME),
+            Some(dlpack_capsule_destructor),
+        )?
+    };
+    Ok(capsule.into_py(py))
+}
+
+#[cfg(test)]
+mod dlpack_tests {
+    use super::*;
+    use pyo3::prelude::*;
+
+    #[test]
+    fn py_tensor_implements_dlpack_protocol() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let base = Tensor::from_vec(1, 2, vec![1.0, 2.0]).unwrap();
+            let source_ptr = base.data().as_ptr();
+            let py_tensor = Py::new(py, PyTensor::from_tensor(base)).unwrap();
+
+            let capsule = py_tensor.call_method0(py, "__dlpack__").unwrap();
+            let device = py_tensor
+                .call_method0(py, "__dlpack_device__")
+                .unwrap()
+                .extract::<(i32, i32)>(py)
+                .unwrap();
+            assert_eq!(device, (DLDeviceType::Cpu as i32, 0));
+
+            let (managed, guard) = extract_dlpack_managed(py, capsule.as_ref(py)).unwrap();
+            let restored = unsafe { Tensor::from_dlpack(managed).unwrap() };
+            assert_eq!(restored.data(), &[1.0, 2.0]);
+            assert_eq!(source_ptr, restored.data().as_ptr());
+            drop(guard);
+        });
+    }
 }
 
 fn desire_phase_name(phase: DesirePhase) -> &'static str {
@@ -1001,6 +1128,14 @@ impl PyTensor {
         Ok(Self::from_tensor(convert(Tensor::zeros(rows, cols))?))
     }
 
+    #[staticmethod]
+    fn from_dlpack(py: Python<'_>, capsule: &PyAny) -> PyResult<Self> {
+        let (managed, guard) = extract_dlpack_managed(py, capsule)?;
+        let tensor = unsafe { convert(Tensor::from_dlpack(managed))? };
+        drop(guard);
+        Ok(Self::from_tensor(tensor))
+    }
+
     #[pyo3(name = "clone")]
     fn clone_py(&self) -> Self {
         Self {
@@ -1024,6 +1159,31 @@ impl PyTensor {
 
     fn data(&self) -> Vec<f32> {
         self.inner.data().to_vec()
+    }
+
+    fn to_dlpack(&self, py: Python<'_>) -> PyResult<PyObject> {
+        make_dlpack_capsule(py, &self.inner)
+    }
+
+    #[pyo3(name = "__dlpack__")]
+    #[pyo3(signature = (*, stream=None))]
+    fn py_dlpack(&self, py: Python<'_>, stream: Option<&PyAny>) -> PyResult<PyObject> {
+        if let Some(hint) = stream {
+            if !hint.is_none() {
+                let is_zero = hint.extract::<usize>().map(|value| value == 0).unwrap_or(false);
+                if !is_zero {
+                    return Err(PyValueError::new_err(
+                        "SpiralTorch CPU tensors do not support __dlpack__ stream hints",
+                    ));
+                }
+            }
+        }
+        make_dlpack_capsule(py, &self.inner)
+    }
+
+    #[pyo3(name = "__dlpack_device__")]
+    fn py_dlpack_device(&self) -> (i32, i32) {
+        (DLDeviceType::Cpu as i32, 0)
     }
 
     fn tolist(&self) -> Vec<Vec<f32>> {
@@ -1245,6 +1405,98 @@ struct PyBarycenterIntermediate {
 impl PyBarycenterIntermediate {
     fn from_stage(stage: BarycenterIntermediate) -> Self {
         Self { inner: stage }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "TeslaTailLine")]
+#[derive(Clone, Debug)]
+struct PyTeslaTailLine {
+    inner: TeslaTailLine,
+}
+
+impl PyTeslaTailLine {
+    fn from_line(line: TeslaTailLine) -> Self {
+        Self { inner: line }
+    }
+}
+
+#[pymethods]
+impl PyTeslaTailLine {
+    #[getter]
+    fn frequency(&self) -> f32 {
+        self.inner.frequency
+    }
+
+    #[getter]
+    fn amplitude(&self) -> f32 {
+        self.inner.amplitude
+    }
+
+    #[getter]
+    fn weight(&self) -> f32 {
+        self.inner.weight
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("frequency", self.inner.frequency)?;
+        dict.set_item("amplitude", self.inner.amplitude)?;
+        dict.set_item("weight", self.inner.weight)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "TeslaTailLine(freq={:.4}, amp={:.4}, weight={:.4})",
+            self.inner.frequency, self.inner.amplitude, self.inner.weight
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "TeslaTail")]
+#[derive(Clone, Debug)]
+struct PyTeslaTail {
+    inner: TeslaTail,
+}
+
+impl PyTeslaTail {
+    fn from_tail(tail: TeslaTail) -> Self {
+        Self { inner: tail }
+    }
+}
+
+#[pymethods]
+impl PyTeslaTail {
+    #[getter]
+    fn coherence_rate(&self) -> f32 {
+        self.inner.coherence_rate
+    }
+
+    fn lines(&self, py: Python<'_>) -> PyResult<Vec<Py<PyTeslaTailLine>>> {
+        let mut out = Vec::with_capacity(self.inner.lines.len());
+        for line in &self.inner.lines {
+            out.push(Py::new(py, PyTeslaTailLine::from_line(line.clone()))?);
+        }
+        Ok(out)
+    }
+
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("coherence_rate", self.inner.coherence_rate)?;
+        let py_lines = PyList::empty_bound(py);
+        for line in &self.inner.lines {
+            py_lines.append(PyTeslaTailLine::from_line(line.clone()).into_py(py))?;
+        }
+        dict.set_item("lines", py_lines.into_py(py))?;
+        Ok(dict.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "TeslaTail(coherence_rate={:.4}, lines={})",
+            self.inner.coherence_rate,
+            self.inner.lines.len()
+        ))
     }
 }
 
@@ -3241,8 +3493,6 @@ impl PyCollapsePulse {
             self.command_kind()
         ))
     }
-}
-
 #[pyclass(module = "spiraltorch", name = "ChronoFrame")]
 #[derive(Clone)]
 struct PyChronoFrame {
@@ -12648,34 +12898,11 @@ impl PyChronoSummary {
             Some(0) | None => 1,
             Some(value) => value.max(1),
         };
-        let mut plan_steps = default_steps;
-        let mut params = Sot3DParams {
-            base_radius: 1.0,
-            radial_growth: 0.05,
-            base_height: 1.0,
-            meso_gain: 0.2,
-            micro_gain: 0.05,
-        };
-        if let Some(cfg) = sot {
-            if let Some(value) = cfg.get_item("steps")? {
-                plan_steps = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("base_radius")? {
-                params.base_radius = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("radial_growth")? {
-                params.radial_growth = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("base_height")? {
-                params.base_height = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("meso_gain")? {
-                params.meso_gain = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("micro_gain")? {
-                params.micro_gain = value.extract()?;
-            }
-        }
+        let plan = plan_from_py_config(default_steps, sot)?;
+        let trace = convert(self.inner.trace(seed.as_tensor().clone()))?;
+        Ok(PySpiralDifferentialTrace::from_trace_with_plan(trace, plan))
+    }
+
     #[getter]
     fn duration(&self) -> f32 {
         self.summary.duration
@@ -13304,6 +13531,11 @@ impl PySpiralDifferentialTrace {
         self.sot_plan.clone()
     }
 
+    #[getter]
+    fn sot_total_steps(&self) -> Option<usize> {
+        self.sot_plan.as_ref().map(|plan| plan.total_steps())
+    }
+
     fn set_sot_plan(&mut self, plan: Option<&PySoT3DPlan>) -> PyResult<()> {
         self.sot_plan = plan.cloned();
         Ok(())
@@ -13339,6 +13571,93 @@ impl PySpiralDifferentialTrace {
         } else {
             Ok(false)
         }
+    }
+
+    fn sot_positions_tensor(&self) -> PyResult<Option<PyTensor>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.as_tensor())
+            .transpose()
+    }
+
+    fn sot_feature_tensor(&self) -> PyResult<Option<PyTensor>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.feature_tensor())
+            .transpose()
+    }
+
+    fn sot_role_tensor(&self) -> PyResult<Option<PyTensor>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.role_tensor())
+            .transpose()
+    }
+
+    fn sot_reflection_tensor(&self) -> PyResult<Option<PyTensor>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.reflection_tensor())
+            .transpose()
+    }
+
+    fn sot_macro_summary_tensor(&self) -> PyResult<Option<PyTensor>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.macro_summary_tensor())
+            .transpose()
+    }
+
+    fn sot_steps(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<Option<Vec<Py<PySoT3DStep>>>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.steps(py))
+            .transpose()
+    }
+
+    fn sot_step_dicts(&self, py: Python<'_>) -> PyResult<Option<Vec<PyObject>>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.as_dicts(py))
+            .transpose()
+    }
+
+    fn sot_macro_summaries(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<Option<Vec<Py<PyMacroSummary>>>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.macro_summaries(py))
+            .transpose()
+    }
+
+    fn sot_macro_dicts(&self, py: Python<'_>) -> PyResult<Option<Vec<PyObject>>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| {
+                let summaries = plan.macro_summaries(py)?;
+                let mut out = Vec::with_capacity(summaries.len());
+                for summary in summaries {
+                    let dict = summary.bind(py).call_method0("as_dict")?;
+                    out.push(dict.into_py(py));
+                }
+                Ok(out)
+            })
+            .transpose()
+    }
+
+    fn sot_polyline(&self) -> Option<Vec<(f64, f64, f64)>> {
+        self.sot_plan.as_ref().map(|plan| plan.polyline())
+    }
+
+    fn sot_reflection_points(&self) -> Option<Vec<(usize, &'static str)>> {
+        self.sot_plan
+            .as_ref()
+            .map(|plan| plan.reflection_points())
     }
 
     fn deform(&mut self, generator: &PyTensor, direction: &PyTensor) -> PyResult<()> {
@@ -15906,41 +16225,8 @@ impl PySpiralSession {
             Some(0) | None => 1,
             Some(value) => value.max(1),
         };
-        let mut plan_steps = default_steps;
-        let mut params = Sot3DParams {
-            base_radius: 1.0,
-            radial_growth: 0.05,
-            base_height: 1.0,
-            meso_gain: 0.2,
-            micro_gain: 0.05,
-        };
-        if let Some(cfg) = sot {
-            if let Some(value) = cfg.get_item("steps")? {
-                plan_steps = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("base_radius")? {
-                params.base_radius = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("radial_growth")? {
-                params.radial_growth = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("base_height")? {
-                params.base_height = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("meso_gain")? {
-                params.meso_gain = value.extract()?;
-            }
-            if let Some(value) = cfg.get_item("micro_gain")? {
-                params.micro_gain = value.extract()?;
-            }
-        }
-
+        let plan = plan_from_py_config(default_steps, sot)?;
         let trace = convert(self.inner.trace(seed.as_tensor().clone()))?;
-        let plan = if plan_steps == 0 {
-            None
-        } else {
-            Some(crate::sot::generate_plan_with_params(plan_steps, params)?)
-        };
         Ok(PySpiralDifferentialTrace::from_trace_with_plan(trace, plan))
     }
 
@@ -17930,6 +18216,36 @@ fn z_space_barycenter_py(
     PyZSpaceBarycenter::from_result(barycenter).as_dict(py)
 }
 
+#[pyfunction(name = "tesla_tail_spectrum")]
+#[pyo3(signature = (radii, frequencies, weights, kappa))]
+fn tesla_tail_spectrum_py(
+    py: Python<'_>,
+    radii: Vec<f32>,
+    frequencies: Vec<f32>,
+    weights: Vec<f32>,
+    kappa: f32,
+) -> PyResult<PyObject> {
+    let tail = convert(rust_tesla_tail_spectrum(&radii, &frequencies, &weights, kappa))?;
+    PyTeslaTail::from_tail(tail).as_dict(py)
+}
+
+#[pyfunction(name = "nirt_weight_update")]
+#[pyo3(signature = (weights, similarities, coherence_rate, eta))]
+fn nirt_weight_update_py(
+    mut weights: Vec<f32>,
+    similarities: Vec<f32>,
+    coherence_rate: f32,
+    eta: f32,
+) -> PyResult<Vec<f32>> {
+    convert(rust_nirt_weight_update(
+        &mut weights,
+        &similarities,
+        coherence_rate,
+        eta,
+    ))?;
+    Ok(weights)
+}
+
 fn parse_frac_pad(pad: &str) -> PyResult<FracPad> {
     match pad.to_ascii_lowercase().as_str() {
         "zero" => Ok(FracPad::Zero),
@@ -19379,6 +19695,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(topk2d_tensor_py, m)?)?;
     m.add_function(wrap_pyfunction!(topk2d_py, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
+    m.add_function(wrap_pyfunction!(tesla_tail_spectrum_py, m)?)?;
+    m.add_function(wrap_pyfunction!(nirt_weight_update_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_function(wrap_pyfunction!(get_config_events, m)?)?;
@@ -19404,6 +19722,8 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTensor>()?;
     m.add_class::<PyComplexTensor>()?;
     m.add_class::<PyBarycenterIntermediate>()?;
+    m.add_class::<PyTeslaTailLine>()?;
+    m.add_class::<PyTeslaTail>()?;
     m.add_class::<PyZSpaceBarycenter>()?;
     m.add_class::<PyDifferentialResonance>()?;
     m.add_class::<PyAtlasMetric>()?;

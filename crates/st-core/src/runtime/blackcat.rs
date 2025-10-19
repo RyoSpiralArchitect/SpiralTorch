@@ -197,6 +197,7 @@ impl BlackCatRuntime {
         self.z.update(
             reward_current,
             reward_current - (proposed_penalty - curr_penalty),
+            Some(&self.last_context),
         );
         let grad_norm = metrics.extra.get("grad_norm").copied().unwrap_or(0.0);
         let loss_var = metrics
@@ -459,6 +460,8 @@ pub mod zmeta {
         pub lr: f64,
         pub alpha_frac: f64,
         pub lam_frac: f64,
+        pub orientation_eta: f64,
+        pub orientation_eps: f64,
         pub seed: u64,
     }
 
@@ -470,6 +473,8 @@ pub mod zmeta {
                 lr: 0.1,
                 alpha_frac: 0.35,
                 lam_frac: 0.1,
+                orientation_eta: 0.15,
+                orientation_eps: 1e-3,
                 seed: 42,
             }
         }
@@ -484,6 +489,7 @@ pub mod zmeta {
         temp: f64,
         temp_min: f64,
         temp_max: f64,
+        structural: Vec<f64>,
     }
 
     impl ZMetaES {
@@ -494,8 +500,9 @@ pub mod zmeta {
                 *value = rng.gauss(0.0, 1.0);
             }
             normalize(&mut dir);
+            let dim = params.dim;
             Self {
-                z: vec![0.0; params.dim],
+                z: vec![0.0; dim],
                 dir,
                 params,
                 rng,
@@ -503,6 +510,7 @@ pub mod zmeta {
                 temp: 1.0,
                 temp_min: 0.1,
                 temp_max: 4.0,
+                structural: vec![0.0; dim],
             }
         }
 
@@ -565,8 +573,16 @@ pub mod zmeta {
             )
         }
 
-        pub fn update(&mut self, reward_current: f64, reward_proposed: f64) {
-            let improved = reward_proposed > reward_current;
+        pub fn update(
+            &mut self,
+            reward_current: f64,
+            reward_proposed: f64,
+            structural: Option<&[f64]>,
+        ) {
+            let delta_reward = reward_proposed - reward_current;
+            let structural_delta = self.ingest_structural(structural);
+            let improved = delta_reward > 0.0;
+
             if improved {
                 for (z, d) in self.z.iter_mut().zip(self.dir.iter()) {
                     *z += self.params.lr * (self.params.sigma * d);
@@ -574,7 +590,6 @@ pub mod zmeta {
                 for dir in self.dir.iter_mut() {
                     *dir = 0.7 * (*dir) + 0.3 * self.rng.gauss(0.0, 1.0);
                 }
-                normalize(&mut self.dir);
             } else {
                 let mut kick: Vec<f64> = (0..self.params.dim)
                     .map(|_| self.rng.gauss(0.0, 0.5))
@@ -586,8 +601,295 @@ pub mod zmeta {
                 for (dir, kick) in self.dir.iter_mut().zip(kick.iter()) {
                     *dir = 0.9 * (*dir) + 0.1 * (*kick);
                 }
-                normalize(&mut self.dir);
             }
+
+            normalize(&mut self.dir);
+
+            if let Some(delta) = structural_delta {
+                self.apply_structural_drive(delta, delta_reward);
+            }
+        }
+
+        #[allow(dead_code)]
+        fn ingest_structural_legacy(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
+            let Some(raw) = structural else {
+                return None;
+            };
+            if self.params.dim == 0 {
+                return None;
+            }
+
+            let mut new_vec = vec![0.0f64; self.params.dim];
+            let mut any = false;
+            for (idx, slot) in new_vec.iter_mut().enumerate() {
+                if let Some(value) = raw.get(idx).copied() {
+                    if value.is_finite() {
+                        *slot = value;
+                        any |= value.abs() > 1e-12;
+                    }
+                }
+            }
+            if !any {
+                return None;
+            }
+
+            let norm = (new_vec.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            if norm <= 1e-9 {
+                return None;
+            }
+            for value in new_vec.iter_mut() {
+                *value /= norm;
+            }
+
+            let prev = self.structural.clone();
+            self.structural = new_vec;
+            Some(
+                self.structural
+                    .iter()
+                    .zip(prev.iter())
+                    .map(|(new, old)| new - old)
+                    .collect(),
+            )
+        }
+
+        fn ingest_structural(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
+            let Some(raw) = structural else {
+                return None;
+            };
+            if self.params.dim == 0 {
+                return None;
+            }
+
+            let mut new_vec = vec![0.0f64; self.params.dim];
+            let mut any = false;
+            for (idx, slot) in new_vec.iter_mut().enumerate() {
+                if let Some(value) = raw.get(idx).copied() {
+                    if value.is_finite() {
+                        *slot = value;
+                        any |= value.abs() > 1e-12;
+                    }
+                }
+            }
+            if !any {
+                return None;
+            }
+
+            let norm = (new_vec.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            if norm <= 1e-9 {
+                return None;
+            }
+            for value in new_vec.iter_mut() {
+                *value /= norm;
+            }
+
+            let prev = self.structural.clone();
+            self.structural = new_vec;
+            Some(
+                self.structural
+                    .iter()
+                    .zip(prev.iter())
+                    .map(|(new, old)| new - old)
+                    .collect(),
+            )
+        }
+
+        #[allow(dead_code)]
+        fn apply_structural_drive_legacy(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
+            if delta_reward.abs() <= 1e-9 {
+                return;
+            }
+            let gain = delta_reward.tanh();
+            if !gain.is_finite() || gain.abs() <= 1e-6 {
+                return;
+            }
+
+            let delta_norm = (delta.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            if delta_norm <= 1e-9 {
+                return;
+            }
+
+            for value in delta.iter_mut() {
+                *value *= gain;
+            }
+
+            self.logistic_project_step_legacy(&delta);
+        }
+
+        fn apply_structural_drive(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
+            if delta_reward.abs() <= 1e-9 {
+                return;
+            }
+            let gain = delta_reward.tanh();
+            if !gain.is_finite() || gain.abs() <= 1e-6 {
+                return;
+            }
+
+            let delta_norm = (delta.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            if delta_norm <= 1e-9 {
+                return;
+            }
+
+            for value in delta.iter_mut() {
+                *value *= gain;
+            }
+
+            self.logistic_project_step_legacy(&delta);
+        }
+
+        #[allow(dead_code)]
+        fn logistic_project_step_legacy(&mut self, drive: &[f64]) {
+            if self.dir.is_empty() {
+                return;
+            }
+
+            let structural_norm_sq = self.structural.iter().map(|v| v * v).sum::<f64>();
+            if structural_norm_sq <= 1e-12 {
+                return;
+            }
+
+            let mut projected = Vec::with_capacity(self.dir.len());
+            let dot_nd = dot(&self.dir, drive);
+            for (n, d) in self.dir.iter().zip(drive.iter()) {
+                projected.push(d - dot_nd * n);
+            }
+
+            let proj_norm_sq = projected.iter().map(|v| v * v).sum::<f64>();
+            if proj_norm_sq <= 1e-12 {
+                return;
+            }
+
+            let proj_norm = proj_norm_sq.sqrt();
+            let dot_nr = self
+                .dir
+                .iter()
+                .zip(self.structural.iter())
+                .map(|(n, r)| n * r)
+                .sum::<f64>()
+                .clamp(-1.0, 1.0);
+            let p_t = 0.5 * (1.0 + dot_nr);
+            let eps = self.params.orientation_eps.max(1e-6);
+            let denom = 2.0 * p_t * (1.0 - p_t) + eps;
+            let eta = self.params.orientation_eta.max(0.0);
+            if eta <= 0.0 {
+                return;
+            }
+
+            for (n, proj) in self.dir.iter_mut().zip(projected.iter()) {
+                *n += eta * (*proj) / denom;
+            }
+            normalize(&mut self.dir);
+        }
+
+        #[cfg(feature = "blackcat_v2")]
+        fn ingest_structural(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
+            let Some(raw) = structural else {
+                return None;
+            };
+            if self.params.dim == 0 {
+                return None;
+            }
+
+            let mut new_vec = vec![0.0f64; self.params.dim];
+            let mut any = false;
+            for (idx, slot) in new_vec.iter_mut().enumerate() {
+                if let Some(value) = raw.get(idx).copied() {
+                    if value.is_finite() {
+                        *slot = value;
+                        any |= value.abs() > 1e-12;
+                    }
+                }
+            }
+            if !any {
+                return None;
+            }
+
+            let norm = (new_vec.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            if norm <= 1e-9 {
+                return None;
+            }
+            for value in new_vec.iter_mut() {
+                *value /= norm;
+            }
+
+            let prev = self.structural.clone();
+            self.structural = new_vec;
+            Some(
+                self.structural
+                    .iter()
+                    .zip(prev.iter())
+                    .map(|(new, old)| new - old)
+                    .collect(),
+            )
+        }
+
+        #[cfg(feature = "blackcat_v2")]
+        fn apply_structural_drive(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
+            if delta_reward.abs() <= 1e-9 {
+                return;
+            }
+            let gain = delta_reward.tanh();
+            if !gain.is_finite() || gain.abs() <= 1e-6 {
+                return;
+            }
+
+            let delta_norm = (delta.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            if delta_norm <= 1e-9 {
+                return;
+            }
+
+            for value in delta.iter_mut() {
+                *value *= gain;
+            }
+
+            self.logistic_project_step(&delta);
+        }
+
+        #[cfg(feature = "blackcat_v2")]
+        fn logistic_project_step(&mut self, drive: &[f64]) {
+            if self.dir.is_empty() {
+                return;
+            }
+
+            let structural_norm_sq = self.structural.iter().map(|v| v * v).sum::<f64>();
+            if structural_norm_sq <= 1e-12 {
+                return;
+            }
+
+            let mut projected = Vec::with_capacity(self.dir.len());
+            let dot_nd = dot(&self.dir, drive);
+            for (n, d) in self.dir.iter().zip(drive.iter()) {
+                projected.push(d - dot_nd * n);
+            }
+
+            let proj_norm = (projected.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            if proj_norm <= 1e-12 {
+                return;
+            }
+
+            let scale = 1.0 / proj_norm.max(1.0);
+            for value in projected.iter_mut() {
+                *value *= scale;
+            }
+
+            let dot_nr = self
+                .dir
+                .iter()
+                .zip(self.structural.iter())
+                .map(|(n, r)| n * r)
+                .sum::<f64>()
+                .clamp(-1.0, 1.0);
+            let p_t = 0.5 * (1.0 + dot_nr);
+            let eps = self.params.orientation_eps.max(1e-6);
+            let denom = 2.0 * p_t * (1.0 - p_t) + eps;
+            let eta = self.params.orientation_eta.max(0.0);
+            if eta <= 0.0 {
+                return;
+            }
+
+            for (n, proj) in self.dir.iter_mut().zip(projected.iter()) {
+                *n += eta * (*proj) / denom;
+            }
+            normalize(&mut self.dir);
         }
     }
 
@@ -622,6 +924,45 @@ pub mod zmeta {
                 let radix_factor = (*radix as f64).max(2.0) / 2.0;
                 base * (1.0 + 0.15 * (radix_factor - 1.0))
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn norm(vec: &[f64]) -> f64 {
+            vec.iter().map(|v| v * v).sum::<f64>().sqrt()
+        }
+
+        #[test]
+        fn logistic_projection_keeps_unit_norm() {
+            let mut params = ZMetaParams::default();
+            params.dim = 3;
+            params.seed = 7;
+            params.orientation_eta = 0.2;
+            params.orientation_eps = 5e-3;
+            let mut es = ZMetaES::new(params);
+            assert!((norm(&es.dir) - 1.0).abs() < 1e-6);
+
+            let context1 = [0.2, 0.5, -0.3];
+            let delta1 = es.ingest_structural(Some(&context1)).unwrap();
+            es.apply_structural_drive(delta1, 0.15);
+            assert!((norm(&es.dir) - 1.0).abs() < 1e-6);
+
+            let context2 = [0.8, -0.1, 0.3];
+            let delta2 = es.ingest_structural(Some(&context2)).unwrap();
+            let dir_before = es.dir.clone();
+            es.apply_structural_drive(delta2, 0.25);
+            assert!((norm(&es.dir) - 1.0).abs() < 1e-6);
+            let delta_dir = es
+                .dir
+                .iter()
+                .zip(dir_before.iter())
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt();
+            assert!(delta_dir > 1e-6);
         }
     }
 

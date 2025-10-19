@@ -22,7 +22,7 @@
 // ============================================================================
 
 use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
-use super::dashboard::{DashboardFrame, DashboardRing, DashboardSummary};
+use super::dashboard::{DashboardFrame, DashboardRing};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
@@ -34,9 +34,11 @@ use std::time::SystemTime;
 
 use serde_json::Value;
 
+use crate::theory::zpulse::ZScale;
+
 use super::chrono::ChronoLoopSignal;
 #[cfg(feature = "psi")]
-use super::psi::{PsiComponent, PsiEvent, PsiReading};
+use super::psi::{PsiComponent, PsiEvent, PsiReading, PsiSpiralAdvisory, PsiSpiralTuning};
 #[cfg(feature = "psychoid")]
 use super::psychoid::PsychoidReading;
 #[cfg(feature = "collapse")]
@@ -49,6 +51,13 @@ static LAST_PSI: Lazy<RwLock<Option<PsiReading>>> = Lazy::new(|| RwLock::new(Non
 
 #[cfg(feature = "psi")]
 static LAST_PSI_EVENTS: Lazy<RwLock<Vec<PsiEvent>>> = Lazy::new(|| RwLock::new(Vec::new()));
+
+#[cfg(feature = "psi")]
+static LAST_PSI_SPIRAL: Lazy<RwLock<Option<PsiSpiralAdvisory>>> = Lazy::new(|| RwLock::new(None));
+
+#[cfg(feature = "psi")]
+static LAST_PSI_SPIRAL_TUNING: Lazy<RwLock<Option<PsiSpiralTuning>>> =
+    Lazy::new(|| RwLock::new(None));
 
 static CONFIG_DIFF_EVENTS: OnceLock<RwLock<Vec<ConfigDiffEvent>>> = OnceLock::new();
 
@@ -114,6 +123,36 @@ pub fn get_last_psi_events() -> Vec<PsiEvent> {
         .unwrap_or_default()
 }
 
+#[cfg(feature = "psi")]
+pub fn set_last_psi_spiral(advisory: &PsiSpiralAdvisory) {
+    if let Ok(mut guard) = LAST_PSI_SPIRAL.write() {
+        *guard = Some(advisory.clone());
+    }
+}
+
+#[cfg(feature = "psi")]
+pub fn get_last_psi_spiral() -> Option<PsiSpiralAdvisory> {
+    LAST_PSI_SPIRAL
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
+#[cfg(feature = "psi")]
+pub fn set_last_psi_spiral_tuning(tuning: &PsiSpiralTuning) {
+    if let Ok(mut guard) = LAST_PSI_SPIRAL_TUNING.write() {
+        *guard = Some(tuning.clone());
+    }
+}
+
+#[cfg(feature = "psi")]
+pub fn get_last_psi_spiral_tuning() -> Option<PsiSpiralTuning> {
+    LAST_PSI_SPIRAL_TUNING
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
 /// Records the most recent configuration diff events produced when loading
 /// layered configuration files.
 pub fn record_config_events(events: &[ConfigDiffEvent]) {
@@ -162,6 +201,8 @@ pub struct SoftlogicZFeedback {
     pub drift: f32,
     /// Normalized control signal in the Z space. Positive values bias Above, negative bias Beneath.
     pub z_signal: f32,
+    /// Optional log-scale tag attached to the fused pulse that produced the feedback.
+    pub scale: Option<ZScale>,
 }
 
 static LAST_SOFTLOGIC_Z: OnceLock<RwLock<Option<SoftlogicZFeedback>>> = OnceLock::new();
