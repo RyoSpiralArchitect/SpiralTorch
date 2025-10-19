@@ -337,13 +337,15 @@ impl InterfaceZLift {
             0.0
         };
 
+        // ここで物理半径からスケールを設定
+        let scale = ZScale::new(signature.physical_radius).unwrap_or(ZScale::ONE);
+
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support: total_support,
             interface_cells,
             band_energy,
-            // Patch: Option<ZScale> expects Some(...)
-            scale: Some(ZScale::ONE),
+            scale: Some(scale),
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -408,13 +410,20 @@ impl InterfaceZPulse {
                 scale_weight += w;
             }
         }
+
+        // 集約スケールを計算して利用する（unused 警告の解消）
+        let scale = if scale_weight > 0.0 {
+            ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
+        } else {
+            None
+        };
+
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
             interface_cells,
             band_energy: band,
-            // Patch: keep placeholder but wrap as Some(...)
-            scale: Some(ZScale::ONE),
+            scale,
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -432,6 +441,15 @@ impl InterfaceZPulse {
 
     pub fn lerp(current: &InterfaceZPulse, next: &InterfaceZPulse, alpha: f32) -> InterfaceZPulse {
         let t = alpha.clamp(0.0, 1.0);
+
+        // スケールの補間（両方 Some の場合のみ補間、それ以外は次を優先）
+        let scale = match (current.scale, next.scale) {
+            (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
+            (_, s @ Some(_)) => s,
+            (s @ Some(_), None) => s,
+            (None, None) => None,
+        };
+
         InterfaceZPulse {
             source: next.source,
             support: lerp(current.support, next.support, t),
@@ -441,8 +459,7 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            // Patch: wrap unity in Some(...)
-            scale: Some(ZScale::ONE),
+            scale,
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -496,8 +513,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            // Patch: wrap unity in Some(...)
-            scale: Some(ZScale::ONE),
+            scale: None,
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
@@ -806,7 +822,6 @@ impl InterfaceZConductor {
     pub fn step(
         &mut self,
         mask: &ArrayD<f32>,
-//         c_prime: Option<&ArrayD<f32>>,
         c_prime: Option<&ArrayD<f32>>,
         tempo_hint: Option<f32>,
         stderr_hint: Option<f32>,
