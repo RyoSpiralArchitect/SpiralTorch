@@ -1,20 +1,28 @@
-# SpiralTorchVision ガイド
+# SpiralTorchVision Guide
 
-SpiralTorchVision は SpiralTorch の Z-space ネイティブ機能を拡張しつつ、TorchVision 標準機能との互換性を意識した設計を採用しています。ここでは TorchVision が提供する主要機能と、それを SpiralTorchVision でどのように活用・拡張していくのかを整理します。
+SpiralTorchVision extends SpiralTorch's native Z-space capabilities while staying compatible with the standard TorchVision stack. This guide inventories the core features that TorchVision ships today and outlines how SpiralTorchVision builds on top of them.
 
-## TorchVision 標準機能の整理
-- **データセット**: 画像分類、物体検出・セマンティック/インスタンスセグメンテーション、光学フロー、ステレオマッチング、画像ペア、キャプション、動画分類・予測といった代表的タスクを `torchvision.datasets` 経由で提供。
-- **モデル**: AlexNet から Vision Transformer 系までの分類モデル、量子化対応分類器、セマンティックセグメンテーション、検出/インスタンスセグメント/キーポイント推定、動画分類、光学フローなど、学習済みウェイトとともに活用可能。
-- **Transforms v2**: `torchvision.transforms.v2` は画像・動画・バウンディングボックス・マスク・キーポイントを一貫した API で扱える拡張前処理パイプライン。v1 互換性を維持しつつ高速化。
-- **TVTensors**: Image、Video、BoundingBoxes といったテンソルサブクラスによるメタデータ保持と自動ディスパッチを実現。
-- **ユーティリティ**: `draw_bounding_boxes`、`draw_segmentation_masks`、`make_grid`、`save_image` などの可視化/保存ツールを `torchvision.utils` で提供。
-- **カスタムオペレータ**: `torchvision.ops` による NMS・RoI 系演算、ボックス演算、検出向け損失、Conv/DropBlock/SE など TorchScript 互換のプリミティブ。
-- **IO**: JPEG/PNG/WEBP/GIF/AVIF/HEIC のデコードと JPEG/PNG エンコード、動画の読み書き（廃止予定）を備え、高速なテンソル変換が可能。
-- **特徴抽出ユーティリティ**: `create_feature_extractor` などで中間特徴を抽出し、可視化や転移学習、FPN などの高度な用途に対応。
+## TorchVision feature overview
+- **Datasets**: Canonical tasks for image classification, detection, semantic/instance segmentation, optical flow, stereo matching, image pairs, captioning, video classification, and video prediction through `torchvision.datasets`.
+- **Models**: Classification architectures ranging from AlexNet to Vision Transformers, quantization-ready classifiers, semantic segmentation, detection/instance segmentation/keypoint estimation, video classification, and optical flow modules with pre-trained weights.
+- **Transforms v2**: A unified preprocessing pipeline under `torchvision.transforms.v2` that handles images, videos, bounding boxes, masks, and keypoints with a consistent API while retaining v1 compatibility and higher throughput.
+- **TVTensors**: Tensor subclasses such as Image, Video, and BoundingBoxes that preserve metadata and enable automatic dispatch.
+- **Utilities**: Visualization and persistence helpers in `torchvision.utils`, including `draw_bounding_boxes`, `draw_segmentation_masks`, `make_grid`, and `save_image`.
+- **Custom operators**: TorchScript-friendly primitives in `torchvision.ops` for NMS, RoI ops, box algebra, detection losses, convolution/DropBlock/SE blocks, and more.
+- **IO**: Decoding for JPEG/PNG/WEBP/GIF/AVIF/HEIC, encoding for JPEG/PNG, and (deprecated) video IO with fast tensor conversion.
+- **Feature extraction utilities**: Tools like `create_feature_extractor` for intermediate feature capture, visualization, transfer learning, FPN assembly, and other advanced uses.
 
-## SpiralTorchVision での発展ポイント
-- **ZSpaceVolume / VisionProjector**: Z 軸方向の共鳴特徴を蓄積し、Tensor へ崩壊させるボリューム表現。TorchVision モデルの中間表現を取り込んで SpiralTorch の Z-space 解析へ橋渡しする基盤。
-- **Differential Resonance 連携**: `st_tensor::DifferentialResonance` と組み合わせることで、TorchVision モデルから得た時空間特徴を SpiralTorch の共鳴フレームへ再投影。
-- **将来的な統合**: TorchVision のデータセット/変換を入力段として活かし、Z-space ネイティブな損失や可視化ツール、さらには SpiralTorch 独自のモデルヘッドを追加実装予定。
+## SpiralTorchVision expansion points
+- **Spectral Z-attention**: `SpectralWindow` functions (Hann, Hamming, Blackman, Gaussian) now modulate how `VisionProjector` collapses `ZSpaceVolume` slices, letting you pre-emphasize perceptual frequencies before feeding tensors to TorchVision models.
+- **ZSpaceVolume / VisionProjector**: A volumetric representation that accumulates resonant features along the Z-axis and collapses them into tensors. It ingests intermediate activations from TorchVision models and bridges them into SpiralTorch's Z-space analyzers.
+- **Differential Resonance integration**: Combining with `st_tensor::DifferentialResonance` to reproject spatiotemporal features gathered from TorchVision networks back into SpiralTorch's resonant frames.
+- **Long-term integrations**: Leveraging TorchVision datasets/transforms as inputs while adding Z-space-native losses, visualization tools, and SpiralTorch-specific model heads.
 
-本ガイドは随時更新し、TorchVision エコシステムと SpiralTorchVision 拡張の対応関係を明確化していきます。
+## Resonant roadmap
+- **Z-space as a perceptual frequency domain**: Use the new spectral windows and `ZSpaceVolume::spectral_response` helper to treat collapse as a frequency-aware attention sweep that preconditions downstream ConvNets.
+- **Temporal resonance accumulation**: Introduce exponential moving averages across `ZSpaceVolume` slices so `VisionProjector` can weight both depth and time, enabling video- and timeseries-aware perception.
+- **Multi-camera Z-fusion**: Treat each Z slice as a distinct viewpoint index, fuse multi-perspective tensors inside `ZSpaceVolume::from_slices`, and drive viewpoint-specific attention maps for stereo and birds-eye tasks.
+- **Generative resonance coupling**: Feed resonance fields generated by SpiralRNN or future ZConductors back into the projector, creating a closed-loop "generative visual consciousness" cycle.
+- **Super-resolution and synthesis in Z**: Add interpolation, upscaling, diffusion, and decoding helpers so Z-aware GAN/VAE stacks can both enhance and generate volumetric inputs.
+
+This guide will evolve over time to map TorchVision ecosystems to the expanding SpiralTorchVision feature set.
