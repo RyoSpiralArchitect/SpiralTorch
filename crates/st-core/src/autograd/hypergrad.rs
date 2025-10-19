@@ -33,6 +33,7 @@ pub struct ImplicitDiagnostics {
     pub solver: Solver,
     pub iterations: usize,
     pub residual: f32,
+    pub residual_history: Vec<f32>,
     pub finite_diff_mode: FiniteDiffMode,
 }
 
@@ -234,6 +235,8 @@ where
     let mut jt = g.clone();
     let mut iterations = 0usize;
     let mut residual = jt.dot(&jt).item_f32().sqrt();
+    let mut residual_history = Vec::with_capacity(opts.max_iters + 1);
+    residual_history.push(residual);
 
     for _ in 0..opts.max_iters {
         iterations += 1;
@@ -248,6 +251,7 @@ where
             opts.finite_diff_mode,
         );
         residual = jt.dot(&jt).item_f32().sqrt();
+        residual_history.push(residual);
         v = v.add(&jt);
         if residual < opts.tolerance {
             break;
@@ -263,6 +267,7 @@ where
             solver: opts.solver,
             iterations,
             residual,
+            residual_history,
             finite_diff_mode: opts.finite_diff_mode,
         }),
     })
@@ -288,6 +293,8 @@ where
     let mut p = r.clone();
     let mut rr_old = r.dot(&r).item_f32();
     let mut residual = rr_old.sqrt();
+    let mut residual_history = Vec::with_capacity(opts.max_iters + 1);
+    residual_history.push(residual);
     let mut iterations = 0usize;
 
     for _ in 0..opts.max_iters {
@@ -327,6 +334,7 @@ where
         r = r.sub(&ap.mul_scalar(alpha));
         let rr_new = r.dot(&r).item_f32();
         residual = rr_new.sqrt();
+        residual_history.push(residual);
         if residual < opts.tolerance { break; }
         let beta = rr_new / rr_old;
         p = r.add(&p.mul_scalar(beta));
@@ -343,6 +351,7 @@ where
             solver: opts.solver,
             iterations,
             residual,
+            residual_history,
             finite_diff_mode: opts.finite_diff_mode,
         }),
     })
