@@ -87,11 +87,6 @@ pub struct ZScale {
 }
 
 impl ZScale {
-    pub const ONE: ZScale = ZScale {
-        physical_radius: 1.0,
-        log_radius: 0.0,
-    };
-
     /// Creates a new scale from a physical radius, rejecting non-positive or non-finite values.
     pub fn new(physical_radius: f32) -> Option<Self> {
         if physical_radius.is_finite() && physical_radius > 0.0 {

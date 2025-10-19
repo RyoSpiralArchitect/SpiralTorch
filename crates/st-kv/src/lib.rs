@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
+/// Result alias specialised for key-value helper routines.
+pub type KvResult<T> = std::result::Result<T, KvErr>;
+
 #[derive(Error, Debug)]
 pub enum KvErr {
     #[error("redis error: {0}")]
@@ -114,6 +117,7 @@ pub fn redis_rpush<V: ToRedisArgs>(url: &str, key: &str, values: V) -> KvResult<
     with_redis(url, |kv| kv.rpush(key, values))
 }
 
+/// Push new values onto the tail of a list.
 #[cfg(feature = "redis")]
 pub fn redis_lpush_json<T: Serialize>(url: &str, key: &str, value: &T) -> KvResult<usize> {
     with_redis(url, |kv| kv.lpush_json(key, value))
