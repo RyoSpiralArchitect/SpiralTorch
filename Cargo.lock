@@ -2380,6 +2380,7 @@ dependencies = [
  "ndarray",
  "num-complex",
  "pyo3",
+ "pyo3-build-config",
  "st-backend-hip",
  "st-core",
  "st-frac",
