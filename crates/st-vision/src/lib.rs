@@ -62,6 +62,7 @@
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::cmp::min;
+use std::f32::consts::PI;
 use std::sync::Arc;
 
 use st_core::telemetry::atlas::AtlasFrame;
@@ -235,6 +236,203 @@ impl ZSpaceVolume {
         let weights = self.resonance_weights(resonance)?;
         self.collapse_with_weights(&weights)
     }
+
+    /// Computes a spectral energy response for each depth slice using the provided window.
+    pub fn spectral_response(&self, window: &SpectralWindow) -> Vec<f32> {
+        let slice_len = self.height.saturating_mul(self.width);
+        if slice_len == 0 || self.depth == 0 {
+            return Vec::new();
+        }
+        let mut response = Vec::with_capacity(self.depth);
+        let window_weights = window.weights(self.depth);
+        for (z, coeff) in window_weights.iter().enumerate() {
+            let start = z * slice_len;
+            let end = start + slice_len;
+            let slice = &self.voxels[start..end];
+            let energy = if slice_len > 0 {
+                slice.iter().map(|v| v.abs()).sum::<f32>() / slice_len as f32
+            } else {
+                0.0
+            };
+            response.push(energy * coeff);
+        }
+        response
+    }
+
+    /// Performs an exponential moving average with the provided next volume.
+    pub fn accumulate(&mut self, next: &ZSpaceVolume, alpha: f32) -> PureResult<()> {
+        if self.depth != next.depth || self.height != next.height || self.width != next.width {
+            return Err(TensorError::ShapeMismatch {
+                left: (self.depth * self.height, self.width),
+                right: (next.depth * next.height, next.width),
+            });
+        }
+        let alpha = if alpha.is_finite() {
+            alpha.clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+        let beta = 1.0 - alpha;
+        for (current, incoming) in self.voxels.iter_mut().zip(next.voxels.iter()) {
+            *current = beta * *current + alpha * *incoming;
+        }
+        Ok(())
+    }
+
+    /// Returns a new volume representing the exponential moving average of `self` and `next`.
+    pub fn accumulated(&self, next: &ZSpaceVolume, alpha: f32) -> PureResult<Self> {
+        let mut blended = self.clone();
+        blended.accumulate(next, alpha)?;
+        Ok(blended)
+    }
+
+    /// Blends a temporal sequence of volumes using the provided weights.
+    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        if sequence.len() != weights.len() {
+            return Err(TensorError::DataLength {
+                expected: sequence.len(),
+                got: weights.len(),
+            });
+        }
+        let reference = &sequence[0];
+        let mut weights = weights.to_vec();
+        Self::normalise_weights(&mut weights);
+        let total_len = reference.voxels.len();
+        let mut voxels = vec![0.0; total_len];
+        for (volume, weight) in sequence.iter().zip(weights.iter()) {
+            if volume.depth != reference.depth
+                || volume.height != reference.height
+                || volume.width != reference.width
+            {
+                return Err(TensorError::ShapeMismatch {
+                    left: (reference.depth * reference.height, reference.width),
+                    right: (volume.depth * volume.height, volume.width),
+                });
+            }
+            if !weight.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "temporal_weight",
+                    value: *weight,
+                });
+            }
+            for (dst, src) in voxels.iter_mut().zip(volume.voxels.iter()) {
+                *dst += src * *weight;
+            }
+        }
+        Ok(Self {
+            depth: reference.depth,
+            height: reference.height,
+            width: reference.width,
+            voxels,
+        })
+    }
+}
+
+/// Spectral window functions used to modulate depth resonance weights.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpectralWindow {
+    kind: SpectralWindowKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SpectralWindowKind {
+    Rectangular,
+    Hann,
+    Hamming,
+    Blackman,
+    Gaussian { sigma: f32 },
+}
+
+impl SpectralWindow {
+    /// Creates a rectangular window (no modulation).
+    pub fn rectangular() -> Self {
+        Self {
+            kind: SpectralWindowKind::Rectangular,
+        }
+    }
+
+    /// Creates a Hann window.
+    pub fn hann() -> Self {
+        Self {
+            kind: SpectralWindowKind::Hann,
+        }
+    }
+
+    /// Creates a Hamming window.
+    pub fn hamming() -> Self {
+        Self {
+            kind: SpectralWindowKind::Hamming,
+        }
+    }
+
+    /// Creates a Blackman window.
+    pub fn blackman() -> Self {
+        Self {
+            kind: SpectralWindowKind::Blackman,
+        }
+    }
+
+    /// Creates a Gaussian window with the provided sigma parameter.
+    pub fn gaussian(sigma: f32) -> Self {
+        let sigma = if sigma.is_finite() && sigma > 1e-3 {
+            sigma
+        } else {
+            0.4
+        };
+        Self {
+            kind: SpectralWindowKind::Gaussian { sigma },
+        }
+    }
+
+    /// Generates normalised weights for the configured window.
+    pub fn weights(&self, depth: usize) -> Vec<f32> {
+        if depth == 0 {
+            return Vec::new();
+        }
+        if depth == 1 {
+            return vec![1.0];
+        }
+        let mut weights = Vec::with_capacity(depth);
+        let n_minus_1 = (depth - 1) as f32;
+        match self.kind {
+            SpectralWindowKind::Rectangular => {
+                weights.resize(depth, 1.0);
+            }
+            SpectralWindowKind::Hann => {
+                for n in 0..depth {
+                    let coeff = 0.5 * (1.0 - (2.0 * PI * n as f32 / n_minus_1).cos());
+                    weights.push(coeff.max(0.0));
+                }
+            }
+            SpectralWindowKind::Hamming => {
+                for n in 0..depth {
+                    let coeff = 0.54 - 0.46 * (2.0 * PI * n as f32 / n_minus_1).cos();
+                    weights.push(coeff.max(0.0));
+                }
+            }
+            SpectralWindowKind::Blackman => {
+                for n in 0..depth {
+                    let ratio = 2.0 * PI * n as f32 / n_minus_1;
+                    let coeff = 0.42 - 0.5 * ratio.cos() + 0.08 * (2.0 * ratio).cos();
+                    weights.push(coeff.max(0.0));
+                }
+            }
+            SpectralWindowKind::Gaussian { sigma } => {
+                let centre = n_minus_1 / 2.0;
+                let denom = 2.0 * sigma.powi(2) * (centre + 1.0).powi(2);
+                for n in 0..depth {
+                    let delta = n as f32 - centre;
+                    let coeff = (-delta.powi(2) / denom.max(1e-6)).exp();
+                    weights.push(coeff.max(0.0));
+                }
+            }
+        }
+        ZSpaceVolume::normalise_weights(&mut weights);
+        weights
+    }
 }
 
 /// Adaptive projector that fuses resonance telemetry with chrono summaries.
@@ -243,6 +441,9 @@ pub struct VisionProjector {
     focus: f32,
     spread: f32,
     energy_bias: f32,
+    window: SpectralWindow,
+    temporal_focus: f32,
+    temporal_decay: f32,
 }
 
 impl VisionProjector {
@@ -263,7 +464,27 @@ impl VisionProjector {
             focus,
             spread,
             energy_bias,
+            window: SpectralWindow::hann(),
+            temporal_focus: 1.0,
+            temporal_decay: 0.25,
         }
+    }
+
+    /// Sets a custom spectral window that modulates the depth attention profile.
+    pub fn with_spectral_window(mut self, window: SpectralWindow) -> Self {
+        self.window = window;
+        self
+    }
+
+    /// Configures temporal attention focusing on a point in the sequence with a decay width.
+    pub fn with_temporal_attention(mut self, focus: f32, decay: f32) -> Self {
+        self.temporal_focus = focus.clamp(0.0, 1.0);
+        self.temporal_decay = if decay.is_finite() && decay > 1e-3 {
+            decay.min(1.0)
+        } else {
+            0.25
+        };
+        self
     }
 
     /// Builds a projector from a chrono summary.
@@ -275,7 +496,13 @@ impl VisionProjector {
             spread /= 1.0 + summary.mean_abs_drift.abs();
         }
         let energy_bias = summary.mean_decay;
-        Self::new(focus, spread, energy_bias)
+        let mut projector = Self::new(focus, spread, energy_bias);
+        if summary.mean_abs_drift.is_finite() {
+            projector.temporal_decay =
+                (1.0 / (1.0 + summary.mean_abs_drift.abs())).clamp(0.05, 1.0);
+        }
+        projector.temporal_focus = 1.0;
+        projector
     }
 
     /// Updates the projector using live atlas telemetry.
@@ -296,6 +523,24 @@ impl VisionProjector {
                 self.energy_bias = total.tanh();
             }
         }
+        for metric in &frame.metrics {
+            match metric.name.as_str() {
+                "temporal_focus" | "z_temporal_focus" => {
+                    self.temporal_focus = metric.value.clamp(0.0, 1.0);
+                }
+                "temporal_decay" | "z_temporal_decay" => {
+                    if metric.value.is_finite() {
+                        self.temporal_decay = metric.value.abs().clamp(0.05, 1.0);
+                    }
+                }
+                _ => {}
+            }
+            if let Some(district) = metric.district() {
+                if district.eq_ignore_ascii_case("temporal") && metric.value.is_finite() {
+                    self.temporal_decay = metric.value.abs().clamp(0.05, 1.0);
+                }
+            }
+        }
     }
 
     /// Returns the current focus along the Z axis.
@@ -313,6 +558,21 @@ impl VisionProjector {
         self.energy_bias
     }
 
+    /// Returns the configured spectral window.
+    pub fn spectral_window(&self) -> SpectralWindow {
+        self.window
+    }
+
+    /// Returns the temporal focus (0 = earliest frame, 1 = latest frame).
+    pub fn temporal_focus(&self) -> f32 {
+        self.temporal_focus
+    }
+
+    /// Returns the temporal decay width controlling the Gaussian window over time.
+    pub fn temporal_decay(&self) -> f32 {
+        self.temporal_decay
+    }
+
     fn compute_depth_weights(
         &self,
         volume: &ZSpaceVolume,
@@ -322,6 +582,7 @@ impl VisionProjector {
         if weights.is_empty() {
             return Ok(weights);
         }
+        let window = self.window.weights(volume.depth());
         let spread = self.spread.max(1e-3);
         let energy_mod = 1.0 + self.energy_bias.tanh();
         if volume.depth() > 1 {
@@ -330,15 +591,75 @@ impl VisionProjector {
                 let position = if denom > 0.0 { idx as f32 / denom } else { 0.0 };
                 let delta = position - self.focus;
                 let gaussian = (-0.5 * (delta / spread).powi(2)).exp();
-                *weight *= gaussian.max(1e-6) * energy_mod.max(0.1);
+                let window_coeff = window.get(idx).copied().unwrap_or(1.0);
+                *weight *= gaussian.max(1e-6) * energy_mod.max(0.1) * window_coeff.max(1e-6);
             }
         } else {
+            let coeff = window.first().copied().unwrap_or(1.0);
             for weight in weights.iter_mut() {
-                *weight *= energy_mod.max(0.1);
+                *weight *= energy_mod.max(0.1) * coeff.max(1e-6);
             }
         }
         ZSpaceVolume::normalise_weights(&mut weights);
         Ok(weights)
+    }
+
+    fn compute_temporal_weights(&self, frames: usize) -> Vec<f32> {
+        if frames == 0 {
+            return Vec::new();
+        }
+        if frames == 1 {
+            return vec![1.0];
+        }
+        let focus = self.temporal_focus.clamp(0.0, 1.0);
+        let decay = self.temporal_decay.max(1e-3);
+        let denom = (frames - 1) as f32;
+        let mut weights = Vec::with_capacity(frames);
+        for idx in 0..frames {
+            let position = if denom > 0.0 { idx as f32 / denom } else { 0.0 };
+            let delta = position - focus;
+            let gaussian = (-0.5 * (delta / decay).powi(2)).exp();
+            weights.push(gaussian.max(1e-6));
+        }
+        let mut total = 0.0f32;
+        for weight in &weights {
+            total += *weight;
+        }
+        if total <= f32::EPSILON || !total.is_finite() {
+            let uniform = 1.0 / frames as f32;
+            weights.iter_mut().for_each(|w| *w = uniform);
+        } else {
+            weights.iter_mut().for_each(|w| *w /= total);
+        }
+        weights
+    }
+
+    /// Returns the temporal weights applied when fusing a sequence of frames.
+    pub fn temporal_weights(&self, frames: usize) -> Vec<f32> {
+        self.compute_temporal_weights(frames)
+    }
+
+    fn streaming_alpha(&self) -> f32 {
+        (1.0 - self.temporal_decay.clamp(0.0, 0.99)).clamp(0.05, 0.95)
+    }
+
+    /// Applies the projector's streaming temporal preference as an EMA update.
+    pub fn accumulate_temporal(
+        &self,
+        state: &mut ZSpaceVolume,
+        next: &ZSpaceVolume,
+    ) -> PureResult<()> {
+        let alpha = self.streaming_alpha();
+        state.accumulate(next, alpha)
+    }
+
+    /// Fuses a temporal sequence of volumes into a single blended volume.
+    pub fn fuse_sequence(&self, sequence: &[ZSpaceVolume]) -> PureResult<ZSpaceVolume> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        let weights = self.compute_temporal_weights(sequence.len());
+        ZSpaceVolume::blend_sequence(sequence, &weights)
     }
 
     /// Produces the final depth weights as a tensor.
@@ -359,6 +680,16 @@ impl VisionProjector {
     ) -> PureResult<Tensor> {
         let weights = self.compute_depth_weights(volume, resonance)?;
         volume.collapse_with_weights(&weights)
+    }
+
+    /// Projects a temporal sequence by first fusing frames with temporal attention.
+    pub fn project_sequence(
+        &self,
+        sequence: &[ZSpaceVolume],
+        resonance: &DifferentialResonance,
+    ) -> PureResult<Tensor> {
+        let fused = self.fuse_sequence(sequence)?;
+        self.project(&fused, resonance)
     }
 }
 
