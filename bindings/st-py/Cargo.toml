@@ -33,6 +33,9 @@ kdsl = ["st-core/kdsl", "st-nn/kdsl", "st-rl/kdsl"]
 "kv-redis" = ["st-core/kv-redis"]
 "wgpu-frac" = ["wgpu"]
 
+[build-dependencies]
+pyo3-build-config = "0.22"
+
 [dependencies]
 pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", "gil-refs", "num-complex"] }
 st-core = { path = "../../crates/st-core", default-features = false, features = ["psi", "psychoid", "collapse"] }
