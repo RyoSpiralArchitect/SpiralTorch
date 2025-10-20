@@ -41,6 +41,7 @@ use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSch
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::ecosystem::CloudConnector;
 use st_core::ecosystem::{
     CloudConnector, ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample,
     RankPlanSummary, RoundtableConfigSummary, RoundtableSummary,
@@ -1344,10 +1345,7 @@ impl ModuleTrainer {
             }
             #[cfg(feature = "collapse")]
             if let Some(reading) = psi_snapshot.as_ref() {
-                let command = self
-                    .collapse
-                    .as_mut()
-                    .map(|driver| driver.update(reading));
+                let command = self.collapse.as_mut().map(|driver| driver.update(reading));
                 if let Some(command) = command {
                     match &command {
                         DriveCmd::Collapse {

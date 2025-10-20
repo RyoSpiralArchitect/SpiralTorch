@@ -648,6 +648,7 @@ impl OpenCartesianTopos {
         let volume = rows.saturating_mul(cols);
         if volume > self.max_volume {
             return Err(TensorError::TensorVolumeExceeded {
+                label,
                 volume,
                 max_volume: self.max_volume,
             });
@@ -779,6 +780,7 @@ impl ModalityProfile {
     fn guard_volume(&self, label: &'static str, volume: usize) -> PureResult<()> {
         if volume > self.max_volume {
             return Err(TensorError::TensorVolumeExceeded {
+                label,
                 volume,
                 max_volume: self.max_volume,
             });
@@ -1268,7 +1270,13 @@ impl<'a> MultiModalToposGuard<'a> {
             self.graph.guard_degree(degree)?;
             max_degree = cmp::max(max_degree, degree);
         }
-        let overflow = self.graph.guard_edge_budget(edge_count)?;
+        if edge_count > self.graph.max_edges {
+            return Err(TensorError::TensorVolumeExceeded {
+                label: "graph_edges",
+                volume: edge_count,
+                max_volume: self.graph.max_edges,
+            });
+        }
         self.topos.guard_slice("graph_adjacency", adjacency)?;
         Ok(GraphGuardReport {
             edge_count,
@@ -1674,10 +1682,11 @@ impl<'a> ToposAtlas<'a> {
         self.monad
     }
 
-    fn observe_volume(&mut self, volume: usize) -> PureResult<()> {
+    fn observe_volume(&mut self, label: &'static str, volume: usize) -> PureResult<()> {
         let projected = self.visited_volume.saturating_add(volume);
         if projected > self.topos.max_volume() {
             return Err(TensorError::TensorVolumeExceeded {
+                label,
                 volume: projected,
                 max_volume: self.topos.max_volume(),
             });
@@ -1689,21 +1698,21 @@ impl<'a> ToposAtlas<'a> {
     /// Guards a tensor and records the total traversed volume.
     pub fn guard_tensor(&mut self, label: &'static str, tensor: &Tensor) -> PureResult<()> {
         let (rows, cols) = tensor.shape();
-        self.observe_volume(rows.saturating_mul(cols))?;
+        self.observe_volume(label, rows.saturating_mul(cols))?;
         self.monad.guard_tensor(label, tensor)
     }
 
     /// Rewrites a tensor in-place while tracking the traversed volume.
     pub fn guard_tensor_mut(&mut self, label: &'static str, tensor: &mut Tensor) -> PureResult<()> {
         let (rows, cols) = tensor.shape();
-        self.observe_volume(rows.saturating_mul(cols))?;
+        self.observe_volume(label, rows.saturating_mul(cols))?;
         self.monad.rewrite_tensor(label, tensor)
     }
 
     /// Lifts an owned tensor into the atlas, returning the rewritten value.
     pub fn lift_tensor(&mut self, label: &'static str, tensor: Tensor) -> PureResult<Tensor> {
         let (rows, cols) = tensor.shape();
-        self.observe_volume(rows.saturating_mul(cols))?;
+        self.observe_volume(label, rows.saturating_mul(cols))?;
         self.monad.lift_tensor(label, tensor)
     }
 

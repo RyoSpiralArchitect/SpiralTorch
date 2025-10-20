@@ -86,7 +86,7 @@ impl From<AuditEvent> for AuditEventPy {
 
 #[pyclass(module = "spiraltorch.inference", name = "AuditLog")]
 #[derive(Clone)]
-struct AuditLogPy {
+pub struct AuditLogPy {
     sink: AuditSink,
 }
 
@@ -172,10 +172,10 @@ impl InferenceRuntime {
         &self,
         _py: Python<'_>,
         prompt: &str,
-        metadata: Option<&PyDict>,
+        metadata: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<InferenceResultPy> {
         if let Some(meta) = metadata {
-            if matches!(meta.contains("force_error"), Ok(true)) {
+            if meta.contains("force_error")? {
                 return Err(PyRuntimeError::new_err("forced error via metadata"));
             }
         }
