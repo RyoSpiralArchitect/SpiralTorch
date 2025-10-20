@@ -15,6 +15,7 @@ members = [
   "crates/st-rec",
   "crates/st-bench",
   "crates/st-amg",
+  "crates/spiral-hpo",
   "bindings/st-py",
   "bindings/st-wasm",
   "tools/xai-cli"
