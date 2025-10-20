@@ -2604,7 +2604,21 @@ version = "0.1.0"
 dependencies = [
  "rand",
  "st-core",
+ "st-nn",
  "st-tensor",
+]
+
+[[package]]
+name = "st-xai-cli"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "st-core",
+ "st-nn",
+ "st-tensor",
+ "st-vision",
+ "tempfile",
 ]
 
 [[package]]
