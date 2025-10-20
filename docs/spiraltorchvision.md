@@ -19,6 +19,29 @@ SpiralTorchVision extends SpiralTorch's native Z-space capabilities while stayin
 - **Temporal resonance accumulation**: `ZSpaceVolume::accumulate` and `TemporalResonanceBuffer` perform exponential moving averages across frames so `VisionProjector::project_with_temporal` can mix historical attention with new resonance in real time.
 - **Multi-view Z-fusion**: Register camera descriptors with `MultiViewFusion` so `VisionProjector::project_multi_view` can weight Z slices as viewpoints, modulating attention with orientation-aware biases before collapse.
 - **Long-term integrations**: Leveraging TorchVision datasets/transforms as inputs while adding Z-space-native losses, visualization tools, and SpiralTorch-specific model heads.
+- **Modular vision backbones**: `st_vision::models` ships ergonomic ResNet, ViT, and ConvNeXt backbones built on the `st-nn` module trait. They expose configuration structs, state-dict interop, and forward passes tuned for SpiralTorch tensors.
+
+### Backbone quickstart
+
+Instantiate and run a pretrained-friendly backbone directly from Rust. The modules implement `st_nn::module::Module`, so optimizers, telemetry, and serialization utilities interoperate out of the box:
+
+```rust
+use st_tensor::Tensor;
+use st_vision::models::{ResNetBackbone, ResNetConfig};
+
+let config = ResNetConfig {
+    input_hw: (224, 224),
+    stage_channels: vec![64, 128, 256, 512],
+    block_depths: vec![2, 2, 2, 2],
+    ..Default::default()
+};
+let backbone = ResNetBackbone::new(config)?;
+let input = Tensor::random_normal(1, 3 * 224 * 224, 0.0, 1.0, Some(0))?;
+let embedding = backbone.forward(&input)?;
+assert_eq!(embedding.shape().1, backbone.output_features());
+```
+
+The `ViTBackbone` exports `load_weights_json`/`load_weights_bincode` helpers, accepts patch/grid tweaks, and emits CLS-token embeddings by default. `ConvNeXtBackbone` mirrors ConvNeXt-T style stage depths, returning flattened feature maps ready for detection heads or Z-space projection.
 
 ### Temporal resonance accumulation
 

@@ -65,6 +65,8 @@ use std::cmp::min;
 use std::f32::consts::PI;
 use std::sync::Arc;
 
+pub mod models;
+
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
@@ -289,6 +291,51 @@ impl ZSpaceVolume {
         };
         blended.accumulate(next, alpha)?;
         Ok(blended)
+    }
+
+    /// Blends an ordered sequence of volumes according to the provided weights.
+    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_sequence_blend"));
+        }
+        if sequence.len() != weights.len() {
+            return Err(TensorError::InvalidDimensions {
+                rows: sequence.len(),
+                cols: weights.len(),
+            });
+        }
+        let first = &sequence[0];
+        let slice_len = first.height * first.width;
+        let volume_len = first.depth * slice_len;
+        if volume_len == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: first.depth,
+                cols: slice_len,
+            });
+        }
+        let mut normalised = Vec::from(weights);
+        ZSpaceVolume::normalise_weights(&mut normalised);
+        let mut voxels = vec![0.0f32; volume_len];
+        for (volume, weight) in sequence.iter().zip(normalised.iter()) {
+            if volume.depth != first.depth
+                || volume.height != first.height
+                || volume.width != first.width
+            {
+                return Err(TensorError::ShapeMismatch {
+                    left: (volume.depth, volume.height * volume.width),
+                    right: (first.depth, first.height * first.width),
+                });
+            }
+            for (dst, src) in voxels.iter_mut().zip(volume.voxels.iter()) {
+                *dst += *weight * *src;
+            }
+        }
+        Ok(Self {
+            depth: first.depth,
+            height: first.height,
+            width: first.width,
+            voxels,
+        })
     }
 }
 
@@ -649,6 +696,8 @@ pub struct VisionProjector {
     spread: f32,
     energy_bias: f32,
     window: SpectralWindow,
+    temporal_focus: f32,
+    temporal_decay: f32,
 }
 
 impl VisionProjector {
@@ -670,6 +719,8 @@ impl VisionProjector {
             spread,
             energy_bias,
             window: SpectralWindow::hann(),
+            temporal_focus: 0.5,
+            temporal_decay: 0.5,
         }
     }
 
