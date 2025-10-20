@@ -18,7 +18,7 @@
 use crate::theory::microlocal::{
     InterfaceSignature, InterfaceZLift, InterfaceZPulse, MicrolocalFeedback,
 };
-use ndarray::ArrayD;
+use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -372,7 +372,9 @@ impl MacroKinetics {
                 ExternalForce::PressureJump(delta_p) => delta_p as f64,
                 ExternalForce::BulkPotential(value)
                 | ExternalForce::Nonlocal(value)
-                | ExternalForce::Custom { magnitude: value, .. } => value as f64,
+                | ExternalForce::Custom {
+                    magnitude: value, ..
+                } => value as f64,
                 ExternalForce::ContactAngle {
                     equilibrium,
                     friction,
@@ -867,6 +869,125 @@ impl MacroZBridge {
         }
     }
 
+    fn weighted_average(field: &ArrayD<f32>, weights: Option<&ArrayD<f32>>) -> f64 {
+        if let Some(weights) = weights {
+            let mut weighted = 0.0f64;
+            let mut total = 0.0f64;
+            for (value, weight) in field.iter().zip(weights.iter()) {
+                let w = *weight as f64;
+                if w <= 0.0 {
+                    continue;
+                }
+                weighted += (*value as f64) * w;
+                total += w;
+            }
+            if total > 0.0 {
+                return weighted / total;
+            }
+        }
+        Self::average_field(field)
+    }
+
+    fn average_normal(
+        signature: &InterfaceSignature,
+        weights: Option<&ArrayD<f32>>,
+    ) -> Option<Vec<f64>> {
+        let orient = signature.orientation.as_ref()?;
+        let components = orient.shape().first().copied().unwrap_or(0);
+        if components == 0 {
+            return None;
+        }
+
+        let mut accum = vec![0.0f64; components];
+        let mut total = 0.0f64;
+        for idx in indices(signature.r_machine.raw_dim()) {
+            let idx_dyn = IxDyn(idx.slice());
+            let weight = weights
+                .map(|w| w[&idx_dyn] as f64)
+                .unwrap_or_else(|| signature.r_machine[&idx_dyn] as f64);
+            if weight <= 0.0 {
+                continue;
+            }
+            total += weight;
+            for axis in 0..components {
+                let mut orient_idx = Vec::with_capacity(orient.ndim());
+                orient_idx.push(axis);
+                orient_idx.extend_from_slice(idx.slice());
+                accum[axis] += orient[IxDyn(&orient_idx)] as f64 * weight;
+            }
+        }
+
+        if total <= 0.0 {
+            return None;
+        }
+
+        for value in &mut accum {
+            *value /= total;
+        }
+
+        let norm = accum.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm <= 1e-12 {
+            None
+        } else {
+            for value in &mut accum {
+                *value /= norm;
+            }
+            Some(accum)
+        }
+    }
+
+    fn evaluate_anisotropy(spec: &AnisotropySpec, normal: &[f64]) -> Option<f64> {
+        match spec {
+            AnisotropySpec::Isotropic => Some(1.0),
+            AnisotropySpec::Fourier { modes } => {
+                if normal.len() < 2 {
+                    return None;
+                }
+                let nx = normal.get(1).copied().unwrap_or(0.0);
+                let ny = normal.get(0).copied().unwrap_or(0.0);
+                if nx.abs() + ny.abs() <= 1e-12 {
+                    return None;
+                }
+                let theta = ny.atan2(nx);
+                let mut gamma = 1.0f64;
+                for (k, amplitude) in modes {
+                    let multiplier = (*k as f64) * theta;
+                    gamma += amplitude * multiplier.cos();
+                }
+                Some(gamma.max(0.0))
+            }
+            AnisotropySpec::Tabulated { weights, .. } => {
+                if weights.is_empty() {
+                    Some(1.0)
+                } else {
+                    let avg = weights.iter().copied().sum::<f64>() / weights.len() as f64;
+                    Some(avg.max(0.0))
+                }
+            }
+            AnisotropySpec::Custom { .. } => None,
+        }
+    }
+
+    fn anisotropy_factor_for_normal(&self, normal: &[f64]) -> Option<f64> {
+        let mut weighted = 0.0f64;
+        let mut sigma_total = 0.0f64;
+        for term in &self.template.functional.surface_terms {
+            let sigma = term.sigma as f64;
+            if sigma <= 0.0 {
+                continue;
+            }
+            let factor = Self::evaluate_anisotropy(&term.anisotropy, normal).unwrap_or(1.0);
+            weighted += sigma * factor;
+            sigma_total += sigma;
+        }
+
+        if sigma_total > 0.0 {
+            Some(weighted / sigma_total)
+        } else {
+            None
+        }
+    }
+
     fn derive_feedback(
         &self,
         contributions: &CurvatureContributions,
@@ -888,7 +1009,17 @@ impl MacroZBridge {
             }
         }
 
-        let smoothing = if let Some(cap) = self.template.nondimensional.capillary {
+        if let Some(anisotropic) = contributions.anisotropic_curvature {
+            let base = contributions.mean_curvature.abs().max(1e-6);
+            let ratio = (anisotropic.abs() / base).max(0.0);
+            if ratio > 1.5 {
+                threshold_scale *= 0.85;
+            } else if ratio < 0.5 {
+                threshold_scale *= 1.05;
+            }
+        }
+
+        let mut smoothing = if let Some(cap) = self.template.nondimensional.capillary {
             let cap = cap.max(0.0);
             let ratio = cap / (1.0 + cap);
             ratio.clamp(0.2, 0.8) as f32
@@ -897,6 +1028,12 @@ impl MacroZBridge {
         } else {
             0.3
         };
+
+        if let Some(anisotropic) = contributions.anisotropic_curvature {
+            if anisotropic.abs() > contributions.mean_curvature.abs() {
+                smoothing = (smoothing + 0.1).min(0.9);
+            }
+        }
 
         let vel_mag = velocity.abs() as f32;
         let mut bias_gain = 1.0f32;
@@ -933,11 +1070,22 @@ impl MacroZBridge {
     /// Projects a microlocal signature into Z-space and evaluates the macro drive.
     pub fn ingest_signature(&self, signature: &InterfaceSignature) -> MacroDrive {
         let pulse = self.lift.project(signature);
-        let mean_curvature = Self::average_field(&signature.mean_curvature);
-        let anisotropic_curvature = signature
+        let weights = Some(&signature.perimeter_density);
+        let mean_curvature = Self::weighted_average(&signature.mean_curvature, weights);
+        let signed_curvature = signature
             .signed_mean_curvature
             .as_ref()
-            .map(|field| Self::average_field(field));
+            .map(|field| Self::weighted_average(field, weights));
+        let normal = Self::average_normal(signature, weights);
+        let anisotropy_factor = normal
+            .as_ref()
+            .and_then(|normal| self.anisotropy_factor_for_normal(normal));
+        let anisotropic_curvature = match (signed_curvature, anisotropy_factor) {
+            (Some(value), Some(factor)) => Some(value * factor),
+            (Some(value), None) => Some(value),
+            (None, Some(factor)) => Some(mean_curvature * factor),
+            (None, None) => None,
+        };
         let bending_operator = self
             .template
             .functional
@@ -1159,5 +1307,100 @@ mod tests {
         assert!(feedback.smoothing.unwrap() >= 0.2);
         assert!(feedback.tempo_hint.unwrap() > 0.0);
         assert!(feedback.threshold_scale.unwrap() < 1.0);
+    }
+
+    #[test]
+    fn bridge_uses_perimeter_weighting_for_curvature() {
+        let config = MinimalCardConfig {
+            phase_pair: PhasePair::new("A", "B"),
+            sigma: 0.2,
+            mobility: 1.0,
+            volume: None,
+            physical_scales: None,
+        };
+        let template = MacroModelTemplate::from_card(MacroCard::Minimal(config));
+        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.2));
+        let bridge = template.couple_with(lift);
+
+        let shape = IxDyn(&[1, 2]);
+        let r_machine = ArrayD::from_shape_vec(shape.clone(), vec![1.0f32, 0.0f32]).unwrap();
+        let raw_density = ArrayD::zeros(shape.clone());
+        let perimeter_density =
+            ArrayD::from_shape_vec(shape.clone(), vec![1.0f32, 0.0f32]).unwrap();
+        let mean_curvature = ArrayD::from_shape_vec(shape.clone(), vec![2.0f32, 20.0f32]).unwrap();
+        let signed_mean = ArrayD::from_shape_vec(shape.clone(), vec![2.0f32, 20.0f32]).unwrap();
+
+        let signature = InterfaceSignature {
+            r_machine,
+            raw_density,
+            perimeter_density,
+            mean_curvature,
+            signed_mean_curvature: Some(signed_mean),
+            orientation: None,
+            kappa_d: 1.0,
+            radius: 1,
+            physical_radius: 1.0,
+        };
+
+        let drive = bridge.ingest_signature(&signature);
+        assert!((drive.contributions.mean_curvature - 2.0).abs() < 1e-6);
+        assert!(
+            (drive
+                .contributions
+                .anisotropic_curvature
+                .expect("anisotropic curvature missing")
+                - 2.0)
+                .abs()
+                < 1e-6
+        );
+        assert!((drive.velocity - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bridge_applies_fourier_anisotropy_from_orientation() {
+        let pair = PhasePair::new("A", "B");
+        let mut functional = MacroInterfacialFunctional::minimal(pair.clone(), 0.3);
+        functional.surface_terms[0].anisotropy = AnisotropySpec::Fourier {
+            modes: vec![(4, 0.5)],
+        };
+        let kinetics = MacroKinetics::non_conserved(1.0);
+        let template = MacroModelTemplate {
+            functional,
+            kinetics,
+            nondimensional: DimensionlessGroups::default(),
+            analysis: AnalysisChecklist::minimal_surface(),
+            numerics: NumericalRecipe::mbo(false),
+        };
+        let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+        let bridge = MacroZBridge::new(template, lift);
+
+        let shape = IxDyn(&[1, 1]);
+        let r_machine = ArrayD::from_elem(shape.clone(), 1.0f32);
+        let raw_density = ArrayD::from_elem(shape.clone(), 0.1f32);
+        let perimeter_density = ArrayD::from_elem(shape.clone(), 1.0f32);
+        let mean_curvature = ArrayD::from_elem(shape.clone(), 2.0f32);
+        let signed_mean = ArrayD::from_elem(shape.clone(), 2.0f32);
+        let orientation = ArrayD::from_shape_vec(IxDyn(&[2, 1, 1]), vec![0.0f32, 1.0f32]).unwrap();
+
+        let signature = InterfaceSignature {
+            r_machine,
+            raw_density,
+            perimeter_density,
+            mean_curvature,
+            signed_mean_curvature: Some(signed_mean),
+            orientation: Some(orientation),
+            kappa_d: 1.0,
+            radius: 1,
+            physical_radius: 1.0,
+        };
+
+        let drive = bridge.ingest_signature(&signature);
+        let anisotropic = drive
+            .contributions
+            .anisotropic_curvature
+            .expect("anisotropic curvature missing");
+        assert!((drive.contributions.mean_curvature - 2.0).abs() < 1e-6);
+        assert!((anisotropic - 3.0).abs() < 1e-6);
+        assert!((drive.velocity - 3.0).abs() < 1e-6);
     }
 }
