@@ -274,6 +274,34 @@ impl NerfField {
         Tensor::from_vec(rows, 4, data)
     }
 
+    fn density_needs_activation(density: &Tensor) -> bool {
+        density.data().iter().any(|value| *value < 0.0)
+    }
+
+    fn activate_density(density: &mut Tensor) {
+        for value in density.data_mut().iter_mut() {
+            if *value < 0.0 {
+                *value = 0.0;
+            }
+        }
+    }
+
+    fn mask_density_gradients(pre_activation: &Tensor, grad: &mut Tensor) -> PureResult<()> {
+        if pre_activation.shape() != grad.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: pre_activation.shape(),
+                right: grad.shape(),
+            });
+        }
+        let pre_values = pre_activation.data();
+        for (pre, grad_value) in pre_values.iter().zip(grad.data_mut().iter_mut()) {
+            if *pre <= 0.0 {
+                *grad_value = 0.0;
+            }
+        }
+        Ok(())
+    }
+
     fn split_grad_output(&self, grad_output: &Tensor) -> PureResult<(Tensor, Tensor)> {
         let (rows, cols) = grad_output.shape();
         if cols != 4 {
@@ -301,7 +329,10 @@ impl Module for NerfField {
         let (positions, directions) = self.split_inputs(input)?;
         let encoded_pos = self.position_encoding.encode(&positions)?;
         let trunk = self.trunk.forward(&encoded_pos)?;
-        let density = self.density_head.forward(&trunk)?;
+        let mut density = self.density_head.forward(&trunk)?;
+        if Self::density_needs_activation(&density) {
+            Self::activate_density(&mut density);
+        }
         let features = self.feature_head.forward(&trunk)?;
         let color_input = if let Some(dir_enc) = &self.direction_encoding {
             let dir_tensor = directions.as_ref().map_or_else(
@@ -321,7 +352,7 @@ impl Module for NerfField {
         let (positions, directions) = self.split_inputs(input)?;
         let encoded_pos = self.position_encoding.encode(&positions)?;
         let trunk = self.trunk.forward(&encoded_pos)?;
-        let density = self.density_head.forward(&trunk)?;
+        let density_pre_activation = self.density_head.forward(&trunk)?;
         let features = self.feature_head.forward(&trunk)?;
         let color_input = if let Some(dir_enc) = &self.direction_encoding {
             let dir_tensor = directions.as_ref().map_or_else(
@@ -333,7 +364,8 @@ impl Module for NerfField {
         } else {
             features.clone()
         };
-        let (grad_density, grad_color) = self.split_grad_output(grad_output)?;
+        let (mut grad_density, grad_color) = self.split_grad_output(grad_output)?;
+        Self::mask_density_gradients(&density_pre_activation, &mut grad_density)?;
         let grad_color_input = self.color_head.backward(&color_input, &grad_color)?;
 
         let (grad_features_from_color, _grad_dir) = if self.color_input_dim > self.feature_dim {

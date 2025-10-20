@@ -95,6 +95,19 @@ fn clamped_edge_index(idx: isize, len: usize) -> usize {
     } else {
         idx as usize
     }
+
+    idx as usize
+}
+
+fn clamped_edge_index(idx: isize, len: usize) -> usize {
+    debug_assert!(len > 0);
+    if idx < 0 {
+        0
+    } else if idx as usize >= len {
+        len - 1
+    } else {
+        idx as usize
+    }
 }
 
 #[inline]
