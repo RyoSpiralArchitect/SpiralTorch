@@ -15,8 +15,9 @@ wgpu = { version = "0.19", default-features = false, features = ["wgsl"] }
 thiserror = "1"
 bytemuck = { version = "1", features = ["derive"] }
 st-vision = { path = "../st-vision" }
-st-tensor = { path = "../st-tensor" }
 rand = "0.8"
+st-tensor = { path = "../st-tensor", features = ["wgpu"] }
+pollster = "0.3"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

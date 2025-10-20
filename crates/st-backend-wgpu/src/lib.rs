@@ -8,7 +8,9 @@ pub mod compaction_2ce;
 pub mod midk_bottomk;
 pub mod nd_indexer;
 pub mod render;
+pub mod nerf;
 pub mod topk_keepk;
+pub mod transform;
 
 mod util;
 
