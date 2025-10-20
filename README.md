@@ -28,6 +28,8 @@ sequenceDiagram
   Core--)TLM: spans / metrics / logs
 ```
 
+> **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
+
 **License**
 
 AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
