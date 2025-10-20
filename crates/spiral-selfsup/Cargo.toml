@@ -1,0 +1,13 @@
+[package]
+name = "spiral-selfsup"
+version = "0.1.0"
+edition = "2021"
+authors = ["SpiralTorch Contributors"]
+description = "Self-supervised learning objectives for SpiralTorch"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+thiserror = "1"
+
+[dev-dependencies]
+rand = { version = "0.8", features = ["std", "std_rng"] }

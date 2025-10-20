@@ -12,13 +12,12 @@ mod telemetry;
 mod pure;
 mod nn;
 mod planner;
+mod selfsup;
 mod export;
 mod inference;
 
-// =======================
-// extras（安全・自己完結）
-// =======================
-mod extras {
+// ================// extras（安全・自己完結）
+// ================mod extras {
     use super::*;
     use pyo3::wrap_pyfunction; // ← マクロをこのモジュール内に import
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -141,10 +140,8 @@ mod extras {
     }
 }
 
-// =======================
-// st-frac の実API
-// =======================
-mod frac_bindings {
+// ================// st-frac の実API
+// ================mod frac_bindings {
     use super::*;
     use pyo3::wrap_pyfunction; // ← ここでも import
     use st_frac::{Pad, gl_coeffs_adaptive as gl_coeffs_adaptive_rs, fracdiff_gl_1d as fracdiff_gl_1d_rs};
@@ -184,10 +181,8 @@ mod frac_bindings {
     }
 }
 
-// =======================
-// ルート #[pymodule]
-// =======================
-#[pymodule]
+// ================// ルート #[pymodule]
+// ================#[pymodule]
 fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     // 1) トップレベル（そのまま import できる）
     extras::register(py, m)?;
@@ -212,6 +207,10 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     frac_bindings::register(py, &frac)?; // 実APIを公開
     m.add_submodule(&frac)?;
 
+    let selfsup_mod = PyModule::new_bound(py, "selfsup")?;
+    selfsup::register(py, &selfsup_mod)?;
+    m.add_submodule(&selfsup_mod)?;
+
     let dataset = PyModule::new_bound(py, "dataset")?;
     dataset.add("__doc__", "Datasets & loaders")?;
     m.add_submodule(&dataset)?;
@@ -230,6 +229,7 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
         "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
         "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
+        "nn","frac","selfsup","dataset","linalg","rl","rec","telemetry","ecosystem",
         "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem","hpo","inference","export",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",

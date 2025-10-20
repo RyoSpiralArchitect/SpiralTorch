@@ -5,6 +5,7 @@
 
 #[cfg(not(feature = "logic"))]
 use super::wgpu_heuristics::{Choice, DslOverrides};
+use super::soft_logic::SoftRule;
 #[cfg(feature = "logic")]
 use super::wgpu_heuristics::{
     Choice, DslOverrides, SOFT_NAME_ALGO, SOFT_NAME_CH, SOFT_NAME_CTILE, SOFT_NAME_KL,

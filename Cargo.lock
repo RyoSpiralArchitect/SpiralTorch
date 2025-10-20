@@ -2425,6 +2425,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "spiral-selfsup"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "thiserror 1.0.69",
 name = "spiral-safety"
 version = "0.1.0"
 dependencies = [
@@ -2444,6 +2449,7 @@ dependencies = [
  "num-complex",
  "pyo3",
  "pyo3-build-config",
+ "spiral-selfsup",
  "spiral-safety",
  "spiral-opt",
  "st-backend-hip",
@@ -2596,6 +2602,9 @@ dependencies = [
  "st-vision",
  "serde",
  "serde_json",
+ "st-nn",
+ "st-tensor",
+ "st-vision",
  "st-tensor",
  "thiserror 1.0.69",
 ]

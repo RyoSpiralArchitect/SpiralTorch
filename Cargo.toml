@@ -16,6 +16,7 @@ members = [
   "crates/st-rec",
   "crates/st-bench",
   "crates/st-amg",
+  "crates/spiral-selfsup",
   "crates/spiral-opt",
   "crates/spiral-hpo",
   "crates/spiral-safety",

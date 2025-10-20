@@ -8,10 +8,7 @@ pub use st_softlogic::{apply_softmode, beam_select, Ctx, SoftMode, SoftRule, Sol
 #[cfg(feature = "learn_store")]
 pub use st_softlogic::learn;
 
-<<<<<<< HEAD
 #[cfg(feature = "nerf")]
 pub mod nerf_trainer;
-=======
->>>>>>> origin/main
 pub mod quantum_reality;
 pub mod temporal_dynamics;

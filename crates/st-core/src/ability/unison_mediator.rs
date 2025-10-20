@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 //! Unison mediator: read Redis bucket, compute median Choice, inject low-weight soft rules.
+use crate::backend::soft_logic::SoftRule;
 use crate::backend::wgpu_heuristics::{
     SOFT_NAME_CH, SOFT_NAME_KL, SOFT_NAME_USE2CE, SOFT_NAME_WG,
 };

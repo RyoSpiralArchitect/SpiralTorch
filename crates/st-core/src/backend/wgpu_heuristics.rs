@@ -12,6 +12,9 @@ use crate::ecosystem::{
     EcosystemRegistry, HeuristicChoiceSummary, HeuristicDecision, HeuristicSource, MetricSample,
 };
 #[cfg(feature = "logic-learn")]
+use super::soft_logic::learn;
+#[cfg(feature = "logic")]
+use super::soft_logic::SoftRule;
 use st_softlogic::learn;
 #[cfg(feature = "logic")]
 use st_softlogic::SoftRule;
