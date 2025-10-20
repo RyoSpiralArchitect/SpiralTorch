@@ -76,13 +76,6 @@ use st_nn::layers::spiral_rnn::SpiralRnn;
 use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
-#[cfg(feature = "wgpu")]
-use st_backend_wgpu::transform::{
-    CenterCropConfig, ColorJitterConfig, HorizontalFlipConfig, ResizeConfig,
-    TransformDispatchError, TransformDispatcher,
-};
-
-pub mod transforms;
 pub mod datasets;
 pub mod nerf;
 pub mod transforms;
@@ -3602,21 +3595,11 @@ impl TransformOperation {
     }
 }
 
-#[cfg(feature = "wgpu")]
-fn map_dispatch_error(err: TransformDispatchError) -> TensorError {
-    TensorError::BackendFailure {
-        backend: "wgpu",
-        message: err.to_string(),
-    }
-}
-
 /// Sequential container for image transforms.
 #[derive(Clone)]
 pub struct TransformPipeline {
     ops: Vec<TransformOperation>,
     rng: StdRng,
-    #[cfg(feature = "wgpu")]
-    dispatcher: Option<Arc<TransformDispatcher>>,
 }
 
 impl fmt::Debug for TransformPipeline {
@@ -3624,8 +3607,6 @@ impl fmt::Debug for TransformPipeline {
         let op_names: Vec<&'static str> = self.ops.iter().map(|op| op.name()).collect();
         let mut debug = f.debug_struct("TransformPipeline");
         debug.field("operations", &op_names);
-        #[cfg(feature = "wgpu")]
-        debug.field("gpu_dispatcher", &self.dispatcher.is_some());
         debug.finish()
     }
 }
@@ -3635,8 +3616,6 @@ impl TransformPipeline {
         Self {
             ops: Vec::new(),
             rng: StdRng::from_entropy(),
-            #[cfg(feature = "wgpu")]
-            dispatcher: None,
         }
     }
 
@@ -3644,41 +3623,12 @@ impl TransformPipeline {
         Self {
             ops: Vec::new(),
             rng: StdRng::seed_from_u64(seed),
-            #[cfg(feature = "wgpu")]
-            dispatcher: None,
         }
     }
 
     pub fn add(&mut self, op: TransformOperation) -> &mut Self {
         self.ops.push(op);
         self
-    }
-
-    #[cfg(feature = "wgpu")]
-    pub fn with_gpu_dispatcher_arc(mut self, dispatcher: Arc<TransformDispatcher>) -> Self {
-        self.dispatcher = Some(dispatcher);
-        self
-    }
-
-    #[cfg(feature = "wgpu")]
-    pub fn with_gpu_dispatcher(mut self, dispatcher: TransformDispatcher) -> Self {
-        self.dispatcher = Some(Arc::new(dispatcher));
-        self
-    }
-
-    #[cfg(feature = "wgpu")]
-    pub fn set_gpu_dispatcher_arc(&mut self, dispatcher: Arc<TransformDispatcher>) {
-        self.dispatcher = Some(dispatcher);
-    }
-
-    #[cfg(feature = "wgpu")]
-    pub fn set_gpu_dispatcher(&mut self, dispatcher: TransformDispatcher) {
-        self.dispatcher = Some(Arc::new(dispatcher));
-    }
-
-    #[cfg(feature = "wgpu")]
-    pub fn clear_gpu_dispatcher(&mut self) {
-        self.dispatcher = None;
     }
 
     pub fn apply(&mut self, image: &mut ImageTensor) -> PureResult<()> {
@@ -3702,50 +3652,10 @@ impl TransformPipeline {
     }
 
     fn apply_resize(&mut self, op: &Resize, image: &mut ImageTensor) -> PureResult<()> {
-        #[cfg(feature = "wgpu")]
-        {
-            if let Some(dispatcher) = self.dispatcher.as_deref() {
-                let (channels, src_height, src_width) = image.shape();
-                let output = dispatcher
-                    .resize(
-                        image.as_slice(),
-                        ResizeConfig {
-                            channels,
-                            src_height,
-                            src_width,
-                            dst_height: op.height,
-                            dst_width: op.width,
-                        },
-                    )
-                    .map_err(map_dispatch_error)?;
-                *image = ImageTensor::new(channels, op.height, op.width, output)?;
-                return Ok(());
-            }
-        }
         op.apply(image)
     }
 
     fn apply_center_crop(&mut self, op: &CenterCrop, image: &mut ImageTensor) -> PureResult<()> {
-        #[cfg(feature = "wgpu")]
-        {
-            if let Some(dispatcher) = self.dispatcher.as_deref() {
-                let (channels, src_height, src_width) = image.shape();
-                let output = dispatcher
-                    .center_crop(
-                        image.as_slice(),
-                        CenterCropConfig {
-                            channels,
-                            src_height,
-                            src_width,
-                            crop_height: op.height,
-                            crop_width: op.width,
-                        },
-                    )
-                    .map_err(map_dispatch_error)?;
-                *image = ImageTensor::new(channels, op.height, op.width, output)?;
-                return Ok(());
-            }
-        }
         op.apply(image)
     }
 
@@ -3755,25 +3665,6 @@ impl TransformPipeline {
         image: &mut ImageTensor,
     ) -> PureResult<()> {
         let apply = self.rng.gen::<f32>() < op.probability;
-        #[cfg(feature = "wgpu")]
-        {
-            if let Some(dispatcher) = self.dispatcher.as_deref() {
-                let (channels, height, width) = image.shape();
-                let output = dispatcher
-                    .horizontal_flip(
-                        image.as_slice(),
-                        HorizontalFlipConfig {
-                            channels,
-                            height,
-                            width,
-                            apply,
-                        },
-                    )
-                    .map_err(map_dispatch_error)?;
-                *image = ImageTensor::new(channels, height, width, output)?;
-                return Ok(());
-            }
-        }
         op.apply_with_flag(image, apply)
     }
 
@@ -3781,58 +3672,6 @@ impl TransformPipeline {
         let ops = op.sample_ops(&mut self.rng, image.channels());
         if ops.is_empty() {
             return Ok(());
-        }
-
-        #[cfg(feature = "wgpu")]
-        {
-            if let Some(dispatcher) = self.dispatcher.as_deref() {
-                let (channels, height, width) = image.shape();
-                for jitter_op in &ops {
-                    let config = match jitter_op {
-                        ColorJitterOp::Brightness(factor) => ColorJitterConfig {
-                            channels,
-                            height,
-                            width,
-                            brightness: *factor,
-                            contrast: 1.0,
-                            saturation: 1.0,
-                            hue: 0.0,
-                        },
-                        ColorJitterOp::Contrast(factor) => ColorJitterConfig {
-                            channels,
-                            height,
-                            width,
-                            brightness: 1.0,
-                            contrast: *factor,
-                            saturation: 1.0,
-                            hue: 0.0,
-                        },
-                        ColorJitterOp::Saturation(factor) => ColorJitterConfig {
-                            channels,
-                            height,
-                            width,
-                            brightness: 1.0,
-                            contrast: 1.0,
-                            saturation: *factor,
-                            hue: 0.0,
-                        },
-                        ColorJitterOp::Hue(angle) => ColorJitterConfig {
-                            channels,
-                            height,
-                            width,
-                            brightness: 1.0,
-                            contrast: 1.0,
-                            saturation: 1.0,
-                            hue: *angle,
-                        },
-                    };
-                    let output = dispatcher
-                        .color_jitter(image.as_slice(), config)
-                        .map_err(map_dispatch_error)?;
-                    *image = ImageTensor::new(channels, height, width, output)?;
-                }
-                return Ok(());
-            }
         }
 
         op.apply_ops(image, &ops)

@@ -6,17 +6,12 @@ authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 description = "Z-space native vision utilities for SpiralTorch"
 license = "AGPL-3.0-or-later"
 
-[features]
-default = []
-wgpu = ["dep:st-backend-wgpu"]
-
 [dependencies]
 st-core = { path = "../st-core" }
 st-tensor = { path = "../st-tensor" }
 st-logic = { path = "../st-logic" }
 st-nn = { path = "../st-nn" }
 rand = "0.8"
-st-backend-wgpu = { path = "../st-backend-wgpu", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
