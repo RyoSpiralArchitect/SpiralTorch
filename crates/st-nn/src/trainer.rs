@@ -1344,10 +1344,7 @@ impl ModuleTrainer {
             }
             #[cfg(feature = "collapse")]
             if let Some(reading) = psi_snapshot.as_ref() {
-                let command = self
-                    .collapse
-                    .as_mut()
-                    .map(|driver| driver.update(reading));
+                let command = self.collapse.as_mut().map(|driver| driver.update(reading));
                 if let Some(command) = command {
                     match &command {
                         DriveCmd::Collapse {

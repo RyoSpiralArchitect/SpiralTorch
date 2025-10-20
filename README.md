@@ -133,187 +133,97 @@ The stack is comfortable living entirely in Rust—yet the Python wheel remains 
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
-## SpiralTorchVision overview
-
-SpiralTorchVision reinterprets the Z-axis as a perceptual frequency domain and
-collapses it with spectral-window-aware projectors into tensor spaces that any
-TorchVision model can consume. Temporal resonance buffers smooth depth attention
-for streaming inputs, `MultiViewFusion` registers multi-camera descriptors, and
-the SpiralRNN-backed `ResonanceGenerator` synthesises fresh
-`DifferentialResonance` fields on demand. The latest drop layers in Z-space
-super-resolution (`InterpolationMethod` + `ZSpaceVolume::upscale`), diffusion and
-latent decoding helpers (`ZDiffuser`, `ZDecoder`), plus a
-`VideoStreamProjector` that fuses all of the above while stepping through video
-sequences. Read the full guide in
-[docs/spiraltorchvision.md](docs/spiraltorchvision.md).
-
 ---
+
+# SpiralTorch (Python bindings) — v0.1.2
+
+A **thin Python bridge** to SpiralTorch’s Rust-first Z-space learning stack.  
+The wheel exposes the same Z-space tensors, hypergrad primitives, and planner helpers used by the Rust API—no heavy shims.
 
 ## Install
-
-### From PyPI (recommended)
-
-> Requires Python ≥ 3.8
-
 ```bash
-# fresh venv (recommended)
-python3 -m venv .venv && source .venv/bin/activate
-python -m pip install -U pip
-
-# install Spiraltorch
-pip install spiraltorch==0.1.1
+pip install -U pip
+pip install spiraltorch==0.1.2
 ```
+> GPU backends (WGPU/MPS/CUDA/HIP) can be selected when building from source. For prebuilt wheels on PyPI, CPU/MPS/WGPU usage depends on your platform.
 
-#### Quick smoke test
+## Quickstart (works on 0.1.2)
 
-```bash
-python - <<'PY'
-import spiraltorch as st, importlib.metadata as im
-print("spiraltorch:", im.version("spiraltorch"))
-print("phi =", st.golden_ratio(), "theta =", st.golden_angle())
-print("extras ok:", all(hasattr(st, n) for n in [
-    "set_global_seed","fibonacci_pacing","pack_nacci_chunks",
-    "pack_tribonacci_chunks","pack_tetranacci_chunks","generate_plan_batch_ex",
-]))
-PY
-```
-
----
-
-## Build from source
-
-You’ll need Rust and `maturin`.
-
-```bash
-# 1) install maturin
-python -m pip install -U maturin
-
-# 2) build a wheel (pick one backend; macOS can use wgpu or mps)
-maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
-
-# 3) install the built wheel
-pip install ./target/wheels/spiraltorch-*.whl
-```
-
-> For Metal via Apple’s MPS, you can also use `--features mps` instead of `wgpu`.
-
----
-
-## Usage
-
-Top-level convenience functions are exported (extras). Submodules like `spiraltorch.nn` are currently placeholders for future public APIs.
-
+### 1) Extras utilities
 ```python
 import spiraltorch as st
 
-# extras
-print(st.golden_ratio())   # 1.6180...
-print(st.golden_angle())   # 2.39996...
-
-# pacing utilities
-print(st.fibonacci_pacing(12))
-print(st.pack_tribonacci_chunks(20))
-
-# global seed for batch helpers / future generators
+print("phi =", st.golden_ratio())      # 1.618...
+print("theta =", st.golden_angle())    # ~2.399...
 st.set_global_seed(42)
 
-# (wire-up pending) batch plan API—connect to your existing generate_plan()
-# st.generate_plan_batch_ex(
-#     n=3, total_steps=256,
-#     base_radius=1.2, radial_growth=0.01,
-#     base_height=0.5, meso_gain=0.8, micro_gain=0.2,
-#     seed=None
-# )
+# pacing helpers
+print(st.fibonacci_pacing(12))
+print(st.pack_tribonacci_chunks(20))
 ```
 
-Submodules import (placeholders for now):
-
+### 2) Tensor (Rust-backed, Python-accessible)
 ```python
-import spiraltorch.nn, spiraltorch.frac, spiraltorch.linalg
+from spiraltorch import Tensor
+
+# Create a 2×4 tensor from a flat list
+x = Tensor(2, 4, [0.1, 0.7, -0.2, 0.4, 0.9, 0.5, 0.6, 0.0])
+print("shape:", x.shape())
+print("as list:", x.tolist())
 ```
 
----
-
-## Troubleshooting
-
-- **`No matching distribution found`**  
-  Your platform may not have a prebuilt wheel yet. Build from source (see above).
-
-- **Backend errors**  
-  Set `WGPU_BACKEND` explicitly (`metal` on macOS, `vulkan` on Linux, `dx12` on Windows).
-
----
-
-## Versioning
-
-- **0.1.x**: PyO3 **abi3** single-binary packaging; stable `extras` surface.  
-- Future minor releases will gradually expose public APIs under `spiraltorch.*` (e.g., `nn`, `frac`).
-
-### 2) Build from source (Rust)
+## Build from source (optional)
+If you need a custom backend or feature flags:
 
 ```bash
 git clone https://github.com/RyoSpiralArchitect/SpiralTorch.git
 cd SpiralTorch
 ```
-**CPU (default; no GPU deps)**
-```bash
-cargo build -p st-core --release
-```
 
-**WGPU (WebGPU; Windows/Linux/macOS)**
-```bash
-cargo build -p st-core --features wgpu --release
-```
-
-**MPS (macOS GPU)**
-```bash
-cargo build -p st-core --features mps --release
-```
-
-**CUDA (optional; needs NVRTC/Toolkit)**
-```bash
-cargo build -p st-core --features cuda --release
-```
-
-**HIP / ROCm (optional)**
-```bash
-export HIPCC=/opt/rocm/bin/hipcc
-export ROCM_PATH=/opt/rocm
-cargo build -p st-core --features hip,st-backend-hip/hip-real --release
-```
-
-### 3) Python wheels (optional)
 ```bash
 pip install maturin==1.*
 
-# CPU + WebGPU (default)
+# From the repo root:
+# WGPU (WebGPU; macOS/Windows/Linux)
 maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
 
-# Metal (macOS GPU)
+# macOS Metal (MPS)
 maturin build -m bindings/st-py/Cargo.toml --release --features mps
 
-# CUDA (toolchain on PATH)
+# CUDA
 maturin build -m bindings/st-py/Cargo.toml --release --features cuda
 
-# HIP / ROCm (add hip-real for RCCL)
+# HIP / ROCm
 maturin build -m bindings/st-py/Cargo.toml --release --features "hip hip-real"
 ```
 
-### 4) Python tensors & hypergrads
-
-```python
-from spiraltorch import Tensor, Hypergrad, LanguageWaveEncoder
-
-encoder = LanguageWaveEncoder(-1.0, 0.6)
-target = encoder.encode_z_space("SpiralTorch dances in Z-space")
-
-weights = Tensor(*target.shape())
-tape = Hypergrad(-1.0, 0.05, *target.shape())
-tape.accumulate_pair(weights, target)
-tape.apply(weights)
-print("updated weights", weights.tolist())
+Install your local wheel:
+```bash
+pip install target/wheels/spiraltorch-0.1.2-*.whl
 ```
 
+## Troubleshooting
+- **No matching distribution found** → Build from source with `maturin` (see above).
+- **Backend selection issues** → Set `WGPU_BACKEND` (e.g., `metal` on macOS, `vulkan` on Linux, `dx12` on Windows).  
+- **Import errors after local build** → Ensure you installed the newly built wheel (`pip install target/wheels/*.whl`) and that multiple Python environments aren’t conflicting.
+
+## Versioning
+- **0.1.x** ships as a PyO3 **abi3** wheel (Python ≥3.8).  
+- Public Python surface focuses on **extras utilities** and **Tensor**; additional domains (e.g., `nn`, `frac`, etc.) will be rolled out incrementally in later 0.1.x releases.
+
+## What’s new in 0.1.2
+
+- 📦 **First stable PyPI wheel** (PyO3 **abi3**, Python ≥3.8) — `pip install spiraltorch==0.1.2`
+- 🧱 **Tensor binding** exposed as `spiraltorch.Tensor` with `shape()` / `tolist()` helpers
+- 🧮 **Extras utilities**: `golden_ratio`, `golden_angle`, `set_global_seed`, `fibonacci_pacing`, `pack_tribonacci_chunks`
+- ⚙️ **Backend-ready builds** from source: `--features wgpu | mps | cuda | "hip hip-real"`
+- 🧰 **Packaging cleanup**: slimmer wheel, consistent metadata, and README rendered on PyPI
+- 🧪 **Smoke-tested** on macOS arm64; groundwork laid for Linux/Windows wheels next
+
+> Upgrade:
+> ```bash
+> pip install -U spiraltorch==0.1.2
+> ```
 ---
 
 ## Planning the Ecosystem
@@ -457,7 +367,7 @@ SpiralRNN conductors and vision modules. Read the full guide in
 
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
 - [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
-- [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory, signature geometry with timing elasticities and tipping radii, and how SpiralTorch wires DRL penalties into trainers and governance loops.
+- [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory, signature geometry with timing elasticities, tipping radii, and direction-aware safe radii, plus how SpiralTorch wires DRL penalties into trainers and governance loops.
 - [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
 
 ## Emerging toolkits unique to SpiralTorch
@@ -1791,80 +1701,6 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
 - `logic` / `kdsl`: SoftLogic solver / SpiralK DSL
 
 ---
-
-## Quick Start
-
-### 1) Clone
-```bash
-git clone https://github.com/RyoSpiralArchitect/SpiralTorch.git
-cd SpiralTorch
-```
-
-### 2) Build from source (Rust)
-
-**CPU (default; no GPU deps)**
-```bash
-cargo build -p st-core --release
-```
-
-**WGPU (WebGPU; Windows/Linux/macOS)**
-```bash
-cargo build -p st-core --features wgpu --release
-```
-
-**MPS (macOS GPU)**
-```bash
-cargo build -p st-core --features mps --release
-```
-
-**CUDA (optional; needs NVRTC/Toolkit)**
-```bash
-cargo build -p st-core --features cuda --release
-```
-
-**HIP / ROCm (optional; real backend is feature-gated)**
-```bash
-export HIPCC=/opt/rocm/bin/hipcc
-export ROCM_PATH=/opt/rocm
-cargo build -p st-core --features hip,st-backend-hip/hip-real --release
-```
-
-### 3) Python wheels (optional)
-```bash
-pip install maturin==1.*
-
-# CPU + WebGPU (default)
-maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
-
-# Metal (macOS GPU)
-maturin build -m bindings/st-py/Cargo.toml --release --features mps
-
-# CUDA (toolchain on PATH)
-maturin build -m bindings/st-py/Cargo.toml --release --features cuda
-
-# HIP / ROCm (add hip-real for RCCL)
-maturin build -m bindings/st-py/Cargo.toml --release --features "hip hip-real"
-```
-
-### 4) Python tensors & hypergrads
-
-```python
-from spiraltorch import Tensor, Hypergrad, LanguageWaveEncoder
-
-encoder = LanguageWaveEncoder(-1.0, 0.6)
-target = encoder.encode_z_space("SpiralTorch dances in Z-space")
-
-weights = Tensor(*target.shape())
-tape = Hypergrad(-1.0, 0.05, *target.shape())
-tape.accumulate_pair(weights, target)
-tape.apply(weights)
-print("updated weights", weights.tolist())
-```
-
-Prefer flat-space optimisation? Reach for the new Rust-side
-`st_tensor::AmegaRealgrad` tape to mirror the same API without the Poincaré
-projection step—handy when Canvas Transformer energy needs to feed classical
-optimisers alongside its hypergradient updates.
 
 ### Canvas Pixel Transformer → Z-space feedback
 

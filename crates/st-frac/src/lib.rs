@@ -37,6 +37,10 @@ pub enum Pad {
     Zero,
     /// Mirror the signal across the boundary (a.k.a. Neumann reflection).
     Reflect,
+    /// Clamp to the edge value (a.k.a. Dirichlet boundary condition).
+    Edge,
+    /// Wrap around the signal length (periodic boundary condition).
+    Wrap,
     /// Fill with the provided constant value.
     Constant(f32),
 }
@@ -54,17 +58,42 @@ pub fn gl_coeffs(alpha: f32, len: usize) -> Vec<f32> {
     c
 }
 
-fn reflected_index(mut idx: isize, len: usize) -> usize {
+fn wrap_index(idx: isize, len: usize) -> usize {
     debug_assert!(len > 0);
     let len = len as isize;
-    loop {
-        if idx < 0 {
-            idx = -idx - 1;
-        } else if idx >= len {
-            idx = len - (idx - len) - 1;
-        } else {
-            break idx as usize;
-        }
+    idx.rem_euclid(len) as usize
+}
+
+/// Reflect `idx` into the valid `[0, len)` range using the same "edge repeating"
+/// semantics as the previous iterative implementation but without potentially
+/// overflowing when `idx` is at the limits of `isize`.
+fn reflected_index(idx: isize, len: usize) -> usize {
+    debug_assert!(len > 0);
+    if len == 1 {
+        return 0;
+    }
+
+    let len_i128 = len as i128;
+    let period = len_i128 * 2;
+    let mut m = idx as i128 % period;
+    if m < 0 {
+        m += period;
+    }
+    if m >= len_i128 {
+        m = period - m - 1;
+    }
+
+    m as usize
+}
+
+fn clamped_edge_index(idx: isize, len: usize) -> usize {
+    debug_assert!(len > 0);
+    if idx < 0 {
+        0
+    } else if idx as usize >= len {
+        len - 1
+    } else {
+        idx as usize
     }
 }
 
@@ -74,7 +103,7 @@ fn sample_with_pad(x: &[f32], idx: isize, pad: Pad) -> f32 {
 
     if len == 0 {
         return match pad {
-            Pad::Zero | Pad::Reflect => 0.0,
+            Pad::Zero | Pad::Reflect | Pad::Edge | Pad::Wrap => 0.0,
             Pad::Constant(v) => v,
         };
     }
@@ -86,10 +115,9 @@ fn sample_with_pad(x: &[f32], idx: isize, pad: Pad) -> f32 {
     match pad {
         Pad::Zero => 0.0,
         Pad::Constant(v) => v,
-        Pad::Reflect => {
-            let idx = reflected_index(idx, x.len());
-            x[idx]
-        }
+        Pad::Reflect => x[reflected_index(idx, x.len())],
+        Pad::Edge => x[clamped_edge_index(idx, x.len())],
+        Pad::Wrap => x[wrap_index(idx, x.len())],
     }
 }
 
@@ -345,14 +373,103 @@ mod tests {
     }
 
     #[test]
+    fn edge_pad_clamps_to_boundary() {
+        let x = vec![3.0, 7.0, 11.0];
+        let coeff = vec![1.0, 1.0, 1.0];
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Edge, Some(1.0)).unwrap();
+
+        assert_eq!(y[0], 3.0 + 3.0 + 3.0);
+    }
+
+    #[test]
+    fn wrap_pad_cycles_through_signal() {
+        let x = vec![2.0, 4.0, 6.0];
+        let coeff = vec![1.0, 1.0, 1.0, 1.0];
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Wrap, Some(1.0)).unwrap();
+
+        assert_eq!(y[0], 2.0 + 6.0 + 4.0 + 2.0);
+        assert_eq!(y[1], 4.0 + 2.0 + 6.0 + 4.0);
+    }
+
+    #[test]
     fn reflected_index_wraps_right_edge() {
         assert_eq!(super::reflected_index(3, 3), 2);
         assert_eq!(super::reflected_index(4, 3), 1);
     }
 
     #[test]
+    fn reflected_index_handles_far_offsets() {
+        assert_eq!(super::reflected_index(-7, 4), 1);
+        assert_eq!(super::reflected_index(9, 4), 1);
+        assert_eq!(super::reflected_index(-1, 1), 0);
+    }
+
+    #[test]
+    fn wrap_index_handles_large_displacements() {
+        assert_eq!(super::wrap_index(10, 3), 1);
+        assert_eq!(super::wrap_index(-8, 5), 2);
+    }
+
+    #[test]
+    fn reflected_index_matches_naive_small_ranges() {
+        fn naive(idx: isize, len: usize) -> usize {
+            if len == 1 {
+                return 0;
+            }
+            let len_i128 = len as i128;
+            let mut idx = idx as i128;
+            while idx < 0 || idx >= len_i128 {
+                if idx < 0 {
+                    idx = -idx - 1;
+                } else {
+                    idx = len_i128 - (idx - len_i128) - 1;
+                }
+            }
+            idx as usize
+        }
+
+        for len in 1..6 {
+            for idx in -32..=32 {
+                assert_eq!(super::reflected_index(idx, len), naive(idx, len));
+            }
+        }
+    }
+
+    #[test]
+    fn sample_with_pad_reflect_handles_extreme_indices() {
+        let x = [10.0, 20.0, 30.0, 40.0];
+        assert_eq!(super::sample_with_pad(&x, isize::MIN, Pad::Reflect), 10.0);
+        assert_eq!(
+            super::sample_with_pad(&x, isize::MAX - 1, Pad::Reflect),
+            20.0
+        );
+    }
+
+    #[test]
+    fn clamped_edge_index_clamps_bounds() {
+        assert_eq!(super::clamped_edge_index(-3, 4), 0);
+        assert_eq!(super::clamped_edge_index(8, 4), 3);
+        assert_eq!(super::clamped_edge_index(2, 4), 2);
+    }
+
+    #[test]
     fn sample_with_pad_handles_right_constant() {
         let x = [1.0, 2.0];
         assert_eq!(super::sample_with_pad(&x, 2, Pad::Constant(5.0)), 5.0);
+    }
+
+    #[test]
+    fn sample_with_pad_handles_edge() {
+        let x = [1.0, 2.0, 3.0];
+        assert_eq!(super::sample_with_pad(&x, -1, Pad::Edge), 1.0);
+        assert_eq!(super::sample_with_pad(&x, 5, Pad::Edge), 3.0);
+    }
+
+    #[test]
+    fn sample_with_pad_handles_wrap() {
+        let x = [1.0, 2.0, 3.0];
+        assert_eq!(super::sample_with_pad(&x, -1, Pad::Wrap), 3.0);
+        assert_eq!(super::sample_with_pad(&x, 4, Pad::Wrap), 2.0);
+        assert_eq!(super::sample_with_pad(&x, 10, Pad::Wrap), 2.0);
     }
 }

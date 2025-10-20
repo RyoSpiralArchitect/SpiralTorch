@@ -10,10 +10,11 @@ use tracing::debug;
 
 pub mod drift_response;
 pub use drift_response::{
-    aggregate_penalty, aggregate_penalty_with, analyse_word, analyse_word_with, default_thresholds,
-    existence_load, frame_hazard, frame_summary, safe_radius, trainer_penalty,
-    trainer_penalty_with, DrlMetrics, DrsMetrics, FrameSignature, FrameState, FrameThreshold,
-    WordState, DEFAULT_THRESHOLDS,
+    aggregate_penalty, aggregate_penalty_with, analyse_word, analyse_word_with,
+    analyse_word_with_options, default_thresholds, existence_load, frame_hazard, frame_summary,
+    safe_radius, trainer_penalty, trainer_penalty_with, AnalysisOptions, DirectionQuery,
+    DirectionalAxis, DirectionalSignature, DrlMetrics, DrsMetrics, FrameSignature, FrameState,
+    FrameThreshold, WordState, DEFAULT_THRESHOLDS,
 };
 
 /// Content channel used when evaluating policy (prompt vs response).

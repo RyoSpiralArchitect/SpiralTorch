@@ -79,7 +79,23 @@ from the theory note:
   keeps the comprehension curvature \(\kappa'_{w,f}\) intact.  When the linear
   and quadratic terms predict a net balance change, `tipping_radius` estimates
   where the frame's value-minus-risk crosses zero along that drift direction.
-  【F:crates/spiral-safety/src/drift_response.rs†L1-L288】
+  【F:crates/spiral-safety/src/drift_response.rs†L1-L380】
+
+### Direction-Aware Signatures
+
+Frames can now carry explicit directional bases via
+`FrameState.directional_axes`.  Each `DirectionalAxis` stores coefficients for
+value, risk, and comprehension slopes (plus optional curvature terms) so the
+analysis can query **比喩方向** versus **定義破壊方向** or any other bespoke drift
+vector.  Pass a mapping of `DirectionQuery` entries into `analyse_word` (or
+`analyse_word_with_options` in Rust) to obtain directional signatures alongside
+the frame-level ones.【F:tools/python/drift_response_linguistics.py†L56-L191】【F:crates/spiral-safety/src/drift_response.rs†L61-L318】
+
+The resulting `direction_signatures` structure mirrors the frame signatures but
+adds the raw hazard base and any direction-specific safe radius.  The trainer
+penalty incorporates these radii and tipping distances, ensuring that hazards
+predicted along a single drift vector still increase the optimisation pressure
+even when the isotropic safe radius looks acceptable.【F:tools/python/drift_response_linguistics.py†L232-L309】【F:crates/spiral-safety/src/drift_response.rs†L318-L494】
 
 ## 3. Triple-Product Amplifier
 
@@ -105,10 +121,12 @@ The penalty adds the existential load, frame count, and a radius surcharge when
 radii dip below the configured tolerance.  A second surcharge applies when the
 predicted tipping radius falls inside the safety band, reflecting frames whose
 quadratic terms suggest imminent harm even before the observed radius
-collapses.  Strict mode applies a 1.25× boost so
+collapses.  Directional signatures feed an additional surcharge whenever a
+direction-specific safe radius or tipping distance violates the guard band.
+Strict mode applies a 1.25× boost so
 schedulers can flip into hardened policies without rewiring the trainer.
 Aggregating multiple words is a simple sum via `aggregate_penalty`.
-【F:tools/python/drift_response_linguistics.py†L199-L230】
+【F:tools/python/drift_response_linguistics.py†L199-L309】
 
 Rust services tap the exact same flow through
 `spiral_safety::drift_response`, which mirrors the helper with serde-friendly
