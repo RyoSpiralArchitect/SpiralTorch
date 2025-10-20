@@ -1681,7 +1681,34 @@ mod language_pipeline {
             if let Some(dist) = &distribution_summary {
                 connector_metadata.push(("distribution_mode".to_string(), dist.mode.clone()));
                 connector_metadata.push(("node_id".to_string(), dist.node_id.clone()));
-                connector_metadata.extend(format_cloud_targets(&dist.cloud_targets));
+                if !dist.cloud_targets.is_empty() {
+                    let mut azure_targets = Vec::new();
+                    let mut aws_targets = Vec::new();
+                    for target in &dist.cloud_targets {
+                        let descriptor = target.descriptor();
+                        match target {
+                            CloudConnector::AzureEventHub { .. } => {
+                                azure_targets.push(format!("event_hub:{descriptor}"));
+                            }
+                            CloudConnector::AzureStorageQueue { .. } => {
+                                azure_targets.push(format!("storage_queue:{descriptor}"));
+                            }
+                            CloudConnector::AwsKinesis { .. } => {
+                                aws_targets.push(format!("kinesis:{descriptor}"));
+                            }
+                            CloudConnector::AwsSqs { .. } => {
+                                aws_targets.push(format!("sqs:{descriptor}"));
+                            }
+                        }
+                    }
+                    if !azure_targets.is_empty() {
+                        connector_metadata
+                            .push(("azure_targets".to_string(), azure_targets.join(",")));
+                    }
+                    if !aws_targets.is_empty() {
+                        connector_metadata.push(("aws_targets".to_string(), aws_targets.join(",")));
+                    }
+                }
             }
             self.record_connector("roundtable", connector_metadata);
 

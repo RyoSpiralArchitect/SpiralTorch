@@ -722,8 +722,32 @@ impl ModuleTrainer {
             );
         }
 
-        for (key, value) in format_cloud_targets(&config.cloud_targets) {
-            metadata.insert(key, value);
+        if !config.cloud_targets.is_empty() {
+            let mut azure_targets = Vec::new();
+            let mut aws_targets = Vec::new();
+            for target in &config.cloud_targets {
+                let descriptor = target.descriptor();
+                match target {
+                    CloudConnector::AzureEventHub { .. } => {
+                        azure_targets.push(format!("event_hub:{descriptor}"));
+                    }
+                    CloudConnector::AzureStorageQueue { .. } => {
+                        azure_targets.push(format!("storage_queue:{descriptor}"));
+                    }
+                    CloudConnector::AwsKinesis { .. } => {
+                        aws_targets.push(format!("kinesis:{descriptor}"));
+                    }
+                    CloudConnector::AwsSqs { .. } => {
+                        aws_targets.push(format!("sqs:{descriptor}"));
+                    }
+                }
+            }
+            if !azure_targets.is_empty() {
+                metadata.insert("azure_targets".to_string(), azure_targets.join(","));
+            }
+            if !aws_targets.is_empty() {
+                metadata.insert("aws_targets".to_string(), aws_targets.join(","));
+            }
         }
         self.log_connector_event("configure_distribution", metadata);
         self.distribution = Some(RoundtableNode::new(config));
