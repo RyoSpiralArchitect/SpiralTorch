@@ -8,7 +8,9 @@
 The helper mirrors the design sketched in the user request but avoids NumPy
 and PyTorch so it can run in constrained environments.  A tiny Adam
 implementation keeps the Z vector stable while a fractional FFT regulariser
-penalises high-frequency drift.
+penalises high-frequency drift.  The trainer also accepts Drift-Response
+Semantics (DRS) penalties so language batches can react to high-risk
+vocabulary without rewriting the Rust stack.
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ class ZMetrics:
     memory: float
     stability: float
     gradient: Optional[Sequence[float]] = None
+    drs: float = 0.0
 
 
 class ZSpaceTrainer:
@@ -35,6 +38,7 @@ class ZSpaceTrainer:
         lam_mem: float = 0.3,
         lam_stab: float = 0.2,
         lam_frac: float = 0.1,
+        lam_drs: float = 0.0,
         lr: float = 1e-2,
         beta1: float = 0.9,
         beta2: float = 0.999,
@@ -44,7 +48,7 @@ class ZSpaceTrainer:
             raise ValueError("z_dim must be positive")
         self.z: List[float] = [0.0] * z_dim
         self._alpha = max(1e-6, alpha)
-        self._lam = (lam_speed, lam_mem, lam_stab, lam_frac)
+        self._lam = (lam_speed, lam_mem, lam_stab, lam_frac, lam_drs)
         self._lr = lr
         self._beta1 = beta1
         self._beta2 = beta2
@@ -122,13 +126,16 @@ class ZSpaceTrainer:
             stability = float(metrics.get("stab", metrics.get("stability", 0.0)))
             grad = metrics.get("gradient")
             gradient = grad if isinstance(grad, Sequence) else None
-        lam_speed, lam_mem, lam_stab, lam_frac = self._lam
+        lam_speed, lam_mem, lam_stab, lam_frac, lam_drs = self._lam
 
         penalty = (
             lam_speed * self._normalise(speed)
             + lam_mem * self._normalise(memory)
             + lam_stab * self._normalise(stability)
         )
+        drs_signal = metrics.drs if isinstance(metrics, ZMetrics) else float(metrics.get("drs", 0.0))
+        if lam_drs:
+            penalty += lam_drs * self._normalise(drs_signal)
         frac_reg = self._frac_reg(self.z)
         loss = penalty + lam_frac * frac_reg
 
