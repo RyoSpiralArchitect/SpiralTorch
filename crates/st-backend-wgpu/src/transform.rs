@@ -212,6 +212,29 @@ impl Pipelines {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImageGeometry {
+    pub channels: usize,
+    pub height: usize,
+    pub width: usize,
+}
+
+impl ImageGeometry {
+    pub fn element_count(&self) -> usize {
+        self.channels
+            .checked_mul(self.height)
+            .and_then(|v| v.checked_mul(self.width))
+            .expect("image geometry overflow")
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum GeometryCommand {
+    Resize(ResizeConfig),
+    CenterCrop(CenterCropConfig),
+    HorizontalFlip(HorizontalFlipConfig),
+}
+
 struct GpuContext {
     context: WgpuContext,
     pipelines: Pipelines,
@@ -455,6 +478,86 @@ impl TransformDispatcher {
             Backend::Gpu(ctx) => gpu_color_jitter(ctx, input, config, means),
         }
     }
+
+    pub fn run_geometry_sequence(
+        &self,
+        input: &[f32],
+        initial: ImageGeometry,
+        commands: &[GeometryCommand],
+    ) -> Result<(Vec<f32>, ImageGeometry), TransformDispatchError> {
+        if commands.is_empty() {
+            return Ok((input.to_vec(), initial));
+        }
+        let expected = initial.element_count();
+        if input.len() != expected {
+            return Err(TransformDispatchError::InvalidGeometry(format!(
+                "input length {} does not match geometry {}x{}x{}",
+                input.len(),
+                initial.channels,
+                initial.height,
+                initial.width
+            )));
+        }
+
+        let mut geometries = Vec::with_capacity(commands.len());
+        let mut current = initial;
+        for command in commands {
+            current = validate_geometry_transition(current, *command)?;
+            geometries.push(current);
+        }
+
+        match &self.backend {
+            Backend::Cpu => {
+                let mut data = input.to_vec();
+                for (command, geometry) in commands.iter().zip(&geometries) {
+                    data = match *command {
+                        GeometryCommand::Resize(config) => cpu_resize(&data, config),
+                        GeometryCommand::CenterCrop(config) => cpu_center_crop(&data, config),
+                        GeometryCommand::HorizontalFlip(config) => {
+                            cpu_horizontal_flip(&data, config)
+                        }
+                    };
+                    debug_assert_eq!(data.len(), geometry.element_count());
+                }
+                let final_geometry = *geometries.last().unwrap_or(&initial);
+                Ok((data, final_geometry))
+            }
+            Backend::Gpu(ctx) => {
+                let device = ctx.context.device();
+                let queue = ctx.context.queue();
+                let mut current_buffer = upload_slice(
+                    device,
+                    "st.backend.transform.sequence.input",
+                    input,
+                    BufferUsages::STORAGE,
+                );
+                for (command, _geometry) in commands.iter().zip(&geometries) {
+                    let next_buffer = match *command {
+                        GeometryCommand::Resize(config) => {
+                            dispatch_resize_buffer(ctx, &current_buffer, config)?
+                        }
+                        GeometryCommand::CenterCrop(config) => {
+                            dispatch_center_crop_buffer(ctx, &current_buffer, config)?
+                        }
+                        GeometryCommand::HorizontalFlip(config) => {
+                            dispatch_horizontal_flip_buffer(ctx, &current_buffer, config)?
+                        }
+                    };
+                    device.poll(wgpu::Maintain::Wait);
+                    current_buffer = next_buffer;
+                }
+                let final_geometry = *geometries.last().unwrap();
+                let output = read_buffer(
+                    device,
+                    queue,
+                    &current_buffer,
+                    final_geometry.element_count(),
+                )
+                .map_err(TransformDispatchError::Readback)?;
+                Ok((output, final_geometry))
+            }
+        }
+    }
 }
 
 fn workgroup_dims(
@@ -626,49 +729,8 @@ fn gpu_resize(
         BufferUsages::STORAGE,
     );
     let out_elements = config.channels * config.dst_height * config.dst_width;
-    let out_buffer = empty_buffer(
-        device,
-        "st.backend.transform.resize.output",
-        out_elements,
-        BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-    );
-    let params = ResizeParams {
-        src_height: config.src_height as u32,
-        src_width: config.src_width as u32,
-        dst_height: config.dst_height as u32,
-        dst_width: config.dst_width as u32,
-        channels: config.channels as u32,
-        _pad0: 0,
-        _pad1: 0,
-        _pad2: 0,
-    };
-    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("st.backend.transform.resize.params"),
-        contents: bytemuck::bytes_of(&params),
-        usage: BufferUsages::UNIFORM,
-    });
-    let bind_group = ctx.bind_group(&in_buffer, &out_buffer, &params_buffer);
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("st.backend.transform.resize.encoder"),
-    });
-    {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("st.backend.transform.resize.pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(&ctx.pipelines.resize);
-        pass.set_bind_group(0, &bind_group, &[]);
-        let (gx, gy, gz) = workgroup_dims(
-            config.dst_width,
-            config.dst_height,
-            config.channels,
-            8,
-            8,
-            1,
-        );
-        pass.dispatch_workgroups(gx, gy, gz);
-    }
-    queue.submit(std::iter::once(encoder.finish()));
+    let out_buffer = dispatch_resize_buffer(ctx, &in_buffer, config)?;
+    device.poll(wgpu::Maintain::Wait);
     read_buffer(device, queue, &out_buffer, out_elements).map_err(TransformDispatchError::Readback)
 }
 
@@ -686,49 +748,8 @@ fn gpu_center_crop(
         BufferUsages::STORAGE,
     );
     let out_elements = config.channels * config.crop_height * config.crop_width;
-    let out_buffer = empty_buffer(
-        device,
-        "st.backend.transform.crop.output",
-        out_elements,
-        BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-    );
-    let params = CropParams {
-        src_height: config.src_height as u32,
-        src_width: config.src_width as u32,
-        dst_height: config.crop_height as u32,
-        dst_width: config.crop_width as u32,
-        top: ((config.src_height - config.crop_height) / 2) as u32,
-        left: ((config.src_width - config.crop_width) / 2) as u32,
-        channels: config.channels as u32,
-        _pad: 0,
-    };
-    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("st.backend.transform.crop.params"),
-        contents: bytemuck::bytes_of(&params),
-        usage: BufferUsages::UNIFORM,
-    });
-    let bind_group = ctx.bind_group(&in_buffer, &out_buffer, &params_buffer);
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("st.backend.transform.crop.encoder"),
-    });
-    {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("st.backend.transform.crop.pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(&ctx.pipelines.center_crop);
-        pass.set_bind_group(0, &bind_group, &[]);
-        let (gx, gy, gz) = workgroup_dims(
-            config.crop_width,
-            config.crop_height,
-            config.channels,
-            8,
-            8,
-            1,
-        );
-        pass.dispatch_workgroups(gx, gy, gz);
-    }
-    queue.submit(std::iter::once(encoder.finish()));
+    let out_buffer = dispatch_center_crop_buffer(ctx, &in_buffer, config)?;
+    device.poll(wgpu::Maintain::Wait);
     read_buffer(device, queue, &out_buffer, out_elements).map_err(TransformDispatchError::Readback)
 }
 
@@ -746,38 +767,8 @@ fn gpu_horizontal_flip(
         BufferUsages::STORAGE,
     );
     let out_elements = config.channels * config.height * config.width;
-    let out_buffer = empty_buffer(
-        device,
-        "st.backend.transform.flip.output",
-        out_elements,
-        BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-    );
-    let params = FlipParams {
-        height: config.height as u32,
-        width: config.width as u32,
-        channels: config.channels as u32,
-        apply: config.apply as u32,
-    };
-    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("st.backend.transform.flip.params"),
-        contents: bytemuck::bytes_of(&params),
-        usage: BufferUsages::UNIFORM,
-    });
-    let bind_group = ctx.bind_group(&in_buffer, &out_buffer, &params_buffer);
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("st.backend.transform.flip.encoder"),
-    });
-    {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("st.backend.transform.flip.pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(&ctx.pipelines.horizontal_flip);
-        pass.set_bind_group(0, &bind_group, &[]);
-        let (gx, gy, gz) = workgroup_dims(config.width, config.height, config.channels, 16, 16, 1);
-        pass.dispatch_workgroups(gx, gy, gz);
-    }
-    queue.submit(std::iter::once(encoder.finish()));
+    let out_buffer = dispatch_horizontal_flip_buffer(ctx, &in_buffer, config)?;
+    device.poll(wgpu::Maintain::Wait);
     read_buffer(device, queue, &out_buffer, out_elements).map_err(TransformDispatchError::Readback)
 }
 
@@ -838,4 +829,227 @@ fn gpu_color_jitter(
     }
     queue.submit(std::iter::once(encoder.finish()));
     read_buffer(device, queue, &out_buffer, out_elements).map_err(TransformDispatchError::Readback)
+}
+
+fn dispatch_resize_buffer(
+    ctx: &GpuContext,
+    input: &Buffer,
+    config: ResizeConfig,
+) -> Result<Buffer, TransformDispatchError> {
+    let device = ctx.context.device();
+    let queue = ctx.context.queue();
+    let out_elements = config.channels * config.dst_height * config.dst_width;
+    let out_buffer = empty_buffer(
+        device,
+        "st.backend.transform.resize.seq.output",
+        out_elements,
+        BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+    );
+    let params = ResizeParams {
+        src_height: config.src_height as u32,
+        src_width: config.src_width as u32,
+        dst_height: config.dst_height as u32,
+        dst_width: config.dst_width as u32,
+        channels: config.channels as u32,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+    };
+    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.backend.transform.resize.seq.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: BufferUsages::UNIFORM,
+    });
+    let bind_group = ctx.bind_group(input, &out_buffer, &params_buffer);
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.backend.transform.resize.seq.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.backend.transform.resize.seq.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&ctx.pipelines.resize);
+        pass.set_bind_group(0, &bind_group, &[]);
+        let (gx, gy, gz) = workgroup_dims(
+            config.dst_width,
+            config.dst_height,
+            config.channels,
+            8,
+            8,
+            1,
+        );
+        pass.dispatch_workgroups(gx, gy, gz);
+    }
+    queue.submit(std::iter::once(encoder.finish()));
+    Ok(out_buffer)
+}
+
+fn dispatch_center_crop_buffer(
+    ctx: &GpuContext,
+    input: &Buffer,
+    config: CenterCropConfig,
+) -> Result<Buffer, TransformDispatchError> {
+    let device = ctx.context.device();
+    let queue = ctx.context.queue();
+    let out_elements = config.channels * config.crop_height * config.crop_width;
+    let out_buffer = empty_buffer(
+        device,
+        "st.backend.transform.crop.seq.output",
+        out_elements,
+        BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+    );
+    let params = CropParams {
+        src_height: config.src_height as u32,
+        src_width: config.src_width as u32,
+        dst_height: config.crop_height as u32,
+        dst_width: config.crop_width as u32,
+        top: ((config.src_height - config.crop_height) / 2) as u32,
+        left: ((config.src_width - config.crop_width) / 2) as u32,
+        channels: config.channels as u32,
+        _pad: 0,
+    };
+    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.backend.transform.crop.seq.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: BufferUsages::UNIFORM,
+    });
+    let bind_group = ctx.bind_group(input, &out_buffer, &params_buffer);
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.backend.transform.crop.seq.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.backend.transform.crop.seq.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&ctx.pipelines.center_crop);
+        pass.set_bind_group(0, &bind_group, &[]);
+        let (gx, gy, gz) = workgroup_dims(
+            config.crop_width,
+            config.crop_height,
+            config.channels,
+            8,
+            8,
+            1,
+        );
+        pass.dispatch_workgroups(gx, gy, gz);
+    }
+    queue.submit(std::iter::once(encoder.finish()));
+    Ok(out_buffer)
+}
+
+fn dispatch_horizontal_flip_buffer(
+    ctx: &GpuContext,
+    input: &Buffer,
+    config: HorizontalFlipConfig,
+) -> Result<Buffer, TransformDispatchError> {
+    let device = ctx.context.device();
+    let queue = ctx.context.queue();
+    let out_elements = config.channels * config.height * config.width;
+    let out_buffer = empty_buffer(
+        device,
+        "st.backend.transform.flip.seq.output",
+        out_elements,
+        BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+    );
+    let params = FlipParams {
+        height: config.height as u32,
+        width: config.width as u32,
+        channels: config.channels as u32,
+        apply: config.apply as u32,
+    };
+    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.backend.transform.flip.seq.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: BufferUsages::UNIFORM,
+    });
+    let bind_group = ctx.bind_group(input, &out_buffer, &params_buffer);
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.backend.transform.flip.seq.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.backend.transform.flip.seq.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&ctx.pipelines.horizontal_flip);
+        pass.set_bind_group(0, &bind_group, &[]);
+        let (gx, gy, gz) = workgroup_dims(config.width, config.height, config.channels, 16, 16, 1);
+        pass.dispatch_workgroups(gx, gy, gz);
+    }
+    queue.submit(std::iter::once(encoder.finish()));
+    Ok(out_buffer)
+}
+
+fn validate_geometry_transition(
+    current: ImageGeometry,
+    command: GeometryCommand,
+) -> Result<ImageGeometry, TransformDispatchError> {
+    match command {
+        GeometryCommand::Resize(config) => {
+            if config.channels != current.channels
+                || config.src_height != current.height
+                || config.src_width != current.width
+            {
+                return Err(TransformDispatchError::InvalidGeometry(
+                    "resize config incompatible with input geometry".into(),
+                ));
+            }
+            TransformDispatcher::ensure_geometry(
+                config.src_height,
+                config.src_width,
+                config.dst_height,
+                config.dst_width,
+            )?;
+            Ok(ImageGeometry {
+                channels: current.channels,
+                height: config.dst_height,
+                width: config.dst_width,
+            })
+        }
+        GeometryCommand::CenterCrop(config) => {
+            if config.channels != current.channels
+                || config.src_height != current.height
+                || config.src_width != current.width
+            {
+                return Err(TransformDispatchError::InvalidGeometry(
+                    "center crop config incompatible with input geometry".into(),
+                ));
+            }
+            TransformDispatcher::ensure_geometry(
+                config.src_height,
+                config.src_width,
+                config.crop_height,
+                config.crop_width,
+            )?;
+            if config.crop_height > config.src_height || config.crop_width > config.src_width {
+                return Err(TransformDispatchError::InvalidGeometry(
+                    "crop must fit inside source".into(),
+                ));
+            }
+            Ok(ImageGeometry {
+                channels: current.channels,
+                height: config.crop_height,
+                width: config.crop_width,
+            })
+        }
+        GeometryCommand::HorizontalFlip(config) => {
+            if config.channels != current.channels
+                || config.height != current.height
+                || config.width != current.width
+            {
+                return Err(TransformDispatchError::InvalidGeometry(
+                    "horizontal flip config incompatible with input geometry".into(),
+                ));
+            }
+            TransformDispatcher::ensure_geometry(
+                config.height,
+                config.width,
+                config.height,
+                config.width,
+            )?;
+            Ok(current)
+        }
+    }
 }
