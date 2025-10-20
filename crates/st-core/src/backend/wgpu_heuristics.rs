@@ -6,15 +6,15 @@
 use super::consensus;
 use super::device_caps::DeviceCaps;
 use super::kdsl_bridge;
+#[cfg(feature = "logic-learn")]
+use super::soft_logic::learn;
+#[cfg(feature = "logic")]
+use super::soft_logic::SoftRule;
 use super::spiralk_fft::SpiralKFftPlan;
 use crate::backend::wgpu_heuristics_generated as gen;
 use crate::ecosystem::{
     EcosystemRegistry, HeuristicChoiceSummary, HeuristicDecision, HeuristicSource, MetricSample,
 };
-#[cfg(feature = "logic-learn")]
-use st_logic::learn;
-#[cfg(feature = "logic")]
-use st_logic::SoftRule;
 #[cfg(feature = "logic-learn")]
 use std::sync::Mutex;
 use std::time::SystemTime;

@@ -3,6 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use super::soft_logic::SoftRule;
 #[cfg(not(feature = "logic"))]
 use super::wgpu_heuristics::{Choice, DslOverrides};
 #[cfg(feature = "logic")]
@@ -11,11 +12,6 @@ use super::wgpu_heuristics::{
     SOFT_NAME_MODE_BOTTOMK, SOFT_NAME_MODE_MIDK, SOFT_NAME_RADIX, SOFT_NAME_SEGMENTS,
     SOFT_NAME_TILE_COLS, SOFT_NAME_USE2CE, SOFT_NAME_WG,
 };
-#[cfg(feature = "logic")]
-pub use st_logic::SoftRule;
-#[cfg(not(feature = "logic"))]
-#[derive(Clone, Debug, Default)]
-pub struct SoftRule;
 #[cfg(feature = "kdsl")]
 use serde::Deserialize;
 

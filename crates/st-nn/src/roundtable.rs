@@ -26,6 +26,7 @@ use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant, SystemTime};
 
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::ecosystem::CloudConnector;
 use st_core::runtime::blackcat::zmeta::ZMetaParams;
 use st_core::runtime::blackcat::{
     bandit::SoftBanditMode, BlackCatRuntime, ChoiceGroups, StepMetrics,
@@ -66,6 +67,7 @@ pub struct DistConfig {
     pub push_interval: Duration,
     pub meta_endpoints: Vec<String>,
     pub summary_window: usize,
+    pub cloud_targets: Vec<CloudConnector>,
 }
 
 impl Default for DistConfig {
@@ -76,7 +78,63 @@ impl Default for DistConfig {
             push_interval: Duration::from_secs(30),
             meta_endpoints: Vec::new(),
             summary_window: 32,
+            cloud_targets: Vec::new(),
         }
+    }
+}
+
+impl DistConfig {
+    /// Registers an additional cloud target, deduplicating existing entries.
+    pub fn with_cloud_target(mut self, target: CloudConnector) -> Self {
+        if !self.cloud_targets.contains(&target) {
+            self.cloud_targets.push(target);
+        }
+        self
+    }
+
+    /// Adds an Azure Event Hub target using the provided namespace and hub name.
+    pub fn with_azure_event_hub(
+        self,
+        namespace: impl Into<String>,
+        hub: impl Into<String>,
+    ) -> Self {
+        self.with_cloud_target(CloudConnector::AzureEventHub {
+            namespace: namespace.into(),
+            hub: hub.into(),
+        })
+    }
+
+    /// Adds an Azure Storage Queue target identified by account and queue names.
+    pub fn with_azure_storage_queue(
+        self,
+        account: impl Into<String>,
+        queue: impl Into<String>,
+    ) -> Self {
+        self.with_cloud_target(CloudConnector::AzureStorageQueue {
+            account: account.into(),
+            queue: queue.into(),
+        })
+    }
+
+    /// Adds an AWS Kinesis stream target.
+    pub fn with_aws_kinesis(self, region: impl Into<String>, stream: impl Into<String>) -> Self {
+        self.with_cloud_target(CloudConnector::AwsKinesis {
+            region: region.into(),
+            stream: stream.into(),
+        })
+    }
+
+    /// Adds an AWS SQS queue target.
+    pub fn with_aws_sqs(self, region: impl Into<String>, queue: impl Into<String>) -> Self {
+        self.with_cloud_target(CloudConnector::AwsSqs {
+            region: region.into(),
+            queue: queue.into(),
+        })
+    }
+
+    /// Returns the configured cloud targets.
+    pub fn cloud_targets(&self) -> &[CloudConnector] {
+        &self.cloud_targets
     }
 }
 
@@ -918,6 +976,24 @@ mod tests {
     }
 
     #[test]
+    fn dist_config_cloud_targets_builder_deduplicates() {
+        let cfg = DistConfig::default()
+            .with_azure_event_hub("spiral-meta", "roundtable")
+            .with_azure_event_hub("spiral-meta", "roundtable")
+            .with_aws_sqs("us-east-1", "spiral-jobs");
+
+        assert_eq!(cfg.cloud_targets.len(), 2);
+        assert!(cfg
+            .cloud_targets
+            .iter()
+            .any(|target| matches!(target, CloudConnector::AzureEventHub { .. })));
+        assert!(cfg
+            .cloud_targets
+            .iter()
+            .any(|target| matches!(target, CloudConnector::AwsSqs { .. })));
+    }
+
+    #[test]
     fn node_flushes_with_window() {
         let mut node = RoundtableNode::new(DistConfig {
             node_id: "n1".to_string(),
@@ -925,6 +1001,7 @@ mod tests {
             push_interval: Duration::from_secs(60),
             meta_endpoints: Vec::new(),
             summary_window: 2,
+            cloud_targets: Vec::new(),
         });
         assert!(node
             .record_decision(

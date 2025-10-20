@@ -6,6 +6,21 @@ _(Still under active repair while expanding — API changes hourly.)_
 
 **Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
 
+---
+
+### Why SpiralTorch  
+
+Modern ML stacks were built around CUDA—fast, but closed and rigid.  
+**SpiralTorch** aims to make high-theory GPU computing *portable* again.  
+It keeps the expressive PyTorch-style API that researchers already know, but runs on **WGPU** (Metal / Vulkan / DX12), so the same code works across macOS, Windows, and Linux without vendor lock-in.  
+
+Where frameworks chase throughput, SpiralTorch chases **fidelity**: exact spectral operators, stable autodiff at microlocal scales, and a cooperative scheduler designed for reproducible research.  
+You can start with existing PyTorch checkpoints via `spiraltorch.compat.torch`, move training loops unchanged, and gradually adopt SpiralTorch’s runtime for fine-grained control over kernels and device orchestration.  
+
+It’s not just an engine—it’s a **bridge** between the pragmatism of deep-learning frameworks and the precision of computational geometry.  
+
+---
+
 **Architecture Overview.**
 ```mermaid
 sequenceDiagram
@@ -30,6 +45,8 @@ sequenceDiagram
   Core--)TLM: spans / metrics / logs
 ```
 
+> **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
+
 **License**
 
 AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
@@ -52,6 +69,8 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 - Contact: [Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) · <mailto:kishkavsesvit@icloud.com>  
 - Unauthorized derivations are non-compliant with AGPL §13  
 - **For research collaborations or integration inquiries, please reach out directly.**
+- **Cloud integrations:** see [Cloud Integration Guide](docs/cloud_integration.md) for
+  Azure and AWS deployment blueprints.
 - **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors. Any network-facing use must comply with AGPL §13.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
@@ -104,6 +123,20 @@ the kernels, the hypergrad tape streams Z-space meaning, and the high-level
 The stack is comfortable living entirely in Rust—yet the Python wheel remains a
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
+
+## SpiralTorchVision overview
+
+SpiralTorchVision reinterprets the Z-axis as a perceptual frequency domain and
+collapses it with spectral-window-aware projectors into tensor spaces that any
+TorchVision model can consume. Temporal resonance buffers smooth depth attention
+for streaming inputs, `MultiViewFusion` registers multi-camera descriptors, and
+the SpiralRNN-backed `ResonanceGenerator` synthesises fresh
+`DifferentialResonance` fields on demand. The latest drop layers in Z-space
+super-resolution (`InterpolationMethod` + `ZSpaceVolume::upscale`), diffusion and
+latent decoding helpers (`ZDiffuser`, `ZDecoder`), plus a
+`VideoStreamProjector` that fuses all of the above while stepping through video
+sequences. Read the full guide in
+[docs/spiraltorchvision.md](docs/spiraltorchvision.md).
 
 ---
 
@@ -415,7 +448,7 @@ SpiralRNN conductors and vision modules. Read the full guide in
 
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
 - [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
-- [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Japanese design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
+- [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
 
 ## Emerging toolkits unique to SpiralTorch
 
@@ -1864,6 +1897,7 @@ execute_rank(&exec, &plan)?;
 **Features**
 - Dataset abstraction and serialization
 - Hypergrad integration for every parameter
+- Optional Realgrad accumulation via `ModuleTrainer::with_realgrad`
 - WGPU · MPS · CUDA unified backends
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
@@ -1918,12 +1952,24 @@ use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{DistConfig, ModuleTrainer, RoundtableConfig, Sequential, Linear, MeanSquaredError};
 
 let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
+use st_core::ecosystem::CloudConnector;
+
 let dist = DistConfig {
     node_id: "node-a".into(),
     mode: st_nn::DistMode::PeriodicMeta,
     push_interval: std::time::Duration::from_secs(15),
     meta_endpoints: vec!["tcp://meta:5005".into()],
     summary_window: 8,
+    cloud_targets: vec![
+        CloudConnector::AzureEventHub {
+            namespace: "spiral-meta".into(),
+            hub: "roundtable".into(),
+        },
+        CloudConnector::AwsKinesis {
+            region: "us-east-1".into(),
+            stream: "spiral-roundtable".into(),
+        },
+    ],
 };
 trainer.configure_distribution(dist);
 trainer.install_blackcat_moderator(0.75, 2);
@@ -1963,6 +2009,10 @@ for entry in trainer.blackcat_scoreboard() {
     );
 }
 ```
+
+The `cloud_targets` catalogue surfaces Azure Event Hub / Storage Queue and AWS Kinesis /
+SQS integrations to telemetry consumers, ensuring roundtable connectors advertise which
+cloud fabrics receive summaries and proposals.
 
 **BlackCat runtime tap-in**
 

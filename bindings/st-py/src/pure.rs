@@ -1,13 +1,16 @@
 use num_complex::Complex32 as PyComplex32;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use pyo3::{Bound, PyRefMut};
+use pyo3::{wrap_pyfunction, Bound, PyRefMut};
 
 use crate::tensor::{tensor_err_to_py, PyTensor};
 
+use st_tensor::measure::{
+    z_space_barycenter as z_space_barycenter_rs, BarycenterIntermediate, ZSpaceBarycenter,
+};
 use st_tensor::{
     AmegaHypergrad, Complex32 as StComplex32, ComplexTensor, GradientSummary, LanguageWaveEncoder,
-    OpenCartesianTopos, TensorBiome,
+    OpenCartesianTopos, Tensor, TensorBiome,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -302,6 +305,58 @@ pub(crate) struct PyTensorBiome {
     inner: TensorBiome,
 }
 
+#[pyclass(module = "spiraltorch", name = "BarycenterIntermediate", unsendable)]
+#[derive(Clone)]
+pub(crate) struct PyBarycenterIntermediate {
+    inner: BarycenterIntermediate,
+}
+
+impl From<BarycenterIntermediate> for PyBarycenterIntermediate {
+    fn from(inner: BarycenterIntermediate) -> Self {
+        Self { inner }
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ZSpaceBarycenter", unsendable)]
+pub(crate) struct PyZSpaceBarycenter {
+    inner: ZSpaceBarycenter,
+}
+
+impl From<ZSpaceBarycenter> for PyZSpaceBarycenter {
+    fn from(inner: ZSpaceBarycenter) -> Self {
+        Self { inner }
+    }
+}
+
+#[pyfunction]
+#[pyo3(
+    name = "z_space_barycenter",
+    signature = (weights, densities, entropy_weight, beta_j, coupling=None)
+)]
+fn py_z_space_barycenter(
+    py: Python<'_>,
+    weights: Vec<f32>,
+    densities: Vec<Py<PyTensor>>,
+    entropy_weight: f32,
+    beta_j: f32,
+    coupling: Option<Py<PyTensor>>,
+) -> PyResult<PyZSpaceBarycenter> {
+    let density_clones: Vec<Tensor> = densities
+        .into_iter()
+        .map(|tensor| tensor.bind(py).borrow().inner.clone())
+        .collect();
+    let coupling_tensor = coupling.map(|tensor| tensor.bind(py).borrow().inner.clone());
+    let barycenter = z_space_barycenter_rs(
+        &weights,
+        &density_clones,
+        entropy_weight,
+        beta_j,
+        coupling_tensor.as_ref(),
+    )
+    .map_err(tensor_err_to_py)?;
+    Ok(PyZSpaceBarycenter::from(barycenter))
+}
+
 #[pymethods]
 impl PyTensorBiome {
     #[new]
@@ -361,6 +416,76 @@ impl PyTensorBiome {
     }
 }
 
+#[pymethods]
+impl PyBarycenterIntermediate {
+    #[getter]
+    fn interpolation(&self) -> f32 {
+        self.inner.interpolation
+    }
+
+    #[getter]
+    fn density(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(self.inner.density.clone()))
+    }
+
+    #[getter]
+    fn kl_energy(&self) -> f32 {
+        self.inner.kl_energy
+    }
+
+    #[getter]
+    fn entropy(&self) -> f32 {
+        self.inner.entropy
+    }
+
+    #[getter]
+    fn objective(&self) -> f32 {
+        self.inner.objective
+    }
+}
+
+#[pymethods]
+impl PyZSpaceBarycenter {
+    #[getter]
+    fn density(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(self.inner.density.clone()))
+    }
+
+    #[getter]
+    fn kl_energy(&self) -> f32 {
+        self.inner.kl_energy
+    }
+
+    #[getter]
+    fn entropy(&self) -> f32 {
+        self.inner.entropy
+    }
+
+    #[getter]
+    fn coupling_energy(&self) -> f32 {
+        self.inner.coupling_energy
+    }
+
+    #[getter]
+    fn objective(&self) -> f32 {
+        self.inner.objective
+    }
+
+    #[getter]
+    fn effective_weight(&self) -> f32 {
+        self.inner.effective_weight
+    }
+
+    fn intermediates(&self) -> Vec<PyBarycenterIntermediate> {
+        self.inner
+            .intermediates
+            .iter()
+            .cloned()
+            .map(PyBarycenterIntermediate::from)
+            .collect()
+    }
+}
+
 pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyComplexTensor>()?;
     m.add_class::<PyOpenCartesianTopos>()?;
@@ -368,5 +493,8 @@ pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyGradientSummary>()?;
     m.add_class::<PyHypergrad>()?;
     m.add_class::<PyTensorBiome>()?;
+    m.add_class::<PyBarycenterIntermediate>()?;
+    m.add_class::<PyZSpaceBarycenter>()?;
+    m.add_function(wrap_pyfunction!(py_z_space_barycenter, m)?)?;
     Ok(())
 }

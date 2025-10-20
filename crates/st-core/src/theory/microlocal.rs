@@ -337,15 +337,12 @@ impl InterfaceZLift {
             0.0
         };
 
-        // ここで物理半径からスケールを設定
-        let scale = ZScale::new(signature.physical_radius).unwrap_or(ZScale::ONE);
-
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support: total_support,
             interface_cells,
             band_energy,
-            scale: Some(scale),
+            scale: ZScale::new(signature.physical_radius),
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -389,9 +386,7 @@ impl InterfaceZPulse {
         let mut drift_weight = 0.0f32;
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
-        let mut scale_phys = 0.0f32;
-        let mut scale_log = 0.0f32;
-        let mut scale_weight = 0.0f32;
+        let mut scale_weights = Vec::new();
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
@@ -404,26 +399,22 @@ impl InterfaceZPulse {
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
             if let Some(scale) = pulse.scale {
-                let w = scale_weight_for(pulse);
-                scale_phys += scale.physical_radius * w;
-                scale_log += scale.log_radius * w;
-                scale_weight += w;
+                let scale_weight = scale_weight_for(pulse);
+                scale_weights.push((scale, scale_weight));
             }
         }
 
-        // 集約スケールを計算して利用する（unused 警告の解消）
-        let scale = if scale_weight > 0.0 {
-            ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
-        } else {
-            None
-        };
-
+        // Combine the weighted scale contributions from the input pulses.  When all
+        // contributors omit the scale metadata we conservatively fall back to the
+        // most recent non-empty sample so downstream consumers retain continuity.
+        let aggregated_scale = ZScale::weighted_average(scale_weights.iter().copied())
+            .or_else(|| pulses.iter().rev().find_map(|pulse| pulse.scale));
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
             interface_cells,
             band_energy: band,
-            scale,
+            scale: aggregated_scale.or(Some(ZScale::ONE)),
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -442,14 +433,6 @@ impl InterfaceZPulse {
     pub fn lerp(current: &InterfaceZPulse, next: &InterfaceZPulse, alpha: f32) -> InterfaceZPulse {
         let t = alpha.clamp(0.0, 1.0);
 
-        // スケールの補間（両方 Some の場合のみ補間、それ以外は次を優先）
-        let scale = match (current.scale, next.scale) {
-            (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
-            (_, s @ Some(_)) => s,
-            (s @ Some(_), None) => s,
-            (None, None) => None,
-        };
-
         InterfaceZPulse {
             source: next.source,
             support: lerp(current.support, next.support, t),
@@ -459,7 +442,12 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            scale,
+            scale: match (current.scale, next.scale) {
+                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
@@ -497,6 +485,7 @@ impl InterfaceZPulse {
             band_energy: self.band_energy,
             drift: self.drift,
             z_signal: self.z_bias,
+            // [SCALE-TODO] Patch 0 optional tagging
             scale: self.scale,
         }
     }
@@ -513,7 +502,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: None,
+            scale: Some(ZScale::ONE),
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
@@ -964,6 +953,12 @@ mod tests {
     use super::*;
     use ndarray::array;
 
+    fn assert_neutral_scale(scale: Option<ZScale>) {
+        let scale = scale.expect("scale tag missing from pulse");
+        assert!((scale.physical_radius - ZScale::ONE.physical_radius).abs() < 1e-6);
+        assert!((scale.log_radius - ZScale::ONE.log_radius).abs() < 1e-6);
+    }
+
     #[test]
     fn detects_boundary_presence() {
         let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
@@ -989,5 +984,23 @@ mod tests {
         assert!((norm - 1.0).abs() < 1e-3);
         assert!(normal_y.abs() > 0.5);
         assert!(normal_x.abs() > 0.5);
+    }
+
+    #[test]
+    fn conductor_rollout_preserves_neutral_scale() {
+        let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift);
+
+        let report = conductor.step(&mask, None, None, None);
+
+        for pulse in &report.pulses {
+            assert_neutral_scale(pulse.scale);
+        }
+
+        assert_neutral_scale(report.fused_pulse.scale);
+        assert_neutral_scale(report.feedback.scale);
+        assert_neutral_scale(report.fused_z.pulse.scale);
     }
 }

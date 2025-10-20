@@ -6,6 +6,8 @@
 use crate::module::{Module, Parameter};
 use crate::schedule::GradientBands;
 use crate::{PureResult, Tensor, TensorError};
+#[cfg(feature = "wgpu")]
+use st_tensor::backend::wgpu_dense;
 use std::cell::RefCell;
 
 fn validate_positive(value: usize, _label: &str) -> PureResult<()> {
@@ -281,19 +283,12 @@ impl Conv2d {
             kernel,
             stride,
             padding,
-            dilation: (1, 1),
+            dilation,
             input_hw,
         };
         // Validate configuration by computing the output size once during construction.
         conv.output_hw()?;
         Ok(conv)
-    }
-
-    fn dilated_kernel(&self) -> PureResult<(usize, usize)> {
-        Ok((
-            dilated_extent(self.kernel.0, self.dilation.0)?,
-            dilated_extent(self.kernel.1, self.dilation.1)?,
-        ))
     }
 
     /// Overrides the dilation factors used by the convolution.
@@ -317,20 +312,18 @@ impl Conv2d {
 
     fn output_hw(&self) -> PureResult<(usize, usize)> {
         let (h, w) = self.input_hw;
-        let (kh, kw) = self.dilated_kernel()?;
+        let eff_kh = dilated_extent(self.kernel.0, self.dilation.0)?;
+        let eff_kw = dilated_extent(self.kernel.1, self.dilation.1)?;
         let (ph, pw) = self.padding;
         let (sh, sw) = self.stride;
-        let (dh, dw) = self.dilation;
-        let effective_kh = dh * (kh.saturating_sub(1)) + 1;
-        let effective_kw = dw * (kw.saturating_sub(1)) + 1;
-        if h + 2 * ph < effective_kh || w + 2 * pw < effective_kw {
+        if h + 2 * ph < eff_kh || w + 2 * pw < eff_kw {
             return Err(TensorError::InvalidDimensions {
                 rows: h + 2 * ph,
-                cols: effective_kh.max(effective_kw),
+                cols: eff_kh.max(eff_kw),
             });
         }
-        let oh = (h + 2 * ph - effective_kh) / sh + 1;
-        let ow = (w + 2 * pw - effective_kw) / sw + 1;
+        let oh = (h + 2 * ph - eff_kh) / sh + 1;
+        let ow = (w + 2 * pw - eff_kw) / sw + 1;
         Ok((oh, ow))
     }
 
@@ -548,6 +541,68 @@ impl Module for Conv2d {
             });
         }
         let (oh, ow) = self.output_hw()?;
+        #[cfg(feature = "wgpu")]
+        {
+            if let Some(tensor) = self.try_forward_wgpu(input, batch, oh, ow)? {
+                return Ok(tensor);
+            }
+        }
+        self.forward_cpu(input, batch, oh, ow)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        let expected_cols = self.in_channels * self.input_hw.0 * self.input_hw.1;
+        if cols != expected_cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (1, cols),
+                right: (1, expected_cols),
+            });
+        }
+        let (oh, ow) = self.output_hw()?;
+        if grad_output.shape() != (batch, self.out_channels * oh * ow) {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: (batch, self.out_channels * oh * ow),
+            });
+        }
+        let patches = self.im2col(input, batch, oh, ow)?;
+        let grad_matrix = self.grad_output_to_matrix(grad_output, batch, oh, ow)?;
+        self.accumulate_from_grad_matrix(&grad_matrix, &patches, batch, oh, ow)
+    }
+
+    fn backward_bands(&mut self, input: &Tensor, bands: &GradientBands) -> PureResult<Tensor> {
+        let volume = self.backward_band_volume(input, bands)?;
+        volume.combine()
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&self.weight)?;
+        visitor(&self.bias)?;
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&mut self.weight)?;
+        visitor(&mut self.bias)?;
+        Ok(())
+    }
+}
+
+impl Conv2d {
+    fn forward_cpu(
+        &self,
+        input: &Tensor,
+        batch: usize,
+        oh: usize,
+        ow: usize,
+    ) -> PureResult<Tensor> {
         let mut out = Tensor::zeros(batch, self.out_channels * oh * ow)?;
         let weight = self.weight.value();
         let bias = self.bias.value();
@@ -557,6 +612,7 @@ impl Module for Conv2d {
         let (h, w) = self.input_hw;
         let (dilation_h, dilation_w) = self.dilation;
         let out_cols = out.shape().1;
+        let cols = input.shape().1;
         {
             let out_data = out.data_mut();
             for b in 0..batch {
@@ -602,48 +658,92 @@ impl Module for Conv2d {
         Ok(out)
     }
 
-    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
-        let (batch, cols) = input.shape();
-        let expected_cols = self.in_channels * self.input_hw.0 * self.input_hw.1;
-        if cols != expected_cols {
-            return Err(TensorError::ShapeMismatch {
-                left: (1, cols),
-                right: (1, expected_cols),
-            });
-        }
-        let (oh, ow) = self.output_hw()?;
-        if grad_output.shape() != (batch, self.out_channels * oh * ow) {
-            return Err(TensorError::ShapeMismatch {
-                left: grad_output.shape(),
-                right: (batch, self.out_channels * oh * ow),
-            });
-        }
-        let patches = self.im2col(input, batch, oh, ow)?;
-        let grad_matrix = self.grad_output_to_matrix(grad_output, batch, oh, ow)?;
-        self.accumulate_from_grad_matrix(&grad_matrix, &patches, batch, oh, ow)
-    }
-
-    fn backward_bands(&mut self, input: &Tensor, bands: &GradientBands) -> PureResult<Tensor> {
-        let volume = self.backward_band_volume(input, bands)?;
-        volume.combine()
-    }
-
-    fn visit_parameters(
+    #[cfg(feature = "wgpu")]
+    fn try_forward_wgpu(
         &self,
-        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
-    ) -> PureResult<()> {
-        visitor(&self.weight)?;
-        visitor(&self.bias)?;
-        Ok(())
-    }
+        input: &Tensor,
+        batch: usize,
+        oh: usize,
+        ow: usize,
+    ) -> PureResult<Option<Tensor>> {
+        if !wgpu_dense::is_available() {
+            return Ok(None);
+        }
+        let span = self.in_channels * self.kernel.0 * self.kernel.1;
+        let rows = batch * oh * ow;
+        let total_work = rows
+            .checked_mul(span)
+            .and_then(|value| value.checked_mul(self.out_channels))
+            .unwrap_or(usize::MAX);
+        if total_work < 4096 {
+            return Ok(None);
+        }
+        let pad_h = match i32::try_from(self.padding.0) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
+        let pad_w = match i32::try_from(self.padding.1) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
 
-    fn visit_parameters_mut(
-        &mut self,
-        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
-    ) -> PureResult<()> {
-        visitor(&mut self.weight)?;
-        visitor(&mut self.bias)?;
-        Ok(())
+        let mut weight_t = vec![0.0f32; span * self.out_channels];
+        let weight_data = self.weight.value().data();
+        for oc in 0..self.out_channels {
+            let start = oc * span;
+            let end = start + span;
+            for (idx, value) in weight_data[start..end].iter().enumerate() {
+                weight_t[idx * self.out_channels + oc] = *value;
+            }
+        }
+
+        let maybe = wgpu_dense::conv_im2col_gemm(
+            input.data(),
+            batch,
+            self.in_channels,
+            self.input_hw.0,
+            self.input_hw.1,
+            self.kernel.0,
+            self.kernel.1,
+            self.stride.0,
+            self.stride.1,
+            pad_h,
+            pad_w,
+            self.dilation.0,
+            self.dilation.1,
+            &weight_t,
+            self.out_channels,
+            oh,
+            ow,
+        );
+
+        let buffer = match maybe {
+            Ok(buffer) => buffer,
+            Err(_) => return Ok(None),
+        };
+
+        let mut out = Tensor::zeros(batch, self.out_channels * oh * ow)?;
+        let bias_data = self.bias.value().data();
+        let spatial = oh * ow;
+        {
+            let out_data = out.data_mut();
+            for b in 0..batch {
+                for oh_idx in 0..oh {
+                    for ow_idx in 0..ow {
+                        let row_index = b * spatial + oh_idx * ow + ow_idx;
+                        let row_start = row_index * self.out_channels;
+                        for oc in 0..self.out_channels {
+                            let target = b * self.out_channels * spatial
+                                + oc * spatial
+                                + oh_idx * ow
+                                + ow_idx;
+                            out_data[target] = buffer[row_start + oc] + bias_data[oc];
+                        }
+                    }
+                }
+            }
+        }
+        Ok(Some(out))
     }
 }
 
@@ -970,6 +1070,8 @@ impl Module for AvgPool2d {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use st_tensor::backend::wgpu_dense;
 
     #[test]
     fn conv1d_forward_matches_manual() {
@@ -977,6 +1079,36 @@ mod tests {
         let input = Tensor::from_vec(1, 5, vec![1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
         let output = conv.forward(&input).unwrap();
         assert_eq!(output.shape().0, 1);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn conv2d_wgpu_matches_cpu_path() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let mut conv =
+            Conv2d::new("conv_gpu", 3, 8, (3, 3), (1, 1), (1, 1), (1, 1), (8, 8)).unwrap();
+        for (idx, value) in conv.weight.value_mut().data_mut().iter_mut().enumerate() {
+            *value = (idx as f32).sin();
+        }
+        for (idx, value) in conv.bias.value_mut().data_mut().iter_mut().enumerate() {
+            *value = idx as f32 * 0.1;
+        }
+        let batch = 4;
+        let input = Tensor::from_fn(batch, 3 * 8 * 8, |row, col| {
+            ((row * 97 + col * 31) % 23) as f32 * 0.05
+        })
+        .unwrap();
+        let (oh, ow) = conv.output_hw().unwrap();
+        let cpu = conv.forward_cpu(&input, batch, oh, ow).unwrap();
+        let gpu = conv
+            .try_forward_wgpu(&input, batch, oh, ow)
+            .unwrap()
+            .unwrap_or_else(|| panic!("wgpu path unexpectedly unavailable"));
+        for (&a, &b) in cpu.data().iter().zip(gpu.data().iter()) {
+            assert!((a - b).abs() < 1e-4);
+        }
     }
 
     #[test]
@@ -989,7 +1121,7 @@ mod tests {
 
     #[test]
     fn conv2d_backward_matches_manual_kernel11() {
-        let mut conv = Conv2d::new("conv", 1, 1, (1, 1), (1, 1), (0, 0), (2, 2), (2, 2)).unwrap();
+        let mut conv = Conv2d::new("conv", 1, 1, (1, 1), (1, 1), (0, 0), (1, 1), (2, 2)).unwrap();
         conv.weight.value_mut().data_mut()[0] = 1.5;
         conv.bias.value_mut().data_mut()[0] = 0.0;
         let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
@@ -1007,9 +1139,9 @@ mod tests {
 
     #[test]
     fn conv2d_respects_dilation_configuration() {
-        let mut conv = Conv2d::new("conv", 1, 1, (3, 3), (1, 1), (0, 0), (5, 5), (9, 9)).unwrap();
+        let mut conv = Conv2d::new("conv", 1, 1, (3, 3), (1, 1), (0, 0), (1, 1), (9, 9)).unwrap();
         conv.set_dilation((2, 2)).unwrap();
-        assert_eq!(conv.output_hw().unwrap(), (1, 1));
+        assert_eq!(conv.output_hw().unwrap(), (5, 5));
     }
 
     #[test]
@@ -1018,9 +1150,9 @@ mod tests {
         use crate::schedule::{RoundtableConfig, RoundtableSchedule};
         use st_core::backend::device_caps::DeviceCaps;
 
-        let mut conv = Conv2d::new("conv_a", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3), (3, 3)).unwrap();
+        let mut conv = Conv2d::new("conv_a", 1, 1, (2, 2), (1, 1), (0, 0), (1, 1), (3, 3)).unwrap();
         let mut conv_bands =
-            Conv2d::new("conv_b", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3), (3, 3)).unwrap();
+            Conv2d::new("conv_b", 1, 1, (2, 2), (1, 1), (0, 0), (1, 1), (3, 3)).unwrap();
 
         for (idx, value) in conv.weight.value_mut().data_mut().iter_mut().enumerate() {
             *value = idx as f32 + 1.0;
@@ -1074,9 +1206,9 @@ mod tests {
         use st_core::backend::device_caps::DeviceCaps;
 
         let mut conv_seq =
-            Conv2d::new("conv_seq", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3), (3, 3)).unwrap();
+            Conv2d::new("conv_seq", 1, 1, (2, 2), (1, 1), (0, 0), (1, 1), (3, 3)).unwrap();
         let mut conv_volume =
-            Conv2d::new("conv_vol", 1, 1, (2, 2), (1, 1), (0, 0), (3, 3), (3, 3)).unwrap();
+            Conv2d::new("conv_vol", 1, 1, (2, 2), (1, 1), (0, 0), (1, 1), (3, 3)).unwrap();
 
         for (idx, value) in conv_seq
             .weight
