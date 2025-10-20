@@ -9,12 +9,17 @@ description = "WGPU backend kernels and pipeline loaders for SpiralTorch"
 [[bin]]
 name = "visualize_z_volume"
 path = "../../tools/visualize_z_volume.rs"
+required-features = ["vision"]
+
+[features]
+default = []
+vision = ["dep:st-vision"]
 
 [dependencies]
 wgpu = { version = "0.19", default-features = false, features = ["wgsl"] }
 thiserror = "1"
 bytemuck = { version = "1", features = ["derive"] }
-st-vision = { path = "../st-vision" }
+st-vision = { path = "../st-vision", optional = true }
 rand = "0.8"
 st-tensor = { path = "../st-tensor", features = ["wgpu"] }
 pollster = "0.3"

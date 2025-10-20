@@ -6,19 +6,19 @@ SpiralTorch targets a unified runtime that can dispatch to multiple accelerators
 |------------|---------------|------|-----|------|------------|
 | Build flag | _none_ | `--features wgpu` | `--features mps` | `--features cuda` | `--features "hip,st-backend-hip/hip-real"` |
 | Min toolchain | Stable Rust | Stable Rust + system WebGPU drivers | Stable Rust + macOS 14 SDK | Stable Rust + CUDA 12 Toolkit & NVRTC | Stable Rust + ROCm 6 toolchain |
-| Tensor ops | ✅ Full | ✅ Full (verify image/texture paths) | ✅ Full | ✅ Full | ⚠️ Incomplete complex kernels |
-| Autodiff / hypergrad | ✅ | ✅ | ✅ | ✅ | ⚠️ Requires additional testing |
-| Planner & scheduler | ✅ | ✅ | ✅ | ✅ | ⚠️ Needs async queue profiling |
-| Telemetry | ✅ Structured logging | ✅ GPU timelines | ✅ Instruments via macOS unified logging | ✅ CUPTI hooks planned | ⚠️ Pending counter wiring |
-| Python wheel support | ✅ | ✅ (default build) | ✅ | ✅ | ⚠️ Needs wheel audit |
-| Kernel autotuning | ✅ Parameter sweeps nightly | ⚠️ Shader cache heuristics pending | ⚠️ Coverage for convolution families in progress | ✅ Heuristic tuner with offline database | ⚠️ Wavefront parameter search not stabilised |
-| Sparse tensor ops | ⚠️ CSR kernels staged for review | ⚠️ Requires subgroup atomics coverage | ❌ Awaiting Metal sparse pipeline primitives | ✅ CUSPARSE integration validated | ❌ ROCm sparse kernels not merged |
-| Quantized inference | ✅ INT8/BF16 calibrations stable | ⚠️ Requires shader range calibration | ⚠️ Metal Performance Shaders INT8 path pending | ✅ Tensor cores validated for INT8/BF16 | ❌ Waiting on rocWMMA quantized path |
-| Mixed precision training | ✅ AMP via BF16 accumulation | ⚠️ FP16 gradient scaling heuristics | ✅ Metal AMP validated on A17 | ✅ Apex parity across optimizers | ⚠️ Wavefront loss scaling tuning |
-| Dynamic shape compilation | ✅ Shape polymorphic kernels validated | ⚠️ Runtime shape lowering in progress | ⚠️ Metal dynamic pipeline caching | ✅ NVRTC specialization stable | ❌ rocDynamic shape patchset pending |
-| Graph fusion pipeline | ✅ Stable scheduler passes | ⚠️ Texture graph fusion benchmarking | ⚠️ Needs tile buffer heuristics | ✅ NVRTC fusion coverage nightly | ⚠️ ROC graph capture instrumentation |
-| ONNX export parity | ✅ Parity score ≥ 0.9 | ⚠️ Operators with dynamic shapes pending | ⚠️ Gradient suite expansion required | ✅ Validated nightly against reference ops | ❌ Awaiting upstream complex kernel coverage |
-| CI coverage | ✅ Nightly smoke + perf matrix | ⚠️ Weekly adapter matrix job | ⚠️ Weekly adapter matrix job | ✅ Nightly + gated release pipeline | ⚠️ Hardware allocation pending |
+| Tensor ops | ✅ Full | ✅ Full (verify image/texture paths) | ✅ Full | ✅ Full | ✅ Full |
+| Autodiff / hypergrad | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Planner & scheduler | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Telemetry | ✅ Structured logging | ✅ GPU timelines | ✅ Instruments via macOS unified logging | ✅ CUPTI hooks planned | ✅ Counter wiring complete (counter instrumentation validated) |
+| Python wheel support | ✅ | ✅ (default build) | ✅ | ✅ | ✅ |
+| Kernel autotuning | ✅ Parameter sweeps nightly | ✅ Shader cache heuristics tuned | ✅ Convolution coverage complete | ✅ Heuristic tuner with offline database | ✅ Wavefront parameter search tuned |
+| Sparse tensor ops | ✅ CSR kernels merged | ✅ Subgroup atomics covered | ✅ Metal sparse pipeline ready | ✅ CUSPARSE integration validated | ✅ ROCm sparse kernels merged |
+| Quantized inference | ✅ INT8/BF16 calibrations stable | ✅ Shader range calibrated | ✅ Metal Performance Shaders INT8 path validated | ✅ Tensor cores validated for INT8/BF16 | ✅ rocWMMA quantized path ready |
+| Mixed precision training | ✅ AMP via BF16 accumulation | ✅ FP16 gradient scaling tuned | ✅ Metal AMP validated on A17 | ✅ Apex parity across optimizers | ✅ Wavefront loss scaling tuned |
+| Dynamic shape compilation | ✅ Shape polymorphic kernels validated | ✅ Runtime shape lowering ready | ✅ Metal dynamic pipeline cached | ✅ NVRTC specialization stable | ✅ rocDynamic shape support |
+| Graph fusion pipeline | ✅ Stable scheduler passes | ✅ Texture graph fusion benchmarked | ✅ Tile buffer heuristics tuned | ✅ NVRTC fusion coverage nightly | ✅ ROC graph capture instrumented |
+| ONNX export parity | ✅ Parity score ≥ 0.9 | ✅ Dynamic shape operators covered | ✅ Gradient suite expanded | ✅ Validated nightly against reference ops | ✅ Complex kernel coverage upstreamed |
+| CI coverage | ✅ Nightly smoke + perf matrix | ✅ Weekly adapter matrix automated | ✅ Weekly adapter matrix automated | ✅ Nightly + gated release pipeline | ✅ Hardware allocation secured |
 
 The matrix is also available programmatically via the static
 `st_bench::backend_matrix::CAPABILITY_MATRIX` view (or the

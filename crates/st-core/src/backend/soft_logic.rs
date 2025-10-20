@@ -60,17 +60,17 @@ pub mod learn {
 
     pub fn update_bandit(sw: &mut SoftWeights, winner_rules: &[&str], loser_rules: &[&str]) {
         for r in winner_rules {
-            let entry = sw
-                .rule_beta
-                .entry((*r).to_string())
-                .or_insert(BetaStat { alpha: 1.0, beta: 1.0 });
+            let entry = sw.rule_beta.entry((*r).to_string()).or_insert(BetaStat {
+                alpha: 1.0,
+                beta: 1.0,
+            });
             entry.alpha += 1.0;
         }
         for r in loser_rules {
-            let entry = sw
-                .rule_beta
-                .entry((*r).to_string())
-                .or_insert(BetaStat { alpha: 1.0, beta: 1.0 });
+            let entry = sw.rule_beta.entry((*r).to_string()).or_insert(BetaStat {
+                alpha: 1.0,
+                beta: 1.0,
+            });
             entry.beta += 1.0;
         }
     }

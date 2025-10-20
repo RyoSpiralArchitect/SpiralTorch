@@ -12,7 +12,7 @@ st-nn = { path = "../st-nn" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.8"
-st-backend-wgpu = { path = "../st-backend-wgpu" }
+st-backend-wgpu = { path = "../st-backend-wgpu", default-features = false }
 
 [dev-dependencies]
 criterion = "0.5"

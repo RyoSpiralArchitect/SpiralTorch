@@ -3,9 +3,9 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use super::soft_logic::SoftRule;
 #[cfg(not(feature = "logic"))]
 use super::wgpu_heuristics::{Choice, DslOverrides};
-use super::soft_logic::SoftRule;
 #[cfg(feature = "logic")]
 use super::wgpu_heuristics::{
     Choice, DslOverrides, SOFT_NAME_ALGO, SOFT_NAME_CH, SOFT_NAME_CTILE, SOFT_NAME_KL,
