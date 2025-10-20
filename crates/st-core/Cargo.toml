@@ -29,7 +29,6 @@ apply_zscale = []
 golden   = []
 experimental_zpulse = []
 blackcat_v2 = []
-apply_zscale = []
 
 [dependencies]
 thiserror   = "1"

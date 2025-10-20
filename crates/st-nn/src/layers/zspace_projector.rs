@@ -3,28 +3,41 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use crate::module::Module;
-use crate::{PureResult, Tensor};
+use crate::module::{Module, Parameter};
+use crate::{PureResult, Tensor, TensorError};
 use st_frac::FracBackend;
 use st_tensor::{LanguageWaveEncoder, OpenCartesianTopos, RewriteMonad, TensorBiome};
 
-/// Projects Euclidean activations back into the open-cartesian Z-space manifold.
-#[derive(Clone, Debug)]
+/// Projects Euclidean activations back into the open-cartesian Z-space manifold while
+/// exposing trainable focus and spread controls for adaptive gating.
+#[derive(Debug)]
 pub struct ZSpaceProjector {
     topos: OpenCartesianTopos,
     encoder: LanguageWaveEncoder,
+    focus: Parameter,
+    spread: Parameter,
 }
 
 impl ZSpaceProjector {
     /// Builds a projector with a guard topos and matching Z-space encoder.
     pub fn new(topos: OpenCartesianTopos, encoder: LanguageWaveEncoder) -> PureResult<Self> {
         if (topos.curvature() - encoder.curvature()).abs() > 1e-6 {
-            return Err(crate::TensorError::CurvatureMismatch {
+            return Err(TensorError::CurvatureMismatch {
                 expected: topos.curvature(),
                 got: encoder.curvature(),
             });
         }
-        Ok(Self { topos, encoder })
+        let focus = Parameter::new("zspace_projector_focus", Tensor::from_vec(1, 1, vec![1.0])?);
+        let spread = Parameter::new(
+            "zspace_projector_spread",
+            Tensor::from_vec(1, 1, vec![0.0])?,
+        );
+        Ok(Self {
+            topos,
+            encoder,
+            focus,
+            spread,
+        })
     }
 
     /// Returns the open-cartesian guard backing the projector.
@@ -40,6 +53,26 @@ impl ZSpaceProjector {
     /// Returns the internal Z-space encoder for direct wave creation.
     pub fn encoder(&self) -> &LanguageWaveEncoder {
         &self.encoder
+    }
+
+    /// Returns the learnable focus scalar that contracts or amplifies each slice.
+    pub fn focus(&self) -> &Parameter {
+        &self.focus
+    }
+
+    /// Returns a mutable handle to the focus parameter.
+    pub fn focus_mut(&mut self) -> &mut Parameter {
+        &mut self.focus
+    }
+
+    /// Returns the learnable spread scalar that redistributes energy across a slice.
+    pub fn spread(&self) -> &Parameter {
+        &self.spread
+    }
+
+    /// Returns a mutable handle to the spread parameter.
+    pub fn spread_mut(&mut self) -> &mut Parameter {
+        &mut self.spread
     }
 
     /// Applies a fractional regularisation penalty to the provided latent slice.
@@ -73,10 +106,10 @@ impl ZSpaceProjector {
     /// Collapses a tensor biome and projects the resulting canopy back into Z-space.
     pub fn reimport_biome(&self, biome: &TensorBiome) -> PureResult<Tensor> {
         if biome.is_empty() {
-            return Err(crate::TensorError::EmptyInput("tensor_biome"));
+            return Err(TensorError::EmptyInput("tensor_biome"));
         }
         if (biome.topos().curvature() - self.curvature()).abs() > 1e-6 {
-            return Err(crate::TensorError::CurvatureMismatch {
+            return Err(TensorError::CurvatureMismatch {
                 expected: self.curvature(),
                 got: biome.topos().curvature(),
             });
@@ -96,30 +129,95 @@ impl Module for ZSpaceProjector {
         let projected = rewritten.project_to_poincare(self.topos.curvature())?;
         self.topos
             .guard_tensor("zspace_projector_forward_out", &projected)?;
-        Ok(projected)
+
+        let focus = self.focus.value().data()[0];
+        let spread = self.spread.value().data()[0];
+        let (rows, cols) = projected.shape();
+        let mut data = projected.data().to_vec();
+        for r in 0..rows {
+            let offset = r * cols;
+            let mut mean = 0.0f32;
+            for c in 0..cols {
+                mean += data[offset + c];
+            }
+            mean /= cols as f32;
+            for c in 0..cols {
+                data[offset + c] = data[offset + c] * focus + mean * spread;
+            }
+        }
+        let output = Tensor::from_vec(rows, cols, data)?;
+        self.topos
+            .guard_tensor("zspace_projector_forward_focus", &output)?;
+        Ok(output)
     }
 
-    fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         self.topos
             .guard_tensor("zspace_projector_backward_in", grad_output)?;
-        let mut grad = grad_output.clone();
+        let focus = self.focus.value().data()[0];
+        let spread = self.spread.value().data()[0];
+
+        let mut rewritten = input.clone();
         let monad = RewriteMonad::new(&self.topos);
-        monad.rewrite_tensor("zspace_projector_backward_rewrite", &mut grad)?;
-        Ok(grad)
+        monad.rewrite_tensor("zspace_projector_backward_rewrite_input", &mut rewritten)?;
+        let projected = rewritten.project_to_poincare(self.topos.curvature())?;
+
+        let (rows, cols) = grad_output.shape();
+        if projected.shape() != (rows, cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: projected.shape(),
+                right: grad_output.shape(),
+            });
+        }
+
+        let mut grad_input_data = vec![0.0f32; rows * cols];
+        let mut focus_grad = 0.0f32;
+        let mut spread_grad = 0.0f32;
+
+        for r in 0..rows {
+            let offset = r * cols;
+            let row_output = &grad_output.data()[offset..offset + cols];
+            let row_projected = &projected.data()[offset..offset + cols];
+            let sum_grad: f32 = row_output.iter().copied().sum();
+            let mut mean_proj = 0.0f32;
+            for value in row_projected {
+                mean_proj += *value;
+            }
+            mean_proj /= cols as f32;
+
+            for c in 0..cols {
+                let grad_out = row_output[c];
+                let proj = row_projected[c];
+                grad_input_data[offset + c] += grad_out * focus + sum_grad * spread / cols as f32;
+                focus_grad += grad_out * proj;
+            }
+            spread_grad += sum_grad * mean_proj;
+        }
+
+        let focus_update = Tensor::from_vec(1, 1, vec![focus_grad])?;
+        let spread_update = Tensor::from_vec(1, 1, vec![spread_grad])?;
+        self.focus.accumulate_euclidean(&focus_update)?;
+        self.spread.accumulate_euclidean(&spread_update)?;
+
+        let mut grad_tensor = Tensor::from_vec(rows, cols, grad_input_data)?;
+        monad.rewrite_tensor("zspace_projector_backward_rewrite_out", &mut grad_tensor)?;
+        Ok(grad_tensor)
     }
 
     fn visit_parameters(
         &self,
-        _visitor: &mut dyn FnMut(&crate::module::Parameter) -> PureResult<()>,
+        visitor: &mut dyn FnMut(&crate::module::Parameter) -> PureResult<()>,
     ) -> PureResult<()> {
-        Ok(())
+        visitor(&self.focus)?;
+        visitor(&self.spread)
     }
 
     fn visit_parameters_mut(
         &mut self,
-        _visitor: &mut dyn FnMut(&mut crate::module::Parameter) -> PureResult<()>,
+        visitor: &mut dyn FnMut(&mut crate::module::Parameter) -> PureResult<()>,
     ) -> PureResult<()> {
-        Ok(())
+        visitor(&mut self.focus)?;
+        visitor(&mut self.spread)
     }
 }
 
@@ -191,5 +289,28 @@ mod tests {
         let projector = ZSpaceProjector::new(topos, encoder).unwrap();
         let projected = projector.reimport_biome(&biome).unwrap();
         assert_eq!(projected.shape(), (1, 4));
+    }
+
+    #[test]
+    fn projector_focus_and_spread_accumulate_gradients() {
+        let topos = demo_topos();
+        let encoder = LanguageWaveEncoder::new(topos.curvature(), 0.6).unwrap();
+        let mut module = ZSpaceProjector::new(topos, encoder).unwrap();
+        let input = Tensor::from_vec(1, 4, vec![0.2, -0.1, 0.4, -0.3]).unwrap();
+        let _ = module.forward(&input).unwrap();
+
+        let grad_out = Tensor::from_vec(1, 4, vec![0.5, -0.25, 0.1, 0.2]).unwrap();
+        let _ = module.backward(&input, &grad_out).unwrap();
+
+        let focus_grad = module
+            .focus()
+            .gradient()
+            .expect("focus gradient to accumulate");
+        let spread_grad = module
+            .spread()
+            .gradient()
+            .expect("spread gradient to accumulate");
+        assert_eq!(focus_grad.shape(), (1, 1));
+        assert_eq!(spread_grad.shape(), (1, 1));
     }
 }
