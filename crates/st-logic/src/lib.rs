@@ -134,3 +134,4 @@ pub mod learn;
 
 pub mod nerf_trainer;
 pub mod quantum_reality;
+pub mod temporal_dynamics;
