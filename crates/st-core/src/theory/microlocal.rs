@@ -345,7 +345,7 @@ impl InterfaceZLift {
             support: total_support,
             interface_cells,
             band_energy,
-            scale: Some(scale),
+            scale: ZScale::new(signature.physical_radius),
             drift,
             z_bias: bias,
             quality_hint: None,
@@ -389,6 +389,7 @@ impl InterfaceZPulse {
         let mut drift_weight = 0.0f32;
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
+        let mut scale_weights = Vec::new();
         let mut scale_phys = 0.0f32;
         let mut scale_log = 0.0f32;
         let mut scale_weight = 0.0f32;
@@ -404,27 +405,21 @@ impl InterfaceZPulse {
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
             if let Some(scale) = pulse.scale {
-                let w = scale_weight_for(pulse);
-                scale_phys += scale.physical_radius * w;
-                scale_log += scale.log_radius * w;
-                scale_weight += w;
+                scale_weights.push((scale, weight));
             }
         }
-
-        // 集約スケールを計算して利用する（unused 警告の解消）
-        let scale = if scale_weight > 0.0 {
-            ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
+        let scale = if scale_weights.is_empty() {
+            pulses.iter().find_map(|pulse| pulse.scale)
         } else {
-            None
+            ZScale::weighted_average(scale_weights.into_iter())
+                .or_else(|| pulses.iter().find_map(|pulse| pulse.scale))
         };
-
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
             interface_cells,
             band_energy: band,
-            // [SCALE-TODO] Patch 0 aggregate placeholder
-            scale: scale.or(Some(ZScale::ONE)),
+            scale,
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -460,7 +455,12 @@ impl InterfaceZPulse {
                 lerp(current.band_energy.1, next.band_energy.1, t),
                 lerp(current.band_energy.2, next.band_energy.2, t),
             ),
-            scale,
+            scale: match (current.scale, next.scale) {
+                (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
             drift: lerp(current.drift, next.drift, t),
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
