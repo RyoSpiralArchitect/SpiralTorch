@@ -1681,7 +1681,7 @@ mod language_pipeline {
             if let Some(dist) = &distribution_summary {
                 connector_metadata.push(("distribution_mode".to_string(), dist.mode.clone()));
                 connector_metadata.push(("node_id".to_string(), dist.node_id.clone()));
-                connector_metadata.extend(summarise_cloud_targets(&dist.cloud_targets));
+                connector_metadata.extend(format_cloud_targets(&dist.cloud_targets));
             }
             self.record_connector("roundtable", connector_metadata);
 
@@ -1956,6 +1956,27 @@ mod language_pipeline {
                 .insert("collapse".to_string(), config.collapse_enabled);
         }
         summary
+    }
+
+    fn format_cloud_targets(targets: &[CloudConnector]) -> Vec<(String, String)> {
+        let mut azure_targets = Vec::new();
+        let mut aws_targets = Vec::new();
+        for target in targets {
+            let descriptor = target.descriptor();
+            match target.provider() {
+                "azure" => azure_targets.push(format!("{}:{descriptor}", target.service())),
+                "aws" => aws_targets.push(format!("{}:{descriptor}", target.service())),
+                _ => {}
+            }
+        }
+        let mut entries = Vec::new();
+        if !azure_targets.is_empty() {
+            entries.push(("azure_targets".to_string(), azure_targets.join(",")));
+        }
+        if !aws_targets.is_empty() {
+            entries.push(("aws_targets".to_string(), aws_targets.join(",")));
+        }
+        entries
     }
 
     impl LanguagePipeline {
