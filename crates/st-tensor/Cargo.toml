@@ -20,7 +20,7 @@ cpu = []
 # Keep the granular feature name for the fractional WGPU kernels while also
 # providing the alias expected by the Python bindings (and end users invoking
 # `--features wgpu`).
-wgpu_frac = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
+wgpu_frac = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:futures-intrusive", "dep:futures-lite"]
 wgpu = ["wgpu_frac"]
 
 # Placeholder features for other accelerators.  These currently do not pull in
@@ -45,6 +45,8 @@ faer = { version = "0.18", default-features = false, features = ["std"], optiona
 wgpu = { version = "0.19", optional = true }
 bytemuck = { version = "1.15", features = ["derive"], optional = true }
 pollster = { version = "0.3", optional = true }
+futures-intrusive = { version = "0.5", optional = true }
+futures-lite = { version = "1.13", optional = true }
 
 [dev-dependencies]
 # Used in tests to validate conversions against ndarray utilities.

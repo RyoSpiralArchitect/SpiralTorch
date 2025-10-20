@@ -3,13 +3,11 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-pub mod faer_dense;
+//! Lightweight NeRF field definitions built on top of the core SpiralTorch
+//! neural network layers.
 
-#[cfg(feature = "wgpu_frac")]
-pub mod wgpu_frac;
+mod encoding;
+mod field;
 
-#[cfg(feature = "wgpu")]
-pub mod wgpu_dense;
-
-#[cfg(feature = "wgpu")]
-pub mod wgpu_util;
+pub use encoding::PositionalEncoding;
+pub use field::{FieldSampleLayout, NerfField, NerfFieldConfig};

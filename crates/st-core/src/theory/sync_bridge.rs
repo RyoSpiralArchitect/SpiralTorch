@@ -21,6 +21,9 @@
 //! - State is maintained per sample, so downstream callers can seed the log
 //!   `e`-process with [`SyncTheoremTrainer::set_log_e`] and retrieve the
 //!   anytime confidence curve for their own labelling policies.
+//! - [`SyncTheoremTrainer::aggregate_family`] folds pairwise runs into a
+//!   multi-universe signal with configurable structural policies, matching the
+//!   Mandela synchrony discussion from Theorem 5.
 //!
 //! The implementation uses standard Rust containers (`Vec`) so it works in
 //! `no_std`-averse crates, yet remains interoperable with SpiralTorch tensors by
@@ -137,6 +140,9 @@ pub enum SyncError {
     /// The drift implied by `(tau_b, cos_phi_min, epsilon_max)` is non-positive.
     #[error("expected positive observation drift, denominator = {0}")]
     NonPositiveDrift(f32),
+    /// Family aggregation cannot proceed without at least one pair entry.
+    #[error("family aggregation requires at least one pair contribution")]
+    EmptyFamily,
 }
 
 /// Aggregated output for a single synchronisation step.
@@ -156,6 +162,55 @@ pub struct SyncStep {
     pub increment: Vec<f32>,
     /// Anytime confidence values `1 - 1/E_k` used for the SAFE label.
     pub confidence: Vec<f32>,
+}
+
+/// Policy describing how per-pair structural gates should be folded into a
+/// family-wide signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FamilyStructurePolicy {
+    /// Open the family gate as soon as any pair has crossed its structural
+    /// threshold.  Mirrors a Bonferroni-style union bound.
+    Any,
+    /// Require all pairs to have crossed their structural thresholds before the
+    /// family gate opens.
+    All,
+    /// Require a strict majority of pairs to confirm the structural event.
+    Majority,
+}
+
+impl FamilyStructurePolicy {
+    fn fold(self, gates: &[bool]) -> bool {
+        match self {
+            Self::Any => gates.iter().any(|gate| *gate),
+            Self::All => gates.iter().all(|gate| *gate),
+            Self::Majority => {
+                let positives = gates.iter().filter(|gate| **gate).count();
+                positives * 2 > gates.len()
+            }
+        }
+    }
+}
+
+/// Aggregated view over a multi-universe synchronisation pass.
+#[derive(Debug, Clone)]
+pub struct FamilyAggregation {
+    /// Family-averaged log `e`-process across the pair contributions.
+    pub log_e_family: f32,
+    /// Anytime confidence implied by the family log `e`.
+    pub confidence: f32,
+    /// Structural gate indicator after applying [`FamilyStructurePolicy`].
+    pub structure_gate: bool,
+    /// Observation gate indicator using the family log `e` and global
+    /// threshold.
+    pub observation_gate: bool,
+    /// Aggregated I×K label for the family.
+    pub label: IKLabel,
+    /// Number of pair contributions participating in the aggregation.
+    pub pair_count: usize,
+    /// Index of the pair with the largest log `e` contribution, if any.
+    pub dominant_pair: Option<usize>,
+    /// Maximal pair log `e` value, if any.
+    pub dominant_log_e: Option<f32>,
 }
 
 /// State machine that fuses structural and observational evidence.
@@ -382,6 +437,53 @@ impl SyncTheoremTrainer {
 
         Ok((log_trajectory, gate_iter))
     }
+
+    /// Aggregate the per-pair outputs from [`SyncStep`] into a family-level
+    /// signal, matching the multi-universe synchrony recipe from Theorem 5.
+    pub fn aggregate_family(
+        &self,
+        step: &SyncStep,
+        policy: FamilyStructurePolicy,
+    ) -> Result<FamilyAggregation, SyncError> {
+        if step.log_e.is_empty() {
+            return Err(SyncError::EmptyFamily);
+        }
+
+        let pair_count = step.log_e.len();
+        let log_e_family = step.log_e.iter().sum::<f32>() / pair_count as f32;
+        let confidence = 1.0 - (-log_e_family).exp();
+
+        let structure_gate = policy.fold(&step.structure_gate);
+        let observation_gate = log_e_family >= self.threshold();
+
+        let (dominant_pair, dominant_log_e) = step
+            .log_e
+            .iter()
+            .copied()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(idx, value)| (Some(idx), Some(value)))
+            .unwrap_or((None, None));
+
+        let label = if structure_gate && observation_gate {
+            IKLabel::Critical
+        } else if !structure_gate && !observation_gate && confidence >= 1.0 - self.config.alpha {
+            IKLabel::Safe
+        } else {
+            IKLabel::Abstain
+        };
+
+        Ok(FamilyAggregation {
+            log_e_family,
+            confidence,
+            structure_gate,
+            observation_gate,
+            label,
+            pair_count,
+            dominant_pair,
+            dominant_log_e,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -482,5 +584,66 @@ mod tests {
             config.hitting_time_bound(),
             Err(SyncError::NonPositiveDrift(_))
         ));
+    }
+
+    #[test]
+    fn family_aggregation_policies() {
+        let config = SyncConfig::new(0.1, 0.2, 0.0, 1.0, 0).unwrap();
+        let mut trainer = SyncTheoremTrainer::new(config).unwrap();
+        let step = trainer
+            .step(
+                &[0.25, 0.1, 0.15],
+                Some(&[0.0, 0.0, 0.0]),
+                Some(&[1.0, 1.0, 1.0]),
+            )
+            .unwrap();
+
+        let any = trainer
+            .aggregate_family(&step, FamilyStructurePolicy::Any)
+            .unwrap();
+        assert!(any.structure_gate);
+        assert_eq!(any.pair_count, 3);
+        assert_eq!(any.dominant_pair, Some(0));
+
+        let all = trainer
+            .aggregate_family(&step, FamilyStructurePolicy::All)
+            .unwrap();
+        assert!(!all.structure_gate);
+
+        let majority = trainer
+            .aggregate_family(&step, FamilyStructurePolicy::Majority)
+            .unwrap();
+        assert!(!majority.structure_gate);
+    }
+
+    #[test]
+    fn family_aggregation_respects_thresholds() {
+        let config = SyncConfig::new(0.2, 0.05, 0.0, 1.0, 0).unwrap();
+        let mut trainer = SyncTheoremTrainer::new(config).unwrap();
+        for _ in 0..5 {
+            trainer
+                .step(
+                    &[0.5, 0.5, 0.5],
+                    Some(&[0.0, 0.0, 0.0]),
+                    Some(&[1.0, 1.0, 1.0]),
+                )
+                .unwrap();
+        }
+
+        let step = trainer
+            .step(
+                &[0.5, 0.5, 0.5],
+                Some(&[0.0, 0.0, 0.0]),
+                Some(&[1.0, 1.0, 1.0]),
+            )
+            .unwrap();
+
+        let aggregation = trainer
+            .aggregate_family(&step, FamilyStructurePolicy::All)
+            .unwrap();
+        assert!(aggregation.structure_gate);
+        assert!(aggregation.observation_gate);
+        assert_eq!(aggregation.label, IKLabel::Critical);
+        assert!(aggregation.confidence >= 1.0 - trainer.config().alpha);
     }
 }
