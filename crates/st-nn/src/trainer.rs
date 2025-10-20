@@ -1301,12 +1301,18 @@ impl ModuleTrainer {
             #[cfg(feature = "collapse")]
             if let (Some(driver), Some(reading)) = (self.collapse.as_mut(), psi_snapshot.as_ref()) {
                 let command = driver.update(reading);
+                let mut collapse_due_to_trend = false;
+                let mut collapse_due_to_deviation = false;
                 match command {
                     DriveCmd::Collapse {
                         grad_scale,
                         max_norm,
                         lr_decay,
+                        due_to_trend,
+                        due_to_deviation,
                     } => {
+                        collapse_due_to_trend = due_to_trend;
+                        collapse_due_to_deviation = due_to_deviation;
                         if grad_scale < 0.999 {
                             self.apply_grad_scale(module, grad_scale)?;
                         }
@@ -1318,13 +1324,26 @@ impl ModuleTrainer {
                             self.optimizer_mul_lr(module, factor)?;
                         }
                     }
-                    DriveCmd::Bloom { lr_mul } => {
+                    DriveCmd::Bloom {
+                        lr_mul,
+                        due_to_trend,
+                        due_to_deviation,
+                    } => {
+                        collapse_due_to_trend = due_to_trend;
+                        collapse_due_to_deviation = due_to_deviation;
                         if lr_mul > 1.0 {
                             self.optimizer_mul_lr(module, lr_mul)?;
                         }
                     }
                     DriveCmd::None => {}
                 }
+                let diag = driver.diagnostics();
+                extra.insert("collapse_state".to_string(), diag.state_scalar());
+                extra.insert("collapse_trend".to_string(), diag.trend as f64);
+                if let Some(baseline) = diag.baseline {
+                    extra.insert("collapse_baseline".to_string(), baseline as f64);
+                }
+                extra.insert("collapse_cooldown".to_string(), diag.cooldown as f64);
                 if !matches!(command, DriveCmd::None) {
                     let loop_signal = hub::get_chrono_loop();
                     hub::set_collapse_pulse(CollapsePulse {
@@ -1333,6 +1352,14 @@ impl ModuleTrainer {
                         command,
                         loop_signal,
                     });
+                    extra.insert(
+                        "collapse_due_to_trend".to_string(),
+                        if collapse_due_to_trend { 1.0 } else { 0.0 },
+                    );
+                    extra.insert(
+                        "collapse_due_to_deviation".to_string(),
+                        if collapse_due_to_deviation { 1.0 } else { 0.0 },
+                    );
                 }
             }
             let psi_total_opt: Option<f32> = {
