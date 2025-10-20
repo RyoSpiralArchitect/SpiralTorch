@@ -42,7 +42,7 @@ Example
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from typing import Dict, Iterable, Mapping, MutableMapping
 
@@ -81,12 +81,23 @@ class FrameState:
     b_con: float
     kappa: float
     timing_scale: float = 1.0
+    curvature_a_den: float = 0.0
+    curvature_a_con: float = 0.0
+    curvature_b_den: float = 0.0
+    curvature_b_con: float = 0.0
+    kappa_slope: float = 0.0
 
     def mix_a(self) -> float:
         return (1.0 - self.phi) * self.a_den + self.phi * self.a_con
 
     def mix_b(self) -> float:
         return (1.0 - self.phi) * self.b_den + self.phi * self.b_con
+
+    def mix_curvature_a(self) -> float:
+        return (1.0 - self.phi) * self.curvature_a_den + self.phi * self.curvature_a_con
+
+    def mix_curvature_b(self) -> float:
+        return (1.0 - self.phi) * self.curvature_b_den + self.phi * self.curvature_b_con
 
 
 @dataclass
@@ -101,6 +112,21 @@ class WordState:
     beta: float = 1.0
 
 
+@dataclass(frozen=True)
+class FrameSignature:
+    """Local linear and quadratic response statistics for a frame."""
+
+    value_slope: float
+    risk_slope: float
+    net_slope: float
+    value_curvature: float
+    risk_curvature: float
+    net_curvature: float
+    hazard_multiplier: float
+    safe_radius: float | None
+    kappa_slope: float
+
+
 @dataclass
 class DRLMetrics:
     """Summary of DRL statistics for a word."""
@@ -111,6 +137,7 @@ class DRLMetrics:
     safe_radii: Dict[str, float]
     chi: int
     strict_mode: bool
+    frame_signatures: Dict[str, FrameSignature]
 
 
 # Backwards compatibility for earlier drafts that used the "semantics" label.
@@ -187,10 +214,33 @@ def analyse_word(
     min_radius: float = 0.2,
 ) -> DRLMetrics:
     frame_hazards: Dict[str, float] = {}
+    signatures: Dict[str, FrameSignature] = {}
     for name, frame in word.frames.items():
-        frame_hazards[name] = frame_hazard(word, name, frame)
+        hazard = frame_hazard(word, name, frame)
+        frame_hazards[name] = hazard
+        value_slope = frame.mix_a()
+        risk_slope = word.base_lambda * frame.mix_b() * frame.S
+        net_slope = value_slope - risk_slope
+        value_curvature = frame.mix_curvature_a()
+        risk_curvature = word.base_lambda * frame.mix_curvature_b() * frame.S
+        net_curvature = value_curvature - risk_curvature
+        signatures[name] = FrameSignature(
+            value_slope=value_slope,
+            risk_slope=risk_slope,
+            net_slope=net_slope,
+            value_curvature=value_curvature,
+            risk_curvature=risk_curvature,
+            net_curvature=net_curvature,
+            hazard_multiplier=_hazard_multiplier(word, frame),
+            safe_radius=None,
+            kappa_slope=frame.kappa_slope,
+        )
 
     radii = safe_radius(word, thresholds)
+    for name, radius in radii.items():
+        if name in signatures:
+            signatures[name] = replace(signatures[name], safe_radius=radius)
+
     hazard_counts = 0
     for name, hz in frame_hazards.items():
         threshold = thresholds.get(name)
@@ -201,19 +251,21 @@ def analyse_word(
             hazard_counts += 1
 
     min_radius_observed = min(radii.values()) if radii else float("inf")
+    existence = existence_load(word)
     strict = (
         hazard_counts >= 4
         or min_radius_observed <= min_radius
-        or existence_load(word) >= 1.0
+        or existence >= 1.0
     )
 
     return DRLMetrics(
         word=word,
-        existence_load=existence_load(word),
+        existence_load=existence,
         frame_hazards=frame_hazards,
         safe_radii=radii,
         chi=hazard_counts,
         strict_mode=strict,
+        frame_signatures=signatures,
     )
 
 
@@ -253,6 +305,7 @@ __all__ = [
     "DRSMetrics",
     "DEFAULT_THRESHOLDS",
     "FrameState",
+    "FrameSignature",
     "FrameThreshold",
     "WordState",
     "aggregate_penalty",
