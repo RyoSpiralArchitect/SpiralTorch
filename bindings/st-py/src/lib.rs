@@ -182,8 +182,7 @@ mod inference;
 }
 
 // ================// ルート #[pymodule]
-// ================#[pymodule]
-fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     // 1) トップレベル（そのまま import できる）
     extras::register(py, m)?;
     tensor::register(py, m)?;
@@ -237,4 +236,16 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
         "gl_coeffs_adaptive","fracdiff_gl_1d",
     ])?;
     Ok(())
+}
+
+// ================#[pymodule]
+#[pymodule]
+fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+    init_spiraltorch_module(py, m)
+}
+
+// ================#[pymodule] (alias for maturin's `_native` expectation)
+#[pymodule]
+fn spiraltorch_native(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+    init_spiraltorch_module(py, m)
 }
