@@ -42,8 +42,8 @@ use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ecosystem::{
-    ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample, RankPlanSummary,
-    RoundtableConfigSummary, RoundtableSummary,
+    CloudConnector, ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample,
+    RankPlanSummary, RoundtableConfigSummary, RoundtableSummary,
 };
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
@@ -1354,6 +1354,7 @@ impl ModuleTrainer {
                             grad_scale,
                             max_norm,
                             lr_decay,
+                            ..
                         } => {
                             if *grad_scale < 0.999 {
                                 self.apply_grad_scale(module, *grad_scale)?;
@@ -1366,7 +1367,7 @@ impl ModuleTrainer {
                                 self.optimizer_mul_lr(module, factor)?;
                             }
                         }
-                        DriveCmd::Bloom { lr_mul } => {
+                        DriveCmd::Bloom { lr_mul, .. } => {
                             if *lr_mul > 1.0 {
                                 self.optimizer_mul_lr(module, *lr_mul)?;
                             }
