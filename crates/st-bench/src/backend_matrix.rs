@@ -170,6 +170,11 @@ impl CapabilityMatrix {
     pub fn pending_for_backend(&self, backend: Backend) -> Vec<&'static CapabilityRow> {
         pending_capabilities_for_backend(backend)
     }
+
+    /// Returns capability rows whose notes mention `query` (case-insensitive).
+    pub fn capabilities_with_note(&self, query: &str) -> Vec<&'static CapabilityRow> {
+        capabilities_with_note_containing(query)
+    }
 }
 
 impl CapabilityRow {
@@ -491,6 +496,44 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
         ],
     },
     CapabilityRow {
+        capability: "Mixed precision training",
+        entries: [
+            CapabilityEntry::with_state(CapabilityState::Ready, "AMP via BF16 accumulation"),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "FP16 gradient scaling heuristics",
+            ),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Metal AMP validated on A17"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Apex parity across optimizers"),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Wavefront loss scaling tuning",
+            ),
+        ],
+    },
+    CapabilityRow {
+        capability: "Dynamic shape compilation",
+        entries: [
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Shape polymorphic kernels validated",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Runtime shape lowering in progress",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Metal dynamic pipeline caching",
+            ),
+            CapabilityEntry::with_state(CapabilityState::Ready, "NVRTC specialization stable"),
+            CapabilityEntry::with_state(
+                CapabilityState::Blocked,
+                "rocDynamic shape patchset pending",
+            ),
+        ],
+    },
+    CapabilityRow {
         capability: "Graph fusion pipeline",
         entries: [
             CapabilityEntry::with_state(CapabilityState::Ready, "Stable scheduler passes"),
@@ -643,6 +686,24 @@ pub fn capabilities_for_backend_with_state(
         .collect()
 }
 
+/// Returns capability rows whose notes mention `query` (case-insensitive).
+pub fn capabilities_with_note_containing(query: &str) -> Vec<&'static CapabilityRow> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let needle = trimmed.to_ascii_lowercase();
+    CAPABILITY_ROWS
+        .iter()
+        .filter(|row| {
+            row.entries
+                .iter()
+                .any(|entry| entry.note.to_ascii_lowercase().contains(needle.as_str()))
+        })
+        .collect()
+}
+
 /// Returns capability rows where `backend` is not yet marked ready.
 pub fn pending_capabilities_for_backend(backend: Backend) -> Vec<&'static CapabilityRow> {
     CAPABILITY_ROWS
@@ -732,12 +793,12 @@ mod tests {
     fn summarizes_backend_counts_watchlist_items() {
         let hip = summarize_backend(Backend::Hip);
         assert_eq!(hip.backend, Backend::Hip);
-        assert_eq!(hip.watchlist, 8);
-        assert_eq!(hip.blocked, 3);
+        assert_eq!(hip.watchlist, 9);
+        assert_eq!(hip.blocked, 4);
         assert!(!hip.is_fully_ready());
-        assert_eq!(hip.tracked_capabilities(), 11);
+        assert_eq!(hip.tracked_capabilities(), 13);
         assert_eq!(hip.readiness_ratio(), 0.0);
-        assert_eq!(hip.pending(), 11);
+        assert_eq!(hip.pending(), 13);
         assert!(hip
             .notes
             .iter()
@@ -808,6 +869,19 @@ mod tests {
     }
 
     #[test]
+    fn capabilities_with_note_containing_is_case_insensitive() {
+        let wavefront = capabilities_with_note_containing("wavefront");
+        assert!(wavefront
+            .iter()
+            .any(|row| row.capability == "Kernel autotuning"));
+        assert!(wavefront
+            .iter()
+            .any(|row| row.capability == "Mixed precision training"));
+
+        assert!(capabilities_with_note_containing(" ").is_empty());
+    }
+
+    #[test]
     fn matrix_summary_matches_manual_counts() {
         let summary = matrix_summary();
         let mut ready = 0usize;
@@ -849,6 +923,15 @@ mod tests {
         assert!(view
             .capability("Telemetry")
             .is_some_and(|row| row.capability == "Telemetry"));
+    }
+
+    #[test]
+    fn capability_matrix_view_provides_note_search() {
+        let view = capability_matrix_view();
+        let matches = view.capabilities_with_note("dynamic shape");
+        assert!(matches
+            .iter()
+            .any(|row| row.capability == "Dynamic shape compilation"));
     }
 
     #[test]

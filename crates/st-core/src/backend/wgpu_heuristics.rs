@@ -15,6 +15,9 @@ use crate::ecosystem::{
 use super::soft_logic::learn;
 #[cfg(feature = "logic")]
 use super::soft_logic::SoftRule;
+use st_softlogic::learn;
+#[cfg(feature = "logic")]
+use st_softlogic::SoftRule;
 #[cfg(feature = "logic-learn")]
 use std::sync::Mutex;
 use std::time::SystemTime;

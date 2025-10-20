@@ -1,0 +1,16 @@
+[package]
+name = "spiral-safety"
+version = "0.1.0"
+edition = "2021"
+description = "Safety policy evaluation for SpiralTorch runtime surfaces"
+license = "AGPL-3.0-or-later"
+authors = ["SpiralTorch Safety Team <safety@spiraltorch.ai>"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+tracing = "0.1"
+
+[dev-dependencies]
+serde_json = "1"

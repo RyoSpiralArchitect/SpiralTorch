@@ -20,6 +20,8 @@ mps      = []
 cuda     = ["dep:cudarc"]
 logic    = []
 "logic-learn" = ["logic"]
+logic    = ["dep:st-softlogic"]
+"logic-learn" = ["logic", "st-softlogic/learn_store"]
 kdsl     = ["dep:st-kdsl", "logic"]
 kv-redis = ["st-kv/redis"]
 psi      = ["dep:bitflags", "dep:once_cell"]
@@ -29,6 +31,8 @@ apply_zscale = []
 golden   = []
 experimental_zpulse = []
 blackcat_v2 = []
+observability-prometheus = ["dep:prometheus"]
+observability-otlp = ["dep:opentelemetry"]
 
 [dependencies]
 thiserror   = "1"
@@ -49,10 +53,13 @@ wgpu        = { version = "0.19", optional = true, default-features = false, fea
 bitflags    = { version = "2.4", optional = true }
 
 st-backend-hip = { path = "../st-backend-hip", optional = true }
+st-softlogic   = { path = "../st-softlogic",   optional = true }
 st-kdsl        = { path = "../st-kdsl",        optional = true }
 st-kv          = { path = "../st-kv",          optional = true }
 st-frac        = { path = "../st-frac" }
 cudarc         = { version = "0.11", optional = true, features = ["nvrtc"] }
+prometheus     = { version = "0.13", optional = true }
+opentelemetry  = { version = "0.21", optional = true, features = ["metrics"] }
 
 [dev-dependencies]
 approx = "0.5"

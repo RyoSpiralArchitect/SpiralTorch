@@ -8,6 +8,8 @@ use crate::backend::soft_logic::SoftRule;
 use crate::backend::wgpu_heuristics::{
     SOFT_NAME_CH, SOFT_NAME_KL, SOFT_NAME_USE2CE, SOFT_NAME_WG,
 };
+#[cfg(feature = "logic")]
+use st_softlogic::SoftRule;
 
 #[cfg(feature="kv-redis")]
 pub fn soft_from_redis(rows:u32, cols:u32, k:u32, subgroup:bool) -> Vec<SoftRule> {

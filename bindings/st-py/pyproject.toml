@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "spiraltorch"
-version = "0.1.1"
+version = "0.1.2"
 description = "Rust-first learning primitives for SpiralTorch"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -19,6 +19,9 @@ classifiers = [
 
 [tool.maturin]
 python-source = "python"
+
+[project.scripts]
+spiral-train = "spiral.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/RyoSpiralArchitect/SpiralTorch"

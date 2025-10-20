@@ -19,6 +19,9 @@ SpiralTorchVision extends SpiralTorch's native Z-space capabilities while stayin
 - **Temporal resonance accumulation**: `ZSpaceVolume::accumulate` and `TemporalResonanceBuffer` perform exponential moving averages across frames so `VisionProjector::project_with_temporal` can mix historical attention with new resonance in real time.
 - **Multi-view Z-fusion**: Register camera descriptors with `MultiViewFusion` so `VisionProjector::project_multi_view` can weight Z slices as viewpoints, modulating attention with orientation-aware biases before collapse.
 - **Generative resonance coupling**: Feed `ZSpaceVolume` slice statistics into a `ResonanceGenerator` backed by `SpiralRnn` so synthetic `DifferentialResonance` fields can drive projection without an external conductor.
+- **Z-space super-resolution & diffusion**: Upsample volumes with `InterpolationMethod`, `ZSpaceVolume::interpolate`, and `ZSpaceVolume::upscale`, then refine or hallucinate detail with `ZDiffuser` and the stochastic `ZDecoder` latent bridge.
+- **Video stream projection**: Pipe temporally ordered volumes through `VideoStreamProjector` to mix diffusion, super-resolution, generative resonance, and temporal smoothing while tracking previous feedback.
+- **Long-term integrations**: Leverage TorchVision datasets/transforms as inputs while adding Z-space-native losses, visualisation tools, and SpiralTorch-specific model heads.
 - **Long-term integrations**: Leveraging TorchVision datasets/transforms as inputs while adding Z-space-native losses, visualization tools, and SpiralTorch-specific model heads.
 - **Modular vision backbones**: `st_vision::models` ships ergonomic ResNet, ViT, and ConvNeXt backbones built on the `st-nn` module trait. They expose configuration structs, state-dict interop, and forward passes tuned for SpiralTorch tensors.
 
@@ -119,11 +122,61 @@ let fused = projector.project(&volume, &synthetic)?;
 
 Passing the previous `DifferentialResonance` back into `generate` closes the loop, allowing the RNN to refine its latent state over time. Because `ResonanceGenerator` exposes `rnn_mut`, you can attach hypergrads or otherwise fine-tune the SpiralRNN as part of a larger training run. The resulting projections inherit spectral, temporal, and multi-view behaviour from `VisionProjector`, but now the resonance driving that collapse is born from the same pipeline.
 
+### Z-space super-resolution, diffusion, and decoding
+
+`InterpolationMethod` controls how intermediate slices are synthesised while traversing depth. Call `ZSpaceVolume::interpolate`
+to densify the Z-axis and `ZSpaceVolume::upscale` to bilinearly expand each slice's spatial resolution. Couple the output with a
+`ZDiffuser` to bloom sparse activations without erasing structural cues:
+
+```rust
+let hi_res = volume
+    .interpolate(InterpolationMethod::Cubic)?
+    .upscale(2)?;
+
+let diffuser = ZDiffuser::new(2, 0.35);
+let softened = diffuser.diffuse(&hi_res)?;
+```
+
+For generative workflows, `ZDecoder` turns latent tensors into volumetric canvases using deterministic seeds. Optional refinement
+stages let you reuse the same diffusion/super-resolution path immediately after decoding:
+
+```rust
+let latent = Tensor::from_vec(1, 16, latent_vec)?;
+let mut decoder = ZDecoder::new(4, 32, 32, 0xDEADBEEF)?;
+let generated = decoder.decode_with_refinement(
+    &latent,
+    Some(&diffuser),
+    Some(InterpolationMethod::Linear),
+    Some(2),
+)?;
+```
+
+### Video-aware projection pipeline
+
+`VideoStreamProjector` orchestrates diffusion, super-resolution, temporal smoothing, and SpiralRNN-driven resonance generation
+for sequential inputs. It keeps a `TemporalResonanceBuffer`, calibrates the internal `VisionProjector` with live `AtlasFrame`
+telemetry, and threads the previous resonance back into `ResonanceGenerator::generate` for continuity:
+
+```rust
+let generator = ResonanceGenerator::new("video", 12, 5)?;
+let projector = VisionProjector::new(0.55, 0.35, 0.1);
+let mut stream = VideoStreamProjector::new(projector, generator, 0.25)
+    .with_diffuser(ZDiffuser::new(1, 0.2))
+    .with_super_resolution(InterpolationMethod::Linear, 2);
+
+let chrono_frames = vec![Some(summary_for(frame0)), Some(summary_for(frame1))];
+let atlas_frames = vec![Some(atlas0), Some(atlas1)];
+let projections = stream.project_sequence(&[volume0, volume1], &chrono_frames, &atlas_frames)?;
+let latest_resonance = stream.last_resonance();
+```
+
+You can also process frames incrementally with `step`, which returns both the projection and an `Arc<DifferentialResonance>` for downstream logging, feedback, or closed-loop modulation.
+
 ## Resonant roadmap
 - **Z-space as a perceptual frequency domain**: Use the new spectral windows and `ZSpaceVolume::spectral_response` helper to treat collapse as a frequency-aware attention sweep that preconditions downstream ConvNets.
 - **Temporal resonance layering**: Extend the new `TemporalResonanceBuffer` into multi-scale stacks that model short- and long-term attention simultaneously.
 - **Dynamic multi-camera orchestration**: Extend `MultiViewFusion` with calibration from SLAM/IMU pipelines and learnable alignment gammas so attention follows moving rigs in autonomous capture setups.
 - **Generative resonance coupling**: Train the new `ResonanceGenerator` alongside SpiralRNN/`ZConductor` stacks so resonance synthesis becomes adaptive rather than purely heuristic.
-- **Super-resolution and synthesis in Z**: Add interpolation, upscaling, diffusion, and decoding helpers so Z-aware GAN/VAE stacks can both enhance and generate volumetric inputs.
+- **Learnable super-resolution in Z**: Pair the new interpolation/diffusion primitives with trainable weights so Z-aware GAN/VAE stacks can decide when to refine, denoise, or hallucinate volumetric detail instead of relying on heuristics.
 
 This guide will evolve over time to map TorchVision ecosystems to the expanding SpiralTorchVision feature set.

@@ -209,6 +209,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -2429,6 +2430,15 @@ version = "0.1.0"
 dependencies = [
  "rand",
  "thiserror 1.0.69",
+name = "spiral-safety"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "serde",
+ "tracing",
 ]
 
 [[package]]
@@ -2440,6 +2450,8 @@ dependencies = [
  "pyo3",
  "pyo3-build-config",
  "spiral-selfsup",
+ "spiral-safety",
+ "spiral-opt",
  "st-backend-hip",
  "st-core",
  "st-frac",
@@ -2497,6 +2509,8 @@ name = "st-backend-wgpu"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "rand",
+ "st-vision",
  "pollster",
  "st-tensor",
  "thiserror 1.0.69",
@@ -2538,6 +2552,7 @@ dependencies = [
  "st-frac",
  "st-kdsl",
  "st-kv",
+ "st-softlogic",
  "statrs",
  "thiserror 1.0.69",
  "toml",
@@ -2581,11 +2596,16 @@ dependencies = [
  "nalgebra 0.32.6",
  "num-complex",
  "rand",
+ "st-nn",
+ "st-softlogic",
+ "st-tensor",
+ "st-vision",
  "serde",
  "serde_json",
  "st-nn",
  "st-tensor",
  "st-vision",
+ "st-tensor",
  "thiserror 1.0.69",
 ]
 
@@ -2638,6 +2658,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "st-softlogic"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "st-tensor"
 version = "0.1.0"
 dependencies = [
@@ -2670,6 +2698,7 @@ version = "0.1.0"
 dependencies = [
  "rand",
  "st-core",
+ "st-logic",
  "st-nn",
  "st-tensor",
  "tempfile",
@@ -2894,6 +2923,37 @@ name = "toml_write"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
+
+[[package]]
+name = "tracing"
+version = "0.1.41"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "784e0ac535deb450455cbfa28a6f0df145ea1bb7ae51b821cf5e7927fdcfbdd0"
+dependencies = [
+ "pin-project-lite",
+ "tracing-attributes",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.30"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81383ab64e72a7a8b8e13130c49e3dab29def6d0c7d76a03087b3cf71c5c6903"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+]
+
+[[package]]
+name = "tracing-core"
+version = "0.1.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9d12581f227e93f094d3af2ae690a574abb8a2b9b7a96e7cfe9647b2b617678"
+dependencies = [
+ "once_cell",
+]
 
 [[package]]
 name = "transpose"

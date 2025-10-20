@@ -9,6 +9,7 @@ license = "AGPL-3.0-or-later"
 [dependencies]
 st-core = { path = "../st-core" }
 st-tensor = { path = "../st-tensor" }
+st-logic = { path = "../st-logic" }
 st-nn = { path = "../st-nn" }
 rand = "0.8"
 

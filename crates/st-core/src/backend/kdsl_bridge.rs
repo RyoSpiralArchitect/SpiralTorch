@@ -12,6 +12,11 @@ use super::wgpu_heuristics::{
     SOFT_NAME_MODE_BOTTOMK, SOFT_NAME_MODE_MIDK, SOFT_NAME_RADIX, SOFT_NAME_SEGMENTS,
     SOFT_NAME_TILE_COLS, SOFT_NAME_USE2CE, SOFT_NAME_WG,
 };
+#[cfg(feature = "logic")]
+pub use st_softlogic::SoftRule;
+#[cfg(not(feature = "logic"))]
+#[derive(Clone, Debug, Default)]
+pub struct SoftRule;
 #[cfg(feature = "kdsl")]
 use serde::Deserialize;
 
