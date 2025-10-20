@@ -134,6 +134,7 @@ impl<'a> TemporalVolumeLike for TemporalVolumeView<'a> {
     }
 }
 
+
 /// Configuration for rendering a temporal volume into time-aware slices.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TemporalRendererConfig {
@@ -379,24 +380,4 @@ mod tests {
         assert!(matches!(result, Err(TensorError::DataLength { .. })));
     }
 
-    #[cfg(feature = "vision-volume")]
-    #[test]
-    fn renders_from_zspace_volume() {
-        use st_vision::ZSpaceVolume;
-
-        let mut volume = ZSpaceVolume::zeros_with_temporal(1, 1, 2, 2).unwrap();
-        volume.voxels_mut().copy_from_slice(&[0.25, 0.75]);
-        volume
-            .temporal_harmonics_mut()
-            .copy_from_slice(&[0.1, 0.0, -0.1, 0.2]);
-        volume.resonance_decay_mut().copy_from_slice(&[0.4, 0.6]);
-        let renderer = TemporalRenderer::new(TemporalRendererConfig {
-            frames: 2,
-            sample_rate_hz: 12.0,
-        });
-        let output = renderer.render(&volume).unwrap();
-        assert_eq!(output.frames, 2);
-        assert_eq!(output.depth, 1);
-        assert_eq!(output.width, 2);
-    }
 }

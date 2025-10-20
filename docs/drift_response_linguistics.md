@@ -19,13 +19,17 @@ DRL works with a vocabulary \(W\) embedded in a meaning space
 For every frame the helper expects:
 
 - **Containment weight** \(c_{w,f}\): how tightly the word binds to the frame.
-- **Contained risk** via two mixed slopes:
+- **Contained risk** via two mixed slopes (and optional quadratic terms):
   \[
     a_{w,f} = (1-\phi_{w,f}) a^{\text{den}}_{w,f} + \phi_{w,f} a^{\text{con}}_{w,f},\qquad
     b_{w,f} = (1-\phi_{w,f}) b^{\text{den}}_{w,f} + \phi_{w,f} b^{\text{con}}_{w,f}.
   \]
+  Curvature coefficients \(a''\) and \(b''\) follow the same mixture to model
+  how value or risk accelerates once the drift leaves the purely linear regime.
 - **Comprehension slope** \(\kappa_{w,f}\) describing how quickly listeners
-  lose the intended denotation under perturbation.
+  lose the intended denotation under perturbation, plus an optional
+  **comprehension curvature** \(\kappa'_{w,f}\) when that erosion itself
+  accelerates.
 - **Timing signal** \(s_w(t)\) that raises risk when the community or media
   cycle is hot.
 
@@ -52,7 +56,30 @@ The helper calculates two core quantities:
 
 These metrics emerge from `analyse_word`, which also measures the hazard count
 \(\mathrm{CHI}_w\) and toggles strict mode when multiple frames flare up or the
-safe radius collapses.【F:tools/python/drift_response_linguistics.py†L117-L197】
+safe radius collapses.  The call additionally emits a **frame signature** for
+every frame, capturing the local slopes, curvatures, hazard multiplier, safe
+radius, and comprehension curvature so downstream policy surfaces can see *why*
+a frame is risky before acting.【F:tools/python/drift_response_linguistics.py†L117-L271】
+
+### Signature Geometry
+
+Each entry inside `DRLMetrics.frame_signatures` (mirrored by the Rust
+`FrameSignature`) corresponds to the signature tuple \((S_w, C_w, r_{w,f}, \ldots)\)
+from the theory note:
+
+- `value_slope` \(= a_{w,f}\) and `risk_slope` \(= \lambda b_{w,f} S_f\) define the
+  local tangent between creative value and harm.
+- `value_curvature` and `risk_curvature` reuse the optional quadratic
+  coefficients to measure how quickly the tangent changes.
+- `net_slope` / `net_curvature` are the differences of the above, i.e. the
+  signed quantities \(S_w\) and \(C_w\).
+- `hazard_multiplier` exposes the triple-product amplifier, `safe_radius`
+  mirrors \(r_{w,f}\).  `timing_elasticity` holds the first derivative of the
+  hazard multiplier with respect to the timing signal, while `kappa_slope`
+  keeps the comprehension curvature \(\kappa'_{w,f}\) intact.  When the linear
+  and quadratic terms predict a net balance change, `tipping_radius` estimates
+  where the frame's value-minus-risk crosses zero along that drift direction.
+  【F:crates/spiral-safety/src/drift_response.rs†L1-L288】
 
 ## 3. Triple-Product Amplifier
 
@@ -75,15 +102,18 @@ penalty = trainer_penalty(metrics)
 ```
 
 The penalty adds the existential load, frame count, and a radius surcharge when
-radii dip below the configured tolerance.  Strict mode applies a 1.25× boost so
+radii dip below the configured tolerance.  A second surcharge applies when the
+predicted tipping radius falls inside the safety band, reflecting frames whose
+quadratic terms suggest imminent harm even before the observed radius
+collapses.  Strict mode applies a 1.25× boost so
 schedulers can flip into hardened policies without rewiring the trainer.
 Aggregating multiple words is a simple sum via `aggregate_penalty`.
 【F:tools/python/drift_response_linguistics.py†L199-L230】
 
 Rust services tap the exact same flow through
 `spiral_safety::drift_response`, which mirrors the helper with serde-friendly
-structs, lazy default thresholds, and unit tests pinned to the Python
-reference.【F:crates/spiral-safety/src/drift_response.rs†L1-L357】
+structs, signature extraction, lazy default thresholds, and unit tests pinned to
+the Python reference.【F:crates/spiral-safety/src/drift_response.rs†L1-L357】
 
 ## 5. Feeding Z-space Trainers
 

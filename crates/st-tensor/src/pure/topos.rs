@@ -25,21 +25,34 @@
 use super::{fractal::FractalPatch, PureResult, Tensor, TensorError};
 use core::{cmp, f64::consts::PI as PI64};
 
-fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
+const DEFAULT_MODALITY_PERMEABILITY: f32 = 0.12;
+const DEFAULT_GRAPH_PERMEABILITY: f32 = 0.08;
+
+fn validate_permeability(label: &'static str, permeability: f32) -> PureResult<()> {
+    if !permeability.is_finite() || permeability < 0.0 || permeability > 1.0 {
+        return Err(TensorError::InvalidValue { label });
+    }
+    Ok(())
+}
+
+fn permeable_clamp(value: f32, limit: f32, permeability: f32) -> f32 {
     if !value.is_finite() {
         return 0.0;
     }
-    if !saturation.is_finite() || saturation <= 0.0 {
+    if limit <= 0.0 {
         return 0.0;
     }
-    let clamp = value.clamp(-saturation, saturation);
-    let leak = porosity.clamp(0.0, 1.0);
-    if leak <= 0.0 {
-        return clamp;
+    let magnitude = value.abs();
+    if magnitude <= limit {
+        return value;
     }
-    let normalised = value / saturation;
-    let soft = saturation * normalised.tanh();
-    clamp * (1.0 - leak) + soft * leak
+    let sign = value.signum();
+    if permeability <= f32::EPSILON {
+        return sign * limit;
+    }
+    let headroom = limit * permeability;
+    let softened = 1.0 - (-((magnitude - limit) / (headroom + limit))).exp();
+    sign * (limit + headroom * softened.min(1.0))
 }
 
 /// Numerically guards the Lawvere–Tierney topology that keeps probabilistic data j-closed.
@@ -718,22 +731,13 @@ impl OpenCartesianTopos {
 pub struct ModalityProfile {
     max_volume: usize,
     local_saturation: Option<f32>,
-    porosity: f32,
+    permeability: f32,
 }
 
 impl ModalityProfile {
     /// Creates a new modality envelope. `max_volume` must be non-zero and `local_saturation`,
     /// when provided, must be positive.
     pub fn new(max_volume: usize, local_saturation: Option<f32>) -> PureResult<Self> {
-        Self::with_porosity(max_volume, local_saturation, 0.25)
-    }
-
-    /// Creates a modality envelope with explicit porosity.
-    pub fn with_porosity(
-        max_volume: usize,
-        local_saturation: Option<f32>,
-        porosity: f32,
-    ) -> PureResult<Self> {
         if max_volume == 0 {
             return Err(TensorError::EmptyInput("modality_max_volume"));
         }
@@ -742,13 +746,10 @@ impl ModalityProfile {
                 return Err(TensorError::NonPositiveSaturation { saturation });
             }
         }
-        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
-            return Err(TensorError::PorosityOutOfRange { porosity });
-        }
         Ok(Self {
             max_volume,
             local_saturation,
-            porosity,
+            permeability: DEFAULT_MODALITY_PERMEABILITY,
         })
     }
 
@@ -757,9 +758,16 @@ impl ModalityProfile {
         self.max_volume
     }
 
-    /// Returns the porosity configured for this modality.
-    pub fn porosity(&self) -> f32 {
-        self.porosity
+    /// Returns the permeability applied when clamping modality values.
+    pub fn permeability(&self) -> f32 {
+        self.permeability
+    }
+
+    /// Overrides the permeability while preserving other settings.
+    pub fn with_permeability(mut self, permeability: f32) -> PureResult<Self> {
+        validate_permeability("modality_permeability", permeability)?;
+        self.permeability = permeability;
+        Ok(self)
     }
 
     fn effective_saturation(&self, topos: &OpenCartesianTopos) -> f32 {
@@ -767,10 +775,6 @@ impl ModalityProfile {
             .unwrap_or_else(|| topos.saturation())
             .min(topos.saturation())
             .max(0.0)
-    }
-
-    fn effective_porosity(&self, topos: &OpenCartesianTopos) -> f32 {
-        self.porosity.max(topos.porosity())
     }
 
     fn guard_volume(&self, label: &'static str, volume: usize) -> PureResult<()> {
@@ -791,7 +795,6 @@ impl ModalityProfile {
         slice: &mut [f32],
     ) -> PureResult<()> {
         let saturation = self.effective_saturation(topos);
-        let porosity = self.effective_porosity(topos);
         for value in slice.iter_mut() {
             if !value.is_finite() {
                 return Err(TensorError::NonFiniteValue {
@@ -799,7 +802,7 @@ impl ModalityProfile {
                     value: *value,
                 });
             }
-            *value = porous_mix(*value, saturation, porosity);
+            *value = permeable_clamp(*value, saturation, self.permeability);
         }
         topos.guard_slice(label, slice)
     }
@@ -835,7 +838,7 @@ pub struct GraphGuardProfile {
     symmetry_tolerance: f32,
     activation_threshold: f32,
     edge_saturation: Option<f32>,
-    porosity: f32,
+    permeability: f32,
 }
 
 impl GraphGuardProfile {
@@ -879,7 +882,7 @@ impl GraphGuardProfile {
             symmetry_tolerance,
             activation_threshold,
             edge_saturation,
-            porosity: 0.2,
+            permeability: DEFAULT_GRAPH_PERMEABILITY,
         })
     }
 
@@ -888,18 +891,9 @@ impl GraphGuardProfile {
         self.max_nodes
     }
 
-    /// Returns the configured graph porosity.
-    pub fn porosity(&self) -> f32 {
-        self.porosity
-    }
-
-    /// Adjusts the porosity applied while saturating adjacency entries.
-    pub fn with_porosity(mut self, porosity: f32) -> PureResult<Self> {
-        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
-            return Err(TensorError::PorosityOutOfRange { porosity });
-        }
-        self.porosity = porosity;
-        Ok(self)
+    /// Returns the permeability admitted while guarding adjacency tensors.
+    pub fn permeability(&self) -> f32 {
+        self.permeability
     }
 
     fn validate_for_topos(&self, topos: &OpenCartesianTopos) -> PureResult<()> {
@@ -930,8 +924,7 @@ impl GraphGuardProfile {
             .unwrap_or_else(|| topos.saturation())
             .min(topos.saturation())
             .max(0.0);
-        let porosity = self.porosity.max(topos.porosity());
-        porous_mix(value, limit, porosity)
+        permeable_clamp(value, limit, self.permeability)
     }
 
     fn guard_shape(&self, node_count: usize, len: usize) -> PureResult<usize> {
@@ -958,6 +951,28 @@ impl GraphGuardProfile {
         }
         Ok(())
     }
+
+    fn guard_edge_budget(&self, edge_count: usize) -> PureResult<usize> {
+        if edge_count <= self.max_edges {
+            return Ok(0);
+        }
+        let slack = ((self.max_edges as f32) * self.permeability).ceil() as usize;
+        let overflow = edge_count - self.max_edges;
+        if overflow > slack {
+            return Err(TensorError::TensorVolumeExceeded {
+                volume: edge_count,
+                max_volume: self.max_edges,
+            });
+        }
+        Ok(overflow)
+    }
+
+    /// Overrides the permeability used when smoothing adjacency saturation and edge budgets.
+    pub fn with_permeability(mut self, permeability: f32) -> PureResult<Self> {
+        validate_permeability("graph_permeability", permeability)?;
+        self.permeability = permeability;
+        Ok(self)
+    }
 }
 
 /// Structured report emitted by [`MultiModalToposGuard::guard_graph_adjacency`].
@@ -971,6 +986,8 @@ pub struct GraphGuardReport {
     pub symmetry_violations: usize,
     /// Number of entries that were saturated into the admissible range.
     pub saturated_entries: usize,
+    /// Number of edges exceeding the configured budget but tolerated by permeability.
+    pub edge_overflow: usize,
 }
 
 /// Reward boundary used to detect runaway reinforcement learning signals.
@@ -979,23 +996,12 @@ pub struct RewardBoundary {
     lower: f32,
     upper: f32,
     hysteresis: f32,
-    porosity: f32,
 }
 
 impl RewardBoundary {
     /// Creates a new reward boundary. `lower` must be below `upper` and hysteresis must be
     /// non-negative.
     pub fn new(lower: f32, upper: f32, hysteresis: f32) -> PureResult<Self> {
-        Self::with_porosity(lower, upper, hysteresis, 0.3)
-    }
-
-    /// Creates a new reward boundary with explicit porosity.
-    pub fn with_porosity(
-        lower: f32,
-        upper: f32,
-        hysteresis: f32,
-        porosity: f32,
-    ) -> PureResult<Self> {
         if !lower.is_finite() || !upper.is_finite() || !hysteresis.is_finite() {
             return Err(TensorError::NonFiniteValue {
                 label: "reward_boundary",
@@ -1012,14 +1018,10 @@ impl RewardBoundary {
                 label: "reward_boundary_hysteresis",
             });
         }
-        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
-            return Err(TensorError::PorosityOutOfRange { porosity });
-        }
         Ok(Self {
             lower,
             upper,
             hysteresis,
-            porosity,
         })
     }
 
@@ -1033,34 +1035,16 @@ impl RewardBoundary {
         self.upper
     }
 
-    /// Returns the porosity applied when clamping reward traces.
-    pub fn porosity(&self) -> f32 {
-        self.porosity
-    }
-
-    fn slack(&self) -> f32 {
-        self.hysteresis * (1.0 + self.porosity)
-    }
-
     fn clamp(&self, value: f32) -> f32 {
-        if !value.is_finite() {
-            return 0.0;
-        }
-        let mid = 0.5 * (self.upper + self.lower);
-        let half = 0.5 * (self.upper - self.lower);
-        if half <= 0.0 {
-            return mid;
-        }
-        let offset = porous_mix(value - mid, half, self.porosity);
-        (mid + offset).clamp(self.lower, self.upper)
+        value.clamp(self.lower, self.upper)
     }
 
     fn breached_lower(&self, value: f32) -> bool {
-        value < self.lower - self.slack()
+        value < self.lower - self.hysteresis
     }
 
     fn breached_upper(&self, value: f32) -> bool {
-        value > self.upper + self.slack()
+        value > self.upper + self.hysteresis
     }
 }
 
@@ -1117,27 +1101,19 @@ pub struct MultiModalToposGuard<'a> {
 }
 
 impl<'a> MultiModalToposGuard<'a> {
-    /// Builds a new multi-modal guard anchored to the provided topos with conservative defaults.
-    pub fn new(topos: &'a OpenCartesianTopos) -> PureResult<Self> {
-        let text = ModalityProfile::new(topos.max_volume().min(16384).max(1), None)?;
-        let audio = ModalityProfile::new(
-            topos.max_volume().min(65536).max(1),
-            Some(topos.saturation()),
-        )?;
-        let vision = ModalityProfile::new(topos.max_volume().min(262144).max(1), None)?;
-        let graph = GraphGuardProfile::new(
-            cmp::min(2048, topos.max_volume()),
-            cmp::min(topos.max_volume(), 131_072),
-            1024,
-            1e-3,
-            1e-4,
-            None,
-        )?;
+    /// Builds a multi-modal guard from explicit modality profiles and a reward boundary.
+    pub fn from_profiles(
+        topos: &'a OpenCartesianTopos,
+        text: ModalityProfile,
+        audio: ModalityProfile,
+        vision: ModalityProfile,
+        graph: GraphGuardProfile,
+        reward: RewardBoundary,
+    ) -> PureResult<Self> {
         graph.validate_for_topos(topos)?;
         text.validate_for_topos(topos)?;
         audio.validate_for_topos(topos)?;
         vision.validate_for_topos(topos)?;
-        let reward = RewardBoundary::new(-topos.saturation(), topos.saturation(), 0.05)?;
         Ok(Self {
             topos,
             text,
@@ -1148,9 +1124,48 @@ impl<'a> MultiModalToposGuard<'a> {
         })
     }
 
+    /// Builds a new multi-modal guard anchored to the provided topos with conservative defaults.
+    pub fn new(topos: &'a OpenCartesianTopos) -> PureResult<Self> {
+        let text = ModalityProfile::new(topos.max_volume().min(16384).max(1), None)?
+            .with_permeability(0.18)?;
+        let audio = ModalityProfile::new(
+            topos.max_volume().min(65536).max(1),
+            Some(topos.saturation()),
+        )?
+        .with_permeability(0.1)?;
+        let vision = ModalityProfile::new(topos.max_volume().min(262144).max(1), None)?
+            .with_permeability(0.15)?;
+        let graph = GraphGuardProfile::new(
+            cmp::min(2048, topos.max_volume()),
+            cmp::min(topos.max_volume(), 131_072),
+            1024,
+            1e-3,
+            1e-4,
+            None,
+        )?
+        .with_permeability(0.1)?;
+        let reward = RewardBoundary::new(-topos.saturation(), topos.saturation(), 0.05)?;
+        Self::from_profiles(topos, text, audio, vision, graph, reward)
+    }
+
     /// Returns the underlying topos guard.
     pub fn topos(&self) -> &'a OpenCartesianTopos {
         self.topos
+    }
+
+    /// Returns a rewrite monad anchored to the multi-modal guard.
+    pub fn monad(&self) -> RewriteMonad<'a> {
+        RewriteMonad::new(self.topos)
+    }
+
+    /// Creates a multi-modal atlas that shares this guard's modality envelopes.
+    pub fn atlas(&self) -> MultiModalAtlas<'a> {
+        MultiModalAtlas::new(*self)
+    }
+
+    /// Cultivates a tensor biome that preserves the guard's modality profiles.
+    pub fn cultivate_biome(&self) -> MultiModalBiome {
+        MultiModalBiome::new(*self)
     }
 
     /// Overrides the text modality profile.
@@ -1216,7 +1231,10 @@ impl<'a> MultiModalToposGuard<'a> {
     ) -> PureResult<GraphGuardReport> {
         let expected = self.graph.guard_shape(node_count, adjacency.len())?;
         if let Some(budget) = self.graph.max_edges.checked_mul(2) {
-            if expected > budget {
+            let soft_budget = (budget as f32 * (1.0 + self.graph.permeability()))
+                .ceil()
+                .max(budget as f32) as usize;
+            if expected > soft_budget {
                 return Err(TensorError::InvalidValue {
                     label: "graph_edge_budget",
                 });
@@ -1265,6 +1283,7 @@ impl<'a> MultiModalToposGuard<'a> {
             max_degree,
             symmetry_violations,
             saturated_entries,
+            edge_overflow: overflow,
         })
     }
 
@@ -1298,6 +1317,338 @@ impl<'a> MultiModalToposGuard<'a> {
         }
         self.topos.guard_slice("reward_trace", rewards)?;
         Ok(signal.finalise())
+    }
+}
+
+/// Atlas that keeps track of modality-aware traversals across an open-cartesian topos.
+#[derive(Clone, Debug)]
+pub struct MultiModalAtlas<'a> {
+    guard: MultiModalToposGuard<'a>,
+    atlas: ToposAtlas<'a>,
+}
+
+impl<'a> MultiModalAtlas<'a> {
+    pub(crate) fn from_parts(guard: MultiModalToposGuard<'a>, atlas: ToposAtlas<'a>) -> Self {
+        Self { guard, atlas }
+    }
+
+    /// Creates a fresh multi-modal atlas from a guard.
+    pub fn new(guard: MultiModalToposGuard<'a>) -> Self {
+        Self::from_parts(guard, ToposAtlas::new(guard.topos))
+    }
+
+    /// Returns the underlying topos.
+    pub fn topos(&self) -> &'a OpenCartesianTopos {
+        self.guard.topos
+    }
+
+    /// Returns the rewrite monad anchored to this atlas.
+    pub fn monad(&self) -> RewriteMonad<'a> {
+        self.atlas.monad()
+    }
+
+    /// Returns the visited depth recorded by the underlying atlas.
+    pub fn depth(&self) -> usize {
+        self.atlas.depth()
+    }
+
+    /// Returns the accumulated tensor volume rewritten through this atlas.
+    pub fn visited_volume(&self) -> usize {
+        self.atlas.visited_volume()
+    }
+
+    /// Remaining admissible volume before the guard saturates.
+    pub fn remaining_volume(&self) -> usize {
+        self.atlas.remaining_volume()
+    }
+
+    /// Borrows the inner atlas.
+    pub fn inner(&self) -> &ToposAtlas<'a> {
+        &self.atlas
+    }
+
+    /// Borrows the inner atlas mutably.
+    pub fn inner_mut(&mut self) -> &mut ToposAtlas<'a> {
+        &mut self.atlas
+    }
+
+    /// Consumes the multi-modal wrapper and returns the underlying atlas.
+    pub fn into_inner(self) -> ToposAtlas<'a> {
+        self.atlas
+    }
+
+    /// Guards language tensors while tracking atlas traversal.
+    pub fn guard_text_tensor(
+        &mut self,
+        label: &'static str,
+        tensor: &mut Tensor,
+    ) -> PureResult<()> {
+        self.guard
+            .text
+            .rewrite_tensor(self.guard.topos, label, tensor)?;
+        self.atlas.guard_tensor(label, tensor)
+    }
+
+    /// Lifts a text tensor through the atlas after applying modality saturation.
+    pub fn lift_text_tensor(&mut self, label: &'static str, tensor: Tensor) -> PureResult<Tensor> {
+        let mut tensor = tensor;
+        self.guard
+            .text
+            .rewrite_tensor(self.guard.topos, label, &mut tensor)?;
+        self.atlas.lift_tensor(label, tensor)
+    }
+
+    /// Guards audio waveforms using the atlas.
+    pub fn guard_audio_waveform(
+        &mut self,
+        label: &'static str,
+        waveform: &mut [f32],
+    ) -> PureResult<()> {
+        self.guard.audio.guard_volume(label, waveform.len())?;
+        self.guard
+            .audio
+            .rewrite_slice(self.guard.topos, label, waveform)?;
+        self.atlas.guard_slice(label, waveform)
+    }
+
+    /// Guards vision tensors while accounting for atlas traversal volume.
+    pub fn guard_vision_tensor(
+        &mut self,
+        label: &'static str,
+        tensor: &mut Tensor,
+    ) -> PureResult<()> {
+        self.guard
+            .vision
+            .rewrite_tensor(self.guard.topos, label, tensor)?;
+        self.atlas.guard_tensor(label, tensor)
+    }
+
+    /// Lifts a vision tensor through the atlas after modality saturation.
+    pub fn lift_vision_tensor(
+        &mut self,
+        label: &'static str,
+        tensor: Tensor,
+    ) -> PureResult<Tensor> {
+        let mut tensor = tensor;
+        self.guard
+            .vision
+            .rewrite_tensor(self.guard.topos, label, &mut tensor)?;
+        self.atlas.lift_tensor(label, tensor)
+    }
+
+    /// Guards graph adjacency matrices and reuses the atlas guard for the resulting slice.
+    pub fn guard_graph_adjacency(
+        &mut self,
+        adjacency: &mut [f32],
+        node_count: usize,
+    ) -> PureResult<GraphGuardReport> {
+        let report = self.guard.guard_graph_adjacency(adjacency, node_count)?;
+        self.atlas.guard_slice("graph_adjacency", adjacency)?;
+        Ok(report)
+    }
+
+    /// Guards reinforcement-learning reward traces through the atlas.
+    pub fn guard_reward_trace(&mut self, rewards: &mut [f32]) -> PureResult<RewardBoundarySignal> {
+        let signal = self.guard.guard_reward_trace(rewards)?;
+        self.atlas.guard_slice("reward_trace", rewards)?;
+        Ok(signal)
+    }
+
+    /// Guards a fractal patch by delegating to the underlying atlas.
+    pub fn guard_fractal_patch(
+        &mut self,
+        label: &'static str,
+        patch: &FractalPatch,
+    ) -> PureResult<()> {
+        self.atlas.guard_fractal_patch(label, patch)
+    }
+}
+
+/// Tensor biome that preserves modality envelopes while absorbing shoots.
+#[derive(Clone, Debug)]
+pub struct MultiModalBiome {
+    biome: TensorBiome,
+    text: ModalityProfile,
+    audio: ModalityProfile,
+    vision: ModalityProfile,
+    graph: GraphGuardProfile,
+    reward: RewardBoundary,
+}
+
+impl MultiModalBiome {
+    /// Cultivates a biome from the provided guard.
+    pub fn new(guard: MultiModalToposGuard<'_>) -> Self {
+        Self {
+            biome: TensorBiome::new(guard.topos.clone()),
+            text: guard.text,
+            audio: guard.audio,
+            vision: guard.vision,
+            graph: guard.graph,
+            reward: guard.reward,
+        }
+    }
+
+    fn guard_ref(&self) -> MultiModalToposGuard<'_> {
+        MultiModalToposGuard {
+            topos: self.biome.topos(),
+            text: self.text,
+            audio: self.audio,
+            vision: self.vision,
+            graph: self.graph,
+            reward: self.reward,
+        }
+    }
+
+    fn absorb_with_profile(
+        &mut self,
+        label: &'static str,
+        mut tensor: Tensor,
+        profile: ModalityProfile,
+        weight: f32,
+    ) -> PureResult<()> {
+        let guard = self.guard_ref();
+        profile.rewrite_tensor(guard.topos, label, &mut tensor)?;
+        self.biome.absorb_weighted(label, tensor, weight)
+    }
+
+    /// Returns the underlying open-cartesian topos.
+    pub fn topos(&self) -> &OpenCartesianTopos {
+        self.biome.topos()
+    }
+
+    /// Returns a rewrite monad anchored to the biome's guard.
+    pub fn monad(&self) -> RewriteMonad<'_> {
+        self.biome.monad()
+    }
+
+    /// Creates a multi-modal atlas sharing the biome's profiles.
+    pub fn atlas(&self) -> MultiModalAtlas<'_> {
+        MultiModalAtlas::from_parts(self.guard_ref(), self.biome.atlas())
+    }
+
+    /// Absorbs a text tensor into the biome.
+    pub fn absorb_text(&mut self, label: &'static str, tensor: Tensor) -> PureResult<()> {
+        self.absorb_text_weighted(label, tensor, 1.0)
+    }
+
+    /// Absorbs a text tensor with an explicit weight.
+    pub fn absorb_text_weighted(
+        &mut self,
+        label: &'static str,
+        tensor: Tensor,
+        weight: f32,
+    ) -> PureResult<()> {
+        self.absorb_with_profile(label, tensor, self.text, weight)
+    }
+
+    /// Absorbs a vision tensor into the biome.
+    pub fn absorb_vision(&mut self, label: &'static str, tensor: Tensor) -> PureResult<()> {
+        self.absorb_vision_weighted(label, tensor, 1.0)
+    }
+
+    /// Absorbs a vision tensor with an explicit weight.
+    pub fn absorb_vision_weighted(
+        &mut self,
+        label: &'static str,
+        tensor: Tensor,
+        weight: f32,
+    ) -> PureResult<()> {
+        self.absorb_with_profile(label, tensor, self.vision, weight)
+    }
+
+    /// Absorbs an audio tensor into the biome.
+    pub fn absorb_audio(&mut self, label: &'static str, tensor: Tensor) -> PureResult<()> {
+        self.absorb_audio_weighted(label, tensor, 1.0)
+    }
+
+    /// Absorbs an audio tensor with an explicit weight.
+    pub fn absorb_audio_weighted(
+        &mut self,
+        label: &'static str,
+        tensor: Tensor,
+        weight: f32,
+    ) -> PureResult<()> {
+        self.absorb_with_profile(label, tensor, self.audio, weight)
+    }
+
+    /// Delegates graph guarding to the preserved profiles.
+    pub fn guard_graph_adjacency(
+        &self,
+        adjacency: &mut [f32],
+        node_count: usize,
+    ) -> PureResult<GraphGuardReport> {
+        self.guard_ref()
+            .guard_graph_adjacency(adjacency, node_count)
+    }
+
+    /// Guards reward traces through the biome's guard.
+    pub fn guard_reward_trace(&self, rewards: &mut [f32]) -> PureResult<RewardBoundarySignal> {
+        self.guard_ref().guard_reward_trace(rewards)
+    }
+
+    /// Borrows the inner tensor biome.
+    pub fn inner(&self) -> &TensorBiome {
+        &self.biome
+    }
+
+    /// Borrows the inner tensor biome mutably.
+    pub fn inner_mut(&mut self) -> &mut TensorBiome {
+        &mut self.biome
+    }
+
+    /// Consumes the wrapper and returns the inner tensor biome.
+    pub fn into_inner(self) -> TensorBiome {
+        self.biome
+    }
+
+    /// Number of shoots currently stored in the biome.
+    pub fn len(&self) -> usize {
+        self.biome.len()
+    }
+
+    /// Whether the biome has absorbed any shoots.
+    pub fn is_empty(&self) -> bool {
+        self.biome.is_empty()
+    }
+
+    /// Total accumulated weight across all shoots.
+    pub fn total_weight(&self) -> f32 {
+        self.biome.total_weight()
+    }
+
+    /// Returns the weights assigned to each shoot.
+    pub fn weights(&self) -> &[f32] {
+        self.biome.weights()
+    }
+
+    /// Harvests the canopy averaged across all shoots.
+    pub fn canopy(&self) -> PureResult<Tensor> {
+        self.biome.canopy()
+    }
+
+    /// Clears all shoots from the biome.
+    pub fn clear(&mut self) {
+        self.biome.clear();
+    }
+
+    /// Returns a view over the stored shoots.
+    pub fn shoots(&self) -> &[Tensor] {
+        self.biome.shoots()
+    }
+
+    /// Stacks all shoots into a dense tensor.
+    pub fn stack(&self) -> PureResult<Tensor> {
+        self.biome.stack()
+    }
+
+    /// Delegates fractal patch absorption to the underlying biome.
+    pub fn absorb_fractal_patch(&mut self, patch: &FractalPatch) -> PureResult<()> {
+        self.biome.absorb_fractal_patch(patch)
+    }
+
+    /// Renormalises the shoot weights through the preserved guard.
+    pub fn renormalise_weights(&mut self) -> PureResult<()> {
+        self.biome.renormalise_weights()
     }
 }
 
@@ -2319,10 +2670,11 @@ mod tests {
         guard
             .guard_text_tensor("multi_modal_text", &mut tensor)
             .unwrap();
+        let headroom = 0.25 * (1.0 + DEFAULT_MODALITY_PERMEABILITY);
         assert!(tensor
             .data()
             .iter()
-            .all(|&value| (value - 0.25).abs() < 1e-6));
+            .all(|&value| value <= headroom + 1e-6 && value >= 0.25 - 1e-6));
     }
 
     #[test]
@@ -2338,6 +2690,7 @@ mod tests {
         let report = guard.guard_graph_adjacency(&mut adjacency, 4).unwrap();
         assert_eq!(report.edge_count, 1);
         assert_eq!(report.symmetry_violations, 1);
+        assert_eq!(report.edge_overflow, 0);
         assert!(adjacency.iter().all(|value| value.abs() <= 1.0));
     }
 
@@ -2356,5 +2709,93 @@ mod tests {
         assert!((signal.min_observed + 0.9).abs() < 1e-6);
         assert!((signal.max_observed - 0.8).abs() < 1e-6);
         assert!(rewards.iter().all(|value| *value >= -0.5 && *value <= 0.5));
+    }
+
+    #[test]
+    fn multi_modal_atlas_tracks_volume_and_lifts() {
+        let topos = demo_topos();
+        let guard = MultiModalToposGuard::new(&topos).unwrap();
+        let mut atlas = guard.atlas();
+        let mut text = Tensor::from_vec(2, 4, vec![topos.saturation() * 4.0; 8]).unwrap();
+        atlas
+            .guard_text_tensor("multi_modal_atlas_text", &mut text)
+            .unwrap();
+        assert_eq!(atlas.visited_volume(), 8);
+        let text_limit = atlas.guard.text.effective_saturation(atlas.guard.topos);
+        let text_headroom = text_limit * (1.0 + atlas.guard.text.permeability());
+        assert!(text
+            .data()
+            .iter()
+            .all(|&value| value.abs() <= text_headroom + 1e-5));
+        let lifted = atlas
+            .lift_vision_tensor(
+                "multi_modal_atlas_vision",
+                Tensor::from_vec(1, 4, vec![topos.saturation() * 3.0; 4]).unwrap(),
+            )
+            .unwrap();
+        let vision_limit = atlas.guard.vision.effective_saturation(atlas.guard.topos);
+        let vision_headroom = vision_limit * (1.0 + atlas.guard.vision.permeability());
+        assert!(lifted
+            .data()
+            .iter()
+            .all(|&value| value.abs() <= vision_headroom + 1e-5));
+        assert_eq!(atlas.visited_volume(), 12);
+    }
+
+    #[test]
+    fn multi_modal_biome_absorbs_with_preserved_profiles() {
+        let topos = demo_topos();
+        let guard = MultiModalToposGuard::new(&topos)
+            .unwrap()
+            .with_text_profile(
+                ModalityProfile::new(64, Some(0.5))
+                    .unwrap()
+                    .with_permeability(0.2)
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut biome = guard.cultivate_biome();
+        biome
+            .absorb_text(
+                "multi_modal_biome_text",
+                Tensor::from_vec(1, 4, vec![2.0; 4]).unwrap(),
+            )
+            .unwrap();
+        biome
+            .absorb_vision_weighted(
+                "multi_modal_biome_vision",
+                Tensor::from_vec(1, 4, vec![5.0; 4]).unwrap(),
+                2.0,
+            )
+            .unwrap();
+        assert_eq!(biome.len(), 2);
+        assert!((biome.total_weight() - 3.0).abs() < 1e-6);
+        let canopy = biome.canopy().unwrap();
+        let text_limit = biome.text.effective_saturation(biome.topos());
+        let text_headroom = text_limit * (1.0 + biome.text.permeability());
+        let vision_limit = biome.vision.effective_saturation(biome.topos());
+        let vision_headroom = vision_limit * (1.0 + biome.vision.permeability());
+        let max_headroom = text_headroom.max(vision_headroom);
+        assert!(canopy
+            .data()
+            .iter()
+            .all(|&value| value.abs() <= max_headroom + 1e-5));
+        let mut atlas = biome.atlas();
+        let mut waveform = vec![topos.saturation() * 6.0; 4];
+        atlas
+            .guard_audio_waveform("multi_modal_biome_audio", &mut waveform)
+            .unwrap();
+        let audio_limit = biome.audio.effective_saturation(biome.topos());
+        let audio_headroom = audio_limit * (1.0 + biome.audio.permeability());
+        assert!(waveform
+            .iter()
+            .all(|&value| value.abs() <= audio_headroom + 1e-5));
+        let _lifted = atlas
+            .lift_text_tensor(
+                "multi_modal_biome_lift",
+                Tensor::from_vec(1, 4, vec![topos.saturation() * 2.5; 4]).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(atlas.visited_volume(), 4);
     }
 }

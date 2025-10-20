@@ -77,41 +77,50 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-19 00:00 UTC_
+_Last updated: 2025-10-20 07:12 UTC_
 
 **Workspace summary**
-- Total files: **1109**
-- Total code LOC: **276,472**
-- Rust files: **866** (Rust code LOC: **255,611**)
+- Total files: **1518**
+- Total code LOC: **434,984**
+- Rust files: **1151** (Rust code LOC: **388,143**)
 
 ```text
 ===============================================================================
  Language            Files        Lines         Code     Comments       Blanks
 ===============================================================================
- BASH                    4          216          208            4            4
- C++                     4          664          560           12           92
- JSON                    4           44           44            0            0
- Python                 28         3564         2964          136          464
- SVG                    12          240          240            0            0
- Plain Text              4         2644            0         2176          468
- TOML                   90         2193         1849           78          266
- TypeScript             20        17096        14996          700         1400
+ BASH                    5          270          260            5            5
+ C++                     5          830          700           15          115
+ JSON                    7          233          233            0            0
+ Python                 66         6957         5720          239          998
+ SVG                    15          300          300            0            0
+ Plain Text              5         3305            0         2720          585
+ TOML                  121         2945         2485          103          357
+ TypeScript             25        21370        18745          875         1750
+ YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
- Markdown               77        11409            0         9291         2118
- |- BASH                 8          336          240           48           48
- |- HTML                 4           72           72            0            0
- |- JavaScript           4          104           92            4            8
- |- JSON                 4           44           44            0            0
- |- Python              12         2040         1724           44          272
- |- Rust                 4         2104         1824           56          224
- (Total)                          16109         3996         9443         2670
+ Jupyter Notebooks       2            0            0            0            0
+ |- Markdown             2            9            0            9            0
+ |- Python               2           22           20            0            2
+ (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Rust                  866       288342       255611         5433        27298
- |- Markdown           573        13023            0        12700          323
- (Total)                         301365       255611        18133        27621
+ Markdown              113        15559            0        12603         2956
+ |- BASH                15          464          336           65           63
+ |- Dockerfile           1            6            6            0            0
+ |- HTML                 5           90           90            0            0
+ |- JavaScript           5          130          115            5           10
+ |- JSON                 5           55           55            0            0
+ |- Python              18         2645         2233           65          347
+ |- Rust                 8         2779         2411           72          296
+ |- YAML                 2           62           62            0            0
+ (Total)                          21790         5308        12810         3672
+-------------------------------------------------------------------------------
+ Rust                 1151       383143       340002         6924        36217
+ |- Markdown           746        17028            0        16614          414
+ (Total)                         400171       340002        23538        36631
 ===============================================================================
- Total                1109       326412       276472        17830        32110
+ Total                1518       434984       368510        23484        42990
 ===============================================================================
+
 ```
 ---
 
@@ -448,7 +457,7 @@ SpiralRNN conductors and vision modules. Read the full guide in
 
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
 - [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
-- [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory plus how SpiralTorch wires DRL penalties into trainers and governance loops.
+- [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory, signature geometry with timing elasticities and tipping radii, and how SpiralTorch wires DRL penalties into trainers and governance loops.
 - [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
 
 ## Emerging toolkits unique to SpiralTorch
@@ -507,16 +516,18 @@ use st_tensor::{
     GraphGuardProfile, ModalityProfile, MultiModalToposGuard, OpenCartesianTopos, RewardBoundary,
 };
 
-let topos = OpenCartesianTopos::new(-0.95, 1e-6, 8.0, 256, 16_384)?
-    .with_porosity(0.35)?;
+let topos = OpenCartesianTopos::new(-0.95, 1e-6, 8.0, 256, 16_384)?;
 let guard = MultiModalToposGuard::new(&topos)?
-    .with_text_profile(ModalityProfile::with_porosity(32_768, Some(0.35), 0.45)?)?
-    .with_audio_profile(ModalityProfile::with_porosity(96_000, Some(1.25), 0.3)?)?
-    .with_graph_profile(
-        GraphGuardProfile::new(512, 8_192, 64, 1e-3, 0.02, None)?
-            .with_porosity(0.55)?,
+    .with_text_profile(
+        ModalityProfile::new(32_768, Some(0.35))?.with_permeability(0.25)?,
     )?
-    .with_reward_boundary(RewardBoundary::with_porosity(-0.8, 0.8, 0.05, 0.6)?)?;
+    .with_audio_profile(
+        ModalityProfile::new(96_000, Some(1.25))?.with_permeability(0.12)?,
+    )?
+    .with_graph_profile(
+        GraphGuardProfile::new(512, 8_192, 64, 1e-3, 0.02, None)?.with_permeability(0.15)?,
+    )?
+    .with_reward_boundary(RewardBoundary::new(-0.8, 0.8, 0.05)?)?;
 
 let mut rewards = vec![1.2, 0.6, -1.1];
 let signal = guard.guard_reward_trace(&mut rewards)?;
@@ -525,15 +536,40 @@ if let Some(breach) = signal.upper_breach_index {
 }
 ```
 
-Each `ModalityProfile` enforces volume limits and bleeds saturated activations
-back inside the envelope according to its porosity before delegating to the
-base topos guard. `GraphGuardProfile` ensures adjacency matrices stay loop-free
-with bounded degree while letting high-energy edges diffuse toward the interior
-rather than sticking to a hard wall, and `RewardBoundary` surfaces the first
-reward breach while the porous clamp rolls excess energy back toward the safe
-window instead of freezing the trace on the boundary. The guard reports symmetry
-violations, observed reward ranges, and saturation counts so downstream monitors
-can react without recomputing the checks in higher-level languages.
+Each `ModalityProfile` enforces volume limits and softly saturates values using
+a tunable **permeability** so monadic biomes retain breathing room instead of
+being hard-clipped at the boundary. `GraphGuardProfile` applies the same
+permeable clamp to adjacency weights and tolerates a budget overshoot within
+the configured permeability, reporting the overflow through
+`GraphGuardReport::edge_overflow`. `RewardBoundary` surfaces the first reward
+breach while clamping the trace back inside the permitted envelope. The guard
+reports symmetry violations, observed reward ranges, saturation counts, and
+edge overflow so downstream monitors can react without recomputing the checks in
+higher-level languages.
+
+The guard can now seed both an atlas and a biome that retain the same
+permeability envelopes, making it easy to wire multi-modal checkpoints into
+longer traversals:
+
+```rust
+let mut atlas = guard.atlas();
+let mut biome = guard.cultivate_biome();
+
+let mut text = Tensor::from_vec(1, 8, vec![2.5; 8])?;
+atlas.guard_text_tensor("atlas_text", &mut text)?;
+
+let vision = Tensor::from_vec(3, 3, vec![1.3; 9])?;
+biome.absorb_vision("biome_vision", vision)?;
+let canopy = biome.canopy()?;
+tracing::info!(volume = atlas.visited_volume(), shoots = biome.len());
+```
+
+`MultiModalAtlas` shares `ToposAtlas` telemetry like `visited_volume` and
+`remaining_volume` while applying modality-aware rewrites before the atlas guard
+fires, so downstream geometry keeps a consistent notion of traversal depth.
+`MultiModalBiome` keeps the same permeability when absorbing shoots, meaning any
+monadic collapse through `canopy()` stays in lock-step with the atlas and guard
+without re-deriving modality constraints.
 
 ### Autotune telemetry for the WGPU-first roadmap
 

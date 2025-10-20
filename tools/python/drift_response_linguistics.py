@@ -42,7 +42,7 @@ Example
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from typing import Dict, Iterable, Mapping, MutableMapping
 
@@ -81,12 +81,23 @@ class FrameState:
     b_con: float
     kappa: float
     timing_scale: float = 1.0
+    curvature_a_den: float = 0.0
+    curvature_a_con: float = 0.0
+    curvature_b_den: float = 0.0
+    curvature_b_con: float = 0.0
+    kappa_slope: float = 0.0
 
     def mix_a(self) -> float:
         return (1.0 - self.phi) * self.a_den + self.phi * self.a_con
 
     def mix_b(self) -> float:
         return (1.0 - self.phi) * self.b_den + self.phi * self.b_con
+
+    def mix_curvature_a(self) -> float:
+        return (1.0 - self.phi) * self.curvature_a_den + self.phi * self.curvature_a_con
+
+    def mix_curvature_b(self) -> float:
+        return (1.0 - self.phi) * self.curvature_b_den + self.phi * self.curvature_b_con
 
 
 @dataclass
@@ -101,6 +112,23 @@ class WordState:
     beta: float = 1.0
 
 
+@dataclass(frozen=True)
+class FrameSignature:
+    """Local linear and quadratic response statistics for a frame."""
+
+    value_slope: float
+    risk_slope: float
+    net_slope: float
+    value_curvature: float
+    risk_curvature: float
+    net_curvature: float
+    hazard_multiplier: float
+    timing_elasticity: float
+    safe_radius: float | None
+    kappa_slope: float
+    tipping_radius: float | None
+
+
 @dataclass
 class DRLMetrics:
     """Summary of DRL statistics for a word."""
@@ -111,6 +139,7 @@ class DRLMetrics:
     safe_radii: Dict[str, float]
     chi: int
     strict_mode: bool
+    frame_signatures: Dict[str, FrameSignature]
 
 
 # Backwards compatibility for earlier drafts that used the "semantics" label.
@@ -179,6 +208,17 @@ def safe_radius(
     return radii
 
 
+def _tipping_radius(net_slope: float, net_curvature: float) -> float | None:
+    """Estimate where the frame's value-risk balance tips under small drift."""
+
+    if abs(net_curvature) < 1e-9:
+        return None
+    tipping = -net_slope / net_curvature
+    if tipping > 0.0:
+        return tipping
+    return None
+
+
 def analyse_word(
     word: WordState,
     thresholds: Mapping[str, FrameThreshold],
@@ -187,10 +227,37 @@ def analyse_word(
     min_radius: float = 0.2,
 ) -> DRLMetrics:
     frame_hazards: Dict[str, float] = {}
+    signatures: Dict[str, FrameSignature] = {}
     for name, frame in word.frames.items():
-        frame_hazards[name] = frame_hazard(word, name, frame)
+        hazard = frame_hazard(word, name, frame)
+        frame_hazards[name] = hazard
+        value_slope = frame.mix_a()
+        risk_slope = word.base_lambda * frame.mix_b() * frame.S
+        net_slope = value_slope - risk_slope
+        value_curvature = frame.mix_curvature_a()
+        risk_curvature = word.base_lambda * frame.mix_curvature_b() * frame.S
+        net_curvature = value_curvature - risk_curvature
+        multiplier = _hazard_multiplier(word, frame)
+        timing_elasticity = multiplier * word.beta * word.definition_entropy * frame.phi * frame.timing_scale
+        signatures[name] = FrameSignature(
+            value_slope=value_slope,
+            risk_slope=risk_slope,
+            net_slope=net_slope,
+            value_curvature=value_curvature,
+            risk_curvature=risk_curvature,
+            net_curvature=net_curvature,
+            hazard_multiplier=multiplier,
+            timing_elasticity=timing_elasticity,
+            safe_radius=None,
+            kappa_slope=frame.kappa_slope,
+            tipping_radius=_tipping_radius(net_slope, net_curvature),
+        )
 
     radii = safe_radius(word, thresholds)
+    for name, radius in radii.items():
+        if name in signatures:
+            signatures[name] = replace(signatures[name], safe_radius=radius)
+
     hazard_counts = 0
     for name, hz in frame_hazards.items():
         threshold = thresholds.get(name)
@@ -201,19 +268,21 @@ def analyse_word(
             hazard_counts += 1
 
     min_radius_observed = min(radii.values()) if radii else float("inf")
+    existence = existence_load(word)
     strict = (
         hazard_counts >= 4
         or min_radius_observed <= min_radius
-        or existence_load(word) >= 1.0
+        or existence >= 1.0
     )
 
     return DRLMetrics(
         word=word,
-        existence_load=existence_load(word),
+        existence_load=existence,
         frame_hazards=frame_hazards,
         safe_radii=radii,
         chi=hazard_counts,
         strict_mode=strict,
+        frame_signatures=signatures,
     )
 
 
@@ -224,6 +293,15 @@ def trainer_penalty(metrics: DRLMetrics, *, min_radius: float = 0.2) -> float:
         if min_radius_observed < min_radius:
             penalty += (min_radius - min_radius_observed) / max(min_radius, 1e-6)
     penalty += float(metrics.chi)
+    positive_tipping = [
+        sig.tipping_radius
+        for sig in metrics.frame_signatures.values()
+        if sig.tipping_radius is not None and sig.tipping_radius > 0.0
+    ]
+    if positive_tipping:
+        min_tipping = min(positive_tipping)
+        if min_tipping < min_radius:
+            penalty += (min_radius - min_tipping) / max(min_radius, 1e-6)
     if metrics.strict_mode:
         penalty *= 1.25
     return penalty
@@ -253,6 +331,7 @@ __all__ = [
     "DRSMetrics",
     "DEFAULT_THRESHOLDS",
     "FrameState",
+    "FrameSignature",
     "FrameThreshold",
     "WordState",
     "aggregate_penalty",
