@@ -64,6 +64,7 @@ st-text = { path = "../../crates/st-text", optional = true }
 st-kdsl = { path = "../../crates/st-kdsl", optional = true }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }
+spiral-hpo = { path = "../../crates/spiral-hpo" }
 ndarray = { version = "0.15", default-features = false, features = ["std"] }
 num-complex = { version = "0.4" }
 spiral-safety = { path = "../../crates/spiral-safety" }

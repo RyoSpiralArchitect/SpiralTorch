@@ -194,6 +194,7 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     compat::register(py, m)?;
     pure::register(py, m)?;
     planner::register(py, m)?;
+    hpo::register(py, m)?;
     inference::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
@@ -224,7 +225,7 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
         "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
         "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
-        "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem","inference",
+        "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem","hpo","inference",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",
