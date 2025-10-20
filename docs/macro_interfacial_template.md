@@ -92,11 +92,15 @@ reintroduce microlocal calibration later if needed.
 ## 10. Microlocal and Z-space coupling
 - `MacroModelTemplate::couple_with` produces a `MacroZBridge` that accepts an
   `InterfaceZLift`, letting the macro card tap directly into the microlocal
-  gauges and Z pulses without duplicating wiring code.【F:crates/st-core/src/theory/macro.rs†L694-L746】
+  gauges and Z pulses without duplicating wiring code.【F:crates/st-core/src/theory/macro.rs†L841-L843】
 - `MacroZBridge::ingest_signature` converts an `InterfaceSignature` into a
   fused `MacroDrive` carrying the projected `InterfaceZPulse`, curvature bundle,
   and predicted normal velocity so Z-space conductors can steer macro evolution
-  using the template’s kinetics.【F:crates/st-core/src/theory/macro.rs†L722-L741】
+  using the template’s kinetics.【F:crates/st-core/src/theory/macro.rs†L870-L963】
 - `MacroDrive::sharp_interface_ok` reuses the dimensionless dashboard to ensure
   the detected interface still respects the sharp-interface regime before the
-  signal is injected back into SpiralFlow.【F:crates/st-core/src/theory/macro.rs†L744-L746】
+  signal is injected back into SpiralFlow.【F:crates/st-core/src/theory/macro.rs†L977-L980】
+- `MacroDrive::microlocal_feedback` emits a `MicrolocalFeedback` payload that
+  tells the microlocal side how to retune gauge thresholds, Z-lift bias gains,
+  smoothing, and tempo hints based on the macro kinetics and dimensionless
+  regime.【F:crates/st-core/src/theory/macro.rs†L870-L984】

@@ -15,7 +15,9 @@
 //! of SpiralTorch can instantiate droplets, crystalline fronts, membranes, or
 //! pattern-forming interfaces without re-deriving the bookkeeping each time.
 
-use crate::theory::microlocal::{InterfaceSignature, InterfaceZLift, InterfaceZPulse};
+use crate::theory::microlocal::{
+    InterfaceSignature, InterfaceZLift, InterfaceZPulse, MicrolocalFeedback,
+};
 use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -865,6 +867,69 @@ impl MacroZBridge {
         }
     }
 
+    fn derive_feedback(
+        &self,
+        contributions: &CurvatureContributions,
+        velocity: f64,
+        pulse: &InterfaceZPulse,
+    ) -> MicrolocalFeedback {
+        let mut threshold_scale = 1.0f32;
+        if pulse.support < 1e-6 {
+            threshold_scale *= 0.9;
+        }
+        if !self.template.nondimensional.sharp_interface_ok() {
+            threshold_scale *= 0.75;
+        }
+        if let Some(cahn) = self.template.nondimensional.cahn {
+            if cahn < 0.02 {
+                threshold_scale *= 1.1;
+            } else if cahn > 0.1 {
+                threshold_scale *= 0.8;
+            }
+        }
+
+        let smoothing = if let Some(cap) = self.template.nondimensional.capillary {
+            let cap = cap.max(0.0);
+            let ratio = cap / (1.0 + cap);
+            ratio.clamp(0.2, 0.8) as f32
+        } else if threshold_scale < 1.0 {
+            0.6
+        } else {
+            0.3
+        };
+
+        let vel_mag = velocity.abs() as f32;
+        let mut bias_gain = 1.0f32;
+        if let Some(bond) = self.template.nondimensional.bond {
+            if bond > 1.0 {
+                bias_gain *= 0.8;
+            } else if bond < 0.1 {
+                bias_gain *= 1.1;
+            }
+        }
+        if vel_mag > 1.0 {
+            bias_gain *= 1.0 + (vel_mag.min(5.0) - 1.0) * 0.15;
+        } else if vel_mag < 0.05 {
+            bias_gain *= 0.85;
+        }
+
+        let mut feedback = MicrolocalFeedback::default()
+            .with_bias_gain(bias_gain)
+            .with_smoothing(smoothing)
+            .with_tempo_hint(vel_mag.max(0.01));
+
+        let stderr = contributions.forcing.abs() as f32;
+        if stderr > 0.0 {
+            feedback = feedback.with_stderr_hint(stderr);
+        }
+
+        if (threshold_scale - 1.0).abs() > 1e-3 {
+            feedback = feedback.with_threshold_scale(threshold_scale);
+        }
+
+        feedback
+    }
+
     /// Projects a microlocal signature into Z-space and evaluates the macro drive.
     pub fn ingest_signature(&self, signature: &InterfaceSignature) -> MacroDrive {
         let pulse = self.lift.project(signature);
@@ -888,11 +953,13 @@ impl MacroZBridge {
             forcing,
         };
         let velocity = self.template.kinetics.evaluate_velocity(&contributions);
+        let feedback = self.derive_feedback(&contributions, velocity, &pulse);
         MacroDrive {
             pulse,
             contributions,
             velocity,
             dimensionless: self.template.nondimensional.clone(),
+            feedback,
         }
     }
 }
@@ -904,11 +971,16 @@ pub struct MacroDrive {
     pub contributions: CurvatureContributions,
     pub velocity: f64,
     pub dimensionless: DimensionlessGroups,
+    feedback: MicrolocalFeedback,
 }
 
 impl MacroDrive {
     pub fn sharp_interface_ok(&self) -> bool {
         self.dimensionless.sharp_interface_ok()
+    }
+
+    pub fn microlocal_feedback(&self) -> &MicrolocalFeedback {
+        &self.feedback
     }
 }
 
@@ -1044,7 +1116,16 @@ mod tests {
             sigma: 0.1,
             mobility: 1.0,
             volume: None,
-            physical_scales: None,
+            physical_scales: {
+                let mut scales = PhysicalScales::with_sigma(0.1);
+                scales.reference_length = Some(1.0);
+                scales.velocity_scale = Some(0.5);
+                scales.viscosity = Some(0.2);
+                scales.interface_thickness = Some(0.2);
+                scales.density_difference = Some(1.0);
+                scales.gravity = Some(9.81);
+                Some(scales)
+            },
         };
         let template = MacroModelTemplate::from_card(MacroCard::Minimal(config));
         let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.1));
@@ -1072,6 +1153,11 @@ mod tests {
         assert!(drive.velocity > 0.0);
         assert!((drive.contributions.mean_curvature - 0.5).abs() < 1e-6);
         assert!(drive.pulse.support > 0.0);
-        assert!(drive.sharp_interface_ok());
+        assert!(!drive.sharp_interface_ok());
+        let feedback = drive.microlocal_feedback();
+        assert!(feedback.bias_gain.unwrap() > 0.0);
+        assert!(feedback.smoothing.unwrap() >= 0.2);
+        assert!(feedback.tempo_hint.unwrap() > 0.0);
+        assert!(feedback.threshold_scale.unwrap() < 1.0);
     }
 }
