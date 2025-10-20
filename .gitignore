@@ -4,3 +4,4 @@ target/
 .buildenv/
 node_modules/
 *.zip
+dist/

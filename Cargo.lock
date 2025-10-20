@@ -2546,7 +2546,7 @@ dependencies = [
  "st-frac",
  "st-kdsl",
  "st-kv",
- "st-logic",
+ "st-softlogic",
  "statrs",
  "thiserror 1.0.69",
  "toml",
@@ -2590,9 +2590,16 @@ dependencies = [
  "nalgebra 0.32.6",
  "num-complex",
  "rand",
+<<<<<<< HEAD
+ "st-nn",
+ "st-softlogic",
+ "st-tensor",
+ "st-vision",
+=======
  "serde",
  "serde_json",
  "st-tensor",
+>>>>>>> origin/main
  "thiserror 1.0.69",
 ]
 
@@ -2642,6 +2649,14 @@ dependencies = [
  "rand",
  "st-core",
  "st-tensor",
+]
+
+[[package]]
+name = "st-softlogic"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

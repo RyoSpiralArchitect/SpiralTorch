@@ -3,6 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#![cfg(feature = "nerf")]
+
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use st_nn::module::Module;
 use st_tensor::{PureResult, Tensor, TensorError};
