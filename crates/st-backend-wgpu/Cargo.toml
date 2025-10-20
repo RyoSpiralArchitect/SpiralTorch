@@ -6,10 +6,17 @@ authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 license = "AGPL-3.0-or-later"
 description = "WGPU backend kernels and pipeline loaders for SpiralTorch"
 
+[[bin]]
+name = "visualize_z_volume"
+path = "../../tools/visualize_z_volume.rs"
+
 [dependencies]
 wgpu = { version = "0.19", default-features = false, features = ["wgsl"] }
 thiserror = "1"
 bytemuck = { version = "1", features = ["derive"] }
+st-vision = { path = "../st-vision" }
+st-tensor = { path = "../st-tensor" }
+rand = "0.8"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

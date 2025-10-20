@@ -7,6 +7,7 @@ pub mod compaction2ce;
 pub mod compaction_2ce;
 pub mod midk_bottomk;
 pub mod nd_indexer;
+pub mod render;
 pub mod topk_keepk;
 
 mod util;

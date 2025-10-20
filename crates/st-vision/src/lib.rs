@@ -67,6 +67,7 @@ use std::sync::Arc;
 
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
+use st_logic::temporal_dynamics::TemporalVolume;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
 /// Volumetric container that holds planar tensors along the Z axis.
@@ -76,6 +77,9 @@ pub struct ZSpaceVolume {
     height: usize,
     width: usize,
     voxels: Vec<f32>,
+    harmonic_channels: usize,
+    temporal_harmonics: Vec<f32>,
+    resonance_decay: Vec<f32>,
 }
 
 impl ZSpaceVolume {
@@ -87,11 +91,32 @@ impl ZSpaceVolume {
                 cols: height.saturating_mul(width),
             });
         }
+        Self::zeros_with_temporal(depth, height, width, 0)
+    }
+
+    /// Creates a Z-space volume filled with zeros and allocates harmonic channels.
+    pub fn zeros_with_temporal(
+        depth: usize,
+        height: usize,
+        width: usize,
+        harmonic_channels: usize,
+    ) -> PureResult<Self> {
+        if depth == 0 || height == 0 || width == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: depth,
+                cols: height.saturating_mul(width),
+            });
+        }
+        let voxel_count = depth * height * width;
+        let harmonic_len = voxel_count.saturating_mul(harmonic_channels);
         Ok(Self {
             depth,
             height,
             width,
-            voxels: vec![0.0; depth * height * width],
+            voxels: vec![0.0; voxel_count],
+            harmonic_channels,
+            temporal_harmonics: vec![0.0; harmonic_len],
+            resonance_decay: vec![1.0; voxel_count],
         })
     }
 
@@ -117,6 +142,9 @@ impl ZSpaceVolume {
             height,
             width,
             voxels,
+            harmonic_channels: 0,
+            temporal_harmonics: Vec::new(),
+            resonance_decay: vec![1.0; slices.len() * height * width],
         })
     }
 
@@ -143,6 +171,46 @@ impl ZSpaceVolume {
     /// Mutable access to the raw voxel buffer.
     pub fn voxels_mut(&mut self) -> &mut [f32] {
         &mut self.voxels
+    }
+
+    /// Returns the number of harmonic channels stored per voxel.
+    pub fn harmonic_channels(&self) -> usize {
+        self.harmonic_channels
+    }
+
+    /// Immutable access to the harmonic buffer.
+    pub fn temporal_harmonics(&self) -> &[f32] {
+        &self.temporal_harmonics
+    }
+
+    /// Mutable access to the harmonic buffer.
+    pub fn temporal_harmonics_mut(&mut self) -> &mut [f32] {
+        &mut self.temporal_harmonics
+    }
+
+    /// Immutable access to the resonance decay buffer.
+    pub fn resonance_decay(&self) -> &[f32] {
+        &self.resonance_decay
+    }
+
+    /// Mutable access to the resonance decay buffer.
+    pub fn resonance_decay_mut(&mut self) -> &mut [f32] {
+        &mut self.resonance_decay
+    }
+
+    /// Returns the number of voxels contained in the volume.
+    pub fn voxel_count(&self) -> usize {
+        self.depth * self.height * self.width
+    }
+
+    /// Ensures the harmonic buffer has the requested channel count, reallocating if required.
+    pub fn ensure_harmonic_channels(&mut self, harmonic_channels: usize) {
+        if self.harmonic_channels == harmonic_channels {
+            return;
+        }
+        self.harmonic_channels = harmonic_channels;
+        let harmonic_len = self.voxel_count().saturating_mul(harmonic_channels);
+        self.temporal_harmonics.resize(harmonic_len, 0.0);
     }
 
     /// Extracts a slice at the requested depth index.
@@ -272,8 +340,53 @@ impl ZSpaceVolume {
                 label: "temporal_alpha",
             });
         }
+        if self.resonance_decay.len() != next.resonance_decay.len() {
+            return Err(TensorError::ShapeMismatch {
+                left: (self.depth, self.height * self.width),
+                right: (next.depth, next.height * next.width),
+            });
+        }
         let retain = 1.0 - alpha;
         for (current, incoming) in self.voxels.iter_mut().zip(next.voxels.iter()) {
+            *current = (*current * retain) + (incoming * alpha);
+        }
+        let harmonic_channels = self.harmonic_channels.max(next.harmonic_channels);
+        if self.harmonic_channels != harmonic_channels {
+            self.ensure_harmonic_channels(harmonic_channels);
+        }
+        let mut expanded_next;
+        let next_harmonics: &[f32] = if next.harmonic_channels == harmonic_channels {
+            &next.temporal_harmonics
+        } else {
+            expanded_next = vec![0.0; self.voxel_count().saturating_mul(harmonic_channels)];
+            if next.harmonic_channels > 0 {
+                let next_stride = next.harmonic_channels;
+                let dst_stride = harmonic_channels;
+                for (voxel_idx, chunk) in expanded_next
+                    .chunks_mut(dst_stride)
+                    .enumerate()
+                    .take(next.voxel_count())
+                {
+                    let src_start = voxel_idx * next_stride;
+                    let src_end = src_start + next_stride;
+                    let dst_slice = &mut chunk[..next_stride];
+                    dst_slice.copy_from_slice(&next.temporal_harmonics[src_start..src_end]);
+                }
+            }
+            &expanded_next
+        };
+        for (current, incoming) in self
+            .temporal_harmonics
+            .iter_mut()
+            .zip(next_harmonics.iter())
+        {
+            *current = (*current * retain) + (incoming * alpha);
+        }
+        for (current, incoming) in self
+            .resonance_decay
+            .iter_mut()
+            .zip(next.resonance_decay.iter())
+        {
             *current = (*current * retain) + (incoming * alpha);
         }
         Ok(())
@@ -286,8 +399,84 @@ impl ZSpaceVolume {
             height: self.height,
             width: self.width,
             voxels: self.voxels.clone(),
+            harmonic_channels: self.harmonic_channels,
+            temporal_harmonics: self.temporal_harmonics.clone(),
+            resonance_decay: self.resonance_decay.clone(),
         };
         blended.accumulate(next, alpha)?;
+        Ok(blended)
+    }
+
+    /// Blends a sequence of volumes using the provided weights.
+    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        if weights.len() != sequence.len() {
+            return Err(TensorError::DataLength {
+                expected: sequence.len(),
+                got: weights.len(),
+            });
+        }
+        let base = &sequence[0];
+        let harmonic_channels = sequence
+            .iter()
+            .map(|volume| volume.harmonic_channels)
+            .max()
+            .unwrap_or(0);
+        let mut blended = ZSpaceVolume::zeros_with_temporal(
+            base.depth,
+            base.height,
+            base.width,
+            harmonic_channels,
+        )?;
+        for value in blended.resonance_decay.iter_mut() {
+            *value = 0.0;
+        }
+        let mut total_weight = 0.0f32;
+        let voxel_count = blended.voxel_count();
+        for (volume, &weight) in sequence.iter().zip(weights.iter()) {
+            if volume.depth != base.depth
+                || volume.height != base.height
+                || volume.width != base.width
+            {
+                return Err(TensorError::ShapeMismatch {
+                    left: (base.depth, base.height * base.width),
+                    right: (volume.depth, volume.height * volume.width),
+                });
+            }
+            if !weight.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "temporal_weight",
+                    value: weight,
+                });
+            }
+            total_weight += weight;
+            for idx in 0..voxel_count {
+                blended.voxels[idx] += volume.voxels()[idx] * weight;
+                blended.resonance_decay[idx] += volume.resonance_decay()[idx] * weight;
+                if volume.harmonic_channels > 0 && harmonic_channels > 0 {
+                    let src_offset = idx * volume.harmonic_channels;
+                    let dst_offset = idx * harmonic_channels;
+                    for channel in 0..volume.harmonic_channels.min(harmonic_channels) {
+                        blended.temporal_harmonics[dst_offset + channel] +=
+                            volume.temporal_harmonics()[src_offset + channel] * weight;
+                    }
+                }
+            }
+        }
+        if total_weight > 0.0 {
+            let inv = 1.0 / total_weight;
+            for value in blended.voxels.iter_mut() {
+                *value *= inv;
+            }
+            for value in blended.temporal_harmonics.iter_mut() {
+                *value *= inv;
+            }
+            for value in blended.resonance_decay.iter_mut() {
+                *value *= inv;
+            }
+        }
         Ok(blended)
     }
 }
@@ -649,6 +838,8 @@ pub struct VisionProjector {
     spread: f32,
     energy_bias: f32,
     window: SpectralWindow,
+    temporal_focus: f32,
+    temporal_decay: f32,
 }
 
 impl VisionProjector {
@@ -670,6 +861,8 @@ impl VisionProjector {
             spread,
             energy_bias,
             window: SpectralWindow::hann(),
+            temporal_focus: 0.5,
+            temporal_decay: 0.5,
         }
     }
 
@@ -1193,12 +1386,69 @@ impl ZSpaceVolume {
             height: image.height(),
             width: image.width(),
             voxels: image.as_slice().to_vec(),
+            harmonic_channels: 0,
+            temporal_harmonics: Vec::new(),
+            resonance_decay: vec![1.0; image.channels() * image.height() * image.width()],
         })
     }
 
     /// Converts the volume back into an [`ImageTensor`].
     pub fn to_image_tensor(&self) -> PureResult<ImageTensor> {
         ImageTensor::new(self.depth, self.height, self.width, self.voxels.clone())
+    }
+}
+
+impl TemporalVolume for ZSpaceVolume {
+    fn depth(&self) -> usize {
+        self.depth
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn voxel_count(&self) -> usize {
+        ZSpaceVolume::voxel_count(self)
+    }
+
+    fn harmonic_channels(&self) -> usize {
+        self.harmonic_channels
+    }
+
+    fn voxels(&self) -> &[f32] {
+        &self.voxels
+    }
+
+    fn voxels_mut(&mut self) -> &mut [f32] {
+        &mut self.voxels
+    }
+
+    fn harmonics(&self) -> &[f32] {
+        &self.temporal_harmonics
+    }
+
+    fn harmonics_mut(&mut self) -> &mut [f32] {
+        &mut self.temporal_harmonics
+    }
+
+    fn resonance_decay(&self) -> &[f32] {
+        &self.resonance_decay
+    }
+
+    fn resonance_decay_mut(&mut self) -> &mut [f32] {
+        &mut self.resonance_decay
+    }
+
+    fn ensure_harmonic_channels(&mut self, channels: usize) {
+        ZSpaceVolume::ensure_harmonic_channels(self, channels);
+    }
+
+    fn blank_like(&self, harmonic_channels: usize) -> PureResult<Self> {
+        ZSpaceVolume::zeros_with_temporal(self.depth, self.height, self.width, harmonic_channels)
     }
 }
 
@@ -2384,6 +2634,18 @@ mod tests {
     }
 
     #[test]
+    fn volume_zeros_with_temporal_allocates_expected_buffers() {
+        let volume = ZSpaceVolume::zeros_with_temporal(2, 3, 4, 3).unwrap();
+        assert_eq!(volume.voxel_count(), 24);
+        assert_eq!(volume.temporal_harmonics().len(), 72);
+        assert_eq!(volume.harmonic_channels(), 3);
+        assert!(volume
+            .resonance_decay()
+            .iter()
+            .all(|v| (*v - 1.0).abs() < 1e-6));
+    }
+
+    #[test]
     fn volume_from_slices_respects_shapes() {
         let slice_a = tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2);
         let slice_b = tensor_from(&[4.0, 5.0, 6.0, 7.0], 2, 2);
@@ -2435,6 +2697,43 @@ mod tests {
         let next_slices = vec![tensor_from(&front_b, 2, 2), tensor_from(&back_b, 2, 2)];
         let mut ema = ZSpaceVolume::from_slices(&base_slices).unwrap();
         let next = ZSpaceVolume::from_slices(&next_slices).unwrap();
+        ema.ensure_harmonic_channels(2);
+        let mut next = next;
+        next.ensure_harmonic_channels(2);
+        let ema_channels = ema.harmonic_channels();
+        for (idx, chunk) in ema
+            .temporal_harmonics_mut()
+            .chunks_mut(ema_channels)
+            .enumerate()
+        {
+            let base = idx as f32 * 0.1;
+            chunk[0] = 0.5 + base;
+            chunk[1] = 0.25 + base;
+        }
+        let next_channels = next.harmonic_channels();
+        for (idx, chunk) in next
+            .temporal_harmonics_mut()
+            .chunks_mut(next_channels)
+            .enumerate()
+        {
+            let base = idx as f32 * 0.05;
+            chunk[0] = 0.1 + base;
+            chunk[1] = 0.8 - base;
+        }
+        ema.resonance_decay_mut()
+            .iter_mut()
+            .enumerate()
+            .for_each(|(idx, v)| {
+                *v = 0.2 * (idx as f32 + 1.0);
+            });
+        next.resonance_decay_mut()
+            .iter_mut()
+            .enumerate()
+            .for_each(|(idx, v)| {
+                *v = 0.4 * (idx as f32 + 1.0);
+            });
+        let base_harmonics = ema.temporal_harmonics().to_vec();
+        let base_decay = ema.resonance_decay().to_vec();
         let alpha = 0.25;
         ema.accumulate(&next, alpha).unwrap();
         let retain = 1.0 - alpha;
@@ -2454,9 +2753,62 @@ mod tests {
             .accumulated(&next, alpha)
             .unwrap();
         assert_eq!(blended.voxels(), ema.voxels());
+        for ((idx, observed), anticipated) in ema
+            .temporal_harmonics()
+            .iter()
+            .enumerate()
+            .zip(next.temporal_harmonics().iter())
+        {
+            let baseline = base_harmonics[idx];
+            let expected_value = baseline * retain + anticipated * alpha;
+            assert!((observed - expected_value).abs() < 1e-5);
+        }
+        for ((idx, observed), expected_decay) in ema
+            .resonance_decay()
+            .iter()
+            .enumerate()
+            .zip(next.resonance_decay())
+        {
+            let baseline = base_decay[idx];
+            let anticipated = baseline * retain + expected_decay * alpha;
+            assert!((observed - anticipated).abs() < 1e-5);
+        }
         let mismatched = ZSpaceVolume::from_slices(&[tensor_from(&front_a, 2, 2)]).unwrap();
         assert!(ema.accumulate(&mismatched, alpha).is_err());
         assert!(ema.accumulated(&next, 1.5).is_err());
+    }
+
+    #[test]
+    fn blend_sequence_respects_weights() {
+        let mut a = ZSpaceVolume::zeros_with_temporal(1, 1, 2, 2).unwrap();
+        a.voxels_mut().copy_from_slice(&[1.0, 2.0]);
+        a.resonance_decay_mut().copy_from_slice(&[0.2, 0.4]);
+        let a_channels = a.harmonic_channels();
+        for (idx, chunk) in a
+            .temporal_harmonics_mut()
+            .chunks_mut(a_channels)
+            .enumerate()
+        {
+            chunk[0] = 0.5 + idx as f32;
+            chunk[1] = 0.1;
+        }
+        let mut b = ZSpaceVolume::zeros_with_temporal(1, 1, 2, 2).unwrap();
+        b.voxels_mut().copy_from_slice(&[3.0, 5.0]);
+        b.resonance_decay_mut().copy_from_slice(&[0.6, 0.8]);
+        let b_channels = b.harmonic_channels();
+        for (idx, chunk) in b
+            .temporal_harmonics_mut()
+            .chunks_mut(b_channels)
+            .enumerate()
+        {
+            chunk[0] = 1.0 + idx as f32;
+            chunk[1] = 0.3;
+        }
+        let blended = ZSpaceVolume::blend_sequence(&[a.clone(), b.clone()], &[0.25, 0.75]).unwrap();
+        assert_eq!(blended.voxels()[0], 0.25 * 1.0 + 0.75 * 3.0);
+        assert_eq!(blended.voxels()[1], 0.25 * 2.0 + 0.75 * 5.0);
+        assert!((blended.resonance_decay()[0] - (0.25 * 0.2 + 0.75 * 0.6)).abs() < 1e-6);
+        assert!((blended.temporal_harmonics()[0] - (0.25 * 0.5 + 0.75 * 1.0)).abs() < 1e-6);
     }
 
     #[test]
