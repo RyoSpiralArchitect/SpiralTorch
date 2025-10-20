@@ -13,6 +13,12 @@ pub mod experimental {
     use super::*;
     use crate::theory::zpulse::ZScale;
     use ndarray::array;
+
+    fn assert_neutral_scale(scale: Option<ZScale>) {
+        let scale = scale.expect("scale tag missing from pulse");
+        assert!((scale.physical_radius - ZScale::ONE.physical_radius).abs() < 1e-6);
+        assert!((scale.log_radius - ZScale::ONE.log_radius).abs() < 1e-6);
+    }
     
     #[test]
     fn detects_boundary_presence() {
@@ -66,6 +72,24 @@ pub mod experimental {
         let feedback = pulse.clone().into_softlogic_feedback();
         assert_eq!(feedback.band_energy, pulse.band_energy);
         assert_eq!(feedback.z_signal, pulse.z_bias);
+    }
+
+    #[test]
+    fn conductor_rollout_preserves_neutral_scale() {
+        let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift);
+
+        let report = conductor.step(&mask, None, None, None);
+
+        for pulse in &report.pulses {
+            assert_neutral_scale(pulse.scale);
+        }
+
+        assert_neutral_scale(report.fused_pulse.scale);
+        assert_neutral_scale(report.feedback.scale);
+        assert_neutral_scale(report.fused_z.pulse.scale);
     }
     
     #[test]
@@ -338,7 +362,7 @@ pub mod experimental {
             band_energy: (0.3, 0.3, 0.4),
             drift: 0.2,
             z_bias: 0.1,
-            scale: ZScale::ONE, // [SCALE-TODO] ensure scale stays neutral during rollout
+            scale: Some(ZScale::ONE),
             ..InterfaceZPulse::default()
         };
         assert!((composite.quality(&pulse) - 0.5).abs() < 1e-6);
