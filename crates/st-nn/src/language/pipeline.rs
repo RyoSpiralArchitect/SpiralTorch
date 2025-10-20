@@ -1329,13 +1329,12 @@ impl DesirePsiSummary {
 }
 
 mod language_pipeline {
-    use crate::cloud::CloudTargetSummary;
     use crate::roundtable::RoundtableNode;
     use crate::{RoundtableConfig, RoundtableSchedule};
     use st_core::ecosystem::{
-        ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
-        HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
-        RoundtableSummary,
+        CloudConnector, ConnectorEvent, DistributionSummary, EcosystemRegistry,
+        HeuristicChoiceSummary, HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary,
+        RoundtableConfigSummary, RoundtableSummary,
     };
     use st_core::ops::rank_entry::RankPlan;
     use st_core::util::math::{ramanujan_pi, LeechProjector};
@@ -1476,6 +1475,9 @@ mod language_pipeline {
                 summarise_rank_plan(schedule.beneath()),
             ];
             let distribution_summary = distribution.map(summarise_distribution);
+            let cloud_tags = distribution_summary
+                .as_ref()
+                .map(|dist| summarise_cloud_targets(&dist.cloud_targets));
             let summary = RoundtableSummary {
                 rows,
                 cols,
@@ -1497,6 +1499,9 @@ mod language_pipeline {
             let mut extra_tags = vec![("autopilot".to_string(), autopilot_enabled.to_string())];
             if let Some(dist) = &distribution_summary {
                 extra_tags.push(("distribution_mode".to_string(), dist.mode.clone()));
+                if let Some(tags) = &cloud_tags {
+                    extra_tags.extend(tags.iter().cloned());
+                }
             }
 
             self.registry.record_metric(self.apply_tags(
@@ -1682,8 +1687,9 @@ mod language_pipeline {
             if let Some(dist) = &distribution_summary {
                 connector_metadata.push(("distribution_mode".to_string(), dist.mode.clone()));
                 connector_metadata.push(("node_id".to_string(), dist.node_id.clone()));
-                CloudTargetSummary::from_targets(&dist.cloud_targets)
-                    .extend_vec(&mut connector_metadata);
+                if let Some(tags) = &cloud_tags {
+                    connector_metadata.extend(tags.clone());
+                }
             }
             self.record_connector("roundtable", connector_metadata);
 
@@ -1850,39 +1856,7 @@ mod language_pipeline {
     }
 
     fn summarise_cloud_targets(targets: &[CloudConnector]) -> Vec<(String, String)> {
-        if targets.is_empty() {
-            return Vec::new();
-        }
-
-        let mut azure_targets = Vec::new();
-        let mut aws_targets = Vec::new();
-
-        for target in targets {
-            match target {
-                CloudConnector::AzureEventHub { namespace, hub } => {
-                    azure_targets.push(format!("event_hub:{namespace}/{hub}"));
-                }
-                CloudConnector::AzureStorageQueue { account, queue } => {
-                    azure_targets.push(format!("storage_queue:{account}/{queue}"));
-                }
-                CloudConnector::AwsKinesis { region, stream } => {
-                    aws_targets.push(format!("kinesis:{region}/{stream}"));
-                }
-                CloudConnector::AwsSqs { region, queue } => {
-                    aws_targets.push(format!("sqs:{region}/{queue}"));
-                }
-            }
-        }
-
-        let mut metadata = Vec::new();
-        if !azure_targets.is_empty() {
-            metadata.push(("azure_targets".to_string(), azure_targets.join(",")));
-        }
-        if !aws_targets.is_empty() {
-            metadata.push(("aws_targets".to_string(), aws_targets.join(",")));
-        }
-
-        metadata
+        format_cloud_targets(targets)
     }
 
     impl From<TensorError> for PipelineError {

@@ -76,6 +76,7 @@ serde_json = "1"
 
 [package.metadata.maturin]
 name = "spiraltorch"
+python-source = "python"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

@@ -635,6 +635,7 @@ impl OpenCartesianTopos {
         let volume = rows.saturating_mul(cols);
         if volume > self.max_volume {
             return Err(TensorError::TensorVolumeExceeded {
+                label,
                 volume,
                 max_volume: self.max_volume,
             });
@@ -775,6 +776,7 @@ impl ModalityProfile {
     fn guard_volume(&self, label: &'static str, volume: usize) -> PureResult<()> {
         if volume > self.max_volume {
             return Err(TensorError::TensorVolumeExceeded {
+                label,
                 volume,
                 max_volume: self.max_volume,
             });
@@ -943,10 +945,7 @@ impl GraphGuardProfile {
         }
         let expected = self.expected_len(node_count)?;
         if len != expected {
-            return Err(TensorError::DataLength {
-                expected,
-                got: len,
-            });
+            return Err(TensorError::DataLength { expected, got: len });
         }
         Ok(expected)
     }
@@ -1195,7 +1194,11 @@ impl<'a> MultiModalToposGuard<'a> {
     }
 
     /// Guards audio waveforms represented as contiguous slices.
-    pub fn guard_audio_waveform(&self, label: &'static str, waveform: &mut [f32]) -> PureResult<()> {
+    pub fn guard_audio_waveform(
+        &self,
+        label: &'static str,
+        waveform: &mut [f32],
+    ) -> PureResult<()> {
         self.audio.guard_volume(label, waveform.len())?;
         self.audio.rewrite_slice(self.topos, label, waveform)
     }
@@ -1251,6 +1254,7 @@ impl<'a> MultiModalToposGuard<'a> {
         }
         if edge_count > self.graph.max_edges {
             return Err(TensorError::TensorVolumeExceeded {
+                label: "graph_edges",
                 volume: edge_count,
                 max_volume: self.graph.max_edges,
             });
@@ -1327,10 +1331,11 @@ impl<'a> ToposAtlas<'a> {
         self.monad
     }
 
-    fn observe_volume(&mut self, volume: usize) -> PureResult<()> {
+    fn observe_volume(&mut self, label: &'static str, volume: usize) -> PureResult<()> {
         let projected = self.visited_volume.saturating_add(volume);
         if projected > self.topos.max_volume() {
             return Err(TensorError::TensorVolumeExceeded {
+                label,
                 volume: projected,
                 max_volume: self.topos.max_volume(),
             });
@@ -1342,21 +1347,21 @@ impl<'a> ToposAtlas<'a> {
     /// Guards a tensor and records the total traversed volume.
     pub fn guard_tensor(&mut self, label: &'static str, tensor: &Tensor) -> PureResult<()> {
         let (rows, cols) = tensor.shape();
-        self.observe_volume(rows.saturating_mul(cols))?;
+        self.observe_volume(label, rows.saturating_mul(cols))?;
         self.monad.guard_tensor(label, tensor)
     }
 
     /// Rewrites a tensor in-place while tracking the traversed volume.
     pub fn guard_tensor_mut(&mut self, label: &'static str, tensor: &mut Tensor) -> PureResult<()> {
         let (rows, cols) = tensor.shape();
-        self.observe_volume(rows.saturating_mul(cols))?;
+        self.observe_volume(label, rows.saturating_mul(cols))?;
         self.monad.rewrite_tensor(label, tensor)
     }
 
     /// Lifts an owned tensor into the atlas, returning the rewritten value.
     pub fn lift_tensor(&mut self, label: &'static str, tensor: Tensor) -> PureResult<Tensor> {
         let (rows, cols) = tensor.shape();
-        self.observe_volume(rows.saturating_mul(cols))?;
+        self.observe_volume(label, rows.saturating_mul(cols))?;
         self.monad.lift_tensor(label, tensor)
     }
 

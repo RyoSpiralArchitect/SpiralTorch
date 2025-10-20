@@ -102,7 +102,11 @@ pub enum TensorError {
     /// Numeric guard detected a non-finite value that would otherwise propagate NaNs.
     NonFiniteValue { label: &'static str, value: f32 },
     /// The requested tensor volume exceeds the configured open-cartesian topos boundary.
-    TensorVolumeExceeded { volume: usize, max_volume: usize },
+    TensorVolumeExceeded {
+        label: &'static str,
+        volume: usize,
+        max_volume: usize,
+    },
     /// Loop detection tripped for an open-cartesian topos traversal.
     LoopDetected { depth: usize, max_depth: usize },
     /// Conjugate gradient solver could not reach the requested tolerance.
@@ -202,10 +206,14 @@ impl fmt::Display for TensorError {
                     "serialization error while handling tensor data: {message}"
                 )
             }
-            TensorError::TensorVolumeExceeded { volume, max_volume } => {
+            TensorError::TensorVolumeExceeded {
+                label,
+                volume,
+                max_volume,
+            } => {
                 write!(
                     f,
-                    "tensor volume {volume} exceeds open-cartesian capacity {max_volume}"
+                    "tensor '{label}' volume {volume} exceeds open-cartesian capacity {max_volume}"
                 )
             }
             TensorError::LoopDetected { depth, max_depth } => {
@@ -2265,6 +2273,7 @@ impl AmegaHypergrad {
         let capacity = rows.saturating_mul(cols);
         if capacity > topos.max_volume() {
             return Err(TensorError::TensorVolumeExceeded {
+                label: "hypergradient_tape",
                 volume: capacity,
                 max_volume: topos.max_volume(),
             });
