@@ -27,7 +27,9 @@ pub use self::measure::{
     BarycenterIntermediate, TeslaTail, TeslaTailLine, ZSpaceBarycenter,
 };
 pub use self::topos::{
-    LawvereTierneyGuard, OpenCartesianTopos, RewriteMonad, TensorBiome, ToposAtlas, ZBox, ZBoxSite,
+    GraphGuardProfile, GraphGuardReport, LawvereTierneyGuard, ModalityProfile, MultiModalToposGuard,
+    OpenCartesianTopos, RewardBoundary, RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas,
+    ZBox, ZBoxSite,
 };
 
 use crate::backend::faer_dense;
