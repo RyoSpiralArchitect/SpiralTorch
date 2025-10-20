@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyImportError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyModule};
+use pyo3::types::{PyAny, PyDict, PyModule};
 use pyo3::wrap_pyfunction;
 
 use crate::tensor::PyTensor;
@@ -87,7 +87,7 @@ fn capture_impl(py: Python<'_>, value: &Bound<PyAny>) -> PyResult<PyTensor> {
             let py_tensor: Py<PyTensor> = value.extract()?;
             Ok(py_tensor.bind(py).borrow().clone())
         }
-        Source::Torch => torch::from_torch(py, value),
+        Source::Torch => torch::from_torch_simple(py, value),
         Source::Jax => jax::from_jax(py, value),
         Source::TensorFlow => tensorflow::from_tensorflow(py, value),
         Source::Dlpack => PyTensor::from_dlpack(py, value.clone().unbind().into_py(py)),
@@ -115,7 +115,7 @@ fn share_impl(py: Python<'_>, value: &Bound<PyAny>, target: &str) -> PyResult<Py
                 return Ok(value.clone().unbind().into_py(py));
             }
             let tensor = capture_impl(py, value)?;
-            torch::to_torch(py, &tensor)
+            torch::to_torch_simple(py, &tensor)
         }
         "jax" => {
             if module.starts_with("jax") || module.contains("jaxlib") {
@@ -167,9 +167,7 @@ mod torch {
         Ok(())
     }
 
-    #[pyfunction]
-    #[pyo3(signature = (tensor, *, dtype=None, device=None, requires_grad=None, copy=None, memory_format=None))]
-    pub(super) fn to_torch(
+    fn to_torch_impl(
         py: Python<'_>,
         tensor: &PyTensor,
         dtype: Option<PyObject>,
@@ -206,17 +204,32 @@ mod torch {
             tensor = tensor.call_method1("requires_grad_", (requires_grad,))?;
         }
 
-    pub(super) fn to_torch(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
-        let utils = super::import_with_hint(py, "torch.utils.dlpack", "PyTorch >= 1.10")?;
-        let from_dlpack = utils.getattr("from_dlpack")?;
-        let capsule = tensor.to_dlpack(py)?;
-        let tensor = from_dlpack.call1((capsule,))?;
         Ok(tensor.into_py(py))
     }
 
     #[pyfunction]
-    #[pyo3(signature = (tensor, *, dtype=None, device=None, ensure_cpu=None, copy=None, require_contiguous=None))]
-    pub(super) fn from_torch(
+    #[pyo3(signature = (tensor, *, dtype=None, device=None, requires_grad=None, copy=None, memory_format=None))]
+    pub(super) fn to_torch(
+        py: Python<'_>,
+        tensor: &PyTensor,
+        dtype: Option<PyObject>,
+        device: Option<PyObject>,
+        requires_grad: Option<bool>,
+        copy: Option<bool>,
+        memory_format: Option<PyObject>,
+    ) -> PyResult<PyObject> {
+        to_torch_impl(
+            py,
+            tensor,
+            dtype,
+            device,
+            requires_grad,
+            copy,
+            memory_format,
+        )
+    }
+
+    fn from_torch_impl(
         py: Python<'_>,
         tensor: &Bound<PyAny>,
         dtype: Option<PyObject>,
@@ -271,11 +284,37 @@ mod torch {
         }
 
         let capsule = to_dlpack.call1((candidate,))?.unbind();
-    pub(super) fn from_torch(py: Python<'_>, tensor: &Bound<PyAny>) -> PyResult<PyTensor> {
-        let utils = super::import_with_hint(py, "torch.utils.dlpack", "PyTorch >= 1.10")?;
-        let to_dlpack = utils.getattr("to_dlpack")?;
-        let capsule = to_dlpack.call1((tensor,))?.unbind();
         PyTensor::from_dlpack(py, capsule)
+    }
+
+    #[pyfunction]
+    #[pyo3(signature = (tensor, *, dtype=None, device=None, ensure_cpu=None, copy=None, require_contiguous=None))]
+    pub(super) fn from_torch(
+        py: Python<'_>,
+        tensor: &Bound<PyAny>,
+        dtype: Option<PyObject>,
+        device: Option<PyObject>,
+        ensure_cpu: Option<bool>,
+        copy: Option<bool>,
+        require_contiguous: Option<bool>,
+    ) -> PyResult<PyTensor> {
+        from_torch_impl(
+            py,
+            tensor,
+            dtype,
+            device,
+            ensure_cpu,
+            copy,
+            require_contiguous,
+        )
+    }
+
+    pub(super) fn from_torch_simple(py: Python<'_>, tensor: &Bound<PyAny>) -> PyResult<PyTensor> {
+        from_torch_impl(py, tensor, None, None, None, None, None)
+    }
+
+    pub(super) fn to_torch_simple(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
+        to_torch_impl(py, tensor, None, None, None, None, None)
     }
 }
 
