@@ -23,7 +23,24 @@
 //! from both CPU-only and WASM environments without fighting the borrow checker.
 
 use super::{fractal::FractalPatch, PureResult, Tensor, TensorError};
-use core::f64::consts::PI as PI64;
+use core::{cmp, f64::consts::PI as PI64};
+
+fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    if !saturation.is_finite() || saturation <= 0.0 {
+        return 0.0;
+    }
+    let clamp = value.clamp(-saturation, saturation);
+    let leak = porosity.clamp(0.0, 1.0);
+    if leak <= 0.0 {
+        return clamp;
+    }
+    let normalised = value / saturation;
+    let soft = saturation * normalised.tanh();
+    clamp * (1.0 - leak) + soft * leak
+}
 
 /// Numerically guards the Lawvere–Tierney topology that keeps probabilistic data j-closed.
 #[derive(Clone, Copy, Debug)]
@@ -510,6 +527,7 @@ pub struct OpenCartesianTopos {
     curvature: f32,
     tolerance: f32,
     saturation: f32,
+    porosity: f32,
     max_depth: usize,
     max_volume: usize,
     site: ZBoxSite,
@@ -547,6 +565,7 @@ impl OpenCartesianTopos {
             curvature,
             tolerance,
             saturation,
+            porosity: 0.2,
             max_depth,
             max_volume,
             site,
@@ -566,6 +585,11 @@ impl OpenCartesianTopos {
     /// Returns the saturation limit used to absorb overflows.
     pub fn saturation(&self) -> f32 {
         self.saturation
+    }
+
+    /// Returns the permeability applied while saturating values.
+    pub fn porosity(&self) -> f32 {
+        self.porosity
     }
 
     /// Maximum permitted traversal depth before the guard considers the topos
@@ -593,6 +617,15 @@ impl OpenCartesianTopos {
             });
         }
         self.site = site;
+        Ok(self)
+    }
+
+    /// Replaces the porosity used during saturation.
+    pub fn with_porosity(mut self, porosity: f32) -> PureResult<Self> {
+        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
+            return Err(TensorError::PorosityOutOfRange { porosity });
+        }
+        self.porosity = porosity;
         Ok(self)
     }
 
@@ -668,10 +701,7 @@ impl OpenCartesianTopos {
 
     /// Saturates a scalar into the finite window enforced by the topos.
     pub fn saturate(&self, value: f32) -> f32 {
-        if !value.is_finite() {
-            return 0.0;
-        }
-        value.clamp(-self.saturation, self.saturation)
+        porous_mix(value, self.saturation, self.porosity)
     }
 
     /// Saturates an entire slice in-place.
@@ -679,6 +709,591 @@ impl OpenCartesianTopos {
         for value in slice.iter_mut() {
             *value = self.saturate(*value);
         }
+    }
+}
+
+/// Local envelope that specialises an [`OpenCartesianTopos`] guard for a specific modality.
+#[derive(Clone, Copy, Debug)]
+pub struct ModalityProfile {
+    max_volume: usize,
+    local_saturation: Option<f32>,
+    porosity: f32,
+}
+
+impl ModalityProfile {
+    /// Creates a new modality envelope. `max_volume` must be non-zero and `local_saturation`,
+    /// when provided, must be positive.
+    pub fn new(max_volume: usize, local_saturation: Option<f32>) -> PureResult<Self> {
+        Self::with_porosity(max_volume, local_saturation, 0.25)
+    }
+
+    /// Creates a modality envelope with explicit porosity.
+    pub fn with_porosity(
+        max_volume: usize,
+        local_saturation: Option<f32>,
+        porosity: f32,
+    ) -> PureResult<Self> {
+        if max_volume == 0 {
+            return Err(TensorError::EmptyInput("modality_max_volume"));
+        }
+        if let Some(saturation) = local_saturation {
+            if saturation <= 0.0 || !saturation.is_finite() {
+                return Err(TensorError::NonPositiveSaturation { saturation });
+            }
+        }
+        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
+            return Err(TensorError::PorosityOutOfRange { porosity });
+        }
+        Ok(Self {
+            max_volume,
+            local_saturation,
+            porosity,
+        })
+    }
+
+    /// Returns the maximum tensor volume admitted by the modality.
+    pub fn max_volume(&self) -> usize {
+        self.max_volume
+    }
+
+    /// Returns the porosity configured for this modality.
+    pub fn porosity(&self) -> f32 {
+        self.porosity
+    }
+
+    fn effective_saturation(&self, topos: &OpenCartesianTopos) -> f32 {
+        self.local_saturation
+            .unwrap_or_else(|| topos.saturation())
+            .min(topos.saturation())
+            .max(0.0)
+    }
+
+    fn effective_porosity(&self, topos: &OpenCartesianTopos) -> f32 {
+        self.porosity.max(topos.porosity())
+    }
+
+    fn guard_volume(&self, label: &'static str, volume: usize) -> PureResult<()> {
+        if volume > self.max_volume {
+            return Err(TensorError::TensorVolumeExceeded {
+                volume,
+                max_volume: self.max_volume,
+            });
+        }
+        Ok(())
+    }
+
+    fn rewrite_slice(
+        &self,
+        topos: &OpenCartesianTopos,
+        label: &'static str,
+        slice: &mut [f32],
+    ) -> PureResult<()> {
+        let saturation = self.effective_saturation(topos);
+        let porosity = self.effective_porosity(topos);
+        for value in slice.iter_mut() {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label,
+                    value: *value,
+                });
+            }
+            *value = porous_mix(*value, saturation, porosity);
+        }
+        topos.guard_slice(label, slice)
+    }
+
+    fn rewrite_tensor(
+        &self,
+        topos: &OpenCartesianTopos,
+        label: &'static str,
+        tensor: &mut Tensor,
+    ) -> PureResult<()> {
+        let (rows, cols) = tensor.shape();
+        self.guard_volume(label, rows.saturating_mul(cols))?;
+        self.rewrite_slice(topos, label, tensor.data_mut())?;
+        topos.guard_tensor(label, tensor)
+    }
+
+    fn validate_for_topos(&self, topos: &OpenCartesianTopos) -> PureResult<()> {
+        if self.max_volume > topos.max_volume() {
+            return Err(TensorError::InvalidValue {
+                label: "modality_volume_exceeds_topos",
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Guard configuration for structured graph data rewritten through an open-cartesian topos.
+#[derive(Clone, Copy, Debug)]
+pub struct GraphGuardProfile {
+    max_nodes: usize,
+    max_edges: usize,
+    max_degree: usize,
+    symmetry_tolerance: f32,
+    activation_threshold: f32,
+    edge_saturation: Option<f32>,
+    porosity: f32,
+}
+
+impl GraphGuardProfile {
+    /// Creates a graph guard profile. Node, edge, and degree counts must be positive.
+    pub fn new(
+        max_nodes: usize,
+        max_edges: usize,
+        max_degree: usize,
+        symmetry_tolerance: f32,
+        activation_threshold: f32,
+        edge_saturation: Option<f32>,
+    ) -> PureResult<Self> {
+        if max_nodes == 0 {
+            return Err(TensorError::EmptyInput("graph_max_nodes"));
+        }
+        if max_edges == 0 {
+            return Err(TensorError::EmptyInput("graph_max_edges"));
+        }
+        if max_degree == 0 {
+            return Err(TensorError::EmptyInput("graph_max_degree"));
+        }
+        if symmetry_tolerance < 0.0 || !symmetry_tolerance.is_finite() {
+            return Err(TensorError::InvalidValue {
+                label: "graph_symmetry_tolerance",
+            });
+        }
+        if activation_threshold < 0.0 || !activation_threshold.is_finite() {
+            return Err(TensorError::InvalidValue {
+                label: "graph_activation_threshold",
+            });
+        }
+        if let Some(saturation) = edge_saturation {
+            if saturation <= 0.0 || !saturation.is_finite() {
+                return Err(TensorError::NonPositiveSaturation { saturation });
+            }
+        }
+        Ok(Self {
+            max_nodes,
+            max_edges,
+            max_degree,
+            symmetry_tolerance,
+            activation_threshold,
+            edge_saturation,
+            porosity: 0.2,
+        })
+    }
+
+    /// Maximum number of graph nodes admitted by the guard.
+    pub fn max_nodes(&self) -> usize {
+        self.max_nodes
+    }
+
+    /// Returns the configured graph porosity.
+    pub fn porosity(&self) -> f32 {
+        self.porosity
+    }
+
+    /// Adjusts the porosity applied while saturating adjacency entries.
+    pub fn with_porosity(mut self, porosity: f32) -> PureResult<Self> {
+        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
+            return Err(TensorError::PorosityOutOfRange { porosity });
+        }
+        self.porosity = porosity;
+        Ok(self)
+    }
+
+    fn validate_for_topos(&self, topos: &OpenCartesianTopos) -> PureResult<()> {
+        let max_possible = topos.max_volume();
+        if self.max_edges > max_possible {
+            return Err(TensorError::InvalidValue {
+                label: "graph_edges_exceed_topos_volume",
+            });
+        }
+        Ok(())
+    }
+
+    fn expected_len(&self, node_count: usize) -> PureResult<usize> {
+        node_count
+            .checked_mul(node_count)
+            .ok_or(TensorError::InvalidDimensions {
+                rows: node_count,
+                cols: node_count,
+            })
+    }
+
+    fn saturate_value(&self, topos: &OpenCartesianTopos, value: f32) -> f32 {
+        if !value.is_finite() {
+            return 0.0;
+        }
+        let limit = self
+            .edge_saturation
+            .unwrap_or_else(|| topos.saturation())
+            .min(topos.saturation())
+            .max(0.0);
+        let porosity = self.porosity.max(topos.porosity());
+        porous_mix(value, limit, porosity)
+    }
+
+    fn guard_shape(&self, node_count: usize, len: usize) -> PureResult<usize> {
+        if node_count == 0 {
+            return Err(TensorError::EmptyInput("graph_nodes"));
+        }
+        if node_count > self.max_nodes {
+            return Err(TensorError::InvalidValue {
+                label: "graph_max_nodes_exceeded",
+            });
+        }
+        let expected = self.expected_len(node_count)?;
+        if len != expected {
+            return Err(TensorError::DataLength {
+                expected,
+                got: len,
+            });
+        }
+        Ok(expected)
+    }
+
+    fn guard_degree(&self, degree: usize) -> PureResult<()> {
+        if degree > self.max_degree {
+            return Err(TensorError::InvalidValue {
+                label: "graph_degree_exceeded",
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Structured report emitted by [`MultiModalToposGuard::guard_graph_adjacency`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GraphGuardReport {
+    /// Number of undirected edges whose absolute weight exceeded the activation threshold.
+    pub edge_count: usize,
+    /// Maximum node degree observed while guarding the adjacency matrix.
+    pub max_degree: usize,
+    /// Number of asymmetric edge pairs detected beyond the configured tolerance.
+    pub symmetry_violations: usize,
+    /// Number of entries that were saturated into the admissible range.
+    pub saturated_entries: usize,
+}
+
+/// Reward boundary used to detect runaway reinforcement learning signals.
+#[derive(Clone, Copy, Debug)]
+pub struct RewardBoundary {
+    lower: f32,
+    upper: f32,
+    hysteresis: f32,
+    porosity: f32,
+}
+
+impl RewardBoundary {
+    /// Creates a new reward boundary. `lower` must be below `upper` and hysteresis must be
+    /// non-negative.
+    pub fn new(lower: f32, upper: f32, hysteresis: f32) -> PureResult<Self> {
+        Self::with_porosity(lower, upper, hysteresis, 0.3)
+    }
+
+    /// Creates a new reward boundary with explicit porosity.
+    pub fn with_porosity(
+        lower: f32,
+        upper: f32,
+        hysteresis: f32,
+        porosity: f32,
+    ) -> PureResult<Self> {
+        if !lower.is_finite() || !upper.is_finite() || !hysteresis.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "reward_boundary",
+                value: f32::NAN,
+            });
+        }
+        if lower >= upper {
+            return Err(TensorError::InvalidValue {
+                label: "reward_boundary_window",
+            });
+        }
+        if hysteresis < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "reward_boundary_hysteresis",
+            });
+        }
+        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
+            return Err(TensorError::PorosityOutOfRange { porosity });
+        }
+        Ok(Self {
+            lower,
+            upper,
+            hysteresis,
+            porosity,
+        })
+    }
+
+    /// Returns the lower reward bound.
+    pub fn lower(&self) -> f32 {
+        self.lower
+    }
+
+    /// Returns the upper reward bound.
+    pub fn upper(&self) -> f32 {
+        self.upper
+    }
+
+    /// Returns the porosity applied when clamping reward traces.
+    pub fn porosity(&self) -> f32 {
+        self.porosity
+    }
+
+    fn slack(&self) -> f32 {
+        self.hysteresis * (1.0 + self.porosity)
+    }
+
+    fn clamp(&self, value: f32) -> f32 {
+        if !value.is_finite() {
+            return 0.0;
+        }
+        let mid = 0.5 * (self.upper + self.lower);
+        let half = 0.5 * (self.upper - self.lower);
+        if half <= 0.0 {
+            return mid;
+        }
+        let offset = porous_mix(value - mid, half, self.porosity);
+        (mid + offset).clamp(self.lower, self.upper)
+    }
+
+    fn breached_lower(&self, value: f32) -> bool {
+        value < self.lower - self.slack()
+    }
+
+    fn breached_upper(&self, value: f32) -> bool {
+        value > self.upper + self.slack()
+    }
+}
+
+/// Signal emitted when reward traces cross configured boundaries.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RewardBoundarySignal {
+    /// Index of the first sample that breached the lower boundary, if any.
+    pub lower_breach_index: Option<usize>,
+    /// Index of the first sample that breached the upper boundary, if any.
+    pub upper_breach_index: Option<usize>,
+    /// Number of reward samples that were clamped back into the admissible window.
+    pub clamped: usize,
+    /// Minimum reward observed before clamping.
+    pub min_observed: f32,
+    /// Maximum reward observed before clamping.
+    pub max_observed: f32,
+}
+
+impl Default for RewardBoundarySignal {
+    fn default() -> Self {
+        Self {
+            lower_breach_index: None,
+            upper_breach_index: None,
+            clamped: 0,
+            min_observed: f32::INFINITY,
+            max_observed: f32::NEG_INFINITY,
+        }
+    }
+}
+
+impl RewardBoundarySignal {
+    /// Finalises the observed range by normalising infinities for empty traces.
+    fn finalise(mut self) -> Self {
+        if !self.min_observed.is_finite() {
+            self.min_observed = 0.0;
+        }
+        if !self.max_observed.is_finite() {
+            self.max_observed = 0.0;
+        }
+        self
+    }
+}
+
+/// Multi-modal guard that specialises an [`OpenCartesianTopos`] for audio, vision, text, graph,
+/// and reinforcement-learning reward traces.
+#[derive(Clone, Copy, Debug)]
+pub struct MultiModalToposGuard<'a> {
+    topos: &'a OpenCartesianTopos,
+    text: ModalityProfile,
+    audio: ModalityProfile,
+    vision: ModalityProfile,
+    graph: GraphGuardProfile,
+    reward: RewardBoundary,
+}
+
+impl<'a> MultiModalToposGuard<'a> {
+    /// Builds a new multi-modal guard anchored to the provided topos with conservative defaults.
+    pub fn new(topos: &'a OpenCartesianTopos) -> PureResult<Self> {
+        let text = ModalityProfile::new(topos.max_volume().min(16384).max(1), None)?;
+        let audio = ModalityProfile::new(
+            topos.max_volume().min(65536).max(1),
+            Some(topos.saturation()),
+        )?;
+        let vision = ModalityProfile::new(topos.max_volume().min(262144).max(1), None)?;
+        let graph = GraphGuardProfile::new(
+            cmp::min(2048, topos.max_volume()),
+            cmp::min(topos.max_volume(), 131_072),
+            1024,
+            1e-3,
+            1e-4,
+            None,
+        )?;
+        graph.validate_for_topos(topos)?;
+        text.validate_for_topos(topos)?;
+        audio.validate_for_topos(topos)?;
+        vision.validate_for_topos(topos)?;
+        let reward = RewardBoundary::new(-topos.saturation(), topos.saturation(), 0.05)?;
+        Ok(Self {
+            topos,
+            text,
+            audio,
+            vision,
+            graph,
+            reward,
+        })
+    }
+
+    /// Returns the underlying topos guard.
+    pub fn topos(&self) -> &'a OpenCartesianTopos {
+        self.topos
+    }
+
+    /// Overrides the text modality profile.
+    pub fn with_text_profile(mut self, profile: ModalityProfile) -> PureResult<Self> {
+        profile.validate_for_topos(self.topos)?;
+        self.text = profile;
+        Ok(self)
+    }
+
+    /// Overrides the audio modality profile.
+    pub fn with_audio_profile(mut self, profile: ModalityProfile) -> PureResult<Self> {
+        profile.validate_for_topos(self.topos)?;
+        self.audio = profile;
+        Ok(self)
+    }
+
+    /// Overrides the vision modality profile.
+    pub fn with_vision_profile(mut self, profile: ModalityProfile) -> PureResult<Self> {
+        profile.validate_for_topos(self.topos)?;
+        self.vision = profile;
+        Ok(self)
+    }
+
+    /// Overrides the graph guard profile.
+    pub fn with_graph_profile(mut self, profile: GraphGuardProfile) -> PureResult<Self> {
+        profile.validate_for_topos(self.topos)?;
+        self.graph = profile;
+        Ok(self)
+    }
+
+    /// Overrides the reward boundary detector.
+    pub fn with_reward_boundary(mut self, boundary: RewardBoundary) -> PureResult<Self> {
+        self.reward = boundary;
+        Ok(self)
+    }
+
+    /// Guards language or text tensors by applying modality-specific saturation before
+    /// delegating to the underlying topos guard.
+    pub fn guard_text_tensor(&self, label: &'static str, tensor: &mut Tensor) -> PureResult<()> {
+        self.text.rewrite_tensor(self.topos, label, tensor)
+    }
+
+    /// Guards audio waveforms represented as contiguous slices.
+    pub fn guard_audio_waveform(&self, label: &'static str, waveform: &mut [f32]) -> PureResult<()> {
+        self.audio.guard_volume(label, waveform.len())?;
+        self.audio.rewrite_slice(self.topos, label, waveform)
+    }
+
+    /// Guards image or vision tensors by applying the configured vision profile.
+    pub fn guard_vision_tensor(&self, label: &'static str, tensor: &mut Tensor) -> PureResult<()> {
+        self.vision.rewrite_tensor(self.topos, label, tensor)
+    }
+
+    /// Guards graph adjacency matrices and reports symmetry and activation statistics.
+    pub fn guard_graph_adjacency(
+        &self,
+        adjacency: &mut [f32],
+        node_count: usize,
+    ) -> PureResult<GraphGuardReport> {
+        let expected = self.graph.guard_shape(node_count, adjacency.len())?;
+        if let Some(budget) = self.graph.max_edges.checked_mul(2) {
+            if expected > budget {
+                return Err(TensorError::InvalidValue {
+                    label: "graph_edge_budget",
+                });
+            }
+        }
+        let mut edge_count = 0usize;
+        let mut max_degree = 0usize;
+        let mut symmetry_violations = 0usize;
+        let mut saturated_entries = 0usize;
+        for i in 0..node_count {
+            let mut degree = 0usize;
+            for j in 0..node_count {
+                let idx = i * node_count + j;
+                let clamped = self.graph.saturate_value(self.topos, adjacency[idx]);
+                if clamped != adjacency[idx] {
+                    adjacency[idx] = clamped;
+                    saturated_entries += 1;
+                }
+                if clamped.abs() >= self.graph.activation_threshold {
+                    degree += 1;
+                    if i < j {
+                        edge_count += 1;
+                    }
+                }
+                if i < j {
+                    let sym_idx = j * node_count + i;
+                    let sym = adjacency[sym_idx];
+                    if (clamped - sym).abs() > self.graph.symmetry_tolerance {
+                        symmetry_violations += 1;
+                    }
+                }
+            }
+            self.graph.guard_degree(degree)?;
+            max_degree = cmp::max(max_degree, degree);
+        }
+        if edge_count > self.graph.max_edges {
+            return Err(TensorError::TensorVolumeExceeded {
+                volume: edge_count,
+                max_volume: self.graph.max_edges,
+            });
+        }
+        self.topos.guard_slice("graph_adjacency", adjacency)?;
+        Ok(GraphGuardReport {
+            edge_count,
+            max_degree,
+            symmetry_violations,
+            saturated_entries,
+        })
+    }
+
+    /// Guards reinforcement learning reward traces and detects boundary breaches.
+    pub fn guard_reward_trace(&self, rewards: &mut [f32]) -> PureResult<RewardBoundarySignal> {
+        if rewards.is_empty() {
+            return Err(TensorError::EmptyInput("reward_trace"));
+        }
+        let mut signal = RewardBoundarySignal::default();
+        for (idx, reward) in rewards.iter_mut().enumerate() {
+            if !reward.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "reward_trace",
+                    value: *reward,
+                });
+            }
+            signal.min_observed = signal.min_observed.min(*reward);
+            signal.max_observed = signal.max_observed.max(*reward);
+            let saturated = self.topos.saturate(*reward);
+            if self.reward.breached_lower(saturated) && signal.lower_breach_index.is_none() {
+                signal.lower_breach_index = Some(idx);
+            }
+            if self.reward.breached_upper(saturated) && signal.upper_breach_index.is_none() {
+                signal.upper_breach_index = Some(idx);
+            }
+            let clamped = self.reward.clamp(saturated);
+            if (clamped - *reward).abs() > f32::EPSILON {
+                signal.clamped += 1;
+            }
+            *reward = clamped;
+        }
+        self.topos.guard_slice("reward_trace", rewards)?;
+        Ok(signal.finalise())
     }
 }
 
@@ -1287,6 +1902,53 @@ mod tests {
     }
 
     #[test]
+    fn topos_porosity_softens_extremes() {
+        let rigid = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096)
+            .unwrap()
+            .with_porosity(0.0)
+            .unwrap();
+        let porous = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096)
+            .unwrap()
+            .with_porosity(0.9)
+            .unwrap();
+        let sample = rigid.saturation() * 4.0;
+        let rigid_value = rigid.saturate(sample);
+        let porous_value = porous.saturate(sample);
+        assert!(porous_value.abs() < rigid_value.abs());
+        assert!(porous_value.abs() > rigid.saturation() * 0.8);
+    }
+
+    #[test]
+    fn reward_boundary_porosity_delays_breach() {
+        let topos = demo_topos();
+        let strict_boundary = RewardBoundary::with_porosity(-0.5, 0.5, 0.05, 0.0).unwrap();
+        let porous_boundary = RewardBoundary::with_porosity(-0.5, 0.5, 0.05, 0.8).unwrap();
+        let strict_guard = MultiModalToposGuard::new(&topos)
+            .unwrap()
+            .with_reward_boundary(strict_boundary)
+            .unwrap();
+        let porous_guard = MultiModalToposGuard::new(&topos)
+            .unwrap()
+            .with_reward_boundary(porous_boundary)
+            .unwrap();
+        let mut strict_trace = vec![0.56f32];
+        let mut porous_trace = vec![0.56f32];
+        let strict_signal = strict_guard.guard_reward_trace(&mut strict_trace).unwrap();
+        let porous_signal = porous_guard.guard_reward_trace(&mut porous_trace).unwrap();
+        assert!(strict_signal.upper_breach_index.is_some());
+        assert!(porous_signal.upper_breach_index.is_none());
+        assert!(strict_trace[0] <= 0.5 + 1e-6);
+        assert!(porous_trace[0] < 0.5);
+    }
+
+    #[test]
+    fn graph_profile_rejects_invalid_porosity() {
+        let profile = GraphGuardProfile::new(8, 12, 4, 1e-3, 0.05, Some(1.0)).unwrap();
+        let err = profile.with_porosity(1.5).unwrap_err();
+        assert!(matches!(err, TensorError::PorosityOutOfRange { .. }));
+    }
+
+    #[test]
     fn zbox_cover_respects_mass() {
         let topos = demo_topos();
         let centers_a = vec![vec![0.0f32, 0.0]];
@@ -1639,5 +2301,55 @@ mod tests {
         }
         let norm: f32 = residual.iter().map(|v| v * v).sum();
         assert!(norm.sqrt() <= solver.tolerance().max(topos.tolerance()));
+    }
+
+    #[test]
+    fn multi_modal_text_profile_clamps_values() {
+        let topos = demo_topos();
+        let guard = MultiModalToposGuard::new(&topos)
+            .unwrap()
+            .with_text_profile(ModalityProfile::new(16, Some(0.25)).unwrap())
+            .unwrap();
+        let mut tensor = Tensor::from_vec(4, 4, vec![10.0; 16]).unwrap();
+        guard
+            .guard_text_tensor("multi_modal_text", &mut tensor)
+            .unwrap();
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|&value| (value - 0.25).abs() < 1e-6));
+    }
+
+    #[test]
+    fn multi_modal_graph_guard_reports_symmetry() {
+        let topos = demo_topos();
+        let guard = MultiModalToposGuard::new(&topos)
+            .unwrap()
+            .with_graph_profile(GraphGuardProfile::new(8, 12, 4, 1e-3, 0.05, Some(1.0)).unwrap())
+            .unwrap();
+        let mut adjacency = vec![0.0f32; 16];
+        adjacency[0 * 4 + 1] = 0.2;
+        adjacency[1 * 4 + 0] = 0.1;
+        let report = guard.guard_graph_adjacency(&mut adjacency, 4).unwrap();
+        assert_eq!(report.edge_count, 1);
+        assert_eq!(report.symmetry_violations, 1);
+        assert!(adjacency.iter().all(|value| value.abs() <= 1.0));
+    }
+
+    #[test]
+    fn multi_modal_reward_boundary_detects_breaches() {
+        let topos = demo_topos();
+        let guard = MultiModalToposGuard::new(&topos)
+            .unwrap()
+            .with_reward_boundary(RewardBoundary::new(-0.5, 0.5, 0.1).unwrap())
+            .unwrap();
+        let mut rewards = vec![-0.9, 0.2, 0.8];
+        let signal = guard.guard_reward_trace(&mut rewards).unwrap();
+        assert_eq!(signal.lower_breach_index, Some(0));
+        assert_eq!(signal.upper_breach_index, Some(2));
+        assert_eq!(signal.clamped, 2);
+        assert!((signal.min_observed + 0.9).abs() < 1e-6);
+        assert!((signal.max_observed - 0.8).abs() < 1e-6);
+        assert!(rewards.iter().all(|value| *value >= -0.5 && *value <= 0.5));
     }
 }

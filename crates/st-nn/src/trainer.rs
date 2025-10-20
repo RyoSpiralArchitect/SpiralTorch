@@ -21,6 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+use crate::cloud::CloudTargetSummary;
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
@@ -274,36 +275,7 @@ impl core::fmt::Debug for ModuleTrainer {
 pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
 
 fn append_cloud_targets(metadata: &mut HashMap<String, String>, targets: &[CloudConnector]) {
-    if targets.is_empty() {
-        return;
-    }
-
-    let mut azure_targets = Vec::new();
-    let mut aws_targets = Vec::new();
-
-    for target in targets {
-        match target {
-            CloudConnector::AzureEventHub { namespace, hub } => {
-                azure_targets.push(format!("event_hub:{namespace}/{hub}"));
-            }
-            CloudConnector::AzureStorageQueue { account, queue } => {
-                azure_targets.push(format!("storage_queue:{account}/{queue}"));
-            }
-            CloudConnector::AwsKinesis { region, stream } => {
-                aws_targets.push(format!("kinesis:{region}/{stream}"));
-            }
-            CloudConnector::AwsSqs { region, queue } => {
-                aws_targets.push(format!("sqs:{region}/{queue}"));
-            }
-        }
-    }
-
-    if !azure_targets.is_empty() {
-        metadata.insert("azure_targets".to_string(), azure_targets.join(","));
-    }
-    if !aws_targets.is_empty() {
-        metadata.insert("aws_targets".to_string(), aws_targets.join(","));
-    }
+    CloudTargetSummary::from_targets(targets).extend_map(metadata);
 }
 
 #[derive(Debug, Clone)]

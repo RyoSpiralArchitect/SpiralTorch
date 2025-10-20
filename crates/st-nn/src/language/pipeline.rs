@@ -1329,6 +1329,7 @@ impl DesirePsiSummary {
 }
 
 mod language_pipeline {
+    use crate::cloud::CloudTargetSummary;
     use crate::roundtable::RoundtableNode;
     use crate::{RoundtableConfig, RoundtableSchedule};
     use st_core::ecosystem::{
@@ -1681,7 +1682,8 @@ mod language_pipeline {
             if let Some(dist) = &distribution_summary {
                 connector_metadata.push(("distribution_mode".to_string(), dist.mode.clone()));
                 connector_metadata.push(("node_id".to_string(), dist.node_id.clone()));
-                connector_metadata.extend(summarise_cloud_targets(&dist.cloud_targets));
+                CloudTargetSummary::from_targets(&dist.cloud_targets)
+                    .extend_vec(&mut connector_metadata);
             }
             self.record_connector("roundtable", connector_metadata);
 
@@ -1958,6 +1960,27 @@ mod language_pipeline {
         summary
     }
 
+    fn format_cloud_targets(targets: &[CloudConnector]) -> Vec<(String, String)> {
+        let mut azure_targets = Vec::new();
+        let mut aws_targets = Vec::new();
+        for target in targets {
+            let descriptor = target.descriptor();
+            match target.provider() {
+                "azure" => azure_targets.push(format!("{}:{descriptor}", target.service())),
+                "aws" => aws_targets.push(format!("{}:{descriptor}", target.service())),
+                _ => {}
+            }
+        }
+        let mut entries = Vec::new();
+        if !azure_targets.is_empty() {
+            entries.push(("azure_targets".to_string(), azure_targets.join(",")));
+        }
+        if !aws_targets.is_empty() {
+            entries.push(("aws_targets".to_string(), aws_targets.join(",")));
+        }
+        entries
+    }
+
     impl LanguagePipeline {
         fn apply_tags(
             &self,
@@ -2151,7 +2174,10 @@ mod language_pipeline {
                 .expect("missing roundtable connector");
             assert_eq!(
                 connector.metadata.get("azure_targets"),
-                Some(&"event_hub:spiral-meta/roundtable,storage_queue:spiralstorage/roundtable".to_string())
+                Some(
+                    &"event_hub:spiral-meta/roundtable,storage_queue:spiralstorage/roundtable"
+                        .to_string()
+                )
             );
             assert_eq!(
                 connector.metadata.get("aws_targets"),
