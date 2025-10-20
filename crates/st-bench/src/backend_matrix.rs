@@ -212,6 +212,41 @@ impl BackendSummary {
     }
 }
 
+/// Aggregate counters describing the entire backend matrix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct MatrixSummary {
+    /// Number of entries marked ready across the matrix.
+    pub ready: usize,
+    /// Number of entries tracked on the watchlist.
+    pub watchlist: usize,
+    /// Number of entries marked as blocked.
+    pub blocked: usize,
+    /// Number of informational entries without readiness markers.
+    pub informational: usize,
+}
+
+impl MatrixSummary {
+    /// Number of entries that have an explicit readiness marker.
+    pub const fn tracked_entries(&self) -> usize {
+        self.ready + self.watchlist + self.blocked
+    }
+
+    /// Total number of entries including informational notes.
+    pub const fn total_entries(&self) -> usize {
+        self.tracked_entries() + self.informational
+    }
+
+    /// Fraction of tracked entries that are marked ready.
+    pub fn readiness_ratio(&self) -> f32 {
+        let tracked = self.tracked_entries();
+        if tracked == 0 {
+            0.0
+        } else {
+            self.ready as f32 / tracked as f32
+        }
+    }
+}
+
 /// Aggregated readiness information across all backends for a single capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct CapabilitySummary {
@@ -350,6 +385,47 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
         ],
     },
     CapabilityRow {
+        capability: "Kernel autotuning",
+        entries: [
+            CapabilityEntry::with_state(CapabilityState::Ready, "Parameter sweeps nightly"),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Shader cache heuristics pending",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Coverage for convolution families in progress",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Heuristic tuner with offline database",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Wavefront parameter search not stabilised",
+            ),
+        ],
+    },
+    CapabilityRow {
+        capability: "Sparse tensor ops",
+        entries: [
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "CSR kernels staged for review",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Requires subgroup atomics coverage",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Blocked,
+                "Awaiting Metal sparse pipeline primitives",
+            ),
+            CapabilityEntry::with_state(CapabilityState::Ready, "CUSPARSE integration validated"),
+            CapabilityEntry::with_state(CapabilityState::Blocked, "ROCm sparse kernels not merged"),
+        ],
+    },
+    CapabilityRow {
         capability: "ONNX export parity",
         entries: [
             CapabilityEntry::with_state(CapabilityState::Ready, "Parity score ≥ 0.9"),
@@ -467,9 +543,43 @@ pub fn capabilities_with_state(state: CapabilityState) -> Vec<&'static Capabilit
         .collect()
 }
 
+/// Returns capability rows where `backend` is marked with the requested state.
+pub fn capabilities_for_backend_with_state(
+    backend: Backend,
+    state: CapabilityState,
+) -> Vec<&'static CapabilityRow> {
+    CAPABILITY_ROWS
+        .iter()
+        .filter(|row| row.entry(backend).state == Some(state))
+        .collect()
+}
+
 /// Serialises the matrix into a JSON value for downstream tooling.
 pub fn capability_matrix_json() -> serde_json::Value {
     serde_json::to_value(CAPABILITY_ROWS).expect("matrix is serialisable")
+}
+
+/// Computes aggregate readiness counts across the entire matrix.
+pub fn matrix_summary() -> MatrixSummary {
+    let mut summary = MatrixSummary {
+        ready: 0,
+        watchlist: 0,
+        blocked: 0,
+        informational: 0,
+    };
+
+    for row in CAPABILITY_ROWS {
+        for entry in &row.entries {
+            match entry.state {
+                Some(CapabilityState::Ready) => summary.ready += 1,
+                Some(CapabilityState::Watchlist) => summary.watchlist += 1,
+                Some(CapabilityState::Blocked) => summary.blocked += 1,
+                None => summary.informational += 1,
+            }
+        }
+    }
+
+    summary
 }
 
 #[cfg(test)]
@@ -509,11 +619,11 @@ mod tests {
     fn summarizes_backend_counts_watchlist_items() {
         let hip = summarize_backend(Backend::Hip);
         assert_eq!(hip.backend, Backend::Hip);
-        assert_eq!(hip.watchlist, 6);
-        assert_eq!(hip.blocked, 1);
+        assert_eq!(hip.watchlist, 7);
+        assert_eq!(hip.blocked, 2);
         assert!(!hip.is_fully_ready());
-        assert_eq!(hip.tracked_capabilities(), 7);
-        assert!(hip.readiness_ratio() < 0.5);
+        assert_eq!(hip.tracked_capabilities(), 9);
+        assert_eq!(hip.readiness_ratio(), 0.0);
         assert!(hip
             .notes
             .iter()
@@ -565,5 +675,56 @@ mod tests {
 
         let ready_rows = capabilities_with_state(CapabilityState::Ready);
         assert!(ready_rows.iter().any(|row| row.capability == "Tensor ops"));
+    }
+
+    #[test]
+    fn capabilities_for_backend_with_state_lists_pending_items() {
+        let hip_watchlist =
+            capabilities_for_backend_with_state(Backend::Hip, CapabilityState::Watchlist);
+        assert!(hip_watchlist
+            .iter()
+            .any(|row| row.capability == "Kernel autotuning"));
+        assert!(hip_watchlist
+            .iter()
+            .all(|row| row.entry(Backend::Hip).state == Some(CapabilityState::Watchlist)));
+
+        let cuda_blocked =
+            capabilities_for_backend_with_state(Backend::Cuda, CapabilityState::Blocked);
+        assert!(cuda_blocked.is_empty());
+    }
+
+    #[test]
+    fn matrix_summary_matches_manual_counts() {
+        let summary = matrix_summary();
+        let mut ready = 0usize;
+        let mut watchlist = 0usize;
+        let mut blocked = 0usize;
+        let mut informational = 0usize;
+
+        for row in capability_matrix() {
+            for entry in &row.entries {
+                match entry.state {
+                    Some(CapabilityState::Ready) => ready += 1,
+                    Some(CapabilityState::Watchlist) => watchlist += 1,
+                    Some(CapabilityState::Blocked) => blocked += 1,
+                    None => informational += 1,
+                }
+            }
+        }
+
+        assert_eq!(summary.ready, ready);
+        assert_eq!(summary.watchlist, watchlist);
+        assert_eq!(summary.blocked, blocked);
+        assert_eq!(summary.informational, informational);
+        assert_eq!(
+            summary.total_entries(),
+            ready + watchlist + blocked + informational
+        );
+        if summary.tracked_entries() > 0 {
+            let expected_ratio = ready as f32 / summary.tracked_entries() as f32;
+            assert!((summary.readiness_ratio() - expected_ratio).abs() <= f32::EPSILON);
+        } else {
+            assert_eq!(summary.readiness_ratio(), 0.0);
+        }
     }
 }
