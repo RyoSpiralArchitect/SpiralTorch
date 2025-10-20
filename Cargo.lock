@@ -2604,6 +2604,7 @@ version = "0.1.0"
 dependencies = [
  "rand",
  "st-core",
+ "st-nn",
  "st-tensor",
 ]
 

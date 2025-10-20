@@ -67,7 +67,11 @@ use std::sync::Arc;
 
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
+use st_nn::layers::spiral_rnn::SpiralRnn;
+use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
+
+const RESONANCE_FEATURES_PER_SLICE: usize = 10;
 
 /// Volumetric container that holds planar tensors along the Z axis.
 #[derive(Clone, Debug, PartialEq)]
@@ -76,6 +80,76 @@ pub struct ZSpaceVolume {
     height: usize,
     width: usize,
     voxels: Vec<f32>,
+}
+
+/// Statistical summary describing each slice inside a [`ZSpaceVolume`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZSliceProfile {
+    means: Vec<f32>,
+    stds: Vec<f32>,
+    energies: Vec<f32>,
+}
+
+impl ZSliceProfile {
+    /// Creates a new profile from explicit per-slice statistics.
+    pub fn new(means: Vec<f32>, stds: Vec<f32>, energies: Vec<f32>) -> PureResult<Self> {
+        if means.is_empty() {
+            return Err(TensorError::EmptyInput("z_slice_profile"));
+        }
+        let depth = means.len();
+        if stds.len() != depth {
+            return Err(TensorError::DataLength {
+                expected: depth,
+                got: stds.len(),
+            });
+        }
+        if energies.len() != depth {
+            return Err(TensorError::DataLength {
+                expected: depth,
+                got: energies.len(),
+            });
+        }
+        Ok(Self {
+            means,
+            stds,
+            energies,
+        })
+    }
+
+    /// Number of slices contained in the profile.
+    pub fn depth(&self) -> usize {
+        self.means.len()
+    }
+
+    /// Returns an immutable view of the slice means.
+    pub fn means(&self) -> &[f32] {
+        &self.means
+    }
+
+    /// Returns an immutable view of the slice standard deviations.
+    pub fn stds(&self) -> &[f32] {
+        &self.stds
+    }
+
+    /// Returns an immutable view of the slice energies.
+    pub fn energies(&self) -> &[f32] {
+        &self.energies
+    }
+
+    /// Fetches the mean intensity for the given slice index.
+    pub fn mean(&self, index: usize) -> f32 {
+        self.means[index]
+    }
+
+    /// Fetches the standard deviation for the given slice index.
+    pub fn std(&self, index: usize) -> f32 {
+        self.stds[index]
+    }
+
+    /// Fetches the mean squared energy for the given slice index.
+    pub fn energy(&self, index: usize) -> f32 {
+        self.energies[index]
+    }
 }
 
 impl ZSpaceVolume {
@@ -471,6 +545,259 @@ impl TemporalResonanceBuffer {
                 Ok(history)
             }
         }
+    }
+}
+
+/// Synthesises differential resonances using a [`SpiralRnn`] conditioned on Z-space telemetry.
+#[derive(Debug)]
+pub struct ResonanceGenerator {
+    rnn: SpiralRnn,
+    features_per_slice: usize,
+    steps: usize,
+    hidden_dim: usize,
+}
+
+impl ResonanceGenerator {
+    /// Creates a generator that uses the default feature set per slice.
+    pub fn new(name: impl Into<String>, hidden_dim: usize, steps: usize) -> PureResult<Self> {
+        Self::with_features(name, RESONANCE_FEATURES_PER_SLICE, hidden_dim, steps)
+    }
+
+    /// Creates a generator with an explicit feature dimensionality per slice.
+    pub fn with_features(
+        name: impl Into<String>,
+        features_per_slice: usize,
+        hidden_dim: usize,
+        steps: usize,
+    ) -> PureResult<Self> {
+        if features_per_slice == 0 || hidden_dim == 0 || steps == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: features_per_slice.max(1),
+                cols: hidden_dim.max(1),
+            });
+        }
+        let rnn = SpiralRnn::new(name, features_per_slice, hidden_dim, steps)?;
+        Ok(Self {
+            rnn,
+            features_per_slice,
+            steps,
+            hidden_dim,
+        })
+    }
+
+    /// Number of conditioning features encoded for each Z slice.
+    pub fn features_per_slice(&self) -> usize {
+        self.features_per_slice
+    }
+
+    /// Number of temporal steps expected by the underlying [`SpiralRnn`].
+    pub fn steps(&self) -> usize {
+        self.steps
+    }
+
+    /// Hidden dimensionality of the [`SpiralRnn`].
+    pub fn hidden_dim(&self) -> usize {
+        self.hidden_dim
+    }
+
+    /// Immutable access to the internal [`SpiralRnn`].
+    pub fn rnn(&self) -> &SpiralRnn {
+        &self.rnn
+    }
+
+    /// Mutable access to the internal [`SpiralRnn`] for fine-tuning.
+    pub fn rnn_mut(&mut self) -> &mut SpiralRnn {
+        &mut self.rnn
+    }
+
+    /// Generates a [`DifferentialResonance`] conditioned on the provided telemetry.
+    pub fn generate(
+        &mut self,
+        volume: &ZSpaceVolume,
+        projector: &VisionProjector,
+        chrono: Option<&ChronoSummary>,
+        atlas: Option<&AtlasFrame>,
+        previous: Option<&DifferentialResonance>,
+    ) -> PureResult<DifferentialResonance> {
+        if volume.depth() > self.steps {
+            return Err(TensorError::InvalidDimensions {
+                rows: volume.depth(),
+                cols: self.steps,
+            });
+        }
+        let profile = volume.slice_profile()?;
+        let encoded = self.encode(volume, projector, chrono, atlas, previous, &profile)?;
+        let latent = self.rnn.forward(&encoded)?;
+        self.decode(
+            volume, projector, chrono, atlas, previous, &profile, &latent,
+        )
+    }
+
+    fn encode(
+        &self,
+        volume: &ZSpaceVolume,
+        projector: &VisionProjector,
+        chrono: Option<&ChronoSummary>,
+        atlas: Option<&AtlasFrame>,
+        previous: Option<&DifferentialResonance>,
+        profile: &ZSliceProfile,
+    ) -> PureResult<Tensor> {
+        let depth = profile.depth();
+        let mut buffer = vec![0.0f32; self.steps * self.features_per_slice];
+        let atlas_signal = atlas
+            .and_then(|frame| frame.z_signal)
+            .unwrap_or_else(|| projector.focus());
+        let atlas_pressure = atlas
+            .and_then(|frame| frame.suggested_pressure)
+            .unwrap_or_else(|| projector.spread());
+        let atlas_total = atlas
+            .and_then(|frame| frame.collapse_total)
+            .unwrap_or_else(|| projector.energy_bias());
+        let chrono_mean = chrono
+            .map(|summary| summary.mean_energy)
+            .unwrap_or(atlas_total);
+        let chrono_std = chrono.map(|summary| summary.energy_std).unwrap_or(0.0);
+        let global_energy = volume.total_energy();
+        let aspect = if volume.width() > 0 {
+            volume.height() as f32 / volume.width() as f32
+        } else {
+            1.0
+        };
+        let prev_energy = previous.map(|res| res.infinity_energy.data().to_vec());
+        let prev_objective = previous.map(|res| res.recursive_objective.data().to_vec());
+        for idx in 0..depth {
+            let offset = idx * self.features_per_slice;
+            if self.features_per_slice > 0 {
+                buffer[offset] = profile.mean(idx);
+            }
+            if self.features_per_slice > 1 {
+                buffer[offset + 1] = profile.std(idx);
+            }
+            if self.features_per_slice > 2 {
+                buffer[offset + 2] = profile.energy(idx);
+            }
+            if self.features_per_slice > 3 {
+                buffer[offset + 3] = projector.focus();
+            }
+            if self.features_per_slice > 4 {
+                buffer[offset + 4] = projector.spread();
+            }
+            if self.features_per_slice > 5 {
+                buffer[offset + 5] = projector.energy_bias();
+            }
+            if self.features_per_slice > 6 {
+                buffer[offset + 6] = atlas_signal;
+            }
+            if self.features_per_slice > 7 {
+                buffer[offset + 7] = atlas_pressure;
+            }
+            if self.features_per_slice > 8 {
+                buffer[offset + 8] = prev_energy
+                    .as_ref()
+                    .map(|values| values[idx % values.len()])
+                    .unwrap_or(chrono_mean);
+            }
+            if self.features_per_slice > 9 {
+                buffer[offset + 9] = prev_objective
+                    .as_ref()
+                    .map(|values| values[idx % values.len()])
+                    .unwrap_or(chrono_std);
+            }
+            if self.features_per_slice > 10 {
+                buffer[offset + 10] = global_energy;
+            }
+            if self.features_per_slice > 11 {
+                buffer[offset + 11] = aspect;
+            }
+        }
+        Tensor::from_vec(1, buffer.len(), buffer)
+    }
+
+    fn decode(
+        &self,
+        volume: &ZSpaceVolume,
+        projector: &VisionProjector,
+        chrono: Option<&ChronoSummary>,
+        atlas: Option<&AtlasFrame>,
+        previous: Option<&DifferentialResonance>,
+        profile: &ZSliceProfile,
+        latent: &Tensor,
+    ) -> PureResult<DifferentialResonance> {
+        let depth = volume.depth();
+        let hidden = latent.data();
+        if hidden.is_empty() {
+            return Err(TensorError::EmptyInput("spiral_resonance_latent"));
+        }
+        let chrono_drift = chrono.map(|summary| summary.mean_drift).unwrap_or(0.0);
+        let chrono_energy_std = chrono.map(|summary| summary.energy_std).unwrap_or(0.0);
+        let chrono_drift_std = chrono.map(|summary| summary.drift_std).unwrap_or(0.0);
+        let atlas_feedback = atlas
+            .and_then(|frame| frame.collapse_total)
+            .unwrap_or_else(|| projector.energy_bias());
+        let prev_energy = previous.map(|res| res.infinity_energy.data().to_vec());
+        let prev_objective = previous.map(|res| res.recursive_objective.data().to_vec());
+        let prev_homotopy = previous.map(|res| res.homotopy_flow.data().to_vec());
+        let prev_projection = previous.map(|res| res.infinity_projection.data().to_vec());
+
+        let mut energies = Vec::with_capacity(depth);
+        let mut objectives = Vec::with_capacity(depth);
+        let mut homotopies = Vec::with_capacity(depth);
+        let mut projections = Vec::with_capacity(depth);
+        let mut functors = Vec::with_capacity(depth);
+
+        for idx in 0..depth {
+            let base = hidden[idx % hidden.len()];
+            let mean = profile.mean(idx);
+            let std = profile.std(idx);
+            let slice_energy = profile.energy(idx);
+            let prev_e = prev_energy
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(slice_energy);
+            let prev_o = prev_objective
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(mean);
+            let prev_h = prev_homotopy
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(0.0);
+            let prev_p = prev_projection
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(slice_energy.tanh());
+
+            let intensity = mean.abs() + std + slice_energy;
+            let energy_value = (base + intensity + prev_e + atlas_feedback).abs() + 1e-3;
+            energies.push(energy_value);
+
+            let objective_value = (base + prev_o + projector.energy_bias() + chrono_drift).tanh();
+            objectives.push(objective_value);
+
+            let homotopy_value = (base + prev_h + projector.focus() - 0.5).tanh();
+            homotopies.push(homotopy_value);
+
+            let projection_value = (base + prev_p + slice_energy - chrono_energy_std).tanh();
+            projections.push(projection_value);
+
+            let functor_value =
+                objective_value * 0.5 + slice_energy * 0.1 + chrono_drift_std * 0.05;
+            functors.push(functor_value);
+        }
+
+        let homotopy_tensor = Tensor::from_vec(1, depth, homotopies)?;
+        let functor_tensor = Tensor::from_vec(1, depth, functors)?;
+        let objective_tensor = Tensor::from_vec(1, depth, objectives)?;
+        let projection_tensor = Tensor::from_vec(1, depth, projections)?;
+        let energy_tensor = Tensor::from_vec(1, depth, energies)?;
+
+        Ok(DifferentialResonance {
+            homotopy_flow: homotopy_tensor,
+            functor_linearisation: functor_tensor,
+            recursive_objective: objective_tensor,
+            infinity_projection: projection_tensor,
+            infinity_energy: energy_tensor,
+        })
     }
 }
 
@@ -1199,6 +1526,47 @@ impl ZSpaceVolume {
     /// Converts the volume back into an [`ImageTensor`].
     pub fn to_image_tensor(&self) -> PureResult<ImageTensor> {
         ImageTensor::new(self.depth, self.height, self.width, self.voxels.clone())
+    }
+
+    /// Computes per-slice summary statistics for resonance synthesis.
+    pub fn slice_profile(&self) -> PureResult<ZSliceProfile> {
+        let slice_len = self.height * self.width;
+        if slice_len == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: self.height,
+                cols: self.width,
+            });
+        }
+        let mut means = Vec::with_capacity(self.depth);
+        let mut stds = Vec::with_capacity(self.depth);
+        let mut energies = Vec::with_capacity(self.depth);
+        let normaliser = slice_len as f32;
+        for idx in 0..self.depth {
+            let start = idx * slice_len;
+            let end = start + slice_len;
+            let slice = &self.voxels[start..end];
+            let mut sum = 0.0f32;
+            let mut sum_sq = 0.0f32;
+            for &value in slice.iter() {
+                sum += value;
+                sum_sq += value * value;
+            }
+            let mean = sum / normaliser;
+            let variance = (sum_sq / normaliser) - mean.powi(2);
+            means.push(mean);
+            stds.push(variance.max(0.0).sqrt());
+            energies.push(sum_sq / normaliser);
+        }
+        ZSliceProfile::new(means, stds, energies)
+    }
+
+    /// Computes the mean squared energy across the entire volume.
+    pub fn total_energy(&self) -> f32 {
+        if self.voxels.is_empty() {
+            return 0.0;
+        }
+        let sum_sq: f32 = self.voxels.iter().map(|value| value * value).sum();
+        sum_sq / (self.voxels.len() as f32)
     }
 }
 
@@ -2383,6 +2751,22 @@ mod tests {
         }
     }
 
+    fn toy_summary() -> ChronoSummary {
+        ChronoSummary {
+            frames: 4,
+            duration: 0.25,
+            latest_timestamp: 1.5,
+            mean_drift: 0.05,
+            mean_abs_drift: 0.06,
+            drift_std: 0.02,
+            mean_energy: 1.4,
+            energy_std: 0.3,
+            mean_decay: -0.1,
+            min_energy: 1.1,
+            max_energy: 1.8,
+        }
+    }
+
     #[test]
     fn volume_from_slices_respects_shapes() {
         let slice_a = tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2);
@@ -2568,6 +2952,82 @@ mod tests {
         assert!((weights_after.data()[0] - weights_before.data()[0]).abs() > 1e-3);
         let projection = projector.project(&volume, &resonance).unwrap();
         assert_eq!(projection.shape(), (2, 2));
+    }
+
+    #[test]
+    fn slice_profile_matches_manual_stats() {
+        let slices = vec![
+            tensor_from(&[1.0, 3.0], 1, 2),
+            tensor_from(&[2.0, 4.0], 1, 2),
+        ];
+        let volume = ZSpaceVolume::from_slices(&slices).unwrap();
+        let profile = volume.slice_profile().unwrap();
+        assert_eq!(profile.depth(), 2);
+        let expected_mean0 = (1.0 + 3.0) / 2.0;
+        assert!((profile.mean(0) - expected_mean0).abs() < 1e-6);
+        let variance0 =
+            (((1.0 - expected_mean0).powi(2) + (3.0 - expected_mean0).powi(2)) / 2.0).max(0.0);
+        assert!((profile.std(0) - variance0.sqrt()).abs() < 1e-6);
+        let energy1 = (2.0f32.powi(2) + 4.0f32.powi(2)) / 2.0;
+        assert!((profile.energy(1) - energy1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn resonance_generator_produces_projectable_resonance() {
+        let slices = vec![
+            tensor_from(&[0.1, 0.2, 0.3, 0.4], 2, 2),
+            tensor_from(&[0.5, 0.4, 0.3, 0.2], 2, 2),
+            tensor_from(&[0.9, 0.8, 0.7, 0.6], 2, 2),
+        ];
+        let volume = ZSpaceVolume::from_slices(&slices).unwrap();
+        let mut generator = ResonanceGenerator::new("loop", 8, 3).unwrap();
+        let projector =
+            VisionProjector::new(0.6, 0.4, 0.2).with_spectral_window(SpectralWindow::hann());
+        let chrono = toy_summary();
+        let mut atlas = AtlasFrame::new(0.2);
+        atlas.z_signal = Some(0.75);
+        atlas.suggested_pressure = Some(48.0);
+        atlas.collapse_total = Some(1.1);
+
+        let resonance = generator
+            .generate(&volume, &projector, Some(&chrono), Some(&atlas), None)
+            .unwrap();
+        assert_eq!(resonance.infinity_energy.shape(), (1, volume.depth()));
+        let weights = projector.depth_weights(&volume, &resonance).unwrap();
+        assert_eq!(weights.data().len(), volume.depth());
+        assert!((weights.data().iter().sum::<f32>() - 1.0).abs() < 1e-3);
+        let projection = projector.project(&volume, &resonance).unwrap();
+        assert_eq!(projection.shape(), (volume.height(), volume.width()));
+    }
+
+    #[test]
+    fn resonance_generator_respects_feedback_history() {
+        let slices = vec![
+            tensor_from(&[0.2, 0.1, 0.0, 0.3], 2, 2),
+            tensor_from(&[0.4, 0.6, 0.8, 1.0], 2, 2),
+            tensor_from(&[0.9, 0.7, 0.5, 0.3], 2, 2),
+        ];
+        let volume = ZSpaceVolume::from_slices(&slices).unwrap();
+        let mut generator = ResonanceGenerator::new("loop-feedback", 10, 3).unwrap();
+        let projector = VisionProjector::new(0.45, 0.5, -0.2);
+        let chrono = toy_summary();
+        let atlas = AtlasFrame::new(0.4);
+
+        let first = generator
+            .generate(&volume, &projector, Some(&chrono), Some(&atlas), None)
+            .unwrap();
+        let second = generator
+            .generate(
+                &volume,
+                &projector,
+                Some(&chrono),
+                Some(&atlas),
+                Some(&first),
+            )
+            .unwrap();
+        let first_energy = first.infinity_energy.data()[0];
+        let second_energy = second.infinity_energy.data()[0];
+        assert!((second_energy - first_energy).abs() > 1e-6);
     }
 
     #[test]
