@@ -4,10 +4,16 @@ use pyo3::types::PyModule;
 use pyo3::wrap_pyfunction;
 
 #[cfg(feature = "nn")]
+use crate::pure::PyOpenCartesianTopos;
+#[cfg(feature = "nn")]
 use crate::tensor::{tensor_err_to_py, PyTensor};
 
 #[cfg(feature = "nn")]
-use st_nn::{dataset::DataLoaderBatches, dataset_from_vec, DataLoader, Dataset};
+use st_nn::{
+    dataset::DataLoaderBatches, dataset_from_vec, DataLoader, Dataset, ZSpaceCoherenceSequencer,
+};
+#[cfg(feature = "nn")]
+use st_tensor::OpenCartesianTopos;
 
 #[cfg(feature = "nn")]
 fn convert_samples(
@@ -178,16 +184,87 @@ fn from_samples(samples: Vec<(PyTensor, PyTensor)>) -> PyDataLoader {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(
+    module = "spiraltorch.nn",
+    name = "ZSpaceCoherenceSequencer",
+    unsendable
+)]
+pub(crate) struct PyZSpaceCoherenceSequencer {
+    inner: ZSpaceCoherenceSequencer,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceCoherenceSequencer {
+    #[new]
+    #[pyo3(signature = (dim, num_heads, curvature, *, topos=None))]
+    pub fn new(
+        dim: usize,
+        num_heads: usize,
+        curvature: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<Self> {
+        let topos = match topos {
+            Some(guard) => guard.inner.clone(),
+            None => OpenCartesianTopos::new(curvature, 1e-5, 10.0, 256, 8192)
+                .map_err(tensor_err_to_py)?,
+        };
+        let inner = ZSpaceCoherenceSequencer::new(dim, num_heads, curvature, topos)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    pub fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner.forward(&x.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+
+    #[getter]
+    pub fn dim(&self) -> usize {
+        self.inner.dim
+    }
+
+    #[getter]
+    pub fn num_heads(&self) -> usize {
+        self.inner.num_heads
+    }
+
+    #[getter]
+    pub fn curvature(&self) -> f32 {
+        self.inner.curvature
+    }
+
+    pub fn maxwell_channels(&self) -> usize {
+        self.inner.maxwell_channels()
+    }
+
+    pub fn topos(&self) -> PyOpenCartesianTopos {
+        PyOpenCartesianTopos::from_topos(self.inner.topos().clone())
+    }
+}
+
+#[cfg(feature = "nn")]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "nn")?;
     module.add("__doc__", "SpiralTorch neural network primitives")?;
     module.add_class::<PyDataset>()?;
     module.add_class::<PyDataLoader>()?;
     module.add_class::<PyDataLoaderIter>()?;
+    module.add_class::<PyZSpaceCoherenceSequencer>()?;
     module.add_function(wrap_pyfunction!(from_samples, &module)?)?;
     module.add(
         "__all__",
-        vec!["Dataset", "DataLoader", "DataLoaderIter", "from_samples"],
+        vec![
+            "Dataset",
+            "DataLoader",
+            "DataLoaderIter",
+            "ZSpaceCoherenceSequencer",
+            "from_samples",
+        ],
     )?;
     parent.add_submodule(&module)?;
     Ok(())
