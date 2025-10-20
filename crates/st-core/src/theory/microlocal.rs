@@ -408,18 +408,21 @@ impl InterfaceZPulse {
                 scale_weights.push((scale, weight));
             }
         }
-        let scale = if scale_weights.is_empty() {
-            pulses.iter().find_map(|pulse| pulse.scale)
+
+        // Combine the weighted scale contributions from the input pulses.  When all
+        // contributors omit the scale metadata we conservatively fall back to the
+        // most recent non-empty sample so downstream consumers retain continuity.
+        let aggregated_scale = if scale_weight > 0.0 {
+            ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
         } else {
-            ZScale::weighted_average(scale_weights.into_iter())
-                .or_else(|| pulses.iter().find_map(|pulse| pulse.scale))
+            pulses.iter().rev().find_map(|pulse| pulse.scale)
         };
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
             interface_cells,
             band_energy: band,
-            scale,
+            scale: aggregated_scale.or(Some(ZScale::ONE)),
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {

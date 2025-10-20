@@ -731,7 +731,7 @@ pub mod zmeta {
                 *value *= gain;
             }
 
-            self.logistic_project_step_legacy(&delta);
+            self.logistic_project_step(&delta);
         }
 
         fn apply_structural_drive(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
