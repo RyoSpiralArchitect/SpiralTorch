@@ -12,6 +12,7 @@ mod telemetry;
 mod pure;
 mod nn;
 mod planner;
+mod selfsup;
 
 // =======================
 // extras（安全・自己完結）
@@ -204,6 +205,10 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     frac_bindings::register(py, &frac)?; // 実APIを公開
     m.add_submodule(&frac)?;
 
+    let selfsup_mod = PyModule::new_bound(py, "selfsup")?;
+    selfsup::register(py, &selfsup_mod)?;
+    m.add_submodule(&selfsup_mod)?;
+
     let dataset = PyModule::new_bound(py, "dataset")?;
     dataset.add("__doc__", "Datasets & loaders")?;
     m.add_submodule(&dataset)?;
@@ -222,7 +227,7 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
         "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
         "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
-        "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
+        "nn","frac","selfsup","dataset","linalg","rl","rec","telemetry","ecosystem",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",
