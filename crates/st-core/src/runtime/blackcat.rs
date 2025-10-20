@@ -12,6 +12,8 @@ use st_frac::FracBackend;
 use wilson::wilson_lower;
 use zmeta::{ZMetaES, ZMetaParams};
 
+use crate::telemetry::monitoring::MonitoringHub;
+
 /// Metrics reported by a training loop back into the runtime.
 #[derive(Clone, Debug, Default)]
 pub struct StepMetrics {
@@ -110,6 +112,7 @@ pub struct BlackCatRuntime {
     metrics_ema: MetricsEma,
     frac_penalty_ema: RollingEma,
     extra_ema: HashMap<String, RollingEma>,
+    monitoring: MonitoringHub,
 }
 
 impl BlackCatRuntime {
@@ -141,6 +144,7 @@ impl BlackCatRuntime {
             metrics_ema: MetricsEma::new(stats_alpha),
             frac_penalty_ema: RollingEma::new(stats_alpha),
             extra_ema: HashMap::new(),
+            monitoring: MonitoringHub::default(),
         }
     }
 
@@ -232,7 +236,18 @@ impl BlackCatRuntime {
                 .or_insert_with(|| RollingEma::new(self.stats_alpha))
                 .update(*value);
         }
+        let _ = self.monitoring.observe(metrics, reward_current);
         reward_current
+    }
+
+    /// Access the embedded monitoring hub for instrumentation.
+    pub fn monitoring(&self) -> &MonitoringHub {
+        &self.monitoring
+    }
+
+    /// Mutable access to attach exporters or tweak configuration.
+    pub fn monitoring_mut(&mut self) -> &mut MonitoringHub {
+        &mut self.monitoring
     }
 
     /// Returns the dimensionality expected by the contextual bandits.
