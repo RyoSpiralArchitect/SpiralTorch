@@ -77,7 +77,6 @@ use st_nn::layers::spiral_rnn::SpiralRnn;
 use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
-pub mod transforms;
 pub mod datasets;
 pub mod nerf;
 pub mod transforms;
