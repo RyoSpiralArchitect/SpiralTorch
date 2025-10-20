@@ -15,6 +15,7 @@ members = [
   "crates/st-rec",
   "crates/st-bench",
   "crates/st-amg",
+  "crates/spiral-opt",
   "crates/spiral-hpo",
   "crates/spiral-safety",
   "bindings/st-py",
@@ -36,6 +37,7 @@ default-members = [
   "crates/st-rec",
   "crates/st-bench",
   "crates/st-amg",
+  "crates/spiral-opt",
   "bindings/st-wasm"
 ]
 resolver = "2"
