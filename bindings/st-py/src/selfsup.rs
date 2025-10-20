@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
+use pyo3::IntoPy;
 use spiral_selfsup::{contrastive, masked, ObjectiveError};
 
 fn objective_err(err: ObjectiveError) -> PyErr {
@@ -19,7 +20,7 @@ fn info_nce(
     let result = contrastive::info_nce_loss(&anchors, &positives, temperature, normalize)
         .map_err(objective_err)?;
 
-    let dict = PyDict::new(py);
+    let dict = PyDict::new_bound(py);
     dict.set_item("loss", result.loss)?;
     let mut rows = Vec::with_capacity(result.batch);
     for row in result.logits.chunks(result.batch) {
@@ -30,7 +31,7 @@ fn info_nce(
     dict.set_item("batch", result.batch)?;
     dict.set_item("temperature", temperature)?;
     dict.set_item("normalized", normalize)?;
-    Ok(dict.into())
+    Ok(dict.into_py(py))
 }
 
 #[pyfunction]
@@ -44,11 +45,11 @@ fn masked_mse(
     let result =
         masked::masked_mse_loss(&predictions, &targets, &mask_indices).map_err(objective_err)?;
 
-    let dict = PyDict::new(py);
+    let dict = PyDict::new_bound(py);
     dict.set_item("loss", result.loss)?;
     dict.set_item("total_masked", result.total_masked)?;
     dict.set_item("per_example", result.per_example)?;
-    Ok(dict.into())
+    Ok(dict.into_py(py))
 }
 
 pub fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {

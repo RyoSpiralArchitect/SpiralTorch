@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
+use pyo3::IntoPy;
 use spiral_opt::{
     CompressionReport, OptimisationError, QatConfig, QatObserver, QuantizationLeveling,
     QuantizationReport, StructuredPruner, StructuredPruningConfig, StructuredPruningReport,
@@ -42,8 +43,8 @@ impl PyQuantizationReport {
         self.inner.observed_steps
     }
 
-    fn as_dict<'py>(&self, py: Python<'py>) -> PyResult<&'py PyDict> {
-        let dict = PyDict::new(py);
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
         dict.set_item("bit_width", self.inner.bit_width)?;
         dict.set_item("observed_min", self.inner.observed_min)?;
         dict.set_item("observed_max", self.inner.observed_max)?;
@@ -51,7 +52,7 @@ impl PyQuantizationReport {
         dict.set_item("zero_point", self.inner.zero_point)?;
         dict.set_item("quant_error", self.inner.quant_error)?;
         dict.set_item("observed_steps", self.inner.observed_steps)?;
-        Ok(dict)
+        Ok(dict.into_py(py))
     }
 }
 
@@ -93,15 +94,15 @@ impl PyStructuredPruningReport {
         self.inner.kept_blocks
     }
 
-    fn as_dict<'py>(&self, py: Python<'py>) -> PyResult<&'py PyDict> {
-        let dict = PyDict::new(py);
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
         dict.set_item("target_sparsity", self.inner.target_sparsity)?;
         dict.set_item("achieved_sparsity", self.inner.achieved_sparsity)?;
         dict.set_item("block_size", self.inner.block_size)?;
         dict.set_item("pruned_blocks", self.inner.pruned_blocks)?;
         dict.set_item("kept_blocks", self.inner.kept_blocks)?;
         dict.set_item("l2_error", self.inner.l2_error)?;
-        Ok(dict)
+        Ok(dict.into_py(py))
     }
 }
 
@@ -141,8 +142,8 @@ impl PyCompressionReport {
         self.inner.pruning.is_some()
     }
 
-    fn as_dict<'py>(&self, py: Python<'py>) -> PyResult<&'py PyDict> {
-        let dict = PyDict::new(py);
+    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
         dict.set_item("original_params", self.inner.original_params)?;
         dict.set_item("remaining_params", self.inner.remaining_params)?;
         dict.set_item(
@@ -161,7 +162,7 @@ impl PyCompressionReport {
                 PyStructuredPruningReport { inner: p.clone() }.as_dict(py)?,
             )?;
         }
-        Ok(dict)
+        Ok(dict.into_py(py))
     }
 }
 
@@ -237,13 +238,12 @@ fn structured_prune(
 #[pyo3(signature = (weights, observer, pruning_config=None, latency_hint=0.25))]
 fn compress_weights(
     mut weights: Vec<f32>,
-    observer: &PyCell<PyQatObserver>,
+    mut observer: PyRefMut<'_, PyQatObserver>,
     pruning_config: Option<(usize, f32, f32)>,
     latency_hint: f32,
 ) -> PyResult<(Vec<f32>, PyCompressionReport)> {
-    let mut observer_mut = observer.borrow_mut();
-    observer_mut.inner.observe(&weights);
-    let quant_report = observer_mut.inner.quantize(&mut weights);
+    observer.inner.observe(&weights);
+    let quant_report = observer.inner.quantize(&mut weights);
 
     let (remaining_params, pruning_report) = if let Some((block, sparsity, keep)) = pruning_config {
         let pruner = StructuredPruner::new();

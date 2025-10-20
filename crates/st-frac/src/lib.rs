@@ -37,6 +37,10 @@ pub enum Pad {
     Zero,
     /// Mirror the signal across the boundary (a.k.a. Neumann reflection).
     Reflect,
+    /// Clamp to the edge value (a.k.a. Dirichlet boundary condition).
+    Edge,
+    /// Wrap around the signal length (periodic boundary condition).
+    Wrap,
     /// Fill with the provided constant value.
     Constant(f32),
 }
@@ -54,17 +58,38 @@ pub fn gl_coeffs(alpha: f32, len: usize) -> Vec<f32> {
     c
 }
 
-fn reflected_index(mut idx: isize, len: usize) -> usize {
+fn wrap_index(idx: isize, len: usize) -> usize {
     debug_assert!(len > 0);
     let len = len as isize;
-    loop {
+    idx.rem_euclid(len) as usize
+}
+
+fn reflected_index(mut idx: isize, len: usize) -> usize {
+    debug_assert!(len > 0);
+    if len == 1 {
+        return 0;
+    }
+
+    let len_isize = len as isize;
+    while idx < 0 || idx >= len_isize {
         if idx < 0 {
             idx = -idx - 1;
-        } else if idx >= len {
-            idx = len - (idx - len) - 1;
         } else {
-            break idx as usize;
+            idx = len_isize - (idx - len_isize) - 1;
         }
+    }
+
+    idx as usize
+}
+
+fn clamped_edge_index(idx: isize, len: usize) -> usize {
+    debug_assert!(len > 0);
+    if idx < 0 {
+        0
+    } else if idx as usize >= len {
+        len - 1
+    } else {
+        idx as usize
     }
 }
 
@@ -74,7 +99,7 @@ fn sample_with_pad(x: &[f32], idx: isize, pad: Pad) -> f32 {
 
     if len == 0 {
         return match pad {
-            Pad::Zero | Pad::Reflect => 0.0,
+            Pad::Zero | Pad::Reflect | Pad::Edge | Pad::Wrap => 0.0,
             Pad::Constant(v) => v,
         };
     }
@@ -86,10 +111,9 @@ fn sample_with_pad(x: &[f32], idx: isize, pad: Pad) -> f32 {
     match pad {
         Pad::Zero => 0.0,
         Pad::Constant(v) => v,
-        Pad::Reflect => {
-            let idx = reflected_index(idx, x.len());
-            x[idx]
-        }
+        Pad::Reflect => x[reflected_index(idx, x.len())],
+        Pad::Edge => x[clamped_edge_index(idx, x.len())],
+        Pad::Wrap => x[wrap_index(idx, x.len())],
     }
 }
 
@@ -345,14 +369,68 @@ mod tests {
     }
 
     #[test]
+    fn edge_pad_clamps_to_boundary() {
+        let x = vec![3.0, 7.0, 11.0];
+        let coeff = vec![1.0, 1.0, 1.0];
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Edge, Some(1.0)).unwrap();
+
+        assert_eq!(y[0], 3.0 + 3.0 + 3.0);
+    }
+
+    #[test]
+    fn wrap_pad_cycles_through_signal() {
+        let x = vec![2.0, 4.0, 6.0];
+        let coeff = vec![1.0, 1.0, 1.0, 1.0];
+        let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Wrap, Some(1.0)).unwrap();
+
+        assert_eq!(y[0], 2.0 + 6.0 + 4.0 + 2.0);
+        assert_eq!(y[1], 4.0 + 2.0 + 6.0 + 4.0);
+    }
+
+    #[test]
     fn reflected_index_wraps_right_edge() {
         assert_eq!(super::reflected_index(3, 3), 2);
         assert_eq!(super::reflected_index(4, 3), 1);
     }
 
     #[test]
+    fn reflected_index_handles_far_offsets() {
+        assert_eq!(super::reflected_index(-7, 4), 1);
+        assert_eq!(super::reflected_index(9, 4), 1);
+        assert_eq!(super::reflected_index(-1, 1), 0);
+    }
+
+    #[test]
+    fn wrap_index_handles_large_displacements() {
+        assert_eq!(super::wrap_index(10, 3), 1);
+        assert_eq!(super::wrap_index(-8, 5), 2);
+    }
+
+    #[test]
+    fn clamped_edge_index_clamps_bounds() {
+        assert_eq!(super::clamped_edge_index(-3, 4), 0);
+        assert_eq!(super::clamped_edge_index(8, 4), 3);
+        assert_eq!(super::clamped_edge_index(2, 4), 2);
+    }
+
+    #[test]
     fn sample_with_pad_handles_right_constant() {
         let x = [1.0, 2.0];
         assert_eq!(super::sample_with_pad(&x, 2, Pad::Constant(5.0)), 5.0);
+    }
+
+    #[test]
+    fn sample_with_pad_handles_edge() {
+        let x = [1.0, 2.0, 3.0];
+        assert_eq!(super::sample_with_pad(&x, -1, Pad::Edge), 1.0);
+        assert_eq!(super::sample_with_pad(&x, 5, Pad::Edge), 3.0);
+    }
+
+    #[test]
+    fn sample_with_pad_handles_wrap() {
+        let x = [1.0, 2.0, 3.0];
+        assert_eq!(super::sample_with_pad(&x, -1, Pad::Wrap), 3.0);
+        assert_eq!(super::sample_with_pad(&x, 4, Pad::Wrap), 2.0);
+        assert_eq!(super::sample_with_pad(&x, 10, Pad::Wrap), 2.0);
     }
 }
