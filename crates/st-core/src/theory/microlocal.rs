@@ -67,6 +67,16 @@ impl InterfaceGauge {
         self
     }
 
+    pub fn threshold(&self) -> f32 {
+        self.threshold
+    }
+
+    pub fn scale_threshold(&mut self, scale: f32) {
+        if scale > 0.0 {
+            self.threshold = (self.threshold * scale).max(0.0);
+        }
+    }
+
     pub fn analyze(&self, mask: &ArrayD<f32>) -> InterfaceSignature {
         self.analyze_with_radius(mask, None, self.physical_radius)
     }
@@ -282,6 +292,16 @@ impl InterfaceZLift {
     pub fn with_bias_gain(mut self, gain: f32) -> Self {
         self.bias_gain = gain.max(0.0);
         self
+    }
+
+    pub fn set_bias_gain(&mut self, gain: f32) {
+        if gain > 0.0 {
+            self.bias_gain = gain;
+        }
+    }
+
+    pub fn bias_gain(&self) -> f32 {
+        self.bias_gain
     }
 
     pub fn project(&self, signature: &InterfaceSignature) -> InterfaceZPulse {
@@ -542,6 +562,67 @@ impl InterfaceZReport {
     }
 }
 
+/// Macro-to-microlocal feedback payload used to retune gauges and fusion.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MicrolocalFeedback {
+    pub threshold_scale: Option<f32>,
+    pub bias_gain: Option<f32>,
+    pub smoothing: Option<f32>,
+    pub tempo_hint: Option<f32>,
+    pub stderr_hint: Option<f32>,
+}
+
+impl MicrolocalFeedback {
+    pub fn merge(&self, other: &Self) -> Self {
+        let threshold_scale = match (self.threshold_scale, other.threshold_scale) {
+            (Some(a), Some(b)) => Some((a * b).max(0.0)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
+        MicrolocalFeedback {
+            threshold_scale,
+            bias_gain: other.bias_gain.or(self.bias_gain),
+            smoothing: other.smoothing.or(self.smoothing),
+            tempo_hint: other.tempo_hint.or(self.tempo_hint),
+            stderr_hint: other.stderr_hint.or(self.stderr_hint),
+        }
+    }
+
+    pub fn with_threshold_scale(mut self, scale: f32) -> Self {
+        if scale > 0.0 {
+            self.threshold_scale = Some(self.threshold_scale.unwrap_or(1.0) * scale);
+        }
+        self
+    }
+
+    pub fn with_bias_gain(mut self, gain: f32) -> Self {
+        if gain > 0.0 {
+            self.bias_gain = Some(gain);
+        }
+        self
+    }
+
+    pub fn with_smoothing(mut self, smoothing: f32) -> Self {
+        self.smoothing = Some(smoothing.clamp(0.0, 1.0));
+        self
+    }
+
+    pub fn with_tempo_hint(mut self, tempo: f32) -> Self {
+        if tempo >= 0.0 {
+            self.tempo_hint = Some(tempo);
+        }
+        self
+    }
+
+    pub fn with_stderr_hint(mut self, stderr: f32) -> Self {
+        if stderr >= 0.0 {
+            self.stderr_hint = Some(stderr);
+        }
+        self
+    }
+}
+
 /// Quality policy applied to each microlocal pulse prior to fusion.
 pub trait ZSourcePolicy: Send + Sync {
     fn quality(&self, pulse: &InterfaceZPulse) -> f32;
@@ -765,6 +846,8 @@ pub struct InterfaceZConductor {
     previous: Option<InterfaceZPulse>,
     carry: Option<InterfaceZPulse>,
     emitter: MicrolocalEmitter,
+    default_tempo_hint: Option<f32>,
+    default_stderr_hint: Option<f32>,
 }
 
 impl InterfaceZConductor {
@@ -782,6 +865,8 @@ impl InterfaceZConductor {
             previous: None,
             carry: None,
             emitter: MicrolocalEmitter::new(),
+            default_tempo_hint: None,
+            default_stderr_hint: None,
         }
     }
 
@@ -808,6 +893,48 @@ impl InterfaceZConductor {
         self
     }
 
+    pub fn apply_feedback(&mut self, feedback: &MicrolocalFeedback) {
+        if let Some(scale) = feedback.threshold_scale {
+            if scale > 0.0 {
+                for gauge in &mut self.gauges {
+                    gauge.scale_threshold(scale);
+                }
+            }
+        }
+        if let Some(gain) = feedback.bias_gain {
+            self.lift.set_bias_gain(gain);
+        }
+        if let Some(smoothing) = feedback.smoothing {
+            self.smoothing = smoothing.clamp(0.0, 1.0);
+        }
+        if let Some(tempo) = feedback.tempo_hint {
+            self.default_tempo_hint = Some(tempo.max(0.0));
+        }
+        if let Some(stderr) = feedback.stderr_hint {
+            self.default_stderr_hint = Some(stderr.max(0.0));
+        }
+    }
+
+    #[cfg(test)]
+    pub fn gauge_thresholds(&self) -> Vec<f32> {
+        self.gauges.iter().map(|g| g.threshold()).collect()
+    }
+
+    #[cfg(test)]
+    pub fn bias_gain(&self) -> f32 {
+        self.lift.bias_gain()
+    }
+
+    #[cfg(test)]
+    pub fn default_tempo_hint(&self) -> Option<f32> {
+        self.default_tempo_hint
+    }
+
+    #[cfg(test)]
+    pub fn default_stderr_hint(&self) -> Option<f32> {
+        self.default_stderr_hint
+    }
+
     pub fn step(
         &mut self,
         mask: &ArrayD<f32>,
@@ -816,11 +943,14 @@ impl InterfaceZConductor {
         stderr_hint: Option<f32>,
     ) -> InterfaceZReport {
         let mut pulses = Vec::with_capacity(self.gauges.len());
+        let stderr_base = stderr_hint
+            .or(self.default_stderr_hint)
+            .map(|stderr| stderr.max(0.0));
         for gauge in &self.gauges {
             let signature = gauge.analyze_with_label(mask, c_prime);
             let mut pulse = self.lift.project(&signature);
-            if let Some(stderr) = stderr_hint {
-                pulse.standard_error = Some(stderr.max(0.0));
+            if let Some(stderr) = stderr_base {
+                pulse.standard_error = Some(stderr);
             }
             pulses.push(pulse);
         }
@@ -854,14 +984,21 @@ impl InterfaceZConductor {
 
         let now = self.clock;
         self.clock = self.clock.wrapping_add(1);
-        let tempo_estimate = tempo_hint.unwrap_or_else(|| fused.total_energy());
+        if fused.standard_error.is_none() {
+            if let Some(stderr) = stderr_base {
+                fused.standard_error = Some(stderr);
+            }
+        }
+
+        let tempo_estimate = tempo_hint
+            .or(self.default_tempo_hint)
+            .unwrap_or_else(|| fused.total_energy());
 
         let mut zpulses = Vec::with_capacity(pulses.len());
+        let stderr_base = stderr_base.unwrap_or(0.0);
         for (pulse, &quality) in pulses.iter().zip(&qualities) {
             let support = ZSupport::from_band_energy(pulse.band_energy);
-            let stderr = pulse
-                .standard_error
-                .unwrap_or_else(|| stderr_hint.unwrap_or(0.0));
+            let stderr = pulse.standard_error.unwrap_or(stderr_base);
             zpulses.push(ZPulse {
                 source: pulse.source,
                 ts: now,
@@ -889,7 +1026,7 @@ impl InterfaceZConductor {
         self.previous = Some(fused.clone());
         self.carry = Some(fused.clone());
 
-        let z_pulse = InterfaceZConductor::into_zpulse(&fused, now, &qualities);
+        let z_pulse = InterfaceZConductor::into_zpulse(&fused, now, &qualities, tempo_estimate);
         let fused_report = InterfaceZFused {
             pulse: z_pulse,
             z: z_fused.z,
@@ -912,7 +1049,12 @@ impl InterfaceZConductor {
         self.carry.clone().unwrap_or_default()
     }
 
-    fn into_zpulse(fused: &InterfaceZPulse, now: u64, qualities: &[f32]) -> ZPulse {
+    fn into_zpulse(
+        fused: &InterfaceZPulse,
+        now: u64,
+        qualities: &[f32],
+        tempo: f32,
+    ) -> ZPulse {
         let support = ZSupport::from_band_energy(fused.band_energy);
         let avg_quality = if qualities.is_empty() {
             0.0
@@ -922,7 +1064,7 @@ impl InterfaceZConductor {
         ZPulse {
             source: fused.source,
             ts: now,
-            tempo: fused.total_energy(),
+            tempo,
             band_energy: fused.band_energy,
             drift: fused.drift,
             z_bias: fused.z_bias,
@@ -1002,5 +1144,35 @@ mod tests {
         assert_neutral_scale(report.fused_pulse.scale);
         assert_neutral_scale(report.feedback.scale);
         assert_neutral_scale(report.fused_z.pulse.scale);
+    }
+
+    #[test]
+    fn feedback_reconfigures_conductor_defaults() {
+        let mask = array![[0.0, 1.0], [0.0, 1.0]].into_dyn();
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.3));
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift);
+
+        let feedback = MicrolocalFeedback::default()
+            .with_threshold_scale(0.5)
+            .with_bias_gain(1.8)
+            .with_smoothing(0.4)
+            .with_tempo_hint(1.2)
+            .with_stderr_hint(0.05);
+        conductor.apply_feedback(&feedback);
+
+        let thresholds = conductor.gauge_thresholds();
+        assert_eq!(thresholds.len(), 1);
+        assert!((thresholds[0] - 0.125).abs() < 1e-6);
+        assert!((conductor.bias_gain() - 1.8).abs() < 1e-6);
+        assert!((conductor.default_tempo_hint().unwrap() - 1.2).abs() < 1e-6);
+        assert!((conductor.default_stderr_hint().unwrap() - 0.05).abs() < 1e-6);
+
+        let report = conductor.step(&mask, None, None, None);
+        assert_eq!(report.pulses.len(), 1);
+        let stderr = report.pulses[0].standard_error.expect("stderr missing");
+        assert!((stderr - 0.05).abs() < 1e-6);
+        assert!((report.fused_pulse.standard_error.expect("fused stderr") - 0.05).abs() < 1e-6);
+        assert!((report.fused_z.pulse.tempo - 1.2).abs() < 1e-6);
     }
 }
