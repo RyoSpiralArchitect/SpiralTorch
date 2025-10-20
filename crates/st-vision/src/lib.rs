@@ -77,9 +77,12 @@ use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
 #[cfg(feature = "wgpu")]
-use st_backend_wgpu::transform::{
-    CenterCropConfig, ColorJitterConfig, GeometryCommand, HorizontalFlipConfig, ImageGeometry,
-    ResizeConfig, TransformDispatchError, TransformDispatcher,
+use st_backend_wgpu::{
+    render::TemporalVolumeLike,
+    transform::{
+        CenterCropConfig, ColorJitterConfig, GeometryCommand, HorizontalFlipConfig, ImageGeometry,
+        ResizeConfig, TransformDispatchError, TransformDispatcher,
+    },
 };
 
 pub mod transforms;
@@ -731,6 +734,37 @@ impl ZSpaceVolume {
     pub fn project_resonance(&self, resonance: &DifferentialResonance) -> PureResult<Tensor> {
         let weights = self.resonance_weights(resonance)?;
         self.collapse_with_weights(&weights)
+    }
+}
+
+#[cfg(feature = "wgpu")]
+impl TemporalVolumeLike for ZSpaceVolume {
+    fn depth(&self) -> usize {
+        self.depth()
+    }
+
+    fn height(&self) -> usize {
+        self.height()
+    }
+
+    fn width(&self) -> usize {
+        self.width()
+    }
+
+    fn harmonic_channels(&self) -> usize {
+        self.harmonic_channels()
+    }
+
+    fn voxels(&self) -> &[f32] {
+        self.voxels()
+    }
+
+    fn temporal_harmonics(&self) -> &[f32] {
+        self.temporal_harmonics()
+    }
+
+    fn resonance_decay(&self) -> &[f32] {
+        self.resonance_decay()
     }
 }
 

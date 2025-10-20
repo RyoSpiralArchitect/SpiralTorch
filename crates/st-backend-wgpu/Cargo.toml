@@ -14,5 +14,8 @@ rand = "0.8"
 st-tensor = { path = "../st-tensor", features = ["wgpu"] }
 pollster = "0.3"
 
+[dev-dependencies]
+st-vision = { path = "../st-vision", features = ["wgpu"] }
+
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

@@ -67,6 +67,16 @@ pub struct FrameState {
     pub kappa: f32,
     #[serde(default = "default_timing_scale")]
     pub timing_scale: f32,
+    #[serde(default)]
+    pub curvature_a_den: f32,
+    #[serde(default)]
+    pub curvature_a_con: f32,
+    #[serde(default)]
+    pub curvature_b_den: f32,
+    #[serde(default)]
+    pub curvature_b_con: f32,
+    #[serde(default)]
+    pub kappa_slope: f32,
 }
 
 impl FrameState {
@@ -80,6 +90,39 @@ impl FrameState {
     #[inline]
     pub fn mix_b(&self) -> f32 {
         (1.0 - self.phi) * self.b_den + self.phi * self.b_con
+    }
+
+    /// Mixture curvature for value/benefit under drift.
+    #[inline]
+    pub fn mix_curvature_a(&self) -> f32 {
+        (1.0 - self.phi) * self.curvature_a_den + self.phi * self.curvature_a_con
+    }
+
+    /// Mixture curvature for risk under drift.
+    #[inline]
+    pub fn mix_curvature_b(&self) -> f32 {
+        (1.0 - self.phi) * self.curvature_b_den + self.phi * self.curvature_b_con
+    }
+}
+
+impl Default for FrameState {
+    fn default() -> Self {
+        Self {
+            phi: 0.0,
+            c: 0.0,
+            s: 0.0,
+            a_den: 0.0,
+            a_con: 0.0,
+            b_den: 0.0,
+            b_con: 0.0,
+            kappa: 0.0,
+            timing_scale: default_timing_scale(),
+            curvature_a_den: 0.0,
+            curvature_a_con: 0.0,
+            curvature_b_den: 0.0,
+            curvature_b_con: 0.0,
+            kappa_slope: 0.0,
+        }
     }
 }
 
@@ -126,10 +169,25 @@ pub struct DrlMetrics {
     pub safe_radii: BTreeMap<String, f32>,
     pub chi: u32,
     pub strict_mode: bool,
+    pub frame_signatures: BTreeMap<String, FrameSignature>,
 }
 
 /// Backwards compatibility alias for earlier drafts that surfaced DRS.
 pub type DrsMetrics = DrlMetrics;
+
+/// Local linear and quadratic response statistics for a frame.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct FrameSignature {
+    pub value_slope: f32,
+    pub risk_slope: f32,
+    pub net_slope: f32,
+    pub value_curvature: f32,
+    pub risk_curvature: f32,
+    pub net_curvature: f32,
+    pub hazard_multiplier: f32,
+    pub safe_radius: Option<f32>,
+    pub kappa_slope: f32,
+}
 
 /// Reasonable defaults that prioritise high-safety frames.
 pub static DEFAULT_THRESHOLDS: LazyLock<BTreeMap<String, FrameThreshold>> = LazyLock::new(|| {
@@ -224,11 +282,36 @@ pub fn analyse_word_with(
     min_radius: f32,
 ) -> DrlMetrics {
     let mut frame_hazards = BTreeMap::new();
+    let mut frame_signatures = BTreeMap::new();
     for (name, frame) in &word.frames {
-        frame_hazards.insert(name.clone(), frame_hazard(word, frame));
+        let hazard = frame_hazard(word, frame);
+        frame_hazards.insert(name.clone(), hazard);
+        let value_slope = frame.mix_a();
+        let risk_slope = word.base_lambda * frame.mix_b() * frame.s;
+        let net_slope = value_slope - risk_slope;
+        let value_curvature = frame.mix_curvature_a();
+        let risk_curvature = word.base_lambda * frame.mix_curvature_b() * frame.s;
+        let net_curvature = value_curvature - risk_curvature;
+        let signature = FrameSignature {
+            value_slope,
+            risk_slope,
+            net_slope,
+            value_curvature,
+            risk_curvature,
+            net_curvature,
+            hazard_multiplier: hazard_multiplier(word, frame),
+            safe_radius: None,
+            kappa_slope: frame.kappa_slope,
+        };
+        frame_signatures.insert(name.clone(), signature);
     }
 
     let radii = safe_radius(word, thresholds);
+    for (name, radius) in &radii {
+        if let Some(signature) = frame_signatures.get_mut(name) {
+            signature.safe_radius = Some(*radius);
+        }
+    }
     let mut hazard_counts = 0u32;
     for (name, hazard) in &frame_hazards {
         if let Some(threshold) = thresholds.get(name) {
@@ -250,6 +333,7 @@ pub fn analyse_word_with(
         safe_radii: radii,
         chi: hazard_counts,
         strict_mode: strict,
+        frame_signatures,
     }
 }
 
@@ -329,6 +413,7 @@ mod tests {
                 b_con: 0.8,
                 kappa: 0.35,
                 timing_scale: 1.0,
+                ..FrameState::default()
             },
         );
         WordState {
@@ -359,6 +444,17 @@ mod tests {
         assert!((radius - 0.151_515_16).abs() < 1e-6);
         assert!(metrics.strict_mode);
         assert_eq!(metrics.chi, 0);
+
+        let signature = metrics
+            .frame_signatures
+            .get("Normative")
+            .expect("signature for Normative frame");
+        assert!((signature.value_slope - 0.112_5).abs() < 1e-6);
+        assert!((signature.risk_slope - 0.528).abs() < 1e-6);
+        assert!((signature.net_slope + 0.415_5).abs() < 1e-6);
+        let expected_multiplier = (0.72_f32 * 0.65 * 1.4).clamp(-30.0, 30.0).exp();
+        assert!((signature.hazard_multiplier - expected_multiplier).abs() < 1e-6);
+        assert_eq!(signature.safe_radius, Some(radius));
 
         let penalty = trainer_penalty(&metrics);
         assert!((penalty - 0.989_228_55).abs() < 1e-6);
