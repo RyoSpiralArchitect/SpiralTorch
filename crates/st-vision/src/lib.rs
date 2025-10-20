@@ -60,7 +60,7 @@
 //! while respecting Z-space curvature, resonance energy and the live telemetry
 //! streamed through [`AtlasFrame`] snapshots.
 
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 use std::cmp::min;
 use std::f32::consts::PI;
 use std::sync::Arc;
@@ -68,6 +68,8 @@ use std::sync::Arc;
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
+
+pub mod transforms;
 
 /// Volumetric container that holds planar tensors along the Z axis.
 #[derive(Clone, Debug, PartialEq)]
@@ -289,6 +291,54 @@ impl ZSpaceVolume {
         };
         blended.accumulate(next, alpha)?;
         Ok(blended)
+    }
+
+    /// Blends a sequence of volumes into a single volume using provided weights.
+    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        if sequence.len() != weights.len() {
+            return Err(TensorError::DataLength {
+                expected: sequence.len(),
+                got: weights.len(),
+            });
+        }
+        let reference = &sequence[0];
+        let depth = reference.depth;
+        let height = reference.height;
+        let width = reference.width;
+        let voxel_count = depth
+            .checked_mul(height)
+            .and_then(|value| value.checked_mul(width))
+            .ok_or(TensorError::InvalidDimensions {
+                rows: depth,
+                cols: height.saturating_mul(width),
+            })?;
+        let mut canvas = vec![0.0f32; voxel_count];
+        for (volume, &weight) in sequence.iter().zip(weights.iter()) {
+            if volume.depth != depth || volume.height != height || volume.width != width {
+                return Err(TensorError::ShapeMismatch {
+                    left: (volume.depth, volume.height * volume.width),
+                    right: (depth, height * width),
+                });
+            }
+            if !weight.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "z_space_blend_weight",
+                    value: weight,
+                });
+            }
+            for (accum, voxel) in canvas.iter_mut().zip(volume.voxels.iter()) {
+                *accum += voxel * weight;
+            }
+        }
+        Ok(Self {
+            depth,
+            height,
+            width,
+            voxels: canvas,
+        })
     }
 }
 
@@ -649,6 +699,8 @@ pub struct VisionProjector {
     spread: f32,
     energy_bias: f32,
     window: SpectralWindow,
+    temporal_focus: f32,
+    temporal_decay: f32,
 }
 
 impl VisionProjector {
@@ -670,6 +722,8 @@ impl VisionProjector {
             spread,
             energy_bias,
             window: SpectralWindow::hann(),
+            temporal_focus: 1.0,
+            temporal_decay: 0.35,
         }
     }
 
@@ -1581,6 +1635,7 @@ pub enum TransformOperation {
     Resize(Resize),
     CenterCrop(CenterCrop),
     RandomHorizontalFlip(RandomHorizontalFlip),
+    ColorJitter(ColorJitter),
 }
 
 impl TransformOperation {
@@ -1590,6 +1645,7 @@ impl TransformOperation {
             TransformOperation::Resize(_) => "Resize",
             TransformOperation::CenterCrop(_) => "CenterCrop",
             TransformOperation::RandomHorizontalFlip(_) => "RandomHorizontalFlip",
+            TransformOperation::ColorJitter(_) => "ColorJitter",
         }
     }
 
@@ -1599,6 +1655,7 @@ impl TransformOperation {
             TransformOperation::Resize(op) => op.apply(image),
             TransformOperation::CenterCrop(op) => op.apply(image),
             TransformOperation::RandomHorizontalFlip(op) => op.apply(image, rng),
+            TransformOperation::ColorJitter(op) => op.apply(image, rng),
         }
     }
 }
@@ -1822,6 +1879,164 @@ impl RandomHorizontalFlip {
                     let left = c * stride_c + y * width + x;
                     let right = c * stride_c + y * width + (width - 1 - x);
                     data.swap(left, right);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ColorJitterOp {
+    Brightness(f32),
+    Contrast(f32),
+    Saturation(f32),
+    Hue(f32),
+}
+
+/// Applies brightness/contrast/saturation/hue perturbations.
+#[derive(Clone, Debug)]
+pub struct ColorJitter {
+    brightness: f32,
+    contrast: f32,
+    saturation: f32,
+    hue: f32,
+}
+
+impl ColorJitter {
+    pub fn new(brightness: f32, contrast: f32, saturation: f32, hue: f32) -> PureResult<Self> {
+        if brightness < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "color_jitter_brightness",
+            });
+        }
+        if contrast < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "color_jitter_contrast",
+            });
+        }
+        if saturation < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "color_jitter_saturation",
+            });
+        }
+        if !(0.0..=0.5).contains(&hue) {
+            return Err(TensorError::InvalidValue {
+                label: "color_jitter_hue",
+            });
+        }
+        Ok(Self {
+            brightness,
+            contrast,
+            saturation,
+            hue,
+        })
+    }
+
+    fn apply_brightness(data: &mut [f32], factor: f32) {
+        for value in data.iter_mut() {
+            *value *= factor;
+        }
+    }
+
+    fn apply_contrast(data: &mut [f32], channels: usize, pixels: usize, factor: f32) {
+        if factor == 1.0 {
+            return;
+        }
+        for c in 0..channels {
+            let range = c * pixels..(c + 1) * pixels;
+            let slice = &mut data[range];
+            let mean = slice.iter().copied().sum::<f32>() / pixels as f32;
+            for value in slice.iter_mut() {
+                *value = (*value - mean) * factor + mean;
+            }
+        }
+    }
+
+    fn apply_saturation(data: &mut [f32], pixels: usize, factor: f32) {
+        if factor == 1.0 {
+            return;
+        }
+        let r_offset = 0;
+        let g_offset = pixels;
+        let b_offset = 2 * pixels;
+        for idx in 0..pixels {
+            let r = data[r_offset + idx];
+            let g = data[g_offset + idx];
+            let b = data[b_offset + idx];
+            let gray = 0.298_995_97 * r + 0.587_096 * g + 0.113_907_03 * b;
+            data[r_offset + idx] = (r - gray) * factor + gray;
+            data[g_offset + idx] = (g - gray) * factor + gray;
+            data[b_offset + idx] = (b - gray) * factor + gray;
+        }
+    }
+
+    fn apply_hue(data: &mut [f32], pixels: usize, radians: f32) {
+        if radians == 0.0 {
+            return;
+        }
+        let cos_h = radians.cos();
+        let sin_h = radians.sin();
+        let r_offset = 0;
+        let g_offset = pixels;
+        let b_offset = 2 * pixels;
+        for idx in 0..pixels {
+            let r = data[r_offset + idx];
+            let g = data[g_offset + idx];
+            let b = data[b_offset + idx];
+            let y = 0.299 * r + 0.587 * g + 0.114 * b;
+            let u = -0.147_13 * r - 0.288_86 * g + 0.436 * b;
+            let v = 0.615 * r - 0.514_99 * g - 0.100_01 * b;
+            let u_prime = u * cos_h - v * sin_h;
+            let v_prime = u * sin_h + v * cos_h;
+            data[r_offset + idx] = y + 1.13983 * v_prime;
+            data[g_offset + idx] = y - 0.39465 * u_prime - 0.58060 * v_prime;
+            data[b_offset + idx] = y + 2.03211 * u_prime;
+        }
+    }
+
+    pub fn apply(&self, image: &mut ImageTensor, rng: &mut StdRng) -> PureResult<()> {
+        let mut ops = Vec::with_capacity(4);
+        if self.brightness > 0.0 {
+            let delta = rng.gen_range(-self.brightness..=self.brightness);
+            ops.push(ColorJitterOp::Brightness(1.0 + delta));
+        }
+        if self.contrast > 0.0 {
+            let delta = rng.gen_range(-self.contrast..=self.contrast);
+            ops.push(ColorJitterOp::Contrast(1.0 + delta));
+        }
+        if self.saturation > 0.0 && image.channels() >= 3 {
+            let delta = rng.gen_range(-self.saturation..=self.saturation);
+            ops.push(ColorJitterOp::Saturation(1.0 + delta));
+        }
+        if self.hue > 0.0 && image.channels() >= 3 {
+            let delta = rng.gen_range(-self.hue..=self.hue);
+            ops.push(ColorJitterOp::Hue(delta * PI));
+        }
+
+        if ops.is_empty() {
+            return Ok(());
+        }
+
+        ops.shuffle(rng);
+        let channels = image.channels();
+        let pixels = image.height() * image.width();
+        let data = image.as_mut_slice();
+        for op in ops {
+            match op {
+                ColorJitterOp::Brightness(factor) => Self::apply_brightness(data, factor),
+                ColorJitterOp::Contrast(factor) => {
+                    Self::apply_contrast(data, channels, pixels, factor)
+                }
+                ColorJitterOp::Saturation(factor) => {
+                    if channels >= 3 {
+                        Self::apply_saturation(data, pixels, factor)
+                    }
+                }
+                ColorJitterOp::Hue(angle) => {
+                    if channels >= 3 {
+                        Self::apply_hue(data, pixels, angle)
+                    }
                 }
             }
         }
@@ -2760,5 +2975,19 @@ mod tests {
             stem.shape().1,
             (metadata.image_size.0 / 2) * (metadata.image_size.1 / 2)
         );
+    }
+
+    #[test]
+    fn color_jitter_produces_finite_values() {
+        let mut image = ImageTensor::new(3, 8, 8, vec![0.5; 3 * 8 * 8]).unwrap();
+        let jitter = ColorJitter::new(0.2, 0.2, 0.2, 0.1).unwrap();
+        let mut rng = StdRng::seed_from_u64(1234);
+        jitter.apply(&mut image, &mut rng).unwrap();
+        assert!(image.as_slice().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn color_jitter_validates_hue_bounds() {
+        assert!(ColorJitter::new(0.1, 0.2, 0.3, 0.75).is_err());
     }
 }
