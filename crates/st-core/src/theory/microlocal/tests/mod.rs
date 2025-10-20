@@ -2,6 +2,12 @@ use super::*;
 use crate::theory::zpulse::ZScale;
 use ndarray::array;
 
+fn assert_neutral_scale(scale: Option<ZScale>) {
+    let scale = scale.expect("scale tag missing from pulse");
+    assert!((scale.physical_radius - ZScale::ONE.physical_radius).abs() < 1e-6);
+    assert!((scale.log_radius - ZScale::ONE.log_radius).abs() < 1e-6);
+}
+
 #[test]
 fn detects_boundary_presence() {
     let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
@@ -24,8 +30,18 @@ fn oriented_normals_require_label() {
     let normal_y = orient[IxDyn(&[0, 1, 1])];
     let normal_x = orient[IxDyn(&[1, 1, 1])];
     assert!(normal_y.abs() > 0.5);
-    assert!((normal_x.abs() - normal_y.abs()).abs() < 1e-6); // [SCALE-TODO] diagonal orientation persists with neutral scale
+    assert!((normal_x.abs() - normal_y.abs()).abs() < 1e-6);
     assert!(normal_x.is_sign_negative());
+
+    let wide_gauge = InterfaceGauge::new(1.0, 2.0);
+    let wide_sig = wide_gauge.analyze_with_label(&mask, Some(&c_prime));
+    let wide_orient = wide_sig.orientation.expect("orientation missing after rescale");
+    let wide_y = wide_orient[IxDyn(&[0, 1, 1])];
+    let wide_x = wide_orient[IxDyn(&[1, 1, 1])];
+    let base_norm = (normal_x * normal_x + normal_y * normal_y).sqrt();
+    let wide_norm = (wide_x * wide_x + wide_y * wide_y).sqrt();
+    assert!((wide_x / wide_norm - normal_x / base_norm).abs() < 1e-6);
+    assert!((wide_y / wide_norm - normal_y / base_norm).abs() < 1e-6);
 }
 
 #[test]
@@ -44,6 +60,24 @@ fn z_lift_produces_oriented_bias() {
     let feedback = pulse.clone().into_softlogic_feedback();
     assert_eq!(feedback.band_energy, pulse.band_energy);
     assert_eq!(feedback.z_signal, pulse.z_bias);
+}
+
+#[test]
+fn conductor_rollout_preserves_neutral_scale() {
+    let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+    let gauge = InterfaceGauge::new(1.0, 1.0);
+    let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+    let mut conductor = InterfaceZConductor::new(vec![gauge], lift);
+
+    let report = conductor.step(&mask, None, None, None);
+
+    for pulse in &report.pulses {
+        assert_neutral_scale(pulse.scale);
+    }
+
+    assert_neutral_scale(report.fused_pulse.scale);
+    assert_neutral_scale(report.feedback.scale);
+    assert_neutral_scale(report.fused_z.pulse.scale);
 }
 
 #[test]
@@ -203,11 +237,12 @@ fn band_policy_demotes_unbalanced_energy() {
         band_energy: (0.9, 0.05, 0.05),
         drift: 0.4,
         z_bias: 0.3,
-        scale: ZScale::ONE, // [SCALE-TODO] ensure scale stays neutral during rollout
+        scale: Some(ZScale::ONE),
         ..InterfaceZPulse::default()
     };
     let policy = BandPolicy::new([0.2, 0.2, 0.2]);
     let quality = policy.project_quality(&pulse);
+    assert_eq!(pulse.scale, Some(ZScale::ONE));
     assert!(quality < 1.0);
 }
 
@@ -222,7 +257,7 @@ fn maxwell_policy_prefers_confident_z_scores() {
         source: ZSource::Maxwell,
         z_score: Some(2.5),
         standard_error: Some(0.05),
-        scale: ZScale::ONE, // [SCALE-TODO] ensure scale stays neutral during rollout
+        scale: Some(ZScale::ONE),
         ..InterfaceZPulse::default()
     };
     let policy = MaxwellPolicy::default();
@@ -246,7 +281,7 @@ fn realgrad_policy_scales_with_residual_and_band() {
         residual_p90: Some(0.05),
         quality_hint: Some(0.8),
         has_low_band: true,
-        scale: ZScale::ONE, // [SCALE-TODO] ensure scale stays neutral during rollout
+        scale: Some(ZScale::ONE),
         ..InterfaceZPulse::default()
     };
     let policy = RealGradPolicy::default();
@@ -278,7 +313,7 @@ fn composite_policy_routes_per_source() {
         band_energy: (0.3, 0.3, 0.4),
         drift: 0.2,
         z_bias: 0.1,
-        scale: ZScale::ONE, // [SCALE-TODO] ensure scale stays neutral during rollout
+        scale: Some(ZScale::ONE),
         ..InterfaceZPulse::default()
     };
     assert!((composite.quality(&pulse) - 0.5).abs() < 1e-6);

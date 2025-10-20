@@ -1,0 +1,22 @@
+[package]
+name = "st-xai-cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
+license = "AGPL-3.0-or-later"
+description = "Batch explainability driver for SpiralTorch vision models"
+
+[dependencies]
+st-vision = { path = "../../crates/st-vision" }
+st-core = { path = "../../crates/st-core" }
+st-tensor = { path = "../../crates/st-tensor" }
+st-nn = { path = "../../crates/st-nn" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "st-xai-cli"
+path = "src/main.rs"
