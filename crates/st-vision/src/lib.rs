@@ -77,9 +77,12 @@ use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
 #[cfg(feature = "wgpu")]
-use st_backend_wgpu::transform::{
-    CenterCropConfig, ColorJitterConfig, GeometryCommand, HorizontalFlipConfig, ImageGeometry,
-    ResizeConfig, TransformDispatchError, TransformDispatcher,
+use st_backend_wgpu::{
+    render::TemporalVolumeLike,
+    transform::{
+        CenterCropConfig, ColorJitterConfig, GeometryCommand, HorizontalFlipConfig, ImageGeometry,
+        ResizeConfig, TransformDispatchError, TransformDispatcher,
+    },
 };
 
 pub mod transforms;

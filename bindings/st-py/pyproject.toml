@@ -18,7 +18,15 @@ classifiers = [
 ]
 
 [tool.maturin]
-python-source = "python"
+# Allow invoking maturin from either the repository root (using `-m bindings/st-py/Cargo.toml`)
+# or the crate directory directly.  Older maturin releases resolve `python-source`
+# relative to the current working directory, which meant the default value of
+# "python" only worked when the command was executed from `bindings/st-py`.
+# By pointing `python-source` at the crate root and explicitly listing the
+# packages that should be included we keep the packaging layout stable while
+# avoiding the missing-path error the user reported.
+python-source = "."
+python-packages = ["spiral", "spiraltorch"]
 
 [project.scripts]
 spiral-train = "spiral.cli:main"
