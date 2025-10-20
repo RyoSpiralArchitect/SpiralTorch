@@ -134,6 +134,44 @@ pub struct CapabilityRow {
     pub entries: [CapabilityEntry; Backend::COUNT],
 }
 
+/// Wrapper providing utility accessors around the static capability matrix.
+#[derive(Debug, Clone, Copy)]
+pub struct CapabilityMatrix {
+    rows: &'static [CapabilityRow],
+}
+
+impl CapabilityMatrix {
+    /// Construct a view over the provided capability rows.
+    pub const fn new(rows: &'static [CapabilityRow]) -> Self {
+        Self { rows }
+    }
+
+    /// Returns the raw capability rows in definition order.
+    pub const fn rows(&self) -> &'static [CapabilityRow] {
+        self.rows
+    }
+
+    /// Finds a capability row by name (case-insensitive).
+    pub fn capability(&self, name: &str) -> Option<&'static CapabilityRow> {
+        capability_by_name(name)
+    }
+
+    /// Summarises how `backend` fares across every capability.
+    pub fn backend_summary(&self, backend: Backend) -> BackendSummary {
+        summarize_backend(backend)
+    }
+
+    /// Returns the matrix-wide readiness counters.
+    pub fn summary(&self) -> MatrixSummary {
+        matrix_summary()
+    }
+
+    /// Lists every capability where `backend` still requires follow-up work.
+    pub fn pending_for_backend(&self, backend: Backend) -> Vec<&'static CapabilityRow> {
+        pending_capabilities_for_backend(backend)
+    }
+}
+
 impl CapabilityRow {
     /// Retrieve the entry for `backend`.
     pub const fn entry(&self, backend: Backend) -> &CapabilityEntry {
@@ -209,6 +247,11 @@ impl BackendSummary {
         } else {
             self.ready as f32 / total as f32
         }
+    }
+
+    /// Number of capabilities that are not yet ready.
+    pub fn pending(&self) -> usize {
+        self.watchlist + self.blocked
     }
 }
 
@@ -426,6 +469,44 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
         ],
     },
     CapabilityRow {
+        capability: "Quantized inference",
+        entries: [
+            CapabilityEntry::with_state(CapabilityState::Ready, "INT8/BF16 calibrations stable"),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Requires shader range calibration",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Metal Performance Shaders INT8 path pending",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Tensor cores validated for INT8/BF16",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Blocked,
+                "Waiting on rocWMMA quantized path",
+            ),
+        ],
+    },
+    CapabilityRow {
+        capability: "Graph fusion pipeline",
+        entries: [
+            CapabilityEntry::with_state(CapabilityState::Ready, "Stable scheduler passes"),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Texture graph fusion benchmarking",
+            ),
+            CapabilityEntry::with_state(CapabilityState::Watchlist, "Needs tile buffer heuristics"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "NVRTC fusion coverage nightly"),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "ROC graph capture instrumentation",
+            ),
+        ],
+    },
+    CapabilityRow {
         capability: "ONNX export parity",
         entries: [
             CapabilityEntry::with_state(CapabilityState::Ready, "Parity score ≥ 0.9"),
@@ -459,9 +540,17 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
     },
 ];
 
+/// Canonical capability matrix view mirroring the documentation table.
+pub const CAPABILITY_MATRIX: CapabilityMatrix = CapabilityMatrix::new(CAPABILITY_ROWS);
+
+/// Returns the backend feature matrix mirrored from `docs/backend_matrix.md`.
+pub const fn capability_matrix_view() -> &'static CapabilityMatrix {
+    &CAPABILITY_MATRIX
+}
+
 /// Returns the backend feature matrix mirrored from `docs/backend_matrix.md`.
 pub fn capability_matrix() -> &'static [CapabilityRow] {
-    CAPABILITY_ROWS
+    CAPABILITY_MATRIX.rows()
 }
 
 /// Locates a capability row by name (case-insensitive).
@@ -554,6 +643,30 @@ pub fn capabilities_for_backend_with_state(
         .collect()
 }
 
+/// Returns capability rows where `backend` is not yet marked ready.
+pub fn pending_capabilities_for_backend(backend: Backend) -> Vec<&'static CapabilityRow> {
+    CAPABILITY_ROWS
+        .iter()
+        .filter(|row| match row.entry(backend).state {
+            Some(CapabilityState::Ready) => false,
+            Some(CapabilityState::Watchlist) | Some(CapabilityState::Blocked) => true,
+            None => false,
+        })
+        .collect()
+}
+
+/// Backend summaries ordered by readiness ratio (descending) and ready count.
+pub fn readiness_leaderboard() -> Vec<BackendSummary> {
+    let mut summaries = backend_summaries();
+    summaries.sort_by(|a, b| {
+        b.readiness_ratio()
+            .total_cmp(&a.readiness_ratio())
+            .then(b.ready.cmp(&a.ready))
+            .then_with(|| a.backend.as_str().cmp(b.backend.as_str()))
+    });
+    summaries
+}
+
 /// Serialises the matrix into a JSON value for downstream tooling.
 pub fn capability_matrix_json() -> serde_json::Value {
     serde_json::to_value(CAPABILITY_ROWS).expect("matrix is serialisable")
@@ -619,11 +732,12 @@ mod tests {
     fn summarizes_backend_counts_watchlist_items() {
         let hip = summarize_backend(Backend::Hip);
         assert_eq!(hip.backend, Backend::Hip);
-        assert_eq!(hip.watchlist, 7);
-        assert_eq!(hip.blocked, 2);
+        assert_eq!(hip.watchlist, 8);
+        assert_eq!(hip.blocked, 3);
         assert!(!hip.is_fully_ready());
-        assert_eq!(hip.tracked_capabilities(), 9);
+        assert_eq!(hip.tracked_capabilities(), 11);
         assert_eq!(hip.readiness_ratio(), 0.0);
+        assert_eq!(hip.pending(), 11);
         assert!(hip
             .notes
             .iter()
@@ -726,5 +840,43 @@ mod tests {
         } else {
             assert_eq!(summary.readiness_ratio(), 0.0);
         }
+    }
+
+    #[test]
+    fn capability_matrix_view_matches_slice() {
+        let view = capability_matrix_view();
+        assert_eq!(view.rows().len(), capability_matrix().len());
+        assert!(view
+            .capability("Telemetry")
+            .is_some_and(|row| row.capability == "Telemetry"));
+    }
+
+    #[test]
+    fn pending_capabilities_collects_watchlist_and_blocked() {
+        let hip_pending = pending_capabilities_for_backend(Backend::Hip);
+        assert!(hip_pending
+            .iter()
+            .any(|row| row.capability == "Sparse tensor ops"));
+        assert!(hip_pending
+            .iter()
+            .any(|row| row.capability == "Quantized inference"));
+        assert!(hip_pending.iter().all(|row| {
+            matches!(
+                row.entry(Backend::Hip).state,
+                Some(CapabilityState::Watchlist) | Some(CapabilityState::Blocked)
+            )
+        }));
+    }
+
+    #[test]
+    fn readiness_leaderboard_prefers_higher_ratios() {
+        let leaderboard = readiness_leaderboard();
+        assert_eq!(
+            leaderboard.first().expect("non-empty").backend,
+            Backend::Cuda
+        );
+        assert!(leaderboard
+            .windows(2)
+            .all(|pair| pair[0].readiness_ratio() >= pair[1].readiness_ratio()));
     }
 }

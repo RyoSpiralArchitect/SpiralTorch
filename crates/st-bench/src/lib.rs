@@ -11,9 +11,10 @@ pub mod backend_matrix;
 
 pub use backend_matrix::{
     backend_summaries, capabilities_for_backend_with_state, capabilities_with_state,
-    capability_by_name, capability_matrix, capability_matrix_json, capability_summaries,
-    matrix_summary, summarize_backend, Backend, BackendNote, BackendSummary, CapabilityEntry,
-    CapabilityRow, CapabilityState, CapabilitySummary, MatrixSummary,
+    capability_by_name, capability_matrix, capability_matrix_json, capability_matrix_view,
+    capability_summaries, matrix_summary, pending_capabilities_for_backend, readiness_leaderboard,
+    summarize_backend, Backend, BackendNote, BackendSummary, CapabilityEntry, CapabilityMatrix,
+    CapabilityRow, CapabilityState, CapabilitySummary, MatrixSummary, CAPABILITY_MATRIX,
 };
 
 mod model {
