@@ -485,6 +485,85 @@ pub struct CanvasProjector {
     vectors: ColorVectorField,
 }
 
+/// Convenience wrapper that mirrors the WASM `FractalCanvas` bindings while
+/// remaining entirely in-process for native smoke tests.
+#[derive(Clone, Debug)]
+pub struct FractalCanvas {
+    projector: CanvasProjector,
+    width: usize,
+    height: usize,
+}
+
+impl FractalCanvas {
+    /// Construct a projector-backed canvas with the requested queue capacity.
+    pub fn new(capacity: usize, width: usize, height: usize) -> PureResult<Self> {
+        let scheduler = UringFractalScheduler::new(capacity)?;
+        let projector = CanvasProjector::new(scheduler, width, height)?;
+        Ok(Self {
+            projector,
+            width,
+            height,
+        })
+    }
+
+    /// Canvas width in pixels.
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    /// Canvas height in pixels.
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    /// Immutable access to the projector.
+    pub fn projector(&self) -> &CanvasProjector {
+        &self.projector
+    }
+
+    /// Mutable access to the projector.
+    pub fn projector_mut(&mut self) -> &mut CanvasProjector {
+        &mut self.projector
+    }
+
+    /// Immutable access to the underlying scheduler.
+    pub fn scheduler(&self) -> &UringFractalScheduler {
+        self.projector.scheduler()
+    }
+
+    /// Mutable access to the underlying scheduler.
+    pub fn scheduler_mut(&mut self) -> &mut UringFractalScheduler {
+        self.projector.scheduler_mut()
+    }
+
+    /// Refresh the canvas returning the latest RGBA buffer.
+    pub fn refresh(&mut self) -> PureResult<&[u8]> {
+        self.projector.refresh()
+    }
+
+    /// Refresh the canvas returning both the RGBA buffer and the vector field.
+    pub fn refresh_with_vectors(&mut self) -> PureResult<(&[u8], &ColorVectorField)> {
+        self.projector.refresh_with_vectors()
+    }
+
+    /// Refresh the canvas returning the latest tensor relation.
+    pub fn refresh_tensor(&mut self) -> PureResult<&Tensor> {
+        self.projector.refresh_tensor()
+    }
+
+    /// Push a new fractal patch into the scheduler.
+    pub fn push_patch(
+        &self,
+        relation: Tensor,
+        coherence: f32,
+        tension: f32,
+        depth: u32,
+    ) -> PureResult<()> {
+        let patch = FractalPatch::new(relation, coherence, tension, depth)?;
+        self.projector.scheduler().push(patch)
+    }
+}
+
 impl CanvasProjector {
     /// Construct a projector with a shared scheduler. The workspace tensor is
     /// reused for every refresh call to avoid hitting the WASM allocator.
