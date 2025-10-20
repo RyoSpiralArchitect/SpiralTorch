@@ -7,15 +7,22 @@ members = [
   "crates/st-logic",
   "crates/st-kv",
   "crates/st-tensor",
+  "crates/st-softlogic",
   "crates/st-nn",
   "crates/st-qr-studio",
   "crates/st-text",
+  "crates/st-vision",
   "crates/st-rl",
   "crates/st-rec",
   "crates/st-bench",
   "crates/st-amg",
+  "crates/spiral-selfsup",
+  "crates/spiral-opt",
+  "crates/spiral-hpo",
+  "crates/spiral-safety",
   "bindings/st-py",
-  "bindings/st-wasm"
+  "bindings/st-wasm",
+  "tools/xai-cli"
 ]
 default-members = [
   "crates/st-core",
@@ -24,13 +31,16 @@ default-members = [
   "crates/st-logic",
   "crates/st-kv",
   "crates/st-tensor",
+  "crates/st-softlogic",
   "crates/st-nn",
   "crates/st-qr-studio",
   "crates/st-text",
+  "crates/st-vision",
   "crates/st-rl",
   "crates/st-rec",
   "crates/st-bench",
   "crates/st-amg",
+  "crates/spiral-opt",
   "bindings/st-wasm"
 ]
 resolver = "2"

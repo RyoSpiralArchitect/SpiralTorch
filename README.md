@@ -4,6 +4,8 @@ _(Still under active repair while expanding — API changes hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
+**Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
+
 **Architecture Overview.**
 ```mermaid
 sequenceDiagram
@@ -52,26 +54,50 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 - Contact: [Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) · <mailto:kishkavsesvit@icloud.com>  
 - Unauthorized derivations are non-compliant with AGPL §13  
 - **For research collaborations or integration inquiries, please reach out directly.**
-- **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors.
+- **Cloud integrations:** see [Cloud Integration Guide](docs/cloud_integration.md) for
+  Azure and AWS deployment blueprints.
+- **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors. Any network-facing use must comply with AGPL §13.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
-<!-- STATS:START -->
-> _auto-generated: 2025-10-18 21:39 UTC_
+## Code stats
 
-| Metric | Value |
-|---|---:|
-| Rust code LOC | **71,317** |
-| Rust files | 197 |
-| Total code LOC (all langs) | 76,480 |
-| Workspace+deps crates | 241 |
+<!-- AUTOGEN: CODESTATS BEGIN -->
+_Last updated: 2025-10-19 00:00 UTC_
 
-<p>
-<img src="docs/badges/rust-loc.svg" alt="rust loc" />
-<img src="docs/badges/total-code.svg" alt="total code" />
-<img src="docs/badges/deps.svg" alt="crates" />
-</p>
-<!-- STATS:END -->
+**Workspace summary**
+- Total files: **1109**
+- Total code LOC: **276,472**
+- Rust files: **866** (Rust code LOC: **255,611**)
 
+```text
+===============================================================================
+ Language            Files        Lines         Code     Comments       Blanks
+===============================================================================
+ BASH                    4          216          208            4            4
+ C++                     4          664          560           12           92
+ JSON                    4           44           44            0            0
+ Python                 28         3564         2964          136          464
+ SVG                    12          240          240            0            0
+ Plain Text              4         2644            0         2176          468
+ TOML                   90         2193         1849           78          266
+ TypeScript             20        17096        14996          700         1400
+-------------------------------------------------------------------------------
+ Markdown               77        11409            0         9291         2118
+ |- BASH                 8          336          240           48           48
+ |- HTML                 4           72           72            0            0
+ |- JavaScript           4          104           92            4            8
+ |- JSON                 4           44           44            0            0
+ |- Python              12         2040         1724           44          272
+ |- Rust                 4         2104         1824           56          224
+ (Total)                          16109         3996         9443         2670
+-------------------------------------------------------------------------------
+ Rust                  866       288342       255611         5433        27298
+ |- Markdown           573        13023            0        12700          323
+ (Total)                         301365       255611        18133        27621
+===============================================================================
+ Total                1109       326412       276472        17830        32110
+===============================================================================
+```
 ---
 
 **SpiralTorch is a Rust-first AI training framework** that keeps language,
@@ -83,18 +109,128 @@ The stack is comfortable living entirely in Rust—yet the Python wheel remains 
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
+## SpiralTorchVision overview
+
+SpiralTorchVision reinterprets the Z-axis as a perceptual frequency domain and
+collapses it with spectral-window-aware projectors into tensor spaces that any
+TorchVision model can consume. Temporal resonance buffers smooth depth attention
+for streaming inputs, `MultiViewFusion` registers multi-camera descriptors, and
+the SpiralRNN-backed `ResonanceGenerator` synthesises fresh
+`DifferentialResonance` fields on demand. The latest drop layers in Z-space
+super-resolution (`InterpolationMethod` + `ZSpaceVolume::upscale`), diffusion and
+latent decoding helpers (`ZDiffuser`, `ZDecoder`), plus a
+`VideoStreamProjector` that fuses all of the above while stepping through video
+sequences. Read the full guide in
+[docs/spiraltorchvision.md](docs/spiraltorchvision.md).
+
 ---
 
-## Quick Start
+## Install
 
-### 1) Clone
+### From PyPI (recommended)
+
+> Requires Python ≥ 3.8
+
+```bash
+# fresh venv (recommended)
+python3 -m venv .venv && source .venv/bin/activate
+python -m pip install -U pip
+
+# install Spiraltorch
+pip install spiraltorch==0.1.1
+```
+
+#### Quick smoke test
+
+```bash
+python - <<'PY'
+import spiraltorch as st, importlib.metadata as im
+print("spiraltorch:", im.version("spiraltorch"))
+print("phi =", st.golden_ratio(), "theta =", st.golden_angle())
+print("extras ok:", all(hasattr(st, n) for n in [
+    "set_global_seed","fibonacci_pacing","pack_nacci_chunks",
+    "pack_tribonacci_chunks","pack_tetranacci_chunks","generate_plan_batch_ex",
+]))
+PY
+```
+
+---
+
+## Build from source
+
+You’ll need Rust and `maturin`.
+
+```bash
+# 1) install maturin
+python -m pip install -U maturin
+
+# 2) build a wheel (pick one backend; macOS can use wgpu or mps)
+maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
+
+# 3) install the built wheel
+pip install ./target/wheels/spiraltorch-*.whl
+```
+
+> For Metal via Apple’s MPS, you can also use `--features mps` instead of `wgpu`.
+
+---
+
+## Usage
+
+Top-level convenience functions are exported (extras). Submodules like `spiraltorch.nn` are currently placeholders for future public APIs.
+
+```python
+import spiraltorch as st
+
+# extras
+print(st.golden_ratio())   # 1.6180...
+print(st.golden_angle())   # 2.39996...
+
+# pacing utilities
+print(st.fibonacci_pacing(12))
+print(st.pack_tribonacci_chunks(20))
+
+# global seed for batch helpers / future generators
+st.set_global_seed(42)
+
+# (wire-up pending) batch plan API—connect to your existing generate_plan()
+# st.generate_plan_batch_ex(
+#     n=3, total_steps=256,
+#     base_radius=1.2, radial_growth=0.01,
+#     base_height=0.5, meso_gain=0.8, micro_gain=0.2,
+#     seed=None
+# )
+```
+
+Submodules import (placeholders for now):
+
+```python
+import spiraltorch.nn, spiraltorch.frac, spiraltorch.linalg
+```
+
+---
+
+## Troubleshooting
+
+- **`No matching distribution found`**  
+  Your platform may not have a prebuilt wheel yet. Build from source (see above).
+
+- **Backend errors**  
+  Set `WGPU_BACKEND` explicitly (`metal` on macOS, `vulkan` on Linux, `dx12` on Windows).
+
+---
+
+## Versioning
+
+- **0.1.x**: PyO3 **abi3** single-binary packaging; stable `extras` surface.  
+- Future minor releases will gradually expose public APIs under `spiraltorch.*` (e.g., `nn`, `frac`).
+
+### 2) Build from source (Rust)
+
 ```bash
 git clone https://github.com/RyoSpiralArchitect/SpiralTorch.git
 cd SpiralTorch
 ```
-
-### 2) Build from source (Rust)
-
 **CPU (default; no GPU deps)**
 ```bash
 cargo build -p st-core --release
@@ -115,7 +251,7 @@ cargo build -p st-core --features mps --release
 cargo build -p st-core --features cuda --release
 ```
 
-**HIP / ROCm (optional; real backend is feature-gated)**
+**HIP / ROCm (optional)**
 ```bash
 export HIPCC=/opt/rocm/bin/hipcc
 export ROCM_PATH=/opt/rocm
@@ -244,6 +380,17 @@ optimisers alongside its hypergradient updates.
   matrix with `trace.with_barycenter_with(weights, densities, Some(coupling))`
   before resonating, keeping Z-space orchestration entirely on the session.
 
+## SpiralTorchVision overview
+
+SpiralTorchVision reinterprets the Z-axis as a perceptual frequency domain,
+collapsing it with spectral-window-aware projectors into tensor spaces that any
+TorchVision model can consume. Temporal resonance buffers now let `ZSpaceVolume`
+perform exponential moving averages across frames, while `MultiViewFusion`
+registers camera descriptors so the projector can weight view-specific Z slices
+before collapse. The roadmap now leans into generative feedback loops between
+SpiralRNN conductors and vision modules. Read the full guide in
+[docs/spiraltorchvision.md](docs/spiraltorchvision.md).).
+
 
 ## Why it’s different
  - **Training comes first:** Modules such as `Linear`, `Sequential`,
@@ -330,6 +477,18 @@ interpretability toolkit that maps gradient flows, consensus splits, and
 telemetry spikes back to model behaviour. Visualising these pathways keeps
 “why” answers native to Z-space, turning SpiralTorch’s internal instrumentation
 into an Explainable AI surface without external probes.
+
+### Autotune telemetry for the WGPU-first roadmap
+
+SpiralTorch now ships an autotuning registry and bounded telemetry log so the
+WGPU backend can remember which tile schedules performed best on each device.
+We encode the hardware fingerprint using vendor, numeric device ID, subgroup
+size, shared-memory budget, and driver revision, then splice in the shader
+revision plus op signature to form a stable cache key—no timestamps or host
+process details required.【F:crates/st-kdsl/src/registry.rs†L15-L89】 The same log
+tracks throughput, bandwidth, occupancy, chosen tile, and regression fallbacks
+while evicting the oldest samples once the per-key capacity is reached, keeping
+the cache warm without unbounded growth.【F:crates/st-kdsl/src/registry.rs†L92-L229】【F:crates/st-kdsl/src/registry.rs†L248-L334】
 
 ### Microlocal interface gauges
 
@@ -1723,6 +1882,7 @@ execute_rank(&exec, &plan)?;
 **Features**
 - Dataset abstraction and serialization
 - Hypergrad integration for every parameter
+- Optional Realgrad accumulation via `ModuleTrainer::with_realgrad`
 - WGPU · MPS · CUDA unified backends
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
@@ -1777,12 +1937,24 @@ use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{DistConfig, ModuleTrainer, RoundtableConfig, Sequential, Linear, MeanSquaredError};
 
 let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
+use st_core::ecosystem::CloudConnector;
+
 let dist = DistConfig {
     node_id: "node-a".into(),
     mode: st_nn::DistMode::PeriodicMeta,
     push_interval: std::time::Duration::from_secs(15),
     meta_endpoints: vec!["tcp://meta:5005".into()],
     summary_window: 8,
+    cloud_targets: vec![
+        CloudConnector::AzureEventHub {
+            namespace: "spiral-meta".into(),
+            hub: "roundtable".into(),
+        },
+        CloudConnector::AwsKinesis {
+            region: "us-east-1".into(),
+            stream: "spiral-roundtable".into(),
+        },
+    ],
 };
 trainer.configure_distribution(dist);
 trainer.install_blackcat_moderator(0.75, 2);
@@ -1822,6 +1994,10 @@ for entry in trainer.blackcat_scoreboard() {
     );
 }
 ```
+
+The `cloud_targets` catalogue surfaces Azure Event Hub / Storage Queue and AWS Kinesis /
+SQS integrations to telemetry consumers, ensuring roundtable connectors advertise which
+cloud fabrics receive summaries and proposals.
 
 **BlackCat runtime tap-in**
 

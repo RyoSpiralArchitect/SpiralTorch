@@ -188,3 +188,6 @@ with \\(r^2 = \\psi^2 + \\phi^2\\). Even small oscillations therefore accelerate
 * **Audit vs. container gain**
   * `audit_container_balance` reports \(\kappa a/\tau - \sigma_s\rho/\lambda\).
   * A positive gap pushes the Hopf coefficient toward the subcritical side; tighten container feedback to cancel the excess.
+  * `psi_spiral_metrics` bundles the Hopf, balance, and dimensionless combos so PSI dashboards can render `PsiSpiralAdvisory` notices when the audit side overpowers the container feedback.
+  * `psi_spiral_tuning_from_params` pushes those notices into concrete PSI weight and threshold adjustments so monitoring stays aligned with Spiral health.
+  * `PsiConfig::automated_with_spiral` seeds the meter defaults and immediately folds in the advisory so container reinforcements and thresholds are live from the first sample.

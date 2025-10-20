@@ -61,6 +61,18 @@ Quantum reality, as we imagine it inside SpiralTorch, is not a single experiment
 - Publish open, reproducible experiment kits so allies outside SpiralTorch can join the movement and feed discoveries back upstream.
 - Treat every iteration as a rehearsal for the next, letting the narrative, the physics, and the software spiral upward together.
 
+## 7. Field Links Beyond the Playground
+
+- Ship `StudioSink` adapters inside `spiraltorch-qr-studio` so Quantum Reality Studio frames can stream to field teams, not just the local playground rigs.
+- Prototype starter sinks—file drop, realtime relay, telemetry mirror—and document how external partners can extend them safely.
+- Bake `QuantumRealityStudio::register_sink` hooks into lab templates so every run can broadcast both concept vectors and overlays to the wider SpiralTorch mesh.
+- Publish a Z-space bridge by default: the new `ZSpaceSink` turns captured
+  pulses into Mellin-line projections that `st-frac::zspace` rigs can ingest
+  without extra glue. The sink now exports ready-made
+  `st_logic::quantum_reality::ZSpace` signatures so theory teams can plug
+  them into collapse analyses immediately after a field run.
+- Extend the QR salons with "outside playground" residencies where visiting teams bring their own sinks, stress-test the adapters, and contribute patches upstream.
+
 ---
 
 By turning a simple call for "more amazing" into structured vectors—physics, perception, semantics, workflows, experiences, and culture—we give the team a map. Follow it with courage, and quantum reality stops being a far-off promise and becomes the stage on which SpiralTorch performs every day.

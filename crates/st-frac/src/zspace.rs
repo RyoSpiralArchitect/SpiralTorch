@@ -135,10 +135,10 @@ pub fn evaluate_weighted_series_many(
         return Err(ZSpaceError::EmptyZValues.into());
     }
 
-    Ok(z_values
+    z_values
         .iter()
         .map(|&z| evaluate_weighted_series(weighted, z))
-        .collect::<Result<Vec<_>, _>>()?)
+        .collect()
 }
 
 /// Evaluate the Mellin transform on a log-uniform grid by routing the computation

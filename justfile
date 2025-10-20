@@ -23,4 +23,7 @@ stack:
     cargo build -p st-rl --release && \
     cargo build -p st-rec --release
 
+safety-suite:
+    cargo test --manifest-path crates/spiral-safety/Cargo.toml
+
 all: fmt clippy core-build core-test stack

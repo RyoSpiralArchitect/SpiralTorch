@@ -1,0 +1,19 @@
+[package]
+name = "spiral-opt"
+version = "0.1.0"
+edition = "2021"
+description = "Quantization-aware training and structured pruning utilities for SpiralTorch"
+license = "AGPL-3.0-or-later"
+authors = ["SpiralTorch Contributors"]
+
+[lib]
+name = "spiral_opt"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+thiserror = "1"
+
+[features]
+default = []
+report-serde = ["serde"]

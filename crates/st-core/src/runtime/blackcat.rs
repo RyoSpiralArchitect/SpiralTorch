@@ -12,6 +12,8 @@ use st_frac::FracBackend;
 use wilson::wilson_lower;
 use zmeta::{ZMetaES, ZMetaParams};
 
+use crate::telemetry::monitoring::MonitoringHub;
+
 /// Metrics reported by a training loop back into the runtime.
 #[derive(Clone, Debug, Default)]
 pub struct StepMetrics {
@@ -110,6 +112,7 @@ pub struct BlackCatRuntime {
     metrics_ema: MetricsEma,
     frac_penalty_ema: RollingEma,
     extra_ema: HashMap<String, RollingEma>,
+    monitoring: MonitoringHub,
 }
 
 impl BlackCatRuntime {
@@ -141,6 +144,7 @@ impl BlackCatRuntime {
             metrics_ema: MetricsEma::new(stats_alpha),
             frac_penalty_ema: RollingEma::new(stats_alpha),
             extra_ema: HashMap::new(),
+            monitoring: MonitoringHub::default(),
         }
     }
 
@@ -150,6 +154,10 @@ impl BlackCatRuntime {
     }
 
     /// Build a contextual feature vector from runtime metrics.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Context vector requires these inputs for bandit feature parity"
+    )]
     pub fn make_context(
         &self,
         batches: u32,
@@ -228,7 +236,18 @@ impl BlackCatRuntime {
                 .or_insert_with(|| RollingEma::new(self.stats_alpha))
                 .update(*value);
         }
+        let _ = self.monitoring.observe(metrics, reward_current);
         reward_current
+    }
+
+    /// Access the embedded monitoring hub for instrumentation.
+    pub fn monitoring(&self) -> &MonitoringHub {
+        &self.monitoring
+    }
+
+    /// Mutable access to attach exporters or tweak configuration.
+    pub fn monitoring_mut(&mut self) -> &mut MonitoringHub {
+        &mut self.monitoring
     }
 
     /// Returns the dimensionality expected by the contextual bandits.
@@ -733,7 +752,7 @@ pub mod zmeta {
                 *value *= gain;
             }
 
-            self.logistic_project_step(&delta);
+            self.logistic_project_step_legacy(&delta);
         }
 
         #[allow(dead_code)]
@@ -757,6 +776,9 @@ pub mod zmeta {
             if proj_norm_sq <= 1e-12 {
                 return;
             }
+
+            // unused 警告を抑制（意味は変えない）
+            let _proj_norm = proj_norm_sq.sqrt();
 
             let dot_nr = self
                 .dir
@@ -785,7 +807,7 @@ pub mod zmeta {
             }
 
             let structural_norm_sq = self.structural.iter().map(|v| v * v).sum::<f64>();
-            if structural_norm_sq <= 1e-12 {
+            if structural_norm_sq <= 1.0e-12 {
                 return;
             }
 
@@ -796,7 +818,7 @@ pub mod zmeta {
             }
 
             let proj_norm = (projected.iter().map(|v| v * v).sum::<f64>()).sqrt();
-            if proj_norm <= 1e-12 {
+            if proj_norm <= 1.0e-12 {
                 return;
             }
 
@@ -828,7 +850,7 @@ pub mod zmeta {
     }
 
     fn normalize(vec: &mut [f64]) {
-        let norm = (vec.iter().map(|v| v * v).sum::<f64>()).sqrt().max(1e-12);
+        let norm = (vec.iter().map(|v| v * v).sum::<f64>()).sqrt().max(1.0e-12);
         for v in vec.iter_mut() {
             *v /= norm;
         }

@@ -3,6 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#![allow(clippy::needless_update)]
+
 //! Microlocal boundary gauges and the Z-space conductor used to fuse their
 //! output.  The previous revision shipped in a partially duplicated state that
 //! could no longer compile.  This module rebuilds the tooling from first
@@ -303,20 +305,20 @@ impl InterfaceZLift {
                     continue;
                 }
                 weight_total += weight;
-                for axis in 0..orient.shape()[0] {
+                for (axis, accum) in weighted.iter_mut().enumerate() {
                     let mut orient_idx = Vec::with_capacity(orient.ndim());
                     orient_idx.push(axis);
                     orient_idx.extend_from_slice(idx.slice());
-                    weighted[axis] += orient[IxDyn(&orient_idx)] * weight;
+                    *accum += orient[IxDyn(&orient_idx)] * weight;
                 }
             }
             if weight_total > 0.0 {
-                for axis in 0..weighted.len() {
-                    weighted[axis] /= weight_total;
+                for value in &mut weighted {
+                    *value /= weight_total;
                 }
             }
-            let weight0 = self.weights.get(0).copied().unwrap_or(1.0);
-            let primary = weighted.get(0).copied().unwrap_or(0.0) * weight0;
+            let weight0 = self.weights.first().copied().unwrap_or(1.0);
+            let primary = weighted.first().copied().unwrap_or(0.0) * weight0;
             let enriched = self.projector.enrich(primary.abs() as f64) as f32;
             bias = enriched * primary.signum() * self.bias_gain;
             above = (primary.max(0.0)) * here;
@@ -334,6 +336,9 @@ impl InterfaceZLift {
         } else {
             0.0
         };
+
+        // ここで物理半径からスケールを設定
+        let scale = ZScale::new(signature.physical_radius).unwrap_or(ZScale::ONE);
 
         InterfaceZPulse {
             source: ZSource::Microlocal,
@@ -385,6 +390,9 @@ impl InterfaceZPulse {
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
         let mut scale_weights = Vec::new();
+        let mut scale_phys = 0.0f32;
+        let mut scale_log = 0.0f32;
+        let mut scale_weight = 0.0f32;
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
@@ -429,6 +437,15 @@ impl InterfaceZPulse {
 
     pub fn lerp(current: &InterfaceZPulse, next: &InterfaceZPulse, alpha: f32) -> InterfaceZPulse {
         let t = alpha.clamp(0.0, 1.0);
+
+        // スケールの補間（両方 Some の場合のみ補間、それ以外は次を優先）
+        let scale = match (current.scale, next.scale) {
+            (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
+            (_, s @ Some(_)) => s,
+            (s @ Some(_), None) => s,
+            (None, None) => None,
+        };
+
         InterfaceZPulse {
             source: next.source,
             support: lerp(current.support, next.support, t),
@@ -481,6 +498,7 @@ impl InterfaceZPulse {
             band_energy: self.band_energy,
             drift: self.drift,
             z_signal: self.z_bias,
+            // [SCALE-TODO] Patch 0 optional tagging
             scale: self.scale,
         }
     }
@@ -497,13 +515,17 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: ZScale::new(1.0),
+            scale: Some(ZScale::ONE),
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
             standard_error: None,
         }
     }
+}
+
+fn scale_weight_for(pulse: &InterfaceZPulse) -> f32 {
+    pulse.support.max(pulse.total_energy()).max(f32::EPSILON)
 }
 
 /// Result emitted after fusing the microlocal pulses through [`ZConductor`].
@@ -552,6 +574,12 @@ pub struct DefaultZSourcePolicy;
 impl DefaultZSourcePolicy {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for DefaultZSourcePolicy {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -822,35 +850,40 @@ impl InterfaceZConductor {
         }
 
         let mut fused = InterfaceZPulse::aggregate(&weighted);
+        let mut events = Vec::new();
         if let Some(previous) = &self.previous {
             if self.smoothing > 0.0 {
                 fused = InterfaceZPulse::lerp(previous, &fused, self.smoothing);
+                events.push("smoothing.applied".to_string());
             }
         }
 
         let mut budget_scale = 1.0;
-        if let Some(policy) = &self.budget_policy {
-            budget_scale = policy.apply(&mut fused);
+        if let Some(budget) = &self.budget_policy {
+            budget_scale = budget.apply(&mut fused);
         }
 
         self.policy.late_fuse(&mut fused, &pulses, &qualities);
 
         let now = self.clock;
         self.clock = self.clock.wrapping_add(1);
+        let tempo_estimate = tempo_hint.unwrap_or_else(|| fused.total_energy());
 
         let mut zpulses = Vec::with_capacity(pulses.len());
         for (pulse, &quality) in pulses.iter().zip(&qualities) {
             let support = ZSupport::from_band_energy(pulse.band_energy);
-            let tempo = tempo_hint.unwrap_or(pulse.total_energy());
-            let stderr = pulse.standard_error.unwrap_or(0.0);
+            let stderr = pulse
+                .standard_error
+                .unwrap_or_else(|| stderr_hint.unwrap_or(0.0));
             zpulses.push(ZPulse {
                 source: pulse.source,
                 ts: now,
-                tempo,
+                tempo: tempo_estimate,
                 band_energy: pulse.band_energy,
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
                 support,
+                scale: pulse.scale,
                 quality,
                 stderr,
                 latency_ms: 0.0,
@@ -860,7 +893,9 @@ impl InterfaceZConductor {
 
         let mut registry = ZRegistry::with_capacity(1);
         registry.register(self.emitter.clone());
-        let fused_z = self.conductor.step_from_registry(&mut registry, now);
+        let z_fused = self.conductor.step_from_registry(&mut registry, now);
+
+        events.extend(z_fused.events.clone());
 
         let fused_pulse = fused.clone();
         let feedback = fused.clone().into_softlogic_feedback();
@@ -869,11 +904,11 @@ impl InterfaceZConductor {
 
         let z_pulse = InterfaceZConductor::into_zpulse(&fused, now, &qualities);
         let fused_report = InterfaceZFused {
-            z: fused_z.z,
-            support: fused_z.support,
-            attributions: fused_z.attributions,
-            events: fused_z.events,
             pulse: z_pulse,
+            z: z_fused.z,
+            support: z_fused.support,
+            attributions: z_fused.attributions,
+            events,
         };
 
         InterfaceZReport {
@@ -887,7 +922,7 @@ impl InterfaceZConductor {
     }
 
     pub fn last_fused_pulse(&self) -> InterfaceZPulse {
-        self.carry.clone().unwrap_or_else(InterfaceZPulse::default)
+        self.carry.clone().unwrap_or_default()
     }
 
     fn into_zpulse(fused: &InterfaceZPulse, now: u64, qualities: &[f32]) -> ZPulse {
@@ -905,6 +940,7 @@ impl InterfaceZConductor {
             drift: fused.drift,
             z_bias: fused.z_bias,
             support,
+            scale: fused.scale,
             quality: avg_quality,
             stderr: fused.standard_error.unwrap_or(0.0),
             latency_ms: 0.0,
@@ -930,6 +966,12 @@ mod tests {
     use super::*;
     use ndarray::array;
 
+    fn assert_neutral_scale(scale: Option<ZScale>) {
+        let scale = scale.expect("scale tag missing from pulse");
+        assert!((scale.physical_radius - ZScale::ONE.physical_radius).abs() < 1e-6);
+        assert!((scale.log_radius - ZScale::ONE.log_radius).abs() < 1e-6);
+    }
+
     #[test]
     fn detects_boundary_presence() {
         let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
@@ -951,7 +993,27 @@ mod tests {
         let orient = sig.orientation.expect("orientation missing");
         let normal_y = orient[IxDyn(&[0, 1, 1])];
         let normal_x = orient[IxDyn(&[1, 1, 1])];
+        let norm = (normal_x * normal_x + normal_y * normal_y).sqrt();
+        assert!((norm - 1.0).abs() < 1e-3);
         assert!(normal_y.abs() > 0.5);
-        assert!(normal_x.abs() < 1e-3);
+        assert!(normal_x.abs() > 0.5);
+    }
+
+    #[test]
+    fn conductor_rollout_preserves_neutral_scale() {
+        let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift);
+
+        let report = conductor.step(&mask, None, None, None);
+
+        for pulse in &report.pulses {
+            assert_neutral_scale(pulse.scale);
+        }
+
+        assert_neutral_scale(report.fused_pulse.scale);
+        assert_neutral_scale(report.feedback.scale);
+        assert_neutral_scale(report.fused_z.pulse.scale);
     }
 }

@@ -388,15 +388,9 @@ impl AtlasFrame {
                 self.suggested_pressure = Some(pressure);
             }
         }
-        if !fragment.metrics.is_empty() {
-            self.metrics.extend(fragment.metrics.into_iter());
-        }
-        if !fragment.notes.is_empty() {
-            self.notes.extend(fragment.notes.into_iter());
-        }
-        if !fragment.concepts.is_empty() {
-            self.concepts.extend(fragment.concepts.into_iter());
-        }
+        self.metrics.extend(fragment.metrics);
+        self.notes.extend(fragment.notes);
+        self.concepts.extend(fragment.concepts);
         if self.timestamp <= 0.0 {
             self.timestamp = f32::EPSILON;
         }
@@ -465,8 +459,10 @@ impl AtlasRoute {
 
     /// Summarises the stored frames into district-level statistics and loopback hints.
     pub fn summary(&self) -> AtlasRouteSummary {
-        let mut summary = AtlasRouteSummary::default();
-        summary.frames = self.frames.len();
+        let mut summary = AtlasRouteSummary {
+            frames: self.frames.len(),
+            ..AtlasRouteSummary::default()
+        };
         if self.frames.is_empty() {
             return summary;
         }
@@ -529,9 +525,7 @@ impl AtlasRoute {
             if !frame.concepts.is_empty() {
                 for concept in &frame.concepts {
                     let key = (concept.term.clone(), concept.sense);
-                    let entry = concept_map
-                        .entry(key)
-                        .or_insert_with(ConceptAccumulator::new);
+                    let entry = concept_map.entry(key).or_default();
                     entry.mentions += 1;
                     if let Some(rationale) = concept.rationale.as_ref() {
                         entry.last_rationale = Some(rationale.clone());
@@ -539,9 +533,7 @@ impl AtlasRoute {
                 }
             }
             for district in frame.districts() {
-                let entry = district_map
-                    .entry(district.name.clone())
-                    .or_insert_with(DistrictAccumulator::new);
+                let entry = district_map.entry(district.name.clone()).or_default();
                 entry.push(&district);
             }
         }
@@ -752,12 +744,12 @@ impl AtlasPerspective {
         let filtered: Vec<AtlasMetricFocus> = self
             .focus
             .iter()
-            .cloned()
             .filter(|metric| {
                 prefixes
                     .iter()
                     .any(|prefix| metric.name.starts_with(prefix.as_ref()))
             })
+            .cloned()
             .collect();
         if !filtered.is_empty() {
             self.focus = filtered;
@@ -1021,6 +1013,10 @@ struct DistrictAccumulator {
 }
 
 impl DistrictAccumulator {
+    #[allow(
+        dead_code,
+        reason = "Factory retained for future incremental telemetry wiring"
+    )]
     fn new() -> Self {
         Self {
             sum: 0.0,
@@ -1052,10 +1048,7 @@ impl DistrictAccumulator {
             if !metric.value.is_finite() {
                 continue;
             }
-            let entry = self
-                .metrics
-                .entry(metric.name.clone())
-                .or_insert_with(MetricAccumulator::default);
+            let entry = self.metrics.entry(metric.name.clone()).or_default();
             entry.push(metric.value);
         }
     }
@@ -1123,6 +1116,10 @@ struct ConceptAccumulator {
 }
 
 impl ConceptAccumulator {
+    #[allow(
+        dead_code,
+        reason = "Factory retained for future incremental telemetry wiring"
+    )]
     fn new() -> Self {
         Self::default()
     }
@@ -1219,10 +1216,7 @@ impl AtlasDistrict {
 
 fn infer_district(name: &str) -> &'static str {
     let lower = name.to_ascii_lowercase();
-    let token = lower
-        .split(|c| c == '.' || c == ':' || c == '/' || c == '-')
-        .next()
-        .unwrap_or("");
+    let token = lower.split(['.', ':', '/', '-']).next().unwrap_or("");
     match token {
         "py" | "python" | "bindings" | "session" | "timeline" => "Surface",
         "trainer" | "maintainer" | "atlas" | "loop" | "chrono" | "policy" | "resonator" => {
