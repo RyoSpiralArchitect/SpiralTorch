@@ -52,6 +52,8 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 - Contact: [Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) · <mailto:kishkavsesvit@icloud.com>  
 - Unauthorized derivations are non-compliant with AGPL §13  
 - **For research collaborations or integration inquiries, please reach out directly.**
+- **Cloud integrations:** see [Cloud Integration Guide](docs/cloud_integration.md) for
+  Azure and AWS deployment blueprints.
 - **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors. Any network-facing use must comply with AGPL §13.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
