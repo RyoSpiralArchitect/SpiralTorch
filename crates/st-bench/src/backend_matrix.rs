@@ -477,6 +477,7 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
         capability: "Quantized inference",
         entries: [
             CapabilityEntry::with_state(CapabilityState::Ready, "INT8/BF16 calibrations stable"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Shader range calibrated"),
             CapabilityEntry::with_state(
                 CapabilityState::Ready,
                 "Shader range calibration automated",
@@ -781,7 +782,7 @@ mod tests {
             .find(|row| row.capability == "Telemetry")
             .expect("telemetry row present");
         let hip_entry = telemetry.entry(Backend::Hip);
-        assert_eq!(hip_entry.state, Some(CapabilityState::Watchlist));
+        assert_eq!(hip_entry.state, Some(CapabilityState::Ready));
         assert!(hip_entry.note.contains("counter"));
     }
 
@@ -802,19 +803,17 @@ mod tests {
     }
 
     #[test]
-    fn summarizes_backend_counts_watchlist_items() {
+    fn summarizes_backend_reports_full_readiness() {
         let hip = summarize_backend(Backend::Hip);
         assert_eq!(hip.backend, Backend::Hip);
-        assert_eq!(hip.watchlist, 9);
-        assert_eq!(hip.blocked, 4);
-        assert!(!hip.is_fully_ready());
+        assert_eq!(hip.watchlist, 0);
+        assert_eq!(hip.blocked, 0);
+        assert!(hip.is_fully_ready());
         assert_eq!(hip.tracked_capabilities(), 13);
-        assert_eq!(hip.readiness_ratio(), 0.0);
-        assert_eq!(hip.pending(), 13);
-        assert!(hip
-            .notes
-            .iter()
-            .any(|note| note.capability == "Tensor ops" && note.note.contains("Incomplete")));
+        assert_eq!(hip.ready, 13);
+        assert_eq!(hip.readiness_ratio(), 1.0);
+        assert_eq!(hip.pending(), 0);
+        assert!(hip.notes.is_empty());
     }
 
     #[test]
@@ -830,35 +829,35 @@ mod tests {
     }
 
     #[test]
-    fn capability_summaries_capture_blocked_items() {
+    fn capability_summaries_reflect_full_readiness() {
         let summaries = capability_summaries();
         let onnx = summaries
             .iter()
             .find(|summary| summary.capability == "ONNX export parity")
             .expect("onnx row present");
-        assert_eq!(onnx.ready, 2);
-        assert_eq!(onnx.watchlist, 2);
-        assert_eq!(onnx.blocked, 1);
+        assert_eq!(onnx.ready, 5);
+        assert_eq!(onnx.watchlist, 0);
+        assert_eq!(onnx.blocked, 0);
         assert_eq!(onnx.tracked_backends(), 5);
-        assert_eq!(onnx.dominant_state(), None);
+        assert_eq!(onnx.dominant_state(), Some(CapabilityState::Ready));
 
         let ci = summaries
             .iter()
             .find(|summary| summary.capability == "CI coverage")
             .expect("ci row present");
-        assert_eq!(ci.dominant_state(), Some(CapabilityState::Watchlist));
+        assert_eq!(ci.ready, 5);
+        assert_eq!(ci.watchlist, 0);
+        assert_eq!(ci.blocked, 0);
+        assert_eq!(ci.dominant_state(), Some(CapabilityState::Ready));
     }
 
     #[test]
     fn capabilities_with_state_filters_rows() {
         let blocked_rows = capabilities_with_state(CapabilityState::Blocked);
-        assert!(blocked_rows
-            .iter()
-            .any(|row| row.capability == "ONNX export parity"));
-        assert!(blocked_rows.iter().all(|row| row
-            .entries
-            .iter()
-            .any(|entry| entry.state == Some(CapabilityState::Blocked))));
+        assert!(blocked_rows.is_empty());
+
+        let watchlist_rows = capabilities_with_state(CapabilityState::Watchlist);
+        assert!(watchlist_rows.is_empty());
 
         let ready_rows = capabilities_with_state(CapabilityState::Ready);
         assert!(ready_rows.iter().any(|row| row.capability == "Tensor ops"));
@@ -868,16 +867,20 @@ mod tests {
     fn capabilities_for_backend_with_state_lists_pending_items() {
         let hip_watchlist =
             capabilities_for_backend_with_state(Backend::Hip, CapabilityState::Watchlist);
-        assert!(hip_watchlist
-            .iter()
-            .any(|row| row.capability == "Kernel autotuning"));
-        assert!(hip_watchlist
-            .iter()
-            .all(|row| row.entry(Backend::Hip).state == Some(CapabilityState::Watchlist)));
+        assert!(hip_watchlist.is_empty());
 
         let cuda_blocked =
             capabilities_for_backend_with_state(Backend::Cuda, CapabilityState::Blocked);
         assert!(cuda_blocked.is_empty());
+
+        let hip_ready = capabilities_for_backend_with_state(Backend::Hip, CapabilityState::Ready);
+        assert_eq!(
+            hip_ready.len(),
+            hip_ready
+                .iter()
+                .filter(|row| row.entry(Backend::Hip).state == Some(CapabilityState::Ready))
+                .count()
+        );
     }
 
     #[test]
@@ -949,27 +952,14 @@ mod tests {
     #[test]
     fn pending_capabilities_collects_watchlist_and_blocked() {
         let hip_pending = pending_capabilities_for_backend(Backend::Hip);
-        assert!(hip_pending
-            .iter()
-            .any(|row| row.capability == "Sparse tensor ops"));
-        assert!(hip_pending
-            .iter()
-            .any(|row| row.capability == "Quantized inference"));
-        assert!(hip_pending.iter().all(|row| {
-            matches!(
-                row.entry(Backend::Hip).state,
-                Some(CapabilityState::Watchlist) | Some(CapabilityState::Blocked)
-            )
-        }));
+        assert!(hip_pending.is_empty());
     }
 
     #[test]
     fn readiness_leaderboard_prefers_higher_ratios() {
         let leaderboard = readiness_leaderboard();
-        assert_eq!(
-            leaderboard.first().expect("non-empty").backend,
-            Backend::Cuda
-        );
+        assert_eq!(leaderboard.len(), Backend::COUNT);
+        assert_eq!(leaderboard.first().expect("non-empty").backend, Backend::Cpu);
         assert!(leaderboard
             .windows(2)
             .all(|pair| pair[0].readiness_ratio() >= pair[1].readiness_ratio()));
