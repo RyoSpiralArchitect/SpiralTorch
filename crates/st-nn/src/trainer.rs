@@ -220,6 +220,7 @@ pub struct ModuleTrainer {
     curvature: f32,
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
+    real_learning_rate: Option<f32>,
     blackcat: Option<BlackCatRuntime>,
     blackcat_moderator: Option<BlackcatModerator>,
     autopilot: Option<Autopilot>,
@@ -260,8 +261,11 @@ impl core::fmt::Debug for ModuleTrainer {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "ModuleTrainer(curv={},lr_h={},lr_f={})",
-            self.curvature, self.hyper_learning_rate, self.fallback_learning_rate
+            "ModuleTrainer(curv={},lr_h={},lr_f={},lr_r={:?})",
+            self.curvature,
+            self.hyper_learning_rate,
+            self.fallback_learning_rate,
+            self.real_learning_rate
         )
     }
 }
@@ -459,6 +463,7 @@ impl ModuleTrainer {
             curvature,
             hyper_learning_rate,
             fallback_learning_rate,
+            real_learning_rate: None,
             blackcat: None,
             blackcat_moderator: None,
             autopilot: None,
@@ -1057,9 +1062,36 @@ impl ModuleTrainer {
         self.hyper_learning_rate
     }
 
+    /// Returns the Euclidean realgrad learning rate, when enabled.
+    pub fn real_learning_rate(&self) -> Option<f32> {
+        self.real_learning_rate
+    }
+
+    /// Enables Euclidean realgrad accumulation with the provided learning rate.
+    pub fn with_realgrad(mut self, learning_rate: f32) -> Self {
+        self.enable_realgrad(learning_rate);
+        self
+    }
+
+    /// Enables Euclidean realgrad accumulation with the provided learning rate.
+    pub fn enable_realgrad(&mut self, learning_rate: f32) {
+        if learning_rate.is_finite() && learning_rate > 0.0 {
+            self.real_learning_rate = Some(learning_rate);
+        }
+    }
+
+    /// Disables the optional realgrad accumulation pathway.
+    pub fn disable_realgrad(&mut self) {
+        self.real_learning_rate = None;
+    }
+
     /// Attaches hypergrad tapes to all parameters of the provided module.
     pub fn prepare<M: Module>(&self, module: &mut M) -> PureResult<()> {
-        module.attach_hypergrad(self.curvature, self.hyper_learning_rate)
+        module.attach_hypergrad(self.curvature, self.hyper_learning_rate)?;
+        if let Some(rate) = self.real_learning_rate {
+            module.attach_realgrad(rate)?;
+        }
+        Ok(())
     }
 
     /// Attaches hypergrad tapes with an explicit topos shared across parameters.
@@ -1068,7 +1100,11 @@ impl ModuleTrainer {
         module: &mut M,
         topos: OpenCartesianTopos,
     ) -> PureResult<()> {
-        module.attach_hypergrad_with_topos(self.curvature, self.hyper_learning_rate, topos)
+        module.attach_hypergrad_with_topos(self.curvature, self.hyper_learning_rate, topos)?;
+        if let Some(rate) = self.real_learning_rate {
+            module.attach_realgrad(rate)?;
+        }
+        Ok(())
     }
 
     /// Clears accumulated gradients or hypergrad buffers.
@@ -1757,6 +1793,9 @@ impl ModuleTrainer {
         }
         self.fallback_learning_rate *= factor;
         self.hyper_learning_rate *= factor;
+        if let Some(rate) = self.real_learning_rate.as_mut() {
+            *rate *= factor;
+        }
         module.visit_parameters_mut(&mut |param| {
             param.scale_learning_rate(factor);
             Ok(())
@@ -1772,10 +1811,19 @@ impl ModuleTrainer {
                     let v = value as f64;
                     sum += v * v;
                 }
-            } else if let Some(grad) = param.gradient() {
-                for &value in grad.data().iter() {
+            }
+            if let Some(tape) = param.realgrad() {
+                for &value in tape.gradient().iter() {
                     let v = value as f64;
                     sum += v * v;
+                }
+            }
+            if param.hypergrad().is_none() && param.realgrad().is_none() {
+                if let Some(grad) = param.gradient() {
+                    for &value in grad.data().iter() {
+                        let v = value as f64;
+                        sum += v * v;
+                    }
                 }
             }
             Ok(())
@@ -2046,6 +2094,23 @@ mod tests {
     }
 
     #[test]
+    fn trainer_attaches_realgrad_when_enabled() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_realgrad(0.02);
+        let mut layer = Linear::new("fc", 2, 1).unwrap();
+        trainer.prepare(&mut layer).unwrap();
+        let mut saw_parameter = false;
+        layer
+            .visit_parameters(&mut |param| {
+                saw_parameter = true;
+                assert!(param.realgrad().is_some());
+                Ok(())
+            })
+            .unwrap();
+        assert!(saw_parameter);
+    }
+
+    #[test]
     fn trainer_prepares_with_topos_for_wave_gate() {
         let caps = DeviceCaps::wgpu(64, true, 512);
         let trainer = ModuleTrainer::new(caps, -0.9, 0.06, 0.02);
@@ -2065,6 +2130,21 @@ mod tests {
         let _ = gate.backward(&input, &grad_out).unwrap();
         trainer.step(&mut gate).unwrap();
         assert!(gate.gate().value().squared_l2_norm() > 0.0);
+    }
+
+    #[test]
+    fn trainer_prepare_with_topos_attaches_realgrad() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let trainer = ModuleTrainer::new(caps, -0.95, 0.05, 0.01).with_realgrad(0.015);
+        let mut layer = Linear::new("fc", 3, 2).unwrap();
+        let topos = OpenCartesianTopos::new(trainer.curvature(), 1e-6, 1e4, 128, 4096).unwrap();
+        trainer.prepare_with_topos(&mut layer, topos).unwrap();
+        layer
+            .visit_parameters(&mut |param| {
+                assert!(param.realgrad().is_some());
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
