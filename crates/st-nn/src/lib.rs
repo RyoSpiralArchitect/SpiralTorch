@@ -9,6 +9,7 @@
 //! stack entirely in Rust while remaining fully compatible with the hypergrad
 //! tape and SpiralK planners.
 
+pub mod cloud;
 pub mod dataset;
 pub mod gnn;
 #[cfg(feature = "golden")]

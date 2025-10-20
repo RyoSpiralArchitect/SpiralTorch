@@ -9,7 +9,7 @@ The helper mirrors the design sketched in the user request but avoids NumPy
 and PyTorch so it can run in constrained environments.  A tiny Adam
 implementation keeps the Z vector stable while a fractional FFT regulariser
 penalises high-frequency drift.  The trainer also accepts Drift-Response
-Semantics (DRS) penalties so language batches can react to high-risk
+Linguistics (DRL) penalties so language batches can react to high-risk
 vocabulary without rewriting the Rust stack.
 """
 from __future__ import annotations
