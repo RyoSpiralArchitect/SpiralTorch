@@ -1,7 +1,7 @@
-//! Drift-Response Semantics helpers for Rust callers.
+//! Drift-Response Linguistics helpers for Rust callers.
 //!
 //! This module mirrors the equations used by the Python helper in
-//! `tools/python/drift_response_semantics.py`.  It exposes the existential
+//! `tools/python/drift_response_linguistics.py`.  It exposes the existential
 //! load, safe radius, and strict-mode latching logic so Rust surfaces inside
 //! SpiralTorch can participate in the same governance loop.
 
@@ -83,7 +83,7 @@ impl FrameState {
     }
 }
 
-/// Container for per-word DRS measurements.
+/// Container for per-word DRL measurements.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct WordState {
     pub name: String,
@@ -117,9 +117,9 @@ impl WordState {
     }
 }
 
-/// Summary of DRS statistics for a word.
+/// Summary of DRL statistics for a word.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct DrsMetrics {
+pub struct DrlMetrics {
     pub word: WordState,
     pub existence_load: f32,
     pub frame_hazards: BTreeMap<String, f32>,
@@ -127,6 +127,9 @@ pub struct DrsMetrics {
     pub chi: u32,
     pub strict_mode: bool,
 }
+
+/// Backwards compatibility alias for earlier drafts that surfaced DRS.
+pub type DrsMetrics = DrlMetrics;
 
 /// Reasonable defaults that prioritise high-safety frames.
 pub static DEFAULT_THRESHOLDS: LazyLock<BTreeMap<String, FrameThreshold>> = LazyLock::new(|| {
@@ -209,7 +212,7 @@ pub fn safe_radius(
 }
 
 /// Analyse a word using default hazard cut and radius threshold.
-pub fn analyse_word(word: &WordState, thresholds: &BTreeMap<String, FrameThreshold>) -> DrsMetrics {
+pub fn analyse_word(word: &WordState, thresholds: &BTreeMap<String, FrameThreshold>) -> DrlMetrics {
     analyse_word_with(word, thresholds, None, 0.2)
 }
 
@@ -219,7 +222,7 @@ pub fn analyse_word_with(
     thresholds: &BTreeMap<String, FrameThreshold>,
     hazard_cut: Option<f32>,
     min_radius: f32,
-) -> DrsMetrics {
+) -> DrlMetrics {
     let mut frame_hazards = BTreeMap::new();
     for (name, frame) in &word.frames {
         frame_hazards.insert(name.clone(), frame_hazard(word, frame));
@@ -240,7 +243,7 @@ pub fn analyse_word_with(
     let existence = existence_load(word);
     let strict = hazard_counts >= 4 || min_radius_observed <= min_radius || existence >= 1.0;
 
-    DrsMetrics {
+    DrlMetrics {
         word: word.clone(),
         existence_load: existence,
         frame_hazards,
@@ -251,12 +254,12 @@ pub fn analyse_word_with(
 }
 
 /// Convert metrics into a scalar penalty using the default radius.
-pub fn trainer_penalty(metrics: &DrsMetrics) -> f32 {
+pub fn trainer_penalty(metrics: &DrlMetrics) -> f32 {
     trainer_penalty_with(metrics, 0.2)
 }
 
 /// Convert metrics into a scalar penalty using a custom minimum radius.
-pub fn trainer_penalty_with(metrics: &DrsMetrics, min_radius: f32) -> f32 {
+pub fn trainer_penalty_with(metrics: &DrlMetrics, min_radius: f32) -> f32 {
     let mut penalty = metrics.existence_load;
     if let Some(&min_radius_observed) = metrics
         .safe_radii
@@ -278,7 +281,7 @@ pub fn trainer_penalty_with(metrics: &DrsMetrics, min_radius: f32) -> f32 {
 /// Aggregate a collection of metrics using the default minimum radius.
 pub fn aggregate_penalty<'a, I>(metrics: I) -> f32
 where
-    I: IntoIterator<Item = &'a DrsMetrics>,
+    I: IntoIterator<Item = &'a DrlMetrics>,
 {
     aggregate_penalty_with(metrics, 0.2)
 }
@@ -286,7 +289,7 @@ where
 /// Aggregate a collection of metrics using a custom minimum radius.
 pub fn aggregate_penalty_with<'a, I>(metrics: I, min_radius: f32) -> f32
 where
-    I: IntoIterator<Item = &'a DrsMetrics>,
+    I: IntoIterator<Item = &'a DrlMetrics>,
 {
     metrics.into_iter().fold(0.0, |acc, item| {
         acc + trainer_penalty_with(item, min_radius)
@@ -294,7 +297,7 @@ where
 }
 
 /// Produce a hazard-to-radius summary per frame.
-pub fn frame_summary(metrics: &DrsMetrics) -> BTreeMap<String, f32> {
+pub fn frame_summary(metrics: &DrlMetrics) -> BTreeMap<String, f32> {
     let mut summary = BTreeMap::new();
     for (name, hazard) in &metrics.frame_hazards {
         let value = if let Some(radius) = metrics.safe_radii.get(name) {
