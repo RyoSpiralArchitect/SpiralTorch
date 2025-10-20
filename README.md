@@ -494,6 +494,74 @@ telemetry spikes back to model behaviour. Visualising these pathways keeps
 “why” answers native to Z-space, turning SpiralTorch’s internal instrumentation
 into an Explainable AI surface without external probes.
 
+### Multi-modal topos safety envelopes
+
+Open topos guards now ship a unified, multi-modal façade so the same
+hyperbolic safety window can simultaneously protect text, audio, vision, graph
+and reinforcement-learning reward streams. The new
+`st_tensor::MultiModalToposGuard` wraps an existing `OpenCartesianTopos` and
+lets you tune per-modality envelopes through lightweight profiles:
+
+```rust
+use st_tensor::{
+    GraphGuardProfile, ModalityProfile, MultiModalToposGuard, OpenCartesianTopos, RewardBoundary,
+};
+
+let topos = OpenCartesianTopos::new(-0.95, 1e-6, 8.0, 256, 16_384)?;
+let guard = MultiModalToposGuard::new(&topos)?
+    .with_text_profile(
+        ModalityProfile::new(32_768, Some(0.35))?.with_permeability(0.25)?,
+    )?
+    .with_audio_profile(
+        ModalityProfile::new(96_000, Some(1.25))?.with_permeability(0.12)?,
+    )?
+    .with_graph_profile(
+        GraphGuardProfile::new(512, 8_192, 64, 1e-3, 0.02, None)?.with_permeability(0.15)?,
+    )?
+    .with_reward_boundary(RewardBoundary::new(-0.8, 0.8, 0.05)?)?;
+
+let mut rewards = vec![1.2, 0.6, -1.1];
+let signal = guard.guard_reward_trace(&mut rewards)?;
+if let Some(breach) = signal.upper_breach_index {
+    tracing::warn!(breach, "reward trace escaped the safe window");
+}
+```
+
+Each `ModalityProfile` enforces volume limits and softly saturates values using
+a tunable **permeability** so monadic biomes retain breathing room instead of
+being hard-clipped at the boundary. `GraphGuardProfile` applies the same
+permeable clamp to adjacency weights and tolerates a budget overshoot within
+the configured permeability, reporting the overflow through
+`GraphGuardReport::edge_overflow`. `RewardBoundary` surfaces the first reward
+breach while clamping the trace back inside the permitted envelope. The guard
+reports symmetry violations, observed reward ranges, saturation counts, and
+edge overflow so downstream monitors can react without recomputing the checks in
+higher-level languages.
+
+The guard can now seed both an atlas and a biome that retain the same
+permeability envelopes, making it easy to wire multi-modal checkpoints into
+longer traversals:
+
+```rust
+let mut atlas = guard.atlas();
+let mut biome = guard.cultivate_biome();
+
+let mut text = Tensor::from_vec(1, 8, vec![2.5; 8])?;
+atlas.guard_text_tensor("atlas_text", &mut text)?;
+
+let vision = Tensor::from_vec(3, 3, vec![1.3; 9])?;
+biome.absorb_vision("biome_vision", vision)?;
+let canopy = biome.canopy()?;
+tracing::info!(volume = atlas.visited_volume(), shoots = biome.len());
+```
+
+`MultiModalAtlas` shares `ToposAtlas` telemetry like `visited_volume` and
+`remaining_volume` while applying modality-aware rewrites before the atlas guard
+fires, so downstream geometry keeps a consistent notion of traversal depth.
+`MultiModalBiome` keeps the same permeability when absorbing shoots, meaning any
+monadic collapse through `canopy()` stays in lock-step with the atlas and guard
+without re-deriving modality constraints.
+
 ### Autotune telemetry for the WGPU-first roadmap
 
 SpiralTorch now ships an autotuning registry and bounded telemetry log so the
