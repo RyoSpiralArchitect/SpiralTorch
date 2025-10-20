@@ -64,19 +64,36 @@ fn wrap_index(idx: isize, len: usize) -> usize {
     idx.rem_euclid(len) as usize
 }
 
-fn reflected_index(mut idx: isize, len: usize) -> usize {
+/// Reflect `idx` into the valid `[0, len)` range using the same "edge repeating"
+/// semantics as the previous iterative implementation but without potentially
+/// overflowing when `idx` is at the limits of `isize`.
+fn reflected_index(idx: isize, len: usize) -> usize {
     debug_assert!(len > 0);
     if len == 1 {
         return 0;
     }
 
-    let len_isize = len as isize;
-    while idx < 0 || idx >= len_isize {
-        if idx < 0 {
-            idx = -idx - 1;
-        } else {
-            idx = len_isize - (idx - len_isize) - 1;
-        }
+    let len_i128 = len as i128;
+    let period = len_i128 * 2;
+    let mut m = idx as i128 % period;
+    if m < 0 {
+        m += period;
+    }
+    if m >= len_i128 {
+        m = period - m - 1;
+    }
+
+    m as usize
+}
+
+fn clamped_edge_index(idx: isize, len: usize) -> usize {
+    debug_assert!(len > 0);
+    if idx < 0 {
+        0
+    } else if idx as usize >= len {
+        len - 1
+    } else {
+        idx as usize
     }
 
     idx as usize
@@ -404,6 +421,44 @@ mod tests {
     fn wrap_index_handles_large_displacements() {
         assert_eq!(super::wrap_index(10, 3), 1);
         assert_eq!(super::wrap_index(-8, 5), 2);
+    }
+
+    #[test]
+    fn reflected_index_matches_naive_small_ranges() {
+        fn naive(idx: isize, len: usize) -> usize {
+            if len == 1 {
+                return 0;
+            }
+            let len_i128 = len as i128;
+            let mut idx = idx as i128;
+            while idx < 0 || idx >= len_i128 {
+                if idx < 0 {
+                    idx = -idx - 1;
+                } else {
+                    idx = len_i128 - (idx - len_i128) - 1;
+                }
+            }
+            idx as usize
+        }
+
+        for len in 1..6 {
+            for idx in -32..=32 {
+                assert_eq!(super::reflected_index(idx, len), naive(idx, len));
+            }
+        }
+    }
+
+    #[test]
+    fn sample_with_pad_reflect_handles_extreme_indices() {
+        let x = [10.0, 20.0, 30.0, 40.0];
+        assert_eq!(
+            super::sample_with_pad(&x, isize::MIN, Pad::Reflect),
+            10.0
+        );
+        assert_eq!(
+            super::sample_with_pad(&x, isize::MAX - 1, Pad::Reflect),
+            20.0
+        );
     }
 
     #[test]
