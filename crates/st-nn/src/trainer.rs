@@ -41,8 +41,8 @@ use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ecosystem::{
-    CloudConnector, ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample,
-    RankPlanSummary, RoundtableConfigSummary, RoundtableSummary,
+    ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample, RankPlanSummary,
+    RoundtableConfigSummary, RoundtableSummary,
 };
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
@@ -1359,40 +1359,45 @@ impl ModuleTrainer {
                 }
             }
             #[cfg(feature = "collapse")]
-            if let (Some(driver), Some(reading)) = (self.collapse.as_mut(), psi_snapshot.as_ref()) {
-                let command = driver.update(reading);
-                match command {
-                    DriveCmd::Collapse {
-                        grad_scale,
-                        max_norm,
-                        lr_decay,
-                    } => {
-                        if grad_scale < 0.999 {
-                            self.apply_grad_scale(module, grad_scale)?;
+            if let Some(reading) = psi_snapshot.as_ref() {
+                let command = self
+                    .collapse
+                    .as_mut()
+                    .map(|driver| driver.update(reading));
+                if let Some(command) = command {
+                    match &command {
+                        DriveCmd::Collapse {
+                            grad_scale,
+                            max_norm,
+                            lr_decay,
+                        } => {
+                            if *grad_scale < 0.999 {
+                                self.apply_grad_scale(module, *grad_scale)?;
+                            }
+                            if let Some(limit) = max_norm {
+                                self.clip_grad_global_norm(module, *limit)?;
+                            }
+                            if let Some(decay) = lr_decay {
+                                let factor = (1.0 - decay).clamp(0.1, 1.0);
+                                self.optimizer_mul_lr(module, factor)?;
+                            }
                         }
-                        if let Some(limit) = max_norm {
-                            self.clip_grad_global_norm(module, limit)?;
+                        DriveCmd::Bloom { lr_mul } => {
+                            if *lr_mul > 1.0 {
+                                self.optimizer_mul_lr(module, *lr_mul)?;
+                            }
                         }
-                        if let Some(decay) = lr_decay {
-                            let factor = (1.0 - decay).clamp(0.1, 1.0);
-                            self.optimizer_mul_lr(module, factor)?;
-                        }
+                        DriveCmd::None => {}
                     }
-                    DriveCmd::Bloom { lr_mul } => {
-                        if lr_mul > 1.0 {
-                            self.optimizer_mul_lr(module, lr_mul)?;
-                        }
+                    if !matches!(command, DriveCmd::None) {
+                        let loop_signal = hub::get_chrono_loop();
+                        hub::set_collapse_pulse(CollapsePulse {
+                            step: reading.step,
+                            total: reading.total,
+                            command,
+                            loop_signal,
+                        });
                     }
-                    DriveCmd::None => {}
-                }
-                if !matches!(command, DriveCmd::None) {
-                    let loop_signal = hub::get_chrono_loop();
-                    hub::set_collapse_pulse(CollapsePulse {
-                        step: reading.step,
-                        total: reading.total,
-                        command,
-                        loop_signal,
-                    });
                 }
             }
             let psi_total_opt: Option<f32> = {

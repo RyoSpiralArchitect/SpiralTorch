@@ -6,10 +6,8 @@ use spiral_opt::{
     QuantizationReport, StructuredPruner, StructuredPruningConfig, StructuredPruningReport,
 };
 
-impl From<OptimisationError> for PyErr {
-    fn from(value: OptimisationError) -> Self {
-        pyo3::exceptions::PyValueError::new_err(value.to_string())
-    }
+fn optimisation_error_to_py(err: OptimisationError) -> PyErr {
+    pyo3::exceptions::PyValueError::new_err(err.to_string())
 }
 
 #[pyclass(module = "spiraltorch.export")]
@@ -229,7 +227,9 @@ fn structured_prune(
         target_sparsity,
         min_l2_keep,
     };
-    let report = pruner.apply(&mut weights, config)?;
+    let report = pruner
+        .apply(&mut weights, config)
+        .map_err(optimisation_error_to_py)?;
     Ok((weights, PyStructuredPruningReport::from(report)))
 }
 
@@ -247,14 +247,16 @@ fn compress_weights(
 
     let (remaining_params, pruning_report) = if let Some((block, sparsity, keep)) = pruning_config {
         let pruner = StructuredPruner::new();
-        let report = pruner.apply(
-            &mut weights,
-            StructuredPruningConfig {
-                block_size: block,
-                target_sparsity: sparsity,
-                min_l2_keep: keep,
-            },
-        )?;
+        let report = pruner
+            .apply(
+                &mut weights,
+                StructuredPruningConfig {
+                    block_size: block,
+                    target_sparsity: sparsity,
+                    min_l2_keep: keep,
+                },
+            )
+            .map_err(optimisation_error_to_py)?;
         let remaining = weights.iter().filter(|&&w| w != 0.0).count();
         (remaining, Some(report))
     } else {
