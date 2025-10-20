@@ -50,7 +50,8 @@ performance, memory safety, and collaborative tooling.
   callers can swap tensors without writing glue code. The new `spiraltorch.compat`
   namespace wraps these bridges with `compat.torch`, `compat.jax`, and
   `compat.tensorflow` helpers that import the respective frameworks and call their
-  DLPack shims directly.
+  DLPack shims directly, with kwargs for dtype/device rebinding, gradient toggles,
+  and contiguous/copy enforcement to keep conversions intentional and safe.
 - **Telemetry bridges.** Map SpiralTorch's observability events to tensorboard, Weights &
   Biases, JAX's `jax.profiler`, and OpenTelemetry spans so teams can keep their existing dashboards.
 
