@@ -40,6 +40,12 @@ pub mod microlocal_impl;
 #[doc(inline)]
 pub use microlocal_impl as microlocal;
 
+#[path = "macro.rs"]
+#[doc(hidden)]
+pub mod macro_impl;
+#[doc(inline)]
+pub use macro_impl as macro_model;
+
 #[cfg(feature = "experimental_zpulse")]
 pub mod microlocal_experimental;
 
