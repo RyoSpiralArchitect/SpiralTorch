@@ -5,10 +5,12 @@ use pyo3::{wrap_pyfunction, Bound, PyRefMut};
 
 use crate::tensor::{tensor_err_to_py, PyTensor};
 
-use st_tensor::measure::{z_space_barycenter as z_space_barycenter_rs, BarycenterIntermediate, ZSpaceBarycenter};
+use st_tensor::measure::{
+    z_space_barycenter as z_space_barycenter_rs, BarycenterIntermediate, ZSpaceBarycenter,
+};
 use st_tensor::{
     AmegaHypergrad, Complex32 as StComplex32, ComplexTensor, GradientSummary, LanguageWaveEncoder,
-    OpenCartesianTopos, TensorBiome, Tensor,
+    OpenCartesianTopos, Tensor, TensorBiome,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -343,8 +345,7 @@ fn py_z_space_barycenter(
         .into_iter()
         .map(|tensor| tensor.bind(py).borrow().inner.clone())
         .collect();
-    let coupling_tensor = coupling
-        .map(|tensor| tensor.bind(py).borrow().inner.clone());
+    let coupling_tensor = coupling.map(|tensor| tensor.bind(py).borrow().inner.clone());
     let barycenter = z_space_barycenter_rs(
         &weights,
         &density_clones,
