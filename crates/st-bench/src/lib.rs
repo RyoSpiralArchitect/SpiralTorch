@@ -10,7 +10,9 @@ use std::collections::HashMap;
 pub mod backend_matrix;
 
 pub use backend_matrix::{
-    capability_matrix, Backend, CapabilityEntry, CapabilityRow, CapabilityState,
+    backend_summaries, capability_by_name, capability_matrix, capability_matrix_json,
+    summarize_backend, Backend, BackendNote, BackendSummary, CapabilityEntry, CapabilityRow,
+    CapabilityState,
 };
 
 mod model {

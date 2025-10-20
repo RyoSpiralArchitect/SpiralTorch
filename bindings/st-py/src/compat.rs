@@ -87,7 +87,7 @@ fn capture_impl(py: Python<'_>, value: &Bound<PyAny>) -> PyResult<PyTensor> {
             let py_tensor: Py<PyTensor> = value.extract()?;
             Ok(py_tensor.bind(py).borrow().clone())
         }
-        Source::Torch => torch::from_torch_simple(py, value),
+        Source::Torch => torch::from_torch(py, value, None, None, None, None, None),
         Source::Jax => jax::from_jax(py, value),
         Source::TensorFlow => tensorflow::from_tensorflow(py, value),
         Source::Dlpack => PyTensor::from_dlpack(py, value.clone().unbind().into_py(py)),
@@ -115,7 +115,7 @@ fn share_impl(py: Python<'_>, value: &Bound<PyAny>, target: &str) -> PyResult<Py
                 return Ok(value.clone().unbind().into_py(py));
             }
             let tensor = capture_impl(py, value)?;
-            torch::to_torch_simple(py, &tensor)
+            torch::to_torch(py, &tensor, None, None, None, None, None)
         }
         "jax" => {
             if module.starts_with("jax") || module.contains("jaxlib") {

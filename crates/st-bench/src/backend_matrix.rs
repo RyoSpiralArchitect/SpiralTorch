@@ -12,6 +12,7 @@
 //! and stores the qualitative readiness state alongside the note rendered in the
 //! document.
 
+use serde::Serialize;
 use std::fmt;
 
 /// Backends tracked in the feature matrix.
@@ -48,6 +49,14 @@ impl Backend {
         }
     }
 
+    /// Parses the canonical backend label back into a [`Backend`].
+    pub fn from_str(name: &str) -> Option<Self> {
+        Backend::ALL
+            .iter()
+            .copied()
+            .find(|backend| backend.as_str().eq_ignore_ascii_case(name.trim()))
+    }
+
     pub(crate) const fn index(self) -> usize {
         match self {
             Backend::Cpu => 0,
@@ -59,8 +68,17 @@ impl Backend {
     }
 }
 
+impl Serialize for Backend {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 /// Qualitative readiness level used in the documentation matrix.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CapabilityState {
     Ready,
     Watchlist,
@@ -85,7 +103,7 @@ impl fmt::Display for CapabilityState {
 }
 
 /// Entry describing how a backend fulfils a given capability.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct CapabilityEntry {
     /// Optional readiness classification. Rows that convey free-form notes
     /// (e.g. build flags) omit a state marker.
@@ -108,7 +126,7 @@ impl CapabilityEntry {
 }
 
 /// Capability row in the backend matrix.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct CapabilityRow {
     /// Capability name as rendered in the first column of the table.
     pub capability: &'static str,
@@ -120,6 +138,37 @@ impl CapabilityRow {
     /// Retrieve the entry for `backend`.
     pub const fn entry(&self, backend: Backend) -> &CapabilityEntry {
         &self.entries[backend.index()]
+    }
+}
+
+/// Aggregated readiness information for a backend across the entire matrix.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BackendNote {
+    /// Capability row the note originates from.
+    pub capability: &'static str,
+    /// Additional context mirrored from the documentation table.
+    pub note: &'static str,
+}
+
+/// Aggregated readiness information for a backend across the entire matrix.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BackendSummary {
+    /// Backend identifier.
+    pub backend: Backend,
+    /// Number of ready capabilities.
+    pub ready: usize,
+    /// Number of capabilities tracked on the watchlist.
+    pub watchlist: usize,
+    /// Number of blocked capabilities.
+    pub blocked: usize,
+    /// Collected notes for non-ready capabilities and informational rows.
+    pub notes: Vec<BackendNote>,
+}
+
+impl BackendSummary {
+    /// Returns `true` if the backend has no watchlist or blocked capabilities.
+    pub fn is_fully_ready(&self) -> bool {
+        self.watchlist == 0 && self.blocked == 0
     }
 }
 
@@ -207,6 +256,74 @@ pub fn capability_matrix() -> &'static [CapabilityRow] {
     CAPABILITY_ROWS
 }
 
+/// Locates a capability row by name (case-insensitive).
+pub fn capability_by_name(name: &str) -> Option<&'static CapabilityRow> {
+    let query = name.trim();
+    if query.is_empty() {
+        return None;
+    }
+
+    CAPABILITY_ROWS
+        .iter()
+        .find(|row| row.capability.eq_ignore_ascii_case(query))
+}
+
+/// Produces a summary describing how `backend` fares across all capabilities.
+pub fn summarize_backend(backend: Backend) -> BackendSummary {
+    let mut summary = BackendSummary {
+        backend,
+        ready: 0,
+        watchlist: 0,
+        blocked: 0,
+        notes: Vec::new(),
+    };
+
+    for row in CAPABILITY_ROWS {
+        let entry = row.entry(backend);
+        match entry.state {
+            Some(CapabilityState::Ready) => summary.ready += 1,
+            Some(CapabilityState::Watchlist) => {
+                summary.watchlist += 1;
+                summary.notes.push(BackendNote {
+                    capability: row.capability,
+                    note: entry.note,
+                });
+            }
+            Some(CapabilityState::Blocked) => {
+                summary.blocked += 1;
+                summary.notes.push(BackendNote {
+                    capability: row.capability,
+                    note: entry.note,
+                });
+            }
+            None => {
+                if !entry.note.is_empty() {
+                    summary.notes.push(BackendNote {
+                        capability: row.capability,
+                        note: entry.note,
+                    });
+                }
+            }
+        }
+    }
+
+    summary
+}
+
+/// Convenience helper returning summaries for every backend in the matrix.
+pub fn backend_summaries() -> Vec<BackendSummary> {
+    Backend::ALL
+        .iter()
+        .copied()
+        .map(summarize_backend)
+        .collect()
+}
+
+/// Serialises the matrix into a JSON value for downstream tooling.
+pub fn capability_matrix_json() -> serde_json::Value {
+    serde_json::to_value(CAPABILITY_ROWS).expect("matrix is serialisable")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,5 +348,37 @@ mod tests {
             .map(|backend| backend.as_str())
             .collect();
         assert_eq!(names, vec!["CPU", "WGPU", "MPS", "CUDA", "HIP / ROCm"]);
+    }
+
+    #[test]
+    fn backend_parsing_is_case_insensitive() {
+        assert_eq!(Backend::from_str("cuda"), Some(Backend::Cuda));
+        assert_eq!(Backend::from_str(" HIP / ROCM"), Some(Backend::Hip));
+        assert_eq!(Backend::from_str("unknown"), None);
+    }
+
+    #[test]
+    fn summarizes_backend_counts_watchlist_items() {
+        let hip = summarize_backend(Backend::Hip);
+        assert_eq!(hip.backend, Backend::Hip);
+        assert_eq!(hip.watchlist, 5);
+        assert_eq!(hip.blocked, 0);
+        assert!(!hip.is_fully_ready());
+        assert!(hip
+            .notes
+            .iter()
+            .any(|note| note.capability == "Tensor ops" && note.note.contains("Incomplete")));
+    }
+
+    #[test]
+    fn matrix_serialises_to_json() {
+        let value = capability_matrix_json();
+        let rows = value.as_array().expect("array of rows");
+        let first = rows
+            .iter()
+            .find(|row| row["capability"].as_str() == Some("Telemetry"))
+            .expect("telemetry row serialized");
+        let hip_note = first["entries"][Backend::Hip.index()]["note"].as_str();
+        assert!(hip_note.expect("hip note present").contains("counter"));
     }
 }
