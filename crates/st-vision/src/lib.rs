@@ -60,6 +60,9 @@
 //! while respecting Z-space curvature, resonance energy and the live telemetry
 //! streamed through [`AtlasFrame`] snapshots.
 
+pub mod models;
+pub mod xai;
+
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::cmp::min;
 use std::f32::consts::PI;
@@ -363,6 +366,56 @@ impl ZSpaceVolume {
         };
         blended.accumulate(next, alpha)?;
         Ok(blended)
+    }
+
+    /// Blends a sequence of volumes using provided weights.
+    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        if sequence.len() != weights.len() {
+            return Err(TensorError::DataLength {
+                expected: sequence.len(),
+                got: weights.len(),
+            });
+        }
+        let reference = &sequence[0];
+        let slice_len = reference.depth * reference.height * reference.width;
+        let mut voxels = vec![0.0f32; slice_len];
+        let mut normaliser = 0.0f32;
+        for (volume, &weight) in sequence.iter().zip(weights.iter()) {
+            if volume.depth != reference.depth
+                || volume.height != reference.height
+                || volume.width != reference.width
+            {
+                return Err(TensorError::ShapeMismatch {
+                    left: (reference.depth, reference.height * reference.width),
+                    right: (volume.depth, volume.height * volume.width),
+                });
+            }
+            if !weight.is_finite() {
+                continue;
+            }
+            normaliser += weight.max(0.0);
+            for (dst, src) in voxels.iter_mut().zip(volume.voxels.iter()) {
+                *dst += src * weight.max(0.0);
+            }
+        }
+        if normaliser <= f32::EPSILON {
+            return Err(TensorError::InvalidValue {
+                label: "z_space_blend_weights",
+            });
+        }
+        let inv = 1.0 / normaliser;
+        for value in voxels.iter_mut() {
+            *value *= inv;
+        }
+        Ok(Self {
+            depth: reference.depth,
+            height: reference.height,
+            width: reference.width,
+            voxels,
+        })
     }
 }
 
@@ -976,6 +1029,8 @@ pub struct VisionProjector {
     spread: f32,
     energy_bias: f32,
     window: SpectralWindow,
+    temporal_focus: f32,
+    temporal_decay: f32,
 }
 
 impl VisionProjector {
@@ -997,6 +1052,8 @@ impl VisionProjector {
             spread,
             energy_bias,
             window: SpectralWindow::hann(),
+            temporal_focus: 0.5,
+            temporal_decay: 0.5,
         }
     }
 
