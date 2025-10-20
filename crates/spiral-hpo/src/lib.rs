@@ -1,5 +1,5 @@
-use rand::distributions::{Distribution, StandardNormal};
 use rand::prelude::*;
+use rand_distr::StandardNormal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -93,30 +93,34 @@ pub mod space {
         pub fn clamp(&self, suggestion: &mut TrialSuggestion) {
             for spec in &self.params {
                 if let Some(value) = suggestion.get_mut(spec.name()) {
-                    match (spec, value) {
-                        (ParamSpec::Float { low, high, .. }, ParamValue::Float(v)) => {
-                            *v = v.clamp(*low, *high);
-                        }
-                        (ParamSpec::Int { low, high, .. }, ParamValue::Int(v)) => {
-                            *v = (*v).clamp(*low, *high);
-                        }
-                        (
-                            ParamSpec::Categorical { choices, .. },
-                            ParamValue::Categorical(choice),
-                        ) => {
-                            if !choices.contains(choice) && !choices.is_empty() {
-                                *choice = choices[0].clone();
+                    match spec {
+                        ParamSpec::Float { low, high, .. } => match value {
+                            ParamValue::Float(v) => {
+                                *v = v.clamp(*low, *high);
+                            }
+                            ParamValue::Int(v) => {
+                                let new_val = (*v as f64).clamp(*low, *high);
+                                *value = ParamValue::Float(new_val);
+                            }
+                            _ => {}
+                        },
+                        ParamSpec::Int { low, high, .. } => match value {
+                            ParamValue::Int(v) => {
+                                *v = (*v).clamp(*low, *high);
+                            }
+                            ParamValue::Float(v) => {
+                                let iv = (*v).round().clamp(*low as f64, *high as f64) as i64;
+                                *value = ParamValue::Int(iv);
+                            }
+                            _ => {}
+                        },
+                        ParamSpec::Categorical { choices, .. } => {
+                            if let ParamValue::Categorical(choice) = value {
+                                if !choices.contains(choice) && !choices.is_empty() {
+                                    *choice = choices[0].clone();
+                                }
                             }
                         }
-                        (ParamSpec::Float { low, high, .. }, ParamValue::Int(v)) => {
-                            let new_val = (*v as f64).clamp(*low, *high);
-                            *value = ParamValue::Float(new_val);
-                        }
-                        (ParamSpec::Int { low, high, .. }, ParamValue::Float(v)) => {
-                            let iv = (*v).round().clamp(*low as f64, *high as f64) as i64;
-                            *value = ParamValue::Int(iv);
-                        }
-                        _ => {}
                     }
                 }
             }
@@ -138,8 +142,8 @@ pub struct Observation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StrategyState {
-    Bayesian(super::strategies::BayesianState),
-    Population(super::strategies::PopulationState),
+    Bayesian(crate::strategies::BayesianState),
+    Population(crate::strategies::PopulationState),
 }
 
 pub mod strategies {
@@ -369,7 +373,7 @@ pub mod strategies {
     }
 }
 
-use strategies::{BayesianState, BayesianStrategy, PopulationState, PopulationStrategy};
+use strategies::{BayesianStrategy, PopulationStrategy};
 
 #[derive(Debug, Clone)]
 pub enum Strategy {

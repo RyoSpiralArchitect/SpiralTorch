@@ -87,7 +87,7 @@ fn capture_impl(py: Python<'_>, value: &Bound<PyAny>) -> PyResult<PyTensor> {
             let py_tensor: Py<PyTensor> = value.extract()?;
             Ok(py_tensor.bind(py).borrow().clone())
         }
-        Source::Torch => torch::from_torch(py, value, None, None, None, None, None),
+        Source::Torch => torch::from_torch(py, value),
         Source::Jax => jax::from_jax(py, value),
         Source::TensorFlow => tensorflow::from_tensorflow(py, value),
         Source::Dlpack => PyTensor::from_dlpack(py, value.clone().unbind().into_py(py)),
@@ -115,7 +115,7 @@ fn share_impl(py: Python<'_>, value: &Bound<PyAny>, target: &str) -> PyResult<Py
                 return Ok(value.clone().unbind().into_py(py));
             }
             let tensor = capture_impl(py, value)?;
-            torch::to_torch(py, &tensor, None, None, None, None, None)
+            torch::to_torch(py, &tensor)
         }
         "jax" => {
             if module.starts_with("jax") || module.contains("jaxlib") {
@@ -210,14 +210,6 @@ mod torch {
     }
 
     pub(super) fn to_torch(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
-        let utils = super::import_with_hint(py, "torch.utils.dlpack", "PyTorch >= 1.10")?;
-        let from_dlpack = utils.getattr("from_dlpack")?;
-        let capsule = tensor.to_dlpack(py)?;
-        let tensor = from_dlpack.call1((capsule,))?;
-        Ok(tensor.into_py(py))
-    }
-
-    pub(super) fn to_torch(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
         to_torch_py(py, tensor, None, None, None, None, None)
     }
 
@@ -278,13 +270,6 @@ mod torch {
         }
 
         let capsule = to_dlpack.call1((candidate,))?.unbind();
-        PyTensor::from_dlpack(py, capsule)
-    }
-
-    pub(super) fn from_torch(py: Python<'_>, tensor: &Bound<PyAny>) -> PyResult<PyTensor> {
-        let utils = super::import_with_hint(py, "torch.utils.dlpack", "PyTorch >= 1.10")?;
-        let to_dlpack = utils.getattr("to_dlpack")?;
-        let capsule = to_dlpack.call1((tensor,))?.unbind();
         PyTensor::from_dlpack(py, capsule)
     }
 

@@ -2473,6 +2473,7 @@ version = "0.1.0"
 dependencies = [
  "once_cell",
  "rand",
+ "rand_distr",
  "serde",
  "serde_json",
  "smallvec",
@@ -2514,6 +2515,7 @@ dependencies = [
  "num-complex",
  "pyo3",
  "pyo3-build-config",
+ "serde_json",
  "spiral-hpo",
  "spiral-opt",
  "spiral-safety",
