@@ -75,6 +75,7 @@ use st_nn::layers::spiral_rnn::SpiralRnn;
 use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
+pub mod transforms;
 pub mod datasets;
 pub mod nerf;
 pub mod transforms;
@@ -372,7 +373,7 @@ impl ZSpaceVolume {
         Ok(blended)
     }
 
-    /// Blends a sequence of volumes using provided weights.
+    /// Blends a sequence of volumes into a single volume using provided weights.
     pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
         if sequence.is_empty() {
             return Err(TensorError::EmptyInput("z_space_sequence"));
@@ -384,6 +385,39 @@ impl ZSpaceVolume {
             });
         }
         let reference = &sequence[0];
+        let depth = reference.depth;
+        let height = reference.height;
+        let width = reference.width;
+        let voxel_count = depth
+            .checked_mul(height)
+            .and_then(|value| value.checked_mul(width))
+            .ok_or(TensorError::InvalidDimensions {
+                rows: depth,
+                cols: height.saturating_mul(width),
+            })?;
+        let mut canvas = vec![0.0f32; voxel_count];
+        for (volume, &weight) in sequence.iter().zip(weights.iter()) {
+            if volume.depth != depth || volume.height != height || volume.width != width {
+                return Err(TensorError::ShapeMismatch {
+                    left: (volume.depth, volume.height * volume.width),
+                    right: (depth, height * width),
+                });
+            }
+            if !weight.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "z_space_blend_weight",
+                    value: weight,
+                });
+            }
+            for (accum, voxel) in canvas.iter_mut().zip(volume.voxels.iter()) {
+                *accum += voxel * weight;
+            }
+        }
+        Ok(Self {
+            depth,
+            height,
+            width,
+            voxels: canvas,
         let slice_len = reference.depth * reference.height * reference.width;
         let mut voxels = vec![0.0f32; slice_len];
         let mut normaliser = 0.0f32;
@@ -1056,8 +1090,8 @@ impl VisionProjector {
             spread,
             energy_bias,
             window: SpectralWindow::hann(),
-            temporal_focus: 0.5,
-            temporal_decay: 0.5,
+            temporal_focus: 1.0,
+            temporal_decay: 0.35,
         }
     }
 
