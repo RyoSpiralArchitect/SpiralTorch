@@ -8,6 +8,7 @@ edition = "2021"
 default = ["soft"]
 soft = ["st-softlogic/soft"]
 learn_store = ["dep:serde", "dep:serde_json", "st-softlogic/learn_store"]
+nerf = []
 
 [dependencies]
 thiserror = "1"

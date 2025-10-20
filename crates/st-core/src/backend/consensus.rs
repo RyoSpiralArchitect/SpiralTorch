@@ -3,12 +3,12 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#[cfg(feature = "logic")]
+use super::soft_logic::SoftRule;
 #[cfg(all(feature = "logic", feature = "kv-redis"))]
 use super::wgpu_heuristics::{SOFT_NAME_CH, SOFT_NAME_KL, SOFT_NAME_USE2CE, SOFT_NAME_WG};
 #[cfg(all(feature = "logic", feature = "kv-redis"))]
 use serde_json::Value;
-#[cfg(feature = "logic")]
-use super::soft_logic::SoftRule;
 
 #[cfg(feature = "logic")]
 pub fn kv_consensus_soft_rules(
