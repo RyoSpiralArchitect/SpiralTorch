@@ -273,6 +273,39 @@ impl core::fmt::Debug for ModuleTrainer {
 /// Function pointer used to convert band energy into Above/Here/Beneath weights.
 pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
 
+fn append_cloud_targets(metadata: &mut HashMap<String, String>, targets: &[CloudConnector]) {
+    if targets.is_empty() {
+        return;
+    }
+
+    let mut azure_targets = Vec::new();
+    let mut aws_targets = Vec::new();
+
+    for target in targets {
+        match target {
+            CloudConnector::AzureEventHub { namespace, hub } => {
+                azure_targets.push(format!("event_hub:{namespace}/{hub}"));
+            }
+            CloudConnector::AzureStorageQueue { account, queue } => {
+                azure_targets.push(format!("storage_queue:{account}/{queue}"));
+            }
+            CloudConnector::AwsKinesis { region, stream } => {
+                aws_targets.push(format!("kinesis:{region}/{stream}"));
+            }
+            CloudConnector::AwsSqs { region, queue } => {
+                aws_targets.push(format!("sqs:{region}/{queue}"));
+            }
+        }
+    }
+
+    if !azure_targets.is_empty() {
+        metadata.insert("azure_targets".to_string(), azure_targets.join(","));
+    }
+    if !aws_targets.is_empty() {
+        metadata.insert("aws_targets".to_string(), aws_targets.join(","));
+    }
+}
+
 #[derive(Debug, Clone)]
 struct SoftLogicFlex {
     inertia: f32,
@@ -701,28 +734,7 @@ impl ModuleTrainer {
             );
         }
 
-        if !config.cloud_targets.is_empty() {
-            let mut azure_targets = Vec::new();
-            let mut aws_targets = Vec::new();
-            for target in &config.cloud_targets {
-                let descriptor = target.descriptor();
-                match target.provider() {
-                    "azure" => {
-                        azure_targets.push(format!("{}:{descriptor}", target.service()));
-                    }
-                    "aws" => {
-                        aws_targets.push(format!("{}:{descriptor}", target.service()));
-                    }
-                    _ => {}
-                }
-            }
-            if !azure_targets.is_empty() {
-                metadata.insert("azure_targets".to_string(), azure_targets.join(","));
-            }
-            if !aws_targets.is_empty() {
-                metadata.insert("aws_targets".to_string(), aws_targets.join(","));
-            }
-        }
+        append_cloud_targets(&mut metadata, &config.cloud_targets);
         self.log_connector_event("configure_distribution", metadata);
         self.distribution = Some(RoundtableNode::new(config));
     }
