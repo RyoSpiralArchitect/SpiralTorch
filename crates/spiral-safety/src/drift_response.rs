@@ -1,7 +1,7 @@
-//! Drift-Response Semantics helpers for Rust callers.
+//! Drift-Response Linguistics helpers for Rust callers.
 //!
 //! This module mirrors the equations used by the Python helper in
-//! `tools/python/drift_response_semantics.py`.  It exposes the existential
+//! `tools/python/drift_response_linguistics.py`.  It exposes the existential
 //! load, safe radius, and strict-mode latching logic so Rust surfaces inside
 //! SpiralTorch can participate in the same governance loop.
 
@@ -67,6 +67,16 @@ pub struct FrameState {
     pub kappa: f32,
     #[serde(default = "default_timing_scale")]
     pub timing_scale: f32,
+    #[serde(default)]
+    pub curvature_a_den: f32,
+    #[serde(default)]
+    pub curvature_a_con: f32,
+    #[serde(default)]
+    pub curvature_b_den: f32,
+    #[serde(default)]
+    pub curvature_b_con: f32,
+    #[serde(default)]
+    pub kappa_slope: f32,
 }
 
 impl FrameState {
@@ -81,9 +91,42 @@ impl FrameState {
     pub fn mix_b(&self) -> f32 {
         (1.0 - self.phi) * self.b_den + self.phi * self.b_con
     }
+
+    /// Mixture curvature for value/benefit under drift.
+    #[inline]
+    pub fn mix_curvature_a(&self) -> f32 {
+        (1.0 - self.phi) * self.curvature_a_den + self.phi * self.curvature_a_con
+    }
+
+    /// Mixture curvature for risk under drift.
+    #[inline]
+    pub fn mix_curvature_b(&self) -> f32 {
+        (1.0 - self.phi) * self.curvature_b_den + self.phi * self.curvature_b_con
+    }
 }
 
-/// Container for per-word DRS measurements.
+impl Default for FrameState {
+    fn default() -> Self {
+        Self {
+            phi: 0.0,
+            c: 0.0,
+            s: 0.0,
+            a_den: 0.0,
+            a_con: 0.0,
+            b_den: 0.0,
+            b_con: 0.0,
+            kappa: 0.0,
+            timing_scale: default_timing_scale(),
+            curvature_a_den: 0.0,
+            curvature_a_con: 0.0,
+            curvature_b_den: 0.0,
+            curvature_b_con: 0.0,
+            kappa_slope: 0.0,
+        }
+    }
+}
+
+/// Container for per-word DRL measurements.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct WordState {
     pub name: String,
@@ -117,15 +160,35 @@ impl WordState {
     }
 }
 
-/// Summary of DRS statistics for a word.
+/// Summary of DRL statistics for a word.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct DrsMetrics {
+pub struct DrlMetrics {
     pub word: WordState,
     pub existence_load: f32,
     pub frame_hazards: BTreeMap<String, f32>,
     pub safe_radii: BTreeMap<String, f32>,
     pub chi: u32,
     pub strict_mode: bool,
+    pub frame_signatures: BTreeMap<String, FrameSignature>,
+}
+
+/// Backwards compatibility alias for earlier drafts that surfaced DRS.
+pub type DrsMetrics = DrlMetrics;
+
+/// Local linear and quadratic response statistics for a frame.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct FrameSignature {
+    pub value_slope: f32,
+    pub risk_slope: f32,
+    pub net_slope: f32,
+    pub value_curvature: f32,
+    pub risk_curvature: f32,
+    pub net_curvature: f32,
+    pub hazard_multiplier: f32,
+    pub timing_elasticity: f32,
+    pub safe_radius: Option<f32>,
+    pub kappa_slope: f32,
+    pub tipping_radius: Option<f32>,
 }
 
 /// Reasonable defaults that prioritise high-safety frames.
@@ -158,6 +221,22 @@ fn hazard_multiplier(word: &WordState, frame: &FrameState) -> f32 {
     }
     let exponent = (word.beta * word.definition_entropy * frame.phi * timing).clamp(-30.0, 30.0);
     exponent.exp()
+}
+
+fn timing_elasticity(word: &WordState, frame: &FrameState, multiplier: f32) -> f32 {
+    multiplier * word.beta * word.definition_entropy * frame.phi * frame.timing_scale
+}
+
+fn tipping_radius(net_slope: f32, net_curvature: f32) -> Option<f32> {
+    if net_curvature.abs() < 1e-9 {
+        return None;
+    }
+    let tipping = -net_slope / net_curvature;
+    if tipping > 0.0 {
+        Some(tipping)
+    } else {
+        None
+    }
 }
 
 /// Compute the hazard for a specific frame.
@@ -209,7 +288,7 @@ pub fn safe_radius(
 }
 
 /// Analyse a word using default hazard cut and radius threshold.
-pub fn analyse_word(word: &WordState, thresholds: &BTreeMap<String, FrameThreshold>) -> DrsMetrics {
+pub fn analyse_word(word: &WordState, thresholds: &BTreeMap<String, FrameThreshold>) -> DrlMetrics {
     analyse_word_with(word, thresholds, None, 0.2)
 }
 
@@ -219,13 +298,41 @@ pub fn analyse_word_with(
     thresholds: &BTreeMap<String, FrameThreshold>,
     hazard_cut: Option<f32>,
     min_radius: f32,
-) -> DrsMetrics {
+) -> DrlMetrics {
     let mut frame_hazards = BTreeMap::new();
+    let mut frame_signatures = BTreeMap::new();
     for (name, frame) in &word.frames {
-        frame_hazards.insert(name.clone(), frame_hazard(word, frame));
+        let hazard = frame_hazard(word, frame);
+        frame_hazards.insert(name.clone(), hazard);
+        let value_slope = frame.mix_a();
+        let risk_slope = word.base_lambda * frame.mix_b() * frame.s;
+        let net_slope = value_slope - risk_slope;
+        let value_curvature = frame.mix_curvature_a();
+        let risk_curvature = word.base_lambda * frame.mix_curvature_b() * frame.s;
+        let net_curvature = value_curvature - risk_curvature;
+        let multiplier = hazard_multiplier(word, frame);
+        let signature = FrameSignature {
+            value_slope,
+            risk_slope,
+            net_slope,
+            value_curvature,
+            risk_curvature,
+            net_curvature,
+            hazard_multiplier: multiplier,
+            timing_elasticity: timing_elasticity(word, frame, multiplier),
+            safe_radius: None,
+            kappa_slope: frame.kappa_slope,
+            tipping_radius: tipping_radius(net_slope, net_curvature),
+        };
+        frame_signatures.insert(name.clone(), signature);
     }
 
     let radii = safe_radius(word, thresholds);
+    for (name, radius) in &radii {
+        if let Some(signature) = frame_signatures.get_mut(name) {
+            signature.safe_radius = Some(*radius);
+        }
+    }
     let mut hazard_counts = 0u32;
     for (name, hazard) in &frame_hazards {
         if let Some(threshold) = thresholds.get(name) {
@@ -240,23 +347,24 @@ pub fn analyse_word_with(
     let existence = existence_load(word);
     let strict = hazard_counts >= 4 || min_radius_observed <= min_radius || existence >= 1.0;
 
-    DrsMetrics {
+    DrlMetrics {
         word: word.clone(),
         existence_load: existence,
         frame_hazards,
         safe_radii: radii,
         chi: hazard_counts,
         strict_mode: strict,
+        frame_signatures,
     }
 }
 
 /// Convert metrics into a scalar penalty using the default radius.
-pub fn trainer_penalty(metrics: &DrsMetrics) -> f32 {
+pub fn trainer_penalty(metrics: &DrlMetrics) -> f32 {
     trainer_penalty_with(metrics, 0.2)
 }
 
 /// Convert metrics into a scalar penalty using a custom minimum radius.
-pub fn trainer_penalty_with(metrics: &DrsMetrics, min_radius: f32) -> f32 {
+pub fn trainer_penalty_with(metrics: &DrlMetrics, min_radius: f32) -> f32 {
     let mut penalty = metrics.existence_load;
     if let Some(&min_radius_observed) = metrics
         .safe_radii
@@ -269,6 +377,16 @@ pub fn trainer_penalty_with(metrics: &DrsMetrics, min_radius: f32) -> f32 {
         }
     }
     penalty += metrics.chi as f32;
+    if let Some(min_tipping) = metrics.frame_signatures.values().filter_map(|sig| {
+        sig.tipping_radius
+            .and_then(|r| if r > 0.0 { Some(r) } else { None })
+    }).min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+    {
+        if min_tipping < min_radius {
+            let denom = min_radius.max(1e-6);
+            penalty += (min_radius - min_tipping) / denom;
+        }
+    }
     if metrics.strict_mode {
         penalty *= 1.25;
     }
@@ -278,7 +396,7 @@ pub fn trainer_penalty_with(metrics: &DrsMetrics, min_radius: f32) -> f32 {
 /// Aggregate a collection of metrics using the default minimum radius.
 pub fn aggregate_penalty<'a, I>(metrics: I) -> f32
 where
-    I: IntoIterator<Item = &'a DrsMetrics>,
+    I: IntoIterator<Item = &'a DrlMetrics>,
 {
     aggregate_penalty_with(metrics, 0.2)
 }
@@ -286,7 +404,7 @@ where
 /// Aggregate a collection of metrics using a custom minimum radius.
 pub fn aggregate_penalty_with<'a, I>(metrics: I, min_radius: f32) -> f32
 where
-    I: IntoIterator<Item = &'a DrsMetrics>,
+    I: IntoIterator<Item = &'a DrlMetrics>,
 {
     metrics.into_iter().fold(0.0, |acc, item| {
         acc + trainer_penalty_with(item, min_radius)
@@ -294,7 +412,7 @@ where
 }
 
 /// Produce a hazard-to-radius summary per frame.
-pub fn frame_summary(metrics: &DrsMetrics) -> BTreeMap<String, f32> {
+pub fn frame_summary(metrics: &DrlMetrics) -> BTreeMap<String, f32> {
     let mut summary = BTreeMap::new();
     for (name, hazard) in &metrics.frame_hazards {
         let value = if let Some(radius) = metrics.safe_radii.get(name) {
@@ -326,6 +444,7 @@ mod tests {
                 b_con: 0.8,
                 kappa: 0.35,
                 timing_scale: 1.0,
+                ..FrameState::default()
             },
         );
         WordState {
@@ -356,6 +475,21 @@ mod tests {
         assert!((radius - 0.151_515_16).abs() < 1e-6);
         assert!(metrics.strict_mode);
         assert_eq!(metrics.chi, 0);
+
+        let signature = metrics
+            .frame_signatures
+            .get("Normative")
+            .expect("signature for Normative frame");
+        assert!((signature.value_slope - 0.112_5).abs() < 1e-6);
+        assert!((signature.risk_slope - 0.528).abs() < 1e-6);
+        assert!((signature.net_slope + 0.415_5).abs() < 1e-6);
+        let expected_multiplier = (0.72_f32 * 0.65 * 1.4).clamp(-30.0, 30.0).exp();
+        assert!((signature.hazard_multiplier - expected_multiplier).abs() < 1e-6);
+        let expected_elasticity =
+            expected_multiplier * 0.72_f32 * 0.65 * 1.0;
+        assert!((signature.timing_elasticity - expected_elasticity).abs() < 1e-6);
+        assert_eq!(signature.safe_radius, Some(radius));
+        assert!(signature.tipping_radius.is_none());
 
         let penalty = trainer_penalty(&metrics);
         assert!((penalty - 0.989_228_55).abs() < 1e-6);

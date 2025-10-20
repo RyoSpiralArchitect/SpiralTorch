@@ -112,6 +112,8 @@ pub enum TensorError {
         backend: &'static str,
         message: String,
     },
+    /// Porosity parameters must stay within [0, 1].
+    PorosityOutOfRange { porosity: f32 },
     /// Generic configuration violation for pure-language helpers.
     InvalidValue { label: &'static str },
     /// Interoperability bridge encountered an unsupported or malformed DLPack tensor.
@@ -223,6 +225,9 @@ impl fmt::Display for TensorError {
             }
             TensorError::BackendFailure { backend, message } => {
                 write!(f, "{backend} backend failure: {message}")
+            }
+            TensorError::PorosityOutOfRange { porosity } => {
+                write!(f, "porosity must lie in [0, 1]; received {porosity}")
             }
             TensorError::InvalidValue { label } => {
                 write!(f, "invalid value: {label}")

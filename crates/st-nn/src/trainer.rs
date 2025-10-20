@@ -21,6 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+use crate::cloud::CloudTargetSummary;
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
@@ -41,8 +42,8 @@ use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ecosystem::{
-    ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample, RankPlanSummary,
-    RoundtableConfigSummary, RoundtableSummary,
+    CloudConnector, ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample,
+    RankPlanSummary, RoundtableConfigSummary, RoundtableSummary,
 };
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
@@ -273,25 +274,8 @@ impl core::fmt::Debug for ModuleTrainer {
 /// Function pointer used to convert band energy into Above/Here/Beneath weights.
 pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
 
-fn format_cloud_targets(targets: &[CloudConnector]) -> Vec<(String, String)> {
-    let mut azure_targets = Vec::new();
-    let mut aws_targets = Vec::new();
-    for target in targets {
-        let descriptor = target.descriptor();
-        match target.provider() {
-            "azure" => azure_targets.push(format!("{}:{descriptor}", target.service())),
-            "aws" => aws_targets.push(format!("{}:{descriptor}", target.service())),
-            _ => {}
-        }
-    }
-    let mut entries = Vec::new();
-    if !azure_targets.is_empty() {
-        entries.push(("azure_targets".to_string(), azure_targets.join(",")));
-    }
-    if !aws_targets.is_empty() {
-        entries.push(("aws_targets".to_string(), aws_targets.join(",")));
-    }
-    entries
+fn append_cloud_targets(metadata: &mut HashMap<String, String>, targets: &[CloudConnector]) {
+    CloudTargetSummary::from_targets(targets).extend_map(metadata);
 }
 
 #[derive(Debug, Clone)]
@@ -722,9 +706,7 @@ impl ModuleTrainer {
             );
         }
 
-        for (key, value) in format_cloud_targets(&config.cloud_targets) {
-            metadata.insert(key, value);
-        }
+        append_cloud_targets(&mut metadata, &config.cloud_targets);
         self.log_connector_event("configure_distribution", metadata);
         self.distribution = Some(RoundtableNode::new(config));
     }
@@ -1372,6 +1354,7 @@ impl ModuleTrainer {
                             grad_scale,
                             max_norm,
                             lr_decay,
+                            ..
                         } => {
                             if *grad_scale < 0.999 {
                                 self.apply_grad_scale(module, *grad_scale)?;
@@ -1384,7 +1367,7 @@ impl ModuleTrainer {
                                 self.optimizer_mul_lr(module, factor)?;
                             }
                         }
-                        DriveCmd::Bloom { lr_mul } => {
+                        DriveCmd::Bloom { lr_mul, .. } => {
                             if *lr_mul > 1.0 {
                                 self.optimizer_mul_lr(module, *lr_mul)?;
                             }

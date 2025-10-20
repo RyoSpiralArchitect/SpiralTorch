@@ -540,6 +540,7 @@ pub struct OpenCartesianTopos {
     curvature: f32,
     tolerance: f32,
     saturation: f32,
+    porosity: f32,
     max_depth: usize,
     max_volume: usize,
     site: ZBoxSite,
@@ -577,6 +578,7 @@ impl OpenCartesianTopos {
             curvature,
             tolerance,
             saturation,
+            porosity: 0.2,
             max_depth,
             max_volume,
             site,
@@ -596,6 +598,11 @@ impl OpenCartesianTopos {
     /// Returns the saturation limit used to absorb overflows.
     pub fn saturation(&self) -> f32 {
         self.saturation
+    }
+
+    /// Returns the permeability applied while saturating values.
+    pub fn porosity(&self) -> f32 {
+        self.porosity
     }
 
     /// Maximum permitted traversal depth before the guard considers the topos
@@ -623,6 +630,15 @@ impl OpenCartesianTopos {
             });
         }
         self.site = site;
+        Ok(self)
+    }
+
+    /// Replaces the porosity used during saturation.
+    pub fn with_porosity(mut self, porosity: f32) -> PureResult<Self> {
+        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
+            return Err(TensorError::PorosityOutOfRange { porosity });
+        }
+        self.porosity = porosity;
         Ok(self)
     }
 
@@ -698,10 +714,7 @@ impl OpenCartesianTopos {
 
     /// Saturates a scalar into the finite window enforced by the topos.
     pub fn saturate(&self, value: f32) -> f32 {
-        if !value.is_finite() {
-            return 0.0;
-        }
-        value.clamp(-self.saturation, self.saturation)
+        porous_mix(value, self.saturation, self.porosity)
     }
 
     /// Saturates an entire slice in-place.
@@ -2233,6 +2246,53 @@ mod tests {
 
     fn demo_topos() -> OpenCartesianTopos {
         OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096).unwrap()
+    }
+
+    #[test]
+    fn topos_porosity_softens_extremes() {
+        let rigid = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096)
+            .unwrap()
+            .with_porosity(0.0)
+            .unwrap();
+        let porous = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096)
+            .unwrap()
+            .with_porosity(0.9)
+            .unwrap();
+        let sample = rigid.saturation() * 4.0;
+        let rigid_value = rigid.saturate(sample);
+        let porous_value = porous.saturate(sample);
+        assert!(porous_value.abs() < rigid_value.abs());
+        assert!(porous_value.abs() > rigid.saturation() * 0.8);
+    }
+
+    #[test]
+    fn reward_boundary_porosity_delays_breach() {
+        let topos = demo_topos();
+        let strict_boundary = RewardBoundary::with_porosity(-0.5, 0.5, 0.05, 0.0).unwrap();
+        let porous_boundary = RewardBoundary::with_porosity(-0.5, 0.5, 0.05, 0.8).unwrap();
+        let strict_guard = MultiModalToposGuard::new(&topos)
+            .unwrap()
+            .with_reward_boundary(strict_boundary)
+            .unwrap();
+        let porous_guard = MultiModalToposGuard::new(&topos)
+            .unwrap()
+            .with_reward_boundary(porous_boundary)
+            .unwrap();
+        let mut strict_trace = vec![0.56f32];
+        let mut porous_trace = vec![0.56f32];
+        let strict_signal = strict_guard.guard_reward_trace(&mut strict_trace).unwrap();
+        let porous_signal = porous_guard.guard_reward_trace(&mut porous_trace).unwrap();
+        assert!(strict_signal.upper_breach_index.is_some());
+        assert!(porous_signal.upper_breach_index.is_none());
+        assert!(strict_trace[0] <= 0.5 + 1e-6);
+        assert!(porous_trace[0] < 0.5);
+    }
+
+    #[test]
+    fn graph_profile_rejects_invalid_porosity() {
+        let profile = GraphGuardProfile::new(8, 12, 4, 1e-3, 0.05, Some(1.0)).unwrap();
+        let err = profile.with_porosity(1.5).unwrap_err();
+        assert!(matches!(err, TensorError::PorosityOutOfRange { .. }));
     }
 
     #[test]
