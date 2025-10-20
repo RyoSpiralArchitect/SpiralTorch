@@ -423,7 +423,8 @@ impl InterfaceZPulse {
             support,
             interface_cells,
             band_energy: band,
-            scale,
+            // [SCALE-TODO] Patch 0 aggregate placeholder
+            scale: scale.or(Some(ZScale::ONE)),
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -497,6 +498,7 @@ impl InterfaceZPulse {
             band_energy: self.band_energy,
             drift: self.drift,
             z_signal: self.z_bias,
+            // [SCALE-TODO] Patch 0 optional tagging
             scale: self.scale,
         }
     }
@@ -513,7 +515,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: None,
+            scale: Some(ZScale::ONE),
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
@@ -964,6 +966,12 @@ mod tests {
     use super::*;
     use ndarray::array;
 
+    fn assert_neutral_scale(scale: Option<ZScale>) {
+        let scale = scale.expect("scale tag missing from pulse");
+        assert!((scale.physical_radius - ZScale::ONE.physical_radius).abs() < 1e-6);
+        assert!((scale.log_radius - ZScale::ONE.log_radius).abs() < 1e-6);
+    }
+
     #[test]
     fn detects_boundary_presence() {
         let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
@@ -989,5 +997,23 @@ mod tests {
         assert!((norm - 1.0).abs() < 1e-3);
         assert!(normal_y.abs() > 0.5);
         assert!(normal_x.abs() > 0.5);
+    }
+
+    #[test]
+    fn conductor_rollout_preserves_neutral_scale() {
+        let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift);
+
+        let report = conductor.step(&mask, None, None, None);
+
+        for pulse in &report.pulses {
+            assert_neutral_scale(pulse.scale);
+        }
+
+        assert_neutral_scale(report.fused_pulse.scale);
+        assert_neutral_scale(report.feedback.scale);
+        assert_neutral_scale(report.fused_z.pulse.scale);
     }
 }

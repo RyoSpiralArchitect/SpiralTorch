@@ -12,6 +12,8 @@ mod telemetry;
 mod pure;
 mod nn;
 mod planner;
+mod export;
+mod inference;
 
 // =======================
 // extras（安全・自己完結）
@@ -193,12 +195,18 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     compat::register(py, m)?;
     pure::register(py, m)?;
     planner::register(py, m)?;
+    hpo::register(py, m)?;
+    inference::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;
     rl::register(py, m)?;
     rec::register(py, m)?;
     telemetry::register(py, m)?;
+
+    let export_module = PyModule::new_bound(py, "export")?;
+    export::register(py, &export_module)?;
+    m.add_submodule(&export_module)?;
 
     let frac = PyModule::new_bound(py, "frac")?;
     frac_bindings::register(py, &frac)?; // 実APIを公開
@@ -220,8 +228,9 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add("__all__", vec![
         "Tensor","from_dlpack","to_dlpack",
         "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
+        "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
-        "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
+        "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem","hpo","inference","export",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",

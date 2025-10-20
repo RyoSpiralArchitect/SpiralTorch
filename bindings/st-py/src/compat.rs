@@ -210,6 +210,14 @@ mod torch {
     }
 
     pub(super) fn to_torch(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
+        let utils = super::import_with_hint(py, "torch.utils.dlpack", "PyTorch >= 1.10")?;
+        let from_dlpack = utils.getattr("from_dlpack")?;
+        let capsule = tensor.to_dlpack(py)?;
+        let tensor = from_dlpack.call1((capsule,))?;
+        Ok(tensor.into_py(py))
+    }
+
+    pub(super) fn to_torch(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
         to_torch_py(py, tensor, None, None, None, None, None)
     }
 
@@ -274,9 +282,15 @@ mod torch {
     }
 
     pub(super) fn from_torch(py: Python<'_>, tensor: &Bound<PyAny>) -> PyResult<PyTensor> {
-        from_torch_py(py, tensor, None, None, None, None, None)
+        let utils = super::import_with_hint(py, "torch.utils.dlpack", "PyTorch >= 1.10")?;
+        let to_dlpack = utils.getattr("to_dlpack")?;
+        let capsule = to_dlpack.call1((tensor,))?.unbind();
+        PyTensor::from_dlpack(py, capsule)
     }
 
+    pub(super) fn from_torch(py: Python<'_>, tensor: &Bound<PyAny>) -> PyResult<PyTensor> {
+        from_torch_py(py, tensor, None, None, None, None, None)
+    }
 }
 
 mod jax {

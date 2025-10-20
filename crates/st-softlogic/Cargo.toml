@@ -1,0 +1,19 @@
+[package]
+name = "st-softlogic"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
+license = "AGPL-3.0-or-later"
+description = "Shared soft logic primitives for SpiralTorch heuristics"
+
+[features]
+default = ["soft"]
+soft = []
+learn_store = ["dep:serde", "dep:serde_json"]
+
+[dependencies]
+serde = { version = "1", optional = true, features = ["derive"] }
+serde_json = { version = "1", optional = true }
+
+[package.metadata.spiraltorch]
+copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
