@@ -1332,9 +1332,9 @@ mod language_pipeline {
     use crate::roundtable::RoundtableNode;
     use crate::{RoundtableConfig, RoundtableSchedule};
     use st_core::ecosystem::{
-        CloudConnector, ConnectorEvent, DistributionSummary, EcosystemRegistry,
-        HeuristicChoiceSummary, HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary,
-        RoundtableConfigSummary, RoundtableSummary,
+        ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
+        HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
+        RoundtableSummary,
     };
     use st_core::ops::rank_entry::RankPlan;
     use st_core::util::math::{ramanujan_pi, LeechProjector};
