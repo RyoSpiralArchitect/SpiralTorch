@@ -64,20 +64,15 @@ use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 pub mod models;
 pub mod xai;
 
-use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::cmp::min;
 use std::f32::consts::PI;
 use std::sync::Arc;
-
-pub mod models;
 
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
 use st_nn::layers::spiral_rnn::SpiralRnn;
 use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
-
-pub mod transforms;
 pub mod datasets;
 pub mod nerf;
 pub mod transforms;

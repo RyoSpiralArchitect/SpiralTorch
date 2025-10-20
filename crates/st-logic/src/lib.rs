@@ -132,5 +132,4 @@ pub fn beam_select<C: Clone>(
 #[cfg(feature = "learn_store")]
 pub mod learn;
 
-pub mod nerf_trainer;
 pub mod quantum_reality;

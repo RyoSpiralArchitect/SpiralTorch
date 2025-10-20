@@ -66,6 +66,7 @@ st-backend-hip = { path = "../../crates/st-backend-hip", default-features = fals
 st-frac = { path = "../../crates/st-frac" }
 ndarray = { version = "0.15", default-features = false, features = ["std"] }
 num-complex = { version = "0.4" }
+spiral-safety = { path = "../../crates/spiral-safety" }
 
 [package.metadata.maturin]
 name = "spiraltorch"

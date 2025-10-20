@@ -6,8 +6,9 @@
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use st_nn::module::Module;
 use st_tensor::{PureResult, Tensor, TensorError};
-use st_vision::datasets::{MultiViewDatasetAdapter, RayBatch};
-use st_vision::nerf::NerfField;
+
+use crate::datasets::{MultiViewDatasetAdapter, RayBatch};
+use crate::nerf::{FieldSampleLayout, NerfField};
 
 /// Configuration for the [`NerfTrainer`].
 #[derive(Clone, Debug)]
@@ -127,7 +128,7 @@ impl NerfTrainer {
         })
     }
 
-    /// Renders a batch of rays without updating the field parameters.
+    /// Renders a batch of rays using the current field parameters.
     pub fn render_batch(&mut self, batch: &RayBatch) -> PureResult<Tensor> {
         let (positions, maybe_directions, deltas) = self.sample_points(batch)?;
         let input = if let Some(directions) = maybe_directions.as_ref() {
@@ -145,18 +146,18 @@ impl NerfTrainer {
         batch: &RayBatch,
     ) -> PureResult<(Tensor, Option<Tensor>, Vec<f32>)> {
         let layout = self.field.sample_layout();
-        let origin_shape = batch.origins.shape();
-        if origin_shape.1 != layout.position_dims {
-            return Err(TensorError::ShapeMismatch {
-                left: (origin_shape.0, layout.position_dims),
-                right: origin_shape,
-            });
-        }
-        let direction_shape = batch.directions.shape();
-        if layout.direction_dims != 0 && direction_shape.1 != layout.direction_dims {
-            return Err(TensorError::ShapeMismatch {
-                left: (direction_shape.0, layout.direction_dims),
-                right: direction_shape,
+        self.sample_points_with_layout(batch, layout)
+    }
+
+    fn sample_points_with_layout(
+        &mut self,
+        batch: &RayBatch,
+        layout: FieldSampleLayout,
+    ) -> PureResult<(Tensor, Option<Tensor>, Vec<f32>)> {
+        if batch.len() != self.config.batch_size {
+            return Err(TensorError::InvalidDimensions {
+                rows: batch.len(),
+                cols: self.config.batch_size,
             });
         }
         let batch_size = batch.len();
