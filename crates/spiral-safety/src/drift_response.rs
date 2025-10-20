@@ -185,8 +185,10 @@ pub struct FrameSignature {
     pub risk_curvature: f32,
     pub net_curvature: f32,
     pub hazard_multiplier: f32,
+    pub timing_elasticity: f32,
     pub safe_radius: Option<f32>,
     pub kappa_slope: f32,
+    pub tipping_radius: Option<f32>,
 }
 
 /// Reasonable defaults that prioritise high-safety frames.
@@ -219,6 +221,22 @@ fn hazard_multiplier(word: &WordState, frame: &FrameState) -> f32 {
     }
     let exponent = (word.beta * word.definition_entropy * frame.phi * timing).clamp(-30.0, 30.0);
     exponent.exp()
+}
+
+fn timing_elasticity(word: &WordState, frame: &FrameState, multiplier: f32) -> f32 {
+    multiplier * word.beta * word.definition_entropy * frame.phi * frame.timing_scale
+}
+
+fn tipping_radius(net_slope: f32, net_curvature: f32) -> Option<f32> {
+    if net_curvature.abs() < 1e-9 {
+        return None;
+    }
+    let tipping = -net_slope / net_curvature;
+    if tipping > 0.0 {
+        Some(tipping)
+    } else {
+        None
+    }
 }
 
 /// Compute the hazard for a specific frame.
@@ -292,6 +310,7 @@ pub fn analyse_word_with(
         let value_curvature = frame.mix_curvature_a();
         let risk_curvature = word.base_lambda * frame.mix_curvature_b() * frame.s;
         let net_curvature = value_curvature - risk_curvature;
+        let multiplier = hazard_multiplier(word, frame);
         let signature = FrameSignature {
             value_slope,
             risk_slope,
@@ -299,9 +318,11 @@ pub fn analyse_word_with(
             value_curvature,
             risk_curvature,
             net_curvature,
-            hazard_multiplier: hazard_multiplier(word, frame),
+            hazard_multiplier: multiplier,
+            timing_elasticity: timing_elasticity(word, frame, multiplier),
             safe_radius: None,
             kappa_slope: frame.kappa_slope,
+            tipping_radius: tipping_radius(net_slope, net_curvature),
         };
         frame_signatures.insert(name.clone(), signature);
     }
@@ -356,6 +377,16 @@ pub fn trainer_penalty_with(metrics: &DrlMetrics, min_radius: f32) -> f32 {
         }
     }
     penalty += metrics.chi as f32;
+    if let Some(min_tipping) = metrics.frame_signatures.values().filter_map(|sig| {
+        sig.tipping_radius
+            .and_then(|r| if r > 0.0 { Some(r) } else { None })
+    }).min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+    {
+        if min_tipping < min_radius {
+            let denom = min_radius.max(1e-6);
+            penalty += (min_radius - min_tipping) / denom;
+        }
+    }
     if metrics.strict_mode {
         penalty *= 1.25;
     }
@@ -454,7 +485,11 @@ mod tests {
         assert!((signature.net_slope + 0.415_5).abs() < 1e-6);
         let expected_multiplier = (0.72_f32 * 0.65 * 1.4).clamp(-30.0, 30.0).exp();
         assert!((signature.hazard_multiplier - expected_multiplier).abs() < 1e-6);
+        let expected_elasticity =
+            expected_multiplier * 0.72_f32 * 0.65 * 1.0;
+        assert!((signature.timing_elasticity - expected_elasticity).abs() < 1e-6);
         assert_eq!(signature.safe_radius, Some(radius));
+        assert!(signature.tipping_radius.is_none());
 
         let penalty = trainer_penalty(&metrics);
         assert!((penalty - 0.989_228_55).abs() < 1e-6);

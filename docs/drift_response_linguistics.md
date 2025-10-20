@@ -74,8 +74,12 @@ from the theory note:
 - `net_slope` / `net_curvature` are the differences of the above, i.e. the
   signed quantities \(S_w\) and \(C_w\).
 - `hazard_multiplier` exposes the triple-product amplifier, `safe_radius`
-  mirrors \(r_{w,f}\), and `kappa_slope` keeps the comprehension curvature
-  \(\kappa'_{w,f}\) intact.【F:crates/spiral-safety/src/drift_response.rs†L1-L236】
+  mirrors \(r_{w,f}\).  `timing_elasticity` holds the first derivative of the
+  hazard multiplier with respect to the timing signal, while `kappa_slope`
+  keeps the comprehension curvature \(\kappa'_{w,f}\) intact.  When the linear
+  and quadratic terms predict a net balance change, `tipping_radius` estimates
+  where the frame's value-minus-risk crosses zero along that drift direction.
+  【F:crates/spiral-safety/src/drift_response.rs†L1-L288】
 
 ## 3. Triple-Product Amplifier
 
@@ -98,7 +102,10 @@ penalty = trainer_penalty(metrics)
 ```
 
 The penalty adds the existential load, frame count, and a radius surcharge when
-radii dip below the configured tolerance.  Strict mode applies a 1.25× boost so
+radii dip below the configured tolerance.  A second surcharge applies when the
+predicted tipping radius falls inside the safety band, reflecting frames whose
+quadratic terms suggest imminent harm even before the observed radius
+collapses.  Strict mode applies a 1.25× boost so
 schedulers can flip into hardened policies without rewiring the trainer.
 Aggregating multiple words is a simple sum via `aggregate_penalty`.
 【F:tools/python/drift_response_linguistics.py†L199-L230】
