@@ -87,6 +87,11 @@ pub trait SpectralEngine {
 
     /// Returns the length supported by the cached plan.
     fn len(&self) -> usize;
+
+    /// Returns `true` when the cached plan has zero length.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Naive O(N²) reference implementation of [`SpectralEngine`].
@@ -579,8 +584,8 @@ impl RealGradKernel {
             0.0
         };
 
-        for idx in 0..len {
-            projection.realgrad[idx] = values[idx] * normaliser + self.z_buf[idx];
+        for (idx, value) in values.iter().enumerate().take(len) {
+            projection.realgrad[idx] = *value * normaliser + self.z_buf[idx];
         }
 
         projection.monad_biome.extend_from_slice(&self.residuals);

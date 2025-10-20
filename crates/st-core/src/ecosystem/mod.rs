@@ -41,6 +41,10 @@ pub struct HeuristicChoiceSummary {
 }
 
 impl HeuristicChoiceSummary {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Telemetry summary retains explicit fields for downstream consumers"
+    )]
     pub fn new(
         use_two_stage: bool,
         workgroup: u32,
@@ -228,6 +232,54 @@ pub struct DistributionSummary {
     pub summary_window: usize,
     pub push_interval_ms: u64,
     pub meta_endpoints: Vec<String>,
+    pub cloud_targets: Vec<CloudConnector>,
+}
+
+/// Cloud connector that mirrors where summaries or proposals are exchanged.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CloudConnector {
+    AzureEventHub { namespace: String, hub: String },
+    AzureStorageQueue { account: String, queue: String },
+    AwsKinesis { region: String, stream: String },
+    AwsSqs { region: String, queue: String },
+}
+
+impl CloudConnector {
+    /// Returns the cloud provider backing the connector.
+    pub fn provider(&self) -> &'static str {
+        match self {
+            CloudConnector::AzureEventHub { .. } | CloudConnector::AzureStorageQueue { .. } => {
+                "azure"
+            }
+            CloudConnector::AwsKinesis { .. } | CloudConnector::AwsSqs { .. } => "aws",
+        }
+    }
+
+    /// Returns the service or transport kind used by the connector.
+    pub fn service(&self) -> &'static str {
+        match self {
+            CloudConnector::AzureEventHub { .. } => "event_hub",
+            CloudConnector::AzureStorageQueue { .. } => "storage_queue",
+            CloudConnector::AwsKinesis { .. } => "kinesis",
+            CloudConnector::AwsSqs { .. } => "sqs",
+        }
+    }
+
+    /// Human-friendly descriptor identifying the remote resource.
+    pub fn descriptor(&self) -> String {
+        match self {
+            CloudConnector::AzureEventHub { namespace, hub } => {
+                format!("{namespace}/{hub}")
+            }
+            CloudConnector::AzureStorageQueue { account, queue } => {
+                format!("{account}/{queue}")
+            }
+            CloudConnector::AwsKinesis { region, stream } => {
+                format!("{region}/{stream}")
+            }
+            CloudConnector::AwsSqs { region, queue } => format!("{region}/{queue}"),
+        }
+    }
 }
 
 /// Log entry that describes cross-cutting connectors (e.g. between RL/Rec/Nn).
@@ -533,6 +585,25 @@ mod tests {
         assert_eq!(digest.min, 0.5);
         assert_eq!(digest.max, 1.0);
         assert_eq!(digest.unit.as_deref(), Some("nats"));
+    }
+
+    #[test]
+    fn cloud_connector_helpers_expose_metadata() {
+        let azure = CloudConnector::AzureEventHub {
+            namespace: "spiral-meta".to_string(),
+            hub: "roundtable".to_string(),
+        };
+        assert_eq!(azure.provider(), "azure");
+        assert_eq!(azure.service(), "event_hub");
+        assert_eq!(azure.descriptor(), "spiral-meta/roundtable");
+
+        let aws = CloudConnector::AwsSqs {
+            region: "us-east-1".to_string(),
+            queue: "spiral-jobs".to_string(),
+        };
+        assert_eq!(aws.provider(), "aws");
+        assert_eq!(aws.service(), "sqs");
+        assert_eq!(aws.descriptor(), "us-east-1/spiral-jobs");
     }
 
     #[test]

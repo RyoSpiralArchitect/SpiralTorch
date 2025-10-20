@@ -49,7 +49,7 @@ pub fn gl_coeffs(alpha: f32, len: usize) -> Vec<f32> {
     for k in 1..len {
         let prev = c[k - 1];
         let num = alpha - (k as f32 - 1.0);
-        c[k] = prev * (num / (k as f32)) * -1.0;
+        c[k] = -(prev * (num / k as f32));
     }
     c
 }
@@ -121,7 +121,7 @@ fn gl_coeffs_adaptive_impl(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
 
     for k in 1..max_len {
         let num = alpha - (k as f32 - 1.0);
-        prev *= (num / k as f32) * -1.0;
+        prev *= -(num / k as f32);
         coeffs.push(prev);
         if prev.abs() < tol {
             break;
@@ -310,7 +310,7 @@ mod tests {
 
         assert_eq!(line.len(), nd.len());
         for (a, b) in line.iter().zip(nd.iter()) {
-            assert!((a - b).abs() < 1e-6);
+            assert!((*a - *b).abs() < 1e-6f32);
         }
     }
 
@@ -322,7 +322,7 @@ mod tests {
         assert_eq!(y.len(), 2);
         // When padding with 5, the first element should only see the padded value
         // except for the zeroth coefficient which stays 1.
-        assert!((y[0] - (coeff[0] * 1.0 + coeff[1] * 5.0 + coeff[2] * 5.0)).abs() < 1e-6);
+        assert!((y[0] - (coeff[0] * 1.0 + coeff[1] * 5.0 + coeff[2] * 5.0)).abs() < 1e-6f32);
     }
 
     #[test]

@@ -106,7 +106,7 @@ impl DeviceCaps {
         let lanes = self.lane_width.max(1);
         let max = self.max_workgroup.max(lanes);
         let base = requested.clamp(lanes, max);
-        let mut aligned = ((base + lanes - 1) / lanes) * lanes;
+        let mut aligned = base.div_ceil(lanes) * lanes;
         if aligned > max {
             let rem = max % lanes;
             aligned = if rem == 0 { max } else { max - rem };
@@ -161,7 +161,7 @@ impl DeviceCaps {
         let lanes = self.lane_width.max(1);
         let max_tile = ceiling.max(lanes);
         let base = tile.clamp(lanes, max_tile);
-        let mut aligned = ((base + lanes - 1) / lanes) * lanes;
+        let mut aligned = base.div_ceil(lanes) * lanes;
         if aligned > max_tile {
             let rem = max_tile % lanes;
             aligned = if rem == 0 { max_tile } else { max_tile - rem };
@@ -235,7 +235,7 @@ impl DeviceCaps {
             // Align the workgroup with the hardware lane width so we keep
             // coalesced accesses while avoiding oversubscribing the SM.
             let align = lanes;
-            let aligned_rows = ((rows + align - 1) / align) * align;
+            let aligned_rows = rows.div_ceil(align) * align;
             aligned_rows.max(align).max(64).min(target)
         } else {
             target
@@ -251,8 +251,7 @@ impl DeviceCaps {
         let lanes = self.lane_width.max(1);
         let mut tile = TILE_OPTIONS
             .into_iter()
-            .filter(|opt| cols >= *opt)
-            .last()
+            .rfind(|opt| cols >= *opt)
             .unwrap_or(256);
 
         // Respect the lane width and workgroup limits.
@@ -392,21 +391,11 @@ impl DeviceCaps {
     /// Derive the merge sub-strategy to pair with `preferred_merge_kind`.
     pub fn preferred_substrategy(&self, merge_kind: u32, k: u32) -> u32 {
         match merge_kind {
-            2 => {
-                if k <= 128 {
-                    4 // warp_heap
-                } else {
-                    5 // warp_bitonic
-                }
-            }
-            1 => {
-                if k <= 1024 {
-                    1 // heap
-                } else {
-                    2 // kway
-                }
-            }
-            _ => 3, // bitonic
+            2 if k <= 128 => 4, // warp_heap
+            2 => 5,              // warp_bitonic
+            1 if k <= 1024 => 1, // heap
+            1 => 2,              // kway
+            _ => 3,              // bitonic
         }
     }
 
@@ -446,12 +435,7 @@ fn align_up(value: u32, align: u32) -> u32 {
     if align <= 1 {
         return value;
     }
-    let remainder = value % align;
-    if remainder == 0 {
-        value
-    } else {
-        value + (align - remainder)
-    }
+    value.div_ceil(align) * align
 }
 
 #[cfg(test)]

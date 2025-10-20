@@ -86,6 +86,9 @@ struct ForeignTensorInner {
     len: usize,
 }
 
+unsafe impl Send for ForeignTensorInner {}
+unsafe impl Sync for ForeignTensorInner {}
+
 impl Drop for ForeignTensorInner {
     fn drop(&mut self) {
         unsafe {

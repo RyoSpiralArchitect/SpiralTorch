@@ -394,6 +394,7 @@ pub mod experimental {
     struct LagEstimate {
         lag: f32,
         frames_since_update: u32,
+        seeded: bool,
     }
 
     impl Default for LagEstimate {
@@ -401,6 +402,7 @@ pub mod experimental {
             Self {
                 lag: 0.0,
                 frames_since_update: u32::MAX,
+                seeded: false,
             }
         }
     }
@@ -439,6 +441,7 @@ pub mod experimental {
                     .or_insert_with(LagEstimate::default);
                 entry.lag = pulse.latency_ms;
                 entry.frames_since_update = 0;
+                entry.seeded = true;
                 self.pending_events.push(format!(
                     "latency.seeded:{:?}:{:.2}",
                     pulse.source, entry.lag
@@ -481,6 +484,15 @@ pub mod experimental {
                     continue;
                 }
                 let entry = self.lags.entry(source).or_insert_with(LagEstimate::default);
+                if entry.seeded {
+                    if self.cfg.hold_steps > 0 {
+                        events.push(format!("latency.held:{:?}", source));
+                        entry.frames_since_update = entry.frames_since_update.max(1);
+                        entry.seeded = false;
+                        continue;
+                    }
+                    entry.seeded = false;
+                }
                 if entry.frames_since_update != u32::MAX
                     && entry.frames_since_update < self.cfg.hold_steps
                 {

@@ -1,0 +1,20 @@
+[package]
+name = "st-vision"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
+description = "Z-space native vision utilities for SpiralTorch"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+st-core = { path = "../st-core" }
+st-tensor = { path = "../st-tensor" }
+st-logic = { path = "../st-logic" }
+st-nn = { path = "../st-nn" }
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
+
+[package.metadata.spiraltorch]
+copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

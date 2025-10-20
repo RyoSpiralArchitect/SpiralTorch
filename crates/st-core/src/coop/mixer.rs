@@ -62,7 +62,7 @@ where
 {
     fn mix(&mut self, proposals: &[CoopProposal], telemetry: &TeamTelemetry) -> TeamMix {
         let fused_z_bias = fuse_z_bias(proposals);
-        let team_reward = (&self.reward_fn)(fused_z_bias, telemetry);
+        let team_reward = (self.reward_fn)(fused_z_bias, telemetry);
 
         let mut credits = Vec::with_capacity(proposals.len());
         let total_weight: f32 = proposals.iter().map(|p| p.weight).sum();
@@ -76,7 +76,7 @@ where
             } else {
                 remainder_weighted / remainder_weight
             };
-            let counter_reward = (&self.reward_fn)(counterfactual_z, telemetry);
+            let counter_reward = (self.reward_fn)(counterfactual_z, telemetry);
             credits.push(team_reward - counter_reward);
         }
 

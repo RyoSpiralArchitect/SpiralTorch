@@ -150,6 +150,10 @@ impl BlackCatRuntime {
     }
 
     /// Build a contextual feature vector from runtime metrics.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Context vector requires these inputs for bandit feature parity"
+    )]
     pub fn make_context(
         &self,
         batches: u32,
@@ -653,9 +657,7 @@ pub mod zmeta {
         }
 
         fn ingest_structural(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
-            let Some(raw) = structural else {
-                return None;
-            };
+            let raw = structural?;
             if self.params.dim == 0 {
                 return None;
             }
@@ -693,28 +695,7 @@ pub mod zmeta {
             )
         }
 
-        #[allow(dead_code)]
-        fn apply_structural_drive_legacy(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
-            if delta_reward.abs() <= 1e-9 {
-                return;
-            }
-            let gain = delta_reward.tanh();
-            if !gain.is_finite() || gain.abs() <= 1e-6 {
-                return;
-            }
-
-            let delta_norm = (delta.iter().map(|v| v * v).sum::<f64>()).sqrt();
-            if delta_norm <= 1e-9 {
-                return;
-            }
-
-            for value in delta.iter_mut() {
-                *value *= gain;
-            }
-
-            self.logistic_project_step_legacy(&delta);
-        }
-
+        #[cfg(not(feature = "blackcat_v2"))]
         fn apply_structural_drive(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
             if delta_reward.abs() <= 1e-9 {
                 return;
@@ -736,8 +717,8 @@ pub mod zmeta {
             self.logistic_project_step_legacy(&delta);
         }
 
-        #[allow(dead_code)]
-        fn logistic_project_step_legacy(&mut self, drive: &[f64]) {
+        #[cfg(not(feature = "blackcat_v2"))]
+        fn logistic_project_step(&mut self, drive: &[f64]) {
             if self.dir.is_empty() {
                 return;
             }
@@ -757,6 +738,9 @@ pub mod zmeta {
             if proj_norm_sq <= 1e-12 {
                 return;
             }
+
+            // unused 警告を抑制（意味は変えない）
+            let _proj_norm = proj_norm_sq.sqrt();
 
             let dot_nr = self
                 .dir
@@ -850,7 +834,7 @@ pub mod zmeta {
             }
 
             let structural_norm_sq = self.structural.iter().map(|v| v * v).sum::<f64>();
-            if structural_norm_sq <= 1e-12 {
+            if structural_norm_sq <= 1.0e-12 {
                 return;
             }
 
@@ -861,7 +845,7 @@ pub mod zmeta {
             }
 
             let proj_norm = (projected.iter().map(|v| v * v).sum::<f64>()).sqrt();
-            if proj_norm <= 1e-12 {
+            if proj_norm <= 1.0e-12 {
                 return;
             }
 
@@ -893,7 +877,7 @@ pub mod zmeta {
     }
 
     fn normalize(vec: &mut [f64]) {
-        let norm = (vec.iter().map(|v| v * v).sum::<f64>()).sqrt().max(1e-12);
+        let norm = (vec.iter().map(|v| v * v).sum::<f64>()).sqrt().max(1.0e-12);
         for v in vec.iter_mut() {
             *v /= norm;
         }

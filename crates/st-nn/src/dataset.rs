@@ -7,9 +7,7 @@ use crate::{PureResult, Tensor};
 use futures::stream::{self, Stream};
 use rand::rngs::StdRng;
 use rand::{seq::SliceRandom, SeedableRng};
-use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
-use std::thread;
 
 type Sample = (Tensor, Tensor);
 
@@ -221,27 +219,14 @@ impl Iterator for ImmediateBatches {
     }
 }
 
+// Prefetch のスレッド化を取りやめ、同期イテレータとして実装
 struct PrefetchBatches {
-    rx: Receiver<Option<PureResult<(Tensor, Tensor)>>>,
-    handle: Option<thread::JoinHandle<()>>,
+    state: BatchState,
 }
 
 impl PrefetchBatches {
-    fn spawn(state: BatchState, depth: usize) -> Self {
-        let (tx, rx) = mpsc::sync_channel(depth.max(1));
-        let handle = thread::spawn(move || {
-            let mut state = state;
-            while let Some(batch) = state.next_batch() {
-                if tx.send(Some(batch)).is_err() {
-                    return;
-                }
-            }
-            let _ = tx.send(None);
-        });
-        Self {
-            rx,
-            handle: Some(handle),
-        }
+    fn spawn(state: BatchState, _depth: usize) -> Self {
+        Self { state }
     }
 }
 
@@ -249,18 +234,7 @@ impl Iterator for PrefetchBatches {
     type Item = PureResult<(Tensor, Tensor)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.rx.recv().ok()? {
-            Some(batch) => Some(batch),
-            None => None,
-        }
-    }
-}
-
-impl Drop for PrefetchBatches {
-    fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
+        self.state.next_batch()
     }
 }
 

@@ -78,10 +78,7 @@ pub fn parse_env_dsl_plus_kind(
     subgroup: bool,
     kind: &'static str,
 ) -> (Option<Choice>, Vec<SoftRule>, DslOverrides) {
-    let src = match std::env::var("SPIRAL_HEUR_K") {
-        Ok(s) => s,
-        Err(_) => String::new(),
-    };
+    let src = std::env::var("SPIRAL_HEUR_K").unwrap_or_default();
     #[allow(unused_mut)]
     let kc = {
         #[cfg(feature = "kdsl")]
@@ -161,7 +158,7 @@ pub fn parse_env_dsl_plus_kind(
                 tile_cols: out
                     .hard
                     .tile_cols
-                    .unwrap_or(((cols.max(1) + 1023) / 1024) as u32 * 1024),
+                    .unwrap_or(cols.max(1).div_ceil(1024) * 1024),
                 radix: out
                     .hard
                     .radix
@@ -310,8 +307,7 @@ pub fn choose_from_kv(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<Ch
                     ctile: getu("ctile").unwrap_or(0),
                     mode_midk: getu("mode_midk").unwrap_or(0) as u8,
                     mode_bottomk: getu("mode_bottomk").unwrap_or(0) as u8,
-                    tile_cols: getu("tile_cols")
-                        .unwrap_or(((cols.max(1) + 1023) / 1024) as u32 * 1024),
+                    tile_cols: getu("tile_cols").unwrap_or(cols.max(1).div_ceil(1024) * 1024),
                     radix: getu("radix").unwrap_or(if k.is_power_of_two() { 4 } else { 2 }),
                     segments: getu("segments").unwrap_or(if cols > 131_072 {
                         4

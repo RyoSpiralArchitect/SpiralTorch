@@ -237,6 +237,12 @@ pub struct DashboardBuilder {
     start: SystemTime,
 }
 
+impl Default for DashboardBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DashboardBuilder {
     pub fn new() -> Self {
         Self {
