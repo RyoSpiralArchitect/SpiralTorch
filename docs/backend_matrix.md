@@ -23,6 +23,13 @@ stats for one or all accelerators, derive per-capability counts via
 `capabilities_with_state`. `capability_matrix_json()` continues to emit a JSON
 payload for dashboards.
 
+The matrix is also available programmatically via
+`st_bench::backend_matrix::capability_matrix()` so automation tools can stay in
+lockstep with the documentation when tracking backend readiness. Use
+`summarize_backend` (or `backend_summaries`) to compute aggregated readiness
+stats for one or all accelerators, and `capability_matrix_json()` to emit a
+JSON payload for dashboards.
+
 ## Usage Notes
 - **Feature flags are additive.** Combine multiple backend features during development to compile shared traits, but prefer single-backend release builds for predictable binaries.
 - **Driver hygiene matters.** WGPU relies on system graphics drivers. For reproducible CI, pin to Dawn or Vulkan SDK releases and snapshot supported adapters in documentation.
