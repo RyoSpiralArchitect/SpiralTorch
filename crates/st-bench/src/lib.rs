@@ -7,6 +7,14 @@ use st_core::coop::mixer::{team_reward, DifferenceRewardMixer, TeamTelemetry};
 use st_core::coop::r#loop::CoopLoop;
 use std::collections::HashMap;
 
+pub mod backend_matrix;
+
+pub use backend_matrix::{
+    backend_summaries, capability_by_name, capability_matrix, capability_matrix_json,
+    summarize_backend, Backend, BackendNote, BackendSummary, CapabilityEntry, CapabilityRow,
+    CapabilityState,
+};
+
 mod model {
     use super::*;
 
@@ -94,6 +102,41 @@ mod model {
 }
 
 pub use model::{BackendProbe, BenchmarkReport, BenchmarkSample, BenchmarkStats};
+
+/// Canonical backend probes derived from the documentation matrix.
+///
+/// The heuristics mirror the expectations outlined in `docs/backend_matrix.md`:
+/// CPU acts as the baseline, CUDA leads throughput, and HIP starts slightly
+/// behind CUDA while the outstanding watchlist items are addressed.
+pub fn canonical_backend_probes() -> Vec<BackendProbe<'static>> {
+    vec![
+        BackendProbe {
+            name: Backend::Cpu.as_str(),
+            base_throughput: 1.0,
+            latency_ms: 9.5,
+        },
+        BackendProbe {
+            name: Backend::Wgpu.as_str(),
+            base_throughput: 1.25,
+            latency_ms: 8.0,
+        },
+        BackendProbe {
+            name: Backend::Mps.as_str(),
+            base_throughput: 1.35,
+            latency_ms: 6.5,
+        },
+        BackendProbe {
+            name: Backend::Cuda.as_str(),
+            base_throughput: 2.1,
+            latency_ms: 4.2,
+        },
+        BackendProbe {
+            name: Backend::Hip.as_str(),
+            base_throughput: 1.7,
+            latency_ms: 5.3,
+        },
+    ]
+}
 
 struct BenchAgent {
     rng: StdRng,
@@ -218,6 +261,15 @@ mod tests {
         for summary in summaries {
             assert!(summary.throughput_mean > 0.0);
             assert!(summary.latency_p95 >= summary.latency_mean);
+        }
+    }
+
+    #[test]
+    fn canonical_probes_cover_all_backends() {
+        let probes = canonical_backend_probes();
+        assert_eq!(probes.len(), Backend::COUNT);
+        for backend in Backend::ALL {
+            assert!(probes.iter().any(|probe| probe.name == backend.as_str()));
         }
     }
 }
