@@ -21,6 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+use crate::cloud::CloudTargetSummary;
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
@@ -41,8 +42,8 @@ use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ecosystem::{
-    ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample, RankPlanSummary,
-    RoundtableConfigSummary, RoundtableSummary,
+    CloudConnector, ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample,
+    RankPlanSummary, RoundtableConfigSummary, RoundtableSummary,
 };
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
@@ -274,36 +275,7 @@ impl core::fmt::Debug for ModuleTrainer {
 pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
 
 fn append_cloud_targets(metadata: &mut HashMap<String, String>, targets: &[CloudConnector]) {
-    if targets.is_empty() {
-        return;
-    }
-
-    let mut azure_targets = Vec::new();
-    let mut aws_targets = Vec::new();
-
-    for target in targets {
-        match target {
-            CloudConnector::AzureEventHub { namespace, hub } => {
-                azure_targets.push(format!("event_hub:{namespace}/{hub}"));
-            }
-            CloudConnector::AzureStorageQueue { account, queue } => {
-                azure_targets.push(format!("storage_queue:{account}/{queue}"));
-            }
-            CloudConnector::AwsKinesis { region, stream } => {
-                aws_targets.push(format!("kinesis:{region}/{stream}"));
-            }
-            CloudConnector::AwsSqs { region, queue } => {
-                aws_targets.push(format!("sqs:{region}/{queue}"));
-            }
-        }
-    }
-
-    if !azure_targets.is_empty() {
-        metadata.insert("azure_targets".to_string(), azure_targets.join(","));
-    }
-    if !aws_targets.is_empty() {
-        metadata.insert("aws_targets".to_string(), aws_targets.join(","));
-    }
+    CloudTargetSummary::from_targets(targets).extend_map(metadata);
 }
 
 #[derive(Debug, Clone)]
@@ -1382,6 +1354,7 @@ impl ModuleTrainer {
                             grad_scale,
                             max_norm,
                             lr_decay,
+                            ..
                         } => {
                             if *grad_scale < 0.999 {
                                 self.apply_grad_scale(module, *grad_scale)?;
@@ -1394,7 +1367,7 @@ impl ModuleTrainer {
                                 self.optimizer_mul_lr(module, factor)?;
                             }
                         }
-                        DriveCmd::Bloom { lr_mul } => {
+                        DriveCmd::Bloom { lr_mul, .. } => {
                             if *lr_mul > 1.0 {
                                 self.optimizer_mul_lr(module, *lr_mul)?;
                             }

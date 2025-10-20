@@ -56,6 +56,10 @@ processing large batches.
   `TransformPipeline::with_gpu_dispatcher` (or the `*_arc` helpers) to offload
   resize/crop/flip/jitter operations automatically while normalisation stays on
   the CPU.
+- Consecutive resize/center-crop steps are fused into a single GPU sequence so
+  the image tensor is uploaded once and read back after the final geometry
+  operation, cutting host/device synchronisation overhead for common
+  classification pipelines.
 - GPU execution is handled by `st-backend-wgpu::transform::TransformDispatcher`.
   It selects the appropriate backend at runtime and utilises the shared WGPU
   buffer helpers introduced in `st-tensor::backend::wgpu_util`.

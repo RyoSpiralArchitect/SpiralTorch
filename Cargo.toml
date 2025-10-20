@@ -22,7 +22,8 @@ members = [
   "crates/spiral-safety",
   "bindings/st-py",
   "bindings/st-wasm",
-  "tools/xai-cli"
+  "tools/xai-cli",
+  "tools/visualize-z-volume"
 ]
 default-members = [
   "crates/st-core",
