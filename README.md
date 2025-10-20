@@ -4,6 +4,8 @@ _(Still under active repair while expanding — API changes hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
+> **Latest progress.** Conv2d now dispatches its 5D im2col expansion through the WGPU GEMM pipeline, keeping dilation-aware patches on the GPU before the matrix multiply.
+
 **Architecture Overview.**
 ```mermaid
 sequenceDiagram
