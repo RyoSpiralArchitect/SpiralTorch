@@ -24,9 +24,11 @@ except PackageNotFoundError:
 # 追加API（Rust側でエクスポート済みのやつだけ拾う）
 _EXTRAS = [
     "golden_ratio","golden_angle","set_global_seed",
+    "capture","share","compat",
     "fibonacci_pacing","pack_nacci_chunks",
     "pack_tribonacci_chunks","pack_tetranacci_chunks",
-    "generate_plan_batch_ex",
+    "generate_plan_batch_ex","plan","plan_topk",
+    "describe_device","hip_probe","z_space_barycenter",
 ]
 for _n in _EXTRAS:
     if hasattr(_rs, _n):
@@ -76,6 +78,21 @@ def _expose_from_rs(name: str) -> None:
     if hasattr(_rs, name):
         globals()[name] = getattr(_rs, name)
 
+def _mirror_into_module(name: str, members: list[str]) -> _types.ModuleType:
+    module = _ensure_submodule(name)
+    exported: set[str] = set(getattr(module, "__all__", ()))
+    for member in members:
+        _expose_from_rs(member)
+        value = globals().get(member)
+        if value is None:
+            continue
+        setattr(module, member, value)
+        exported.add(member)
+    if exported:
+        module.__all__ = sorted(exported)
+    return module
+
+
 for _name, _doc in [
     ("nn","SpiralTorch neural network primitives"),
     ("frac","Fractal & fractional tools"),
@@ -85,8 +102,36 @@ for _name, _doc in [
     ("rec","Reconstruction / signal processing"),
     ("telemetry","Telemetry / dashboards / metrics"),
     ("ecosystem","Integrations & ecosystem glue"),
+    ("selfsup","Self-supervised objectives"),
+    ("export","Model export & compression"),
+    ("compat","Interoperability bridges"),
+    ("hpo","Hyper-parameter optimization tools"),
+    ("inference","Safety inference runtime & auditing"),
 ]:
     _ensure_submodule(_name, _doc)
+
+
+_mirror_into_module(
+    "inference",
+    [
+        "SafetyViolation","SafetyVerdict","AuditEvent","AuditLog",
+        "InferenceResult","InferenceRuntime",
+    ],
+)
+
+
+_CORE_EXPORTS = [
+    "Tensor","ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder",
+    "GradientSummary","Hypergrad","TensorBiome",
+    "BarycenterIntermediate","ZSpaceBarycenter",
+    "QueryPlan","RecEpochReport","Recommender",
+    "DqnAgent","PpoAgent","SacAgent",
+    "DashboardMetric","DashboardEvent","DashboardFrame","DashboardRing",
+    "AuditEvent","AuditLog","InferenceResult","InferenceRuntime",
+    "SafetyVerdict","SafetyViolation",
+]
+for _name in _CORE_EXPORTS:
+    _expose_from_rs(_name)
 
 
 def __getattr__(name: str) -> _Any:
@@ -112,8 +157,10 @@ def __dir__() -> list[str]:
 
 _EXPORTED = {
     *_EXTRAS,
+    *_CORE_EXPORTS,
     *[n for n in _COMPAT_ALIAS if n in globals()],
     "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
+    "selfsup","export","compat","hpo","inference",
     "__version__",
 }
 _EXPORTED.update(
