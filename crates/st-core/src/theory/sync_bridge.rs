@@ -18,6 +18,9 @@
 //! - [`SyncTheoremTrainer::run`] recreates the hitting-time viewpoint from the
 //!   document, returning the log trajectory and the first observation-gate
 //!   iteration if one exists.
+//! - State is maintained per sample, so downstream callers can seed the log
+//!   `e`-process with [`SyncTheoremTrainer::set_log_e`] and retrieve the
+//!   anytime confidence curve for their own labelling policies.
 //!
 //! The implementation uses standard Rust containers (`Vec`) so it works in
 //! `no_std`-averse crates, yet remains interoperable with SpiralTorch tensors by
@@ -151,12 +154,15 @@ pub struct SyncStep {
     pub hitting_time_bound: f32,
     /// Expected log-`e` increment from Theorem 1.
     pub increment: Vec<f32>,
+    /// Anytime confidence values `1 - 1/E_k` used for the SAFE label.
+    pub confidence: Vec<f32>,
 }
 
 /// State machine that fuses structural and observational evidence.
 #[derive(Debug, Clone)]
 pub struct SyncTheoremTrainer {
     config: SyncConfig,
+    log_e: Vec<f32>,
     log_e_mean: f32,
     iteration: usize,
 }
@@ -167,6 +173,7 @@ impl SyncTheoremTrainer {
         config.validate()?;
         Ok(Self {
             config,
+            log_e: Vec::new(),
             log_e_mean: 0.0,
             iteration: 0,
         })
@@ -179,8 +186,24 @@ impl SyncTheoremTrainer {
 
     /// Reset the internal log `e`-process and iteration counter.
     pub fn reset(&mut self) {
+        self.log_e.clear();
         self.log_e_mean = 0.0;
         self.iteration = 0;
+    }
+
+    /// Replace the internal log `e`-state.
+    pub fn set_log_e(&mut self, log_e: &[f32]) {
+        self.log_e = log_e.to_vec();
+        self.log_e_mean = if log_e.is_empty() {
+            0.0
+        } else {
+            log_e.iter().sum::<f32>() / log_e.len() as f32
+        };
+    }
+
+    /// Borrow the internal log `e`-state.
+    pub fn log_e(&self) -> &[f32] {
+        &self.log_e
     }
 
     /// Access the observation threshold `\log(1/\alpha)`.
@@ -262,6 +285,7 @@ impl SyncTheoremTrainer {
                 labels: Vec::new(),
                 hitting_time_bound: self.config.hitting_time_bound()?,
                 increment: Vec::new(),
+                confidence: Vec::new(),
             });
         }
 
@@ -270,7 +294,14 @@ impl SyncTheoremTrainer {
             self.default_or("cos_sq_phi", cos_sq_phi, batch, self.config.cos_phi_min)?;
 
         let increment = self.expected_increment(delta_b_sq, &epsilon, Some(&cos_sq_phi))?;
-        let log_e: Vec<f32> = increment.iter().map(|inc| self.log_e_mean + inc).collect();
+        if self.log_e.len() != batch {
+            self.log_e = vec![0.0; batch];
+        }
+
+        for (value, inc) in self.log_e.iter_mut().zip(increment.iter()) {
+            *value += *inc;
+        }
+        let log_e = self.log_e.clone();
 
         self.iteration += 1;
 
@@ -284,22 +315,25 @@ impl SyncTheoremTrainer {
 
         let threshold = self.threshold();
         let observation_gate: Vec<bool> = log_e.iter().map(|value| *value >= threshold).collect();
+        let confidence: Vec<f32> = log_e.iter().map(|value| 1.0 - (-value).exp()).collect();
 
         let mut labels = Vec::with_capacity(batch);
         for idx in 0..batch {
-            let value = log_e[idx];
             let structure_open = structure_gate[idx];
             let observation_open = observation_gate[idx];
             if structure_open && observation_open {
                 labels.push(IKLabel::Critical);
-            } else if !structure_open && !observation_open && (-value).exp() <= self.config.alpha {
+            } else if !structure_open
+                && !observation_open
+                && confidence[idx] >= 1.0 - self.config.alpha
+            {
                 labels.push(IKLabel::Safe);
             } else {
                 labels.push(IKLabel::Abstain);
             }
         }
 
-        self.log_e_mean = log_e.iter().sum::<f32>() / batch as f32;
+        self.log_e_mean = self.log_e.iter().sum::<f32>() / batch as f32;
 
         Ok(SyncStep {
             log_e,
@@ -308,6 +342,7 @@ impl SyncTheoremTrainer {
             labels,
             hitting_time_bound: self.config.hitting_time_bound()?,
             increment,
+            confidence,
         })
     }
 
@@ -401,6 +436,8 @@ mod tests {
         assert_eq!(step.structure_gate, vec![true, false]);
         assert_eq!(step.observation_gate, vec![false, false]);
         assert_eq!(step.labels, vec![IKLabel::Abstain, IKLabel::Abstain]);
+        assert_eq!(trainer.log_e().len(), 2);
+        assert_eq!(step.confidence.len(), 2);
     }
 
     #[test]
@@ -413,6 +450,28 @@ mod tests {
         assert_eq!(trajectory.len(), 10);
         assert!(gate_iter.is_some());
         assert!(trajectory[gate_iter.unwrap()] >= trainer.threshold());
+    }
+
+    #[test]
+    fn state_accumulates_across_steps() {
+        let config = SyncConfig::new(0.1, 0.2, 0.01, 0.8, 0).unwrap();
+        let mut trainer = SyncTheoremTrainer::new(config).unwrap();
+        let first = trainer.step(&[0.25], Some(&[0.01]), Some(&[0.9])).unwrap();
+        let second = trainer.step(&[0.25], Some(&[0.01]), Some(&[0.9])).unwrap();
+        assert!(second.log_e[0] > first.log_e[0]);
+        assert_eq!(trainer.log_e()[0], second.log_e[0]);
+    }
+
+    #[test]
+    fn set_log_e_reinitialises_state() {
+        let config = SyncConfig::new(0.1, 0.2, 0.01, 0.8, 0).unwrap();
+        let mut trainer = SyncTheoremTrainer::new(config).unwrap();
+        trainer.set_log_e(&[1.0, -0.5]);
+        assert_eq!(trainer.log_e(), &[1.0, -0.5]);
+        let step = trainer
+            .step(&[0.2, 0.2], Some(&[0.0, 0.0]), Some(&[1.0, 1.0]))
+            .unwrap();
+        assert_eq!(step.log_e.len(), 2);
     }
 
     #[test]
