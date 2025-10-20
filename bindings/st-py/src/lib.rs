@@ -5,6 +5,10 @@ use pyo3::types::PyModule;
 
 mod tensor;
 mod compat;
+mod nn;
+mod rl;
+mod rec;
+mod telemetry;
 
 // =======================
 // extras（安全・自己完結）
@@ -186,9 +190,10 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     compat::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
-    let nn = PyModule::new_bound(py, "nn")?;
-    nn.add("__doc__", "SpiralTorch neural network primitives")?;
-    m.add_submodule(&nn)?;
+    nn::register(py, m)?;
+    rl::register(py, m)?;
+    rec::register(py, m)?;
+    telemetry::register(py, m)?;
 
     let frac = PyModule::new_bound(py, "frac")?;
     frac_bindings::register(py, &frac)?; // 実APIを公開
@@ -201,18 +206,6 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     let linalg = PyModule::new_bound(py, "linalg")?;
     linalg.add("__doc__", "Linear algebra utilities")?;
     m.add_submodule(&linalg)?;
-
-    let rl = PyModule::new_bound(py, "rl")?;
-    rl.add("__doc__", "Reinforcement learning components")?;
-    m.add_submodule(&rl)?;
-
-    let rec = PyModule::new_bound(py, "rec")?;
-    rec.add("__doc__", "Reconstruction / signal processing")?;
-    m.add_submodule(&rec)?;
-
-    let telemetry = PyModule::new_bound(py, "telemetry")?;
-    telemetry.add("__doc__", "Telemetry / dashboards / metrics")?;
-    m.add_submodule(&telemetry)?;
 
     let ecosystem = PyModule::new_bound(py, "ecosystem")?;
     ecosystem.add("__doc__", "Integrations & ecosystem glue")?;
