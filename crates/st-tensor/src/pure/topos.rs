@@ -55,6 +55,27 @@ fn permeable_clamp(value: f32, limit: f32, permeability: f32) -> f32 {
     sign * (limit + headroom * softened.min(1.0))
 }
 
+fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    if saturation <= 0.0 {
+        return 0.0;
+    }
+    let limit = saturation.abs();
+    let magnitude = value.abs();
+    if magnitude <= limit {
+        return value;
+    }
+    if porosity <= f32::EPSILON {
+        return value.signum() * limit;
+    }
+    let bleed = (magnitude - limit) / (magnitude + limit);
+    let absorb = (porosity * 0.25).min(1.0);
+    let softened = limit * (1.0 - absorb * bleed.min(1.0)).max(0.0);
+    value.signum() * softened
+}
+
 /// Numerically guards the Lawvere–Tierney topology that keeps probabilistic data j-closed.
 #[derive(Clone, Copy, Debug)]
 pub struct LawvereTierneyGuard {
@@ -960,6 +981,7 @@ impl GraphGuardProfile {
         let overflow = edge_count - self.max_edges;
         if overflow > slack {
             return Err(TensorError::TensorVolumeExceeded {
+                label: "graph_edge_budget",
                 volume: edge_count,
                 max_volume: self.max_edges,
             });
@@ -996,6 +1018,7 @@ pub struct RewardBoundary {
     lower: f32,
     upper: f32,
     hysteresis: f32,
+    porosity: f32,
 }
 
 impl RewardBoundary {
@@ -1022,7 +1045,23 @@ impl RewardBoundary {
             lower,
             upper,
             hysteresis,
+            porosity: 0.0,
         })
+    }
+
+    /// Creates a new reward boundary with the provided porosity.
+    pub fn with_porosity(
+        lower: f32,
+        upper: f32,
+        hysteresis: f32,
+        porosity: f32,
+    ) -> PureResult<Self> {
+        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
+            return Err(TensorError::PorosityOutOfRange { porosity });
+        }
+        let mut boundary = Self::new(lower, upper, hysteresis)?;
+        boundary.porosity = porosity;
+        Ok(boundary)
     }
 
     /// Returns the lower reward bound.
@@ -1035,16 +1074,27 @@ impl RewardBoundary {
         self.upper
     }
 
+    /// Returns the configured porosity.
+    pub fn porosity(&self) -> f32 {
+        self.porosity
+    }
+
     fn clamp(&self, value: f32) -> f32 {
-        value.clamp(self.lower, self.upper)
+        if value > self.upper {
+            porous_mix(value, self.upper, self.porosity)
+        } else if value < self.lower {
+            -porous_mix(-value, -self.lower, self.porosity)
+        } else {
+            value
+        }
     }
 
     fn breached_lower(&self, value: f32) -> bool {
-        value < self.lower - self.hysteresis
+        value < self.lower - self.hysteresis * (1.0 + self.porosity)
     }
 
     fn breached_upper(&self, value: f32) -> bool {
-        value > self.upper + self.hysteresis
+        value > self.upper + self.hysteresis * (1.0 + self.porosity)
     }
 }
 
@@ -1270,13 +1320,7 @@ impl<'a> MultiModalToposGuard<'a> {
             self.graph.guard_degree(degree)?;
             max_degree = cmp::max(max_degree, degree);
         }
-        if edge_count > self.graph.max_edges {
-            return Err(TensorError::TensorVolumeExceeded {
-                label: "graph_edges",
-                volume: edge_count,
-                max_volume: self.graph.max_edges,
-            });
-        }
+        let overflow = self.graph.guard_edge_budget(edge_count)?;
         self.topos.guard_slice("graph_adjacency", adjacency)?;
         Ok(GraphGuardReport {
             edge_count,
