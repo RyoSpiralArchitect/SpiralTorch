@@ -69,6 +69,9 @@ use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
+pub mod datasets;
+pub mod nerf;
+
 /// Volumetric container that holds planar tensors along the Z axis.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZSpaceVolume {
