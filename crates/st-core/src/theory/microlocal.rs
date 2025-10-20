@@ -412,7 +412,7 @@ impl InterfaceZPulse {
             interface_cells,
             band_energy: band,
             // [SCALE-TODO] Patch 0 aggregate placeholder
-            scale: ZScale::ONE,
+            scale: scale.or(Some(ZScale::ONE)),
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
@@ -483,7 +483,7 @@ impl InterfaceZPulse {
             drift: self.drift,
             z_signal: self.z_bias,
             // [SCALE-TODO] Patch 0 optional tagging
-            scale: Some(self.scale),
+            scale: self.scale,
         }
     }
 
@@ -499,7 +499,7 @@ impl Default for InterfaceZPulse {
             support: 0.0,
             interface_cells: 0.0,
             band_energy: (0.0, 0.0, 0.0),
-            scale: ZScale::ONE,
+            scale: Some(ZScale::ONE),
             drift: 0.0,
             z_bias: 0.0,
             quality_hint: None,
@@ -853,6 +853,7 @@ impl InterfaceZConductor {
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
                 support,
+                scale: pulse.scale,
                 quality,
                 stderr,
                 latency_ms: 0.0,
@@ -907,6 +908,7 @@ impl InterfaceZConductor {
             drift: fused.drift,
             z_bias: fused.z_bias,
             support,
+            scale: fused.scale,
             quality: avg_quality,
             stderr: fused.standard_error.unwrap_or(0.0),
             latency_ms: 0.0,
