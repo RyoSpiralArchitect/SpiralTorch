@@ -1,14 +1,13 @@
 [package]
 name = "spiraltorch-py"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "Python bindings for SpiralTorch heuristics"
 license = "AGPL-3.0-or-later"
 authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 
 [lib]
-# ← Rust 側ビルド成果物の内部名（任意・Pythonには見えない）
-name = "spiraltorch_native"
+name = "spiraltorch"
 crate-type = ["cdylib"]
 
 [package.metadata.pyo3]
@@ -17,11 +16,24 @@ abi3 = true
 abi3-py38 = true
 
 [features]
-default = ["extension-module", "psi", "psychoid", "collapse"]
+default = [
+    "extension-module",
+    "psi",
+    "psychoid",
+    "collapse",
+    "nn",
+    "rl",
+    "rec",
+    "text",
+]
 extension-module = ["pyo3/extension-module"]
 psi = []
 psychoid = ["psi"]
 collapse = ["psi"]
+nn = ["dep:st-nn"]
+rl = ["dep:st-rl"]
+rec = ["dep:st-rec", "dep:st-kdsl"]
+text = ["dep:st-text"]
 
 # Backend selection (mirrors the CLI surface expected by maturin builds)
 cpu = []
@@ -45,19 +57,18 @@ pyo3-build-config = "0.22"
 pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", "gil-refs", "num-complex"] }
 st-core = { path = "../../crates/st-core", default-features = false, features = ["psi", "psychoid", "collapse"] }
 st-tensor = { path = "../../crates/st-tensor", default-features = false }
-st-nn = { path = "../../crates/st-nn", features = ["psychoid", "collapse"] }
-st-rl = { path = "../../crates/st-rl" }
-st-rec = { path = "../../crates/st-rec" }
-st-text = { path = "../../crates/st-text" }
+st-nn = { path = "../../crates/st-nn", optional = true, features = ["psychoid", "collapse"] }
+st-rl = { path = "../../crates/st-rl", optional = true }
+st-rec = { path = "../../crates/st-rec", optional = true }
+st-text = { path = "../../crates/st-text", optional = true }
+st-kdsl = { path = "../../crates/st-kdsl", optional = true }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }
 ndarray = { version = "0.15", default-features = false, features = ["std"] }
 num-complex = { version = "0.4" }
 
 [package.metadata.maturin]
-# ← Python から見える拡張モジュール名（import 時のサブモジュール名）
-#    これで `spiraltorch._native` が生成される
-name = "spiraltorch._native"
+name = "spiraltorch"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

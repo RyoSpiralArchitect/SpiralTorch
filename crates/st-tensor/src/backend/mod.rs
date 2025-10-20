@@ -10,3 +10,6 @@ pub mod wgpu_frac;
 
 #[cfg(feature = "wgpu")]
 pub mod wgpu_dense;
+
+#[cfg(feature = "wgpu")]
+pub mod wgpu_util;
