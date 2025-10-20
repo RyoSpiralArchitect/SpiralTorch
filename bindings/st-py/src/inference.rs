@@ -191,8 +191,12 @@ impl InferenceRuntime {
         }
 
         // Placeholder inference implementation; integrates safety for outputs as well.
-        let response = if let Some(meta) = metadata.and_then(|dict| dict.get_item("candidate")) {
-            meta.extract::<String>()?
+        let response = if let Some(meta) = metadata {
+            if let Some(candidate) = meta.get_item("candidate")? {
+                candidate.extract::<String>()?
+            } else {
+                format!("Generated response for: {prompt}")
+            }
         } else {
             format!("Generated response for: {prompt}")
         };

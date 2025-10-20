@@ -115,6 +115,17 @@ pub enum DriveState {
     Bloom,
 }
 
+impl DriveState {
+    pub fn as_scalar(self) -> f64 {
+        match self {
+            DriveState::Warmup => 0.0,
+            DriveState::Stable => 1.0,
+            DriveState::Collapse => 2.0,
+            DriveState::Bloom => 3.0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DriveCmd {
     None,
@@ -122,10 +133,28 @@ pub enum DriveCmd {
         grad_scale: f32,
         max_norm: Option<f32>,
         lr_decay: Option<f32>,
+        due_to_trend: bool,
+        due_to_deviation: bool,
     },
     Bloom {
         lr_mul: f32,
+        due_to_trend: bool,
+        due_to_deviation: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CollapseDiagnostics {
+    pub state: DriveState,
+    pub trend: f32,
+    pub baseline: Option<f32>,
+    pub cooldown: u32,
+}
+
+impl CollapseDiagnostics {
+    pub fn state_scalar(&self) -> f64 {
+        self.state.as_scalar()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -175,7 +204,9 @@ impl CollapseDrive {
 
         let psi = reading.total;
         let mut collapse_due_to_trend = false;
+        let mut collapse_due_to_deviation = false;
         let mut bloom_due_to_trend = false;
+        let mut bloom_due_to_deviation = false;
 
         if let Some(prev) = self.prev_total {
             let delta = psi - prev;
@@ -195,12 +226,12 @@ impl CollapseDrive {
                 if self.cfg.collapse_deviation_threshold.is_finite()
                     && deviation >= self.cfg.collapse_deviation_threshold
                 {
-                    collapse_due_to_trend = true;
+                    collapse_due_to_deviation = true;
                 }
                 if self.cfg.bloom_deviation_threshold.is_finite()
                     && deviation <= -self.cfg.bloom_deviation_threshold
                 {
-                    bloom_due_to_trend = true;
+                    bloom_due_to_deviation = true;
                 }
             } else {
                 self.baseline = Some(psi);
@@ -224,19 +255,26 @@ impl CollapseDrive {
 
         match self.state {
             DriveState::Warmup | DriveState::Stable => {
-                if psi >= self.cfg.hi || collapse_due_to_trend {
+                let collapse_due =
+                    psi >= self.cfg.hi || collapse_due_to_trend || collapse_due_to_deviation;
+                let bloom_due = psi <= self.cfg.lo || bloom_due_to_trend || bloom_due_to_deviation;
+                if collapse_due {
                     self.state = DriveState::Collapse;
                     self.cooldown = self.cfg.cooldown_steps;
                     DriveCmd::Collapse {
                         grad_scale: self.cfg.collapse_scale,
                         max_norm: self.cfg.collapse_max_norm,
                         lr_decay: self.cfg.collapse_lr_decay,
+                        due_to_trend: collapse_due_to_trend,
+                        due_to_deviation: collapse_due_to_deviation,
                     }
-                } else if psi <= self.cfg.lo || bloom_due_to_trend {
+                } else if bloom_due {
                     self.state = DriveState::Bloom;
                     self.cooldown = self.cfg.cooldown_steps;
                     DriveCmd::Bloom {
                         lr_mul: self.cfg.bloom_lr_mul,
+                        due_to_trend: bloom_due_to_trend,
+                        due_to_deviation: bloom_due_to_deviation,
                     }
                 } else {
                     DriveCmd::None
@@ -254,6 +292,15 @@ impl CollapseDrive {
                 }
                 DriveCmd::None
             }
+        }
+    }
+
+    pub fn diagnostics(&self) -> CollapseDiagnostics {
+        CollapseDiagnostics {
+            state: self.state,
+            trend: self.trend,
+            baseline: self.baseline,
+            cooldown: self.cooldown,
         }
     }
 }
@@ -305,17 +352,25 @@ mod tests {
         cfg.trend_alpha = 1.0;
         cfg.collapse_trend_threshold = 0.5;
         cfg.baseline_alpha = 0.5;
-        cfg.collapse_deviation_threshold = 0.4;
+        cfg.collapse_deviation_threshold = f32::INFINITY;
         cfg.bloom_trend_threshold = f32::NEG_INFINITY;
         cfg.bloom_deviation_threshold = f32::INFINITY;
 
         let mut drive = CollapseDrive::new(cfg);
         assert!(matches!(drive.update(&reading(1, 0.0)), DriveCmd::None));
         assert!(matches!(drive.update(&reading(2, 0.3)), DriveCmd::None));
-        assert!(matches!(
-            drive.update(&reading(3, 1.1)),
-            DriveCmd::Collapse { .. }
-        ));
+        match drive.update(&reading(3, 1.1)) {
+            DriveCmd::Collapse {
+                due_to_trend,
+                due_to_deviation,
+                ..
+            } => {
+                assert!(due_to_trend || due_to_deviation);
+                assert!(due_to_trend);
+                assert!(!due_to_deviation);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]
@@ -330,15 +385,97 @@ mod tests {
         cfg.collapse_trend_threshold = f32::INFINITY;
         cfg.baseline_alpha = 0.5;
         cfg.bloom_trend_threshold = -0.4;
-        cfg.bloom_deviation_threshold = 0.3;
+        cfg.bloom_deviation_threshold = f32::INFINITY;
         cfg.collapse_deviation_threshold = f32::INFINITY;
 
         let mut drive = CollapseDrive::new(cfg);
         assert!(matches!(drive.update(&reading(1, 1.0)), DriveCmd::None));
         assert!(matches!(drive.update(&reading(2, 0.9)), DriveCmd::None));
-        assert!(matches!(
-            drive.update(&reading(3, 0.2)),
-            DriveCmd::Bloom { .. }
-        ));
+        match drive.update(&reading(3, 0.2)) {
+            DriveCmd::Bloom {
+                due_to_trend,
+                due_to_deviation,
+                ..
+            } => {
+                assert!(due_to_trend || due_to_deviation);
+                assert!(due_to_trend);
+                assert!(!due_to_deviation);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn collapse_marks_deviation_cause() {
+        let mut cfg = CollapseConfig::default();
+        cfg.enabled = true;
+        cfg.hi = 9.0;
+        cfg.lo = -2.0;
+        cfg.warmup_steps = 0;
+        cfg.cooldown_steps = 0;
+        cfg.trend_alpha = 0.5;
+        cfg.collapse_trend_threshold = f32::INFINITY;
+        cfg.baseline_alpha = 0.5;
+        cfg.collapse_deviation_threshold = 0.2;
+        let mut drive = CollapseDrive::new(cfg);
+        drive.update(&reading(1, 0.0));
+        drive.update(&reading(2, 0.1));
+        match drive.update(&reading(3, 0.6)) {
+            DriveCmd::Collapse {
+                due_to_trend,
+                due_to_deviation,
+                ..
+            } => {
+                assert!(!due_to_trend);
+                assert!(due_to_deviation);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bloom_marks_deviation_cause() {
+        let mut cfg = CollapseConfig::default();
+        cfg.enabled = true;
+        cfg.hi = 9.0;
+        cfg.lo = -2.0;
+        cfg.warmup_steps = 0;
+        cfg.cooldown_steps = 0;
+        cfg.trend_alpha = 0.5;
+        cfg.bloom_trend_threshold = f32::NEG_INFINITY;
+        cfg.baseline_alpha = 0.5;
+        cfg.bloom_deviation_threshold = 0.15;
+        let mut drive = CollapseDrive::new(cfg);
+        drive.update(&reading(1, 0.5));
+        drive.update(&reading(2, 0.3));
+        match drive.update(&reading(3, -0.1)) {
+            DriveCmd::Bloom {
+                due_to_trend,
+                due_to_deviation,
+                ..
+            } => {
+                assert!(!due_to_trend);
+                assert!(due_to_deviation);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn diagnostics_reports_state_and_trend() {
+        let mut cfg = CollapseConfig::default();
+        cfg.enabled = true;
+        cfg.hi = 1.0;
+        cfg.lo = -1.0;
+        cfg.warmup_steps = 0;
+        cfg.trend_alpha = 1.0;
+        let cooldown_steps = cfg.cooldown_steps;
+        let mut drive = CollapseDrive::new(cfg);
+        assert_eq!(drive.diagnostics().state, DriveState::Warmup);
+        drive.update(&reading(1, 0.0));
+        let diag = drive.diagnostics();
+        assert_eq!(diag.state, DriveState::Stable);
+        assert_eq!(diag.baseline, Some(0.0));
+        assert!(diag.cooldown <= cooldown_steps);
     }
 }
