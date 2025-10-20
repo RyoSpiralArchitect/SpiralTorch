@@ -1,17 +1,24 @@
 //! Minimal one-binary PyO3 module: `import spiraltorch`
-//! - ルート1つだけ（#[pymodule] fn spiraltorch）
-//! - サブモジュールは動的生成（nn/frac/... は import 可）
-//! - extras はトップレベルに直登録
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use pyo3::wrap_pyfunction;
+
+mod tensor;
+mod compat;
+mod nn;
+mod rl;
+mod rec;
+mod telemetry;
+mod pure;
+mod nn;
+mod planner;
 
 // =======================
 // extras（安全・自己完結）
 // =======================
 mod extras {
     use super::*;
+    use pyo3::wrap_pyfunction; // ← マクロをこのモジュール内に import
     use std::sync::atomic::{AtomicU64, Ordering};
 
     pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_894_8_f64;
@@ -76,23 +83,45 @@ mod extras {
         nacci_orbits(4, &[1, 1, 2, 4], total_steps).into_iter().map(|o| o.actual).collect()
     }
 
-    // 既存 generate_plan へ配線するための薄い入口（今は NotImplemented）
+    // ← 引数名を #[pyo3(signature=...)] と一致させる
     #[pyfunction]
     #[pyo3(signature = (n, total_steps, base_radius, radial_growth, base_height, meso_gain, micro_gain, seed=None))]
     pub fn generate_plan_batch_ex(
-        _py: Python<'_>,
-        _n: usize,
-        _total_steps: usize,
-        _base_radius: f64,
-        _radial_growth: f64,
-        _base_height: f64,
-        _meso_gain: f64,
-        _micro_gain: f64,
-        _seed: Option<u64>,
+        py: Python<'_>,
+        n: usize,
+        total_steps: usize,
+        base_radius: f64,
+        radial_growth: f64,
+        base_height: f64,
+        meso_gain: f64,
+        micro_gain: f64,
+        seed: Option<u64>,
     ) -> PyResult<Vec<PyObject>> {
-        Err(pyo3::exceptions::PyNotImplementedError::new_err(
-            "wire generate_plan_batch_ex() to your existing generate_plan()",
-        ))
+        fn call_generate_plan(
+            _py: Python<'_>,
+            _total_steps: usize,
+            _base_radius: f64,
+            _radial_growth: f64,
+            _base_height: f64,
+            _meso_gain: f64,
+            _micro_gain: f64,
+            _seed: Option<u64>,
+        ) -> PyResult<PyObject> {
+            Err(pyo3::exceptions::PyNotImplementedError::new_err(
+                "wire generate_plan_batch_ex() to your existing generate_plan()",
+            ))
+        }
+
+        let base_seed = seed.unwrap_or_else(|| GLOBAL_SEED.load(Ordering::SeqCst));
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let s = base_seed.wrapping_add(i as u64);
+            let plan_obj = call_generate_plan(
+                py, total_steps, base_radius, radial_growth, base_height, meso_gain, micro_gain, Some(s)
+            )?;
+            out.push(plan_obj);
+        }
+        Ok(out)
     }
 
     pub fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
@@ -111,10 +140,11 @@ mod extras {
 }
 
 // =======================
-// st-frac の実APIを公開
+// st-frac の実API
 // =======================
 mod frac_bindings {
     use super::*;
+    use pyo3::wrap_pyfunction; // ← ここでも import
     use st_frac::{Pad, gl_coeffs_adaptive as gl_coeffs_adaptive_rs, fracdiff_gl_1d as fracdiff_gl_1d_rs};
 
     #[pyfunction]
@@ -159,15 +189,19 @@ mod frac_bindings {
 fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     // 1) トップレベル（そのまま import できる）
     extras::register(py, m)?;
+    tensor::register(py, m)?;
+    compat::register(py, m)?;
+    pure::register(py, m)?;
+    planner::register(py, m)?;
 
-    // 2) サブモジュール（nn/frac/...）
-    //    PyO3 0.22 以降は new_bound / Bound<PyModule> を使う
-    let nn = PyModule::new_bound(py, "nn")?;
-    nn.add("__doc__", "SpiralTorch neural network primitives")?;
-    m.add_submodule(&nn)?;
+    // 2) サブモジュール（空でも import 可）
+    nn::register(py, m)?;
+    rl::register(py, m)?;
+    rec::register(py, m)?;
+    telemetry::register(py, m)?;
 
     let frac = PyModule::new_bound(py, "frac")?;
-    frac_bindings::register(py, &frac)?; // ← ここで実APIを公開
+    frac_bindings::register(py, &frac)?; // 実APIを公開
     m.add_submodule(&frac)?;
 
     let dataset = PyModule::new_bound(py, "dataset")?;
@@ -178,24 +212,16 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     linalg.add("__doc__", "Linear algebra utilities")?;
     m.add_submodule(&linalg)?;
 
-    let rl = PyModule::new_bound(py, "rl")?;
-    rl.add("__doc__", "Reinforcement learning components")?;
-    m.add_submodule(&rl)?;
-
-    let rec = PyModule::new_bound(py, "rec")?;
-    rec.add("__doc__", "Reconstruction / signal processing")?;
-    m.add_submodule(&rec)?;
-
-    let telemetry = PyModule::new_bound(py, "telemetry")?;
-    telemetry.add("__doc__", "Telemetry / dashboards / metrics")?;
-    m.add_submodule(&telemetry)?;
-
     let ecosystem = PyModule::new_bound(py, "ecosystem")?;
     ecosystem.add("__doc__", "Integrations & ecosystem glue")?;
     m.add_submodule(&ecosystem)?;
 
-    // 3) __all__（見栄え）
+    // 3) __all__
     m.add("__all__", vec![
+        "Tensor","from_dlpack","to_dlpack",
+        "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
+        "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
+        "RankPlan","plan","plan_topk","describe_device","hip_probe",
         "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",

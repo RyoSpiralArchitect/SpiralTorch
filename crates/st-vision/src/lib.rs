@@ -60,10 +60,16 @@
 //! while respecting Z-space curvature, resonance energy and the live telemetry
 //! streamed through [`AtlasFrame`] snapshots.
 
+use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+pub mod models;
+pub mod xai;
+
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::cmp::min;
 use std::f32::consts::PI;
 use std::sync::Arc;
+
+pub mod models;
 
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
@@ -71,6 +77,10 @@ use st_nn::layers::spiral_rnn::SpiralRnn;
 use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
+pub mod transforms;
+pub mod datasets;
+pub mod nerf;
+pub mod transforms;
 const RESONANCE_FEATURES_PER_SLICE: usize = 10;
 
 /// Volumetric container that holds planar tensors along the Z axis.
@@ -1453,6 +1463,708 @@ fn normalise_direction(direction: [f32; 3]) -> [f32; 3] {
             direction[2] / norm,
         ]
     }
+
+    /// Computes a spectral energy response for each depth slice using the provided window.
+    pub fn spectral_response(&self, window: &SpectralWindow) -> Vec<f32> {
+        let slice_len = self.height.saturating_mul(self.width);
+        if slice_len == 0 || self.depth == 0 {
+            return Vec::new();
+        }
+        let mut response = Vec::with_capacity(self.depth);
+        let window_weights = window.weights(self.depth);
+        for (z, coeff) in window_weights.iter().enumerate() {
+            let start = z * slice_len;
+            let end = start + slice_len;
+            let slice = &self.voxels[start..end];
+            let energy = if slice_len > 0 {
+                slice.iter().map(|v| v.abs()).sum::<f32>() / slice_len as f32
+            } else {
+                0.0
+            };
+            response.push(energy * coeff);
+        }
+        response
+    }
+
+    /// Performs an exponential moving average with another volume in-place.
+    pub fn accumulate(&mut self, next: &ZSpaceVolume, alpha: f32) -> PureResult<()> {
+        if self.depth != next.depth || self.height != next.height || self.width != next.width {
+            return Err(TensorError::ShapeMismatch {
+                left: (self.depth, self.height * self.width),
+                right: (next.depth, next.height * next.width),
+            });
+        }
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(TensorError::InvalidValue {
+                label: "temporal_alpha",
+            });
+        }
+        let retain = 1.0 - alpha;
+        for (current, incoming) in self.voxels.iter_mut().zip(next.voxels.iter()) {
+            *current = (*current * retain) + (incoming * alpha);
+        }
+        Ok(())
+    }
+
+    /// Returns a blended copy that incorporates the next volume using EMA weighting.
+    pub fn accumulated(&self, next: &ZSpaceVolume, alpha: f32) -> PureResult<Self> {
+        let mut blended = Self {
+            depth: self.depth,
+            height: self.height,
+            width: self.width,
+            voxels: self.voxels.clone(),
+        };
+        blended.accumulate(next, alpha)?;
+        Ok(blended)
+    }
+
+    /// Blends an ordered sequence of volumes according to the provided weights.
+    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_sequence_blend"));
+        }
+        if sequence.len() != weights.len() {
+            return Err(TensorError::InvalidDimensions {
+                rows: sequence.len(),
+                cols: weights.len(),
+            });
+        }
+        let first = &sequence[0];
+        let slice_len = first.height * first.width;
+        let volume_len = first.depth * slice_len;
+        if volume_len == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: first.depth,
+                cols: slice_len,
+            });
+        }
+        let mut normalised = Vec::from(weights);
+        ZSpaceVolume::normalise_weights(&mut normalised);
+        let mut voxels = vec![0.0f32; volume_len];
+        for (volume, weight) in sequence.iter().zip(normalised.iter()) {
+            if volume.depth != first.depth
+                || volume.height != first.height
+                || volume.width != first.width
+            {
+                return Err(TensorError::ShapeMismatch {
+                    left: (volume.depth, volume.height * volume.width),
+                    right: (first.depth, first.height * first.width),
+                });
+            }
+            for (dst, src) in voxels.iter_mut().zip(volume.voxels.iter()) {
+                *dst += *weight * *src;
+            }
+        }
+        Ok(Self {
+            depth: first.depth,
+            height: first.height,
+            width: first.width,
+            voxels,
+        })
+    }
+}
+
+/// Spectral window functions used to modulate depth resonance weights.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpectralWindow {
+    kind: SpectralWindowKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SpectralWindowKind {
+    Rectangular,
+    Hann,
+    Hamming,
+    Blackman,
+    Gaussian { sigma: f32 },
+}
+
+impl SpectralWindow {
+    /// Creates a rectangular window (no modulation).
+    pub fn rectangular() -> Self {
+        Self {
+            kind: SpectralWindowKind::Rectangular,
+        }
+    }
+
+    /// Creates a Hann window.
+    pub fn hann() -> Self {
+        Self {
+            kind: SpectralWindowKind::Hann,
+        }
+    }
+
+    /// Creates a Hamming window.
+    pub fn hamming() -> Self {
+        Self {
+            kind: SpectralWindowKind::Hamming,
+        }
+    }
+
+    /// Creates a Blackman window.
+    pub fn blackman() -> Self {
+        Self {
+            kind: SpectralWindowKind::Blackman,
+        }
+    }
+
+    /// Creates a Gaussian window with the provided sigma parameter.
+    pub fn gaussian(sigma: f32) -> Self {
+        let sigma = if sigma.is_finite() && sigma > 1e-3 {
+            sigma
+        } else {
+            0.4
+        };
+        Self {
+            kind: SpectralWindowKind::Gaussian { sigma },
+        }
+    }
+
+    /// Generates normalised weights for the configured window.
+    pub fn weights(&self, depth: usize) -> Vec<f32> {
+        if depth == 0 {
+            return Vec::new();
+        }
+        if depth == 1 {
+            return vec![1.0];
+        }
+        let mut weights = Vec::with_capacity(depth);
+        let n_minus_1 = (depth - 1) as f32;
+        match self.kind {
+            SpectralWindowKind::Rectangular => {
+                weights.resize(depth, 1.0);
+            }
+            SpectralWindowKind::Hann => {
+                for n in 0..depth {
+                    let coeff = 0.5 * (1.0 - (2.0 * PI * n as f32 / n_minus_1).cos());
+                    weights.push(coeff.max(0.0));
+                }
+            }
+            SpectralWindowKind::Hamming => {
+                for n in 0..depth {
+                    let coeff = 0.54 - 0.46 * (2.0 * PI * n as f32 / n_minus_1).cos();
+                    weights.push(coeff.max(0.0));
+                }
+            }
+            SpectralWindowKind::Blackman => {
+                for n in 0..depth {
+                    let ratio = 2.0 * PI * n as f32 / n_minus_1;
+                    let coeff = 0.42 - 0.5 * ratio.cos() + 0.08 * (2.0 * ratio).cos();
+                    weights.push(coeff.max(0.0));
+                }
+            }
+            SpectralWindowKind::Gaussian { sigma } => {
+                let centre = n_minus_1 / 2.0;
+                let denom = 2.0 * sigma.powi(2) * (centre + 1.0).powi(2);
+                for n in 0..depth {
+                    let delta = n as f32 - centre;
+                    let coeff = (-delta.powi(2) / denom.max(1e-6)).exp();
+                    weights.push(coeff.max(0.0));
+                }
+            }
+        }
+        ZSpaceVolume::normalise_weights(&mut weights);
+        weights
+    }
+}
+
+/// Maintains a temporal exponential moving average of depth attention weights.
+#[derive(Clone, Debug)]
+pub struct TemporalResonanceBuffer {
+    decay: f32,
+    history: Option<Vec<f32>>,
+    frames: usize,
+}
+
+impl TemporalResonanceBuffer {
+    /// Creates a new temporal buffer using the provided decay coefficient.
+    pub fn new(decay: f32) -> Self {
+        let decay = if decay.is_finite() {
+            decay.clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+        Self {
+            decay,
+            history: None,
+            frames: 0,
+        }
+    }
+
+    /// Returns the exponential decay factor applied to new weights.
+    pub fn decay(&self) -> f32 {
+        self.decay
+    }
+
+    /// Returns how many frames have been fused into the buffer.
+    pub fn frames_accumulated(&self) -> usize {
+        self.frames
+    }
+
+    /// Returns the current temporal history if it exists.
+    pub fn history(&self) -> Option<&[f32]> {
+        self.history.as_deref()
+    }
+
+    /// Clears the stored history and resets the buffer.
+    pub fn clear(&mut self) {
+        self.history = None;
+        self.frames = 0;
+    }
+
+    /// Applies the temporal smoothing to a new set of weights and returns the fused profile.
+    pub fn apply(&mut self, weights: &[f32]) -> PureResult<Vec<f32>> {
+        if let Some(value) = weights.iter().find(|value| !value.is_finite()) {
+            return Err(TensorError::NonFiniteValue {
+                label: "temporal_resonance_weight",
+                value: *value,
+            });
+        }
+        if weights.is_empty() {
+            self.clear();
+            return Ok(Vec::new());
+        }
+        match self.history {
+            Some(ref mut history) if history.len() == weights.len() => {
+                let alpha = self.decay;
+                let retain = 1.0 - alpha;
+                for (stored, &incoming) in history.iter_mut().zip(weights.iter()) {
+                    *stored = (*stored * retain) + (incoming * alpha);
+                }
+                ZSpaceVolume::normalise_weights(history);
+                self.frames = self.frames.saturating_add(1);
+                Ok(history.clone())
+            }
+            _ => {
+                let mut history = weights.to_vec();
+                ZSpaceVolume::normalise_weights(&mut history);
+                self.history = Some(history.clone());
+                self.frames = 1;
+                Ok(history)
+            }
+        }
+    }
+}
+
+/// Synthesises differential resonances using a [`SpiralRnn`] conditioned on Z-space telemetry.
+#[derive(Debug)]
+pub struct ResonanceGenerator {
+    rnn: SpiralRnn,
+    features_per_slice: usize,
+    steps: usize,
+    hidden_dim: usize,
+}
+
+impl ResonanceGenerator {
+    /// Creates a generator that uses the default feature set per slice.
+    pub fn new(name: impl Into<String>, hidden_dim: usize, steps: usize) -> PureResult<Self> {
+        Self::with_features(name, RESONANCE_FEATURES_PER_SLICE, hidden_dim, steps)
+    }
+
+    /// Creates a generator with an explicit feature dimensionality per slice.
+    pub fn with_features(
+        name: impl Into<String>,
+        features_per_slice: usize,
+        hidden_dim: usize,
+        steps: usize,
+    ) -> PureResult<Self> {
+        if features_per_slice == 0 || hidden_dim == 0 || steps == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: features_per_slice.max(1),
+                cols: hidden_dim.max(1),
+            });
+        }
+        let rnn = SpiralRnn::new(name, features_per_slice, hidden_dim, steps)?;
+        Ok(Self {
+            rnn,
+            features_per_slice,
+            steps,
+            hidden_dim,
+        })
+    }
+
+    /// Number of conditioning features encoded for each Z slice.
+    pub fn features_per_slice(&self) -> usize {
+        self.features_per_slice
+    }
+
+    /// Number of temporal steps expected by the underlying [`SpiralRnn`].
+    pub fn steps(&self) -> usize {
+        self.steps
+    }
+
+    /// Hidden dimensionality of the [`SpiralRnn`].
+    pub fn hidden_dim(&self) -> usize {
+        self.hidden_dim
+    }
+
+    /// Immutable access to the internal [`SpiralRnn`].
+    pub fn rnn(&self) -> &SpiralRnn {
+        &self.rnn
+    }
+
+    /// Mutable access to the internal [`SpiralRnn`] for fine-tuning.
+    pub fn rnn_mut(&mut self) -> &mut SpiralRnn {
+        &mut self.rnn
+    }
+
+    /// Generates a [`DifferentialResonance`] conditioned on the provided telemetry.
+    pub fn generate(
+        &mut self,
+        volume: &ZSpaceVolume,
+        projector: &VisionProjector,
+        chrono: Option<&ChronoSummary>,
+        atlas: Option<&AtlasFrame>,
+        previous: Option<&DifferentialResonance>,
+    ) -> PureResult<DifferentialResonance> {
+        if volume.depth() > self.steps {
+            return Err(TensorError::InvalidDimensions {
+                rows: volume.depth(),
+                cols: self.steps,
+            });
+        }
+        let profile = volume.slice_profile()?;
+        let encoded = self.encode(volume, projector, chrono, atlas, previous, &profile)?;
+        let latent = self.rnn.forward(&encoded)?;
+        self.decode(
+            volume, projector, chrono, atlas, previous, &profile, &latent,
+        )
+    }
+
+    fn encode(
+        &self,
+        volume: &ZSpaceVolume,
+        projector: &VisionProjector,
+        chrono: Option<&ChronoSummary>,
+        atlas: Option<&AtlasFrame>,
+        previous: Option<&DifferentialResonance>,
+        profile: &ZSliceProfile,
+    ) -> PureResult<Tensor> {
+        let depth = profile.depth();
+        let mut buffer = vec![0.0f32; self.steps * self.features_per_slice];
+        let atlas_signal = atlas
+            .and_then(|frame| frame.z_signal)
+            .unwrap_or_else(|| projector.focus());
+        let atlas_pressure = atlas
+            .and_then(|frame| frame.suggested_pressure)
+            .unwrap_or_else(|| projector.spread());
+        let atlas_total = atlas
+            .and_then(|frame| frame.collapse_total)
+            .unwrap_or_else(|| projector.energy_bias());
+        let chrono_mean = chrono
+            .map(|summary| summary.mean_energy)
+            .unwrap_or(atlas_total);
+        let chrono_std = chrono.map(|summary| summary.energy_std).unwrap_or(0.0);
+        let global_energy = volume.total_energy();
+        let aspect = if volume.width() > 0 {
+            volume.height() as f32 / volume.width() as f32
+        } else {
+            1.0
+        };
+        let prev_energy = previous.map(|res| res.infinity_energy.data().to_vec());
+        let prev_objective = previous.map(|res| res.recursive_objective.data().to_vec());
+        for idx in 0..depth {
+            let offset = idx * self.features_per_slice;
+            if self.features_per_slice > 0 {
+                buffer[offset] = profile.mean(idx);
+            }
+            if self.features_per_slice > 1 {
+                buffer[offset + 1] = profile.std(idx);
+            }
+            if self.features_per_slice > 2 {
+                buffer[offset + 2] = profile.energy(idx);
+            }
+            if self.features_per_slice > 3 {
+                buffer[offset + 3] = projector.focus();
+            }
+            if self.features_per_slice > 4 {
+                buffer[offset + 4] = projector.spread();
+            }
+            if self.features_per_slice > 5 {
+                buffer[offset + 5] = projector.energy_bias();
+            }
+            if self.features_per_slice > 6 {
+                buffer[offset + 6] = atlas_signal;
+            }
+            if self.features_per_slice > 7 {
+                buffer[offset + 7] = atlas_pressure;
+            }
+            if self.features_per_slice > 8 {
+                buffer[offset + 8] = prev_energy
+                    .as_ref()
+                    .map(|values| values[idx % values.len()])
+                    .unwrap_or(chrono_mean);
+            }
+            if self.features_per_slice > 9 {
+                buffer[offset + 9] = prev_objective
+                    .as_ref()
+                    .map(|values| values[idx % values.len()])
+                    .unwrap_or(chrono_std);
+            }
+            if self.features_per_slice > 10 {
+                buffer[offset + 10] = global_energy;
+            }
+            if self.features_per_slice > 11 {
+                buffer[offset + 11] = aspect;
+            }
+        }
+        Tensor::from_vec(1, buffer.len(), buffer)
+    }
+
+    fn decode(
+        &self,
+        volume: &ZSpaceVolume,
+        projector: &VisionProjector,
+        chrono: Option<&ChronoSummary>,
+        atlas: Option<&AtlasFrame>,
+        previous: Option<&DifferentialResonance>,
+        profile: &ZSliceProfile,
+        latent: &Tensor,
+    ) -> PureResult<DifferentialResonance> {
+        let depth = volume.depth();
+        let hidden = latent.data();
+        if hidden.is_empty() {
+            return Err(TensorError::EmptyInput("spiral_resonance_latent"));
+        }
+        let chrono_drift = chrono.map(|summary| summary.mean_drift).unwrap_or(0.0);
+        let chrono_energy_std = chrono.map(|summary| summary.energy_std).unwrap_or(0.0);
+        let chrono_drift_std = chrono.map(|summary| summary.drift_std).unwrap_or(0.0);
+        let atlas_feedback = atlas
+            .and_then(|frame| frame.collapse_total)
+            .unwrap_or_else(|| projector.energy_bias());
+        let prev_energy = previous.map(|res| res.infinity_energy.data().to_vec());
+        let prev_objective = previous.map(|res| res.recursive_objective.data().to_vec());
+        let prev_homotopy = previous.map(|res| res.homotopy_flow.data().to_vec());
+        let prev_projection = previous.map(|res| res.infinity_projection.data().to_vec());
+
+        let mut energies = Vec::with_capacity(depth);
+        let mut objectives = Vec::with_capacity(depth);
+        let mut homotopies = Vec::with_capacity(depth);
+        let mut projections = Vec::with_capacity(depth);
+        let mut functors = Vec::with_capacity(depth);
+
+        for idx in 0..depth {
+            let base = hidden[idx % hidden.len()];
+            let mean = profile.mean(idx);
+            let std = profile.std(idx);
+            let slice_energy = profile.energy(idx);
+            let prev_e = prev_energy
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(slice_energy);
+            let prev_o = prev_objective
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(mean);
+            let prev_h = prev_homotopy
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(0.0);
+            let prev_p = prev_projection
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(slice_energy.tanh());
+
+            let intensity = mean.abs() + std + slice_energy;
+            let energy_value = (base + intensity + prev_e + atlas_feedback).abs() + 1e-3;
+            energies.push(energy_value);
+
+            let objective_value = (base + prev_o + projector.energy_bias() + chrono_drift).tanh();
+            objectives.push(objective_value);
+
+            let homotopy_value = (base + prev_h + projector.focus() - 0.5).tanh();
+            homotopies.push(homotopy_value);
+
+            let projection_value = (base + prev_p + slice_energy - chrono_energy_std).tanh();
+            projections.push(projection_value);
+
+            let functor_value =
+                objective_value * 0.5 + slice_energy * 0.1 + chrono_drift_std * 0.05;
+            functors.push(functor_value);
+        }
+
+        let homotopy_tensor = Tensor::from_vec(1, depth, homotopies)?;
+        let functor_tensor = Tensor::from_vec(1, depth, functors)?;
+        let objective_tensor = Tensor::from_vec(1, depth, objectives)?;
+        let projection_tensor = Tensor::from_vec(1, depth, projections)?;
+        let energy_tensor = Tensor::from_vec(1, depth, energies)?;
+
+        Ok(DifferentialResonance {
+            homotopy_flow: homotopy_tensor,
+            functor_linearisation: functor_tensor,
+            recursive_objective: objective_tensor,
+            infinity_projection: projection_tensor,
+            infinity_energy: energy_tensor,
+        })
+    }
+}
+
+/// Metadata describing a registered camera/view that contributes to a Z-space volume.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewDescriptor {
+    id: Arc<str>,
+    origin: [f32; 3],
+    forward: [f32; 3],
+    baseline_weight: f32,
+}
+
+impl ViewDescriptor {
+    /// Creates a new view descriptor with the provided identifier, origin, and forward vector.
+    pub fn new(id: impl Into<String>, origin: [f32; 3], forward: [f32; 3]) -> Self {
+        let id: Arc<str> = Arc::from(id.into());
+        let mut descriptor = Self {
+            id,
+            origin,
+            forward: normalise_direction(forward),
+            baseline_weight: 1.0,
+        };
+        if !descriptor.forward.iter().any(|value| value.abs() > 0.0) {
+            descriptor.forward = [0.0, 0.0, 1.0];
+        }
+        descriptor
+    }
+
+    /// Sets a baseline importance weight for the view during fusion.
+    pub fn with_baseline_weight(mut self, weight: f32) -> Self {
+        self.baseline_weight = weight.max(0.0);
+        self
+    }
+
+    /// Returns the identifier of the view.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns the origin of the camera in world coordinates.
+    pub fn origin(&self) -> [f32; 3] {
+        self.origin
+    }
+
+    /// Updates the origin of the camera in world coordinates.
+    pub fn set_origin(&mut self, origin: [f32; 3]) {
+        self.origin = origin;
+    }
+
+    /// Returns the forward direction of the camera.
+    pub fn forward(&self) -> [f32; 3] {
+        self.forward
+    }
+
+    /// Updates the forward direction (normalised) of the camera.
+    pub fn set_forward(&mut self, forward: [f32; 3]) {
+        self.forward = normalise_direction(forward);
+    }
+
+    /// Returns the baseline fusion weight associated with this view.
+    pub fn baseline_weight(&self) -> f32 {
+        self.baseline_weight.max(0.0)
+    }
+
+    fn alignment(&self, focus: [f32; 3]) -> f32 {
+        let focus = normalise_direction(focus);
+        let dot =
+            self.forward[0] * focus[0] + self.forward[1] * focus[1] + self.forward[2] * focus[2];
+        dot.max(0.0)
+    }
+}
+
+/// Helper that fuses multi-view registrations into Z-space attention profiles.
+#[derive(Clone, Debug)]
+pub struct MultiViewFusion {
+    views: Vec<ViewDescriptor>,
+    focus_direction: [f32; 3],
+    alignment_gamma: f32,
+}
+
+impl MultiViewFusion {
+    /// Builds a new fusion helper from the provided view descriptors.
+    pub fn new(views: Vec<ViewDescriptor>) -> PureResult<Self> {
+        if views.is_empty() {
+            return Err(TensorError::EmptyInput("multi_view_fusion"));
+        }
+        Ok(Self {
+            views,
+            focus_direction: [0.0, 0.0, 1.0],
+            alignment_gamma: 1.0,
+        })
+    }
+
+    /// Returns the registered views.
+    pub fn views(&self) -> &[ViewDescriptor] {
+        &self.views
+    }
+
+    /// Returns the number of registered views.
+    pub fn view_count(&self) -> usize {
+        self.views.len()
+    }
+
+    /// Updates the focus direction used when modulating view weights.
+    pub fn with_focus_direction(mut self, focus_direction: [f32; 3]) -> Self {
+        self.focus_direction = normalise_direction(focus_direction);
+        self
+    }
+
+    /// Updates the alignment gamma used to sharpen or soften orientation bias.
+    pub fn with_alignment_gamma(mut self, gamma: f32) -> Self {
+        self.alignment_gamma = if gamma.is_finite() {
+            gamma.clamp(0.25, 8.0)
+        } else {
+            1.0
+        };
+        self
+    }
+
+    /// Returns the current focus direction.
+    pub fn focus_direction(&self) -> [f32; 3] {
+        self.focus_direction
+    }
+
+    /// Returns the alignment gamma used for orientation bias.
+    pub fn alignment_gamma(&self) -> f32 {
+        self.alignment_gamma
+    }
+
+    /// Returns the current normalised bias profile applied during fusion.
+    pub fn view_bias_profile(&self) -> Vec<f32> {
+        self.normalised_biases()
+    }
+
+    fn raw_biases(&self) -> Vec<f32> {
+        let focus = self.focus_direction;
+        let gamma = self.alignment_gamma.max(1e-3);
+        self.views
+            .iter()
+            .map(|view| {
+                let alignment = view.alignment(focus).max(1e-3).powf(gamma);
+                alignment * view.baseline_weight().max(1e-3)
+            })
+            .collect()
+    }
+
+    fn normalised_biases(&self) -> Vec<f32> {
+        let mut biases = self.raw_biases();
+        if biases.is_empty() {
+            return biases;
+        }
+        ZSpaceVolume::normalise_weights(&mut biases);
+        biases
+    }
+}
+
+fn normalise_direction(direction: [f32; 3]) -> [f32; 3] {
+    let norm =
+        (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
+            .sqrt();
+    if norm <= 1e-6 || !norm.is_finite() {
+        [0.0, 0.0, 1.0]
+    } else {
+        [
+            direction[0] / norm,
+            direction[1] / norm,
+            direction[2] / norm,
+        ]
+    }
 }
 
 /// Adaptive projector that fuses resonance telemetry with chrono summaries.
@@ -1462,6 +2174,8 @@ pub struct VisionProjector {
     spread: f32,
     energy_bias: f32,
     window: SpectralWindow,
+    temporal_focus: f32,
+    temporal_decay: f32,
 }
 
 impl VisionProjector {
@@ -1483,6 +2197,8 @@ impl VisionProjector {
             spread,
             energy_bias,
             window: SpectralWindow::hann(),
+            temporal_focus: 0.5,
+            temporal_decay: 0.5,
         }
     }
 
@@ -1501,7 +2217,13 @@ impl VisionProjector {
             spread /= 1.0 + summary.mean_abs_drift.abs();
         }
         let energy_bias = summary.mean_decay;
-        Self::new(focus, spread, energy_bias)
+        let mut projector = Self::new(focus, spread, energy_bias);
+        if summary.mean_abs_drift.is_finite() {
+            projector.temporal_decay =
+                (1.0 / (1.0 + summary.mean_abs_drift.abs())).clamp(0.05, 1.0);
+        }
+        projector.temporal_focus = 1.0;
+        projector
     }
 
     /// Updates the projector using live atlas telemetry.
@@ -1520,6 +2242,24 @@ impl VisionProjector {
         if let Some(total) = frame.collapse_total {
             if total.is_finite() {
                 self.energy_bias = total.tanh();
+            }
+        }
+        for metric in &frame.metrics {
+            match metric.name.as_str() {
+                "temporal_focus" | "z_temporal_focus" => {
+                    self.temporal_focus = metric.value.clamp(0.0, 1.0);
+                }
+                "temporal_decay" | "z_temporal_decay" => {
+                    if metric.value.is_finite() {
+                        self.temporal_decay = metric.value.abs().clamp(0.05, 1.0);
+                    }
+                }
+                _ => {}
+            }
+            if let Some(district) = metric.district() {
+                if district.eq_ignore_ascii_case("temporal") && metric.value.is_finite() {
+                    self.temporal_decay = metric.value.abs().clamp(0.05, 1.0);
+                }
             }
         }
     }
@@ -1573,6 +2313,64 @@ impl VisionProjector {
         }
         ZSpaceVolume::normalise_weights(&mut weights);
         Ok(weights)
+    }
+
+    fn compute_temporal_weights(&self, frames: usize) -> Vec<f32> {
+        if frames == 0 {
+            return Vec::new();
+        }
+        if frames == 1 {
+            return vec![1.0];
+        }
+        let focus = self.temporal_focus.clamp(0.0, 1.0);
+        let decay = self.temporal_decay.max(1e-3);
+        let denom = (frames - 1) as f32;
+        let mut weights = Vec::with_capacity(frames);
+        for idx in 0..frames {
+            let position = if denom > 0.0 { idx as f32 / denom } else { 0.0 };
+            let delta = position - focus;
+            let gaussian = (-0.5 * (delta / decay).powi(2)).exp();
+            weights.push(gaussian.max(1e-6));
+        }
+        let mut total = 0.0f32;
+        for weight in &weights {
+            total += *weight;
+        }
+        if total <= f32::EPSILON || !total.is_finite() {
+            let uniform = 1.0 / frames as f32;
+            weights.iter_mut().for_each(|w| *w = uniform);
+        } else {
+            weights.iter_mut().for_each(|w| *w /= total);
+        }
+        weights
+    }
+
+    /// Returns the temporal weights applied when fusing a sequence of frames.
+    pub fn temporal_weights(&self, frames: usize) -> Vec<f32> {
+        self.compute_temporal_weights(frames)
+    }
+
+    fn streaming_alpha(&self) -> f32 {
+        (1.0 - self.temporal_decay.clamp(0.0, 0.99)).clamp(0.05, 0.95)
+    }
+
+    /// Applies the projector's streaming temporal preference as an EMA update.
+    pub fn accumulate_temporal(
+        &self,
+        state: &mut ZSpaceVolume,
+        next: &ZSpaceVolume,
+    ) -> PureResult<()> {
+        let alpha = self.streaming_alpha();
+        state.accumulate(next, alpha)
+    }
+
+    /// Fuses a temporal sequence of volumes into a single blended volume.
+    pub fn fuse_sequence(&self, sequence: &[ZSpaceVolume]) -> PureResult<ZSpaceVolume> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        let weights = self.compute_temporal_weights(sequence.len());
+        ZSpaceVolume::blend_sequence(sequence, &weights)
     }
 
     /// Produces the final depth weights as a tensor.
@@ -2353,6 +3151,7 @@ pub enum TransformOperation {
     Resize(Resize),
     CenterCrop(CenterCrop),
     RandomHorizontalFlip(RandomHorizontalFlip),
+    ColorJitter(ColorJitter),
 }
 
 impl TransformOperation {
@@ -2362,6 +3161,7 @@ impl TransformOperation {
             TransformOperation::Resize(_) => "Resize",
             TransformOperation::CenterCrop(_) => "CenterCrop",
             TransformOperation::RandomHorizontalFlip(_) => "RandomHorizontalFlip",
+            TransformOperation::ColorJitter(_) => "ColorJitter",
         }
     }
 
@@ -2371,6 +3171,7 @@ impl TransformOperation {
             TransformOperation::Resize(op) => op.apply(image),
             TransformOperation::CenterCrop(op) => op.apply(image),
             TransformOperation::RandomHorizontalFlip(op) => op.apply(image, rng),
+            TransformOperation::ColorJitter(op) => op.apply(image, rng),
         }
     }
 }
@@ -2594,6 +3395,164 @@ impl RandomHorizontalFlip {
                     let left = c * stride_c + y * width + x;
                     let right = c * stride_c + y * width + (width - 1 - x);
                     data.swap(left, right);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ColorJitterOp {
+    Brightness(f32),
+    Contrast(f32),
+    Saturation(f32),
+    Hue(f32),
+}
+
+/// Applies brightness/contrast/saturation/hue perturbations.
+#[derive(Clone, Debug)]
+pub struct ColorJitter {
+    brightness: f32,
+    contrast: f32,
+    saturation: f32,
+    hue: f32,
+}
+
+impl ColorJitter {
+    pub fn new(brightness: f32, contrast: f32, saturation: f32, hue: f32) -> PureResult<Self> {
+        if brightness < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "color_jitter_brightness",
+            });
+        }
+        if contrast < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "color_jitter_contrast",
+            });
+        }
+        if saturation < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "color_jitter_saturation",
+            });
+        }
+        if !(0.0..=0.5).contains(&hue) {
+            return Err(TensorError::InvalidValue {
+                label: "color_jitter_hue",
+            });
+        }
+        Ok(Self {
+            brightness,
+            contrast,
+            saturation,
+            hue,
+        })
+    }
+
+    fn apply_brightness(data: &mut [f32], factor: f32) {
+        for value in data.iter_mut() {
+            *value *= factor;
+        }
+    }
+
+    fn apply_contrast(data: &mut [f32], channels: usize, pixels: usize, factor: f32) {
+        if factor == 1.0 {
+            return;
+        }
+        for c in 0..channels {
+            let range = c * pixels..(c + 1) * pixels;
+            let slice = &mut data[range];
+            let mean = slice.iter().copied().sum::<f32>() / pixels as f32;
+            for value in slice.iter_mut() {
+                *value = (*value - mean) * factor + mean;
+            }
+        }
+    }
+
+    fn apply_saturation(data: &mut [f32], pixels: usize, factor: f32) {
+        if factor == 1.0 {
+            return;
+        }
+        let r_offset = 0;
+        let g_offset = pixels;
+        let b_offset = 2 * pixels;
+        for idx in 0..pixels {
+            let r = data[r_offset + idx];
+            let g = data[g_offset + idx];
+            let b = data[b_offset + idx];
+            let gray = 0.298_995_97 * r + 0.587_096 * g + 0.113_907_03 * b;
+            data[r_offset + idx] = (r - gray) * factor + gray;
+            data[g_offset + idx] = (g - gray) * factor + gray;
+            data[b_offset + idx] = (b - gray) * factor + gray;
+        }
+    }
+
+    fn apply_hue(data: &mut [f32], pixels: usize, radians: f32) {
+        if radians == 0.0 {
+            return;
+        }
+        let cos_h = radians.cos();
+        let sin_h = radians.sin();
+        let r_offset = 0;
+        let g_offset = pixels;
+        let b_offset = 2 * pixels;
+        for idx in 0..pixels {
+            let r = data[r_offset + idx];
+            let g = data[g_offset + idx];
+            let b = data[b_offset + idx];
+            let y = 0.299 * r + 0.587 * g + 0.114 * b;
+            let u = -0.147_13 * r - 0.288_86 * g + 0.436 * b;
+            let v = 0.615 * r - 0.514_99 * g - 0.100_01 * b;
+            let u_prime = u * cos_h - v * sin_h;
+            let v_prime = u * sin_h + v * cos_h;
+            data[r_offset + idx] = y + 1.13983 * v_prime;
+            data[g_offset + idx] = y - 0.39465 * u_prime - 0.58060 * v_prime;
+            data[b_offset + idx] = y + 2.03211 * u_prime;
+        }
+    }
+
+    pub fn apply(&self, image: &mut ImageTensor, rng: &mut StdRng) -> PureResult<()> {
+        let mut ops = Vec::with_capacity(4);
+        if self.brightness > 0.0 {
+            let delta = rng.gen_range(-self.brightness..=self.brightness);
+            ops.push(ColorJitterOp::Brightness(1.0 + delta));
+        }
+        if self.contrast > 0.0 {
+            let delta = rng.gen_range(-self.contrast..=self.contrast);
+            ops.push(ColorJitterOp::Contrast(1.0 + delta));
+        }
+        if self.saturation > 0.0 && image.channels() >= 3 {
+            let delta = rng.gen_range(-self.saturation..=self.saturation);
+            ops.push(ColorJitterOp::Saturation(1.0 + delta));
+        }
+        if self.hue > 0.0 && image.channels() >= 3 {
+            let delta = rng.gen_range(-self.hue..=self.hue);
+            ops.push(ColorJitterOp::Hue(delta * PI));
+        }
+
+        if ops.is_empty() {
+            return Ok(());
+        }
+
+        ops.shuffle(rng);
+        let channels = image.channels();
+        let pixels = image.height() * image.width();
+        let data = image.as_mut_slice();
+        for op in ops {
+            match op {
+                ColorJitterOp::Brightness(factor) => Self::apply_brightness(data, factor),
+                ColorJitterOp::Contrast(factor) => {
+                    Self::apply_contrast(data, channels, pixels, factor)
+                }
+                ColorJitterOp::Saturation(factor) => {
+                    if channels >= 3 {
+                        Self::apply_saturation(data, pixels, factor)
+                    }
+                }
+                ColorJitterOp::Hue(angle) => {
+                    if channels >= 3 {
+                        Self::apply_hue(data, pixels, angle)
+                    }
                 }
             }
         }
@@ -3713,5 +4672,19 @@ mod tests {
             stem.shape().1,
             (metadata.image_size.0 / 2) * (metadata.image_size.1 / 2)
         );
+    }
+
+    #[test]
+    fn color_jitter_produces_finite_values() {
+        let mut image = ImageTensor::new(3, 8, 8, vec![0.5; 3 * 8 * 8]).unwrap();
+        let jitter = ColorJitter::new(0.2, 0.2, 0.2, 0.1).unwrap();
+        let mut rng = StdRng::seed_from_u64(1234);
+        jitter.apply(&mut image, &mut rng).unwrap();
+        assert!(image.as_slice().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn color_jitter_validates_hue_bounds() {
+        assert!(ColorJitter::new(0.1, 0.2, 0.3, 0.75).is_err());
     }
 }
