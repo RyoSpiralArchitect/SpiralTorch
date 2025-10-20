@@ -69,6 +69,8 @@ use std::cmp::min;
 use std::f32::consts::PI;
 use std::sync::Arc;
 
+pub mod models;
+
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
 use st_nn::layers::spiral_rnn::SpiralRnn;
@@ -373,85 +375,47 @@ impl ZSpaceVolume {
         Ok(blended)
     }
 
-    /// Blends a sequence of volumes into a single volume using provided weights.
+    /// Blends an ordered sequence of volumes according to the provided weights.
     pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
         if sequence.is_empty() {
-            return Err(TensorError::EmptyInput("z_space_sequence"));
+            return Err(TensorError::EmptyInput("z_sequence_blend"));
         }
         if sequence.len() != weights.len() {
-            return Err(TensorError::DataLength {
-                expected: sequence.len(),
-                got: weights.len(),
+            return Err(TensorError::InvalidDimensions {
+                rows: sequence.len(),
+                cols: weights.len(),
             });
         }
-        let reference = &sequence[0];
-        let depth = reference.depth;
-        let height = reference.height;
-        let width = reference.width;
-        let voxel_count = depth
-            .checked_mul(height)
-            .and_then(|value| value.checked_mul(width))
-            .ok_or(TensorError::InvalidDimensions {
-                rows: depth,
-                cols: height.saturating_mul(width),
-            })?;
-        let mut canvas = vec![0.0f32; voxel_count];
-        for (volume, &weight) in sequence.iter().zip(weights.iter()) {
-            if volume.depth != depth || volume.height != height || volume.width != width {
-                return Err(TensorError::ShapeMismatch {
-                    left: (volume.depth, volume.height * volume.width),
-                    right: (depth, height * width),
-                });
-            }
-            if !weight.is_finite() {
-                return Err(TensorError::NonFiniteValue {
-                    label: "z_space_blend_weight",
-                    value: weight,
-                });
-            }
-            for (accum, voxel) in canvas.iter_mut().zip(volume.voxels.iter()) {
-                *accum += voxel * weight;
-            }
+        let first = &sequence[0];
+        let slice_len = first.height * first.width;
+        let volume_len = first.depth * slice_len;
+        if volume_len == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: first.depth,
+                cols: slice_len,
+            });
         }
-        Ok(Self {
-            depth,
-            height,
-            width,
-            voxels: canvas,
-        let slice_len = reference.depth * reference.height * reference.width;
-        let mut voxels = vec![0.0f32; slice_len];
-        let mut normaliser = 0.0f32;
-        for (volume, &weight) in sequence.iter().zip(weights.iter()) {
-            if volume.depth != reference.depth
-                || volume.height != reference.height
-                || volume.width != reference.width
+        let mut normalised = Vec::from(weights);
+        ZSpaceVolume::normalise_weights(&mut normalised);
+        let mut voxels = vec![0.0f32; volume_len];
+        for (volume, weight) in sequence.iter().zip(normalised.iter()) {
+            if volume.depth != first.depth
+                || volume.height != first.height
+                || volume.width != first.width
             {
                 return Err(TensorError::ShapeMismatch {
-                    left: (reference.depth, reference.height * reference.width),
-                    right: (volume.depth, volume.height * volume.width),
+                    left: (volume.depth, volume.height * volume.width),
+                    right: (first.depth, first.height * first.width),
                 });
             }
-            if !weight.is_finite() {
-                continue;
-            }
-            normaliser += weight.max(0.0);
             for (dst, src) in voxels.iter_mut().zip(volume.voxels.iter()) {
-                *dst += src * weight.max(0.0);
+                *dst += *weight * *src;
             }
-        }
-        if normaliser <= f32::EPSILON {
-            return Err(TensorError::InvalidValue {
-                label: "z_space_blend_weights",
-            });
-        }
-        let inv = 1.0 / normaliser;
-        for value in voxels.iter_mut() {
-            *value *= inv;
         }
         Ok(Self {
-            depth: reference.depth,
-            height: reference.height,
-            width: reference.width,
+            depth: first.depth,
+            height: first.height,
+            width: first.width,
             voxels,
         })
     }
@@ -1090,8 +1054,8 @@ impl VisionProjector {
             spread,
             energy_bias,
             window: SpectralWindow::hann(),
-            temporal_focus: 1.0,
-            temporal_decay: 0.35,
+            temporal_focus: 0.5,
+            temporal_decay: 0.5,
         }
     }
 

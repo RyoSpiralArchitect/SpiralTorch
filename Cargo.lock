@@ -2661,6 +2661,7 @@ dependencies = [
  "st-core",
  "st-nn",
  "st-tensor",
+ "tempfile",
 ]
 
 [[package]]
