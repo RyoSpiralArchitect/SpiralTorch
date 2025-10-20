@@ -273,6 +273,27 @@ impl core::fmt::Debug for ModuleTrainer {
 /// Function pointer used to convert band energy into Above/Here/Beneath weights.
 pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
 
+fn format_cloud_targets(targets: &[CloudConnector]) -> Vec<(String, String)> {
+    let mut azure_targets = Vec::new();
+    let mut aws_targets = Vec::new();
+    for target in targets {
+        let descriptor = target.descriptor();
+        match target.provider() {
+            "azure" => azure_targets.push(format!("{}:{descriptor}", target.service())),
+            "aws" => aws_targets.push(format!("{}:{descriptor}", target.service())),
+            _ => {}
+        }
+    }
+    let mut entries = Vec::new();
+    if !azure_targets.is_empty() {
+        entries.push(("azure_targets".to_string(), azure_targets.join(",")));
+    }
+    if !aws_targets.is_empty() {
+        entries.push(("aws_targets".to_string(), aws_targets.join(",")));
+    }
+    entries
+}
+
 #[derive(Debug, Clone)]
 struct SoftLogicFlex {
     inertia: f32,
@@ -701,27 +722,8 @@ impl ModuleTrainer {
             );
         }
 
-        if !config.cloud_targets.is_empty() {
-            let mut azure_targets = Vec::new();
-            let mut aws_targets = Vec::new();
-            for target in &config.cloud_targets {
-                let descriptor = target.descriptor();
-                match target.provider() {
-                    "azure" => {
-                        azure_targets.push(format!("{}:{descriptor}", target.service()));
-                    }
-                    "aws" => {
-                        aws_targets.push(format!("{}:{descriptor}", target.service()));
-                    }
-                    _ => {}
-                }
-            }
-            if !azure_targets.is_empty() {
-                metadata.insert("azure_targets".to_string(), azure_targets.join(","));
-            }
-            if !aws_targets.is_empty() {
-                metadata.insert("aws_targets".to_string(), aws_targets.join(","));
-            }
+        for (key, value) in format_cloud_targets(&config.cloud_targets) {
+            metadata.insert(key, value);
         }
         self.log_connector_event("configure_distribution", metadata);
         self.distribution = Some(RoundtableNode::new(config));
