@@ -1,0 +1,391 @@
+use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyList, PyModule};
+use pyo3::wrap_pyfunction;
+use pyo3::Bound;
+
+use st_backend_hip as hip_backend;
+use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+use st_core::backend::unison_heuristics::RankKind;
+use st_core::ops::rank_entry::{plan_rank, RankPlan};
+
+#[pyclass(module = "spiraltorch", name = "RankPlan")]
+pub(crate) struct PyRankPlan {
+    inner: RankPlan,
+}
+
+impl PyRankPlan {
+    fn from_plan(inner: RankPlan) -> Self {
+        Self { inner }
+    }
+
+    fn merge_kind(&self) -> &'static str {
+        match self.inner.choice.mk {
+            1 => "shared",
+            2 => "warp",
+            _ => "bitonic",
+        }
+    }
+
+    fn merge_detail_label(&self) -> &'static str {
+        match self.inner.choice.mkd {
+            1 => "heap",
+            2 => "kway",
+            3 => "bitonic",
+            4 => "warp_heap",
+            5 => "warp_bitonic",
+            _ => "auto",
+        }
+    }
+}
+
+#[pymethods]
+impl PyRankPlan {
+    #[getter]
+    fn kind(&self) -> &'static str {
+        self.inner.kind.as_str()
+    }
+
+    #[getter]
+    fn rows(&self) -> u32 {
+        self.inner.rows
+    }
+
+    #[getter]
+    fn cols(&self) -> u32 {
+        self.inner.cols
+    }
+
+    #[getter]
+    fn k(&self) -> u32 {
+        self.inner.k
+    }
+
+    #[getter]
+    fn workgroup(&self) -> u32 {
+        self.inner.choice.wg
+    }
+
+    #[getter]
+    fn lanes(&self) -> u32 {
+        self.inner.choice.kl
+    }
+
+    #[getter]
+    fn channel_stride(&self) -> u32 {
+        self.inner.choice.ch
+    }
+
+    #[getter]
+    fn merge_strategy(&self) -> &'static str {
+        self.merge_kind()
+    }
+
+    #[getter]
+    fn merge_detail(&self) -> &'static str {
+        self.merge_detail_label()
+    }
+
+    #[getter]
+    fn use_two_stage(&self) -> bool {
+        self.inner.choice.use_2ce
+    }
+
+    #[getter]
+    fn subgroup(&self) -> bool {
+        self.inner.choice.subgroup
+    }
+
+    #[getter]
+    fn tile(&self) -> u32 {
+        self.inner.choice.tile
+    }
+
+    #[getter]
+    fn compaction_tile(&self) -> u32 {
+        self.inner.choice.ctile
+    }
+
+    #[getter]
+    fn fft_tile(&self) -> u32 {
+        self.inner.choice.fft_tile
+    }
+
+    #[getter]
+    fn fft_radix(&self) -> u32 {
+        self.inner.choice.fft_radix
+    }
+
+    #[getter]
+    fn fft_segments(&self) -> u32 {
+        self.inner.choice.fft_segments
+    }
+
+    fn latency_window(&self) -> Option<(u32, u32, u32, u32, u32, u32, u32)> {
+        self.inner.choice.latency_window.map(|window| {
+            (
+                window.target,
+                window.lower,
+                window.upper,
+                window.min_lane,
+                window.max_lane,
+                window.slack,
+                window.stride,
+            )
+        })
+    }
+
+    fn to_unison_script(&self) -> String {
+        self.inner.choice.to_unison_script(self.inner.kind)
+    }
+
+    fn fft_wgsl(&self) -> String {
+        self.inner.fft_wgsl()
+    }
+
+    fn fft_spiralk_hint(&self) -> String {
+        self.inner.fft_spiralk_hint()
+    }
+}
+
+fn parse_backend(name: Option<&str>) -> PyResult<BackendKind> {
+    match name.unwrap_or("wgpu").to_ascii_lowercase().as_str() {
+        "wgpu" | "webgpu" => Ok(BackendKind::Wgpu),
+        "cuda" => Ok(BackendKind::Cuda),
+        "hip" | "rocm" => Ok(BackendKind::Hip),
+        "cpu" => Ok(BackendKind::Cpu),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "unknown backend '{other}', expected 'wgpu', 'cuda', 'hip', or 'cpu'"
+        ))),
+    }
+}
+
+fn backend_label(kind: BackendKind) -> &'static str {
+    match kind {
+        BackendKind::Wgpu => "wgpu",
+        BackendKind::Cuda => "cuda",
+        BackendKind::Hip => "hip",
+        BackendKind::Cpu => "cpu",
+    }
+}
+
+fn apply_overrides(
+    mut caps: DeviceCaps,
+    lane_width: Option<u32>,
+    subgroup: Option<bool>,
+    max_workgroup: Option<u32>,
+    shared_mem_per_workgroup: Option<u32>,
+) -> DeviceCaps {
+    if let Some(width) = lane_width {
+        caps.lane_width = width.max(1);
+    }
+    if let Some(flag) = subgroup {
+        caps.subgroup = flag;
+    }
+    if let Some(max_wg) = max_workgroup {
+        caps.max_workgroup = max_wg.max(1);
+    }
+    if let Some(shared) = shared_mem_per_workgroup {
+        if shared == 0 {
+            caps.shared_mem_per_workgroup = None;
+        } else {
+            caps.shared_mem_per_workgroup = Some(shared);
+        }
+    }
+    caps
+}
+
+fn build_caps(
+    backend: BackendKind,
+    lane_width: Option<u32>,
+    subgroup: Option<bool>,
+    max_workgroup: Option<u32>,
+    shared_mem_per_workgroup: Option<u32>,
+) -> DeviceCaps {
+    let base = match backend {
+        BackendKind::Wgpu => {
+            let lanes = lane_width.unwrap_or(32);
+            let subgroup_flag = subgroup.unwrap_or(true);
+            let max_wg = max_workgroup.unwrap_or(256);
+            DeviceCaps::wgpu(lanes, subgroup_flag, max_wg)
+        }
+        BackendKind::Cuda => DeviceCaps::cuda(
+            lane_width.unwrap_or(32),
+            max_workgroup.unwrap_or(1024),
+            shared_mem_per_workgroup.or(Some(96 * 1024)),
+        ),
+        BackendKind::Hip => DeviceCaps::hip(
+            lane_width.unwrap_or(32),
+            max_workgroup.unwrap_or(1024),
+            shared_mem_per_workgroup.or(Some(64 * 1024)),
+        ),
+        BackendKind::Cpu => DeviceCaps::cpu(),
+    };
+
+    apply_overrides(
+        base,
+        lane_width,
+        subgroup,
+        max_workgroup,
+        shared_mem_per_workgroup,
+    )
+}
+
+fn plan_impl(
+    kind: RankKind,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    backend: Option<&str>,
+    lane_width: Option<u32>,
+    subgroup: Option<bool>,
+    max_workgroup: Option<u32>,
+    shared_mem_per_workgroup: Option<u32>,
+) -> PyResult<PyRankPlan> {
+    let backend_kind = parse_backend(backend)?;
+    let caps = build_caps(
+        backend_kind,
+        lane_width,
+        subgroup,
+        max_workgroup,
+        shared_mem_per_workgroup,
+    );
+    let plan = plan_rank(kind, rows, cols, k, caps);
+    Ok(PyRankPlan::from_plan(plan))
+}
+
+#[pyfunction]
+#[pyo3(signature = (kind, rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None))]
+fn plan(
+    kind: &str,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    backend: Option<&str>,
+    lane_width: Option<u32>,
+    subgroup: Option<bool>,
+    max_workgroup: Option<u32>,
+    shared_mem_per_workgroup: Option<u32>,
+) -> PyResult<PyRankPlan> {
+    let rank_kind = match kind.to_ascii_lowercase().as_str() {
+        "topk" | "top_k" => RankKind::TopK,
+        "midk" | "mid_k" => RankKind::MidK,
+        "bottomk" | "bottom_k" => RankKind::BottomK,
+        other => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown rank kind '{other}', expected 'topk', 'midk', or 'bottomk'"
+            )))
+        }
+    };
+    plan_impl(
+        rank_kind,
+        rows,
+        cols,
+        k,
+        backend,
+        lane_width,
+        subgroup,
+        max_workgroup,
+        shared_mem_per_workgroup,
+    )
+}
+
+#[pyfunction]
+#[pyo3(signature = (rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None))]
+fn plan_topk(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    backend: Option<&str>,
+    lane_width: Option<u32>,
+    subgroup: Option<bool>,
+    max_workgroup: Option<u32>,
+    shared_mem_per_workgroup: Option<u32>,
+) -> PyResult<PyRankPlan> {
+    plan_impl(
+        RankKind::TopK,
+        rows,
+        cols,
+        k,
+        backend,
+        lane_width,
+        subgroup,
+        max_workgroup,
+        shared_mem_per_workgroup,
+    )
+}
+
+#[pyfunction]
+#[pyo3(signature = (backend="wgpu", *, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None, workgroup=None, cols=None, tile_hint=None, compaction_hint=None))]
+fn describe_device(
+    py: Python<'_>,
+    backend: &str,
+    lane_width: Option<u32>,
+    subgroup: Option<bool>,
+    max_workgroup: Option<u32>,
+    shared_mem_per_workgroup: Option<u32>,
+    workgroup: Option<u32>,
+    cols: Option<u32>,
+    tile_hint: Option<u32>,
+    compaction_hint: Option<u32>,
+) -> PyResult<PyObject> {
+    let backend_kind = parse_backend(Some(backend))?;
+    let caps = build_caps(
+        backend_kind,
+        lane_width,
+        subgroup,
+        max_workgroup,
+        shared_mem_per_workgroup,
+    );
+    let report = PyDict::new_bound(py);
+    report.set_item("backend", backend_label(caps.backend))?;
+    report.set_item("subgroup", caps.subgroup)?;
+    report.set_item("lane_width", caps.lane_width)?;
+    report.set_item("max_workgroup", caps.max_workgroup)?;
+    match caps.shared_mem_per_workgroup {
+        Some(value) => report.set_item("shared_mem_per_workgroup", value)?,
+        None => report.set_item("shared_mem_per_workgroup", py.None())?,
+    };
+
+    if let Some(requested) = workgroup {
+        report.set_item("requested_workgroup", requested)?;
+        report.set_item("aligned_workgroup", caps.align_workgroup(requested))?;
+        report.set_item("occupancy_score", caps.occupancy_score(requested))?;
+    }
+
+    if let Some(total_cols) = cols {
+        let tile = caps.preferred_tile(total_cols, tile_hint.unwrap_or(0));
+        let compaction = caps.preferred_compaction_tile(total_cols, compaction_hint.unwrap_or(0));
+        report.set_item("preferred_tile", tile)?;
+        report.set_item("preferred_compaction_tile", compaction)?;
+    }
+
+    Ok(report.into_py(py))
+}
+
+#[pyfunction]
+fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
+    let available = hip_backend::hip_available();
+    let devices = hip_backend::device_info();
+    let py_devices = PyList::empty_bound(py);
+    for device in devices {
+        let info = PyDict::new_bound(py);
+        info.set_item("id", device.id)?;
+        info.set_item("name", device.name.to_string())?;
+        info.set_item("multi_node", device.multi_node)?;
+        py_devices.append(info)?;
+    }
+    let out = PyDict::new_bound(py);
+    out.set_item("available", available)?;
+    out.set_item("devices", py_devices)?;
+    Ok(out.into_py(py))
+}
+
+pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+    m.add_class::<PyRankPlan>()?;
+    m.add_function(wrap_pyfunction!(plan, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
+    m.add_function(wrap_pyfunction!(describe_device, m)?)?;
+    m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
+    let _ = py;
+    Ok(())
+}
