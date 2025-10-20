@@ -41,8 +41,8 @@ use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ecosystem::{
-    ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample, RankPlanSummary,
-    RoundtableConfigSummary, RoundtableSummary,
+    CloudConnector, ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample,
+    RankPlanSummary, RoundtableConfigSummary, RoundtableSummary,
 };
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};

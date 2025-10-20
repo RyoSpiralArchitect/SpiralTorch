@@ -301,6 +301,7 @@ impl Module for NerfField {
         let (positions, directions) = self.split_inputs(input)?;
         let encoded_pos = self.position_encoding.encode(&positions)?;
         let trunk = self.trunk.forward(&encoded_pos)?;
+        let density = self.density_head.forward(&trunk)?;
         let features = self.feature_head.forward(&trunk)?;
         let color_input = if let Some(dir_enc) = &self.direction_encoding {
             let dir_tensor = directions.as_ref().map_or_else(

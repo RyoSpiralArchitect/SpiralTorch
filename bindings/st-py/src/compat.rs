@@ -291,7 +291,6 @@ mod torch {
     pub(super) fn from_torch(py: Python<'_>, tensor: &Bound<PyAny>) -> PyResult<PyTensor> {
         from_torch_py(py, tensor, None, None, None, None, None)
     }
-
 }
 
 mod jax {

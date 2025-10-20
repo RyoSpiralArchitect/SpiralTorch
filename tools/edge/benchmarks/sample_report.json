@@ -1,0 +1,14 @@
+{
+  "model": "synthetic",
+  "target": "tflite",
+  "compression_report": {
+    "original_params": 128,
+    "remaining_params": 72,
+    "estimated_latency_reduction": 0.36
+  },
+  "benchmark_report": {
+    "iterations": 1000,
+    "average_latency_ms": 2.4,
+    "realised_speedup": 0.62
+  }
+}
