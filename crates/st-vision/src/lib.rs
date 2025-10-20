@@ -69,6 +69,128 @@ use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
+/// Streaming chrono snapshot associated with a batch of Z-space slices.
+#[derive(Clone, Debug)]
+pub struct ChronoSnapshot {
+    timestamp: f32,
+    dt: f32,
+    summary: ChronoSummary,
+}
+
+impl ChronoSnapshot {
+    /// Creates a new snapshot with explicit timestep metadata.
+    pub fn new(summary: ChronoSummary, dt: f32) -> Self {
+        let mut snapshot = Self {
+            timestamp: summary.latest_timestamp,
+            dt: if dt.is_finite() && dt >= 0.0 { dt } else { 0.0 },
+            summary,
+        };
+        if !snapshot.timestamp.is_finite() {
+            snapshot.timestamp = 0.0;
+        }
+        snapshot
+    }
+
+    /// Timestamp associated with the summary's latest frame.
+    pub fn timestamp(&self) -> f32 {
+        self.timestamp
+    }
+
+    /// Duration represented by the snapshot.
+    pub fn dt(&self) -> f32 {
+        self.dt
+    }
+
+    /// Immutable access to the captured summary.
+    pub fn summary(&self) -> &ChronoSummary {
+        &self.summary
+    }
+
+    /// Consumes the snapshot returning its inner summary.
+    pub fn into_summary(self) -> ChronoSummary {
+        self.summary
+    }
+}
+
+/// In-flight frame carrying Z-space slices and optional telemetry metadata.
+#[derive(Clone, Debug)]
+pub struct ZSpaceStreamFrame {
+    slices: Vec<Tensor>,
+    atlas_frame: Option<AtlasFrame>,
+    chrono_snapshot: Option<ChronoSnapshot>,
+}
+
+impl ZSpaceStreamFrame {
+    /// Builds a streaming frame ensuring all slices share identical dimensions.
+    pub fn new(slices: Vec<Tensor>) -> PureResult<Self> {
+        if slices.is_empty() {
+            return Err(TensorError::EmptyInput("z_stream_frame_slices"));
+        }
+        let (height, width) = slices[0].shape();
+        for slice in &slices[1..] {
+            let shape = slice.shape();
+            if shape != (height, width) {
+                return Err(TensorError::ShapeMismatch {
+                    left: (height, width),
+                    right: shape,
+                });
+            }
+        }
+        Ok(Self {
+            slices,
+            atlas_frame: None,
+            chrono_snapshot: None,
+        })
+    }
+
+    /// Attaches an atlas frame to the streaming bundle.
+    pub fn with_atlas(mut self, atlas: AtlasFrame) -> Self {
+        self.atlas_frame = Some(atlas);
+        self
+    }
+
+    /// Attaches a chrono snapshot to the streaming bundle.
+    pub fn with_snapshot(mut self, snapshot: ChronoSnapshot) -> Self {
+        self.chrono_snapshot = Some(snapshot);
+        self
+    }
+
+    /// Returns the contained slices.
+    pub fn slices(&self) -> &[Tensor] {
+        &self.slices
+    }
+
+    /// Returns a mutable view into the slices.
+    pub fn slices_mut(&mut self) -> &mut [Tensor] {
+        &mut self.slices
+    }
+
+    /// Returns the attached atlas frame when present.
+    pub fn atlas_frame(&self) -> Option<&AtlasFrame> {
+        self.atlas_frame.as_ref()
+    }
+
+    /// Returns the attached chrono snapshot when present.
+    pub fn chrono_snapshot(&self) -> Option<&ChronoSnapshot> {
+        self.chrono_snapshot.as_ref()
+    }
+}
+
+/// Result of converting a streaming frame into a concrete Z-space volume.
+#[derive(Clone, Debug)]
+pub struct StreamedVolume {
+    pub volume: ZSpaceVolume,
+    pub atlas_frame: Option<AtlasFrame>,
+    pub chrono_snapshot: Option<ChronoSnapshot>,
+}
+
+pub mod video;
+
+pub use video::{
+    DecodedFrame, FfmpegBinding, FfmpegDecoder, VideoDecoder, VideoPipeline, VideoPipelineConfig,
+    VideoPipelineOutput, ZDynamicsAnnotation,
+};
+
 /// Volumetric container that holds planar tensors along the Z axis.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZSpaceVolume {
@@ -118,6 +240,91 @@ impl ZSpaceVolume {
             width,
             voxels,
         })
+    }
+
+    /// Builds a Z-space volume from a streaming frame, returning attached metadata.
+    pub fn from_stream_frame(frame: ZSpaceStreamFrame) -> PureResult<StreamedVolume> {
+        let volume = Self::from_slices(&frame.slices)?;
+        Ok(StreamedVolume {
+            volume,
+            atlas_frame: frame.atlas_frame,
+            chrono_snapshot: frame.chrono_snapshot,
+        })
+    }
+
+    /// Accumulates a streaming frame into the current volume and propagates metadata.
+    pub fn ingest_stream_frame(
+        &mut self,
+        frame: ZSpaceStreamFrame,
+        alpha: f32,
+    ) -> PureResult<StreamedVolume> {
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(TensorError::InvalidValue {
+                label: "temporal_alpha",
+            });
+        }
+        let mut streamed = Self::from_stream_frame(frame)?;
+        let shape_matches = self.depth == streamed.volume.depth
+            && self.height == streamed.volume.height
+            && self.width == streamed.volume.width;
+        if shape_matches {
+            self.accumulate(&streamed.volume, alpha)?;
+            streamed.volume = self.clone();
+        } else {
+            *self = streamed.volume.clone();
+        }
+        if let Some(snapshot) = streamed.chrono_snapshot.as_ref() {
+            match streamed.atlas_frame.as_mut() {
+                Some(atlas) => {
+                    if atlas.timestamp <= 0.0 {
+                        atlas.timestamp = snapshot.timestamp();
+                    } else {
+                        atlas.timestamp = atlas.timestamp.max(snapshot.timestamp());
+                    }
+                    if atlas.chrono_summary.is_none() {
+                        atlas.chrono_summary = Some(snapshot.summary().clone());
+                    }
+                }
+                None => {
+                    let mut atlas = AtlasFrame::new(snapshot.timestamp());
+                    atlas.chrono_summary = Some(snapshot.summary().clone());
+                    streamed.atlas_frame = Some(atlas);
+                }
+            }
+        }
+        Ok(streamed)
+    }
+
+    /// Blends a sequence of volumes using the provided weights.
+    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        if sequence.len() != weights.len() {
+            return Err(TensorError::DataLength {
+                expected: sequence.len(),
+                got: weights.len(),
+            });
+        }
+        let reference = &sequence[0];
+        let mut normalised = weights.to_vec();
+        Self::normalise_weights(&mut normalised);
+        let mut blended = Self::zeros(reference.depth, reference.height, reference.width)?;
+        for (volume, &weight) in sequence.iter().zip(normalised.iter()) {
+            if volume.depth != reference.depth
+                || volume.height != reference.height
+                || volume.width != reference.width
+            {
+                return Err(TensorError::ShapeMismatch {
+                    left: (reference.depth, reference.height * reference.width),
+                    right: (volume.depth, volume.height * volume.width),
+                });
+            }
+            for (target, source) in blended.voxels.iter_mut().zip(volume.voxels.iter()) {
+                *target += source * weight;
+            }
+        }
+        Ok(blended)
     }
 
     /// Returns the depth (number of Z slices).
@@ -649,6 +856,8 @@ pub struct VisionProjector {
     spread: f32,
     energy_bias: f32,
     window: SpectralWindow,
+    temporal_focus: f32,
+    temporal_decay: f32,
 }
 
 impl VisionProjector {
@@ -670,6 +879,8 @@ impl VisionProjector {
             spread,
             energy_bias,
             window: SpectralWindow::hann(),
+            temporal_focus: 1.0,
+            temporal_decay: 0.5,
         }
     }
 
