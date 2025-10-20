@@ -2598,6 +2598,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "st-vision"
+version = "0.1.0"
+dependencies = [
+ "st-core",
+ "st-tensor",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
