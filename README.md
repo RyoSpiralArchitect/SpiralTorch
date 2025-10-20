@@ -1933,12 +1933,24 @@ use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{DistConfig, ModuleTrainer, RoundtableConfig, Sequential, Linear, MeanSquaredError};
 
 let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
+use st_core::ecosystem::CloudConnector;
+
 let dist = DistConfig {
     node_id: "node-a".into(),
     mode: st_nn::DistMode::PeriodicMeta,
     push_interval: std::time::Duration::from_secs(15),
     meta_endpoints: vec!["tcp://meta:5005".into()],
     summary_window: 8,
+    cloud_targets: vec![
+        CloudConnector::AzureEventHub {
+            namespace: "spiral-meta".into(),
+            hub: "roundtable".into(),
+        },
+        CloudConnector::AwsKinesis {
+            region: "us-east-1".into(),
+            stream: "spiral-roundtable".into(),
+        },
+    ],
 };
 trainer.configure_distribution(dist);
 trainer.install_blackcat_moderator(0.75, 2);
@@ -1978,6 +1990,10 @@ for entry in trainer.blackcat_scoreboard() {
     );
 }
 ```
+
+The `cloud_targets` catalogue surfaces Azure Event Hub / Storage Queue and AWS Kinesis /
+SQS integrations to telemetry consumers, ensuring roundtable connectors advertise which
+cloud fabrics receive summaries and proposals.
 
 **BlackCat runtime tap-in**
 
