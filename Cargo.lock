@@ -2384,6 +2384,7 @@ dependencies = [
  "st-backend-hip",
  "st-core",
  "st-frac",
+ "st-kdsl",
  "st-nn",
  "st-rec",
  "st-rl",

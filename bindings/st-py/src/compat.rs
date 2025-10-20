@@ -167,9 +167,7 @@ mod torch {
         Ok(())
     }
 
-    #[pyfunction]
-    #[pyo3(signature = (tensor, *, dtype=None, device=None, requires_grad=None, copy=None, memory_format=None))]
-    pub(super) fn to_torch(
+    fn to_torch_impl(
         py: Python<'_>,
         tensor: &PyTensor,
         dtype: Option<PyObject>,
@@ -210,8 +208,28 @@ mod torch {
     }
 
     #[pyfunction]
-    #[pyo3(signature = (tensor, *, dtype=None, device=None, ensure_cpu=None, copy=None, require_contiguous=None))]
-    pub(super) fn from_torch(
+    #[pyo3(signature = (tensor, *, dtype=None, device=None, requires_grad=None, copy=None, memory_format=None))]
+    pub(super) fn to_torch(
+        py: Python<'_>,
+        tensor: &PyTensor,
+        dtype: Option<PyObject>,
+        device: Option<PyObject>,
+        requires_grad: Option<bool>,
+        copy: Option<bool>,
+        memory_format: Option<PyObject>,
+    ) -> PyResult<PyObject> {
+        to_torch_impl(
+            py,
+            tensor,
+            dtype,
+            device,
+            requires_grad,
+            copy,
+            memory_format,
+        )
+    }
+
+    fn from_torch_impl(
         py: Python<'_>,
         tensor: &Bound<PyAny>,
         dtype: Option<PyObject>,
