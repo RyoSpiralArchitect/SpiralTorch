@@ -4,8 +4,42 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use st_backend_wgpu::render::{TemporalRenderOutput, TemporalRenderer, TemporalRendererConfig};
+use st_backend_wgpu::render::{
+    TemporalRenderOutput, TemporalRenderer, TemporalRendererConfig, TemporalVolumeLike,
+};
 use st_vision::ZSpaceVolume;
+
+struct VisionVolume<'a>(&'a ZSpaceVolume);
+
+impl<'a> TemporalVolumeLike for VisionVolume<'a> {
+    fn depth(&self) -> usize {
+        self.0.depth()
+    }
+
+    fn height(&self) -> usize {
+        self.0.height()
+    }
+
+    fn width(&self) -> usize {
+        self.0.width()
+    }
+
+    fn harmonic_channels(&self) -> usize {
+        self.0.harmonic_channels()
+    }
+
+    fn voxels(&self) -> &[f32] {
+        self.0.voxels()
+    }
+
+    fn temporal_harmonics(&self) -> &[f32] {
+        self.0.temporal_harmonics()
+    }
+
+    fn resonance_decay(&self) -> &[f32] {
+        self.0.resonance_decay()
+    }
+}
 
 fn parse_arg<T: std::str::FromStr>(name: &str, default: T) -> T {
     let key = format!("--{}=", name);
@@ -86,7 +120,7 @@ fn main() -> io::Result<()> {
         ..Default::default()
     });
     let render_output = renderer
-        .render(&volume)
+        .render(&VisionVolume(&volume))
         .expect("unable to render temporal volume");
     if let Some(path) = output_path {
         write_output(&render_output, Some(path))?;
