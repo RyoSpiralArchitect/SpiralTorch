@@ -1,20 +1,106 @@
-# SpiralTorchVision ガイド
+# SpiralTorchVision Guide
 
-SpiralTorchVision は SpiralTorch の Z-space ネイティブ機能を拡張しつつ、TorchVision 標準機能との互換性を意識した設計を採用しています。ここでは TorchVision が提供する主要機能と、それを SpiralTorchVision でどのように活用・拡張していくのかを整理します。
+SpiralTorchVision extends SpiralTorch's native Z-space capabilities while staying compatible with the standard TorchVision stack. This guide inventories the core features that TorchVision ships today and outlines how SpiralTorchVision builds on top of them.
 
-## TorchVision 標準機能の整理
-- **データセット**: 画像分類、物体検出・セマンティック/インスタンスセグメンテーション、光学フロー、ステレオマッチング、画像ペア、キャプション、動画分類・予測といった代表的タスクを `torchvision.datasets` 経由で提供。
-- **モデル**: AlexNet から Vision Transformer 系までの分類モデル、量子化対応分類器、セマンティックセグメンテーション、検出/インスタンスセグメント/キーポイント推定、動画分類、光学フローなど、学習済みウェイトとともに活用可能。
-- **Transforms v2**: `torchvision.transforms.v2` は画像・動画・バウンディングボックス・マスク・キーポイントを一貫した API で扱える拡張前処理パイプライン。v1 互換性を維持しつつ高速化。
-- **TVTensors**: Image、Video、BoundingBoxes といったテンソルサブクラスによるメタデータ保持と自動ディスパッチを実現。
-- **ユーティリティ**: `draw_bounding_boxes`、`draw_segmentation_masks`、`make_grid`、`save_image` などの可視化/保存ツールを `torchvision.utils` で提供。
-- **カスタムオペレータ**: `torchvision.ops` による NMS・RoI 系演算、ボックス演算、検出向け損失、Conv/DropBlock/SE など TorchScript 互換のプリミティブ。
-- **IO**: JPEG/PNG/WEBP/GIF/AVIF/HEIC のデコードと JPEG/PNG エンコード、動画の読み書き（廃止予定）を備え、高速なテンソル変換が可能。
-- **特徴抽出ユーティリティ**: `create_feature_extractor` などで中間特徴を抽出し、可視化や転移学習、FPN などの高度な用途に対応。
+## TorchVision feature overview
+- **Datasets**: Canonical tasks for image classification, detection, semantic/instance segmentation, optical flow, stereo matching, image pairs, captioning, video classification, and video prediction through `torchvision.datasets`.
+- **Models**: Classification architectures ranging from AlexNet to Vision Transformers, quantization-ready classifiers, semantic segmentation, detection/instance segmentation/keypoint estimation, video classification, and optical flow modules with pre-trained weights.
+- **Transforms v2**: A unified preprocessing pipeline under `torchvision.transforms.v2` that handles images, videos, bounding boxes, masks, and keypoints with a consistent API while retaining v1 compatibility and higher throughput.
+- **TVTensors**: Tensor subclasses such as Image, Video, and BoundingBoxes that preserve metadata and enable automatic dispatch.
+- **Utilities**: Visualization and persistence helpers in `torchvision.utils`, including `draw_bounding_boxes`, `draw_segmentation_masks`, `make_grid`, and `save_image`.
+- **Custom operators**: TorchScript-friendly primitives in `torchvision.ops` for NMS, RoI ops, box algebra, detection losses, convolution/DropBlock/SE blocks, and more.
+- **IO**: Decoding for JPEG/PNG/WEBP/GIF/AVIF/HEIC, encoding for JPEG/PNG, and (deprecated) video IO with fast tensor conversion.
+- **Feature extraction utilities**: Tools like `create_feature_extractor` for intermediate feature capture, visualization, transfer learning, FPN assembly, and other advanced uses.
 
-## SpiralTorchVision での発展ポイント
-- **ZSpaceVolume / VisionProjector**: Z 軸方向の共鳴特徴を蓄積し、Tensor へ崩壊させるボリューム表現。TorchVision モデルの中間表現を取り込んで SpiralTorch の Z-space 解析へ橋渡しする基盤。
-- **Differential Resonance 連携**: `st_tensor::DifferentialResonance` と組み合わせることで、TorchVision モデルから得た時空間特徴を SpiralTorch の共鳴フレームへ再投影。
-- **将来的な統合**: TorchVision のデータセット/変換を入力段として活かし、Z-space ネイティブな損失や可視化ツール、さらには SpiralTorch 独自のモデルヘッドを追加実装予定。
+## SpiralTorchVision expansion points
+- **Spectral Z-attention**: `SpectralWindow` functions (Hann, Hamming, Blackman, Gaussian) now modulate how `VisionProjector` collapses `ZSpaceVolume` slices, letting you pre-emphasize perceptual frequencies before feeding tensors to TorchVision models.
+- **ZSpaceVolume / VisionProjector**: A volumetric representation that accumulates resonant features along the Z-axis and collapses them into tensors. It ingests intermediate activations from TorchVision models and bridges them into SpiralTorch's Z-space analyzers.
+- **Differential Resonance integration**: Combining with `st_tensor::DifferentialResonance` to reproject spatiotemporal features gathered from TorchVision networks back into SpiralTorch's resonant frames.
+- **Temporal resonance accumulation**: `ZSpaceVolume::accumulate` and `TemporalResonanceBuffer` perform exponential moving averages across frames so `VisionProjector::project_with_temporal` can mix historical attention with new resonance in real time.
+- **Multi-view Z-fusion**: Register camera descriptors with `MultiViewFusion` so `VisionProjector::project_multi_view` can weight Z slices as viewpoints, modulating attention with orientation-aware biases before collapse.
+- **Generative resonance coupling**: Feed `ZSpaceVolume` slice statistics into a `ResonanceGenerator` backed by `SpiralRnn` so synthetic `DifferentialResonance` fields can drive projection without an external conductor.
+- **Long-term integrations**: Leveraging TorchVision datasets/transforms as inputs while adding Z-space-native losses, visualization tools, and SpiralTorch-specific model heads.
 
-本ガイドは随時更新し、TorchVision エコシステムと SpiralTorchVision 拡張の対応関係を明確化していきます。
+### Temporal resonance accumulation
+
+Temporal continuity lets SpiralTorchVision respond to motion and lingering cues without reprocessing an entire video buffer. Each frame updates a `ZSpaceVolume` in-place with `accumulate`, applying an exponential moving average (`alpha` near `0.2` preserves the past, `alpha` near `1.0` chases the latest frame). The resulting volume feeds a `TemporalResonanceBuffer`, which smooths the depth attention profile before collapse:
+
+```rust
+let mut ema_volume = ZSpaceVolume::from_slices(&frame_zero_slices)?;
+let mut temporal = TemporalResonanceBuffer::new(0.25);
+
+for frame in sequence {
+    let next_volume = ZSpaceVolume::from_slices(&frame.slices)?;
+    ema_volume.accumulate(&next_volume, 0.25)?;
+
+    let projection = projector.project_with_temporal(
+        &ema_volume,
+        &frame.resonance,
+        &mut temporal,
+    )?;
+    // feed projection into downstream TorchVision modules here
+}
+```
+
+`TemporalResonanceBuffer::apply` keeps track of how many frames influenced the profile, so you can reset when a scene cut happens or when sensors disagree. Pairing it with spectral windows gives a dual attention sweep—frequency over Z, inertia over time.
+
+### Multi-view Z-fusion
+
+Multi-camera rigs treat the Z-axis as a viewpoint stack. Describe each camera with a `ViewDescriptor`, build a `MultiViewFusion`, and project the stacked volume with view-aware weights. The fusion helper normalises alignment biases (dot product between a view's forward vector and the configured focus direction) and combines them with baseline weights so attention favours cameras that cover the region of interest:
+
+```rust
+let views = vec![
+    ViewDescriptor::new("front", [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+    ViewDescriptor::new("right", [0.0, 0.0, 0.0], [1.0, 0.0, 0.25]).with_baseline_weight(1.2),
+    ViewDescriptor::new("up", [0.0, 0.0, 0.0], [0.0, 1.0, 0.8]),
+];
+let fusion = MultiViewFusion::new(views)?
+    .with_focus_direction([0.2, 0.1, 1.0])
+    .with_alignment_gamma(1.5);
+
+let multi_view_volume = ZSpaceVolume::from_slices(&view_slices)?; // Z = view index
+let weights = projector.depth_weights_multi_view(&fusion, &multi_view_volume, &resonance)?;
+let fused_projection = projector.project_multi_view(&fusion, &multi_view_volume, &resonance)?;
+
+let mut temporal = TemporalResonanceBuffer::new(0.35);
+let fused_temporal = projector.project_multi_view_with_temporal(
+    &fusion,
+    &multi_view_volume,
+    &resonance,
+    &mut temporal,
+)?;
+```
+
+Multi-view temporal buffers reuse the same decay logic, so you can smooth viewpoint attention as sensors hand off dominance (e.g., during turns or occlusions). Downstream TorchVision modules receive a fused 2D tensor while retaining inspectable per-view weights.
+
+### Generative resonance coupling
+
+With spectral, temporal, and multi-view conditioning in place, the next step is to let SpiralTorchVision **synthesize** its own resonance fields. `ZSpaceVolume::slice_profile` summarises every slice with means, standard deviations, and energy estimates, while `ZSpaceVolume::total_energy` reports the global activation budget. Feed those statistics into a `ResonanceGenerator`—a thin wrapper around `st_nn::SpiralRnn`—and you receive a fully populated `DifferentialResonance` without querying an external conductor:
+
+```rust
+let mut generator = ResonanceGenerator::new("vision-loop", 12, volume.depth())?;
+let chrono_summary = build_chrono_summary(); // produce a ChronoSummary from your telemetry window
+let mut atlas = AtlasFrame::new(chrono_summary.latest_timestamp);
+atlas.z_signal = Some(0.7);
+atlas.collapse_total = Some(1.05);
+
+let synthetic = generator.generate(
+    &volume,
+    &projector,
+    Some(&chrono_summary),
+    Some(&atlas),
+    last_resonance.as_ref(),
+)?;
+let fused = projector.project(&volume, &synthetic)?;
+```
+
+Passing the previous `DifferentialResonance` back into `generate` closes the loop, allowing the RNN to refine its latent state over time. Because `ResonanceGenerator` exposes `rnn_mut`, you can attach hypergrads or otherwise fine-tune the SpiralRNN as part of a larger training run. The resulting projections inherit spectral, temporal, and multi-view behaviour from `VisionProjector`, but now the resonance driving that collapse is born from the same pipeline.
+
+## Resonant roadmap
+- **Z-space as a perceptual frequency domain**: Use the new spectral windows and `ZSpaceVolume::spectral_response` helper to treat collapse as a frequency-aware attention sweep that preconditions downstream ConvNets.
+- **Temporal resonance layering**: Extend the new `TemporalResonanceBuffer` into multi-scale stacks that model short- and long-term attention simultaneously.
+- **Dynamic multi-camera orchestration**: Extend `MultiViewFusion` with calibration from SLAM/IMU pipelines and learnable alignment gammas so attention follows moving rigs in autonomous capture setups.
+- **Generative resonance coupling**: Train the new `ResonanceGenerator` alongside SpiralRNN/`ZConductor` stacks so resonance synthesis becomes adaptive rather than purely heuristic.
+- **Super-resolution and synthesis in Z**: Add interpolation, upscaling, diffusion, and decoding helpers so Z-aware GAN/VAE stacks can both enhance and generate volumetric inputs.
+
+This guide will evolve over time to map TorchVision ecosystems to the expanding SpiralTorchVision feature set.
