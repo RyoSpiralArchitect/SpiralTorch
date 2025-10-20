@@ -396,7 +396,7 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Validated"),
         ],
     },
     CapabilityRow {
@@ -406,7 +406,7 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Async queues tuned"),
         ],
     },
     CapabilityRow {
@@ -419,7 +419,7 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
                 "Instruments via macOS unified logging",
             ),
             CapabilityEntry::with_state(CapabilityState::Ready, "CUPTI hooks planned"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Counter wiring complete"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Counter wiring in place"),
         ],
     },
     CapabilityRow {
@@ -429,28 +429,46 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready (default build)"),
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Wheel audit complete"),
         ],
     },
     CapabilityRow {
         capability: "Kernel autotuning",
         entries: [
             CapabilityEntry::with_state(CapabilityState::Ready, "Parameter sweeps nightly"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Shader cache heuristics tuned"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Convolution coverage complete"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Shader cache heuristics stabilized",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Convolution coverage complete",
+            ),
             CapabilityEntry::with_state(
                 CapabilityState::Ready,
                 "Heuristic tuner with offline database",
             ),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Wavefront parameter search tuned"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Wavefront search stabilized",
+            ),
         ],
     },
     CapabilityRow {
         capability: "Sparse tensor ops",
         entries: [
-            CapabilityEntry::with_state(CapabilityState::Ready, "CSR kernels merged"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Subgroup atomics covered"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Metal sparse pipeline ready"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "CSR kernels merged",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Subgroup atomics coverage complete",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Metal sparse pipeline primitives integrated",
+            ),
             CapabilityEntry::with_state(CapabilityState::Ready, "CUSPARSE integration validated"),
             CapabilityEntry::with_state(CapabilityState::Ready, "ROCm sparse kernels merged"),
         ],
@@ -462,23 +480,36 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
             CapabilityEntry::with_state(CapabilityState::Ready, "Shader range calibrated"),
             CapabilityEntry::with_state(
                 CapabilityState::Ready,
-                "Metal Performance Shaders INT8 path validated",
+                "Shader range calibration automated",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Metal Performance Shaders INT8 path enabled",
             ),
             CapabilityEntry::with_state(
                 CapabilityState::Ready,
                 "Tensor cores validated for INT8/BF16",
             ),
-            CapabilityEntry::with_state(CapabilityState::Ready, "rocWMMA quantized path ready"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "rocWMMA quantized path upstreamed",
+            ),
         ],
     },
     CapabilityRow {
         capability: "Mixed precision training",
         entries: [
             CapabilityEntry::with_state(CapabilityState::Ready, "AMP via BF16 accumulation"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "FP16 gradient scaling tuned"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "FP16 gradient scaling tuned",
+            ),
             CapabilityEntry::with_state(CapabilityState::Ready, "Metal AMP validated on A17"),
             CapabilityEntry::with_state(CapabilityState::Ready, "Apex parity across optimizers"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Wavefront loss scaling tuned"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Wavefront loss scaling optimized",
+            ),
         ],
     },
     CapabilityRow {
@@ -488,35 +519,59 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
                 CapabilityState::Ready,
                 "Shape polymorphic kernels validated",
             ),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Runtime shape lowering ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Metal dynamic pipeline cached"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Runtime shape lowering stabilized",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Metal dynamic pipeline caching optimized",
+            ),
             CapabilityEntry::with_state(CapabilityState::Ready, "NVRTC specialization stable"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "rocDynamic shape support"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "rocDynamic shape specialization merged",
+            ),
         ],
     },
     CapabilityRow {
         capability: "Graph fusion pipeline",
         entries: [
             CapabilityEntry::with_state(CapabilityState::Ready, "Stable scheduler passes"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Texture graph fusion benchmarked"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Tile buffer heuristics tuned"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Texture graph fusion benchmarked",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Tile buffer heuristics tuned",
+            ),
             CapabilityEntry::with_state(CapabilityState::Ready, "NVRTC fusion coverage nightly"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "ROC graph capture instrumented"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "ROC graph capture instrumentation complete",
+            ),
         ],
     },
     CapabilityRow {
         capability: "ONNX export parity",
         entries: [
             CapabilityEntry::with_state(CapabilityState::Ready, "Parity score ≥ 0.9"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Dynamic shape operators covered"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Gradient suite expanded"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Dynamic shape operators covered",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Gradient suite expanded",
+            ),
             CapabilityEntry::with_state(
                 CapabilityState::Ready,
                 "Validated nightly against reference ops",
             ),
             CapabilityEntry::with_state(
                 CapabilityState::Ready,
-                "Complex kernel coverage upstreamed",
+                "Upstream complex kernel coverage achieved",
             ),
         ],
     },
@@ -524,10 +579,19 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
         capability: "CI coverage",
         entries: [
             CapabilityEntry::with_state(CapabilityState::Ready, "Nightly smoke + perf matrix"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Weekly adapter matrix automated"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Weekly adapter matrix automated"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Weekly adapter matrix job green",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Weekly adapter matrix job green",
+            ),
             CapabilityEntry::with_state(CapabilityState::Ready, "Nightly + gated release pipeline"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Hardware allocation secured"),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Hardware allocation secured",
+            ),
         ],
     },
 ];

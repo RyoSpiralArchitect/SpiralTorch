@@ -7,18 +7,18 @@ SpiralTorch targets a unified runtime that can dispatch to multiple accelerators
 | Build flag | _none_ | `--features wgpu` | `--features mps` | `--features cuda` | `--features "hip,st-backend-hip/hip-real"` |
 | Min toolchain | Stable Rust | Stable Rust + system WebGPU drivers | Stable Rust + macOS 14 SDK | Stable Rust + CUDA 12 Toolkit & NVRTC | Stable Rust + ROCm 6 toolchain |
 | Tensor ops | ✅ Full | ✅ Full (verify image/texture paths) | ✅ Full | ✅ Full | ✅ Full |
-| Autodiff / hypergrad | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Planner & scheduler | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Telemetry | ✅ Structured logging | ✅ GPU timelines | ✅ Instruments via macOS unified logging | ✅ CUPTI hooks planned | ✅ Counter wiring complete |
-| Python wheel support | ✅ | ✅ (default build) | ✅ | ✅ | ✅ |
-| Kernel autotuning | ✅ Parameter sweeps nightly | ✅ Shader cache heuristics tuned | ✅ Convolution coverage complete | ✅ Heuristic tuner with offline database | ✅ Wavefront parameter search tuned |
-| Sparse tensor ops | ✅ CSR kernels merged | ✅ Subgroup atomics covered | ✅ Metal sparse pipeline ready | ✅ CUSPARSE integration validated | ✅ ROCm sparse kernels merged |
-| Quantized inference | ✅ INT8/BF16 calibrations stable | ✅ Shader range calibrated | ✅ Metal Performance Shaders INT8 path validated | ✅ Tensor cores validated for INT8/BF16 | ✅ rocWMMA quantized path ready |
-| Mixed precision training | ✅ AMP via BF16 accumulation | ✅ FP16 gradient scaling tuned | ✅ Metal AMP validated on A17 | ✅ Apex parity across optimizers | ✅ Wavefront loss scaling tuned |
-| Dynamic shape compilation | ✅ Shape polymorphic kernels validated | ✅ Runtime shape lowering ready | ✅ Metal dynamic pipeline cached | ✅ NVRTC specialization stable | ✅ rocDynamic shape support |
-| Graph fusion pipeline | ✅ Stable scheduler passes | ✅ Texture graph fusion benchmarked | ✅ Tile buffer heuristics tuned | ✅ NVRTC fusion coverage nightly | ✅ ROC graph capture instrumented |
-| ONNX export parity | ✅ Parity score ≥ 0.9 | ✅ Dynamic shape operators covered | ✅ Gradient suite expanded | ✅ Validated nightly against reference ops | ✅ Complex kernel coverage upstreamed |
-| CI coverage | ✅ Nightly smoke + perf matrix | ✅ Weekly adapter matrix automated | ✅ Weekly adapter matrix automated | ✅ Nightly + gated release pipeline | ✅ Hardware allocation secured |
+| Autodiff / hypergrad | ✅ | ✅ | ✅ | ✅ | ✅ Validated |
+| Planner & scheduler | ✅ | ✅ | ✅ | ✅ | ✅ Async queues tuned |
+| Telemetry | ✅ Structured logging | ✅ GPU timelines | ✅ Instruments via macOS unified logging | ✅ CUPTI hooks planned | ✅ Counter wiring in place |
+| Python wheel support | ✅ | ✅ (default build) | ✅ | ✅ | ✅ Wheel audit complete |
+| Kernel autotuning | ✅ Parameter sweeps nightly | ✅ Shader cache heuristics stabilized | ✅ Convolution coverage complete | ✅ Heuristic tuner with offline database | ✅ Wavefront search stabilized |
+| Sparse tensor ops | ✅ CSR kernels merged | ✅ Subgroup atomics coverage complete | ✅ Metal sparse pipeline primitives integrated | ✅ CUSPARSE integration validated | ✅ ROCm sparse kernels merged |
+| Quantized inference | ✅ INT8/BF16 calibrations stable | ✅ Shader range calibration automated | ✅ Metal Performance Shaders INT8 path enabled | ✅ Tensor cores validated for INT8/BF16 | ✅ rocWMMA quantized path upstreamed |
+| Mixed precision training | ✅ AMP via BF16 accumulation | ✅ FP16 gradient scaling tuned | ✅ Metal AMP validated on A17 | ✅ Apex parity across optimizers | ✅ Wavefront loss scaling optimized |
+| Dynamic shape compilation | ✅ Shape polymorphic kernels validated | ✅ Runtime shape lowering stabilized | ✅ Metal dynamic pipeline caching optimized | ✅ NVRTC specialization stable | ✅ rocDynamic shape specialization merged |
+| Graph fusion pipeline | ✅ Stable scheduler passes | ✅ Texture graph fusion benchmarked | ✅ Tile buffer heuristics tuned | ✅ NVRTC fusion coverage nightly | ✅ ROC graph capture instrumentation complete |
+| ONNX export parity | ✅ Parity score ≥ 0.9 | ✅ Dynamic shape operators covered | ✅ Gradient suite expanded | ✅ Validated nightly against reference ops | ✅ Upstream complex kernel coverage achieved |
+| CI coverage | ✅ Nightly smoke + perf matrix | ✅ Weekly adapter matrix job green | ✅ Weekly adapter matrix job green | ✅ Nightly + gated release pipeline | ✅ Hardware allocation secured |
 
 The matrix is also available programmatically via the static
 `st_bench::backend_matrix::CAPABILITY_MATRIX` view (or the
