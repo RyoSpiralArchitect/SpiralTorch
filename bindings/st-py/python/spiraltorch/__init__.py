@@ -4,7 +4,15 @@ from importlib import import_module
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
 # Rust拡張の本体
-_rs = import_module("spiraltorch.spiraltorch")
+try:
+    _rs = import_module("spiraltorch.spiraltorch")
+except ModuleNotFoundError as exc:
+    if exc.name not in {"spiraltorch.spiraltorch", "spiraltorch"}:
+        raise
+    try:
+        _rs = import_module("spiraltorch.spiraltorch_native")
+    except ModuleNotFoundError:
+        _rs = import_module("spiraltorch_native")
 
 # パッケージ版
 try:
