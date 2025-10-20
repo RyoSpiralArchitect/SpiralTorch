@@ -10,9 +10,9 @@ pub mod device_caps;
 #[cfg(feature = "hip-real")]
 pub mod hip_runtime;
 pub mod kdsl_bridge;
-pub mod soft_logic;
 pub mod rankk_launch;
 pub mod rankk_software;
+pub mod soft_logic;
 pub mod spiralk_fft;
 pub mod temporal_fusion;
 pub mod unison_heuristics;
