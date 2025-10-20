@@ -139,6 +139,31 @@ impl CapabilityRow {
     pub const fn entry(&self, backend: Backend) -> &CapabilityEntry {
         &self.entries[backend.index()]
     }
+
+    /// Computes a [`CapabilitySummary`] describing how every backend fares for this row.
+    pub const fn summarize(&self) -> CapabilitySummary {
+        let mut ready = 0;
+        let mut watchlist = 0;
+        let mut blocked = 0;
+        let mut idx = 0;
+        while idx < Backend::COUNT {
+            let state = self.entries[idx].state;
+            match state {
+                Some(CapabilityState::Ready) => ready += 1,
+                Some(CapabilityState::Watchlist) => watchlist += 1,
+                Some(CapabilityState::Blocked) => blocked += 1,
+                None => {}
+            }
+            idx += 1;
+        }
+
+        CapabilitySummary {
+            capability: self.capability,
+            ready,
+            watchlist,
+            blocked,
+        }
+    }
 }
 
 /// Aggregated readiness information for a backend across the entire matrix.
@@ -169,6 +194,81 @@ impl BackendSummary {
     /// Returns `true` if the backend has no watchlist or blocked capabilities.
     pub fn is_fully_ready(&self) -> bool {
         self.watchlist == 0 && self.blocked == 0
+    }
+
+    /// Number of capabilities that carry a readiness marker for this backend.
+    pub fn tracked_capabilities(&self) -> usize {
+        self.ready + self.watchlist + self.blocked
+    }
+
+    /// Fraction of tracked capabilities that are marked as ready.
+    pub fn readiness_ratio(&self) -> f32 {
+        let total = self.tracked_capabilities();
+        if total == 0 {
+            0.0
+        } else {
+            self.ready as f32 / total as f32
+        }
+    }
+}
+
+/// Aggregated readiness information across all backends for a single capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CapabilitySummary {
+    /// Capability name as rendered in the documentation matrix.
+    pub capability: &'static str,
+    /// Number of backends marked as ready.
+    pub ready: usize,
+    /// Number of backends on the watchlist.
+    pub watchlist: usize,
+    /// Number of backends marked as blocked.
+    pub blocked: usize,
+}
+
+impl CapabilitySummary {
+    /// Total number of backends that have an explicit readiness marker for the capability.
+    pub const fn tracked_backends(&self) -> usize {
+        self.ready + self.watchlist + self.blocked
+    }
+
+    /// Dominant state if exactly one readiness tier has the highest count.
+    pub const fn dominant_state(&self) -> Option<CapabilityState> {
+        let mut max = 0usize;
+        let mut ties = 0usize;
+        let mut candidate: Option<CapabilityState> = None;
+
+        let ready = self.ready;
+        if ready > max {
+            max = ready;
+            ties = 1;
+            candidate = Some(CapabilityState::Ready);
+        } else if ready != 0 && ready == max {
+            ties += 1;
+        }
+
+        let watchlist = self.watchlist;
+        if watchlist > max {
+            max = watchlist;
+            ties = 1;
+            candidate = Some(CapabilityState::Watchlist);
+        } else if watchlist != 0 && watchlist == max {
+            ties += 1;
+        }
+
+        let blocked = self.blocked;
+        if blocked > max {
+            max = blocked;
+            ties = 1;
+            candidate = Some(CapabilityState::Blocked);
+        } else if blocked != 0 && blocked == max {
+            ties += 1;
+        }
+
+        if max == 0 || ties != 1 {
+            None
+        } else {
+            candidate
+        }
     }
 }
 
@@ -249,6 +349,38 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
             CapabilityEntry::with_state(CapabilityState::Watchlist, "Needs wheel audit"),
         ],
     },
+    CapabilityRow {
+        capability: "ONNX export parity",
+        entries: [
+            CapabilityEntry::with_state(CapabilityState::Ready, "Parity score ≥ 0.9"),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Operators with dynamic shapes pending",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Watchlist,
+                "Gradient suite expansion required",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Ready,
+                "Validated nightly against reference ops",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Blocked,
+                "Awaiting upstream complex kernel coverage",
+            ),
+        ],
+    },
+    CapabilityRow {
+        capability: "CI coverage",
+        entries: [
+            CapabilityEntry::with_state(CapabilityState::Ready, "Nightly smoke + perf matrix"),
+            CapabilityEntry::with_state(CapabilityState::Watchlist, "Weekly adapter matrix job"),
+            CapabilityEntry::with_state(CapabilityState::Watchlist, "Weekly adapter matrix job"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Nightly + gated release pipeline"),
+            CapabilityEntry::with_state(CapabilityState::Watchlist, "Hardware allocation pending"),
+        ],
+    },
 ];
 
 /// Returns the backend feature matrix mirrored from `docs/backend_matrix.md`.
@@ -319,6 +451,22 @@ pub fn backend_summaries() -> Vec<BackendSummary> {
         .collect()
 }
 
+/// Convenience helper returning capability summaries for every row in the matrix.
+pub fn capability_summaries() -> Vec<CapabilitySummary> {
+    CAPABILITY_ROWS
+        .iter()
+        .map(CapabilityRow::summarize)
+        .collect()
+}
+
+/// Returns capability rows that contain at least one backend marked with the requested state.
+pub fn capabilities_with_state(state: CapabilityState) -> Vec<&'static CapabilityRow> {
+    CAPABILITY_ROWS
+        .iter()
+        .filter(|row| row.entries.iter().any(|entry| entry.state == Some(state)))
+        .collect()
+}
+
 /// Serialises the matrix into a JSON value for downstream tooling.
 pub fn capability_matrix_json() -> serde_json::Value {
     serde_json::to_value(CAPABILITY_ROWS).expect("matrix is serialisable")
@@ -361,9 +509,11 @@ mod tests {
     fn summarizes_backend_counts_watchlist_items() {
         let hip = summarize_backend(Backend::Hip);
         assert_eq!(hip.backend, Backend::Hip);
-        assert_eq!(hip.watchlist, 5);
-        assert_eq!(hip.blocked, 0);
+        assert_eq!(hip.watchlist, 6);
+        assert_eq!(hip.blocked, 1);
         assert!(!hip.is_fully_ready());
+        assert_eq!(hip.tracked_capabilities(), 7);
+        assert!(hip.readiness_ratio() < 0.5);
         assert!(hip
             .notes
             .iter()
@@ -380,5 +530,40 @@ mod tests {
             .expect("telemetry row serialized");
         let hip_note = first["entries"][Backend::Hip.index()]["note"].as_str();
         assert!(hip_note.expect("hip note present").contains("counter"));
+    }
+
+    #[test]
+    fn capability_summaries_capture_blocked_items() {
+        let summaries = capability_summaries();
+        let onnx = summaries
+            .iter()
+            .find(|summary| summary.capability == "ONNX export parity")
+            .expect("onnx row present");
+        assert_eq!(onnx.ready, 2);
+        assert_eq!(onnx.watchlist, 2);
+        assert_eq!(onnx.blocked, 1);
+        assert_eq!(onnx.tracked_backends(), 5);
+        assert_eq!(onnx.dominant_state(), None);
+
+        let ci = summaries
+            .iter()
+            .find(|summary| summary.capability == "CI coverage")
+            .expect("ci row present");
+        assert_eq!(ci.dominant_state(), Some(CapabilityState::Watchlist));
+    }
+
+    #[test]
+    fn capabilities_with_state_filters_rows() {
+        let blocked_rows = capabilities_with_state(CapabilityState::Blocked);
+        assert!(blocked_rows
+            .iter()
+            .any(|row| row.capability == "ONNX export parity"));
+        assert!(blocked_rows.iter().all(|row| row
+            .entries
+            .iter()
+            .any(|entry| entry.state == Some(CapabilityState::Blocked))));
+
+        let ready_rows = capabilities_with_state(CapabilityState::Ready);
+        assert!(ready_rows.iter().any(|row| row.capability == "Tensor ops"));
     }
 }
