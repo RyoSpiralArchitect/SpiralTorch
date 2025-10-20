@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use std::collections::{HashMap, VecDeque};
+use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -496,7 +497,6 @@ mod otel_exporter {
 pub use otel_exporter::OtelExporter;
 
 /// Central hub orchestrating drift detectors, performance monitors, and exporters.
-#[derive(Debug)]
 pub struct MonitoringHub {
     drift: DriftDetector,
     performance: PerformanceMonitor,
@@ -584,6 +584,19 @@ impl MonitoringHub {
 
     pub fn last_observation(&self) -> Option<Instant> {
         self.last_observation
+    }
+}
+
+impl fmt::Debug for MonitoringHub {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MonitoringHub")
+            .field("drift", &self.drift)
+            .field("performance", &self.performance)
+            .field("exporter_count", &self.exporters.len())
+            .field("alert_log_len", &self.alert_log.len())
+            .field("alert_capacity", &self.alert_capacity)
+            .field("last_observation", &self.last_observation)
+            .finish()
     }
 }
 
