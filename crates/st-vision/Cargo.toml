@@ -9,7 +9,11 @@ license = "AGPL-3.0-or-later"
 [dependencies]
 st-core = { path = "../st-core" }
 st-tensor = { path = "../st-tensor" }
+st-nn = { path = "../st-nn" }
 rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

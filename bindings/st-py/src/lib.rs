@@ -5,6 +5,13 @@ use pyo3::types::PyModule;
 
 mod tensor;
 mod compat;
+mod nn;
+mod rl;
+mod rec;
+mod telemetry;
+mod pure;
+mod nn;
+mod planner;
 
 // =======================
 // extras（安全・自己完結）
@@ -184,9 +191,14 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     extras::register(py, m)?;
     tensor::register(py, m)?;
     compat::register(py, m)?;
+    pure::register(py, m)?;
+    planner::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;
+    rl::register(py, m)?;
+    rec::register(py, m)?;
+    telemetry::register(py, m)?;
 
     let frac = PyModule::new_bound(py, "frac")?;
     frac_bindings::register(py, &frac)?; // 実APIを公開
@@ -200,25 +212,16 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     linalg.add("__doc__", "Linear algebra utilities")?;
     m.add_submodule(&linalg)?;
 
-    let rl = PyModule::new_bound(py, "rl")?;
-    rl.add("__doc__", "Reinforcement learning components")?;
-    m.add_submodule(&rl)?;
-
-    let rec = PyModule::new_bound(py, "rec")?;
-    rec.add("__doc__", "Reconstruction / signal processing")?;
-    m.add_submodule(&rec)?;
-
-    let telemetry = PyModule::new_bound(py, "telemetry")?;
-    telemetry.add("__doc__", "Telemetry / dashboards / metrics")?;
-    m.add_submodule(&telemetry)?;
-
     let ecosystem = PyModule::new_bound(py, "ecosystem")?;
     ecosystem.add("__doc__", "Integrations & ecosystem glue")?;
     m.add_submodule(&ecosystem)?;
 
     // 3) __all__
     m.add("__all__", vec![
-        "Tensor","from_dlpack","to_dlpack","compat","capture","share",
+        "Tensor","from_dlpack","to_dlpack",
+        "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
+        "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
+        "RankPlan","plan","plan_topk","describe_device","hip_probe",
         "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",

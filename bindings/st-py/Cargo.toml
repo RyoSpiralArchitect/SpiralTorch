@@ -32,7 +32,7 @@ psychoid = ["psi"]
 collapse = ["psi"]
 nn = ["dep:st-nn"]
 rl = ["dep:st-rl"]
-rec = ["dep:st-rec"]
+rec = ["dep:st-rec", "dep:st-kdsl"]
 text = ["dep:st-text"]
 
 # Backend selection (mirrors the CLI surface expected by maturin builds)
@@ -61,6 +61,7 @@ st-nn = { path = "../../crates/st-nn", optional = true, features = ["psychoid", 
 st-rl = { path = "../../crates/st-rl", optional = true }
 st-rec = { path = "../../crates/st-rec", optional = true }
 st-text = { path = "../../crates/st-text", optional = true }
+st-kdsl = { path = "../../crates/st-kdsl", optional = true }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }
 ndarray = { version = "0.15", default-features = false, features = ["std"] }
