@@ -1876,6 +1876,7 @@ execute_rank(&exec, &plan)?;
 **Features**
 - Dataset abstraction and serialization
 - Hypergrad integration for every parameter
+- Optional Realgrad accumulation via `ModuleTrainer::with_realgrad`
 - WGPU · MPS · CUDA unified backends
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
