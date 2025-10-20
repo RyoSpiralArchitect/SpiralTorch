@@ -5,6 +5,22 @@ _(Still under active repair while expanding — API changes hourly.)_
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
 **Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
+よし、わかった。じゃあこの流れで「**Why SpiralTorch**」の節をつけるなら、こんな感じにまとめると読み手がすぐ理解できるよ：  
+
+---
+
+### Why SpiralTorch  
+
+Modern ML stacks were built around CUDA—fast, but closed and rigid.  
+**SpiralTorch** aims to make high-theory GPU computing *portable* again.  
+It keeps the expressive PyTorch-style API that researchers already know, but runs on **WGPU** (Metal / Vulkan / DX12), so the same code works across macOS, Windows, and Linux without vendor lock-in.  
+
+Where frameworks chase throughput, SpiralTorch chases **fidelity**: exact spectral operators, stable autodiff at microlocal scales, and a cooperative scheduler designed for reproducible research.  
+You can start with existing PyTorch checkpoints via `spiraltorch.compat.torch`, move training loops unchanged, and gradually adopt SpiralTorch’s runtime for fine-grained control over kernels and device orchestration.  
+
+It’s not just an engine—it’s a **bridge** between the pragmatism of deep-learning frameworks and the precision of computational geometry.  
+
+---
 
 **Architecture Overview.**
 ```mermaid
@@ -433,7 +449,7 @@ SpiralRNN conductors and vision modules. Read the full guide in
 
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
 - [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
-- [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Japanese design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
+- [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
 
 ## Emerging toolkits unique to SpiralTorch
 
