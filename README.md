@@ -448,6 +448,7 @@ SpiralRNN conductors and vision modules. Read the full guide in
 
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
 - [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
+- [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory plus how SpiralTorch wires DRL penalties into trainers and governance loops.
 - [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
 
 ## Emerging toolkits unique to SpiralTorch
@@ -492,6 +493,41 @@ interpretability toolkit that maps gradient flows, consensus splits, and
 telemetry spikes back to model behaviour. Visualising these pathways keeps
 “why” answers native to Z-space, turning SpiralTorch’s internal instrumentation
 into an Explainable AI surface without external probes.
+
+### Multi-modal topos safety envelopes
+
+Open topos guards now ship a unified, multi-modal façade so the same
+hyperbolic safety window can simultaneously protect text, audio, vision, graph
+and reinforcement-learning reward streams. The new
+`st_tensor::MultiModalToposGuard` wraps an existing `OpenCartesianTopos` and
+lets you tune per-modality envelopes through lightweight profiles:
+
+```rust
+use st_tensor::{
+    GraphGuardProfile, ModalityProfile, MultiModalToposGuard, OpenCartesianTopos, RewardBoundary,
+};
+
+let topos = OpenCartesianTopos::new(-0.95, 1e-6, 8.0, 256, 16_384)?;
+let guard = MultiModalToposGuard::new(&topos)?
+    .with_text_profile(ModalityProfile::new(32_768, Some(0.35))?)?
+    .with_audio_profile(ModalityProfile::new(96_000, Some(1.25))?)?
+    .with_graph_profile(GraphGuardProfile::new(512, 8_192, 64, 1e-3, 0.02, None)?)?
+    .with_reward_boundary(RewardBoundary::new(-0.8, 0.8, 0.05)?)?;
+
+let mut rewards = vec![1.2, 0.6, -1.1];
+let signal = guard.guard_reward_trace(&mut rewards)?;
+if let Some(breach) = signal.upper_breach_index {
+    tracing::warn!(breach, "reward trace escaped the safe window");
+}
+```
+
+Each `ModalityProfile` enforces volume and saturation limits before delegating
+to the base topos guard, `GraphGuardProfile` ensures adjacency matrices stay
+loop-free with bounded degree, and `RewardBoundary` surfaces the first reward
+breach while clamping the trace back inside the permitted envelope. The guard
+reports symmetry violations, observed reward ranges, and saturation counts so
+downstream monitors can react without recomputing the checks in higher-level
+languages.
 
 ### Autotune telemetry for the WGPU-first roadmap
 

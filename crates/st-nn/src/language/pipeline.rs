@@ -1332,9 +1332,9 @@ mod language_pipeline {
     use crate::roundtable::RoundtableNode;
     use crate::{RoundtableConfig, RoundtableSchedule};
     use st_core::ecosystem::{
-        CloudConnector, ConnectorEvent, DistributionSummary, EcosystemRegistry,
-        HeuristicChoiceSummary, HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary,
-        RoundtableConfigSummary, RoundtableSummary,
+        ConnectorEvent, DistributionSummary, EcosystemRegistry, HeuristicChoiceSummary,
+        HeuristicDecision, HeuristicSource, MetricSample, RankPlanSummary, RoundtableConfigSummary,
+        RoundtableSummary,
     };
     use st_core::ops::rank_entry::RankPlan;
     use st_core::util::math::{ramanujan_pi, LeechProjector};
@@ -1874,6 +1874,42 @@ mod language_pipeline {
         }
     }
 
+    fn summarise_cloud_targets(targets: &[CloudConnector]) -> Vec<(String, String)> {
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
+        let mut azure_targets = Vec::new();
+        let mut aws_targets = Vec::new();
+
+        for target in targets {
+            match target {
+                CloudConnector::AzureEventHub { namespace, hub } => {
+                    azure_targets.push(format!("event_hub:{namespace}/{hub}"));
+                }
+                CloudConnector::AzureStorageQueue { account, queue } => {
+                    azure_targets.push(format!("storage_queue:{account}/{queue}"));
+                }
+                CloudConnector::AwsKinesis { region, stream } => {
+                    aws_targets.push(format!("kinesis:{region}/{stream}"));
+                }
+                CloudConnector::AwsSqs { region, queue } => {
+                    aws_targets.push(format!("sqs:{region}/{queue}"));
+                }
+            }
+        }
+
+        let mut metadata = Vec::new();
+        if !azure_targets.is_empty() {
+            metadata.push(("azure_targets".to_string(), azure_targets.join(",")));
+        }
+        if !aws_targets.is_empty() {
+            metadata.push(("aws_targets".to_string(), aws_targets.join(",")));
+        }
+
+        metadata
+    }
+
     impl From<TensorError> for PipelineError {
         fn from(err: TensorError) -> Self {
             PipelineError::Tensor(err)
@@ -1947,6 +1983,27 @@ mod language_pipeline {
                 .insert("collapse".to_string(), config.collapse_enabled);
         }
         summary
+    }
+
+    fn format_cloud_targets(targets: &[CloudConnector]) -> Vec<(String, String)> {
+        let mut azure_targets = Vec::new();
+        let mut aws_targets = Vec::new();
+        for target in targets {
+            let descriptor = target.descriptor();
+            match target.provider() {
+                "azure" => azure_targets.push(format!("{}:{descriptor}", target.service())),
+                "aws" => aws_targets.push(format!("{}:{descriptor}", target.service())),
+                _ => {}
+            }
+        }
+        let mut entries = Vec::new();
+        if !azure_targets.is_empty() {
+            entries.push(("azure_targets".to_string(), azure_targets.join(",")));
+        }
+        if !aws_targets.is_empty() {
+            entries.push(("aws_targets".to_string(), aws_targets.join(",")));
+        }
+        entries
     }
 
     impl LanguagePipeline {
@@ -2118,9 +2175,17 @@ mod language_pipeline {
                         namespace: "spiral-meta".into(),
                         hub: "roundtable".into(),
                     },
+                    CloudConnector::AzureStorageQueue {
+                        account: "spiralstorage".into(),
+                        queue: "roundtable".into(),
+                    },
                     CloudConnector::AwsKinesis {
                         region: "us-east-1".into(),
                         stream: "roundtable".into(),
+                    },
+                    CloudConnector::AwsSqs {
+                        region: "us-west-2".into(),
+                        queue: "roundtable".into(),
                     },
                 ],
             };
@@ -2134,11 +2199,11 @@ mod language_pipeline {
                 .expect("missing roundtable connector");
             assert_eq!(
                 connector.metadata.get("azure_targets"),
-                Some(&"event_hub:spiral-meta/roundtable".to_string())
+                Some(&"event_hub:spiral-meta/roundtable,storage_queue:spiralstorage/roundtable".to_string())
             );
             assert_eq!(
                 connector.metadata.get("aws_targets"),
-                Some(&"kinesis:us-east-1/roundtable".to_string())
+                Some(&"kinesis:us-east-1/roundtable,sqs:us-west-2/roundtable".to_string())
             );
         }
 

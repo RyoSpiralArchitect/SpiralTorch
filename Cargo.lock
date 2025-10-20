@@ -2762,6 +2762,7 @@ name = "st-vision"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "st-backend-wgpu",
  "st-core",
  "st-logic",
  "st-nn",
