@@ -3,13 +3,10 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-pub mod faer_dense;
+//! Transform metadata for SpiralTorch vision pipelines.
 
-#[cfg(feature = "wgpu_frac")]
-pub mod wgpu_frac;
+pub mod audit;
+pub mod cpu;
 
-#[cfg(feature = "wgpu")]
-pub mod wgpu_dense;
-
-#[cfg(feature = "wgpu")]
-pub mod wgpu_util;
+pub use audit::*;
+pub use cpu::*;
