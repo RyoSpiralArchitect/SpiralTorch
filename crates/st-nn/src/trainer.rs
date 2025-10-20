@@ -21,6 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+use crate::cloud::CloudTargetSummary;
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
@@ -273,25 +274,8 @@ impl core::fmt::Debug for ModuleTrainer {
 /// Function pointer used to convert band energy into Above/Here/Beneath weights.
 pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
 
-fn format_cloud_targets(targets: &[CloudConnector]) -> Vec<(String, String)> {
-    let mut azure_targets = Vec::new();
-    let mut aws_targets = Vec::new();
-    for target in targets {
-        let descriptor = target.descriptor();
-        match target.provider() {
-            "azure" => azure_targets.push(format!("{}:{descriptor}", target.service())),
-            "aws" => aws_targets.push(format!("{}:{descriptor}", target.service())),
-            _ => {}
-        }
-    }
-    let mut entries = Vec::new();
-    if !azure_targets.is_empty() {
-        entries.push(("azure_targets".to_string(), azure_targets.join(",")));
-    }
-    if !aws_targets.is_empty() {
-        entries.push(("aws_targets".to_string(), aws_targets.join(",")));
-    }
-    entries
+fn append_cloud_targets(metadata: &mut HashMap<String, String>, targets: &[CloudConnector]) {
+    CloudTargetSummary::from_targets(targets).extend_map(metadata);
 }
 
 #[derive(Debug, Clone)]
@@ -722,33 +706,7 @@ impl ModuleTrainer {
             );
         }
 
-        if !config.cloud_targets.is_empty() {
-            let mut azure_targets = Vec::new();
-            let mut aws_targets = Vec::new();
-            for target in &config.cloud_targets {
-                let descriptor = target.descriptor();
-                match target {
-                    CloudConnector::AzureEventHub { .. } => {
-                        azure_targets.push(format!("event_hub:{descriptor}"));
-                    }
-                    CloudConnector::AzureStorageQueue { .. } => {
-                        azure_targets.push(format!("storage_queue:{descriptor}"));
-                    }
-                    CloudConnector::AwsKinesis { .. } => {
-                        aws_targets.push(format!("kinesis:{descriptor}"));
-                    }
-                    CloudConnector::AwsSqs { .. } => {
-                        aws_targets.push(format!("sqs:{descriptor}"));
-                    }
-                }
-            }
-            if !azure_targets.is_empty() {
-                metadata.insert("azure_targets".to_string(), azure_targets.join(","));
-            }
-            if !aws_targets.is_empty() {
-                metadata.insert("aws_targets".to_string(), aws_targets.join(","));
-            }
-        }
+        append_cloud_targets(&mut metadata, &config.cloud_targets);
         self.log_connector_event("configure_distribution", metadata);
         self.distribution = Some(RoundtableNode::new(config));
     }
