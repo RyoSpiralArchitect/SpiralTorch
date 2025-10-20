@@ -597,13 +597,38 @@ mod tests {
         assert!(matches!(data.regime, HopfRegime::Supercritical));
         let flipped =
             hopf_normal_form(-0.1, 0.5, 0.8, 1.2, 0.6, 0.7, 1.2, 0.2, 1.2, 0.5, 0.3, 0.4).unwrap();
-        assert!(matches!(flipped.regime, HopfRegime::Supercritical)); // [SCALE-TODO] classification unchanged under neutral scale
+        assert!(matches!(flipped.regime, HopfRegime::Supercritical));
+
+        // Neutral rescalings of the audit gain keep the classification intact.
+        let neutral_scale = 3.5;
+        let rescaled = hopf_normal_form(
+            -0.1,
+            0.5,
+            0.8,
+            1.2,
+            0.6 * neutral_scale,
+            0.7,
+            1.2 * neutral_scale,
+            0.2,
+            0.3,
+            0.5,
+            1.1,
+            0.4,
+        )
+        .unwrap();
+        assert_eq!(rescaled.regime, data.regime);
+        assert_abs_diff_eq!(rescaled.alpha3, data.alpha3, epsilon = 1e-12);
     }
 
     #[test]
     fn ito_noise_bound_matches_closed_form() {
         let bound = ito_mean_square_bound(-0.2, 0.5, 0.04).unwrap();
-        assert_abs_diff_eq!(bound, 0.0828427125, epsilon = 1e-9); // [SCALE-TODO] expectation tracks current neutral output
+        assert_abs_diff_eq!(bound, 0.0828427125, epsilon = 1e-9);
+
+        // Scaling all terms by a neutral gain leaves the bound unchanged.
+        let scale = 2.75;
+        let scaled = ito_mean_square_bound(-0.2 * scale, 0.5 * scale, 0.04 * scale).unwrap();
+        assert_abs_diff_eq!(scaled, bound, epsilon = 1e-9);
         assert!(ito_mean_square_bound(-0.2, -0.5, 0.04).is_none());
     }
 
@@ -615,7 +640,10 @@ mod tests {
         assert_abs_diff_eq!(params.gamma_bar, 0.625, epsilon = 1e-12);
         assert_abs_diff_eq!(params.omega_bar, 1.5, epsilon = 1e-12);
         assert_abs_diff_eq!(params.audit_cluster, 0.4772727272, epsilon = 1e-9);
-        // [SCALE-TODO] ratio reflects neutral scale metadata
         assert_abs_diff_eq!(params.container_cluster, 0.1923076923, epsilon = 1e-9);
+
+        let ratio = params.container_cluster / params.audit_cluster;
+        let expected_ratio = (0.4 * 0.5 * 1.1) / (0.6 * 0.7 * 1.3);
+        assert_abs_diff_eq!(ratio, expected_ratio, epsilon = 1e-12);
     }
 }
