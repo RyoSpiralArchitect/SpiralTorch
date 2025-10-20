@@ -1015,7 +1015,13 @@ impl VisionProjector {
             spread /= 1.0 + summary.mean_abs_drift.abs();
         }
         let energy_bias = summary.mean_decay;
-        Self::new(focus, spread, energy_bias)
+        let mut projector = Self::new(focus, spread, energy_bias);
+        if summary.mean_abs_drift.is_finite() {
+            projector.temporal_decay =
+                (1.0 / (1.0 + summary.mean_abs_drift.abs())).clamp(0.05, 1.0);
+        }
+        projector.temporal_focus = 1.0;
+        projector
     }
 
     /// Updates the projector using live atlas telemetry.
@@ -1034,6 +1040,24 @@ impl VisionProjector {
         if let Some(total) = frame.collapse_total {
             if total.is_finite() {
                 self.energy_bias = total.tanh();
+            }
+        }
+        for metric in &frame.metrics {
+            match metric.name.as_str() {
+                "temporal_focus" | "z_temporal_focus" => {
+                    self.temporal_focus = metric.value.clamp(0.0, 1.0);
+                }
+                "temporal_decay" | "z_temporal_decay" => {
+                    if metric.value.is_finite() {
+                        self.temporal_decay = metric.value.abs().clamp(0.05, 1.0);
+                    }
+                }
+                _ => {}
+            }
+            if let Some(district) = metric.district() {
+                if district.eq_ignore_ascii_case("temporal") && metric.value.is_finite() {
+                    self.temporal_decay = metric.value.abs().clamp(0.05, 1.0);
+                }
             }
         }
     }
@@ -1087,6 +1111,64 @@ impl VisionProjector {
         }
         ZSpaceVolume::normalise_weights(&mut weights);
         Ok(weights)
+    }
+
+    fn compute_temporal_weights(&self, frames: usize) -> Vec<f32> {
+        if frames == 0 {
+            return Vec::new();
+        }
+        if frames == 1 {
+            return vec![1.0];
+        }
+        let focus = self.temporal_focus.clamp(0.0, 1.0);
+        let decay = self.temporal_decay.max(1e-3);
+        let denom = (frames - 1) as f32;
+        let mut weights = Vec::with_capacity(frames);
+        for idx in 0..frames {
+            let position = if denom > 0.0 { idx as f32 / denom } else { 0.0 };
+            let delta = position - focus;
+            let gaussian = (-0.5 * (delta / decay).powi(2)).exp();
+            weights.push(gaussian.max(1e-6));
+        }
+        let mut total = 0.0f32;
+        for weight in &weights {
+            total += *weight;
+        }
+        if total <= f32::EPSILON || !total.is_finite() {
+            let uniform = 1.0 / frames as f32;
+            weights.iter_mut().for_each(|w| *w = uniform);
+        } else {
+            weights.iter_mut().for_each(|w| *w /= total);
+        }
+        weights
+    }
+
+    /// Returns the temporal weights applied when fusing a sequence of frames.
+    pub fn temporal_weights(&self, frames: usize) -> Vec<f32> {
+        self.compute_temporal_weights(frames)
+    }
+
+    fn streaming_alpha(&self) -> f32 {
+        (1.0 - self.temporal_decay.clamp(0.0, 0.99)).clamp(0.05, 0.95)
+    }
+
+    /// Applies the projector's streaming temporal preference as an EMA update.
+    pub fn accumulate_temporal(
+        &self,
+        state: &mut ZSpaceVolume,
+        next: &ZSpaceVolume,
+    ) -> PureResult<()> {
+        let alpha = self.streaming_alpha();
+        state.accumulate(next, alpha)
+    }
+
+    /// Fuses a temporal sequence of volumes into a single blended volume.
+    pub fn fuse_sequence(&self, sequence: &[ZSpaceVolume]) -> PureResult<ZSpaceVolume> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        let weights = self.compute_temporal_weights(sequence.len());
+        ZSpaceVolume::blend_sequence(sequence, &weights)
     }
 
     /// Produces the final depth weights as a tensor.
