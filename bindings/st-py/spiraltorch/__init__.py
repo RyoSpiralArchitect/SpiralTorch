@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys, types as _types
 from importlib import import_module
-from typing import Any as _Any
+from typing import Any as _Any, Iterable as _Iterable, Mapping as _Mapping
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
 # Rust拡張の本体
@@ -47,42 +47,151 @@ for _pub, _cands in _COMPAT_ALIAS.items():
             globals()[_pub] = getattr(_rs, _c)
             break
 
-# 空サブモジュール（将来ここに実装をぶら下げる）
+_FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
+    "nn": {
+        "Dataset": ("_NnDataset",),
+        "DataLoader": ("_NnDataLoader",),
+        "DataLoaderIter": ("_NnDataLoaderIter",),
+        "from_samples": ("nn_from_samples", "dataset_from_samples"),
+    },
+    "compat.torch": {
+        "to_torch": ("compat_to_torch", "to_torch"),
+        "from_torch": ("compat_from_torch", "from_torch"),
+    },
+    "compat.jax": {
+        "to_jax": ("compat_to_jax", "to_jax"),
+        "from_jax": ("compat_from_jax", "from_jax"),
+    },
+    "compat.tensorflow": {
+        "to_tensorflow": ("compat_to_tensorflow", "to_tensorflow"),
+        "from_tensorflow": ("compat_from_tensorflow", "from_tensorflow"),
+    },
+}
+
+
+class _ForwardingModule(_types.ModuleType):
+    """Module stub that forwards attribute lookups to the Rust backend."""
+
+    def __init__(self, name: str, doc: str, key: str) -> None:
+        super().__init__(name, doc)
+        self.__dict__["_forward_key"] = key
+
+    @property
+    def _forward_key(self) -> str:
+        return self.__dict__["_forward_key"]
+
+    def __getattr__(self, attr: str) -> _Any:
+        if attr.startswith("_"):
+            raise AttributeError(f"module '{self.__name__}' has no attribute '{attr}'")
+
+        # Prefer already-exposed globals so top-level mirrors stay consistent.
+        if attr in globals():
+            value = globals()[attr]
+            setattr(self, attr, value)
+            _register_module_export(self, attr)
+            return value
+
+        hints = _FORWARDING_HINTS.get(self._forward_key, {})
+        candidates: list[str] = []
+        aliases = hints.get(attr)
+        if aliases:
+            candidates.extend(aliases)
+
+        namespace_parts = self._forward_key.split(".")
+        suffix = namespace_parts[-1]
+        flat_suffix = "_".join(namespace_parts)
+        candidates.extend(
+            [
+                attr,
+                f"{suffix}_{attr}",
+                f"{suffix}_{attr.lower()}",
+                f"{flat_suffix}_{attr}",
+                f"{flat_suffix}_{attr.lower()}",
+            ]
+        )
+
+        for candidate in dict.fromkeys(candidates):
+            if hasattr(_rs, candidate):
+                value = getattr(_rs, candidate)
+                setattr(self, attr, value)
+                _register_module_export(self, attr)
+                return value
+
+        raise AttributeError(f"module '{self.__name__}' has no attribute '{attr}'")
+
+    def __dir__(self) -> list[str]:
+        exported = set(getattr(self, "__all__", ()))
+        exported.update(super().__dir__())
+        hints = _FORWARDING_HINTS.get(self._forward_key, {})
+        exported.update(hints.keys())
+        suffix = self._forward_key.split(".")[-1] + "_"
+        flat_suffix = "_".join(self._forward_key.split(".")) + "_"
+        for name in dir(_rs):
+            if name.startswith(suffix):
+                exported.add(name[len(suffix):])
+            elif name.startswith(flat_suffix):
+                exported.add(name[len(flat_suffix):])
+        return sorted(exported)
+
+
+def _register_module_export(module: _types.ModuleType, name: str) -> None:
+    exported = set(getattr(module, "__all__", ()))
+    exported.add(name)
+    module.__all__ = sorted(exported)
+
+
 def _ensure_submodule(name: str, doc: str = "") -> _types.ModuleType:
-    """Return an existing or synthetic child module.
+    """Return an existing or synthetic child module (supports dotted paths)."""
 
-    The stub modules keep ``import spiraltorch.<name>`` from escaping to
-    unrelated third-party packages while we gradually expose more bindings
-    from the Rust extension.
-    """
-
-    fq = f"{__name__}.{name}"
-    module = getattr(_rs, name, None)
-    if isinstance(module, _types.ModuleType):
-        # Bind the real Rust powered submodule directly and make sure the
-        # absolute import machinery can still find it.
-        if not module.__doc__:
-            module.__doc__ = doc
-        sys.modules[fq] = module
-    else:
+    parts = name.split(".")
+    fq = __name__
+    parent: _types.ModuleType = sys.modules[__name__]
+    for idx, part in enumerate(parts):
+        fq = f"{fq}.{part}"
         module = sys.modules.get(fq)
+        final = idx == len(parts) - 1
+        doc_for_part = doc if final else ""
         if module is None:
-            module = _types.ModuleType(fq, doc)
+            candidate = getattr(parent, part, None)
+            if not isinstance(candidate, _types.ModuleType):
+                candidate = getattr(_rs, part, None) if idx == 0 else None
+            if isinstance(candidate, _types.ModuleType):
+                module = candidate
+                if doc_for_part and not getattr(module, "__doc__", None):
+                    module.__doc__ = doc_for_part
+            else:
+                key = ".".join(parts[: idx + 1])
+                module = _ForwardingModule(fq, doc_for_part, key)
             sys.modules[fq] = module
-    globals()[name] = module
-    return module
+        elif doc_for_part and not getattr(module, "__doc__", None):
+            module.__doc__ = doc_for_part
 
-def _expose_from_rs(name: str) -> None:
+        setattr(parent, part, module)
+        if idx == 0:
+            globals()[part] = module
+        parent = module
+    return parent
+
+
+def _expose_from_rs(name: str, *aliases: str) -> None:
     if name in globals():
         return
-    if hasattr(_rs, name):
-        globals()[name] = getattr(_rs, name)
+    for candidate in (name, *aliases):
+        if hasattr(_rs, candidate):
+            globals()[name] = getattr(_rs, candidate)
+            return
 
-def _mirror_into_module(name: str, members: list[str]) -> _types.ModuleType:
+
+def _mirror_into_module(
+    name: str,
+    members: _Iterable[str] | _Mapping[str, _Iterable[str]]
+) -> _types.ModuleType:
     module = _ensure_submodule(name)
     exported: set[str] = set(getattr(module, "__all__", ()))
-    for member in members:
-        _expose_from_rs(member)
+    items: _Iterable[tuple[str, _Iterable[str]]] \
+        = members.items() if isinstance(members, _Mapping) else ((m, ()) for m in members)
+    for member, aliases in items:
+        _expose_from_rs(member, *aliases)
         value = globals().get(member)
         if value is None:
             continue
@@ -111,6 +220,20 @@ for _name, _doc in [
     _ensure_submodule(_name, _doc)
 
 
+_compat_children = {
+    "torch": "PyTorch interoperability helpers",
+    "jax": "JAX interoperability helpers",
+    "tensorflow": "TensorFlow interoperability helpers",
+}
+for _child, _doc in _compat_children.items():
+    _ensure_submodule(f"compat.{_child}", _doc)
+_compat_module = globals().get("compat")
+if isinstance(_compat_module, _types.ModuleType):
+    _compat_exports = set(getattr(_compat_module, "__all__", ()))
+    _compat_exports.update(_compat_children.keys())
+    _compat_module.__all__ = sorted(_compat_exports)
+
+
 _mirror_into_module(
     "inference",
     [
@@ -118,6 +241,58 @@ _mirror_into_module(
         "InferenceResult","InferenceRuntime",
     ],
 )
+
+
+_mirror_into_module(
+    "nn",
+    {
+        "Dataset": ("_NnDataset",),
+        "DataLoader": ("_NnDataLoader",),
+        "DataLoaderIter": ("_NnDataLoaderIter",),
+        "from_samples": ("nn_from_samples", "dataset_from_samples"),
+    },
+)
+_mirror_into_module(
+    "frac",
+    [
+        "gl_coeffs_adaptive",
+        "fracdiff_gl_1d",
+    ],
+)
+_mirror_into_module(
+    "rl",
+    [
+        "DqnAgent",
+        "PpoAgent",
+        "SacAgent",
+    ],
+)
+_mirror_into_module(
+    "rec",
+    [
+        "QueryPlan",
+        "RecEpochReport",
+        "Recommender",
+    ],
+)
+_mirror_into_module(
+    "telemetry",
+    [
+        "DashboardMetric",
+        "DashboardEvent",
+        "DashboardFrame",
+        "DashboardRing",
+    ],
+)
+
+
+for _key, _hint in _FORWARDING_HINTS.items():
+    _module = _ensure_submodule(_key)
+    if not _hint:
+        continue
+    _exports = set(getattr(_module, "__all__", ()))
+    _exports.update(_hint.keys())
+    _module.__all__ = sorted(_exports)
 
 
 _CORE_EXPORTS = [
