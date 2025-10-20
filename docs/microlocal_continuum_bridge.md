@@ -40,3 +40,8 @@ SpiralTorch already measures boundary activity with microlocal gauges and turns 
 4. Use the fused `ZPulse` stream to drive your macro evolution loop, modulating learning rates, actuation, or constraint forces according to the detected curvature pressure.
 
 This workflow lets the microlocal "R machine" act as a data-driven estimator for the continuum models summarized earlier, while keeping everything within SpiralTorch's native Z-space orchestration.
+
+## 7. Handshake with the macro template
+
+- `MacroZBridge` couples any macro card to an `InterfaceZLift`, reusing the exact Z pulses produced above instead of reimplementing the projection logic.【F:crates/st-core/src/theory/macro.rs†L706-L741】
+- `MacroDrive` emits the curvature bundle and predicted velocity derived from the macro kinetics, so the same fused pulse can be inspected in Z-space while closing the sharp-interface dynamics.【F:crates/st-core/src/theory/macro.rs†L738-L746】

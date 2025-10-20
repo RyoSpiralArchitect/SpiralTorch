@@ -3,24 +3,6 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-// =============================================================================
-//  SpiralReality Proprietary
-// Copyright (c) 2025 SpiralReality. All Rights Reserved.
-//
-// NOTICE: This file contains confidential and proprietary information of
-// SpiralReality. ANY USE, COPYING, MODIFICATION, DISTRIBUTION, DISPLAY,
-// OR DISCLOSURE OF THIS FILE, IN WHOLE OR IN PART, IS STRICTLY PROHIBITED
-// WITHOUT THE PRIOR WRITTEN CONSENT OF SPIRALREALITY.
-//
-// NO LICENSE IS GRANTED OR IMPLIED BY THIS FILE. THIS SOFTWARE IS PROVIDED
-// "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
-// NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
-// PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL SPIRALREALITY OR ITS
-// SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
-// AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-// =============================================================================
-
 //! Macro-scale interfacial templates used to keep the sharp-interface
 //! description "closeable" without invoking the microlocal gauges.
 //!
@@ -33,6 +15,8 @@
 //! of SpiralTorch can instantiate droplets, crystalline fronts, membranes, or
 //! pattern-forming interfaces without re-deriving the bookkeeping each time.
 
+use crate::theory::microlocal::{InterfaceSignature, InterfaceZLift, InterfaceZPulse};
+use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -376,6 +360,30 @@ impl MacroKinetics {
     pub fn with_force(mut self, force: ExternalForce) -> Self {
         self.external_forces.push(force);
         self
+    }
+
+    /// Aggregates the external forcing term using the supplied Z-space pulse if available.
+    pub fn forcing_from_pulse(&self, pulse: Option<&InterfaceZPulse>) -> f64 {
+        self.external_forces
+            .iter()
+            .map(|force| match *force {
+                ExternalForce::PressureJump(delta_p) => delta_p as f64,
+                ExternalForce::BulkPotential(value)
+                | ExternalForce::Nonlocal(value)
+                | ExternalForce::Custom { magnitude: value, .. } => value as f64,
+                ExternalForce::ContactAngle {
+                    equilibrium,
+                    friction,
+                } => {
+                    if let Some(pulse) = pulse {
+                        let deviation = pulse.z_bias as f64 - equilibrium as f64;
+                        -(friction as f64) * deviation
+                    } else {
+                        0.0
+                    }
+                }
+            })
+            .sum()
     }
 
     /// Evaluates the normal velocity for the supplied contributions.
@@ -826,6 +834,82 @@ impl MacroModelTemplate {
             }
         }
     }
+
+    /// Couples the template with a microlocal lift to produce Z-space aware drives.
+    pub fn couple_with(self, lift: InterfaceZLift) -> MacroZBridge {
+        MacroZBridge::new(self, lift)
+    }
+}
+
+/// Bridges macro templates with microlocal signatures and Z pulses.
+#[derive(Clone)]
+pub struct MacroZBridge {
+    template: MacroModelTemplate,
+    lift: InterfaceZLift,
+}
+
+impl MacroZBridge {
+    pub fn new(template: MacroModelTemplate, lift: InterfaceZLift) -> Self {
+        Self { template, lift }
+    }
+
+    pub fn template(&self) -> &MacroModelTemplate {
+        &self.template
+    }
+
+    fn average_field(field: &ArrayD<f32>) -> f64 {
+        if field.len() == 0 {
+            0.0
+        } else {
+            field.iter().map(|v| *v as f64).sum::<f64>() / field.len() as f64
+        }
+    }
+
+    /// Projects a microlocal signature into Z-space and evaluates the macro drive.
+    pub fn ingest_signature(&self, signature: &InterfaceSignature) -> MacroDrive {
+        let pulse = self.lift.project(signature);
+        let mean_curvature = Self::average_field(&signature.mean_curvature);
+        let anisotropic_curvature = signature
+            .signed_mean_curvature
+            .as_ref()
+            .map(|field| Self::average_field(field));
+        let bending_operator = self
+            .template
+            .functional
+            .bending_terms
+            .iter()
+            .find_map(|term| term.spontaneous_curvature)
+            .map(|h0| mean_curvature - h0);
+        let forcing = self.template.kinetics.forcing_from_pulse(Some(&pulse));
+        let contributions = CurvatureContributions {
+            mean_curvature,
+            anisotropic_curvature,
+            bending_operator,
+            forcing,
+        };
+        let velocity = self.template.kinetics.evaluate_velocity(&contributions);
+        MacroDrive {
+            pulse,
+            contributions,
+            velocity,
+            dimensionless: self.template.nondimensional.clone(),
+        }
+    }
+}
+
+/// Result of pushing a microlocal signature through a macro template.
+#[derive(Clone, Debug)]
+pub struct MacroDrive {
+    pub pulse: InterfaceZPulse,
+    pub contributions: CurvatureContributions,
+    pub velocity: f64,
+    pub dimensionless: DimensionlessGroups,
+}
+
+impl MacroDrive {
+    pub fn sharp_interface_ok(&self) -> bool {
+        self.dimensionless.sharp_interface_ok()
+    }
 }
 
 /// Macro model cards (A–E) mirroring the memo.
@@ -893,6 +977,9 @@ pub struct ContactCardConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theory::microlocal::{InterfaceSignature, InterfaceZLift};
+    use crate::util::math::LeechProjector;
+    use ndarray::{ArrayD, IxDyn};
 
     #[test]
     fn dimensionless_groups_compute_expected_values() {
@@ -948,5 +1035,43 @@ mod tests {
         };
         let velocity = kinetics.evaluate_velocity(&contributions);
         assert!((velocity - 1.4).abs() < 1e-12);
+    }
+
+    #[test]
+    fn bridge_converts_microlocal_signature_into_drive() {
+        let config = MinimalCardConfig {
+            phase_pair: PhasePair::new("A", "B"),
+            sigma: 0.1,
+            mobility: 1.0,
+            volume: None,
+            physical_scales: None,
+        };
+        let template = MacroModelTemplate::from_card(MacroCard::Minimal(config));
+        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.1));
+        let bridge = template.couple_with(lift);
+
+        let shape = IxDyn(&[1, 1, 1]);
+        let r_machine = ArrayD::from_elem(shape.clone(), 1.0f32);
+        let raw_density = ArrayD::from_elem(shape.clone(), 0.2f32);
+        let perimeter_density = ArrayD::from_elem(shape.clone(), 0.1f32);
+        let mean_curvature = ArrayD::from_elem(shape.clone(), 0.5f32);
+        let signed_mean = ArrayD::from_elem(shape.clone(), 0.55f32);
+        let signature = InterfaceSignature {
+            r_machine,
+            raw_density,
+            perimeter_density,
+            mean_curvature,
+            signed_mean_curvature: Some(signed_mean),
+            orientation: None,
+            kappa_d: 1.0,
+            radius: 1,
+            physical_radius: 1.0,
+        };
+
+        let drive = bridge.ingest_signature(&signature);
+        assert!(drive.velocity > 0.0);
+        assert!((drive.contributions.mean_curvature - 0.5).abs() < 1e-6);
+        assert!(drive.pulse.support > 0.0);
+        assert!(drive.sharp_interface_ok());
     }
 }
