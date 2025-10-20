@@ -429,7 +429,7 @@ impl DeviceCaps {
             BackendKind::Wgpu => col_heavy || (k_heavy && !small_rows),
             BackendKind::Cuda | BackendKind::Hip => {
                 col_heavy || (k_heavy && rows > lanes.saturating_mul(8))
-            },
+            }
             BackendKind::Cpu => col_heavy && rows > 512,
         }
     }
