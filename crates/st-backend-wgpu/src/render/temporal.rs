@@ -134,7 +134,6 @@ impl<'a> TemporalVolumeLike for TemporalVolumeView<'a> {
     }
 }
 
-
 /// Configuration for rendering a temporal volume into time-aware slices.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TemporalRendererConfig {
@@ -379,5 +378,4 @@ mod tests {
         let result = TemporalVolumeView::new(1, 1, 2, 2, &voxels, &harmonics, &decay);
         assert!(matches!(result, Err(TensorError::DataLength { .. })));
     }
-
 }
