@@ -337,9 +337,6 @@ impl InterfaceZLift {
             0.0
         };
 
-        // ここで物理半径からスケールを設定
-        let scale = ZScale::new(signature.physical_radius).unwrap_or(ZScale::ONE);
-
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support: total_support,
@@ -390,9 +387,6 @@ impl InterfaceZPulse {
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
         let mut scale_weights = Vec::new();
-        let mut scale_phys = 0.0f32;
-        let mut scale_log = 0.0f32;
-        let mut scale_weight = 0.0f32;
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
@@ -405,18 +399,16 @@ impl InterfaceZPulse {
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
             if let Some(scale) = pulse.scale {
-                scale_weights.push((scale, weight));
+                let scale_weight = scale_weight_for(pulse);
+                scale_weights.push((scale, scale_weight));
             }
         }
 
         // Combine the weighted scale contributions from the input pulses.  When all
         // contributors omit the scale metadata we conservatively fall back to the
         // most recent non-empty sample so downstream consumers retain continuity.
-        let aggregated_scale = if scale_weight > 0.0 {
-            ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
-        } else {
-            pulses.iter().rev().find_map(|pulse| pulse.scale)
-        };
+        let aggregated_scale = ZScale::weighted_average(scale_weights.iter().copied())
+            .or_else(|| pulses.iter().rev().find_map(|pulse| pulse.scale));
         InterfaceZPulse {
             source: ZSource::Microlocal,
             support,
@@ -440,14 +432,6 @@ impl InterfaceZPulse {
 
     pub fn lerp(current: &InterfaceZPulse, next: &InterfaceZPulse, alpha: f32) -> InterfaceZPulse {
         let t = alpha.clamp(0.0, 1.0);
-
-        // スケールの補間（両方 Some の場合のみ補間、それ以外は次を優先）
-        let scale = match (current.scale, next.scale) {
-            (Some(a), Some(b)) => Some(ZScale::lerp(a, b, t)),
-            (_, s @ Some(_)) => s,
-            (s @ Some(_), None) => s,
-            (None, None) => None,
-        };
 
         InterfaceZPulse {
             source: next.source,
