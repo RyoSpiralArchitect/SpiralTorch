@@ -58,6 +58,7 @@ struct CliArgs {
     weights: Option<PathBuf>,
     epsilon: Option<f32>,
     apply_relu: bool,
+    normalise: bool,
     output: PathBuf,
 }
 
@@ -78,6 +79,7 @@ impl CliArgs {
         let mut weights = None;
         let mut epsilon = None;
         let mut apply_relu = true;
+        let mut normalise = true;
         let mut output = None;
 
         while let Some(arg) = args.next() {
@@ -176,6 +178,9 @@ impl CliArgs {
                 "--no-relu" => {
                     apply_relu = false;
                 }
+                "--raw-heatmap" => {
+                    normalise = false;
+                }
                 "--output" => {
                     let value = args.next().ok_or_else(|| {
                         io::Error::new(ErrorKind::InvalidInput, "--output requires a path")
@@ -223,6 +228,7 @@ impl CliArgs {
             weights,
             epsilon,
             apply_relu,
+            normalise,
             output,
         })
     }
@@ -257,6 +263,7 @@ fn run_grad_cam(args: &CliArgs) -> Result<(), Box<dyn std::error::Error>> {
         width,
         apply_relu: args.apply_relu,
         epsilon,
+        normalise: args.normalise,
     };
     let heatmap = GradCam::attribute(&activations, &gradients, &config)
         .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
@@ -268,6 +275,7 @@ fn run_grad_cam(args: &CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     metadata.insert_extra_number("width", width as f64);
     metadata.insert_extra_flag("apply_relu", config.apply_relu);
     metadata.insert_extra_number("epsilon", epsilon as f64);
+    metadata.insert_extra_flag("normalise", config.normalise);
     let output = AttributionOutput::new(heatmap, metadata);
     write_report(&output.to_report(), &args.output)
 }
@@ -350,7 +358,7 @@ fn print_usage() {
          --gradients <file>\n\
          --height <pixels>\n\
          --width <pixels>\n\
-         [--epsilon <float>] [--no-relu]\n\
+         [--epsilon <float>] [--no-relu] [--raw-heatmap]\n\
          \n\
          Integrated Gradients:\n\
          --input <file> --baseline <file>\n\

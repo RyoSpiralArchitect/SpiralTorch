@@ -11,8 +11,9 @@ CLI.
 * **Grad-CAM** (`st_vision::xai::GradCam`) accepts channel-major activation and
 gradient tensors sourced from registered forward hooks. Channel weights are
 computed using global-average pooling of the gradients before projecting back
-into the requested spatial dimensions. Heatmaps are rectified (configurable) and
-normalised to the unit interval with an epsilon guard to preserve determinism.
+into the requested spatial dimensions. Heatmaps are rectified (configurable),
+and callers can opt-in to raw (unnormalised) outputs or min-max scaling with an
+epsilon guard to preserve determinism.
 * **Integrated Gradients** (`st_vision::xai::IntegratedGradients`) interpolates
 between a deterministic baseline and the analysed sample. A provided
 `st_nn::module::Module` instance is evaluated along the integration path and the
@@ -27,9 +28,10 @@ and rich metadata for downstream telemetry.
 `st_vision::models::ForwardAttributionHooks` registers layer-specific Grad-CAM
 configurations and records activation/gradient pairs. When both tensors are
 available the hook produces an `AttributionOutput`, ensuring intermediate state
-is drained to avoid stale data. Integrated Gradients support is exposed through
-`run_integrated_gradients`, combining attribution metadata with optional
-human-readable labels.
+is drained to avoid stale data. Hooks can also flush every registered layer via
+`compute_all_grad_cam`, keeping attribution metadata synchronised per layer.
+Integrated Gradients support is exposed through `run_integrated_gradients`,
+combining attribution metadata with optional human-readable labels.
 
 ## Telemetry Reports
 
@@ -61,8 +63,10 @@ cargo run -p st-xai-cli -- \
   --output heatmap.json
 ```
 
-Integrated Gradients accepts optional linear weights for lightweight models and
-a `--target-label` annotation for reporting:
+Grad-CAM outputs are min-max normalised by default; append `--raw-heatmap` to
+preserve the raw weighted activations. Integrated Gradients accepts optional
+linear weights for lightweight models and a `--target-label` annotation for
+reporting:
 
 ```bash
 cargo run -p st-xai-cli -- \

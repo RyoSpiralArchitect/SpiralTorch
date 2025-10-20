@@ -63,7 +63,19 @@ impl ForwardAttributionHooks {
         metadata.insert_extra_number("width", config.width as f64);
         metadata.insert_extra_flag("apply_relu", config.apply_relu);
         metadata.insert_extra_number("epsilon", config.epsilon as f64);
+        metadata.insert_extra_flag("normalise", config.normalise);
         Ok(Some(AttributionOutput::new(heatmap, metadata)))
+    }
+
+    pub fn compute_all_grad_cam(&mut self) -> PureResult<Vec<(String, AttributionOutput)>> {
+        let layers: Vec<String> = self.grad_cam.keys().cloned().collect();
+        let mut outputs = Vec::new();
+        for layer in layers {
+            if let Some(output) = self.compute_grad_cam(&layer)? {
+                outputs.push((layer, output));
+            }
+        }
+        Ok(outputs)
     }
 }
 
@@ -126,6 +138,7 @@ mod tests {
                 width: 2,
                 apply_relu: true,
                 epsilon: 1e-6,
+                normalise: true,
             },
         );
         let activation =
@@ -141,6 +154,14 @@ mod tests {
         assert_eq!(report.shape(), (2, 2));
         assert_eq!(report.metadata.algorithm, "grad-cam");
         assert_eq!(report.metadata.layer.as_deref(), Some("conv1"));
+        assert_eq!(
+            report
+                .metadata
+                .extras
+                .get("normalise")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
     }
 
     #[test]
@@ -155,5 +176,21 @@ mod tests {
         assert_eq!(attribution.metadata.algorithm, "integrated-gradients");
         assert_eq!(attribution.metadata.steps, Some(8));
         assert_eq!(attribution.metadata.target.as_deref(), Some("class_a"));
+    }
+
+    #[test]
+    fn compute_all_grad_cam_drains_layers() {
+        let mut hooks = ForwardAttributionHooks::new();
+        hooks.register_grad_cam("conv1", GradCamConfig::new(1, 2).with_normalise(false));
+        let activation = Tensor::from_vec(1, 2, vec![1.0, 2.0]).unwrap();
+        let gradient = Tensor::from_vec(1, 2, vec![0.5, 0.5]).unwrap();
+        hooks.record_activation("conv1", &activation);
+        hooks.record_gradient("conv1", &gradient);
+        let outputs = hooks.compute_all_grad_cam().unwrap();
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].0, "conv1");
+        assert_eq!(outputs[0].1.metadata.algorithm, "grad-cam");
+        assert_eq!(outputs[0].1.map.data(), &[0.5, 1.0]);
+        assert!(hooks.compute_grad_cam("conv1").unwrap().is_none());
     }
 }

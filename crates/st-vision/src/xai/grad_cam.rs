@@ -8,6 +8,7 @@ pub struct GradCamConfig {
     pub width: usize,
     pub apply_relu: bool,
     pub epsilon: f32,
+    pub normalise: bool,
 }
 
 impl GradCamConfig {
@@ -17,7 +18,23 @@ impl GradCamConfig {
             width,
             apply_relu: true,
             epsilon: 1e-6,
+            normalise: true,
         }
+    }
+
+    pub fn with_relu(mut self, enabled: bool) -> Self {
+        self.apply_relu = enabled;
+        self
+    }
+
+    pub fn with_epsilon(mut self, epsilon: f32) -> Self {
+        self.epsilon = epsilon;
+        self
+    }
+
+    pub fn with_normalise(mut self, enabled: bool) -> Self {
+        self.normalise = enabled;
+        self
     }
 }
 
@@ -64,7 +81,10 @@ impl GradCam {
             }
             heatmap[idx] = value;
         }
-        normalise_unit_interval(&mut heatmap, config.epsilon);
+
+        if config.normalise {
+            normalise_unit_interval(&mut heatmap, config.epsilon);
+        }
         Tensor::from_vec(config.height, config.width, heatmap)
     }
 }
@@ -101,5 +121,14 @@ mod tests {
         }
         let (rows, cols) = heatmap.shape();
         assert_eq!((rows, cols), (2, 2));
+    }
+
+    #[test]
+    fn grad_cam_allows_raw_heatmap() {
+        let activations = Tensor::from_vec(1, 4, vec![0.2, 0.5, 0.9, 1.1]).unwrap();
+        let gradients = Tensor::from_vec(1, 4, vec![1.0, 1.0, 1.0, 1.0]).unwrap();
+        let config = GradCamConfig::new(2, 2).with_normalise(false);
+        let heatmap = GradCam::attribute(&activations, &gradients, &config).unwrap();
+        assert_eq!(heatmap.data(), &[0.2, 0.5, 0.9, 1.1]);
     }
 }
