@@ -13,3 +13,8 @@ __all__ = [
     "ExportPipeline",
     "load_benchmark_report",
 ]
+"""Python utilities for the SpiralTorch training CLI."""
+
+from . import cli
+
+__all__ = ["cli"]

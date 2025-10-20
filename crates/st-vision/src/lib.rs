@@ -73,6 +73,7 @@ pub mod models;
 
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
+use st_logic::temporal_dynamics::TemporalVolume;
 use st_nn::layers::spiral_rnn::SpiralRnn;
 use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
@@ -81,6 +82,127 @@ pub mod datasets;
 pub mod nerf;
 pub mod transforms;
 const RESONANCE_FEATURES_PER_SLICE: usize = 10;
+/// Streaming chrono snapshot associated with a batch of Z-space slices.
+#[derive(Clone, Debug)]
+pub struct ChronoSnapshot {
+    timestamp: f32,
+    dt: f32,
+    summary: ChronoSummary,
+}
+
+impl ChronoSnapshot {
+    /// Creates a new snapshot with explicit timestep metadata.
+    pub fn new(summary: ChronoSummary, dt: f32) -> Self {
+        let mut snapshot = Self {
+            timestamp: summary.latest_timestamp,
+            dt: if dt.is_finite() && dt >= 0.0 { dt } else { 0.0 },
+            summary,
+        };
+        if !snapshot.timestamp.is_finite() {
+            snapshot.timestamp = 0.0;
+        }
+        snapshot
+    }
+
+    /// Timestamp associated with the summary's latest frame.
+    pub fn timestamp(&self) -> f32 {
+        self.timestamp
+    }
+
+    /// Duration represented by the snapshot.
+    pub fn dt(&self) -> f32 {
+        self.dt
+    }
+
+    /// Immutable access to the captured summary.
+    pub fn summary(&self) -> &ChronoSummary {
+        &self.summary
+    }
+
+    /// Consumes the snapshot returning its inner summary.
+    pub fn into_summary(self) -> ChronoSummary {
+        self.summary
+    }
+}
+
+/// In-flight frame carrying Z-space slices and optional telemetry metadata.
+#[derive(Clone, Debug)]
+pub struct ZSpaceStreamFrame {
+    slices: Vec<Tensor>,
+    atlas_frame: Option<AtlasFrame>,
+    chrono_snapshot: Option<ChronoSnapshot>,
+}
+
+impl ZSpaceStreamFrame {
+    /// Builds a streaming frame ensuring all slices share identical dimensions.
+    pub fn new(slices: Vec<Tensor>) -> PureResult<Self> {
+        if slices.is_empty() {
+            return Err(TensorError::EmptyInput("z_stream_frame_slices"));
+        }
+        let (height, width) = slices[0].shape();
+        for slice in &slices[1..] {
+            let shape = slice.shape();
+            if shape != (height, width) {
+                return Err(TensorError::ShapeMismatch {
+                    left: (height, width),
+                    right: shape,
+                });
+            }
+        }
+        Ok(Self {
+            slices,
+            atlas_frame: None,
+            chrono_snapshot: None,
+        })
+    }
+
+    /// Attaches an atlas frame to the streaming bundle.
+    pub fn with_atlas(mut self, atlas: AtlasFrame) -> Self {
+        self.atlas_frame = Some(atlas);
+        self
+    }
+
+    /// Attaches a chrono snapshot to the streaming bundle.
+    pub fn with_snapshot(mut self, snapshot: ChronoSnapshot) -> Self {
+        self.chrono_snapshot = Some(snapshot);
+        self
+    }
+
+    /// Returns the contained slices.
+    pub fn slices(&self) -> &[Tensor] {
+        &self.slices
+    }
+
+    /// Returns a mutable view into the slices.
+    pub fn slices_mut(&mut self) -> &mut [Tensor] {
+        &mut self.slices
+    }
+
+    /// Returns the attached atlas frame when present.
+    pub fn atlas_frame(&self) -> Option<&AtlasFrame> {
+        self.atlas_frame.as_ref()
+    }
+
+    /// Returns the attached chrono snapshot when present.
+    pub fn chrono_snapshot(&self) -> Option<&ChronoSnapshot> {
+        self.chrono_snapshot.as_ref()
+    }
+}
+
+/// Result of converting a streaming frame into a concrete Z-space volume.
+#[derive(Clone, Debug)]
+pub struct StreamedVolume {
+    pub volume: ZSpaceVolume,
+    pub atlas_frame: Option<AtlasFrame>,
+    pub chrono_snapshot: Option<ChronoSnapshot>,
+}
+
+pub mod video;
+
+pub use video::{
+    DecodedFrame, FfmpegBinding, FfmpegDecoder, VideoDecoder, VideoPipeline, VideoPipelineConfig,
+    VideoPipelineOutput, ZDynamicsAnnotation,
+};
 
 /// Volumetric container that holds planar tensors along the Z axis.
 #[derive(Clone, Debug, PartialEq)]
@@ -89,6 +211,9 @@ pub struct ZSpaceVolume {
     height: usize,
     width: usize,
     voxels: Vec<f32>,
+    harmonic_channels: usize,
+    temporal_harmonics: Vec<f32>,
+    resonance_decay: Vec<f32>,
 }
 
 /// Statistical summary describing each slice inside a [`ZSpaceVolume`].
@@ -170,11 +295,32 @@ impl ZSpaceVolume {
                 cols: height.saturating_mul(width),
             });
         }
+        Self::zeros_with_temporal(depth, height, width, 0)
+    }
+
+    /// Creates a Z-space volume filled with zeros and allocates harmonic channels.
+    pub fn zeros_with_temporal(
+        depth: usize,
+        height: usize,
+        width: usize,
+        harmonic_channels: usize,
+    ) -> PureResult<Self> {
+        if depth == 0 || height == 0 || width == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: depth,
+                cols: height.saturating_mul(width),
+            });
+        }
+        let voxel_count = depth * height * width;
+        let harmonic_len = voxel_count.saturating_mul(harmonic_channels);
         Ok(Self {
             depth,
             height,
             width,
-            voxels: vec![0.0; depth * height * width],
+            voxels: vec![0.0; voxel_count],
+            harmonic_channels,
+            temporal_harmonics: vec![0.0; harmonic_len],
+            resonance_decay: vec![1.0; voxel_count],
         })
     }
 
@@ -200,7 +346,95 @@ impl ZSpaceVolume {
             height,
             width,
             voxels,
+            harmonic_channels: 0,
+            temporal_harmonics: Vec::new(),
+            resonance_decay: vec![1.0; slices.len() * height * width],
         })
+    }
+
+    /// Builds a Z-space volume from a streaming frame, returning attached metadata.
+    pub fn from_stream_frame(frame: ZSpaceStreamFrame) -> PureResult<StreamedVolume> {
+        let volume = Self::from_slices(&frame.slices)?;
+        Ok(StreamedVolume {
+            volume,
+            atlas_frame: frame.atlas_frame,
+            chrono_snapshot: frame.chrono_snapshot,
+        })
+    }
+
+    /// Accumulates a streaming frame into the current volume and propagates metadata.
+    pub fn ingest_stream_frame(
+        &mut self,
+        frame: ZSpaceStreamFrame,
+        alpha: f32,
+    ) -> PureResult<StreamedVolume> {
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(TensorError::InvalidValue {
+                label: "temporal_alpha",
+            });
+        }
+        let mut streamed = Self::from_stream_frame(frame)?;
+        let shape_matches = self.depth == streamed.volume.depth
+            && self.height == streamed.volume.height
+            && self.width == streamed.volume.width;
+        if shape_matches {
+            self.accumulate(&streamed.volume, alpha)?;
+            streamed.volume = self.clone();
+        } else {
+            *self = streamed.volume.clone();
+        }
+        if let Some(snapshot) = streamed.chrono_snapshot.as_ref() {
+            match streamed.atlas_frame.as_mut() {
+                Some(atlas) => {
+                    if atlas.timestamp <= 0.0 {
+                        atlas.timestamp = snapshot.timestamp();
+                    } else {
+                        atlas.timestamp = atlas.timestamp.max(snapshot.timestamp());
+                    }
+                    if atlas.chrono_summary.is_none() {
+                        atlas.chrono_summary = Some(snapshot.summary().clone());
+                    }
+                }
+                None => {
+                    let mut atlas = AtlasFrame::new(snapshot.timestamp());
+                    atlas.chrono_summary = Some(snapshot.summary().clone());
+                    streamed.atlas_frame = Some(atlas);
+                }
+            }
+        }
+        Ok(streamed)
+    }
+
+    /// Blends a sequence of volumes using the provided weights.
+    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        if sequence.len() != weights.len() {
+            return Err(TensorError::DataLength {
+                expected: sequence.len(),
+                got: weights.len(),
+            });
+        }
+        let reference = &sequence[0];
+        let mut normalised = weights.to_vec();
+        Self::normalise_weights(&mut normalised);
+        let mut blended = Self::zeros(reference.depth, reference.height, reference.width)?;
+        for (volume, &weight) in sequence.iter().zip(normalised.iter()) {
+            if volume.depth != reference.depth
+                || volume.height != reference.height
+                || volume.width != reference.width
+            {
+                return Err(TensorError::ShapeMismatch {
+                    left: (reference.depth, reference.height * reference.width),
+                    right: (volume.depth, volume.height * volume.width),
+                });
+            }
+            for (target, source) in blended.voxels.iter_mut().zip(volume.voxels.iter()) {
+                *target += source * weight;
+            }
+        }
+        Ok(blended)
     }
 
     /// Returns the depth (number of Z slices).
@@ -226,6 +460,46 @@ impl ZSpaceVolume {
     /// Mutable access to the raw voxel buffer.
     pub fn voxels_mut(&mut self) -> &mut [f32] {
         &mut self.voxels
+    }
+
+    /// Returns the number of harmonic channels stored per voxel.
+    pub fn harmonic_channels(&self) -> usize {
+        self.harmonic_channels
+    }
+
+    /// Immutable access to the harmonic buffer.
+    pub fn temporal_harmonics(&self) -> &[f32] {
+        &self.temporal_harmonics
+    }
+
+    /// Mutable access to the harmonic buffer.
+    pub fn temporal_harmonics_mut(&mut self) -> &mut [f32] {
+        &mut self.temporal_harmonics
+    }
+
+    /// Immutable access to the resonance decay buffer.
+    pub fn resonance_decay(&self) -> &[f32] {
+        &self.resonance_decay
+    }
+
+    /// Mutable access to the resonance decay buffer.
+    pub fn resonance_decay_mut(&mut self) -> &mut [f32] {
+        &mut self.resonance_decay
+    }
+
+    /// Returns the number of voxels contained in the volume.
+    pub fn voxel_count(&self) -> usize {
+        self.depth * self.height * self.width
+    }
+
+    /// Ensures the harmonic buffer has the requested channel count, reallocating if required.
+    pub fn ensure_harmonic_channels(&mut self, harmonic_channels: usize) {
+        if self.harmonic_channels == harmonic_channels {
+            return;
+        }
+        self.harmonic_channels = harmonic_channels;
+        let harmonic_len = self.voxel_count().saturating_mul(harmonic_channels);
+        self.temporal_harmonics.resize(harmonic_len, 0.0);
     }
 
     /// Extracts a slice at the requested depth index.
@@ -293,6 +567,142 @@ impl ZSpaceVolume {
         }
         Self::normalise_weights(&mut weights);
         Ok(weights)
+    }
+
+    /// Interpolates between existing Z slices, returning a densified volume.
+    pub fn interpolate(&self, method: InterpolationMethod) -> PureResult<Self> {
+        if self.depth <= 1 || self.height == 0 || self.width == 0 {
+            return Ok(self.clone());
+        }
+        let slice_len = self.height * self.width;
+        let mut voxels = Vec::with_capacity(slice_len * (self.depth * 2 - 1));
+        for z in 0..self.depth - 1 {
+            let start = z * slice_len;
+            let current = &self.voxels[start..start + slice_len];
+            let next_start = (z + 1) * slice_len;
+            let next = &self.voxels[next_start..next_start + slice_len];
+            voxels.extend_from_slice(current);
+            let interpolated = match method {
+                InterpolationMethod::Nearest => current.to_vec(),
+                InterpolationMethod::Linear => current
+                    .iter()
+                    .zip(next.iter())
+                    .map(|(a, b)| 0.5 * (a + b))
+                    .collect(),
+                InterpolationMethod::Cubic => {
+                    let prev = if z == 0 {
+                        current
+                    } else {
+                        let prev_start = (z - 1) * slice_len;
+                        &self.voxels[prev_start..prev_start + slice_len]
+                    };
+                    let ahead = if z + 2 < self.depth {
+                        let ahead_start = (z + 2) * slice_len;
+                        &self.voxels[ahead_start..ahead_start + slice_len]
+                    } else {
+                        next
+                    };
+                    let mut buffer = Vec::with_capacity(slice_len);
+                    for idx in 0..slice_len {
+                        let value =
+                            Self::catmull_rom(prev[idx], current[idx], next[idx], ahead[idx], 0.5);
+                        buffer.push(value);
+                    }
+                    buffer
+                }
+            };
+            voxels.extend_from_slice(&interpolated);
+        }
+        let last_start = (self.depth - 1) * slice_len;
+        voxels.extend_from_slice(&self.voxels[last_start..last_start + slice_len]);
+        Self::from_voxels(self.depth * 2 - 1, self.height, self.width, voxels)
+    }
+
+    /// Upscales each slice using bilinear interpolation and returns a refined volume.
+    pub fn upscale(&self, factor: usize) -> PureResult<Self> {
+        if factor == 0 {
+            return Err(TensorError::InvalidValue {
+                label: "z_upscale_factor",
+            });
+        }
+        if factor == 1 || self.height == 0 || self.width == 0 {
+            return Ok(self.clone());
+        }
+        let new_height = self
+            .height
+            .checked_mul(factor)
+            .ok_or(TensorError::InvalidDimensions {
+                rows: self.height,
+                cols: factor,
+            })?;
+        let new_width = self
+            .width
+            .checked_mul(factor)
+            .ok_or(TensorError::InvalidDimensions {
+                rows: self.width,
+                cols: factor,
+            })?;
+        let slice_len = self.height * self.width;
+        let mut voxels = Vec::with_capacity(self.depth * new_height * new_width);
+        for z in 0..self.depth {
+            let start = z * slice_len;
+            let slice = &self.voxels[start..start + slice_len];
+            let upscaled =
+                Self::bilinear_resample(slice, self.height, self.width, new_height, new_width);
+            voxels.extend_from_slice(&upscaled);
+        }
+        Self::from_voxels(self.depth, new_height, new_width, voxels)
+    }
+
+    fn catmull_rom(p0: f32, p1: f32, p2: f32, p3: f32, t: f32) -> f32 {
+        let a0 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+        let a1 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+        let a2 = -0.5 * p0 + 0.5 * p2;
+        let a3 = p1;
+        ((a0 * t + a1) * t + a2) * t + a3
+    }
+
+    fn bilinear_resample(
+        slice: &[f32],
+        height: usize,
+        width: usize,
+        new_height: usize,
+        new_width: usize,
+    ) -> Vec<f32> {
+        if height == 0 || width == 0 || new_height == 0 || new_width == 0 {
+            return Vec::new();
+        }
+        let mut output = vec![0.0; new_height * new_width];
+        let h_scale = if new_height > 1 {
+            (height.saturating_sub(1)) as f32 / (new_height.saturating_sub(1)) as f32
+        } else {
+            0.0
+        };
+        let w_scale = if new_width > 1 {
+            (width.saturating_sub(1)) as f32 / (new_width.saturating_sub(1)) as f32
+        } else {
+            0.0
+        };
+        for y in 0..new_height {
+            let src_y = h_scale * y as f32;
+            let y0 = src_y.floor() as usize;
+            let y1 = min(y0 + 1, height - 1);
+            let ty = src_y - y0 as f32;
+            for x in 0..new_width {
+                let src_x = w_scale * x as f32;
+                let x0 = src_x.floor() as usize;
+                let x1 = min(x0 + 1, width - 1);
+                let tx = src_x - x0 as f32;
+                let top_left = slice[y0 * width + x0];
+                let top_right = slice[y0 * width + x1];
+                let bottom_left = slice[y1 * width + x0];
+                let bottom_right = slice[y1 * width + x1];
+                let top = top_left + (top_right - top_left) * tx;
+                let bottom = bottom_left + (bottom_right - bottom_left) * tx;
+                output[y * new_width + x] = top + (bottom - top) * ty;
+            }
+        }
+        output
     }
 
     fn normalise_weights(weights: &mut [f32]) {
@@ -373,50 +783,1099 @@ impl ZSpaceVolume {
         blended.accumulate(next, alpha)?;
         Ok(blended)
     }
+}
 
-    /// Blends an ordered sequence of volumes according to the provided weights.
-    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
-        if sequence.is_empty() {
-            return Err(TensorError::EmptyInput("z_sequence_blend"));
+/// Interpolation methods available for Z-space resampling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InterpolationMethod {
+    /// Keeps neighbouring voxels unchanged when interpolating.
+    Nearest,
+    /// Uses linear interpolation between neighbouring voxels.
+    Linear,
+    /// Applies a Catmull-Rom cubic interpolation across neighbours.
+    Cubic,
+}
+
+/// Spectral window functions used to modulate depth resonance weights.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpectralWindow {
+    kind: SpectralWindowKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SpectralWindowKind {
+    Rectangular,
+    Hann,
+    Hamming,
+    Blackman,
+    Gaussian { sigma: f32 },
+}
+
+impl SpectralWindow {
+    /// Creates a rectangular window (no modulation).
+    pub fn rectangular() -> Self {
+        Self {
+            kind: SpectralWindowKind::Rectangular,
         }
-        if sequence.len() != weights.len() {
-            return Err(TensorError::InvalidDimensions {
-                rows: sequence.len(),
-                cols: weights.len(),
+    }
+
+    /// Creates a Hann window.
+    pub fn hann() -> Self {
+        Self {
+            kind: SpectralWindowKind::Hann,
+        }
+    }
+
+    /// Creates a Hamming window.
+    pub fn hamming() -> Self {
+        Self {
+            kind: SpectralWindowKind::Hamming,
+        }
+    }
+
+    /// Creates a Blackman window.
+    pub fn blackman() -> Self {
+        Self {
+            kind: SpectralWindowKind::Blackman,
+        }
+    }
+
+    /// Creates a Gaussian window with the provided sigma parameter.
+    pub fn gaussian(sigma: f32) -> Self {
+        let sigma = if sigma.is_finite() && sigma > 1e-3 {
+            sigma
+        } else {
+            0.4
+        };
+        Self {
+            kind: SpectralWindowKind::Gaussian { sigma },
+        }
+    }
+
+    /// Generates normalised weights for the configured window.
+    pub fn weights(&self, depth: usize) -> Vec<f32> {
+        if depth == 0 {
+            return Vec::new();
+        }
+        if depth == 1 {
+            return vec![1.0];
+        }
+        let mut weights = Vec::with_capacity(depth);
+        let n_minus_1 = (depth - 1) as f32;
+        match self.kind {
+            SpectralWindowKind::Rectangular => {
+                weights.resize(depth, 1.0);
+            }
+            SpectralWindowKind::Hann => {
+                for n in 0..depth {
+                    let coeff = 0.5 * (1.0 - (2.0 * PI * n as f32 / n_minus_1).cos());
+                    weights.push(coeff.max(0.0));
+                }
+            }
+            SpectralWindowKind::Hamming => {
+                for n in 0..depth {
+                    let coeff = 0.54 - 0.46 * (2.0 * PI * n as f32 / n_minus_1).cos();
+                    weights.push(coeff.max(0.0));
+                }
+            }
+            SpectralWindowKind::Blackman => {
+                for n in 0..depth {
+                    let ratio = 2.0 * PI * n as f32 / n_minus_1;
+                    let coeff = 0.42 - 0.5 * ratio.cos() + 0.08 * (2.0 * ratio).cos();
+                    weights.push(coeff.max(0.0));
+                }
+            }
+            SpectralWindowKind::Gaussian { sigma } => {
+                let centre = n_minus_1 / 2.0;
+                let denom = 2.0 * sigma.powi(2) * (centre + 1.0).powi(2);
+                for n in 0..depth {
+                    let delta = n as f32 - centre;
+                    let coeff = (-delta.powi(2) / denom.max(1e-6)).exp();
+                    weights.push(coeff.max(0.0));
+                }
+            }
+        }
+        ZSpaceVolume::normalise_weights(&mut weights);
+        weights
+    }
+}
+
+/// Maintains a temporal exponential moving average of depth attention weights.
+#[derive(Clone, Debug)]
+pub struct TemporalResonanceBuffer {
+    decay: f32,
+    history: Option<Vec<f32>>,
+    frames: usize,
+}
+
+impl TemporalResonanceBuffer {
+    /// Creates a new temporal buffer using the provided decay coefficient.
+    pub fn new(decay: f32) -> Self {
+        let decay = if decay.is_finite() {
+            decay.clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+        Self {
+            decay,
+            history: None,
+            frames: 0,
+        }
+    }
+
+    /// Returns the exponential decay factor applied to new weights.
+    pub fn decay(&self) -> f32 {
+        self.decay
+    }
+
+    /// Returns how many frames have been fused into the buffer.
+    pub fn frames_accumulated(&self) -> usize {
+        self.frames
+    }
+
+    /// Returns the current temporal history if it exists.
+    pub fn history(&self) -> Option<&[f32]> {
+        self.history.as_deref()
+    }
+
+    /// Clears the stored history and resets the buffer.
+    pub fn clear(&mut self) {
+        self.history = None;
+        self.frames = 0;
+    }
+
+    /// Applies the temporal smoothing to a new set of weights and returns the fused profile.
+    pub fn apply(&mut self, weights: &[f32]) -> PureResult<Vec<f32>> {
+        if let Some(value) = weights.iter().find(|value| !value.is_finite()) {
+            return Err(TensorError::NonFiniteValue {
+                label: "temporal_resonance_weight",
+                value: *value,
             });
         }
-        let first = &sequence[0];
-        let slice_len = first.height * first.width;
-        let volume_len = first.depth * slice_len;
-        if volume_len == 0 {
+        if weights.is_empty() {
+            self.clear();
+            return Ok(Vec::new());
+        }
+        match self.history {
+            Some(ref mut history) if history.len() == weights.len() => {
+                let alpha = self.decay;
+                let retain = 1.0 - alpha;
+                for (stored, &incoming) in history.iter_mut().zip(weights.iter()) {
+                    *stored = (*stored * retain) + (incoming * alpha);
+                }
+                ZSpaceVolume::normalise_weights(history);
+                self.frames = self.frames.saturating_add(1);
+                Ok(history.clone())
+            }
+            _ => {
+                let mut history = weights.to_vec();
+                ZSpaceVolume::normalise_weights(&mut history);
+                self.history = Some(history.clone());
+                self.frames = 1;
+                Ok(history)
+            }
+        }
+    }
+}
+
+/// Diffuses voxels along the spatial and depth axes to fill sparse slices.
+#[derive(Clone, Debug)]
+pub struct ZDiffuser {
+    iterations: usize,
+    rate: f32,
+}
+
+impl ZDiffuser {
+    /// Creates a new diffuser with the desired iteration count and diffusion rate.
+    pub fn new(iterations: usize, rate: f32) -> Self {
+        let rate = if rate.is_finite() {
+            rate.clamp(0.0, 1.0)
+        } else {
+            0.25
+        };
+        Self { iterations, rate }
+    }
+
+    /// Number of diffusion passes that will be applied.
+    pub fn iterations(&self) -> usize {
+        self.iterations
+    }
+
+    /// Blend rate used when combining neighbours.
+    pub fn rate(&self) -> f32 {
+        self.rate
+    }
+
+    /// Applies diffusion and returns a smoothed Z-space volume.
+    pub fn diffuse(&self, volume: &ZSpaceVolume) -> PureResult<ZSpaceVolume> {
+        if volume.depth() == 0 || volume.height() == 0 || volume.width() == 0 {
+            return Ok(volume.clone());
+        }
+        let mut current = volume.clone();
+        for _ in 0..self.iterations {
+            current = self.diffuse_once(&current)?;
+        }
+        Ok(current)
+    }
+
+    fn diffuse_once(&self, volume: &ZSpaceVolume) -> PureResult<ZSpaceVolume> {
+        let depth = volume.depth();
+        let height = volume.height();
+        let width = volume.width();
+        let slice_len = height * width;
+        let voxels = volume.voxels().to_vec();
+        let mut next = voxels.clone();
+        for z in 0..depth {
+            for y in 0..height {
+                for x in 0..width {
+                    let idx = z * slice_len + y * width + x;
+                    let centre = voxels[idx];
+                    let mut sum = 0.0;
+                    let mut count = 0.0;
+                    if x > 0 {
+                        sum += voxels[idx - 1];
+                        count += 1.0;
+                    }
+                    if x + 1 < width {
+                        sum += voxels[idx + 1];
+                        count += 1.0;
+                    }
+                    if y > 0 {
+                        sum += voxels[idx - width];
+                        count += 1.0;
+                    }
+                    if y + 1 < height {
+                        sum += voxels[idx + width];
+                        count += 1.0;
+                    }
+                    if z > 0 {
+                        sum += voxels[idx - slice_len];
+                        count += 1.0;
+                    }
+                    if z + 1 < depth {
+                        sum += voxels[idx + slice_len];
+                        count += 1.0;
+                    }
+                    if count == 0.0 {
+                        continue;
+                    }
+                    let average = sum / count;
+                    next[idx] = centre * (1.0 - self.rate) + average * self.rate;
+                }
+            }
+        }
+        ZSpaceVolume::from_voxels(depth, height, width, next)
+    }
+}
+
+/// Synthesises differential resonances using a [`SpiralRnn`] conditioned on Z-space telemetry.
+#[derive(Debug)]
+pub struct ResonanceGenerator {
+    rnn: SpiralRnn,
+    features_per_slice: usize,
+    steps: usize,
+    hidden_dim: usize,
+}
+
+impl ResonanceGenerator {
+    /// Creates a generator that uses the default feature set per slice.
+    pub fn new(name: impl Into<String>, hidden_dim: usize, steps: usize) -> PureResult<Self> {
+        Self::with_features(name, RESONANCE_FEATURES_PER_SLICE, hidden_dim, steps)
+    }
+
+    /// Creates a generator with an explicit feature dimensionality per slice.
+    pub fn with_features(
+        name: impl Into<String>,
+        features_per_slice: usize,
+        hidden_dim: usize,
+        steps: usize,
+    ) -> PureResult<Self> {
+        if features_per_slice == 0 || hidden_dim == 0 || steps == 0 {
             return Err(TensorError::InvalidDimensions {
-                rows: first.depth,
-                cols: slice_len,
+                rows: features_per_slice.max(1),
+                cols: hidden_dim.max(1),
             });
         }
-        let mut normalised = Vec::from(weights);
-        ZSpaceVolume::normalise_weights(&mut normalised);
-        let mut voxels = vec![0.0f32; volume_len];
-        for (volume, weight) in sequence.iter().zip(normalised.iter()) {
-            if volume.depth != first.depth
-                || volume.height != first.height
-                || volume.width != first.width
-            {
-                return Err(TensorError::ShapeMismatch {
-                    left: (volume.depth, volume.height * volume.width),
-                    right: (first.depth, first.height * first.width),
-                });
+        let rnn = SpiralRnn::new(name, features_per_slice, hidden_dim, steps)?;
+        Ok(Self {
+            rnn,
+            features_per_slice,
+            steps,
+            hidden_dim,
+        })
+    }
+
+    /// Number of conditioning features encoded for each Z slice.
+    pub fn features_per_slice(&self) -> usize {
+        self.features_per_slice
+    }
+
+    /// Number of temporal steps expected by the underlying [`SpiralRnn`].
+    pub fn steps(&self) -> usize {
+        self.steps
+    }
+
+    /// Hidden dimensionality of the [`SpiralRnn`].
+    pub fn hidden_dim(&self) -> usize {
+        self.hidden_dim
+    }
+
+    /// Immutable access to the internal [`SpiralRnn`].
+    pub fn rnn(&self) -> &SpiralRnn {
+        &self.rnn
+    }
+
+    /// Mutable access to the internal [`SpiralRnn`] for fine-tuning.
+    pub fn rnn_mut(&mut self) -> &mut SpiralRnn {
+        &mut self.rnn
+    }
+
+    /// Generates a [`DifferentialResonance`] conditioned on the provided telemetry.
+    pub fn generate(
+        &mut self,
+        volume: &ZSpaceVolume,
+        projector: &VisionProjector,
+        chrono: Option<&ChronoSummary>,
+        atlas: Option<&AtlasFrame>,
+        previous: Option<&DifferentialResonance>,
+    ) -> PureResult<DifferentialResonance> {
+        if volume.depth() > self.steps {
+            return Err(TensorError::InvalidDimensions {
+                rows: volume.depth(),
+                cols: self.steps,
+            });
+        }
+        let profile = volume.slice_profile()?;
+        let encoded = self.encode(volume, projector, chrono, atlas, previous, &profile)?;
+        let latent = self.rnn.forward(&encoded)?;
+        self.decode(
+            volume, projector, chrono, atlas, previous, &profile, &latent,
+        )
+    }
+
+    fn encode(
+        &self,
+        volume: &ZSpaceVolume,
+        projector: &VisionProjector,
+        chrono: Option<&ChronoSummary>,
+        atlas: Option<&AtlasFrame>,
+        previous: Option<&DifferentialResonance>,
+        profile: &ZSliceProfile,
+    ) -> PureResult<Tensor> {
+        let depth = profile.depth();
+        let mut buffer = vec![0.0f32; self.steps * self.features_per_slice];
+        let atlas_signal = atlas
+            .and_then(|frame| frame.z_signal)
+            .unwrap_or_else(|| projector.focus());
+        let atlas_pressure = atlas
+            .and_then(|frame| frame.suggested_pressure)
+            .unwrap_or_else(|| projector.spread());
+        let atlas_total = atlas
+            .and_then(|frame| frame.collapse_total)
+            .unwrap_or_else(|| projector.energy_bias());
+        let chrono_mean = chrono
+            .map(|summary| summary.mean_energy)
+            .unwrap_or(atlas_total);
+        let chrono_std = chrono.map(|summary| summary.energy_std).unwrap_or(0.0);
+        let global_energy = volume.total_energy();
+        let aspect = if volume.width() > 0 {
+            volume.height() as f32 / volume.width() as f32
+        } else {
+            1.0
+        };
+        let prev_energy = previous.map(|res| res.infinity_energy.data().to_vec());
+        let prev_objective = previous.map(|res| res.recursive_objective.data().to_vec());
+        for idx in 0..depth {
+            let offset = idx * self.features_per_slice;
+            if self.features_per_slice > 0 {
+                buffer[offset] = profile.mean(idx);
             }
-            for (dst, src) in voxels.iter_mut().zip(volume.voxels.iter()) {
-                *dst += *weight * *src;
+            if self.features_per_slice > 1 {
+                buffer[offset + 1] = profile.std(idx);
             }
+            if self.features_per_slice > 2 {
+                buffer[offset + 2] = profile.energy(idx);
+            }
+            if self.features_per_slice > 3 {
+                buffer[offset + 3] = projector.focus();
+            }
+            if self.features_per_slice > 4 {
+                buffer[offset + 4] = projector.spread();
+            }
+            if self.features_per_slice > 5 {
+                buffer[offset + 5] = projector.energy_bias();
+            }
+            if self.features_per_slice > 6 {
+                buffer[offset + 6] = atlas_signal;
+            }
+            if self.features_per_slice > 7 {
+                buffer[offset + 7] = atlas_pressure;
+            }
+            if self.features_per_slice > 8 {
+                buffer[offset + 8] = prev_energy
+                    .as_ref()
+                    .map(|values| values[idx % values.len()])
+                    .unwrap_or(chrono_mean);
+            }
+            if self.features_per_slice > 9 {
+                buffer[offset + 9] = prev_objective
+                    .as_ref()
+                    .map(|values| values[idx % values.len()])
+                    .unwrap_or(chrono_std);
+            }
+            if self.features_per_slice > 10 {
+                buffer[offset + 10] = global_energy;
+            }
+            if self.features_per_slice > 11 {
+                buffer[offset + 11] = aspect;
+            }
+        }
+        Tensor::from_vec(1, buffer.len(), buffer)
+    }
+
+    fn decode(
+        &self,
+        volume: &ZSpaceVolume,
+        projector: &VisionProjector,
+        chrono: Option<&ChronoSummary>,
+        atlas: Option<&AtlasFrame>,
+        previous: Option<&DifferentialResonance>,
+        profile: &ZSliceProfile,
+        latent: &Tensor,
+    ) -> PureResult<DifferentialResonance> {
+        let depth = volume.depth();
+        let hidden = latent.data();
+        if hidden.is_empty() {
+            return Err(TensorError::EmptyInput("spiral_resonance_latent"));
+        }
+        let chrono_drift = chrono.map(|summary| summary.mean_drift).unwrap_or(0.0);
+        let chrono_energy_std = chrono.map(|summary| summary.energy_std).unwrap_or(0.0);
+        let chrono_drift_std = chrono.map(|summary| summary.drift_std).unwrap_or(0.0);
+        let atlas_feedback = atlas
+            .and_then(|frame| frame.collapse_total)
+            .unwrap_or_else(|| projector.energy_bias());
+        let prev_energy = previous.map(|res| res.infinity_energy.data().to_vec());
+        let prev_objective = previous.map(|res| res.recursive_objective.data().to_vec());
+        let prev_homotopy = previous.map(|res| res.homotopy_flow.data().to_vec());
+        let prev_projection = previous.map(|res| res.infinity_projection.data().to_vec());
+
+        let mut energies = Vec::with_capacity(depth);
+        let mut objectives = Vec::with_capacity(depth);
+        let mut homotopies = Vec::with_capacity(depth);
+        let mut projections = Vec::with_capacity(depth);
+        let mut functors = Vec::with_capacity(depth);
+
+        for idx in 0..depth {
+            let base = hidden[idx % hidden.len()];
+            let mean = profile.mean(idx);
+            let std = profile.std(idx);
+            let slice_energy = profile.energy(idx);
+            let prev_e = prev_energy
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(slice_energy);
+            let prev_o = prev_objective
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(mean);
+            let prev_h = prev_homotopy
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(0.0);
+            let prev_p = prev_projection
+                .as_ref()
+                .map(|values| values[idx % values.len()])
+                .unwrap_or(slice_energy.tanh());
+
+            let intensity = mean.abs() + std + slice_energy;
+            let energy_value = (base + intensity + prev_e + atlas_feedback).abs() + 1e-3;
+            energies.push(energy_value);
+
+            let objective_value = (base + prev_o + projector.energy_bias() + chrono_drift).tanh();
+            objectives.push(objective_value);
+
+            let homotopy_value = (base + prev_h + projector.focus() - 0.5).tanh();
+            homotopies.push(homotopy_value);
+
+            let projection_value = (base + prev_p + slice_energy - chrono_energy_std).tanh();
+            projections.push(projection_value);
+
+            let functor_value =
+                objective_value * 0.5 + slice_energy * 0.1 + chrono_drift_std * 0.05;
+            functors.push(functor_value);
+        }
+
+        let homotopy_tensor = Tensor::from_vec(1, depth, homotopies)?;
+        let functor_tensor = Tensor::from_vec(1, depth, functors)?;
+        let objective_tensor = Tensor::from_vec(1, depth, objectives)?;
+        let projection_tensor = Tensor::from_vec(1, depth, projections)?;
+        let energy_tensor = Tensor::from_vec(1, depth, energies)?;
+
+        Ok(DifferentialResonance {
+            homotopy_flow: homotopy_tensor,
+            functor_linearisation: functor_tensor,
+            recursive_objective: objective_tensor,
+            infinity_projection: projection_tensor,
+            infinity_energy: energy_tensor,
+        })
+    }
+}
+
+/// Decodes latent feature vectors into volumetric Z-space tensors.
+#[derive(Debug)]
+pub struct ZDecoder {
+    depth: usize,
+    height: usize,
+    width: usize,
+    rng: StdRng,
+}
+
+impl ZDecoder {
+    /// Creates a decoder with the expected target dimensions and RNG seed.
+    pub fn new(depth: usize, height: usize, width: usize, seed: u64) -> PureResult<Self> {
+        if depth == 0 || height == 0 || width == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: depth.max(1),
+                cols: height.saturating_mul(width).max(1),
+            });
         }
         Ok(Self {
-            depth: first.depth,
-            height: first.height,
-            width: first.width,
-            voxels,
+            depth,
+            height,
+            width,
+            rng: StdRng::seed_from_u64(seed),
         })
+    }
+
+    /// Decodes the latent tensor into a Z-space volume using stochastic projection.
+    pub fn decode(&mut self, latent: &Tensor) -> PureResult<ZSpaceVolume> {
+        let features = latent.data();
+        if features.is_empty() {
+            return Err(TensorError::EmptyInput("z_decoder_latent"));
+        }
+        let voxel_count = self
+            .depth
+            .checked_mul(self.height)
+            .and_then(|value| value.checked_mul(self.width))
+            .ok_or(TensorError::InvalidDimensions {
+                rows: self.depth,
+                cols: self.height.saturating_mul(self.width),
+            })?;
+        let mut voxels = Vec::with_capacity(voxel_count);
+        for _ in 0..voxel_count {
+            let mut value = 0.0f32;
+            for &feature in features.iter() {
+                let weight: f32 = self.rng.gen_range(-1.0..1.0);
+                value += feature * weight;
+            }
+            let normalised = value / features.len() as f32;
+            voxels.push(normalised.tanh());
+        }
+        ZSpaceVolume::from_voxels(self.depth, self.height, self.width, voxels)
+    }
+
+    /// Decodes the latent tensor and applies optional refinement stages.
+    pub fn decode_with_refinement(
+        &mut self,
+        latent: &Tensor,
+        diffuser: Option<&ZDiffuser>,
+        interpolation: Option<InterpolationMethod>,
+        upscale_factor: Option<usize>,
+    ) -> PureResult<ZSpaceVolume> {
+        let mut volume = self.decode(latent)?;
+        if let Some(diffuser) = diffuser {
+            volume = diffuser.diffuse(&volume)?;
+        }
+        if let Some(method) = interpolation {
+            volume = volume.interpolate(method)?;
+        }
+        if let Some(factor) = upscale_factor {
+            if factor > 1 {
+                volume = volume.upscale(factor)?;
+            }
+        }
+        Ok(volume)
+    }
+
+    /// Returns the configured depth.
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
+    /// Returns the configured height.
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    /// Returns the configured width.
+    pub fn width(&self) -> usize {
+        self.width
+    }
+}
+
+/// Streams Z-space volumes while generating resonances and temporal projections.
+pub struct VideoStreamProjector {
+    projector: VisionProjector,
+    generator: ResonanceGenerator,
+    smoothing: TemporalResonanceBuffer,
+    previous_resonance: Option<Arc<DifferentialResonance>>,
+    diffuser: Option<ZDiffuser>,
+    super_resolution: Option<(InterpolationMethod, usize)>,
+}
+
+impl VideoStreamProjector {
+    /// Creates a new video stream projector with the desired smoothing decay.
+    pub fn new(projector: VisionProjector, generator: ResonanceGenerator, decay: f32) -> Self {
+        Self {
+            projector,
+            generator,
+            smoothing: TemporalResonanceBuffer::new(decay),
+            previous_resonance: None,
+            diffuser: None,
+            super_resolution: None,
+        }
+    }
+
+    /// Configures a diffuser that is applied before projection.
+    pub fn with_diffuser(mut self, diffuser: ZDiffuser) -> Self {
+        self.diffuser = Some(diffuser);
+        self
+    }
+
+    /// Enables Z-space super resolution using interpolation and spatial upscaling.
+    pub fn with_super_resolution(mut self, method: InterpolationMethod, factor: usize) -> Self {
+        self.super_resolution = Some((method, factor));
+        self
+    }
+
+    /// Resets accumulated temporal state.
+    pub fn reset(&mut self) {
+        self.smoothing.clear();
+        self.previous_resonance = None;
+    }
+
+    /// Accessor for the underlying projector.
+    pub fn projector(&self) -> &VisionProjector {
+        &self.projector
+    }
+
+    /// Mutable accessor for the underlying projector.
+    pub fn projector_mut(&mut self) -> &mut VisionProjector {
+        &mut self.projector
+    }
+
+    /// Returns the previously generated resonance when available.
+    pub fn last_resonance(&self) -> Option<&Arc<DifferentialResonance>> {
+        self.previous_resonance.as_ref()
+    }
+
+    /// Processes a single frame and returns the projection together with the resonance.
+    pub fn step(
+        &mut self,
+        volume: &ZSpaceVolume,
+        chrono: Option<&ChronoSummary>,
+        atlas: Option<&AtlasFrame>,
+    ) -> PureResult<(Tensor, Arc<DifferentialResonance>)> {
+        if let Some(frame) = atlas {
+            self.projector.calibrate_from_atlas(frame);
+        }
+        let mut working = volume.clone();
+        if let Some(diffuser) = &self.diffuser {
+            working = diffuser.diffuse(&working)?;
+        }
+        if let Some((method, factor)) = self.super_resolution {
+            working = working.interpolate(method)?;
+            if factor > 1 {
+                working = working.upscale(factor)?;
+            }
+        }
+        let resonance = self.generator.generate(
+            &working,
+            &self.projector,
+            chrono,
+            atlas,
+            self.previous_resonance.as_deref(),
+        )?;
+        let resonance = Arc::new(resonance);
+        let projection = self.projector.project_with_temporal(
+            &working,
+            resonance.as_ref(),
+            &mut self.smoothing,
+        )?;
+        self.previous_resonance = Some(resonance.clone());
+        Ok((projection, resonance))
+    }
+
+    /// Projects a full sequence of volumes using optional telemetry and atlas data.
+    pub fn project_sequence(
+        &mut self,
+        volumes: &[ZSpaceVolume],
+        chrono: &[Option<ChronoSummary>],
+        atlas: &[Option<AtlasFrame>],
+    ) -> PureResult<Vec<Tensor>> {
+        if !chrono.is_empty() && chrono.len() != volumes.len() {
+            return Err(TensorError::DataLength {
+                expected: volumes.len(),
+                got: chrono.len(),
+            });
+        }
+        if !atlas.is_empty() && atlas.len() != volumes.len() {
+            return Err(TensorError::DataLength {
+                expected: volumes.len(),
+                got: atlas.len(),
+            });
+        }
+        let mut projections = Vec::with_capacity(volumes.len());
+        for (idx, volume) in volumes.iter().enumerate() {
+            let chrono_ref = chrono.get(idx).and_then(|summary| summary.as_ref());
+            let atlas_ref = atlas.get(idx).and_then(|frame| frame.as_ref());
+            let (projection, _) = self.step(volume, chrono_ref, atlas_ref)?;
+            projections.push(projection);
+        }
+        Ok(projections)
+    }
+}
+
+/// Metadata describing a registered camera/view that contributes to a Z-space volume.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewDescriptor {
+    id: Arc<str>,
+    origin: [f32; 3],
+    forward: [f32; 3],
+    baseline_weight: f32,
+}
+
+impl ViewDescriptor {
+    /// Creates a new view descriptor with the provided identifier, origin, and forward vector.
+    pub fn new(id: impl Into<String>, origin: [f32; 3], forward: [f32; 3]) -> Self {
+        let id: Arc<str> = Arc::from(id.into());
+        let mut descriptor = Self {
+            id,
+            origin,
+            forward: normalise_direction(forward),
+            baseline_weight: 1.0,
+        };
+        if !descriptor.forward.iter().any(|value| value.abs() > 0.0) {
+            descriptor.forward = [0.0, 0.0, 1.0];
+        }
+        descriptor
+    }
+
+    /// Sets a baseline importance weight for the view during fusion.
+    pub fn with_baseline_weight(mut self, weight: f32) -> Self {
+        self.baseline_weight = weight.max(0.0);
+        self
+    }
+
+    /// Returns the identifier of the view.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns the origin of the camera in world coordinates.
+    pub fn origin(&self) -> [f32; 3] {
+        self.origin
+    }
+
+    /// Updates the origin of the camera in world coordinates.
+    pub fn set_origin(&mut self, origin: [f32; 3]) {
+        self.origin = origin;
+    }
+
+    /// Returns the forward direction of the camera.
+    pub fn forward(&self) -> [f32; 3] {
+        self.forward
+    }
+
+    /// Updates the forward direction (normalised) of the camera.
+    pub fn set_forward(&mut self, forward: [f32; 3]) {
+        self.forward = normalise_direction(forward);
+    }
+
+    /// Returns the baseline fusion weight associated with this view.
+    pub fn baseline_weight(&self) -> f32 {
+        self.baseline_weight.max(0.0)
+    }
+
+    fn alignment(&self, focus: [f32; 3]) -> f32 {
+        let focus = normalise_direction(focus);
+        let dot =
+            self.forward[0] * focus[0] + self.forward[1] * focus[1] + self.forward[2] * focus[2];
+        dot.max(0.0)
+    }
+}
+
+/// Helper that fuses multi-view registrations into Z-space attention profiles.
+#[derive(Clone, Debug)]
+pub struct MultiViewFusion {
+    views: Vec<ViewDescriptor>,
+    focus_direction: [f32; 3],
+    alignment_gamma: f32,
+}
+
+impl MultiViewFusion {
+    /// Builds a new fusion helper from the provided view descriptors.
+    pub fn new(views: Vec<ViewDescriptor>) -> PureResult<Self> {
+        if views.is_empty() {
+            return Err(TensorError::EmptyInput("multi_view_fusion"));
+        }
+        Ok(Self {
+            views,
+            focus_direction: [0.0, 0.0, 1.0],
+            alignment_gamma: 1.0,
+        })
+    }
+
+    /// Returns the registered views.
+    pub fn views(&self) -> &[ViewDescriptor] {
+        &self.views
+    }
+
+    /// Returns the number of registered views.
+    pub fn view_count(&self) -> usize {
+        self.views.len()
+    }
+
+    /// Updates the focus direction used when modulating view weights.
+    pub fn with_focus_direction(mut self, focus_direction: [f32; 3]) -> Self {
+        self.focus_direction = normalise_direction(focus_direction);
+        self
+    }
+
+    /// Updates the alignment gamma used to sharpen or soften orientation bias.
+    pub fn with_alignment_gamma(mut self, gamma: f32) -> Self {
+        self.alignment_gamma = if gamma.is_finite() {
+            gamma.clamp(0.25, 8.0)
+        } else {
+            1.0
+        };
+        self
+    }
+
+    /// Returns the current focus direction.
+    pub fn focus_direction(&self) -> [f32; 3] {
+        self.focus_direction
+    }
+
+    /// Returns the alignment gamma used for orientation bias.
+    pub fn alignment_gamma(&self) -> f32 {
+        self.alignment_gamma
+    }
+
+    /// Returns the current normalised bias profile applied during fusion.
+    pub fn view_bias_profile(&self) -> Vec<f32> {
+        self.normalised_biases()
+    }
+
+    fn raw_biases(&self) -> Vec<f32> {
+        let focus = self.focus_direction;
+        let gamma = self.alignment_gamma.max(1e-3);
+        self.views
+            .iter()
+            .map(|view| {
+                let alignment = view.alignment(focus).max(1e-3).powf(gamma);
+                alignment * view.baseline_weight().max(1e-3)
+            })
+            .collect()
+    }
+
+    fn normalised_biases(&self) -> Vec<f32> {
+        let mut biases = self.raw_biases();
+        if biases.is_empty() {
+            return biases;
+        }
+        ZSpaceVolume::normalise_weights(&mut biases);
+        biases
+    }
+}
+
+fn normalise_direction(direction: [f32; 3]) -> [f32; 3] {
+    let norm =
+        (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
+            .sqrt();
+    if norm <= 1e-6 || !norm.is_finite() {
+        [0.0, 0.0, 1.0]
+    } else {
+        [
+            direction[0] / norm,
+            direction[1] / norm,
+            direction[2] / norm,
+        ]
+    }
+
+    /// Computes a spectral energy response for each depth slice using the provided window.
+    pub fn spectral_response(&self, window: &SpectralWindow) -> Vec<f32> {
+        let slice_len = self.height.saturating_mul(self.width);
+        if slice_len == 0 || self.depth == 0 {
+            return Vec::new();
+        }
+        let mut response = Vec::with_capacity(self.depth);
+        let window_weights = window.weights(self.depth);
+        for (z, coeff) in window_weights.iter().enumerate() {
+            let start = z * slice_len;
+            let end = start + slice_len;
+            let slice = &self.voxels[start..end];
+            let energy = if slice_len > 0 {
+                slice.iter().map(|v| v.abs()).sum::<f32>() / slice_len as f32
+            } else {
+                0.0
+            };
+            response.push(energy * coeff);
+        }
+        response
+    }
+
+    /// Performs an exponential moving average with another volume in-place.
+    pub fn accumulate(&mut self, next: &ZSpaceVolume, alpha: f32) -> PureResult<()> {
+        if self.depth != next.depth || self.height != next.height || self.width != next.width {
+            return Err(TensorError::ShapeMismatch {
+                left: (self.depth, self.height * self.width),
+                right: (next.depth, next.height * next.width),
+            });
+        }
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(TensorError::InvalidValue {
+                label: "temporal_alpha",
+            });
+        }
+        if self.resonance_decay.len() != next.resonance_decay.len() {
+            return Err(TensorError::ShapeMismatch {
+                left: (self.depth, self.height * self.width),
+                right: (next.depth, next.height * next.width),
+            });
+        }
+        let retain = 1.0 - alpha;
+        for (current, incoming) in self.voxels.iter_mut().zip(next.voxels.iter()) {
+            *current = (*current * retain) + (incoming * alpha);
+        }
+        let harmonic_channels = self.harmonic_channels.max(next.harmonic_channels);
+        if self.harmonic_channels != harmonic_channels {
+            self.ensure_harmonic_channels(harmonic_channels);
+        }
+        let mut expanded_next;
+        let next_harmonics: &[f32] = if next.harmonic_channels == harmonic_channels {
+            &next.temporal_harmonics
+        } else {
+            expanded_next = vec![0.0; self.voxel_count().saturating_mul(harmonic_channels)];
+            if next.harmonic_channels > 0 {
+                let next_stride = next.harmonic_channels;
+                let dst_stride = harmonic_channels;
+                for (voxel_idx, chunk) in expanded_next
+                    .chunks_mut(dst_stride)
+                    .enumerate()
+                    .take(next.voxel_count())
+                {
+                    let src_start = voxel_idx * next_stride;
+                    let src_end = src_start + next_stride;
+                    let dst_slice = &mut chunk[..next_stride];
+                    dst_slice.copy_from_slice(&next.temporal_harmonics[src_start..src_end]);
+                }
+            }
+            &expanded_next
+        };
+        for (current, incoming) in self
+            .temporal_harmonics
+            .iter_mut()
+            .zip(next_harmonics.iter())
+        {
+            *current = (*current * retain) + (incoming * alpha);
+        }
+        for (current, incoming) in self
+            .resonance_decay
+            .iter_mut()
+            .zip(next.resonance_decay.iter())
+        {
+            *current = (*current * retain) + (incoming * alpha);
+        }
+        Ok(())
+    }
+
+    /// Returns a blended copy that incorporates the next volume using EMA weighting.
+    pub fn accumulated(&self, next: &ZSpaceVolume, alpha: f32) -> PureResult<Self> {
+        let mut blended = Self {
+            depth: self.depth,
+            height: self.height,
+            width: self.width,
+            voxels: self.voxels.clone(),
+            harmonic_channels: self.harmonic_channels,
+            temporal_harmonics: self.temporal_harmonics.clone(),
+            resonance_decay: self.resonance_decay.clone(),
+        };
+        blended.accumulate(next, alpha)?;
+        Ok(blended)
+    }
+
+    /// Blends a sequence of volumes using the provided weights.
+    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        if weights.len() != sequence.len() {
+            return Err(TensorError::DataLength {
+                expected: sequence.len(),
+                got: weights.len(),
+            });
+        }
+        let base = &sequence[0];
+        let harmonic_channels = sequence
+            .iter()
+            .map(|volume| volume.harmonic_channels)
+            .max()
+            .unwrap_or(0);
+        let mut blended = ZSpaceVolume::zeros_with_temporal(
+            base.depth,
+            base.height,
+            base.width,
+            harmonic_channels,
+        )?;
+        for value in blended.resonance_decay.iter_mut() {
+            *value = 0.0;
+        }
+        let mut total_weight = 0.0f32;
+        let voxel_count = blended.voxel_count();
+        for (volume, &weight) in sequence.iter().zip(weights.iter()) {
+            if volume.depth != base.depth
+                || volume.height != base.height
+                || volume.width != base.width
+            {
+                return Err(TensorError::ShapeMismatch {
+                    left: (base.depth, base.height * base.width),
+                    right: (volume.depth, volume.height * volume.width),
+                });
+            }
+            if !weight.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "temporal_weight",
+                    value: weight,
+                });
+            }
+            total_weight += weight;
+            for idx in 0..voxel_count {
+                blended.voxels[idx] += volume.voxels()[idx] * weight;
+                blended.resonance_decay[idx] += volume.resonance_decay()[idx] * weight;
+                if volume.harmonic_channels > 0 && harmonic_channels > 0 {
+                    let src_offset = idx * volume.harmonic_channels;
+                    let dst_offset = idx * harmonic_channels;
+                    for channel in 0..volume.harmonic_channels.min(harmonic_channels) {
+                        blended.temporal_harmonics[dst_offset + channel] +=
+                            volume.temporal_harmonics()[src_offset + channel] * weight;
+                    }
+                }
+            }
+        }
+        if total_weight > 0.0 {
+            let inv = 1.0 / total_weight;
+            for value in blended.voxels.iter_mut() {
+                *value *= inv;
+            }
+            for value in blended.temporal_harmonics.iter_mut() {
+                *value *= inv;
+            }
+            for value in blended.resonance_decay.iter_mut() {
+                *value *= inv;
+            }
+        }
+        Ok(blended)
     }
 }
 
@@ -1578,6 +3037,9 @@ impl ZSpaceVolume {
             height: image.height(),
             width: image.width(),
             voxels: image.as_slice().to_vec(),
+            harmonic_channels: 0,
+            temporal_harmonics: Vec::new(),
+            resonance_decay: vec![1.0; image.channels() * image.height() * image.width()],
         })
     }
 
@@ -1625,6 +3087,60 @@ impl ZSpaceVolume {
         }
         let sum_sq: f32 = self.voxels.iter().map(|value| value * value).sum();
         sum_sq / (self.voxels.len() as f32)
+    }
+}
+
+impl TemporalVolume for ZSpaceVolume {
+    fn depth(&self) -> usize {
+        self.depth
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn voxel_count(&self) -> usize {
+        ZSpaceVolume::voxel_count(self)
+    }
+
+    fn harmonic_channels(&self) -> usize {
+        self.harmonic_channels
+    }
+
+    fn voxels(&self) -> &[f32] {
+        &self.voxels
+    }
+
+    fn voxels_mut(&mut self) -> &mut [f32] {
+        &mut self.voxels
+    }
+
+    fn harmonics(&self) -> &[f32] {
+        &self.temporal_harmonics
+    }
+
+    fn harmonics_mut(&mut self) -> &mut [f32] {
+        &mut self.temporal_harmonics
+    }
+
+    fn resonance_decay(&self) -> &[f32] {
+        &self.resonance_decay
+    }
+
+    fn resonance_decay_mut(&mut self) -> &mut [f32] {
+        &mut self.resonance_decay
+    }
+
+    fn ensure_harmonic_channels(&mut self, channels: usize) {
+        ZSpaceVolume::ensure_harmonic_channels(self, channels);
+    }
+
+    fn blank_like(&self, harmonic_channels: usize) -> PureResult<Self> {
+        ZSpaceVolume::zeros_with_temporal(self.depth, self.height, self.width, harmonic_channels)
     }
 }
 
@@ -2987,6 +4503,18 @@ mod tests {
     }
 
     #[test]
+    fn volume_zeros_with_temporal_allocates_expected_buffers() {
+        let volume = ZSpaceVolume::zeros_with_temporal(2, 3, 4, 3).unwrap();
+        assert_eq!(volume.voxel_count(), 24);
+        assert_eq!(volume.temporal_harmonics().len(), 72);
+        assert_eq!(volume.harmonic_channels(), 3);
+        assert!(volume
+            .resonance_decay()
+            .iter()
+            .all(|v| (*v - 1.0).abs() < 1e-6));
+    }
+
+    #[test]
     fn volume_from_slices_respects_shapes() {
         let slice_a = tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2);
         let slice_b = tensor_from(&[4.0, 5.0, 6.0, 7.0], 2, 2);
@@ -3038,6 +4566,43 @@ mod tests {
         let next_slices = vec![tensor_from(&front_b, 2, 2), tensor_from(&back_b, 2, 2)];
         let mut ema = ZSpaceVolume::from_slices(&base_slices).unwrap();
         let next = ZSpaceVolume::from_slices(&next_slices).unwrap();
+        ema.ensure_harmonic_channels(2);
+        let mut next = next;
+        next.ensure_harmonic_channels(2);
+        let ema_channels = ema.harmonic_channels();
+        for (idx, chunk) in ema
+            .temporal_harmonics_mut()
+            .chunks_mut(ema_channels)
+            .enumerate()
+        {
+            let base = idx as f32 * 0.1;
+            chunk[0] = 0.5 + base;
+            chunk[1] = 0.25 + base;
+        }
+        let next_channels = next.harmonic_channels();
+        for (idx, chunk) in next
+            .temporal_harmonics_mut()
+            .chunks_mut(next_channels)
+            .enumerate()
+        {
+            let base = idx as f32 * 0.05;
+            chunk[0] = 0.1 + base;
+            chunk[1] = 0.8 - base;
+        }
+        ema.resonance_decay_mut()
+            .iter_mut()
+            .enumerate()
+            .for_each(|(idx, v)| {
+                *v = 0.2 * (idx as f32 + 1.0);
+            });
+        next.resonance_decay_mut()
+            .iter_mut()
+            .enumerate()
+            .for_each(|(idx, v)| {
+                *v = 0.4 * (idx as f32 + 1.0);
+            });
+        let base_harmonics = ema.temporal_harmonics().to_vec();
+        let base_decay = ema.resonance_decay().to_vec();
         let alpha = 0.25;
         ema.accumulate(&next, alpha).unwrap();
         let retain = 1.0 - alpha;
@@ -3057,9 +4622,62 @@ mod tests {
             .accumulated(&next, alpha)
             .unwrap();
         assert_eq!(blended.voxels(), ema.voxels());
+        for ((idx, observed), anticipated) in ema
+            .temporal_harmonics()
+            .iter()
+            .enumerate()
+            .zip(next.temporal_harmonics().iter())
+        {
+            let baseline = base_harmonics[idx];
+            let expected_value = baseline * retain + anticipated * alpha;
+            assert!((observed - expected_value).abs() < 1e-5);
+        }
+        for ((idx, observed), expected_decay) in ema
+            .resonance_decay()
+            .iter()
+            .enumerate()
+            .zip(next.resonance_decay())
+        {
+            let baseline = base_decay[idx];
+            let anticipated = baseline * retain + expected_decay * alpha;
+            assert!((observed - anticipated).abs() < 1e-5);
+        }
         let mismatched = ZSpaceVolume::from_slices(&[tensor_from(&front_a, 2, 2)]).unwrap();
         assert!(ema.accumulate(&mismatched, alpha).is_err());
         assert!(ema.accumulated(&next, 1.5).is_err());
+    }
+
+    #[test]
+    fn blend_sequence_respects_weights() {
+        let mut a = ZSpaceVolume::zeros_with_temporal(1, 1, 2, 2).unwrap();
+        a.voxels_mut().copy_from_slice(&[1.0, 2.0]);
+        a.resonance_decay_mut().copy_from_slice(&[0.2, 0.4]);
+        let a_channels = a.harmonic_channels();
+        for (idx, chunk) in a
+            .temporal_harmonics_mut()
+            .chunks_mut(a_channels)
+            .enumerate()
+        {
+            chunk[0] = 0.5 + idx as f32;
+            chunk[1] = 0.1;
+        }
+        let mut b = ZSpaceVolume::zeros_with_temporal(1, 1, 2, 2).unwrap();
+        b.voxels_mut().copy_from_slice(&[3.0, 5.0]);
+        b.resonance_decay_mut().copy_from_slice(&[0.6, 0.8]);
+        let b_channels = b.harmonic_channels();
+        for (idx, chunk) in b
+            .temporal_harmonics_mut()
+            .chunks_mut(b_channels)
+            .enumerate()
+        {
+            chunk[0] = 1.0 + idx as f32;
+            chunk[1] = 0.3;
+        }
+        let blended = ZSpaceVolume::blend_sequence(&[a.clone(), b.clone()], &[0.25, 0.75]).unwrap();
+        assert_eq!(blended.voxels()[0], 0.25 * 1.0 + 0.75 * 3.0);
+        assert_eq!(blended.voxels()[1], 0.25 * 2.0 + 0.75 * 5.0);
+        assert!((blended.resonance_decay()[0] - (0.25 * 0.2 + 0.75 * 0.6)).abs() < 1e-6);
+        assert!((blended.temporal_harmonics()[0] - (0.25 * 0.5 + 0.75 * 1.0)).abs() < 1e-6);
     }
 
     #[test]
@@ -3247,6 +4865,95 @@ mod tests {
         let first_energy = first.infinity_energy.data()[0];
         let second_energy = second.infinity_energy.data()[0];
         assert!((second_energy - first_energy).abs() > 1e-6);
+    }
+
+    #[test]
+    fn volume_interpolation_and_upscale_refine_geometry() {
+        let slices = vec![
+            tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2),
+            tensor_from(&[4.0, 5.0, 6.0, 7.0], 2, 2),
+        ];
+        let volume = ZSpaceVolume::from_slices(&slices).unwrap();
+        let interpolated = volume.interpolate(InterpolationMethod::Linear).unwrap();
+        assert_eq!(interpolated.depth(), volume.depth() * 2 - 1);
+        let mid_slice = interpolated.slice(1).unwrap();
+        let expected: Vec<f32> = slices[0]
+            .data()
+            .iter()
+            .zip(slices[1].data().iter())
+            .map(|(a, b)| 0.5 * (a + b))
+            .collect();
+        assert_eq!(mid_slice.data(), expected.as_slice());
+
+        let upscaled = interpolated.upscale(2).unwrap();
+        assert_eq!(upscaled.height(), interpolated.height() * 2);
+        assert_eq!(upscaled.width(), interpolated.width() * 2);
+        let top_left = upscaled.slice(0).unwrap().data()[0];
+        assert!((top_left - slices[0].data()[0]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn diffuser_softens_sharp_transitions() {
+        let slices = vec![
+            tensor_from(&[10.0, 0.0, 0.0, 0.0], 2, 2),
+            tensor_from(&[0.0, 0.0, 0.0, 0.0], 2, 2),
+        ];
+        let volume = ZSpaceVolume::from_slices(&slices).unwrap();
+        let diffuser = ZDiffuser::new(1, 0.5);
+        let diffused = diffuser.diffuse(&volume).unwrap();
+        assert!(diffused.voxels()[0] < 10.0);
+        assert!(diffused.voxels()[1] > 0.0);
+    }
+
+    #[test]
+    fn decoder_is_deterministic_for_seed() {
+        let latent = tensor_from(&[0.3, -0.1, 0.5], 1, 3);
+        let mut decoder_a = ZDecoder::new(2, 2, 2, 7).unwrap();
+        let mut decoder_b = ZDecoder::new(2, 2, 2, 7).unwrap();
+        let volume_a = decoder_a.decode(&latent).unwrap();
+        let volume_b = decoder_b.decode(&latent).unwrap();
+        assert_eq!(volume_a.voxels(), volume_b.voxels());
+    }
+
+    #[test]
+    fn video_stream_projector_handles_sequences() {
+        let frame_a = vec![
+            tensor_from(&[0.2, 0.4, 0.6, 0.8], 2, 2),
+            tensor_from(&[0.1, 0.3, 0.5, 0.7], 2, 2),
+            tensor_from(&[0.0, 0.2, 0.4, 0.6], 2, 2),
+        ];
+        let frame_b = vec![
+            tensor_from(&[0.5, 0.3, 0.1, -0.1], 2, 2),
+            tensor_from(&[0.6, 0.4, 0.2, 0.0], 2, 2),
+            tensor_from(&[0.7, 0.5, 0.3, 0.1], 2, 2),
+        ];
+        let volume_a = ZSpaceVolume::from_slices(&frame_a).unwrap();
+        let volume_b = ZSpaceVolume::from_slices(&frame_b).unwrap();
+        let projector = VisionProjector::new(0.5, 0.4, 0.1);
+        let generator = ResonanceGenerator::new("video", 12, 5).unwrap();
+        let mut stream = VideoStreamProjector::new(projector, generator, 0.3)
+            .with_diffuser(ZDiffuser::new(1, 0.25))
+            .with_super_resolution(InterpolationMethod::Linear, 2);
+        let chrono_frames = vec![Some(toy_summary()), Some(toy_summary())];
+        let mut atlas_first = AtlasFrame::new(0.1);
+        atlas_first.z_signal = Some(0.6);
+        let mut atlas_second = AtlasFrame::new(0.2);
+        atlas_second.z_signal = Some(0.8);
+        atlas_second.suggested_pressure = Some(40.0);
+        let atlas_frames = vec![Some(atlas_first), Some(atlas_second)];
+        let projections = stream
+            .project_sequence(
+                &[volume_a.clone(), volume_b.clone()],
+                &chrono_frames,
+                &atlas_frames,
+            )
+            .unwrap();
+        assert_eq!(projections.len(), 2);
+        assert_eq!(
+            projections[0].shape(),
+            (volume_a.height() * 2, volume_a.width() * 2)
+        );
+        assert!(stream.last_resonance().is_some());
     }
 
     #[test]

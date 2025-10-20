@@ -20,6 +20,9 @@ classifiers = [
 [tool.maturin]
 python-source = "python"
 
+[project.scripts]
+spiral-train = "spiral.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/RyoSpiralArchitect/SpiralTorch"
 Source = "https://github.com/RyoSpiralArchitect/SpiralTorch"
