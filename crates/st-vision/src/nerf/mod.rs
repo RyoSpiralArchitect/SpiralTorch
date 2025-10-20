@@ -8,6 +8,8 @@
 
 mod encoding;
 mod field;
+mod trainer;
 
 pub use encoding::PositionalEncoding;
 pub use field::{FieldSampleLayout, NerfField, NerfFieldConfig};
+pub use trainer::{NerfTrainer, NerfTrainingConfig, NerfTrainingStats};

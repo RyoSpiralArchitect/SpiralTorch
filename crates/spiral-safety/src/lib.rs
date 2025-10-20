@@ -173,7 +173,7 @@ pub enum SafetyError {
 }
 
 /// Collects audit events and exposes them to callers.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AuditSink {
     inner: Arc<Mutex<Vec<AuditEvent>>>,
 }
@@ -257,7 +257,7 @@ impl SafetyPolicy {
                 cumulative_score += score;
                 violations.push(SafetyViolation::new(
                     ViolationCategory::Toxicity,
-                    term,
+                    *term,
                     score,
                 ));
             }
@@ -267,7 +267,7 @@ impl SafetyPolicy {
             if content.to_ascii_lowercase().contains(term) {
                 let score = 0.5;
                 cumulative_score += score;
-                violations.push(SafetyViolation::new(ViolationCategory::Bias, term, score));
+                violations.push(SafetyViolation::new(ViolationCategory::Bias, *term, score));
             }
         }
 

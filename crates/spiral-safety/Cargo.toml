@@ -9,7 +9,7 @@ authors = ["SpiralTorch Safety Team <safety@spiraltorch.ai>"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 tracing = "0.1"
 
 [dev-dependencies]
