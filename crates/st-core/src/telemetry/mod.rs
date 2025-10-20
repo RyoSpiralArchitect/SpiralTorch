@@ -26,6 +26,7 @@ pub mod chrono;
 pub mod dashboard;
 pub mod hub;
 pub mod maintainer;
+pub mod xai_report;
 
 #[cfg(feature = "psi")]
 pub mod psi;
