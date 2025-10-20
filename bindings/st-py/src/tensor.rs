@@ -12,7 +12,7 @@ use st_tensor::{Tensor, TensorError};
 const USED_DLPACK_CAPSULE_NAME: &CStr =
     unsafe { CStr::from_bytes_with_nul_unchecked(b"used_dltensor\0") };
 
-#[pyclass(module = "spiraltorch")]
+#[pyclass(module = "spiraltorch", name = "Tensor")]
 #[derive(Clone)]
 pub(crate) struct PyTensor {
     pub(crate) inner: Tensor,

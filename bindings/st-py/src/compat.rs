@@ -87,7 +87,7 @@ fn capture_impl(py: Python<'_>, value: &Bound<PyAny>) -> PyResult<PyTensor> {
             let py_tensor: Py<PyTensor> = value.extract()?;
             Ok(py_tensor.bind(py).borrow().clone())
         }
-        Source::Torch => torch::from_torch(py, value),
+        Source::Torch => torch::from_torch(py, value, None, None, None, None, None),
         Source::Jax => jax::from_jax(py, value),
         Source::TensorFlow => tensorflow::from_tensorflow(py, value),
         Source::Dlpack => PyTensor::from_dlpack(py, value.clone().unbind().into_py(py)),
@@ -115,7 +115,7 @@ fn share_impl(py: Python<'_>, value: &Bound<PyAny>, target: &str) -> PyResult<Py
                 return Ok(value.clone().unbind().into_py(py));
             }
             let tensor = capture_impl(py, value)?;
-            torch::to_torch(py, &tensor)
+            torch::to_torch(py, &tensor, None, None, None, None, None)
         }
         "jax" => {
             if module.starts_with("jax") || module.contains("jaxlib") {
@@ -161,15 +161,15 @@ mod torch {
             "__doc__",
             "PyTorch conversion helpers backed by torch.utils.dlpack with post-conversion tuning.",
         )?;
-        torch.add_function(wrap_pyfunction!(to_torch, &torch)?)?;
-        torch.add_function(wrap_pyfunction!(from_torch, &torch)?)?;
+        torch.add_function(wrap_pyfunction!(self::to_torch_py, &torch)?)?;
+        torch.add_function(wrap_pyfunction!(self::from_torch_py, &torch)?)?;
         compat.add_submodule(&torch)?;
         Ok(())
     }
 
-    #[pyfunction]
+    #[pyfunction(name = "to_torch")]
     #[pyo3(signature = (tensor, *, dtype=None, device=None, requires_grad=None, copy=None, memory_format=None))]
-    pub(super) fn to_torch(
+    fn to_torch_py(
         py: Python<'_>,
         tensor: &PyTensor,
         dtype: Option<PyObject>,
@@ -210,16 +210,12 @@ mod torch {
     }
 
     pub(super) fn to_torch(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
-        let utils = super::import_with_hint(py, "torch.utils.dlpack", "PyTorch >= 1.10")?;
-        let from_dlpack = utils.getattr("from_dlpack")?;
-        let capsule = tensor.to_dlpack(py)?;
-        let tensor = from_dlpack.call1((capsule,))?;
-        Ok(tensor.into_py(py))
+        to_torch_py(py, tensor, None, None, None, None, None)
     }
 
-    #[pyfunction]
+    #[pyfunction(name = "from_torch")]
     #[pyo3(signature = (tensor, *, dtype=None, device=None, ensure_cpu=None, copy=None, require_contiguous=None))]
-    pub(super) fn from_torch(
+    fn from_torch_py(
         py: Python<'_>,
         tensor: &Bound<PyAny>,
         dtype: Option<PyObject>,
@@ -278,11 +274,9 @@ mod torch {
     }
 
     pub(super) fn from_torch(py: Python<'_>, tensor: &Bound<PyAny>) -> PyResult<PyTensor> {
-        let utils = super::import_with_hint(py, "torch.utils.dlpack", "PyTorch >= 1.10")?;
-        let to_dlpack = utils.getattr("to_dlpack")?;
-        let capsule = to_dlpack.call1((tensor,))?.unbind();
-        PyTensor::from_dlpack(py, capsule)
+        from_torch_py(py, tensor, None, None, None, None, None)
     }
+
 }
 
 mod jax {
