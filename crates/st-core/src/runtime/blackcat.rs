@@ -729,7 +729,7 @@ pub mod zmeta {
                 *value *= gain;
             }
 
-            self.logistic_project_step_legacy(&delta);
+            self.logistic_project_step(&delta);
         }
 
         #[cfg(not(feature = "blackcat_v2"))]

@@ -9,7 +9,6 @@ use super::wgpu_heuristics::{SOFT_NAME_CH, SOFT_NAME_KL, SOFT_NAME_USE2CE, SOFT_
 use serde_json::Value;
 #[cfg(feature = "logic")]
 use super::soft_logic::SoftRule;
-use st_softlogic::SoftRule;
 
 #[cfg(feature = "logic")]
 pub fn kv_consensus_soft_rules(

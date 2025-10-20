@@ -411,11 +411,13 @@ impl InterfaceZPulse {
             }
         }
 
-        // 集約スケールを計算して利用する（unused 警告の解消）
-        let scale = if scale_weight > 0.0 {
+        // Combine the weighted scale contributions from the input pulses.  When all
+        // contributors omit the scale metadata we conservatively fall back to the
+        // most recent non-empty sample so downstream consumers retain continuity.
+        let aggregated_scale = if scale_weight > 0.0 {
             ZScale::from_components(scale_phys / scale_weight, scale_log / scale_weight)
         } else {
-            None
+            pulses.iter().rev().find_map(|pulse| pulse.scale)
         };
 
         InterfaceZPulse {
@@ -423,8 +425,7 @@ impl InterfaceZPulse {
             support,
             interface_cells,
             band_energy: band,
-            // [SCALE-TODO] Patch 0 aggregate placeholder
-            scale: scale.or(Some(ZScale::ONE)),
+            scale: aggregated_scale.or(Some(ZScale::ONE)),
             drift: if drift_weight > 0.0 {
                 drift_sum / drift_weight
             } else {
