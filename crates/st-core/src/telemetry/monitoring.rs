@@ -98,6 +98,7 @@ struct FeatureWindow {
     baseline: RunningStats,
     window_stats: RunningStats,
     warmup: usize,
+    baseline_frozen: bool,
 }
 
 impl FeatureWindow {
@@ -108,20 +109,22 @@ impl FeatureWindow {
             baseline: RunningStats::default(),
             window_stats: RunningStats::default(),
             warmup,
+            baseline_frozen: false,
         }
     }
 
     fn update(&mut self, value: f64) {
         if self.history.len() == self.capacity {
             self.history.pop_front();
-            self.window_stats = recompute_stats(&self.history);
         }
         self.history.push_back(value);
-        self.baseline.update(value);
-        if self.history.len() == 1 {
-            self.window_stats = RunningStats::default();
+        if !self.baseline_frozen {
+            self.baseline.update(value);
+            if self.baseline.count as usize >= self.warmup {
+                self.baseline_frozen = true;
+            }
         }
-        self.window_stats.update(value);
+        self.window_stats = recompute_stats(&self.history);
     }
 
     fn ready(&self) -> bool {
