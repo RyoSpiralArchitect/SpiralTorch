@@ -1686,14 +1686,19 @@ mod language_pipeline {
                     let mut aws_targets = Vec::new();
                     for target in &dist.cloud_targets {
                         let descriptor = target.descriptor();
-                        match target.provider() {
-                            "azure" => {
-                                azure_targets.push(format!("{}:{descriptor}", target.service()));
+                        match target {
+                            CloudConnector::AzureEventHub { .. } => {
+                                azure_targets.push(format!("event_hub:{descriptor}"));
                             }
-                            "aws" => {
-                                aws_targets.push(format!("{}:{descriptor}", target.service()));
+                            CloudConnector::AzureStorageQueue { .. } => {
+                                azure_targets.push(format!("storage_queue:{descriptor}"));
                             }
-                            _ => {}
+                            CloudConnector::AwsKinesis { .. } => {
+                                aws_targets.push(format!("kinesis:{descriptor}"));
+                            }
+                            CloudConnector::AwsSqs { .. } => {
+                                aws_targets.push(format!("sqs:{descriptor}"));
+                            }
                         }
                     }
                     if !azure_targets.is_empty() {
