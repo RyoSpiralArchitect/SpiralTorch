@@ -77,6 +77,8 @@ pub struct FrameState {
     pub curvature_b_con: f32,
     #[serde(default)]
     pub kappa_slope: f32,
+    #[serde(default)]
+    pub directional_axes: BTreeMap<String, DirectionalAxis>,
 }
 
 impl FrameState {
@@ -122,6 +124,7 @@ impl Default for FrameState {
             curvature_b_den: 0.0,
             curvature_b_con: 0.0,
             kappa_slope: 0.0,
+            directional_axes: BTreeMap::new(),
         }
     }
 }
@@ -170,6 +173,7 @@ pub struct DrlMetrics {
     pub chi: u32,
     pub strict_mode: bool,
     pub frame_signatures: BTreeMap<String, FrameSignature>,
+    pub direction_signatures: BTreeMap<String, BTreeMap<String, DirectionalSignature>>,
 }
 
 /// Backwards compatibility alias for earlier drafts that surfaced DRS.
@@ -189,6 +193,78 @@ pub struct FrameSignature {
     pub safe_radius: Option<f32>,
     pub kappa_slope: f32,
     pub tipping_radius: Option<f32>,
+}
+
+/// Basis coefficients for evaluating a directional drift.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DirectionalAxis {
+    pub value_components: Vec<f32>,
+    pub risk_components: Vec<f32>,
+    pub kappa_components: Vec<f32>,
+    #[serde(default)]
+    pub value_curvature_components: Vec<f32>,
+    #[serde(default)]
+    pub risk_curvature_components: Vec<f32>,
+    #[serde(default)]
+    pub kappa_slope_components: Vec<f32>,
+}
+
+/// Request for a directional signature.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DirectionQuery {
+    pub axis: String,
+    pub weights: Vec<f32>,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+impl DirectionQuery {
+    fn label_or_axis(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.axis)
+    }
+}
+
+/// Directional response diagnostics for a frame.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DirectionalSignature {
+    pub value_slope: f32,
+    pub risk_slope: f32,
+    pub net_slope: f32,
+    pub value_curvature: f32,
+    pub risk_curvature: f32,
+    pub net_curvature: f32,
+    pub hazard_base: f32,
+    pub hazard: f32,
+    pub hazard_multiplier: f32,
+    pub timing_elasticity: f32,
+    pub safe_radius: Option<f32>,
+    pub kappa_slope: f32,
+    pub tipping_radius: Option<f32>,
+}
+
+/// Options for analysing a word.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct AnalysisOptions {
+    #[serde(default)]
+    pub hazard_cut: Option<f32>,
+    #[serde(default = "default_min_radius")]
+    pub min_radius: f32,
+    #[serde(default)]
+    pub direction_queries: BTreeMap<String, Vec<DirectionQuery>>,
+}
+
+const fn default_min_radius() -> f32 {
+    0.2
+}
+
+impl Default for AnalysisOptions {
+    fn default() -> Self {
+        Self {
+            hazard_cut: None,
+            min_radius: default_min_radius(),
+            direction_queries: BTreeMap::new(),
+        }
+    }
 }
 
 /// Reasonable defaults that prioritise high-safety frames.
@@ -237,6 +313,72 @@ fn tipping_radius(net_slope: f32, net_curvature: f32) -> Option<f32> {
     } else {
         None
     }
+}
+
+fn directional_dot(components: &[f32], weights: &[f32]) -> Option<f32> {
+    if components.is_empty() {
+        return None;
+    }
+    if components.len() != weights.len() {
+        return None;
+    }
+    Some(
+        components
+            .iter()
+            .zip(weights.iter())
+            .map(|(comp, weight)| comp * weight)
+            .sum(),
+    )
+}
+
+fn directional_signature(
+    word: &WordState,
+    frame: &FrameState,
+    axis: &DirectionalAxis,
+    weights: &[f32],
+    threshold: Option<&FrameThreshold>,
+) -> Option<DirectionalSignature> {
+    let value_slope =
+        directional_dot(&axis.value_components, weights).unwrap_or_else(|| frame.mix_a());
+    let risk_linear =
+        directional_dot(&axis.risk_components, weights).unwrap_or_else(|| frame.mix_b());
+    let risk_slope = word.base_lambda * risk_linear * frame.s;
+    let net_slope = value_slope - risk_slope;
+    let value_curvature = directional_dot(&axis.value_curvature_components, weights)
+        .unwrap_or_else(|| frame.mix_curvature_a());
+    let risk_curvature_base = directional_dot(&axis.risk_curvature_components, weights)
+        .unwrap_or_else(|| frame.mix_curvature_b());
+    let risk_curvature = word.base_lambda * risk_curvature_base * frame.s;
+    let net_curvature = value_curvature - risk_curvature;
+    let multiplier = hazard_multiplier(word, frame);
+    let hazard_base = -(value_slope - risk_slope);
+    let hazard_base = hazard_base.max(0.0);
+    let hazard = frame.c * multiplier * hazard_base;
+    let kappa_value = directional_dot(&axis.kappa_components, weights).unwrap_or(frame.kappa);
+    let kappa_slope =
+        directional_dot(&axis.kappa_slope_components, weights).unwrap_or(frame.kappa_slope);
+    let safe_radius = threshold.map(|t| {
+        let kappa_denom = kappa_value.max(1e-6);
+        let comprehension_limit = (1.0 - t.tau) / kappa_denom;
+        let risk_denom = (risk_linear.abs() * frame.s).max(1e-9);
+        let risk_limit = t.rho / risk_denom;
+        comprehension_limit.min(risk_limit)
+    });
+    Some(DirectionalSignature {
+        value_slope,
+        risk_slope,
+        net_slope,
+        value_curvature,
+        risk_curvature,
+        net_curvature,
+        hazard_base,
+        hazard,
+        hazard_multiplier: multiplier,
+        timing_elasticity: timing_elasticity(word, frame, multiplier),
+        safe_radius,
+        kappa_slope,
+        tipping_radius: tipping_radius(net_slope, net_curvature),
+    })
 }
 
 /// Compute the hazard for a specific frame.
@@ -289,7 +431,7 @@ pub fn safe_radius(
 
 /// Analyse a word using default hazard cut and radius threshold.
 pub fn analyse_word(word: &WordState, thresholds: &BTreeMap<String, FrameThreshold>) -> DrlMetrics {
-    analyse_word_with(word, thresholds, None, 0.2)
+    analyse_word_with_options(word, thresholds, &AnalysisOptions::default())
 }
 
 /// Analyse a word using custom hazard cut and radius threshold.
@@ -298,6 +440,18 @@ pub fn analyse_word_with(
     thresholds: &BTreeMap<String, FrameThreshold>,
     hazard_cut: Option<f32>,
     min_radius: f32,
+) -> DrlMetrics {
+    let mut options = AnalysisOptions::default();
+    options.hazard_cut = hazard_cut;
+    options.min_radius = min_radius;
+    analyse_word_with_options(word, thresholds, &options)
+}
+
+/// Analyse a word with explicit options including directional queries.
+pub fn analyse_word_with_options(
+    word: &WordState,
+    thresholds: &BTreeMap<String, FrameThreshold>,
+    options: &AnalysisOptions,
 ) -> DrlMetrics {
     let mut frame_hazards = BTreeMap::new();
     let mut frame_signatures = BTreeMap::new();
@@ -336,7 +490,7 @@ pub fn analyse_word_with(
     let mut hazard_counts = 0u32;
     for (name, hazard) in &frame_hazards {
         if let Some(threshold) = thresholds.get(name) {
-            let cut = hazard_cut.unwrap_or(threshold.hazard);
+            let cut = options.hazard_cut.unwrap_or(threshold.hazard);
             if *hazard >= cut {
                 hazard_counts += 1;
             }
@@ -345,7 +499,34 @@ pub fn analyse_word_with(
 
     let min_radius_observed = radii.values().fold(f32::INFINITY, |acc, r| acc.min(*r));
     let existence = existence_load(word);
-    let strict = hazard_counts >= 4 || min_radius_observed <= min_radius || existence >= 1.0;
+    let strict =
+        hazard_counts >= 4 || min_radius_observed <= options.min_radius || existence >= 1.0;
+
+    let mut direction_signatures: BTreeMap<String, BTreeMap<String, DirectionalSignature>> =
+        BTreeMap::new();
+    if !options.direction_queries.is_empty() {
+        for (frame_name, queries) in &options.direction_queries {
+            if let Some(frame) = word.frames.get(frame_name) {
+                if frame.directional_axes.is_empty() {
+                    continue;
+                }
+                let threshold = thresholds.get(frame_name);
+                let mut collected = BTreeMap::new();
+                for query in queries {
+                    if let Some(axis) = frame.directional_axes.get(&query.axis) {
+                        if let Some(signature) =
+                            directional_signature(word, frame, axis, &query.weights, threshold)
+                        {
+                            collected.insert(query.label_or_axis().to_string(), signature);
+                        }
+                    }
+                }
+                if !collected.is_empty() {
+                    direction_signatures.insert(frame_name.clone(), collected);
+                }
+            }
+        }
+    }
 
     DrlMetrics {
         word: word.clone(),
@@ -355,6 +536,7 @@ pub fn analyse_word_with(
         chi: hazard_counts,
         strict_mode: strict,
         frame_signatures,
+        direction_signatures,
     }
 }
 
@@ -377,14 +559,47 @@ pub fn trainer_penalty_with(metrics: &DrlMetrics, min_radius: f32) -> f32 {
         }
     }
     penalty += metrics.chi as f32;
-    if let Some(min_tipping) = metrics.frame_signatures.values().filter_map(|sig| {
-        sig.tipping_radius
-            .and_then(|r| if r > 0.0 { Some(r) } else { None })
-    }).min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+    if let Some(min_tipping) = metrics
+        .frame_signatures
+        .values()
+        .filter_map(|sig| {
+            sig.tipping_radius
+                .and_then(|r| if r > 0.0 { Some(r) } else { None })
+        })
+        .min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
     {
         if min_tipping < min_radius {
             let denom = min_radius.max(1e-6);
             penalty += (min_radius - min_tipping) / denom;
+        }
+    }
+    if !metrics.direction_signatures.is_empty() {
+        if let Some(min_direction_radius) = metrics
+            .direction_signatures
+            .values()
+            .flat_map(|map| map.values().filter_map(|sig| sig.safe_radius))
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+        {
+            if min_direction_radius < min_radius {
+                let denom = min_radius.max(1e-6);
+                penalty += (min_radius - min_direction_radius) / denom;
+            }
+        }
+        if let Some(min_direction_tipping) = metrics
+            .direction_signatures
+            .values()
+            .flat_map(|map| {
+                map.values().filter_map(|sig| {
+                    sig.tipping_radius
+                        .and_then(|r| if r > 0.0 { Some(r) } else { None })
+                })
+            })
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+        {
+            if min_direction_tipping < min_radius {
+                let denom = min_radius.max(1e-6);
+                penalty += (min_radius - min_direction_tipping) / denom;
+            }
         }
     }
     if metrics.strict_mode {
@@ -432,6 +647,29 @@ mod tests {
 
     fn normative_word() -> WordState {
         let mut frames = BTreeMap::new();
+        let mut axes = BTreeMap::new();
+        axes.insert(
+            "metaphor".to_string(),
+            DirectionalAxis {
+                value_components: vec![0.08],
+                risk_components: vec![0.12],
+                kappa_components: vec![0.18],
+                value_curvature_components: vec![0.0],
+                risk_curvature_components: vec![0.0],
+                kappa_slope_components: vec![0.0],
+            },
+        );
+        axes.insert(
+            "definition_break".to_string(),
+            DirectionalAxis {
+                value_components: vec![-0.2],
+                risk_components: vec![0.9],
+                kappa_components: vec![0.6],
+                value_curvature_components: vec![0.1],
+                risk_curvature_components: vec![0.5],
+                kappa_slope_components: vec![0.05],
+            },
+        );
         frames.insert(
             "Normative".to_string(),
             FrameState {
@@ -444,6 +682,7 @@ mod tests {
                 b_con: 0.8,
                 kappa: 0.35,
                 timing_scale: 1.0,
+                directional_axes: axes,
                 ..FrameState::default()
             },
         );
@@ -485,8 +724,7 @@ mod tests {
         assert!((signature.net_slope + 0.415_5).abs() < 1e-6);
         let expected_multiplier = (0.72_f32 * 0.65 * 1.4).clamp(-30.0, 30.0).exp();
         assert!((signature.hazard_multiplier - expected_multiplier).abs() < 1e-6);
-        let expected_elasticity =
-            expected_multiplier * 0.72_f32 * 0.65 * 1.0;
+        let expected_elasticity = expected_multiplier * 0.72_f32 * 0.65 * 1.0;
         assert!((signature.timing_elasticity - expected_elasticity).abs() < 1e-6);
         assert_eq!(signature.safe_radius, Some(radius));
         assert!(signature.tipping_radius.is_none());
@@ -503,5 +741,45 @@ mod tests {
         let metrics_vec = vec![metrics.clone(), metrics];
         let penalty = aggregate_penalty_with(metrics_vec.iter(), 0.2);
         assert!((penalty - 2.0 * 0.989_228_55).abs() < 1e-6);
+    }
+
+    #[test]
+    fn directional_queries_drive_extra_penalty() {
+        let word = normative_word();
+        let thresholds = default_thresholds();
+        let mut options = AnalysisOptions::default();
+        options.direction_queries.insert(
+            "Normative".to_string(),
+            vec![
+                DirectionQuery {
+                    axis: "metaphor".to_string(),
+                    weights: vec![1.0],
+                    label: Some("metaphor".to_string()),
+                },
+                DirectionQuery {
+                    axis: "definition_break".to_string(),
+                    weights: vec![1.0],
+                    label: None,
+                },
+            ],
+        );
+        let metrics = analyse_word_with_options(&word, &thresholds, &options);
+        let base_metrics = analyse_word(&word, &thresholds);
+        let normative = metrics
+            .direction_signatures
+            .get("Normative")
+            .expect("normative directional signatures");
+        assert!(normative.contains_key("metaphor"));
+        assert!(normative.contains_key("definition_break"));
+        let definition_break = normative
+            .get("definition_break")
+            .expect("definition break signature");
+        let radius = definition_break
+            .safe_radius
+            .expect("directional safe radius computed");
+        assert!(radius < 0.2);
+        let penalty_with = trainer_penalty_with(&metrics, 0.2);
+        let penalty_without = trainer_penalty(&base_metrics);
+        assert!(penalty_with > penalty_without);
     }
 }

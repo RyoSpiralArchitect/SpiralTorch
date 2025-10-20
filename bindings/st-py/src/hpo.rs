@@ -1,6 +1,7 @@
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PySequence};
+use pyo3::IntoPy;
 use spiral_hpo::{
     self as hpo, ExperimentTracker, NoOpTracker, ParamSpec, ParamValue, ResourceConfig,
     SearchError, SearchLoop, SearchLoopState, SearchSpace, Strategy, TrialRecord,
@@ -10,30 +11,24 @@ use std::sync::Mutex;
 fn search_error_to_py(err: SearchError) -> PyErr {
     match err {
         SearchError::NoAvailableSlot => PyRuntimeError::new_err("no available resource slots"),
-        SearchError::UnknownTrial(id) => {
-            PyValueError::new_err(format!("unknown trial id {id}"))
-        }
+        SearchError::UnknownTrial(id) => PyValueError::new_err(format!("unknown trial id {id}")),
         SearchError::EmptySpace => {
             PyValueError::new_err("search space must have at least one parameter")
         }
     }
 }
 
-fn required_item<'py, T: FromPyObject<'py>>(dict: &'py PyDict, key: &str, err: &str) -> PyResult<T> {
-    dict
-        .get_item(key)?
+fn required_item<'py, T: FromPyObject<'py>>(
+    dict: &Bound<'py, PyDict>,
+    key: &str,
+    err: &str,
+) -> PyResult<T> {
+    dict.get_item(key)?
         .ok_or_else(|| PyValueError::new_err(err.to_string()))?
         .extract()
 }
 
-fn optional_item<'py, T: FromPyObject<'py>>(dict: &'py PyDict, key: &str) -> PyResult<Option<T>> {
-    dict
-        .get_item(key)?
-        .map(|value| value.extract())
-        .transpose()
-}
-
-fn parse_param_spec(any: &PyAny) -> PyResult<ParamSpec> {
+fn parse_param_spec(any: &Bound<'_, PyAny>) -> PyResult<ParamSpec> {
     let dict = any
         .downcast::<PyDict>()
         .map_err(|_| PyValueError::new_err("parameter spec must be a mapping"))?;
@@ -65,12 +60,12 @@ fn parse_param_spec(any: &PyAny) -> PyResult<ParamSpec> {
     }
 }
 
-fn parse_space(specs: &PyAny) -> PyResult<SearchSpace> {
+fn parse_space(specs: &Bound<'_, PyAny>) -> PyResult<SearchSpace> {
     if let Ok(dict) = specs.downcast::<PyDict>() {
         // allow mapping -> {name: {...}}
         let mut params = Vec::with_capacity(dict.len());
         for (_, value) in dict.iter() {
-            params.push(parse_param_spec(value)?);
+            params.push(parse_param_spec(&value)?);
         }
         return Ok(SearchSpace::new(params));
     }
@@ -80,15 +75,21 @@ fn parse_space(specs: &PyAny) -> PyResult<SearchSpace> {
     let mut params = Vec::new();
     for item in seq.iter()? {
         let item = item?;
-        params.push(parse_param_spec(item)?);
+        params.push(parse_param_spec(&item)?);
     }
     Ok(SearchSpace::new(params))
 }
 
-fn parse_resource_config(resource: Option<&PyDict>) -> PyResult<ResourceConfig> {
+fn parse_resource_config(resource: Option<&Bound<'_, PyDict>>) -> PyResult<ResourceConfig> {
     if let Some(resource) = resource {
-        let max_concurrent = optional_item(resource, "max_concurrent")?;
-        let min_interval_ms = optional_item(resource, "min_interval_ms")?;
+        let max_concurrent = resource
+            .get_item("max_concurrent")?
+            .map(|item| item.extract())
+            .transpose()?;
+        let min_interval_ms = resource
+            .get_item("min_interval_ms")?
+            .map(|item| item.extract())
+            .transpose()?;
         Ok(ResourceConfig {
             max_concurrent: max_concurrent.unwrap_or(1),
             min_interval: min_interval_ms,
@@ -98,21 +99,44 @@ fn parse_resource_config(resource: Option<&PyDict>) -> PyResult<ResourceConfig> 
     }
 }
 
-fn parse_strategy(config: &PyDict) -> PyResult<Strategy> {
-    let name: String = required_item(config, "name", "strategy requires 'name'")?;
-    let seed: u64 = optional_item(config, "seed")?.unwrap_or(0);
+fn parse_strategy(config: &Bound<'_, PyDict>) -> PyResult<Strategy> {
+    let name: String = config
+        .get_item("name")?
+        .ok_or_else(|| PyValueError::new_err("strategy requires 'name'"))?
+        .extract()?;
+    let seed: u64 = config
+        .get_item("seed")?
+        .map(|value| value.extract())
+        .transpose()?
+        .unwrap_or(0);
     match name.to_ascii_lowercase().as_str() {
         "bayesian" => {
-            let exploration: f64 = optional_item(config, "exploration")?.unwrap_or(0.25);
+            let exploration: f64 = config
+                .get_item("exploration")?
+                .map(|value| value.extract())
+                .transpose()?
+                .unwrap_or(0.25);
             Ok(Strategy::Bayesian(hpo::strategies::BayesianStrategy::new(
                 seed,
                 exploration,
             )))
         }
         "population" | "population_based" => {
-            let population_size: usize = optional_item(config, "population_size")?.unwrap_or(16);
-            let elite_fraction: f64 = optional_item(config, "elite_fraction")?.unwrap_or(0.25);
-            let mutation_rate: f64 = optional_item(config, "mutation_rate")?.unwrap_or(0.3);
+            let population_size: usize = config
+                .get_item("population_size")?
+                .map(|value| value.extract())
+                .transpose()?
+                .unwrap_or(16);
+            let elite_fraction: f64 = config
+                .get_item("elite_fraction")?
+                .map(|value| value.extract())
+                .transpose()?
+                .unwrap_or(0.25);
+            let mutation_rate: f64 = config
+                .get_item("mutation_rate")?
+                .map(|value| value.extract())
+                .transpose()?
+                .unwrap_or(0.3);
             Ok(Strategy::Population(
                 hpo::strategies::PopulationStrategy::new(
                     seed,
@@ -126,10 +150,10 @@ fn parse_strategy(config: &PyDict) -> PyResult<Strategy> {
     }
 }
 
-fn trial_to_dict<'py>(py: Python<'py>, record: &TrialRecord) -> PyResult<&'py PyDict> {
-    let dict = PyDict::new(py);
+fn trial_to_dict(py: Python<'_>, record: &TrialRecord) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
     dict.set_item("id", record.id)?;
-    let params = PyDict::new(py);
+    let params = PyDict::new_bound(py);
     for (key, value) in &record.suggestion {
         match value {
             ParamValue::Float(v) => {
@@ -147,7 +171,7 @@ fn trial_to_dict<'py>(py: Python<'py>, record: &TrialRecord) -> PyResult<&'py Py
     if let Some(metric) = record.metric {
         dict.set_item("metric", metric)?;
     }
-    Ok(dict)
+    Ok(dict.into_py(py))
 }
 
 fn dict_to_state(checkpoint: &str) -> PyResult<SearchLoopState> {
@@ -180,7 +204,7 @@ impl PythonTracker {
             if let Ok(attr) = cb.getattr(py, method) {
                 if let Ok(trial_dict) = trial_to_dict(py, trial) {
                     let _ = match metric {
-                        Some(metric) => attr.call1(py, (trial_dict, metric)),
+                        Some(metric) => attr.call1(py, (trial_dict.clone_ref(py), metric)),
                         None => attr.call1(py, (trial_dict,)),
                     };
                 }
@@ -239,9 +263,9 @@ impl PySearchLoop {
     #[staticmethod]
     #[pyo3(signature = (space, strategy, resource=None, tracker=None))]
     pub fn create(
-        space: &PyAny,
-        strategy: &PyDict,
-        resource: Option<&PyDict>,
+        space: &Bound<'_, PyAny>,
+        strategy: &Bound<'_, PyDict>,
+        resource: Option<&Bound<'_, PyDict>>,
         tracker: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         Python::with_gil(|_py| {
@@ -250,15 +274,15 @@ impl PySearchLoop {
             let resource = parse_resource_config(resource)?;
             let tracker = tracker_from_py(tracker);
             let loop_inner =
-                SearchLoop::new(space, strategy, resource, tracker)
-                    .map_err(search_error_to_py)?;
+                SearchLoop::new(space, strategy, resource, tracker).map_err(search_error_to_py)?;
             Ok(PySearchLoop::new(loop_inner))
         })
     }
 
     #[staticmethod]
+    #[pyo3(signature = (space, checkpoint, tracker=None))]
     pub fn from_checkpoint(
-        space: &PyAny,
+        space: &Bound<'_, PyAny>,
         checkpoint: &str,
         tracker: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
@@ -275,14 +299,12 @@ impl PySearchLoop {
     pub fn suggest(&self, py: Python<'_>) -> PyResult<PyObject> {
         let mut guard = self.inner.lock().unwrap();
         let record = guard.suggest().map_err(search_error_to_py)?;
-        Ok(trial_to_dict(py, &record)?.into())
+        trial_to_dict(py, &record)
     }
 
     pub fn observe(&self, trial_id: usize, metric: f64) -> PyResult<()> {
         let mut guard = self.inner.lock().unwrap();
-        guard
-            .observe(trial_id, metric)
-            .map_err(search_error_to_py)
+        guard.observe(trial_id, metric).map_err(search_error_to_py)
     }
 
     pub fn checkpoint(&self) -> PyResult<String> {
@@ -293,18 +315,20 @@ impl PySearchLoop {
 
     pub fn pending(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
         let guard = self.inner.lock().unwrap();
-        let list = PyList::empty(py);
+        let list = PyList::empty_bound(py);
         for record in guard.pending() {
-            list.append(trial_to_dict(py, record)?)?;
+            let entry = trial_to_dict(py, record)?;
+            list.append(entry.bind(py))?;
         }
         Ok(list.into())
     }
 
     pub fn completed(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
         let guard = self.inner.lock().unwrap();
-        let list = PyList::empty(py);
+        let list = PyList::empty_bound(py);
         for record in guard.completed() {
-            list.append(trial_to_dict(py, record)?)?;
+            let entry = trial_to_dict(py, record)?;
+            list.append(entry.bind(py))?;
         }
         Ok(list.into())
     }

@@ -133,20 +133,6 @@ The stack is comfortable living entirely in Rust—yet the Python wheel remains 
 thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
-## SpiralTorchVision overview
-
-SpiralTorchVision reinterprets the Z-axis as a perceptual frequency domain and
-collapses it with spectral-window-aware projectors into tensor spaces that any
-TorchVision model can consume. Temporal resonance buffers smooth depth attention
-for streaming inputs, `MultiViewFusion` registers multi-camera descriptors, and
-the SpiralRNN-backed `ResonanceGenerator` synthesises fresh
-`DifferentialResonance` fields on demand. The latest drop layers in Z-space
-super-resolution (`InterpolationMethod` + `ZSpaceVolume::upscale`), diffusion and
-latent decoding helpers (`ZDiffuser`, `ZDecoder`), plus a
-`VideoStreamProjector` that fuses all of the above while stepping through video
-sequences. Read the full guide in
-[docs/spiraltorchvision.md](docs/spiraltorchvision.md).
-
 ---
 
 ## Install
@@ -457,7 +443,7 @@ SpiralRNN conductors and vision modules. Read the full guide in
 
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
 - [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
-- [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory, signature geometry with timing elasticities and tipping radii, and how SpiralTorch wires DRL penalties into trainers and governance loops.
+- [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory, signature geometry with timing elasticities, tipping radii, and direction-aware safe radii, plus how SpiralTorch wires DRL penalties into trainers and governance loops.
 - [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
 
 ## Emerging toolkits unique to SpiralTorch
@@ -1791,80 +1777,6 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
 - `logic` / `kdsl`: SoftLogic solver / SpiralK DSL
 
 ---
-
-## Quick Start
-
-### 1) Clone
-```bash
-git clone https://github.com/RyoSpiralArchitect/SpiralTorch.git
-cd SpiralTorch
-```
-
-### 2) Build from source (Rust)
-
-**CPU (default; no GPU deps)**
-```bash
-cargo build -p st-core --release
-```
-
-**WGPU (WebGPU; Windows/Linux/macOS)**
-```bash
-cargo build -p st-core --features wgpu --release
-```
-
-**MPS (macOS GPU)**
-```bash
-cargo build -p st-core --features mps --release
-```
-
-**CUDA (optional; needs NVRTC/Toolkit)**
-```bash
-cargo build -p st-core --features cuda --release
-```
-
-**HIP / ROCm (optional; real backend is feature-gated)**
-```bash
-export HIPCC=/opt/rocm/bin/hipcc
-export ROCM_PATH=/opt/rocm
-cargo build -p st-core --features hip,st-backend-hip/hip-real --release
-```
-
-### 3) Python wheels (optional)
-```bash
-pip install maturin==1.*
-
-# CPU + WebGPU (default)
-maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
-
-# Metal (macOS GPU)
-maturin build -m bindings/st-py/Cargo.toml --release --features mps
-
-# CUDA (toolchain on PATH)
-maturin build -m bindings/st-py/Cargo.toml --release --features cuda
-
-# HIP / ROCm (add hip-real for RCCL)
-maturin build -m bindings/st-py/Cargo.toml --release --features "hip hip-real"
-```
-
-### 4) Python tensors & hypergrads
-
-```python
-from spiraltorch import Tensor, Hypergrad, LanguageWaveEncoder
-
-encoder = LanguageWaveEncoder(-1.0, 0.6)
-target = encoder.encode_z_space("SpiralTorch dances in Z-space")
-
-weights = Tensor(*target.shape())
-tape = Hypergrad(-1.0, 0.05, *target.shape())
-tape.accumulate_pair(weights, target)
-tape.apply(weights)
-print("updated weights", weights.tolist())
-```
-
-Prefer flat-space optimisation? Reach for the new Rust-side
-`st_tensor::AmegaRealgrad` tape to mirror the same API without the Poincaré
-projection step—handy when Canvas Transformer energy needs to feed classical
-optimisers alongside its hypergradient updates.
 
 ### Canvas Pixel Transformer → Z-space feedback
 
