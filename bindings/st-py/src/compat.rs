@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyImportError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyModule};
+use pyo3::types::{PyAny, PyDict, PyModule};
 use pyo3::wrap_pyfunction;
 
 use crate::tensor::PyTensor;
@@ -206,11 +206,6 @@ mod torch {
             tensor = tensor.call_method1("requires_grad_", (requires_grad,))?;
         }
 
-    pub(super) fn to_torch(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
-        let utils = super::import_with_hint(py, "torch.utils.dlpack", "PyTorch >= 1.10")?;
-        let from_dlpack = utils.getattr("from_dlpack")?;
-        let capsule = tensor.to_dlpack(py)?;
-        let tensor = from_dlpack.call1((capsule,))?;
         Ok(tensor.into_py(py))
     }
 
@@ -271,10 +266,6 @@ mod torch {
         }
 
         let capsule = to_dlpack.call1((candidate,))?.unbind();
-    pub(super) fn from_torch(py: Python<'_>, tensor: &Bound<PyAny>) -> PyResult<PyTensor> {
-        let utils = super::import_with_hint(py, "torch.utils.dlpack", "PyTorch >= 1.10")?;
-        let to_dlpack = utils.getattr("to_dlpack")?;
-        let capsule = to_dlpack.call1((tensor,))?.unbind();
         PyTensor::from_dlpack(py, capsule)
     }
 }
