@@ -391,21 +391,11 @@ impl DeviceCaps {
     /// Derive the merge sub-strategy to pair with `preferred_merge_kind`.
     pub fn preferred_substrategy(&self, merge_kind: u32, k: u32) -> u32 {
         match merge_kind {
-            2 => {
-                if k <= 128 {
-                    4 // warp_heap
-                } else {
-                    5 // warp_bitonic
-                }
-            }
-            1 => {
-                if k <= 1024 {
-                    1 // heap
-                } else {
-                    2 // kway
-                }
-            }
-            _ => 3, // bitonic
+            2 if k <= 128 => 4, // warp_heap
+            2 => 5,              // warp_bitonic
+            1 if k <= 1024 => 1, // heap
+            1 => 2,              // kway
+            _ => 3,              // bitonic
         }
     }
 
@@ -429,7 +419,7 @@ impl DeviceCaps {
             BackendKind::Wgpu => col_heavy || (k_heavy && !small_rows),
             BackendKind::Cuda | BackendKind::Hip => {
                 col_heavy || (k_heavy && rows > lanes.saturating_mul(8))
-            }
+            },
             BackendKind::Cpu => col_heavy && rows > 512,
         }
     }

@@ -11,6 +11,24 @@ SpiralTorch targets a unified runtime that can dispatch to multiple accelerators
 | Planner & scheduler | ✅ | ✅ | ✅ | ✅ | ⚠️ Needs async queue profiling |
 | Telemetry | ✅ Structured logging | ✅ GPU timelines | ✅ Instruments via macOS unified logging | ✅ CUPTI hooks planned | ⚠️ Pending counter wiring |
 | Python wheel support | ✅ | ✅ (default build) | ✅ | ✅ | ⚠️ Needs wheel audit |
+| ONNX export parity | ✅ Parity score ≥ 0.9 | ⚠️ Operators with dynamic shapes pending | ⚠️ Gradient suite expansion required | ✅ Validated nightly against reference ops | ❌ Awaiting upstream complex kernel coverage |
+| CI coverage | ✅ Nightly smoke + perf matrix | ⚠️ Weekly adapter matrix job | ⚠️ Weekly adapter matrix job | ✅ Nightly + gated release pipeline | ⚠️ Hardware allocation pending |
+
+The matrix is also available programmatically via
+`st_bench::backend_matrix::capability_matrix()` so automation tools can stay in
+lockstep with the documentation when tracking backend readiness. Use
+`summarize_backend` (or `backend_summaries`) to compute aggregated readiness
+stats for one or all accelerators, derive per-capability counts via
+`capability_summaries`, and focus on specific readiness tiers with
+`capabilities_with_state`. `capability_matrix_json()` continues to emit a JSON
+payload for dashboards.
+
+The matrix is also available programmatically via
+`st_bench::backend_matrix::capability_matrix()` so automation tools can stay in
+lockstep with the documentation when tracking backend readiness. Use
+`summarize_backend` (or `backend_summaries`) to compute aggregated readiness
+stats for one or all accelerators, and `capability_matrix_json()` to emit a
+JSON payload for dashboards.
 
 ## Usage Notes
 - **Feature flags are additive.** Combine multiple backend features during development to compile shared traits, but prefer single-backend release builds for predictable binaries.

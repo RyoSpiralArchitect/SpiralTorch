@@ -193,8 +193,25 @@ def describe_device(
 def hip_probe() -> Dict[str, object]: ...
 
 class _CompatTorch(ModuleType):
-    def to_torch(tensor: Tensor) -> object: ...
-    def from_torch(tensor: object) -> Tensor: ...
+    def to_torch(
+        tensor: Tensor,
+        *,
+        dtype: object | None = ...,
+        device: object | None = ...,
+        requires_grad: bool | None = ...,
+        copy: bool | None = ...,
+        memory_format: object | None = ...,
+    ) -> object: ...
+
+    def from_torch(
+        tensor: object,
+        *,
+        dtype: object | None = ...,
+        device: object | None = ...,
+        ensure_cpu: bool | None = ...,
+        copy: bool | None = ...,
+        require_contiguous: bool | None = ...,
+    ) -> Tensor: ...
 
 class _CompatJax(ModuleType):
     def to_jax(tensor: Tensor) -> object: ...
@@ -397,6 +414,11 @@ __all__ = [
     "ZSpaceBarycenter",
     "BarycenterIntermediate",
     "z_space_barycenter",
+    "compat",
+    "capture",
+    "share",
+    "from_dlpack",
+    "to_dlpack",
     "nn",
     "frac",
     "dataset",
