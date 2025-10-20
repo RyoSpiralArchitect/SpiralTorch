@@ -700,6 +700,29 @@ impl ModuleTrainer {
                 config.meta_endpoints.join(","),
             );
         }
+
+        if !config.cloud_targets.is_empty() {
+            let mut azure_targets = Vec::new();
+            let mut aws_targets = Vec::new();
+            for target in &config.cloud_targets {
+                let descriptor = target.descriptor();
+                match target.provider() {
+                    "azure" => {
+                        azure_targets.push(format!("{}:{descriptor}", target.service()));
+                    }
+                    "aws" => {
+                        aws_targets.push(format!("{}:{descriptor}", target.service()));
+                    }
+                    _ => {}
+                }
+            }
+            if !azure_targets.is_empty() {
+                metadata.insert("azure_targets".to_string(), azure_targets.join(","));
+            }
+            if !aws_targets.is_empty() {
+                metadata.insert("aws_targets".to_string(), aws_targets.join(","));
+            }
+        }
         self.log_connector_event("configure_distribution", metadata);
         self.distribution = Some(RoundtableNode::new(config));
     }
@@ -906,6 +929,7 @@ impl ModuleTrainer {
                 summary_window: cfg.summary_window,
                 push_interval_ms: cfg.push_interval.as_millis().min(u64::MAX as u128) as u64,
                 meta_endpoints: cfg.meta_endpoints.clone(),
+                cloud_targets: cfg.cloud_targets.clone(),
             }
         });
 

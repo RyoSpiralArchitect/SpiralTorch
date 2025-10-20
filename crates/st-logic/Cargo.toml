@@ -6,18 +6,18 @@ edition = "2021"
 
 [features]
 default = ["soft"]
-soft = []
-learn_store = ["dep:serde", "dep:serde_json"]
+soft = ["st-softlogic/soft"]
+learn_store = ["st-softlogic/learn_store"]
+nerf = ["dep:st-nn", "dep:st-vision"]
 
 [dependencies]
 thiserror = "1"
 rand = "0.8"
 num-complex = "0.4"
 nalgebra = "0.32"
-serde = { version = "1", optional = true, features = ["derive"] }
-serde_json = { version = "1", optional = true }
-st-nn = { path = "../st-nn" }
-st-vision = { path = "../st-vision" }
+st-softlogic = { path = "../st-softlogic" }
+st-nn = { path = "../st-nn", optional = true }
+st-vision = { path = "../st-vision", optional = true }
 st-tensor = { path = "../st-tensor" }
 
 [package.metadata.spiraltorch]

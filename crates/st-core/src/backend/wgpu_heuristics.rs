@@ -12,9 +12,9 @@ use crate::ecosystem::{
     EcosystemRegistry, HeuristicChoiceSummary, HeuristicDecision, HeuristicSource, MetricSample,
 };
 #[cfg(feature = "logic-learn")]
-use st_logic::learn;
+use st_softlogic::learn;
 #[cfg(feature = "logic")]
-use st_logic::SoftRule;
+use st_softlogic::SoftRule;
 #[cfg(feature = "logic-learn")]
 use std::sync::Mutex;
 use std::time::SystemTime;

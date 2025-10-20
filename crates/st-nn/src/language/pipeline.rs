@@ -1681,6 +1681,29 @@ mod language_pipeline {
             if let Some(dist) = &distribution_summary {
                 connector_metadata.push(("distribution_mode".to_string(), dist.mode.clone()));
                 connector_metadata.push(("node_id".to_string(), dist.node_id.clone()));
+                if !dist.cloud_targets.is_empty() {
+                    let mut azure_targets = Vec::new();
+                    let mut aws_targets = Vec::new();
+                    for target in &dist.cloud_targets {
+                        let descriptor = target.descriptor();
+                        match target.provider() {
+                            "azure" => {
+                                azure_targets.push(format!("{}:{descriptor}", target.service()));
+                            }
+                            "aws" => {
+                                aws_targets.push(format!("{}:{descriptor}", target.service()));
+                            }
+                            _ => {}
+                        }
+                    }
+                    if !azure_targets.is_empty() {
+                        connector_metadata
+                            .push(("azure_targets".to_string(), azure_targets.join(",")));
+                    }
+                    if !aws_targets.is_empty() {
+                        connector_metadata.push(("aws_targets".to_string(), aws_targets.join(",")));
+                    }
+                }
             }
             self.record_connector("roundtable", connector_metadata);
 
@@ -1887,6 +1910,7 @@ mod language_pipeline {
             summary_window: cfg.summary_window,
             push_interval_ms: cfg.push_interval.as_millis().min(u64::MAX as u128) as u64,
             meta_endpoints: cfg.meta_endpoints.clone(),
+            cloud_targets: cfg.cloud_targets.clone(),
         }
     }
 
@@ -1953,7 +1977,7 @@ mod language_pipeline {
         use crate::schedule::{BandEnergy, RoundtableConfig, RoundtableSchedule};
         use st_core::backend::device_caps::DeviceCaps;
         use st_core::config::self_rewrite::SelfRewriteCfg;
-        use st_core::ecosystem::EcosystemRegistry;
+        use st_core::ecosystem::{CloudConnector, DistributionSummary, EcosystemRegistry};
         use st_core::telemetry::hub::{self, DesirePhaseTelemetry};
         use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
         use st_tensor::LanguageWaveEncoder;
@@ -2067,6 +2091,50 @@ mod language_pipeline {
             let connector = &report.connectors[0];
             assert_eq!(connector.stage, "roundtable");
             assert_eq!(connector.metadata.get("rows"), Some(&"16".to_string()));
+        }
+
+        #[test]
+        fn roundtable_connector_exposes_cloud_targets() {
+            let _lock = registry_guard().lock().unwrap();
+            let registry = EcosystemRegistry::global();
+            registry.drain();
+            let pipeline = LanguagePipeline::builder("trainer-cloud").build();
+            let planner = RankPlanner::new(DeviceCaps::wgpu(32, true, 256));
+            let config = RoundtableConfig::default();
+            let schedule = RoundtableSchedule::new(&planner, 8, 16, config);
+            let distribution = DistributionSummary {
+                node_id: "node-cloud".into(),
+                mode: "periodic_meta".into(),
+                summary_window: 4,
+                push_interval_ms: 250,
+                meta_endpoints: vec!["tcp://meta:5005".into()],
+                cloud_targets: vec![
+                    CloudConnector::AzureEventHub {
+                        namespace: "spiral-meta".into(),
+                        hub: "roundtable".into(),
+                    },
+                    CloudConnector::AwsKinesis {
+                        region: "us-east-1".into(),
+                        stream: "roundtable".into(),
+                    },
+                ],
+            };
+            pipeline.record_roundtable(8, 16, config, &schedule, false, Some(distribution));
+
+            let report = registry.drain();
+            let connector = report
+                .connectors
+                .iter()
+                .find(|c| c.stage == "roundtable")
+                .expect("missing roundtable connector");
+            assert_eq!(
+                connector.metadata.get("azure_targets"),
+                Some(&"event_hub:spiral-meta/roundtable".to_string())
+            );
+            assert_eq!(
+                connector.metadata.get("aws_targets"),
+                Some(&"kinesis:us-east-1/roundtable".to_string())
+            );
         }
 
         fn build_geometry() -> SymbolGeometry {

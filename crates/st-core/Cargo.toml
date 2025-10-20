@@ -18,8 +18,8 @@ wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:once_cell"]
 wgpu-rt  = ["wgpu"]
 mps      = []
 cuda     = ["dep:cudarc"]
-logic    = ["dep:st-logic"]
-"logic-learn" = ["logic", "st-logic/learn_store"]
+logic    = ["dep:st-softlogic"]
+"logic-learn" = ["logic", "st-softlogic/learn_store"]
 kdsl     = ["dep:st-kdsl", "logic"]
 kv-redis = ["st-kv/redis"]
 psi      = ["dep:bitflags", "dep:once_cell"]
@@ -49,7 +49,7 @@ wgpu        = { version = "0.19", optional = true, default-features = false, fea
 bitflags    = { version = "2.4", optional = true }
 
 st-backend-hip = { path = "../st-backend-hip", optional = true }
-st-logic       = { path = "../st-logic",       optional = true }
+st-softlogic   = { path = "../st-softlogic",   optional = true }
 st-kdsl        = { path = "../st-kdsl",        optional = true }
 st-kv          = { path = "../st-kv",          optional = true }
 st-frac        = { path = "../st-frac" }
