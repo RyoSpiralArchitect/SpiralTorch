@@ -74,6 +74,11 @@ schedulers can flip into hardened policies without rewiring the trainer.
 Aggregating multiple words is a simple sum via `aggregate_penalty`.
 【F:tools/python/drift_response_semantics.py†L193-L224】
 
+Rust services tap the exact same flow through
+`spiral_safety::drift_response`, which mirrors the helper with serde-friendly
+structs, lazy default thresholds, and unit tests pinned to the Python
+reference.【F:crates/spiral-safety/src/drift_response.rs†L1-L347】
+
 ## 5. Feeding Z-space Trainers
 
 `ZSpaceTrainer` now accepts a Drift-Response signal.  Pass the scalar under the
