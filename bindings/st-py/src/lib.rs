@@ -10,14 +10,13 @@ mod rl;
 mod rec;
 mod telemetry;
 mod pure;
-mod nn;
 mod planner;
 mod selfsup;
 mod export;
 mod inference;
+mod hpo;
 
-// ================// extras（安全・自己完結）
-// ================mod extras {
+mod extras {
     use super::*;
     use pyo3::wrap_pyfunction; // ← マクロをこのモジュール内に import
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -140,8 +139,7 @@ mod inference;
     }
 }
 
-// ================// st-frac の実API
-// ================mod frac_bindings {
+mod frac_bindings {
     use super::*;
     use pyo3::wrap_pyfunction; // ← ここでも import
     use st_frac::{Pad, gl_coeffs_adaptive as gl_coeffs_adaptive_rs, fracdiff_gl_1d as fracdiff_gl_1d_rs};

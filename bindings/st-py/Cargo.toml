@@ -72,6 +72,7 @@ spiral-hpo = { path = "../../crates/spiral-hpo" }
 ndarray = { version = "0.15", default-features = false, features = ["std"] }
 num-complex = { version = "0.4" }
 spiral-safety = { path = "../../crates/spiral-safety" }
+serde_json = "1"
 
 [package.metadata.maturin]
 name = "spiraltorch"

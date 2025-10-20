@@ -7,46 +7,52 @@ use spiral_hpo::{
 };
 use std::sync::Mutex;
 
+fn search_error_to_py(err: SearchError) -> PyErr {
+    match err {
+        SearchError::NoAvailableSlot => PyRuntimeError::new_err("no available resource slots"),
+        SearchError::UnknownTrial(id) => {
+            PyValueError::new_err(format!("unknown trial id {id}"))
+        }
+        SearchError::EmptySpace => {
+            PyValueError::new_err("search space must have at least one parameter")
+        }
+    }
+}
+
+fn required_item<'py, T: FromPyObject<'py>>(dict: &'py PyDict, key: &str, err: &str) -> PyResult<T> {
+    dict
+        .get_item(key)?
+        .ok_or_else(|| PyValueError::new_err(err.to_string()))?
+        .extract()
+}
+
+fn optional_item<'py, T: FromPyObject<'py>>(dict: &'py PyDict, key: &str) -> PyResult<Option<T>> {
+    dict
+        .get_item(key)?
+        .map(|value| value.extract())
+        .transpose()
+}
+
 fn parse_param_spec(any: &PyAny) -> PyResult<ParamSpec> {
     let dict = any
         .downcast::<PyDict>()
         .map_err(|_| PyValueError::new_err("parameter spec must be a mapping"))?;
-    let name: String = dict
-        .get_item("name")
-        .ok_or_else(|| PyValueError::new_err("parameter spec missing 'name'"))?
-        .extract()?;
-    let kind: String = dict
-        .get_item("type")
-        .ok_or_else(|| PyValueError::new_err("parameter spec missing 'type'"))?
-        .extract()?;
+    let name: String = required_item(dict, "name", "parameter spec missing 'name'")?;
+    let kind: String = required_item(dict, "type", "parameter spec missing 'type'")?;
     match kind.to_ascii_lowercase().as_str() {
         "float" => {
-            let low: f64 = dict
-                .get_item("low")
-                .ok_or_else(|| PyValueError::new_err("float spec missing 'low'"))?
-                .extract()?;
-            let high: f64 = dict
-                .get_item("high")
-                .ok_or_else(|| PyValueError::new_err("float spec missing 'high'"))?
-                .extract()?;
+            let low: f64 = required_item(dict, "low", "float spec missing 'low'")?;
+            let high: f64 = required_item(dict, "high", "float spec missing 'high'")?;
             Ok(ParamSpec::Float { name, low, high })
         }
         "int" => {
-            let low: i64 = dict
-                .get_item("low")
-                .ok_or_else(|| PyValueError::new_err("int spec missing 'low'"))?
-                .extract()?;
-            let high: i64 = dict
-                .get_item("high")
-                .ok_or_else(|| PyValueError::new_err("int spec missing 'high'"))?
-                .extract()?;
+            let low: i64 = required_item(dict, "low", "int spec missing 'low'")?;
+            let high: i64 = required_item(dict, "high", "int spec missing 'high'")?;
             Ok(ParamSpec::Int { name, low, high })
         }
         "categorical" => {
-            let choices: Vec<String> = dict
-                .get_item("choices")
-                .ok_or_else(|| PyValueError::new_err("categorical spec missing 'choices'"))?
-                .extract()?;
+            let choices: Vec<String> =
+                required_item(dict, "choices", "categorical spec missing 'choices'")?;
             if choices.is_empty() {
                 Err(PyValueError::new_err("categorical choices cannot be empty"))
             } else {
@@ -73,21 +79,16 @@ fn parse_space(specs: &PyAny) -> PyResult<SearchSpace> {
         .map_err(|_| PyValueError::new_err("search space must be a sequence or mapping"))?;
     let mut params = Vec::new();
     for item in seq.iter()? {
-        params.push(parse_param_spec(&item?)?);
+        let item = item?;
+        params.push(parse_param_spec(item)?);
     }
     Ok(SearchSpace::new(params))
 }
 
 fn parse_resource_config(resource: Option<&PyDict>) -> PyResult<ResourceConfig> {
     if let Some(resource) = resource {
-        let max_concurrent = resource
-            .get_item("max_concurrent")
-            .map(|v| v.extract())
-            .transpose()?;
-        let min_interval_ms = resource
-            .get_item("min_interval_ms")
-            .map(|v| v.extract())
-            .transpose()?;
+        let max_concurrent = optional_item(resource, "max_concurrent")?;
+        let min_interval_ms = optional_item(resource, "min_interval_ms")?;
         Ok(ResourceConfig {
             max_concurrent: max_concurrent.unwrap_or(1),
             min_interval: min_interval_ms,
@@ -98,43 +99,20 @@ fn parse_resource_config(resource: Option<&PyDict>) -> PyResult<ResourceConfig> 
 }
 
 fn parse_strategy(config: &PyDict) -> PyResult<Strategy> {
-    let name: String = config
-        .get_item("name")
-        .ok_or_else(|| PyValueError::new_err("strategy requires 'name'"))?
-        .extract()?;
-    let seed: u64 = config
-        .get_item("seed")
-        .map(|v| v.extract())
-        .transpose()
-        .unwrap_or(Ok(0))?;
+    let name: String = required_item(config, "name", "strategy requires 'name'")?;
+    let seed: u64 = optional_item(config, "seed")?.unwrap_or(0);
     match name.to_ascii_lowercase().as_str() {
         "bayesian" => {
-            let exploration: f64 = config
-                .get_item("exploration")
-                .map(|v| v.extract())
-                .transpose()
-                .unwrap_or(Ok(0.25))?;
+            let exploration: f64 = optional_item(config, "exploration")?.unwrap_or(0.25);
             Ok(Strategy::Bayesian(hpo::strategies::BayesianStrategy::new(
                 seed,
                 exploration,
             )))
         }
         "population" | "population_based" => {
-            let population_size: usize = config
-                .get_item("population_size")
-                .map(|v| v.extract())
-                .transpose()
-                .unwrap_or(Ok(16))?;
-            let elite_fraction: f64 = config
-                .get_item("elite_fraction")
-                .map(|v| v.extract())
-                .transpose()
-                .unwrap_or(Ok(0.25))?;
-            let mutation_rate: f64 = config
-                .get_item("mutation_rate")
-                .map(|v| v.extract())
-                .transpose()
-                .unwrap_or(Ok(0.3))?;
+            let population_size: usize = optional_item(config, "population_size")?.unwrap_or(16);
+            let elite_fraction: f64 = optional_item(config, "elite_fraction")?.unwrap_or(0.25);
+            let mutation_rate: f64 = optional_item(config, "mutation_rate")?.unwrap_or(0.3);
             Ok(Strategy::Population(
                 hpo::strategies::PopulationStrategy::new(
                     seed,
@@ -202,8 +180,8 @@ impl PythonTracker {
             if let Ok(attr) = cb.getattr(py, method) {
                 if let Ok(trial_dict) = trial_to_dict(py, trial) {
                     let _ = match metric {
-                        Some(metric) => attr.call1((trial_dict, metric)),
-                        None => attr.call1((trial_dict,)),
+                        Some(metric) => attr.call1(py, (trial_dict, metric)),
+                        None => attr.call1(py, (trial_dict,)),
                     };
                 }
             }
@@ -225,7 +203,7 @@ impl ExperimentTracker for PythonTracker {
             Python::with_gil(|py| {
                 if let Ok(attr) = cb.getattr(py, "on_checkpoint") {
                     if let Ok(json) = state_to_json(state) {
-                        let _ = attr.call1((json,));
+                        let _ = attr.call1(py, (json,));
                     }
                 }
             });
@@ -266,13 +244,14 @@ impl PySearchLoop {
         resource: Option<&PyDict>,
         tracker: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::with_gil(|_py| {
             let space = parse_space(space)?;
             let strategy = parse_strategy(strategy)?;
             let resource = parse_resource_config(resource)?;
             let tracker = tracker_from_py(tracker);
             let loop_inner =
-                SearchLoop::new(space, strategy, resource, tracker).map_err(PyErr::from)?;
+                SearchLoop::new(space, strategy, resource, tracker)
+                    .map_err(search_error_to_py)?;
             Ok(PySearchLoop::new(loop_inner))
         })
     }
@@ -283,7 +262,7 @@ impl PySearchLoop {
         checkpoint: &str,
         tracker: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::with_gil(|_py| {
             let space = parse_space(space)?;
             let state = dict_to_state(checkpoint)?;
             let tracker = tracker_from_py(tracker);
@@ -295,13 +274,15 @@ impl PySearchLoop {
 
     pub fn suggest(&self, py: Python<'_>) -> PyResult<PyObject> {
         let mut guard = self.inner.lock().unwrap();
-        let record = guard.suggest().map_err(PyErr::from)?;
+        let record = guard.suggest().map_err(search_error_to_py)?;
         Ok(trial_to_dict(py, &record)?.into())
     }
 
     pub fn observe(&self, trial_id: usize, metric: f64) -> PyResult<()> {
         let mut guard = self.inner.lock().unwrap();
-        guard.observe(trial_id, metric).map_err(PyErr::from)
+        guard
+            .observe(trial_id, metric)
+            .map_err(search_error_to_py)
     }
 
     pub fn checkpoint(&self) -> PyResult<String> {
@@ -326,20 +307,6 @@ impl PySearchLoop {
             list.append(trial_to_dict(py, record)?)?;
         }
         Ok(list.into())
-    }
-}
-
-impl From<SearchError> for PyErr {
-    fn from(value: SearchError) -> Self {
-        match value {
-            SearchError::NoAvailableSlot => PyRuntimeError::new_err("no available resource slots"),
-            SearchError::UnknownTrial(id) => {
-                PyValueError::new_err(format!("unknown trial id {id}"))
-            }
-            SearchError::EmptySpace => {
-                PyValueError::new_err("search space must have at least one parameter")
-            }
-        }
     }
 }
 
