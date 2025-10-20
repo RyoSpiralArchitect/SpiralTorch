@@ -133,3 +133,4 @@ pub fn beam_select<C: Clone>(
 pub mod learn;
 
 pub mod quantum_reality;
+pub mod temporal_dynamics;

@@ -2432,6 +2432,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "serde",
  "tracing",
 ]
 
@@ -2444,6 +2445,7 @@ dependencies = [
  "pyo3",
  "pyo3-build-config",
  "spiral-safety",
+ "spiral-opt",
  "st-backend-hip",
  "st-core",
  "st-frac",
@@ -2501,6 +2503,8 @@ name = "st-backend-wgpu"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "rand",
+ "st-vision",
  "pollster",
  "st-tensor",
  "thiserror 1.0.69",
@@ -2673,6 +2677,7 @@ version = "0.1.0"
 dependencies = [
  "rand",
  "st-core",
+ "st-logic",
  "st-nn",
  "st-tensor",
  "tempfile",
