@@ -16,6 +16,7 @@ members = [
   "crates/st-bench",
   "crates/st-amg",
   "crates/spiral-hpo",
+  "crates/spiral-safety",
   "bindings/st-py",
   "bindings/st-wasm",
   "tools/xai-cli"
