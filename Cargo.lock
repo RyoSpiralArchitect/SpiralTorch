@@ -2590,16 +2590,13 @@ dependencies = [
  "nalgebra 0.32.6",
  "num-complex",
  "rand",
-<<<<<<< HEAD
  "st-nn",
  "st-softlogic",
  "st-tensor",
  "st-vision",
-=======
  "serde",
  "serde_json",
  "st-tensor",
->>>>>>> origin/main
  "thiserror 1.0.69",
 ]
 
@@ -2691,6 +2688,7 @@ name = "st-vision"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "st-backend-wgpu",
  "st-core",
  "st-logic",
  "st-nn",

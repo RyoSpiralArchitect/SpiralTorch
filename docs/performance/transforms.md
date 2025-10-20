@@ -52,6 +52,10 @@ processing large batches.
 
 - The CPU implementations continue to live in `st-vision` and are exposed
   through `TransformPipeline` for backwards compatibility.
+- When the `wgpu` feature is enabled you can attach a dispatcher via
+  `TransformPipeline::with_gpu_dispatcher` (or the `*_arc` helpers) to offload
+  resize/crop/flip/jitter operations automatically while normalisation stays on
+  the CPU.
 - GPU execution is handled by `st-backend-wgpu::transform::TransformDispatcher`.
   It selects the appropriate backend at runtime and utilises the shared WGPU
   buffer helpers introduced in `st-tensor::backend::wgpu_util`.

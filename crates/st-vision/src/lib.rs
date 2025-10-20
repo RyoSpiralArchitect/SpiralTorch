@@ -66,6 +66,7 @@ pub mod xai;
 
 use std::cmp::min;
 use std::f32::consts::PI;
+use std::fmt;
 use std::sync::Arc;
 
 use st_core::telemetry::atlas::AtlasFrame;
@@ -75,6 +76,13 @@ use st_nn::layers::spiral_rnn::SpiralRnn;
 use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
+#[cfg(feature = "wgpu")]
+use st_backend_wgpu::transform::{
+    CenterCropConfig, ColorJitterConfig, HorizontalFlipConfig, ResizeConfig,
+    TransformDispatchError, TransformDispatcher,
+};
+
+pub mod transforms;
 pub mod datasets;
 pub mod nerf;
 pub mod transforms;
@@ -779,6 +787,54 @@ impl ZSpaceVolume {
         };
         blended.accumulate(next, alpha)?;
         Ok(blended)
+    }
+
+    /// Blends a sequence of volumes into a single volume using provided weights.
+    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
+        if sequence.is_empty() {
+            return Err(TensorError::EmptyInput("z_space_sequence"));
+        }
+        if sequence.len() != weights.len() {
+            return Err(TensorError::DataLength {
+                expected: sequence.len(),
+                got: weights.len(),
+            });
+        }
+        let reference = &sequence[0];
+        let depth = reference.depth;
+        let height = reference.height;
+        let width = reference.width;
+        let voxel_count = depth
+            .checked_mul(height)
+            .and_then(|value| value.checked_mul(width))
+            .ok_or(TensorError::InvalidDimensions {
+                rows: depth,
+                cols: height.saturating_mul(width),
+            })?;
+        let mut canvas = vec![0.0f32; voxel_count];
+        for (volume, &weight) in sequence.iter().zip(weights.iter()) {
+            if volume.depth != depth || volume.height != height || volume.width != width {
+                return Err(TensorError::ShapeMismatch {
+                    left: (volume.depth, volume.height * volume.width),
+                    right: (depth, height * width),
+                });
+            }
+            if !weight.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "z_space_blend_weight",
+                    value: weight,
+                });
+            }
+            for (accum, voxel) in canvas.iter_mut().zip(volume.voxels.iter()) {
+                *accum += voxel * weight;
+            }
+        }
+        Ok(Self {
+            depth,
+            height,
+            width,
+            voxels: canvas,
+        })
     }
 }
 
@@ -2509,8 +2565,8 @@ impl VisionProjector {
             spread,
             energy_bias,
             window: SpectralWindow::hann(),
-            temporal_focus: 0.5,
-            temporal_decay: 0.5,
+            temporal_focus: 1.0,
+            temporal_decay: 0.35,
         }
     }
 
@@ -3534,6 +3590,7 @@ impl TransformOperation {
         }
     }
 
+    #[allow(dead_code)]
     fn apply(&self, image: &mut ImageTensor, rng: &mut StdRng) -> PureResult<()> {
         match self {
             TransformOperation::Normalize(op) => op.apply(image),
@@ -3545,11 +3602,32 @@ impl TransformOperation {
     }
 }
 
+#[cfg(feature = "wgpu")]
+fn map_dispatch_error(err: TransformDispatchError) -> TensorError {
+    TensorError::BackendFailure {
+        backend: "wgpu",
+        message: err.to_string(),
+    }
+}
+
 /// Sequential container for image transforms.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct TransformPipeline {
     ops: Vec<TransformOperation>,
     rng: StdRng,
+    #[cfg(feature = "wgpu")]
+    dispatcher: Option<Arc<TransformDispatcher>>,
+}
+
+impl fmt::Debug for TransformPipeline {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let op_names: Vec<&'static str> = self.ops.iter().map(|op| op.name()).collect();
+        let mut debug = f.debug_struct("TransformPipeline");
+        debug.field("operations", &op_names);
+        #[cfg(feature = "wgpu")]
+        debug.field("gpu_dispatcher", &self.dispatcher.is_some());
+        debug.finish()
+    }
 }
 
 impl TransformPipeline {
@@ -3557,6 +3635,8 @@ impl TransformPipeline {
         Self {
             ops: Vec::new(),
             rng: StdRng::from_entropy(),
+            #[cfg(feature = "wgpu")]
+            dispatcher: None,
         }
     }
 
@@ -3564,6 +3644,8 @@ impl TransformPipeline {
         Self {
             ops: Vec::new(),
             rng: StdRng::seed_from_u64(seed),
+            #[cfg(feature = "wgpu")]
+            dispatcher: None,
         }
     }
 
@@ -3572,15 +3654,188 @@ impl TransformPipeline {
         self
     }
 
+    #[cfg(feature = "wgpu")]
+    pub fn with_gpu_dispatcher_arc(mut self, dispatcher: Arc<TransformDispatcher>) -> Self {
+        self.dispatcher = Some(dispatcher);
+        self
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn with_gpu_dispatcher(mut self, dispatcher: TransformDispatcher) -> Self {
+        self.dispatcher = Some(Arc::new(dispatcher));
+        self
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn set_gpu_dispatcher_arc(&mut self, dispatcher: Arc<TransformDispatcher>) {
+        self.dispatcher = Some(dispatcher);
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn set_gpu_dispatcher(&mut self, dispatcher: TransformDispatcher) {
+        self.dispatcher = Some(Arc::new(dispatcher));
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn clear_gpu_dispatcher(&mut self) {
+        self.dispatcher = None;
+    }
+
     pub fn apply(&mut self, image: &mut ImageTensor) -> PureResult<()> {
-        for op in &self.ops {
-            op.apply(image, &mut self.rng)?;
+        for idx in 0..self.ops.len() {
+            let op = self.ops[idx].clone();
+            match op {
+                TransformOperation::Normalize(op) => op.apply(image)?,
+                TransformOperation::Resize(op) => self.apply_resize(&op, image)?,
+                TransformOperation::CenterCrop(op) => self.apply_center_crop(&op, image)?,
+                TransformOperation::RandomHorizontalFlip(op) => {
+                    self.apply_horizontal_flip(&op, image)?
+                }
+                TransformOperation::ColorJitter(op) => self.apply_color_jitter(&op, image)?,
+            }
         }
         Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
         self.ops.is_empty()
+    }
+
+    fn apply_resize(&mut self, op: &Resize, image: &mut ImageTensor) -> PureResult<()> {
+        #[cfg(feature = "wgpu")]
+        {
+            if let Some(dispatcher) = self.dispatcher.as_deref() {
+                let (channels, src_height, src_width) = image.shape();
+                let output = dispatcher
+                    .resize(
+                        image.as_slice(),
+                        ResizeConfig {
+                            channels,
+                            src_height,
+                            src_width,
+                            dst_height: op.height,
+                            dst_width: op.width,
+                        },
+                    )
+                    .map_err(map_dispatch_error)?;
+                *image = ImageTensor::new(channels, op.height, op.width, output)?;
+                return Ok(());
+            }
+        }
+        op.apply(image)
+    }
+
+    fn apply_center_crop(&mut self, op: &CenterCrop, image: &mut ImageTensor) -> PureResult<()> {
+        #[cfg(feature = "wgpu")]
+        {
+            if let Some(dispatcher) = self.dispatcher.as_deref() {
+                let (channels, src_height, src_width) = image.shape();
+                let output = dispatcher
+                    .center_crop(
+                        image.as_slice(),
+                        CenterCropConfig {
+                            channels,
+                            src_height,
+                            src_width,
+                            crop_height: op.height,
+                            crop_width: op.width,
+                        },
+                    )
+                    .map_err(map_dispatch_error)?;
+                *image = ImageTensor::new(channels, op.height, op.width, output)?;
+                return Ok(());
+            }
+        }
+        op.apply(image)
+    }
+
+    fn apply_horizontal_flip(
+        &mut self,
+        op: &RandomHorizontalFlip,
+        image: &mut ImageTensor,
+    ) -> PureResult<()> {
+        let apply = self.rng.gen::<f32>() < op.probability;
+        #[cfg(feature = "wgpu")]
+        {
+            if let Some(dispatcher) = self.dispatcher.as_deref() {
+                let (channels, height, width) = image.shape();
+                let output = dispatcher
+                    .horizontal_flip(
+                        image.as_slice(),
+                        HorizontalFlipConfig {
+                            channels,
+                            height,
+                            width,
+                            apply,
+                        },
+                    )
+                    .map_err(map_dispatch_error)?;
+                *image = ImageTensor::new(channels, height, width, output)?;
+                return Ok(());
+            }
+        }
+        op.apply_with_flag(image, apply)
+    }
+
+    fn apply_color_jitter(&mut self, op: &ColorJitter, image: &mut ImageTensor) -> PureResult<()> {
+        let ops = op.sample_ops(&mut self.rng, image.channels());
+        if ops.is_empty() {
+            return Ok(());
+        }
+
+        #[cfg(feature = "wgpu")]
+        {
+            if let Some(dispatcher) = self.dispatcher.as_deref() {
+                let (channels, height, width) = image.shape();
+                for jitter_op in &ops {
+                    let config = match jitter_op {
+                        ColorJitterOp::Brightness(factor) => ColorJitterConfig {
+                            channels,
+                            height,
+                            width,
+                            brightness: *factor,
+                            contrast: 1.0,
+                            saturation: 1.0,
+                            hue: 0.0,
+                        },
+                        ColorJitterOp::Contrast(factor) => ColorJitterConfig {
+                            channels,
+                            height,
+                            width,
+                            brightness: 1.0,
+                            contrast: *factor,
+                            saturation: 1.0,
+                            hue: 0.0,
+                        },
+                        ColorJitterOp::Saturation(factor) => ColorJitterConfig {
+                            channels,
+                            height,
+                            width,
+                            brightness: 1.0,
+                            contrast: 1.0,
+                            saturation: *factor,
+                            hue: 0.0,
+                        },
+                        ColorJitterOp::Hue(angle) => ColorJitterConfig {
+                            channels,
+                            height,
+                            width,
+                            brightness: 1.0,
+                            contrast: 1.0,
+                            saturation: 1.0,
+                            hue: *angle,
+                        },
+                    };
+                    let output = dispatcher
+                        .color_jitter(image.as_slice(), config)
+                        .map_err(map_dispatch_error)?;
+                    *image = ImageTensor::new(channels, height, width, output)?;
+                }
+                return Ok(());
+            }
+        }
+
+        op.apply_ops(image, &ops)
     }
 }
 
@@ -3750,7 +4005,12 @@ impl RandomHorizontalFlip {
     }
 
     pub fn apply(&self, image: &mut ImageTensor, rng: &mut StdRng) -> PureResult<()> {
-        if rng.gen::<f32>() >= self.probability {
+        let apply = rng.gen::<f32>() < self.probability;
+        self.apply_with_flag(image, apply)
+    }
+
+    pub fn apply_with_flag(&self, image: &mut ImageTensor, apply: bool) -> PureResult<()> {
+        if !apply {
             return Ok(());
         }
         let channels = image.channels();
@@ -3881,6 +4141,14 @@ impl ColorJitter {
     }
 
     pub fn apply(&self, image: &mut ImageTensor, rng: &mut StdRng) -> PureResult<()> {
+        let ops = self.sample_ops(rng, image.channels());
+        if ops.is_empty() {
+            return Ok(());
+        }
+        self.apply_ops(image, &ops)
+    }
+
+    fn sample_ops(&self, rng: &mut StdRng, channels: usize) -> Vec<ColorJitterOp> {
         let mut ops = Vec::with_capacity(4);
         if self.brightness > 0.0 {
             let delta = rng.gen_range(-self.brightness..=self.brightness);
@@ -3890,37 +4158,39 @@ impl ColorJitter {
             let delta = rng.gen_range(-self.contrast..=self.contrast);
             ops.push(ColorJitterOp::Contrast(1.0 + delta));
         }
-        if self.saturation > 0.0 && image.channels() >= 3 {
+        if self.saturation > 0.0 && channels >= 3 {
             let delta = rng.gen_range(-self.saturation..=self.saturation);
             ops.push(ColorJitterOp::Saturation(1.0 + delta));
         }
-        if self.hue > 0.0 && image.channels() >= 3 {
+        if self.hue > 0.0 && channels >= 3 {
             let delta = rng.gen_range(-self.hue..=self.hue);
             ops.push(ColorJitterOp::Hue(delta * PI));
         }
+        ops.shuffle(rng);
+        ops
+    }
 
+    fn apply_ops(&self, image: &mut ImageTensor, ops: &[ColorJitterOp]) -> PureResult<()> {
         if ops.is_empty() {
             return Ok(());
         }
-
-        ops.shuffle(rng);
         let channels = image.channels();
         let pixels = image.height() * image.width();
         let data = image.as_mut_slice();
         for op in ops {
-            match op {
+            match *op {
                 ColorJitterOp::Brightness(factor) => Self::apply_brightness(data, factor),
                 ColorJitterOp::Contrast(factor) => {
                     Self::apply_contrast(data, channels, pixels, factor)
                 }
                 ColorJitterOp::Saturation(factor) => {
                     if channels >= 3 {
-                        Self::apply_saturation(data, pixels, factor)
+                        Self::apply_saturation(data, pixels, factor);
                     }
                 }
                 ColorJitterOp::Hue(angle) => {
                     if channels >= 3 {
-                        Self::apply_hue(data, pixels, angle)
+                        Self::apply_hue(data, pixels, angle);
                     }
                 }
             }
