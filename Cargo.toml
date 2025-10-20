@@ -16,7 +16,8 @@ members = [
   "crates/st-bench",
   "crates/st-amg",
   "bindings/st-py",
-  "bindings/st-wasm"
+  "bindings/st-wasm",
+  "tools/xai-cli"
 ]
 default-members = [
   "crates/st-core",
