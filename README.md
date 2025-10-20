@@ -80,9 +80,9 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 _Last updated: 2025-10-20 07:12 UTC_
 
 **Workspace summary**
-- Total files: **1109**
-- Total code LOC: **276,472**
-- Rust files: **866** (Rust code LOC: **255,611**)
+- Total files: **1518**
+- Total code LOC: **434,984**
+- Rust files: **1151** (Rust code LOC: **388,143**)
 
 ```text
 ===============================================================================
