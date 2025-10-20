@@ -158,6 +158,25 @@ def describe_device(
 def hip_probe() -> Dict[str, object]: ...
 
 class _CompatTorch(ModuleType):
+    def to_torch(
+        tensor: Tensor,
+        *,
+        dtype: object | None = ...,
+        device: object | None = ...,
+        requires_grad: bool | None = ...,
+        copy: bool | None = ...,
+        memory_format: object | None = ...,
+    ) -> object: ...
+
+    def from_torch(
+        tensor: object,
+        *,
+        dtype: object | None = ...,
+        device: object | None = ...,
+        ensure_cpu: bool | None = ...,
+        copy: bool | None = ...,
+        require_contiguous: bool | None = ...,
+    ) -> Tensor: ...
     def to_torch(tensor: Tensor) -> object: ...
     def from_torch(tensor: object) -> Tensor: ...
 
@@ -357,6 +376,9 @@ class DashboardRing:
 
 __all__ = [
     "Tensor",
+    "compat",
+    "capture",
+    "share",
     "from_dlpack",
     "to_dlpack",
     "nn",

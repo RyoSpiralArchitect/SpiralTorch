@@ -60,3 +60,9 @@ pub use zpulse_impl as zpulse;
 pub mod spiral_dynamics_impl;
 #[doc(inline)]
 pub use spiral_dynamics_impl as spiral_dynamics;
+
+#[path = "sync_bridge.rs"]
+#[doc(hidden)]
+pub mod sync_bridge_impl;
+#[doc(inline)]
+pub use sync_bridge_impl as sync_bridge;
