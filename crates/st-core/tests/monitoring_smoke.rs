@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use bandit::SoftBanditMode;
+use st_core::runtime::blackcat::bandit::SoftBanditMode;
 use st_core::runtime::blackcat::zmeta::ZMetaParams;
 use st_core::runtime::blackcat::{BlackCatRuntime, ChoiceGroups, StepMetrics};
 use st_core::telemetry::monitoring::{AlertKind, MonitoringHub};

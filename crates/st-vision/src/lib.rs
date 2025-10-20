@@ -77,14 +77,16 @@ use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
 #[cfg(feature = "wgpu")]
+use st_backend_wgpu::render::temporal::TemporalVolumeLike;
+#[cfg(feature = "wgpu")]
 use st_backend_wgpu::transform::{
     CenterCropConfig, ColorJitterConfig, GeometryCommand, HorizontalFlipConfig, ImageGeometry,
     ResizeConfig, TransformDispatchError, TransformDispatcher,
 };
 
-pub mod transforms;
 pub mod datasets;
 pub mod nerf;
+pub mod transforms;
 const RESONANCE_FEATURES_PER_SLICE: usize = 10;
 /// Streaming chrono snapshot associated with a batch of Z-space slices.
 #[derive(Clone, Debug)]
@@ -218,6 +220,37 @@ pub struct ZSpaceVolume {
     harmonic_channels: usize,
     temporal_harmonics: Vec<f32>,
     resonance_decay: Vec<f32>,
+}
+
+#[cfg(feature = "wgpu")]
+impl TemporalVolumeLike for ZSpaceVolume {
+    fn depth(&self) -> usize {
+        self.depth
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn harmonic_channels(&self) -> usize {
+        self.harmonic_channels
+    }
+
+    fn voxels(&self) -> &[f32] {
+        &self.voxels
+    }
+
+    fn temporal_harmonics(&self) -> &[f32] {
+        &self.temporal_harmonics
+    }
+
+    fn resonance_decay(&self) -> &[f32] {
+        &self.resonance_decay
+    }
 }
 
 /// Statistical summary describing each slice inside a [`ZSpaceVolume`].
@@ -734,107 +767,107 @@ impl ZSpaceVolume {
     }
 }
 
-    /// Computes a spectral energy response for each depth slice using the provided window.
-    pub fn spectral_response(&self, window: &SpectralWindow) -> Vec<f32> {
-        let slice_len = self.height.saturating_mul(self.width);
-        if slice_len == 0 || self.depth == 0 {
-            return Vec::new();
-        }
-        let mut response = Vec::with_capacity(self.depth);
-        let window_weights = window.weights(self.depth);
-        for (z, coeff) in window_weights.iter().enumerate() {
-            let start = z * slice_len;
-            let end = start + slice_len;
-            let slice = &self.voxels[start..end];
-            let energy = if slice_len > 0 {
-                slice.iter().map(|v| v.abs()).sum::<f32>() / slice_len as f32
-            } else {
-                0.0
-            };
-            response.push(energy * coeff);
-        }
-        response
+/// Computes a spectral energy response for each depth slice using the provided window.
+pub fn spectral_response(&self, window: &SpectralWindow) -> Vec<f32> {
+    let slice_len = self.height.saturating_mul(self.width);
+    if slice_len == 0 || self.depth == 0 {
+        return Vec::new();
     }
-
-    /// Performs an exponential moving average with another volume in-place.
-    pub fn accumulate(&mut self, next: &ZSpaceVolume, alpha: f32) -> PureResult<()> {
-        if self.depth != next.depth || self.height != next.height || self.width != next.width {
-            return Err(TensorError::ShapeMismatch {
-                left: (self.depth, self.height * self.width),
-                right: (next.depth, next.height * next.width),
-            });
-        }
-        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
-            return Err(TensorError::InvalidValue {
-                label: "temporal_alpha",
-            });
-        }
-        let retain = 1.0 - alpha;
-        for (current, incoming) in self.voxels.iter_mut().zip(next.voxels.iter()) {
-            *current = (*current * retain) + (incoming * alpha);
-        }
-        Ok(())
-    }
-
-    /// Returns a blended copy that incorporates the next volume using EMA weighting.
-    pub fn accumulated(&self, next: &ZSpaceVolume, alpha: f32) -> PureResult<Self> {
-        let mut blended = Self {
-            depth: self.depth,
-            height: self.height,
-            width: self.width,
-            voxels: self.voxels.clone(),
+    let mut response = Vec::with_capacity(self.depth);
+    let window_weights = window.weights(self.depth);
+    for (z, coeff) in window_weights.iter().enumerate() {
+        let start = z * slice_len;
+        let end = start + slice_len;
+        let slice = &self.voxels[start..end];
+        let energy = if slice_len > 0 {
+            slice.iter().map(|v| v.abs()).sum::<f32>() / slice_len as f32
+        } else {
+            0.0
         };
-        blended.accumulate(next, alpha)?;
-        Ok(blended)
+        response.push(energy * coeff);
     }
+    response
+}
 
-    /// Blends a sequence of volumes into a single volume using provided weights.
-    pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
-        if sequence.is_empty() {
-            return Err(TensorError::EmptyInput("z_space_sequence"));
-        }
-        if sequence.len() != weights.len() {
-            return Err(TensorError::DataLength {
-                expected: sequence.len(),
-                got: weights.len(),
+/// Performs an exponential moving average with another volume in-place.
+pub fn accumulate(&mut self, next: &ZSpaceVolume, alpha: f32) -> PureResult<()> {
+    if self.depth != next.depth || self.height != next.height || self.width != next.width {
+        return Err(TensorError::ShapeMismatch {
+            left: (self.depth, self.height * self.width),
+            right: (next.depth, next.height * next.width),
+        });
+    }
+    if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+        return Err(TensorError::InvalidValue {
+            label: "temporal_alpha",
+        });
+    }
+    let retain = 1.0 - alpha;
+    for (current, incoming) in self.voxels.iter_mut().zip(next.voxels.iter()) {
+        *current = (*current * retain) + (incoming * alpha);
+    }
+    Ok(())
+}
+
+/// Returns a blended copy that incorporates the next volume using EMA weighting.
+pub fn accumulated(&self, next: &ZSpaceVolume, alpha: f32) -> PureResult<Self> {
+    let mut blended = Self {
+        depth: self.depth,
+        height: self.height,
+        width: self.width,
+        voxels: self.voxels.clone(),
+    };
+    blended.accumulate(next, alpha)?;
+    Ok(blended)
+}
+
+/// Blends a sequence of volumes into a single volume using provided weights.
+pub fn blend_sequence(sequence: &[ZSpaceVolume], weights: &[f32]) -> PureResult<Self> {
+    if sequence.is_empty() {
+        return Err(TensorError::EmptyInput("z_space_sequence"));
+    }
+    if sequence.len() != weights.len() {
+        return Err(TensorError::DataLength {
+            expected: sequence.len(),
+            got: weights.len(),
+        });
+    }
+    let reference = &sequence[0];
+    let depth = reference.depth;
+    let height = reference.height;
+    let width = reference.width;
+    let voxel_count = depth
+        .checked_mul(height)
+        .and_then(|value| value.checked_mul(width))
+        .ok_or(TensorError::InvalidDimensions {
+            rows: depth,
+            cols: height.saturating_mul(width),
+        })?;
+    let mut canvas = vec![0.0f32; voxel_count];
+    for (volume, &weight) in sequence.iter().zip(weights.iter()) {
+        if volume.depth != depth || volume.height != height || volume.width != width {
+            return Err(TensorError::ShapeMismatch {
+                left: (volume.depth, volume.height * volume.width),
+                right: (depth, height * width),
             });
         }
-        let reference = &sequence[0];
-        let depth = reference.depth;
-        let height = reference.height;
-        let width = reference.width;
-        let voxel_count = depth
-            .checked_mul(height)
-            .and_then(|value| value.checked_mul(width))
-            .ok_or(TensorError::InvalidDimensions {
-                rows: depth,
-                cols: height.saturating_mul(width),
-            })?;
-        let mut canvas = vec![0.0f32; voxel_count];
-        for (volume, &weight) in sequence.iter().zip(weights.iter()) {
-            if volume.depth != depth || volume.height != height || volume.width != width {
-                return Err(TensorError::ShapeMismatch {
-                    left: (volume.depth, volume.height * volume.width),
-                    right: (depth, height * width),
-                });
-            }
-            if !weight.is_finite() {
-                return Err(TensorError::NonFiniteValue {
-                    label: "z_space_blend_weight",
-                    value: weight,
-                });
-            }
-            for (accum, voxel) in canvas.iter_mut().zip(volume.voxels.iter()) {
-                *accum += voxel * weight;
-            }
+        if !weight.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "z_space_blend_weight",
+                value: weight,
+            });
         }
-        Ok(Self {
-            depth,
-            height,
-            width,
-            voxels: canvas,
-        })
+        for (accum, voxel) in canvas.iter_mut().zip(volume.voxels.iter()) {
+            *accum += voxel * weight;
+        }
     }
+    Ok(Self {
+        depth,
+        height,
+        width,
+        voxels: canvas,
+    })
+}
 /// Interpolation methods available for Z-space resampling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InterpolationMethod {
@@ -3026,15 +3059,6 @@ impl fmt::Debug for TransformPipeline {
     }
 }
 
-impl fmt::Debug for TransformPipeline {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let op_names: Vec<&'static str> = self.ops.iter().map(|op| op.name()).collect();
-        let mut debug = f.debug_struct("TransformPipeline");
-        debug.field("operations", &op_names);
-        debug.finish()
-    }
-}
-
 impl TransformPipeline {
     pub fn new() -> Self {
         Self {
@@ -3344,8 +3368,6 @@ impl TransformPipeline {
 
         Ok(index)
     }
-        op.apply_ops(image, &ops)
-    }
 }
 
 /// Per-channel normalization.
@@ -3541,174 +3563,6 @@ impl RandomHorizontalFlip {
 
     pub fn should_apply(&self, rng: &mut StdRng) -> bool {
         rng.gen::<f32>() < self.probability
-    }
-}
-
-#[derive(Clone, Debug)]
-enum ColorJitterOp {
-    Brightness(f32),
-    Contrast(f32),
-    Saturation(f32),
-    Hue(f32),
-}
-
-/// Applies brightness/contrast/saturation/hue perturbations.
-#[derive(Clone, Debug)]
-pub struct ColorJitter {
-    brightness: f32,
-    contrast: f32,
-    saturation: f32,
-    hue: f32,
-}
-
-impl ColorJitter {
-    pub fn new(brightness: f32, contrast: f32, saturation: f32, hue: f32) -> PureResult<Self> {
-        if brightness < 0.0 {
-            return Err(TensorError::InvalidValue {
-                label: "color_jitter_brightness",
-            });
-        }
-        if contrast < 0.0 {
-            return Err(TensorError::InvalidValue {
-                label: "color_jitter_contrast",
-            });
-        }
-        if saturation < 0.0 {
-            return Err(TensorError::InvalidValue {
-                label: "color_jitter_saturation",
-            });
-        }
-        if !(0.0..=0.5).contains(&hue) {
-            return Err(TensorError::InvalidValue {
-                label: "color_jitter_hue",
-            });
-        }
-        Ok(Self {
-            brightness,
-            contrast,
-            saturation,
-            hue,
-        })
-    }
-
-    fn apply_brightness(data: &mut [f32], factor: f32) {
-        for value in data.iter_mut() {
-            *value *= factor;
-        }
-    }
-
-    fn apply_contrast(data: &mut [f32], channels: usize, pixels: usize, factor: f32) {
-        if factor == 1.0 {
-            return;
-        }
-        for c in 0..channels {
-            let range = c * pixels..(c + 1) * pixels;
-            let slice = &mut data[range];
-            let mean = slice.iter().copied().sum::<f32>() / pixels as f32;
-            for value in slice.iter_mut() {
-                *value = (*value - mean) * factor + mean;
-            }
-        }
-    }
-
-    fn apply_saturation(data: &mut [f32], pixels: usize, factor: f32) {
-        if factor == 1.0 {
-            return;
-        }
-        let r_offset = 0;
-        let g_offset = pixels;
-        let b_offset = 2 * pixels;
-        for idx in 0..pixels {
-            let r = data[r_offset + idx];
-            let g = data[g_offset + idx];
-            let b = data[b_offset + idx];
-            let gray = 0.298_995_97 * r + 0.587_096 * g + 0.113_907_03 * b;
-            data[r_offset + idx] = (r - gray) * factor + gray;
-            data[g_offset + idx] = (g - gray) * factor + gray;
-            data[b_offset + idx] = (b - gray) * factor + gray;
-        }
-    }
-
-    fn apply_hue(data: &mut [f32], pixels: usize, radians: f32) {
-        if radians == 0.0 {
-            return;
-        }
-        let cos_h = radians.cos();
-        let sin_h = radians.sin();
-        let r_offset = 0;
-        let g_offset = pixels;
-        let b_offset = 2 * pixels;
-        for idx in 0..pixels {
-            let r = data[r_offset + idx];
-            let g = data[g_offset + idx];
-            let b = data[b_offset + idx];
-            let y = 0.299 * r + 0.587 * g + 0.114 * b;
-            let u = -0.147_13 * r - 0.288_86 * g + 0.436 * b;
-            let v = 0.615 * r - 0.514_99 * g - 0.100_01 * b;
-            let u_prime = u * cos_h - v * sin_h;
-            let v_prime = u * sin_h + v * cos_h;
-            data[r_offset + idx] = y + 1.13983 * v_prime;
-            data[g_offset + idx] = y - 0.39465 * u_prime - 0.58060 * v_prime;
-            data[b_offset + idx] = y + 2.03211 * u_prime;
-        }
-    }
-
-    pub fn apply(&self, image: &mut ImageTensor, rng: &mut StdRng) -> PureResult<()> {
-        let ops = self.sample_ops(rng, image.channels());
-        if ops.is_empty() {
-            return Ok(());
-        }
-        self.apply_ops(image, &ops)
-    }
-
-    fn sample_ops(&self, rng: &mut StdRng, channels: usize) -> Vec<ColorJitterOp> {
-        let mut ops = Vec::with_capacity(4);
-        if self.brightness > 0.0 {
-            let delta = rng.gen_range(-self.brightness..=self.brightness);
-            ops.push(ColorJitterOp::Brightness(1.0 + delta));
-        }
-        if self.contrast > 0.0 {
-            let delta = rng.gen_range(-self.contrast..=self.contrast);
-            ops.push(ColorJitterOp::Contrast(1.0 + delta));
-        }
-        if self.saturation > 0.0 && channels >= 3 {
-            let delta = rng.gen_range(-self.saturation..=self.saturation);
-            ops.push(ColorJitterOp::Saturation(1.0 + delta));
-        }
-        if self.hue > 0.0 && channels >= 3 {
-            let delta = rng.gen_range(-self.hue..=self.hue);
-            ops.push(ColorJitterOp::Hue(delta * PI));
-        }
-        ops.shuffle(rng);
-        ops
-    }
-
-    fn apply_ops(&self, image: &mut ImageTensor, ops: &[ColorJitterOp]) -> PureResult<()> {
-        if ops.is_empty() {
-            return Ok(());
-        }
-        let channels = image.channels();
-        let pixels = image.height() * image.width();
-        let data = image.as_mut_slice();
-        for op in ops {
-            match *op {
-                ColorJitterOp::Brightness(factor) => Self::apply_brightness(data, factor),
-                ColorJitterOp::Contrast(factor) => {
-                    Self::apply_contrast(data, channels, pixels, factor)
-                }
-                ColorJitterOp::Saturation(factor) => {
-                    if channels >= 3 {
-                        Self::apply_saturation(data, pixels, factor);
-                    }
-                }
-                ColorJitterOp::Hue(angle) => {
-                    if channels >= 3 {
-                        Self::apply_hue(data, pixels, angle);
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 }
 
@@ -5143,5 +4997,28 @@ mod tests {
     #[test]
     fn color_jitter_validates_hue_bounds() {
         assert!(ColorJitter::new(0.1, 0.2, 0.3, 0.75).is_err());
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn temporal_renderer_accepts_zspace_volume() {
+        use st_backend_wgpu::render::temporal::{TemporalRenderer, TemporalRendererConfig};
+
+        let mut volume = ZSpaceVolume::zeros_with_temporal(1, 1, 2, 2).unwrap();
+        volume.voxels_mut().copy_from_slice(&[0.25, 0.75]);
+        volume
+            .temporal_harmonics_mut()
+            .copy_from_slice(&[0.1, 0.0, -0.1, 0.2]);
+        volume.resonance_decay_mut().copy_from_slice(&[0.4, 0.6]);
+
+        let renderer = TemporalRenderer::new(TemporalRendererConfig {
+            frames: 2,
+            sample_rate_hz: 12.0,
+        });
+
+        let output = renderer.render(&volume).unwrap();
+        assert_eq!(output.frames, 2);
+        assert_eq!(output.depth, 1);
+        assert_eq!(output.width, 2);
     }
 }

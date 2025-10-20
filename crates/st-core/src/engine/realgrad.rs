@@ -17,6 +17,12 @@ pub struct RealGradEngine {
     kernel: RealGradKernel,
     tolerance: f32,
     last_tuning: Option<RealGradTuning>,
+    ema_alpha: f32,
+    rolling_gradient_norm: Option<f32>,
+    rolling_residual_ratio: Option<f32>,
+    rolling_lebesgue_ratio: Option<f32>,
+    rolling_gradient_sparsity: Option<f32>,
+    last_pulse: Option<RealGradPulse>,
 }
 
 impl RealGradEngine {
@@ -28,6 +34,12 @@ impl RealGradEngine {
             kernel,
             tolerance,
             last_tuning: None,
+            ema_alpha: 0.2,
+            rolling_gradient_norm: None,
+            rolling_residual_ratio: None,
+            rolling_lebesgue_ratio: None,
+            rolling_gradient_sparsity: None,
+            last_pulse: None,
         }
     }
 
@@ -44,6 +56,16 @@ impl RealGradEngine {
     /// Updates the tolerance used for tempered projections.
     pub fn set_tolerance(&mut self, tolerance: f32) {
         self.tolerance = tolerance.max(0.0);
+    }
+
+    /// Returns the smoothing factor used for the rolling telemetry metrics.
+    pub fn ema_alpha(&self) -> f32 {
+        self.ema_alpha
+    }
+
+    /// Updates the smoothing factor used for the rolling telemetry metrics.
+    pub fn set_ema_alpha(&mut self, alpha: f32) {
+        self.ema_alpha = alpha.clamp(0.0, 1.0);
     }
 
     /// Returns the cached Ramanujan π estimate used by the engine.
@@ -65,6 +87,61 @@ impl RealGradEngine {
         tempered
     }
 
+    /// Projects a Euclidean gradient and returns both the projection and the emitted telemetry.
+    pub fn project_with_pulse(&mut self, values: &[f32]) -> (RealGradProjection, RealGradPulse) {
+        let projection = self.project(values);
+        let pulse = self
+            .last_pulse
+            .expect("telemetry pulse emitted after projection");
+        (projection, pulse)
+    }
+
+    /// Projects a tempered sequence and returns both the projection and the emitted telemetry.
+    pub fn project_tempered_with_pulse(
+        &mut self,
+        sequence: &SchwartzSequence,
+    ) -> (TemperedRealGradProjection, RealGradPulse) {
+        let tempered = self.project_tempered(sequence);
+        let pulse = self
+            .last_pulse
+            .expect("telemetry pulse emitted after tempered projection");
+        (tempered, pulse)
+    }
+
+    /// Returns the most recent telemetry pulse emitted by the engine, if any.
+    pub fn last_pulse(&self) -> Option<RealGradPulse> {
+        self.last_pulse
+    }
+
+    /// Returns the rolling gradient norm tracked by the engine.
+    pub fn rolling_gradient_norm(&self) -> Option<f32> {
+        self.rolling_gradient_norm
+    }
+
+    /// Returns the rolling residual ratio tracked by the engine.
+    pub fn rolling_residual_ratio(&self) -> Option<f32> {
+        self.rolling_residual_ratio
+    }
+
+    /// Returns the rolling Lebesgue ratio tracked by the engine.
+    pub fn rolling_lebesgue_ratio(&self) -> Option<f32> {
+        self.rolling_lebesgue_ratio
+    }
+
+    /// Returns the rolling gradient sparsity tracked by the engine.
+    pub fn rolling_gradient_sparsity(&self) -> Option<f32> {
+        self.rolling_gradient_sparsity
+    }
+
+    /// Clears the accumulated rolling statistics and stored telemetry pulse.
+    pub fn clear_history(&mut self) {
+        self.rolling_gradient_norm = None;
+        self.rolling_residual_ratio = None;
+        self.rolling_lebesgue_ratio = None;
+        self.rolling_gradient_sparsity = None;
+        self.last_pulse = None;
+    }
+
     /// Calibrates the engine using the provided projection and returns the tuning diagnostics.
     pub fn calibrate(&mut self, projection: &RealGradProjection) -> RealGradTuning {
         let (config, tuning) = self.kernel.config().calibrate(projection);
@@ -80,7 +157,7 @@ impl RealGradEngine {
     }
 
     fn emit_pulse(
-        &self,
+        &mut self,
         projection: &RealGradProjection,
         tempered: Option<&TemperedRealGradProjection>,
     ) {
@@ -106,7 +183,7 @@ impl RealGradEngine {
             (1, 0.0, true, true)
         };
 
-        let pulse = RealGradPulse {
+        let mut pulse = RealGradPulse {
             lebesgue_measure: projection.lebesgue_measure,
             monad_energy,
             z_energy,
@@ -120,7 +197,54 @@ impl RealGradEngine {
             converged,
             gradient_norm: gradient_summary.norm,
             gradient_sparsity: gradient_summary.sparsity,
+            rolling_gradient_norm: 0.0,
+            rolling_residual_ratio: 0.0,
+            rolling_lebesgue_ratio: 0.0,
+            rolling_gradient_sparsity: 0.0,
         };
+
+        let rolling_gradient = match self.rolling_gradient_norm {
+            Some(prev) if self.ema_alpha > 0.0 => {
+                prev + self.ema_alpha * (pulse.gradient_norm - prev)
+            }
+            Some(_) => pulse.gradient_norm,
+            None => pulse.gradient_norm,
+        };
+        self.rolling_gradient_norm = Some(rolling_gradient);
+
+        let rolling_residual = match self.rolling_residual_ratio {
+            Some(prev) if self.ema_alpha > 0.0 => {
+                prev + self.ema_alpha * (pulse.residual_ratio - prev)
+            }
+            Some(_) => pulse.residual_ratio,
+            None => pulse.residual_ratio,
+        };
+        self.rolling_residual_ratio = Some(rolling_residual);
+
+        let rolling_lebesgue = match self.rolling_lebesgue_ratio {
+            Some(prev) if self.ema_alpha > 0.0 => {
+                prev + self.ema_alpha * (pulse.lebesgue_ratio - prev)
+            }
+            Some(_) => pulse.lebesgue_ratio,
+            None => pulse.lebesgue_ratio,
+        };
+        self.rolling_lebesgue_ratio = Some(rolling_lebesgue);
+
+        let rolling_sparsity = match self.rolling_gradient_sparsity {
+            Some(prev) if self.ema_alpha > 0.0 => {
+                prev + self.ema_alpha * (gradient_summary.sparsity - prev)
+            }
+            Some(_) => gradient_summary.sparsity,
+            None => gradient_summary.sparsity,
+        };
+        self.rolling_gradient_sparsity = Some(rolling_sparsity);
+
+        pulse.rolling_gradient_norm = rolling_gradient;
+        pulse.rolling_residual_ratio = rolling_residual;
+        pulse.rolling_lebesgue_ratio = rolling_lebesgue;
+        pulse.rolling_gradient_sparsity = rolling_sparsity;
+
+        self.last_pulse = Some(pulse);
         set_last_realgrad(&pulse);
     }
 }
@@ -158,6 +282,7 @@ mod tests {
         let values = vec![0.5f32, -0.25, 0.75, -0.5];
         let projection = engine.project(&values);
         assert_eq!(projection.realgrad.len(), values.len());
+        let local_pulse = engine.last_pulse().expect("pulse stored in engine");
         let tuning = engine.calibrate(&projection);
         assert!(tuning.adjustment_factor.is_finite());
         assert!(engine.last_tuning().is_some());
@@ -167,6 +292,31 @@ mod tests {
         assert!(pulse.iterations >= 1);
         assert!(pulse.gradient_norm >= 0.0);
         assert!(pulse.gradient_sparsity >= 0.0 && pulse.gradient_sparsity <= 1.0);
+        assert!(pulse.rolling_gradient_norm >= 0.0);
+        assert!(pulse.rolling_residual_ratio >= 0.0);
+        assert!(pulse.rolling_lebesgue_ratio >= 0.0);
+        assert!(pulse.rolling_gradient_sparsity >= 0.0);
+        assert_eq!(pulse.gradient_norm, local_pulse.gradient_norm);
+        assert_eq!(
+            pulse.rolling_gradient_norm,
+            local_pulse.rolling_gradient_norm
+        );
+        assert_eq!(
+            engine.rolling_gradient_norm().unwrap(),
+            pulse.rolling_gradient_norm
+        );
+        assert_eq!(
+            engine.rolling_residual_ratio().unwrap(),
+            pulse.rolling_residual_ratio
+        );
+        assert_eq!(
+            engine.rolling_lebesgue_ratio().unwrap(),
+            pulse.rolling_lebesgue_ratio
+        );
+        assert_eq!(
+            engine.rolling_gradient_sparsity().unwrap(),
+            pulse.rolling_gradient_sparsity
+        );
     }
 
     #[test]
@@ -187,5 +337,64 @@ mod tests {
         assert_eq!(pulse.dominated, tempered.dominated);
         assert!(pulse.gradient_norm >= 0.0);
         assert!(pulse.gradient_sparsity >= 0.0 && pulse.gradient_sparsity <= 1.0);
+        assert!(pulse.rolling_gradient_norm >= 0.0);
+        assert!(pulse.rolling_residual_ratio >= 0.0);
+        assert!(pulse.rolling_lebesgue_ratio >= 0.0);
+        assert!(pulse.rolling_gradient_sparsity >= 0.0);
+    }
+
+    #[test]
+    fn engine_project_with_pulse_roundtrips() {
+        crate::telemetry::hub::clear_last_realgrad_for_test();
+        let mut engine = RealGradEngine::new(RealGradConfig::default());
+        let values = vec![1.0f32, 0.5, -0.25, -0.75];
+        let (projection, pulse) = engine.project_with_pulse(&values);
+        assert_eq!(projection.realgrad.len(), values.len());
+        let cached = engine.last_pulse().expect("pulse cached");
+        assert_eq!(pulse, cached);
+        assert_eq!(
+            pulse.rolling_gradient_norm,
+            engine.rolling_gradient_norm().unwrap()
+        );
+        assert_eq!(
+            pulse.rolling_residual_ratio,
+            engine.rolling_residual_ratio().unwrap()
+        );
+        assert_eq!(
+            pulse.rolling_lebesgue_ratio,
+            engine.rolling_lebesgue_ratio().unwrap()
+        );
+        assert_eq!(
+            pulse.rolling_gradient_sparsity,
+            engine.rolling_gradient_sparsity().unwrap()
+        );
+    }
+
+    #[test]
+    fn engine_allows_history_reset() {
+        crate::telemetry::hub::clear_last_realgrad_for_test();
+        let mut engine = RealGradEngine::new(RealGradConfig::default());
+        let values = vec![0.1f32, 0.2, 0.3, 0.4];
+        engine.project(&values);
+        assert!(engine.last_pulse().is_some());
+        assert!(engine.rolling_gradient_norm().is_some());
+        engine.clear_history();
+        assert!(engine.last_pulse().is_none());
+        assert!(engine.rolling_gradient_norm().is_none());
+        assert!(engine.rolling_residual_ratio().is_none());
+        assert!(engine.rolling_lebesgue_ratio().is_none());
+        assert!(engine.rolling_gradient_sparsity().is_none());
+    }
+
+    #[test]
+    fn engine_allows_custom_ema_alpha() {
+        let mut engine = RealGradEngine::new(RealGradConfig::default());
+        assert!((engine.ema_alpha() - 0.2).abs() < f32::EPSILON);
+        engine.set_ema_alpha(0.75);
+        assert!((engine.ema_alpha() - 0.75).abs() < f32::EPSILON);
+        engine.set_ema_alpha(-2.0);
+        assert_eq!(engine.ema_alpha(), 0.0);
+        engine.set_ema_alpha(1.5);
+        assert_eq!(engine.ema_alpha(), 1.0);
     }
 }

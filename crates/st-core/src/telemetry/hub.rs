@@ -418,7 +418,7 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
 }
 
 /// Snapshot summarising the latest RealGrad projection applied by the system.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RealGradPulse {
     /// L¹ magnitude of the input signal.
     pub lebesgue_measure: f32,
@@ -446,6 +446,14 @@ pub struct RealGradPulse {
     pub gradient_norm: f32,
     /// Ratio of near-zero gradient entries observed by the projection.
     pub gradient_sparsity: f32,
+    /// Exponential moving average of the gradient norm reported by the engine.
+    pub rolling_gradient_norm: f32,
+    /// Exponential moving average of the residual ratio reported by the engine.
+    pub rolling_residual_ratio: f32,
+    /// Exponential moving average of the Lebesgue-to-monad ratio reported by the engine.
+    pub rolling_lebesgue_ratio: f32,
+    /// Exponential moving average of the gradient sparsity reported by the engine.
+    pub rolling_gradient_sparsity: f32,
 }
 
 impl Default for RealGradPulse {
@@ -464,6 +472,10 @@ impl Default for RealGradPulse {
             converged: false,
             gradient_norm: 0.0,
             gradient_sparsity: 1.0,
+            rolling_gradient_norm: 0.0,
+            rolling_residual_ratio: 0.0,
+            rolling_lebesgue_ratio: 0.0,
+            rolling_gradient_sparsity: 1.0,
         }
     }
 }
@@ -904,6 +916,8 @@ mod tests {
         pulse.converged = true;
         pulse.gradient_norm = 2.5;
         pulse.gradient_sparsity = 0.75;
+        pulse.rolling_gradient_norm = 1.5;
+        pulse.rolling_residual_ratio = 0.2;
         set_last_realgrad(&pulse);
         let stored = get_last_realgrad().expect("pulse stored");
         assert_eq!(stored.iterations, 3);
@@ -911,6 +925,8 @@ mod tests {
         assert!((stored.residual_ratio - 0.25).abs() < f32::EPSILON);
         assert!((stored.gradient_norm - 2.5).abs() < f32::EPSILON);
         assert!((stored.gradient_sparsity - 0.75).abs() < f32::EPSILON);
+        assert!((stored.rolling_gradient_norm - 1.5).abs() < f32::EPSILON);
+        assert!((stored.rolling_residual_ratio - 0.2).abs() < f32::EPSILON);
         let summary = stored.gradient_summary();
         assert!((summary.norm - 2.5).abs() < f32::EPSILON);
         assert!((summary.sparsity - 0.75).abs() < f32::EPSILON);
