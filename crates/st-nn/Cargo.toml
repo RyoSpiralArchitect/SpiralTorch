@@ -17,6 +17,7 @@ psychoid = ["st-core/psychoid"]
 collapse = ["psi", "st-core/collapse"]
 golden = ["st-core/golden"]
 kdsl = ["st-core/kdsl"]
+wgpu = ["st-core/wgpu", "st-tensor/wgpu"]
 
 [dependencies]
 st-tensor = { path = "../st-tensor" }

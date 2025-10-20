@@ -25,6 +25,7 @@ default = [
     "rl",
     "rec",
     "text",
+    "selfsup",
 ]
 extension-module = ["pyo3/extension-module"]
 psi = []
@@ -34,6 +35,7 @@ nn = ["dep:st-nn"]
 rl = ["dep:st-rl"]
 rec = ["dep:st-rec", "dep:st-kdsl"]
 text = ["dep:st-text"]
+selfsup = ["dep:spiral-selfsup"]
 
 # Backend selection (mirrors the CLI surface expected by maturin builds)
 cpu = []
@@ -64,8 +66,13 @@ st-text = { path = "../../crates/st-text", optional = true }
 st-kdsl = { path = "../../crates/st-kdsl", optional = true }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }
+spiral-selfsup = { path = "../../crates/spiral-selfsup", optional = true }
+spiral-opt = { path = "../../crates/spiral-opt" }
+spiral-hpo = { path = "../../crates/spiral-hpo" }
 ndarray = { version = "0.15", default-features = false, features = ["std"] }
 num-complex = { version = "0.4" }
+spiral-safety = { path = "../../crates/spiral-safety" }
+serde_json = "1"
 
 [package.metadata.maturin]
 name = "spiraltorch"

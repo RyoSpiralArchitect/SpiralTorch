@@ -12,6 +12,8 @@ use st_frac::FracBackend;
 use wilson::wilson_lower;
 use zmeta::{ZMetaES, ZMetaParams};
 
+use crate::telemetry::monitoring::MonitoringHub;
+
 /// Metrics reported by a training loop back into the runtime.
 #[derive(Clone, Debug, Default)]
 pub struct StepMetrics {
@@ -110,6 +112,7 @@ pub struct BlackCatRuntime {
     metrics_ema: MetricsEma,
     frac_penalty_ema: RollingEma,
     extra_ema: HashMap<String, RollingEma>,
+    monitoring: MonitoringHub,
 }
 
 impl BlackCatRuntime {
@@ -141,6 +144,7 @@ impl BlackCatRuntime {
             metrics_ema: MetricsEma::new(stats_alpha),
             frac_penalty_ema: RollingEma::new(stats_alpha),
             extra_ema: HashMap::new(),
+            monitoring: MonitoringHub::default(),
         }
     }
 
@@ -232,7 +236,18 @@ impl BlackCatRuntime {
                 .or_insert_with(|| RollingEma::new(self.stats_alpha))
                 .update(*value);
         }
+        let _ = self.monitoring.observe(metrics, reward_current);
         reward_current
+    }
+
+    /// Access the embedded monitoring hub for instrumentation.
+    pub fn monitoring(&self) -> &MonitoringHub {
+        &self.monitoring
+    }
+
+    /// Mutable access to attach exporters or tweak configuration.
+    pub fn monitoring_mut(&mut self) -> &mut MonitoringHub {
+        &mut self.monitoring
     }
 
     /// Returns the dimensionality expected by the contextual bandits.
@@ -614,9 +629,11 @@ pub mod zmeta {
             }
         }
 
-        #[cfg(not(feature = "blackcat_v2"))]
-        fn ingest_structural(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
-            let raw = structural?;
+        #[allow(dead_code)]
+        fn ingest_structural_legacy(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
+            let Some(raw) = structural else {
+                return None;
+            };
             if self.params.dim == 0 {
                 return None;
             }
@@ -654,7 +671,69 @@ pub mod zmeta {
             )
         }
 
-        #[cfg(not(feature = "blackcat_v2"))]
+        fn ingest_structural(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
+            let Some(raw) = structural else {
+                return None;
+            };
+            if self.params.dim == 0 {
+                return None;
+            }
+
+            let mut new_vec = vec![0.0f64; self.params.dim];
+            let mut any = false;
+            for (idx, slot) in new_vec.iter_mut().enumerate() {
+                if let Some(value) = raw.get(idx).copied() {
+                    if value.is_finite() {
+                        *slot = value;
+                        any |= value.abs() > 1e-12;
+                    }
+                }
+            }
+            if !any {
+                return None;
+            }
+
+            let norm = (new_vec.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            if norm <= 1e-9 {
+                return None;
+            }
+            for value in new_vec.iter_mut() {
+                *value /= norm;
+            }
+
+            let prev = self.structural.clone();
+            self.structural = new_vec;
+            Some(
+                self.structural
+                    .iter()
+                    .zip(prev.iter())
+                    .map(|(new, old)| new - old)
+                    .collect(),
+            )
+        }
+
+        #[allow(dead_code)]
+        fn apply_structural_drive_legacy(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
+            if delta_reward.abs() <= 1e-9 {
+                return;
+            }
+            let gain = delta_reward.tanh();
+            if !gain.is_finite() || gain.abs() <= 1e-6 {
+                return;
+            }
+
+            let delta_norm = (delta.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            if delta_norm <= 1e-9 {
+                return;
+            }
+
+            for value in delta.iter_mut() {
+                *value *= gain;
+            }
+
+            self.logistic_project_step(&delta);
+        }
+
         fn apply_structural_drive(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
             if delta_reward.abs() <= 1e-9 {
                 return;
@@ -673,12 +752,11 @@ pub mod zmeta {
                 *value *= gain;
             }
 
-            // legacy名を参照せず、現行の投影ステップを使う
             self.logistic_project_step(&delta);
         }
 
-        #[cfg(not(feature = "blackcat_v2"))]
-        fn logistic_project_step(&mut self, drive: &[f64]) {
+        #[allow(dead_code)]
+        fn logistic_project_step_legacy(&mut self, drive: &[f64]) {
             if self.dir.is_empty() {
                 return;
             }
@@ -723,71 +801,6 @@ pub mod zmeta {
             normalize(&mut self.dir);
         }
 
-        #[cfg(feature = "blackcat_v2")]
-        fn ingest_structural(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
-            let Some(raw) = structural else {
-                return None;
-            };
-            if self.params.dim == 0 {
-                return None;
-            }
-
-            let mut new_vec = vec![0.0f64; self.params.dim];
-            let mut any = false;
-            for (idx, slot) in new_vec.iter_mut().enumerate() {
-                if let Some(value) = raw.get(idx).copied() {
-                    if value.is_finite() {
-                        *slot = value;
-                        any |= value.abs() > 1e-12;
-                    }
-                }
-            }
-            if !any {
-                return None;
-            }
-
-            let norm = (new_vec.iter().map(|v| v * v).sum::<f64>()).sqrt();
-            if norm <= 1e-9 {
-                return None;
-            }
-            for value in new_vec.iter_mut() {
-                *value /= norm;
-            }
-
-            let prev = self.structural.clone();
-            self.structural = new_vec;
-            Some(
-                self.structural
-                    .iter()
-                    .zip(prev.iter())
-                    .map(|(new, old)| new - old)
-                    .collect(),
-            )
-        }
-
-        #[cfg(feature = "blackcat_v2")]
-        fn apply_structural_drive(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
-            if delta_reward.abs() <= 1e-9 {
-                return;
-            }
-            let gain = delta_reward.tanh();
-            if !gain.is_finite() || gain.abs() <= 1e-6 {
-                return;
-            }
-
-            let delta_norm = (delta.iter().map(|v| v * v).sum::<f64>()).sqrt();
-            if delta_norm <= 1e-9 {
-                return;
-            }
-
-            for value in delta.iter_mut() {
-                *value *= gain;
-            }
-
-            self.logistic_project_step(&delta);
-        }
-
-        #[cfg(feature = "blackcat_v2")]
         fn logistic_project_step(&mut self, drive: &[f64]) {
             if self.dir.is_empty() {
                 return;

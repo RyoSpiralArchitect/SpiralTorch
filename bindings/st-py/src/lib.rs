@@ -10,12 +10,12 @@ mod rl;
 mod rec;
 mod telemetry;
 mod pure;
-mod nn;
 mod planner;
+mod selfsup;
+mod export;
+mod inference;
+mod hpo;
 
-// =======================
-// extras（安全・自己完結）
-// =======================
 mod extras {
     use super::*;
     use pyo3::wrap_pyfunction; // ← マクロをこのモジュール内に import
@@ -139,9 +139,6 @@ mod extras {
     }
 }
 
-// =======================
-// st-frac の実API
-// =======================
 mod frac_bindings {
     use super::*;
     use pyo3::wrap_pyfunction; // ← ここでも import
@@ -182,17 +179,16 @@ mod frac_bindings {
     }
 }
 
-// =======================
-// ルート #[pymodule]
-// =======================
-#[pymodule]
-fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+// ================// ルート #[pymodule]
+fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     // 1) トップレベル（そのまま import できる）
     extras::register(py, m)?;
     tensor::register(py, m)?;
     compat::register(py, m)?;
     pure::register(py, m)?;
     planner::register(py, m)?;
+    hpo::register(py, m)?;
+    inference::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;
@@ -200,9 +196,17 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     rec::register(py, m)?;
     telemetry::register(py, m)?;
 
+    let export_module = PyModule::new_bound(py, "export")?;
+    export::register(py, &export_module)?;
+    m.add_submodule(&export_module)?;
+
     let frac = PyModule::new_bound(py, "frac")?;
     frac_bindings::register(py, &frac)?; // 実APIを公開
     m.add_submodule(&frac)?;
+
+    let selfsup_mod = PyModule::new_bound(py, "selfsup")?;
+    selfsup::register(py, &selfsup_mod)?;
+    m.add_submodule(&selfsup_mod)?;
 
     let dataset = PyModule::new_bound(py, "dataset")?;
     dataset.add("__doc__", "Datasets & loaders")?;
@@ -220,12 +224,26 @@ fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add("__all__", vec![
         "Tensor","from_dlpack","to_dlpack",
         "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
+        "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
-        "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
+        "nn","frac","selfsup","dataset","linalg","rl","rec","telemetry","ecosystem",
+        "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem","hpo","inference","export",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",
         "gl_coeffs_adaptive","fracdiff_gl_1d",
     ])?;
     Ok(())
+}
+
+// ================#[pymodule]
+#[pymodule]
+fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+    init_spiraltorch_module(py, m)
+}
+
+// ================#[pymodule] (alias for maturin's `_native` expectation)
+#[pymodule]
+fn spiraltorch_native(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+    init_spiraltorch_module(py, m)
 }

@@ -21,6 +21,13 @@
 //! - State is maintained per sample, so downstream callers can seed the log
 //!   `e`-process with [`SyncTheoremTrainer::set_log_e`] and retrieve the
 //!   anytime confidence curve for their own labelling policies.
+//! - [`SyncTheoremTrainer::aggregate_family`] folds pairwise runs into a
+//!   multi-universe signal with configurable structural policies, matching the
+//!   Mandela synchrony discussion from Theorem 5.
+//! - [`SyncConfig::with_azuma_c`] exposes the Azuma--Hoeffding tail bound from
+//!   Theorem 2 so callers can budget additional delay mass, while
+//!   [`SyncStep::effective_delta_b_sq`] surfaces the misalignment-adjusted
+//!   Bures gaps used in Proposition 3.
 //!
 //! The implementation uses standard Rust containers (`Vec`) so it works in
 //! `no_std`-averse crates, yet remains interoperable with SpiralTorch tensors by
@@ -54,6 +61,8 @@ pub struct SyncConfig {
     pub cos_phi_min: f32,
     /// Optional number of steps spent honouring a slew-rate constraint.
     pub slew_steps: usize,
+    /// Optional Azuma--Hoeffding scale `c` describing bounded log-e increments.
+    azuma_c: Option<f32>,
 }
 
 impl SyncConfig {
@@ -71,6 +80,7 @@ impl SyncConfig {
             epsilon_max,
             cos_phi_min,
             slew_steps,
+            azuma_c: None,
         };
         config.validate()?;
         Ok(config)
@@ -92,6 +102,20 @@ impl SyncConfig {
         Ok(())
     }
 
+    /// Return the Azuma--Hoeffding coefficient when configured.
+    pub fn azuma_c(&self) -> Option<f32> {
+        self.azuma_c
+    }
+
+    /// Attach an Azuma--Hoeffding coefficient describing deviation control.
+    pub fn with_azuma_c(mut self, azuma_c: f32) -> Result<Self, SyncError> {
+        if !(azuma_c.is_finite() && azuma_c > 0.0) {
+            return Err(SyncError::InvalidAzuma(azuma_c));
+        }
+        self.azuma_c = Some(azuma_c);
+        Ok(self)
+    }
+
     /// Log threshold `\log(1/\alpha)` from Proposition 4.
     pub fn threshold(&self) -> f32 {
         (1.0 / self.alpha).ln()
@@ -109,6 +133,16 @@ impl SyncConfig {
     /// Analytic upper bound on the observation hitting time (Theorem 2).
     pub fn hitting_time_bound(&self) -> Result<f32, SyncError> {
         Ok(self.threshold() / self.hitting_time_denominator()?)
+    }
+
+    /// Azuma--Hoeffding tail bound for observing an additional delay `\delta`.
+    pub fn hitting_time_tail(&self, delta: f32) -> Option<f32> {
+        let c = self.azuma_c?;
+        if delta <= 0.0 {
+            Some(1.0)
+        } else {
+            Some((-c * delta * delta).exp())
+        }
     }
 }
 
@@ -137,6 +171,12 @@ pub enum SyncError {
     /// The drift implied by `(tau_b, cos_phi_min, epsilon_max)` is non-positive.
     #[error("expected positive observation drift, denominator = {0}")]
     NonPositiveDrift(f32),
+    /// Family aggregation cannot proceed without at least one pair entry.
+    #[error("family aggregation requires at least one pair contribution")]
+    EmptyFamily,
+    /// Azuma--Hoeffding scale must be positive and finite.
+    #[error("azuma coefficient must be positive, received {0}")]
+    InvalidAzuma(f32),
 }
 
 /// Aggregated output for a single synchronisation step.
@@ -156,6 +196,57 @@ pub struct SyncStep {
     pub increment: Vec<f32>,
     /// Anytime confidence values `1 - 1/E_k` used for the SAFE label.
     pub confidence: Vec<f32>,
+    /// Effective Bures gaps after incorporating axis misalignment.
+    pub effective_delta_b_sq: Vec<f32>,
+}
+
+/// Policy describing how per-pair structural gates should be folded into a
+/// family-wide signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FamilyStructurePolicy {
+    /// Open the family gate as soon as any pair has crossed its structural
+    /// threshold.  Mirrors a Bonferroni-style union bound.
+    Any,
+    /// Require all pairs to have crossed their structural thresholds before the
+    /// family gate opens.
+    All,
+    /// Require a strict majority of pairs to confirm the structural event.
+    Majority,
+}
+
+impl FamilyStructurePolicy {
+    fn fold(self, gates: &[bool]) -> bool {
+        match self {
+            Self::Any => gates.iter().any(|gate| *gate),
+            Self::All => gates.iter().all(|gate| *gate),
+            Self::Majority => {
+                let positives = gates.iter().filter(|gate| **gate).count();
+                positives * 2 > gates.len()
+            }
+        }
+    }
+}
+
+/// Aggregated view over a multi-universe synchronisation pass.
+#[derive(Debug, Clone)]
+pub struct FamilyAggregation {
+    /// Family-averaged log `e`-process across the pair contributions.
+    pub log_e_family: f32,
+    /// Anytime confidence implied by the family log `e`.
+    pub confidence: f32,
+    /// Structural gate indicator after applying [`FamilyStructurePolicy`].
+    pub structure_gate: bool,
+    /// Observation gate indicator using the family log `e` and global
+    /// threshold.
+    pub observation_gate: bool,
+    /// Aggregated I×K label for the family.
+    pub label: IKLabel,
+    /// Number of pair contributions participating in the aggregation.
+    pub pair_count: usize,
+    /// Index of the pair with the largest log `e` contribution, if any.
+    pub dominant_pair: Option<usize>,
+    /// Maximal pair log `e` value, if any.
+    pub dominant_log_e: Option<f32>,
 }
 
 /// State machine that fuses structural and observational evidence.
@@ -218,23 +309,44 @@ impl SyncTheoremTrainer {
         epsilon: &[f32],
         cos_sq_phi: Option<&[f32]>,
     ) -> Result<Vec<f32>, SyncError> {
+        Ok(self
+            .expected_increment_profile(delta_b_sq, epsilon, cos_sq_phi)?
+            .0)
+    }
+
+    /// Jointly compute the effective Bures gaps and the log-e drift lower bound.
+    pub fn expected_increment_profile(
+        &self,
+        delta_b_sq: &[f32],
+        epsilon: &[f32],
+        cos_sq_phi: Option<&[f32]>,
+    ) -> Result<(Vec<f32>, Vec<f32>), SyncError> {
         let batch = delta_b_sq.len();
         self.ensure_length("epsilon", epsilon.len(), batch)?;
-        if let Some(cos) = cos_sq_phi {
+        let (effective_delta, increment): (Vec<f32>, Vec<f32>) = if let Some(cos) = cos_sq_phi {
             self.ensure_length("cos_sq_phi", cos.len(), batch)?;
-            Ok(delta_b_sq
+            delta_b_sq
                 .iter()
                 .zip(cos.iter())
                 .zip(epsilon.iter())
-                .map(|((delta, cos), eps)| 2.0 * delta * cos - eps)
-                .collect())
+                .map(|((delta, cos), eps)| {
+                    let effective = delta * cos;
+                    let drift = 2.0 * effective - eps;
+                    (effective, drift)
+                })
+                .unzip()
         } else {
-            Ok(delta_b_sq
+            delta_b_sq
                 .iter()
                 .zip(epsilon.iter())
-                .map(|(delta, eps)| 2.0 * delta * self.config.cos_phi_min - eps)
-                .collect())
-        }
+                .map(|(delta, eps)| {
+                    let effective = delta * self.config.cos_phi_min;
+                    let drift = 2.0 * effective - eps;
+                    (effective, drift)
+                })
+                .unzip()
+        };
+        Ok((increment, effective_delta))
     }
 
     fn ensure_length(
@@ -286,6 +398,7 @@ impl SyncTheoremTrainer {
                 hitting_time_bound: self.config.hitting_time_bound()?,
                 increment: Vec::new(),
                 confidence: Vec::new(),
+                effective_delta_b_sq: Vec::new(),
             });
         }
 
@@ -293,7 +406,11 @@ impl SyncTheoremTrainer {
         let cos_sq_phi =
             self.default_or("cos_sq_phi", cos_sq_phi, batch, self.config.cos_phi_min)?;
 
-        let increment = self.expected_increment(delta_b_sq, &epsilon, Some(&cos_sq_phi))?;
+        let (increment, effective_delta_b_sq) = self.expected_increment_profile(
+            delta_b_sq,
+            epsilon.as_ref(),
+            Some(cos_sq_phi.as_ref()),
+        )?;
         if self.log_e.len() != batch {
             self.log_e = vec![0.0; batch];
         }
@@ -343,6 +460,7 @@ impl SyncTheoremTrainer {
             hitting_time_bound: self.config.hitting_time_bound()?,
             increment,
             confidence,
+            effective_delta_b_sq,
         })
     }
 
@@ -381,6 +499,53 @@ impl SyncTheoremTrainer {
         }
 
         Ok((log_trajectory, gate_iter))
+    }
+
+    /// Aggregate the per-pair outputs from [`SyncStep`] into a family-level
+    /// signal, matching the multi-universe synchrony recipe from Theorem 5.
+    pub fn aggregate_family(
+        &self,
+        step: &SyncStep,
+        policy: FamilyStructurePolicy,
+    ) -> Result<FamilyAggregation, SyncError> {
+        if step.log_e.is_empty() {
+            return Err(SyncError::EmptyFamily);
+        }
+
+        let pair_count = step.log_e.len();
+        let log_e_family = step.log_e.iter().sum::<f32>() / pair_count as f32;
+        let confidence = 1.0 - (-log_e_family).exp();
+
+        let structure_gate = policy.fold(&step.structure_gate);
+        let observation_gate = log_e_family >= self.threshold();
+
+        let (dominant_pair, dominant_log_e) = step
+            .log_e
+            .iter()
+            .copied()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(idx, value)| (Some(idx), Some(value)))
+            .unwrap_or((None, None));
+
+        let label = if structure_gate && observation_gate {
+            IKLabel::Critical
+        } else if !structure_gate && !observation_gate && confidence >= 1.0 - self.config.alpha {
+            IKLabel::Safe
+        } else {
+            IKLabel::Abstain
+        };
+
+        Ok(FamilyAggregation {
+            log_e_family,
+            confidence,
+            structure_gate,
+            observation_gate,
+            label,
+            pair_count,
+            dominant_pair,
+            dominant_log_e,
+        })
     }
 }
 
@@ -424,6 +589,13 @@ mod tests {
 
         let default_increment = trainer.expected_increment(&delta, &epsilon, None).unwrap();
         assert!((default_increment[0] - (2.0 * 0.3 * config.cos_phi_min - 0.02)).abs() < 1e-6);
+
+        let (increment_profile, effective_gap) = trainer
+            .expected_increment_profile(&delta, &epsilon, Some(&cos))
+            .unwrap();
+        assert_eq!(increment_profile, increment);
+        assert!((effective_gap[0] - 0.27).abs() < 1e-6);
+        assert!((effective_gap[1] - 0.2375).abs() < 1e-6);
     }
 
     #[test]
@@ -438,6 +610,7 @@ mod tests {
         assert_eq!(step.labels, vec![IKLabel::Abstain, IKLabel::Abstain]);
         assert_eq!(trainer.log_e().len(), 2);
         assert_eq!(step.confidence.len(), 2);
+        assert_eq!(step.effective_delta_b_sq.len(), 2);
     }
 
     #[test]
@@ -482,5 +655,84 @@ mod tests {
             config.hitting_time_bound(),
             Err(SyncError::NonPositiveDrift(_))
         ));
+    }
+
+    #[test]
+    fn azuma_tail_controls_deviation() {
+        let config = SyncConfig::new(0.1, 0.2, 0.01, 0.9, 0)
+            .unwrap()
+            .with_azuma_c(0.5)
+            .unwrap();
+        assert!((config.hitting_time_tail(0.0).unwrap() - 1.0).abs() < 1e-6);
+        let tail = config.hitting_time_tail(3.0).unwrap();
+        let reference = (-0.5f32 * 9.0).exp();
+        assert!((tail - reference).abs() < 1e-6);
+        let trainer = SyncTheoremTrainer::new(config).unwrap();
+        assert!(trainer.config().hitting_time_tail(1.0).is_some());
+        assert!(SyncConfig::new(0.1, 0.2, 0.01, 0.9, 0)
+            .unwrap()
+            .with_azuma_c(-0.5)
+            .is_err());
+    }
+
+    #[test]
+    fn family_aggregation_policies() {
+        let config = SyncConfig::new(0.1, 0.2, 0.0, 1.0, 0).unwrap();
+        let mut trainer = SyncTheoremTrainer::new(config).unwrap();
+        let step = trainer
+            .step(
+                &[0.25, 0.1, 0.15],
+                Some(&[0.0, 0.0, 0.0]),
+                Some(&[1.0, 1.0, 1.0]),
+            )
+            .unwrap();
+
+        let any = trainer
+            .aggregate_family(&step, FamilyStructurePolicy::Any)
+            .unwrap();
+        assert!(any.structure_gate);
+        assert_eq!(any.pair_count, 3);
+        assert_eq!(any.dominant_pair, Some(0));
+
+        let all = trainer
+            .aggregate_family(&step, FamilyStructurePolicy::All)
+            .unwrap();
+        assert!(!all.structure_gate);
+
+        let majority = trainer
+            .aggregate_family(&step, FamilyStructurePolicy::Majority)
+            .unwrap();
+        assert!(!majority.structure_gate);
+    }
+
+    #[test]
+    fn family_aggregation_respects_thresholds() {
+        let config = SyncConfig::new(0.2, 0.05, 0.0, 1.0, 0).unwrap();
+        let mut trainer = SyncTheoremTrainer::new(config).unwrap();
+        for _ in 0..5 {
+            trainer
+                .step(
+                    &[0.5, 0.5, 0.5],
+                    Some(&[0.0, 0.0, 0.0]),
+                    Some(&[1.0, 1.0, 1.0]),
+                )
+                .unwrap();
+        }
+
+        let step = trainer
+            .step(
+                &[0.5, 0.5, 0.5],
+                Some(&[0.0, 0.0, 0.0]),
+                Some(&[1.0, 1.0, 1.0]),
+            )
+            .unwrap();
+
+        let aggregation = trainer
+            .aggregate_family(&step, FamilyStructurePolicy::All)
+            .unwrap();
+        assert!(aggregation.structure_gate);
+        assert!(aggregation.observation_gate);
+        assert_eq!(aggregation.label, IKLabel::Critical);
+        assert!(aggregation.confidence >= 1.0 - trainer.config().alpha);
     }
 }
