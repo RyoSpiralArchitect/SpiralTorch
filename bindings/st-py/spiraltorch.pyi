@@ -301,10 +301,36 @@ class _NnDataLoaderIter(Iterable[Tuple[Tensor, Tensor]]):
     def __next__(self) -> Tuple[Tensor, Tensor]: ...
 
 
+class _ZSpaceCoherenceSequencer:
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        curvature: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def forward(self, x: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def dim(self) -> int: ...
+
+    def num_heads(self) -> int: ...
+
+    def curvature(self) -> float: ...
+
+    def maxwell_channels(self) -> int: ...
+
+    def topos(self) -> OpenCartesianTopos: ...
+
+
 class _NnModule(ModuleType):
     Dataset: type[_NnDataset]
     DataLoader: type[_NnDataLoader]
     DataLoaderIter: type[_NnDataLoaderIter]
+    ZSpaceCoherenceSequencer: type[_ZSpaceCoherenceSequencer]
 
     def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...
 
@@ -370,7 +396,7 @@ class Recommender:
     @property
     def factors(self) -> int: ...
 
-class DqnAgent:
+class stAgent:
     def __init__(self, state_dim: int, action_dim: int, discount: float, learning_rate: float) -> None: ...
     def select_action(self, state: int) -> int: ...
     def update(self, state: int, action: int, reward: float, next_state: int) -> None: ...
@@ -441,7 +467,7 @@ __all__ = [
     "QueryPlan",
     "RecEpochReport",
     "Recommender",
-    "DqnAgent",
+    "stAgent",
     "PpoAgent",
     "SacAgent",
     "DashboardMetric",
