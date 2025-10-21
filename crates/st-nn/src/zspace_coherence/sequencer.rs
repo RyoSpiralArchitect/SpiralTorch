@@ -11,7 +11,7 @@
 //! - Fractional calculus for spectral operators
 
 use super::coherence_engine::{
-    CoherenceBackend, CoherenceEngine, DomainConcept, DomainSemanticProfile,
+    CoherenceBackend, CoherenceEngine, DomainSemanticProfile,
 };
 use crate::{Module, PureResult, Tensor};
 use st_tensor::{OpenCartesianTopos, TensorError};
@@ -172,6 +172,16 @@ impl ZSpaceCoherenceSequencer {
     pub fn backend(&self) -> &CoherenceBackend {
         self.coherence_engine.backend()
     }
+
+    /// Returns the number of Maxwell channels in the underlying coherence engine.
+    pub fn maxwell_channels(&self) -> usize {
+        self.coherence_engine.num_channels()
+    }
+
+    /// Returns the OpenCartesianTopos associated with this sequencer.
+    pub fn topos(&self) -> &OpenCartesianTopos {
+        &self.topos
+    }
 }
 
 impl Module for ZSpaceCoherenceSequencer {
@@ -212,6 +222,7 @@ impl Module for ZSpaceCoherenceSequencer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::coherence_engine::DomainConcept;
 
     #[test]
     fn sequencer_forward_preserves_shape() {
