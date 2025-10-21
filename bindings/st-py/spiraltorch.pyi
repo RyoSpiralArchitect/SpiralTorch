@@ -118,6 +118,35 @@ class ZSpaceBarycenter:
     def effective_weight(self) -> float: ...
     def intermediates(self) -> List[BarycenterIntermediate]: ...
 
+class ZMetrics:
+    speed: float
+    memory: float
+    stability: float
+    gradient: Optional[Sequence[float]]
+    drs: float
+
+class ZSpaceTrainer:
+    def __init__(
+        self,
+        z_dim: int = ...,
+        *,
+        alpha: float = ...,
+        lam_speed: float = ...,
+        lam_mem: float = ...,
+        lam_stab: float = ...,
+        lam_frac: float = ...,
+        lam_drs: float = ...,
+        lr: float = ...,
+        beta1: float = ...,
+        beta2: float = ...,
+        eps: float = ...,
+    ) -> None: ...
+    @property
+    def state(self) -> List[float]: ...
+    def step(self, metrics: Mapping[str, float] | ZMetrics) -> float: ...
+
+def step_many(trainer: ZSpaceTrainer, samples: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
+
 class RankPlan:
     def kind(self) -> str: ...
     def rows(self) -> int: ...
@@ -228,6 +257,56 @@ class _CompatNamespace(ModuleType):
 
 compat: _CompatNamespace
 
+class TemporalResonanceBuffer:
+    def __init__(self, capacity: int = ..., alpha: float = ...) -> None: ...
+    @property
+    def alpha(self) -> float: ...
+    def update(self, volume: Sequence[Sequence[Sequence[float]]]) -> List[List[List[float]]]: ...
+    def state(self) -> Optional[List[List[List[float]]]]: ...
+    def history(self) -> List[List[List[List[float]]]]: ...
+
+class SliceProfile:
+    mean: float
+    std: float
+    energy: float
+
+class SpiralTorchVision:
+    def __init__(
+        self,
+        depth: int,
+        height: int,
+        width: int,
+        *,
+        alpha: float = ...,
+        window: Optional[str] = ...,
+        temporal: int = ...,
+    ) -> None: ...
+    @property
+    def volume(self) -> List[List[List[float]]]: ...
+    def reset(self) -> None: ...
+    def accumulate(self, volume: Sequence[Sequence[Sequence[float]]], weight: float = ...) -> None: ...
+    def accumulate_slices(self, slices: Sequence[Sequence[Sequence[float]]]) -> None: ...
+    def accumulate_sequence(
+        self,
+        frames: Iterable[Sequence[Sequence[Sequence[float]]]],
+        weights: Optional[Sequence[float]] = ...,
+    ) -> None: ...
+    def project(self, *, normalise: bool = ...) -> List[List[float]]: ...
+    def volume_energy(self) -> float: ...
+    def slice_profile(self) -> List[SliceProfile]: ...
+    def snapshot(self) -> Dict[str, object]: ...
+
+class CanvasTransformer:
+    def __init__(self, width: int, height: int, *, smoothing: float = ...) -> None: ...
+    def refresh(self, projection: Sequence[Sequence[float]]) -> List[List[float]]: ...
+    def accumulate_hypergrad(self, gradient: Sequence[Sequence[float]]) -> None: ...
+    def accumulate_realgrad(self, gradient: Sequence[Sequence[float]]) -> None: ...
+    def gradient_summary(self) -> Dict[str, Dict[str, float]]: ...
+    def emit_zspace_patch(self, vision: SpiralTorchVision, weight: float = ...) -> List[List[float]]: ...
+    def canvas(self) -> List[List[float]]: ...
+    def hypergrad(self) -> List[List[float]]: ...
+    def realgrad(self) -> List[List[float]]: ...
+
 def set_global_seed(seed: int) -> None: ...
 
 def golden_ratio() -> float: ...
@@ -301,10 +380,36 @@ class _NnDataLoaderIter(Iterable[Tuple[Tensor, Tensor]]):
     def __next__(self) -> Tuple[Tensor, Tensor]: ...
 
 
+class _ZSpaceCoherenceSequencer:
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        curvature: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def forward(self, x: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def dim(self) -> int: ...
+
+    def num_heads(self) -> int: ...
+
+    def curvature(self) -> float: ...
+
+    def maxwell_channels(self) -> int: ...
+
+    def topos(self) -> OpenCartesianTopos: ...
+
+
 class _NnModule(ModuleType):
     Dataset: type[_NnDataset]
     DataLoader: type[_NnDataLoader]
     DataLoaderIter: type[_NnDataLoaderIter]
+    ZSpaceCoherenceSequencer: type[_ZSpaceCoherenceSequencer]
 
     def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...
 
@@ -339,6 +444,25 @@ telemetry: ModuleType
 
 ecosystem: ModuleType
 
+class _ZSpaceModule(ModuleType):
+    ZMetrics: type[ZMetrics]
+    ZSpaceTrainer: type[ZSpaceTrainer]
+    step_many: staticmethod
+
+zspace: _ZSpaceModule
+
+class _VisionModule(ModuleType):
+    SpiralTorchVision: type[SpiralTorchVision]
+    TemporalResonanceBuffer: type[TemporalResonanceBuffer]
+    SliceProfile: type[SliceProfile]
+
+vision: _VisionModule
+
+class _CanvasModule(ModuleType):
+    CanvasTransformer: type[CanvasTransformer]
+
+canvas: _CanvasModule
+
 class QueryPlan:
     def __init__(self, query: str) -> None: ...
     @property
@@ -370,7 +494,7 @@ class Recommender:
     @property
     def factors(self) -> int: ...
 
-class DqnAgent:
+class stAgent:
     def __init__(self, state_dim: int, action_dim: int, discount: float, learning_rate: float) -> None: ...
     def select_action(self, state: int) -> int: ...
     def update(self, state: int, action: int, reward: float, next_state: int) -> None: ...
@@ -414,6 +538,9 @@ __all__ = [
     "ZSpaceBarycenter",
     "BarycenterIntermediate",
     "z_space_barycenter",
+    "ZMetrics",
+    "ZSpaceTrainer",
+    "step_many",
     "compat",
     "capture",
     "share",
@@ -427,6 +554,9 @@ __all__ = [
     "rec",
     "telemetry",
     "ecosystem",
+    "zspace",
+    "vision",
+    "canvas",
     "compat",
     "set_global_seed",
     "golden_ratio",
@@ -441,9 +571,13 @@ __all__ = [
     "QueryPlan",
     "RecEpochReport",
     "Recommender",
-    "DqnAgent",
+    "stAgent",
     "PpoAgent",
     "SacAgent",
+    "TemporalResonanceBuffer",
+    "SpiralTorchVision",
+    "SliceProfile",
+    "CanvasTransformer",
     "DashboardMetric",
     "DashboardEvent",
     "DashboardFrame",
