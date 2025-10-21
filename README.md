@@ -53,6 +53,7 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 
 
 <p align="center">
+  [![PyPI version](https://img.shields.io/pypi/v/spiraltorch.svg)](https://pypi.org/project/spiraltorch/)
   <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
   <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
   <img src="https://img.shields.io/badge/MPS-ready-brightgreen.svg" alt="MPS ready">
@@ -80,22 +81,19 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 _Last updated: 2025-10-20 07:12 UTC_
 
 **Workspace summary**
-- Total files: **1518**
-- Total code LOC: **434,984**
-- Rust files: **1151** (Rust code LOC: **388,143**)
 
 ```text
 ===============================================================================
  Language            Files        Lines         Code     Comments       Blanks
 ===============================================================================
- BASH                    5          270          260            5            5
- C++                     5          830          700           15          115
- JSON                    7          233          233            0            0
- Python                 66         6957         5720          239          998
- SVG                    15          300          300            0            0
- Plain Text              5         3305            0         2720          585
- TOML                  121         2945         2485          103          357
- TypeScript             25        21370        18745          875         1750
+ BASH                    1           54           52            1            1
+ C++                     1          166          140            3           23
+ JSON                    3          189          189            0            0
+ Python                 33         3414         2811           62          541
+ SVG                     3           60           60            0            0
+ Plain Text              1          661            0          544          117
+ TOML                   31          753          647           18           88
+ TypeScript              5         4274         3749          175          350
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
  Jupyter Notebooks       2            0            0            0            0
@@ -103,22 +101,22 @@ _Last updated: 2025-10-20 07:12 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown              113        15559            0        12603         2956
- |- BASH                15          464          336           65           63
+ Markdown               38         4237            0         3396          841
+ |- BASH                 7           82           65            9            8
  |- Dockerfile           1            6            6            0            0
- |- HTML                 5           90           90            0            0
- |- JavaScript           5          130          115            5           10
- |- JSON                 5           55           55            0            0
- |- Python              18         2645         2233           65          347
- |- Rust                 8         2779         2411           72          296
+ |- HTML                 1           18           18            0            0
+ |- JavaScript           1           26           23            1            2
+ |- JSON                 1           11           11            0            0
+ |- Python               6          588          503           13           72
+ |- Rust                 3          661          576           15           70
  |- YAML                 2           62           62            0            0
- (Total)                          21790         5308        12810         3672
+ (Total)                           5691         1264         3434          993
 -------------------------------------------------------------------------------
- Rust                 1151       383143       340002         6924        36217
- |- Markdown           746        17028            0        16614          414
- (Total)                         400171       340002        23538        36631
+ Rust                  290        96782        86160         1506         9116
+ |- Markdown           177         4098            0         4004           94
+ (Total)                         100880        86160         5510         9210
 ===============================================================================
- Total                1518       434984       368510        23484        42990
+ Total                 411       110662        93873         5705        11084
 ===============================================================================
 
 ```
@@ -135,171 +133,98 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
+# SpiralTorch (Python bindings) — v0.1.3
+
+A **thin Python bridge** to SpiralTorch’s Rust-first Z-space learning stack.  
+The wheel exposes the same Z-space tensors, hypergrad primitives, and planner helpers used by the Rust API—no heavy shims.
+
 ## Install
-
-### From PyPI (recommended)
-
-> Requires Python ≥ 3.8
-
 ```bash
-# fresh venv (recommended)
-python3 -m venv .venv && source .venv/bin/activate
-python -m pip install -U pip
-
-# install Spiraltorch
-pip install spiraltorch==0.1.1
+pip install -U pip
+pip install spiraltorch==0.1.2
 ```
+> GPU backends (WGPU/MPS/CUDA/HIP) can be selected when building from source. For prebuilt wheels on PyPI, CPU/MPS/WGPU usage depends on your platform.
 
-#### Quick smoke test
+## Quickstart (works on 0.1.2)
 
-```bash
-python - <<'PY'
-import spiraltorch as st, importlib.metadata as im
-print("spiraltorch:", im.version("spiraltorch"))
-print("phi =", st.golden_ratio(), "theta =", st.golden_angle())
-print("extras ok:", all(hasattr(st, n) for n in [
-    "set_global_seed","fibonacci_pacing","pack_nacci_chunks",
-    "pack_tribonacci_chunks","pack_tetranacci_chunks","generate_plan_batch_ex",
-]))
-PY
-```
-
----
-
-## Build from source
-
-You’ll need Rust and `maturin`.
-
-```bash
-# 1) install maturin
-python -m pip install -U maturin
-
-# 2) build a wheel (pick one backend; macOS can use wgpu or mps)
-maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
-
-# 3) install the built wheel
-pip install ./target/wheels/spiraltorch-*.whl
-```
-
-> For Metal via Apple’s MPS, you can also use `--features mps` instead of `wgpu`.
-
----
-
-## Usage
-
-Top-level convenience functions are exported (extras). Submodules like `spiraltorch.nn` are currently placeholders for future public APIs.
-
+### 1) Extras utilities
 ```python
 import spiraltorch as st
 
-# extras
-print(st.golden_ratio())   # 1.6180...
-print(st.golden_angle())   # 2.39996...
-
-# pacing utilities
-print(st.fibonacci_pacing(12))
-print(st.pack_tribonacci_chunks(20))
-
-# global seed for batch helpers / future generators
+print("phi =", st.golden_ratio())      # 1.618...
+print("theta =", st.golden_angle())    # ~2.399...
 st.set_global_seed(42)
 
-# (wire-up pending) batch plan API—connect to your existing generate_plan()
-# st.generate_plan_batch_ex(
-#     n=3, total_steps=256,
-#     base_radius=1.2, radial_growth=0.01,
-#     base_height=0.5, meso_gain=0.8, micro_gain=0.2,
-#     seed=None
-# )
+# pacing helpers
+print(st.fibonacci_pacing(12))
+print(st.pack_tribonacci_chunks(20))
 ```
 
-Submodules import (placeholders for now):
-
+### 2) Tensor (Rust-backed, Python-accessible)
 ```python
-import spiraltorch.nn, spiraltorch.frac, spiraltorch.linalg
+from spiraltorch import Tensor
+
+# Create a 2×4 tensor from a flat list
+x = Tensor(2, 4, [0.1, 0.7, -0.2, 0.4, 0.9, 0.5, 0.6, 0.0])
+print("shape:", x.shape())
+print("as list:", x.tolist())
 ```
 
----
-
-## Troubleshooting
-
-- **`No matching distribution found`**  
-  Your platform may not have a prebuilt wheel yet. Build from source (see above).
-
-- **Backend errors**  
-  Set `WGPU_BACKEND` explicitly (`metal` on macOS, `vulkan` on Linux, `dx12` on Windows).
-
----
-
-## Versioning
-
-- **0.1.x**: PyO3 **abi3** single-binary packaging; stable `extras` surface.  
-- Future minor releases will gradually expose public APIs under `spiraltorch.*` (e.g., `nn`, `frac`).
-
-### 2) Build from source (Rust)
+## Build from source (optional)
+If you need a custom backend or feature flags:
 
 ```bash
 git clone https://github.com/RyoSpiralArchitect/SpiralTorch.git
 cd SpiralTorch
 ```
-**CPU (default; no GPU deps)**
-```bash
-cargo build -p st-core --release
-```
 
-**WGPU (WebGPU; Windows/Linux/macOS)**
-```bash
-cargo build -p st-core --features wgpu --release
-```
-
-**MPS (macOS GPU)**
-```bash
-cargo build -p st-core --features mps --release
-```
-
-**CUDA (optional; needs NVRTC/Toolkit)**
-```bash
-cargo build -p st-core --features cuda --release
-```
-
-**HIP / ROCm (optional)**
-```bash
-export HIPCC=/opt/rocm/bin/hipcc
-export ROCM_PATH=/opt/rocm
-cargo build -p st-core --features hip,st-backend-hip/hip-real --release
-```
-
-### 3) Python wheels (optional)
 ```bash
 pip install maturin==1.*
 
-# CPU + WebGPU (default)
+# From the repo root:
+# CPU
+maturin build -m bindings/st-py/Cargo.toml --release --features cpu
+
+# WGPU (WebGPU; macOS/Windows/Linux)
 maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
 
-# Metal (macOS GPU)
+# macOS Metal (MPS)
 maturin build -m bindings/st-py/Cargo.toml --release --features mps
 
-# CUDA (toolchain on PATH)
+# CUDA
 maturin build -m bindings/st-py/Cargo.toml --release --features cuda
 
-# HIP / ROCm (add hip-real for RCCL)
+# HIP / ROCm
 maturin build -m bindings/st-py/Cargo.toml --release --features "hip hip-real"
 ```
 
-### 4) Python tensors & hypergrads
-
-```python
-from spiraltorch import Tensor, Hypergrad, LanguageWaveEncoder
-
-encoder = LanguageWaveEncoder(-1.0, 0.6)
-target = encoder.encode_z_space("SpiralTorch dances in Z-space")
-
-weights = Tensor(*target.shape())
-tape = Hypergrad(-1.0, 0.05, *target.shape())
-tape.accumulate_pair(weights, target)
-tape.apply(weights)
-print("updated weights", weights.tolist())
+Install your local wheel:
+```bash
+pip install target/wheels/spiraltorch-0.1.2-*.whl
 ```
 
+## Troubleshooting
+- **No matching distribution found** → Build from source with `maturin` (see above).
+- **Backend selection issues** → Set `WGPU_BACKEND` (e.g., `metal` on macOS, `vulkan` on Linux, `dx12` on Windows).  
+- **Import errors after local build** → Ensure you installed the newly built wheel (`pip install target/wheels/*.whl`) and that multiple Python environments aren’t conflicting.
+
+## Versioning
+- **0.1.x** ships as a PyO3 **abi3** wheel (Python ≥3.8).  
+- Public Python surface focuses on **extras utilities** and **Tensor**; additional domains (e.g., `nn`, `frac`, etc.) will be rolled out incrementally in later 0.1.x releases.
+
+## What’s new in 0.1.2
+
+- 📦 **First stable PyPI wheel** (PyO3 **abi3**, Python ≥3.8) — `pip install spiraltorch==0.1.2`
+- 🧱 **Tensor binding** exposed as `spiraltorch.Tensor` with `shape()` / `tolist()` helpers
+- 🧮 **Extras utilities**: `golden_ratio`, `golden_angle`, `set_global_seed`, `fibonacci_pacing`, `pack_tribonacci_chunks`
+- ⚙️ **Backend-ready builds** from source: `--features wgpu | mps | cuda | "hip hip-real"`
+- 🧰 **Packaging cleanup**: slimmer wheel, consistent metadata, and README rendered on PyPI
+- 🧪 **Smoke-tested** on macOS arm64; groundwork laid for Linux/Windows wheels next
+
+> Upgrade:
+> ```bash
+> pip install -U spiraltorch==0.1.2
+> ```
 ---
 
 ## Planning the Ecosystem
@@ -1884,6 +1809,40 @@ execute_rank(&exec, &plan)?;
 - `Sequential` composition and `ModuleTrainer`
 - Fully Rust-native, Python-accessible via wheels
 
+## 🌀 New: ZSpaceCoherenceSequencer
+
+**NOT Attention. NOT Transformer.**
+
+Instead of Q·K^T softmax:
+- **Maxwell pulses** detect phase synchronization
+- **Desire Lagrangian** applies semantic bias (no RLHF needed)
+- **Hyperbolic geometry** naturally encodes hierarchy
+- **Fractional operators** replace dot products
+
+```python
+from spiraltorch.nn import ZSpaceCoherenceSequencer
+
+model = ZSpaceCoherenceSequencer(
+    dim=768,
+    num_heads=12,
+    curvature=-1.0
+)
+
+out = model.forward(x)  # Coherence-weighted aggregation
+```
+
+[See example](examples/05_new_layers/zspace_coherence_demo.py)
+
+### Why Not Attention?
+
+| Aspect | Attention | ZSpaceCoherence |
+|--------|-----------|-----------------|
+| Token weighting | Q·K^T softmax | Maxwell pulses |
+| Geometry | Euclidean (dot product) | Hyperbolic (geodesic) |
+| Semantic bias | External (RLHF/DPO) | Intrinsic (Desire Lagrangian) |
+| Operators | Softmax | Fractional calculus |
+| Hierarchy | Implicit | Explicit (curvature) |
+
 **Features**
 - Dataset abstraction and serialization
 - Hypergrad integration for every parameter
@@ -1919,6 +1878,44 @@ let dataset = vec![
 let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
 println!("roundtable avg loss: {:.6}", stats.average_loss);
 ```
+
+## 🌀 New: ZSpaceCoherenceSequencer
+
+**NOT Attention. NOT Transformer.**
+
+Instead of Q·K^T softmax:
+- **Maxwell pulses** detect phase synchronization
+- **Desire Lagrangian** applies linguistic bias (no RLHF needed)
+- **Hyperbolic geometry** naturally encodes hierarchy
+- **Fractional operators** replace dot products
+
+```python
+from spiraltorch.nn import ZSpaceCoherenceSequencer
+
+model = ZSpaceCoherenceSequencer(
+    dim=768,
+    num_heads=12,
+    curvature=-1.0
+)
+
+out = model.forward(x)  # Coherence-weighted aggregation
+
+# Derive a linguistic contour descriptor for downstream vocalisation
+contour = model.emit_linguistic_contour(x)
+print(contour.prosody_index())
+```
+
+[See example](examples/05_new_layers/zspace_coherence_demo.py)
+
+### Why Not Attention?
+
+| Aspect | Attention | ZSpaceCoherence |
+|--------|-----------|-----------------|
+| Token weighting | Q·K^T softmax | Maxwell pulses |
+| Geometry | Euclidean (dot product) | Hyperbolic (geodesic) |
+| Linguistic bias | External (RLHF/DPO) | Intrinsic (Desire Lagrangian) |
+| Operators | Softmax | Fractional calculus |
+| Hierarchy | Implicit | Explicit (curvature) |
 
 ### Distributed roundtable consensus
 
