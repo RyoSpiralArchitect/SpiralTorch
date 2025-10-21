@@ -131,99 +131,355 @@ thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
 ---
+よし、ロング版いくよ！貼り替えやすいように **完全置き換え可能** な README テンプレを用意した。前に出した短縮版の流れ（Quick Links→3導線→Examples→Backend）をベースに、**アーキ概観 / フィーチャーフラグ / 開発環境 / テスト / リリース手順 / トラブルシュート / FAQ** を厚めにしたもの。必要なとこだけコピペでもOK。
 
-# SpiralTorch (Python bindings) — v0.1.3
+---
 
-A **thin Python bridge** to SpiralTorch’s Rust-first Z-space learning stack.  
-The wheel exposes the same Z-space tensors, hypergrad primitives, and planner helpers used by the Rust API—no heavy shims.
+> **Current release:** `spiraltorch==0.1.4` (abi3 wheel, Python ≥3.8)  
+> **Targets:** CPU (always), Metal via WGPU (macOS), Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
-## Install
+---
+
+## Install (pip)
+
 ```bash
-pip install -U pip
-pip install spiraltorch==0.1.2
+pip install -U spiraltorch==0.1.4
 ```
-> GPU backends (WGPU/MPS/CUDA/HIP) can be selected when building from source. For prebuilt wheels on PyPI, CPU/MPS/WGPU usage depends on your platform.
 
-## Quickstart (works on 0.1.2)
+- Wheels are **abi3**; you can use any CPython ≥ 3.8.
+- macOS/aarch64 wheel bundles the Rust extension; no system Python deps required.
 
-### 1) Extras utilities
+---
+
+## Build from source (cargo)
+
+**Prereqs**
+
+- Rust stable (`rustup`), Cargo
+- macOS: Xcode CLT / Linux: build-essentials
+- Optional GPU stacks: CUDA / ROCm / Vulkan as needed
+
+**Workspace build**
+
+```bash
+# Debug (fast iteration)
+cargo build --workspace
+
+# Release (optimised)
+cargo build --workspace --release
+
+# Run tests
+cargo test --workspace
+```
+
+**Per-crate**
+
+```bash
+cargo build -p st-core        # core math/runtime
+cargo build -p st-nn          # neural helpers
+cargo build -p st-vision      # vision kernels/pipelines
+```
+
+**Feature flags (typical)**
+- `cpu` — CPU fallback (on by default in many crates)
+- `wgpu` — Metal/Vulkan/DX12 backends via WGPU
+- `cuda` — CUDA kernels
+- `hip` — ROCm/HIP kernels
+
+---
+
+## Build Python wheel (maturin)
+
+```bash
+# CPU-only
+maturin build -m bindings/st-py/Cargo.toml --release \
+  --no-default-features --features cpu
+
+# Metal (macOS, via WGPU)
+maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
+
+# CUDA (NVIDIA)
+maturin build -m bindings/st-py/Cargo.toml --release --features cuda
+
+# HIP/ROCm (AMD, Linux)
+maturin build -m bindings/st-py/Cargo.toml --release --features hip
+
+# Install the wheel you just built
+pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
+```
+
+---
+
+## What’s New in 0.1.4
+
+- **Stable Python façade**  
+  Missing attributes defer to the Rust extension at runtime → 新しい Rust 側の公開が Python に即時反映。
+- **Planner & device utilities**  
+  `plan`, `plan_topk`, `RankPlan.*`, `describe_device`, `hip_probe`.
+- **Self-supervised helpers**  
+  `selfsup.info_nce(...)`, `selfsup.masked_mse(...)`.
+- **Z-space trainer kit**  
+  `ZSpaceTrainer`, `ZMetrics`, `step_many`（軽量・依存薄め）。
+- **Vision/Canvas micro-orchestrators**  
+  `SpiralTorchVision`, `TemporalResonanceBuffer`, `CanvasTransformer`.
+- **Lightweight NN data utils**  
+  `nn.Dataset` / `nn.DataLoader`.
+- **RL rename**  
+  旧 `DqnAgent` → **`stAgent`**。`PpoAgent`, `SacAgent` はそのまま。
+- **Interop bridges**  
+  `compat.torch/jax/tensorflow` で DLPack 経由のやり取り。
+
+---
+
+## Python Examples
+
+### 1) Core tensor & DLPack
+
 ```python
 import spiraltorch as st
 
-print("phi =", st.golden_ratio())      # 1.618...
-print("theta =", st.golden_angle())    # ~2.399...
-st.set_global_seed(42)
+x = st.Tensor(2, 3, [1,2,3,4,5,6])
+print("shape:", x.shape(), "rows:", x.rows, "cols:", x.cols)
 
-# pacing helpers
+cap = st.to_dlpack(x)
+x2 = st.from_dlpack(cap)
+print("tolist:", x2.tolist())
+```
+
+### 2) Planner & device
+
+```python
+import spiraltorch as st
+
+rp = st.plan_topk(rows=1024, cols=256, k=16, backend="wgpu", subgroup=True)
+print("kind:", rp.kind(), "tile:", rp.tile(), "wg:", rp.workgroup())
+
+print("device:", st.describe_device(backend="wgpu", cols=1024, tile_hint=16))
+print("hip:", st.hip_probe())  # if supported
+```
+
+### 3) Self-supervised
+
+```python
+import spiraltorch as st
+
+anchors   = [[0.1, 0.9], [0.8, 0.2]]
+positives = [[0.12, 0.88], [0.79, 0.21]]
+print("info_nce:", st.selfsup.info_nce(anchors, positives, temperature=0.1, normalize=True))
+
+pred = [[0.2, 0.8], [0.6, 0.4]]
+tgt  = [[0.0, 1.0], [1.0, 0.0]]
+mask = [[1], [0]]  # mask by column indices per row
+print("masked_mse:", st.selfsup.masked_mse(pred, tgt, mask))
+```
+
+### 4) Z-space trainer
+
+```python
+import spiraltorch as st
+
+trainer = st.ZSpaceTrainer(z_dim=4, alpha=0.35, lam_frac=0.1, lr=1e-2)
+samples = [
+    {"speed": 0.2, "mem": 0.1, "stab": 0.7, "gradient": [0.05, -0.02, 0.01, 0.0]},
+    {"speed": 0.3, "mem": 0.2, "stab": 0.6, "drs": 0.1},
+]
+print("z:", st.step_many(trainer, samples))
+```
+
+### 5) Vision × Canvas
+
+```python
+import spiraltorch as st
+
+vision = st.SpiralTorchVision(depth=4, height=3, width=3, alpha=0.2, window="hann", temporal=4)
+canvas = st.CanvasTransformer(width=3, height=3, smoothing=0.85)
+
+for t in range(3):
+    vol = [[[0.0+(t*0.1) for _ in range(3)] for _ in range(3)] for _ in range(4)]
+    vision.accumulate(vol)
+
+# If you packaged an apply helper under st.canvas:
+snap = st.canvas.apply_vision_update(vision, canvas, include_patch=True)
+print("canvas summary:", snap.summary)
+print("patch[0][:3]:", snap.patch[0][:3] if snap.patch else None)
+```
+
+### 6) NN data utilities
+
+```python
+import spiraltorch as st
+
+pairs = [
+    (st.Tensor(1,2,[1,0]), st.Tensor(1,2,[1,0])),
+    (st.Tensor(1,2,[0,1]), st.Tensor(1,2,[0,1])),
+]
+loader = st.nn.Dataset.from_pairs(pairs).loader().shuffle(123).batched(2).prefetch(2)
+for x, y in loader:
+    pass
+```
+
+### 7) Recommender & RL
+
+```python
+import spiraltorch as st
+
+rec = st.Recommender(users=8, items=12, factors=4, learning_rate=0.05, regularization=0.002)
+rec.train_epoch([(0,0,5.0),(0,1,3.0),(1,0,4.0)])
+print("top-k:", rec.recommend_top_k(0, k=3))
+
+# RL: use stAgent (DQN-like), PPO, SAC
+agent = st.stAgent(state_dim=4, action_dim=2, discount=0.99, learning_rate=1e-3)
+a = agent.select_action(0); agent.update(0, a, 1.0, 1)
+
+ppo = st.PpoAgent(state_dim=4, action_dim=2, learning_rate=3e-4, clip_range=0.2)
+sac = st.SacAgent(state_dim=4, action_dim=2, temperature=0.1)
+```
+
+### 8) Interop (PyTorch / JAX / TensorFlow)
+
+```python
+import spiraltorch as st, torch
+
+x = st.Tensor(1,3,[1.0, 2.0, 3.0])
+xt = st.compat.torch.to_torch(x, dtype=torch.float32, device="cpu")
+x_back = st.compat.torch.from_torch(xt)
+```
+
+### 9) Math & pacing helpers
+
+```python
+import spiraltorch as st
+st.set_global_seed(42)
+print(st.golden_ratio(), st.golden_angle())
 print(st.fibonacci_pacing(12))
 print(st.pack_tribonacci_chunks(20))
 ```
 
-### 2) Tensor (Rust-backed, Python-accessible)
-```python
-from spiraltorch import Tensor
+---
 
-# Create a 2×4 tensor from a flat list
-x = Tensor(2, 4, [0.1, 0.7, -0.2, 0.4, 0.9, 0.5, 0.6, 0.0])
-print("shape:", x.shape())
-print("as list:", x.tolist())
+## Backend Matrix
+
+> Replace feature names if your `Cargo.toml` differs (`cpu`, `wgpu`, `cuda`, `hip` are typical).
+
+| Backend | How to build (cargo) | Notes |
+|---|---|---|
+| **CPU** | `cargo build -p st-core --no-default-features --features cpu` | Portable, no GPU deps |
+| **Metal (macOS)** | `export WGPU_BACKEND=metal` then `cargo build -p st-core --features wgpu` | Apple GPUs via WGPU |
+| **CUDA (NVIDIA)** | `export CUDA_HOME=/usr/local/cuda` then `cargo build -p st-core --features cuda` | Ensure driver & toolkit |
+| **HIP/ROCm (AMD, Linux)** | `cargo build -p st-core --features hip` | Ensure ROCm installation |
+
+**Wheel builds** mirror these with `maturin build ... --features <backend>`.
+
+---
+
+## Architecture Overview
+
+```
+crates/
+  st-core      # tensors, planner, telemetry, math, runtime bridges
+  st-nn        # nn helpers, datasets/loader, training loops (Rust-side)
+  st-vision    # temporal/video, projections, render utils
+  st-rl        # minimal RL agents (DQN-like, PPO, SAC)
+  st-rec       # recommender primitives
+  st-text      # language wave encoders, text geometry
+  st-frac      # fractional calculus helpers
+  st-backend-hip / st-backend-wgpu  # GPU backends
+bindings/
+  st-py/       # PyO3 extension + Python façade (__init__.py, type stubs)
 ```
 
-## Build from source (optional)
-If you need a custom backend or feature flags:
+### Python façade design
+
+- **Deferred exposure:** `__getattr__` forwards unknown names to the Rust extension → no need to constantly sync `__init__.py`.  
+- **Namespaced mirrors:** `nn`, `selfsup`, `vision`, `canvas`, `compat.*` are *forwarding modules*; they resolve symbols from Rust on first access.  
+- **Renames for stability:** e.g., `DqnAgent` → **`stAgent`**; the façade preserves import stability while Rust internals evolve.
+
+---
+
+## Contributing & Dev Notes
+
+### Local dev loop
 
 ```bash
-git clone https://github.com/RyoSpiralArchitect/SpiralTorch.git
-cd SpiralTorch
+# 1) Keep your repo clean
+git pull --rebase
+
+# 2) Build fast and often
+cargo check --workspace
+cargo test  --workspace
+
+# 3) Python wheel (CPU)
+maturin develop -m bindings/st-py/Cargo.toml --no-default-features --features cpu
+
+# 4) Sanity in Python
+python - <<'PY'
+import spiraltorch as st
+print(st.__version__, hasattr(st, "Tensor"), hasattr(st, "stAgent"))
+PY
 ```
+
+### Coding guidelines
+
+- **Rust**
+  - Keep public APIs thin and **feature-gated** (group domain features under logical flags).
+  - Provide *facade functions* at crate boundary to avoid leaking complex types to PyO3.
+  - Long-running ops: wrap with `pyo3::allow_threads` to release the GIL.
+
+- **Python**
+  - For new Rust exports, prefer **top-level re-exports** + **namespaced mirrors** (e.g., `selfsup.*`).
+  - Update `spiraltorch.pyi` alongside Rust exports to document the surface.
+  - Avoid heavy dependencies; keep the package import-time light.
+
+### Tests
 
 ```bash
-pip install maturin==1.*
+# Rust tests
+cargo test --workspace
 
-# From the repo root:
-# CPU
-maturin build -m bindings/st-py/Cargo.toml --release --features cpu
-
-# WGPU (WebGPU; macOS/Windows/Linux)
-maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
-
-# macOS Metal (MPS)
-maturin build -m bindings/st-py/Cargo.toml --release --features mps
-
-# CUDA
-maturin build -m bindings/st-py/Cargo.toml --release --features cuda
-
-# HIP / ROCm
-maturin build -m bindings/st-py/Cargo.toml --release --features "hip hip-real"
+# Python smoke
+python - <<'PY'
+import spiraltorch as st
+x = st.Tensor(1,2,[1,0]); cap = st.to_dlpack(x); assert st.from_dlpack(cap).tolist()==[[1.0,0.0]]
+print("ok")
+PY
 ```
 
-Install your local wheel:
-```bash
-pip install target/wheels/spiraltorch-0.1.2-*.whl
-```
+### Release Checklist
 
-## Troubleshooting
-- **No matching distribution found** → Build from source with `maturin` (see above).
-- **Backend selection issues** → Set `WGPU_BACKEND` (e.g., `metal` on macOS, `vulkan` on Linux, `dx12` on Windows).  
-- **Import errors after local build** → Ensure you installed the newly built wheel (`pip install target/wheels/*.whl`) and that multiple Python environments aren’t conflicting.
+1. Bump versions in `bindings/st-py/pyproject.toml` (and crate manifests if needed)  
+2. `cargo check && cargo test --workspace`  
+3. `maturin build -m bindings/st-py/Cargo.toml --release [--features <backend>]`  
+4. **Upload**:  
+   ```bash
+   export TWINE_USERNAME="__token__"
+   export TWINE_PASSWORD="pypi-..."   # API token
+   python -m twine upload target/wheels/spiraltorch-*.whl
+   ```
+5. Verify on PyPI project page, tag the commit, push.
 
-## Versioning
-- **0.1.x** ships as a PyO3 **abi3** wheel (Python ≥3.8).  
-- Public Python surface focuses on **extras utilities** and **Tensor**; additional domains (e.g., `nn`, `frac`, etc.) will be rolled out incrementally in later 0.1.x releases.
+---
 
-## What’s new in 0.1.2
+## Troubleshooting & FAQ
 
-- 📦 **First stable PyPI wheel** (PyO3 **abi3**, Python ≥3.8) — `pip install spiraltorch==0.1.2`
-- 🧱 **Tensor binding** exposed as `spiraltorch.Tensor` with `shape()` / `tolist()` helpers
-- 🧮 **Extras utilities**: `golden_ratio`, `golden_angle`, `set_global_seed`, `fibonacci_pacing`, `pack_tribonacci_chunks`
-- ⚙️ **Backend-ready builds** from source: `--features wgpu | mps | cuda | "hip hip-real"`
-- 🧰 **Packaging cleanup**: slimmer wheel, consistent metadata, and README rendered on PyPI
-- 🧪 **Smoke-tested** on macOS arm64; groundwork laid for Linux/Windows wheels next
+**Q: `AttributeError: module 'rl' has no attribute 'DqnAgent'`**  
+A: Use **`st.stAgent`**. The DQN surface was renamed for stability; façade provides the alias.
 
-> Upgrade:
-> ```bash
-> pip install -U spiraltorch==0.1.2
-> ```
+**Q: CUDA/ROCm link errors**  
+A: Verify `CUDA_HOME`, driver/toolkit versions, or ROCm installation. On CI, add toolkit paths to `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH`.
+
+**Q: Wheel contains stale symbols after code changes**  
+A: `pip uninstall -y spiraltorch && pip cache purge` → reinstall the freshly built wheel with `--no-cache-dir`.
+
+**Q: How stable is the Python API?**  
+A: The type stubs (`spiraltorch.pyi`) reflect the **supported** surface. New Rust exports appear dynamically via forwarding; removals/renames adopt compatibility aliases where possible.
+
+---
+
+## License
+
+Copyright © SpiralReality.  
+See `LICENSE` for details.
+
 ---
 
 ## Planning the Ecosystem
