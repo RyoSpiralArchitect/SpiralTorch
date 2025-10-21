@@ -12,6 +12,8 @@
 
 use std::fmt;
 
+use nalgebra as na;
+
 /// Alias for a spatial three-vector.
 pub type Vec3 = [f64; 3];
 
@@ -33,6 +35,11 @@ pub enum StvError {
     /// The matrix `D D^⊤` became singular while evaluating β.
     #[error("matrix D·Dᵀ is singular (determinant ≈ 0)")]
     SingularDdT,
+    /// The whitening step yielded a non-positive eigenvalue for `(D Dᵀ)⁻¹`.
+    #[error(
+        "intersection requires positive definite D·Dᵀ (encountered eigenvalue {eigenvalue:.3e})"
+    )]
+    NonPositiveGamma { eigenvalue: f64 },
 }
 
 /// Causal classification of the kernel vector.
@@ -57,6 +64,96 @@ pub enum KernelNormalization {
     Spacelike { direction: Vec4, beta: f64 },
 }
 
+/// Branch selection for the intersection curve between the kernel hyperplane
+/// and the lightlike ellipsoid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntersectionBranch {
+    Positive,
+    Negative,
+}
+
+impl IntersectionBranch {
+    fn sign(self) -> f64 {
+        match self {
+            IntersectionBranch::Positive => 1.0,
+            IntersectionBranch::Negative => -1.0,
+        }
+    }
+}
+
+/// Elliptic intersection curve of the kernel hyperplane with the lightlike
+/// ellipsoid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct IntersectionEllipse {
+    rotation: Matrix3,
+    gamma_inv_sqrt: Matrix3,
+    q: Matrix3,
+    a1: f64,
+    a2: f64,
+}
+
+impl IntersectionEllipse {
+    /// Returns the semi-axes parameters `(a₁, a₂)` appearing in the parametric
+    /// description of the ellipse.
+    pub fn parameters(&self) -> (f64, f64) {
+        (self.a1, self.a2)
+    }
+
+    /// Evaluates the electric field on the intersection curve for the supplied
+    /// parameter `t ∈ [0, 2π)` and branch sign.
+    pub fn electric_field(&self, t: f64, branch: IntersectionBranch) -> Vec3 {
+        let cos_t = t.cos();
+        let sin_t = t.sin();
+        let z1 = self.a1 * cos_t;
+        let z2 = self.a2 * sin_t;
+        let mut inside =
+            1.0 - self.a1 * self.a1 * cos_t * cos_t - self.a2 * self.a2 * sin_t * sin_t;
+        if inside < 0.0 {
+            inside = inside.max(-DEFAULT_TOLERANCE);
+        }
+        let z3 = inside.max(0.0).sqrt() * branch.sign();
+        let z = [z1, z2, z3];
+        let y = self.q.mul_vec(&z);
+        let whitened = self.gamma_inv_sqrt.mul_vec(&y);
+        self.rotation.transpose().mul_vec(&whitened)
+    }
+}
+
+/// Possible shapes of the intersection between `𝒬_α` and `𝒠_β`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IntersectionCurve {
+    /// No real intersection exists or it is degenerate beyond the supported
+    /// model (e.g. hyperbolic).
+    None,
+    /// Elliptic intersection with parametric accessors.
+    Ellipse(IntersectionEllipse),
+}
+
+/// Minimal-norm solution for either the electric field or the vorticity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MinimalVectorSolution {
+    /// Squared magnitude of the extremal vector.
+    pub magnitude_squared: f64,
+    /// The extremal vector achieving the minimal norm.
+    pub vector: Vec3,
+}
+
+impl MinimalVectorSolution {
+    /// Returns the unit direction of the extremal vector.
+    pub fn direction(&self) -> Vec3 {
+        let norm = self.magnitude_squared.sqrt();
+        if norm <= 0.0 {
+            [0.0, 0.0, 0.0]
+        } else {
+            [
+                self.vector[0] / norm,
+                self.vector[1] / norm,
+                self.vector[2] / norm,
+            ]
+        }
+    }
+}
+
 /// Container for a 3×3 real matrix.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Matrix3 {
@@ -72,6 +169,32 @@ impl Matrix3 {
         Self {
             data: [[0.0; 3]; 3],
         }
+    }
+
+    pub const fn identity() -> Self {
+        Self {
+            data: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        }
+    }
+
+    pub const fn from_diagonal(diagonal: Vec3) -> Self {
+        Self {
+            data: [
+                [diagonal[0], 0.0, 0.0],
+                [0.0, diagonal[1], 0.0],
+                [0.0, 0.0, diagonal[2]],
+            ],
+        }
+    }
+
+    pub fn from_columns(columns: [Vec3; 3]) -> Self {
+        let mut data = [[0.0; 3]; 3];
+        for col in 0..3 {
+            for row in 0..3 {
+                data[row][col] = columns[col][row];
+            }
+        }
+        Self { data }
     }
 
     pub fn transpose(&self) -> Self {
@@ -139,6 +262,16 @@ impl Matrix3 {
         Self { data: out }
     }
 
+    pub fn sub(&self, rhs: &Self) -> Self {
+        let mut out = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                out[i][j] = self.data[i][j] - rhs.data[i][j];
+            }
+        }
+        Self { data: out }
+    }
+
     pub fn mul(&self, rhs: &Self) -> Self {
         let mut out = [[0.0; 3]; 3];
         for i in 0..3 {
@@ -161,8 +294,85 @@ impl Matrix3 {
         out
     }
 
+    pub fn symmetrize(&self) -> Self {
+        let mut out = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                out[i][j] = 0.5 * (self.data[i][j] + self.data[j][i]);
+            }
+        }
+        Self { data: out }
+    }
+
+    pub fn outer(a: &Vec3, b: &Vec3) -> Self {
+        let mut out = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                out[i][j] = a[i] * b[j];
+            }
+        }
+        Self { data: out }
+    }
+
+    pub fn column(&self, index: usize) -> Vec3 {
+        [
+            self.data[0][index],
+            self.data[1][index],
+            self.data[2][index],
+        ]
+    }
+
     pub fn as_array(&self) -> [[f64; 3]; 3] {
         self.data
+    }
+
+    pub fn to_na(&self) -> na::Matrix3<f64> {
+        na::Matrix3::from_row_slice(&[
+            self.data[0][0],
+            self.data[0][1],
+            self.data[0][2],
+            self.data[1][0],
+            self.data[1][1],
+            self.data[1][2],
+            self.data[2][0],
+            self.data[2][1],
+            self.data[2][2],
+        ])
+    }
+
+    pub fn from_na(matrix: na::Matrix3<f64>) -> Self {
+        let mut data = [[0.0; 3]; 3];
+        for row in 0..3 {
+            for col in 0..3 {
+                data[row][col] = matrix[(row, col)];
+            }
+        }
+        Self { data }
+    }
+
+    pub fn symmetric_eigendecomposition(&self) -> ([f64; 3], Matrix3) {
+        let eig = na::SymmetricEigen::new(self.to_na());
+        let mut pairs: Vec<(f64, Vec3)> = (0..3)
+            .map(|idx| {
+                (
+                    eig.eigenvalues[idx],
+                    [
+                        eig.eigenvectors[(0, idx)],
+                        eig.eigenvectors[(1, idx)],
+                        eig.eigenvectors[(2, idx)],
+                    ],
+                )
+            })
+            .collect();
+        pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+        let mut values = [0.0; 3];
+        let mut columns = [[0.0; 3]; 3];
+        for (idx, (value, column)) in pairs.into_iter().enumerate() {
+            values[idx] = value;
+            columns[idx] = column;
+        }
+        (values, Matrix3::from_columns(columns))
     }
 }
 
@@ -271,6 +481,12 @@ impl SpinoTensorKernel {
         self.a.add(&omega_matrix(&self.omega))
     }
 
+    /// Returns the matrix `D D^⊤`.
+    pub fn dd_t(&self) -> Matrix3 {
+        let d = self.d();
+        d.mul(&d.transpose())
+    }
+
     /// Determinant of `D`.
     pub fn det_d(&self) -> f64 {
         self.d().determinant()
@@ -313,6 +529,70 @@ impl SpinoTensorKernel {
         let inv = dd_t.adjugate().scale(1.0 / det_dd_t);
         let projected = inv.mul_vec(&self.e);
         Ok(dot(&self.e, &projected))
+    }
+
+    /// Returns a parametric description of `𝒬_α ∩ 𝒠_β` when it forms an
+    /// ellipse. Degenerate or hyperbolic cases yield `IntersectionCurve::None`.
+    pub fn intersection_curve(&self, tolerance: f64) -> Result<IntersectionCurve, StvError> {
+        let d = self.d();
+        let dd_t = self.dd_t();
+        let det_dd_t = dd_t.determinant();
+        if det_dd_t.abs() <= DEFAULT_TOLERANCE {
+            return Err(StvError::SingularDdT);
+        }
+        let inv_dd_t = match dd_t.inverse() {
+            Some(inv) => inv.symmetrize(),
+            None => return Err(StvError::SingularDdT),
+        };
+        let (gamma_vals, gamma_vecs) = inv_dd_t.symmetric_eigendecomposition();
+        for value in gamma_vals.iter() {
+            if *value <= tolerance {
+                return Err(StvError::NonPositiveGamma { eigenvalue: *value });
+            }
+        }
+        let gamma_inv_sqrt = Matrix3::from_diagonal([
+            1.0 / gamma_vals[0].sqrt(),
+            1.0 / gamma_vals[1].sqrt(),
+            1.0 / gamma_vals[2].sqrt(),
+        ]);
+        let rotation = gamma_vecs.transpose();
+        let adj_d = d.adjugate();
+        let b = adj_d.add(&adj_d.transpose()).scale(0.5);
+        let temp = rotation.mul(&b.mul(&rotation.transpose()));
+        let c_matrix = gamma_inv_sqrt.mul(&temp.mul(&gamma_inv_sqrt)).symmetrize();
+        let (c_vals, q_vectors) = c_matrix.symmetric_eigendecomposition();
+
+        let c1 = c_vals[0];
+        let c2 = c_vals[1];
+        let c3 = c_vals[2];
+        let den1 = c1 - c3;
+        let den2 = c2 - c3;
+        if den1.abs() <= tolerance || den2.abs() <= tolerance {
+            return Ok(IntersectionCurve::None);
+        }
+
+        let kappa = self.s0 * d.determinant();
+        let a1_sq = (kappa - c3) / den1;
+        let a2_sq = (kappa - c3) / den2;
+        if !a1_sq.is_finite() || !a2_sq.is_finite() {
+            return Ok(IntersectionCurve::None);
+        }
+        if a1_sq < -tolerance || a2_sq < -tolerance {
+            return Ok(IntersectionCurve::None);
+        }
+        let a1_sq = a1_sq.clamp(0.0, 1.0);
+        let a2_sq = a2_sq.clamp(0.0, 1.0);
+        if 1.0 - a1_sq < -tolerance || 1.0 - a2_sq < -tolerance {
+            return Ok(IntersectionCurve::None);
+        }
+
+        Ok(IntersectionCurve::Ellipse(IntersectionEllipse {
+            rotation,
+            gamma_inv_sqrt,
+            q: q_vectors,
+            a1: a1_sq.sqrt(),
+            a2: a2_sq.sqrt(),
+        }))
     }
 
     /// Computes the kernel direction `(1, -D⁻¹E)` if `D` is invertible.
@@ -361,6 +641,122 @@ impl SpinoTensorKernel {
             Ok(KernelNormalization::Spacelike { direction, beta })
         }
     }
+
+    /// Minimal-norm electric field satisfying the kernel constraint when it
+    /// exists.
+    pub fn minimal_electric_field(&self) -> Option<MinimalVectorSolution> {
+        let det_a = self.a.determinant();
+        let omega_a = self.a.mul_vec(&self.omega);
+        let numerator = self.s0 * (det_a + dot(&self.omega, &omega_a));
+        if !(numerator > 0.0) {
+            return None;
+        }
+        let k = self
+            .a
+            .adjugate()
+            .add(&Matrix3::outer(&self.omega, &self.omega))
+            .symmetrize();
+        let (values, vectors) = k.symmetric_eigendecomposition();
+        let mut index = 0;
+        let mut lambda_max = values[0];
+        for (i, value) in values.iter().enumerate() {
+            if *value > lambda_max {
+                lambda_max = *value;
+                index = i;
+            }
+        }
+        if lambda_max <= DEFAULT_TOLERANCE {
+            return None;
+        }
+        let magnitude_squared = numerator / lambda_max;
+        if !(magnitude_squared > 0.0) {
+            return None;
+        }
+        let direction = vectors.column(index);
+        let magnitude = magnitude_squared.sqrt();
+        let vector = [
+            direction[0] * magnitude,
+            direction[1] * magnitude,
+            direction[2] * magnitude,
+        ];
+        Some(MinimalVectorSolution {
+            magnitude_squared,
+            vector,
+        })
+    }
+
+    /// Minimal-norm vorticity satisfying the kernel constraint when it exists.
+    pub fn minimal_vorticity(&self) -> Option<MinimalVectorSolution> {
+        let adj_a = self.a.adjugate();
+        let mu = dot(&self.e, &adj_a.mul_vec(&self.e)) - self.s0 * self.a.determinant();
+        if mu.abs() <= DEFAULT_TOLERANCE {
+            return Some(MinimalVectorSolution {
+                magnitude_squared: 0.0,
+                vector: [0.0, 0.0, 0.0],
+            });
+        }
+        let k = self
+            .a
+            .scale(self.s0)
+            .sub(&Matrix3::outer(&self.e, &self.e))
+            .symmetrize();
+        let (values, vectors) = k.symmetric_eigendecomposition();
+        if mu > 0.0 {
+            let mut index = 0;
+            let mut lambda = values[0];
+            for (i, value) in values.iter().enumerate() {
+                if *value > lambda {
+                    lambda = *value;
+                    index = i;
+                }
+            }
+            if lambda <= DEFAULT_TOLERANCE {
+                return None;
+            }
+            let magnitude_squared = mu / lambda;
+            if !(magnitude_squared > 0.0) {
+                return None;
+            }
+            let direction = vectors.column(index);
+            let magnitude = magnitude_squared.sqrt();
+            let vector = [
+                direction[0] * magnitude,
+                direction[1] * magnitude,
+                direction[2] * magnitude,
+            ];
+            Some(MinimalVectorSolution {
+                magnitude_squared,
+                vector,
+            })
+        } else {
+            let mut index = 0;
+            let mut lambda = values[0];
+            for (i, value) in values.iter().enumerate() {
+                if *value < lambda {
+                    lambda = *value;
+                    index = i;
+                }
+            }
+            if lambda >= -DEFAULT_TOLERANCE {
+                return None;
+            }
+            let magnitude_squared = mu / lambda;
+            if !(magnitude_squared > 0.0) {
+                return None;
+            }
+            let direction = vectors.column(index);
+            let magnitude = magnitude_squared.sqrt();
+            let vector = [
+                direction[0] * magnitude,
+                direction[1] * magnitude,
+                direction[2] * magnitude,
+            ];
+            Some(MinimalVectorSolution {
+                magnitude_squared,
+                vector,
+            })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -398,6 +794,65 @@ mod tests {
 
         assert_abs_diff_eq!(kernel.alpha().unwrap(), 1.5, epsilon = 1e-9);
         assert_abs_diff_eq!(kernel.beta().unwrap(), 1.25, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn intersection_curve_matches_constraints() {
+        let kernel =
+            SpinoTensorKernel::new(2.1, diag([2.0, 1.0, 3.0]), [0.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+                .unwrap();
+
+        let curve = kernel.intersection_curve(1e-9).unwrap();
+        let ellipse = match curve {
+            IntersectionCurve::Ellipse(ellipse) => ellipse,
+            IntersectionCurve::None => panic!("expected ellipse intersection"),
+        };
+
+        let sample = ellipse.electric_field(0.3, IntersectionBranch::Positive);
+        let d = kernel.d();
+        let dd_t = kernel.dd_t();
+        let adj_d = d.adjugate();
+        let inv_dd_t = dd_t.inverse().unwrap();
+        let lhs = dot(&sample, &adj_d.mul_vec(&sample));
+        let rhs = kernel.s0() * kernel.det_d();
+        assert_abs_diff_eq!(lhs, rhs, epsilon = 1e-6);
+
+        let ellipsoid = dot(&sample, &inv_dd_t.mul_vec(&sample));
+        assert_abs_diff_eq!(ellipsoid, 1.0, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn minimal_electric_field_matches_design_recipe() {
+        let kernel =
+            SpinoTensorKernel::new(1.5, diag([2.0, 1.0, 3.0]), [0.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+                .unwrap();
+
+        let solution = kernel.minimal_electric_field().expect("solution exists");
+        assert_abs_diff_eq!(solution.magnitude_squared, 2.25, epsilon = 1e-9);
+        assert_abs_diff_eq!(solution.vector[0], 0.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(solution.vector[2], 0.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(solution.vector[1].abs(), 1.5, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn minimal_vorticity_matches_design_recipe() {
+        let kernel = SpinoTensorKernel::new(
+            1.5,
+            diag([2.0, 1.0, 3.0]),
+            [0.0, 2.0_f64.sqrt(), 0.0],
+            [0.0, 0.0, 0.0],
+        )
+        .unwrap();
+
+        let solution = kernel.minimal_vorticity().expect("solution exists");
+        assert_abs_diff_eq!(solution.magnitude_squared, 2.0 / 3.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(solution.vector[0], 0.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(solution.vector[1], 0.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(
+            solution.vector[2].abs(),
+            (2.0f64 / 3.0).sqrt(),
+            epsilon = 1e-9
+        );
     }
 
     #[test]
