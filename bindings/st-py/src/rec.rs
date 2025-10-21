@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
+use pyo3::types::{PyDict, PyModule};
 use pyo3::Bound;
+use std::borrow::Cow;
 
 #[cfg(feature = "rec")]
 use crate::tensor::{tensor_err_to_py, PyTensor};
@@ -20,6 +21,23 @@ fn rec_err_to_py(err: SpiralRecError) -> PyErr {
         SpiralRecError::OutOfBoundsRating { .. } | SpiralRecError::EmptyBatch => {
             PyValueError::new_err(err.to_string())
         }
+    }
+}
+
+#[cfg(feature = "rec")]
+fn canonicalize_query(input: &str) -> Cow<'_, str> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Cow::Owned(String::new());
+    }
+
+    let lowered = trimmed.to_ascii_lowercase();
+    if lowered.starts_with("select ") {
+        Cow::Borrowed(trimmed)
+    } else if lowered.starts_with("where ") {
+        Cow::Owned(format!("select * {}", trimmed))
+    } else {
+        Cow::Owned(format!("select * where {}", trimmed))
     }
 }
 
@@ -46,9 +64,10 @@ impl PyQueryPlan {
 impl PyQueryPlan {
     #[new]
     pub fn new(query: String) -> PyResult<Self> {
-        let plan = compile_query(&query)
+        let normalized = canonicalize_query(&query).into_owned();
+        let plan = compile_query(&normalized)
             .map_err(|err: KdslError| PyValueError::new_err(err.to_string()))?;
-        Ok(Self::from_query(query, plan))
+        Ok(Self::from_query(normalized, plan))
     }
 
     pub fn query(&self) -> &str {
@@ -237,6 +256,8 @@ impl PyRecommender {
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "rec")?;
     module.add("__doc__", "SpiralTorch recommendation toolkit")?;
+    module.add("__name__", "spiraltorch.rec")?;
+    module.add("__package__", "spiraltorch")?;
     module.add_class::<PyQueryPlan>()?;
     module.add_class::<PyRecEpochReport>()?;
     module.add_class::<PyRecommender>()?;
@@ -250,9 +271,15 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         vec!["QueryPlan", "RecEpochReport", "Recommender"],
     )?;
     parent.add_submodule(&module)?;
-    parent.add("QueryPlan", query_plan)?;
-    parent.add("RecEpochReport", rec_epoch_report)?;
-    parent.add("Recommender", recommender)?;
+    parent.add("QueryPlan", &query_plan)?;
+    parent.add("RecEpochReport", &rec_epoch_report)?;
+    parent.add("Recommender", &recommender)?;
+
+    let sys = py.import_bound("sys")?;
+    let modules_binding = sys.getattr("modules")?;
+    let modules = modules_binding.downcast::<PyDict>()?;
+    modules.set_item("spiraltorch.rec", &module)?;
+    modules.set_item("rec", &module)?;
     Ok(())
 }
 

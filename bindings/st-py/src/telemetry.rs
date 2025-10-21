@@ -43,7 +43,7 @@ fn seconds_to_timestamp(seconds: Option<f64>) -> SystemTime {
     }
 }
 
-#[pyclass(module = "spiraltorch.telemetry")]
+#[pyclass(module = "spiraltorch.telemetry", name = "DashboardMetric")]
 #[derive(Clone)]
 pub(crate) struct PyDashboardMetric {
     inner: DashboardMetric,
@@ -91,7 +91,7 @@ impl PyDashboardMetric {
     }
 }
 
-#[pyclass(module = "spiraltorch.telemetry")]
+#[pyclass(module = "spiraltorch.telemetry", name = "DashboardEvent")]
 #[derive(Clone)]
 pub(crate) struct PyDashboardEvent {
     inner: DashboardEvent,
@@ -124,7 +124,7 @@ impl PyDashboardEvent {
     }
 }
 
-#[pyclass(module = "spiraltorch.telemetry")]
+#[pyclass(module = "spiraltorch.telemetry", name = "DashboardFrame")]
 #[derive(Clone)]
 pub(crate) struct PyDashboardFrame {
     pub(crate) inner: DashboardFrame,
@@ -185,7 +185,7 @@ impl PyDashboardFrame {
     }
 }
 
-#[pyclass(module = "spiraltorch.telemetry", unsendable)]
+#[pyclass(module = "spiraltorch.telemetry", name = "DashboardRing", unsendable)]
 pub(crate) struct PyDashboardRing {
     inner: DashboardRing,
 }
@@ -225,7 +225,11 @@ impl PyDashboardRing {
     }
 }
 
-#[pyclass(module = "spiraltorch.telemetry", unsendable)]
+#[pyclass(
+    module = "spiraltorch.telemetry",
+    name = "DashboardRingIter",
+    unsendable
+)]
 pub(crate) struct PyDashboardRingIter {
     frames: Vec<DashboardFrame>,
     index: usize,
