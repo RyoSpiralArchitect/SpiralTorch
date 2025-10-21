@@ -14,7 +14,19 @@ use super::coherence_engine::{
     CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile,
     LinguisticChannelReport, LinguisticContour,
 };
-use crate::{Module, PureResult, Tensor};
+use crate::{
+    language::{ConceptHint, MaxwellDesireBridge, NarrativeHint, SemanticBridge},
+    Module, PureResult, Tensor,
+};
+use st_core::maxwell::MaxwellZPulse;
+#[cfg(feature = "psi")]
+use st_core::{
+    telemetry::{
+        hub::{self, SoftlogicZFeedback},
+        psi::{PsiEvent, PsiReading},
+    },
+    theory::maxwell::MaxwellPsiTelemetryBridge,
+};
 use st_tensor::{OpenCartesianTopos, TensorError};
 
 /// Z-space native sequence modeling via coherence and semiotic suturing.
@@ -71,6 +83,21 @@ impl ZSpaceCoherenceSequencer {
         self.coherence_engine.measure_phases(x)
     }
 
+    /// Projects an input tensor onto the Z-space manifold guarded by the topos.
+    pub fn project_to_zspace(&self, x: &Tensor) -> PureResult<Tensor> {
+        let mut projected = if self.curvature < 0.0 {
+            x.project_to_poincare(self.curvature)?
+        } else {
+            x.clone()
+        };
+
+        self.topos.saturate_slice(projected.data_mut());
+        self.topos
+            .guard_tensor("zspace_coherence_project_to_zspace", &projected)?;
+
+        Ok(projected)
+    }
+
     /// Performs coherence-weighted geometric aggregation.
     fn geometric_aggregate(&self, x: &Tensor, coherence_weights: &[f32]) -> PureResult<Tensor> {
         if coherence_weights.is_empty() {
@@ -86,14 +113,20 @@ impl ZSpaceCoherenceSequencer {
 
         let (rows, cols) = x.shape();
         let mut aggregated = Tensor::zeros(rows, cols)?;
-        let channel_width = (self.dim + coherence_weights.len() - 1) / coherence_weights.len();
+        let channel_width = (cols + coherence_weights.len() - 1) / coherence_weights.len();
         let normalization = coherence_weights.iter().copied().sum::<f32>().max(1e-6);
         let canonical_concept = self.canonical_domain_concept();
         let fractional_order = match canonical_concept {
             DomainConcept::Membrane => (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.85),
-            DomainConcept::GrainBoundary => (1.0 / (1.0 + self.curvature.abs() * 0.8)).clamp(0.15, 0.9),
-            DomainConcept::NeuronalPattern => (1.0 / (1.0 + self.curvature.abs() * 0.6)).clamp(0.2, 0.95),
-            DomainConcept::DropletCoalescence => (1.0 / (1.0 + self.curvature.abs() * 1.2)).clamp(0.05, 0.8),
+            DomainConcept::GrainBoundary => {
+                (1.0 / (1.0 + self.curvature.abs() * 0.8)).clamp(0.15, 0.9)
+            }
+            DomainConcept::NeuronalPattern => {
+                (1.0 / (1.0 + self.curvature.abs() * 0.6)).clamp(0.2, 0.95)
+            }
+            DomainConcept::DropletCoalescence => {
+                (1.0 / (1.0 + self.curvature.abs() * 1.2)).clamp(0.05, 0.8)
+            }
             DomainConcept::Custom(_) => (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.95),
         };
         let input = x.data();
@@ -141,10 +174,10 @@ impl ZSpaceCoherenceSequencer {
         Ok(aggregated)
     }
 
-    pub fn forward(&self, x: &Tensor) -> PureResult<Tensor> {
+    pub fn forward_with_coherence(&self, x: &Tensor) -> PureResult<(Tensor, Vec<f32>)> {
         let _ = self.topos.curvature();
         // Step 1: Project to Z-space
-        let z_space = x.clone(); // TODO: project_to_poincare()
+        let z_space = self.project_to_zspace(x)?;
 
         // Step 2: Measure Maxwell coherence
         let coherence = self.measure_coherence(&z_space)?;
@@ -153,7 +186,84 @@ impl ZSpaceCoherenceSequencer {
         let aggregated = self.geometric_aggregate(&z_space, &coherence)?;
 
         // Step 4: Output from Z-space (to Euclidean)
+        Ok((aggregated, coherence))
+    }
+
+    pub fn forward(&self, x: &Tensor) -> PureResult<Tensor> {
+        let (aggregated, _) = self.forward_with_coherence(x)?;
         Ok(aggregated)
+    }
+
+    /// Runs the sequencer while fusing semantic and narrative bridges so callers can
+    /// project coherence weights back into language space.
+    pub fn forward_with_language_bridges(
+        &self,
+        x: &Tensor,
+        semantics: &SemanticBridge,
+        maxwell_bridge: &MaxwellDesireBridge,
+    ) -> PureResult<(
+        Tensor,
+        Vec<f32>,
+        ConceptHint,
+        Option<NarrativeHint>,
+        MaxwellZPulse,
+    )> {
+        let (aggregated, coherence) = self.forward_with_coherence(x)?;
+        let semantic_distribution =
+            self.derive_semantic_distribution(&aggregated, &coherence, semantics);
+        let pulse = self.summarise_maxwell_pulse(&aggregated, &coherence);
+        let canonical_concept = self.canonical_domain_concept();
+        let channel = canonical_concept.label();
+
+        let (concept_hint, narrative) = if let Some((hint, narrative)) =
+            maxwell_bridge.emit(channel, &pulse)
+        {
+            let fused =
+                Self::fuse_distributions(&semantic_distribution, &hint.as_distribution(semantics));
+            (ConceptHint::Distribution(fused), narrative)
+        } else {
+            (ConceptHint::Distribution(semantic_distribution), None)
+        };
+
+        Ok((aggregated, coherence, concept_hint, narrative, pulse))
+    }
+
+    #[cfg(feature = "psi")]
+    /// Runs the sequencer, fuses language bridges, and publishes PSI telemetry
+    /// derived from the Maxwell pulse via the provided telemetry bridge.
+    pub fn forward_with_language_and_psi(
+        &self,
+        x: &Tensor,
+        semantics: &SemanticBridge,
+        maxwell_bridge: &MaxwellDesireBridge,
+        psi_bridge: &MaxwellPsiTelemetryBridge,
+        psi_step: u64,
+    ) -> PureResult<(
+        Tensor,
+        Vec<f32>,
+        ConceptHint,
+        Option<NarrativeHint>,
+        MaxwellZPulse,
+        Option<PsiReading>,
+        Vec<PsiEvent>,
+        SoftlogicZFeedback,
+    )> {
+        let (aggregated, coherence, concept_hint, narrative, pulse) =
+            self.forward_with_language_bridges(x, semantics, maxwell_bridge)?;
+        let feedback = psi_bridge.publish(&pulse, psi_step);
+        let psi_reading = hub::get_last_psi();
+        let psi_events = hub::get_last_psi_events();
+
+        Ok((
+            aggregated,
+            coherence,
+            concept_hint,
+            narrative,
+            pulse,
+            psi_reading,
+            psi_events,
+            feedback,
+        ))
     }
 
     /// Configures the execution backend for coherence measurement.
@@ -224,6 +334,147 @@ impl ZSpaceCoherenceSequencer {
             DomainConcept::Membrane
         }
     }
+
+    fn derive_semantic_distribution(
+        &self,
+        aggregated: &Tensor,
+        coherence: &[f32],
+        semantics: &SemanticBridge,
+    ) -> Vec<f32> {
+        let window = self.derive_semantic_window(aggregated, coherence, semantics.vocab_size());
+        if window.is_empty() {
+            let concepts = semantics.concept_count().max(1);
+            vec![1.0 / concepts as f32; concepts]
+        } else {
+            semantics.infer_from_window(&window, 1e-6)
+        }
+    }
+
+    fn derive_semantic_window(
+        &self,
+        aggregated: &Tensor,
+        coherence: &[f32],
+        tokens: usize,
+    ) -> Vec<(usize, f32)> {
+        if tokens == 0 || coherence.is_empty() {
+            return Vec::new();
+        }
+        let (rows, cols) = aggregated.shape();
+        if cols == 0 || rows == 0 {
+            return Vec::new();
+        }
+        let token_width = (cols + tokens - 1) / tokens;
+        let channel_width = (cols + coherence.len() - 1) / coherence.len().max(1);
+        let mut window = Vec::with_capacity(tokens);
+        let data = aggregated.data();
+        for token in 0..tokens {
+            let start = token * token_width;
+            if start >= cols {
+                break;
+            }
+            let end = ((token + 1) * token_width).min(cols);
+            if start >= end {
+                continue;
+            }
+            let mut energy = 0.0f32;
+            for row in 0..rows {
+                let offset = row * cols;
+                for value in &data[offset + start..offset + end] {
+                    energy += value.abs();
+                }
+            }
+            let samples = (end - start) * rows;
+            if samples == 0 {
+                continue;
+            }
+            energy /= samples as f32;
+            if energy <= 0.0 || !energy.is_finite() {
+                continue;
+            }
+            let center = (start + end - 1) / 2;
+            let channel = center / channel_width;
+            let coherence_weight = coherence
+                .get(channel)
+                .copied()
+                .unwrap_or(1.0 / coherence.len() as f32);
+            let weight = (energy * coherence_weight).max(0.0);
+            if weight > 0.0 {
+                window.push((token, weight));
+            }
+        }
+        let sum: f32 = window.iter().map(|(_, weight)| *weight).sum();
+        if sum > 0.0 {
+            for (_, weight) in &mut window {
+                *weight = (*weight / sum).max(1e-6);
+            }
+        }
+        window
+    }
+
+    fn summarise_maxwell_pulse(&self, aggregated: &Tensor, coherence: &[f32]) -> MaxwellZPulse {
+        let data = aggregated.data();
+        let total = data.len().max(1);
+        let total_f64 = total as f64;
+        let mean = data.iter().map(|v| *v as f64).sum::<f64>() / total_f64;
+        let variance = data
+            .iter()
+            .map(|v| {
+                let diff = *v as f64 - mean;
+                diff * diff
+            })
+            .sum::<f64>()
+            / total_f64.max(1.0);
+        let std_dev = variance.sqrt();
+        let standard_error = if total_f64 > 0.0 {
+            std_dev / total_f64.sqrt()
+        } else {
+            0.0
+        };
+        let z_score = if standard_error > 0.0 {
+            mean / standard_error
+        } else {
+            0.0
+        };
+        let third = (coherence.len() / 3).max(1);
+        let above: f32 = coherence.iter().take(third).copied().sum();
+        let here: f32 = coherence.iter().skip(third).take(third).copied().sum();
+        let beneath: f32 = coherence.iter().skip(third * 2).copied().sum();
+        let curvature_scale = self.curvature.abs().sqrt();
+        let mut z_bias = (above - beneath) * curvature_scale;
+        if !z_bias.is_finite() {
+            z_bias = 0.0;
+        }
+        MaxwellZPulse {
+            blocks: aggregated.shape().0 as u64,
+            mean,
+            standard_error,
+            z_score,
+            band_energy: (above, here, beneath),
+            z_bias,
+        }
+    }
+
+    fn fuse_distributions(lhs: &[f32], rhs: &[f32]) -> Vec<f32> {
+        let len = lhs.len().max(rhs.len()).max(1);
+        let mut fused = vec![0.0f32; len];
+        for (idx, slot) in fused.iter_mut().enumerate() {
+            let a = lhs.get(idx).copied().unwrap_or(1e-6);
+            let b = rhs.get(idx).copied().unwrap_or(1e-6);
+            *slot = a.max(0.0) + b.max(0.0);
+        }
+        let sum: f32 = fused.iter().sum();
+        if sum > 0.0 {
+            for value in &mut fused {
+                *value = (*value / sum).max(1e-6);
+            }
+        } else {
+            let fill = 1.0 / len as f32;
+            for value in &mut fused {
+                *value = fill;
+            }
+        }
+        fused
+    }
 }
 
 impl Module for ZSpaceCoherenceSequencer {
@@ -264,6 +515,7 @@ impl Module for ZSpaceCoherenceSequencer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language::{MaxwellDesireBridge, SemanticBridge, SparseKernel};
 
     #[test]
     fn sequencer_forward_preserves_shape() {
@@ -274,6 +526,49 @@ mod tests {
         let out = seq.forward(&x).unwrap();
 
         assert_eq!(out.shape(), x.shape());
+    }
+
+    #[test]
+    fn forward_with_coherence_matches_forward() {
+        let topos = OpenCartesianTopos::new(-0.5, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(192, 6, -0.5, topos).unwrap();
+
+        let mut ramp = vec![0.0f32; 192 * 3];
+        for (idx, value) in ramp.iter_mut().enumerate() {
+            *value = (idx as f32 % 17.0) / 17.0;
+        }
+        let x = Tensor::from_vec(3, 192, ramp).unwrap();
+
+        let (with_coherence, weights) = seq.forward_with_coherence(&x).unwrap();
+        let standalone = seq.forward(&x).unwrap();
+
+        assert_eq!(with_coherence.shape(), standalone.shape());
+        assert_eq!(with_coherence.data(), standalone.data());
+        assert_eq!(weights.len(), seq.maxwell_channels());
+        assert!(weights.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn projection_respects_poincare_ball_and_topos_guard() {
+        let topos = OpenCartesianTopos::new(-0.75, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(128, 8, -0.75, topos).unwrap();
+
+        let mut exaggerated = vec![0.0f32; 128];
+        for (idx, value) in exaggerated.iter_mut().enumerate() {
+            *value = (idx as f32 + 1.0) * 5.0;
+        }
+
+        let x = Tensor::from_vec(1, 128, exaggerated.clone()).unwrap();
+        let projected = seq.project_to_zspace(&x).unwrap();
+
+        let norm: f32 = projected.data().iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!(norm <= 1.0 + 1e-4);
+        assert!(projected.data().iter().all(|v| v.is_finite()));
+        assert!(projected.data()[0].abs() < exaggerated[0].abs());
+
+        seq.topos()
+            .guard_tensor("projection_respects_poincare_ball", &projected)
+            .unwrap();
     }
 
     #[test]
@@ -341,5 +636,127 @@ mod tests {
             assert_eq!(report.backend().label(), seq.backend().label());
             assert_eq!(report.descriptor(), Some("fluid-lilt"));
         }
+    }
+
+    #[test]
+    fn language_bridges_fuse_concepts_and_emit_narrative() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
+
+        let concept_kernel =
+            SparseKernel::from_dense(vec![vec![0.7, 0.3], vec![0.2, 0.8]], 1e-6).unwrap();
+        let semantics = SemanticBridge::from_dense(
+            vec![vec![0.6, 0.4], vec![0.3, 0.7]],
+            [(0usize, 0usize), (1, 1)],
+            1e-6,
+            concept_kernel,
+        )
+        .unwrap();
+        let mut bridge = MaxwellDesireBridge::new()
+            .with_smoothing(0.05)
+            .with_magnitude_floor(0.05)
+            .with_channel(
+                seq.canonical_domain_concept().label(),
+                vec![(0, 0.55), (1, 0.45)],
+            )
+            .unwrap();
+        bridge
+            .set_narrative_gain(seq.canonical_domain_concept().label(), 1.2)
+            .unwrap();
+
+        let mut data = vec![0.02f32; 128 * 2];
+        for (idx, value) in data.iter_mut().enumerate() {
+            *value += ((idx % 64) as f32) * 0.01;
+        }
+        let x = Tensor::from_vec(2, 128, data).unwrap();
+
+        let (_, coherence, concept_hint, narrative, pulse) = seq
+            .forward_with_language_bridges(&x, &semantics, &bridge)
+            .unwrap();
+
+        assert_eq!(coherence.len(), seq.maxwell_channels());
+        assert!(coherence
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
+        match concept_hint {
+            ConceptHint::Distribution(dist) => {
+                assert_eq!(dist.len(), semantics.concept_count());
+                assert!(dist.iter().all(|value| *value >= 0.0));
+                assert!(dist[1] > dist[0]);
+            }
+            ConceptHint::Window(window) => {
+                let dist = semantics.infer_from_window(&window, 1e-6);
+                assert_eq!(dist.len(), semantics.concept_count());
+                assert!(dist[1] > dist[0]);
+            }
+        }
+        if let Some(narrative) = narrative {
+            assert_eq!(narrative.channel(), seq.canonical_domain_concept().label());
+            assert!(narrative.intensity() > 0.0);
+        }
+        assert!(pulse.magnitude().is_finite());
+        assert!(pulse.band_energy.0 >= 0.0);
+        assert!(pulse.band_energy.1 >= 0.0);
+        assert!(pulse.band_energy.2 >= 0.0);
+    }
+
+    #[cfg(feature = "psi")]
+    #[test]
+    fn language_bridges_publish_psi_telemetry() {
+        use st_core::telemetry::{hub, psi::PsiComponent};
+        use st_core::theory::maxwell::MaxwellPsiTelemetryBridge;
+
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
+
+        let concept_kernel =
+            SparseKernel::from_dense(vec![vec![0.7, 0.3], vec![0.2, 0.8]], 1e-6).unwrap();
+        let semantics = SemanticBridge::from_dense(
+            vec![vec![0.6, 0.4], vec![0.3, 0.7]],
+            [(0usize, 0usize), (1, 1)],
+            1e-6,
+            concept_kernel,
+        )
+        .unwrap();
+        let mut bridge = MaxwellDesireBridge::new()
+            .with_smoothing(0.05)
+            .with_magnitude_floor(0.05)
+            .with_channel(
+                seq.canonical_domain_concept().label(),
+                vec![(0, 0.55), (1, 0.45)],
+            )
+            .unwrap();
+        bridge
+            .set_narrative_gain(seq.canonical_domain_concept().label(), 1.2)
+            .unwrap();
+
+        let psi_bridge = MaxwellPsiTelemetryBridge::new()
+            .with_psi_gain(1.25)
+            .with_loss_gain(0.5)
+            .with_band_threshold(0.0);
+
+        let mut data = vec![0.02f32; 128 * 2];
+        for (idx, value) in data.iter_mut().enumerate() {
+            *value += ((idx % 64) as f32) * 0.01;
+        }
+        let x = Tensor::from_vec(2, 128, data).unwrap();
+
+        let (_aggregated, coherence, _concept_hint, _narrative, pulse, reading, events, feedback) =
+            seq.forward_with_language_and_psi(&x, &semantics, &bridge, &psi_bridge, 64)
+                .unwrap();
+
+        assert_eq!(coherence.len(), seq.maxwell_channels());
+        let reading = reading.expect("psi reading should be available");
+        assert_eq!(reading.step, 64);
+        assert!(reading.total >= 0.0);
+        assert!(reading.breakdown.get(&PsiComponent::BAND_ENERGY).is_some());
+        assert!(events.is_empty());
+
+        let stored_reading = hub::get_last_psi().unwrap();
+        assert_eq!(stored_reading.step, reading.step);
+        let stored_feedback = hub::get_softlogic_z().unwrap();
+        assert!((stored_feedback.psi_total - feedback.psi_total).abs() <= 1e-6);
+        assert!(feedback.weighted_loss >= 0.0);
+        assert!(pulse.band_energy.0 >= 0.0);
     }
 }
