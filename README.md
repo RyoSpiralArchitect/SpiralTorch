@@ -1844,6 +1844,49 @@ let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
 println!("roundtable avg loss: {:.6}", stats.average_loss);
 ```
 
+## 🌀 New: ZSpaceCoherenceSequencer
+
+**NOT Attention. NOT Transformer.**
+
+Instead of Q·K^T softmax:
+- **Maxwell pulses** detect phase synchronization
+- **Desire Lagrangian** applies linguistic bias (no RLHF needed)
+- **Hyperbolic geometry** naturally encodes hierarchy
+- **Fractional operators** replace dot products
+
+```python
+from spiraltorch.nn import ZSpaceCoherenceSequencer
+
+model = ZSpaceCoherenceSequencer(
+    dim=768,
+    num_heads=12,
+    curvature=-1.0
+)
+
+out = model.forward(x)  # Coherence-weighted aggregation
+
+# Derive a linguistic contour descriptor for downstream vocalisation
+contour = model.emit_linguistic_contour(x)
+print(contour.prosody_index())
+
+# Inspect channel-level linguistic reports for bridging into external runtimes
+reports = model.describe_channels(x)
+for report in reports[:3]:
+    print(report.channel(), report.dominant_concept(), report.weight())
+```
+
+[See example](examples/05_new_layers/zspace_coherence_demo.py)
+
+### Why Not Attention?
+
+| Aspect | Attention | ZSpaceCoherence |
+|--------|-----------|-----------------|
+| Token weighting | Q·K^T softmax | Maxwell pulses |
+| Geometry | Euclidean (dot product) | Hyperbolic (geodesic) |
+| Linguistic bias | External (RLHF/DPO) | Intrinsic (Desire Lagrangian) |
+| Operators | Softmax | Fractional calculus |
+| Hierarchy | Implicit | Explicit (curvature) |
+
 ### Distributed roundtable consensus
 
 SpiralTorch's roundtable now runs with a Blackcat moderator sitting between
