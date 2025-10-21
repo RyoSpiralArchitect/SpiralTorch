@@ -71,6 +71,21 @@ impl ZSpaceCoherenceSequencer {
         self.coherence_engine.measure_phases(x)
     }
 
+    /// Projects an input tensor onto the Z-space manifold guarded by the topos.
+    pub fn project_to_zspace(&self, x: &Tensor) -> PureResult<Tensor> {
+        let mut projected = if self.curvature < 0.0 {
+            x.project_to_poincare(self.curvature)?
+        } else {
+            x.clone()
+        };
+
+        self.topos.saturate_slice(projected.data_mut());
+        self.topos
+            .guard_tensor("zspace_coherence_project_to_zspace", &projected)?;
+
+        Ok(projected)
+    }
+
     /// Performs coherence-weighted geometric aggregation.
     fn geometric_aggregate(&self, x: &Tensor, coherence_weights: &[f32]) -> PureResult<Tensor> {
         if coherence_weights.is_empty() {
@@ -91,9 +106,15 @@ impl ZSpaceCoherenceSequencer {
         let canonical_concept = self.canonical_domain_concept();
         let fractional_order = match canonical_concept {
             DomainConcept::Membrane => (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.85),
-            DomainConcept::GrainBoundary => (1.0 / (1.0 + self.curvature.abs() * 0.8)).clamp(0.15, 0.9),
-            DomainConcept::NeuronalPattern => (1.0 / (1.0 + self.curvature.abs() * 0.6)).clamp(0.2, 0.95),
-            DomainConcept::DropletCoalescence => (1.0 / (1.0 + self.curvature.abs() * 1.2)).clamp(0.05, 0.8),
+            DomainConcept::GrainBoundary => {
+                (1.0 / (1.0 + self.curvature.abs() * 0.8)).clamp(0.15, 0.9)
+            }
+            DomainConcept::NeuronalPattern => {
+                (1.0 / (1.0 + self.curvature.abs() * 0.6)).clamp(0.2, 0.95)
+            }
+            DomainConcept::DropletCoalescence => {
+                (1.0 / (1.0 + self.curvature.abs() * 1.2)).clamp(0.05, 0.8)
+            }
             DomainConcept::Custom(_) => (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.95),
         };
         let input = x.data();
@@ -144,7 +165,7 @@ impl ZSpaceCoherenceSequencer {
     pub fn forward(&self, x: &Tensor) -> PureResult<Tensor> {
         let _ = self.topos.curvature();
         // Step 1: Project to Z-space
-        let z_space = x.clone(); // TODO: project_to_poincare()
+        let z_space = self.project_to_zspace(x)?;
 
         // Step 2: Measure Maxwell coherence
         let coherence = self.measure_coherence(&z_space)?;
@@ -274,6 +295,29 @@ mod tests {
         let out = seq.forward(&x).unwrap();
 
         assert_eq!(out.shape(), x.shape());
+    }
+
+    #[test]
+    fn projection_respects_poincare_ball_and_topos_guard() {
+        let topos = OpenCartesianTopos::new(-0.75, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(128, 8, -0.75, topos).unwrap();
+
+        let mut exaggerated = vec![0.0f32; 128];
+        for (idx, value) in exaggerated.iter_mut().enumerate() {
+            *value = (idx as f32 + 1.0) * 5.0;
+        }
+
+        let x = Tensor::from_vec(1, 128, exaggerated.clone()).unwrap();
+        let projected = seq.project_to_zspace(&x).unwrap();
+
+        let norm: f32 = projected.data().iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!(norm <= 1.0 + 1e-4);
+        assert!(projected.data().iter().all(|v| v.is_finite()));
+        assert!(projected.data()[0].abs() < exaggerated[0].abs());
+
+        seq.topos()
+            .guard_tensor("projection_respects_poincare_ball", &projected)
+            .unwrap();
     }
 
     #[test]
