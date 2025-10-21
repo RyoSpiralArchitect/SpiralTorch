@@ -158,6 +158,10 @@ pip install -U spiraltorch==0.1.6
 - macOS: Xcode CLT / Linux: build-essentials
 - Optional GPU stacks: CUDA / ROCm / Vulkan as needed
 
+## Julia & Go integration (draft)
+
+- Prototype workflows for future Julia/Go bindings live in [docs/ops/julia_go_development.md](docs/ops/julia_go_development.md). Follow the guide for setup, lint/test commands, and release checklists.
+
 **Workspace build**
 
 ```bash
