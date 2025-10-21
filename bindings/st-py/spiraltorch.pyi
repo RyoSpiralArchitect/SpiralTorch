@@ -380,10 +380,36 @@ class _NnDataLoaderIter(Iterable[Tuple[Tensor, Tensor]]):
     def __next__(self) -> Tuple[Tensor, Tensor]: ...
 
 
+class _ZSpaceCoherenceSequencer:
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        curvature: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def forward(self, x: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def dim(self) -> int: ...
+
+    def num_heads(self) -> int: ...
+
+    def curvature(self) -> float: ...
+
+    def maxwell_channels(self) -> int: ...
+
+    def topos(self) -> OpenCartesianTopos: ...
+
+
 class _NnModule(ModuleType):
     Dataset: type[_NnDataset]
     DataLoader: type[_NnDataLoader]
     DataLoaderIter: type[_NnDataLoaderIter]
+    ZSpaceCoherenceSequencer: type[_ZSpaceCoherenceSequencer]
 
     def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...
 
