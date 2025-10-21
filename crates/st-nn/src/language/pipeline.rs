@@ -1988,7 +1988,7 @@ mod language_pipeline {
         use crate::schedule::{BandEnergy, RoundtableConfig, RoundtableSchedule};
         use st_core::backend::device_caps::DeviceCaps;
         use st_core::config::self_rewrite::SelfRewriteCfg;
-        use st_core::ecosystem::{CloudConnector, DistributionSummary, EcosystemRegistry};
+        use st_core::ecosystem::{CloudConnector, EcosystemRegistry};
         use st_core::telemetry::hub::{self, DesirePhaseTelemetry};
         use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
         use st_tensor::LanguageWaveEncoder;
@@ -2113,12 +2113,15 @@ mod language_pipeline {
             let planner = RankPlanner::new(DeviceCaps::wgpu(32, true, 256));
             let config = RoundtableConfig::default();
             let schedule = RoundtableSchedule::new(&planner, 8, 16, config);
-            let distribution = DistributionSummary {
+            use crate::roundtable::{DistConfig, DistMode};
+            use std::time::Duration;
+
+            let distribution = DistConfig {
                 node_id: "node-cloud".into(),
-                mode: "periodic_meta".into(),
-                summary_window: 4,
-                push_interval_ms: 250,
+                mode: DistMode::PeriodicMeta,
+                push_interval: Duration::from_millis(250),
                 meta_endpoints: vec!["tcp://meta:5005".into()],
+                summary_window: 4,
                 cloud_targets: vec![
                     CloudConnector::AzureEventHub {
                         namespace: "spiral-meta".into(),
@@ -2138,7 +2141,8 @@ mod language_pipeline {
                     },
                 ],
             };
-            pipeline.record_roundtable(8, 16, config, &schedule, false, Some(distribution));
+            let distribution = RoundtableNode::new(distribution);
+            pipeline.record_roundtable(8, 16, config, &schedule, false, Some(&distribution));
 
             let report = registry.drain();
             let connector = report
