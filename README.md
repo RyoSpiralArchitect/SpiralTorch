@@ -132,8 +132,8 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
-> **Current release:** `spiraltorch==0.1.4` (abi3 wheel, Python ≥3.8)  
-> **Targets:** CPU (always), Metal via WGPU (macOS), Vulkan/DX (WGPU), CUDA, HIP/ROCm
+**Current release:** `spiraltorch==0.1.4` (abi3 wheel, Python ≥3.8)  
+**Targets:** CPU (always), Metal via WGPU (macOS), Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
 
