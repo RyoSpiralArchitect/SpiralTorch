@@ -33,6 +33,8 @@ use core::f32;
 use core::f32::consts::TAU;
 use std::collections::VecDeque;
 
+use crate::util::timewarp::{TemporalWarp, TemporalWarpError};
+
 #[cfg(feature = "kdsl")]
 use st_kdsl::auto::{synthesize_program, HeuristicHint};
 
@@ -573,6 +575,108 @@ impl ChronoTimeline {
         };
         Some(ChronoLoopSignal::new(summary, harmonics))
     }
+
+    fn axis_origin(&self) -> Option<f32> {
+        let first = self.frames.front()?;
+        Some(first.timestamp - first.dt)
+    }
+
+    /// Applies an affine warp to the timeline's timestamps.
+    pub fn warp_time_axis(&mut self, warp: TemporalWarp) -> Result<(), TemporalWarpError> {
+        if self.frames.is_empty() {
+            return Err(TemporalWarpError::Empty);
+        }
+        warp.validate()?;
+        let start = self.axis_origin().unwrap_or(0.0);
+        let mut previous = warp.apply(start);
+        if !previous.is_finite() {
+            return Err(TemporalWarpError::NonFinite);
+        }
+        let scale = warp.scale;
+        for frame in &mut self.frames {
+            let warped_timestamp = warp.apply(frame.timestamp);
+            if !warped_timestamp.is_finite() {
+                return Err(TemporalWarpError::NonFinite);
+            }
+            let new_dt = (warped_timestamp - previous).max(f32::EPSILON);
+            frame.dt = new_dt;
+            frame.timestamp = warped_timestamp;
+            frame.energy_decay /= scale;
+            previous = warped_timestamp;
+        }
+        self.elapsed = previous;
+        Ok(())
+    }
+
+    /// Multiplies the recorded timeline by a constant factor.
+    pub fn dilate(&mut self, factor: f32) -> Result<(), TemporalWarpError> {
+        self.warp_time_axis(TemporalWarp::dilation(factor))
+    }
+
+    /// Shifts all timestamps by the provided offset.
+    pub fn shift(&mut self, offset: f32) -> Result<(), TemporalWarpError> {
+        if self.frames.is_empty() {
+            return Err(TemporalWarpError::Empty);
+        }
+        if !offset.is_finite() {
+            return Err(TemporalWarpError::NonFinite);
+        }
+        for frame in &mut self.frames {
+            frame.timestamp += offset;
+        }
+        self.elapsed += offset;
+        Ok(())
+    }
+
+    /// Rescales the axis so the latest frame aligns with the requested progress.
+    pub fn align_to_progress(
+        &mut self,
+        progress: f32,
+        window: f32,
+    ) -> Result<(), TemporalWarpError> {
+        if self.frames.is_empty() {
+            return Err(TemporalWarpError::Empty);
+        }
+        if !progress.is_finite() || !window.is_finite() {
+            return Err(TemporalWarpError::NonFinite);
+        }
+        let window = window.max(f32::EPSILON);
+        let progress = progress.max(0.0);
+        let start = self.axis_origin().unwrap_or(0.0);
+        let last = self
+            .frames
+            .back()
+            .map(|frame| frame.timestamp)
+            .unwrap_or(start);
+        let span = (last - start).max(f32::EPSILON);
+        let target = (window * progress).max(f32::EPSILON);
+        let factor = target / span;
+        self.dilate(factor)?;
+        let new_start = self.axis_origin().unwrap_or(0.0);
+        if new_start.abs() > f32::EPSILON {
+            self.shift(-new_start)?;
+        }
+        Ok(())
+    }
+
+    /// Removes the most recent `steps` frames from the timeline.
+    pub fn rewind_steps(&mut self, steps: usize) -> usize {
+        if self.frames.is_empty() || steps == 0 {
+            return 0;
+        }
+        let remove = steps.min(self.frames.len());
+        for _ in 0..remove {
+            self.frames.pop_back();
+        }
+        if let Some(last) = self.frames.back() {
+            self.elapsed = last.timestamp;
+            self.step = last.step + 1;
+        } else {
+            self.elapsed = 0.0;
+            self.step = 0;
+        }
+        remove
+    }
 }
 
 impl Default for ChronoTimeline {
@@ -813,5 +917,83 @@ mod tests {
         let signal = timeline.loop_signal(4, 8).expect("loop signal");
         assert_eq!(signal.summary.frames, 4);
         assert!(signal.summary.mean_energy > 0.0);
+    }
+
+    #[test]
+    fn warp_and_shift_time_axis() {
+        let mut timeline = ChronoTimeline::with_capacity(4);
+        let metrics = ResonanceTemporalMetrics {
+            observed_curvature: 0.0,
+            total_energy: 1.0,
+            homotopy_energy: 0.2,
+            functor_energy: 0.2,
+            recursive_energy: 0.2,
+            projection_energy: 0.2,
+            infinity_energy: 0.2,
+        };
+        for _ in 0..3 {
+            timeline.record(1.0, metrics.clone());
+        }
+        let before = timeline.latest().unwrap().timestamp;
+        timeline.dilate(2.0).expect("dilate");
+        let after = timeline.latest().unwrap().timestamp;
+        assert!((after - before * 2.0).abs() < 1e-6);
+        timeline.shift(1.5).expect("shift");
+        let first = timeline.frames().next().unwrap();
+        assert!((first.timestamp - 3.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn align_to_progress_rescales_axis() {
+        let mut timeline = ChronoTimeline::with_capacity(8);
+        let metrics = ResonanceTemporalMetrics {
+            observed_curvature: 0.0,
+            total_energy: 1.0,
+            homotopy_energy: 0.2,
+            functor_energy: 0.2,
+            recursive_energy: 0.2,
+            projection_energy: 0.2,
+            infinity_energy: 0.2,
+        };
+        for _ in 0..4 {
+            timeline.record(0.5, metrics.clone());
+        }
+        timeline.align_to_progress(0.5, 20.0).expect("align");
+        let last = timeline.latest().unwrap();
+        assert!((last.timestamp - 10.0).abs() < 1e-5);
+        let start = timeline
+            .frames()
+            .next()
+            .map(|frame| frame.timestamp - frame.dt)
+            .unwrap();
+        assert!(start.abs() < 1e-6);
+    }
+
+    #[test]
+    fn rewind_steps_updates_elapsed() {
+        let mut timeline = ChronoTimeline::with_capacity(8);
+        let metrics = ResonanceTemporalMetrics {
+            observed_curvature: 0.0,
+            total_energy: 1.0,
+            homotopy_energy: 0.2,
+            functor_energy: 0.2,
+            recursive_energy: 0.2,
+            projection_energy: 0.2,
+            infinity_energy: 0.2,
+        };
+        for _ in 0..5 {
+            timeline.record(0.25, metrics.clone());
+        }
+        let removed = timeline.rewind_steps(2);
+        assert_eq!(removed, 2);
+        assert_eq!(timeline.len(), 3);
+        let latest = timeline.latest().unwrap();
+        assert_eq!(latest.step, 2);
+        assert!((timeline.elapsed - latest.timestamp).abs() < 1e-6);
+        let cleared = timeline.rewind_steps(10);
+        assert_eq!(cleared, 3);
+        assert!(timeline.is_empty());
+        assert_eq!(timeline.elapsed, 0.0);
+        assert_eq!(timeline.step, 0);
     }
 }
