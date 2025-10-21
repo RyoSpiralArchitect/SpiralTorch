@@ -24,7 +24,7 @@ fn rec_err_to_py(err: SpiralRecError) -> PyErr {
 }
 
 #[cfg(feature = "rec")]
-#[pyclass(module = "spiraltorch.rec")]
+#[pyclass(name = "QueryPlan", module = "spiraltorch.rec")]
 pub(crate) struct PyQueryPlan {
     source: String,
     inner: KdslQueryPlan,
@@ -90,7 +90,7 @@ impl PyQueryPlan {
 }
 
 #[cfg(feature = "rec")]
-#[pyclass(module = "spiraltorch.rec")]
+#[pyclass(name = "RecEpochReport", module = "spiraltorch.rec")]
 #[derive(Clone)]
 pub(crate) struct PyRecEpochReport {
     #[pyo3(get)]
@@ -124,7 +124,7 @@ impl PyRecEpochReport {
 }
 
 #[cfg(feature = "rec")]
-#[pyclass(module = "spiraltorch.rec")]
+#[pyclass(name = "Recommender", module = "spiraltorch.rec")]
 pub(crate) struct PyRecommender {
     inner: SpiralRecommender,
 }
@@ -240,14 +240,19 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyQueryPlan>()?;
     module.add_class::<PyRecEpochReport>()?;
     module.add_class::<PyRecommender>()?;
+
+    let query_plan = module.getattr("QueryPlan")?;
+    let rec_epoch_report = module.getattr("RecEpochReport")?;
+    let recommender = module.getattr("Recommender")?;
+
     module.add(
         "__all__",
         vec!["QueryPlan", "RecEpochReport", "Recommender"],
     )?;
     parent.add_submodule(&module)?;
-    parent.add("QueryPlan", module.getattr("QueryPlan")?)?;
-    parent.add("RecEpochReport", module.getattr("RecEpochReport")?)?;
-    parent.add("Recommender", module.getattr("Recommender")?)?;
+    parent.add("QueryPlan", query_plan)?;
+    parent.add("RecEpochReport", rec_epoch_report)?;
+    parent.add("Recommender", recommender)?;
     Ok(())
 }
 
