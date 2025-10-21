@@ -376,7 +376,7 @@ crates/
   st-core      # tensors, planner, telemetry, math, runtime bridges
   st-nn        # nn helpers, datasets/loader, training loops (Rust-side)
   st-vision    # temporal/video, projections, render utils
-  st-rl        # minimal RL agents (DQN-like, PPO, SAC)
+  st-spiral-rl # minimal RL agents (DQN-like, PPO, SAC)
   st-rec       # recommender primitives
   st-text      # language wave encoders, text geometry
   st-frac      # fractional calculus helpers
@@ -1710,12 +1710,12 @@ Z-space tensors that power the supervised stack. Policies stream returns into
 optional `AmegaHypergrad` tapes, meaning the Riemannian curvature remains under
 control even when reward schedules wobble. The Rust crate ships with a
 hypergrad-aware policy gradient learner and the Python bindings mirror it via
-`spiraltorch.rl.PolicyGradient` so notebooks can probe schedules without
+`spiraltorch.spiral_rl.PolicyGradient` so notebooks can probe schedules without
 departing from the Rust implementation.
 
 ```python
 from spiraltorch import Tensor
-from spiraltorch.rl import PolicyGradient
+from spiraltorch.spiral_rl import PolicyGradient
 
 policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
 policy.enable_hypergrad(curvature=-1.0, learning_rate=0.05)
@@ -1733,7 +1733,7 @@ observability parameters and smoothing ranges without leaving Python.
 
 ```python
 from spiraltorch import SpiralSession
-from spiraltorch.rl import PolicyGradient
+from spiraltorch.spiral_rl import PolicyGradient
 
 session = SpiralSession(device="wgpu", curvature=-1.0)
 policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
@@ -1758,7 +1758,7 @@ adapt its learning rate according to the coalgebra efficiency.
 
 ```rust
 use st_core::theory::observability::{ObservabilityConfig, SlotSymmetry};
-use st_rl::{GeometryFeedback, GeometryFeedbackConfig, SpiralPolicyGradient};
+use st_spiral_rl::{GeometryFeedback, GeometryFeedbackConfig, SpiralPolicyGradient};
 
 let mut policy = SpiralPolicyGradient::new(6, 3, 0.01, 0.99)?;
 let feedback = GeometryFeedback::new(GeometryFeedbackConfig {

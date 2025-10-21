@@ -324,7 +324,7 @@ impl SpiralPolicyGradient {
                 }
             }
             let signal = controller.process_resonance(resonance);
-            let envelope = controller.emit_loopback_envelope(&signal, Some("st-rl.policy"));
+            let envelope = controller.emit_loopback_envelope(&signal, Some("st-spiral-rl.policy"));
             hub::push_loopback_envelope(envelope);
             (signal.learning_rate_scale.max(f32::EPSILON), Some(signal))
         } else {
@@ -453,7 +453,7 @@ mod tests {
         let drained = hub::drain_loopback_envelopes(8);
         assert!(!drained.is_empty());
         let broadcast = drained.last().unwrap();
-        assert_eq!(broadcast.source.as_deref(), Some("st-rl.policy"));
+        assert_eq!(broadcast.source.as_deref(), Some("st-spiral-rl.policy"));
         assert!(broadcast.z_signal.is_some());
         Ok(())
     }

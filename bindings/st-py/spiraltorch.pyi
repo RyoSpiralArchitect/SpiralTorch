@@ -498,7 +498,7 @@ dataset: ModuleType
 
 linalg: ModuleType
 
-rl: ModuleType
+spiral_rl: ModuleType
 
 rec: ModuleType
 
@@ -696,7 +696,7 @@ __all__ = [
     "frac",
     "dataset",
     "linalg",
-    "rl",
+    "spiral_rl",
     "rec",
     "telemetry",
     "ecosystem",
