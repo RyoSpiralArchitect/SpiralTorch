@@ -132,7 +132,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
-**Current release:** `spiraltorch==0.1.4` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.1.6` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), Metal via WGPU (macOS), Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -140,7 +140,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.1.4
+pip install -U spiraltorch==0.1.6
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -207,7 +207,7 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 ---
 
-## What’s New in 0.1.4
+## What’s New in 0.1.6
 
 - **Stable Python façade**  
   Missing attributes defer to the Rust extension at runtime → 新しい Rust 側の公開が Python に即時反映。
@@ -216,15 +216,15 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 - **Self-supervised helpers**  
   `selfsup.info_nce(...)`, `selfsup.masked_mse(...)`.
 - **Z-space trainer kit**  
-  `ZSpaceTrainer`, `ZMetrics`, `step_many`（軽量・依存薄め）。
+  `ZSpaceTrainer`, `ZMetrics`, `step_many`
 - **Vision/Canvas micro-orchestrators**  
   `SpiralTorchVision`, `TemporalResonanceBuffer`, `CanvasTransformer`.
 - **Lightweight NN data utils**  
   `nn.Dataset` / `nn.DataLoader`.
-- **RL rename**  
-  旧 `DqnAgent` → **`stAgent`**。`PpoAgent`, `SacAgent` はそのまま。
+- **RL name**  
+  **`stAgent`**。`PpoAgent`, `SacAgent` 
 - **Interop bridges**  
-  `compat.torch/jax/tensorflow` で DLPack 経由のやり取り。
+  `compat.torch/jax/tensorflow` 
 
 ---
 
