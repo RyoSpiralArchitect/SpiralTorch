@@ -53,7 +53,6 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 
 
 <p align="center">
-  [![PyPI version](https://img.shields.io/pypi/v/spiraltorch.svg)](https://pypi.org/project/spiraltorch/)
   <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
   <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
   <img src="https://img.shields.io/badge/MPS-ready-brightgreen.svg" alt="MPS ready">
