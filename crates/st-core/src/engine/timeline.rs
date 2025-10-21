@@ -69,6 +69,22 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
+fn warp_progress(progress: f32, curvature: f32) -> f32 {
+    let progress = progress.clamp(0.0, 1.0);
+    if curvature.abs() < 1e-6 {
+        return progress;
+    }
+
+    let intensity = curvature.abs().clamp(0.0, 0.999);
+    if curvature > 0.0 {
+        let exponent = 1.0 + 3.0 * intensity;
+        1.0 - (1.0 - progress).powf(exponent)
+    } else {
+        let exponent = 1.0 + 3.0 * intensity;
+        progress.powf(exponent)
+    }
+}
+
 impl TimelineScheduler {
     /// Construct a scheduler using the provided gap tolerance.
     pub fn new(epsilon: f32) -> Self {
@@ -303,6 +319,10 @@ pub struct TimelineSignal {
     pub velocity: Option<f32>,
     /// Normalised training progress (0.0 start, 1.0 complete).
     pub progress: Option<f32>,
+    /// Normalised GPU memory pressure (0.0 idle, 1.0 at the limit).
+    pub memory_pressure: Option<f32>,
+    /// Ratio of realised throughput vs the desired reference (1.0 ideal).
+    pub throughput_ratio: Option<f32>,
 }
 
 impl TimelineSignal {
@@ -313,6 +333,8 @@ impl TimelineSignal {
             stability: None,
             velocity: None,
             progress: None,
+            memory_pressure: None,
+            throughput_ratio: None,
         }
     }
 }
@@ -326,6 +348,8 @@ pub struct ManualWarp {
     pub offset: f32,
     /// Blend ratio between the automatic warp (0.0) and manual override (1.0).
     pub blend: f32,
+    /// Desired curvature of the Z-space timeline (-1.0 compresses the future, +1.0 stretches it).
+    pub curvature: f32,
 }
 
 impl ManualWarp {
@@ -334,6 +358,16 @@ impl ManualWarp {
             tempo,
             offset,
             blend,
+            curvature: 0.0,
+        }
+    }
+
+    pub fn with_curvature(tempo: f32, offset: f32, blend: f32, curvature: f32) -> Self {
+        Self {
+            tempo,
+            offset,
+            blend,
+            curvature,
         }
     }
 }
@@ -344,6 +378,7 @@ impl Default for ManualWarp {
             tempo: 1.0,
             offset: 0.0,
             blend: 0.0,
+            curvature: 0.0,
         }
     }
 }
@@ -362,6 +397,12 @@ pub struct TimelineAutoConfig {
     pub min_scale: f32,
     pub max_scale: f32,
     pub max_shift: f32,
+    pub memory_sensitivity: f32,
+    pub throughput_sensitivity: f32,
+    pub curvature_velocity: f32,
+    pub curvature_progress: f32,
+    pub curvature_smoothing: f32,
+    pub max_curvature: f32,
 }
 
 impl Default for TimelineAutoConfig {
@@ -378,6 +419,12 @@ impl Default for TimelineAutoConfig {
             min_scale: 0.25,
             max_scale: 4.0,
             max_shift: 8.0,
+            memory_sensitivity: 0.6,
+            throughput_sensitivity: 0.5,
+            curvature_velocity: 0.35,
+            curvature_progress: 0.25,
+            curvature_smoothing: 0.25,
+            max_curvature: 0.85,
         }
     }
 }
@@ -389,10 +436,14 @@ pub struct TimelineWarpController {
     baseline_lr: Option<f32>,
     lr_state: f32,
     stability_state: f32,
+    memory_state: f32,
+    throughput_state: f32,
     desired_scale: f32,
     desired_offset: f32,
+    desired_curvature: f32,
     current_scale: f32,
     current_offset: f32,
+    current_curvature: f32,
     manual: ManualWarp,
     initialised: bool,
 }
@@ -404,10 +455,14 @@ impl TimelineWarpController {
             baseline_lr: None,
             lr_state: 1.0,
             stability_state: 1.0,
+            memory_state: 0.3,
+            throughput_state: 1.0,
             desired_scale: 1.0,
             desired_offset: 0.0,
+            desired_curvature: 0.0,
             current_scale: 1.0,
             current_offset: 0.0,
+            current_curvature: 0.0,
             manual: ManualWarp::default(),
             initialised: false,
         }
@@ -433,10 +488,14 @@ impl TimelineWarpController {
         self.baseline_lr = None;
         self.lr_state = 1.0;
         self.stability_state = 1.0;
+        self.memory_state = 0.3;
+        self.throughput_state = 1.0;
         self.desired_scale = 1.0;
         self.desired_offset = 0.0;
+        self.desired_curvature = 0.0;
         self.current_scale = 1.0;
         self.current_offset = 0.0;
+        self.current_curvature = 0.0;
         self.initialised = false;
     }
 
@@ -450,6 +509,18 @@ impl TimelineWarpController {
 
         let stability = signal.stability.unwrap_or(0.7).clamp(0.0, 1.0);
         self.stability_state += self.config.smoothing * (stability - self.stability_state);
+
+        let memory = signal
+            .memory_pressure
+            .unwrap_or(self.memory_state)
+            .clamp(0.0, 1.0);
+        self.memory_state += self.config.smoothing * (memory - self.memory_state);
+
+        let throughput = signal
+            .throughput_ratio
+            .unwrap_or(self.throughput_state)
+            .clamp(0.1, 10.0);
+        self.throughput_state += self.config.smoothing * (throughput - self.throughput_state);
     }
 
     fn compute_auto_scale(&self) -> f32 {
@@ -459,6 +530,16 @@ impl TimelineWarpController {
             1.0 + self.config.lr_sensitivity * (1.0 - self.lr_state)
         };
         scale *= 1.0 + self.config.stability_sensitivity * (1.0 - self.stability_state);
+
+        let memory_term = 1.0 + self.config.memory_sensitivity * (self.memory_state - 0.5);
+        let throughput_term = if self.throughput_state >= 1.0 {
+            1.0 / (1.0 + self.config.throughput_sensitivity * (self.throughput_state - 1.0))
+        } else {
+            1.0 + self.config.throughput_sensitivity * (1.0 - self.throughput_state)
+        };
+
+        scale *= memory_term.clamp(0.25, 2.5);
+        scale *= throughput_term.clamp(0.25, 2.5);
         scale.clamp(self.config.min_scale, self.config.max_scale)
     }
 
@@ -466,6 +547,10 @@ impl TimelineWarpController {
         let loss_ratio = signal.loss_ratio.unwrap_or(1.0).clamp(0.1, 10.0);
         let velocity = signal.velocity.unwrap_or(0.0).clamp(-1.0, 1.0);
         let progress = signal.progress.unwrap_or(0.5).clamp(0.0, 1.0);
+        let memory = signal
+            .memory_pressure
+            .unwrap_or(self.memory_state)
+            .clamp(0.0, 1.0);
 
         let mut offset = if loss_ratio >= 1.0 {
             -self.config.loss_drag * (loss_ratio - 1.0)
@@ -474,15 +559,44 @@ impl TimelineWarpController {
         };
 
         offset += self.config.velocity_push * velocity;
+        offset -= self.config.memory_sensitivity * (memory - 0.5);
 
         let mid_weight = 1.0 + self.config.progress_weight * (0.5 - (progress - 0.5).abs());
         offset *= mid_weight;
         offset.clamp(-self.config.max_shift, self.config.max_shift)
     }
 
+    fn compute_auto_curvature(&self, signal: &TimelineSignal) -> f32 {
+        let memory = signal
+            .memory_pressure
+            .unwrap_or(self.memory_state)
+            .clamp(0.0, 1.0);
+        let throughput = signal
+            .throughput_ratio
+            .unwrap_or(self.throughput_state)
+            .clamp(0.1, 10.0);
+        let velocity = signal.velocity.unwrap_or(0.0).clamp(-1.0, 1.0);
+        let progress = signal.progress.unwrap_or(0.5).clamp(0.0, 1.0);
+        let stability = signal
+            .stability
+            .unwrap_or(self.stability_state)
+            .clamp(0.0, 1.0);
+
+        let memory_term = (memory - 0.5) * self.config.memory_sensitivity;
+        let throughput_term = (1.0 - throughput).tanh() * self.config.throughput_sensitivity;
+        let velocity_term = velocity * self.config.curvature_velocity;
+        let progress_term = (progress - 0.5) * self.config.curvature_progress;
+        let stability_term = (0.5 - stability) * 0.5 * self.config.curvature_velocity;
+
+        let curvature =
+            memory_term + throughput_term + velocity_term + progress_term + stability_term;
+        curvature.clamp(-self.config.max_curvature, self.config.max_curvature)
+    }
+
     fn update_targets(&mut self, signal: &TimelineSignal) {
         let auto_scale = self.compute_auto_scale();
         let auto_offset = self.compute_auto_offset(signal);
+        let auto_curvature = self.compute_auto_curvature(signal);
         let manual_scale = self
             .manual
             .tempo
@@ -491,18 +605,26 @@ impl TimelineWarpController {
             .manual
             .offset
             .clamp(-self.config.max_shift, self.config.max_shift);
+        let manual_curvature = self
+            .manual
+            .curvature
+            .clamp(-self.config.max_curvature, self.config.max_curvature);
         let blend = self.manual.blend.clamp(0.0, 1.0);
 
         let blended_scale = lerp(auto_scale, manual_scale, blend);
         let blended_offset = lerp(auto_offset, manual_offset, blend);
+        let blended_curvature = lerp(auto_curvature, manual_curvature, blend);
 
         if !self.initialised {
             self.desired_scale = blended_scale;
             self.desired_offset = blended_offset;
+            self.desired_curvature = blended_curvature;
             self.initialised = true;
         } else {
             self.desired_scale += self.config.smoothing * (blended_scale - self.desired_scale);
             self.desired_offset += self.config.smoothing * (blended_offset - self.desired_offset);
+            self.desired_curvature +=
+                self.config.curvature_smoothing * (blended_curvature - self.desired_curvature);
         }
     }
 
@@ -520,6 +642,14 @@ impl TimelineWarpController {
         if translation.abs() > 1e-6 {
             scheduler.translate(translation)?;
             self.current_offset += translation;
+        }
+
+        let curvature_delta = self.desired_curvature - self.current_curvature;
+        if curvature_delta.abs() > 1e-4 {
+            let step = (self.current_curvature + curvature_delta)
+                .clamp(-self.config.max_curvature, self.config.max_curvature);
+            scheduler.remap_progress(|_, progress| warp_progress(progress, step))?;
+            self.current_curvature = step;
         }
 
         Ok(())
@@ -672,6 +802,8 @@ mod tests {
             stability: Some(1.0),
             velocity: Some(0.0),
             progress: Some(0.5),
+            memory_pressure: Some(0.2),
+            throughput_ratio: Some(1.0),
         };
         controller
             .apply(&mut scheduler, &baseline)
@@ -708,6 +840,8 @@ mod tests {
             stability: Some(1.0),
             velocity: Some(0.0),
             progress: Some(0.5),
+            memory_pressure: Some(0.2),
+            throughput_ratio: Some(1.0),
         };
         controller
             .apply(&mut scheduler, &baseline)
@@ -743,6 +877,8 @@ mod tests {
             stability: Some(1.0),
             velocity: Some(0.0),
             progress: Some(0.5),
+            memory_pressure: Some(0.2),
+            throughput_ratio: Some(1.0),
         };
         controller.apply(&mut scheduler, &signal).expect("manual");
 
@@ -750,6 +886,132 @@ mod tests {
         assert!((slots[0].start - 0.5).abs() < 1e-4);
         assert!((slots[0].duration() - 1.2).abs() < 1e-4);
         assert!((slots[1].start - 1.7).abs() < 1e-4);
+    }
+
+    #[test]
+    fn manual_curvature_bends_timeline() {
+        let mut scheduler = TimelineScheduler::new(0.0);
+        scheduler
+            .schedule_kernel("fft", 0, 0.0, 1.0)
+            .expect("first");
+        scheduler
+            .schedule_kernel("conv", 0, 1.0, 1.0)
+            .expect("second");
+
+        let mut config = TimelineAutoConfig::default();
+        config.smoothing = 1.0;
+        config.memory_sensitivity = 0.0;
+        config.throughput_sensitivity = 0.0;
+        let mut controller = TimelineWarpController::new(config);
+        controller.set_manual_control(ManualWarp::with_curvature(1.0, 0.0, 1.0, 0.7));
+
+        let signal = TimelineSignal {
+            learning_rate: 0.01,
+            loss_ratio: Some(1.0),
+            stability: Some(1.0),
+            velocity: Some(0.0),
+            progress: Some(0.5),
+            memory_pressure: Some(0.2),
+            throughput_ratio: Some(1.0),
+        };
+
+        controller.apply(&mut scheduler, &signal).expect("manual");
+
+        let slots = scheduler.stream(0).unwrap();
+        assert!(slots[0].duration() > 1.0);
+        assert!(slots[1].duration() < 1.0);
+    }
+
+    #[test]
+    fn auto_controller_relaxes_under_memory_pressure() {
+        let mut scheduler = TimelineScheduler::new(0.0);
+        scheduler
+            .schedule_kernel("fft", 0, 0.0, 1.0)
+            .expect("first");
+        scheduler
+            .schedule_kernel("conv", 0, 1.0, 1.0)
+            .expect("second");
+
+        let mut config = TimelineAutoConfig::default();
+        config.smoothing = 1.0;
+        config.throughput_sensitivity = 0.0;
+        let mut controller = TimelineWarpController::new(config);
+
+        let baseline = TimelineSignal {
+            learning_rate: 0.01,
+            loss_ratio: Some(1.0),
+            stability: Some(1.0),
+            velocity: Some(0.0),
+            progress: Some(0.5),
+            memory_pressure: Some(0.2),
+            throughput_ratio: Some(1.0),
+        };
+
+        controller
+            .apply(&mut scheduler, &baseline)
+            .expect("baseline");
+        let before = scheduler.makespan().unwrap();
+
+        let mut pressured = baseline;
+        pressured.memory_pressure = Some(0.95);
+        controller
+            .apply(&mut scheduler, &pressured)
+            .expect("pressure warp");
+
+        let after = scheduler.makespan().unwrap();
+        assert!(after > before);
+    }
+
+    #[test]
+    fn auto_controller_curves_progress_for_future_boost() {
+        let mut scheduler = TimelineScheduler::new(0.0);
+        scheduler
+            .schedule_kernel("fft", 0, 0.0, 1.0)
+            .expect("first");
+        scheduler
+            .schedule_kernel("conv", 0, 1.0, 1.0)
+            .expect("second");
+
+        let mut config = TimelineAutoConfig::default();
+        config.smoothing = 1.0;
+        config.memory_sensitivity = 0.0;
+        config.throughput_sensitivity = 0.0;
+        let mut controller = TimelineWarpController::new(config);
+
+        let mut signal = TimelineSignal {
+            learning_rate: 0.01,
+            loss_ratio: Some(1.0),
+            stability: Some(0.5),
+            velocity: Some(-0.8),
+            progress: Some(0.2),
+            memory_pressure: Some(0.2),
+            throughput_ratio: Some(0.6),
+        };
+
+        controller
+            .apply(&mut scheduler, &signal)
+            .expect("first warp");
+        let slots = scheduler.stream(0).unwrap();
+        assert!(slots[0].start < slots[1].start);
+        let delta = slots[1].start - slots[0].end;
+        assert!(delta < 1.0);
+        let first_duration = slots[0].duration();
+        let second_duration = slots[1].duration();
+
+        signal.velocity = Some(0.9);
+        signal.progress = Some(0.8);
+        signal.throughput_ratio = Some(1.5);
+        controller
+            .apply(&mut scheduler, &signal)
+            .expect("second warp");
+
+        let slots = scheduler.stream(0).unwrap();
+        let new_delta = slots[1].start - slots[0].end;
+        let new_first = slots[0].duration();
+        let new_second = slots[1].duration();
+        assert!(new_delta >= delta);
+        assert!(new_first < first_duration);
+        assert!(new_second > second_duration);
     }
 
     #[test]
