@@ -10,9 +10,7 @@
 //! - Hyperbolic geometry for hierarchical relationships
 //! - Fractional calculus for spectral operators
 
-use super::coherence_engine::{
-    CoherenceBackend, CoherenceEngine, DomainConcept, DomainSemanticProfile,
-};
+use super::coherence_engine::{CoherenceBackend, CoherenceEngine, DomainSemanticProfile};
 use crate::{Module, PureResult, Tensor};
 use st_tensor::{OpenCartesianTopos, TensorError};
 
@@ -172,6 +170,16 @@ impl ZSpaceCoherenceSequencer {
     pub fn backend(&self) -> &CoherenceBackend {
         self.coherence_engine.backend()
     }
+
+    /// Returns the number of Maxwell coherence channels tracked by this sequencer.
+    pub fn maxwell_channels(&self) -> usize {
+        self.coherence_engine.num_channels()
+    }
+
+    /// Provides access to the underlying Z-space topos.
+    pub fn topos(&self) -> &OpenCartesianTopos {
+        &self.topos
+    }
 }
 
 impl Module for ZSpaceCoherenceSequencer {
@@ -212,6 +220,7 @@ impl Module for ZSpaceCoherenceSequencer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::zspace_coherence::coherence_engine::DomainConcept;
 
     #[test]
     fn sequencer_forward_preserves_shape() {
