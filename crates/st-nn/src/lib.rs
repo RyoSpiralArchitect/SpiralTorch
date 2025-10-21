@@ -85,8 +85,8 @@ pub use st_core::runtime::blackcat::{
 };
 pub use trainer::{EpochStats, ModuleTrainer};
 pub use zspace_coherence::{
-    CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile, LinguisticContour,
-    ZSpaceCoherenceSequencer,
+    BackendCapabilities, CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile,
+    LinguisticChannelReport, LinguisticContour, ZSpaceCoherenceSequencer,
 };
 
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};

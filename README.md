@@ -1902,6 +1902,11 @@ out = model.forward(x)  # Coherence-weighted aggregation
 # Derive a linguistic contour descriptor for downstream vocalisation
 contour = model.emit_linguistic_contour(x)
 print(contour.prosody_index())
+
+# Inspect channel-level linguistic reports for bridging into external runtimes
+reports = model.describe_channels(x)
+for report in reports[:3]:
+    print(report.channel(), report.dominant_concept(), report.weight())
 ```
 
 [See example](examples/05_new_layers/zspace_coherence_demo.py)

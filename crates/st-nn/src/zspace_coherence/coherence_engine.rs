@@ -6,6 +6,7 @@
 
 use crate::PureResult;
 use st_tensor::{Tensor, TensorError};
+use std::fmt;
 
 /// Linguistic concept used to bias coherence weighting towards external domains.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -15,6 +16,25 @@ pub enum DomainConcept {
     NeuronalPattern,
     DropletCoalescence,
     Custom(String),
+}
+
+impl DomainConcept {
+    /// Returns a stable human-readable label for the concept.
+    pub fn label(&self) -> &str {
+        match self {
+            DomainConcept::Membrane => "membrane",
+            DomainConcept::GrainBoundary => "grain_boundary",
+            DomainConcept::NeuronalPattern => "neuronal_pattern",
+            DomainConcept::DropletCoalescence => "droplet_coalescence",
+            DomainConcept::Custom(label) => label.as_str(),
+        }
+    }
+}
+
+impl fmt::Display for DomainConcept {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.label())
+    }
 }
 
 /// Execution backend that the coherence engine should target when bridging to
@@ -61,6 +81,57 @@ impl CoherenceBackend {
                 | CoherenceBackend::WebGpu
         )
     }
+
+    /// Describes the capabilities unlocked by the backend for external bridges.
+    pub fn capabilities(&self) -> BackendCapabilities {
+        match self {
+            CoherenceBackend::PureRust => BackendCapabilities {
+                fft: false,
+                gpu: false,
+                timeseries: false,
+                columnar: false,
+            },
+            CoherenceBackend::Fftw => BackendCapabilities {
+                fft: true,
+                gpu: false,
+                timeseries: true,
+                columnar: false,
+            },
+            CoherenceBackend::CuFft => BackendCapabilities {
+                fft: true,
+                gpu: true,
+                timeseries: true,
+                columnar: false,
+            },
+            CoherenceBackend::Polars | CoherenceBackend::Arrow => BackendCapabilities {
+                fft: false,
+                gpu: false,
+                timeseries: true,
+                columnar: true,
+            },
+            CoherenceBackend::WebGpu => BackendCapabilities {
+                fft: true,
+                gpu: true,
+                timeseries: true,
+                columnar: false,
+            },
+            CoherenceBackend::Custom(_) => BackendCapabilities {
+                fft: false,
+                gpu: false,
+                timeseries: false,
+                columnar: false,
+            },
+        }
+    }
+}
+
+/// Capabilities exposed by a backend once the sequencer bridges out of pure Rust.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BackendCapabilities {
+    pub fft: bool,
+    pub gpu: bool,
+    pub timeseries: bool,
+    pub columnar: bool,
 }
 
 /// Domain linguistic profile that biases coherence weighting towards specific
@@ -181,6 +252,49 @@ impl LinguisticContour {
     }
 }
 
+/// Per-channel report pairing the dominant linguistic concept with coherence weight.
+#[derive(Clone, Debug)]
+pub struct LinguisticChannelReport {
+    channel: usize,
+    weight: f32,
+    backend: CoherenceBackend,
+    dominant_concept: Option<DomainConcept>,
+    emphasis: f32,
+    descriptor: Option<String>,
+}
+
+impl LinguisticChannelReport {
+    /// Index of the channel the report corresponds to.
+    pub fn channel(&self) -> usize {
+        self.channel
+    }
+
+    /// Normalised weight contributed by this channel.
+    pub fn weight(&self) -> f32 {
+        self.weight
+    }
+
+    /// Backend that produced the coherence sample.
+    pub fn backend(&self) -> &CoherenceBackend {
+        &self.backend
+    }
+
+    /// Dominant linguistic concept, when a profile biases the channel.
+    pub fn dominant_concept(&self) -> Option<&DomainConcept> {
+        self.dominant_concept.as_ref()
+    }
+
+    /// Effective emphasis value applied by the dominant concept or 1.0 when un-biased.
+    pub fn emphasis(&self) -> f32 {
+        self.emphasis
+    }
+
+    /// Optional descriptor carried from the dominant profile.
+    pub fn descriptor(&self) -> Option<&str> {
+        self.descriptor.as_deref()
+    }
+}
+
 /// Measures phase coherence using Maxwell pulses (instead of attention).
 #[derive(Clone, Debug)]
 pub struct CoherenceEngine {
@@ -289,6 +403,54 @@ impl CoherenceEngine {
             prosody_index: prosody,
             timbre_spread,
         })
+    }
+
+    /// Builds per-channel reports so downstream bridges can consume coherence metadata.
+    pub fn describe_channels(&self, weights: &[f32]) -> PureResult<Vec<LinguisticChannelReport>> {
+        if weights.len() != self.num_channels {
+            return Err(TensorError::DataLength {
+                expected: self.num_channels,
+                got: weights.len(),
+            }
+            .into());
+        }
+        if weights
+            .iter()
+            .any(|weight| !weight.is_finite() || *weight < 0.0)
+        {
+            return Err(TensorError::NonPositiveCoherence { coherence: -1.0 }.into());
+        }
+
+        let mut reports = Vec::with_capacity(self.num_channels);
+        for (channel, &weight) in weights.iter().enumerate() {
+            let mut dominant: Option<(DomainConcept, f32, Option<String>)> = None;
+            for profile in &self.linguistic_profiles {
+                let emphasis = profile.harmonic_multiplier(channel, self.num_channels);
+                let descriptor = profile.descriptor().map(|desc| desc.to_owned());
+                match dominant {
+                    Some((_, current_emphasis, _)) if emphasis <= current_emphasis => {}
+                    _ => {
+                        dominant = Some((profile.concept().clone(), emphasis, descriptor));
+                    }
+                }
+            }
+
+            let (concept, emphasis, descriptor) = match dominant {
+                Some((concept, emphasis, descriptor)) => (Some(concept), emphasis, descriptor),
+                None => (None, 1.0f32, None),
+            };
+
+            reports.push(LinguisticChannelReport {
+                channel,
+                weight,
+                backend: self.backend.clone(),
+                dominant_concept: concept,
+                emphasis,
+                descriptor,
+            });
+        }
+
+        Ok(reports)
     }
 
     fn curvature_bias(&self) -> f32 {
@@ -444,5 +606,44 @@ mod tests {
         assert!(contour.coherence_strength() > 0.0);
         assert!(contour.prosody_index() >= 0.5);
         assert!(contour.timbre_spread() >= 0.0);
+    }
+
+    #[test]
+    fn backend_capabilities_match_flags() {
+        let fftw = CoherenceBackend::Fftw.capabilities();
+        assert!(fftw.fft);
+        assert!(fftw.timeseries);
+        assert!(!fftw.gpu);
+        let webgpu = CoherenceBackend::WebGpu.capabilities();
+        assert!(webgpu.gpu);
+        assert!(webgpu.fft);
+        let rust = CoherenceBackend::PureRust.capabilities();
+        assert!(!rust.fft && !rust.gpu && !rust.timeseries && !rust.columnar);
+    }
+
+    #[test]
+    fn describe_channels_reflects_profiles() {
+        let mut engine = CoherenceEngine::new(128, -1.0).unwrap();
+        let tensor = Tensor::from_vec(1, 128, vec![0.2; 128]).unwrap();
+        let weights = engine.measure_phases(&tensor).unwrap();
+        let reports = engine.describe_channels(&weights).unwrap();
+        assert_eq!(reports.len(), engine.num_channels());
+        for (idx, report) in reports.iter().enumerate() {
+            assert_eq!(report.channel(), idx);
+            assert_eq!(report.weight(), weights[idx]);
+            assert!(report.emphasis() >= 1.0 - f32::EPSILON);
+            assert!(report.backend().label().len() > 0);
+        }
+
+        engine.clear_linguistic_profiles();
+        engine.register_linguistic_profile(
+            DomainLinguisticProfile::new(DomainConcept::NeuronalPattern).with_descriptor("spike"),
+        );
+        let biased = engine.describe_channels(&weights).unwrap();
+        assert_eq!(biased.len(), reports.len());
+        if let Some(dominant) = biased[0].dominant_concept() {
+            assert_eq!(dominant.label(), "neuronal_pattern");
+            assert_eq!(biased[0].descriptor(), Some("spike"));
+        }
     }
 }

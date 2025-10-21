@@ -47,6 +47,18 @@ try:
     print(f"   - Coherence strength: {contour.coherence_strength():.3f}")
     print(f"   - Articulation bias: {contour.articulation_bias():.3f}")
     print()
+    reports = model.describe_channels(x)
+    print("✅ Channel reports (first 5):")
+    for report in reports[:5]:
+        concept = report.dominant_concept()
+        concept_label = concept.label() if concept else "baseline"
+        descriptor = report.descriptor() or "—"
+        print(
+            f"   - ch{report.channel():02d}: weight={report.weight():.4f}"
+            f" concept={concept_label} emphasis={report.emphasis():.2f}"
+            f" descriptor={descriptor} backend={report.backend().label()}"
+        )
+    print()
     print("🎯 ZSpaceCoherenceSequencer is working!")
     print()
     print("Key differences from Attention:")

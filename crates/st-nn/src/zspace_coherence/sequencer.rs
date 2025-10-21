@@ -11,7 +11,8 @@
 //! - Fractional calculus for spectral operators
 
 use super::coherence_engine::{
-    CoherenceBackend, CoherenceEngine, DomainSemanticProfile,
+    CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile,
+    LinguisticChannelReport, LinguisticContour,
 };
 use crate::{Module, PureResult, Tensor};
 use st_tensor::{OpenCartesianTopos, TensorError};
@@ -173,14 +174,17 @@ impl ZSpaceCoherenceSequencer {
         self.coherence_engine.backend()
     }
 
-    /// Returns the number of Maxwell channels in the underlying coherence engine.
-    pub fn maxwell_channels(&self) -> usize {
-        self.coherence_engine.num_channels()
+    /// Converts coherence weights into a linguistic contour descriptor that can be
+    /// used by downstream vocalisation stacks.
+    pub fn emit_linguistic_contour(&self, x: &Tensor) -> PureResult<LinguisticContour> {
+        let coherence = self.measure_coherence(x)?;
+        self.coherence_engine.derive_linguistic_contour(&coherence)
     }
 
-    /// Returns the OpenCartesianTopos associated with this sequencer.
-    pub fn topos(&self) -> &OpenCartesianTopos {
-        &self.topos
+    /// Describes each coherence channel, surfacing dominant linguistic concepts per band.
+    pub fn describe_channels(&self, x: &Tensor) -> PureResult<Vec<LinguisticChannelReport>> {
+        let coherence = self.measure_coherence(x)?;
+        self.coherence_engine.describe_channels(&coherence)
     }
 }
 
@@ -222,7 +226,6 @@ impl Module for ZSpaceCoherenceSequencer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::coherence_engine::DomainConcept;
 
     #[test]
     fn sequencer_forward_preserves_shape() {
@@ -282,5 +285,23 @@ mod tests {
         assert!(contour.coherence_strength() > 0.0);
         assert!(contour.prosody_index() > 0.6);
         assert!(contour.articulation_bias() > 0.0);
+    }
+
+    #[test]
+    fn channel_descriptions_surface_linguistic_bias() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
+        seq.register_linguistic_profile(
+            DomainLinguisticProfile::new(DomainConcept::DropletCoalescence)
+                .with_descriptor("fluid-lilt"),
+        );
+        let x = Tensor::from_vec(1, 128, vec![0.2; 128]).unwrap();
+        let reports = seq.describe_channels(&x).unwrap();
+        assert_eq!(reports.len(), seq.coherence_engine.num_channels());
+        if let Some(report) = reports.first() {
+            assert!(report.weight() >= 0.0);
+            assert_eq!(report.backend().label(), seq.backend().label());
+            assert_eq!(report.descriptor(), Some("fluid-lilt"));
+        }
     }
 }

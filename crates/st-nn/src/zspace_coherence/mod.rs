@@ -7,6 +7,7 @@ pub mod coherence_engine;
 pub mod sequencer;
 
 pub use coherence_engine::{
-    CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile, LinguisticContour,
+    BackendCapabilities, CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile,
+    LinguisticChannelReport, LinguisticContour,
 };
 pub use sequencer::ZSpaceCoherenceSequencer;
