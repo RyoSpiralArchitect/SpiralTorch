@@ -219,6 +219,14 @@ impl PyZSpaceCoherenceSequencer {
         Ok(PyTensor::from_tensor(output))
     }
 
+    pub fn project_to_zspace(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        let projected = self
+            .inner
+            .project_to_zspace(&x.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(projected))
+    }
+
     pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
     }
