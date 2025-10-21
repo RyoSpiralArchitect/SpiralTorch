@@ -372,7 +372,9 @@ impl MacroKinetics {
                 ExternalForce::PressureJump(delta_p) => delta_p as f64,
                 ExternalForce::BulkPotential(value)
                 | ExternalForce::Nonlocal(value)
-                | ExternalForce::Custom { magnitude: value, .. } => value as f64,
+                | ExternalForce::Custom {
+                    magnitude: value, ..
+                } => value as f64,
                 ExternalForce::ContactAngle {
                     equilibrium,
                     friction,
