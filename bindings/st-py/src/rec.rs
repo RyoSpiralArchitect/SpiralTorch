@@ -240,14 +240,24 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyQueryPlan>()?;
     module.add_class::<PyRecEpochReport>()?;
     module.add_class::<PyRecommender>()?;
+
+    let query_plan = module.getattr("PyQueryPlan")?;
+    module.add("QueryPlan", query_plan.clone())?;
+
+    let rec_epoch_report = module.getattr("PyRecEpochReport")?;
+    module.add("RecEpochReport", rec_epoch_report.clone())?;
+
+    let recommender = module.getattr("PyRecommender")?;
+    module.add("Recommender", recommender.clone())?;
+
     module.add(
         "__all__",
         vec!["QueryPlan", "RecEpochReport", "Recommender"],
     )?;
     parent.add_submodule(&module)?;
-    parent.add("QueryPlan", module.getattr("QueryPlan")?)?;
-    parent.add("RecEpochReport", module.getattr("RecEpochReport")?)?;
-    parent.add("Recommender", module.getattr("Recommender")?)?;
+    parent.add("QueryPlan", query_plan)?;
+    parent.add("RecEpochReport", rec_epoch_report)?;
+    parent.add("Recommender", recommender)?;
     Ok(())
 }
 
