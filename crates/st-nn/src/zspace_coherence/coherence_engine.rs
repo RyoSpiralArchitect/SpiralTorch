@@ -7,7 +7,7 @@
 use crate::PureResult;
 use st_tensor::{Tensor, TensorError};
 
-/// Semantic concept used to bias coherence weighting towards external domains.
+/// Linguistic concept used to bias coherence weighting towards external domains.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DomainConcept {
     Membrane,
@@ -63,18 +63,18 @@ impl CoherenceBackend {
     }
 }
 
-/// Domain semantic profile that biases coherence weighting towards specific
+/// Domain linguistic profile that biases coherence weighting towards specific
 /// harmonic structures.
 #[derive(Clone, Debug)]
-pub struct DomainSemanticProfile {
+pub struct DomainLinguisticProfile {
     concept: DomainConcept,
     emphasis: f32,
     harmonic_bias: Option<Vec<f32>>,
     descriptor: Option<String>,
 }
 
-impl DomainSemanticProfile {
-    /// Creates a new semantic profile associated with a concept.
+impl DomainLinguisticProfile {
+    /// Creates a new linguistic profile associated with a concept.
     pub fn new(concept: DomainConcept) -> Self {
         Self {
             concept,
@@ -150,6 +150,37 @@ impl DomainSemanticProfile {
     }
 }
 
+/// Aggregated linguistic contour derived from coherence weights.
+#[derive(Clone, Debug)]
+pub struct LinguisticContour {
+    coherence_strength: f32,
+    articulation_bias: f32,
+    prosody_index: f32,
+    timbre_spread: f32,
+}
+
+impl LinguisticContour {
+    /// Overall coherence concentration (1.0 = single channel dominance).
+    pub fn coherence_strength(&self) -> f32 {
+        self.coherence_strength
+    }
+
+    /// Estimated articulation drive induced by curvature-weighted coherence.
+    pub fn articulation_bias(&self) -> f32 {
+        self.articulation_bias
+    }
+
+    /// Normalised channel centroid capturing rising/falling prosody.
+    pub fn prosody_index(&self) -> f32 {
+        self.prosody_index
+    }
+
+    /// Dispersion of the harmonic emphasis, useful for timbre shaping.
+    pub fn timbre_spread(&self) -> f32 {
+        self.timbre_spread
+    }
+}
+
 /// Measures phase coherence using Maxwell pulses (instead of attention).
 #[derive(Clone, Debug)]
 pub struct CoherenceEngine {
@@ -157,7 +188,7 @@ pub struct CoherenceEngine {
     curvature: f32,
     num_channels: usize,
     backend: CoherenceBackend,
-    semantic_profiles: Vec<DomainSemanticProfile>,
+    linguistic_profiles: Vec<DomainLinguisticProfile>,
 }
 
 impl CoherenceEngine {
@@ -174,7 +205,7 @@ impl CoherenceEngine {
             curvature,
             num_channels: (dim / 64).max(1),
             backend: CoherenceBackend::default(),
-            semantic_profiles: Vec::new(),
+            linguistic_profiles: Vec::new(),
         })
     }
 
@@ -188,19 +219,76 @@ impl CoherenceEngine {
         &self.backend
     }
 
-    /// Registers a new semantic profile.
-    pub fn register_domain_profile(&mut self, profile: DomainSemanticProfile) {
-        self.semantic_profiles.push(profile);
+    /// Registers a new linguistic profile.
+    pub fn register_linguistic_profile(&mut self, profile: DomainLinguisticProfile) {
+        self.linguistic_profiles.push(profile);
     }
 
-    /// Clears all semantic profiles.
-    pub fn clear_domain_profiles(&mut self) {
-        self.semantic_profiles.clear();
+    /// Clears all linguistic profiles.
+    pub fn clear_linguistic_profiles(&mut self) {
+        self.linguistic_profiles.clear();
     }
 
-    /// Exposes the registered semantic profiles.
-    pub fn semantic_profiles(&self) -> &[DomainSemanticProfile] {
-        &self.semantic_profiles
+    /// Exposes the registered linguistic profiles.
+    pub fn linguistic_profiles(&self) -> &[DomainLinguisticProfile] {
+        &self.linguistic_profiles
+    }
+
+    /// Derives a linguistic contour from the provided coherence weights.
+    pub fn derive_linguistic_contour(&self, weights: &[f32]) -> PureResult<LinguisticContour> {
+        if weights.is_empty() {
+            return Err(TensorError::EmptyInput("linguistic_contour_weights").into());
+        }
+        if weights.len() != self.num_channels {
+            return Err(TensorError::DataLength {
+                expected: self.num_channels,
+                got: weights.len(),
+            }
+            .into());
+        }
+
+        let mut total = 0.0f32;
+        for weight in weights {
+            if !weight.is_finite() || *weight < 0.0 {
+                return Err(TensorError::NonPositiveCoherence { coherence: *weight }.into());
+            }
+            total += *weight;
+        }
+        if total <= 0.0 || !total.is_finite() {
+            return Err(TensorError::NonPositiveCoherence { coherence: total }.into());
+        }
+
+        let norm_factor = 1.0 / total;
+        let mut concentration = 0.0f32;
+        let mut centroid = 0.0f32;
+        for (idx, weight) in weights.iter().enumerate() {
+            let normalized = *weight * norm_factor;
+            concentration += normalized * normalized;
+            centroid += normalized * idx as f32;
+        }
+        let max_idx = (self.num_channels - 1).max(1) as f32;
+        let prosody = if self.num_channels > 1 {
+            (centroid / max_idx).clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+
+        let mut variance = 0.0f32;
+        for (idx, weight) in weights.iter().enumerate() {
+            let normalized = *weight * norm_factor;
+            let distance = idx as f32 - centroid;
+            variance += normalized * distance * distance;
+        }
+        let timbre_spread = (variance / (self.num_channels as f32).max(1.0)).sqrt();
+
+        let articulation_bias = (concentration * self.curvature.abs().sqrt()).clamp(0.0, 4.0);
+
+        Ok(LinguisticContour {
+            coherence_strength: concentration,
+            articulation_bias,
+            prosody_index: prosody,
+            timbre_spread,
+        })
     }
 
     fn curvature_bias(&self) -> f32 {
@@ -250,11 +338,11 @@ impl CoherenceEngine {
             if !weight.is_finite() {
                 weight = 0.0;
             }
-            let mut semantic_bias = 1.0f32;
-            for profile in &self.semantic_profiles {
-                semantic_bias *= profile.harmonic_multiplier(channel, self.num_channels);
+            let mut linguistic_bias = 1.0f32;
+            for profile in &self.linguistic_profiles {
+                linguistic_bias *= profile.harmonic_multiplier(channel, self.num_channels);
             }
-            weight = (weight * semantic_bias * curvature_bias * backend_bias).max(1e-6);
+            weight = (weight * linguistic_bias * curvature_bias * backend_bias).max(1e-6);
             weights.push(weight);
         }
 
@@ -313,14 +401,14 @@ mod tests {
     }
 
     #[test]
-    fn semantic_profile_biases_low_frequencies() {
+    fn linguistic_profile_biases_low_frequencies() {
         let mut engine = CoherenceEngine::new(128, -1.2).unwrap();
         let tensor = Tensor::from_vec(1, 128, vec![0.2; 128]).unwrap();
         let baseline = engine.measure_phases(&tensor).unwrap();
-        let profile = DomainSemanticProfile::new(DomainConcept::Membrane)
+        let profile = DomainLinguisticProfile::new(DomainConcept::Membrane)
             .with_emphasis(1.4)
             .unwrap();
-        engine.register_domain_profile(profile);
+        engine.register_linguistic_profile(profile);
         let biased = engine.measure_phases(&tensor).unwrap();
         if engine.num_channels() > 1 {
             assert!(biased[0] > baseline[0]);
@@ -336,5 +424,25 @@ mod tests {
         engine.set_backend(CoherenceBackend::Fftw);
         assert!(engine.is_accelerated());
         assert_eq!(engine.backend().label(), "fftw");
+    }
+
+    #[test]
+    fn linguistic_contour_derivation_reflects_weights() {
+        let engine = CoherenceEngine::new(96, -1.0).unwrap();
+        let tensor = Tensor::from_vec(
+            1,
+            96,
+            vec![0.05; 48]
+                .into_iter()
+                .chain(vec![0.6; 48].into_iter())
+                .collect(),
+        )
+        .unwrap();
+        let weights = engine.measure_phases(&tensor).unwrap();
+        let contour = engine.derive_linguistic_contour(&weights).unwrap();
+
+        assert!(contour.coherence_strength() > 0.0);
+        assert!(contour.prosody_index() >= 0.5);
+        assert!(contour.timbre_spread() >= 0.0);
     }
 }

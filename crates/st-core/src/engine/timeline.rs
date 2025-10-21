@@ -7,6 +7,8 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
 
+use crate::util::timewarp::{TemporalWarp, TemporalWarpError};
+
 /// Identifier describing a scheduled kernel.
 #[derive(Clone, Debug, PartialEq)]
 pub struct KernelSlot {
@@ -85,6 +87,19 @@ impl TimelineScheduler {
         vec.insert(idx, slot);
     }
 
+    fn resync_streams(&mut self) {
+        self.timeline
+            .sort_by(|a, b| match a.start.total_cmp(&b.start) {
+                Ordering::Equal => a.stream.cmp(&b.stream),
+                order => order,
+            });
+        let mut rebuilt: BTreeMap<u32, Vec<KernelSlot>> = BTreeMap::new();
+        for slot in &self.timeline {
+            rebuilt.entry(slot.stream).or_default().push(slot.clone());
+        }
+        self.streams = rebuilt;
+    }
+
     /// Schedule a new kernel span on the requested stream.
     pub fn schedule_kernel<S: Into<String>>(
         &mut self,
@@ -147,6 +162,91 @@ impl TimelineScheduler {
         let span = (slots.last()?.end - slots.first()?.start).max(f32::EPSILON);
         Some((total / span).min(1.0))
     }
+
+    /// Applies an affine warp to the scheduler's time axis.
+    pub fn warp_time_axis(&mut self, warp: TemporalWarp) -> Result<(), TemporalWarpError> {
+        if self.timeline.is_empty() {
+            return Err(TemporalWarpError::Empty);
+        }
+        warp.validate()?;
+        for slot in &mut self.timeline {
+            let start = warp.apply(slot.start);
+            let end = warp.apply(slot.end);
+            if !start.is_finite() || !end.is_finite() {
+                return Err(TemporalWarpError::NonFinite);
+            }
+            if end <= start {
+                return Err(TemporalWarpError::Degenerate);
+            }
+            slot.start = start;
+            slot.end = end;
+        }
+        self.resync_streams();
+        Ok(())
+    }
+
+    /// Multiplies the timeline span by the provided factor.
+    pub fn dilate(&mut self, factor: f32) -> Result<(), TemporalWarpError> {
+        self.warp_time_axis(TemporalWarp::dilation(factor))
+    }
+
+    /// Shifts the entire timeline by the provided offset.
+    pub fn shift(&mut self, offset: f32) -> Result<(), TemporalWarpError> {
+        if self.timeline.is_empty() {
+            return Err(TemporalWarpError::Empty);
+        }
+        if !offset.is_finite() {
+            return Err(TemporalWarpError::NonFinite);
+        }
+        for slot in &mut self.timeline {
+            slot.start += offset;
+            slot.end += offset;
+        }
+        self.resync_streams();
+        Ok(())
+    }
+
+    /// Rescales the timeline so the latest kernel sits at `progress * span`.
+    pub fn align_to_progress(&mut self, progress: f32, span: f32) -> Result<(), TemporalWarpError> {
+        if self.timeline.is_empty() {
+            return Err(TemporalWarpError::Empty);
+        }
+        if !progress.is_finite() || !span.is_finite() {
+            return Err(TemporalWarpError::NonFinite);
+        }
+        let span = span.max(f32::EPSILON);
+        let progress = progress.max(0.0);
+        let first_start = self.timeline.first().map(|slot| slot.start).unwrap_or(0.0);
+        let last_end = self.timeline.last().map(|slot| slot.end).unwrap_or(0.0);
+        let makespan = (last_end - first_start).max(f32::EPSILON);
+        let target_span = (span * progress).max(f32::EPSILON);
+        let factor = target_span / makespan;
+        self.dilate(factor)?;
+        let new_start = self.timeline.first().map(|slot| slot.start).unwrap_or(0.0);
+        if new_start.abs() > f32::EPSILON {
+            self.shift(-new_start)?;
+        }
+        Ok(())
+    }
+
+    /// Drops any kernels that extend beyond the provided timestamp.
+    pub fn rewind_to(&mut self, time: f32) -> usize {
+        if self.timeline.is_empty() {
+            return 0;
+        }
+        let mut removed = 0;
+        while let Some(last) = self.timeline.last() {
+            if last.end <= time + self.epsilon {
+                break;
+            }
+            self.timeline.pop();
+            removed += 1;
+        }
+        if removed > 0 {
+            self.resync_streams();
+        }
+        removed
+    }
 }
 
 #[cfg(test)]
@@ -208,5 +308,34 @@ mod tests {
             .schedule_kernel("nan", 0, f32::NAN, 1.0)
             .unwrap_err();
         assert!(matches!(err, TimelineError::NonFinite));
+    }
+
+    #[test]
+    fn dilates_and_aligns_to_progress() {
+        let mut scheduler = TimelineScheduler::new(0.0);
+        scheduler
+            .schedule_kernel("fft", 0, 0.0, 2.0)
+            .expect("first");
+        scheduler
+            .schedule_kernel("conv", 0, 2.0, 2.0)
+            .expect("second");
+        scheduler.align_to_progress(0.5, 10.0).expect("align");
+        let first = scheduler.timeline.first().unwrap();
+        let last = scheduler.timeline.last().unwrap();
+        assert!((first.start - 0.0).abs() < 1e-6);
+        assert!((last.end - 5.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn rewinds_trailing_kernels() {
+        let mut scheduler = TimelineScheduler::new(0.0);
+        scheduler.schedule_kernel("a", 0, 0.0, 1.0).expect("a");
+        scheduler.schedule_kernel("b", 0, 1.0, 1.0).expect("b");
+        scheduler.schedule_kernel("c", 0, 2.0, 1.0).expect("c");
+        let removed = scheduler.rewind_to(2.5);
+        assert_eq!(removed, 1);
+        assert_eq!(scheduler.timeline.len(), 2);
+        let last = scheduler.timeline.last().unwrap();
+        assert!((last.end - 2.0).abs() < 1e-6);
     }
 }
