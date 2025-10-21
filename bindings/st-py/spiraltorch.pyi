@@ -396,7 +396,7 @@ class Recommender:
     @property
     def factors(self) -> int: ...
 
-class DqnAgent:
+class stAgent:
     def __init__(self, state_dim: int, action_dim: int, discount: float, learning_rate: float) -> None: ...
     def select_action(self, state: int) -> int: ...
     def update(self, state: int, action: int, reward: float, next_state: int) -> None: ...
@@ -467,7 +467,7 @@ __all__ = [
     "QueryPlan",
     "RecEpochReport",
     "Recommender",
-    "DqnAgent",
+    "stAgent",
     "PpoAgent",
     "SacAgent",
     "DashboardMetric",

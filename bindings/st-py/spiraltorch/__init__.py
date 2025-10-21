@@ -4,6 +4,40 @@ from importlib import import_module
 from typing import Any as _Any, Iterable as _Iterable, Mapping as _Mapping
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
+_rs: _types.ModuleType | None = None
+
+_PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
+    ("nn", "SpiralTorch neural network primitives"),
+    ("frac", "Fractal & fractional tools"),
+    ("dataset", "Datasets & loaders"),
+    ("linalg", "Linear algebra utilities"),
+    ("rl", "Reinforcement learning components"),
+    ("rec", "Reconstruction / signal processing"),
+    ("telemetry", "Telemetry / dashboards / metrics"),
+    ("ecosystem", "Integrations & ecosystem glue"),
+    ("selfsup", "Self-supervised objectives"),
+    ("export", "Model export & compression"),
+    ("compat", "Interoperability bridges"),
+    ("hpo", "Hyper-parameter optimization tools"),
+    ("inference", "Safety inference runtime & auditing"),
+]
+
+_RENAMED_EXPORTS: dict[str, str] = {
+    "DqnAgent": "stAgent",
+}
+
+_parent_module = sys.modules[__name__]
+for _name, _doc in _PREDECLARED_SUBMODULES:
+    _fq = f"{__name__}.{_name}"
+    _module = sys.modules.get(_fq)
+    if _module is None:
+        _module = _types.ModuleType(_fq, _doc)
+        sys.modules[_fq] = _module
+    elif _doc and not getattr(_module, "__doc__", None):
+        _module.__doc__ = _doc
+    setattr(_parent_module, _name, _module)
+    globals()[_name] = _module
+
 # Rust拡張の本体
 try:
     _rs = import_module("spiraltorch.spiraltorch")
@@ -54,6 +88,10 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "DataLoaderIter": ("_NnDataLoaderIter",),
         "from_samples": ("nn_from_samples", "dataset_from_samples"),
     },
+    "compat": {
+        "capture": ("capture",),
+        "share": ("share",),
+    },
     "compat.torch": {
         "to_torch": ("compat_to_torch", "to_torch"),
         "from_torch": ("compat_from_torch", "from_torch"),
@@ -65,6 +103,33 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
     "compat.tensorflow": {
         "to_tensorflow": ("compat_to_tensorflow", "to_tensorflow"),
         "from_tensorflow": ("compat_from_tensorflow", "from_tensorflow"),
+    },
+    "rl": {
+        "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
+        "PpoAgent": ("PyPpoAgent",),
+        "SacAgent": ("PySacAgent",),
+    },
+    "rec": {
+        "QueryPlan": ("PyQueryPlan",),
+        "RecEpochReport": ("PyRecEpochReport",),
+        "Recommender": ("PyRecommender",),
+    },
+    "telemetry": {
+        "DashboardMetric": ("PyDashboardMetric",),
+        "DashboardEvent": ("PyDashboardEvent",),
+        "DashboardFrame": ("PyDashboardFrame",),
+        "DashboardRing": ("PyDashboardRing",),
+    },
+    "export": {
+        "QatObserver": ("PyQatObserver",),
+        "QuantizationReport": ("PyQuantizationReport",),
+        "StructuredPruningReport": ("PyStructuredPruningReport",),
+        "CompressionReport": ("PyCompressionReport",),
+        "structured_prune": (),
+        "compress_weights": (),
+    },
+    "hpo": {
+        "SearchLoop": ("PySearchLoop",),
     },
 }
 
@@ -126,11 +191,17 @@ class _ForwardingModule(_types.ModuleType):
         exported.update(hints.keys())
         suffix = self._forward_key.split(".")[-1] + "_"
         flat_suffix = "_".join(self._forward_key.split(".")) + "_"
-        for name in dir(_rs):
-            if name.startswith(suffix):
-                exported.add(name[len(suffix):])
-            elif name.startswith(flat_suffix):
-                exported.add(name[len(flat_suffix):])
+        if _rs is not None:
+            for name in dir(_rs):
+                trimmed = None
+                if name.startswith(suffix):
+                    trimmed = name[len(suffix):]
+                elif name.startswith(flat_suffix):
+                    trimmed = name[len(flat_suffix):]
+                if not trimmed:
+                    continue
+                trimmed = _RENAMED_EXPORTS.get(trimmed, trimmed)
+                exported.add(trimmed)
         return sorted(exported)
 
 
@@ -184,17 +255,31 @@ def _expose_from_rs(name: str, *aliases: str) -> None:
 
 def _mirror_into_module(
     name: str,
-    members: _Iterable[str] | _Mapping[str, _Iterable[str]]
+    members: _Iterable[str] | _Mapping[str, _Iterable[str]],
+    *,
+    reexport: bool = True,
 ) -> _types.ModuleType:
     module = _ensure_submodule(name)
     exported: set[str] = set(getattr(module, "__all__", ()))
     items: _Iterable[tuple[str, _Iterable[str]]] \
         = members.items() if isinstance(members, _Mapping) else ((m, ()) for m in members)
     for member, aliases in items:
-        _expose_from_rs(member, *aliases)
-        value = globals().get(member)
+        value = None
+        if reexport:
+            _expose_from_rs(member, *aliases)
+            value = globals().get(member)
+        else:
+            if member in globals():
+                value = globals()[member]
+            if value is None:
+                for candidate in (member, *aliases):
+                    if hasattr(_rs, candidate):
+                        value = getattr(_rs, candidate)
+                        break
         if value is None:
             continue
+        if reexport:
+            globals()[member] = value
         setattr(module, member, value)
         exported.add(member)
     if exported:
@@ -202,22 +287,20 @@ def _mirror_into_module(
     return module
 
 
-for _name, _doc in [
-    ("nn","SpiralTorch neural network primitives"),
-    ("frac","Fractal & fractional tools"),
-    ("dataset","Datasets & loaders"),
-    ("linalg","Linear algebra utilities"),
-    ("rl","Reinforcement learning components"),
-    ("rec","Reconstruction / signal processing"),
-    ("telemetry","Telemetry / dashboards / metrics"),
-    ("ecosystem","Integrations & ecosystem glue"),
-    ("selfsup","Self-supervised objectives"),
-    ("export","Model export & compression"),
-    ("compat","Interoperability bridges"),
-    ("hpo","Hyper-parameter optimization tools"),
-    ("inference","Safety inference runtime & auditing"),
-]:
-    _ensure_submodule(_name, _doc)
+for _name, _doc in _PREDECLARED_SUBMODULES:
+    _module = _ensure_submodule(_name, _doc)
+    if not isinstance(_module, _ForwardingModule):
+        _fq = f"{__name__}.{_name}"
+        _forward = _ForwardingModule(_fq, getattr(_module, "__doc__", _doc), _name)
+        for _key, _value in vars(_module).items():
+            if _key in {"__dict__", "__weakref__"}:
+                continue
+            if _key == "__name__":
+                continue
+            setattr(_forward, _key, _value)
+        sys.modules[_fq] = _forward
+        setattr(sys.modules[__name__], _name, _forward)
+        globals()[_name] = _forward
 
 
 _compat_children = {
@@ -244,6 +327,27 @@ _mirror_into_module(
 
 
 _mirror_into_module(
+    "hpo",
+    {
+        "SearchLoop": ("PySearchLoop",),
+    },
+)
+
+
+_mirror_into_module(
+    "export",
+    {
+        "QatObserver": ("PyQatObserver",),
+        "QuantizationReport": ("PyQuantizationReport",),
+        "StructuredPruningReport": ("PyStructuredPruningReport",),
+        "CompressionReport": ("PyCompressionReport",),
+        "structured_prune": (),
+        "compress_weights": (),
+    },
+)
+
+
+_mirror_into_module(
     "nn",
     {
         "Dataset": ("_NnDataset",),
@@ -261,28 +365,62 @@ _mirror_into_module(
 )
 _mirror_into_module(
     "rl",
-    [
-        "DqnAgent",
-        "PpoAgent",
-        "SacAgent",
-    ],
+    {
+        "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
+        "PpoAgent": ("PyPpoAgent",),
+        "SacAgent": ("PySacAgent",),
+    },
 )
 _mirror_into_module(
     "rec",
-    [
-        "QueryPlan",
-        "RecEpochReport",
-        "Recommender",
-    ],
+    {
+        "QueryPlan": ("PyQueryPlan",),
+        "RecEpochReport": ("PyRecEpochReport",),
+        "Recommender": ("PyRecommender",),
+    },
 )
 _mirror_into_module(
     "telemetry",
+    {
+        "DashboardMetric": ("PyDashboardMetric",),
+        "DashboardEvent": ("PyDashboardEvent",),
+        "DashboardFrame": ("PyDashboardFrame",),
+        "DashboardRing": ("PyDashboardRing",),
+    },
+)
+
+
+_mirror_into_module(
+    "compat",
     [
-        "DashboardMetric",
-        "DashboardEvent",
-        "DashboardFrame",
-        "DashboardRing",
+        "capture",
+        "share",
     ],
+    reexport=False,
+)
+_mirror_into_module(
+    "compat.torch",
+    {
+        "to_torch": ("compat_to_torch", "to_torch"),
+        "from_torch": ("compat_from_torch", "from_torch"),
+    },
+    reexport=False,
+)
+_mirror_into_module(
+    "compat.jax",
+    {
+        "to_jax": ("compat_to_jax", "to_jax"),
+        "from_jax": ("compat_from_jax", "from_jax"),
+    },
+    reexport=False,
+)
+_mirror_into_module(
+    "compat.tensorflow",
+    {
+        "to_tensorflow": ("compat_to_tensorflow", "to_tensorflow"),
+        "from_tensorflow": ("compat_from_tensorflow", "from_tensorflow"),
+    },
+    reexport=False,
 )
 
 
@@ -300,10 +438,13 @@ _CORE_EXPORTS = [
     "GradientSummary","Hypergrad","TensorBiome",
     "BarycenterIntermediate","ZSpaceBarycenter",
     "QueryPlan","RecEpochReport","Recommender",
-    "DqnAgent","PpoAgent","SacAgent",
+    "stAgent","PpoAgent","SacAgent",
     "DashboardMetric","DashboardEvent","DashboardFrame","DashboardRing",
     "AuditEvent","AuditLog","InferenceResult","InferenceRuntime",
     "SafetyVerdict","SafetyViolation",
+    "SearchLoop",
+    "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
+    "structured_prune","compress_weights",
 ]
 for _name in _CORE_EXPORTS:
     _expose_from_rs(_name)
@@ -318,6 +459,12 @@ def __getattr__(name: str) -> _Any:
 
     if name.startswith("_"):
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    redirect = _RENAMED_EXPORTS.get(name)
+    if redirect is not None:
+        _expose_from_rs(redirect)
+        if redirect in globals():
+            return globals()[redirect]
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
     _expose_from_rs(name)
     if name in globals():
         return globals()[name]
@@ -326,7 +473,11 @@ def __getattr__(name: str) -> _Any:
 
 def __dir__() -> list[str]:
     _public = set(__all__)
-    _public.update(n for n in dir(_rs) if not n.startswith("_"))
+    if _rs is not None:
+        for _name in dir(_rs):
+            if _name.startswith("_"):
+                continue
+            _public.add(_RENAMED_EXPORTS.get(_name, _name))
     return sorted(_public)
 
 
