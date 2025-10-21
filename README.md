@@ -6,6 +6,8 @@ _(Still under active repair while expanding — API changes hourly.)_
 
 **Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
 
+**Theory deep dive.** Start architecting Z-space kernels with the new [SpinoTensorVector derivation notes](docs/stv_z_space.md), covering determinant identities, kernel causality, and minimal-norm constructions ready for implementation.
+
 ---
 
 ### Why SpiralTorch  
