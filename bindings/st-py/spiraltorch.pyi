@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from types import ModuleType
 
 class Tensor:
@@ -118,6 +118,46 @@ class ZSpaceBarycenter:
     def effective_weight(self) -> float: ...
     def intermediates(self) -> List[BarycenterIntermediate]: ...
 
+class ZMetrics:
+    speed: float
+    memory: float
+    stability: float
+    gradient: Optional[Sequence[float]]
+    drs: float
+
+class ZSpaceTrainer:
+    def __init__(
+        self,
+        z_dim: int = ...,
+        *,
+        alpha: float = ...,
+        lam_speed: float = ...,
+        lam_mem: float = ...,
+        lam_stab: float = ...,
+        lam_frac: float = ...,
+        lam_drs: float = ...,
+        lr: float = ...,
+        beta1: float = ...,
+        beta2: float = ...,
+        eps: float = ...,
+    ) -> None: ...
+    @property
+    def state(self) -> List[float]: ...
+    def step(self, metrics: Mapping[str, float] | ZMetrics) -> float: ...
+    def reset(self) -> None: ...
+    def state_dict(self) -> Dict[str, object]: ...
+    def load_state_dict(self, state: Dict[str, object], *, strict: bool = ...) -> None: ...
+    def step_batch(self, metrics: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
+
+def step_many(trainer: ZSpaceTrainer, samples: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
+
+def stream_zspace_training(
+    trainer: ZSpaceTrainer,
+    samples: Iterable[Mapping[str, float] | ZMetrics],
+    *,
+    on_step: Optional[Callable[[int, List[float], float], None]] = ...,
+) -> List[float]: ...
+
 class RankPlan:
     def kind(self) -> str: ...
     def rows(self) -> int: ...
@@ -192,6 +232,19 @@ def describe_device(
 
 def hip_probe() -> Dict[str, object]: ...
 
+def info_nce(
+    anchors: Sequence[Sequence[float]],
+    positives: Sequence[Sequence[float]],
+    temperature: float = ...,
+    normalize: bool = ...,
+) -> Dict[str, object]: ...
+
+def masked_mse(
+    predictions: Sequence[Sequence[float]],
+    targets: Sequence[Sequence[float]],
+    mask_indices: Sequence[Sequence[int]],
+) -> Dict[str, object]: ...
+
 class _CompatTorch(ModuleType):
     def to_torch(
         tensor: Tensor,
@@ -227,6 +280,94 @@ class _CompatNamespace(ModuleType):
     tensorflow: _CompatTensorFlow
 
 compat: _CompatNamespace
+
+class TemporalResonanceBuffer:
+    def __init__(self, capacity: int = ..., alpha: float = ...) -> None: ...
+    @property
+    def alpha(self) -> float: ...
+    @property
+    def capacity(self) -> int: ...
+    def update(self, volume: Sequence[Sequence[Sequence[float]]]) -> List[List[List[float]]]: ...
+    def state(self) -> Optional[List[List[List[float]]]]: ...
+    def history(self) -> List[List[List[List[float]]]]: ...
+    def state_dict(self) -> Dict[str, object]: ...
+    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
+
+class SliceProfile:
+    mean: float
+    std: float
+    energy: float
+
+class SpiralTorchVision:
+    def __init__(
+        self,
+        depth: int,
+        height: int,
+        width: int,
+        *,
+        alpha: float = ...,
+        window: Optional[str] = ...,
+        temporal: int = ...,
+    ) -> None: ...
+    @property
+    def volume(self) -> List[List[List[float]]]: ...
+    @property
+    def alpha(self) -> float: ...
+    @property
+    def temporal_capacity(self) -> int: ...
+    @property
+    def temporal_state(self) -> Optional[List[List[List[float]]]]: ...
+    @property
+    def window(self) -> List[float]: ...
+    def reset(self) -> None: ...
+    def update_window(self, window: Optional[str] | Sequence[float]) -> None: ...
+    def accumulate(self, volume: Sequence[Sequence[Sequence[float]]], weight: float = ...) -> None: ...
+    def accumulate_slices(self, slices: Sequence[Sequence[Sequence[float]]]) -> None: ...
+    def accumulate_sequence(
+        self,
+        frames: Iterable[Sequence[Sequence[Sequence[float]]]],
+        weights: Optional[Sequence[float]] = ...,
+    ) -> None: ...
+    def project(self, *, normalise: bool = ...) -> List[List[float]]: ...
+    def volume_energy(self) -> float: ...
+    def slice_profile(self) -> List[SliceProfile]: ...
+    def snapshot(self) -> Dict[str, object]: ...
+    def state_dict(self) -> Dict[str, object]: ...
+    def load_state_dict(self, state: Mapping[str, object], *, strict: bool = ...) -> None: ...
+
+class CanvasTransformer:
+    def __init__(self, width: int, height: int, *, smoothing: float = ...) -> None: ...
+    @property
+    def smoothing(self) -> float: ...
+    def refresh(self, projection: Sequence[Sequence[float]]) -> List[List[float]]: ...
+    def accumulate_hypergrad(self, gradient: Sequence[Sequence[float]]) -> None: ...
+    def accumulate_realgrad(self, gradient: Sequence[Sequence[float]]) -> None: ...
+    def reset(self) -> None: ...
+    def gradient_summary(self) -> Dict[str, Dict[str, float]]: ...
+    def emit_zspace_patch(self, vision: SpiralTorchVision, weight: float = ...) -> List[List[float]]: ...
+    def canvas(self) -> List[List[float]]: ...
+    def hypergrad(self) -> List[List[float]]: ...
+    def realgrad(self) -> List[List[float]]: ...
+    def state_dict(self) -> Dict[str, object]: ...
+    def load_state_dict(self, state: Mapping[str, object], *, strict: bool = ...) -> None: ...
+    def snapshot(self) -> CanvasSnapshot: ...
+
+class CanvasSnapshot:
+    canvas: List[List[float]]
+    hypergrad: List[List[float]]
+    realgrad: List[List[float]]
+    summary: Dict[str, Dict[str, float]]
+    patch: Optional[List[List[float]]]
+
+def apply_vision_update(
+    vision: SpiralTorchVision,
+    canvas: CanvasTransformer,
+    *,
+    hypergrad: Optional[Sequence[Sequence[float]]] = ...,
+    realgrad: Optional[Sequence[Sequence[float]]] = ...,
+    weight: float = ...,
+    include_patch: bool = ...,
+) -> CanvasSnapshot: ...
 
 def set_global_seed(seed: int) -> None: ...
 
@@ -301,10 +442,36 @@ class _NnDataLoaderIter(Iterable[Tuple[Tensor, Tensor]]):
     def __next__(self) -> Tuple[Tensor, Tensor]: ...
 
 
+class _ZSpaceCoherenceSequencer:
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        curvature: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def forward(self, x: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def dim(self) -> int: ...
+
+    def num_heads(self) -> int: ...
+
+    def curvature(self) -> float: ...
+
+    def maxwell_channels(self) -> int: ...
+
+    def topos(self) -> OpenCartesianTopos: ...
+
+
 class _NnModule(ModuleType):
     Dataset: type[_NnDataset]
     DataLoader: type[_NnDataLoader]
     DataLoaderIter: type[_NnDataLoaderIter]
+    ZSpaceCoherenceSequencer: type[_ZSpaceCoherenceSequencer]
 
     def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...
 
@@ -339,6 +506,108 @@ telemetry: ModuleType
 
 ecosystem: ModuleType
 
+class _ZSpaceModule(ModuleType):
+    ZMetrics: type[ZMetrics]
+    ZSpaceTrainer: type[ZSpaceTrainer]
+    step_many: staticmethod
+    stream_zspace_training: staticmethod
+
+zspace: _ZSpaceModule
+
+class _VisionModule(ModuleType):
+    SpiralTorchVision: type[SpiralTorchVision]
+    TemporalResonanceBuffer: type[TemporalResonanceBuffer]
+    SliceProfile: type[SliceProfile]
+
+vision: _VisionModule
+
+class _CanvasModule(ModuleType):
+    CanvasTransformer: type[CanvasTransformer]
+    CanvasSnapshot: type[CanvasSnapshot]
+
+    def apply_vision_update(
+        vision: SpiralTorchVision,
+        canvas: CanvasTransformer,
+        *,
+        hypergrad: Sequence[Sequence[float]] | None = ...,
+        realgrad: Sequence[Sequence[float]] | None = ...,
+        weight: float = ...,
+        include_patch: bool = ...,
+    ) -> CanvasSnapshot: ...
+
+canvas: _CanvasModule
+
+class _SelfSupModule(ModuleType):
+    def info_nce(
+        anchors: Sequence[Sequence[float]],
+        positives: Sequence[Sequence[float]],
+        temperature: float = ...,
+        normalize: bool = ...,
+    ) -> Dict[str, object]: ...
+
+    def masked_mse(
+        predictions: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+        mask_indices: Sequence[Sequence[int]],
+    ) -> Dict[str, object]: ...
+
+selfsup: _SelfSupModule
+
+class _PlannerModule(ModuleType):
+    RankPlan: type[RankPlan]
+
+    def plan(
+        kind: str,
+        rows: int,
+        cols: int,
+        k: int,
+        *,
+        backend: Optional[str] = ...,
+        lane_width: Optional[int] = ...,
+        subgroup: Optional[bool] = ...,
+        max_workgroup: Optional[int] = ...,
+        shared_mem_per_workgroup: Optional[int] = ...,
+    ) -> RankPlan: ...
+
+    def plan_topk(
+        rows: int,
+        cols: int,
+        k: int,
+        *,
+        backend: Optional[str] = ...,
+        lane_width: Optional[int] = ...,
+        subgroup: Optional[bool] = ...,
+        max_workgroup: Optional[int] = ...,
+        shared_mem_per_workgroup: Optional[int] = ...,
+    ) -> RankPlan: ...
+
+    def describe_device(
+        backend: str = ...,
+        *,
+        lane_width: Optional[int] = ...,
+        subgroup: Optional[bool] = ...,
+        max_workgroup: Optional[int] = ...,
+        shared_mem_per_workgroup: Optional[int] = ...,
+        workgroup: Optional[int] = ...,
+        cols: Optional[int] = ...,
+        tile_hint: Optional[int] = ...,
+        compaction_hint: Optional[int] = ...,
+    ) -> Dict[str, object]: ...
+
+    def hip_probe() -> Dict[str, object]: ...
+    def generate_plan_batch_ex(
+        n: int,
+        total_steps: int,
+        base_radius: float,
+        radial_growth: float,
+        base_height: float,
+        meso_gain: float,
+        micro_gain: float,
+        seed: Optional[int] = ...,
+    ) -> List[object]: ...
+
+planner: _PlannerModule
+
 class QueryPlan:
     def __init__(self, query: str) -> None: ...
     @property
@@ -370,7 +639,7 @@ class Recommender:
     @property
     def factors(self) -> int: ...
 
-class DqnAgent:
+class stAgent:
     def __init__(self, state_dim: int, action_dim: int, discount: float, learning_rate: float) -> None: ...
     def select_action(self, state: int) -> int: ...
     def update(self, state: int, action: int, reward: float, next_state: int) -> None: ...
@@ -414,6 +683,10 @@ __all__ = [
     "ZSpaceBarycenter",
     "BarycenterIntermediate",
     "z_space_barycenter",
+    "ZMetrics",
+    "ZSpaceTrainer",
+    "step_many",
+    "stream_zspace_training",
     "compat",
     "capture",
     "share",
@@ -427,6 +700,11 @@ __all__ = [
     "rec",
     "telemetry",
     "ecosystem",
+    "selfsup",
+    "planner",
+    "zspace",
+    "vision",
+    "canvas",
     "compat",
     "set_global_seed",
     "golden_ratio",
@@ -436,14 +714,22 @@ __all__ = [
     "pack_tribonacci_chunks",
     "pack_tetranacci_chunks",
     "generate_plan_batch_ex",
+    "info_nce",
+    "masked_mse",
     "gl_coeffs_adaptive",
     "fracdiff_gl_1d",
     "QueryPlan",
     "RecEpochReport",
     "Recommender",
-    "DqnAgent",
+    "stAgent",
     "PpoAgent",
     "SacAgent",
+    "TemporalResonanceBuffer",
+    "SpiralTorchVision",
+    "SliceProfile",
+    "CanvasTransformer",
+    "CanvasSnapshot",
+    "apply_vision_update",
     "DashboardMetric",
     "DashboardEvent",
     "DashboardFrame",

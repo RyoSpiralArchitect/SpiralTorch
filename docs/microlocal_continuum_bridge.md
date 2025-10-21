@@ -46,3 +46,7 @@ This workflow lets the microlocal "R machine" act as a data-driven estimator for
 - `MacroZBridge` couples any macro card to an `InterfaceZLift`, reusing the exact Z pulses produced above instead of reimplementing the projection logic.【F:crates/st-core/src/theory/macro.rs†L841-L963】
 - `MacroDrive` emits the curvature bundle and predicted velocity derived from the macro kinetics, so the same fused pulse can be inspected in Z-space while closing the sharp-interface dynamics.【F:crates/st-core/src/theory/macro.rs†L870-L984】
 - The resulting `MicrolocalFeedback` guides `InterfaceZConductor::apply_feedback`, rescaling gauge thresholds, bias gains, smoothing, and default tempo/uncertainty hints so micro sensing reacts to macro regime shifts without manual retuning.【F:crates/st-core/src/theory/macro.rs†L870-L984】【F:crates/st-core/src/theory/microlocal.rs†L565-L1016】
+- Perimeter-weighted curvature averages and orientation-aware anisotropy
+  factors keep the bridge’s \(\kappa_\gamma\) estimate aligned with the macro
+  card, so Fourier spectra or tabulated surface tensions propagate straight into
+  the Z-feedback heuristics.【F:crates/st-core/src/theory/macro.rs†L870-L1041】
