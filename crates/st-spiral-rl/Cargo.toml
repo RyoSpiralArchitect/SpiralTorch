@@ -1,5 +1,5 @@
 [package]
-name = "st-rl"
+name = "st-spiral-rl"
 version = "0.1.0"
 edition = "2021"
 description = "Reinforcement learning harness for SpiralTorch"

@@ -20,7 +20,7 @@ wgpu:
 
 stack:
     cargo build -p st-nn --release && \
-    cargo build -p st-rl --release && \
+    cargo build -p st-spiral-rl --release && \
     cargo build -p st-rec --release
 
 safety-suite:

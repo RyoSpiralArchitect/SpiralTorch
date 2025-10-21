@@ -2526,7 +2526,7 @@ dependencies = [
  "st-kdsl",
  "st-nn",
  "st-rec",
- "st-rl",
+ "st-spiral-rl",
  "st-tensor",
  "st-text",
 ]
@@ -2709,16 +2709,7 @@ version = "0.1.0"
 dependencies = [
  "rand",
  "st-kdsl",
- "st-rl",
- "st-tensor",
-]
-
-[[package]]
-name = "st-rl"
-version = "0.1.0"
-dependencies = [
- "rand",
- "st-core",
+ "st-spiral-rl",
  "st-tensor",
 ]
 
@@ -2728,6 +2719,15 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "st-spiral-rl"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "st-core",
+ "st-tensor",
 ]
 
 [[package]]

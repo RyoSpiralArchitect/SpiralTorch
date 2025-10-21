@@ -52,7 +52,7 @@ NumPy, no PyTorch, and no shim layers.
   TorchServe models, persist BentoML runners, explore hyperparameters with
   Optuna or Ray Tune, and export trained modules to ONNX—all behind ergonomic
   Python call sites.
-- Reinforcement learning harness via `spiraltorch.rl`—SpiralTorchRL keeps
+- Reinforcement learning harness via `spiraltorch.spiral_rl`—SpiralTorchRL keeps
   policy gradients inside Z-space tensors, exposes hypergrad-enabled updates,
   and streams geometric rewards without leaving Rust.
 - Recommendation toolkit via `spiraltorch.rec`—SpiralTorchRec factors user/item
@@ -267,14 +267,14 @@ print("Best Ray Tune result:", analysis.get_best_config(metric="loss", mode="min
 
 ## SpiralTorchRL quickstart
 
-`spiraltorch.rl` packages the policy-gradient harness from the Rust side so
+`spiraltorch.spiral_rl` packages the policy-gradient harness from the Rust side so
 Python notebooks can lean on SpiralTorchRL without reimplementing Z-space
 plumbing. Policies keep their weight updates inside hypergrad tapes and expose
 the discounted-return baseline used during training.
 
 ```python
 from spiraltorch import Tensor
-from spiraltorch.rl import PolicyGradient
+from spiraltorch.spiral_rl import PolicyGradient
 
 policy = PolicyGradient(state_dim=4, action_dim=2, learning_rate=0.02, discount=0.97)
 policy.enable_hypergrad(curvature=-1.0, learning_rate=0.05)
@@ -296,7 +296,7 @@ an optional geometry dictionary so notebooks can react to rank/pressure drift.
 
 ```python
 from spiraltorch import SpiralSession, Tensor
-from spiraltorch.rl import PolicyGradient
+from spiraltorch.spiral_rl import PolicyGradient
 
 session = SpiralSession(device="cpu", curvature=-1.0)
 policy = PolicyGradient(state_dim=4, action_dim=2, learning_rate=0.02)

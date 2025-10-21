@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 import cmath as _cmath
 import math as _math
-import sys, types as _types
+import types as _types
+import sys
 from collections import deque as _deque
 from dataclasses import dataclass as _dataclass
 from importlib import import_module
@@ -27,7 +29,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("dataset", "Datasets & loaders"),
     ("linalg", "Linear algebra utilities"),
     ("planner", "Planning & device heuristics"),
-    ("rl", "Reinforcement learning components"),
+    ("spiral_rl", "Reinforcement learning components"),
     ("rec", "Reconstruction / signal processing"),
     ("telemetry", "Telemetry / dashboards / metrics"),
     ("ecosystem", "Integrations & ecosystem glue"),
@@ -143,7 +145,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "to_tensorflow": ("compat_to_tensorflow", "to_tensorflow"),
         "from_tensorflow": ("compat_from_tensorflow", "from_tensorflow"),
     },
-    "rl": {
+    "spiral_rl": {
         "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
         "PpoAgent": ("PyPpoAgent",),
         "SacAgent": ("PySacAgent",),
@@ -1183,7 +1185,7 @@ _mirror_into_module(
     ],
 )
 _mirror_into_module(
-    "rl",
+    "spiral_rl",
     {
         "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
         "PpoAgent": ("PyPpoAgent",),
@@ -1361,7 +1363,7 @@ _EXPORTED = {
     *_EXTRAS,
     *_CORE_EXPORTS,
     *[n for n in _COMPAT_ALIAS if n in globals()],
-    "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
+    "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
     "selfsup","export","compat","hpo","inference","zspace","vision","canvas",
     "planner",
     "__version__",
