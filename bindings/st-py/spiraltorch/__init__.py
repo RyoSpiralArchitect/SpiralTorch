@@ -48,15 +48,34 @@ _RENAMED_EXPORTS: dict[str, str] = {
 }
 
 
+def _safe_getattr(obj: _Any, name: str, default: _Any = None) -> _Any:
+    if obj is None:
+        return default
+    try:
+        return getattr(obj, name)
+    except AttributeError:
+        return default
+
+
 def _resolve_rs_attr(candidate: str) -> _Any | None:
-    if not candidate or _rs is None:
+    if not candidate:
         return None
-    target: _Any = _rs
-    for part in candidate.split("."):
-        if not part or not hasattr(target, part):
-            return None
-        target = getattr(target, part)
-    return target
+    if "." in candidate:
+        module_name, attr_name = candidate.rsplit(".", 1)
+        module = sys.modules.get(f"{__name__}.{module_name}")
+        if module is None:
+            module = globals().get(module_name)
+        if isinstance(module, _ForwardingModule):
+            return module.__dict__.get(attr_name)
+        if isinstance(module, _types.ModuleType):
+            try:
+                return getattr(module, attr_name)
+            except AttributeError:
+                return None
+        return None
+    if _rs is None:
+        return None
+    return _safe_getattr(_rs, candidate)
 
 
 _parent_module = sys.modules[__name__]
@@ -123,8 +142,9 @@ _EXTRAS = [
     "describe_device","hip_probe","z_space_barycenter",
 ]
 for _n in _EXTRAS:
-    if hasattr(_rs, _n):
-        globals()[_n] = getattr(_rs, _n)
+    value = _safe_getattr(_rs, _n)
+    if value is not None:
+        globals()[_n] = value
 
 # 後方互換の別名（存在する方を公開名にバインド）
 _COMPAT_ALIAS = {
@@ -135,8 +155,9 @@ _COMPAT_ALIAS = {
 }
 for _pub, _cands in _COMPAT_ALIAS.items():
     for _c in _cands:
-        if hasattr(_rs, _c):
-            globals()[_pub] = getattr(_rs, _c)
+        value = _safe_getattr(_rs, _c)
+        if value is not None:
+            globals()[_pub] = value
             break
 
 _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
@@ -1069,8 +1090,6 @@ def _ensure_submodule(name: str, doc: str = "") -> _types.ModuleType:
         doc_for_part = doc if final else ""
         if module is None:
             candidate = getattr(parent, part, None)
-            if not isinstance(candidate, _types.ModuleType):
-                candidate = getattr(_rs, part, None) if idx == 0 else None
             if isinstance(candidate, _types.ModuleType):
                 module = candidate
                 if doc_for_part and not getattr(module, "__doc__", None):
@@ -1119,8 +1138,8 @@ def _mirror_into_module(
                 value = globals()[member]
             if value is None:
                 for candidate in (member, *aliases):
-                    if hasattr(_rs, candidate):
-                        value = getattr(_rs, candidate)
+                    value = _safe_getattr(_rs, candidate)
+                    if value is not None:
                         break
         if value is None:
             continue
@@ -1394,7 +1413,7 @@ _EXPORTED = {
     "__version__",
 }
 _EXPORTED.update(
-    n for n in getattr(_rs, "__all__", ())
+    n for n in _safe_getattr(_rs, "__all__", ())
     if isinstance(n, str) and not n.startswith("_")
 )
 __all__ = sorted(_EXPORTED)
