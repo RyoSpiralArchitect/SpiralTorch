@@ -172,7 +172,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_submodule(&module)?;
 
     // 4) mirror as st.rl (so users can do `import spiraltorch as st; st.rl...`)
-    parent.add("rl", module.clone_ref(py))?;
+    parent.add("rl", module.to_object(py))?;
 
     // 5) mirror convenient top-level names under `spiraltorch` for backward compatibility
     parent.add("stAgent",  module.getattr("stAgent")?)?;
@@ -182,9 +182,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
 
     // 6) (optional but recommended) register legacy top-level module name in sys.modules
     //    so `import spiral_rl` (old code) will find our module object.
-    let sys = py.import("sys")?;
+    let sys = PyModule::import_bound(py, "sys")?;
     sys.getattr("modules")?
-        .set_item("spiral_rl", module.clone_ref(py))?;
+        .set_item("spiral_rl", module.to_object(py))?;
 
     Ok(())
 }
