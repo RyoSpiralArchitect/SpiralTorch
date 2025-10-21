@@ -11,7 +11,7 @@
 //! - Fractional calculus for spectral operators
 
 use super::coherence_engine::{
-    CoherenceBackend, CoherenceEngine, DomainConcept, DomainSemanticProfile,
+    CoherenceBackend, CoherenceEngine, DomainLinguisticProfile, DomainSemanticProfile,
 };
 use crate::{Module, PureResult, Tensor};
 use st_tensor::{OpenCartesianTopos, TensorError};
@@ -168,9 +168,39 @@ impl ZSpaceCoherenceSequencer {
         self.coherence_engine.semantic_profiles()
     }
 
+    /// Registers a linguistic profile to sculpt emitted contours.
+    pub fn register_linguistic_profile(&mut self, profile: DomainLinguisticProfile) {
+        self.coherence_engine.register_linguistic_profile(profile);
+    }
+
+    /// Clears any registered linguistic profiles.
+    pub fn clear_linguistic_profiles(&mut self) {
+        self.coherence_engine.clear_linguistic_profiles();
+    }
+
+    /// Returns the active linguistic profiles.
+    pub fn linguistic_profiles(&self) -> &[DomainLinguisticProfile] {
+        self.coherence_engine.linguistic_profiles()
+    }
+
+    /// Emits a linguistic contour for the provided envelope.
+    pub fn emit_linguistic_contour(&self, envelope: &[f32]) -> PureResult<Vec<f32>> {
+        self.coherence_engine.emit_linguistic_contour(envelope)
+    }
+
     /// Returns the configured coherence backend.
     pub fn backend(&self) -> &CoherenceBackend {
         self.coherence_engine.backend()
+    }
+
+    /// Returns the number of Maxwell channels in the underlying coherence engine.
+    pub fn maxwell_channels(&self) -> usize {
+        self.coherence_engine.num_channels()
+    }
+
+    /// Returns the OpenCartesianTopos associated with this sequencer.
+    pub fn topos(&self) -> &OpenCartesianTopos {
+        &self.topos
     }
 }
 
@@ -211,6 +241,7 @@ impl Module for ZSpaceCoherenceSequencer {
 
 #[cfg(test)]
 mod tests {
+    use super::super::coherence_engine::DomainConcept;
     use super::*;
 
     #[test]
@@ -254,5 +285,27 @@ mod tests {
         assert_eq!(seq.semantic_profiles().len(), 1);
         seq.clear_domain_profiles();
         assert!(seq.semantic_profiles().is_empty());
+    }
+
+    #[test]
+    fn linguistic_profile_lifecycle_and_contour() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(64, 4, -1.0, topos).unwrap();
+        assert!(seq.linguistic_profiles().is_empty());
+        seq.register_linguistic_profile(
+            DomainLinguisticProfile::new(DomainConcept::GrainBoundary)
+                .with_register(1.3)
+                .unwrap()
+                .with_cadence(vec![0.5, 1.5, 1.0])
+                .unwrap(),
+        );
+        assert_eq!(seq.linguistic_profiles().len(), 1);
+
+        let contour = seq.emit_linguistic_contour(&[1.0, 1.0, 1.0]).unwrap();
+        assert_eq!(contour.len(), 3);
+        assert!(contour[1] > contour[0]);
+
+        seq.clear_linguistic_profiles();
+        assert!(seq.linguistic_profiles().is_empty());
     }
 }

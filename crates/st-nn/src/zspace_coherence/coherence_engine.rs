@@ -150,6 +150,126 @@ impl DomainSemanticProfile {
     }
 }
 
+/// Linguistic bias profile used to sculpt coherence contours across tokens.
+#[derive(Clone, Debug)]
+pub struct DomainLinguisticProfile {
+    concept: DomainConcept,
+    register: f32,
+    cadence: Option<Vec<f32>>,
+    inflection: f32,
+}
+
+impl DomainLinguisticProfile {
+    /// Creates a new linguistic profile bound to a semantic concept.
+    pub fn new(concept: DomainConcept) -> Self {
+        Self {
+            concept,
+            register: 1.0,
+            cadence: None,
+            inflection: 0.0,
+        }
+    }
+
+    /// Adjusts the vocal register (amplitude scaling) for this profile.
+    pub fn with_register(mut self, register: f32) -> PureResult<Self> {
+        if register <= 0.0 || !register.is_finite() {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: register,
+            }
+            .into());
+        }
+        self.register = register;
+        Ok(self)
+    }
+
+    /// Provides a cadence envelope applied across emitted contours.
+    pub fn with_cadence(mut self, cadence: Vec<f32>) -> PureResult<Self> {
+        if cadence.is_empty() {
+            return Err(TensorError::EmptyInput("cadence").into());
+        }
+        if cadence
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+        {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: cadence
+                    .iter()
+                    .copied()
+                    .find(|v| !v.is_finite() || *v <= 0.0)
+                    .unwrap_or(0.0),
+            }
+            .into());
+        }
+        self.cadence = Some(cadence);
+        Ok(self)
+    }
+
+    /// Tunes the melodic inflection applied after cadence scaling.
+    pub fn with_inflection(mut self, inflection: f32) -> PureResult<Self> {
+        if !inflection.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "inflection",
+                value: inflection,
+            }
+            .into());
+        }
+        self.inflection = inflection.clamp(-2.0, 2.0);
+        Ok(self)
+    }
+
+    /// Returns the underlying concept driving the profile.
+    pub fn concept(&self) -> &DomainConcept {
+        &self.concept
+    }
+
+    /// Exposes the configured cadence when present.
+    pub fn cadence(&self) -> Option<&[f32]> {
+        self.cadence.as_deref()
+    }
+
+    /// Returns the configured register multiplier.
+    pub fn register(&self) -> f32 {
+        self.register
+    }
+
+    fn envelope_weight(&self, token_idx: usize, total_tokens: usize, num_channels: usize) -> f32 {
+        let cadence = self
+            .cadence
+            .as_ref()
+            .and_then(|envelope| envelope.get(token_idx))
+            .copied()
+            .or_else(|| {
+                self.cadence
+                    .as_ref()
+                    .and_then(|envelope| envelope.last().copied())
+            })
+            .unwrap_or(1.0)
+            .max(1e-6);
+
+        let harmonic = if total_tokens > 0 {
+            (token_idx as f32 + 0.5) / total_tokens as f32
+        } else {
+            0.5
+        };
+        let channel_ratio = if num_channels > 0 {
+            (token_idx as f32 + 1.0) / num_channels as f32
+        } else {
+            1.0
+        };
+
+        let base = match self.concept {
+            DomainConcept::Membrane => 1.0 + 0.2 * (1.0 - harmonic),
+            DomainConcept::GrainBoundary => 0.9 + 0.3 * harmonic,
+            DomainConcept::NeuronalPattern => 0.8 + 0.4 * (harmonic - 0.5).abs(),
+            DomainConcept::DropletCoalescence => 0.95 + 0.25 * harmonic * (1.0 - harmonic),
+            DomainConcept::Custom(_) => 1.0,
+        };
+
+        let inflection = 1.0 + self.inflection * (channel_ratio - 0.5);
+        (base * cadence * self.register * inflection).max(1e-6)
+    }
+}
+
 /// Measures phase coherence using Maxwell pulses (instead of attention).
 #[derive(Clone, Debug)]
 pub struct CoherenceEngine {
@@ -158,6 +278,7 @@ pub struct CoherenceEngine {
     num_channels: usize,
     backend: CoherenceBackend,
     semantic_profiles: Vec<DomainSemanticProfile>,
+    linguistic_profiles: Vec<DomainLinguisticProfile>,
 }
 
 impl CoherenceEngine {
@@ -175,6 +296,7 @@ impl CoherenceEngine {
             num_channels: (dim / 64).max(1),
             backend: CoherenceBackend::default(),
             semantic_profiles: Vec::new(),
+            linguistic_profiles: Vec::new(),
         })
     }
 
@@ -201,6 +323,46 @@ impl CoherenceEngine {
     /// Exposes the registered semantic profiles.
     pub fn semantic_profiles(&self) -> &[DomainSemanticProfile] {
         &self.semantic_profiles
+    }
+
+    /// Registers a new linguistic contour profile.
+    pub fn register_linguistic_profile(&mut self, profile: DomainLinguisticProfile) {
+        self.linguistic_profiles.push(profile);
+    }
+
+    /// Removes any registered linguistic profiles.
+    pub fn clear_linguistic_profiles(&mut self) {
+        self.linguistic_profiles.clear();
+    }
+
+    /// Returns the currently registered linguistic profiles.
+    pub fn linguistic_profiles(&self) -> &[DomainLinguisticProfile] {
+        &self.linguistic_profiles
+    }
+
+    /// Synthesises a linguistic contour given an input envelope.
+    pub fn emit_linguistic_contour(&self, envelope: &[f32]) -> PureResult<Vec<f32>> {
+        if envelope.is_empty() {
+            return Err(TensorError::EmptyInput("linguistic_envelope").into());
+        }
+        if self.linguistic_profiles.is_empty() {
+            return Ok(envelope.to_vec());
+        }
+
+        let total_tokens = envelope.len();
+        let mut weights = vec![1.0f32; total_tokens];
+        for profile in &self.linguistic_profiles {
+            for (idx, weight) in weights.iter_mut().enumerate() {
+                *weight *= profile.envelope_weight(idx, total_tokens, self.num_channels);
+            }
+        }
+
+        let normalisation = (weights.iter().sum::<f32>() / total_tokens as f32).max(1e-6);
+        let mut contour = Vec::with_capacity(total_tokens);
+        for (value, weight) in envelope.iter().zip(weights.into_iter()) {
+            contour.push(value * (weight / normalisation));
+        }
+        Ok(contour)
     }
 
     fn curvature_bias(&self) -> f32 {
@@ -336,5 +498,41 @@ mod tests {
         engine.set_backend(CoherenceBackend::Fftw);
         assert!(engine.is_accelerated());
         assert_eq!(engine.backend().label(), "fftw");
+    }
+
+    #[test]
+    fn linguistic_profile_envelope_weight_is_positive() {
+        let profile = DomainLinguisticProfile::new(DomainConcept::Membrane)
+            .with_register(1.2)
+            .unwrap()
+            .with_cadence(vec![0.8, 1.1, 1.3])
+            .unwrap()
+            .with_inflection(0.4)
+            .unwrap();
+
+        for idx in 0..6 {
+            let weight = profile.envelope_weight(idx, 6, 4);
+            assert!(weight.is_finite());
+            assert!(weight > 0.0);
+        }
+    }
+
+    #[test]
+    fn emit_linguistic_contour_scales_envelope() {
+        let mut engine = CoherenceEngine::new(128, -1.0).unwrap();
+        engine.register_linguistic_profile(
+            DomainLinguisticProfile::new(DomainConcept::NeuronalPattern)
+                .with_register(1.5)
+                .unwrap()
+                .with_cadence(vec![1.0, 2.0, 1.0, 0.5])
+                .unwrap(),
+        );
+        let contour = engine
+            .emit_linguistic_contour(&[1.0, 1.0, 1.0, 1.0])
+            .unwrap();
+        assert_eq!(contour.len(), 4);
+        let peak = contour.iter().copied().fold(f32::MIN, |a, b| a.max(b));
+        let trough = contour.iter().copied().fold(f32::MAX, |a, b| a.min(b));
+        assert!(peak > trough);
     }
 }
