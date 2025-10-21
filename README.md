@@ -181,6 +181,9 @@ cd SpiralTorch
 pip install maturin==1.*
 
 # From the repo root:
+# CPU
+maturin build -m bindings/st-py/Cargo.toml --release --features cpu
+
 # WGPU (WebGPU; macOS/Windows/Linux)
 maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
 
