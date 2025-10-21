@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from types import ModuleType
 
 class Tensor:
@@ -124,7 +124,6 @@ class ZMetrics:
     stability: float
     gradient: Optional[Sequence[float]]
     drs: float
-    alpha: Optional[float]
 
 class ZSpaceTrainer:
     def __init__(
@@ -144,66 +143,20 @@ class ZSpaceTrainer:
     ) -> None: ...
     @property
     def state(self) -> List[float]: ...
-    @property
-    def alpha(self) -> float: ...
-    @alpha.setter
-    def alpha(self, value: float) -> None: ...
-    def update_lambdas(
-        self,
-        *,
-        lam_speed: Optional[float] = ...,
-        lam_mem: Optional[float] = ...,
-        lam_stab: Optional[float] = ...,
-        lam_frac: Optional[float] = ...,
-        lam_drs: Optional[float] = ...,
-    ) -> None: ...
-    def update_optimizer(
-        self,
-        *,
-        lr: Optional[float] = ...,
-        beta1: Optional[float] = ...,
-        beta2: Optional[float] = ...,
-        eps: Optional[float] = ...,
-        reset_moments: bool = ...,
-    ) -> None: ...
     def step(self, metrics: Mapping[str, float] | ZMetrics) -> float: ...
+    def reset(self) -> None: ...
     def state_dict(self) -> Dict[str, object]: ...
-    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
-
-class ZSchedulePhase:
-    steps: int
-    alpha: Optional[float]
-    lam_speed: Optional[float]
-    lam_mem: Optional[float]
-    lam_stab: Optional[float]
-    lam_frac: Optional[float]
-    lam_drs: Optional[float]
-    lr: Optional[float]
-    beta1: Optional[float]
-    beta2: Optional[float]
-    def apply(self, trainer: ZSpaceTrainer) -> None: ...
-
-class ZSpaceScheduler:
-    def __init__(
-        self,
-        trainer: ZSpaceTrainer,
-        phases: Sequence[ZSchedulePhase],
-        *,
-        loop: bool = ...,
-        autopatch: bool = ...,
-    ) -> None: ...
-    @property
-    def trainer(self) -> ZSpaceTrainer: ...
-    @property
-    def phase(self) -> ZSchedulePhase: ...
-    @property
-    def remaining(self) -> int: ...
-    def step(self, metrics: Mapping[str, float] | ZMetrics) -> float: ...
-    def run(self, samples: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
-    def state_dict(self) -> Dict[str, object]: ...
-    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
+    def load_state_dict(self, state: Dict[str, object], *, strict: bool = ...) -> None: ...
+    def step_batch(self, metrics: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
 
 def step_many(trainer: ZSpaceTrainer, samples: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
+
+def stream_zspace_training(
+    trainer: ZSpaceTrainer,
+    samples: Iterable[Mapping[str, float] | ZMetrics],
+    *,
+    on_step: Optional[Callable[[int, List[float], float], None]] = ...,
+) -> List[float]: ...
 
 class RankPlan:
     def kind(self) -> str: ...
@@ -279,6 +232,19 @@ def describe_device(
 
 def hip_probe() -> Dict[str, object]: ...
 
+def info_nce(
+    anchors: Sequence[Sequence[float]],
+    positives: Sequence[Sequence[float]],
+    temperature: float = ...,
+    normalize: bool = ...,
+) -> Dict[str, object]: ...
+
+def masked_mse(
+    predictions: Sequence[Sequence[float]],
+    targets: Sequence[Sequence[float]],
+    mask_indices: Sequence[Sequence[int]],
+) -> Dict[str, object]: ...
+
 class _CompatTorch(ModuleType):
     def to_torch(
         tensor: Tensor,
@@ -319,12 +285,11 @@ class TemporalResonanceBuffer:
     def __init__(self, capacity: int = ..., alpha: float = ...) -> None: ...
     @property
     def alpha(self) -> float: ...
-    @alpha.setter
-    def alpha(self, value: float) -> None: ...
+    @property
+    def capacity(self) -> int: ...
     def update(self, volume: Sequence[Sequence[Sequence[float]]]) -> List[List[List[float]]]: ...
     def state(self) -> Optional[List[List[List[float]]]]: ...
     def history(self) -> List[List[List[List[float]]]]: ...
-    def resize(self, capacity: int) -> None: ...
     def state_dict(self) -> Dict[str, object]: ...
     def load_state_dict(self, state: Mapping[str, object]) -> None: ...
 
@@ -347,10 +312,15 @@ class SpiralTorchVision:
     @property
     def volume(self) -> List[List[List[float]]]: ...
     @property
-    def window(self) -> Optional[str]: ...
+    def alpha(self) -> float: ...
+    @property
+    def temporal_capacity(self) -> int: ...
+    @property
+    def temporal_state(self) -> Optional[List[List[List[float]]]]: ...
+    @property
+    def window(self) -> List[float]: ...
     def reset(self) -> None: ...
-    def configure_window(self, name: Optional[str]) -> None: ...
-    def configure_temporal(self, capacity: int) -> None: ...
+    def update_window(self, window: Optional[str] | Sequence[float]) -> None: ...
     def accumulate(self, volume: Sequence[Sequence[Sequence[float]]], weight: float = ...) -> None: ...
     def accumulate_slices(self, slices: Sequence[Sequence[Sequence[float]]]) -> None: ...
     def accumulate_sequence(
@@ -362,43 +332,42 @@ class SpiralTorchVision:
     def volume_energy(self) -> float: ...
     def slice_profile(self) -> List[SliceProfile]: ...
     def snapshot(self) -> Dict[str, object]: ...
-    def temporal_snapshot(self, *, include_history: bool = ...) -> Dict[str, object]: ...
-    def apply_canvas_patch(self, patch: Sequence[Sequence[float]], *, momentum: float = ...) -> None: ...
-    def recent_snapshots(self) -> List[Dict[str, object]]: ...
     def state_dict(self) -> Dict[str, object]: ...
-    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
-
-class VisionAugmentor:
-    def __init__(
-        self,
-        *,
-        noise_std: float = ...,
-        clip: Optional[Tuple[float, float]] = ...,
-        normalise: bool = ...,
-        seed: Optional[int] = ...,
-    ) -> None: ...
-    def seed(self, seed: int) -> None: ...
-    def augment_volume(self, volume: Sequence[Sequence[Sequence[float]]]) -> List[List[List[float]]]: ...
-    def augment_vision(self, vision: SpiralTorchVision) -> None: ...
+    def load_state_dict(self, state: Mapping[str, object], *, strict: bool = ...) -> None: ...
 
 class CanvasTransformer:
-    def __init__(self, width: int, height: int, *, smoothing: float = ..., history: int = ...) -> None: ...
+    def __init__(self, width: int, height: int, *, smoothing: float = ...) -> None: ...
     @property
     def smoothing(self) -> float: ...
-    def configure_smoothing(self, smoothing: float) -> None: ...
     def refresh(self, projection: Sequence[Sequence[float]]) -> List[List[float]]: ...
     def accumulate_hypergrad(self, gradient: Sequence[Sequence[float]]) -> None: ...
     def accumulate_realgrad(self, gradient: Sequence[Sequence[float]]) -> None: ...
+    def reset(self) -> None: ...
     def gradient_summary(self) -> Dict[str, Dict[str, float]]: ...
     def emit_zspace_patch(self, vision: SpiralTorchVision, weight: float = ...) -> List[List[float]]: ...
     def canvas(self) -> List[List[float]]: ...
     def hypergrad(self) -> List[List[float]]: ...
     def realgrad(self) -> List[List[float]]: ...
-    def canvas_energy(self) -> float: ...
-    def reset(self) -> None: ...
-    def history(self) -> List[List[List[float]]]: ...
     def state_dict(self) -> Dict[str, object]: ...
-    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
+    def load_state_dict(self, state: Mapping[str, object], *, strict: bool = ...) -> None: ...
+    def snapshot(self) -> CanvasSnapshot: ...
+
+class CanvasSnapshot:
+    canvas: List[List[float]]
+    hypergrad: List[List[float]]
+    realgrad: List[List[float]]
+    summary: Dict[str, Dict[str, float]]
+    patch: Optional[List[List[float]]]
+
+def apply_vision_update(
+    vision: SpiralTorchVision,
+    canvas: CanvasTransformer,
+    *,
+    hypergrad: Optional[Sequence[Sequence[float]]] = ...,
+    realgrad: Optional[Sequence[Sequence[float]]] = ...,
+    weight: float = ...,
+    include_patch: bool = ...,
+) -> CanvasSnapshot: ...
 
 def set_global_seed(seed: int) -> None: ...
 
@@ -540,9 +509,8 @@ ecosystem: ModuleType
 class _ZSpaceModule(ModuleType):
     ZMetrics: type[ZMetrics]
     ZSpaceTrainer: type[ZSpaceTrainer]
-    ZSchedulePhase: type[ZSchedulePhase]
-    ZSpaceScheduler: type[ZSpaceScheduler]
     step_many: staticmethod
+    stream_zspace_training: staticmethod
 
 zspace: _ZSpaceModule
 
@@ -550,14 +518,95 @@ class _VisionModule(ModuleType):
     SpiralTorchVision: type[SpiralTorchVision]
     TemporalResonanceBuffer: type[TemporalResonanceBuffer]
     SliceProfile: type[SliceProfile]
-    VisionAugmentor: type[VisionAugmentor]
 
 vision: _VisionModule
 
 class _CanvasModule(ModuleType):
     CanvasTransformer: type[CanvasTransformer]
+    CanvasSnapshot: type[CanvasSnapshot]
+
+    def apply_vision_update(
+        vision: SpiralTorchVision,
+        canvas: CanvasTransformer,
+        *,
+        hypergrad: Sequence[Sequence[float]] | None = ...,
+        realgrad: Sequence[Sequence[float]] | None = ...,
+        weight: float = ...,
+        include_patch: bool = ...,
+    ) -> CanvasSnapshot: ...
 
 canvas: _CanvasModule
+
+class _SelfSupModule(ModuleType):
+    def info_nce(
+        anchors: Sequence[Sequence[float]],
+        positives: Sequence[Sequence[float]],
+        temperature: float = ...,
+        normalize: bool = ...,
+    ) -> Dict[str, object]: ...
+
+    def masked_mse(
+        predictions: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+        mask_indices: Sequence[Sequence[int]],
+    ) -> Dict[str, object]: ...
+
+selfsup: _SelfSupModule
+
+class _PlannerModule(ModuleType):
+    RankPlan: type[RankPlan]
+
+    def plan(
+        kind: str,
+        rows: int,
+        cols: int,
+        k: int,
+        *,
+        backend: Optional[str] = ...,
+        lane_width: Optional[int] = ...,
+        subgroup: Optional[bool] = ...,
+        max_workgroup: Optional[int] = ...,
+        shared_mem_per_workgroup: Optional[int] = ...,
+    ) -> RankPlan: ...
+
+    def plan_topk(
+        rows: int,
+        cols: int,
+        k: int,
+        *,
+        backend: Optional[str] = ...,
+        lane_width: Optional[int] = ...,
+        subgroup: Optional[bool] = ...,
+        max_workgroup: Optional[int] = ...,
+        shared_mem_per_workgroup: Optional[int] = ...,
+    ) -> RankPlan: ...
+
+    def describe_device(
+        backend: str = ...,
+        *,
+        lane_width: Optional[int] = ...,
+        subgroup: Optional[bool] = ...,
+        max_workgroup: Optional[int] = ...,
+        shared_mem_per_workgroup: Optional[int] = ...,
+        workgroup: Optional[int] = ...,
+        cols: Optional[int] = ...,
+        tile_hint: Optional[int] = ...,
+        compaction_hint: Optional[int] = ...,
+    ) -> Dict[str, object]: ...
+
+    def hip_probe() -> Dict[str, object]: ...
+    def generate_plan_batch_ex(
+        n: int,
+        total_steps: int,
+        base_radius: float,
+        radial_growth: float,
+        base_height: float,
+        meso_gain: float,
+        micro_gain: float,
+        seed: Optional[int] = ...,
+    ) -> List[object]: ...
+
+planner: _PlannerModule
 
 class QueryPlan:
     def __init__(self, query: str) -> None: ...
@@ -636,9 +685,8 @@ __all__ = [
     "z_space_barycenter",
     "ZMetrics",
     "ZSpaceTrainer",
-    "ZSchedulePhase",
-    "ZSpaceScheduler",
     "step_many",
+    "stream_zspace_training",
     "compat",
     "capture",
     "share",
@@ -652,6 +700,8 @@ __all__ = [
     "rec",
     "telemetry",
     "ecosystem",
+    "selfsup",
+    "planner",
     "zspace",
     "vision",
     "canvas",
@@ -664,6 +714,8 @@ __all__ = [
     "pack_tribonacci_chunks",
     "pack_tetranacci_chunks",
     "generate_plan_batch_ex",
+    "info_nce",
+    "masked_mse",
     "gl_coeffs_adaptive",
     "fracdiff_gl_1d",
     "QueryPlan",
@@ -675,8 +727,9 @@ __all__ = [
     "TemporalResonanceBuffer",
     "SpiralTorchVision",
     "SliceProfile",
-    "VisionAugmentor",
     "CanvasTransformer",
+    "CanvasSnapshot",
+    "apply_vision_update",
     "DashboardMetric",
     "DashboardEvent",
     "DashboardFrame",
