@@ -2608,6 +2608,7 @@ dependencies = [
  "bytemuck",
  "cudarc",
  "dirs 5.0.1",
+ "nalgebra 0.32.6",
  "ndarray",
  "once_cell",
  "opentelemetry",

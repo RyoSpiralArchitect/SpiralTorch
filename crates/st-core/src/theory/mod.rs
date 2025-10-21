@@ -54,3 +54,9 @@ pub use spiral_dynamics_impl as spiral_dynamics;
 pub mod sync_bridge_impl;
 #[doc(inline)]
 pub use sync_bridge_impl as sync_bridge;
+
+#[path = "stv.rs"]
+#[doc(hidden)]
+pub mod stv_impl;
+#[doc(inline)]
+pub use stv_impl as stv;

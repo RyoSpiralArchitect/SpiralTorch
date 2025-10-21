@@ -41,6 +41,7 @@ toml        = "0.8"
 dirs        = "5"
 statrs      = "0.16"
 ndarray     = "0.15"
+nalgebra    = "0.32"
 rustc-hash  = "1.1"
 rustfft     = "6"
 
