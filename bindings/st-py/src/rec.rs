@@ -8,9 +8,7 @@ use crate::tensor::{tensor_err_to_py, PyTensor};
 #[cfg(feature = "rec")]
 use pyo3::exceptions::PyValueError;
 #[cfg(feature = "rec")]
-use st_kdsl::{
-    compile_query, Err as KdslError, Filter, OrderDirection, QueryPlan as KdslQueryPlan,
-};
+use st_kdsl::{compile_query, Filter, OrderDirection, QueryPlan as KdslQueryPlan};
 #[cfg(feature = "rec")]
 use st_rec::{RatingTriple, RecEpochReport, Recommendation, SpiralRecError, SpiralRecommender};
 
@@ -21,23 +19,6 @@ fn rec_err_to_py(err: SpiralRecError) -> PyErr {
         SpiralRecError::OutOfBoundsRating { .. } | SpiralRecError::EmptyBatch => {
             PyValueError::new_err(err.to_string())
         }
-    }
-}
-
-#[cfg(feature = "rec")]
-fn canonicalize_query(input: &str) -> Cow<'_, str> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Cow::Owned(String::new());
-    }
-
-    let lowered = trimmed.to_ascii_lowercase();
-    if lowered.starts_with("select ") {
-        Cow::Borrowed(trimmed)
-    } else if lowered.starts_with("where ") {
-        Cow::Owned(format!("select * {}", trimmed))
-    } else {
-        Cow::Owned(format!("select * where {}", trimmed))
     }
 }
 
@@ -64,10 +45,36 @@ impl PyQueryPlan {
 impl PyQueryPlan {
     #[new]
     pub fn new(query: String) -> PyResult<Self> {
-        let normalized = canonicalize_query(&query).into_owned();
-        let plan = compile_query(&normalized)
-            .map_err(|err: KdslError| PyValueError::new_err(err.to_string()))?;
-        Ok(Self::from_query(normalized, plan))
+        let plan = match compile_query(&query) {
+            Ok(plan) => plan,
+            Err(err) => {
+                let trimmed = query.trim();
+                if trimmed.is_empty() {
+                    return Err(PyValueError::new_err(err.to_string()));
+                }
+                let lower = trimmed.to_ascii_lowercase();
+                let (fallback_source, clear_selects) = if lower.starts_with("select ") {
+                    (trimmed.to_string(), false)
+                } else if lower.starts_with("where ")
+                    || lower.starts_with("order ")
+                    || lower.starts_with("limit ")
+                {
+                    (format!("SELECT * {trimmed}"), true)
+                } else {
+                    (format!("SELECT * WHERE {trimmed}"), true)
+                };
+                match compile_query(&fallback_source) {
+                    Ok(mut plan) => {
+                        if clear_selects {
+                            plan.selects.clear();
+                        }
+                        plan
+                    }
+                    Err(_) => return Err(PyValueError::new_err(err.to_string())),
+                }
+            }
+        };
+        Ok(Self::from_query(query, plan))
     }
 
     pub fn query(&self) -> &str {
@@ -271,15 +278,17 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         vec!["QueryPlan", "RecEpochReport", "Recommender"],
     )?;
     parent.add_submodule(&module)?;
-    parent.add("QueryPlan", &query_plan)?;
-    parent.add("RecEpochReport", &rec_epoch_report)?;
-    parent.add("Recommender", &recommender)?;
 
-    let sys = py.import_bound("sys")?;
-    let modules_binding = sys.getattr("modules")?;
-    let modules = modules_binding.downcast::<PyDict>()?;
-    modules.set_item("spiraltorch.rec", &module)?;
-    modules.set_item("rec", &module)?;
+    parent.add("QueryPlan", query_plan)?;
+    parent.add("RecEpochReport", rec_epoch_report)?;
+    parent.add("Recommender", recommender)?;
+
+    let sys = PyModule::import_bound(py, "sys")?;
+    let modules = sys.getattr("modules")?;
+    let rec_module = parent.getattr("rec")?;
+    let rec_object = rec_module.to_object(py);
+    modules.set_item("spiraltorch.rec", rec_object.clone_ref(py))?;
+    modules.set_item("rec", rec_object)?;
     Ok(())
 }
 

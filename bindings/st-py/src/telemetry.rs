@@ -43,7 +43,7 @@ fn seconds_to_timestamp(seconds: Option<f64>) -> SystemTime {
     }
 }
 
-#[pyclass(module = "spiraltorch.telemetry", name = "DashboardMetric")]
+#[pyclass(name = "DashboardMetric", module = "spiraltorch.telemetry")]
 #[derive(Clone)]
 pub(crate) struct PyDashboardMetric {
     inner: DashboardMetric,
@@ -91,7 +91,7 @@ impl PyDashboardMetric {
     }
 }
 
-#[pyclass(module = "spiraltorch.telemetry", name = "DashboardEvent")]
+#[pyclass(name = "DashboardEvent", module = "spiraltorch.telemetry")]
 #[derive(Clone)]
 pub(crate) struct PyDashboardEvent {
     inner: DashboardEvent,
@@ -124,7 +124,7 @@ impl PyDashboardEvent {
     }
 }
 
-#[pyclass(module = "spiraltorch.telemetry", name = "DashboardFrame")]
+#[pyclass(name = "DashboardFrame", module = "spiraltorch.telemetry")]
 #[derive(Clone)]
 pub(crate) struct PyDashboardFrame {
     pub(crate) inner: DashboardFrame,
@@ -185,7 +185,7 @@ impl PyDashboardFrame {
     }
 }
 
-#[pyclass(module = "spiraltorch.telemetry", name = "DashboardRing", unsendable)]
+#[pyclass(name = "DashboardRing", module = "spiraltorch.telemetry", unsendable)]
 pub(crate) struct PyDashboardRing {
     inner: DashboardRing,
 }
