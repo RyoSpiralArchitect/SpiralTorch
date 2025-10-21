@@ -131,9 +131,6 @@ thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
 ---
-よし、ロング版いくよ！貼り替えやすいように **完全置き換え可能** な README テンプレを用意した。前に出した短縮版の流れ（Quick Links→3導線→Examples→Backend）をベースに、**アーキ概観 / フィーチャーフラグ / 開発環境 / テスト / リリース手順 / トラブルシュート / FAQ** を厚めにしたもの。必要なとこだけコピペでもOK。
-
----
 
 > **Current release:** `spiraltorch==0.1.4` (abi3 wheel, Python ≥3.8)  
 > **Targets:** CPU (always), Metal via WGPU (macOS), Vulkan/DX (WGPU), CUDA, HIP/ROCm
