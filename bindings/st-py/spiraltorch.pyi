@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from types import ModuleType
 
 class Tensor:
@@ -118,6 +118,93 @@ class ZSpaceBarycenter:
     def effective_weight(self) -> float: ...
     def intermediates(self) -> List[BarycenterIntermediate]: ...
 
+class ZMetrics:
+    speed: float
+    memory: float
+    stability: float
+    gradient: Optional[Sequence[float]]
+    drs: float
+    alpha: Optional[float]
+
+class ZSpaceTrainer:
+    def __init__(
+        self,
+        z_dim: int = ...,
+        *,
+        alpha: float = ...,
+        lam_speed: float = ...,
+        lam_mem: float = ...,
+        lam_stab: float = ...,
+        lam_frac: float = ...,
+        lam_drs: float = ...,
+        lr: float = ...,
+        beta1: float = ...,
+        beta2: float = ...,
+        eps: float = ...,
+    ) -> None: ...
+    @property
+    def state(self) -> List[float]: ...
+    @property
+    def alpha(self) -> float: ...
+    @alpha.setter
+    def alpha(self, value: float) -> None: ...
+    def update_lambdas(
+        self,
+        *,
+        lam_speed: Optional[float] = ...,
+        lam_mem: Optional[float] = ...,
+        lam_stab: Optional[float] = ...,
+        lam_frac: Optional[float] = ...,
+        lam_drs: Optional[float] = ...,
+    ) -> None: ...
+    def update_optimizer(
+        self,
+        *,
+        lr: Optional[float] = ...,
+        beta1: Optional[float] = ...,
+        beta2: Optional[float] = ...,
+        eps: Optional[float] = ...,
+        reset_moments: bool = ...,
+    ) -> None: ...
+    def step(self, metrics: Mapping[str, float] | ZMetrics) -> float: ...
+    def state_dict(self) -> Dict[str, object]: ...
+    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
+
+class ZSchedulePhase:
+    steps: int
+    alpha: Optional[float]
+    lam_speed: Optional[float]
+    lam_mem: Optional[float]
+    lam_stab: Optional[float]
+    lam_frac: Optional[float]
+    lam_drs: Optional[float]
+    lr: Optional[float]
+    beta1: Optional[float]
+    beta2: Optional[float]
+    def apply(self, trainer: ZSpaceTrainer) -> None: ...
+
+class ZSpaceScheduler:
+    def __init__(
+        self,
+        trainer: ZSpaceTrainer,
+        phases: Sequence[ZSchedulePhase],
+        *,
+        loop: bool = ...,
+        autopatch: bool = ...,
+    ) -> None: ...
+    @property
+    def trainer(self) -> ZSpaceTrainer: ...
+    @property
+    def phase(self) -> ZSchedulePhase: ...
+    @property
+    def remaining(self) -> int: ...
+    def step(self, metrics: Mapping[str, float] | ZMetrics) -> float: ...
+    def run(self, samples: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
+    def state_dict(self) -> Dict[str, object]: ...
+    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
+
+def step_many(trainer: ZSpaceTrainer, samples: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
+
 class RankPlan:
     def kind(self) -> str: ...
     def rows(self) -> int: ...
@@ -227,6 +314,91 @@ class _CompatNamespace(ModuleType):
     tensorflow: _CompatTensorFlow
 
 compat: _CompatNamespace
+
+class TemporalResonanceBuffer:
+    def __init__(self, capacity: int = ..., alpha: float = ...) -> None: ...
+    @property
+    def alpha(self) -> float: ...
+    @alpha.setter
+    def alpha(self, value: float) -> None: ...
+    def update(self, volume: Sequence[Sequence[Sequence[float]]]) -> List[List[List[float]]]: ...
+    def state(self) -> Optional[List[List[List[float]]]]: ...
+    def history(self) -> List[List[List[List[float]]]]: ...
+    def resize(self, capacity: int) -> None: ...
+    def state_dict(self) -> Dict[str, object]: ...
+    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
+
+class SliceProfile:
+    mean: float
+    std: float
+    energy: float
+
+class SpiralTorchVision:
+    def __init__(
+        self,
+        depth: int,
+        height: int,
+        width: int,
+        *,
+        alpha: float = ...,
+        window: Optional[str] = ...,
+        temporal: int = ...,
+    ) -> None: ...
+    @property
+    def volume(self) -> List[List[List[float]]]: ...
+    @property
+    def window(self) -> Optional[str]: ...
+    def reset(self) -> None: ...
+    def configure_window(self, name: Optional[str]) -> None: ...
+    def configure_temporal(self, capacity: int) -> None: ...
+    def accumulate(self, volume: Sequence[Sequence[Sequence[float]]], weight: float = ...) -> None: ...
+    def accumulate_slices(self, slices: Sequence[Sequence[Sequence[float]]]) -> None: ...
+    def accumulate_sequence(
+        self,
+        frames: Iterable[Sequence[Sequence[Sequence[float]]]],
+        weights: Optional[Sequence[float]] = ...,
+    ) -> None: ...
+    def project(self, *, normalise: bool = ...) -> List[List[float]]: ...
+    def volume_energy(self) -> float: ...
+    def slice_profile(self) -> List[SliceProfile]: ...
+    def snapshot(self) -> Dict[str, object]: ...
+    def temporal_snapshot(self, *, include_history: bool = ...) -> Dict[str, object]: ...
+    def apply_canvas_patch(self, patch: Sequence[Sequence[float]], *, momentum: float = ...) -> None: ...
+    def recent_snapshots(self) -> List[Dict[str, object]]: ...
+    def state_dict(self) -> Dict[str, object]: ...
+    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
+
+class VisionAugmentor:
+    def __init__(
+        self,
+        *,
+        noise_std: float = ...,
+        clip: Optional[Tuple[float, float]] = ...,
+        normalise: bool = ...,
+        seed: Optional[int] = ...,
+    ) -> None: ...
+    def seed(self, seed: int) -> None: ...
+    def augment_volume(self, volume: Sequence[Sequence[Sequence[float]]]) -> List[List[List[float]]]: ...
+    def augment_vision(self, vision: SpiralTorchVision) -> None: ...
+
+class CanvasTransformer:
+    def __init__(self, width: int, height: int, *, smoothing: float = ..., history: int = ...) -> None: ...
+    @property
+    def smoothing(self) -> float: ...
+    def configure_smoothing(self, smoothing: float) -> None: ...
+    def refresh(self, projection: Sequence[Sequence[float]]) -> List[List[float]]: ...
+    def accumulate_hypergrad(self, gradient: Sequence[Sequence[float]]) -> None: ...
+    def accumulate_realgrad(self, gradient: Sequence[Sequence[float]]) -> None: ...
+    def gradient_summary(self) -> Dict[str, Dict[str, float]]: ...
+    def emit_zspace_patch(self, vision: SpiralTorchVision, weight: float = ...) -> List[List[float]]: ...
+    def canvas(self) -> List[List[float]]: ...
+    def hypergrad(self) -> List[List[float]]: ...
+    def realgrad(self) -> List[List[float]]: ...
+    def canvas_energy(self) -> float: ...
+    def reset(self) -> None: ...
+    def history(self) -> List[List[List[float]]]: ...
+    def state_dict(self) -> Dict[str, object]: ...
+    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
 
 def set_global_seed(seed: int) -> None: ...
 
@@ -339,6 +511,28 @@ telemetry: ModuleType
 
 ecosystem: ModuleType
 
+class _ZSpaceModule(ModuleType):
+    ZMetrics: type[ZMetrics]
+    ZSpaceTrainer: type[ZSpaceTrainer]
+    ZSchedulePhase: type[ZSchedulePhase]
+    ZSpaceScheduler: type[ZSpaceScheduler]
+    step_many: staticmethod
+
+zspace: _ZSpaceModule
+
+class _VisionModule(ModuleType):
+    SpiralTorchVision: type[SpiralTorchVision]
+    TemporalResonanceBuffer: type[TemporalResonanceBuffer]
+    SliceProfile: type[SliceProfile]
+    VisionAugmentor: type[VisionAugmentor]
+
+vision: _VisionModule
+
+class _CanvasModule(ModuleType):
+    CanvasTransformer: type[CanvasTransformer]
+
+canvas: _CanvasModule
+
 class QueryPlan:
     def __init__(self, query: str) -> None: ...
     @property
@@ -370,7 +564,7 @@ class Recommender:
     @property
     def factors(self) -> int: ...
 
-class DqnAgent:
+class stAgent:
     def __init__(self, state_dim: int, action_dim: int, discount: float, learning_rate: float) -> None: ...
     def select_action(self, state: int) -> int: ...
     def update(self, state: int, action: int, reward: float, next_state: int) -> None: ...
@@ -414,6 +608,11 @@ __all__ = [
     "ZSpaceBarycenter",
     "BarycenterIntermediate",
     "z_space_barycenter",
+    "ZMetrics",
+    "ZSpaceTrainer",
+    "ZSchedulePhase",
+    "ZSpaceScheduler",
+    "step_many",
     "compat",
     "capture",
     "share",
@@ -427,6 +626,9 @@ __all__ = [
     "rec",
     "telemetry",
     "ecosystem",
+    "zspace",
+    "vision",
+    "canvas",
     "compat",
     "set_global_seed",
     "golden_ratio",
@@ -441,9 +643,14 @@ __all__ = [
     "QueryPlan",
     "RecEpochReport",
     "Recommender",
-    "DqnAgent",
+    "stAgent",
     "PpoAgent",
     "SacAgent",
+    "TemporalResonanceBuffer",
+    "SpiralTorchVision",
+    "SliceProfile",
+    "VisionAugmentor",
+    "CanvasTransformer",
     "DashboardMetric",
     "DashboardEvent",
     "DashboardFrame",
