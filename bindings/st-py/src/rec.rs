@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
+use pyo3::types::{PyDict, PyModule};
 use pyo3::Bound;
+use std::borrow::Cow;
 
 #[cfg(feature = "rec")]
 use crate::tensor::{tensor_err_to_py, PyTensor};
@@ -262,6 +263,8 @@ impl PyRecommender {
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "rec")?;
     module.add("__doc__", "SpiralTorch recommendation toolkit")?;
+    module.add("__name__", "spiraltorch.rec")?;
+    module.add("__package__", "spiraltorch")?;
     module.add_class::<PyQueryPlan>()?;
     module.add_class::<PyRecEpochReport>()?;
     module.add_class::<PyRecommender>()?;
