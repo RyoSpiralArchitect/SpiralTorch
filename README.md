@@ -80,22 +80,19 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 _Last updated: 2025-10-20 07:12 UTC_
 
 **Workspace summary**
-- Total files: **1518**
-- Total code LOC: **434,984**
-- Rust files: **1151** (Rust code LOC: **388,143**)
 
 ```text
 ===============================================================================
  Language            Files        Lines         Code     Comments       Blanks
 ===============================================================================
- BASH                    5          270          260            5            5
- C++                     5          830          700           15          115
- JSON                    7          233          233            0            0
- Python                 66         6957         5720          239          998
- SVG                    15          300          300            0            0
- Plain Text              5         3305            0         2720          585
- TOML                  121         2945         2485          103          357
- TypeScript             25        21370        18745          875         1750
+ BASH                    1           54           52            1            1
+ C++                     1          166          140            3           23
+ JSON                    3          189          189            0            0
+ Python                 33         3414         2811           62          541
+ SVG                     3           60           60            0            0
+ Plain Text              1          661            0          544          117
+ TOML                   31          753          647           18           88
+ TypeScript              5         4274         3749          175          350
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
  Jupyter Notebooks       2            0            0            0            0
@@ -103,22 +100,22 @@ _Last updated: 2025-10-20 07:12 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown              113        15559            0        12603         2956
- |- BASH                15          464          336           65           63
+ Markdown               38         4237            0         3396          841
+ |- BASH                 7           82           65            9            8
  |- Dockerfile           1            6            6            0            0
- |- HTML                 5           90           90            0            0
- |- JavaScript           5          130          115            5           10
- |- JSON                 5           55           55            0            0
- |- Python              18         2645         2233           65          347
- |- Rust                 8         2779         2411           72          296
+ |- HTML                 1           18           18            0            0
+ |- JavaScript           1           26           23            1            2
+ |- JSON                 1           11           11            0            0
+ |- Python               6          588          503           13           72
+ |- Rust                 3          661          576           15           70
  |- YAML                 2           62           62            0            0
- (Total)                          21790         5308        12810         3672
+ (Total)                           5691         1264         3434          993
 -------------------------------------------------------------------------------
- Rust                 1151       383143       340002         6924        36217
- |- Markdown           746        17028            0        16614          414
- (Total)                         400171       340002        23538        36631
+ Rust                  290        96782        86160         1506         9116
+ |- Markdown           177         4098            0         4004           94
+ (Total)                         100880        86160         5510         9210
 ===============================================================================
- Total                1518       434984       368510        23484        42990
+ Total                 411       110662        93873         5705        11084
 ===============================================================================
 
 ```
@@ -135,7 +132,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
-# SpiralTorch (Python bindings) — v0.1.2
+# SpiralTorch (Python bindings) — v0.1.3
 
 A **thin Python bridge** to SpiralTorch’s Rust-first Z-space learning stack.  
 The wheel exposes the same Z-space tensors, hypergrad primitives, and planner helpers used by the Rust API—no heavy shims.
@@ -184,6 +181,9 @@ cd SpiralTorch
 pip install maturin==1.*
 
 # From the repo root:
+# CPU
+maturin build -m bindings/st-py/Cargo.toml --release --features cpu
+
 # WGPU (WebGPU; macOS/Windows/Linux)
 maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
 
@@ -1808,6 +1808,40 @@ execute_rank(&exec, &plan)?;
 - `Sequential` composition and `ModuleTrainer`
 - Fully Rust-native, Python-accessible via wheels
 
+## 🌀 New: ZSpaceCoherenceSequencer
+
+**NOT Attention. NOT Transformer.**
+
+Instead of Q·K^T softmax:
+- **Maxwell pulses** detect phase synchronization
+- **Desire Lagrangian** applies semantic bias (no RLHF needed)
+- **Hyperbolic geometry** naturally encodes hierarchy
+- **Fractional operators** replace dot products
+
+```python
+from spiraltorch.nn import ZSpaceCoherenceSequencer
+
+model = ZSpaceCoherenceSequencer(
+    dim=768,
+    num_heads=12,
+    curvature=-1.0
+)
+
+out = model.forward(x)  # Coherence-weighted aggregation
+```
+
+[See example](examples/05_new_layers/zspace_coherence_demo.py)
+
+### Why Not Attention?
+
+| Aspect | Attention | ZSpaceCoherence |
+|--------|-----------|-----------------|
+| Token weighting | Q·K^T softmax | Maxwell pulses |
+| Geometry | Euclidean (dot product) | Hyperbolic (geodesic) |
+| Semantic bias | External (RLHF/DPO) | Intrinsic (Desire Lagrangian) |
+| Operators | Softmax | Fractional calculus |
+| Hierarchy | Implicit | Explicit (curvature) |
+
 **Features**
 - Dataset abstraction and serialization
 - Hypergrad integration for every parameter
@@ -1843,6 +1877,44 @@ let dataset = vec![
 let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
 println!("roundtable avg loss: {:.6}", stats.average_loss);
 ```
+
+## 🌀 New: ZSpaceCoherenceSequencer
+
+**NOT Attention. NOT Transformer.**
+
+Instead of Q·K^T softmax:
+- **Maxwell pulses** detect phase synchronization
+- **Desire Lagrangian** applies linguistic bias (no RLHF needed)
+- **Hyperbolic geometry** naturally encodes hierarchy
+- **Fractional operators** replace dot products
+
+```python
+from spiraltorch.nn import ZSpaceCoherenceSequencer
+
+model = ZSpaceCoherenceSequencer(
+    dim=768,
+    num_heads=12,
+    curvature=-1.0
+)
+
+out = model.forward(x)  # Coherence-weighted aggregation
+
+# Derive a linguistic contour descriptor for downstream vocalisation
+contour = model.emit_linguistic_contour(x)
+print(contour.prosody_index())
+```
+
+[See example](examples/05_new_layers/zspace_coherence_demo.py)
+
+### Why Not Attention?
+
+| Aspect | Attention | ZSpaceCoherence |
+|--------|-----------|-----------------|
+| Token weighting | Q·K^T softmax | Maxwell pulses |
+| Geometry | Euclidean (dot product) | Hyperbolic (geodesic) |
+| Linguistic bias | External (RLHF/DPO) | Intrinsic (Desire Lagrangian) |
+| Operators | Softmax | Fractional calculus |
+| Hierarchy | Implicit | Explicit (curvature) |
 
 ### Distributed roundtable consensus
 

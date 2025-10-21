@@ -1,20 +1,12 @@
-mod convnext;
-mod resnet;
-mod vit;
+pub mod convnext;
+pub mod resnet;
+pub mod vit;
 
 pub use convnext::{ConvNeXtBackbone, ConvNeXtConfig};
 pub use resnet::{ResNetBackbone, ResNetConfig};
 pub use vit::{ViTBackbone, ViTConfig};
 
 use std::collections::HashMap;
-
-mod convnext;
-mod resnet;
-mod vit;
-
-pub use convnext::{ConvNeXtBackbone, ConvNeXtConfig};
-pub use resnet::{ResNetBackbone, ResNetConfig};
-pub use vit::{ViTBackbone, ViTConfig};
 
 use st_core::telemetry::xai_report::AttributionMetadata;
 use st_nn::module::Module;
