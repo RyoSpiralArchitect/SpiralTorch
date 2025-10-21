@@ -166,7 +166,10 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
 
     // 2) provide aliases / helpers inside the spiral_rl module
     module.add("DqnAgent", module.getattr("stAgent")?)?;
-    module.add("__all__", vec!["stAgent", "DqnAgent", "PpoAgent", "SacAgent"])?;
+    module.add(
+        "__all__",
+        vec!["stAgent", "DqnAgent", "PpoAgent", "SacAgent"],
+    )?;
 
     // 3) attach as a submodule of the parent (spiraltorch.spiral_rl)
     parent.add_submodule(&module)?;
@@ -175,7 +178,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add("rl", module.to_object(py))?;
 
     // 5) mirror convenient top-level names under `spiraltorch` for backward compatibility
-    parent.add("stAgent",  module.getattr("stAgent")?)?;
+    parent.add("stAgent", module.getattr("stAgent")?)?;
     parent.add("DqnAgent", module.getattr("DqnAgent")?)?;
     parent.add("PpoAgent", module.getattr("PpoAgent")?)?;
     parent.add("SacAgent", module.getattr("SacAgent")?)?;

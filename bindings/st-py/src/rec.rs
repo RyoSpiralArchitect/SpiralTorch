@@ -7,9 +7,7 @@ use crate::tensor::{tensor_err_to_py, PyTensor};
 #[cfg(feature = "rec")]
 use pyo3::exceptions::PyValueError;
 #[cfg(feature = "rec")]
-use st_kdsl::{
-    compile_query, Err as KdslError, Filter, OrderDirection, QueryPlan as KdslQueryPlan,
-};
+use st_kdsl::{compile_query, Filter, OrderDirection, QueryPlan as KdslQueryPlan};
 #[cfg(feature = "rec")]
 use st_rec::{RatingTriple, RecEpochReport, Recommendation, SpiralRecError, SpiralRecommender};
 
@@ -24,7 +22,7 @@ fn rec_err_to_py(err: SpiralRecError) -> PyErr {
 }
 
 #[cfg(feature = "rec")]
-#[pyclass(module = "spiraltorch.rec")]
+#[pyclass(name = "QueryPlan", module = "spiraltorch.rec")]
 pub(crate) struct PyQueryPlan {
     source: String,
     inner: KdslQueryPlan,
@@ -46,8 +44,35 @@ impl PyQueryPlan {
 impl PyQueryPlan {
     #[new]
     pub fn new(query: String) -> PyResult<Self> {
-        let plan = compile_query(&query)
-            .map_err(|err: KdslError| PyValueError::new_err(err.to_string()))?;
+        let plan = match compile_query(&query) {
+            Ok(plan) => plan,
+            Err(err) => {
+                let trimmed = query.trim();
+                if trimmed.is_empty() {
+                    return Err(PyValueError::new_err(err.to_string()));
+                }
+                let lower = trimmed.to_ascii_lowercase();
+                let (fallback_source, clear_selects) = if lower.starts_with("select ") {
+                    (trimmed.to_string(), false)
+                } else if lower.starts_with("where ")
+                    || lower.starts_with("order ")
+                    || lower.starts_with("limit ")
+                {
+                    (format!("SELECT * {trimmed}"), true)
+                } else {
+                    (format!("SELECT * WHERE {trimmed}"), true)
+                };
+                match compile_query(&fallback_source) {
+                    Ok(mut plan) => {
+                        if clear_selects {
+                            plan.selects.clear();
+                        }
+                        plan
+                    }
+                    Err(_) => return Err(PyValueError::new_err(err.to_string())),
+                }
+            }
+        };
         Ok(Self::from_query(query, plan))
     }
 
@@ -90,7 +115,7 @@ impl PyQueryPlan {
 }
 
 #[cfg(feature = "rec")]
-#[pyclass(module = "spiraltorch.rec")]
+#[pyclass(name = "RecEpochReport", module = "spiraltorch.rec")]
 #[derive(Clone)]
 pub(crate) struct PyRecEpochReport {
     #[pyo3(get)]
@@ -124,7 +149,7 @@ impl PyRecEpochReport {
 }
 
 #[cfg(feature = "rec")]
-#[pyclass(module = "spiraltorch.rec")]
+#[pyclass(name = "Recommender", module = "spiraltorch.rec")]
 pub(crate) struct PyRecommender {
     inner: SpiralRecommender,
 }
@@ -240,14 +265,27 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyQueryPlan>()?;
     module.add_class::<PyRecEpochReport>()?;
     module.add_class::<PyRecommender>()?;
+
+    let query_plan = module.getattr("QueryPlan")?;
+    let rec_epoch_report = module.getattr("RecEpochReport")?;
+    let recommender = module.getattr("Recommender")?;
+
     module.add(
         "__all__",
         vec!["QueryPlan", "RecEpochReport", "Recommender"],
     )?;
     parent.add_submodule(&module)?;
-    parent.add("QueryPlan", module.getattr("QueryPlan")?)?;
-    parent.add("RecEpochReport", module.getattr("RecEpochReport")?)?;
-    parent.add("Recommender", module.getattr("Recommender")?)?;
+
+    parent.add("QueryPlan", query_plan)?;
+    parent.add("RecEpochReport", rec_epoch_report)?;
+    parent.add("Recommender", recommender)?;
+
+    let sys = PyModule::import_bound(py, "sys")?;
+    let modules = sys.getattr("modules")?;
+    let rec_module = parent.getattr("rec")?;
+    let rec_object = rec_module.to_object(py);
+    modules.set_item("spiraltorch.rec", rec_object.clone_ref(py))?;
+    modules.set_item("rec", rec_object)?;
     Ok(())
 }
 
