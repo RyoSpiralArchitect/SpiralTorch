@@ -88,7 +88,14 @@ impl ZSpaceCoherenceSequencer {
         let mut aggregated = Tensor::zeros(rows, cols)?;
         let channel_width = (self.dim + coherence_weights.len() - 1) / coherence_weights.len();
         let normalization = coherence_weights.iter().copied().sum::<f32>().max(1e-6);
-        let fractional_order = (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.95);
+        let canonical_concept = self.canonical_domain_concept();
+        let fractional_order = match canonical_concept {
+            DomainConcept::Membrane => (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.85),
+            DomainConcept::GrainBoundary => (1.0 / (1.0 + self.curvature.abs() * 0.8)).clamp(0.15, 0.9),
+            DomainConcept::NeuronalPattern => (1.0 / (1.0 + self.curvature.abs() * 0.6)).clamp(0.2, 0.95),
+            DomainConcept::DropletCoalescence => (1.0 / (1.0 + self.curvature.abs() * 1.2)).clamp(0.05, 0.8),
+            DomainConcept::Custom(_) => (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.95),
+        };
         let input = x.data();
         {
             let output = aggregated.data_mut();
@@ -185,6 +192,37 @@ impl ZSpaceCoherenceSequencer {
     pub fn describe_channels(&self, x: &Tensor) -> PureResult<Vec<LinguisticChannelReport>> {
         let coherence = self.measure_coherence(x)?;
         self.coherence_engine.describe_channels(&coherence)
+    }
+
+    /// Returns the number of Maxwell coherence channels computed by the engine.
+    pub fn maxwell_channels(&self) -> usize {
+        self.coherence_engine.num_channels()
+    }
+
+    /// Provides read-only access to the geometric topos used by the sequencer.
+    pub fn topos(&self) -> &OpenCartesianTopos {
+        &self.topos
+    }
+
+    /// Selects a canonical domain concept based on the curvature and head count.
+    pub fn canonical_domain_concept(&self) -> DomainConcept {
+        if self.curvature < -0.5 {
+            if self.num_heads > 16 {
+                DomainConcept::NeuronalPattern
+            } else {
+                DomainConcept::Membrane
+            }
+        } else if self.curvature > 0.5 {
+            if self.num_heads > 8 {
+                DomainConcept::DropletCoalescence
+            } else {
+                DomainConcept::GrainBoundary
+            }
+        } else if self.num_heads >= 12 {
+            DomainConcept::NeuronalPattern
+        } else {
+            DomainConcept::Membrane
+        }
     }
 }
 
