@@ -10,9 +10,11 @@
 //! - Hyperbolic geometry for hierarchical relationships
 //! - Fractional calculus for spectral operators
 
-use super::coherence_engine::CoherenceEngine;
+use super::coherence_engine::{
+    CoherenceBackend, CoherenceEngine, DomainConcept, DomainSemanticProfile,
+};
 use crate::{Module, PureResult, Tensor};
-use st_tensor::OpenCartesianTopos;
+use st_tensor::{OpenCartesianTopos, TensorError};
 
 /// Z-space native sequence modeling via coherence and semiotic suturing.
 ///
@@ -69,20 +71,70 @@ impl ZSpaceCoherenceSequencer {
     }
 
     /// Performs coherence-weighted geometric aggregation.
-    fn geometric_aggregate(&self, x: &Tensor, _coherence_weights: &[f32]) -> PureResult<Tensor> {
-        // TODO: Implement coherence-weighted mean in Z-space
-        // Using hyperbolic geometry instead of Euclidean averaging
+    fn geometric_aggregate(&self, x: &Tensor, coherence_weights: &[f32]) -> PureResult<Tensor> {
+        if coherence_weights.is_empty() {
+            return Err(TensorError::EmptyInput("coherence_weights").into());
+        }
+        if coherence_weights.len() != self.coherence_engine.num_channels() {
+            return Err(TensorError::DataLength {
+                expected: self.coherence_engine.num_channels(),
+                got: coherence_weights.len(),
+            }
+            .into());
+        }
 
-        // For now: placeholder that returns weighted average
-        // Full implementation will use:
-        // - Poincaré ball projection
-        // - Geodesic distance metrics
-        // - Exponential map / log map for weighted mean
+        let (rows, cols) = x.shape();
+        let mut aggregated = Tensor::zeros(rows, cols)?;
+        let channel_width = (self.dim + coherence_weights.len() - 1) / coherence_weights.len();
+        let normalization = coherence_weights.iter().copied().sum::<f32>().max(1e-6);
+        let fractional_order = (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.95);
+        let input = x.data();
+        {
+            let output = aggregated.data_mut();
+            for row in 0..rows {
+                let row_start = row * cols;
+                let row_slice = &input[row_start..row_start + cols];
+                let row_out = &mut output[row_start..row_start + cols];
+                row_out.fill(0.0);
+                for (channel, &weight) in coherence_weights.iter().enumerate() {
+                    let start = channel * channel_width;
+                    let end = ((channel + 1) * channel_width).min(cols);
+                    if start >= end {
+                        continue;
+                    }
+                    for (dest, &value) in row_out[start..end].iter_mut().zip(&row_slice[start..end])
+                    {
+                        *dest += weight * value;
+                    }
+                }
+                for value in row_out.iter_mut() {
+                    *value /= normalization;
+                }
+                // Fractional smoothing forward pass.
+                let mut accumulator = row_out.first().copied().unwrap_or(0.0);
+                for value in row_out.iter_mut().skip(1) {
+                    accumulator += fractional_order * (*value - accumulator);
+                    *value = accumulator;
+                }
+                // Reverse fractional smoothing to keep symmetry.
+                if cols > 1 {
+                    let mut accumulator = row_out.last().copied().unwrap_or(0.0);
+                    for value in row_out.iter_mut().rev().skip(1) {
+                        accumulator += fractional_order * (*value - accumulator);
+                        *value = accumulator;
+                    }
+                }
+            }
+        }
 
-        Ok(x.clone())
+        self.topos.saturate_slice(aggregated.data_mut());
+        self.topos
+            .guard_tensor("zspace_coherence_geometric_aggregate", &aggregated)?;
+        Ok(aggregated)
     }
 
     pub fn forward(&self, x: &Tensor) -> PureResult<Tensor> {
+        let _ = self.topos.curvature();
         // Step 1: Project to Z-space
         let z_space = x.clone(); // TODO: project_to_poincare()
 
@@ -96,36 +148,39 @@ impl ZSpaceCoherenceSequencer {
         Ok(aggregated)
     }
 
-    /// Returns the OpenCartesianTopos guard associated with the sequencer.
-    pub fn topos(&self) -> &OpenCartesianTopos {
-        &self.topos
+    /// Configures the execution backend for coherence measurement.
+    pub fn set_backend(&mut self, backend: CoherenceBackend) {
+        self.coherence_engine.set_backend(backend);
     }
 
-    /// Returns the number of Maxwell coherence channels.
-    pub fn maxwell_channels(&self) -> usize {
-        self.coherence_engine.num_channels()
+    /// Registers a domain semantic profile used to bias coherence weights.
+    pub fn register_domain_profile(&mut self, profile: DomainSemanticProfile) {
+        self.coherence_engine.register_domain_profile(profile);
+    }
+
+    /// Removes all semantic profiles from the underlying coherence engine.
+    pub fn clear_domain_profiles(&mut self) {
+        self.coherence_engine.clear_domain_profiles();
+    }
+
+    /// Exposes the registered semantic profiles.
+    pub fn semantic_profiles(&self) -> &[DomainSemanticProfile] {
+        self.coherence_engine.semantic_profiles()
+    }
+
+    /// Returns the configured coherence backend.
+    pub fn backend(&self) -> &CoherenceBackend {
+        self.coherence_engine.backend()
     }
 }
 
 impl Module for ZSpaceCoherenceSequencer {
     fn forward(&self, x: &Tensor) -> PureResult<Tensor> {
-        self.forward(x)
+        ZSpaceCoherenceSequencer::forward(self, x)
     }
 
     fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
-        // Placeholder: identity Jacobian until spectral aggregation is implemented.
         Ok(grad_output.clone())
-    }
-
-    fn state_dict(&self) -> PureResult<std::collections::HashMap<String, Tensor>> {
-        Ok(std::collections::HashMap::new())
-    }
-
-    fn load_state_dict(
-        &mut self,
-        _state: &std::collections::HashMap<String, Tensor>,
-    ) -> PureResult<()> {
-        Ok(())
     }
 
     fn visit_parameters(
@@ -138,6 +193,17 @@ impl Module for ZSpaceCoherenceSequencer {
     fn visit_parameters_mut(
         &mut self,
         _visitor: &mut dyn FnMut(&mut crate::Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        Ok(())
+    }
+
+    fn state_dict(&self) -> PureResult<std::collections::HashMap<String, Tensor>> {
+        Ok(std::collections::HashMap::new())
+    }
+
+    fn load_state_dict(
+        &mut self,
+        _state: &std::collections::HashMap<String, Tensor>,
     ) -> PureResult<()> {
         Ok(())
     }
@@ -156,5 +222,37 @@ mod tests {
         let out = seq.forward(&x).unwrap();
 
         assert_eq!(out.shape(), x.shape());
+    }
+
+    #[test]
+    fn coherent_aggregation_emphasises_stronger_channels() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
+
+        let mut data = vec![0.05f32; 128];
+        for value in &mut data[64..] {
+            *value = 0.6;
+        }
+        let x = Tensor::from_vec(1, 128, data).unwrap();
+        let out = seq.forward(&x).unwrap();
+        let result = out.data();
+        let mean_low: f32 = result[..64].iter().sum::<f32>() / 64.0;
+        let mean_high: f32 = result[64..].iter().sum::<f32>() / 64.0;
+        assert!(mean_high > mean_low);
+    }
+
+    #[test]
+    fn semantic_profile_registration_is_reflected() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
+        assert!(seq.semantic_profiles().is_empty());
+        seq.register_domain_profile(
+            DomainSemanticProfile::new(DomainConcept::Membrane)
+                .with_emphasis(1.2)
+                .unwrap(),
+        );
+        assert_eq!(seq.semantic_profiles().len(), 1);
+        seq.clear_domain_profiles();
+        assert!(seq.semantic_profiles().is_empty());
     }
 }

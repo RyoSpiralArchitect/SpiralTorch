@@ -6,5 +6,7 @@
 pub mod coherence_engine;
 pub mod sequencer;
 
-pub use coherence_engine::CoherenceEngine;
+pub use coherence_engine::{
+    CoherenceBackend, CoherenceEngine, DomainConcept, DomainSemanticProfile,
+};
 pub use sequencer::ZSpaceCoherenceSequencer;

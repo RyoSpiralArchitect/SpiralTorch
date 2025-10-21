@@ -84,7 +84,10 @@ pub use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
 };
 pub use trainer::{EpochStats, ModuleTrainer};
-pub use zspace_coherence::{CoherenceEngine, ZSpaceCoherenceSequencer};
+pub use zspace_coherence::{
+    CoherenceBackend, CoherenceEngine, DomainConcept, DomainSemanticProfile,
+    ZSpaceCoherenceSequencer,
+};
 
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};
 pub use st_tensor::topos::OpenCartesianTopos;
