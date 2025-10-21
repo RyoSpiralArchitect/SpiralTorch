@@ -104,3 +104,8 @@ reintroduce microlocal calibration later if needed.
   tells the microlocal side how to retune gauge thresholds, Z-lift bias gains,
   smoothing, and tempo hints based on the macro kinetics and dimensionless
   regime.【F:crates/st-core/src/theory/macro.rs†L870-L984】
+- `MacroZBridge::ingest_signature` now weights curvature estimates by the
+  perimeter density and, whenever oriented normals are available, folds the
+  card’s anisotropy specification into \(\kappa_\gamma\) before the velocity is
+  evaluated—keeping Fourier modes and tabulated spectra consistent with the
+  macro functional.【F:crates/st-core/src/theory/macro.rs†L870-L1041】

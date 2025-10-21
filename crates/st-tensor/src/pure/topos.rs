@@ -995,6 +995,18 @@ impl GraphGuardProfile {
         self.permeability = permeability;
         Ok(self)
     }
+
+    /// Configures the porosity for adjacency saturation.
+    ///
+    /// This is an alias for [`with_permeability`](Self::with_permeability) that mirrors the
+    /// terminology used by higher level guards and bindings.
+    pub fn with_porosity(mut self, porosity: f32) -> PureResult<Self> {
+        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
+            return Err(TensorError::PorosityOutOfRange { porosity });
+        }
+        self.permeability = porosity;
+        Ok(self)
+    }
 }
 
 /// Structured report emitted by [`MultiModalToposGuard::guard_graph_adjacency`].

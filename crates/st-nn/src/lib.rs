@@ -26,6 +26,7 @@ pub mod plan;
 pub mod roundtable;
 pub mod schedule;
 pub mod trainer;
+pub mod zspace_coherence;
 
 pub use dataset::{from_vec as dataset_from_vec, BatchIter, DataLoader, Dataset};
 pub use gnn::{
@@ -83,6 +84,10 @@ pub use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
 };
 pub use trainer::{EpochStats, ModuleTrainer};
+pub use zspace_coherence::{
+    CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile, LinguisticContour,
+    ZSpaceCoherenceSequencer,
+};
 
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};
 pub use st_tensor::topos::OpenCartesianTopos;
