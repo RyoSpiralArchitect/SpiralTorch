@@ -53,7 +53,6 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 
 
 <p align="center">
-  [![PyPI version](https://img.shields.io/pypi/v/spiraltorch.svg)](https://pypi.org/project/spiraltorch/)
   <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
   <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
   <img src="https://img.shields.io/badge/MPS-ready-brightgreen.svg" alt="MPS ready">
@@ -1885,7 +1884,7 @@ println!("roundtable avg loss: {:.6}", stats.average_loss);
 
 Instead of Q·K^T softmax:
 - **Maxwell pulses** detect phase synchronization
-- **Desire Lagrangian** applies semantic bias (no RLHF needed)
+- **Desire Lagrangian** applies linguistic bias (no RLHF needed)
 - **Hyperbolic geometry** naturally encodes hierarchy
 - **Fractional operators** replace dot products
 
@@ -1899,6 +1898,10 @@ model = ZSpaceCoherenceSequencer(
 )
 
 out = model.forward(x)  # Coherence-weighted aggregation
+
+# Derive a linguistic contour descriptor for downstream vocalisation
+contour = model.emit_linguistic_contour(x)
+print(contour.prosody_index())
 ```
 
 [See example](examples/05_new_layers/zspace_coherence_demo.py)
@@ -1909,7 +1912,7 @@ out = model.forward(x)  # Coherence-weighted aggregation
 |--------|-----------|-----------------|
 | Token weighting | Q·K^T softmax | Maxwell pulses |
 | Geometry | Euclidean (dot product) | Hyperbolic (geodesic) |
-| Semantic bias | External (RLHF/DPO) | Intrinsic (Desire Lagrangian) |
+| Linguistic bias | External (RLHF/DPO) | Intrinsic (Desire Lagrangian) |
 | Operators | Softmax | Fractional calculus |
 | Hierarchy | Implicit | Explicit (curvature) |
 

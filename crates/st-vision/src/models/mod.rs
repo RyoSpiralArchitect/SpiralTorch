@@ -1,6 +1,6 @@
-mod convnext;
-mod resnet;
-mod vit;
+pub mod convnext;
+pub mod resnet;
+pub mod vit;
 
 pub use convnext::{ConvNeXtBackbone, ConvNeXtConfig};
 pub use resnet::{ResNetBackbone, ResNetConfig};

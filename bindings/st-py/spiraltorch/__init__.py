@@ -1,6 +1,7 @@
 from __future__ import annotations
 import cmath as _cmath
 import math as _math
+import random as _random
 import sys, types as _types
 from collections import deque as _deque
 from dataclasses import dataclass as _dataclass
@@ -160,6 +161,45 @@ class ZMetrics:
     stability: float
     gradient: _Optional[_Sequence[float]] = None
     drs: float = 0.0
+    alpha: float | None = None
+
+
+@_dataclass
+class ZSchedulePhase:
+    """Parameter schedule segment consumed by :class:`ZSpaceScheduler`."""
+
+    steps: int
+    alpha: float | None = None
+    lam_speed: float | None = None
+    lam_mem: float | None = None
+    lam_stab: float | None = None
+    lam_frac: float | None = None
+    lam_drs: float | None = None
+    lr: float | None = None
+    beta1: float | None = None
+    beta2: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.steps <= 0:
+            raise ValueError("steps must be positive")
+
+    def apply(self, trainer: "ZSpaceTrainer") -> None:
+        """Mutate ``trainer`` in-place with non-null attributes."""
+
+        if self.alpha is not None:
+            trainer.alpha = float(self.alpha)
+        trainer.update_lambdas(
+            lam_speed=self.lam_speed,
+            lam_mem=self.lam_mem,
+            lam_stab=self.lam_stab,
+            lam_frac=self.lam_frac,
+            lam_drs=self.lam_drs,
+        )
+        trainer.update_optimizer(
+            lr=self.lr,
+            beta1=self.beta1,
+            beta2=self.beta2,
+        )
 
 
 def _clone_volume(volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
@@ -256,6 +296,10 @@ class TemporalResonanceBuffer:
     def alpha(self) -> float:
         return self._alpha
 
+    @alpha.setter
+    def alpha(self, value: float) -> None:
+        self._alpha = max(1e-6, min(1.0, float(value)))
+
     def update(self, volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
         snapshot = _clone_volume(volume)
         self._history.append(snapshot)
@@ -274,6 +318,33 @@ class TemporalResonanceBuffer:
 
     def history(self) -> _List[_List[_List[_List[float]]]]:
         return [_clone_volume(volume) for volume in self._history]
+
+    def resize(self, capacity: int) -> None:
+        if capacity <= 0:
+            raise ValueError("capacity must be positive")
+        old_history = list(self._history)
+        self._history = _deque(old_history[-capacity:], maxlen=capacity)
+        if len(self._history) < len(old_history):
+            self._ema = None if not self._history else _clone_volume(self._history[-1])
+
+    def state_dict(self) -> _Dict[str, _Any]:
+        return {
+            "alpha": self._alpha,
+            "history": self.history(),
+            "ema": _clone_volume(self._ema) if self._ema is not None else None,
+            "capacity": self._history.maxlen or 0,
+        }
+
+    def load_state_dict(self, state: _Mapping[str, _Any]) -> None:
+        capacity = int(state.get("capacity", self._history.maxlen or 0) or 0)
+        self.resize(capacity or (self._history.maxlen or 1))
+        self.alpha = float(state.get("alpha", self._alpha))
+        history = state.get("history") or []
+        self._history.clear()
+        for volume in history:
+            self._history.append(_clone_volume(volume))
+        ema = state.get("ema")
+        self._ema = _clone_volume(ema) if ema is not None else None
 
 
 @_dataclass
@@ -310,10 +381,15 @@ class SpiralTorchVision:
             for _ in range(depth)
         ]
         self._buffer = TemporalResonanceBuffer(capacity=self._buffer_capacity, alpha=self._alpha)
+        self._snapshots: _deque[_Dict[str, _Any]] = _deque(maxlen=32)
 
     @property
     def volume(self) -> _List[_List[_List[float]]]:
         return _clone_volume(self._volume)
+
+    @property
+    def window(self) -> str | None:
+        return self._window_name
 
     def reset(self) -> None:
         for slice_ in self._volume:
@@ -321,6 +397,15 @@ class SpiralTorchVision:
                 for idx in range(len(row)):
                     row[idx] = 0.0
         self._buffer = TemporalResonanceBuffer(capacity=self._buffer_capacity, alpha=self._alpha)
+        self._snapshots.clear()
+
+    def configure_window(self, name: str | None) -> None:
+        self._window_name = name
+        self._window = _spectral_window(name, self.depth)
+
+    def configure_temporal(self, capacity: int) -> None:
+        self._buffer_capacity = max(1, int(capacity))
+        self._buffer.resize(self._buffer_capacity)
 
     def accumulate(self, volume: _Sequence[_Sequence[_Sequence[float]]], weight: float = 1.0) -> None:
         if hasattr(volume, "tolist"):
@@ -336,6 +421,7 @@ class SpiralTorchVision:
                 for c_idx, value in enumerate(row):
                     target_row[c_idx] = (1.0 - alpha) * target_row[c_idx] + alpha * value
         self._buffer.update(self._volume)
+        self._snapshots.append(self.snapshot())
 
     def accumulate_slices(self, slices: _Sequence[_Sequence[_Sequence[float]]]) -> None:
         self.accumulate(slices)
@@ -402,6 +488,119 @@ class SpiralTorchVision:
             "temporal": self._buffer.state(),
         }
 
+    def temporal_snapshot(self, *, include_history: bool = False) -> _Dict[str, _Any]:
+        payload = {
+            "state": self._buffer.state(),
+            "alpha": self._buffer.alpha,
+        }
+        if include_history:
+            payload["history"] = self._buffer.history()
+        return payload
+
+    def apply_canvas_patch(self, patch: _Sequence[_Sequence[float]], *, momentum: float = 0.0) -> None:
+        rows = _coerce_slice(patch, self.height, self.width)
+        beta = max(0.0, min(1.0, float(momentum)))
+        for depth_idx in range(self.depth):
+            target = self._volume[depth_idx]
+            for row_idx, row in enumerate(rows):
+                target_row = target[row_idx]
+                for col_idx, value in enumerate(row):
+                    target_row[col_idx] = beta * target_row[col_idx] + (1.0 - beta) * float(value)
+        self._buffer.update(self._volume)
+        self._snapshots.append(self.snapshot())
+
+    def recent_snapshots(self) -> _List[_Dict[str, _Any]]:
+        snapshots: _List[_Dict[str, _Any]] = []
+        for snapshot in self._snapshots:
+            payload = {
+                "volume": _clone_volume(snapshot["volume"]),
+                "profiles": [
+                    SliceProfile(profile.mean, profile.std, profile.energy)
+                    for profile in snapshot["profiles"]
+                ],
+                "energy": float(snapshot["energy"]),
+                "temporal": _clone_volume(snapshot["temporal"]) if snapshot["temporal"] is not None else None,
+            }
+            snapshots.append(payload)
+        return snapshots
+
+    def state_dict(self) -> _Dict[str, _Any]:
+        return {
+            "depth": self.depth,
+            "height": self.height,
+            "width": self.width,
+            "alpha": self._alpha,
+            "window": self._window_name,
+            "buffer": self._buffer.state_dict(),
+            "volume": self.volume,
+        }
+
+    def load_state_dict(self, state: _Mapping[str, _Any]) -> None:
+        if int(state.get("depth", self.depth)) != self.depth or int(state.get("height", self.height)) != self.height or int(state.get("width", self.width)) != self.width:
+            raise ValueError("state dimensions do not match vision instance")
+        self._alpha = max(1e-6, min(1.0, float(state.get("alpha", self._alpha))))
+        self.configure_window(state.get("window", self._window_name))
+        buffer_state = state.get("buffer") or {}
+        self._buffer.alpha = self._alpha
+        self._buffer.load_state_dict(buffer_state)
+        volume_state = state.get("volume")
+        if volume_state is not None:
+            self._volume = [
+                _coerce_slice(slice_, self.height, self.width)
+                for slice_ in volume_state
+            ]
+        self._snapshots.clear()
+
+
+class VisionAugmentor:
+    """Applies lightweight augmentations to SpiralTorchVision compatible volumes."""
+
+    def __init__(
+        self,
+        *,
+        noise_std: float = 0.0,
+        clip: tuple[float, float] | None = (-1.0, 1.0),
+        normalise: bool = False,
+        seed: int | None = None,
+    ) -> None:
+        self.noise_std = max(0.0, float(noise_std))
+        self.clip = clip
+        self.normalise = bool(normalise)
+        self._rng = _random.Random(seed)
+
+    def seed(self, seed: int) -> None:
+        self._rng.seed(seed)
+
+    def _apply_noise(self, value: float) -> float:
+        if self.noise_std == 0.0:
+            return value
+        return value + self._rng.gauss(0.0, self.noise_std)
+
+    def _apply_clip(self, value: float) -> float:
+        if self.clip is None:
+            return value
+        lo, hi = self.clip
+        return max(float(lo), min(float(hi), value))
+
+    def _augment_slice(self, slice_: _Sequence[_Sequence[float]]) -> _List[_List[float]]:
+        rows = _coerce_slice(slice_)
+        augmented: _List[_List[float]] = []
+        for row in rows:
+            values = [self._apply_clip(self._apply_noise(float(v))) for v in row]
+            if self.normalise and values:
+                mean = sum(values) / len(values)
+                std = _math.sqrt(sum((v - mean) ** 2 for v in values) / len(values)) or 1.0
+                values = [(v - mean) / std for v in values]
+            augmented.append(values)
+        return augmented
+
+    def augment_volume(self, volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
+        return [self._augment_slice(slice_) for slice_ in volume]
+
+    def augment_vision(self, vision: SpiralTorchVision) -> None:
+        augmented = self.augment_volume(vision.volume)
+        vision.accumulate(augmented, weight=1.0)
+
 
 class ZSpaceTrainer:
     """Lightweight Adam optimiser operating on a Z vector."""
@@ -437,6 +636,58 @@ class ZSpaceTrainer:
     @property
     def state(self) -> _List[float]:
         return list(self._z)
+
+    @property
+    def alpha(self) -> float:
+        return self._alpha
+
+    @alpha.setter
+    def alpha(self, value: float) -> None:
+        self._alpha = max(1e-6, float(value))
+
+    def update_lambdas(
+        self,
+        *,
+        lam_speed: float | None = None,
+        lam_mem: float | None = None,
+        lam_stab: float | None = None,
+        lam_frac: float | None = None,
+        lam_drs: float | None = None,
+    ) -> None:
+        speed, mem, stab, frac, drs = self._lam
+        if lam_speed is not None:
+            speed = float(lam_speed)
+        if lam_mem is not None:
+            mem = float(lam_mem)
+        if lam_stab is not None:
+            stab = float(lam_stab)
+        if lam_frac is not None:
+            frac = float(lam_frac)
+        if lam_drs is not None:
+            drs = float(lam_drs)
+        self._lam = (speed, mem, stab, frac, drs)
+
+    def update_optimizer(
+        self,
+        *,
+        lr: float | None = None,
+        beta1: float | None = None,
+        beta2: float | None = None,
+        eps: float | None = None,
+        reset_moments: bool = False,
+    ) -> None:
+        if lr is not None:
+            self._lr = float(lr)
+        if beta1 is not None:
+            self._beta1 = float(beta1)
+        if beta2 is not None:
+            self._beta2 = float(beta2)
+        if eps is not None:
+            self._eps = max(1e-12, float(eps))
+        if reset_moments:
+            self._m = [0.0] * len(self._z)
+            self._v = [0.0] * len(self._z)
+            self._t = 0
 
     def _rfft(self, values: _Sequence[float]) -> _List[complex]:
         n = len(values)
@@ -508,6 +759,8 @@ class ZSpaceTrainer:
             stability = float(metrics.stability)
             gradient = metrics.gradient
             drs_signal = float(metrics.drs)
+            if metrics.alpha is not None:
+                self.alpha = float(metrics.alpha)
         else:
             speed = float(metrics.get("speed", 0.0))
             memory = float(metrics.get("mem", metrics.get("memory", 0.0)))
@@ -515,6 +768,9 @@ class ZSpaceTrainer:
             grad = metrics.get("gradient")
             gradient = grad if isinstance(grad, _Sequence) else None
             drs_signal = float(metrics.get("drs", 0.0))
+            alpha_override = metrics.get("alpha")
+            if alpha_override is not None:
+                self.alpha = float(alpha_override)
         lam_speed, lam_mem, lam_stab, lam_frac, lam_drs = self._lam
         penalty = (
             lam_speed * self._normalise(speed)
@@ -530,6 +786,120 @@ class ZSpaceTrainer:
         total_grad = [grad_metric[idx] + lam_frac * frac_grad[idx] for idx in range(len(self._z))]
         self._adam_update(total_grad)
         return loss
+
+    def state_dict(self) -> _Dict[str, _Any]:
+        return {
+            "z": list(self._z),
+            "alpha": self._alpha,
+            "lam": list(self._lam),
+            "lr": self._lr,
+            "beta1": self._beta1,
+            "beta2": self._beta2,
+            "eps": self._eps,
+            "m": list(self._m),
+            "v": list(self._v),
+            "t": self._t,
+        }
+
+    def load_state_dict(self, state: _Mapping[str, _Any]) -> None:
+        z = state.get("z")
+        if z is not None:
+            if len(z) != len(self._z):
+                raise ValueError("state dimension mismatch for Z vector")
+            self._z = [float(v) for v in z]
+        self.alpha = float(state.get("alpha", self._alpha))
+        lam = state.get("lam")
+        if lam is not None:
+            if len(lam) != 5:
+                raise ValueError("lambda tuple must have five elements")
+            self._lam = tuple(float(v) for v in lam)  # type: ignore[assignment]
+        self.update_optimizer(
+            lr=state.get("lr", self._lr),
+            beta1=state.get("beta1", self._beta1),
+            beta2=state.get("beta2", self._beta2),
+            eps=state.get("eps", self._eps),
+        )
+        self._m = [float(v) for v in state.get("m", self._m)]
+        self._v = [float(v) for v in state.get("v", self._v)]
+        self._t = int(state.get("t", self._t))
+
+
+class ZSpaceScheduler:
+    """Drive a :class:`ZSpaceTrainer` through staged parameter updates."""
+
+    def __init__(
+        self,
+        trainer: ZSpaceTrainer,
+        phases: _Sequence[ZSchedulePhase],
+        *,
+        loop: bool = False,
+        autopatch: bool = True,
+    ) -> None:
+        if not phases:
+            raise ValueError("phases must be non-empty")
+        self._trainer = trainer
+        self._phases = list(phases)
+        self._loop = bool(loop)
+        self._autopatch = bool(autopatch)
+        self._phase_idx = 0
+        self._remaining = phases[0].steps
+        self._phases[0].apply(trainer)
+
+    @property
+    def trainer(self) -> ZSpaceTrainer:
+        return self._trainer
+
+    @property
+    def phase(self) -> ZSchedulePhase:
+        return self._phases[self._phase_idx]
+
+    @property
+    def remaining(self) -> int:
+        return self._remaining
+
+    def _advance_phase(self) -> None:
+        self._phase_idx += 1
+        if self._phase_idx >= len(self._phases):
+            if not self._loop:
+                self._phase_idx = len(self._phases) - 1
+                self._remaining = 0
+                return
+            self._phase_idx = 0
+        current = self._phases[self._phase_idx]
+        self._remaining = current.steps
+        current.apply(self._trainer)
+
+    def step(self, metrics: _Mapping[str, float] | ZMetrics) -> float:
+        if self._remaining == 0:
+            self._advance_phase()
+        if self._autopatch and isinstance(metrics, _Mapping):
+            metrics = dict(metrics)
+            metrics.setdefault("alpha", self._trainer.alpha)
+        loss = self._trainer.step(metrics)
+        if self._remaining > 0:
+            self._remaining -= 1
+        return loss
+
+    def run(self, samples: _Iterable[_Mapping[str, float] | ZMetrics]) -> _List[float]:
+        return [self.step(sample) for sample in samples]
+
+    def state_dict(self) -> _Dict[str, _Any]:
+        return {
+            "phase_idx": self._phase_idx,
+            "remaining": self._remaining,
+            "loop": self._loop,
+            "autopatch": self._autopatch,
+            "trainer": self._trainer.state_dict(),
+        }
+
+    def load_state_dict(self, state: _Mapping[str, _Any]) -> None:
+        self._phase_idx = min(max(0, int(state.get("phase_idx", self._phase_idx))), len(self._phases) - 1)
+        self._remaining = max(0, int(state.get("remaining", self._remaining)))
+        self._loop = bool(state.get("loop", self._loop))
+        self._autopatch = bool(state.get("autopatch", self._autopatch))
+        trainer_state = state.get("trainer")
+        if trainer_state is not None:
+            self._trainer.load_state_dict(trainer_state)
 
 
 def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | ZMetrics]) -> _List[float]:
@@ -557,7 +927,7 @@ def _coerce_matrix(matrix: _Any, height: int, width: int) -> _List[_List[float]]
 class CanvasTransformer:
     """Canvas feedback helper mirroring the Rust Canvas Transformer surface."""
 
-    def __init__(self, width: int, height: int, *, smoothing: float = 0.85) -> None:
+    def __init__(self, width: int, height: int, *, smoothing: float = 0.85, history: int = 16) -> None:
         if width <= 0 or height <= 0:
             raise ValueError("width and height must be positive")
         self.width = width
@@ -566,6 +936,14 @@ class CanvasTransformer:
         self._canvas: _List[_List[float]] = [[0.0 for _ in range(width)] for _ in range(height)]
         self._hypergrad: _List[_List[float]] = [[0.0 for _ in range(width)] for _ in range(height)]
         self._realgrad: _List[_List[float]] = [[0.0 for _ in range(width)] for _ in range(height)]
+        self._history = _deque(maxlen=max(1, int(history)))
+
+    @property
+    def smoothing(self) -> float:
+        return self._smoothing
+
+    def configure_smoothing(self, smoothing: float) -> None:
+        self._smoothing = min(max(float(smoothing), 0.0), 0.999)
 
     def refresh(self, projection: _Any) -> _List[_List[float]]:
         matrix = _coerce_matrix(projection, self.height, self.width)
@@ -574,7 +952,9 @@ class CanvasTransformer:
             target = self._canvas[r_idx]
             for c_idx, value in enumerate(row):
                 target[c_idx] = self._smoothing * target[c_idx] + alpha * float(value)
-        return _clone_volume([matrix])[0]
+        snapshot = self.canvas()
+        self._history.append(snapshot)
+        return snapshot
 
     def accumulate_hypergrad(self, gradient: _Any) -> None:
         self._accumulate(self._hypergrad, gradient)
@@ -611,6 +991,43 @@ class CanvasTransformer:
 
     def realgrad(self) -> _List[_List[float]]:
         return [list(row) for row in self._realgrad]
+
+    def canvas_energy(self) -> float:
+        return sum(value * value for row in self._canvas for value in row)
+
+    def reset(self) -> None:
+        self._canvas = [[0.0 for _ in range(self.width)] for _ in range(self.height)]
+        self._hypergrad = [[0.0 for _ in range(self.width)] for _ in range(self.height)]
+        self._realgrad = [[0.0 for _ in range(self.width)] for _ in range(self.height)]
+        self._history.clear()
+
+    def history(self) -> _List[_List[_List[float]]]:
+        frames: _List[_List[_List[float]]] = []
+        for frame in self._history:
+            frames.append([[float(value) for value in row] for row in frame])
+        return frames
+
+    def state_dict(self) -> _Dict[str, _Any]:
+        return {
+            "width": self.width,
+            "height": self.height,
+            "smoothing": self._smoothing,
+            "canvas": self.canvas(),
+            "hypergrad": self.hypergrad(),
+            "realgrad": self.realgrad(),
+            "history": self.history(),
+        }
+
+    def load_state_dict(self, state: _Mapping[str, _Any]) -> None:
+        if int(state.get("width", self.width)) != self.width or int(state.get("height", self.height)) != self.height:
+            raise ValueError("state dimensions do not match canvas transformer")
+        self.configure_smoothing(state.get("smoothing", self._smoothing))
+        self._canvas = _coerce_matrix(state.get("canvas", self._canvas), self.height, self.width)
+        self._hypergrad = _coerce_matrix(state.get("hypergrad", self._hypergrad), self.height, self.width)
+        self._realgrad = _coerce_matrix(state.get("realgrad", self._realgrad), self.height, self.width)
+        self._history.clear()
+        for frame in state.get("history", []):
+            self._history.append(_coerce_matrix(frame, self.height, self.width))
 
 
 class _ForwardingModule(_types.ModuleType):
@@ -908,6 +1325,8 @@ _mirror_into_module(
     [
         "ZMetrics",
         "ZSpaceTrainer",
+        "ZSchedulePhase",
+        "ZSpaceScheduler",
         "step_many",
     ],
     reexport=False,
@@ -918,6 +1337,7 @@ _mirror_into_module(
         "SpiralTorchVision",
         "TemporalResonanceBuffer",
         "SliceProfile",
+        "VisionAugmentor",
     ],
     reexport=False,
 )
@@ -951,7 +1371,8 @@ _CORE_EXPORTS = [
     "SearchLoop",
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
-    "ZSpaceTrainer","TemporalResonanceBuffer","SpiralTorchVision",
+    "ZSpaceTrainer","ZSchedulePhase","ZSpaceScheduler",
+    "TemporalResonanceBuffer","SpiralTorchVision","VisionAugmentor",
     "CanvasTransformer","ZMetrics","SliceProfile","step_many",
 ]
 for _name in _CORE_EXPORTS:

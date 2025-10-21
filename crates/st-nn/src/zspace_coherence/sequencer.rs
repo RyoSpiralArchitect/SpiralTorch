@@ -6,7 +6,7 @@
 //!
 //! Unlike attention (Q·K^T softmax), ZSpaceCoherenceSequencer uses:
 //! - Maxwell pulses for phase synchronization
-//! - Desire Lagrangian for semantic bias
+//! - Desire Lagrangian for linguistic bias
 //! - Hyperbolic geometry for hierarchical relationships
 //! - Fractional calculus for spectral operators
 
@@ -20,7 +20,7 @@ use st_tensor::{OpenCartesianTopos, TensorError};
 ///
 /// This layer replaces attention with:
 /// 1. **Coherence-based token weighting** (Maxwell pulse detection)
-/// 2. **Desire-biased logits** (semantic safety without RLHF)
+/// 2. **Desire-biased logits** (linguistic safety without RLHF)
 /// 3. **Hyperbolic token relationships** (natural hierarchy)
 /// 4. **Spectral aggregation** (fractional calculus instead of softmax)
 #[derive(Clone)]
@@ -153,19 +153,19 @@ impl ZSpaceCoherenceSequencer {
         self.coherence_engine.set_backend(backend);
     }
 
-    /// Registers a domain semantic profile used to bias coherence weights.
-    pub fn register_domain_profile(&mut self, profile: DomainSemanticProfile) {
-        self.coherence_engine.register_domain_profile(profile);
+    /// Registers a domain linguistic profile used to bias coherence weights.
+    pub fn register_linguistic_profile(&mut self, profile: DomainLinguisticProfile) {
+        self.coherence_engine.register_linguistic_profile(profile);
     }
 
-    /// Removes all semantic profiles from the underlying coherence engine.
-    pub fn clear_domain_profiles(&mut self) {
-        self.coherence_engine.clear_domain_profiles();
+    /// Removes all linguistic profiles from the underlying coherence engine.
+    pub fn clear_linguistic_profiles(&mut self) {
+        self.coherence_engine.clear_linguistic_profiles();
     }
 
-    /// Exposes the registered semantic profiles.
-    pub fn semantic_profiles(&self) -> &[DomainSemanticProfile] {
-        self.coherence_engine.semantic_profiles()
+    /// Exposes the registered linguistic profiles.
+    pub fn linguistic_profiles(&self) -> &[DomainLinguisticProfile] {
+        self.coherence_engine.linguistic_profiles()
     }
 
     /// Registers a linguistic profile to sculpt emitted contours.
@@ -243,6 +243,7 @@ impl Module for ZSpaceCoherenceSequencer {
 mod tests {
     use super::super::coherence_engine::DomainConcept;
     use super::*;
+    use super::super::coherence_engine::DomainConcept;
 
     #[test]
     fn sequencer_forward_preserves_shape() {
@@ -273,18 +274,35 @@ mod tests {
     }
 
     #[test]
-    fn semantic_profile_registration_is_reflected() {
+    fn linguistic_profile_registration_is_reflected() {
         let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
         let mut seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
-        assert!(seq.semantic_profiles().is_empty());
-        seq.register_domain_profile(
-            DomainSemanticProfile::new(DomainConcept::Membrane)
+        assert!(seq.linguistic_profiles().is_empty());
+        seq.register_linguistic_profile(
+            DomainLinguisticProfile::new(DomainConcept::Membrane)
                 .with_emphasis(1.2)
                 .unwrap(),
         );
-        assert_eq!(seq.semantic_profiles().len(), 1);
-        seq.clear_domain_profiles();
-        assert!(seq.semantic_profiles().is_empty());
+        assert_eq!(seq.linguistic_profiles().len(), 1);
+        seq.clear_linguistic_profiles();
+        assert!(seq.linguistic_profiles().is_empty());
+    }
+
+    #[test]
+    fn linguistic_contour_tracks_high_frequency_bias() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
+
+        let mut data = vec![0.05f32; 128];
+        for value in &mut data[96..] {
+            *value = 0.8;
+        }
+        let x = Tensor::from_vec(1, 128, data).unwrap();
+        let contour = seq.emit_linguistic_contour(&x).unwrap();
+
+        assert!(contour.coherence_strength() > 0.0);
+        assert!(contour.prosody_index() > 0.6);
+        assert!(contour.articulation_bias() > 0.0);
     }
 
     #[test]
