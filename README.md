@@ -391,30 +391,6 @@ bindings/
 - **Namespaced mirrors:** `nn`, `selfsup`, `vision`, `canvas`, `compat.*` are *forwarding modules*; they resolve symbols from Rust on first access.  
 - **Renames for stability:** e.g., `DqnAgent` → **`stAgent`**; the façade preserves import stability while Rust internals evolve.
 
----
-
-## Contributing & Dev Notes
-
-### Local dev loop
-
-```bash
-# 1) Keep your repo clean
-git pull --rebase
-
-# 2) Build fast and often
-cargo check --workspace
-cargo test  --workspace
-
-# 3) Python wheel (CPU)
-maturin develop -m bindings/st-py/Cargo.toml --no-default-features --features cpu
-
-# 4) Sanity in Python
-python - <<'PY'
-import spiraltorch as st
-print(st.__version__, hasattr(st, "Tensor"), hasattr(st, "stAgent"))
-PY
-```
-
 ### Coding guidelines
 
 - **Rust**
