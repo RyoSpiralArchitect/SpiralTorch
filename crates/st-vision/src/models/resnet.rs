@@ -11,7 +11,7 @@ use st_nn::module::{Module, Parameter};
 use st_nn::PureResult;
 use st_tensor::{Tensor, TensorError};
 
-pub(crate) fn conv_output_hw(
+pub fn conv_output_hw(
     input_hw: (usize, usize),
     kernel: (usize, usize),
     stride: (usize, usize),
@@ -35,7 +35,7 @@ pub(crate) fn conv_output_hw(
     Ok((oh, ow))
 }
 
-pub(crate) fn pool_output_hw(
+pub fn pool_output_hw(
     input_hw: (usize, usize),
     kernel: (usize, usize),
     stride: (usize, usize),

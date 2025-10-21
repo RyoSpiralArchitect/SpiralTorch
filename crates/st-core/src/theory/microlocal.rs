@@ -1049,12 +1049,7 @@ impl InterfaceZConductor {
         self.carry.clone().unwrap_or_default()
     }
 
-    fn into_zpulse(
-        fused: &InterfaceZPulse,
-        now: u64,
-        qualities: &[f32],
-        tempo: f32,
-    ) -> ZPulse {
+    fn into_zpulse(fused: &InterfaceZPulse, now: u64, qualities: &[f32], tempo: f32) -> ZPulse {
         let support = ZSupport::from_band_energy(fused.band_energy);
         let avg_quality = if qualities.is_empty() {
             0.0
