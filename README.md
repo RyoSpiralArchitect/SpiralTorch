@@ -53,6 +53,7 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 
 
 <p align="center">
+  [![PyPI version](https://img.shields.io/pypi/v/spiraltorch.svg)](https://pypi.org/project/spiraltorch/)
   <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
   <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
   <img src="https://img.shields.io/badge/MPS-ready-brightgreen.svg" alt="MPS ready">
@@ -132,7 +133,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
-# SpiralTorch (Python bindings) — v0.1.2
+# SpiralTorch (Python bindings) — v0.1.3
 
 A **thin Python bridge** to SpiralTorch’s Rust-first Z-space learning stack.  
 The wheel exposes the same Z-space tensors, hypergrad primitives, and planner helpers used by the Rust API—no heavy shims.
