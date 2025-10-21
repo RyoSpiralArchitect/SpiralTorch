@@ -7,7 +7,7 @@ use std::fmt;
 
 use rand::distributions::{Distribution, WeightedIndex};
 use rand::thread_rng;
-use st_rl::{
+use st_spiral_rl::{
     EpisodeReport, GeometryFeedback, GeometryFeedbackSignal, PolicyTelemetry, SpiralPolicyGradient,
     SpiralRlError,
 };

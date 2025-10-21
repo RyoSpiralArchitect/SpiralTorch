@@ -6,7 +6,7 @@
 
 ## Archetype potentials and field intensities
 - Prototype centroids are the user/item factors already learnt by `SpiralRecommender`. Their dot-product interaction implements the potential \(V_k(x)\) that scores how strongly an incoming state aligns with the archetype indexed by \(k\).【F:crates/st-rec/src/lib.rs†L407-L456】
-- Control surfaces translate those potentials into fields by feeding the embedding through `SpiralPolicyGradient`, whose softmax head produces the activations \(A_k(x)\) used to steer recommendation or policy decisions. `RecBanditController` wires the recommender state into that policy, maps the chosen action back to catalog items, and streams rewards for continual adjustment.【F:crates/st-rl/src/lib.rs†L124-L240】【F:crates/st-rec/src/rl_bridge.rs†L94-L220】
+- Control surfaces translate those potentials into fields by feeding the embedding through `SpiralPolicyGradient`, whose softmax head produces the activations \(A_k(x)\) used to steer recommendation or policy decisions. `RecBanditController` wires the recommender state into that policy, maps the chosen action back to catalog items, and streams rewards for continual adjustment.【F:crates/st-spiral-rl/src/lib.rs†L124-L240】【F:crates/st-rec/src/rl_bridge.rs†L94-L220】
 
 ## Curvature and topology diagnostics
 - Every graph-style layer can push explainability traces into a shared `GraphFlowTracer`. The tracer records per-node energy, curvature, and update magnitudes so the topology of propagation—loops, bridges, or dormancy—remains observable.【F:crates/st-core/src/telemetry/xai.rs†L24-L128】
@@ -18,7 +18,7 @@
 - Runtime drives then hook into the same telemetry. `CollapseDrive` transitions into a `Bloom` command when \(\Psi\) falls below the configured floor, boosting learning rates with `lr_mul` so the system unfurls back toward the desired spiral envelope.【F:crates/st-core/src/engine/collapse_drive.rs†L82-L172】
 
 ## Composite update loop
-- A full step collects the latest manifold snapshot via `PsiMeter::update`, refreshes \(\Psi_{\text{embedding}}\), and forwards the reading to `CollapseDrive` (or other PRSN operators) to decide whether to collapse, bloom, or coast. The same snapshot seeds the softmax control field and the graph-consensus multipliers, forming \(F(\cdot)\).【F:crates/st-core/src/telemetry/psi.rs†L245-L316】【F:crates/st-core/src/engine/collapse_drive.rs†L125-L172】【F:crates/st-rl/src/lib.rs†L221-L240】【F:crates/st-nn/src/gnn/spiralk.rs†L96-L158】
+- A full step collects the latest manifold snapshot via `PsiMeter::update`, refreshes \(\Psi_{\text{embedding}}\), and forwards the reading to `CollapseDrive` (or other PRSN operators) to decide whether to collapse, bloom, or coast. The same snapshot seeds the softmax control field and the graph-consensus multipliers, forming \(F(\cdot)\).【F:crates/st-core/src/telemetry/psi.rs†L245-L316】【F:crates/st-core/src/engine/collapse_drive.rs†L125-L172】【F:crates/st-spiral-rl/src/lib.rs†L221-L240】【F:crates/st-nn/src/gnn/spiralk.rs†L96-L158】
 - Maxwell-coded envelopes convert anomaly pulses into `SoftlogicZFeedback`, preserving the band energies and drift that couple the manifold updates with cross-modal channels (`\phi_{\text{cross}}`). Downstream consumers retrieve that packet from the telemetry hub so language desire loops, policy trainers, or orchestration bridges stay phase-aligned.【F:crates/st-core/src/theory/maxwell.rs†L341-L391】【F:crates/st-core/src/telemetry/hub.rs†L152-L228】
 
 ## Implementation notes

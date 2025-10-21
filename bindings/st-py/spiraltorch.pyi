@@ -498,7 +498,7 @@ dataset: ModuleType
 
 linalg: ModuleType
 
-rl: ModuleType
+spiral_rl: ModuleType
 
 rec: ModuleType
 
@@ -644,6 +644,8 @@ class stAgent:
     def select_action(self, state: int) -> int: ...
     def update(self, state: int, action: int, reward: float, next_state: int) -> None: ...
 
+DqnAgent = stAgent
+
 class PpoAgent:
     def __init__(self, state_dim: int, action_dim: int, learning_rate: float, clip_range: float) -> None: ...
     def score_actions(self, state: Sequence[float]) -> List[float]: ...
@@ -696,7 +698,7 @@ __all__ = [
     "frac",
     "dataset",
     "linalg",
-    "rl",
+    "spiral_rl",
     "rec",
     "telemetry",
     "ecosystem",
@@ -722,6 +724,7 @@ __all__ = [
     "RecEpochReport",
     "Recommender",
     "stAgent",
+    "DqnAgent",
     "PpoAgent",
     "SacAgent",
     "TemporalResonanceBuffer",

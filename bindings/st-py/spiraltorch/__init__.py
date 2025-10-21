@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 import cmath as _cmath
 import math as _math
-import sys, types as _types
+import types as _types
+import sys
 from collections import deque as _deque
 from dataclasses import dataclass as _dataclass
 from importlib import import_module
@@ -27,7 +29,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("dataset", "Datasets & loaders"),
     ("linalg", "Linear algebra utilities"),
     ("planner", "Planning & device heuristics"),
-    ("rl", "Reinforcement learning components"),
+    ("spiral_rl", "Reinforcement learning components"),
     ("rec", "Reconstruction / signal processing"),
     ("telemetry", "Telemetry / dashboards / metrics"),
     ("ecosystem", "Integrations & ecosystem glue"),
@@ -69,6 +71,19 @@ for _name, _doc in _PREDECLARED_SUBMODULES:
     setattr(_parent_module, _name, _module)
     globals()[_name] = _module
 
+# --- begin: preseed shim for legacy init that looks for `spiral_rl.DqnAgent` ---
+# 一部の初期化コードが `spiral_rl.DqnAgent` を触るので、先に偽モジュールを噛ませる
+if "spiral_rl" not in sys.modules:
+    _shim = _types.ModuleType("spiral_rl")
+    # 参照される両方の候補名を用意しておく（実体は後で本物に差し替え）
+    _shim.DqnAgent = type("DqnAgent", (), {})  # placeholder
+    _shim.PyDqnAgent = type("PyDqnAgent", (), {})  # placeholder
+    sys.modules["spiral_rl"] = _shim
+# ついでに第三者パッケージの `rl` が入り込む事故を防止
+if "rl" not in sys.modules:
+    sys.modules["rl"] = _types.ModuleType("rl")
+# --- end: preseed shim ---
+
 # Rust拡張の本体
 try:
     _rs = import_module("spiraltorch.spiraltorch")
@@ -79,6 +94,18 @@ except ModuleNotFoundError as exc:
         _rs = import_module("spiraltorch.spiraltorch_native")
     except ModuleNotFoundError:
         _rs = import_module("spiraltorch_native")
+
+# --- begin: promote real rl submodule & alias DqnAgent->stAgent ---
+try:
+    _spiral_rl = globals().get("spiral_rl")
+    if isinstance(_spiral_rl, _types.ModuleType):
+        sys.modules["spiral_rl"] = _spiral_rl
+        if hasattr(_spiral_rl, "stAgent") and not hasattr(_spiral_rl, "DqnAgent"):
+            setattr(_spiral_rl, "DqnAgent", getattr(_spiral_rl, "stAgent"))
+except Exception:
+    # フェイルセーフ（失敗しても致命ではない）
+    pass
+# --- end: promote ---
 
 # パッケージ版
 try:
@@ -143,7 +170,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "to_tensorflow": ("compat_to_tensorflow", "to_tensorflow"),
         "from_tensorflow": ("compat_from_tensorflow", "from_tensorflow"),
     },
-    "rl": {
+    "spiral_rl": {
         "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
         "PpoAgent": ("PyPpoAgent",),
         "SacAgent": ("PySacAgent",),
@@ -1183,7 +1210,7 @@ _mirror_into_module(
     ],
 )
 _mirror_into_module(
-    "rl",
+    "spiral_rl",
     {
         "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
         "PpoAgent": ("PyPpoAgent",),
@@ -1361,7 +1388,7 @@ _EXPORTED = {
     *_EXTRAS,
     *_CORE_EXPORTS,
     *[n for n in _COMPAT_ALIAS if n in globals()],
-    "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
+    "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
     "selfsup","export","compat","hpo","inference","zspace","vision","canvas",
     "planner",
     "__version__",

@@ -2,14 +2,14 @@ use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use pyo3::Bound;
 
-#[cfg(feature = "rl")]
+#[cfg(feature = "spiral_rl")]
 use crate::tensor::tensor_err_to_py;
-#[cfg(feature = "rl")]
+#[cfg(feature = "spiral_rl")]
 use pyo3::exceptions::PyValueError;
-#[cfg(feature = "rl")]
-use st_rl::{DqnAgent, PpoAgent, SacAgent, SpiralRlError};
+#[cfg(feature = "spiral_rl")]
+use st_spiral_rl::{DqnAgent, PpoAgent, SacAgent, SpiralRlError};
 
-#[cfg(feature = "rl")]
+#[cfg(feature = "spiral_rl")]
 fn rl_err_to_py(err: SpiralRlError) -> PyErr {
     match err {
         SpiralRlError::Tensor(err) => tensor_err_to_py(err),
@@ -20,13 +20,13 @@ fn rl_err_to_py(err: SpiralRlError) -> PyErr {
     }
 }
 
-#[cfg(feature = "rl")]
-#[pyclass(module = "spiraltorch.rl")]
+#[cfg(feature = "spiral_rl")]
+#[pyclass(module = "spiraltorch.spiral_rl", name = "stAgent")]
 pub(crate) struct PyDqnAgent {
     inner: DqnAgent,
 }
 
-#[cfg(feature = "rl")]
+#[cfg(feature = "spiral_rl")]
 #[pymethods]
 impl PyDqnAgent {
     #[new]
@@ -59,14 +59,14 @@ impl PyDqnAgent {
     }
 }
 
-#[cfg(feature = "rl")]
-#[pyclass(module = "spiraltorch.rl")]
+#[cfg(feature = "spiral_rl")]
+#[pyclass(module = "spiraltorch.spiral_rl")]
 pub(crate) struct PyPpoAgent {
     inner: PpoAgent,
     state_dim: usize,
 }
 
-#[cfg(feature = "rl")]
+#[cfg(feature = "spiral_rl")]
 #[pymethods]
 impl PyPpoAgent {
     #[new]
@@ -122,14 +122,14 @@ impl PyPpoAgent {
     }
 }
 
-#[cfg(feature = "rl")]
-#[pyclass(module = "spiraltorch.rl")]
+#[cfg(feature = "spiral_rl")]
+#[pyclass(module = "spiraltorch.spiral_rl")]
 pub(crate) struct PySacAgent {
     inner: SacAgent,
     state_dim: usize,
 }
 
-#[cfg(feature = "rl")]
+#[cfg(feature = "spiral_rl")]
 #[pymethods]
 impl PySacAgent {
     #[new]
@@ -154,24 +154,26 @@ impl PySacAgent {
     }
 }
 
-#[cfg(feature = "rl")]
+#[cfg(feature = "spiral_rl")]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "rl")?;
+    let module = PyModule::new_bound(py, "spiral_rl")?;
     module.add("__doc__", "SpiralTorch reinforcement learning agents")?;
     module.add_class::<PyDqnAgent>()?;
     module.add_class::<PyPpoAgent>()?;
     module.add_class::<PySacAgent>()?;
-    module.add("__all__", vec!["DqnAgent", "PpoAgent", "SacAgent"])?;
+    module.add("DqnAgent", module.getattr("stAgent")?)?;
+    module.add("__all__", vec!["stAgent", "DqnAgent", "PpoAgent", "SacAgent"])?;
     parent.add_submodule(&module)?;
+    parent.add("stAgent", module.getattr("stAgent")?)?;
     parent.add("DqnAgent", module.getattr("DqnAgent")?)?;
     parent.add("PpoAgent", module.getattr("PpoAgent")?)?;
     parent.add("SacAgent", module.getattr("SacAgent")?)?;
     Ok(())
 }
 
-#[cfg(not(feature = "rl"))]
+#[cfg(not(feature = "spiral_rl"))]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "rl")?;
+    let module = PyModule::new_bound(py, "spiral_rl")?;
     module.add("__doc__", "SpiralTorch reinforcement learning agents")?;
     parent.add_submodule(&module)?;
     Ok(())

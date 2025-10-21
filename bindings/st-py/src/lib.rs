@@ -6,7 +6,7 @@ use pyo3::types::PyModule;
 mod tensor;
 mod compat;
 mod nn;
-mod rl;
+mod spiral_rl;
 mod rec;
 mod telemetry;
 mod pure;
@@ -192,7 +192,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;
-    rl::register(py, m)?;
+    spiral_rl::register(py, m)?;
     rec::register(py, m)?;
     telemetry::register(py, m)?;
 
@@ -226,8 +226,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
         "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
-        "nn","frac","selfsup","dataset","linalg","rl","rec","telemetry","ecosystem",
-        "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem","hpo","inference","export",
+        "nn","frac","selfsup","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
+        "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",
