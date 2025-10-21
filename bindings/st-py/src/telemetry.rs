@@ -225,7 +225,11 @@ impl PyDashboardRing {
     }
 }
 
-#[pyclass(module = "spiraltorch.telemetry", unsendable)]
+#[pyclass(
+    module = "spiraltorch.telemetry",
+    name = "DashboardRingIter",
+    unsendable
+)]
 pub(crate) struct PyDashboardRingIter {
     frames: Vec<DashboardFrame>,
     index: usize,
