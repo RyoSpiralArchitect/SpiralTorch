@@ -76,12 +76,13 @@ impl TimelineScheduler {
     }
 
     fn push_sorted(vec: &mut Vec<KernelSlot>, slot: KernelSlot) {
-        vec.push(slot);
-        vec.sort_by(|a, b| match a.start.partial_cmp(&b.start) {
-            Some(Ordering::Equal) => a.stream.cmp(&b.stream),
-            Some(order) => order,
-            None => Ordering::Equal,
-        });
+        let idx = vec
+            .binary_search_by(|existing| match existing.start.total_cmp(&slot.start) {
+                Ordering::Equal => existing.stream.cmp(&slot.stream),
+                order => order,
+            })
+            .unwrap_or_else(|idx| idx);
+        vec.insert(idx, slot);
     }
 
     /// Schedule a new kernel span on the requested stream.
