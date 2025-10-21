@@ -238,6 +238,54 @@ Prefer flat-space optimisation? Reach for the new Rust-side
 projection step—handy when Canvas Transformer energy needs to feed classical
 optimisers alongside its hypergradient updates.
 
+## Why it’s different
+ - **Training comes first:** Modules such as `Linear`, `Sequential`,
+   `WaveGate`, the new `ToposResonator`, and `ZSpaceProjector` stream gradients
+    into the hypergrad tape and expose a `train_epoch` loop that mirrors
+    familiar `nn.Module` patterns.
+  - **Open Z-space:** Gradient splits honour the A/B/C roundtable through the
+    new `zspace_round` ops module so Above/Here/Beneath bands stay in sync with
+    SpiralK plans without auxiliary buffers.
+  - **Hilbert-grounded Mellin bridges:** `st-frac::mellin::MellinLogGrid`
+    now exposes fallible APIs, a `Scalar` alias for f32/f64 toggling, exact
+    lattice bit-matching, and WebGPU-backed vertical/mesh sweeps that reuse the
+    same `st-frac::zspace` weights while `hilbert_inner_product` and
+    `evaluate_vertical_line` surface the lattice’s Hilbert geometry directly.
+  - **Three-voice consensus:** SpiralK heuristics, DSL directives, and the
+    generated WASM tuner table discuss every launch decision and keep the
+    transcript in the roundtable log.
+  - **Rust by default, Python ready:** Every feature—from WASM tuning to
+    hypergrad curvature—is implemented in Rust and exposed unchanged through the
+    Python bindings when needed.
+  - **Unified RL + Rec stacks:** SpiralTorchRL and SpiralTorchRec keep policy
+    gradients, recommendation factors, and hypergrad tapes inside the same
+    Z-space geometry so deployment-grade loops never leave Rust.
+  - **Z-space-native graph reasoning:** The Rust core, backend abstraction
+    layer, and Z-space operators already form the spine of a graph neural
+    network stack that embeds large-scale, hierarchical graphs with the same
+    fidelity as its tree-aligned geometry.
+  - **Semiotic suturing at the logit level:** The new `st-nn::language`
+    toolkit folds symbolic kernels, repression fields, and semantic bridges
+    into a single Lagrangian so SpiralTorch can bias logits with desire,
+    anchor S/s correspondences, and respect target entropies without leaving
+    Z-space.
+  - **Interpretability as a first-class citizen:** Hypergrad tapes, roundtable
+    transcripts, and ψ telemetry double as explainability artifacts, enabling
+    decision-path inspection without leaving the Z-space calculus.
+
+---
+
+## Technical notes
+
+- [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
+- [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
+- [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory, signature geometry with timing elasticities, tipping radii, and direction-aware safe radii, plus how SpiralTorch wires DRL penalties into trainers and governance loops.
+- [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
+
+---
+
+## Emerging toolkits unique to SpiralTorch
+
 ### Canvas Pixel Transformer → Z-space feedback
 
 - `CanvasProjector::refresh_with_vectors` now returns both the RGBA buffer and
@@ -314,7 +362,7 @@ optimisers alongside its hypergradient updates.
   matrix with `trace.with_barycenter_with(weights, densities, Some(coupling))`
   before resonating, keeping Z-space orchestration entirely on the session.
 
-## SpiralTorchVision overview
+### SpiralTorchVision
 
 SpiralTorchVision reinterprets the Z-axis as a perceptual frequency domain,
 collapsing it with spectral-window-aware projectors into tensor spaces that any
@@ -324,53 +372,6 @@ registers camera descriptors so the projector can weight view-specific Z slices
 before collapse. The roadmap now leans into generative feedback loops between
 SpiralRNN conductors and vision modules. Read the full guide in
 [docs/spiraltorchvision.md](docs/spiraltorchvision.md).).
-
-
-## Why it’s different
- - **Training comes first:** Modules such as `Linear`, `Sequential`,
-   `WaveGate`, the new `ToposResonator`, and `ZSpaceProjector` stream gradients
-    into the hypergrad tape and expose a `train_epoch` loop that mirrors
-    familiar `nn.Module` patterns.
-  - **Open Z-space:** Gradient splits honour the A/B/C roundtable through the
-    new `zspace_round` ops module so Above/Here/Beneath bands stay in sync with
-    SpiralK plans without auxiliary buffers.
-  - **Hilbert-grounded Mellin bridges:** `st-frac::mellin::MellinLogGrid`
-    now exposes fallible APIs, a `Scalar` alias for f32/f64 toggling, exact
-    lattice bit-matching, and WebGPU-backed vertical/mesh sweeps that reuse the
-    same `st-frac::zspace` weights while `hilbert_inner_product` and
-    `evaluate_vertical_line` surface the lattice’s Hilbert geometry directly.
-  - **Three-voice consensus:** SpiralK heuristics, DSL directives, and the
-    generated WASM tuner table discuss every launch decision and keep the
-    transcript in the roundtable log.
-  - **Rust by default, Python ready:** Every feature—from WASM tuning to
-    hypergrad curvature—is implemented in Rust and exposed unchanged through the
-    Python bindings when needed.
-  - **Unified RL + Rec stacks:** SpiralTorchRL and SpiralTorchRec keep policy
-    gradients, recommendation factors, and hypergrad tapes inside the same
-    Z-space geometry so deployment-grade loops never leave Rust.
-  - **Z-space-native graph reasoning:** The Rust core, backend abstraction
-    layer, and Z-space operators already form the spine of a graph neural
-    network stack that embeds large-scale, hierarchical graphs with the same
-    fidelity as its tree-aligned geometry.
-  - **Semiotic suturing at the logit level:** The new `st-nn::language`
-    toolkit folds symbolic kernels, repression fields, and semantic bridges
-    into a single Lagrangian so SpiralTorch can bias logits with desire,
-    anchor S/s correspondences, and respect target entropies without leaving
-    Z-space.
-  - **Interpretability as a first-class citizen:** Hypergrad tapes, roundtable
-    transcripts, and ψ telemetry double as explainability artifacts, enabling
-    decision-path inspection without leaving the Z-space calculus.
-
----
-
-## Technical notes
-
-- [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
-- [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
-- [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory, signature geometry with timing elasticities, tipping radii, and direction-aware safe radii, plus how SpiralTorch wires DRL penalties into trainers and governance loops.
-- [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
-
-## Emerging toolkits unique to SpiralTorch
 
 ### Z-space-native graph neural networks
 
