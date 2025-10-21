@@ -21,7 +21,7 @@ fn rl_err_to_py(err: SpiralRlError) -> PyErr {
 }
 
 #[cfg(feature = "spiral_rl")]
-#[pyclass(module = "spiraltorch.spiral_rl")]
+#[pyclass(module = "spiraltorch.spiral_rl", name = "stAgent")]
 pub(crate) struct PyDqnAgent {
     inner: DqnAgent,
 }
@@ -161,8 +161,10 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyDqnAgent>()?;
     module.add_class::<PyPpoAgent>()?;
     module.add_class::<PySacAgent>()?;
-    module.add("__all__", vec!["DqnAgent", "PpoAgent", "SacAgent"])?;
+    module.add("DqnAgent", module.getattr("stAgent")?)?;
+    module.add("__all__", vec!["stAgent", "DqnAgent", "PpoAgent", "SacAgent"])?;
     parent.add_submodule(&module)?;
+    parent.add("stAgent", module.getattr("stAgent")?)?;
     parent.add("DqnAgent", module.getattr("DqnAgent")?)?;
     parent.add("PpoAgent", module.getattr("PpoAgent")?)?;
     parent.add("SacAgent", module.getattr("SacAgent")?)?;
