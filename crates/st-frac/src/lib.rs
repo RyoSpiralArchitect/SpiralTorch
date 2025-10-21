@@ -95,19 +95,6 @@ fn clamped_edge_index(idx: isize, len: usize) -> usize {
     } else {
         idx as usize
     }
-
-    idx as usize
-}
-
-fn clamped_edge_index(idx: isize, len: usize) -> usize {
-    debug_assert!(len > 0);
-    if idx < 0 {
-        0
-    } else if idx as usize >= len {
-        len - 1
-    } else {
-        idx as usize
-    }
 }
 
 #[inline]
@@ -451,10 +438,7 @@ mod tests {
     #[test]
     fn sample_with_pad_reflect_handles_extreme_indices() {
         let x = [10.0, 20.0, 30.0, 40.0];
-        assert_eq!(
-            super::sample_with_pad(&x, isize::MIN, Pad::Reflect),
-            10.0
-        );
+        assert_eq!(super::sample_with_pad(&x, isize::MIN, Pad::Reflect), 10.0);
         assert_eq!(
             super::sample_with_pad(&x, isize::MAX - 1, Pad::Reflect),
             20.0
