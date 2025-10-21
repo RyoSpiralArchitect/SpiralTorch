@@ -91,13 +91,46 @@ impl RunningStats {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct WindowStats {
+    count: usize,
+    sum: f64,
+}
+
+impl WindowStats {
+    fn add(&mut self, value: f64) {
+        self.count += 1;
+        self.sum += value;
+    }
+
+    fn remove(&mut self, value: f64) {
+        if self.count == 0 {
+            return;
+        }
+        self.count -= 1;
+        self.sum -= value;
+        if self.count == 0 {
+            self.sum = 0.0;
+        }
+    }
+
+    fn mean(&self) -> f64 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.sum / self.count as f64
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct FeatureWindow {
     history: VecDeque<f64>,
     capacity: usize,
     baseline: RunningStats,
-    window_stats: RunningStats,
+    window_stats: WindowStats,
     warmup: usize,
+    baseline_frozen: bool,
 }
 
 impl FeatureWindow {
@@ -106,26 +139,30 @@ impl FeatureWindow {
             history: VecDeque::with_capacity(capacity),
             capacity,
             baseline: RunningStats::default(),
-            window_stats: RunningStats::default(),
+            window_stats: WindowStats::default(),
             warmup,
+            baseline_frozen: false,
         }
     }
 
     fn update(&mut self, value: f64) {
         if self.history.len() == self.capacity {
-            self.history.pop_front();
-            self.window_stats = recompute_stats(&self.history);
+            if let Some(removed) = self.history.pop_front() {
+                self.window_stats.remove(removed);
+            }
         }
         self.history.push_back(value);
-        self.baseline.update(value);
-        if self.history.len() == 1 {
-            self.window_stats = RunningStats::default();
+        self.window_stats.add(value);
+        if !self.baseline_frozen {
+            self.baseline.update(value);
+            if self.baseline.count as usize >= self.warmup {
+                self.baseline_frozen = true;
+            }
         }
-        self.window_stats.update(value);
     }
 
     fn ready(&self) -> bool {
-        self.baseline.count as usize >= self.warmup && self.history.len() >= self.capacity / 2
+        self.baseline_frozen && self.window_stats.count >= self.warmup.min(self.capacity)
     }
 
     fn z_score(&self) -> f64 {
@@ -133,19 +170,8 @@ impl FeatureWindow {
             return 0.0;
         }
         let baseline_std = self.baseline.stddev().max(EPS);
-        (self.window_stats.mean - self.baseline.mean).abs() / baseline_std
+        (self.window_stats.mean() - self.baseline.mean).abs() / baseline_std
     }
-}
-
-fn recompute_stats(window: &VecDeque<f64>) -> RunningStats {
-    if window.is_empty() {
-        return RunningStats::default();
-    }
-    let mut stats = RunningStats::default();
-    for value in window.iter().copied() {
-        stats.update(value);
-    }
-    stats
 }
 
 /// Drift detector responsible for tracking feature level changes over time.
