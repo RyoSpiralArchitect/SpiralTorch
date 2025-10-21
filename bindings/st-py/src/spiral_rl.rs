@@ -60,7 +60,7 @@ impl PyDqnAgent {
 }
 
 #[cfg(feature = "spiral_rl")]
-#[pyclass(module = "spiraltorch.spiral_rl")]
+#[pyclass(module = "spiraltorch.spiral_rl", name = "PpoAgent")]
 pub(crate) struct PyPpoAgent {
     inner: PpoAgent,
     state_dim: usize,
@@ -123,7 +123,7 @@ impl PyPpoAgent {
 }
 
 #[cfg(feature = "spiral_rl")]
-#[pyclass(module = "spiraltorch.spiral_rl")]
+#[pyclass(module = "spiraltorch.spiral_rl", name = "SacAgent")]
 pub(crate) struct PySacAgent {
     inner: SacAgent,
     state_dim: usize,
@@ -158,22 +158,40 @@ impl PySacAgent {
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "spiral_rl")?;
     module.add("__doc__", "SpiralTorch reinforcement learning agents")?;
+
+    // 1) register public class names first (these names are what Python code expects)
     module.add_class::<PyDqnAgent>()?;
     module.add_class::<PyPpoAgent>()?;
     module.add_class::<PySacAgent>()?;
+
+    // 2) provide aliases / helpers inside the spiral_rl module
     module.add("DqnAgent", module.getattr("stAgent")?)?;
     module.add("__all__", vec!["stAgent", "DqnAgent", "PpoAgent", "SacAgent"])?;
+
+    // 3) attach as a submodule of the parent (spiraltorch.spiral_rl)
     parent.add_submodule(&module)?;
-    parent.add("stAgent", module.getattr("stAgent")?)?;
+
+    // 4) mirror as st.rl (so users can do `import spiraltorch as st; st.rl...`)
+    parent.add("rl", module.clone_ref(py))?;
+
+    // 5) mirror convenient top-level names under `spiraltorch` for backward compatibility
+    parent.add("stAgent",  module.getattr("stAgent")?)?;
     parent.add("DqnAgent", module.getattr("DqnAgent")?)?;
     parent.add("PpoAgent", module.getattr("PpoAgent")?)?;
     parent.add("SacAgent", module.getattr("SacAgent")?)?;
+
+    // 6) (optional but recommended) register legacy top-level module name in sys.modules
+    //    so `import spiral_rl` (old code) will find our module object.
+    let sys = py.import("sys")?;
+    sys.getattr("modules")?
+        .set_item("spiral_rl", module.clone_ref(py))?;
+
     Ok(())
 }
 
 #[cfg(not(feature = "spiral_rl"))]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "spiral_rl")?;
+    let module = PyModule::new_bound(py, "spiraltorch.spiral_rl")?;
     module.add("__doc__", "SpiralTorch reinforcement learning agents")?;
     parent.add_submodule(&module)?;
     Ok(())
