@@ -1,36 +1,59 @@
 from __future__ import annotations
+import cmath as _cmath
+import math as _math
 import sys, types as _types
+from collections import deque as _deque
+from dataclasses import dataclass as _dataclass
 from importlib import import_module
-from typing import Any as _Any, Iterable as _Iterable, Mapping as _Mapping
+from typing import (
+    Any as _Any,
+    Dict as _Dict,
+    Iterable as _Iterable,
+    List as _List,
+    Mapping as _Mapping,
+    MutableSequence as _MutableSequence,
+    Optional as _Optional,
+    Sequence as _Sequence,
+    Tuple as _Tuple,
+)
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
+_rs: _types.ModuleType | None = None
 
-_PRESEEDED_SUBMODULES: dict[str, str] = {
-    "nn": "SpiralTorch neural network primitives",
-    "frac": "Fractal & fractional tools",
-    "dataset": "Datasets & loaders",
-    "linalg": "Linear algebra utilities",
-    "rl": "Reinforcement learning components",
-    "rec": "Reconstruction / signal processing",
-    "telemetry": "Telemetry / dashboards / metrics",
-    "ecosystem": "Integrations & ecosystem glue",
-    "selfsup": "Self-supervised objectives",
-    "export": "Model export & compression",
-    "compat": "Interoperability bridges",
-    "hpo": "Hyper-parameter optimization tools",
-    "inference": "Safety inference runtime & auditing",
+_PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
+    ("nn", "SpiralTorch neural network primitives"),
+    ("frac", "Fractal & fractional tools"),
+    ("dataset", "Datasets & loaders"),
+    ("linalg", "Linear algebra utilities"),
+    ("rl", "Reinforcement learning components"),
+    ("rec", "Reconstruction / signal processing"),
+    ("telemetry", "Telemetry / dashboards / metrics"),
+    ("ecosystem", "Integrations & ecosystem glue"),
+    ("selfsup", "Self-supervised objectives"),
+    ("export", "Model export & compression"),
+    ("compat", "Interoperability bridges"),
+    ("hpo", "Hyper-parameter optimization tools"),
+    ("inference", "Safety inference runtime & auditing"),
+    ("zspace", "Z-space training helpers"),
+    ("vision", "SpiralTorchVision orchestration"),
+    ("canvas", "Canvas transformer utilities"),
+]
+
+_RENAMED_EXPORTS: dict[str, str] = {
+    "DqnAgent": "stAgent",
 }
 
-for _submodule, _doc in _PRESEEDED_SUBMODULES.items():
-    _fq_name = f"{__name__}.{_submodule}"
-    _module = sys.modules.get(_fq_name)
+_parent_module = sys.modules[__name__]
+for _name, _doc in _PREDECLARED_SUBMODULES:
+    _fq = f"{__name__}.{_name}"
+    _module = sys.modules.get(_fq)
     if _module is None:
-        _module = _types.ModuleType(_fq_name, _doc)
-        _module.__dict__["__spiraltorch_placeholder__"] = True
-        sys.modules[_fq_name] = _module
+        _module = _types.ModuleType(_fq, _doc)
+        sys.modules[_fq] = _module
     elif _doc and not getattr(_module, "__doc__", None):
         _module.__doc__ = _doc
-    globals()[_submodule] = _module
+    setattr(_parent_module, _name, _module)
+    globals()[_name] = _module
 
 # Rust拡張の本体
 try:
@@ -99,7 +122,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "from_tensorflow": ("compat_from_tensorflow", "from_tensorflow"),
     },
     "rl": {
-        "stAgent": ("PyStAgent", "PyDqnAgent"),
+        "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
         "PpoAgent": ("PyPpoAgent",),
         "SacAgent": ("PySacAgent",),
     },
@@ -126,6 +149,468 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "SearchLoop": ("PySearchLoop",),
     },
 }
+
+
+@_dataclass
+class ZMetrics:
+    """Typed metrics container fed into :class:`ZSpaceTrainer`."""
+
+    speed: float
+    memory: float
+    stability: float
+    gradient: _Optional[_Sequence[float]] = None
+    drs: float = 0.0
+
+
+def _clone_volume(volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
+    return [[list(row) for row in slice_] for slice_ in volume]
+
+
+def _coerce_slice(
+    data: _Sequence[_Sequence[float]] | _Any,
+    height: _Optional[int] = None,
+    width: _Optional[int] = None,
+) -> _List[_List[float]]:
+    if hasattr(data, "tolist"):
+        data = data.tolist()
+    if not isinstance(data, _Sequence):
+        raise TypeError("slice must be a sequence of rows")
+    rows_seq = list(data)
+    rows: _List[_List[float]] = []
+    if height is None:
+        height = len(rows_seq)
+    if len(rows_seq) != height:
+        raise ValueError(f"expected {height} rows, received {len(rows_seq)}")
+    for row in rows_seq:
+        if hasattr(row, "tolist"):
+            row = row.tolist()
+        if not isinstance(row, _Sequence):
+            raise TypeError("slice rows must be sequences")
+        values = [float(v) for v in row]
+        if width is None:
+            width = len(values)
+        if len(values) != width:
+            raise ValueError(f"expected row width {width}, received {len(values)}")
+        rows.append(values)
+    return rows
+
+
+def _spectral_window(name: str | None, depth: int) -> _List[float]:
+    if depth <= 0:
+        return []
+    if name is None:
+        return [1.0] * depth
+    key = name.lower()
+    if key == "hann":
+        return [0.5 - 0.5 * _math.cos(2.0 * _math.pi * n / max(1, depth - 1)) for n in range(depth)]
+    if key == "hamming":
+        return [0.54 - 0.46 * _math.cos(2.0 * _math.pi * n / max(1, depth - 1)) for n in range(depth)]
+    if key == "blackman":
+        return [
+            0.42
+            - 0.5 * _math.cos(2.0 * _math.pi * n / max(1, depth - 1))
+            + 0.08 * _math.cos(4.0 * _math.pi * n / max(1, depth - 1))
+            for n in range(depth)
+        ]
+    if key == "gaussian":
+        centre = 0.5 * (depth - 1)
+        sigma = max(depth * 0.17, 1.0)
+        return [
+            _math.exp(-0.5 * ((n - centre) / sigma) ** 2)
+            for n in range(depth)
+        ]
+    raise ValueError(f"unknown spectral window '{name}'")
+
+
+def _blend_volumes(
+    current: _Sequence[_Sequence[_Sequence[float]]],
+    update: _Sequence[_Sequence[_Sequence[float]]],
+    alpha: float,
+) -> _List[_List[_List[float]]]:
+    blended: _List[_List[_List[float]]] = []
+    for cur_slice, upd_slice in zip(current, update):
+        upd_rows = _coerce_slice(upd_slice)
+        width = len(upd_rows[0]) if upd_rows else None
+        cur_rows = _coerce_slice(cur_slice, len(upd_rows), width)
+        rows: _List[_List[float]] = []
+        for cur_row, upd_row in zip(cur_rows, upd_rows):
+            rows.append([
+                (1.0 - alpha) * cur_val + alpha * upd_val
+                for cur_val, upd_val in zip(cur_row, upd_row)
+            ])
+        blended.append(rows)
+    return blended
+
+
+class TemporalResonanceBuffer:
+    """Maintains an exponential moving average over recent Z-space volumes."""
+
+    def __init__(self, capacity: int = 4, alpha: float = 0.2) -> None:
+        if capacity <= 0:
+            raise ValueError("capacity must be positive")
+        self._history: _deque[_List[_List[_List[float]]]] = _deque(maxlen=capacity)
+        self._alpha = max(1e-6, min(1.0, float(alpha)))
+        self._ema: _Optional[_List[_List[_List[float]]]] = None
+
+    @property
+    def alpha(self) -> float:
+        return self._alpha
+
+    def update(self, volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
+        snapshot = _clone_volume(volume)
+        self._history.append(snapshot)
+        if self._ema is None:
+            self._ema = snapshot
+        else:
+            self._ema = _blend_volumes(self._ema, snapshot, self._alpha)
+        return _clone_volume(self._ema)
+
+    def state(self) -> _Optional[_List[_List[_List[float]]]]:
+        if self._ema is not None:
+            return _clone_volume(self._ema)
+        if self._history:
+            return _clone_volume(self._history[-1])
+        return None
+
+    def history(self) -> _List[_List[_List[_List[float]]]]:
+        return [_clone_volume(volume) for volume in self._history]
+
+
+@_dataclass
+class SliceProfile:
+    mean: float
+    std: float
+    energy: float
+
+
+class SpiralTorchVision:
+    """Minimal Python orchestrator for SpiralTorchVision pipelines."""
+
+    def __init__(
+        self,
+        depth: int,
+        height: int,
+        width: int,
+        *,
+        alpha: float = 0.2,
+        window: str | None = "hann",
+        temporal: int = 4,
+    ) -> None:
+        if depth <= 0 or height <= 0 or width <= 0:
+            raise ValueError("depth, height, and width must be positive")
+        self.depth = depth
+        self.height = height
+        self.width = width
+        self._alpha = max(1e-6, min(1.0, float(alpha)))
+        self._window_name = window
+        self._window = _spectral_window(window, depth)
+        self._buffer_capacity = max(1, int(temporal))
+        self._volume: _List[_List[_List[float]]] = [
+            [[0.0 for _ in range(width)] for _ in range(height)]
+            for _ in range(depth)
+        ]
+        self._buffer = TemporalResonanceBuffer(capacity=self._buffer_capacity, alpha=self._alpha)
+
+    @property
+    def volume(self) -> _List[_List[_List[float]]]:
+        return _clone_volume(self._volume)
+
+    def reset(self) -> None:
+        for slice_ in self._volume:
+            for row in slice_:
+                for idx in range(len(row)):
+                    row[idx] = 0.0
+        self._buffer = TemporalResonanceBuffer(capacity=self._buffer_capacity, alpha=self._alpha)
+
+    def accumulate(self, volume: _Sequence[_Sequence[_Sequence[float]]], weight: float = 1.0) -> None:
+        if hasattr(volume, "tolist"):
+            volume = volume.tolist()
+        if len(volume) != self.depth:
+            raise ValueError(f"expected {self.depth} slices, received {len(volume)}")
+        w = max(0.0, float(weight))
+        alpha = self._alpha * (w if w else 1.0)
+        for idx, slice_data in enumerate(volume):
+            rows = _coerce_slice(slice_data, self.height, self.width)
+            for r_idx, row in enumerate(rows):
+                target_row = self._volume[idx][r_idx]
+                for c_idx, value in enumerate(row):
+                    target_row[c_idx] = (1.0 - alpha) * target_row[c_idx] + alpha * value
+        self._buffer.update(self._volume)
+
+    def accumulate_slices(self, slices: _Sequence[_Sequence[_Sequence[float]]]) -> None:
+        self.accumulate(slices)
+
+    def accumulate_sequence(
+        self,
+        frames: _Iterable[_Sequence[_Sequence[_Sequence[float]]]],
+        weights: _Optional[_Sequence[float]] = None,
+    ) -> None:
+        if weights is None:
+            for frame in frames:
+                self.accumulate(frame)
+            return
+        for frame, weight in zip(frames, weights):
+            self.accumulate(frame, weight)
+
+    def project(self, *, normalise: bool = True) -> _List[_List[float]]:
+        window = self._window or [1.0] * self.depth
+        if not window:
+            window = [1.0] * self.depth
+        total: _List[_List[float]] = [[0.0 for _ in range(self.width)] for _ in range(self.height)]
+        weight_sum = 0.0
+        for coeff, slice_ in zip(window, self._volume):
+            if coeff == 0.0:
+                continue
+            weight_sum += coeff
+            for r_idx, row in enumerate(slice_):
+                target = total[r_idx]
+                for c_idx, value in enumerate(row):
+                    target[c_idx] += coeff * value
+        if normalise and weight_sum:
+            inv = 1.0 / weight_sum
+            for row in total:
+                for idx in range(len(row)):
+                    row[idx] *= inv
+        return total
+
+    def volume_energy(self) -> float:
+        acc = 0.0
+        for slice_ in self._volume:
+            for row in slice_:
+                for value in row:
+                    acc += value * value
+        return acc
+
+    def slice_profile(self) -> _List[SliceProfile]:
+        profiles: _List[SliceProfile] = []
+        for slice_ in self._volume:
+            flat = [value for row in slice_ for value in row]
+            if not flat:
+                profiles.append(SliceProfile(0.0, 0.0, 0.0))
+                continue
+            mean = sum(flat) / len(flat)
+            var = sum((value - mean) ** 2 for value in flat) / len(flat)
+            energy = sum(value * value for value in flat) / len(flat)
+            profiles.append(SliceProfile(mean, _math.sqrt(var), energy))
+        return profiles
+
+    def snapshot(self) -> _Dict[str, _Any]:
+        return {
+            "volume": self.volume,
+            "profiles": self.slice_profile(),
+            "energy": self.volume_energy(),
+            "temporal": self._buffer.state(),
+        }
+
+
+class ZSpaceTrainer:
+    """Lightweight Adam optimiser operating on a Z vector."""
+
+    def __init__(
+        self,
+        z_dim: int = 4,
+        *,
+        alpha: float = 0.35,
+        lam_speed: float = 0.5,
+        lam_mem: float = 0.3,
+        lam_stab: float = 0.2,
+        lam_frac: float = 0.1,
+        lam_drs: float = 0.0,
+        lr: float = 1e-2,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
+        eps: float = 1e-8,
+    ) -> None:
+        if z_dim <= 0:
+            raise ValueError("z_dim must be positive")
+        self._z: _List[float] = [0.0] * z_dim
+        self._alpha = max(1e-6, float(alpha))
+        self._lam = (float(lam_speed), float(lam_mem), float(lam_stab), float(lam_frac), float(lam_drs))
+        self._lr = float(lr)
+        self._beta1 = float(beta1)
+        self._beta2 = float(beta2)
+        self._eps = float(eps)
+        self._m: _List[float] = [0.0] * z_dim
+        self._v: _List[float] = [0.0] * z_dim
+        self._t = 0
+
+    @property
+    def state(self) -> _List[float]:
+        return list(self._z)
+
+    def _rfft(self, values: _Sequence[float]) -> _List[complex]:
+        n = len(values)
+        if n == 0:
+            return []
+        freq: _List[complex] = []
+        for k in range(n // 2 + 1):
+            total = 0.0j
+            for t, val in enumerate(values):
+                angle = -2.0 * _math.pi * k * t / max(1, n)
+                total += complex(val, 0.0) * _cmath.exp(1j * angle)
+            freq.append(total)
+        return freq
+
+    def _frac_reg(self, values: _Sequence[float]) -> float:
+        spectrum = self._rfft(values)
+        n = len(spectrum)
+        if n <= 1:
+            return 0.0
+        acc = 0.0
+        for idx, coeff in enumerate(spectrum):
+            omega = idx / max(1, n - 1)
+            weight = omega ** (2.0 * self._alpha)
+            acc += weight * abs(coeff) ** 2
+        return acc / n
+
+    def _frac_grad(self) -> _List[float]:
+        grad: _List[float] = []
+        base = self._frac_reg(self._z)
+        step = 1e-4
+        for i in range(len(self._z)):
+            original = self._z[i]
+            self._z[i] = original + step
+            plus = self._frac_reg(self._z)
+            self._z[i] = original - step
+            minus = self._frac_reg(self._z)
+            self._z[i] = original
+            grad.append((plus - minus) / (2.0 * step))
+        scale = max(1.0, max(abs(g) for g in grad) if grad else 1.0)
+        return [g / scale for g in grad]
+
+    def _normalise(self, value: float) -> float:
+        return _math.tanh(value)
+
+    def _normalise_gradient(self, grad: _Sequence[float] | None) -> _List[float]:
+        if not grad:
+            return [0.0] * len(self._z)
+        grad_list = list(grad)
+        if len(grad_list) == len(self._z):
+            return [self._normalise(g) for g in grad_list]
+        out: _List[float] = []
+        for idx in range(len(self._z)):
+            out.append(self._normalise(grad_list[idx % len(grad_list)]))
+        return out
+
+    def _adam_update(self, grad: _Sequence[float]) -> None:
+        self._t += 1
+        for i, g in enumerate(grad):
+            self._m[i] = self._beta1 * self._m[i] + (1.0 - self._beta1) * g
+            self._v[i] = self._beta2 * self._v[i] + (1.0 - self._beta2) * (g * g)
+            m_hat = self._m[i] / (1.0 - self._beta1 ** self._t)
+            v_hat = self._v[i] / (1.0 - self._beta2 ** self._t)
+            self._z[i] -= self._lr * m_hat / (_math.sqrt(v_hat) + self._eps)
+
+    def step(self, metrics: _Mapping[str, float] | ZMetrics) -> float:
+        if isinstance(metrics, ZMetrics):
+            speed = float(metrics.speed)
+            memory = float(metrics.memory)
+            stability = float(metrics.stability)
+            gradient = metrics.gradient
+            drs_signal = float(metrics.drs)
+        else:
+            speed = float(metrics.get("speed", 0.0))
+            memory = float(metrics.get("mem", metrics.get("memory", 0.0)))
+            stability = float(metrics.get("stab", metrics.get("stability", 0.0)))
+            grad = metrics.get("gradient")
+            gradient = grad if isinstance(grad, _Sequence) else None
+            drs_signal = float(metrics.get("drs", 0.0))
+        lam_speed, lam_mem, lam_stab, lam_frac, lam_drs = self._lam
+        penalty = (
+            lam_speed * self._normalise(speed)
+            + lam_mem * self._normalise(memory)
+            + lam_stab * self._normalise(stability)
+        )
+        if lam_drs:
+            penalty += lam_drs * self._normalise(drs_signal)
+        frac_reg = self._frac_reg(self._z)
+        loss = penalty + lam_frac * frac_reg
+        grad_metric = self._normalise_gradient(gradient)
+        frac_grad = self._frac_grad()
+        total_grad = [grad_metric[idx] + lam_frac * frac_grad[idx] for idx in range(len(self._z))]
+        self._adam_update(total_grad)
+        return loss
+
+
+def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | ZMetrics]) -> _List[float]:
+    for metrics in samples:
+        trainer.step(metrics)
+    return trainer.state
+
+
+def _matrix_summary(matrix: _Sequence[_Sequence[float]]) -> _Dict[str, float]:
+    flat = [float(value) for row in matrix for value in row]
+    if not flat:
+        return {"l1": 0.0, "l2": 0.0, "linf": 0.0, "mean": 0.0}
+    l1 = sum(abs(value) for value in flat)
+    l2 = _math.sqrt(sum(value * value for value in flat))
+    linf = max(abs(value) for value in flat)
+    mean = sum(flat) / len(flat)
+    return {"l1": l1, "l2": l2, "linf": linf, "mean": mean}
+
+
+def _coerce_matrix(matrix: _Any, height: int, width: int) -> _List[_List[float]]:
+    rows = _coerce_slice(matrix, height, width)
+    return rows
+
+
+class CanvasTransformer:
+    """Canvas feedback helper mirroring the Rust Canvas Transformer surface."""
+
+    def __init__(self, width: int, height: int, *, smoothing: float = 0.85) -> None:
+        if width <= 0 or height <= 0:
+            raise ValueError("width and height must be positive")
+        self.width = width
+        self.height = height
+        self._smoothing = min(max(float(smoothing), 0.0), 0.999)
+        self._canvas: _List[_List[float]] = [[0.0 for _ in range(width)] for _ in range(height)]
+        self._hypergrad: _List[_List[float]] = [[0.0 for _ in range(width)] for _ in range(height)]
+        self._realgrad: _List[_List[float]] = [[0.0 for _ in range(width)] for _ in range(height)]
+
+    def refresh(self, projection: _Any) -> _List[_List[float]]:
+        matrix = _coerce_matrix(projection, self.height, self.width)
+        alpha = 1.0 - self._smoothing
+        for r_idx, row in enumerate(matrix):
+            target = self._canvas[r_idx]
+            for c_idx, value in enumerate(row):
+                target[c_idx] = self._smoothing * target[c_idx] + alpha * float(value)
+        return _clone_volume([matrix])[0]
+
+    def accumulate_hypergrad(self, gradient: _Any) -> None:
+        self._accumulate(self._hypergrad, gradient)
+
+    def accumulate_realgrad(self, gradient: _Any) -> None:
+        self._accumulate(self._realgrad, gradient)
+
+    def _accumulate(self, target: _MutableSequence[_MutableSequence[float]], data: _Any) -> None:
+        matrix = _coerce_matrix(data, self.height, self.width)
+        for r_idx, row in enumerate(matrix):
+            target_row = target[r_idx]
+            for c_idx, value in enumerate(row):
+                target_row[c_idx] += float(value)
+
+    def gradient_summary(self) -> _Dict[str, _Dict[str, float]]:
+        return {
+            "hypergrad": _matrix_summary(self._hypergrad),
+            "realgrad": _matrix_summary(self._realgrad),
+        }
+
+    def emit_zspace_patch(self, vision: SpiralTorchVision, weight: float = 1.0) -> _List[_List[float]]:
+        projection = vision.project()
+        patch = self.refresh(projection)
+        if weight != 1.0:
+            scale = float(weight)
+            patch = [[value * scale for value in row] for row in patch]
+        return patch
+
+    def canvas(self) -> _List[_List[float]]:
+        return [list(row) for row in self._canvas]
+
+    def hypergrad(self) -> _List[_List[float]]:
+        return [list(row) for row in self._hypergrad]
+
+    def realgrad(self) -> _List[_List[float]]:
+        return [list(row) for row in self._realgrad]
 
 
 class _ForwardingModule(_types.ModuleType):
@@ -185,11 +670,17 @@ class _ForwardingModule(_types.ModuleType):
         exported.update(hints.keys())
         suffix = self._forward_key.split(".")[-1] + "_"
         flat_suffix = "_".join(self._forward_key.split(".")) + "_"
-        for name in dir(_rs):
-            if name.startswith(suffix):
-                exported.add(name[len(suffix):])
-            elif name.startswith(flat_suffix):
-                exported.add(name[len(flat_suffix):])
+        if _rs is not None:
+            for name in dir(_rs):
+                trimmed = None
+                if name.startswith(suffix):
+                    trimmed = name[len(suffix):]
+                elif name.startswith(flat_suffix):
+                    trimmed = name[len(flat_suffix):]
+                if not trimmed:
+                    continue
+                trimmed = _RENAMED_EXPORTS.get(trimmed, trimmed)
+                exported.add(trimmed)
         return sorted(exported)
 
 
@@ -197,22 +688,6 @@ def _register_module_export(module: _types.ModuleType, name: str) -> None:
     exported = set(getattr(module, "__all__", ()))
     exported.add(name)
     module.__all__ = sorted(exported)
-
-
-def _upgrade_placeholder_modules() -> None:
-    for _submodule, _doc in _PRESEEDED_SUBMODULES.items():
-        _fq_name = f"{__name__}.{_submodule}"
-        _module = sys.modules.get(_fq_name)
-        if not getattr(_module, "__spiraltorch_placeholder__", False):
-            continue
-        _replacement = _ForwardingModule(_fq_name, _doc, _submodule)
-        if _doc and not getattr(_replacement, "__doc__", None):
-            _replacement.__doc__ = _doc
-        sys.modules[_fq_name] = _replacement
-        globals()[_submodule] = _replacement
-
-
-_upgrade_placeholder_modules()
 
 
 def _ensure_submodule(name: str, doc: str = "") -> _types.ModuleType:
@@ -291,8 +766,20 @@ def _mirror_into_module(
     return module
 
 
-for _name, _doc in _PRESEEDED_SUBMODULES.items():
-    _ensure_submodule(_name, _doc)
+for _name, _doc in _PREDECLARED_SUBMODULES:
+    _module = _ensure_submodule(_name, _doc)
+    if not isinstance(_module, _ForwardingModule):
+        _fq = f"{__name__}.{_name}"
+        _forward = _ForwardingModule(_fq, getattr(_module, "__doc__", _doc), _name)
+        for _key, _value in vars(_module).items():
+            if _key in {"__dict__", "__weakref__"}:
+                continue
+            if _key == "__name__":
+                continue
+            setattr(_forward, _key, _value)
+        sys.modules[_fq] = _forward
+        setattr(sys.modules[__name__], _name, _forward)
+        globals()[_name] = _forward
 
 
 _compat_children = {
@@ -358,7 +845,7 @@ _mirror_into_module(
 _mirror_into_module(
     "rl",
     {
-        "stAgent": ("PyStAgent", "PyDqnAgent"),
+        "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
         "PpoAgent": ("PyPpoAgent",),
         "SacAgent": ("PySacAgent",),
     },
@@ -416,6 +903,33 @@ _mirror_into_module(
 )
 
 
+_mirror_into_module(
+    "zspace",
+    [
+        "ZMetrics",
+        "ZSpaceTrainer",
+        "step_many",
+    ],
+    reexport=False,
+)
+_mirror_into_module(
+    "vision",
+    [
+        "SpiralTorchVision",
+        "TemporalResonanceBuffer",
+        "SliceProfile",
+    ],
+    reexport=False,
+)
+_mirror_into_module(
+    "canvas",
+    [
+        "CanvasTransformer",
+    ],
+    reexport=False,
+)
+
+
 for _key, _hint in _FORWARDING_HINTS.items():
     _module = _ensure_submodule(_key)
     if not _hint:
@@ -437,6 +951,8 @@ _CORE_EXPORTS = [
     "SearchLoop",
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
+    "ZSpaceTrainer","TemporalResonanceBuffer","SpiralTorchVision",
+    "CanvasTransformer","ZMetrics","SliceProfile","step_many",
 ]
 for _name in _CORE_EXPORTS:
     _expose_from_rs(_name)
@@ -451,6 +967,12 @@ def __getattr__(name: str) -> _Any:
 
     if name.startswith("_"):
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    redirect = _RENAMED_EXPORTS.get(name)
+    if redirect is not None:
+        _expose_from_rs(redirect)
+        if redirect in globals():
+            return globals()[redirect]
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
     _expose_from_rs(name)
     if name in globals():
         return globals()[name]
@@ -459,7 +981,11 @@ def __getattr__(name: str) -> _Any:
 
 def __dir__() -> list[str]:
     _public = set(__all__)
-    _public.update(n for n in dir(_rs) if not n.startswith("_"))
+    if _rs is not None:
+        for _name in dir(_rs):
+            if _name.startswith("_"):
+                continue
+            _public.add(_RENAMED_EXPORTS.get(_name, _name))
     return sorted(_public)
 
 
@@ -468,7 +994,7 @@ _EXPORTED = {
     *_CORE_EXPORTS,
     *[n for n in _COMPAT_ALIAS if n in globals()],
     "nn","frac","dataset","linalg","rl","rec","telemetry","ecosystem",
-    "selfsup","export","compat","hpo","inference",
+    "selfsup","export","compat","hpo","inference","zspace","vision","canvas",
     "__version__",
 }
 _EXPORTED.update(
