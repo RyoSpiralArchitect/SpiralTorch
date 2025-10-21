@@ -11,7 +11,7 @@
 //! - Fractional calculus for spectral operators
 
 use super::coherence_engine::{
-    CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile, LinguisticContour,
+    CoherenceBackend, CoherenceEngine, DomainSemanticProfile,
 };
 use crate::{Module, PureResult, Tensor};
 use st_tensor::{OpenCartesianTopos, TensorError};
@@ -173,11 +173,14 @@ impl ZSpaceCoherenceSequencer {
         self.coherence_engine.backend()
     }
 
-    /// Converts coherence weights into a linguistic contour descriptor that can be
-    /// used by downstream vocalisation stacks.
-    pub fn emit_linguistic_contour(&self, x: &Tensor) -> PureResult<LinguisticContour> {
-        let coherence = self.measure_coherence(x)?;
-        self.coherence_engine.derive_linguistic_contour(&coherence)
+    /// Returns the number of Maxwell channels in the underlying coherence engine.
+    pub fn maxwell_channels(&self) -> usize {
+        self.coherence_engine.num_channels()
+    }
+
+    /// Returns the OpenCartesianTopos associated with this sequencer.
+    pub fn topos(&self) -> &OpenCartesianTopos {
+        &self.topos
     }
 }
 
@@ -219,6 +222,7 @@ impl Module for ZSpaceCoherenceSequencer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::coherence_engine::DomainConcept;
 
     #[test]
     fn sequencer_forward_preserves_shape() {

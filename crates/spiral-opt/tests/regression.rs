@@ -11,7 +11,7 @@ fn sample_weights() -> Vec<f32> {
 
 #[test]
 fn qat_and_pruning_pipeline_meets_budget() {
-    let mut weights = sample_weights();
+    let weights = sample_weights();
     let original_l2: f32 = weights.iter().map(|w| w * w).sum::<f32>().sqrt();
 
     let mut observer = QatObserver::new(QatConfig::default(), QuantizationLeveling::Symmetric);
