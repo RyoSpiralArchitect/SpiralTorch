@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
+use pyo3::types::{PyDict, PyModule};
 use pyo3::Bound;
+use std::borrow::Cow;
 
 #[cfg(feature = "rec")]
 use crate::tensor::{tensor_err_to_py, PyTensor};
@@ -262,6 +263,8 @@ impl PyRecommender {
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "rec")?;
     module.add("__doc__", "SpiralTorch recommendation toolkit")?;
+    module.add("__name__", "spiraltorch.rec")?;
+    module.add("__package__", "spiraltorch")?;
     module.add_class::<PyQueryPlan>()?;
     module.add_class::<PyRecEpochReport>()?;
     module.add_class::<PyRecommender>()?;
@@ -274,6 +277,12 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         "__all__",
         vec!["QueryPlan", "RecEpochReport", "Recommender"],
     )?;
+
+    let query_plan = module.getattr("QueryPlan")?.into_py(py);
+    let rec_epoch_report = module.getattr("RecEpochReport")?.into_py(py);
+    let recommender = module.getattr("Recommender")?.into_py(py);
+    let rec_module = module.to_object(py);
+
     parent.add_submodule(&module)?;
 
     parent.add("QueryPlan", query_plan)?;
@@ -294,6 +303,8 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "rec")?;
     module.add("__doc__", "SpiralTorch recommendation toolkit")?;
     parent.add_submodule(&module)?;
+    let rec_module = module.to_object(py);
+    parent.add("rec", rec_module)?;
     Ok(())
 }
 
