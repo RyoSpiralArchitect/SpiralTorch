@@ -12,6 +12,8 @@ use super::device_caps::{BackendKind, DeviceCaps};
 use super::kdsl_bridge;
 use super::wgpu_heuristics;
 use crate::backend::temporal_fusion::TemporalSpectralFusion;
+
+mod foreign;
 use crate::ops::realgrad::GradientSummary;
 use crate::telemetry::hub;
 
@@ -1017,7 +1019,7 @@ fn latency_ctile_window_with_slack(
         lower = min_lane;
         upper = min_lane;
     }
-    LaneWindow {
+    let mut window = LaneWindow {
         target,
         lower,
         upper,
@@ -1025,7 +1027,18 @@ fn latency_ctile_window_with_slack(
         max_lane,
         slack,
         stride: lanes.max(1),
-    }
+    };
+    foreign::apply_latency_refinements(
+        rows,
+        cols,
+        k,
+        lanes,
+        min_ctile,
+        max_ctile,
+        slack,
+        &mut window,
+    );
+    window
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
