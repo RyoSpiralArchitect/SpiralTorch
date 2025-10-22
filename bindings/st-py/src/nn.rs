@@ -10,7 +10,10 @@ use crate::tensor::{tensor_err_to_py, PyTensor};
 
 #[cfg(feature = "nn")]
 use st_nn::{
-    dataset::DataLoaderBatches, dataset_from_vec, DataLoader, Dataset, ZSpaceCoherenceSequencer,
+    dataset::DataLoaderBatches,
+    dataset_from_vec,
+    zspace_coherence::{CoherenceDiagnostics, LinguisticChannelReport},
+    DataLoader, Dataset, ZSpaceCoherenceSequencer,
 };
 #[cfg(feature = "nn")]
 use st_tensor::OpenCartesianTopos;
@@ -184,6 +187,112 @@ fn from_samples(samples: Vec<(PyTensor, PyTensor)>) -> PyDataLoader {
 }
 
 #[cfg(feature = "nn")]
+#[derive(Clone)]
+#[pyclass(module = "spiraltorch.nn", name = "CoherenceChannelReport")]
+pub(crate) struct PyCoherenceChannelReport {
+    channel: usize,
+    weight: f32,
+    backend: String,
+    dominant_concept: Option<String>,
+    emphasis: f32,
+    descriptor: Option<String>,
+}
+
+#[cfg(feature = "nn")]
+impl PyCoherenceChannelReport {
+    fn from_report(report: &LinguisticChannelReport) -> Self {
+        Self {
+            channel: report.channel(),
+            weight: report.weight(),
+            backend: report.backend().label().to_string(),
+            dominant_concept: report
+                .dominant_concept()
+                .map(|concept| concept.label().to_string()),
+            emphasis: report.emphasis(),
+            descriptor: report.descriptor().map(|descriptor| descriptor.to_string()),
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyCoherenceChannelReport {
+    #[getter]
+    fn channel(&self) -> usize {
+        self.channel
+    }
+
+    #[getter]
+    fn weight(&self) -> f32 {
+        self.weight
+    }
+
+    #[getter]
+    fn backend(&self) -> &str {
+        &self.backend
+    }
+
+    #[getter]
+    fn dominant_concept(&self) -> Option<&str> {
+        self.dominant_concept.as_deref()
+    }
+
+    #[getter]
+    fn emphasis(&self) -> f32 {
+        self.emphasis
+    }
+
+    #[getter]
+    fn descriptor(&self) -> Option<&str> {
+        self.descriptor.as_deref()
+    }
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone)]
+#[pyclass(module = "spiraltorch.nn", name = "CoherenceDiagnostics", unsendable)]
+pub(crate) struct PyCoherenceDiagnostics {
+    aggregated: PyTensor,
+    coherence: Vec<f32>,
+    channel_reports: Vec<PyCoherenceChannelReport>,
+}
+
+#[cfg(feature = "nn")]
+impl PyCoherenceDiagnostics {
+    fn from_diagnostics(diagnostics: CoherenceDiagnostics) -> Self {
+        let (aggregated, coherence, channel_reports) = diagnostics.into_parts();
+        let channel_reports = channel_reports
+            .iter()
+            .map(PyCoherenceChannelReport::from_report)
+            .collect();
+        Self {
+            aggregated: PyTensor::from_tensor(aggregated),
+            coherence,
+            channel_reports,
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyCoherenceDiagnostics {
+    #[getter]
+    fn aggregated(&self) -> PyTensor {
+        self.aggregated.clone()
+    }
+
+    #[getter]
+    fn coherence(&self) -> Vec<f32> {
+        self.coherence.clone()
+    }
+
+    #[getter]
+    fn channel_reports(&self) -> Vec<PyCoherenceChannelReport> {
+        self.channel_reports.clone()
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(
     module = "spiraltorch.nn",
     name = "ZSpaceCoherenceSequencer",
@@ -235,6 +344,11 @@ impl PyZSpaceCoherenceSequencer {
         Ok(PyTensor::from_tensor(projected))
     }
 
+    pub fn diagnostics(&self, x: &PyTensor) -> PyResult<PyCoherenceDiagnostics> {
+        let diagnostics = self.inner.diagnostics(&x.inner).map_err(tensor_err_to_py)?;
+        Ok(PyCoherenceDiagnostics::from_diagnostics(diagnostics))
+    }
+
     pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
     }
@@ -270,6 +384,8 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyDataset>()?;
     module.add_class::<PyDataLoader>()?;
     module.add_class::<PyDataLoaderIter>()?;
+    module.add_class::<PyCoherenceChannelReport>()?;
+    module.add_class::<PyCoherenceDiagnostics>()?;
     module.add_class::<PyZSpaceCoherenceSequencer>()?;
     module.add_function(wrap_pyfunction!(from_samples, &module)?)?;
     module.add(
@@ -278,6 +394,8 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "Dataset",
             "DataLoader",
             "DataLoaderIter",
+            "CoherenceChannelReport",
+            "CoherenceDiagnostics",
             "ZSpaceCoherenceSequencer",
             "from_samples",
         ],

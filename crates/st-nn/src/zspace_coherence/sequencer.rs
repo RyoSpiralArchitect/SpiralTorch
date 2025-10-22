@@ -46,6 +46,43 @@ pub struct ZSpaceCoherenceSequencer {
     topos: OpenCartesianTopos,
 }
 
+#[derive(Clone, Debug)]
+pub struct CoherenceDiagnostics {
+    aggregated: Tensor,
+    coherence: Vec<f32>,
+    channel_reports: Vec<LinguisticChannelReport>,
+}
+
+impl CoherenceDiagnostics {
+    pub fn new(
+        aggregated: Tensor,
+        coherence: Vec<f32>,
+        channel_reports: Vec<LinguisticChannelReport>,
+    ) -> Self {
+        Self {
+            aggregated,
+            coherence,
+            channel_reports,
+        }
+    }
+
+    pub fn aggregated(&self) -> &Tensor {
+        &self.aggregated
+    }
+
+    pub fn coherence(&self) -> &[f32] {
+        &self.coherence
+    }
+
+    pub fn channel_reports(&self) -> &[LinguisticChannelReport] {
+        &self.channel_reports
+    }
+
+    pub fn into_parts(self) -> (Tensor, Vec<f32>, Vec<LinguisticChannelReport>) {
+        (self.aggregated, self.coherence, self.channel_reports)
+    }
+}
+
 impl ZSpaceCoherenceSequencer {
     /// Creates a new Z-space coherence sequencer.
     pub fn new(
@@ -187,6 +224,18 @@ impl ZSpaceCoherenceSequencer {
 
         // Step 4: Output from Z-space (to Euclidean)
         Ok((aggregated, coherence))
+    }
+
+    /// Produces a rich diagnostic snapshot that includes per-channel linguistic
+    /// descriptors alongside the aggregated tensor.
+    pub fn diagnostics(&self, x: &Tensor) -> PureResult<CoherenceDiagnostics> {
+        let (aggregated, coherence) = self.forward_with_coherence(x)?;
+        let channel_reports = self.coherence_engine.describe_channels(&coherence)?;
+        Ok(CoherenceDiagnostics::new(
+            aggregated,
+            coherence,
+            channel_reports,
+        ))
     }
 
     pub fn forward(&self, x: &Tensor) -> PureResult<Tensor> {
@@ -546,6 +595,23 @@ mod tests {
         assert_eq!(with_coherence.data(), standalone.data());
         assert_eq!(weights.len(), seq.maxwell_channels());
         assert!(weights.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn diagnostics_surfaces_channel_reports() {
+        let topos = OpenCartesianTopos::new(-0.65, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(256, 8, -0.65, topos).unwrap();
+
+        let mut sweep = vec![0.0f32; 256 * 4];
+        for (idx, value) in sweep.iter_mut().enumerate() {
+            *value = ((idx % 97) as f32).sin();
+        }
+        let x = Tensor::from_vec(4, 256, sweep).unwrap();
+
+        let diagnostics = seq.diagnostics(&x).unwrap();
+        assert_eq!(diagnostics.aggregated().shape(), x.shape());
+        assert_eq!(diagnostics.coherence().len(), seq.maxwell_channels());
+        assert_eq!(diagnostics.channel_reports().len(), seq.maxwell_channels());
     }
 
     #[test]
