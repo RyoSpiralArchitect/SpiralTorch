@@ -277,6 +277,16 @@ def describe_device(
 
 def hip_probe() -> Dict[str, object]: ...
 
+def gl_coeffs_adaptive(alpha: float, tol: float = ..., max_len: int = ...) -> List[float]: ...
+
+def fracdiff_gl_1d(
+    xs: Sequence[float],
+    alpha: float,
+    kernel_len: int,
+    pad: str = ...,
+    pad_constant: Optional[float] = ...,
+) -> List[float]: ...
+
 def info_nce(
     anchors: Sequence[Sequence[float]],
     positives: Sequence[Sequence[float]],
