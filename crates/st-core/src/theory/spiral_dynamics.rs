@@ -363,7 +363,13 @@ pub fn hopf_normal_form(
     let u_star = -kappa * theta / tau;
     let force = LogisticForce::evaluate(u_star, 0.0, c_max, sigma_s);
     let mu_eff0 = mu0 + gamma * force.value;
-    let c_correction = force.du * balance.difference;
+    let logistic_prime = if force.value > f64::EPSILON {
+        let ratio = (force.du / force.value).clamp(0.0, 1.0);
+        ratio * (1.0 - ratio)
+    } else {
+        0.0
+    };
+    let c_correction = logistic_prime * balance.difference;
     let alpha3 = nu - gamma * c_correction;
     let regime = HopfNormalForm::classify(alpha3);
     Some(HopfNormalForm {

@@ -8,30 +8,33 @@
 //! can be used by other foreign-language integrations that require a stable
 //! binary interface.
 
-use once_cell::sync::Lazy;
 use st_core::runtime::golden::{GoldenRuntime, GoldenRuntimeConfig};
 use st_tensor::{PureResult, Tensor};
+use std::cell::RefCell;
 use std::ffi::{c_char, CStr, CString};
 use std::ptr;
 use std::slice;
-use std::sync::Mutex;
 
 type FfiResult<T> = Result<T, ()>;
 
-static LAST_ERROR: Lazy<Mutex<Option<CString>>> = Lazy::new(|| Mutex::new(None));
+thread_local! {
+    static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
+}
 
 fn set_last_error(message: impl Into<String>) {
-    let mut slot = LAST_ERROR.lock().expect("last error mutex poisoned");
     let owned = message.into();
-    *slot = Some(
-        CString::new(owned.clone())
-            .unwrap_or_else(|_| CString::new("<error message contained null byte>").unwrap()),
-    );
+    LAST_ERROR.with(|slot| {
+        *slot.borrow_mut() = Some(
+            CString::new(owned.clone())
+                .unwrap_or_else(|_| CString::new("<error message contained null byte>").unwrap()),
+        );
+    });
 }
 
 fn clear_last_error() {
-    let mut slot = LAST_ERROR.lock().expect("last error mutex poisoned");
-    *slot = None;
+    LAST_ERROR.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
 }
 
 fn ok<T>(value: T) -> FfiResult<T> {
@@ -128,8 +131,12 @@ pub extern "C" fn spiraltorch_version(buffer: *mut c_char, capacity: usize) -> u
 /// trailing null terminator).
 #[no_mangle]
 pub extern "C" fn spiraltorch_last_error_length() -> usize {
-    let slot = LAST_ERROR.lock().expect("last error mutex poisoned");
-    slot.as_ref().map(|msg| msg.as_bytes().len()).unwrap_or(0)
+    LAST_ERROR.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|msg| msg.as_bytes().len())
+            .unwrap_or(0)
+    })
 }
 
 /// Copies the last error message into the provided buffer and returns the
@@ -140,19 +147,20 @@ pub extern "C" fn spiraltorch_last_error_message(buffer: *mut c_char, capacity: 
     if buffer.is_null() || capacity == 0 {
         return 0;
     }
-    let slot = LAST_ERROR.lock().expect("last error mutex poisoned");
-    if let Some(message) = slot.as_ref() {
-        let bytes = message.as_bytes();
-        let max_copy = capacity.saturating_sub(1);
-        let to_copy = bytes.len().min(max_copy);
-        unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, buffer, to_copy);
-            *buffer.add(to_copy) = 0;
+    LAST_ERROR.with(|slot| {
+        if let Some(message) = slot.borrow().as_ref() {
+            let bytes = message.as_bytes();
+            let max_copy = capacity.saturating_sub(1);
+            let to_copy = bytes.len().min(max_copy);
+            unsafe {
+                ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, buffer, to_copy);
+                *buffer.add(to_copy) = 0;
+            }
+            to_copy
+        } else {
+            0
         }
-        to_copy
-    } else {
-        0
-    }
+    })
 }
 
 /// Clears the last error so subsequent calls observe an empty state.

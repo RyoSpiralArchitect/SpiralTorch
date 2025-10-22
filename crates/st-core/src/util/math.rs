@@ -121,10 +121,10 @@ pub fn ramanujan_pi_with_tolerance(tolerance: f64, max_iterations: usize) -> (f6
     let max_iterations = max_iterations.max(1);
     let cache = RAMANUJAN_CACHE.get_or_init(|| Mutex::new(RamanujanCache::new()));
     let mut cache = cache.lock().unwrap();
-    let mut previous = cache.value_at(1);
+    let mut previous = cache.value(1);
     for iterations in 2..=max_iterations {
-        let current = cache.value_at(iterations);
-        if (current - previous).abs() <= tolerance {
+        let current = cache.value(iterations);
+        if (current - previous).abs() <= tolerance || (current - PI).abs() <= tolerance {
             return (current, iterations);
         }
         previous = current;
