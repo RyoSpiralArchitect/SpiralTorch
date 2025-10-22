@@ -1025,7 +1025,7 @@ fn annotate_psi_events(
     prefix: &str,
     events: &[PsiEvent],
 ) -> Option<u64> {
-    let mut last_step: Option<u64> = None;
+    let mut last_step = None;
     let mut rising = 0u32;
     let mut falling = 0u32;
     for event in events {
@@ -1037,7 +1037,7 @@ fn annotate_psi_events(
                 up,
                 step,
             } => {
-                last_step = Some(last_step.map_or(*step, |prev| prev.max(*step)));
+                last_step = Some(last_step.map_or(*step, |prev: u64| prev.max(*step)));
                 if *up {
                     rising += 1;
                 } else {
