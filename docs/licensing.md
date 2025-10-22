@@ -64,7 +64,7 @@ You are encouraged to adopt the same practices in derivatives to keep the projec
 
 ## Contact
 
-**Ready to get started?** Email us at [your-email@example.com] for a custom quote, trial license, or CLA (Contributor License Agreement) details. We're excited to partner with you on Rust-powered ML breakthroughs!
+**Ready to get started?** Email us at [kishkavsesvit@icloud.com] for a custom quote, trial license, or CLA (Contributor License Agreement) details. We're excited to partner with you on Rust-powered ML breakthroughs!
 
 ## Why Dual?
 

@@ -29,12 +29,23 @@ void *spiraltorch_tensor_matmul(const void *lhs, const void *rhs);
 void *spiraltorch_tensor_transpose(const void *tensor);
 void *spiraltorch_tensor_reshape(const void *tensor, size_t rows, size_t cols);
 void *spiraltorch_tensor_hadamard(const void *lhs, const void *rhs);
+
+void *spiraltorch_runtime_new(size_t worker_threads, const char *thread_name);
+void spiraltorch_runtime_free(void *runtime);
+size_t spiraltorch_runtime_worker_count(const void *runtime);
+void *spiraltorch_runtime_tensor_add(const void *runtime, const void *lhs, const void *rhs);
+void *spiraltorch_runtime_tensor_sub(const void *runtime, const void *lhs, const void *rhs);
+void *spiraltorch_runtime_tensor_scale(const void *runtime, const void *tensor, float value);
+void *spiraltorch_runtime_tensor_matmul(const void *runtime, const void *lhs, const void *rhs);
+void *spiraltorch_runtime_tensor_transpose(const void *runtime, const void *tensor);
+void *spiraltorch_runtime_tensor_reshape(const void *runtime, const void *tensor, size_t rows, size_t cols);
+void *spiraltorch_runtime_tensor_hadamard(const void *runtime, const void *lhs, const void *rhs);
 */
 import "C"
 
 import (
 	"fmt"
-	"runtime"
+	goruntime "runtime"
 	"unsafe"
 )
 
@@ -78,11 +89,207 @@ func wrapTensor(ptr unsafe.Pointer, context string) (*Tensor, error) {
 		return nil, fmt.Errorf("spiraltorch: %s failed: %s", context, err)
 	}
 	tensor := &Tensor{handle: ptr}
-	runtime.SetFinalizer(tensor, func(t *Tensor) {
+	goruntime.SetFinalizer(tensor, func(t *Tensor) {
 		t.Close()
 	})
 	clearError()
 	return tensor, nil
+}
+
+// Runtime wraps the SpiralTorch golden runtime for scheduling tensor operations.
+type Runtime struct {
+	handle unsafe.Pointer
+}
+
+func wrapRuntime(ptr unsafe.Pointer, context string) (*Runtime, error) {
+	if ptr == nil {
+		err := lastError()
+		if err == "" {
+			err = "unknown error"
+		}
+		return nil, fmt.Errorf("spiraltorch: %s failed: %s", context, err)
+	}
+	runtime := &Runtime{handle: ptr}
+	goruntime.SetFinalizer(runtime, func(r *Runtime) {
+		r.Close()
+	})
+	clearError()
+	return runtime, nil
+}
+
+// NewRuntime constructs a runtime with the requested worker count. When
+// workerThreads <= 0 the core selects a sensible default. An empty threadName
+// uses SpiralTorch's standard label.
+func NewRuntime(workerThreads int, threadName string) (*Runtime, error) {
+	var namePtr *C.char
+	if threadName != "" {
+		namePtr = C.CString(threadName)
+		defer C.free(unsafe.Pointer(namePtr))
+	}
+	ptr := C.spiraltorch_runtime_new(C.size_t(workerThreads), namePtr)
+	return wrapRuntime(ptr, "runtime_new")
+}
+
+// Close releases the underlying runtime handle. Subsequent calls are safe.
+func (r *Runtime) Close() {
+	if r == nil || r.handle == nil {
+		return
+	}
+	C.spiraltorch_runtime_free(r.handle)
+	r.handle = nil
+	clearError()
+}
+
+func (r *Runtime) requireHandle(context string) (unsafe.Pointer, error) {
+	if r == nil || r.handle == nil {
+		return nil, fmt.Errorf("spiraltorch: %s runtime handle is nil", context)
+	}
+	return r.handle, nil
+}
+
+// WorkerCount returns how many worker threads back this runtime.
+func (r *Runtime) WorkerCount() (int, error) {
+	handle, err := r.requireHandle("worker_count")
+	if err != nil {
+		return 0, err
+	}
+	count := C.spiraltorch_runtime_worker_count(handle)
+	if count == 0 {
+		if message := lastError(); message != "" {
+			return 0, fmt.Errorf("spiraltorch: runtime_worker_count failed: %s", message)
+		}
+	}
+	clearError()
+	return int(count), nil
+}
+
+func requireTensorHandle(t *Tensor, context string) (unsafe.Pointer, error) {
+	if t == nil || t.handle == nil {
+		return nil, fmt.Errorf("spiraltorch: %s tensor handle is nil", context)
+	}
+	return t.handle, nil
+}
+
+// Add schedules an element-wise addition on the runtime.
+func (r *Runtime) Add(lhs, rhs *Tensor) (*Tensor, error) {
+	handle, err := r.requireHandle("runtime_tensor_add")
+	if err != nil {
+		return nil, err
+	}
+	left, err := requireTensorHandle(lhs, "runtime_tensor_add lhs")
+	if err != nil {
+		return nil, err
+	}
+	right, err := requireTensorHandle(rhs, "runtime_tensor_add rhs")
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.spiraltorch_runtime_tensor_add(handle, left, right)
+	return wrapTensor(ptr, "runtime_tensor_add")
+}
+
+// Sub schedules an element-wise subtraction on the runtime.
+func (r *Runtime) Sub(lhs, rhs *Tensor) (*Tensor, error) {
+	handle, err := r.requireHandle("runtime_tensor_sub")
+	if err != nil {
+		return nil, err
+	}
+	left, err := requireTensorHandle(lhs, "runtime_tensor_sub lhs")
+	if err != nil {
+		return nil, err
+	}
+	right, err := requireTensorHandle(rhs, "runtime_tensor_sub rhs")
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.spiraltorch_runtime_tensor_sub(handle, left, right)
+	return wrapTensor(ptr, "runtime_tensor_sub")
+}
+
+// Hadamard schedules an element-wise product on the runtime.
+func (r *Runtime) Hadamard(lhs, rhs *Tensor) (*Tensor, error) {
+	handle, err := r.requireHandle("runtime_tensor_hadamard")
+	if err != nil {
+		return nil, err
+	}
+	left, err := requireTensorHandle(lhs, "runtime_tensor_hadamard lhs")
+	if err != nil {
+		return nil, err
+	}
+	right, err := requireTensorHandle(rhs, "runtime_tensor_hadamard rhs")
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.spiraltorch_runtime_tensor_hadamard(handle, left, right)
+	return wrapTensor(ptr, "runtime_tensor_hadamard")
+}
+
+// Matmul schedules a matrix multiplication on the runtime.
+func (r *Runtime) Matmul(lhs, rhs *Tensor) (*Tensor, error) {
+	handle, err := r.requireHandle("runtime_tensor_matmul")
+	if err != nil {
+		return nil, err
+	}
+	left, err := requireTensorHandle(lhs, "runtime_tensor_matmul lhs")
+	if err != nil {
+		return nil, err
+	}
+	right, err := requireTensorHandle(rhs, "runtime_tensor_matmul rhs")
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.spiraltorch_runtime_tensor_matmul(handle, left, right)
+	return wrapTensor(ptr, "runtime_tensor_matmul")
+}
+
+// Scale multiplies all tensor elements by value on the runtime.
+func (r *Runtime) Scale(t *Tensor, value float32) (*Tensor, error) {
+	handle, err := r.requireHandle("runtime_tensor_scale")
+	if err != nil {
+		return nil, err
+	}
+	tensorHandle, err := requireTensorHandle(t, "runtime_tensor_scale tensor")
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.spiraltorch_runtime_tensor_scale(handle, tensorHandle, C.float(value))
+	return wrapTensor(ptr, "runtime_tensor_scale")
+}
+
+// Transpose schedules a transpose operation on the runtime.
+func (r *Runtime) Transpose(t *Tensor) (*Tensor, error) {
+	handle, err := r.requireHandle("runtime_tensor_transpose")
+	if err != nil {
+		return nil, err
+	}
+	tensorHandle, err := requireTensorHandle(t, "runtime_tensor_transpose tensor")
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.spiraltorch_runtime_tensor_transpose(handle, tensorHandle)
+	return wrapTensor(ptr, "runtime_tensor_transpose")
+}
+
+// Reshape schedules a reshape on the runtime.
+func (r *Runtime) Reshape(t *Tensor, rows, cols int) (*Tensor, error) {
+	if rows < 0 || cols < 0 {
+		return nil, fmt.Errorf("spiraltorch: reshape dimensions must be non-negative")
+	}
+	handle, err := r.requireHandle("runtime_tensor_reshape")
+	if err != nil {
+		return nil, err
+	}
+	tensorHandle, err := requireTensorHandle(t, "runtime_tensor_reshape tensor")
+	if err != nil {
+		return nil, err
+	}
+	ptr := C.spiraltorch_runtime_tensor_reshape(
+		handle,
+		tensorHandle,
+		C.size_t(rows),
+		C.size_t(cols),
+	)
+	return wrapTensor(ptr, "runtime_tensor_reshape")
 }
 
 // NewZerosTensor constructs a tensor of the requested shape initialised with zeros.

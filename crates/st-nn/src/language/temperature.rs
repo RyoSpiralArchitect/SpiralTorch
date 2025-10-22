@@ -151,6 +151,8 @@ mod tests {
             drift: 0.0,
             z_signal: 0.0,
             scale: ZScale::new(0.25),
+            events: Vec::new(),
+            attributions: Vec::new(),
         };
         let warmed = controller.update(&distribution, Some(&micro_feedback));
         assert!(warmed > baseline);
@@ -162,6 +164,8 @@ mod tests {
             drift: 0.0,
             z_signal: 0.0,
             scale: ZScale::new(8.0),
+            events: Vec::new(),
+            attributions: Vec::new(),
         };
         let cooled = controller.update(&distribution, Some(&macro_feedback));
         assert!(cooled < warmed);

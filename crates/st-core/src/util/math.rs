@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use std::collections::HashMap;
+use std::f64::consts::PI;
 use std::sync::{Mutex, OnceLock};
 
 /// Packing density of the Leech lattice (Λ₂₄) used as the baseline for
@@ -38,6 +39,25 @@ pub fn ramanujan_pi(iterations: usize) -> f64 {
 
     cache.lock().unwrap().insert(iterations, value);
     value
+}
+
+/// Computes the Ramanujan π approximation while adaptively increasing the
+/// iteration count until two successive approximations differ by at most the
+/// provided tolerance. The iteration count is capped by `max_iterations` to
+/// avoid unbounded work in pathological cases. The resulting approximation and
+/// the iteration count that produced it are returned as a tuple.
+pub fn ramanujan_pi_with_tolerance(tolerance: f64, max_iterations: usize) -> (f64, usize) {
+    let tolerance = tolerance.max(f64::EPSILON);
+    let max_iterations = max_iterations.max(1);
+    let mut previous = ramanujan_pi(1);
+    for iterations in 2..=max_iterations {
+        let current = ramanujan_pi(iterations);
+        if (current - previous).abs() <= tolerance {
+            return (current, iterations);
+        }
+        previous = current;
+    }
+    (previous, max_iterations)
 }
 
 /// Lightweight projector that turns geodesic magnitudes into Leech lattice
@@ -80,6 +100,13 @@ mod tests {
         let first = ramanujan_pi(3);
         let second = ramanujan_pi(3);
         assert_abs_diff_eq!(first, second);
+    }
+
+    #[test]
+    fn ramanujan_pi_with_tolerance_converges() {
+        let (value, iterations) = ramanujan_pi_with_tolerance(1e-12, 8);
+        assert!(iterations >= 1 && iterations <= 8);
+        assert_abs_diff_eq!(value, std::f64::consts::PI, epsilon = 1e-10);
     }
 
     #[test]
