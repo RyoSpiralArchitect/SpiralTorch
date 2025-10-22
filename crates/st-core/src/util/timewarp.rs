@@ -25,12 +25,16 @@ pub fn warp_axis_in_place(axis: &mut [f32], warp: TemporalWarp) -> Result<(), Te
 
     let mut min = f32::INFINITY;
     let mut max = f32::NEG_INFINITY;
-    for value in axis.iter().copied() {
+    for &value in axis.iter() {
         if !value.is_finite() {
             return Err(TemporalWarpError::NonFinite);
         }
         min = min.min(value);
         max = max.max(value);
+        let warped = warp.apply(value);
+        if !warped.is_finite() {
+            return Err(TemporalWarpError::NonFinite);
+        }
     }
 
     if (max - min).abs() <= f32::EPSILON && warp.scale != 1.0 {
@@ -151,6 +155,44 @@ impl TemporalWarp {
             pivot,
         }
     }
+
+    /// Builds a warp that maps one span of time onto another.
+    ///
+    /// The resulting warp sends `source_start` to `target_start` and
+    /// `source_end` to `target_end`. Both spans must be finite and the source
+    /// span must have positive extent unless both spans collapse to a single
+    /// instant, in which case a pure translation is returned.
+    pub fn fit_span(
+        source_start: f32,
+        source_end: f32,
+        target_start: f32,
+        target_end: f32,
+    ) -> Result<Self, TemporalWarpError> {
+        if !source_start.is_finite()
+            || !source_end.is_finite()
+            || !target_start.is_finite()
+            || !target_end.is_finite()
+        {
+            return Err(TemporalWarpError::NonFinite);
+        }
+
+        let source_span = source_end - source_start;
+        let target_span = target_end - target_start;
+
+        if source_span.abs() <= f32::EPSILON {
+            if target_span.abs() <= f32::EPSILON {
+                return Self::try_new(1.0, target_start - source_start, 0.0);
+            }
+            return Err(TemporalWarpError::Degenerate);
+        }
+
+        let scale = target_span / source_span;
+        if scale <= 0.0 {
+            return Err(TemporalWarpError::InvalidScale(scale));
+        }
+        let offset = target_start - source_start * scale;
+        Self::try_new(scale, offset, 0.0)
+    }
 }
 
 impl Default for TemporalWarp {
@@ -227,6 +269,16 @@ mod tests {
     }
 
     #[test]
+    fn warp_axis_rejects_non_finite_outputs() {
+        let original = [f32::MAX, 0.0];
+        let mut axis = original;
+        let warp = TemporalWarp::translation(f32::MAX);
+        let err = warp_axis_in_place(&mut axis, warp).unwrap_err();
+        assert_eq!(err, TemporalWarpError::NonFinite);
+        assert_eq!(axis, original);
+    }
+
+    #[test]
     fn warped_axis_returns_new_buffer() {
         let axis = [0.0, 1.0];
         let warp = TemporalWarp::translation(2.0);
@@ -266,5 +318,25 @@ mod tests {
             let fused = composed.apply(sample);
             assert!((sequential - fused).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn fit_span_maps_endpoints() {
+        let warp = TemporalWarp::fit_span(2.0, 6.0, 0.0, 20.0).expect("fit");
+        assert!((warp.apply(2.0) - 0.0).abs() < 1e-6);
+        assert!((warp.apply(6.0) - 20.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fit_span_handles_collapsed_spans() {
+        let warp = TemporalWarp::fit_span(5.0, 5.0, 3.0, 3.0).expect("fit");
+        assert!((warp.apply(5.0) - 3.0).abs() < 1e-6);
+        assert_eq!(warp.scale, 1.0);
+    }
+
+    #[test]
+    fn fit_span_rejects_negative_scale() {
+        let err = TemporalWarp::fit_span(0.0, 10.0, 5.0, -5.0).unwrap_err();
+        assert_eq!(err, TemporalWarpError::InvalidScale(-1.0));
     }
 }
