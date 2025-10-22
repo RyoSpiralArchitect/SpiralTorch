@@ -444,7 +444,6 @@ A: The type stubs (`spiraltorch.pyi`) reflect the **supported** surface. New Rus
 ## Planning the Ecosystem
 
 - Explore the [Ecosystem Roadmap](docs/ecosystem_roadmap.md) for high-level priorities around documentation, samples, and community building.
-- Study the [Compatibility Strategy](docs/compatibility_strategy.md) to plan incremental migrations from PyTorch/TensorFlow stacks.
 - Review the [Backend Feature Matrix](docs/backend_matrix.md) when validating device support or filing bugs that touch accelerators.
 - **Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
 
