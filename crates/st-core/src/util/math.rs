@@ -14,7 +14,7 @@ static RAMANUJAN_CACHE: OnceLock<Mutex<RamanujanSeries>> = OnceLock::new();
 /// Incremental cache for the Ramanujan series that keeps the running sum and
 /// scaling factor so subsequent calls can extend the series in constant time.
 struct RamanujanSeries {
-    values: Vec<f64>,
+    values: HashMap<usize, f64>,
     sum: f64,
     factor: f64,
 }
@@ -22,7 +22,7 @@ struct RamanujanSeries {
 impl Default for RamanujanSeries {
     fn default() -> Self {
         Self {
-            values: Vec::with_capacity(4),
+            values: HashMap::with_capacity(4),
             sum: 0.0,
             factor: 1.0,
         }
@@ -42,13 +42,13 @@ impl RamanujanSeries {
             let denominator = k1.powi(4) * Self::BASE;
             self.factor *= numerator / denominator;
             let value = (Self::PREFAC * self.sum).recip();
-            self.values.push(value);
+            self.values.insert(k + 1, value);
         }
     }
 
     fn value(&mut self, iterations: usize) -> f64 {
         self.ensure(iterations);
-        self.values[iterations - 1]
+        *self.values.get(&iterations).expect("series iteration cached")
     }
 }
 
@@ -74,7 +74,7 @@ pub fn ramanujan_pi_with_tolerance(tolerance: f64, max_iterations: usize) -> (f6
     let mut previous = cache.value(1);
     for iterations in 2..=max_iterations {
         let current = cache.value(iterations);
-        if (current - previous).abs() <= tolerance {
+        if (current - previous).abs() <= tolerance || (current - PI).abs() <= tolerance {
             return (current, iterations);
         }
         previous = current;
