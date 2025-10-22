@@ -279,16 +279,17 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     )?;
     parent.add_submodule(&module)?;
 
+    let module_obj = module.to_object(py);
+    parent.add("rec", module_obj.clone_ref(py))?;
+
     parent.add("QueryPlan", query_plan)?;
     parent.add("RecEpochReport", rec_epoch_report)?;
     parent.add("Recommender", recommender)?;
 
     let sys = PyModule::import_bound(py, "sys")?;
     let modules = sys.getattr("modules")?;
-    let rec_module = parent.getattr("rec")?;
-    let rec_object = rec_module.to_object(py);
-    modules.set_item("spiraltorch.rec", rec_object.clone_ref(py))?;
-    modules.set_item("rec", rec_object)?;
+    modules.set_item("spiraltorch.rec", module_obj.clone_ref(py))?;
+    modules.set_item("rec", module_obj)?;
     Ok(())
 }
 
@@ -297,6 +298,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "rec")?;
     module.add("__doc__", "SpiralTorch recommendation toolkit")?;
     parent.add_submodule(&module)?;
+    parent.add("rec", module.to_object(py))?;
     Ok(())
 }
 
