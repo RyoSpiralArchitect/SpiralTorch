@@ -3,7 +3,7 @@
 # © 2025 Ryo ∴ SpiralArchitect
 
 import spiraltorch as st
-from spiraltorch.nn import ZSpaceCoherenceSequencer
+from spiraltorch.nn import CoherenceDiagnostics, ZSpaceCoherenceSequencer
 from spiraltorch import Tensor
 
 print("🌀 SpiralTorch ZSpaceCoherenceSequencer Demo\n")
@@ -38,8 +38,18 @@ print(f"✅ Input shape: {x.shape()}")
 
 # Forward pass
 try:
-    out = model.forward(x)
+    out, coherence, diagnostics = model.forward_with_diagnostics(x)
     print(f"✅ Output shape: {out.shape()}")
+
+    print("✅ Coherence diagnostics:")
+    dominant = diagnostics.dominant_channel()
+    dominant_str = f"ch{dominant:02d}" if dominant is not None else "—"
+    print(f"   - Mean coherence: {diagnostics.mean_coherence():.4f}")
+    print(f"   - Entropy: {diagnostics.coherence_entropy():.4f}")
+    print(f"   - Dominant channel: {dominant_str}")
+    print(f"   - Energy ratio: {diagnostics.energy_ratio():.3f}")
+    print(f"   - Z-bias: {diagnostics.z_bias():.3f}")
+    print(f"   - Maxwell channels: {len(coherence)}")
 
     contour = model.emit_linguistic_contour(x)
     print("✅ Linguistic contour:")

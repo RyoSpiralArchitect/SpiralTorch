@@ -67,5 +67,8 @@ ureq           = { version = "2.9", optional = true, default-features = true, fe
 [dev-dependencies]
 approx = "0.5"
 
+[build-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

@@ -3,6 +3,17 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+include!(concat!(env!("OUT_DIR"), "/build_info.rs"));
+
+pub fn print_build_id() {
+    println!("SpiralTorch Build ID: {}", BUILD_ID);
+}
+
+#[allow(dead_code)]
+fn __spiraltorch_license_marker() {
+    let _ = "SpiralTorch::Generated under AGPL-3.0-or-later (c) Ryo SpiralArchitect, 2025";
+}
+
 pub mod backend;
 pub mod causal;
 pub mod config;
