@@ -1347,6 +1347,24 @@ _mirror_into_module(
 
 
 _mirror_into_module(
+    "spiralk",
+    {
+        "SpiralKFftPlan": (),
+        "MaxwellSpiralKBridge": (),
+        "MaxwellSpiralKHint": (),
+        "SpiralKContext": (),
+        "SpiralKWilsonMetrics": (),
+        "SpiralKHeuristicHint": (),
+        "wilson_lower_bound": (),
+        "should_rewrite": (),
+        "synthesize_program": (),
+        "rewrite_with_wilson": (),
+    },
+    reexport=False,
+)
+
+
+_mirror_into_module(
     "planner",
     {
         "RankPlan": (),
