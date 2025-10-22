@@ -324,4 +324,118 @@ declare module "spiraltorch-wasm" {
         k: number,
         subgroup: boolean,
     ): WasmTunerChoice;
+
+    export type CobolInitiatorType = "human" | "model" | "automation";
+
+    export interface CobolInitiator {
+        type: CobolInitiatorType;
+        name: string;
+        persona?: string;
+        revision?: string;
+        contact?: string;
+        notes?: string[];
+    }
+
+    export interface CobolMqRoute {
+        manager: string;
+        queue: string;
+        commit?: string;
+    }
+
+    export interface CobolCicsRoute {
+        transaction: string;
+        program?: string;
+        channel?: string;
+    }
+
+    export interface CobolNarratorPayload {
+        curvature: number;
+        temperature: number;
+        encoder: string;
+        locale?: string;
+        coefficients?: number[];
+    }
+
+    export interface CobolMetadata {
+        tags?: string[];
+        annotations?: string[];
+        extra?: unknown;
+    }
+
+    export interface CobolRoutePlan {
+        mq?: CobolMqRoute;
+        cics?: CobolCicsRoute;
+        dataset?: string;
+    }
+
+    export interface CobolDispatchEnvelope {
+        job_id: string;
+        release_channel: string;
+        created_at: string;
+        initiators: CobolInitiator[];
+        route: CobolRoutePlan;
+        payload: CobolNarratorPayload;
+        metadata: CobolMetadata;
+    }
+
+    export class CobolDispatchPlanner {
+        constructor(jobId: string, releaseChannel?: string | null);
+        static fromJson(json: string): CobolDispatchPlanner;
+        static fromObject(envelope: CobolDispatchEnvelope): CobolDispatchPlanner;
+        setReleaseChannel(channel: string): void;
+        setCreatedAt(timestamp: string): void;
+        resetCreatedAt(): void;
+        setNarratorConfig(
+            curvature: number,
+            temperature: number,
+            encoder: string,
+            locale?: string | null,
+        ): void;
+        setCoefficients(coefficients: Float32Array): void;
+        addHumanInitiator(
+            name: string,
+            persona?: string | null,
+            contact?: string | null,
+            note?: string | null,
+        ): void;
+        addModelInitiator(
+            name: string,
+            revision?: string | null,
+            persona?: string | null,
+            note?: string | null,
+        ): void;
+        addAutomationInitiator(
+            name: string,
+            persona?: string | null,
+            note?: string | null,
+        ): void;
+        clearInitiators(): void;
+        setMqRoute(manager: string, queue: string, commitMode?: string | null): void;
+        clearMqRoute(): void;
+        setCicsRoute(
+            transaction: string,
+            program?: string | null,
+            channel?: string | null,
+        ): void;
+        clearCicsRoute(): void;
+        setDataset(dataset: string): void;
+        clearDataset(): void;
+        clearRoute(): void;
+        addTag(tag: string): void;
+        addAnnotation(annotation: string): void;
+        mergeMetadata(metadata: unknown): void;
+        clearMetadata(): void;
+        isValid(): boolean;
+        validationIssues(): string[];
+        loadJson(json: string): void;
+        loadObject(envelope: CobolDispatchEnvelope): void;
+        toObject(): CobolDispatchEnvelope;
+        toJson(): string;
+        toUint8Array(): Uint8Array;
+        coefficientsAsBytes(): Uint8Array;
+        readonly createdAt: string;
+        mqRoute(): CobolMqRoute | undefined;
+        cicsRoute(): CobolCicsRoute | undefined;
+        toCobolPreview(): unknown;
+    }
 }
