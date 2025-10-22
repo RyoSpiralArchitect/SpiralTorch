@@ -23,6 +23,7 @@
 
 use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
 use super::dashboard::{DashboardFrame, DashboardRing};
+use super::maintainer::MaintainerReport;
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
@@ -396,6 +397,11 @@ fn desire_step_cell() -> &'static RwLock<Option<DesireStepTelemetry>> {
 static ATLAS_FRAME: OnceLock<RwLock<Option<AtlasFrame>>> = OnceLock::new();
 static ATLAS_ROUTE: OnceLock<RwLock<VecDeque<AtlasFrame>>> = OnceLock::new();
 static DASHBOARD_FRAMES: OnceLock<RwLock<DashboardRing>> = OnceLock::new();
+static LAST_MAINTAINER_REPORT: OnceLock<RwLock<Option<MaintainerReport>>> = OnceLock::new();
+
+fn maintainer_cell() -> &'static RwLock<Option<MaintainerReport>> {
+    LAST_MAINTAINER_REPORT.get_or_init(|| RwLock::new(None))
+}
 
 fn atlas_cell() -> &'static RwLock<Option<AtlasFrame>> {
     ATLAS_FRAME.get_or_init(|| RwLock::new(None))
@@ -516,6 +522,30 @@ pub fn merge_atlas_fragment(fragment: AtlasFragment) {
             push_atlas_route(&frame);
             *guard = Some(frame);
         }
+    }
+}
+
+/// Stores the latest maintainer report emitted by the temporal maintainer heuristics.
+pub fn set_maintainer_report(report: MaintainerReport) {
+    if let Ok(mut guard) = maintainer_cell().write() {
+        *guard = Some(report.clone());
+    }
+    let fragment = fragment_from_maintainer_report(&report);
+    merge_atlas_fragment(fragment);
+}
+
+/// Returns the latest maintainer report, if one has been recorded.
+pub fn get_maintainer_report() -> Option<MaintainerReport> {
+    maintainer_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
+#[cfg(test)]
+pub(crate) fn clear_maintainer_report_for_test() {
+    if let Ok(mut guard) = maintainer_cell().write() {
+        *guard = None;
     }
 }
 
@@ -804,6 +834,42 @@ fn fragment_from_loopback(envelope: &LoopbackEnvelope) -> AtlasFragment {
     }
     if let Some(z) = envelope.z_signal {
         fragment.push_metric("z.bias", z);
+    }
+    fragment
+}
+
+fn fragment_from_maintainer_report(report: &MaintainerReport) -> AtlasFragment {
+    let mut fragment = AtlasFragment::new();
+    fragment.maintainer_status = Some(report.status);
+    if !report.diagnostic.is_empty() {
+        fragment.maintainer_diagnostic = Some(report.diagnostic.clone());
+        fragment.push_note(format!("maintainer.diagnostic:{}", report.diagnostic));
+    }
+    fragment.suggested_max_scale = report.suggested_max_scale.filter(|value| value.is_finite());
+    fragment.suggested_pressure = report.suggested_pressure.filter(|value| value.is_finite());
+    fragment.push_note(format!("maintainer.status:{}", report.status.as_str()));
+    fragment.push_metric("maintainer.average_drift", report.average_drift);
+    fragment.push_metric("maintainer.mean_energy", report.mean_energy);
+    fragment.push_metric("maintainer.mean_decay", report.mean_decay);
+    fragment.push_metric(
+        "maintainer.should_rewrite",
+        bool_as_metric(report.should_rewrite()),
+    );
+    if let Some(peak) = &report.drift_peak {
+        fragment.push_metric("maintainer.drift_peak.frequency", peak.frequency);
+        fragment.push_metric("maintainer.drift_peak.magnitude", peak.magnitude);
+        fragment.push_metric("maintainer.drift_peak.phase", peak.phase);
+    }
+    if let Some(peak) = &report.energy_peak {
+        fragment.push_metric("maintainer.energy_peak.frequency", peak.frequency);
+        fragment.push_metric("maintainer.energy_peak.magnitude", peak.magnitude);
+        fragment.push_metric("maintainer.energy_peak.phase", peak.phase);
+    }
+    #[cfg(feature = "kdsl")]
+    if let Some(script) = report.spiralk_script.as_ref() {
+        if !script.is_empty() {
+            fragment.script_hint = Some(script.clone());
+        }
     }
     fragment
 }
@@ -1286,6 +1352,7 @@ mod tests {
     use super::*;
     use crate::telemetry::chrono::{ChronoHarmonics, ChronoPeak, ChronoSummary};
     use crate::telemetry::dashboard::DashboardMetric;
+    use crate::telemetry::maintainer::MaintainerStatus;
     use std::sync::{Mutex, OnceLock};
     use std::time::SystemTime;
 
@@ -1584,5 +1651,74 @@ mod tests {
         let expanded = snapshot_dashboard_frames(baseline + 2);
         assert!(expanded.len() >= baseline + 2);
         assert!(snapshot_dashboard_frames(0).is_empty());
+    }
+
+    #[test]
+    fn maintainer_report_merges_into_atlas() {
+        let _guard = atlas_test_lock().lock().unwrap();
+        clear_atlas();
+        clear_atlas_route();
+        clear_maintainer_report_for_test();
+
+        #[allow(unused_mut)]
+        let mut report = MaintainerReport {
+            status: MaintainerStatus::Clamp,
+            average_drift: 0.42,
+            mean_energy: 1.75,
+            mean_decay: -0.08,
+            drift_peak: Some(ChronoPeak {
+                frequency: 0.33,
+                magnitude: 0.55,
+                phase: 0.12,
+            }),
+            energy_peak: Some(ChronoPeak {
+                frequency: 0.21,
+                magnitude: 0.47,
+                phase: -0.04,
+            }),
+            suggested_max_scale: Some(2.4),
+            suggested_pressure: Some(0.18),
+            diagnostic: "Clamp geometry around 2.4 while boosting pressure.".into(),
+            #[cfg(feature = "kdsl")]
+            spiralk_script: None,
+        };
+
+        #[cfg(feature = "kdsl")]
+        {
+            report.spiralk_script = Some("(maintain clamp)".into());
+        }
+
+        set_maintainer_report(report.clone());
+
+        let atlas = get_atlas_frame().expect("maintainer atlas frame");
+        assert_eq!(atlas.maintainer_status, Some(report.status));
+        assert_eq!(
+            atlas.maintainer_diagnostic.as_deref(),
+            Some(report.diagnostic.as_str())
+        );
+        assert_eq!(atlas.suggested_max_scale, report.suggested_max_scale);
+        assert_eq!(atlas.suggested_pressure, report.suggested_pressure);
+        assert!(atlas
+            .metrics
+            .iter()
+            .any(|metric| metric.name == "maintainer.average_drift"));
+        assert!(atlas
+            .notes
+            .iter()
+            .any(|note| note.starts_with("maintainer.status:")));
+
+        let summary = get_atlas_route_summary(Some(1));
+        assert_eq!(summary.maintainer_status, Some(report.status));
+        assert_eq!(summary.suggested_max_scale, report.suggested_max_scale);
+        assert_eq!(summary.suggested_pressure, report.suggested_pressure);
+        assert_eq!(
+            summary.maintainer_diagnostic.as_deref(),
+            Some(report.diagnostic.as_str())
+        );
+        assert!(summary
+            .districts
+            .iter()
+            .flat_map(|district| district.focus.iter())
+            .any(|focus| focus.name.starts_with("maintainer.")));
     }
 }

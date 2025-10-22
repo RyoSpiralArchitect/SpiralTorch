@@ -151,6 +151,30 @@ pub fn redis_get_json<T: DeserializeOwned>(url: &str, key: &str) -> KvResult<Opt
 }
 
 #[cfg(feature = "redis")]
+pub fn redis_set_json_ex<T: Serialize>(
+    url: &str,
+    key: &str,
+    value: &T,
+    seconds: usize,
+) -> KvResult<()> {
+    with_redis(url, |kv| kv.set_json_ex(key, value, seconds))
+}
+
+#[cfg(feature = "redis")]
+pub fn redis_set_json_nx<T: Serialize>(url: &str, key: &str, value: &T) -> KvResult<bool> {
+    with_redis(url, |kv| kv.set_json_nx(key, value))
+}
+
+#[cfg(feature = "redis")]
+pub fn redis_get_or_set_json<T, F>(url: &str, key: &str, default: F) -> KvResult<T>
+where
+    T: Serialize + DeserializeOwned,
+    F: FnOnce() -> T,
+{
+    with_redis(url, |kv| kv.get_or_set_json(key, default))
+}
+
+#[cfg(feature = "redis")]
 pub fn redis_hset<F, V>(url: &str, key: &str, field: F, value: V) -> KvResult<bool>
 where
     F: ToRedisArgs,
@@ -209,8 +233,26 @@ pub fn redis_set_choice(url: &str, key: &str, choice: &Choice) -> KvResult<()> {
 }
 
 #[cfg(feature = "redis")]
+pub fn redis_set_choice_ex(url: &str, key: &str, choice: &Choice, seconds: usize) -> KvResult<()> {
+    redis_set_json_ex(url, key, choice, seconds)
+}
+
+#[cfg(feature = "redis")]
+pub fn redis_set_choice_nx(url: &str, key: &str, choice: &Choice) -> KvResult<bool> {
+    redis_set_json_nx(url, key, choice)
+}
+
+#[cfg(feature = "redis")]
 pub fn redis_get_choice(url: &str, key: &str) -> KvResult<Option<Choice>> {
     redis_get_json(url, key)
+}
+
+#[cfg(feature = "redis")]
+pub fn redis_get_or_set_choice<F>(url: &str, key: &str, default: F) -> KvResult<Choice>
+where
+    F: FnOnce() -> Choice,
+{
+    redis_get_or_set_json(url, key, default)
 }
 
 #[cfg(feature = "redis")]
@@ -407,6 +449,36 @@ impl RedisKv {
             Some(raw) => Ok(Some(serde_json::from_str(&raw)?)),
             None => Ok(None),
         }
+    }
+
+    pub fn set_json_ex<T>(&mut self, key: &str, value: &T, seconds: usize) -> KvResult<()>
+    where
+        T: Serialize,
+    {
+        let payload = serde_json::to_string(value)?;
+        self.set_ex(key, payload, seconds)
+    }
+
+    pub fn set_json_nx<T>(&mut self, key: &str, value: &T) -> KvResult<bool>
+    where
+        T: Serialize,
+    {
+        let payload = serde_json::to_string(value)?;
+        self.set_nx(key, payload)
+    }
+
+    pub fn get_or_set_json<T, F>(&mut self, key: &str, default: F) -> KvResult<T>
+    where
+        T: Serialize + DeserializeOwned,
+        F: FnOnce() -> T,
+    {
+        if let Some(existing) = self.get_json(key)? {
+            return Ok(existing);
+        }
+
+        let value = default();
+        self.set_json(key, &value)?;
+        Ok(value)
     }
 
     pub fn hset<F, V>(&mut self, key: &str, field: F, value: V) -> KvResult<bool>
