@@ -49,9 +49,9 @@ sequenceDiagram
 
 > **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
 
-**License**
+**Licensing**
 
-AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
+SpiralTorch ships under the [AGPL-3.0-or-later](docs/licensing.md) for open-source users, with commercial licensing available for teams that need closed deployments or priority support. Check the [Licensing overview](docs/licensing.md) for tiered pricing, contact details, and the rationale behind our dual model. Every redistribution—source, binary, or SaaS—must keep the **SpiralTorch** name, the **Ryo ∴ SpiralArchitect** attribution, and AGPL §5/§13 notices intact. Name erasure is non-compliant and treated as an AGPL violation.
 
 
 <p align="center">
@@ -69,7 +69,8 @@ AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
 
 - © 2025 Ryo ∴ SpiralArchitect — Licensed under AGPL-3.0-or-later  
 - Contact: [Discussions](https://github.com/RyoSpiralArchitect/SpiralTorch/discussions) · <mailto:kishkavsesvit@icloud.com>  
-- Unauthorized derivations are non-compliant with AGPL §13  
+- Unauthorized derivations are non-compliant with AGPL §13
+- Repository ships a signed [`.torchmeta.json`](.torchmeta.json) provenance marker—do not strip it in derivatives
 - **For research collaborations or integration inquiries, please reach out directly.**
 - **Cloud integrations:** see [Cloud Integration Guide](docs/cloud_integration.md) for
   Azure and AWS deployment blueprints.
