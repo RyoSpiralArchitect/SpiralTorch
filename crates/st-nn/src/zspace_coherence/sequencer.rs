@@ -651,6 +651,24 @@ impl ZSpaceCoherenceSequencer {
         self.plugins.iter().map(|plugin| plugin.name()).collect()
     }
 
+    /// Registers a plugin that will receive callbacks across the sequencing pipeline.
+    pub fn register_plugin<P>(&mut self, plugin: P)
+    where
+        P: ZSpaceSequencerPlugin + 'static,
+    {
+        self.plugins.push(Arc::new(plugin));
+    }
+
+    /// Removes all registered plugins.
+    pub fn clear_plugins(&mut self) {
+        self.plugins.clear();
+    }
+
+    /// Returns the descriptive names of the registered plugins.
+    pub fn plugin_names(&self) -> Vec<&'static str> {
+        self.plugins.iter().map(|plugin| plugin.name()).collect()
+    }
+
     /// Registers a domain linguistic profile used to bias coherence weights.
     pub fn register_linguistic_profile(
         &mut self,
