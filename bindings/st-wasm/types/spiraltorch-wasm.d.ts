@@ -379,10 +379,12 @@ declare module "spiraltorch-wasm" {
     }
 
     export class CobolDispatchPlanner {
+        constructor(jobId: string, releaseChannel?: string | null);
         static fromJson(json: string): CobolDispatchPlanner;
         static fromObject(envelope: CobolDispatchEnvelope): CobolDispatchPlanner;
-        constructor(jobId: string, releaseChannel?: string | null);
         setReleaseChannel(channel: string): void;
+        setCreatedAt(timestamp: string): void;
+        resetCreatedAt(): void;
         setNarratorConfig(
             curvature: number,
             temperature: number,
@@ -407,17 +409,24 @@ declare module "spiraltorch-wasm" {
             persona?: string | null,
             note?: string | null,
         ): void;
+        clearInitiators(): void;
         setMqRoute(manager: string, queue: string, commitMode?: string | null): void;
+        clearMqRoute(): void;
         setCicsRoute(
             transaction: string,
             program?: string | null,
             channel?: string | null,
         ): void;
+        clearCicsRoute(): void;
         setDataset(dataset: string): void;
+        clearDataset(): void;
+        clearRoute(): void;
         addTag(tag: string): void;
         addAnnotation(annotation: string): void;
         mergeMetadata(metadata: unknown): void;
         clearMetadata(): void;
+        isValid(): boolean;
+        validationIssues(): string[];
         loadJson(json: string): void;
         loadObject(envelope: CobolDispatchEnvelope): void;
         toObject(): CobolDispatchEnvelope;

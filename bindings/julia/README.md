@@ -26,6 +26,9 @@ Rust without manual pointer juggling.
    SpiralTorch.to_array(t + u)
    SpiralTorch.to_array(0.5f0 * t)
    SpiralTorch.to_array(t * u)
+   SpiralTorch.to_array(t .* u)
+   SpiralTorch.to_array(transpose(t))
+   SpiralTorch.to_array(reshape(t, 4, 1))
    ```
 
 The wrapper automatically disposes tensors via finalizers, but you can call
@@ -38,5 +41,10 @@ inspect transient failures.
   `Tensor` instances.
 - `*` between two tensors dispatches to matrix multiplication while scalar
   multiplication scales individual elements.
+- `.*` performs Hadamard (element-wise) multiplication.
+- `transpose(tensor)` surfaces the backend implementation without copying on the
+  Julia side.
+- `reshape(tensor, rows, cols)` returns a view with the requested shape,
+  mirroring the Rust API expectations.
 - `to_array(tensor)` materialises the data into a Julia `Matrix{Float32}` for
   native manipulation.

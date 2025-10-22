@@ -1,4 +1,4 @@
-use js_sys::{Float32Array, Uint8Array};
+use js_sys::{Array, Float32Array, Uint8Array};
 use serde_wasm_bindgen as swb;
 use wasm_bindgen::prelude::*;
 
@@ -23,13 +23,15 @@ impl CobolDispatchPlanner {
 
     #[wasm_bindgen(js_name = fromJson)]
     pub fn from_json(json: &str) -> Result<CobolDispatchPlanner, JsValue> {
-        let builder = CobolEnvelopeBuilder::from_json_str(json).map_err(js_error)?;
-        Ok(CobolDispatchPlanner { builder })
+        let envelope = CobolEnvelope::from_json_str(json).map_err(js_error)?;
+        Ok(CobolDispatchPlanner {
+            builder: CobolEnvelopeBuilder::from_envelope(envelope),
+        })
     }
 
     #[wasm_bindgen(js_name = fromObject)]
-    pub fn from_object(envelope: &JsValue) -> Result<CobolDispatchPlanner, JsValue> {
-        let envelope: CobolEnvelope = swb::from_value(envelope.clone()).map_err(js_error)?;
+    pub fn from_object(value: &JsValue) -> Result<CobolDispatchPlanner, JsValue> {
+        let envelope: CobolEnvelope = swb::from_value(value.clone()).map_err(js_error)?;
         Ok(CobolDispatchPlanner {
             builder: CobolEnvelopeBuilder::from_envelope(envelope),
         })
@@ -38,6 +40,16 @@ impl CobolDispatchPlanner {
     #[wasm_bindgen(js_name = setReleaseChannel)]
     pub fn set_release_channel(&mut self, channel: &str) {
         self.builder.set_release_channel(channel.to_string());
+    }
+
+    #[wasm_bindgen(js_name = setCreatedAt)]
+    pub fn set_created_at(&mut self, timestamp: &str) {
+        self.builder.set_created_at(timestamp.to_string());
+    }
+
+    #[wasm_bindgen(js_name = resetCreatedAt)]
+    pub fn reset_created_at(&mut self) {
+        self.builder.reset_created_at();
     }
 
     #[wasm_bindgen(js_name = setNarratorConfig)]
@@ -116,10 +128,20 @@ impl CobolDispatchPlanner {
         self.builder.add_initiator(initiator);
     }
 
+    #[wasm_bindgen(js_name = clearInitiators)]
+    pub fn clear_initiators(&mut self) {
+        self.builder.clear_initiators();
+    }
+
     #[wasm_bindgen(js_name = setMqRoute)]
     pub fn set_mq_route(&mut self, manager: &str, queue: &str, commit: Option<String>) {
         self.builder
             .set_mq_route(manager.to_string(), queue.to_string(), commit);
+    }
+
+    #[wasm_bindgen(js_name = clearMqRoute)]
+    pub fn clear_mq_route(&mut self) {
+        self.builder.clear_mq_route();
     }
 
     #[wasm_bindgen(js_name = setCicsRoute)]
@@ -133,9 +155,24 @@ impl CobolDispatchPlanner {
             .set_cics_route(transaction.to_string(), program, channel);
     }
 
+    #[wasm_bindgen(js_name = clearCicsRoute)]
+    pub fn clear_cics_route(&mut self) {
+        self.builder.clear_cics_route();
+    }
+
     #[wasm_bindgen(js_name = setDataset)]
     pub fn set_dataset(&mut self, dataset: &str) {
         self.builder.set_dataset(Some(dataset.to_string()));
+    }
+
+    #[wasm_bindgen(js_name = clearDataset)]
+    pub fn clear_dataset(&mut self) {
+        self.builder.set_dataset(None);
+    }
+
+    #[wasm_bindgen(js_name = clearRoute)]
+    pub fn clear_route(&mut self) {
+        self.builder.clear_route();
     }
 
     #[wasm_bindgen(js_name = addTag)]
@@ -164,17 +201,31 @@ impl CobolDispatchPlanner {
         self.builder.clear_metadata();
     }
 
+    #[wasm_bindgen(js_name = isValid)]
+    pub fn is_valid(&self) -> bool {
+        self.builder.envelope().is_valid()
+    }
+
+    #[wasm_bindgen(js_name = validationIssues)]
+    pub fn validation_issues(&self) -> Array {
+        let issues = Array::new();
+        for issue in self.builder.envelope().validation_issues() {
+            issues.push(&JsValue::from(issue));
+        }
+        issues
+    }
+
     #[wasm_bindgen(js_name = loadJson)]
     pub fn load_json(&mut self, json: &str) -> Result<(), JsValue> {
         let envelope = CobolEnvelope::from_json_str(json).map_err(js_error)?;
-        self.builder.replace_envelope(envelope);
+        self.builder.load_envelope(envelope);
         Ok(())
     }
 
     #[wasm_bindgen(js_name = loadObject)]
-    pub fn load_object(&mut self, envelope: &JsValue) -> Result<(), JsValue> {
-        let envelope: CobolEnvelope = swb::from_value(envelope.clone()).map_err(js_error)?;
-        self.builder.replace_envelope(envelope);
+    pub fn load_object(&mut self, value: &JsValue) -> Result<(), JsValue> {
+        let envelope: CobolEnvelope = swb::from_value(value.clone()).map_err(js_error)?;
+        self.builder.load_envelope(envelope);
         Ok(())
     }
 

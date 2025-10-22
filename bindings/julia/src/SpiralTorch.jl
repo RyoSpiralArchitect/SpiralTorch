@@ -177,10 +177,41 @@ function scale(tensor::Tensor, value::Real)
     return _wrap_tensor(result, "tensor_scale")
 end
 
+function hadamard(lhs::Tensor, rhs::Tensor)
+    return _binary_tensor_op(:spiraltorch_tensor_hadamard, lhs, rhs)
+end
+
+function transpose_tensor(tensor::Tensor)
+    lib = _lib()
+    handle = _require_handle(tensor, "tensor_transpose")
+    result = ccall((:spiraltorch_tensor_transpose, lib), Ptr{Cvoid}, (Ptr{Cvoid},), handle)
+    return _wrap_tensor(result, "tensor_transpose")
+end
+
+function reshape_tensor(tensor::Tensor, rows::Integer, cols::Integer)
+    lib = _lib()
+    handle = _require_handle(tensor, "tensor_reshape")
+    result = ccall((:spiraltorch_tensor_reshape, lib), Ptr{Cvoid}, (Ptr{Cvoid}, Csize_t, Csize_t), handle, Csize_t(rows), Csize_t(cols))
+    return _wrap_tensor(result, "tensor_reshape")
+end
+
 Base.:+(lhs::Tensor, rhs::Tensor) = add(lhs, rhs)
 Base.:-(lhs::Tensor, rhs::Tensor) = sub(lhs, rhs)
 Base.:*(lhs::Tensor, rhs::Tensor) = matmul(lhs, rhs)
 Base.:*(tensor::Tensor, value::Real) = scale(tensor, value)
 Base.:*(value::Real, tensor::Tensor) = scale(tensor, value)
+Base.:.*(lhs::Tensor, rhs::Tensor) = hadamard(lhs, rhs)
+Base.transpose(tensor::Tensor) = transpose_tensor(tensor)
+
+function Base.reshape(tensor::Tensor, dims::Integer...)
+    if length(dims) != 2
+        throw(ArgumentError("SpiralTorch tensors currently support reshape with two dimensions"))
+    end
+    return reshape_tensor(tensor, dims[1], dims[2])
+end
+
+function Base.reshape(tensor::Tensor, dims::Tuple{Vararg{Integer, 2}})
+    return reshape_tensor(tensor, dims[1], dims[2])
+end
 
 end # module

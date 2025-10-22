@@ -41,7 +41,7 @@ fresh envelope with a `planner_initialized` annotation to make auditing easier.
 
 ```rust
 use spiraltorch_wasm::{
-    make_initiator, CobolEnvelopeBuilder, InitiatorKind,
+    make_initiator, CobolEnvelope, CobolEnvelopeBuilder, InitiatorKind,
 };
 
 let mut builder = CobolEnvelopeBuilder::new("demo-job");
@@ -60,11 +60,30 @@ builder.set_mq_route("MQ1", "NARRATION.INBOUND", Some("sync".into()));
 builder.add_tag("browser-ui");
 let envelope = builder.snapshot();
 let json = envelope.to_json_string()?;
+
+// Reset the transport plan when retrying a job with different targets.
+builder.clear_route();
+builder.set_cics_route("CX12", Some("NARRDISP".into()), None);
 ```
 
 The snippet above exercises the same code that the WebAssembly planner uses.
 You can serialise the envelope with `to_json_string()` or `to_json_bytes()` and
 ship it directly to batch tooling.
+
+Existing envelopes can be loaded back into the builder for auditing or
+rerouting:
+
+```rust
+let mut builder = CobolEnvelopeBuilder::from_envelope(
+    CobolEnvelope::from_json_str(saved_json)?
+);
+builder.clear_route();
+builder.set_mq_route("MQ2", "NARRATION.REROUTED", None);
+```
+
+`from_envelope` sanitises string fields and re-applies the
+`planner_initialized` annotation so downstream tooling can distinguish between
+fresh and imported envelopes.
 
 ## Calling the planner from JavaScript
 
@@ -79,6 +98,21 @@ planner.addHumanInitiator("Analyst", null, "analyst@example", "pilot run");
 planner.setMqRoute("QM1", "SPIRALTORCH.INBOUND", "commit");
 const jsonEnvelope = planner.toJson();
 const bytes = planner.toUint8Array();
+
+// Later in the session we can re-target the job without rebuilding the planner.
+planner.clearRoute();
+planner.clearInitiators();
+planner.setCreatedAt(new Date().toISOString());
+planner.setCicsRoute("CX45", "NARRDISP", null);
+
+// Load a saved envelope and continue editing in place.
+planner.loadJson(savedJson);
+planner.clearInitiators();
+planner.addAutomationInitiator("retry-bot", null, "retry job");
+
+// Or spawn a planner pre-populated from an existing envelope.
+const imported = CobolDispatchPlanner.fromJson(savedJson);
+imported.setReleaseChannel("staging");
 ```
 
 `toJson()` returns a pretty-printed string suited for debugging UIs while
@@ -88,23 +122,22 @@ If the caller provides `null` or `undefined` metadata, the planner keeps the
 existing structured metadata.  Passing an object merges keys into the `extra`
 map, while any other JSON value replaces the `extra` field entirely.
 
-### Importing existing envelopes
+The planner also exposes ergonomic state management methods.  `clearRoute()`
+removes MQ, CICS, and dataset selectors in one call, while `clearInitiators()`
+empties the collaboration roster.  When a workflow needs a fresh timestamp the
+UI can call `setCreatedAt()` with an explicit value or `resetCreatedAt()` to
+request a new server-side default.  These helpers keep the WebAssembly layer in
+sync with the Rust builder’s semantics.
 
-Browsers that fetch historical envelopes can hydrate a planner directly from
-JSON without re-entering every field manually:
+## Validating envelopes
 
-```ts
-const previousJson = await fetch("/api/envelope/job-200").then((res) => res.text());
-const planner = CobolDispatchPlanner.fromJson(previousJson);
-planner.setReleaseChannel("shadow");
-planner.loadObject({ ...planner.toObject(), job_id: "job-201" });
-```
-
-`CobolDispatchPlanner.fromJson` and `fromObject` run the same sanitisation as
-`CobolEnvelopeBuilder::new`, ensuring empty strings are trimmed away and the
-`planner_initialized` annotation is present.  Instance methods `loadJson` and
-`loadObject` can reset an existing planner, which is useful when rendering the
-same component for multiple envelopes during a debugging session.
+Before dispatching, both the Rust builder and the WebAssembly planner can audit
+envelopes for common mistakes.  Call `builder.validation_issues()` to receive a
+list of human-readable problems or `builder.is_valid()` when only a boolean is
+needed.  Browser callers can mirror the same workflow with
+`planner.validationIssues()` and `planner.isValid()`.  The checks flag missing
+initiators, absent routes, narrator settings outside the 0–1 range, and jobs
+that still rely on the default `job` placeholder identifier.
 
 ## Dispatching to mainframe bridges
 
