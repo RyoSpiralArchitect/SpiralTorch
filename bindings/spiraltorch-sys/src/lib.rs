@@ -8,7 +8,7 @@
 //! can be used by other foreign-language integrations that require a stable
 //! binary interface.
 
-use st_core::runtime::golden::{GoldenRuntime, GoldenRuntimeConfig};
+use st_core::runtime::golden::{GoldenRuntime, GoldenRuntimeConfig, GoldenTensorError};
 use st_tensor::{PureResult, Tensor};
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr, CString};
@@ -334,13 +334,27 @@ fn runtime_spawn(
 fn runtime_tensor_generate(
     runtime: *const RuntimeHandle,
     context: &str,
-    task: impl FnOnce() -> PureResult<Tensor> + Send + 'static,
+    task: impl FnOnce(&GoldenRuntime) -> Result<Tensor, GoldenTensorError>,
 ) -> *mut Tensor {
     let runtime = match runtime_from_ptr(runtime, "runtime handle") {
         Some(runtime) => runtime,
         None => return ptr::null_mut(),
     };
-    runtime_spawn(runtime, context, task)
+
+    match task(runtime) {
+        Ok(tensor) => {
+            clear_last_error();
+            Box::into_raw(Box::new(tensor))
+        }
+        Err(GoldenTensorError::Runtime(err)) => {
+            set_last_error(format!("{context}: {err}"));
+            ptr::null_mut()
+        }
+        Err(GoldenTensorError::Tensor(err)) => {
+            set_last_error(format!("{context}: {err}"));
+            ptr::null_mut()
+        }
+    }
 }
 
 fn runtime_tensor_binary_op<F>(
@@ -624,8 +638,8 @@ pub extern "C" fn spiraltorch_runtime_tensor_random_uniform(
     seed: u64,
     has_seed: bool,
 ) -> *mut Tensor {
-    runtime_tensor_generate(runtime, "runtime_tensor_random_uniform", move || {
-        Tensor::random_uniform(rows, cols, min, max, optional_seed(seed, has_seed))
+    runtime_tensor_generate(runtime, "runtime_tensor_random_uniform", move |runtime| {
+        runtime.tensor_random_uniform(rows, cols, min, max, optional_seed(seed, has_seed))
     })
 }
 
@@ -639,6 +653,8 @@ pub extern "C" fn spiraltorch_runtime_tensor_random_normal(
     seed: u64,
     has_seed: bool,
 ) -> *mut Tensor {
+    runtime_tensor_generate(runtime, "runtime_tensor_random_normal", move |runtime| {
+        runtime.tensor_random_normal(rows, cols, mean, std, optional_seed(seed, has_seed))
     runtime_tensor_generate(runtime, "runtime_tensor_random_normal", move || {
         Tensor::random_normal(rows, cols, mean, std, optional_seed(seed, has_seed))
     })
