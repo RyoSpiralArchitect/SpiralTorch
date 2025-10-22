@@ -2564,6 +2564,8 @@ mod language_pipeline {
                     drift: 0.05,
                     z_signal: 0.1 * step as f32,
                     scale: None,
+                    events: Vec::new(),
+                    attributions: Vec::new(),
                 });
 
                 let now = start + Duration::from_millis((step * 120) as u64);

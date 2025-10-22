@@ -34,7 +34,7 @@ use std::time::SystemTime;
 
 use serde_json::Value;
 
-use crate::theory::zpulse::ZScale;
+use crate::theory::zpulse::{ZScale, ZSource};
 
 use super::chrono::ChronoLoopSignal;
 #[cfg(feature = "psi")]
@@ -189,7 +189,7 @@ pub fn get_last_psychoid() -> Option<PsychoidReading> {
 }
 
 /// Latest SoftLogic-derived telemetry that has been fed back into the "Z" control space.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SoftlogicZFeedback {
     /// Aggregate PSI total used when the sample was recorded.
     pub psi_total: f32,
@@ -203,6 +203,50 @@ pub struct SoftlogicZFeedback {
     pub z_signal: f32,
     /// Optional log-scale tag attached to the fused pulse that produced the feedback.
     pub scale: Option<ZScale>,
+    /// Event tags emitted while producing the fused control signal.
+    pub events: Vec<String>,
+    /// Attribution weights per contributing Z source.
+    pub attributions: Vec<(ZSource, f32)>,
+}
+
+impl SoftlogicZFeedback {
+    /// Returns true when the feedback contains the provided event tag.
+    pub fn has_event(&self, tag: &str) -> bool {
+        self.events.iter().any(|event| event == tag)
+    }
+
+    /// Iterates over all event tags contained in the feedback record.
+    pub fn event_tags(&self) -> impl Iterator<Item = &str> {
+        self.events.iter().map(|event| event.as_str())
+    }
+
+    /// Appends an event tag to the feedback.
+    pub fn push_event<S: Into<String>>(&mut self, tag: S) {
+        self.events.push(tag.into());
+    }
+
+    /// Clears the current event tags and replaces them with the provided iterator.
+    pub fn set_events<I, S>(&mut self, events: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.events.clear();
+        self.events.extend(events.into_iter().map(Into::into));
+    }
+
+    /// Replaces the attribution weights with the provided iterator.
+    pub fn set_attributions<I>(&mut self, attributions: I)
+    where
+        I: IntoIterator<Item = (ZSource, f32)>,
+    {
+        self.attributions.clear();
+        self.attributions.extend(
+            attributions
+                .into_iter()
+                .map(|(source, weight)| (source, weight.max(0.0))),
+        );
+    }
 }
 
 static LAST_SOFTLOGIC_Z: OnceLock<RwLock<Option<SoftlogicZFeedback>>> = OnceLock::new();
@@ -414,7 +458,7 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
     softlogic_z_cell()
         .read()
         .ok()
-        .and_then(|guard| guard.as_ref().copied())
+        .and_then(|guard| guard.as_ref().cloned())
 }
 
 /// Snapshot summarising the latest RealGrad projection applied by the system.

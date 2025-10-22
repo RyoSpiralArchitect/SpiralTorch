@@ -528,6 +528,8 @@ pub mod experimental {
                 drift: self.drift,
                 z_signal: self.z_bias,
                 scale: self.scale,
+                events: Vec::new(),
+                attributions: Vec::new(),
             }
         }
 
@@ -917,7 +919,9 @@ pub mod experimental {
             let fused_z = self.conductor.step_from_registry(&mut registry, now);
 
             let fused_pulse = fused.clone();
-            let feedback = fused.clone().into_softlogic_feedback();
+            let mut feedback = fused.clone().into_softlogic_feedback();
+            feedback.set_events(fused_z.events.clone());
+            feedback.set_attributions(fused_z.attributions.clone());
             self.previous = Some(fused.clone());
             self.carry = Some(fused.clone());
 

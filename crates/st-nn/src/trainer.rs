@@ -351,7 +351,11 @@ impl SoftLogicFlex {
             + (-drift_term * self.drift_gain * 0.5);
 
         if self.scale_gain > 0.0 {
-            if let Some(scale) = self.last_feedback.and_then(|feedback| feedback.scale) {
+            if let Some(scale) = self
+                .last_feedback
+                .as_ref()
+                .and_then(|feedback| feedback.scale)
+            {
                 let bias = (-scale.log_radius).tanh();
                 let explore = bias.max(0.0);
                 let settle = (-bias).max(0.0);
@@ -395,8 +399,10 @@ impl SoftLogicFlex {
             drift,
             z_signal: self.last_z,
             scale: scale_hint,
+            events: Vec::new(),
+            attributions: Vec::new(),
         };
-        self.last_feedback = Some(feedback);
+        self.last_feedback = Some(feedback.clone());
         feedback
     }
 
@@ -1396,7 +1402,7 @@ impl ModuleTrainer {
             let z_feedback =
                 self.softlogic
                     .observe(&band_energy, weighted_loss, psi_total_opt, scale_hint);
-            hub::set_softlogic_z(z_feedback);
+            hub::set_softlogic_z(z_feedback.clone());
             extra.insert("softlogic_z".to_string(), z_feedback.z_signal as f64);
             let mut loop_broadcasted = false;
             if let Some(node) = self.distribution.as_mut() {
