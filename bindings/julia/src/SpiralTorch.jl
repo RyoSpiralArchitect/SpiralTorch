@@ -1,0 +1,144 @@
+module SpiralTorch
+
+using Libdl
+
+const _lib_ref = Ref{Ptr{Cvoid}}(C_NULL)
+
+function _candidate_paths()
+    candidates = String[]
+    if haskey(ENV, "SPIRALTORCH_SYS_LIBRARY")
+        push!(candidates, ENV["SPIRALTORCH_SYS_LIBRARY"])
+    end
+    push!(candidates, joinpath(@__DIR__, "..", "deps", "libspiraltorch_sys." * Libdl.dlext))
+    push!(candidates, "libspiraltorch_sys." * Libdl.dlext)
+    return candidates
+end
+
+function load_library!()
+    if _lib_ref[] != C_NULL
+        return _lib_ref[]
+    end
+    errors = String[]
+    for candidate in _candidate_paths()
+        if isempty(candidate)
+            continue
+        end
+        try
+            handle = Libdl.dlopen(candidate)
+            _lib_ref[] = handle
+            return handle
+        catch err
+            push!(errors, string(candidate, ": ", sprint(showerror, err)))
+        end
+    end
+    error_msg = join(errors, "\n")
+    error("Unable to locate libspiraltorch_sys. Set SPIRALTORCH_SYS_LIBRARY to the compiled shared library path.\n" * error_msg)
+end
+
+@inline function _lib()
+    lib = _lib_ref[]
+    return lib == C_NULL ? load_library!() : lib
+end
+
+function last_error()
+    lib = _lib()
+    len = ccall((:spiraltorch_last_error_length, lib), Csize_t, ())
+    if len == 0
+        return ""
+    end
+    buffer = Vector{UInt8}(undef, len + 1)
+    written = ccall((:spiraltorch_last_error_message, lib), Csize_t, (Ptr{UInt8}, Csize_t), pointer(buffer), length(buffer))
+    return String(unsafe_string(pointer(buffer), written))
+end
+
+function clear_error!()
+    lib = _lib()
+    ccall((:spiraltorch_clear_last_error, lib), Cvoid, ())
+    return nothing
+end
+
+function version()
+    lib = _lib()
+    len = ccall((:spiraltorch_version, lib), Csize_t, (Ptr{UInt8}, Csize_t), Ptr{UInt8}(C_NULL), 0)
+    buffer = Vector{UInt8}(undef, len + 1)
+    written = ccall((:spiraltorch_version, lib), Csize_t, (Ptr{UInt8}, Csize_t), pointer(buffer), length(buffer))
+    return String(unsafe_string(pointer(buffer), written))
+end
+
+mutable struct Tensor
+    handle::Ptr{Cvoid}
+end
+
+function _register_finalizer!(tensor::Tensor)
+    finalizer(tensor) do obj
+        if obj.handle != C_NULL
+            lib = _lib()
+            ccall((:spiraltorch_tensor_free, lib), Cvoid, (Ptr{Cvoid},), obj.handle)
+            obj.handle = C_NULL
+        end
+    end
+    return tensor
+end
+
+function Tensor(rows::Integer, cols::Integer)
+    lib = _lib()
+    handle = ccall((:spiraltorch_tensor_zeros, lib), Ptr{Cvoid}, (Csize_t, Csize_t), rows, cols)
+    if handle == C_NULL
+        error("failed to allocate zero tensor: " * last_error())
+    end
+    return _register_finalizer!(Tensor(handle))
+end
+
+function Tensor(data::AbstractMatrix{<:Real})
+    mat = Float32.(Array(data))
+    rows, cols = size(mat)
+    flat = reshape(mat, :)
+    lib = _lib()
+    handle = ccall((:spiraltorch_tensor_from_dense, lib), Ptr{Cvoid}, (Csize_t, Csize_t, Ptr{Float32}, Csize_t), rows, cols, pointer(flat), length(flat))
+    if handle == C_NULL
+        error("failed to construct tensor from array: " * last_error())
+    end
+    return _register_finalizer!(Tensor(handle))
+end
+
+function shape(tensor::Tensor)
+    lib = _lib()
+    rows = Ref{Csize_t}(0)
+    cols = Ref{Csize_t}(0)
+    ok = ccall((:spiraltorch_tensor_shape, lib), Cuchar, (Ptr{Cvoid}, Ptr{Csize_t}, Ptr{Csize_t}), tensor.handle, rows, cols)
+    if ok == 0
+        error("failed to query tensor shape: " * last_error())
+    end
+    return (Int(rows[]), Int(cols[]))
+end
+
+function elements(tensor::Tensor)
+    lib = _lib()
+    count = ccall((:spiraltorch_tensor_elements, lib), Csize_t, (Ptr{Cvoid},), tensor.handle)
+    if count == 0
+        err = last_error()
+        if !isempty(err)
+            error("failed to query tensor elements: " * err)
+        end
+    end
+    return Int(count)
+end
+
+function to_array(tensor::Tensor)
+    rows, cols = shape(tensor)
+    len = rows * cols
+    buffer = Vector{Float32}(undef, len)
+    lib = _lib()
+    ok = ccall((:spiraltorch_tensor_copy_data, lib), Cuchar, (Ptr{Cvoid}, Ptr{Float32}, Csize_t), tensor.handle, pointer(buffer), len)
+    if ok == 0
+        error("failed to copy tensor data: " * last_error())
+    end
+    return reshape(buffer, rows, cols)
+end
+
+Base.size(tensor::Tensor) = shape(tensor)
+Base.length(tensor::Tensor) = prod(size(tensor))
+Base.convert(::Type{Array{Float32,2}}, tensor::Tensor) = to_array(tensor)
+Base.convert(::Type{Matrix{Float32}}, tensor::Tensor) = to_array(tensor)
+
+end # module

@@ -1,0 +1,10 @@
+name = "SpiralTorch"
+uuid = "3e5668aa-4d45-4a9d-949f-d4634d1a040b"
+authors = ["SpiralTorch Contributors"]
+version = "0.1.0"
+
+[deps]
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+
+[compat]
+julia = "1.9"

@@ -1,0 +1,313 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// © 2025 SpiralTorch Contributors
+// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+
+//! Minimal C-ABI shims that surface a stable subset of SpiralTorch tensor
+//! primitives. These functions are consumed by the Julia and Go bindings and
+//! can be used by other foreign-language integrations that require a stable
+//! binary interface.
+
+use once_cell::sync::Lazy;
+use st_tensor::{PureResult, Tensor};
+use std::ffi::{c_char, CString};
+use std::ptr;
+use std::slice;
+use std::sync::Mutex;
+
+type FfiResult<T> = Result<T, ()>;
+
+static LAST_ERROR: Lazy<Mutex<Option<CString>>> = Lazy::new(|| Mutex::new(None));
+
+fn set_last_error(message: impl Into<String>) {
+    let mut slot = LAST_ERROR.lock().expect("last error mutex poisoned");
+    let owned = message.into();
+    *slot = Some(
+        CString::new(owned.clone())
+            .unwrap_or_else(|_| CString::new("<error message contained null byte>").unwrap()),
+    );
+}
+
+fn clear_last_error() {
+    let mut slot = LAST_ERROR.lock().expect("last error mutex poisoned");
+    *slot = None;
+}
+
+fn ok<T>(value: T) -> FfiResult<T> {
+    clear_last_error();
+    Ok(value)
+}
+
+fn err<T>(message: impl Into<String>) -> FfiResult<T> {
+    set_last_error(message);
+    Err(())
+}
+
+fn tensor_from_result(result: PureResult<Tensor>) -> *mut Tensor {
+    match result {
+        Ok(tensor) => {
+            clear_last_error();
+            Box::into_raw(Box::new(tensor))
+        }
+        Err(err) => {
+            set_last_error(err.to_string());
+            ptr::null_mut()
+        }
+    }
+}
+
+fn tensor_from_result_with_message(result: PureResult<Tensor>, context: &str) -> *mut Tensor {
+    match result {
+        Ok(tensor) => {
+            clear_last_error();
+            Box::into_raw(Box::new(tensor))
+        }
+        Err(err) => {
+            set_last_error(format!("{context}: {err}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+fn tensor_from_data(rows: usize, cols: usize, data: &[f32]) -> PureResult<Tensor> {
+    Tensor::from_vec(rows, cols, data.to_vec())
+}
+
+fn require_non_null<T>(ptr: *const T, label: &str) -> FfiResult<*const T> {
+    if ptr.is_null() {
+        return err(format!("{label} pointer was null"));
+    }
+    ok(ptr)
+}
+
+fn require_non_null_mut<T>(ptr: *mut T, label: &str) -> FfiResult<*mut T> {
+    if ptr.is_null() {
+        return err(format!("{label} pointer was null"));
+    }
+    clear_last_error();
+    Ok(ptr)
+}
+
+/// Write the SpiralTorch semantic version into the provided buffer.
+///
+/// The function returns the number of bytes required to represent the string
+/// (not counting the trailing null terminator). If the provided buffer has
+/// enough capacity (`capacity >= len + 1`), the string is copied and a null
+/// terminator is appended.
+#[no_mangle]
+pub extern "C" fn spiraltorch_version(buffer: *mut c_char, capacity: usize) -> usize {
+    let version = env!("CARGO_PKG_VERSION");
+    let bytes = version.as_bytes();
+    if capacity > 0 && !buffer.is_null() {
+        // Reserve space for the trailing null terminator.
+        let max_copy = capacity.saturating_sub(1);
+        let to_copy = bytes.len().min(max_copy);
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, buffer, to_copy);
+            // Null terminate the buffer even if truncation occurred.
+            *buffer.add(to_copy) = 0;
+        }
+    }
+    bytes.len()
+}
+
+/// Returns the length of the last error message (in bytes, excluding the
+/// trailing null terminator).
+#[no_mangle]
+pub extern "C" fn spiraltorch_last_error_length() -> usize {
+    let slot = LAST_ERROR.lock().expect("last error mutex poisoned");
+    slot.as_ref().map(|msg| msg.as_bytes().len()).unwrap_or(0)
+}
+
+/// Copies the last error message into the provided buffer and returns the
+/// number of bytes copied (excluding the null terminator). If no error is
+/// present the function returns `0` and the buffer is left untouched.
+#[no_mangle]
+pub extern "C" fn spiraltorch_last_error_message(buffer: *mut c_char, capacity: usize) -> usize {
+    if buffer.is_null() || capacity == 0 {
+        return 0;
+    }
+    let slot = LAST_ERROR.lock().expect("last error mutex poisoned");
+    if let Some(message) = slot.as_ref() {
+        let bytes = message.as_bytes();
+        let max_copy = capacity.saturating_sub(1);
+        let to_copy = bytes.len().min(max_copy);
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, buffer, to_copy);
+            *buffer.add(to_copy) = 0;
+        }
+        to_copy
+    } else {
+        0
+    }
+}
+
+/// Clears the last error so subsequent calls observe an empty state.
+#[no_mangle]
+pub extern "C" fn spiraltorch_clear_last_error() {
+    clear_last_error();
+}
+
+/// Constructs a tensor filled with zeros. Returns `NULL` on failure.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_zeros(rows: usize, cols: usize) -> *mut Tensor {
+    tensor_from_result(Tensor::zeros(rows, cols))
+}
+
+/// Constructs a tensor from a dense row-major buffer. Returns `NULL` on failure.
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_tensor_from_dense(
+    rows: usize,
+    cols: usize,
+    data: *const f32,
+    len: usize,
+) -> *mut Tensor {
+    if data.is_null() {
+        set_last_error("tensor_from_dense received null data pointer");
+        return ptr::null_mut();
+    }
+    let required = rows.saturating_mul(cols);
+    if required != len {
+        set_last_error(format!(
+            "tensor_from_dense expected {required} elements but received {len}"
+        ));
+        return ptr::null_mut();
+    }
+    let slice = slice::from_raw_parts(data, len);
+    tensor_from_result_with_message(tensor_from_data(rows, cols, slice), "tensor_from_dense")
+}
+
+/// Releases a tensor previously allocated by this library.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_free(handle: *mut Tensor) {
+    if handle.is_null() {
+        return;
+    }
+    unsafe {
+        drop(Box::from_raw(handle));
+    }
+}
+
+fn with_tensor<'a, T>(
+    handle: *const Tensor,
+    f: impl FnOnce(&'a Tensor) -> FfiResult<T>,
+) -> FfiResult<T> {
+    let handle = require_non_null(handle, "tensor handle")?;
+    // SAFETY: we validated that the pointer is not null above.
+    let tensor = unsafe { &*handle };
+    f(tensor)
+}
+
+/// Retrieves the tensor shape and writes it into the provided output pointers.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_shape(
+    handle: *const Tensor,
+    rows_out: *mut usize,
+    cols_out: *mut usize,
+) -> bool {
+    let result = with_tensor(handle, |tensor| {
+        let rows_ptr = require_non_null_mut(rows_out, "rows_out")?;
+        let cols_ptr = require_non_null_mut(cols_out, "cols_out")?;
+        let (rows, cols) = tensor.shape();
+        unsafe {
+            *rows_ptr = rows;
+            *cols_ptr = cols;
+        }
+        ok(())
+    });
+    result.is_ok()
+}
+
+/// Returns the number of elements stored in the tensor. On failure the
+/// function returns `0` and records an error.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_elements(handle: *const Tensor) -> usize {
+    match with_tensor(handle, |tensor| ok(tensor.data().len())) {
+        Ok(len) => len,
+        Err(_) => 0,
+    }
+}
+
+/// Copies the tensor data into the provided buffer. Returns `true` on success.
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_tensor_copy_data(
+    handle: *const Tensor,
+    out: *mut f32,
+    len: usize,
+) -> bool {
+    let result = with_tensor(handle, |tensor| {
+        let data = tensor.data();
+        if data.len() != len {
+            return err(format!(
+                "tensor_copy_data expected {len} elements but tensor stores {}",
+                data.len()
+            ));
+        }
+        let out_ptr = require_non_null_mut(out, "out")?;
+        unsafe {
+            ptr::copy_nonoverlapping(data.as_ptr(), out_ptr, len);
+        }
+        ok(())
+    });
+    result.is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libc::c_char;
+    use std::ffi::CStr;
+
+    #[test]
+    fn version_roundtrip() {
+        let len = spiraltorch_version(ptr::null_mut(), 0);
+        assert!(len > 0);
+        let mut buffer = vec![0 as c_char; len + 1];
+        let written = spiraltorch_version(buffer.as_mut_ptr(), buffer.len());
+        assert_eq!(written, len);
+        let as_str = unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_str().unwrap();
+        assert_eq!(as_str, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn tensor_lifecycle() {
+        let rows = 2;
+        let cols = 2;
+        let data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let handle =
+            unsafe { spiraltorch_tensor_from_dense(rows, cols, data.as_ptr(), data.len()) };
+        assert!(!handle.is_null(), "tensor handle should be valid");
+
+        let mut rows_out = 0usize;
+        let mut cols_out = 0usize;
+        let ok = spiraltorch_tensor_shape(handle, &mut rows_out, &mut cols_out);
+        assert!(ok);
+        assert_eq!(rows_out, rows);
+        assert_eq!(cols_out, cols);
+
+        let elements = spiraltorch_tensor_elements(handle);
+        assert_eq!(elements, data.len());
+
+        let mut copy = vec![0.0_f32; elements];
+        let copied = unsafe { spiraltorch_tensor_copy_data(handle, copy.as_mut_ptr(), copy.len()) };
+        assert!(copied);
+        assert_eq!(copy, data);
+
+        spiraltorch_tensor_free(handle);
+    }
+
+    #[test]
+    fn reports_errors() {
+        unsafe {
+            let handle = spiraltorch_tensor_from_dense(2, 3, ptr::null(), 0);
+            assert!(handle.is_null());
+        }
+        let len = spiraltorch_last_error_length();
+        assert!(len > 0);
+        let mut buffer = vec![0i8; len + 1];
+        let written = spiraltorch_last_error_message(buffer.as_mut_ptr(), buffer.len());
+        assert_eq!(written, len.min(buffer.len() - 1));
+        let message = unsafe { CStr::from_ptr(buffer.as_ptr()) };
+        assert!(message.to_string_lossy().contains("null"));
+    }
+}
