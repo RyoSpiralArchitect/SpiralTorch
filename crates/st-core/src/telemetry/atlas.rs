@@ -1218,11 +1218,12 @@ fn infer_district(name: &str) -> &'static str {
     let lower = name.to_ascii_lowercase();
     let token = lower.split(['.', ':', '/', '-']).next().unwrap_or("");
     match token {
-        "py" | "python" | "bindings" | "session" | "timeline" => "Surface",
-        "trainer" | "maintainer" | "atlas" | "loop" | "chrono" | "policy" | "resonator" => {
-            "Concourse"
+        "py" | "python" | "bindings" | "session" | "timeline" | "config" | "psychoid" => "Surface",
+        "trainer" | "maintainer" | "atlas" | "loop" | "chrono" | "policy" | "resonator"
+        | "softlogic" | "psi" | "desire" => "Concourse",
+        "tensor" | "backend" | "core" | "z" | "collapse" | "geometry" | "kdsl" | "realgrad" => {
+            "Substrate"
         }
-        "tensor" | "backend" | "core" | "z" | "collapse" | "geometry" | "kdsl" => "Substrate",
         _ => "Unknown",
     }
 }
