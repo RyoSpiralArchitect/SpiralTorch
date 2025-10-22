@@ -22,6 +22,8 @@ pub mod microlocal_impl;
 #[doc(inline)]
 pub use microlocal_impl as microlocal;
 
+pub mod microlocal_bank;
+
 #[path = "macro.rs"]
 #[doc(hidden)]
 pub mod macro_impl;

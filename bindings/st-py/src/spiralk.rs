@@ -1,208 +1,74 @@
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyModule, PyType};
+use pyo3::types::PyModule;
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 
 use crate::planner::PyRankPlan;
 
 use st_core::backend::spiralk_fft::SpiralKFftPlan;
-use st_core::theory::maxwell::{MaxwellSpiralKBridge, MaxwellSpiralKHint, MaxwellZPulse};
-use st_kdsl::auto::{self, HeuristicHint, WilsonMetrics};
-use st_kdsl::{Ctx, Err as KdslErr, Out, SoftRule};
+use st_core::theory::maxwell::{
+    required_blocks as required_blocks_rs, MaxwellFingerprint, MaxwellSpiralKBridge,
+    MaxwellSpiralKHint, MaxwellZProjector, MaxwellZPulse, MeaningGate, SequentialZ,
+};
 
-fn kdsl_err_to_py(err: KdslErr) -> PyErr {
-    PyValueError::new_err(err.to_string())
-}
-
-fn canonical_field(field: &str) -> PyResult<&'static str> {
-    Ok(match field {
-        "use_2ce" | "use_two_stage" => "use_2ce",
-        "wg" | "workgroup" => "wg",
-        "kl" | "lanes" => "kl",
-        "ch" | "channel_stride" => "ch",
-        "algo" | "algorithm" => "algo",
-        "midk" => "midk",
-        "bottomk" => "bottomk",
-        "ctile" | "compaction_tile" => "ctile",
-        "tile_cols" | "tile" => "tile_cols",
-        "radix" => "radix",
-        "segments" => "segments",
-        other => {
-            return Err(PyValueError::new_err(format!(
-                "unknown SpiralK field '{other}'"
-            )))
-        }
-    })
-}
-
-fn kdsl_out_to_py(py: Python<'_>, out: &Out) -> PyResult<PyObject> {
-    fn set_optional<T: ToPyObject>(
-        py: Python<'_>,
-        dict: &Bound<'_, PyDict>,
-        key: &str,
-        value: Option<T>,
-    ) -> PyResult<()> {
-        match value {
-            Some(inner) => dict.set_item(key, inner)?,
-            None => dict.set_item(key, py.None())?,
-        }
-        Ok(())
-    }
-
-    let hard = PyDict::new_bound(py);
-    set_optional(py, &hard, "use_two_stage", out.hard.use_2ce)?;
-    set_optional(py, &hard, "workgroup", out.hard.wg)?;
-    set_optional(py, &hard, "lanes", out.hard.kl)?;
-    set_optional(py, &hard, "channel_stride", out.hard.ch)?;
-    set_optional(py, &hard, "algorithm", out.hard.algo)?;
-    set_optional(py, &hard, "midk", out.hard.midk)?;
-    set_optional(py, &hard, "bottomk", out.hard.bottomk)?;
-    set_optional(py, &hard, "compaction_tile", out.hard.ctile)?;
-    set_optional(py, &hard, "tile_cols", out.hard.tile_cols)?;
-    set_optional(py, &hard, "radix", out.hard.radix)?;
-    set_optional(py, &hard, "segments", out.hard.segments)?;
-
-    let soft = PyList::empty_bound(py);
-    for rule in &out.soft {
-        let entry = PyDict::new_bound(py);
-        match rule {
-            SoftRule::U2 { val, w } => {
-                entry.set_item("field", "use_2ce")?;
-                entry.set_item("value", *val)?;
-                entry.set_item("weight", *w)?;
-            }
-            SoftRule::Wg { val, w } => {
-                entry.set_item("field", "wg")?;
-                entry.set_item("value", *val)?;
-                entry.set_item("weight", *w)?;
-            }
-            SoftRule::Kl { val, w } => {
-                entry.set_item("field", "kl")?;
-                entry.set_item("value", *val)?;
-                entry.set_item("weight", *w)?;
-            }
-            SoftRule::Ch { val, w } => {
-                entry.set_item("field", "ch")?;
-                entry.set_item("value", *val)?;
-                entry.set_item("weight", *w)?;
-            }
-            SoftRule::Algo { val, w } => {
-                entry.set_item("field", "algo")?;
-                entry.set_item("value", *val)?;
-                entry.set_item("weight", *w)?;
-            }
-            SoftRule::Midk { val, w } => {
-                entry.set_item("field", "midk")?;
-                entry.set_item("value", *val)?;
-                entry.set_item("weight", *w)?;
-            }
-            SoftRule::Bottomk { val, w } => {
-                entry.set_item("field", "bottomk")?;
-                entry.set_item("value", *val)?;
-                entry.set_item("weight", *w)?;
-            }
-            SoftRule::Ctile { val, w } => {
-                entry.set_item("field", "ctile")?;
-                entry.set_item("value", *val)?;
-                entry.set_item("weight", *w)?;
-            }
-            SoftRule::TileCols { val, w } => {
-                entry.set_item("field", "tile_cols")?;
-                entry.set_item("value", *val)?;
-                entry.set_item("weight", *w)?;
-            }
-            SoftRule::Radix { val, w } => {
-                entry.set_item("field", "radix")?;
-                entry.set_item("value", *val)?;
-                entry.set_item("weight", *w)?;
-            }
-            SoftRule::Segments { val, w } => {
-                entry.set_item("field", "segments")?;
-                entry.set_item("value", *val)?;
-                entry.set_item("weight", *w)?;
-            }
-        }
-        soft.append(entry)?;
-    }
-
-    let result = PyDict::new_bound(py);
-    result.set_item("hard", hard)?;
-    result.set_item("soft", soft)?;
-    Ok(result.into())
-}
-
-#[pyclass(module = "spiraltorch.spiralk", name = "SpiralKFftPlan")]
+#[pyclass(module = "spiraltorch.spiralk", name = "FftPlan")]
 pub(crate) struct PySpiralKFftPlan {
     pub(crate) inner: SpiralKFftPlan,
-}
-
-impl PySpiralKFftPlan {
-    pub(crate) fn from_inner(inner: SpiralKFftPlan) -> Self {
-        Self { inner }
-    }
 }
 
 #[pymethods]
 impl PySpiralKFftPlan {
     #[new]
-    #[pyo3(signature = (radix, tile_cols, segments, subgroup))]
     pub fn new(radix: u32, tile_cols: u32, segments: u32, subgroup: bool) -> Self {
-        let inner = SpiralKFftPlan {
-            radix: radix.clamp(2, 4),
-            tile_cols: tile_cols.max(1),
-            segments: segments.max(1),
+        let plan = SpiralKFftPlan {
+            radix,
+            tile_cols,
+            segments,
             subgroup,
         };
+        Self { inner: plan }
+    }
+
+    #[staticmethod]
+    pub fn from_rank_plan(plan: &PyRankPlan) -> Self {
+        let inner = plan.plan().fft_plan();
         Self { inner }
     }
 
-    #[classmethod]
-    pub fn from_rank_plan(_cls: &Bound<'_, PyType>, plan: &PyRankPlan) -> PyResult<Self> {
-        Ok(Self::from_inner(plan.inner().fft_plan()))
-    }
-
     #[getter]
-    pub fn radix(&self) -> u32 {
+    fn radix(&self) -> u32 {
         self.inner.radix
     }
 
     #[getter]
-    pub fn tile_cols(&self) -> u32 {
+    fn tile_cols(&self) -> u32 {
         self.inner.tile_cols
     }
 
     #[getter]
-    pub fn segments(&self) -> u32 {
+    fn segments(&self) -> u32 {
         self.inner.segments
     }
 
     #[getter]
-    pub fn subgroup(&self) -> bool {
+    fn subgroup(&self) -> bool {
         self.inner.subgroup
     }
 
-    pub fn workgroup_size(&self) -> u32 {
+    fn workgroup_size(&self) -> u32 {
         self.inner.workgroup_size()
     }
 
-    pub fn wgsl(&self) -> String {
+    fn emit_wgsl(&self) -> String {
         self.inner.emit_wgsl()
     }
 
-    pub fn spiralk_hint(&self) -> String {
+    fn emit_spiralk_hint(&self) -> String {
         self.inner.emit_spiralk_hint()
-    }
-
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!(
-            "SpiralKFftPlan(radix={}, tile_cols={}, segments={}, subgroup={})",
-            self.inner.radix, self.inner.tile_cols, self.inner.segments, self.inner.subgroup
-        ))
     }
 }
 
-#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellSpiralKHint")]
+#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellHint")]
 #[derive(Clone)]
 pub(crate) struct PyMaxwellSpiralKHint {
     inner: MaxwellSpiralKHint,
@@ -244,16 +110,9 @@ impl PyMaxwellSpiralKHint {
     fn script_line(&self) -> String {
         self.inner.script_line()
     }
-
-    fn __repr__(&self) -> PyResult<String> {
-        Ok(format!(
-            "MaxwellSpiralKHint(channel='{}', blocks={}, z_score={:.3}, weight={:.3})",
-            self.inner.channel, self.inner.blocks, self.inner.z_score, self.inner.weight
-        ))
-    }
 }
 
-#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellSpiralKBridge")]
+#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellBridge")]
 pub(crate) struct PyMaxwellSpiralKBridge {
     inner: MaxwellSpiralKBridge,
 }
@@ -261,30 +120,30 @@ pub(crate) struct PyMaxwellSpiralKBridge {
 #[pymethods]
 impl PyMaxwellSpiralKBridge {
     #[new]
-    pub fn new() -> Self {
-        Self {
-            inner: MaxwellSpiralKBridge::new(),
-        }
+    #[pyo3(signature = (base_program=None, min_weight=0.55, max_weight=0.95))]
+    pub fn new(base_program: Option<String>, min_weight: f32, max_weight: f32) -> Self {
+        let bridge = MaxwellSpiralKBridge::new().with_weight_bounds(min_weight, max_weight);
+        let bridge = if let Some(program) = base_program {
+            bridge.with_base_program(program)
+        } else {
+            bridge
+        };
+        Self { inner: bridge }
     }
 
     #[pyo3(signature = (program=None))]
     pub fn set_base_program(&mut self, program: Option<&str>) {
-        let inner = std::mem::replace(&mut self.inner, MaxwellSpiralKBridge::new());
-        let script = program.unwrap_or("");
-        self.inner = inner.with_base_program(script);
+        let mut bridge = self.inner.clone();
+        let code = program.unwrap_or_default();
+        bridge = bridge.with_base_program(code.to_string());
+        self.inner = bridge;
     }
 
     pub fn set_weight_bounds(&mut self, min_weight: f32, max_weight: f32) {
-        let inner = std::mem::replace(&mut self.inner, MaxwellSpiralKBridge::new());
-        self.inner = inner.with_weight_bounds(min_weight, max_weight);
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.inner.hints().len()
+        self.inner = self
+            .inner
+            .clone()
+            .with_weight_bounds(min_weight, max_weight);
     }
 
     pub fn push_pulse(
@@ -305,274 +164,380 @@ impl PyMaxwellSpiralKBridge {
             band_energy,
             z_bias,
         };
-        self.inner.push_pulse(channel, &pulse).into()
+        let hint = self.inner.push_pulse(channel, &pulse);
+        PyMaxwellSpiralKHint::from(hint)
     }
 
     pub fn hints(&self) -> Vec<PyMaxwellSpiralKHint> {
-        self.inner.hints().iter().cloned().map(Into::into).collect()
+        self.inner
+            .hints()
+            .iter()
+            .cloned()
+            .map(PyMaxwellSpiralKHint::from)
+            .collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 
     pub fn script(&self) -> Option<String> {
         self.inner.script()
     }
-
-    pub fn reset(&mut self) {
-        self.inner = MaxwellSpiralKBridge::new();
-    }
 }
 
-#[pyclass(module = "spiraltorch.spiralk", name = "SpiralKContext")]
-#[derive(Clone, Copy)]
-pub(crate) struct PySpiralKContext {
-    inner: Ctx,
+#[pyfunction]
+fn required_blocks(target_z: f64, sigma: f64, kappa: f64, lambda: f64) -> Option<f64> {
+    required_blocks_rs(target_z, sigma, kappa, lambda)
+}
+
+#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellFingerprint")]
+pub(crate) struct PyMaxwellFingerprint {
+    inner: MaxwellFingerprint,
 }
 
 #[pymethods]
-impl PySpiralKContext {
+impl PyMaxwellFingerprint {
     #[new]
-    #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (rows, cols, k, subgroup, subgroup_capacity, kernel_capacity, tile_cols, radix, segments))]
     pub fn new(
-        rows: u32,
-        cols: u32,
-        k: u32,
-        subgroup: bool,
-        subgroup_capacity: u32,
-        kernel_capacity: u32,
-        tile_cols: u32,
-        radix: u32,
-        segments: u32,
+        gamma: f64,
+        modulation_depth: f64,
+        tissue_response: f64,
+        shielding_db: f64,
+        transmit_gain: f64,
+        polarization_angle: f64,
+        distance_m: f64,
     ) -> Self {
-        let inner = Ctx {
-            r: rows,
-            c: cols,
-            k,
-            sg: subgroup,
-            sgc: subgroup_capacity,
-            kc: kernel_capacity,
-            tile_cols,
-            radix,
-            segments,
-        };
+        let inner = MaxwellFingerprint::new(
+            gamma,
+            modulation_depth,
+            tissue_response,
+            shielding_db,
+            transmit_gain,
+            polarization_angle,
+            distance_m,
+        );
         Self { inner }
     }
 
     #[getter]
-    fn rows(&self) -> u32 {
-        self.inner.r
+    fn gamma(&self) -> f64 {
+        self.inner.gamma
     }
 
     #[getter]
-    fn cols(&self) -> u32 {
-        self.inner.c
+    fn modulation_depth(&self) -> f64 {
+        self.inner.modulation_depth
     }
 
     #[getter]
-    fn k(&self) -> u32 {
-        self.inner.k
+    fn tissue_response(&self) -> f64 {
+        self.inner.tissue_response
     }
 
     #[getter]
-    fn subgroup(&self) -> bool {
-        self.inner.sg
+    fn shielding_db(&self) -> f64 {
+        self.inner.shielding_db
     }
 
     #[getter]
-    fn subgroup_capacity(&self) -> u32 {
-        self.inner.sgc
+    fn transmit_gain(&self) -> f64 {
+        self.inner.transmit_gain
     }
 
     #[getter]
-    fn kernel_capacity(&self) -> u32 {
-        self.inner.kc
+    fn polarization_angle(&self) -> f64 {
+        self.inner.polarization_angle
     }
 
     #[getter]
-    fn tile_cols(&self) -> u32 {
-        self.inner.tile_cols
+    fn distance_m(&self) -> f64 {
+        self.inner.distance_m
     }
 
-    #[getter]
-    fn radix(&self) -> u32 {
-        self.inner.radix
+    fn shielding_factor(&self) -> f64 {
+        self.inner.shielding_factor()
     }
 
-    #[getter]
-    fn segments(&self) -> u32 {
-        self.inner.segments
+    fn polarization_alignment(&self) -> f64 {
+        self.inner.polarization_alignment()
+    }
+
+    #[pyo3(name = "lambda_")]
+    fn lambda_value(&self) -> f64 {
+        self.inner.lambda()
+    }
+
+    fn expected_block_mean(&self, kappa: f64) -> f64 {
+        self.inner.expected_block_mean(kappa)
     }
 }
 
-#[pyclass(module = "spiraltorch.spiralk", name = "SpiralKWilsonMetrics")]
-#[derive(Clone, Copy)]
-pub(crate) struct PySpiralKWilsonMetrics {
-    inner: WilsonMetrics,
+#[pyclass(module = "spiraltorch.spiralk", name = "MeaningGate")]
+pub(crate) struct PyMeaningGate {
+    inner: MeaningGate,
 }
 
 #[pymethods]
-impl PySpiralKWilsonMetrics {
+impl PyMeaningGate {
     #[new]
-    #[pyo3(signature = (baseline_latency, candidate_latency, wins, trials))]
-    pub fn new(baseline_latency: f32, candidate_latency: f32, wins: u32, trials: u32) -> Self {
-        let inner = WilsonMetrics {
-            baseline_latency,
-            candidate_latency,
-            wins,
-            trials,
-        };
+    pub fn new(physical_gain: f64, semantic_gain: f64) -> Self {
+        let inner = MeaningGate::new(physical_gain, semantic_gain);
         Self { inner }
     }
 
     #[getter]
-    fn baseline_latency(&self) -> f32 {
-        self.inner.baseline_latency
+    fn physical_gain(&self) -> f64 {
+        self.inner.physical_gain
+    }
+
+    #[setter]
+    fn set_physical_gain(&mut self, value: f64) {
+        self.inner.physical_gain = value;
     }
 
     #[getter]
-    fn candidate_latency(&self) -> f32 {
-        self.inner.candidate_latency
+    fn semantic_gain(&self) -> f64 {
+        self.inner.semantic_gain
     }
 
-    #[getter]
-    fn wins(&self) -> u32 {
-        self.inner.wins
+    #[setter]
+    fn set_semantic_gain(&mut self, value: f64) {
+        self.inner.semantic_gain = value.max(0.0);
     }
 
-    #[getter]
-    fn trials(&self) -> u32 {
-        self.inner.trials
-    }
-
-    fn gain(&self) -> f32 {
-        self.inner.gain()
+    fn envelope(&self, rho: f64) -> f64 {
+        self.inner.envelope(rho)
     }
 }
 
-#[pyclass(module = "spiraltorch.spiralk", name = "SpiralKHeuristicHint")]
+#[pyclass(module = "spiraltorch.spiralk", name = "SequentialZ")]
+#[derive(Clone, Default)]
+pub(crate) struct PySequentialZ {
+    pub(crate) inner: SequentialZ,
+}
+
+#[pymethods]
+impl PySequentialZ {
+    #[new]
+    pub fn new() -> Self {
+        Self {
+            inner: SequentialZ::new(),
+        }
+    }
+
+    fn push(&mut self, sample: f64) -> Option<f64> {
+        self.inner.push(sample)
+    }
+
+    fn extend(&mut self, samples: Vec<f64>) -> Option<f64> {
+        let mut last = None;
+        for sample in samples {
+            last = self.inner.push(sample);
+        }
+        last
+    }
+
+    fn len(&self) -> u64 {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn mean(&self) -> f64 {
+        self.inner.mean()
+    }
+
+    fn variance(&self) -> Option<f64> {
+        self.inner.variance()
+    }
+
+    fn standard_error(&self) -> Option<f64> {
+        self.inner.standard_error()
+    }
+
+    fn z_stat(&self) -> Option<f64> {
+        self.inner.z_stat()
+    }
+
+    fn reset(&mut self) {
+        self.inner = SequentialZ::new();
+    }
+}
+
+#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellPulse")]
 #[derive(Clone)]
-pub(crate) struct PySpiralKHeuristicHint {
-    inner: HeuristicHint,
+pub(crate) struct PyMaxwellPulse {
+    inner: MaxwellZPulse,
+}
+
+impl From<MaxwellZPulse> for PyMaxwellPulse {
+    fn from(inner: MaxwellZPulse) -> Self {
+        Self { inner }
+    }
 }
 
 #[pymethods]
-impl PySpiralKHeuristicHint {
+impl PyMaxwellPulse {
     #[new]
-    #[pyo3(signature = (field, value_expr, weight, condition_expr))]
-    pub fn new(field: &str, value_expr: &str, weight: f32, condition_expr: &str) -> PyResult<Self> {
-        let field = canonical_field(field)?;
-        let inner = HeuristicHint::new(field, value_expr, weight, condition_expr);
-        Ok(Self { inner })
+    #[pyo3(signature = (blocks, mean, standard_error, z_score, band_energy, z_bias))]
+    pub fn new(
+        blocks: u64,
+        mean: f64,
+        standard_error: f64,
+        z_score: f64,
+        band_energy: (f32, f32, f32),
+        z_bias: f32,
+    ) -> Self {
+        let inner = MaxwellZPulse {
+            blocks,
+            mean,
+            standard_error,
+            z_score,
+            band_energy,
+            z_bias,
+        };
+        Self { inner }
     }
 
     #[getter]
-    fn field(&self) -> &str {
-        self.inner.field
+    fn blocks(&self) -> u64 {
+        self.inner.blocks
     }
 
     #[getter]
-    fn value_expr(&self) -> &str {
-        &self.inner.value_expr
+    fn mean(&self) -> f64 {
+        self.inner.mean
     }
 
     #[getter]
-    fn weight_expr(&self) -> &str {
-        &self.inner.weight_expr
+    fn standard_error(&self) -> f64 {
+        self.inner.standard_error
     }
 
     #[getter]
-    fn condition_expr(&self) -> &str {
-        &self.inner.condition_expr
+    fn z_score(&self) -> f64 {
+        self.inner.z_score
+    }
+
+    #[getter]
+    fn band_energy(&self) -> (f32, f32, f32) {
+        self.inner.band_energy
+    }
+
+    #[getter]
+    fn z_bias(&self) -> f32 {
+        self.inner.z_bias
+    }
+
+    fn magnitude(&self) -> f64 {
+        self.inner.magnitude()
     }
 }
 
-#[pyfunction]
-pub fn wilson_lower_bound(wins: u32, trials: u32, z: f32) -> f32 {
-    auto::wilson_lower_bound(wins, trials, z)
+#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellProjector")]
+pub(crate) struct PyMaxwellProjector {
+    inner: MaxwellZProjector,
+    rank: usize,
+    weight: f64,
+    bias_gain: f32,
+    min_blocks: u64,
+    min_z: f64,
 }
 
-#[pyfunction]
-#[pyo3(signature = (metrics, min_gain=0.02, min_confidence=0.6))]
-pub fn should_rewrite(
-    metrics: &PySpiralKWilsonMetrics,
-    min_gain: f32,
-    min_confidence: f32,
-) -> bool {
-    auto::should_rewrite(&metrics.inner, min_gain, min_confidence)
+#[pymethods]
+impl PyMaxwellProjector {
+    #[new]
+    #[pyo3(signature = (rank, weight, bias_gain=1.0, min_blocks=2, min_z=0.0))]
+    pub fn new(rank: usize, weight: f64, bias_gain: f32, min_blocks: u64, min_z: f64) -> Self {
+        let inner = MaxwellZProjector::new(rank, weight)
+            .with_bias_gain(bias_gain)
+            .with_min_blocks(min_blocks)
+            .with_min_z(min_z);
+        Self {
+            inner,
+            rank,
+            weight,
+            bias_gain,
+            min_blocks: min_blocks.max(1),
+            min_z: min_z.max(0.0),
+        }
+    }
+
+    fn project(&self, tracker: &PySequentialZ) -> Option<PyMaxwellPulse> {
+        self.inner.project(&tracker.inner).map(PyMaxwellPulse::from)
+    }
+
+    fn last_pulse(&self) -> Option<PyMaxwellPulse> {
+        self.inner.last_pulse().map(PyMaxwellPulse::from)
+    }
+
+    fn bias_gain(&self) -> f32 {
+        self.bias_gain
+    }
+
+    fn set_bias_gain(&mut self, bias_gain: f32) {
+        self.inner = self.inner.clone().with_bias_gain(bias_gain);
+        self.bias_gain = bias_gain;
+    }
+
+    fn min_blocks(&self) -> u64 {
+        self.min_blocks
+    }
+
+    fn set_min_blocks(&mut self, min_blocks: u64) {
+        let min_blocks = min_blocks.max(1);
+        self.inner = self.inner.clone().with_min_blocks(min_blocks);
+        self.min_blocks = min_blocks;
+    }
+
+    fn min_z(&self) -> f64 {
+        self.min_z
+    }
+
+    fn set_min_z(&mut self, min_z: f64) {
+        let min_z = min_z.max(0.0);
+        self.inner = self.inner.clone().with_min_z(min_z);
+        self.min_z = min_z;
+    }
+
+    fn rank(&self) -> usize {
+        self.rank
+    }
+
+    fn weight(&self) -> f64 {
+        self.weight
+    }
 }
 
-#[pyfunction]
-#[pyo3(signature = (base_src, hints))]
-pub fn synthesize_program(
-    py: Python<'_>,
-    base_src: &str,
-    hints: Vec<Py<PySpiralKHeuristicHint>>,
-) -> PyResult<String> {
-    let hints: Vec<_> = hints
-        .into_iter()
-        .map(|hint| hint.borrow(py).inner.clone())
-        .collect();
-    Ok(auto::synthesize_program(base_src, &hints))
-}
-
-#[pyfunction]
-#[pyo3(signature = (base_src, ctx, metrics, hints, min_gain=0.02, min_confidence=0.6))]
-pub fn rewrite_with_wilson(
-    py: Python<'_>,
-    base_src: &str,
-    ctx: &PySpiralKContext,
-    metrics: &PySpiralKWilsonMetrics,
-    hints: Vec<Py<PySpiralKHeuristicHint>>,
-    min_gain: f32,
-    min_confidence: f32,
-) -> PyResult<(PyObject, String)> {
-    let hints_vec: Vec<_> = hints
-        .into_iter()
-        .map(|hint| hint.borrow(py).inner.clone())
-        .collect();
-    let (out, script) = auto::rewrite_with_wilson(
-        base_src,
-        &ctx.inner,
-        metrics.inner,
-        &hints_vec,
-        min_gain,
-        min_confidence,
-    )
-    .map_err(kdsl_err_to_py)?;
-    let out_dict = kdsl_out_to_py(py, &out)?;
-    Ok((out_dict, script))
-}
-
-pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
+pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "spiralk")?;
     module.add_class::<PySpiralKFftPlan>()?;
-    module.add_class::<PyMaxwellSpiralKBridge>()?;
     module.add_class::<PyMaxwellSpiralKHint>()?;
-    module.add_class::<PySpiralKContext>()?;
-    module.add_class::<PySpiralKWilsonMetrics>()?;
-    module.add_class::<PySpiralKHeuristicHint>()?;
-    module.add_function(wrap_pyfunction!(wilson_lower_bound, &module)?)?;
-    module.add_function(wrap_pyfunction!(should_rewrite, &module)?)?;
-    module.add_function(wrap_pyfunction!(synthesize_program, &module)?)?;
-    module.add_function(wrap_pyfunction!(rewrite_with_wilson, &module)?)?;
-    module.add(
-        "__doc__",
-        "SpiralK planners, heuristics, and Maxwell bridges",
-    )?;
+    module.add_class::<PyMaxwellSpiralKBridge>()?;
+    module.add_class::<PyMaxwellFingerprint>()?;
+    module.add_class::<PyMeaningGate>()?;
+    module.add_class::<PySequentialZ>()?;
+    module.add_class::<PyMaxwellPulse>()?;
+    module.add_class::<PyMaxwellProjector>()?;
+    module.add_function(wrap_pyfunction!(required_blocks, &module)?)?;
+    module.add("__doc__", "SpiralK DSL helpers & Maxwell bridges")?;
     module.add(
         "__all__",
         vec![
-            "SpiralKFftPlan",
-            "MaxwellSpiralKBridge",
-            "MaxwellSpiralKHint",
-            "SpiralKContext",
-            "SpiralKWilsonMetrics",
-            "SpiralKHeuristicHint",
-            "wilson_lower_bound",
-            "should_rewrite",
-            "synthesize_program",
-            "rewrite_with_wilson",
+            "FftPlan",
+            "MaxwellHint",
+            "MaxwellBridge",
+            "MaxwellFingerprint",
+            "MeaningGate",
+            "SequentialZ",
+            "MaxwellPulse",
+            "MaxwellProjector",
+            "required_blocks",
         ],
     )?;
-    parent.add_submodule(&module)?;
+    m.add_submodule(&module)?;
     Ok(())
 }
