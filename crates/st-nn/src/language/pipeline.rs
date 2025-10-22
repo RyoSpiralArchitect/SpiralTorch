@@ -2528,6 +2528,11 @@ mod language_pipeline {
         #[cfg(feature = "psi")]
         #[test]
         fn psi_bridge_collects_telemetry() {
+            let _guard = hub::psi_telemetry_guard();
+            hub::clear_last_psi();
+            hub::clear_last_psi_events();
+            hub::clear_softlogic_z();
+
             let automation = build_automation();
             let bridge = DesirePsiBridge::new();
             let mut pipeline = DesirePipeline::builder(automation)
