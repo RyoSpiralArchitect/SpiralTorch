@@ -93,15 +93,14 @@ class GradientSummary:
     def sum_squares(self) -> float: ...
 
 class Hypergrad:
-    def __init__(self, curvature: float, learning_rate: float, rows: int, cols: int) -> None: ...
-    @staticmethod
-    def with_topos(
+    def __init__(
+        self,
         curvature: float,
         learning_rate: float,
         rows: int,
         cols: int,
-        topos: OpenCartesianTopos,
-    ) -> Hypergrad: ...
+        topos: OpenCartesianTopos | None = None,
+    ) -> None: ...
     def curvature(self) -> float: ...
     def learning_rate(self) -> float: ...
     def shape(self) -> tuple[int, int]: ...
@@ -115,6 +114,7 @@ class Hypergrad:
     def absorb_text(self, encoder: LanguageWaveEncoder, text: str) -> None: ...
     def accumulate_pair(self, prediction: Tensor, target: Tensor) -> None: ...
     def apply(self, weights: Tensor) -> None: ...
+    def accumulate_barycenter_path(self, intermediates: Sequence[BarycenterIntermediate]) -> None: ...
     def topos(self) -> OpenCartesianTopos: ...
     def accumulate_barycenter_path(
         self, intermediates: Sequence[BarycenterIntermediate]
@@ -300,6 +300,128 @@ def rewrite_with_wilson(
     min_gain: float = ...,
     min_confidence: float = ...,
 ) -> tuple[Dict[str, object], str]: ...
+
+    def predict(self, inputs: Sequence[Sequence[float]]) -> Tensor: ...
+
+    def predict_tensor(self, inputs: Tensor) -> Tensor: ...
+
+    def weights(self) -> Tensor: ...
+
+    def bias(self) -> List[float]: ...
+
+    def input_dim(self) -> int: ...
+
+    def output_dim(self) -> int: ...
+
+class LinearModel:
+    def __init__(self, input_dim: int, output_dim: int) -> None: ...
+
+    def forward(
+        self,
+        inputs: Tensor | Sequence[Sequence[float]],
+    ) -> Tensor: ...
+
+    def train_batch(
+        self,
+        inputs: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+        learning_rate: float = ...,
+    ) -> float: ...
+
+    def train_batch_tensor(
+        self,
+        inputs: Tensor,
+        targets: Tensor,
+        learning_rate: float = ...,
+    ) -> float: ...
+
+    def weights(self) -> Tensor: ...
+
+    def bias(self) -> List[float]: ...
+
+    def input_dim(self) -> int: ...
+
+    def output_dim(self) -> int: ...
+
+    def state_dict(self) -> Dict[str, object]: ...
+
+class ModuleTrainer:
+    def __init__(self, input_dim: int, output_dim: int) -> None: ...
+
+    def train_epoch(
+        self,
+        inputs: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+        learning_rate: float = ...,
+        batch_size: int = ...,
+    ) -> float: ...
+
+    def evaluate(
+        self,
+        inputs: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+    ) -> float: ...
+
+    def predict(self, inputs: Sequence[Sequence[float]]) -> Tensor: ...
+
+    def predict_tensor(self, inputs: Tensor) -> Tensor: ...
+
+    def weights(self) -> Tensor: ...
+
+    def bias(self) -> List[float]: ...
+
+    def input_dim(self) -> int: ...
+
+    def output_dim(self) -> int: ...
+
+class LinearModel:
+    def __init__(self, input_dim: int, output_dim: int) -> None: ...
+
+    def forward(
+        self,
+        inputs: Tensor | Sequence[Sequence[float]],
+    ) -> Tensor: ...
+
+    def train_batch(
+        self,
+        inputs: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+        learning_rate: float = ...,
+    ) -> float: ...
+
+    def train_batch_tensor(
+        self,
+        inputs: Tensor,
+        targets: Tensor,
+        learning_rate: float = ...,
+    ) -> float: ...
+
+    def weights(self) -> Tensor: ...
+
+    def bias(self) -> List[float]: ...
+
+    def input_dim(self) -> int: ...
+
+    def output_dim(self) -> int: ...
+
+    def state_dict(self) -> Dict[str, object]: ...
+
+class ModuleTrainer:
+    def __init__(self, input_dim: int, output_dim: int) -> None: ...
+
+    def train_epoch(
+        self,
+        inputs: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+        learning_rate: float = ...,
+        batch_size: int = ...,
+    ) -> float: ...
+
+    def evaluate(
+        self,
+        inputs: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+    ) -> float: ...
 
     def predict(self, inputs: Sequence[Sequence[float]]) -> Tensor: ...
 
@@ -831,6 +953,10 @@ class _NnModule(ModuleType):
 nn: _NnModule
 
 
+class ZSpaceCoherenceSequencer(_ZSpaceCoherenceSequencer):
+    ...
+
+
 class _FracModule(ModuleType):
     def gl_coeffs_adaptive(alpha: float, tol: float = ..., max_len: int = ...) -> List[float]: ...
 
@@ -1048,6 +1174,7 @@ __all__ = [
     "z_space_barycenter",
     "ZMetrics",
     "ZSpaceTrainer",
+    "ZSpaceCoherenceSequencer",
     "step_many",
     "stream_zspace_training",
     "compat",

@@ -32,6 +32,8 @@ use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 #[cfg(feature = "psi")]
+use std::sync::{Mutex, MutexGuard};
+#[cfg(feature = "psi")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;

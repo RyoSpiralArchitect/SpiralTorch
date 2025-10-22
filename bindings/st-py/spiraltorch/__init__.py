@@ -36,6 +36,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("dataset", "Datasets & loaders"),
     ("linalg", "Linear algebra utilities"),
     ("planner", "Planning & device heuristics"),
+    ("spiralk", "SpiralK DSL & hint bridges"),
     ("spiral_rl", "Reinforcement learning components"),
     ("rec", "Reconstruction / signal processing"),
     ("telemetry", "Telemetry / dashboards / metrics"),
@@ -190,6 +191,17 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "describe_device": (),
         "hip_probe": (),
         "generate_plan_batch_ex": (),
+    },
+    "spiralk": {
+        "FftPlan": (),
+        "MaxwellBridge": (),
+        "MaxwellHint": (),
+        "MaxwellFingerprint": (),
+        "MeaningGate": (),
+        "SequentialZ": (),
+        "MaxwellPulse": (),
+        "MaxwellProjector": (),
+        "required_blocks": (),
     },
     "compat.torch": {
         "to_torch": ("compat_to_torch", "to_torch"),
@@ -867,151 +879,6 @@ def _coerce_matrix(matrix: _Any, height: int, width: int) -> _List[_List[float]]
     return rows
 
 
-class CanvasTransformer:
-    """Canvas feedback helper mirroring the Rust Canvas Transformer surface."""
-
-    def __init__(self, width: int, height: int, *, smoothing: float = 0.85) -> None:
-        if width <= 0 or height <= 0:
-            raise ValueError("width and height must be positive")
-        self.width = width
-        self.height = height
-        self._smoothing = min(max(float(smoothing), 0.0), 0.999)
-        self._canvas: _List[_List[float]] = [[0.0 for _ in range(width)] for _ in range(height)]
-        self._hypergrad: _List[_List[float]] = [[0.0 for _ in range(width)] for _ in range(height)]
-        self._realgrad: _List[_List[float]] = [[0.0 for _ in range(width)] for _ in range(height)]
-
-    @property
-    def smoothing(self) -> float:
-        return self._smoothing
-
-    def refresh(self, projection: _Any) -> _List[_List[float]]:
-        matrix = _coerce_matrix(projection, self.height, self.width)
-        alpha = 1.0 - self._smoothing
-        for r_idx, row in enumerate(matrix):
-            target = self._canvas[r_idx]
-            for c_idx, value in enumerate(row):
-                target[c_idx] = self._smoothing * target[c_idx] + alpha * float(value)
-        return _clone_volume([matrix])[0]
-
-    def accumulate_hypergrad(self, gradient: _Any) -> None:
-        self._accumulate(self._hypergrad, gradient)
-
-    def accumulate_realgrad(self, gradient: _Any) -> None:
-        self._accumulate(self._realgrad, gradient)
-
-    def reset(self) -> None:
-        for matrix in (self._canvas, self._hypergrad, self._realgrad):
-            for row in matrix:
-                for idx in range(len(row)):
-                    row[idx] = 0.0
-
-    def _accumulate(self, target: _MutableSequence[_MutableSequence[float]], data: _Any) -> None:
-        matrix = _coerce_matrix(data, self.height, self.width)
-        for r_idx, row in enumerate(matrix):
-            target_row = target[r_idx]
-            for c_idx, value in enumerate(row):
-                target_row[c_idx] += float(value)
-
-    def gradient_summary(self) -> _Dict[str, _Dict[str, float]]:
-        return {
-            "hypergrad": _matrix_summary(self._hypergrad),
-            "realgrad": _matrix_summary(self._realgrad),
-        }
-
-    def emit_zspace_patch(self, vision: SpiralTorchVision, weight: float = 1.0) -> _List[_List[float]]:
-        projection = vision.project()
-        patch = self.refresh(projection)
-        if weight != 1.0:
-            scale = float(weight)
-            patch = [[value * scale for value in row] for row in patch]
-        return patch
-
-    def canvas(self) -> _List[_List[float]]:
-        return [list(row) for row in self._canvas]
-
-    def hypergrad(self) -> _List[_List[float]]:
-        return [list(row) for row in self._hypergrad]
-
-    def realgrad(self) -> _List[_List[float]]:
-        return [list(row) for row in self._realgrad]
-
-    def state_dict(self) -> _Dict[str, _Any]:
-        return {
-            "width": self.width,
-            "height": self.height,
-            "smoothing": self._smoothing,
-            "canvas": self.canvas(),
-            "hypergrad": self.hypergrad(),
-            "realgrad": self.realgrad(),
-        }
-
-    def load_state_dict(self, state: _Mapping[str, _Any], *, strict: bool = True) -> None:
-        if not isinstance(state, _Mapping):
-            raise TypeError("state must be a mapping")
-        width = int(state.get("width", self.width))
-        height = int(state.get("height", self.height))
-        if strict and (width != self.width or height != self.height):
-            raise ValueError("state dimensions do not match the canvas transformer")
-        smoothing = float(state.get("smoothing", self._smoothing))
-        self._smoothing = min(max(smoothing, 0.0), 0.999)
-        if width != self.width or height != self.height:
-            self.width = width
-            self.height = height
-            self._canvas = [[0.0 for _ in range(width)] for _ in range(height)]
-            self._hypergrad = [[0.0 for _ in range(width)] for _ in range(height)]
-            self._realgrad = [[0.0 for _ in range(width)] for _ in range(height)]
-        for key, target in (
-            ("canvas", self._canvas),
-            ("hypergrad", self._hypergrad),
-            ("realgrad", self._realgrad),
-        ):
-            matrix = state.get(key)
-            if matrix is None:
-                continue
-            coerced = _coerce_matrix(matrix, self.height, self.width)
-            for r_idx, row in enumerate(coerced):
-                target_row = target[r_idx]
-                for c_idx, value in enumerate(row):
-                    target_row[c_idx] = value
-
-    def snapshot(self) -> "CanvasSnapshot":
-        return CanvasSnapshot(
-            canvas=self.canvas(),
-            hypergrad=self.hypergrad(),
-            realgrad=self.realgrad(),
-            summary=self.gradient_summary(),
-        )
-
-
-@_dataclass
-class CanvasSnapshot:
-    canvas: _List[_List[float]]
-    hypergrad: _List[_List[float]]
-    realgrad: _List[_List[float]]
-    summary: _Dict[str, _Dict[str, float]]
-    patch: _Optional[_List[_List[float]]] = None
-
-
-def apply_vision_update(
-    vision: SpiralTorchVision,
-    canvas: CanvasTransformer,
-    *,
-    hypergrad: _Any | None = None,
-    realgrad: _Any | None = None,
-    weight: float = 1.0,
-    include_patch: bool = False,
-) -> CanvasSnapshot:
-    patch = canvas.emit_zspace_patch(vision, weight=weight)
-    if hypergrad is not None:
-        canvas.accumulate_hypergrad(hypergrad)
-    if realgrad is not None:
-        canvas.accumulate_realgrad(realgrad)
-    snapshot = canvas.snapshot()
-    if include_patch:
-        snapshot.patch = patch
-    return snapshot
-
-
 class _ForwardingModule(_types.ModuleType):
     """Module stub that forwards attribute lookups to the Rust backend."""
 
@@ -1366,6 +1233,18 @@ _mirror_into_module(
 )
 
 
+_mirror_into_module(
+    "spiralk",
+    {
+        "FftPlan": (),
+        "MaxwellBridge": (),
+        "MaxwellHint": (),
+        "required_blocks": (),
+    },
+    reexport=False,
+)
+
+
 class SpiralSession:
     """Lightweight execution context for quick experimentation."""
 
@@ -1410,13 +1289,10 @@ _CORE_EXPORTS = [
     "SearchLoop",
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
-    "ModuleTrainer","ZSpaceTrainer","TemporalResonanceBuffer","SpiralTorchVision",
+    "ModuleTrainer","ZSpaceTrainer","ZSpaceCoherenceSequencer","TemporalResonanceBuffer","SpiralTorchVision",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
     "info_nce","masked_mse","mean_squared_error",
-    "SpiralKFftPlan","MaxwellSpiralKBridge","MaxwellSpiralKHint",
-    "SpiralKContext","SpiralKWilsonMetrics","SpiralKHeuristicHint",
-    "wilson_lower_bound","should_rewrite","synthesize_program","rewrite_with_wilson",
 ]
 for _name in _CORE_EXPORTS:
     _expose_from_rs(_name)

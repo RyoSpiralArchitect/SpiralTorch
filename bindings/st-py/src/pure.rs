@@ -225,24 +225,25 @@ pub(crate) struct PyHypergrad {
 #[pymethods]
 impl PyHypergrad {
     #[new]
-    pub fn new(curvature: f32, learning_rate: f32, rows: usize, cols: usize) -> PyResult<Self> {
-        let inner =
-            AmegaHypergrad::new(curvature, learning_rate, rows, cols).map_err(tensor_err_to_py)?;
-        Ok(Self { inner })
-    }
-
-    #[staticmethod]
-    #[pyo3(signature = (curvature, learning_rate, rows, cols, topos))]
-    pub fn with_topos(
+    #[pyo3(signature = (curvature, learning_rate, rows, cols, topos=None))]
+    pub fn new(
         curvature: f32,
         learning_rate: f32,
         rows: usize,
         cols: usize,
-        topos: &PyOpenCartesianTopos,
+        topos: Option<&PyOpenCartesianTopos>,
     ) -> PyResult<Self> {
-        let inner =
-            AmegaHypergrad::with_topos(curvature, learning_rate, rows, cols, topos.inner.clone())
-                .map_err(tensor_err_to_py)?;
+        let inner = match topos {
+            Some(guard) => AmegaHypergrad::with_topos(
+                curvature,
+                learning_rate,
+                rows,
+                cols,
+                guard.inner.clone(),
+            ),
+            None => AmegaHypergrad::new(curvature, learning_rate, rows, cols),
+        }
+        .map_err(tensor_err_to_py)?;
         Ok(Self { inner })
     }
 
@@ -310,10 +311,6 @@ impl PyHypergrad {
             .map_err(tensor_err_to_py)
     }
 
-    pub fn topos(&self) -> PyOpenCartesianTopos {
-        PyOpenCartesianTopos::from_topos(self.inner.topos().clone())
-    }
-
     pub fn accumulate_barycenter_path(
         &mut self,
         intermediates: Vec<PyBarycenterIntermediate>,
@@ -323,13 +320,15 @@ impl PyHypergrad {
                 "barycenter intermediates cannot be empty",
             ));
         }
-        let stages: Vec<_> = intermediates
-            .into_iter()
-            .map(|stage| stage.inner.clone())
-            .collect();
+        let stages: Vec<BarycenterIntermediate> =
+            intermediates.into_iter().map(|stage| stage.inner).collect();
         self.inner
             .accumulate_barycenter_path(&stages)
             .map_err(tensor_err_to_py)
+    }
+
+    pub fn topos(&self) -> PyOpenCartesianTopos {
+        PyOpenCartesianTopos::from_topos(self.inner.topos().clone())
     }
 }
 

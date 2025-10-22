@@ -18,7 +18,7 @@ impl PyRankPlan {
         Self { inner }
     }
 
-    pub(crate) fn inner(&self) -> &RankPlan {
+    pub(crate) fn plan(&self) -> &RankPlan {
         &self.inner
     }
 
