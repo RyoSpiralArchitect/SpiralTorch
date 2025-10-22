@@ -195,3 +195,50 @@ hosts the shared library.
 
 Following this pattern lets COBOL pipelines tap into SpiralTorch's language
 stack while keeping existing operational envelopes intact.
+
+## 6. Orchestrating narrations from the browser (WASM → mainframe)
+
+To let humans and LM agents co-author dispatches without leaving the browser, the
+`spiraltorch-wasm` crate now exposes a `CobolDispatchPlanner`. The helper collects narrator
+parameters, provenance, and routing hints entirely in WebAssembly before serialising the
+payload for COBOL.【F:bindings/st-wasm/src/cobol_bridge.rs†L1-L266】 Both people and models can
+identify themselves through `addHumanInitiator`, `addModelInitiator`, or
+`addAutomationInitiator`, keeping an auditable chain of custody inside the envelope.
+
+```ts
+import init, { CobolDispatchPlanner } from "spiraltorch-wasm";
+
+await init();
+
+const planner = new CobolDispatchPlanner("ops-lab-42", "shadow");
+planner.setNarratorConfig(0.48, 0.67, "st-language.wave", "ja-JP");
+planner.setCoefficients(new Float32Array(resonanceBuffer));
+planner.addHumanInitiator("Operator Kana", null, null, "triage");
+planner.addModelInitiator("lm://spiraltorch/language", "2025-05", "lm-agent", "autoprompt");
+planner.setMqRoute("QM1", "ST.NARRATION.IN", "syncpoint");
+planner.setCicsRoute("STXR", "STLANG", "NARRATE");
+planner.setDataset("ST.DATA.NARRATION(+1)");
+
+const bytes = planner.toUint8Array();      // JSON buffer ready for MQ/HTTP bridges
+const leSlice = planner.coefficientsAsBytes(); // F32 little-endian view for pointer passing
+```
+
+On the mainframe side the JSON payload drops straight into the shared library created in the
+previous sections: either push `bytes` onto MQ, invoke a CICS program that unwraps the JSON,
+or write the blob into a dataset for batch jobs to consume. The COBOL preview exported by
+`toCobolPreview()` mirrors the pointer layout used by `st_cobol_describe`, making it simple to
+verify buffer sizing before the dispatch leaves the browser.【F:bindings/st-wasm/src/cobol_bridge.rs†L197-L266】
+
+## 7. Web console for mixed human/model dispatch
+
+The repository now ships a Vite-based sample console under
+`bindings/st-wasm/examples/cobol-console/`. It surfaces the planner in a responsive UI so
+operators, copilots, or autonomous agents can tweak curvature/temperature, seed coefficient
+buffers, and route the payload into MQ or CICS straight from the browser.【F:bindings/st-wasm/examples/cobol-console/index.html†L1-L126】【F:bindings/st-wasm/examples/cobol-console/src/main.ts†L1-L180】
+
+Run `npm run dev` inside the example after building the WASM bindings and point it at your
+HTTP bridge. The UI renders the JSON envelope, a COBOL pointer summary, and the exact byte
+count before letting you POST the payload downstream.【F:bindings/st-wasm/examples/cobol-console/README.md†L1-L62】 Humans can adjust
+fields manually while model agents reuse the same surface via browser automations or direct
+imports of `CobolDispatchPlanner`, providing a shared staging ground before the message enters
+z/OS.
