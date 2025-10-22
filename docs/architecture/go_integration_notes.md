@@ -46,7 +46,7 @@ Near-term recommendation: keep JSON/HTTP for prototyping, graduate to gRPC once 
 
 ## 3. Proof of Concept summary
 
-- Implemented `examples/go_bridge_poc/cmd/server` – a Go HTTP service exposing `/healthz` and `/predict` (sums numeric arrays and returns aggregate stats).
+- Implemented `examples/go_bridge_poc/cmd/server` – a Go HTTP service exposing `/healthz` and `/predict` (sums numeric arrays, derives min/max/average statistics, and shuts down gracefully on signals).
 - Added `examples/go_bridge_poc/rust_client` – a Rust CLI that sends JSON payloads to the Go service and prints the response using `ureq` and `clap`.
 
 ### CI build & test memo
