@@ -36,6 +36,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("dataset", "Datasets & loaders"),
     ("linalg", "Linear algebra utilities"),
     ("planner", "Planning & device heuristics"),
+    ("spiralk", "SpiralK DSL & hint bridges"),
     ("spiral_rl", "Reinforcement learning components"),
     ("rec", "Reconstruction / signal processing"),
     ("telemetry", "Telemetry / dashboards / metrics"),
@@ -190,6 +191,17 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "describe_device": (),
         "hip_probe": (),
         "generate_plan_batch_ex": (),
+    },
+    "spiralk": {
+        "FftPlan": (),
+        "MaxwellBridge": (),
+        "MaxwellHint": (),
+        "MaxwellFingerprint": (),
+        "MeaningGate": (),
+        "SequentialZ": (),
+        "MaxwellPulse": (),
+        "MaxwellProjector": (),
+        "required_blocks": (),
     },
     "compat.torch": {
         "to_torch": ("compat_to_torch", "to_torch"),
@@ -1366,6 +1378,18 @@ _mirror_into_module(
 )
 
 
+_mirror_into_module(
+    "spiralk",
+    {
+        "FftPlan": (),
+        "MaxwellBridge": (),
+        "MaxwellHint": (),
+        "required_blocks": (),
+    },
+    reexport=False,
+)
+
+
 class SpiralSession:
     """Lightweight execution context for quick experimentation."""
 
@@ -1414,9 +1438,6 @@ _CORE_EXPORTS = [
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
     "info_nce","masked_mse","mean_squared_error",
-    "SpiralKFftPlan","MaxwellSpiralKBridge","MaxwellSpiralKHint",
-    "SpiralKContext","SpiralKWilsonMetrics","SpiralKHeuristicHint",
-    "wilson_lower_bound","should_rewrite","synthesize_program","rewrite_with_wilson",
 ]
 for _name in _CORE_EXPORTS:
     _expose_from_rs(_name)
