@@ -21,7 +21,12 @@ from typing import (
 )
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
-from ._meta import BUILD_ID
+from ._meta import (
+    BUILD_FINGERPRINT,
+    BUILD_ID,
+    BUILD_MANIFEST,
+    BUILD_MANIFEST_JSON,
+)
 
 _rs: _types.ModuleType | None = None
 
@@ -125,10 +130,19 @@ except PackageNotFoundError:
     __version__ = "0.0.0+local"
 
 
-def print_build_id() -> None:
+def print_build_id(*, verbose: bool = False) -> None:
     """Display the build identifier embedded in the wheel."""
 
-    print(f"[SpiralTorch] Build ID: {BUILD_ID}")
+    if verbose:
+        print(f"[SpiralTorch] Build manifest: {BUILD_MANIFEST_JSON}")
+    else:
+        print(f"[SpiralTorch] Build ID: {BUILD_ID} ({BUILD_FINGERPRINT})")
+
+
+def build_manifest() -> dict[str, _Any]:
+    """Return a copy of the structured build metadata."""
+
+    return dict(BUILD_MANIFEST)
 
 # 追加API（Rust側でエクスポート済みのやつだけ拾う）
 _EXTRAS = [
