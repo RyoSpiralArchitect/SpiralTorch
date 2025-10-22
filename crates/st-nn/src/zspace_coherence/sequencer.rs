@@ -41,6 +41,9 @@ pub struct CoherenceDiagnostics {
     z_bias: f32,
     energy_ratio: f32,
     entropy: f32,
+    aggregated: Tensor,
+    coherence: Vec<f32>,
+    channel_reports: Vec<LinguisticChannelReport>,
 }
 
 impl CoherenceDiagnostics {
@@ -88,6 +91,32 @@ impl CoherenceDiagnostics {
     pub fn coherence_entropy(&self) -> f32 {
         self.entropy
     }
+
+    /// Returns the aggregated tensor from the coherence pipeline.
+    pub fn aggregated(&self) -> &Tensor {
+        &self.aggregated
+    }
+
+    /// Returns the raw coherence weights captured during the forward pass.
+    pub fn coherence(&self) -> &[f32] {
+        &self.coherence
+    }
+
+    /// Returns the rich linguistic channel reports, if any were computed.
+    pub fn channel_reports(&self) -> &[LinguisticChannelReport] {
+        &self.channel_reports
+    }
+
+    /// Overrides the linguistic channel reports while preserving existing diagnostics.
+    pub fn with_channel_reports(mut self, channel_reports: Vec<LinguisticChannelReport>) -> Self {
+        self.channel_reports = channel_reports;
+        self
+    }
+
+    /// Destructures the diagnostics into their core components.
+    pub fn into_parts(self) -> (Tensor, Vec<f32>, Vec<LinguisticChannelReport>) {
+        (self.aggregated, self.coherence, self.channel_reports)
+    }
 }
 
 /// Z-space native sequence modeling via coherence and semiotic suturing.
@@ -105,43 +134,6 @@ pub struct ZSpaceCoherenceSequencer {
 
     coherence_engine: CoherenceEngine,
     topos: OpenCartesianTopos,
-}
-
-#[derive(Clone, Debug)]
-pub struct CoherenceDiagnostics {
-    aggregated: Tensor,
-    coherence: Vec<f32>,
-    channel_reports: Vec<LinguisticChannelReport>,
-}
-
-impl CoherenceDiagnostics {
-    pub fn new(
-        aggregated: Tensor,
-        coherence: Vec<f32>,
-        channel_reports: Vec<LinguisticChannelReport>,
-    ) -> Self {
-        Self {
-            aggregated,
-            coherence,
-            channel_reports,
-        }
-    }
-
-    pub fn aggregated(&self) -> &Tensor {
-        &self.aggregated
-    }
-
-    pub fn coherence(&self) -> &[f32] {
-        &self.coherence
-    }
-
-    pub fn channel_reports(&self) -> &[LinguisticChannelReport] {
-        &self.channel_reports
-    }
-
-    pub fn into_parts(self) -> (Tensor, Vec<f32>, Vec<LinguisticChannelReport>) {
-        (self.aggregated, self.coherence, self.channel_reports)
-    }
 }
 
 impl ZSpaceCoherenceSequencer {
@@ -343,7 +335,7 @@ impl ZSpaceCoherenceSequencer {
             .z_bias;
 
         CoherenceDiagnostics {
-            channel_weights,
+            channel_weights: channel_weights.clone(),
             normalized_weights,
             normalization,
             fractional_order,
@@ -352,6 +344,9 @@ impl ZSpaceCoherenceSequencer {
             z_bias,
             energy_ratio,
             entropy,
+            aggregated: aggregated.clone(),
+            coherence: channel_weights,
+            channel_reports: Vec::new(),
         }
     }
 
@@ -370,6 +365,9 @@ impl ZSpaceCoherenceSequencer {
         let (aggregated, diagnostics) =
             self.geometric_aggregate_with_diagnostics(&z_space, &coherence)?;
 
+        let channel_reports = self.coherence_engine.describe_channels(&coherence)?;
+        let diagnostics = diagnostics.with_channel_reports(channel_reports);
+
         // Step 4: Output from Z-space (to Euclidean)
         Ok((aggregated, coherence, diagnostics))
     }
@@ -382,13 +380,8 @@ impl ZSpaceCoherenceSequencer {
     /// Produces a rich diagnostic snapshot that includes per-channel linguistic
     /// descriptors alongside the aggregated tensor.
     pub fn diagnostics(&self, x: &Tensor) -> PureResult<CoherenceDiagnostics> {
-        let (aggregated, coherence) = self.forward_with_coherence(x)?;
-        let channel_reports = self.coherence_engine.describe_channels(&coherence)?;
-        Ok(CoherenceDiagnostics::new(
-            aggregated,
-            coherence,
-            channel_reports,
-        ))
+        let (_aggregated, _coherence, diagnostics) = self.forward_with_diagnostics(x)?;
+        Ok(diagnostics)
     }
 
     pub fn forward(&self, x: &Tensor) -> PureResult<Tensor> {
