@@ -9,9 +9,41 @@ use std::{
     process::Command,
 };
 
+use chrono::Utc;
+
 fn main() {
+    emit_build_info();
     ensure_wgpu_stub();
     build_hip_rankk();
+}
+
+fn emit_build_info() {
+    let user = env::var("USER")
+        .or_else(|_| env::var("USERNAME"))
+        .unwrap_or_else(|_| "unknown".into());
+    let build_info = format!(
+        "pub const BUILD_ID: &str = \"Ryo-ST-{}-{}\";",
+        user,
+        Utc::now().to_rfc3339(),
+    );
+
+    let out_dir = match env::var("OUT_DIR") {
+        Ok(dir) => dir,
+        Err(err) => {
+            println!("cargo:warning=st-core: failed to read OUT_DIR for build info: {err}");
+            return;
+        }
+    };
+
+    let dest_path = Path::new(&out_dir).join("build_info.rs");
+    if let Err(err) = fs::write(&dest_path, build_info) {
+        println!(
+            "cargo:warning=st-core: failed to write {}: {err}",
+            dest_path.display()
+        );
+    }
+
+    println!("cargo:rerun-if-changed=build.rs");
 }
 
 fn ensure_wgpu_stub() {
