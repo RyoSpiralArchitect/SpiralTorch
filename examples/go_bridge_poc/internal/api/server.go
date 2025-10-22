@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"log"
 	"net/http"
 )
@@ -54,10 +56,27 @@ func (s *Server) handlePredict(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 	var req PredictionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		s.logger.Printf("failed to decode payload: %v", err)
 		if err := respondJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid payload"}); err != nil {
 			s.logger.Printf("failed to encode error response: %v", err)
+		}
+		return
+	}
+
+	if err := ensureEOF(decoder); err != nil {
+		s.logger.Printf("unexpected trailing data: %v", err)
+		if err := respondJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid payload"}); err != nil {
+			s.logger.Printf("failed to encode error response: %v", err)
+		}
+		return
+	}
+
+	if len(req.Input) == 0 {
+		if err := respondJSON(w, http.StatusBadRequest, errorResponse{Error: "input must include at least one value"}); err != nil {
+			s.logger.Printf("failed to encode validation response: %v", err)
 		}
 		return
 	}
@@ -81,7 +100,32 @@ func (s *Server) handlePredict(w http.ResponseWriter, r *http.Request) {
 }
 
 func respondJSON(w http.ResponseWriter, status int, payload interface{}) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	return json.NewEncoder(w).Encode(payload)
+
+	if _, err := w.Write(append(body, '\n')); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureEOF(decoder *json.Decoder) error {
+	if decoder == nil {
+		return errors.New("decoder is nil")
+	}
+
+	if err := decoder.Decode(&struct{}{}); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+
+	return errors.New("extra data after JSON payload")
 }

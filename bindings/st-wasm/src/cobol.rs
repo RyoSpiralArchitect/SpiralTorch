@@ -116,34 +116,32 @@ pub struct CobolEnvelopeBuilder {
 
 impl CobolEnvelopeBuilder {
     pub fn new(job_id: impl Into<String>) -> Self {
-        let envelope = CobolEnvelope {
-            job_id: sanitize(job_id.into()).unwrap_or_else(|| "job".to_string()),
-            release_channel: "production".to_string(),
-            created_at: now_timestamp(),
-            initiators: Vec::new(),
-            route: CobolRoute::default(),
-            payload: CobolNarratorPayload::default(),
-            metadata: CobolMetadata::default(),
-        };
-        Self::from_envelope(envelope)
-    }
-
-    pub fn from_envelope(envelope: CobolEnvelope) -> Self {
         let mut builder = Self {
-            envelope: sanitize_envelope(envelope),
+            envelope: CobolEnvelope {
+                job_id: job_id.into(),
+                release_channel: "production".to_string(),
+                created_at: now_timestamp(),
+                initiators: Vec::new(),
+                route: CobolRoute::default(),
+                payload: CobolNarratorPayload::default(),
+                metadata: CobolMetadata::default(),
+            },
         };
-        ensure_initialized_annotation(&mut builder.envelope);
+        sanitize_envelope(&mut builder.envelope);
+        ensure_planner_annotation(&mut builder.envelope);
         builder
     }
 
-    pub fn from_json_str(json: &str) -> serde_json::Result<Self> {
-        let envelope = CobolEnvelope::from_json_str(json)?;
-        Ok(Self::from_envelope(envelope))
+    pub fn from_envelope(mut envelope: CobolEnvelope) -> Self {
+        sanitize_envelope(&mut envelope);
+        ensure_planner_annotation(&mut envelope);
+        Self { envelope }
     }
 
-    pub fn from_json_bytes(bytes: &[u8]) -> serde_json::Result<Self> {
-        let envelope = CobolEnvelope::from_json_bytes(bytes)?;
-        Ok(Self::from_envelope(envelope))
+    pub fn load_envelope(&mut self, mut envelope: CobolEnvelope) {
+        sanitize_envelope(&mut envelope);
+        ensure_planner_annotation(&mut envelope);
+        self.envelope = envelope;
     }
 
     pub fn set_release_channel(&mut self, channel: impl Into<String>) {
@@ -156,6 +154,10 @@ impl CobolEnvelopeBuilder {
         if let Some(clean) = sanitize(created_at.into()) {
             self.envelope.created_at = clean;
         }
+    }
+
+    pub fn reset_created_at(&mut self) {
+        self.envelope.created_at = now_timestamp();
     }
 
     pub fn set_narrator_config(
@@ -198,6 +200,10 @@ impl CobolEnvelopeBuilder {
         });
     }
 
+    pub fn clear_mq_route(&mut self) {
+        self.envelope.route.mq = None;
+    }
+
     pub fn set_cics_route(
         &mut self,
         transaction: impl Into<String>,
@@ -211,8 +217,18 @@ impl CobolEnvelopeBuilder {
         });
     }
 
+    pub fn clear_cics_route(&mut self) {
+        self.envelope.route.cics = None;
+    }
+
     pub fn set_dataset(&mut self, dataset: Option<String>) {
         self.envelope.route.dataset = dataset.and_then(sanitize);
+    }
+
+    pub fn clear_route(&mut self) {
+        self.clear_mq_route();
+        self.clear_cics_route();
+        self.envelope.route.dataset = None;
     }
 
     pub fn add_tag(&mut self, tag: impl Into<String>) {
@@ -248,11 +264,6 @@ impl CobolEnvelopeBuilder {
         self.envelope.metadata.extra = default_metadata_extra();
     }
 
-    pub fn replace_envelope(&mut self, envelope: CobolEnvelope) {
-        self.envelope = sanitize_envelope(envelope);
-        ensure_initialized_annotation(&mut self.envelope);
-    }
-
     pub fn envelope(&self) -> &CobolEnvelope {
         &self.envelope
     }
@@ -275,12 +286,12 @@ impl CobolEnvelope {
         serde_json::to_vec(self)
     }
 
-    pub fn from_json_str(json: &str) -> serde_json::Result<Self> {
-        serde_json::from_str(json)
+    pub fn from_json_str(input: &str) -> serde_json::Result<Self> {
+        serde_json::from_str(input)
     }
 
-    pub fn from_json_bytes(bytes: &[u8]) -> serde_json::Result<Self> {
-        serde_json::from_slice(bytes)
+    pub fn from_json_slice(input: &[u8]) -> serde_json::Result<Self> {
+        serde_json::from_slice(input)
     }
 }
 
@@ -299,18 +310,61 @@ fn sanitize(value: String) -> Option<String> {
     }
 }
 
-fn sanitize_vec(values: Vec<String>) -> Vec<String> {
-    values
-        .into_iter()
-        .filter_map(|value| sanitize(value))
-        .collect()
+fn sanitize_envelope(envelope: &mut CobolEnvelope) {
+    sanitize_required(&mut envelope.job_id, || "job".to_string());
+    sanitize_required(&mut envelope.release_channel, || "production".to_string());
+    sanitize_required(&mut envelope.created_at, now_timestamp);
+
+    sanitize_required(&mut envelope.payload.encoder, || {
+        "spiraltorch.default".to_string()
+    });
+    sanitize_option(&mut envelope.payload.locale);
+
+    if let Some(route) = &mut envelope.route.mq {
+        let manager = sanitize(std::mem::take(&mut route.manager));
+        let queue = sanitize(std::mem::take(&mut route.queue));
+        route.commit = route.commit.take().and_then(sanitize);
+        match (manager, queue) {
+            (Some(manager), Some(queue)) => {
+                route.manager = manager;
+                route.queue = queue;
+            }
+            _ => {
+                envelope.route.mq = None;
+            }
+        }
+    }
+
+    if let Some(route) = &mut envelope.route.cics {
+        let transaction = sanitize(std::mem::take(&mut route.transaction));
+        route.program = route.program.take().and_then(sanitize);
+        route.channel = route.channel.take().and_then(sanitize);
+        match transaction {
+            Some(transaction) => {
+                route.transaction = transaction;
+            }
+            None => {
+                envelope.route.cics = None;
+            }
+        }
+    }
+
+    envelope.route.dataset = envelope.route.dataset.take().and_then(sanitize);
+
+    sanitize_vec(&mut envelope.metadata.tags);
+    sanitize_vec(&mut envelope.metadata.annotations);
+
+    for initiator in &mut envelope.initiators {
+        sanitize_required(&mut initiator.name, || "participant".to_string());
+        sanitize_option(&mut initiator.persona);
+        sanitize_option(&mut initiator.revision);
+        sanitize_option(&mut initiator.contact);
+        sanitize_notes(&mut initiator.notes);
+    }
 }
 
-fn sanitize_required(value: String, fallback: &str) -> String {
-    sanitize(value).unwrap_or_else(|| fallback.to_string())
-}
-
-fn ensure_initialized_annotation(envelope: &mut CobolEnvelope) {
+fn ensure_planner_annotation(envelope: &mut CobolEnvelope) {
+    sanitize_vec(&mut envelope.metadata.annotations);
     if !envelope
         .metadata
         .annotations
@@ -324,37 +378,35 @@ fn ensure_initialized_annotation(envelope: &mut CobolEnvelope) {
     }
 }
 
-fn sanitize_envelope(mut envelope: CobolEnvelope) -> CobolEnvelope {
-    envelope.job_id = sanitize_required(envelope.job_id, "job");
-    envelope.release_channel = sanitize_required(envelope.release_channel, "production");
-    envelope.created_at = sanitize(envelope.created_at).unwrap_or_else(now_timestamp);
-
-    if let Some(ref mut mq) = envelope.route.mq {
-        mq.manager = sanitize_required(mq.manager.clone(), "default");
-        mq.queue = sanitize_required(mq.queue.clone(), "queue");
-        mq.commit = mq.commit.take().and_then(sanitize);
+fn sanitize_required<F>(target: &mut String, default: F)
+where
+    F: FnOnce() -> String,
+{
+    let current = std::mem::take(target);
+    match sanitize(current) {
+        Some(value) => *target = value,
+        None => *target = default(),
     }
+}
 
-    if let Some(ref mut cics) = envelope.route.cics {
-        cics.transaction = sanitize_required(cics.transaction.clone(), "TX");
-        cics.program = cics.program.take().and_then(sanitize);
-        cics.channel = cics.channel.take().and_then(sanitize);
+fn sanitize_option(target: &mut Option<String>) {
+    if let Some(value) = target.take() {
+        *target = sanitize(value);
     }
+}
 
-    envelope.route.dataset = envelope.route.dataset.and_then(sanitize);
-
-    for initiator in &mut envelope.initiators {
-        initiator.name = sanitize_required(initiator.name.clone(), "participant");
-        initiator.persona = initiator.persona.take().and_then(sanitize);
-        initiator.revision = initiator.revision.take().and_then(sanitize);
-        initiator.contact = initiator.contact.take().and_then(sanitize);
-        initiator.notes = sanitize_vec(std::mem::take(&mut initiator.notes));
+fn sanitize_vec(values: &mut Vec<String>) {
+    let mut sanitized = Vec::with_capacity(values.len());
+    for value in values.drain(..) {
+        if let Some(clean) = sanitize(value) {
+            sanitized.push(clean);
+        }
     }
+    *values = sanitized;
+}
 
-    envelope.metadata.tags = sanitize_vec(envelope.metadata.tags);
-    envelope.metadata.annotations = sanitize_vec(envelope.metadata.annotations);
-
-    envelope
+fn sanitize_notes(notes: &mut Vec<String>) {
+    sanitize_vec(notes);
 }
 
 pub fn make_initiator(
@@ -440,93 +492,148 @@ mod tests {
     }
 
     #[test]
-    fn builder_round_trips_json() {
-        let mut original = CobolEnvelopeBuilder::new("job-200");
-        original.set_release_channel(" staging ");
-        original.set_narrator_config(0.7, 0.3, " custom ", Some(" fr-FR ".into()));
-        let envelope = original.snapshot();
-        let json = envelope.to_json_string().unwrap();
+    fn clearing_state_resets_routes_and_initiators() {
+        let mut builder = CobolEnvelopeBuilder::new("job-303");
+        builder.add_initiator(make_initiator(
+            InitiatorKind::Automation,
+            "bot",
+            None,
+            None,
+            None,
+            None,
+        ));
+        builder.set_mq_route("QM2", "QUEUE", None);
+        builder.set_cics_route("TRN1", Some("PGM1".into()), Some("CHAN".into()));
+        builder.set_dataset(Some("HLQ.DATA".into()));
 
-        let imported = CobolEnvelopeBuilder::from_json_str(&json).unwrap();
-        assert_eq!(imported.envelope().job_id, "job-200");
-        assert_eq!(imported.envelope().release_channel, "staging");
-        assert_eq!(imported.envelope().payload.locale.as_deref(), Some("fr-FR"));
-        assert!(imported
-            .envelope()
-            .metadata
-            .annotations
-            .contains(&"planner_initialized".to_string()));
+        builder.clear_initiators();
+        builder.clear_mq_route();
+        builder.clear_cics_route();
+        builder.set_dataset(None);
+
+        let envelope = builder.snapshot();
+        assert!(envelope.initiators.is_empty());
+        assert!(envelope.route.mq.is_none());
+        assert!(envelope.route.cics.is_none());
+        assert!(envelope.route.dataset.is_none());
+
+        builder.set_mq_route("QM2", "QUEUE", None);
+        builder.set_cics_route("TRN1", None, None);
+        builder.set_dataset(Some("HLQ.DATA".into()));
+        builder.clear_route();
+        let cleared = builder.snapshot();
+        assert!(cleared.route.mq.is_none());
+        assert!(cleared.route.cics.is_none());
+        assert!(cleared.route.dataset.is_none());
     }
 
     #[test]
-    fn sanitize_envelope_on_import() {
-        let raw = CobolEnvelope {
-            job_id: "   ".into(),
-            release_channel: "  ".into(),
-            created_at: "".into(),
+    fn resetting_created_at_restores_current_timestamp() {
+        let mut builder = CobolEnvelopeBuilder::new("job-404");
+        builder.set_created_at("2020-01-01T00:00:00Z");
+        builder.reset_created_at();
+        assert_ne!(builder.snapshot().created_at, "2020-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn builder_from_envelope_sanitises_imported_state() {
+        let envelope = CobolEnvelope {
+            job_id: "  ".to_string(),
+            release_channel: " shadow ".to_string(),
+            created_at: " ".to_string(),
             initiators: vec![InteractionInitiator {
                 kind: InitiatorKind::Human,
-                name: "  ".into(),
-                persona: Some("  ops  ".into()),
-                revision: None,
-                contact: Some("  contact  ".into()),
-                notes: vec!["  note  ".into(), "".into()],
+                name: "".to_string(),
+                persona: Some(" guide ".to_string()),
+                revision: Some("  ".to_string()),
+                contact: Some("  ops@example  ".to_string()),
+                notes: vec!["  note  ".to_string(), "  ".to_string()],
             }],
             route: CobolRoute {
                 mq: Some(CobolMqRoute {
-                    manager: "   ".into(),
-                    queue: "   ".into(),
-                    commit: Some("   ".into()),
+                    manager: "   ".to_string(),
+                    queue: " inbound ".to_string(),
+                    commit: Some("   ".to_string()),
                 }),
                 cics: Some(CobolCicsRoute {
-                    transaction: "   ".into(),
-                    program: Some("  program  ".into()),
-                    channel: Some("".into()),
+                    transaction: " TRN1 ".to_string(),
+                    program: Some("  ".to_string()),
+                    channel: Some(" CHAN ".to_string()),
                 }),
-                dataset: Some("  dataset  ".into()),
+                dataset: Some("  DATA.SET  ".to_string()),
             },
-            payload: CobolNarratorPayload::default(),
+            payload: CobolNarratorPayload {
+                curvature: 0.7,
+                temperature: 0.3,
+                encoder: "  encoder.custom  ".to_string(),
+                locale: Some("  en-US  ".to_string()),
+                coefficients: vec![0.12],
+            },
             metadata: CobolMetadata {
-                tags: vec!["  a  ".into(), "".into()],
-                annotations: vec!["existing".into(), "".into()],
-                extra: serde_json::json!({"keep": "me"}),
+                tags: vec!["  tag-one  ".to_string(), "  ".to_string()],
+                annotations: vec!["  ".to_string(), "planner_initialized".to_string()],
+                extra: default_metadata_extra(),
             },
         };
 
-        let builder = CobolEnvelopeBuilder::from_envelope(raw);
-        let envelope = builder.envelope();
-        assert_eq!(envelope.job_id, "job");
-        assert_eq!(envelope.release_channel, "production");
-        assert!(!envelope.created_at.is_empty());
-        assert_eq!(envelope.route.dataset.as_deref(), Some("dataset"));
+        let builder = CobolEnvelopeBuilder::from_envelope(envelope);
+        let snapshot = builder.snapshot();
+
+        assert_eq!(snapshot.job_id, "job");
+        assert_eq!(snapshot.release_channel, "shadow");
         assert_eq!(
-            envelope.route.mq.as_ref().map(|mq| (
-                mq.manager.clone(),
-                mq.queue.clone(),
-                mq.commit.clone()
-            )),
-            Some(("default".into(), "queue".into(), None))
+            snapshot
+                .metadata
+                .annotations
+                .iter()
+                .filter(|value| value == "planner_initialized")
+                .count(),
+            1
+        );
+        assert_eq!(snapshot.route.mq, None);
+        assert_eq!(
+            snapshot
+                .route
+                .cics
+                .as_ref()
+                .map(|cics| cics.transaction.clone()),
+            Some("TRN1".to_string())
+        );
+        assert_eq!(snapshot.route.dataset.as_deref(), Some("DATA.SET"));
+        assert_eq!(snapshot.metadata.tags, vec!["tag-one".to_string()]);
+        assert_eq!(
+            snapshot.initiators.first().expect("initiator").name,
+            "participant"
         );
         assert_eq!(
-            envelope.route.cics.as_ref().map(|cics| (
-                cics.transaction.clone(),
-                cics.program.clone(),
-                cics.channel.clone()
-            )),
-            Some(("TX".into(), Some("program".into()), None))
+            snapshot.initiators.first().unwrap().persona.as_deref(),
+            Some("guide")
         );
-        assert_eq!(envelope.initiators[0].name, "participant");
-        assert_eq!(envelope.initiators[0].persona.as_deref(), Some("ops"));
-        assert_eq!(envelope.initiators[0].contact.as_deref(), Some("contact"));
-        assert_eq!(envelope.initiators[0].notes, vec!["note".to_string()]);
-        assert_eq!(envelope.metadata.tags, vec!["a".to_string()]);
-        assert!(envelope
-            .metadata
-            .annotations
-            .contains(&"existing".to_string()));
-        assert!(envelope
-            .metadata
-            .annotations
-            .contains(&"planner_initialized".to_string()));
+        assert_eq!(
+            snapshot.initiators.first().unwrap().contact.as_deref(),
+            Some("ops@example")
+        );
+        assert_eq!(
+            snapshot.initiators.first().unwrap().notes,
+            vec!["note".to_string()]
+        );
+        assert_eq!(snapshot.payload.encoder, "encoder.custom");
+        assert_eq!(snapshot.payload.locale.as_deref(), Some("en-US"));
+        assert_ne!(snapshot.created_at, " ");
+    }
+
+    #[test]
+    fn builder_load_envelope_replaces_previous_state() {
+        let mut builder = CobolEnvelopeBuilder::new("job-a");
+        builder.add_tag("alpha");
+        let mut replacement = builder.snapshot();
+        replacement.job_id = "job-b".to_string();
+        replacement.release_channel = " shadow ".to_string();
+        builder.load_envelope(replacement);
+
+        let snapshot = builder.snapshot();
+        assert_eq!(snapshot.job_id, "job-b");
+        assert_eq!(snapshot.release_channel, "shadow");
+        assert!(snapshot.metadata.tags.contains(&"alpha".to_string()));
     }
 }

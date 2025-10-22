@@ -1207,10 +1207,10 @@ _mirror_into_module(
 )
 _mirror_into_module(
     "frac",
-    [
-        "gl_coeffs_adaptive",
-        "fracdiff_gl_1d",
-    ],
+    {
+        "gl_coeffs_adaptive": ("frac.gl_coeffs_adaptive",),
+        "fracdiff_gl_1d": ("frac.fracdiff_gl_1d",),
+    },
 )
 _mirror_into_module(
     "spiral_rl",
