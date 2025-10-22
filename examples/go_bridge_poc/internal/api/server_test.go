@@ -197,3 +197,90 @@ func TestHandlePredictMethodNotAllowed(t *testing.T) {
 		t.Fatalf("expected Allow header %s, got %s", http.MethodPost, got)
 	}
 }
+
+func TestHandleOpenAPIServesSpec(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest(http.MethodGet, "/openapi.json", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleOpenAPI(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, res.StatusCode)
+	}
+
+	if got := res.Header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("expected content type application/json, got %s", got)
+	}
+
+	if got := res.Header.Get("Cache-Control"); got == "" {
+		t.Fatal("expected cache-control header to be set")
+	}
+
+	data, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	if len(data) == 0 {
+		t.Fatal("expected non-empty spec body")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("failed to unmarshal spec: %v", err)
+	}
+
+	if payload["openapi"] != "3.1.0" {
+		t.Fatalf("expected openapi version 3.1.0, got %v", payload["openapi"])
+	}
+}
+
+func TestHandleOpenAPIRejectsUnsupportedMethods(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest(http.MethodPost, "/openapi.json", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleOpenAPI(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status %d, got %d", http.StatusMethodNotAllowed, res.StatusCode)
+	}
+
+	if got := res.Header.Get("Allow"); got == "" {
+		t.Fatal("expected allow header to be populated")
+	}
+}
+
+func TestHandleOpenAPIHeadRequest(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest(http.MethodHead, "/openapi.json", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleOpenAPI(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, res.StatusCode)
+	}
+
+	if res.ContentLength > 0 {
+		t.Fatalf("expected empty body for HEAD request, got content length %d", res.ContentLength)
+	}
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("failed to read head response body: %v", err)
+	}
+	if len(body) != 0 {
+		t.Fatalf("expected empty body for HEAD request, got %d bytes", len(body))
+	}
+}

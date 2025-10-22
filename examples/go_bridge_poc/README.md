@@ -12,6 +12,7 @@ The service performs basic request validation to prevent schema drift:
 
 ```
 examples/go_bridge_poc/
+├── api/                # Shared OpenAPI description served by the Go bridge
 ├── cmd/server          # Entrypoint wiring logging + HTTP server
 ├── internal/api        # Request/response types and handlers
 └── rust_client         # Standalone Rust binary that exercises the API
@@ -23,6 +24,9 @@ examples/go_bridge_poc/
 cd examples/go_bridge_poc
 GO111MODULE=on GOTOOLCHAIN=local go run ./cmd/server
 ```
+
+The service automatically exposes its contract at `http://127.0.0.1:8080/openapi.json`.  Any updates to the request/response
+types should be reflected in `api/openapi.json` so Rust and Go clients can rely on the same document during integration tests.
 
 ## Running the Rust client
 
