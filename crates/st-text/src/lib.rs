@@ -179,6 +179,28 @@ impl TextResonator {
                 ));
             }
         }
+        if let Some(percentages) = aggregate_band_percentages(frames) {
+            highlights.push(format!("avg Above {:.1}%", percentages[0] * 100.0));
+            highlights.push(format!("avg Here {:.1}%", percentages[1] * 100.0));
+            highlights.push(format!("avg Beneath {:.1}%", percentages[2] * 100.0));
+            highlights.push(format!("avg ∞ proj {:.1}%", percentages[3] * 100.0));
+            highlights.push(format!("avg ∞ tower {:.1}%", percentages[4] * 100.0));
+            let entropy = band_entropy(&percentages);
+            if entropy > 0.0 {
+                highlights.push(format!("band entropy {:.2}", entropy));
+            }
+            let contrast = band_contrast(&percentages);
+            if contrast > 0.0 {
+                highlights.push(format!("dominant contrast {:.1}%", contrast * 100.0));
+            }
+            let spread = band_spread(&percentages);
+            if spread > 0.0 {
+                highlights.push(format!("band spread σ {:.1}%", spread * 100.0));
+            }
+        }
+        if let Some(mean_curvature) = mean_observed_curvature(frames) {
+            highlights.push(format!("avg curvature {:+.3}", mean_curvature));
+        }
         ResonanceNarrative::new(text, highlights)
     }
 
@@ -415,8 +437,8 @@ fn narrative_summary(metrics: &ResonanceTemporalMetrics) -> String {
         .map(|(_, label)| *label)
         .unwrap_or("Resonance energy evenly distributed across bands");
     format!(
-        "{dominant} while total energy sits at {:.3}.",
-        metrics.total_energy
+        "{dominant} while total energy sits at {:.3} with curvature {:+.3}.",
+        metrics.total_energy, metrics.observed_curvature
     )
 }
 
@@ -424,14 +446,122 @@ fn narrative_highlights(metrics: &ResonanceTemporalMetrics) -> Vec<String> {
     if metrics.total_energy <= f32::EPSILON {
         return vec!["all bands below activation threshold".to_string()];
     }
-    let total = metrics.total_energy;
-    vec![
-        format!("Above {:.1}%", metrics.homotopy_energy / total * 100.0),
-        format!("Here {:.1}%", metrics.functor_energy / total * 100.0),
-        format!("Beneath {:.1}%", metrics.recursive_energy / total * 100.0),
-        format!("∞ proj {:.1}%", metrics.projection_energy / total * 100.0),
-        format!("∞ tower {:.1}%", metrics.infinity_energy / total * 100.0),
+    let percentages = band_percentages(metrics);
+    let mut highlights = vec![
+        format!("Above {:.1}%", percentages[0] * 100.0),
+        format!("Here {:.1}%", percentages[1] * 100.0),
+        format!("Beneath {:.1}%", percentages[2] * 100.0),
+        format!("∞ proj {:.1}%", percentages[3] * 100.0),
+        format!("∞ tower {:.1}%", percentages[4] * 100.0),
+        format!("curvature {:+.3}", metrics.observed_curvature),
+    ];
+    let entropy = band_entropy(&percentages);
+    if entropy > 0.0 {
+        highlights.push(format!("band entropy {:.2}", entropy));
+    }
+    let contrast = band_contrast(&percentages);
+    if contrast > 0.0 {
+        highlights.push(format!("dominant contrast {:.1}%", contrast * 100.0));
+    }
+    let spread = band_spread(&percentages);
+    if spread > 0.0 {
+        highlights.push(format!("band spread σ {:.1}%", spread * 100.0));
+    }
+    highlights
+}
+
+fn band_percentages(metrics: &ResonanceTemporalMetrics) -> [f32; 5] {
+    if metrics.total_energy <= f32::EPSILON {
+        return [0.0; 5];
+    }
+    let total = metrics.total_energy.max(f32::EPSILON);
+    [
+        (metrics.homotopy_energy / total).clamp(0.0, 1.0),
+        (metrics.functor_energy / total).clamp(0.0, 1.0),
+        (metrics.recursive_energy / total).clamp(0.0, 1.0),
+        (metrics.projection_energy / total).clamp(0.0, 1.0),
+        (metrics.infinity_energy / total).clamp(0.0, 1.0),
     ]
+}
+
+fn band_entropy(percentages: &[f32; 5]) -> f32 {
+    const EPS: f32 = 1e-6;
+    percentages
+        .iter()
+        .filter(|p| **p > EPS)
+        .map(|p| {
+            let logp = p.ln();
+            -p * logp
+        })
+        .sum::<f32>()
+        / std::f32::consts::LN_2
+}
+
+fn band_contrast(percentages: &[f32; 5]) -> f32 {
+    let mut sorted = *percentages;
+    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal));
+    if sorted[0] <= 0.0 {
+        0.0
+    } else {
+        (sorted[0] - sorted[1].max(0.0)).max(0.0)
+    }
+}
+
+fn band_spread(percentages: &[f32; 5]) -> f32 {
+    let mean = percentages.iter().sum::<f32>() / percentages.len() as f32;
+    let variance = percentages
+        .iter()
+        .map(|p| {
+            let diff = p - mean;
+            diff * diff
+        })
+        .sum::<f32>()
+        / percentages.len() as f32;
+    variance.sqrt()
+}
+
+fn aggregate_band_percentages(frames: &[ChronoFrame]) -> Option<[f32; 5]> {
+    let mut totals = [0.0f32; 5];
+    let mut energy_total = 0.0f32;
+    for frame in frames {
+        if frame.total_energy <= f32::EPSILON {
+            continue;
+        }
+        let energy = frame.total_energy.max(0.0);
+        totals[0] += frame.homotopy_energy.max(0.0);
+        totals[1] += frame.functor_energy.max(0.0);
+        totals[2] += frame.recursive_energy.max(0.0);
+        totals[3] += frame.projection_energy.max(0.0);
+        totals[4] += frame.infinity_energy.max(0.0);
+        energy_total += energy;
+    }
+    if energy_total <= f32::EPSILON {
+        return None;
+    }
+    Some([
+        (totals[0] / energy_total).clamp(0.0, 1.0),
+        (totals[1] / energy_total).clamp(0.0, 1.0),
+        (totals[2] / energy_total).clamp(0.0, 1.0),
+        (totals[3] / energy_total).clamp(0.0, 1.0),
+        (totals[4] / energy_total).clamp(0.0, 1.0),
+    ])
+}
+
+fn mean_observed_curvature(frames: &[ChronoFrame]) -> Option<f32> {
+    let mut sum = 0.0f32;
+    let mut count = 0usize;
+    for frame in frames {
+        if !frame.observed_curvature.is_finite() {
+            continue;
+        }
+        sum += frame.observed_curvature;
+        count += 1;
+    }
+    if count == 0 {
+        None
+    } else {
+        Some(sum / count as f32)
+    }
 }
 
 #[cfg(test)]
@@ -460,7 +590,16 @@ mod tests {
         let narrator = TextResonator::new(-1.0, 0.5).unwrap();
         let narrative = narrator.describe_resonance(&demo_resonance());
         assert!(!narrative.summary.is_empty());
-        assert_eq!(narrative.highlights.len(), 5);
+        assert!(narrative.summary.contains("curvature"));
+        assert!(narrative.highlights.len() >= 6);
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("curvature")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("band entropy")));
     }
 
     #[test]
@@ -504,5 +643,9 @@ mod tests {
             .highlights
             .iter()
             .any(|line| line.contains("harmonic")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("band entropy")));
     }
 }
