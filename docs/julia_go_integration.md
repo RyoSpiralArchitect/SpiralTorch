@@ -16,7 +16,8 @@ reimplementing the runtime.
 
 ## C-ABI foundation (`bindings/spiraltorch-sys`)
 - Export version queries, tensor constructors (`zeros`, `from_dense`), shape and
-  element inspection, and a safe data copy primitive.
+  element inspection, a safe data copy primitive, and arithmetic helpers
+  (addition, subtraction, scaling, matrix multiplication).
 - Maintain a thread-safe error slot so foreign callers can surface rich error
   messages instead of opaque status codes.
 - Provide unit tests that cover the ABI round-trip to prevent regressions before
@@ -24,8 +25,9 @@ reimplementing the runtime.
 
 ## Julia integration (`bindings/julia`)
 - The `SpiralTorch.jl` module loads `libspiraltorch_sys` via `ccall`, offers a
-  garbage-collected `Tensor` wrapper, and exposes helpers to convert between
-  Julia matrices and SpiralTorch tensors.
+  garbage-collected `Tensor` wrapper, overloads `+`, `-`, and `*` (matrix and
+  scalar) and exposes helpers to convert between Julia matrices and SpiralTorch
+  tensors.
 - Library discovery prefers the `SPIRALTORCH_SYS_LIBRARY` environment variable
   before falling back to bundled paths, making ad-hoc experimentation easy.
 - Future steps: wire ChainRules.jl gradient definitions once the autodiff tape
@@ -34,7 +36,8 @@ reimplementing the runtime.
 
 ## Go integration (`bindings/go`)
 - The Go module links with cgo, wraps the tensor lifecycle behind idiomatic Go
-  functions, and provides an example program that prints tensor contents.
+  functions, exposes `Add`/`Sub`/`Scale`/`Matmul`, and provides an example
+  program that prints tensor contents and composite operations.
 - Runtime errors convert into `error` values, embracing Go's standard control
   flow while reusing the shared error slot from `spiraltorch-sys`.
 - Future steps: model builders that mirror the Rust planner, goroutine-aware

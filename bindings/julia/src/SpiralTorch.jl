@@ -80,13 +80,25 @@ function _register_finalizer!(tensor::Tensor)
     return tensor
 end
 
+function _wrap_tensor(handle::Ptr{Cvoid}, context::AbstractString)
+    if handle == C_NULL
+        error("$context failed: " * last_error())
+    end
+    clear_error!()
+    return _register_finalizer!(Tensor(handle))
+end
+
+function _require_handle(tensor::Tensor, label)
+    if tensor.handle == C_NULL
+        error("$(label) handle is null")
+    end
+    return tensor.handle
+end
+
 function Tensor(rows::Integer, cols::Integer)
     lib = _lib()
     handle = ccall((:spiraltorch_tensor_zeros, lib), Ptr{Cvoid}, (Csize_t, Csize_t), rows, cols)
-    if handle == C_NULL
-        error("failed to allocate zero tensor: " * last_error())
-    end
-    return _register_finalizer!(Tensor(handle))
+    return _wrap_tensor(handle, "tensor_zeros")
 end
 
 function Tensor(data::AbstractMatrix{<:Real})
@@ -95,10 +107,7 @@ function Tensor(data::AbstractMatrix{<:Real})
     flat = reshape(mat, :)
     lib = _lib()
     handle = ccall((:spiraltorch_tensor_from_dense, lib), Ptr{Cvoid}, (Csize_t, Csize_t, Ptr{Float32}, Csize_t), rows, cols, pointer(flat), length(flat))
-    if handle == C_NULL
-        error("failed to construct tensor from array: " * last_error())
-    end
-    return _register_finalizer!(Tensor(handle))
+    return _wrap_tensor(handle, "tensor_from_dense")
 end
 
 function shape(tensor::Tensor)
@@ -140,5 +149,38 @@ Base.size(tensor::Tensor) = shape(tensor)
 Base.length(tensor::Tensor) = prod(size(tensor))
 Base.convert(::Type{Array{Float32,2}}, tensor::Tensor) = to_array(tensor)
 Base.convert(::Type{Matrix{Float32}}, tensor::Tensor) = to_array(tensor)
+
+function _binary_tensor_op(fname::Symbol, lhs::Tensor, rhs::Tensor)
+    lib = _lib()
+    left = _require_handle(lhs, string(fname, " lhs"))
+    right = _require_handle(rhs, string(fname, " rhs"))
+    handle = ccall((fname, lib), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}), left, right)
+    return _wrap_tensor(handle, String(fname))
+end
+
+function add(lhs::Tensor, rhs::Tensor)
+    return _binary_tensor_op(:spiraltorch_tensor_add, lhs, rhs)
+end
+
+function sub(lhs::Tensor, rhs::Tensor)
+    return _binary_tensor_op(:spiraltorch_tensor_sub, lhs, rhs)
+end
+
+function matmul(lhs::Tensor, rhs::Tensor)
+    return _binary_tensor_op(:spiraltorch_tensor_matmul, lhs, rhs)
+end
+
+function scale(tensor::Tensor, value::Real)
+    lib = _lib()
+    handle = _require_handle(tensor, "tensor_scale")
+    result = ccall((:spiraltorch_tensor_scale, lib), Ptr{Cvoid}, (Ptr{Cvoid}, Cfloat), handle, Float32(value))
+    return _wrap_tensor(result, "tensor_scale")
+end
+
+Base.:+(lhs::Tensor, rhs::Tensor) = add(lhs, rhs)
+Base.:-(lhs::Tensor, rhs::Tensor) = sub(lhs, rhs)
+Base.:*(lhs::Tensor, rhs::Tensor) = matmul(lhs, rhs)
+Base.:*(tensor::Tensor, value::Real) = scale(tensor, value)
+Base.:*(value::Real, tensor::Tensor) = scale(tensor, value)
 
 end # module

@@ -22,6 +22,10 @@ void spiraltorch_tensor_free(void *tensor);
 bool spiraltorch_tensor_shape(const void *tensor, size_t *rows, size_t *cols);
 size_t spiraltorch_tensor_elements(const void *tensor);
 bool spiraltorch_tensor_copy_data(const void *tensor, float *out, size_t len);
+void *spiraltorch_tensor_add(const void *lhs, const void *rhs);
+void *spiraltorch_tensor_sub(const void *lhs, const void *rhs);
+void *spiraltorch_tensor_scale(const void *tensor, float value);
+void *spiraltorch_tensor_matmul(const void *lhs, const void *rhs);
 */
 import "C"
 
@@ -62,21 +66,26 @@ type Tensor struct {
 	handle unsafe.Pointer
 }
 
-// NewZerosTensor constructs a tensor of the requested shape initialised with zeros.
-func NewZerosTensor(rows, cols int) (*Tensor, error) {
-	ptr := C.spiraltorch_tensor_zeros(C.size_t(rows), C.size_t(cols))
+func wrapTensor(ptr unsafe.Pointer, context string) (*Tensor, error) {
 	if ptr == nil {
 		err := lastError()
 		if err == "" {
 			err = "unknown error"
 		}
-		return nil, fmt.Errorf("spiraltorch: %s", err)
+		return nil, fmt.Errorf("spiraltorch: %s failed: %s", context, err)
 	}
 	tensor := &Tensor{handle: ptr}
 	runtime.SetFinalizer(tensor, func(t *Tensor) {
 		t.Close()
 	})
+	clearError()
 	return tensor, nil
+}
+
+// NewZerosTensor constructs a tensor of the requested shape initialised with zeros.
+func NewZerosTensor(rows, cols int) (*Tensor, error) {
+	ptr := C.spiraltorch_tensor_zeros(C.size_t(rows), C.size_t(cols))
+	return wrapTensor(ptr, "tensor_zeros")
 }
 
 // NewTensorFromDense constructs a tensor from the provided row-major data slice.
@@ -93,18 +102,7 @@ func NewTensorFromDense(rows, cols int, data []float32) (*Tensor, error) {
 		(*C.float)(unsafe.Pointer(&data[0])),
 		C.size_t(len(data)),
 	)
-	if ptr == nil {
-		err := lastError()
-		if err == "" {
-			err = "unknown error"
-		}
-		return nil, fmt.Errorf("spiraltorch: %s", err)
-	}
-	tensor := &Tensor{handle: ptr}
-	runtime.SetFinalizer(tensor, func(t *Tensor) {
-		t.Close()
-	})
-	return tensor, nil
+	return wrapTensor(ptr, "tensor_from_dense")
 }
 
 // Close releases the underlying tensor handle. Subsequent calls are safe.
@@ -167,4 +165,45 @@ func (t *Tensor) Data() ([]float32, error) {
 	}
 	clearError()
 	return buffer, nil
+}
+
+func (t *Tensor) binaryOp(other *Tensor, op func(unsafe.Pointer, unsafe.Pointer) unsafe.Pointer, label string) (*Tensor, error) {
+	if t == nil || t.handle == nil {
+		return nil, fmt.Errorf("spiraltorch: tensor handle is nil")
+	}
+	if other == nil || other.handle == nil {
+		return nil, fmt.Errorf("spiraltorch: other tensor handle is nil")
+	}
+	ptr := op(t.handle, other.handle)
+	return wrapTensor(ptr, label)
+}
+
+// Add performs element-wise addition and returns a new tensor.
+func (t *Tensor) Add(other *Tensor) (*Tensor, error) {
+	return t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
+		return C.spiraltorch_tensor_add(lhs, rhs)
+	}, "tensor_add")
+}
+
+// Sub performs element-wise subtraction and returns a new tensor.
+func (t *Tensor) Sub(other *Tensor) (*Tensor, error) {
+	return t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
+		return C.spiraltorch_tensor_sub(lhs, rhs)
+	}, "tensor_sub")
+}
+
+// Matmul performs matrix multiplication (`t @ other`).
+func (t *Tensor) Matmul(other *Tensor) (*Tensor, error) {
+	return t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
+		return C.spiraltorch_tensor_matmul(lhs, rhs)
+	}, "tensor_matmul")
+}
+
+// Scale multiplies every element by the provided value.
+func (t *Tensor) Scale(value float32) (*Tensor, error) {
+	if t == nil || t.handle == nil {
+		return nil, fmt.Errorf("spiraltorch: tensor handle is nil")
+	}
+	ptr := C.spiraltorch_tensor_scale(t.handle, C.float(value))
+	return wrapTensor(ptr, "tensor_scale")
 }

@@ -21,6 +21,9 @@ programs that import `github.com/spiraltorch/spiraltorch-go`:
 go run ./examples/tensor_dump
 ```
 
+The sample demonstrates element-wise addition, scalar scaling, and matrix
+multiplication using the high-level helpers exposed by the `Tensor` type.
+
 ### Custom linker flags
 
 If the library lives in a non-standard location you can set `CGO_LDFLAGS`:
@@ -34,3 +37,10 @@ CGO_LDFLAGS="-L/path/to/target/release" go test ./...
 Every FFI call updates a thread-local error slot in `spiraltorch-sys`. The Go
 wrapper surfaces this as `error` values so callers can rely on idiomatic Go
 control flow instead of manual error string inspection.
+
+## Available operations
+
+- `Add`, `Sub`, and `Scale` allocate new tensors while preserving the originals.
+- `Matmul` executes matrix multiplication (`lhs @ rhs`) using the same backend
+  selection heuristics as the Rust runtime.
+- `Data` copies tensor contents into Go slices for inspection or interop.
