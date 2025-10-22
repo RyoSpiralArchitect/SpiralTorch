@@ -586,7 +586,7 @@ mod tests {
                 .metadata
                 .annotations
                 .iter()
-                .filter(|value| value == "planner_initialized")
+                .filter(|value| value.as_str() == "planner_initialized")
                 .count(),
             1
         );
