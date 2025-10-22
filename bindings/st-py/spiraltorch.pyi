@@ -435,6 +435,67 @@ class ModuleTrainer:
 
     def output_dim(self) -> int: ...
 
+class LinearModel:
+    def __init__(self, input_dim: int, output_dim: int) -> None: ...
+
+    def forward(
+        self,
+        inputs: Tensor | Sequence[Sequence[float]],
+    ) -> Tensor: ...
+
+    def train_batch(
+        self,
+        inputs: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+        learning_rate: float = ...,
+    ) -> float: ...
+
+    def train_batch_tensor(
+        self,
+        inputs: Tensor,
+        targets: Tensor,
+        learning_rate: float = ...,
+    ) -> float: ...
+
+    def weights(self) -> Tensor: ...
+
+    def bias(self) -> List[float]: ...
+
+    def input_dim(self) -> int: ...
+
+    def output_dim(self) -> int: ...
+
+    def state_dict(self) -> Dict[str, object]: ...
+
+class ModuleTrainer:
+    def __init__(self, input_dim: int, output_dim: int) -> None: ...
+
+    def train_epoch(
+        self,
+        inputs: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+        learning_rate: float = ...,
+        batch_size: int = ...,
+    ) -> float: ...
+
+    def evaluate(
+        self,
+        inputs: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+    ) -> float: ...
+
+    def predict(self, inputs: Sequence[Sequence[float]]) -> Tensor: ...
+
+    def predict_tensor(self, inputs: Tensor) -> Tensor: ...
+
+    def weights(self) -> Tensor: ...
+
+    def bias(self) -> List[float]: ...
+
+    def input_dim(self) -> int: ...
+
+    def output_dim(self) -> int: ...
+
 class TensorBiome:
     def __init__(self, topos: OpenCartesianTopos) -> None: ...
     def topos(self) -> OpenCartesianTopos: ...
@@ -892,6 +953,10 @@ class _NnModule(ModuleType):
 nn: _NnModule
 
 
+class ZSpaceCoherenceSequencer(_ZSpaceCoherenceSequencer):
+    ...
+
+
 class _FracModule(ModuleType):
     def gl_coeffs_adaptive(alpha: float, tol: float = ..., max_len: int = ...) -> List[float]: ...
 
@@ -1109,6 +1174,7 @@ __all__ = [
     "z_space_barycenter",
     "ZMetrics",
     "ZSpaceTrainer",
+    "ZSpaceCoherenceSequencer",
     "step_many",
     "stream_zspace_training",
     "compat",

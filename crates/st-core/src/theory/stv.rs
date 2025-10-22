@@ -1109,6 +1109,98 @@ mod tests {
     }
 
     #[test]
+    fn reconstruct_spinor_from_bloch_vector() {
+        let theta = FRAC_PI_3;
+        let phi = FRAC_PI_4;
+        let spinor = PauliSpinor::from_bloch_angles(theta, phi).unwrap();
+        let direction = spinor.bloch_direction();
+        let reconstructed = PauliSpinor::from_bloch_vector(direction).unwrap();
+
+        let (theta_rec, phi_rec) = reconstructed.bloch_angles();
+        assert_abs_diff_eq!(theta_rec, theta, epsilon = 1e-9);
+        let mut delta_phi = phi_rec - phi;
+        while delta_phi > std::f64::consts::PI {
+            delta_phi -= TAU;
+        }
+        while delta_phi < -std::f64::consts::PI {
+            delta_phi += TAU;
+        }
+        assert_abs_diff_eq!(delta_phi, 0.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(
+            reconstructed.relative_phase(),
+            spinor.relative_phase(),
+            epsilon = 1e-9
+        );
+
+        let bloch = reconstructed.bloch_current();
+        for i in 0..3 {
+            assert_abs_diff_eq!(bloch[i + 1], direction[i], epsilon = 1e-9);
+        }
+    }
+
+    #[test]
+    fn invalid_bloch_vector_rejected() {
+        let err = PauliSpinor::from_bloch_vector([0.0, 0.0, 0.0]).unwrap_err();
+        assert!(matches!(err, StvError::InvalidBlochVector { .. }));
+    }
+
+    #[test]
+    fn zspace_projection_emits_pulse() {
+        let spinor = PauliSpinor::from_bloch_angles(FRAC_PI_3, FRAC_PI_4).unwrap();
+        let kernel =
+            SpinoTensorKernel::new(1.0, diag([1.0, 1.0, 1.0]), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
+                .unwrap();
+        let stv = SpinoTensorVector::new(spinor.clone(), kernel);
+        let projection = stv.zspace_projection();
+
+        let direction = spinor.bloch_direction();
+        for i in 0..3 {
+            assert_abs_diff_eq!(projection.direction[i], direction[i], epsilon = 1e-9);
+        }
+
+        let radial = (direction[0] * direction[0] + direction[1] * direction[1]).sqrt();
+        assert_abs_diff_eq!(projection.coherence as f64, radial, epsilon = 1e-6);
+        assert_abs_diff_eq!(projection.z_bias as f64, direction[2], epsilon = 1e-6);
+        assert_abs_diff_eq!(
+            projection.phase as f64,
+            spinor.relative_phase(),
+            epsilon = 1e-6
+        );
+
+        let pulse = projection.into_pulse(ZSource::Graph, 42, None);
+        assert_eq!(pulse.source, ZSource::Graph);
+        assert_eq!(pulse.ts, 42);
+        assert!(pulse.scale.is_none());
+        assert_eq!(pulse.support, projection.support);
+        assert_abs_diff_eq!(pulse.tempo as f64, 1.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.quality as f64, radial, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.z_bias as f64, direction[2], epsilon = 1e-6);
+        assert_abs_diff_eq!(
+            pulse.drift as f64,
+            projection.band_energy.0 as f64 - projection.band_energy.2 as f64,
+            epsilon = 1e-6
+        );
+        assert_abs_diff_eq!(
+            pulse.band_energy.0 as f64,
+            projection.band_energy.0 as f64,
+            epsilon = 1e-6
+        );
+        assert_abs_diff_eq!(
+            pulse.band_energy.1 as f64,
+            projection.band_energy.1 as f64,
+            epsilon = 1e-6
+        );
+        assert_abs_diff_eq!(
+            pulse.band_energy.2 as f64,
+            projection.band_energy.2 as f64,
+            epsilon = 1e-6
+        );
+
+        let via_helper = stv.into_zpulse(ZSource::Graph, 42, None);
+        assert_eq!(pulse, via_helper);
+    }
+
+    #[test]
     fn determinant_matches_block_formula() {
         let kernel =
             SpinoTensorKernel::new(1.5, diag([2.0, 1.0, 3.0]), [0.0, 1.5, 0.0], [0.0, 0.0, 1.0])
