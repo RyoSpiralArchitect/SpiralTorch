@@ -27,6 +27,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
+use st_tensor::{Tensor, TensorError};
+use thiserror::Error;
+
 /// Shared ownership wrapper that mirrors `Arc` while leaving room for future
 /// instrumentation.
 #[derive(Debug, Clone)]
@@ -162,6 +165,45 @@ impl GoldenRuntime {
         self.workers
     }
 
+    pub fn execute<F, R>(&self, func: F) -> Result<R, GoldenRuntimeError>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let handle = self.spawn_blocking(func)?;
+        handle
+            .join()
+            .map_err(|_| GoldenRuntimeError("golden runtime task panicked".into()))
+    }
+
+    pub fn tensor_random_uniform(
+        &self,
+        rows: usize,
+        cols: usize,
+        min: f32,
+        max: f32,
+        seed: Option<u64>,
+    ) -> Result<Tensor, GoldenTensorError> {
+        let result = self
+            .execute(move || Tensor::random_uniform(rows, cols, min, max, seed))
+            .map_err(GoldenTensorError::from)?;
+        result.map_err(GoldenTensorError::from)
+    }
+
+    pub fn tensor_random_normal(
+        &self,
+        rows: usize,
+        cols: usize,
+        mean: f32,
+        std: f32,
+        seed: Option<u64>,
+    ) -> Result<Tensor, GoldenTensorError> {
+        let result = self
+            .execute(move || Tensor::random_normal(rows, cols, mean, std, seed))
+            .map_err(GoldenTensorError::from)?;
+        result.map_err(GoldenTensorError::from)
+    }
+
     pub fn spawn_blocking<F, R>(&self, func: F) -> Result<thread::JoinHandle<R>, GoldenRuntimeError>
     where
         F: FnOnce() -> R + Send + 'static,
@@ -210,6 +252,14 @@ impl GoldenRuntime {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum GoldenTensorError {
+    #[error("{0}")]
+    Runtime(#[from] GoldenRuntimeError),
+    #[error("{0}")]
+    Tensor(#[from] TensorError),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +283,52 @@ mod tests {
             reduced,
             numbers.iter().copied().map(|v| v as usize).sum::<usize>()
         );
+    }
+
+    #[test]
+    fn runtime_random_uniform_matches_tensor() {
+        let runtime = GoldenRuntime::new(GoldenRuntimeConfig::default()).expect("runtime");
+        let direct = Tensor::random_uniform(3, 4, -1.0, 1.0, Some(7)).expect("direct");
+        let generated = runtime
+            .tensor_random_uniform(3, 4, -1.0, 1.0, Some(7))
+            .expect("runtime tensor");
+        assert_eq!(direct, generated);
+    }
+
+    #[test]
+    fn runtime_random_normal_matches_tensor() {
+        let runtime = GoldenRuntime::new(GoldenRuntimeConfig::default()).expect("runtime");
+        let direct = Tensor::random_normal(2, 5, 0.5, 1.25, Some(11)).expect("direct");
+        let generated = runtime
+            .tensor_random_normal(2, 5, 0.5, 1.25, Some(11))
+            .expect("runtime tensor");
+        assert_eq!(direct, generated);
+    }
+
+    #[test]
+    fn runtime_random_uniform_propagates_tensor_errors() {
+        let runtime = GoldenRuntime::new(GoldenRuntimeConfig::default()).expect("runtime");
+        let err = runtime
+            .tensor_random_uniform(0, 4, 0.0, 1.0, None)
+            .expect_err("invalid dimensions should fail");
+        if let GoldenTensorError::Tensor(inner) = err {
+            let message = inner.to_string();
+            assert!(
+                message.contains("invalid tensor dimensions"),
+                "unexpected error message: {message}"
+            );
+        } else {
+            panic!("expected tensor error variant");
+        }
+    }
+
+    #[test]
+    fn runtime_random_normal_propagates_tensor_errors() {
+        let runtime = GoldenRuntime::new(GoldenRuntimeConfig::default()).expect("runtime");
+        let err = runtime
+            .tensor_random_normal(3, 3, 0.0, 0.0, None)
+            .expect_err("invalid std should fail");
+        let message = err.to_string();
+        assert!(message.contains("random_normal_std"));
     }
 }

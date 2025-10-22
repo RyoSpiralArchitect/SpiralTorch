@@ -2873,6 +2873,7 @@ dependencies = [
  "st-kdsl",
  "st-kv",
  "st-softlogic",
+ "st-tensor",
  "statrs",
  "thiserror 1.0.69",
  "toml",

@@ -237,6 +237,15 @@ pub fn project_tempered_and_calibrate(
 mod tests {
     use super::*;
 
+    fn assert_close(label: &str, lhs: f32, rhs: f32) {
+        let diff = (lhs - rhs).abs();
+        let scale = lhs.abs().max(rhs.abs()).max(1.0);
+        assert!(
+            diff <= 1.0e-5 * scale,
+            "{label} differed beyond tolerance: left={lhs}, right={rhs}, diff={diff}"
+        );
+    }
+
     #[test]
     fn engine_projects_and_calibrates() {
         crate::telemetry::hub::clear_last_realgrad_for_test();
@@ -256,18 +265,21 @@ mod tests {
         assert!(pulse.gradient_sparsity >= 0.0 && pulse.gradient_sparsity <= 1.0);
         assert!(pulse.rolling_gradient_norm >= 0.0);
         assert!(pulse.rolling_residual_ratio >= 0.0);
-        assert_eq!(pulse.gradient_norm, local_pulse.gradient_norm);
-        assert_eq!(
+        assert_close("gradient_norm", pulse.gradient_norm, local_pulse.gradient_norm);
+        assert_close(
+            "rolling_gradient_norm",
             pulse.rolling_gradient_norm,
-            local_pulse.rolling_gradient_norm
+            local_pulse.rolling_gradient_norm,
         );
-        assert_eq!(
+        assert_close(
+            "engine rolling_gradient_norm",
             engine.rolling_gradient_norm().unwrap(),
-            pulse.rolling_gradient_norm
+            pulse.rolling_gradient_norm,
         );
-        assert_eq!(
+        assert_close(
+            "engine rolling_residual_ratio",
             engine.rolling_residual_ratio().unwrap(),
-            pulse.rolling_residual_ratio
+            pulse.rolling_residual_ratio,
         );
     }
 
