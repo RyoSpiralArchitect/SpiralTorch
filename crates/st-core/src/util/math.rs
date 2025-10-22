@@ -40,6 +40,31 @@ pub fn ramanujan_pi(iterations: usize) -> f64 {
     value
 }
 
+/// Computes the Ramanujan π approximation while adaptively increasing the
+/// iteration count until two successive approximations differ by at most the
+/// provided tolerance. The iteration count is capped by `max_iterations` to
+/// avoid unbounded work in pathological cases. When the tolerance is satisfied
+/// the resulting approximation and the iteration count that produced it are
+/// returned. If the tolerance cannot be met within the iteration budget the
+/// function returns `None` so callers can decide how to proceed.
+pub fn ramanujan_pi_with_tolerance(tolerance: f64, max_iterations: usize) -> Option<(f64, usize)> {
+    let tolerance = tolerance.max(f64::EPSILON);
+    let max_iterations = max_iterations.max(1);
+    let mut previous = ramanujan_pi(1);
+    if max_iterations == 1 {
+        return Some((previous, 1));
+    }
+
+    for iterations in 2..=max_iterations {
+        let current = ramanujan_pi(iterations);
+        if (current - previous).abs() <= tolerance {
+            return Some((current, iterations));
+        }
+        previous = current;
+    }
+    None
+}
+
 /// Lightweight projector that turns geodesic magnitudes into Leech lattice
 /// density corrections. The expensive square root of the target rank is cached
 /// within the struct so scaling becomes a single fused multiply operation.
@@ -80,6 +105,19 @@ mod tests {
         let first = ramanujan_pi(3);
         let second = ramanujan_pi(3);
         assert_abs_diff_eq!(first, second);
+    }
+
+    #[test]
+    fn ramanujan_pi_with_tolerance_converges() {
+        let (value, iterations) = ramanujan_pi_with_tolerance(1e-12, 8)
+            .expect("tolerance should be met within iteration budget");
+        assert!(iterations >= 1 && iterations <= 8);
+        assert_abs_diff_eq!(value, std::f64::consts::PI, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn ramanujan_pi_with_tolerance_reports_failure() {
+        assert!(ramanujan_pi_with_tolerance(1e-20, 2).is_none());
     }
 
     #[test]
