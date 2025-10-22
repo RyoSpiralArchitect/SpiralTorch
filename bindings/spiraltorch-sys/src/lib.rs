@@ -394,6 +394,46 @@ pub extern "C" fn spiraltorch_tensor_scale(handle: *const Tensor, value: f32) ->
     tensor_unary_op(handle, "tensor_scale", |tensor| tensor.scale(value))
 }
 
+fn optional_seed(seed: u64, has_seed: bool) -> Option<u64> {
+    if has_seed {
+        Some(seed)
+    } else {
+        None
+    }
+}
+
+/// Samples tensor elements from a uniform distribution in `[min, max)`.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_random_uniform(
+    rows: usize,
+    cols: usize,
+    min: f32,
+    max: f32,
+    seed: u64,
+    has_seed: bool,
+) -> *mut Tensor {
+    tensor_from_result_with_message(
+        Tensor::random_uniform(rows, cols, min, max, optional_seed(seed, has_seed)),
+        "tensor_random_uniform",
+    )
+}
+
+/// Samples tensor elements from a normal distribution with the provided mean and standard deviation.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_random_normal(
+    rows: usize,
+    cols: usize,
+    mean: f32,
+    std: f32,
+    seed: u64,
+    has_seed: bool,
+) -> *mut Tensor {
+    tensor_from_result_with_message(
+        Tensor::random_normal(rows, cols, mean, std, optional_seed(seed, has_seed)),
+        "tensor_random_normal",
+    )
+}
+
 /// Returns a new tensor that is the transpose of the provided tensor.
 #[no_mangle]
 pub extern "C" fn spiraltorch_tensor_transpose(handle: *const Tensor) -> *mut Tensor {
@@ -683,6 +723,55 @@ mod tests {
         spiraltorch_tensor_free(scaled);
         spiraltorch_tensor_free(right);
         spiraltorch_tensor_free(left);
+    }
+
+    #[test]
+    fn tensor_random_uniform_respects_bounds_and_seed() {
+        let first = spiraltorch_tensor_random_uniform(4, 3, -0.5, 0.75, 7, true);
+        let second = spiraltorch_tensor_random_uniform(4, 3, -0.5, 0.75, 7, true);
+        assert!(!first.is_null());
+        assert!(!second.is_null());
+
+        let mut first_buffer = vec![0.0_f32; 12];
+        let mut second_buffer = vec![0.0_f32; 12];
+        let first_ok = unsafe {
+            spiraltorch_tensor_copy_data(first, first_buffer.as_mut_ptr(), first_buffer.len())
+        };
+        let second_ok = unsafe {
+            spiraltorch_tensor_copy_data(second, second_buffer.as_mut_ptr(), second_buffer.len())
+        };
+        assert!(first_ok);
+        assert!(second_ok);
+        assert_eq!(first_buffer, second_buffer);
+        assert!(first_buffer
+            .iter()
+            .all(|value| (-0.5..0.75).contains(value)));
+
+        spiraltorch_tensor_free(second);
+        spiraltorch_tensor_free(first);
+    }
+
+    #[test]
+    fn tensor_random_normal_respects_seed() {
+        let first = spiraltorch_tensor_random_normal(2, 5, 0.0, 1.5, 99, true);
+        let second = spiraltorch_tensor_random_normal(2, 5, 0.0, 1.5, 99, true);
+        assert!(!first.is_null());
+        assert!(!second.is_null());
+
+        let mut first_buffer = vec![0.0_f32; 10];
+        let mut second_buffer = vec![0.0_f32; 10];
+        let first_ok = unsafe {
+            spiraltorch_tensor_copy_data(first, first_buffer.as_mut_ptr(), first_buffer.len())
+        };
+        let second_ok = unsafe {
+            spiraltorch_tensor_copy_data(second, second_buffer.as_mut_ptr(), second_buffer.len())
+        };
+        assert!(first_ok);
+        assert!(second_ok);
+        assert_eq!(first_buffer, second_buffer);
+
+        spiraltorch_tensor_free(second);
+        spiraltorch_tensor_free(first);
     }
 
     #[test]
