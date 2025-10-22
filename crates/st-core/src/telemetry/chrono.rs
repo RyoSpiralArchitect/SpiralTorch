@@ -646,15 +646,9 @@ impl ChronoTimeline {
             .back()
             .map(|frame| frame.timestamp)
             .unwrap_or(start);
-        let span = (last - start).max(f32::EPSILON);
         let target = (window * progress).max(f32::EPSILON);
-        let factor = target / span;
-        self.dilate(factor)?;
-        let new_start = self.axis_origin().unwrap_or(0.0);
-        if new_start.abs() > f32::EPSILON {
-            self.shift(-new_start)?;
-        }
-        Ok(())
+        let warp = TemporalWarp::fit_span(start, last, 0.0, target)?;
+        self.warp_time_axis(warp)
     }
 
     /// Removes the most recent `steps` frames from the timeline.

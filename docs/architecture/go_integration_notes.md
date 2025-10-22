@@ -79,7 +79,7 @@ These commands are safe to run independently of the main workspace because the c
 - Whether Go code should live in the main workspace or in a dedicated submodule to isolate dependencies.
 
 ### Roadmap
-1. **Schema governance** – introduce a shared OpenAPI/protobuf definition and code generation for both languages.
+1. **Schema governance** – ✅ initial OpenAPI document lives in `examples/go_bridge_poc/api/openapi.json` and is served from `/openapi.json`.
 2. **Observability parity** – add OpenTelemetry exporters to the Go service and integrate with existing Rust tracing.
 3. **CI integration** – update GitHub Actions to execute the commands listed above, including caching for Go modules.
 4. **Performance evaluation** – benchmark the Go service vs. direct Rust implementations to measure overhead.

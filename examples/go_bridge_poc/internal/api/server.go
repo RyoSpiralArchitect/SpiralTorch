@@ -3,9 +3,12 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+
+	bridgespec "go_bridge_poc/api"
 )
 
 type PredictionRequest struct {
@@ -37,6 +40,7 @@ func NewServer(logger *log.Logger) *Server {
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/predict", s.handlePredict)
+	mux.HandleFunc("/openapi.json", s.handleOpenAPI)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +100,38 @@ func (s *Server) handlePredict(w http.ResponseWriter, r *http.Request) {
 
 	if err := respondJSON(w, http.StatusOK, &resp); err != nil {
 		s.logger.Printf("failed to encode response: %v", err)
+	}
+}
+
+func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", fmt.Sprintf("%s, %s", http.MethodGet, http.MethodHead))
+		if err := respondJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "only GET is supported"}); err != nil {
+			s.logger.Printf("failed to encode method not allowed response: %v", err)
+		}
+		return
+	}
+
+	if len(bridgespec.OpenAPISpec) == 0 {
+		s.logger.Println("openapi spec is empty")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodHead {
+		return
+	}
+
+	if _, err := w.Write(bridgespec.OpenAPISpec); err != nil {
+		s.logger.Printf("failed to write openapi spec: %v", err)
+	}
+	if bridgespec.OpenAPISpec[len(bridgespec.OpenAPISpec)-1] != '\n' {
+		if _, err := w.Write([]byte{'\n'}); err != nil {
+			s.logger.Printf("failed to write trailing newline: %v", err)
+		}
 	}
 }
 
