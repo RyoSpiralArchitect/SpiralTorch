@@ -9,11 +9,13 @@
 //! binary interface.
 
 use once_cell::sync::Lazy;
+use st_core::ecosystem::foreign::{ForeignLanguage, ForeignRegistry, ForeignRuntimeDescriptor};
 use st_tensor::{PureResult, Tensor};
-use std::ffi::{c_char, CString};
+use std::ffi::{c_char, CStr, CString};
 use std::ptr;
 use std::slice;
 use std::sync::Mutex;
+use std::time::Duration;
 
 type FfiResult<T> = Result<T, ()>;
 
@@ -86,6 +88,32 @@ fn require_non_null_mut<T>(ptr: *mut T, label: &str) -> FfiResult<*mut T> {
     }
     clear_last_error();
     Ok(ptr)
+}
+
+fn parse_c_string(ptr: *const c_char, label: &str) -> FfiResult<String> {
+    if ptr.is_null() {
+        return err(format!("{label} pointer was null"));
+    }
+    // SAFETY: pointer checked for null above.
+    let raw = unsafe { CStr::from_ptr(ptr) };
+    raw.to_str().map(|s| s.to_string()).map_err(|_| {
+        set_last_error(format!("{label} contained invalid UTF-8"));
+        ()
+    })
+}
+
+fn parse_capabilities(ptr: *const c_char) -> FfiResult<Vec<String>> {
+    if ptr.is_null() {
+        return ok(Vec::new());
+    }
+    let raw = parse_c_string(ptr, "capabilities")?;
+    let caps = raw
+        .split(',')
+        .map(|cap| cap.trim())
+        .filter(|cap| !cap.is_empty())
+        .map(|cap| cap.to_string())
+        .collect();
+    ok(caps)
 }
 
 /// Write the SpiralTorch semantic version into the provided buffer.
@@ -343,11 +371,85 @@ pub extern "C" fn spiraltorch_tensor_hadamard(
     tensor_binary_op(lhs, rhs, "tensor_hadamard", Tensor::hadamard)
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_foreign_register(
+    language: *const c_char,
+    runtime_id: *const c_char,
+    version: *const c_char,
+    capabilities: *const c_char,
+) -> bool {
+    let language_str = match parse_c_string(language, "language") {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let runtime = match parse_c_string(runtime_id, "runtime_id") {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let version = match parse_c_string(version, "version") {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let capabilities = match parse_capabilities(capabilities) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+
+    let language = ForeignLanguage::parse(&language_str);
+    let descriptor =
+        ForeignRuntimeDescriptor::new(runtime.clone(), language, version, capabilities);
+    ForeignRegistry::global().register_runtime(descriptor);
+    clear_last_error();
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_foreign_heartbeat(runtime_id: *const c_char) -> bool {
+    let runtime = match parse_c_string(runtime_id, "runtime_id") {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    if ForeignRegistry::global().record_heartbeat(&runtime) {
+        clear_last_error();
+        true
+    } else {
+        set_last_error(format!("runtime '{runtime}' is not registered"));
+        false
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_foreign_record_latency(
+    runtime_id: *const c_char,
+    operation: *const c_char,
+    latency_ns: u64,
+    ok_flag: u8,
+) -> bool {
+    let runtime = match parse_c_string(runtime_id, "runtime_id") {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let operation = match parse_c_string(operation, "operation") {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let ok = ok_flag != 0;
+    let duration = Duration::from_nanos(latency_ns);
+    if ForeignRegistry::global().record_latency(&runtime, &operation, duration, ok) {
+        clear_last_error();
+        true
+    } else {
+        set_last_error(format!("runtime '{runtime}' is not registered"));
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use libc::c_char;
-    use std::ffi::CStr;
+    use std::ffi::{CStr, CString};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn version_roundtrip() {
@@ -520,5 +622,45 @@ mod tests {
         spiraltorch_tensor_free(reshaped);
         spiraltorch_tensor_free(transposed);
         spiraltorch_tensor_free(handle);
+    }
+
+    #[test]
+    fn foreign_registry_roundtrip() {
+        let language = CString::new("go").unwrap();
+        let runtime_id = format!(
+            "ffi-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let runtime = CString::new(runtime_id.clone()).unwrap();
+        let version = CString::new("1.0.0").unwrap();
+        let capabilities = CString::new("tensor.add").unwrap();
+        let operation = CString::new("tensor.add").unwrap();
+        unsafe {
+            assert!(spiraltorch_foreign_register(
+                language.as_ptr(),
+                runtime.as_ptr(),
+                version.as_ptr(),
+                capabilities.as_ptr()
+            ));
+            assert!(spiraltorch_foreign_record_latency(
+                runtime.as_ptr(),
+                operation.as_ptr(),
+                1_000_000,
+                1
+            ));
+        }
+        let snapshot = ForeignRegistry::global().snapshot();
+        let status = snapshot
+            .iter()
+            .find(|entry| entry.descriptor.id == runtime_id)
+            .expect("runtime should be registered");
+        assert_eq!(status.descriptor.language, ForeignLanguage::Go);
+        assert!(status
+            .kernels
+            .iter()
+            .any(|kernel| kernel.operation == "tensor.add"));
     }
 }

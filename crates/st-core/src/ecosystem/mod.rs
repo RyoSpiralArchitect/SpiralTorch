@@ -1,3 +1,5 @@
+pub mod foreign;
+
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};

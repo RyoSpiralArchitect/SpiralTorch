@@ -9,6 +9,7 @@ package spiraltorch
 #cgo LDFLAGS: -lspiraltorch_sys
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 size_t spiraltorch_version(char *buffer, size_t capacity);
@@ -29,12 +30,19 @@ void *spiraltorch_tensor_matmul(const void *lhs, const void *rhs);
 void *spiraltorch_tensor_transpose(const void *tensor);
 void *spiraltorch_tensor_reshape(const void *tensor, size_t rows, size_t cols);
 void *spiraltorch_tensor_hadamard(const void *lhs, const void *rhs);
+
+bool spiraltorch_foreign_register(const char *language, const char *runtime_id, const char *version, const char *capabilities);
+bool spiraltorch_foreign_heartbeat(const char *runtime_id);
+bool spiraltorch_foreign_record_latency(const char *runtime_id, const char *operation, uint64_t latency_ns, uint8_t ok_flag);
 */
 import "C"
 
 import (
 	"fmt"
+	"os"
 	"runtime"
+	"strings"
+	"time"
 	"unsafe"
 )
 
@@ -64,6 +72,77 @@ func clearError() {
 	C.spiraltorch_clear_last_error()
 }
 
+type foreignRuntimeClient struct {
+	id string
+}
+
+var foreignClient *foreignRuntimeClient
+
+func init() {
+	foreignClient = registerForeignRuntime()
+}
+
+func registerForeignRuntime() *foreignRuntimeClient {
+	id := fmt.Sprintf("go-%d-%d", time.Now().UnixNano(), os.Getpid())
+	caps := []string{
+		"tensor.zeros",
+		"tensor.from_dense",
+		"tensor.add",
+		"tensor.sub",
+		"tensor.matmul",
+		"tensor.hadamard",
+		"tensor.scale",
+		"tensor.transpose",
+		"tensor.reshape",
+	}
+	language := C.CString("go")
+	runtimeID := C.CString(id)
+	version := C.CString(runtime.Version())
+	capabilities := C.CString(strings.Join(caps, ","))
+	defer C.free(unsafe.Pointer(language))
+	defer C.free(unsafe.Pointer(runtimeID))
+	defer C.free(unsafe.Pointer(version))
+	defer C.free(unsafe.Pointer(capabilities))
+	registered := C.spiraltorch_foreign_register(language, runtimeID, version, capabilities)
+	if !bool(registered) {
+		if err := lastError(); err != "" {
+			fmt.Fprintf(os.Stderr, "spiraltorch: failed to register Go runtime: %s\n", err)
+			clearError()
+		}
+		return nil
+	}
+	return &foreignRuntimeClient{id: id}
+}
+
+func startForeignCall(operation string) func(success bool) {
+	client := foreignClient
+	if client == nil {
+		return func(bool) {}
+	}
+	started := time.Now()
+	return func(success bool) {
+		client.record(operation, time.Since(started), success)
+	}
+}
+
+func (c *foreignRuntimeClient) record(operation string, elapsed time.Duration, ok bool) {
+	if c == nil {
+		return
+	}
+	runtimeID := C.CString(c.id)
+	op := C.CString(operation)
+	defer C.free(unsafe.Pointer(runtimeID))
+	defer C.free(unsafe.Pointer(op))
+	var success C.uint8_t
+	if ok {
+		success = 1
+	} else {
+		success = 0
+	}
+	C.spiraltorch_foreign_record_latency(runtimeID, op, C.uint64_t(elapsed.Nanoseconds()), success)
+	clearError()
+}
+
 // Tensor owns a pointer to a tensor allocated by the SpiralTorch runtime.
 type Tensor struct {
 	handle unsafe.Pointer
@@ -87,7 +166,9 @@ func wrapTensor(ptr unsafe.Pointer, context string) (*Tensor, error) {
 
 // NewZerosTensor constructs a tensor of the requested shape initialised with zeros.
 func NewZerosTensor(rows, cols int) (*Tensor, error) {
+	finish := startForeignCall("tensor.zeros")
 	ptr := C.spiraltorch_tensor_zeros(C.size_t(rows), C.size_t(cols))
+	finish(ptr != nil)
 	return wrapTensor(ptr, "tensor_zeros")
 }
 
@@ -99,12 +180,14 @@ func NewTensorFromDense(rows, cols int, data []float32) (*Tensor, error) {
 	if rows*cols != len(data) {
 		return nil, fmt.Errorf("spiraltorch: data length %d does not match shape %dx%d", len(data), rows, cols)
 	}
+	finish := startForeignCall("tensor.from_dense")
 	ptr := C.spiraltorch_tensor_from_dense(
 		C.size_t(rows),
 		C.size_t(cols),
 		(*C.float)(unsafe.Pointer(&data[0])),
 		C.size_t(len(data)),
 	)
+	finish(ptr != nil)
 	return wrapTensor(ptr, "tensor_from_dense")
 }
 
@@ -177,7 +260,10 @@ func (t *Tensor) binaryOp(other *Tensor, op func(unsafe.Pointer, unsafe.Pointer)
 	if other == nil || other.handle == nil {
 		return nil, fmt.Errorf("spiraltorch: other tensor handle is nil")
 	}
+	metric := strings.Replace(label, "_", ".", 1)
+	finish := startForeignCall(metric)
 	ptr := op(t.handle, other.handle)
+	finish(ptr != nil)
 	return wrapTensor(ptr, label)
 }
 
@@ -214,7 +300,9 @@ func (t *Tensor) Scale(value float32) (*Tensor, error) {
 	if t == nil || t.handle == nil {
 		return nil, fmt.Errorf("spiraltorch: tensor handle is nil")
 	}
+	finish := startForeignCall("tensor.scale")
 	ptr := C.spiraltorch_tensor_scale(t.handle, C.float(value))
+	finish(ptr != nil)
 	return wrapTensor(ptr, "tensor_scale")
 }
 
@@ -223,7 +311,9 @@ func (t *Tensor) Transpose() (*Tensor, error) {
 	if t == nil || t.handle == nil {
 		return nil, fmt.Errorf("spiraltorch: tensor handle is nil")
 	}
+	finish := startForeignCall("tensor.transpose")
 	ptr := C.spiraltorch_tensor_transpose(t.handle)
+	finish(ptr != nil)
 	return wrapTensor(ptr, "tensor_transpose")
 }
 
@@ -235,6 +325,8 @@ func (t *Tensor) Reshape(rows, cols int) (*Tensor, error) {
 	if rows < 0 || cols < 0 {
 		return nil, fmt.Errorf("spiraltorch: reshape dimensions must be non-negative")
 	}
+	finish := startForeignCall("tensor.reshape")
 	ptr := C.spiraltorch_tensor_reshape(t.handle, C.size_t(rows), C.size_t(cols))
+	finish(ptr != nil)
 	return wrapTensor(ptr, "tensor_reshape")
 }
