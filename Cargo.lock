@@ -2793,6 +2793,7 @@ dependencies = [
  "approx",
  "bitflags 2.9.4",
  "bytemuck",
+ "chrono",
  "cudarc",
  "dirs 5.0.1",
  "julia-ffi-poc",

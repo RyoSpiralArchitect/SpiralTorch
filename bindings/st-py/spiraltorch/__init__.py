@@ -21,6 +21,8 @@ from typing import (
 )
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
+from ._meta import BUILD_ID
+
 _rs: _types.ModuleType | None = None
 
 _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
@@ -121,6 +123,12 @@ try:
     __version__ = _pkg_version("spiraltorch")
 except PackageNotFoundError:
     __version__ = "0.0.0+local"
+
+
+def print_build_id() -> None:
+    """Display the build identifier embedded in the wheel."""
+
+    print(f"[SpiralTorch] Build ID: {BUILD_ID}")
 
 # 追加API（Rust側でエクスポート済みのやつだけ拾う）
 _EXTRAS = [
