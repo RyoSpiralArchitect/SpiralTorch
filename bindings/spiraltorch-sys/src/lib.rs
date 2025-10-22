@@ -8,7 +8,7 @@
 //! can be used by other foreign-language integrations that require a stable
 //! binary interface.
 
-use st_core::runtime::golden::{GoldenRuntime, GoldenRuntimeConfig};
+use st_core::runtime::golden::{GoldenRuntime, GoldenRuntimeConfig, GoldenTensorError};
 use st_tensor::{PureResult, Tensor};
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr, CString};
@@ -331,6 +331,32 @@ fn runtime_spawn(
     }
 }
 
+fn runtime_tensor_generate(
+    runtime: *const RuntimeHandle,
+    context: &str,
+    task: impl FnOnce(&GoldenRuntime) -> Result<Tensor, GoldenTensorError>,
+) -> *mut Tensor {
+    let runtime = match runtime_from_ptr(runtime, "runtime handle") {
+        Some(runtime) => runtime,
+        None => return ptr::null_mut(),
+    };
+
+    match task(runtime) {
+        Ok(tensor) => {
+            clear_last_error();
+            Box::into_raw(Box::new(tensor))
+        }
+        Err(GoldenTensorError::Runtime(err)) => {
+            set_last_error(format!("{context}: {err}"));
+            ptr::null_mut()
+        }
+        Err(GoldenTensorError::Tensor(err)) => {
+            set_last_error(format!("{context}: {err}"));
+            ptr::null_mut()
+        }
+    }
+}
+
 fn runtime_tensor_binary_op<F>(
     runtime: *const RuntimeHandle,
     lhs: *const Tensor,
@@ -392,6 +418,46 @@ pub extern "C" fn spiraltorch_tensor_sub(lhs: *const Tensor, rhs: *const Tensor)
 #[no_mangle]
 pub extern "C" fn spiraltorch_tensor_scale(handle: *const Tensor, value: f32) -> *mut Tensor {
     tensor_unary_op(handle, "tensor_scale", |tensor| tensor.scale(value))
+}
+
+fn optional_seed(seed: u64, has_seed: bool) -> Option<u64> {
+    if has_seed {
+        Some(seed)
+    } else {
+        None
+    }
+}
+
+/// Samples tensor elements from a uniform distribution in `[min, max)`.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_random_uniform(
+    rows: usize,
+    cols: usize,
+    min: f32,
+    max: f32,
+    seed: u64,
+    has_seed: bool,
+) -> *mut Tensor {
+    tensor_from_result_with_message(
+        Tensor::random_uniform(rows, cols, min, max, optional_seed(seed, has_seed)),
+        "tensor_random_uniform",
+    )
+}
+
+/// Samples tensor elements from a normal distribution with the provided mean and standard deviation.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_random_normal(
+    rows: usize,
+    cols: usize,
+    mean: f32,
+    std: f32,
+    seed: u64,
+    has_seed: bool,
+) -> *mut Tensor {
+    tensor_from_result_with_message(
+        Tensor::random_normal(rows, cols, mean, std, optional_seed(seed, has_seed)),
+        "tensor_random_normal",
+    )
 }
 
 /// Returns a new tensor that is the transpose of the provided tensor.
@@ -562,6 +628,36 @@ pub extern "C" fn spiraltorch_runtime_tensor_hadamard(
     )
 }
 
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_random_uniform(
+    runtime: *const RuntimeHandle,
+    rows: usize,
+    cols: usize,
+    min: f32,
+    max: f32,
+    seed: u64,
+    has_seed: bool,
+) -> *mut Tensor {
+    runtime_tensor_generate(runtime, "runtime_tensor_random_uniform", move |runtime| {
+        runtime.tensor_random_uniform(rows, cols, min, max, optional_seed(seed, has_seed))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_random_normal(
+    runtime: *const RuntimeHandle,
+    rows: usize,
+    cols: usize,
+    mean: f32,
+    std: f32,
+    seed: u64,
+    has_seed: bool,
+) -> *mut Tensor {
+    runtime_tensor_generate(runtime, "runtime_tensor_random_normal", move |runtime| {
+        runtime.tensor_random_normal(rows, cols, mean, std, optional_seed(seed, has_seed))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -686,6 +782,55 @@ mod tests {
     }
 
     #[test]
+    fn tensor_random_uniform_respects_bounds_and_seed() {
+        let first = spiraltorch_tensor_random_uniform(4, 3, -0.5, 0.75, 7, true);
+        let second = spiraltorch_tensor_random_uniform(4, 3, -0.5, 0.75, 7, true);
+        assert!(!first.is_null());
+        assert!(!second.is_null());
+
+        let mut first_buffer = vec![0.0_f32; 12];
+        let mut second_buffer = vec![0.0_f32; 12];
+        let first_ok = unsafe {
+            spiraltorch_tensor_copy_data(first, first_buffer.as_mut_ptr(), first_buffer.len())
+        };
+        let second_ok = unsafe {
+            spiraltorch_tensor_copy_data(second, second_buffer.as_mut_ptr(), second_buffer.len())
+        };
+        assert!(first_ok);
+        assert!(second_ok);
+        assert_eq!(first_buffer, second_buffer);
+        assert!(first_buffer
+            .iter()
+            .all(|value| (-0.5..0.75).contains(value)));
+
+        spiraltorch_tensor_free(second);
+        spiraltorch_tensor_free(first);
+    }
+
+    #[test]
+    fn tensor_random_normal_respects_seed() {
+        let first = spiraltorch_tensor_random_normal(2, 5, 0.0, 1.5, 99, true);
+        let second = spiraltorch_tensor_random_normal(2, 5, 0.0, 1.5, 99, true);
+        assert!(!first.is_null());
+        assert!(!second.is_null());
+
+        let mut first_buffer = vec![0.0_f32; 10];
+        let mut second_buffer = vec![0.0_f32; 10];
+        let first_ok = unsafe {
+            spiraltorch_tensor_copy_data(first, first_buffer.as_mut_ptr(), first_buffer.len())
+        };
+        let second_ok = unsafe {
+            spiraltorch_tensor_copy_data(second, second_buffer.as_mut_ptr(), second_buffer.len())
+        };
+        assert!(first_ok);
+        assert!(second_ok);
+        assert_eq!(first_buffer, second_buffer);
+
+        spiraltorch_tensor_free(second);
+        spiraltorch_tensor_free(first);
+    }
+
+    #[test]
     fn tensor_transpose_reshape_and_hadamard() {
         let data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         let handle = unsafe { spiraltorch_tensor_from_dense(2, 3, data.as_ptr(), data.len()) };
@@ -771,6 +916,62 @@ mod tests {
         spiraltorch_tensor_free(product);
         spiraltorch_tensor_free(right);
         spiraltorch_tensor_free(left);
+        spiraltorch_runtime_free(runtime);
+    }
+
+    #[test]
+    fn runtime_random_uniform_matches_direct_seeded_output() {
+        let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
+        assert!(!runtime.is_null());
+
+        let direct = spiraltorch_tensor_random_uniform(3, 4, -1.0, 1.0, 17, true);
+        let spawned = spiraltorch_runtime_tensor_random_uniform(runtime, 3, 4, -1.0, 1.0, 17, true);
+
+        assert!(!direct.is_null());
+        assert!(!spawned.is_null());
+
+        let mut direct_buf = vec![0.0_f32; 12];
+        let mut spawned_buf = vec![0.0_f32; 12];
+        let direct_ok = unsafe {
+            spiraltorch_tensor_copy_data(direct, direct_buf.as_mut_ptr(), direct_buf.len())
+        };
+        let spawned_ok = unsafe {
+            spiraltorch_tensor_copy_data(spawned, spawned_buf.as_mut_ptr(), spawned_buf.len())
+        };
+        assert!(direct_ok);
+        assert!(spawned_ok);
+        assert_eq!(direct_buf, spawned_buf);
+
+        spiraltorch_tensor_free(spawned);
+        spiraltorch_tensor_free(direct);
+        spiraltorch_runtime_free(runtime);
+    }
+
+    #[test]
+    fn runtime_random_normal_matches_direct_seeded_output() {
+        let runtime = unsafe { spiraltorch_runtime_new(1, ptr::null()) };
+        assert!(!runtime.is_null());
+
+        let direct = spiraltorch_tensor_random_normal(2, 5, 0.0, 0.5, 99, true);
+        let spawned = spiraltorch_runtime_tensor_random_normal(runtime, 2, 5, 0.0, 0.5, 99, true);
+
+        assert!(!direct.is_null());
+        assert!(!spawned.is_null());
+
+        let mut direct_buf = vec![0.0_f32; 10];
+        let mut spawned_buf = vec![0.0_f32; 10];
+        let direct_ok = unsafe {
+            spiraltorch_tensor_copy_data(direct, direct_buf.as_mut_ptr(), direct_buf.len())
+        };
+        let spawned_ok = unsafe {
+            spiraltorch_tensor_copy_data(spawned, spawned_buf.as_mut_ptr(), spawned_buf.len())
+        };
+        assert!(direct_ok);
+        assert!(spawned_ok);
+        assert_eq!(direct_buf, spawned_buf);
+
+        spiraltorch_tensor_free(spawned);
+        spiraltorch_tensor_free(direct);
         spiraltorch_runtime_free(runtime);
     }
 }
