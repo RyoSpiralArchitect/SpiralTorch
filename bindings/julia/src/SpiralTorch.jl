@@ -421,5 +421,6 @@ function Base.reshape(tensor::Tensor, dims::Tuple{Vararg{Integer, 2}})
 end
 
 include("tensor_helpers.jl")
+include("runtime_helpers.jl")
 
 end # module
