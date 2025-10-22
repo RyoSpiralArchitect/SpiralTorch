@@ -178,6 +178,28 @@ impl TextResonator {
                 volatility * 100.0
             ));
         }
+        if let Some(swing) = energy_swing_ratio(&summary) {
+            text.push_str(&format!(
+                " Energy swing spans {:.1}% of the mean.",
+                swing * 100.0
+            ));
+        }
+        if let Some((growth, decay, steady)) = energy_change_shares(frames) {
+            text.push_str(&format!(
+                " Growth share {:.1}% vs decay {:.1}% (steady {:.1}%).",
+                growth * 100.0,
+                decay * 100.0,
+                steady * 100.0
+            ));
+        }
+        if let Some((forward, reverse, stalled)) = drift_orientation_shares(frames) {
+            text.push_str(&format!(
+                " Drift orientation {:.1}% forward vs {:.1}% reverse (steady {:.1}%).",
+                forward * 100.0,
+                reverse * 100.0,
+                stalled * 100.0
+            ));
+        }
         if let Some((min_curvature, max_curvature)) = curvature_envelope(frames) {
             text.push_str(&format!(
                 " Curvature envelope spans {:+.3}→{:+.3}.",
@@ -197,6 +219,9 @@ impl TextResonator {
         }
         if let Some(volatility) = drift_volatility_ratio(&summary) {
             highlights.push(format!("drift volatility {:.1}%", volatility * 100.0));
+        }
+        if let Some(swing) = energy_swing_ratio(&summary) {
+            highlights.push(format!("energy swing {:.1}%", swing * 100.0));
         }
         if let Some(spec) = harmonics {
             if let Some(peak) = spec.dominant_drift {
@@ -265,6 +290,22 @@ impl TextResonator {
         }
         if let Some(surge_ratio) = energy_surge_ratio(frames) {
             highlights.push(format!("energy surge ratio {:.1}%", surge_ratio * 100.0));
+        }
+        if let Some((growth, decay, steady)) = energy_change_shares(frames) {
+            highlights.push(format!(
+                "growth {:.1}% decay {:.1}% steady {:.1}%",
+                growth * 100.0,
+                decay * 100.0,
+                steady * 100.0
+            ));
+        }
+        if let Some((forward, reverse, stalled)) = drift_orientation_shares(frames) {
+            highlights.push(format!(
+                "drift forward {:.1}% reverse {:.1}% steady {:.1}%",
+                forward * 100.0,
+                reverse * 100.0,
+                stalled * 100.0
+            ));
         }
         ResonanceNarrative::new(text, highlights)
     }
@@ -868,6 +909,80 @@ fn drift_volatility_ratio(summary: &ChronoSummary) -> Option<f32> {
     }
 }
 
+fn energy_swing_ratio(summary: &ChronoSummary) -> Option<f32> {
+    if summary.mean_energy <= f32::EPSILON {
+        return None;
+    }
+    let swing = (summary.max_energy - summary.min_energy).max(0.0);
+    Some((swing / summary.mean_energy).max(0.0))
+}
+
+fn energy_change_shares(frames: &[ChronoFrame]) -> Option<(f32, f32, f32)> {
+    if frames.is_empty() {
+        return None;
+    }
+    const THRESHOLD: f32 = 1e-3;
+    let mut growth = 0usize;
+    let mut decay = 0usize;
+    let mut steady = 0usize;
+    let mut total = 0usize;
+    for frame in frames {
+        if !frame.energy_decay.is_finite() {
+            continue;
+        }
+        total += 1;
+        if frame.energy_decay < -THRESHOLD {
+            growth += 1;
+        } else if frame.energy_decay > THRESHOLD {
+            decay += 1;
+        } else {
+            steady += 1;
+        }
+    }
+    if total == 0 {
+        None
+    } else {
+        Some((
+            growth as f32 / total as f32,
+            decay as f32 / total as f32,
+            steady as f32 / total as f32,
+        ))
+    }
+}
+
+fn drift_orientation_shares(frames: &[ChronoFrame]) -> Option<(f32, f32, f32)> {
+    if frames.is_empty() {
+        return None;
+    }
+    const THRESHOLD: f32 = 1e-3;
+    let mut forward = 0usize;
+    let mut reverse = 0usize;
+    let mut stalled = 0usize;
+    let mut total = 0usize;
+    for frame in frames {
+        if !frame.curvature_drift.is_finite() {
+            continue;
+        }
+        total += 1;
+        if frame.curvature_drift > THRESHOLD {
+            forward += 1;
+        } else if frame.curvature_drift < -THRESHOLD {
+            reverse += 1;
+        } else {
+            stalled += 1;
+        }
+    }
+    if total == 0 {
+        None
+    } else {
+        Some((
+            forward as f32 / total as f32,
+            reverse as f32 / total as f32,
+            stalled as f32 / total as f32,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -962,6 +1077,9 @@ mod tests {
         assert!(narrative.summary.contains("Curvature envelope"));
         assert!(narrative.summary.contains("Drift magnitude averages"));
         assert!(narrative.summary.contains("Energy volatility"));
+        assert!(narrative.summary.contains("Energy swing spans"));
+        assert!(narrative.summary.contains("Growth share"));
+        assert!(narrative.summary.contains("Drift orientation"));
         assert!(narrative
             .highlights
             .iter()
@@ -1002,5 +1120,17 @@ mod tests {
             .highlights
             .iter()
             .any(|line| line.contains("energy surge ratio")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("energy swing")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("growth")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("drift forward")));
     }
 }
