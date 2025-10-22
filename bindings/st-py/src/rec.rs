@@ -288,20 +288,17 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let rec_module = module.to_object(py);
 
     parent.add_submodule(&module)?;
-    parent.add("rec", rec_module.clone_ref(py))?;
 
-    for (name, class) in &exported_objects {
-        parent.add(name.as_ref(), class.clone_ref(py))?;
-    }
+    parent.add("QueryPlan", query_plan)?;
+    parent.add("RecEpochReport", rec_epoch_report)?;
+    parent.add("Recommender", recommender)?;
 
     let sys = PyModule::import_bound(py, "sys")?;
-    let modules: Bound<PyDict> = sys.getattr("modules")?.downcast_into()?;
-    modules.set_item("spiraltorch.rec", rec_module.clone_ref(py))?;
-    modules.set_item("rec", rec_module)?;
-
-    for (name, class) in exported_objects {
-        module_dict.set_item(name.as_ref(), class)?;
-    }
+    let modules = sys.getattr("modules")?;
+    let rec_module = parent.getattr("rec")?;
+    let rec_object = rec_module.to_object(py);
+    modules.set_item("spiraltorch.rec", rec_object.clone_ref(py))?;
+    modules.set_item("rec", rec_object)?;
     Ok(())
 }
 
