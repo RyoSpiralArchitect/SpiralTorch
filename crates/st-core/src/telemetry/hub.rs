@@ -29,7 +29,8 @@ use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::{OnceLock, RwLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock, RwLock};
 #[cfg(feature = "psi")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -74,6 +75,85 @@ static CONFIG_DIFF_EVENTS: OnceLock<RwLock<Vec<ConfigDiffEvent>>> = OnceLock::ne
 
 fn config_events_cell() -> &'static RwLock<Vec<ConfigDiffEvent>> {
     CONFIG_DIFF_EVENTS.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+/// Trait implemented by observers that want to be notified whenever the
+/// aggregated atlas frame changes.
+pub trait AtlasFrameObserver: Send + Sync {
+    /// Called after the atlas frame has been updated.
+    fn on_frame(&self, frame: &AtlasFrame);
+}
+
+impl<F> AtlasFrameObserver for F
+where
+    F: Fn(&AtlasFrame) + Send + Sync,
+{
+    fn on_frame(&self, frame: &AtlasFrame) {
+        (self)(frame);
+    }
+}
+
+#[derive(Clone)]
+struct AtlasFrameObserverEntry {
+    id: usize,
+    callback: Arc<dyn AtlasFrameObserver>,
+}
+
+static ATLAS_FRAME_OBSERVERS: OnceLock<RwLock<Vec<AtlasFrameObserverEntry>>> = OnceLock::new();
+static NEXT_ATLAS_OBSERVER_ID: AtomicUsize = AtomicUsize::new(1);
+
+fn atlas_observers_cell() -> &'static RwLock<Vec<AtlasFrameObserverEntry>> {
+    ATLAS_FRAME_OBSERVERS.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+/// Guard that keeps an atlas frame observer registered until dropped.
+#[must_use]
+pub struct AtlasFrameSubscription {
+    id: usize,
+}
+
+impl Drop for AtlasFrameSubscription {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = atlas_observers_cell().write() {
+            guard.retain(|entry| entry.id != self.id);
+        }
+    }
+}
+
+/// Registers a new observer that will be notified after each atlas frame update.
+pub fn register_atlas_frame_observer(
+    observer: impl AtlasFrameObserver + 'static,
+) -> AtlasFrameSubscription {
+    let id = NEXT_ATLAS_OBSERVER_ID.fetch_add(1, Ordering::Relaxed);
+    let callback: Arc<dyn AtlasFrameObserver> = Arc::new(observer);
+    {
+        let entry = AtlasFrameObserverEntry {
+            id,
+            callback: callback.clone(),
+        };
+        match atlas_observers_cell().write() {
+            Ok(mut guard) => guard.push(entry),
+            Err(poisoned) => poisoned.into_inner().push(entry),
+        }
+    }
+    if let Some(frame) = get_atlas_frame() {
+        callback.on_frame(&frame);
+    }
+    AtlasFrameSubscription { id }
+}
+
+fn notify_atlas_frame_observers(frame: &AtlasFrame) {
+    let callbacks: Vec<Arc<dyn AtlasFrameObserver>> = match atlas_observers_cell().read() {
+        Ok(guard) => guard.iter().map(|entry| entry.callback.clone()).collect(),
+        Err(poisoned) => poisoned
+            .into_inner()
+            .iter()
+            .map(|entry| entry.callback.clone())
+            .collect(),
+    };
+    for callback in callbacks {
+        callback.on_frame(frame);
+    }
 }
 
 /// Configuration layer that produced a diff event.
@@ -461,6 +541,7 @@ pub fn set_atlas_frame(frame: AtlasFrame) {
         *guard = Some(frame.clone());
     }
     push_atlas_route(&frame);
+    notify_atlas_frame_observers(&frame);
 }
 
 /// Clears the stored atlas frame and route history.
@@ -514,14 +595,20 @@ pub fn merge_atlas_fragment(fragment: AtlasFragment) {
     if fragment.is_empty() {
         return;
     }
+    let mut updated: Option<AtlasFrame> = None;
     if let Ok(mut guard) = atlas_cell().write() {
         if let Some(frame) = guard.as_mut() {
             frame.merge_fragment(fragment);
             push_atlas_route(frame);
+            updated = Some(frame.clone());
         } else if let Some(frame) = AtlasFrame::from_fragment(fragment) {
             push_atlas_route(&frame);
+            updated = Some(frame.clone());
             *guard = Some(frame);
         }
+    }
+    if let Some(frame) = updated {
+        notify_atlas_frame_observers(&frame);
     }
 }
 
