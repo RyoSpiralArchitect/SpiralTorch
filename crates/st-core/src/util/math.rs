@@ -5,6 +5,54 @@
 
 use std::sync::{Mutex, OnceLock};
 
+/// Memoises successive approximations of the Ramanujan π series so repeated
+/// callers only pay for the additional iterations they request.
+struct RamanujanCache {
+    approximations: Vec<f64>,
+    sum: f64,
+    factor: f64,
+    base: f64,
+    prefactor: f64,
+}
+
+impl RamanujanCache {
+    fn new() -> Self {
+        Self {
+            approximations: Vec::new(),
+            sum: 0.0,
+            factor: 1.0,
+            base: 396_f64.powi(4),
+            prefactor: (2.0 * 2.0_f64.sqrt()) / 9801.0,
+        }
+    }
+
+    fn ensure_iterations(&mut self, iterations: usize) {
+        let target = iterations.max(1);
+        while self.approximations.len() < target {
+            let k = self.approximations.len() as f64;
+            self.sum += self.factor * (1103.0 + 26390.0 * k);
+            let value = (self.prefactor * self.sum).recip();
+            self.approximations.push(value);
+
+            let k1 = self.approximations.len() as f64;
+            let numerator = (4.0 * k1 - 3.0) * (4.0 * k1 - 2.0) * (4.0 * k1 - 1.0) * (4.0 * k1);
+            let denominator = k1.powi(4) * self.base;
+            self.factor *= numerator / denominator;
+        }
+    }
+
+    fn value_at(&mut self, iterations: usize) -> f64 {
+        self.ensure_iterations(iterations);
+        self.approximations[iterations.max(1) - 1]
+    }
+}
+
+impl Default for RamanujanCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Packing density of the Leech lattice (Λ₂₄) used as the baseline for
 /// projecting geodesic measurements into a density correction.
 pub const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
@@ -56,6 +104,8 @@ impl RamanujanSeries {
 /// converging series. Results are memoised per iteration count so repeated
 /// callers across the ecosystem share the cached values.
 pub fn ramanujan_pi(iterations: usize) -> f64 {
+    let cache = RAMANUJAN_CACHE.get_or_init(|| Mutex::new(RamanujanCache::new()));
+    cache.lock().unwrap().value_at(iterations)
     let iterations = iterations.max(1);
     let cache = RAMANUJAN_CACHE.get_or_init(|| Mutex::new(RamanujanSeries::default()));
     cache.lock().unwrap().value(iterations)
@@ -69,12 +119,12 @@ pub fn ramanujan_pi(iterations: usize) -> f64 {
 pub fn ramanujan_pi_with_tolerance(tolerance: f64, max_iterations: usize) -> (f64, usize) {
     let tolerance = tolerance.max(f64::EPSILON);
     let max_iterations = max_iterations.max(1);
-    let cache = RAMANUJAN_CACHE.get_or_init(|| Mutex::new(RamanujanSeries::default()));
+    let cache = RAMANUJAN_CACHE.get_or_init(|| Mutex::new(RamanujanCache::new()));
     let mut cache = cache.lock().unwrap();
-    let mut previous = cache.value(1);
+    let mut previous = cache.value_at(1);
     for iterations in 2..=max_iterations {
-        let current = cache.value(iterations);
-        if (current - previous).abs() <= tolerance || (current - PI).abs() <= tolerance {
+        let current = cache.value_at(iterations);
+        if (current - previous).abs() <= tolerance {
             return (current, iterations);
         }
         previous = current;
