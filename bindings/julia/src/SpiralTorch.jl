@@ -180,6 +180,42 @@ function Tensor(data::AbstractMatrix{<:Real})
     return _wrap_tensor(handle, "tensor_from_dense")
 end
 
+function random_uniform(rows::Integer, cols::Integer, min::Real, max::Real; seed::Union{Nothing,Integer}=nothing)
+    lib = _lib()
+    seed_value = seed === nothing ? UInt64(0) : UInt64(seed)
+    has_seed = seed === nothing ? UInt8(0) : UInt8(1)
+    handle = ccall(
+        (:spiraltorch_tensor_random_uniform, lib),
+        Ptr{Cvoid},
+        (Csize_t, Csize_t, Cfloat, Cfloat, UInt64, Cuchar),
+        Csize_t(rows),
+        Csize_t(cols),
+        Float32(min),
+        Float32(max),
+        seed_value,
+        has_seed,
+    )
+    return _wrap_tensor(handle, "tensor_random_uniform")
+end
+
+function random_normal(rows::Integer, cols::Integer, mean::Real, std::Real; seed::Union{Nothing,Integer}=nothing)
+    lib = _lib()
+    seed_value = seed === nothing ? UInt64(0) : UInt64(seed)
+    has_seed = seed === nothing ? UInt8(0) : UInt8(1)
+    handle = ccall(
+        (:spiraltorch_tensor_random_normal, lib),
+        Ptr{Cvoid},
+        (Csize_t, Csize_t, Cfloat, Cfloat, UInt64, Cuchar),
+        Csize_t(rows),
+        Csize_t(cols),
+        Float32(mean),
+        Float32(std),
+        seed_value,
+        has_seed,
+    )
+    return _wrap_tensor(handle, "tensor_random_normal")
+end
+
 function shape(tensor::Tensor)
     lib = _lib()
     rows = Ref{Csize_t}(0)
