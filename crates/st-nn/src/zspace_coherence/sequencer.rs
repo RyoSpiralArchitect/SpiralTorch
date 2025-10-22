@@ -28,6 +28,57 @@ use st_core::{
     theory::maxwell::MaxwellPsiTelemetryBridge,
 };
 use st_tensor::{OpenCartesianTopos, TensorError};
+use std::sync::Arc;
+
+/// Identifies a stage in the Z-space sequencing pipeline for plugin callbacks.
+#[derive(Debug, Clone)]
+pub enum ZSpaceSequencerStage<'a> {
+    /// Fired after the Euclidean input has been projected into Z-space.
+    Projected {
+        /// Original Euclidean input tensor.
+        input: &'a Tensor,
+        /// Resulting projection in Z-space.
+        projected: &'a Tensor,
+    },
+    /// Fired after Maxwell coherence weights have been measured.
+    CoherenceMeasured {
+        /// Tensor residing in Z-space used for coherence measurement.
+        z_space: &'a Tensor,
+        /// Maxwell coherence weights per channel.
+        coherence: &'a [f32],
+    },
+    /// Fired after geometric aggregation has produced the final tensor and diagnostics.
+    Aggregated {
+        /// Aggregated tensor returned by the sequencer.
+        aggregated: &'a Tensor,
+        /// Coherence weights used during aggregation.
+        coherence: &'a [f32],
+        /// Rich diagnostics captured during aggregation.
+        diagnostics: &'a CoherenceDiagnostics,
+    },
+    /// Fired after language bridges have fused semantics and narratives.
+    LanguageBridged {
+        /// Aggregated tensor emitted by the sequencer.
+        aggregated: &'a Tensor,
+        /// Maxwell coherence weights associated with the tensor.
+        coherence: &'a [f32],
+        /// Conceptual hint surfaced for downstream language models.
+        concept: &'a ConceptHint,
+        /// Narrative hint emitted by Maxwell desire bridges, when available.
+        narrative: Option<&'a NarrativeHint>,
+        /// Summarised Maxwell pulse used for PSI telemetry and feedback.
+        pulse: &'a MaxwellZPulse,
+    },
+}
+
+/// Trait implemented by plugins that wish to observe or augment the sequencing pipeline.
+pub trait ZSpaceSequencerPlugin: Send + Sync {
+    /// Returns a descriptive name for the plugin.
+    fn name(&self) -> &'static str;
+
+    /// Receives callbacks for each stage of the sequencing pipeline.
+    fn on_stage(&self, stage: ZSpaceSequencerStage<'_>) -> PureResult<()>;
+}
 
 /// Rich coherence diagnostics surfaced by [`ZSpaceCoherenceSequencer`].
 #[derive(Clone, Debug)]
@@ -134,6 +185,7 @@ pub struct ZSpaceCoherenceSequencer {
 
     coherence_engine: CoherenceEngine,
     topos: OpenCartesianTopos,
+    plugins: Vec<Arc<dyn ZSpaceSequencerPlugin>>,
 }
 
 impl ZSpaceCoherenceSequencer {
@@ -165,6 +217,7 @@ impl ZSpaceCoherenceSequencer {
             curvature,
             coherence_engine: CoherenceEngine::new(dim, curvature)?,
             topos,
+            plugins: Vec::new(),
         })
     }
 
@@ -373,9 +426,17 @@ impl ZSpaceCoherenceSequencer {
         let _ = self.topos.curvature();
         // Step 1: Project to Z-space
         let z_space = self.project_to_zspace(x)?;
+        self.dispatch_plugins(|| ZSpaceSequencerStage::Projected {
+            input: x,
+            projected: &z_space,
+        })?;
 
         // Step 2: Measure Maxwell coherence
         let coherence = self.measure_coherence(&z_space)?;
+        self.dispatch_plugins(|| ZSpaceSequencerStage::CoherenceMeasured {
+            z_space: &z_space,
+            coherence: &coherence,
+        })?;
 
         // Step 3: Geometric aggregation (replaces attention) with diagnostics
         let (aggregated, diagnostics) =
@@ -383,6 +444,11 @@ impl ZSpaceCoherenceSequencer {
 
         let channel_reports = self.coherence_engine.describe_channels(&coherence)?;
         let diagnostics = diagnostics.with_channel_reports(channel_reports);
+        self.dispatch_plugins(|| ZSpaceSequencerStage::Aggregated {
+            aggregated: &aggregated,
+            coherence: &coherence,
+            diagnostics: &diagnostics,
+        })?;
 
         // Step 4: Output from Z-space (to Euclidean)
         Ok((aggregated, coherence, diagnostics))
@@ -436,6 +502,15 @@ impl ZSpaceCoherenceSequencer {
             (ConceptHint::Distribution(semantic_distribution), None)
         };
 
+        let narrative_ref = narrative.as_ref();
+        self.dispatch_plugins(|| ZSpaceSequencerStage::LanguageBridged {
+            aggregated: &aggregated,
+            coherence: &coherence,
+            concept: &concept_hint,
+            narrative: narrative_ref,
+            pulse: &pulse,
+        })?;
+
         Ok((aggregated, coherence, concept_hint, narrative, pulse))
     }
 
@@ -480,6 +555,24 @@ impl ZSpaceCoherenceSequencer {
     /// Configures the execution backend for coherence measurement.
     pub fn set_backend(&mut self, backend: CoherenceBackend) {
         self.coherence_engine.set_backend(backend);
+    }
+
+    /// Registers a plugin that will receive callbacks across the sequencing pipeline.
+    pub fn register_plugin<P>(&mut self, plugin: P)
+    where
+        P: ZSpaceSequencerPlugin + 'static,
+    {
+        self.plugins.push(Arc::new(plugin));
+    }
+
+    /// Removes all registered plugins.
+    pub fn clear_plugins(&mut self) {
+        self.plugins.clear();
+    }
+
+    /// Returns the descriptive names of the registered plugins.
+    pub fn plugin_names(&self) -> Vec<&'static str> {
+        self.plugins.iter().map(|plugin| plugin.name()).collect()
     }
 
     /// Registers a domain linguistic profile used to bias coherence weights.
@@ -702,6 +795,16 @@ impl ZSpaceCoherenceSequencer {
         }
         fused
     }
+
+    fn dispatch_plugins<'a, F>(&'a self, mut stage: F) -> PureResult<()>
+    where
+        F: FnMut() -> ZSpaceSequencerStage<'a>,
+    {
+        for plugin in &self.plugins {
+            plugin.on_stage(stage())?;
+        }
+        Ok(())
+    }
 }
 
 impl Module for ZSpaceCoherenceSequencer {
@@ -743,6 +846,7 @@ impl Module for ZSpaceCoherenceSequencer {
 mod tests {
     use super::*;
     use crate::language::{MaxwellDesireBridge, SemanticBridge, SparseKernel};
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn sequencer_forward_preserves_shape() {
@@ -965,6 +1069,64 @@ mod tests {
         assert!(pulse.band_energy.0 >= 0.0);
         assert!(pulse.band_energy.1 >= 0.0);
         assert!(pulse.band_energy.2 >= 0.0);
+    }
+
+    #[test]
+    fn plugins_observe_pipeline_stages() {
+        struct RecordingPlugin {
+            events: Arc<Mutex<Vec<&'static str>>>,
+        }
+
+        impl ZSpaceSequencerPlugin for RecordingPlugin {
+            fn name(&self) -> &'static str {
+                "recording"
+            }
+
+            fn on_stage(&self, stage: ZSpaceSequencerStage<'_>) -> PureResult<()> {
+                let label = match stage {
+                    ZSpaceSequencerStage::Projected { .. } => "projected",
+                    ZSpaceSequencerStage::CoherenceMeasured { .. } => "coherence",
+                    ZSpaceSequencerStage::Aggregated { .. } => "aggregated",
+                    ZSpaceSequencerStage::LanguageBridged { .. } => "language",
+                };
+                self.events.lock().unwrap().push(label);
+                Ok(())
+            }
+        }
+
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        seq.register_plugin(RecordingPlugin {
+            events: events.clone(),
+        });
+
+        let concept_kernel =
+            SparseKernel::from_dense(vec![vec![0.7, 0.3], vec![0.2, 0.8]], 1e-6).unwrap();
+        let semantics = SemanticBridge::from_dense(
+            vec![vec![0.6, 0.4], vec![0.3, 0.7]],
+            [(0usize, 0usize), (1, 1)],
+            1e-6,
+            concept_kernel,
+        )
+        .unwrap();
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel(
+                seq.canonical_domain_concept().label(),
+                vec![(0, 0.5), (1, 0.5)],
+            )
+            .unwrap();
+
+        let x = Tensor::from_vec(1, 128, vec![0.1; 128]).unwrap();
+        seq.forward_with_language_bridges(&x, &semantics, &bridge)
+            .unwrap();
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0], "projected");
+        assert_eq!(events[1], "coherence");
+        assert_eq!(events[2], "aggregated");
+        assert_eq!(events[3], "language");
     }
 
     #[cfg(feature = "psi")]

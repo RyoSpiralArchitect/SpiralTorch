@@ -726,6 +726,86 @@ fn frame_band_percentages(frame: &ChronoFrame) -> [f32; 5] {
     ]
 }
 
+fn band_entropy(percentages: &[f32; 5]) -> f32 {
+    const EPS: f32 = 1e-6;
+    percentages
+        .iter()
+        .filter(|p| **p > EPS)
+        .map(|p| {
+            let logp = p.ln();
+            -p * logp
+        })
+        .sum::<f32>()
+        / std::f32::consts::LN_2
+}
+
+fn band_contrast(percentages: &[f32; 5]) -> f32 {
+    let mut sorted = *percentages;
+    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal));
+    if sorted[0] <= 0.0 {
+        0.0
+    } else {
+        (sorted[0] - sorted[1].max(0.0)).max(0.0)
+    }
+}
+
+fn band_spread(percentages: &[f32; 5]) -> f32 {
+    let mean = percentages.iter().sum::<f32>() / percentages.len() as f32;
+    let variance = percentages
+        .iter()
+        .map(|p| {
+            let diff = p - mean;
+            diff * diff
+        })
+        .sum::<f32>()
+        / percentages.len() as f32;
+    variance.sqrt()
+}
+
+fn aggregate_band_percentages(frames: &[ChronoFrame]) -> Option<[f32; 5]> {
+    let mut totals = [0.0f32; 5];
+    let mut energy_total = 0.0f32;
+    for frame in frames {
+        if frame.total_energy <= f32::EPSILON {
+            continue;
+        }
+        let energy = frame.total_energy.max(0.0);
+        totals[0] += frame.homotopy_energy.max(0.0);
+        totals[1] += frame.functor_energy.max(0.0);
+        totals[2] += frame.recursive_energy.max(0.0);
+        totals[3] += frame.projection_energy.max(0.0);
+        totals[4] += frame.infinity_energy.max(0.0);
+        energy_total += energy;
+    }
+    if energy_total <= f32::EPSILON {
+        return None;
+    }
+    Some([
+        (totals[0] / energy_total).clamp(0.0, 1.0),
+        (totals[1] / energy_total).clamp(0.0, 1.0),
+        (totals[2] / energy_total).clamp(0.0, 1.0),
+        (totals[3] / energy_total).clamp(0.0, 1.0),
+        (totals[4] / energy_total).clamp(0.0, 1.0),
+    ])
+}
+
+fn mean_observed_curvature(frames: &[ChronoFrame]) -> Option<f32> {
+    let mut sum = 0.0f32;
+    let mut count = 0usize;
+    for frame in frames {
+        if !frame.observed_curvature.is_finite() {
+            continue;
+        }
+        sum += frame.observed_curvature;
+        count += 1;
+    }
+    if count == 0 {
+        None
+    } else {
+        Some(sum / count as f32)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

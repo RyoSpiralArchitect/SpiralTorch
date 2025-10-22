@@ -2060,6 +2060,42 @@ print(f"z-bias: {diagnostics.z_bias():.3f}")
 
 [See example](examples/05_new_layers/zspace_coherence_demo.py)
 
+### Plugin Architecture
+
+`ZSpaceCoherenceSequencer` now exposes a lightweight plugin system so other
+subsystems can tap into each stage of the pipeline without forking the core
+implementation. Implement the `ZSpaceSequencerPlugin` trait and register it on a
+sequencer to receive callbacks as tensors move through projection, coherence
+measurement, aggregation, and language fusion stages:
+
+```rust
+use st_nn::{
+    zspace_coherence::{ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage},
+    OpenCartesianTopos, PureResult, Tensor,
+};
+
+struct TelemetryPlugin;
+
+impl ZSpaceSequencerPlugin for TelemetryPlugin {
+    fn name(&self) -> &'static str { "telemetry" }
+
+    fn on_stage(&self, stage: ZSpaceSequencerStage<'_>) -> PureResult<()> {
+        if let ZSpaceSequencerStage::Aggregated { diagnostics, .. } = stage {
+            println!("entropy: {:.2}", diagnostics.coherence_entropy());
+        }
+        Ok(())
+    }
+}
+
+fn main() -> PureResult<()> {
+    let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192)?;
+    let mut sequencer = ZSpaceCoherenceSequencer::new(768, 12, -1.0, topos)?;
+    sequencer.register_plugin(TelemetryPlugin);
+    let (_out, _, _) = sequencer.forward_with_diagnostics(&Tensor::zeros(1, 768)?);
+    Ok(())
+}
+```
+
 ### Why Not Attention?
 
 | Aspect | Attention | ZSpaceCoherence |
