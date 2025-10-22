@@ -87,8 +87,8 @@ impl PauliSpinor {
     }
 
     /// Reconstructs a Pauli spinor from a Bloch vector. The supplied vector is
-    /// normalised to lie on the unit sphere; when the norm underflows the north
-    /// pole is selected.
+    /// normalised to lie on the unit sphere; when the norm underflows an error
+    /// is returned.
     pub fn from_bloch_vector(mut bloch: Vec3) -> Result<Self, StvError> {
         let norm = (bloch[0] * bloch[0] + bloch[1] * bloch[1] + bloch[2] * bloch[2]).sqrt();
         if !norm.is_finite() {
@@ -96,7 +96,7 @@ impl PauliSpinor {
         }
 
         if norm <= DEFAULT_TOLERANCE {
-            return Self::from_bloch_angles(0.0, 0.0);
+            return Err(StvError::InvalidBlochVector { norm });
         }
 
         let inv_norm = 1.0 / norm;
