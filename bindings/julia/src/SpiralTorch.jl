@@ -216,6 +216,46 @@ function random_normal(rows::Integer, cols::Integer, mean::Real, std::Real; seed
     return _wrap_tensor(handle, "tensor_random_normal")
 end
 
+function random_uniform(runtime::Runtime, rows::Integer, cols::Integer, min::Real, max::Real; seed::Union{Nothing,Integer}=nothing)
+    lib = _lib()
+    handle = _require_runtime(runtime, "runtime_tensor_random_uniform")
+    seed_value = seed === nothing ? UInt64(0) : UInt64(seed)
+    has_seed = seed === nothing ? UInt8(0) : UInt8(1)
+    result = ccall(
+        (:spiraltorch_runtime_tensor_random_uniform, lib),
+        Ptr{Cvoid},
+        (Ptr{Cvoid}, Csize_t, Csize_t, Cfloat, Cfloat, UInt64, Cuchar),
+        handle,
+        Csize_t(rows),
+        Csize_t(cols),
+        Float32(min),
+        Float32(max),
+        seed_value,
+        has_seed,
+    )
+    return _wrap_tensor(result, "runtime_tensor_random_uniform")
+end
+
+function random_normal(runtime::Runtime, rows::Integer, cols::Integer, mean::Real, std::Real; seed::Union{Nothing,Integer}=nothing)
+    lib = _lib()
+    handle = _require_runtime(runtime, "runtime_tensor_random_normal")
+    seed_value = seed === nothing ? UInt64(0) : UInt64(seed)
+    has_seed = seed === nothing ? UInt8(0) : UInt8(1)
+    result = ccall(
+        (:spiraltorch_runtime_tensor_random_normal, lib),
+        Ptr{Cvoid},
+        (Ptr{Cvoid}, Csize_t, Csize_t, Cfloat, Cfloat, UInt64, Cuchar),
+        handle,
+        Csize_t(rows),
+        Csize_t(cols),
+        Float32(mean),
+        Float32(std),
+        seed_value,
+        has_seed,
+    )
+    return _wrap_tensor(result, "runtime_tensor_random_normal")
+end
+
 function shape(tensor::Tensor)
     lib = _lib()
     rows = Ref{Csize_t}(0)
