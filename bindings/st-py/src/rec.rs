@@ -167,15 +167,25 @@ fn convert_ratings(ratings: Vec<(usize, usize, f32)>) -> Vec<RatingTriple> {
 #[pymethods]
 impl PyRecommender {
     #[new]
-    #[pyo3(signature = (users, items, factors, learning_rate, regularization, curvature))]
+    #[pyo3(
+        signature = (
+            users,
+            items,
+            factors,
+            learning_rate = 0.05,
+            regularization = 0.002,
+            curvature = None
+        )
+    )]
     pub fn new(
         users: usize,
         items: usize,
         factors: usize,
         learning_rate: f32,
         regularization: f32,
-        curvature: f32,
+        curvature: Option<f32>,
     ) -> PyResult<Self> {
+        let curvature = curvature.unwrap_or(-1.0);
         let inner = SpiralRecommender::new(
             users,
             items,
@@ -262,33 +272,43 @@ impl PyRecommender {
 #[cfg(feature = "rec")]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "rec")?;
-    module.add("__doc__", "SpiralTorch recommendation toolkit")?;
-    module.add("__name__", "spiraltorch.rec")?;
-    module.add("__package__", "spiraltorch")?;
     module.add_class::<PyQueryPlan>()?;
     module.add_class::<PyRecEpochReport>()?;
     module.add_class::<PyRecommender>()?;
 
-    let query_plan = module.getattr("QueryPlan")?;
-    let rec_epoch_report = module.getattr("RecEpochReport")?;
-    let recommender = module.getattr("Recommender")?;
+    let exports: [Cow<'static, str>; 3] = [
+        Cow::Borrowed("QueryPlan"),
+        Cow::Borrowed("RecEpochReport"),
+        Cow::Borrowed("Recommender"),
+    ];
 
-    module.add(
-        "__all__",
-        vec!["QueryPlan", "RecEpochReport", "Recommender"],
-    )?;
+    let module_dict: Bound<PyDict> = module.dict();
+    module_dict.set_item("__doc__", "SpiralTorch recommendation toolkit")?;
+    module_dict.set_item("__name__", "spiraltorch.rec")?;
+    module_dict.set_item("__package__", "spiraltorch")?;
+    let exported_names: Vec<&str> = exports.iter().map(|name| name.as_ref()).collect();
+    module_dict.set_item("__all__", exported_names.clone())?;
+
+    let mut exported_objects = Vec::with_capacity(exports.len());
+    for name in &exports {
+        let class = module.getattr(name.as_ref())?.into_py(py);
+        exported_objects.push((name.clone(), class));
+    }
+
+    let rec_module = module.to_object(py);
+
     parent.add_submodule(&module)?;
-
-    parent.add("QueryPlan", query_plan)?;
-    parent.add("RecEpochReport", rec_epoch_report)?;
-    parent.add("Recommender", recommender)?;
+    parent.add("rec", rec_module.clone_ref(py))?;
 
     let sys = PyModule::import_bound(py, "sys")?;
-    let modules = sys.getattr("modules")?;
-    let rec_module = parent.getattr("rec")?;
-    let rec_object = rec_module.to_object(py);
-    modules.set_item("spiraltorch.rec", rec_object.clone_ref(py))?;
-    modules.set_item("rec", rec_object)?;
+    let modules: Bound<PyDict> = sys.getattr("modules")?.downcast_into()?;
+    modules.set_item("spiraltorch.rec", rec_module.clone_ref(py))?;
+    modules.set_item("rec", rec_module)?;
+
+    for (name, class) in exported_objects {
+        parent.add(name.as_ref(), class.clone_ref(py))?;
+        module_dict.set_item(name.as_ref(), class)?;
+    }
     Ok(())
 }
 
@@ -297,6 +317,8 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "rec")?;
     module.add("__doc__", "SpiralTorch recommendation toolkit")?;
     parent.add_submodule(&module)?;
+    let rec_module = module.to_object(py);
+    parent.add("rec", rec_module)?;
     Ok(())
 }
 
