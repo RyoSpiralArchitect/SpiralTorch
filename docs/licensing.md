@@ -33,7 +33,7 @@ All commercial tiers unlock premium capabilities such as advanced telemetry dash
 
 ## Getting Started
 
-Ready to evaluate the commercial license, request a trial, or execute a CLA? Reach out at **[your-email@example.com](mailto:kishkaavsesvit@icloud.com)** for a custom quote. We are excited to partner with teams pushing the boundaries of Rust-first machine learning.
+Ready to evaluate the commercial license, request a trial, or execute a CLA? Reach out at **[your-email@example.com](mailto:kishkavsesvit@icloud.com)** for a custom quote. We are excited to partner with teams pushing the boundaries of Rust-first machine learning.
 
 For questions about license compatibility, contributing under the AGPL, or structuring a commercial engagement, please open a discussion thread or contact us directly.
 
