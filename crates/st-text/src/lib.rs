@@ -200,6 +200,21 @@ impl TextResonator {
                 stalled * 100.0
             ));
         }
+        if let Some(delta) = net_energy_change(frames) {
+            text.push_str(&format!(" Net energy change {delta:+.3}."));
+        }
+        if let Some(share) = energy_above_mean_share(frames, summary.mean_energy) {
+            text.push_str(&format!(
+                " {:.1}% of frames sit above the mean energy.",
+                share * 100.0
+            ));
+        }
+        if let Some(persistence) = curvature_persistence(frames) {
+            text.push_str(&format!(
+                " Curvature direction persists {:.1}% of transitions.",
+                persistence * 100.0
+            ));
+        }
         if let Some((min_curvature, max_curvature)) = curvature_envelope(frames) {
             text.push_str(&format!(
                 " Curvature envelope spans {:+.3}→{:+.3}.",
@@ -306,6 +321,15 @@ impl TextResonator {
                 reverse * 100.0,
                 stalled * 100.0
             ));
+        }
+        if let Some(delta) = net_energy_change(frames) {
+            highlights.push(format!("net energy delta {delta:+.3}"));
+        }
+        if let Some(share) = energy_above_mean_share(frames, summary.mean_energy) {
+            highlights.push(format!("frames >mean energy {:.1}%", share * 100.0));
+        }
+        if let Some(persistence) = curvature_persistence(frames) {
+            highlights.push(format!("curvature persistence {:.1}%", persistence * 100.0));
         }
         ResonanceNarrative::new(text, highlights)
     }
@@ -983,6 +1007,81 @@ fn drift_orientation_shares(frames: &[ChronoFrame]) -> Option<(f32, f32, f32)> {
     }
 }
 
+fn net_energy_change(frames: &[ChronoFrame]) -> Option<f32> {
+    let start = frames
+        .iter()
+        .find_map(|frame| frame.total_energy.is_finite().then_some(frame.total_energy))?;
+    let end = frames
+        .iter()
+        .rev()
+        .find_map(|frame| frame.total_energy.is_finite().then_some(frame.total_energy))?;
+    Some(end - start)
+}
+
+fn energy_above_mean_share(frames: &[ChronoFrame], mean_energy: f32) -> Option<f32> {
+    if frames.is_empty() || !mean_energy.is_finite() {
+        return None;
+    }
+    let mut above = 0usize;
+    let mut total = 0usize;
+    for frame in frames {
+        if !frame.total_energy.is_finite() {
+            continue;
+        }
+        total += 1;
+        if frame.total_energy > mean_energy {
+            above += 1;
+        }
+    }
+    if total == 0 {
+        None
+    } else {
+        Some(above as f32 / total as f32)
+    }
+}
+
+fn curvature_persistence(frames: &[ChronoFrame]) -> Option<f32> {
+    if frames.len() < 2 {
+        return None;
+    }
+    const THRESHOLD: f32 = 1e-3;
+    let mut consistent = 0usize;
+    let mut considered = 0usize;
+    for window in frames.windows(2) {
+        let left = window[0].curvature_drift;
+        let right = window[1].curvature_drift;
+        if !left.is_finite() || !right.is_finite() {
+            continue;
+        }
+        let left_sign = if left > THRESHOLD {
+            1
+        } else if left < -THRESHOLD {
+            -1
+        } else {
+            0
+        };
+        let right_sign = if right > THRESHOLD {
+            1
+        } else if right < -THRESHOLD {
+            -1
+        } else {
+            0
+        };
+        if left_sign == 0 && right_sign == 0 {
+            continue;
+        }
+        considered += 1;
+        if left_sign != 0 && left_sign == right_sign {
+            consistent += 1;
+        }
+    }
+    if considered == 0 {
+        None
+    } else {
+        Some(consistent as f32 / considered as f32)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1080,6 +1179,11 @@ mod tests {
         assert!(narrative.summary.contains("Energy swing spans"));
         assert!(narrative.summary.contains("Growth share"));
         assert!(narrative.summary.contains("Drift orientation"));
+        assert!(narrative.summary.contains("Net energy change"));
+        assert!(narrative
+            .summary
+            .contains("frames sit above the mean energy"));
+        assert!(narrative.summary.contains("Curvature direction persists"));
         assert!(narrative
             .highlights
             .iter()
@@ -1132,5 +1236,17 @@ mod tests {
             .highlights
             .iter()
             .any(|line| line.contains("drift forward")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("net energy delta")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains(">mean energy")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("curvature persistence")));
     }
 }
