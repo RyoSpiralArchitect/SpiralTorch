@@ -1068,7 +1068,7 @@ def _register_module_export(module: _types.ModuleType, name: str) -> None:
 
 
 def _ensure_submodule(name: str, doc: str = "") -> _types.ModuleType:
-    """Return or create a forwarding child module without touching the native ext."""
+    """Return or create a synthetic child module without touching the native core."""
 
     parts = name.split(".")
     fq = __name__
