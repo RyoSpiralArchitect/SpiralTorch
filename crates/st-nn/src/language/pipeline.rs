@@ -191,14 +191,14 @@ impl DesireTelemetrySink {
         mut sample: DesireStepTelemetry,
         reading: Option<&PsiReading>,
         events: Vec<PsiEvent>,
-        z_feedback: Option<SoftlogicZFeedback>,
+        z_feedback: Option<&SoftlogicZFeedback>,
     ) -> DesireStepTelemetry {
         sample.psi_total = reading.map(|value| value.total);
         sample.psi_breakdown = reading
             .map(|value| value.breakdown.clone())
             .unwrap_or_default();
         sample.psi_events = events;
-        sample.z_feedback = z_feedback;
+        sample.z_feedback = z_feedback.cloned();
         sample
     }
 
@@ -217,7 +217,7 @@ impl DesireTelemetrySink {
             Self::base_sample(step, timestamp),
             reading.as_ref(),
             events,
-            z_feedback,
+            z_feedback.as_ref(),
         );
         hub::set_last_desire_step(sample.clone());
         (sample, reading, z_feedback)
@@ -1263,7 +1263,7 @@ impl DesirePsiSummary {
                     *component_counts.entry(*component).or_insert(0) += 1;
                 }
             }
-            if let Some(feedback) = event.z_feedback {
+            if let Some(feedback) = &event.z_feedback {
                 z_samples = z_samples.saturating_add(1);
                 z_sum += feedback.z_signal;
             }
