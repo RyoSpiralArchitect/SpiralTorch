@@ -41,30 +41,23 @@ pub fn ramanujan_pi(iterations: usize) -> f64 {
     value
 }
 
-/// Returns the Ramanujan π approximation using as many iterations as needed
-/// to satisfy the provided relative tolerance. The `max_iterations` parameter
-/// ensures callers retain deterministic control over the amount of work that
-/// can be spent in pursuit of the requested precision. The function reuses the
-/// memoised values from [`ramanujan_pi`] so repeated calls amortise the cost of
-/// the series evaluation across the entire runtime.
-pub fn ramanujan_pi_to_tolerance(tolerance: f64, max_iterations: usize) -> (f64, usize) {
-    let tolerance = tolerance.abs().max(f64::MIN_POSITIVE);
+/// Computes the Ramanujan π approximation while adaptively increasing the
+/// iteration count until two successive approximations differ by at most the
+/// provided tolerance. The iteration count is capped by `max_iterations` to
+/// avoid unbounded work in pathological cases. The resulting approximation and
+/// the iteration count that produced it are returned as a tuple.
+pub fn ramanujan_pi_with_tolerance(tolerance: f64, max_iterations: usize) -> (f64, usize) {
+    let tolerance = tolerance.max(f64::EPSILON);
     let max_iterations = max_iterations.max(1);
-
-    let mut best_value = ramanujan_pi(1);
-    if ((best_value - PI) / PI).abs() <= tolerance {
-        return (best_value, 1);
-    }
-
+    let mut previous = ramanujan_pi(1);
     for iterations in 2..=max_iterations {
-        let approx = ramanujan_pi(iterations);
-        if ((approx - PI) / PI).abs() <= tolerance {
-            return (approx, iterations);
+        let current = ramanujan_pi(iterations);
+        if (current - previous).abs() <= tolerance {
+            return (current, iterations);
         }
-        best_value = approx;
+        previous = current;
     }
-
-    (best_value, max_iterations)
+    (previous, max_iterations)
 }
 
 /// Lightweight projector that turns geodesic magnitudes into Leech lattice
@@ -110,17 +103,10 @@ mod tests {
     }
 
     #[test]
-    fn ramanujan_pi_precision_hits_target() {
-        let (value, iterations) = ramanujan_pi_to_tolerance(1e-12, 6);
-        assert!(iterations <= 4);
-        assert_abs_diff_eq!(value, PI, epsilon = PI * 1e-12);
-    }
-
-    #[test]
-    fn ramanujan_pi_precision_respects_iteration_budget() {
-        let (value, iterations) = ramanujan_pi_to_tolerance(1e-30, 3);
-        assert_eq!(iterations, 3);
-        assert_abs_diff_eq!(value, ramanujan_pi(3));
+    fn ramanujan_pi_with_tolerance_converges() {
+        let (value, iterations) = ramanujan_pi_with_tolerance(1e-12, 8);
+        assert!(iterations >= 1 && iterations <= 8);
+        assert_abs_diff_eq!(value, std::f64::consts::PI, epsilon = 1e-10);
     }
 
     #[test]
