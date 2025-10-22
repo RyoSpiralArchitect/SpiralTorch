@@ -236,6 +236,14 @@ fn apply_linkfor_shared(
                 println!("cargo:rustc-link-lib={}", lib);
                 configured = true;
             }
+        } else if token.contains(".framework") {
+            if let Some(component) = token.split('/').find(|part| part.ends_with(".framework")) {
+                let name = component.trim_end_matches(".framework");
+                if !name.is_empty() && emitted_frameworks.insert(name.to_string()) {
+                    println!("cargo:rustc-link-lib=framework={}", name);
+                    configured = true;
+                }
+            }
         } else {
             println!("cargo:rustc-link-arg={}", token);
         }
