@@ -1,4 +1,4 @@
-use js_sys::{Float32Array, Uint8Array};
+use js_sys::{Array, Float32Array, Uint8Array};
 use serde_wasm_bindgen as swb;
 use wasm_bindgen::prelude::*;
 
@@ -199,6 +199,20 @@ impl CobolDispatchPlanner {
     #[wasm_bindgen(js_name = clearMetadata)]
     pub fn clear_metadata(&mut self) {
         self.builder.clear_metadata();
+    }
+
+    #[wasm_bindgen(js_name = isValid)]
+    pub fn is_valid(&self) -> bool {
+        self.builder.envelope().is_valid()
+    }
+
+    #[wasm_bindgen(js_name = validationIssues)]
+    pub fn validation_issues(&self) -> Array {
+        let issues = Array::new();
+        for issue in self.builder.envelope().validation_issues() {
+            issues.push(&JsValue::from(issue));
+        }
+        issues
     }
 
     #[wasm_bindgen(js_name = loadJson)]

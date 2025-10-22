@@ -2,6 +2,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
+const DEFAULT_JOB_PLACEHOLDER: &str = "job";
+const PLANNER_INITIALIZED_ANNOTATION: &str = "planner_initialized";
+const NARRATOR_METRIC_MIN: f32 = 0.0;
+const NARRATOR_METRIC_MAX: f32 = 1.0;
+const FALLBACK_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CobolEnvelope {
     pub job_id: String,
@@ -264,6 +270,14 @@ impl CobolEnvelopeBuilder {
         self.envelope.metadata.extra = default_metadata_extra();
     }
 
+    pub fn is_valid(&self) -> bool {
+        self.envelope.is_valid()
+    }
+
+    pub fn validation_issues(&self) -> Vec<String> {
+        self.envelope.validation_issues()
+    }
+
     pub fn envelope(&self) -> &CobolEnvelope {
         &self.envelope
     }
@@ -293,12 +307,42 @@ impl CobolEnvelope {
     pub fn from_json_slice(input: &[u8]) -> serde_json::Result<Self> {
         serde_json::from_slice(input)
     }
+
+    pub fn validation_issues(&self) -> Vec<String> {
+        let mut issues = Vec::new();
+
+        if self.job_id == DEFAULT_JOB_PLACEHOLDER {
+            issues.push("replace the default job identifier before dispatch".to_string());
+        }
+
+        if self.initiators.is_empty() {
+            issues.push("add at least one initiator before dispatch".to_string());
+        }
+
+        if self.route.mq.is_none() && self.route.cics.is_none() && self.route.dataset.is_none() {
+            issues.push("configure a delivery route (MQ, CICS, or dataset)".to_string());
+        }
+
+        if !(NARRATOR_METRIC_MIN..=NARRATOR_METRIC_MAX).contains(&self.payload.curvature) {
+            issues.push("curvature must be between 0.0 and 1.0".to_string());
+        }
+
+        if !(NARRATOR_METRIC_MIN..=NARRATOR_METRIC_MAX).contains(&self.payload.temperature) {
+            issues.push("temperature must be between 0.0 and 1.0".to_string());
+        }
+
+        issues
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.validation_issues().is_empty()
+    }
 }
 
 fn now_timestamp() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+        .unwrap_or_else(|_| FALLBACK_TIMESTAMP.to_string())
 }
 
 fn sanitize(value: String) -> Option<String> {
@@ -311,7 +355,7 @@ fn sanitize(value: String) -> Option<String> {
 }
 
 fn sanitize_envelope(envelope: &mut CobolEnvelope) {
-    sanitize_required(&mut envelope.job_id, || "job".to_string());
+    sanitize_required(&mut envelope.job_id, || DEFAULT_JOB_PLACEHOLDER.to_string());
     sanitize_required(&mut envelope.release_channel, || "production".to_string());
     sanitize_required(&mut envelope.created_at, now_timestamp);
 
@@ -369,12 +413,12 @@ fn ensure_planner_annotation(envelope: &mut CobolEnvelope) {
         .metadata
         .annotations
         .iter()
-        .any(|annotation| annotation == "planner_initialized")
+        .any(|annotation| annotation == PLANNER_INITIALIZED_ANNOTATION)
     {
         envelope
             .metadata
             .annotations
-            .push("planner_initialized".to_string());
+            .push(PLANNER_INITIALIZED_ANNOTATION.to_string());
     }
 }
 
@@ -571,7 +615,7 @@ mod tests {
             },
             metadata: CobolMetadata {
                 tags: vec!["  tag-one  ".to_string(), "  ".to_string()],
-                annotations: vec!["  ".to_string(), "planner_initialized".to_string()],
+                annotations: vec!["  ".to_string(), PLANNER_INITIALIZED_ANNOTATION.to_string()],
                 extra: default_metadata_extra(),
             },
         };
@@ -586,7 +630,7 @@ mod tests {
                 .metadata
                 .annotations
                 .iter()
-                .filter(|value| value == "planner_initialized")
+                .filter(|value| value.as_str() == PLANNER_INITIALIZED_ANNOTATION)
                 .count(),
             1
         );
@@ -635,5 +679,57 @@ mod tests {
         assert_eq!(snapshot.job_id, "job-b");
         assert_eq!(snapshot.release_channel, "shadow");
         assert!(snapshot.metadata.tags.contains(&"alpha".to_string()));
+    }
+
+    #[test]
+    fn validation_flags_missing_initiators_and_route() {
+        let builder = CobolEnvelopeBuilder::new("job-91");
+        let issues = builder.validation_issues();
+        assert_eq!(issues.len(), 2);
+        assert!(issues.contains(&"add at least one initiator before dispatch".to_string()));
+        assert!(issues.contains(&"configure a delivery route (MQ, CICS, or dataset)".to_string()));
+    }
+
+    #[test]
+    fn validation_marks_default_job_identifier() {
+        let builder = CobolEnvelopeBuilder::new("   ");
+        let issues = builder.validation_issues();
+        assert!(issues.contains(&"replace the default job identifier before dispatch".to_string()));
+    }
+
+    #[test]
+    fn validation_flags_out_of_range_metrics() {
+        let mut builder = CobolEnvelopeBuilder::new("job-curve");
+        builder.add_initiator(make_initiator(
+            InitiatorKind::Human,
+            "Operator",
+            None,
+            None,
+            Some("ops@example".into()),
+            None,
+        ));
+        builder.set_mq_route("QM1", "QUEUE", None);
+        builder.set_narrator_config(1.2, -0.4, "spiraltorch.default", None);
+        let issues = builder.validation_issues();
+        assert_eq!(issues.len(), 2);
+        assert!(issues.contains(&"curvature must be between 0.0 and 1.0".to_string()));
+        assert!(issues.contains(&"temperature must be between 0.0 and 1.0".to_string()));
+    }
+
+    #[test]
+    fn validation_succeeds_for_complete_envelope() {
+        let mut builder = CobolEnvelopeBuilder::new("job-ready");
+        builder.add_initiator(make_initiator(
+            InitiatorKind::Automation,
+            "scheduler",
+            None,
+            None,
+            None,
+            None,
+        ));
+        builder.set_cics_route("TRN1", Some("PROG1".into()), None);
+        builder.set_narrator_config(0.6, 0.4, "spiraltorch.default", None);
+        assert!(builder.is_valid());
+        assert!(builder.validation_issues().is_empty());
     }
 }

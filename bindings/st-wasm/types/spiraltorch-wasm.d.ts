@@ -425,6 +425,8 @@ declare module "spiraltorch-wasm" {
         addAnnotation(annotation: string): void;
         mergeMetadata(metadata: unknown): void;
         clearMetadata(): void;
+        isValid(): boolean;
+        validationIssues(): string[];
         loadJson(json: string): void;
         loadObject(envelope: CobolDispatchEnvelope): void;
         toObject(): CobolDispatchEnvelope;

@@ -129,6 +129,16 @@ UI can call `setCreatedAt()` with an explicit value or `resetCreatedAt()` to
 request a new server-side default.  These helpers keep the WebAssembly layer in
 sync with the Rust builder’s semantics.
 
+## Validating envelopes
+
+Before dispatching, both the Rust builder and the WebAssembly planner can audit
+envelopes for common mistakes.  Call `builder.validation_issues()` to receive a
+list of human-readable problems or `builder.is_valid()` when only a boolean is
+needed.  Browser callers can mirror the same workflow with
+`planner.validationIssues()` and `planner.isValid()`.  The checks flag missing
+initiators, absent routes, narrator settings outside the 0–1 range, and jobs
+that still rely on the default `job` placeholder identifier.
+
 ## Dispatching to mainframe bridges
 
 The WebAssembly planner does not prescribe the bridge mechanism.  Most teams
