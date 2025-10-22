@@ -221,27 +221,6 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 ---
 
-## What’s New in 0.1.6
-
-- **Stable Python façade**  
-  Missing attributes defer to the Rust extension at runtime → 新しい Rust 側の公開が Python に即時反映。
-- **Planner & device utilities**  
-  `plan`, `plan_topk`, `RankPlan.*`, `describe_device`, `hip_probe`.
-- **Self-supervised helpers**  
-  `selfsup.info_nce(...)`, `selfsup.masked_mse(...)`.
-- **Z-space trainer kit**  
-  `ZSpaceTrainer`, `ZMetrics`, `step_many`
-- **Vision/Canvas micro-orchestrators**  
-  `SpiralTorchVision`, `TemporalResonanceBuffer`, `CanvasTransformer`.
-- **Lightweight NN data utils**  
-  `nn.Dataset` / `nn.DataLoader`.
-- **RL name**  
-  **`stAgent`**。`PpoAgent`, `SacAgent` 
-- **Interop bridges**  
-  `compat.torch/jax/tensorflow` 
-
----
-
 ## Python Examples
 
 ### 1) Core tensor & DLPack
