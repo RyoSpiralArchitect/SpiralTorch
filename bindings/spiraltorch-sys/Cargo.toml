@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 once_cell = "1.19"
 st-tensor = { path = "../../crates/st-tensor" }
+st-core = { path = "../../crates/st-core", features = ["golden"] }
 
 [dev-dependencies]
 libc = "0.2"

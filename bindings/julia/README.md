@@ -29,6 +29,9 @@ Rust without manual pointer juggling.
    SpiralTorch.to_array(t .* u)
    SpiralTorch.to_array(transpose(t))
    SpiralTorch.to_array(reshape(t, 4, 1))
+   rt = SpiralTorch.Runtime()
+   SpiralTorch.worker_count(rt)
+   SpiralTorch.to_array(SpiralTorch.matmul(rt, t, u))
    ```
 
 The wrapper automatically disposes tensors via finalizers, but you can call
@@ -48,3 +51,7 @@ inspect transient failures.
   mirroring the Rust API expectations.
 - `to_array(tensor)` materialises the data into a Julia `Matrix{Float32}` for
   native manipulation.
+- `Runtime(; worker_threads, thread_name)` mirrors the Rust “golden runtime” so
+  Julia callers can reuse the cooperative worker pool. Methods such as
+  `SpiralTorch.matmul(runtime, lhs, rhs)` and `SpiralTorch.scale(runtime, tensor,
+  value)` dispatch work through the runtime instead of the direct blocking path.

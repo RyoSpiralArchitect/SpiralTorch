@@ -243,6 +243,26 @@ pub enum PsiEvent {
     },
 }
 
+impl fmt::Display for PsiEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PsiEvent::ThresholdCross {
+                component,
+                value,
+                threshold,
+                up,
+                step,
+            } => {
+                write!(
+                    f,
+                    "psi.threshold:{component:?}:{direction}:{value:.3}:{threshold:.3}@{step}",
+                    direction = if *up { "up" } else { "down" },
+                )
+            }
+        }
+    }
+}
+
 /// Advisory emitted when projecting Spiral dynamics health into PSI channels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PsiSpiralAdvisory {

@@ -4,9 +4,9 @@ _(Still under active repair while expanding — API changes hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
-**Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
-
-**Theory deep dive.** Start architecting Z-space kernels with the new [SpinoTensorVector derivation notes](docs/stv_z_space.md), covering determinant identities, kernel causality, and minimal-norm constructions ready for implementation.
+📜 **Licensing at a glance:** SpiralTorch is AGPL-3.0-or-later by default with a commercial option for proprietary deployments. [Read the full policy.](docs/licensing.md)
+Unauthorized redistribution, scraping, or resale of this repository
+violates AGPL-3.0 and §13. Any commercial deployment requires a license.
 
 ---
 
@@ -49,9 +49,12 @@ sequenceDiagram
 
 > **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
 
-**License**
+**Licensing**
 
-AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
+SpiralTorch ships under a dual-license model:
+
+- **Open-source:** [AGPL-3.0-or-later](docs/licensing.md#open-source-license-agpl-30-or-later) for community contributions and network-transparent deployments.
+- **Commercial:** Flexible subscriptions with priority support for teams that need to keep modifications private or run proprietary SaaS. [Explore tiers and contact details →](docs/licensing.md#commercial-license)
 
 
 <p align="center">
@@ -134,7 +137,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
-**Current release:** `spiraltorch==0.1.6` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.1.9` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), Metal via WGPU (macOS), Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -142,7 +145,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.1.6
+pip install -U spiraltorch==0.1.9
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -157,10 +160,6 @@ pip install -U spiraltorch==0.1.6
 - Rust stable (`rustup`), Cargo
 - macOS: Xcode CLT / Linux: build-essentials
 - Optional GPU stacks: CUDA / ROCm / Vulkan as needed
-
-## Julia & Go integration (draft)
-
-- Prototype workflows for future Julia/Go bindings live in [docs/ops/julia_go_development.md](docs/ops/julia_go_development.md). Follow the guide for setup, lint/test commands, and release checklists.
 
 **Workspace build**
 
@@ -454,19 +453,16 @@ A: The type stubs (`spiraltorch.pyi`) reflect the **supported** surface. New Rus
 
 ---
 
-## License
-
-Copyright © SpiralReality.  
-See `LICENSE` for details.
-
----
-
 ## Planning the Ecosystem
 
 - Explore the [Ecosystem Roadmap](docs/ecosystem_roadmap.md) for high-level priorities around documentation, samples, and community building.
 - Study the [Compatibility Strategy](docs/compatibility_strategy.md) to plan incremental migrations from PyTorch/TensorFlow stacks.
 - Review the [Backend Feature Matrix](docs/backend_matrix.md) when validating device support or filing bugs that touch accelerators.
+- **Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
 
+## Julia & Go integration (draft)
+
+- Prototype workflows for future Julia/Go bindings live in [docs/ops/julia_go_development.md](docs/ops/julia_go_development.md). Follow the guide for setup, lint/test commands, and release checklists.
 
 Prefer flat-space optimisation? Reach for the new Rust-side
 `st_tensor::AmegaRealgrad` tape to mirror the same API without the Poincaré
@@ -517,6 +513,7 @@ optimisers alongside its hypergradient updates.
 - [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory, signature geometry with timing elasticities, tipping radii, and direction-aware safe radii, plus how SpiralTorch wires DRL penalties into trainers and governance loops.
 - [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
 - [COBOL web dispatch quickstart](docs/cobol_web_dispatch.md) — structure of the WASM planner and how to shuttle envelopes into MQ or CICS entrypoints.
+- [SpinoTensorVector derivation notes](docs/stv_z_space.md), Start architecting Z-space kernels with the new  covering determinant identities, kernel causality, and minimal-norm constructions ready for implementation.
 
 ---
 

@@ -9,6 +9,7 @@ license = "AGPL-3.0-or-later"
 [features]
 default = []
 wgpu = ["dep:st-backend-wgpu"]
+nerf = []
 
 [dependencies]
 st-core = { path = "../st-core" }

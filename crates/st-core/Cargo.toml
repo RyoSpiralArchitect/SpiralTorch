@@ -31,6 +31,8 @@ experimental_zpulse = []
 blackcat_v2 = []
 observability-prometheus = ["dep:prometheus"]
 observability-otlp = ["dep:opentelemetry"]
+julia-ffi = ["dep:julia-ffi-poc"]
+go-bridge = ["dep:ureq"]
 
 [dependencies]
 thiserror   = "1"
@@ -59,6 +61,8 @@ st-frac        = { path = "../st-frac" }
 cudarc         = { version = "0.11", optional = true, features = ["nvrtc"] }
 prometheus     = { version = "0.13", optional = true }
 opentelemetry  = { version = "0.21", optional = true, features = ["metrics"] }
+julia-ffi-poc  = { path = "../julia-ffi-poc", optional = true }
+ureq           = { version = "2.9", optional = true, default-features = true, features = ["json"] }
 
 [dev-dependencies]
 approx = "0.5"
