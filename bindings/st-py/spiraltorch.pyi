@@ -8,9 +8,21 @@ class Tensor:
     @staticmethod
     def zeros(rows: int, cols: int) -> Tensor: ...
     @staticmethod
-    def randn(rows: int, cols: int, mean: float = 0.0, std: float = 1.0, seed: int | None = None) -> Tensor: ...
+    def randn(
+        rows: int,
+        cols: int,
+        mean: float = ...,
+        std: float = ...,
+        seed: int | None = ...,
+    ) -> Tensor: ...
     @staticmethod
-    def rand(rows: int, cols: int, min: float = 0.0, max: float = 1.0, seed: int | None = None) -> Tensor: ...
+    def rand(
+        rows: int,
+        cols: int,
+        min: float = ...,
+        max: float = ...,
+        seed: int | None = ...,
+    ) -> Tensor: ...
     @staticmethod
     def from_dlpack(capsule: object) -> Tensor: ...
     def to_dlpack(self) -> object: ...
