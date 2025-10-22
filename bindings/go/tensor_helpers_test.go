@@ -101,3 +101,48 @@ func TestMatrixHelpersWithEmptyDimensions(t *testing.T) {
 		}
 	}
 }
+
+func TestNewTensorFromDenseZeroDimensions(t *testing.T) {
+	cases := []struct {
+		name string
+		rows int
+		cols int
+	}{
+		{name: "zero_rows", rows: 0, cols: 5},
+		{name: "zero_cols", rows: 3, cols: 0},
+		{name: "both_zero", rows: 0, cols: 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tensor, err := NewTensorFromDense(tc.rows, tc.cols, nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			t.Cleanup(func() { tensor.Close() })
+
+			rows, cols, err := tensor.Shape()
+			if err != nil {
+				t.Fatalf("Shape returned error: %v", err)
+			}
+			if rows != tc.rows || cols != tc.cols {
+				t.Fatalf("unexpected shape: got %dx%d want %dx%d", rows, cols, tc.rows, tc.cols)
+			}
+		})
+	}
+}
+
+func TestNewTensorFromDenseValidation(t *testing.T) {
+	if _, err := NewTensorFromDense(-1, 2, []float32{1, 2}); err == nil {
+		t.Fatalf("expected error for negative rows")
+	}
+	if _, err := NewTensorFromDense(2, -1, []float32{1, 2}); err == nil {
+		t.Fatalf("expected error for negative cols")
+	}
+	if _, err := NewTensorFromDense(0, 4, []float32{1}); err == nil {
+		t.Fatalf("expected error for mismatched zero-dimension data")
+	}
+	if _, err := NewTensorFromDense(2, 2, []float32{1, 2, 3}); err == nil {
+		t.Fatalf("expected error for mismatched data length")
+	}
+}
