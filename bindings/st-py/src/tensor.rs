@@ -48,6 +48,36 @@ impl PyTensor {
         Ok(Self { inner: tensor })
     }
 
+    /// Sample from N(mean, std^2) to create a (rows x cols) tensor.
+    #[staticmethod]
+    #[pyo3(signature = (rows, cols, mean=0.0, std=1.0, seed=None))]
+    pub fn randn(
+        rows: usize,
+        cols: usize,
+        mean: f32,
+        std: f32,
+        seed: Option<u64>,
+    ) -> PyResult<Self> {
+        let tensor = Tensor::random_normal(rows, cols, mean, std, seed)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self { inner: tensor })
+    }
+
+    /// Sample from Uniform[min, max) to create a (rows x cols) tensor.
+    #[staticmethod]
+    #[pyo3(signature = (rows, cols, min=0.0, max=1.0, seed=None))]
+    pub fn rand(
+        rows: usize,
+        cols: usize,
+        min: f32,
+        max: f32,
+        seed: Option<u64>,
+    ) -> PyResult<Self> {
+        let tensor = Tensor::random_uniform(rows, cols, min, max, seed)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self { inner: tensor })
+    }
+
     #[staticmethod]
     pub fn from_dlpack(py: Python<'_>, capsule: PyObject) -> PyResult<Self> {
         let capsule = capsule.bind(py);
