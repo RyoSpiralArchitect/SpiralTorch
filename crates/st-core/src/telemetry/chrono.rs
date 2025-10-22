@@ -33,7 +33,7 @@ use core::f32;
 use core::f32::consts::TAU;
 use std::collections::VecDeque;
 
-use crate::util::timewarp::{TemporalWarp, TemporalWarpError};
+use crate::util::timewarp::{warp_axis_in_place, TemporalWarp, TemporalWarpError};
 
 #[cfg(feature = "kdsl")]
 use st_kdsl::auto::{synthesize_program, HeuristicHint};
@@ -586,18 +586,23 @@ impl ChronoTimeline {
         if self.frames.is_empty() {
             return Err(TemporalWarpError::Empty);
         }
+
         warp.validate()?;
+
         let start = self.axis_origin().unwrap_or(0.0);
-        let mut previous = warp.apply(start);
-        if !previous.is_finite() {
+        if !start.is_finite() {
             return Err(TemporalWarpError::NonFinite);
         }
+
+        let mut axis = Vec::with_capacity(self.frames.len() + 1);
+        axis.push(start);
+        axis.extend(self.frames.iter().map(|frame| frame.timestamp));
+
+        warp_axis_in_place(&mut axis, warp)?;
+
         let scale = warp.scale;
-        for frame in &mut self.frames {
-            let warped_timestamp = warp.apply(frame.timestamp);
-            if !warped_timestamp.is_finite() {
-                return Err(TemporalWarpError::NonFinite);
-            }
+        let mut previous = axis[0];
+        for (frame, warped_timestamp) in self.frames.iter_mut().zip(axis.into_iter().skip(1)) {
             let new_dt = (warped_timestamp - previous).max(f32::EPSILON);
             frame.dt = new_dt;
             frame.timestamp = warped_timestamp;
@@ -615,17 +620,10 @@ impl ChronoTimeline {
 
     /// Shifts all timestamps by the provided offset.
     pub fn shift(&mut self, offset: f32) -> Result<(), TemporalWarpError> {
-        if self.frames.is_empty() {
-            return Err(TemporalWarpError::Empty);
-        }
         if !offset.is_finite() {
             return Err(TemporalWarpError::NonFinite);
         }
-        for frame in &mut self.frames {
-            frame.timestamp += offset;
-        }
-        self.elapsed += offset;
-        Ok(())
+        self.warp_time_axis(TemporalWarp::translation(offset))
     }
 
     /// Rescales the axis so the latest frame aligns with the requested progress.

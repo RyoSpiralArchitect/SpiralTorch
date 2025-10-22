@@ -66,6 +66,17 @@ pub struct TemporalWarp {
 }
 
 impl TemporalWarp {
+    /// Attempts to build a warp with the provided components, validating the result.
+    pub fn try_new(scale: f32, offset: f32, pivot: f32) -> Result<Self, TemporalWarpError> {
+        let warp = Self {
+            scale,
+            offset,
+            pivot,
+        };
+        warp.validate()?;
+        Ok(warp)
+    }
+
     /// Returns the identity warp that leaves timestamps untouched.
     pub const fn identity() -> Self {
         Self {
@@ -93,6 +104,15 @@ impl TemporalWarp {
         }
     }
 
+    /// Creates a warp that dilates around an arbitrary pivot without translation.
+    pub const fn about(pivot: f32, scale: f32) -> Self {
+        Self {
+            scale,
+            offset: 0.0,
+            pivot,
+        }
+    }
+
     /// Applies the warp to a timestamp.
     #[inline]
     pub fn apply(&self, t: f32) -> f32 {
@@ -111,6 +131,25 @@ impl TemporalWarp {
             return Err(TemporalWarpError::NonFinite);
         }
         Ok(())
+    }
+
+    /// Returns the affine bias component equivalent to this warp.
+    #[inline]
+    fn bias(&self) -> f32 {
+        self.offset + self.pivot * (1.0 - self.scale)
+    }
+
+    /// Composes this warp with another, applying `other` first and then `self`.
+    pub fn compose(self, other: TemporalWarp) -> Self {
+        let scale = self.scale * other.scale;
+        let bias = self.scale * other.bias() + self.bias();
+        let pivot = self.pivot;
+        let offset = bias - pivot * (1.0 - scale);
+        Self {
+            scale,
+            offset,
+            pivot,
+        }
     }
 }
 
@@ -173,6 +212,13 @@ mod tests {
     }
 
     #[test]
+    fn warp_axis_rejects_empty_axis() {
+        let mut axis: [f32; 0] = [];
+        let err = warp_axis_in_place(&mut axis, TemporalWarp::identity()).unwrap_err();
+        assert_eq!(err, TemporalWarpError::Empty);
+    }
+
+    #[test]
     fn warp_axis_detects_degenerate_dilation() {
         let mut axis = [1.0, 1.0];
         let warp = TemporalWarp::dilation(2.0);
@@ -187,5 +233,38 @@ mod tests {
         let warped = warped_axis(&axis, warp).unwrap();
         assert_eq!(warped, vec![2.0, 3.0]);
         assert_eq!(axis, [0.0, 1.0]);
+    }
+
+    #[test]
+    fn try_new_validates_inputs() {
+        let warp = TemporalWarp::try_new(1.5, 2.0, -3.0).expect("warp");
+        assert!(
+            (warp.apply(4.0)
+                - TemporalWarp {
+                    scale: 1.5,
+                    offset: 2.0,
+                    pivot: -3.0
+                }
+                .apply(4.0))
+            .abs()
+                < 1e-6
+        );
+
+        let err = TemporalWarp::try_new(-0.25, 0.0, 0.0).unwrap_err();
+        assert_eq!(err, TemporalWarpError::InvalidScale(-0.25));
+    }
+
+    #[test]
+    fn compose_applies_other_then_self() {
+        let dilation = TemporalWarp::dilation(2.0);
+        let translation = TemporalWarp::translation(-1.0);
+        let composed = translation.compose(dilation);
+        composed.validate().expect("composed warp");
+
+        for sample in [-3.0, 0.5, 7.25] {
+            let sequential = translation.apply(dilation.apply(sample));
+            let fused = composed.apply(sample);
+            assert!((sequential - fused).abs() < 1e-6);
+        }
     }
 }
