@@ -88,6 +88,24 @@ If the caller provides `null` or `undefined` metadata, the planner keeps the
 existing structured metadata.  Passing an object merges keys into the `extra`
 map, while any other JSON value replaces the `extra` field entirely.
 
+### Importing existing envelopes
+
+Browsers that fetch historical envelopes can hydrate a planner directly from
+JSON without re-entering every field manually:
+
+```ts
+const previousJson = await fetch("/api/envelope/job-200").then((res) => res.text());
+const planner = CobolDispatchPlanner.fromJson(previousJson);
+planner.setReleaseChannel("shadow");
+planner.loadObject({ ...planner.toObject(), job_id: "job-201" });
+```
+
+`CobolDispatchPlanner.fromJson` and `fromObject` run the same sanitisation as
+`CobolEnvelopeBuilder::new`, ensuring empty strings are trimmed away and the
+`planner_initialized` annotation is present.  Instance methods `loadJson` and
+`loadObject` can reset an existing planner, which is useful when rendering the
+same component for multiple envelopes during a debugging session.
+
 ## Dispatching to mainframe bridges
 
 The WebAssembly planner does not prescribe the bridge mechanism.  Most teams

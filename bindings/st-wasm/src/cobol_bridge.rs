@@ -2,7 +2,7 @@ use js_sys::{Float32Array, Uint8Array};
 use serde_wasm_bindgen as swb;
 use wasm_bindgen::prelude::*;
 
-use crate::cobol::{make_initiator, CobolEnvelopeBuilder, InitiatorKind};
+use crate::cobol::{make_initiator, CobolEnvelope, CobolEnvelopeBuilder, InitiatorKind};
 use crate::utils::{js_error, json_to_js_value};
 
 #[wasm_bindgen]
@@ -19,6 +19,20 @@ impl CobolDispatchPlanner {
             builder.set_release_channel(channel);
         }
         CobolDispatchPlanner { builder }
+    }
+
+    #[wasm_bindgen(js_name = fromJson)]
+    pub fn from_json(json: &str) -> Result<CobolDispatchPlanner, JsValue> {
+        let builder = CobolEnvelopeBuilder::from_json_str(json).map_err(js_error)?;
+        Ok(CobolDispatchPlanner { builder })
+    }
+
+    #[wasm_bindgen(js_name = fromObject)]
+    pub fn from_object(envelope: &JsValue) -> Result<CobolDispatchPlanner, JsValue> {
+        let envelope: CobolEnvelope = swb::from_value(envelope.clone()).map_err(js_error)?;
+        Ok(CobolDispatchPlanner {
+            builder: CobolEnvelopeBuilder::from_envelope(envelope),
+        })
     }
 
     #[wasm_bindgen(js_name = setReleaseChannel)]
@@ -148,6 +162,20 @@ impl CobolDispatchPlanner {
     #[wasm_bindgen(js_name = clearMetadata)]
     pub fn clear_metadata(&mut self) {
         self.builder.clear_metadata();
+    }
+
+    #[wasm_bindgen(js_name = loadJson)]
+    pub fn load_json(&mut self, json: &str) -> Result<(), JsValue> {
+        let envelope = CobolEnvelope::from_json_str(json).map_err(js_error)?;
+        self.builder.replace_envelope(envelope);
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = loadObject)]
+    pub fn load_object(&mut self, envelope: &JsValue) -> Result<(), JsValue> {
+        let envelope: CobolEnvelope = swb::from_value(envelope.clone()).map_err(js_error)?;
+        self.builder.replace_envelope(envelope);
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = toObject)]

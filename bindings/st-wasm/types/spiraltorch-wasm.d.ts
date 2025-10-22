@@ -379,6 +379,8 @@ declare module "spiraltorch-wasm" {
     }
 
     export class CobolDispatchPlanner {
+        static fromJson(json: string): CobolDispatchPlanner;
+        static fromObject(envelope: CobolDispatchEnvelope): CobolDispatchPlanner;
         constructor(jobId: string, releaseChannel?: string | null);
         setReleaseChannel(channel: string): void;
         setNarratorConfig(
@@ -416,6 +418,8 @@ declare module "spiraltorch-wasm" {
         addAnnotation(annotation: string): void;
         mergeMetadata(metadata: unknown): void;
         clearMetadata(): void;
+        loadJson(json: string): void;
+        loadObject(envelope: CobolDispatchEnvelope): void;
         toObject(): CobolDispatchEnvelope;
         toJson(): string;
         toUint8Array(): Uint8Array;
