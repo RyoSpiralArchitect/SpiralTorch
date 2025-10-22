@@ -13,6 +13,7 @@
 //! projection, and policy-controlled fusion.
 
 use crate::telemetry::hub::SoftlogicZFeedback;
+use crate::theory::microlocal_bank::GaugeBank;
 use crate::theory::zpulse::{
     ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
 };
@@ -229,16 +230,18 @@ impl InterfaceGauge {
     }
 }
 
+/// Registry holding named [`InterfaceGauge`] instances.
 #[derive(Clone, Debug)]
-struct RegisteredGauge {
-    id: Arc<str>,
-    gauge: InterfaceGauge,
+pub struct MicrolocalGaugeBank {
+    inner: GaugeBank<InterfaceGauge>,
 }
 
-/// Registry holding named [`InterfaceGauge`] instances.
-#[derive(Clone, Debug, Default)]
-pub struct MicrolocalGaugeBank {
-    gauges: Vec<RegisteredGauge>,
+impl Default for MicrolocalGaugeBank {
+    fn default() -> Self {
+        Self {
+            inner: GaugeBank::new(),
+        }
+    }
 }
 
 impl MicrolocalGaugeBank {
@@ -250,16 +253,7 @@ impl MicrolocalGaugeBank {
     /// Registers a gauge with the provided identifier. Returns `false` if an
     /// entry with the same identifier already exists.
     pub fn register(&mut self, id: impl Into<String>, gauge: InterfaceGauge) -> bool {
-        let id: Arc<str> = Arc::from(id.into());
-        if self
-            .gauges
-            .iter()
-            .any(|entry| entry.id.as_ref() == id.as_ref())
-        {
-            return false;
-        }
-        self.gauges.push(RegisteredGauge { id, gauge });
-        true
+        self.inner.register(id, gauge)
     }
 
     /// Convenience for registering and returning `self` in a builder-style
@@ -271,69 +265,52 @@ impl MicrolocalGaugeBank {
 
     /// Returns an immutable reference to the named gauge.
     pub fn get(&self, id: &str) -> Option<&InterfaceGauge> {
-        self.gauges
-            .iter()
-            .find(|entry| entry.id.as_ref() == id)
-            .map(|entry| &entry.gauge)
+        self.inner.get(id)
     }
 
     /// Returns a mutable reference to the named gauge.
     pub fn get_mut(&mut self, id: &str) -> Option<&mut InterfaceGauge> {
-        self.gauges
-            .iter_mut()
-            .find(|entry| entry.id.as_ref() == id)
-            .map(|entry| &mut entry.gauge)
+        self.inner.get_mut(id)
     }
 
     /// Removes a gauge from the registry and returns it if present.
     pub fn remove(&mut self, id: &str) -> Option<InterfaceGauge> {
-        if let Some(idx) = self.gauges.iter().position(|entry| entry.id.as_ref() == id) {
-            Some(self.gauges.remove(idx).gauge)
-        } else {
-            None
-        }
+        self.inner.remove(id)
     }
 
     /// Iterates over registered identifiers and gauges in insertion order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &InterfaceGauge)> {
-        self.gauges
-            .iter()
-            .map(|entry| (entry.id.as_ref(), &entry.gauge))
+        self.inner.iter()
     }
 
     /// Iterates over registered identifiers and mutable gauges in insertion order.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&str, &mut InterfaceGauge)> {
-        self.gauges
-            .iter_mut()
-            .map(|entry| (entry.id.as_ref(), &mut entry.gauge))
+        self.inner.iter_mut()
     }
 
     /// Returns the registered identifiers.
     pub fn ids(&self) -> impl Iterator<Item = &str> {
-        self.gauges.iter().map(|entry| entry.id.as_ref())
+        self.inner.ids()
     }
 
     /// Number of registered gauges.
     pub fn len(&self) -> usize {
-        self.gauges.len()
+        self.inner.len()
     }
 
     /// Returns `true` when no gauges are registered.
     pub fn is_empty(&self) -> bool {
-        self.gauges.is_empty()
+        self.inner.is_empty()
     }
 
     /// Clones the registered gauges into a vector preserving insertion order.
     pub fn to_vec(&self) -> Vec<InterfaceGauge> {
-        self.gauges
-            .iter()
-            .map(|entry| entry.gauge.clone())
-            .collect()
+        self.inner.to_vec()
     }
 
     /// Consumes the bank and returns the gauges in insertion order.
     pub fn into_vec(self) -> Vec<InterfaceGauge> {
-        self.gauges.into_iter().map(|entry| entry.gauge).collect()
+        self.inner.into_vec()
     }
 
     /// Runs every registered gauge against the provided mask and optional
@@ -344,9 +321,9 @@ impl MicrolocalGaugeBank {
         c_prime: Option<&ArrayD<f32>>,
     ) -> FxHashMap<Arc<str>, InterfaceSignature> {
         let mut results = FxHashMap::default();
-        for entry in &self.gauges {
-            let signature = entry.gauge.analyze_with_label(mask, c_prime);
-            results.insert(Arc::clone(&entry.id), signature);
+        for (id, gauge) in self.inner.entries() {
+            let signature = gauge.analyze_with_label(mask, c_prime);
+            results.insert(Arc::clone(id), signature);
         }
         results
     }
@@ -354,10 +331,10 @@ impl MicrolocalGaugeBank {
 
 impl IntoIterator for MicrolocalGaugeBank {
     type Item = InterfaceGauge;
-    type IntoIter = std::vec::IntoIter<InterfaceGauge>;
+    type IntoIter = <GaugeBank<InterfaceGauge> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.into_vec().into_iter()
+        self.inner.into_iter()
     }
 }
 
