@@ -236,9 +236,18 @@ pub fn project_tempered_and_calibrate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn telemetry_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("lock telemetry guard")
+    }
 
     #[test]
     fn engine_projects_and_calibrates() {
+        let _guard = telemetry_guard();
         crate::telemetry::hub::clear_last_realgrad_for_test();
         let mut engine = RealGradEngine::new(RealGradConfig::default());
         let values = vec![0.5f32, -0.25, 0.75, -0.5];
@@ -273,6 +282,7 @@ mod tests {
 
     #[test]
     fn engine_handles_tempered_sequences() {
+        let _guard = telemetry_guard();
         crate::telemetry::hub::clear_last_realgrad_for_test();
         let mut members = Vec::new();
         for scale in [1.0f32, 2.0] {
@@ -295,6 +305,7 @@ mod tests {
 
     #[test]
     fn engine_project_with_pulse_roundtrips() {
+        let _guard = telemetry_guard();
         crate::telemetry::hub::clear_last_realgrad_for_test();
         let mut engine = RealGradEngine::new(RealGradConfig::default());
         let values = vec![1.0f32, 0.5, -0.25, -0.75];
@@ -314,6 +325,7 @@ mod tests {
 
     #[test]
     fn engine_allows_history_reset() {
+        let _guard = telemetry_guard();
         crate::telemetry::hub::clear_last_realgrad_for_test();
         let mut engine = RealGradEngine::new(RealGradConfig::default());
         let values = vec![0.1f32, 0.2, 0.3, 0.4];
