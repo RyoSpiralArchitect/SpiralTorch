@@ -416,6 +416,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         ],
     )?;
     parent.add_submodule(&module)?;
+    if let Ok(sequencer) = module.getattr("ZSpaceCoherenceSequencer") {
+        parent.add("ZSpaceCoherenceSequencer", sequencer)?;
+    }
     Ok(())
 }
 

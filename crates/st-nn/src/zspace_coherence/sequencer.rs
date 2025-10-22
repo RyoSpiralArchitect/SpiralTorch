@@ -95,6 +95,24 @@ pub enum ZSpaceSequencerStage<'a> {
         /// Semantic distribution normalised for downstream bridges.
         distribution: &'a [f32],
     },
+    /// Fired after the canonical domain concept has been selected for bridging.
+    CanonicalConceptSelected {
+        /// Domain concept inferred from curvature and head count.
+        concept: DomainConcept,
+        /// Channel label exposed to the Maxwell desire bridge.
+        channel: &'a str,
+    },
+    /// Fired after the Maxwell desire bridge has emitted a concept hint.
+    MaxwellBridgeEmitted {
+        /// Channel label supplied to the bridge.
+        channel: &'a str,
+        /// Summarised Maxwell pulse used to derive the hint.
+        pulse: &'a MaxwellZPulse,
+        /// Raw concept hint emitted prior to semantic fusion.
+        hint: &'a ConceptHint,
+        /// Narrative hint surfaced by the bridge, when available.
+        narrative: Option<&'a NarrativeHint>,
+    },
     /// Fired after a linguistic contour has been emitted for downstream stacks.
     LinguisticContourEmitted {
         /// Coherence weights that produced the contour.
@@ -547,11 +565,23 @@ impl ZSpaceCoherenceSequencer {
             self.derive_semantic_distribution(&aggregated, &coherence, semantics)?;
         let pulse = self.summarise_maxwell_pulse(&aggregated, &coherence);
         let canonical_concept = self.canonical_domain_concept();
-        let channel = canonical_concept.label();
+        let channel_label = canonical_concept.label().to_string();
+        self.dispatch_plugins(|| ZSpaceSequencerStage::CanonicalConceptSelected {
+            concept: canonical_concept.clone(),
+            channel: channel_label.as_str(),
+        })?;
 
-        let (concept_hint, narrative) = if let Some((hint, narrative)) =
-            maxwell_bridge.emit(channel, &pulse)
-        {
+        let emission = maxwell_bridge.emit(&channel_label, &pulse);
+        if let Some((ref hint, ref narrative)) = emission {
+            self.dispatch_plugins(|| ZSpaceSequencerStage::MaxwellBridgeEmitted {
+                channel: channel_label.as_str(),
+                pulse: &pulse,
+                hint,
+                narrative: narrative.as_ref(),
+            })?;
+        }
+
+        let (concept_hint, narrative) = if let Some((hint, narrative)) = emission {
             let fused =
                 Self::fuse_distributions(&semantic_distribution, &hint.as_distribution(semantics));
             let concept = ConceptHint::Distribution(fused);
@@ -631,24 +661,6 @@ impl ZSpaceCoherenceSequencer {
             backend: backend.clone(),
         })?;
         Ok(())
-    }
-
-    /// Registers a plugin that will receive callbacks across the sequencing pipeline.
-    pub fn register_plugin<P>(&mut self, plugin: P)
-    where
-        P: ZSpaceSequencerPlugin + 'static,
-    {
-        self.plugins.push(Arc::new(plugin));
-    }
-
-    /// Removes all registered plugins.
-    pub fn clear_plugins(&mut self) {
-        self.plugins.clear();
-    }
-
-    /// Returns the descriptive names of the registered plugins.
-    pub fn plugin_names(&self) -> Vec<&'static str> {
-        self.plugins.iter().map(|plugin| plugin.name()).collect()
     }
 
     /// Registers a plugin that will receive callbacks across the sequencing pipeline.
@@ -1233,6 +1245,8 @@ mod tests {
                     ZSpaceSequencerStage::SemanticDistributionDerived { .. } => {
                         "semantic_distribution"
                     }
+                    ZSpaceSequencerStage::CanonicalConceptSelected { .. } => "canonical_concept",
+                    ZSpaceSequencerStage::MaxwellBridgeEmitted { .. } => "maxwell_emitted",
                     ZSpaceSequencerStage::LinguisticContourEmitted { .. } => "linguistic_contour",
                     ZSpaceSequencerStage::ChannelsDescribed { .. } => "channels",
                     ZSpaceSequencerStage::SemanticWindowFused { .. } => "semantic_fused",
@@ -1272,14 +1286,19 @@ mod tests {
             .unwrap();
 
         let events = events.lock().unwrap();
-        assert_eq!(events.len(), 7);
+        assert!(events.len() == 8 || events.len() == 9);
         assert_eq!(events[0], "projected");
         assert_eq!(events[1], "coherence");
         assert_eq!(events[2], "aggregated");
         assert_eq!(events[3], "semantic_window");
         assert_eq!(events[4], "semantic_distribution");
-        assert_eq!(events[5], "semantic_fused");
-        assert_eq!(events[6], "language");
+        assert_eq!(events[5], "canonical_concept");
+        let remaining = &events[6..];
+        match remaining {
+            ["maxwell_emitted", "semantic_fused", "language"] => {}
+            ["semantic_fused", "language"] => {}
+            _ => panic!("unexpected plugin ordering: {:?}", remaining),
+        }
     }
 
     #[test]
