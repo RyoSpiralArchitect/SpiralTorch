@@ -167,15 +167,25 @@ fn convert_ratings(ratings: Vec<(usize, usize, f32)>) -> Vec<RatingTriple> {
 #[pymethods]
 impl PyRecommender {
     #[new]
-    #[pyo3(signature = (users, items, factors, learning_rate, regularization, curvature))]
+    #[pyo3(
+        signature = (
+            users,
+            items,
+            factors,
+            learning_rate = 0.05,
+            regularization = 0.002,
+            curvature = None
+        )
+    )]
     pub fn new(
         users: usize,
         items: usize,
         factors: usize,
         learning_rate: f32,
         regularization: f32,
-        curvature: f32,
+        curvature: Option<f32>,
     ) -> PyResult<Self> {
+        let curvature = curvature.unwrap_or(-1.0);
         let inner = SpiralRecommender::new(
             users,
             items,
