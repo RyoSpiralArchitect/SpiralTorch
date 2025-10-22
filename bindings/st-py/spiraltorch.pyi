@@ -442,6 +442,17 @@ class _NnDataLoaderIter(Iterable[Tuple[Tensor, Tensor]]):
 
     def __next__(self) -> Tuple[Tensor, Tensor]: ...
 
+class CoherenceDiagnostics:
+    channel_weights: List[float]
+    normalized_weights: List[float]
+    normalization: float
+    fractional_order: float
+    dominant_channel: int | None
+    mean_coherence: float
+    z_bias: float
+    energy_ratio: float
+    coherence_entropy: float
+
 
 class _ZSpaceCoherenceSequencer:
     def __init__(
@@ -456,6 +467,10 @@ class _ZSpaceCoherenceSequencer:
     def forward(self, x: Tensor) -> Tensor: ...
 
     def forward_with_coherence(self, x: Tensor) -> Tuple[Tensor, List[float]]: ...
+
+    def forward_with_diagnostics(
+        self, x: Tensor
+    ) -> Tuple[Tensor, List[float], CoherenceDiagnostics]: ...
 
     def project_to_zspace(self, x: Tensor) -> Tensor: ...
 
@@ -476,6 +491,7 @@ class _NnModule(ModuleType):
     Dataset: type[_NnDataset]
     DataLoader: type[_NnDataLoader]
     DataLoaderIter: type[_NnDataLoaderIter]
+    CoherenceDiagnostics: type[CoherenceDiagnostics]
     ZSpaceCoherenceSequencer: type[_ZSpaceCoherenceSequencer]
 
     def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...

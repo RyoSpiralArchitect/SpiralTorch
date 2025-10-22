@@ -67,5 +67,11 @@ ureq           = { version = "2.9", optional = true, default-features = true, fe
 [dev-dependencies]
 approx = "0.5"
 
+[build-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde_json = "1"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
