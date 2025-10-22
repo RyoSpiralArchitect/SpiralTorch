@@ -4,6 +4,8 @@ _(Still under active repair while expanding — API changes hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
+> 📜 **Licensing at a glance:** SpiralTorch is AGPL-3.0-or-later by default with a commercial option for proprietary deployments. [Read the full policy.](docs/licensing.md)
+
 **Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
 
 **Theory deep dive.** Start architecting Z-space kernels with the new [SpinoTensorVector derivation notes](docs/stv_z_space.md), covering determinant identities, kernel causality, and minimal-norm constructions ready for implementation.
@@ -49,9 +51,12 @@ sequenceDiagram
 
 > **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
 
-**License**
+**Licensing**
 
-AGPL-3.0-or-later © 2025 Ryo ∴ SpiralArchitect
+SpiralTorch ships under a dual-license model:
+
+- **Open-source:** [AGPL-3.0-or-later](docs/licensing.md#open-source-license-agpl-30-or-later) for community contributions and network-transparent deployments.
+- **Commercial:** Flexible subscriptions with priority support for teams that need to keep modifications private or run proprietary SaaS. [Explore tiers and contact details →](docs/licensing.md#commercial-license)
 
 
 <p align="center">
