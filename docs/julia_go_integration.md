@@ -19,6 +19,9 @@ reimplementing the runtime.
   element inspection, a safe data copy primitive, and arithmetic helpers that
   now include addition, subtraction, scaling, Hadamard products, transposition,
   reshaping, and matrix multiplication.
+- Surface the cooperative `GoldenRuntime` so foreign bindings can schedule
+  tensor ops on the same worker pool as Rust. Runtime-aware variants of the
+  arithmetic helpers and reshape/transpose now ship in the ABI.
 - Maintain a thread-safe error slot so foreign callers can surface rich error
   messages instead of opaque status codes.
 - Provide unit tests that cover the ABI round-trip to prevent regressions before
@@ -28,7 +31,10 @@ reimplementing the runtime.
 - The `SpiralTorch.jl` module loads `libspiraltorch_sys` via `ccall`, offers a
   garbage-collected `Tensor` wrapper, overloads `+`, `-`, `.*`, and `*` (matrix
   and scalar) and surfaces helpers for transposition, reshaping, and converting
-  between Julia matrices and SpiralTorch tensors.
+  between Julia matrices and SpiralTorch tensors. A matching `Runtime` type now
+  exposes `worker_count` plus runtime-backed `add`/`sub`/`matmul`/`hadamard`/
+  `scale`/`transpose`/`reshape` helpers so Julia code can hop onto the golden
+  scheduler without leaving high-level syntax.
 - Library discovery prefers the `SPIRALTORCH_SYS_LIBRARY` environment variable
   before falling back to bundled paths, making ad-hoc experimentation easy.
 - Future steps: wire ChainRules.jl gradient definitions once the autodiff tape
@@ -39,7 +45,9 @@ reimplementing the runtime.
 - The Go module links with cgo, wraps the tensor lifecycle behind idiomatic Go
   functions, exposes `Add`/`Sub`/`Scale`/`Hadamard`/`Matmul` as well as
   `Transpose` and `Reshape`, and provides an example program that prints tensor
-  contents and composite operations.
+  contents and composite operations. A new `Runtime` wrapper mirrors the golden
+  runtime APIs so Go callers can reuse the shared worker pool when chaining
+  operations.
 - Runtime errors convert into `error` values, embracing Go's standard control
   flow while reusing the shared error slot from `spiraltorch-sys`.
 - Future steps: model builders that mirror the Rust planner, goroutine-aware

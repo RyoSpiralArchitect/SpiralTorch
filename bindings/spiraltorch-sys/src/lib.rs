@@ -9,8 +9,9 @@
 //! binary interface.
 
 use once_cell::sync::Lazy;
+use st_core::runtime::golden::{GoldenRuntime, GoldenRuntimeConfig};
 use st_tensor::{PureResult, Tensor};
-use std::ffi::{c_char, CString};
+use std::ffi::{c_char, CStr, CString};
 use std::ptr;
 use std::slice;
 use std::sync::Mutex;
@@ -67,6 +68,18 @@ fn tensor_from_result_with_message(result: PureResult<Tensor>, context: &str) ->
             ptr::null_mut()
         }
     }
+}
+
+#[repr(C)]
+pub struct RuntimeHandle(GoldenRuntime);
+
+fn runtime_from_ptr<'a>(handle: *const RuntimeHandle, label: &str) -> Option<&'a GoldenRuntime> {
+    let handle = match require_non_null(handle, label) {
+        Ok(handle) => handle,
+        Err(_) => return None,
+    };
+    // SAFETY: pointer validated above.
+    Some(unsafe { &(*handle).0 })
 }
 
 fn tensor_from_data(rows: usize, cols: usize, data: &[f32]) -> PureResult<Tensor> {
@@ -290,6 +303,71 @@ fn tensor_unary_op(
     tensor_from_result_with_message(op(tensor), context)
 }
 
+fn runtime_spawn(
+    runtime: &GoldenRuntime,
+    context: &str,
+    task: impl FnOnce() -> PureResult<Tensor> + Send + 'static,
+) -> *mut Tensor {
+    match runtime.spawn_blocking::<_, PureResult<Tensor>>(task) {
+        Ok(handle) => match handle.join() {
+            Ok(result) => tensor_from_result_with_message(result, context),
+            Err(_) => {
+                set_last_error(format!("{context} task panicked"));
+                ptr::null_mut()
+            }
+        },
+        Err(err) => {
+            set_last_error(format!("{context}: {err}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+fn runtime_tensor_binary_op<F>(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    context: &str,
+    op: F,
+) -> *mut Tensor
+where
+    F: FnOnce(&Tensor, &Tensor) -> PureResult<Tensor> + Send + 'static,
+{
+    let runtime = match runtime_from_ptr(runtime, "runtime handle") {
+        Some(runtime) => runtime,
+        None => return ptr::null_mut(),
+    };
+    let left = match as_tensor(lhs, "lhs tensor") {
+        Some(tensor) => tensor.clone(),
+        None => return ptr::null_mut(),
+    };
+    let right = match as_tensor(rhs, "rhs tensor") {
+        Some(tensor) => tensor.clone(),
+        None => return ptr::null_mut(),
+    };
+    runtime_spawn(runtime, context, move || op(&left, &right))
+}
+
+fn runtime_tensor_unary_op<F>(
+    runtime: *const RuntimeHandle,
+    handle: *const Tensor,
+    context: &str,
+    op: F,
+) -> *mut Tensor
+where
+    F: FnOnce(&Tensor) -> PureResult<Tensor> + Send + 'static,
+{
+    let runtime = match runtime_from_ptr(runtime, "runtime handle") {
+        Some(runtime) => runtime,
+        None => return ptr::null_mut(),
+    };
+    let tensor = match as_tensor(handle, "tensor handle") {
+        Some(tensor) => tensor.clone(),
+        None => return ptr::null_mut(),
+    };
+    runtime_spawn(runtime, context, move || op(&tensor))
+}
+
 /// Element-wise tensor addition. Returns `NULL` on failure.
 #[no_mangle]
 pub extern "C" fn spiraltorch_tensor_add(lhs: *const Tensor, rhs: *const Tensor) -> *mut Tensor {
@@ -343,11 +421,144 @@ pub extern "C" fn spiraltorch_tensor_hadamard(
     tensor_binary_op(lhs, rhs, "tensor_hadamard", Tensor::hadamard)
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_runtime_new(
+    worker_threads: usize,
+    thread_name: *const c_char,
+) -> *mut RuntimeHandle {
+    let mut config = GoldenRuntimeConfig::default();
+    if worker_threads > 0 {
+        config.worker_threads = worker_threads;
+    }
+    if !thread_name.is_null() {
+        match CStr::from_ptr(thread_name).to_str() {
+            Ok(name) if name.is_empty() => {
+                config.thread_name = None;
+            }
+            Ok(name) => {
+                config.thread_name = Some(name.to_string());
+            }
+            Err(err) => {
+                set_last_error(format!(
+                    "runtime_new received invalid thread name utf-8: {err}"
+                ));
+                return ptr::null_mut();
+            }
+        }
+    }
+    match GoldenRuntime::new(config) {
+        Ok(runtime) => {
+            clear_last_error();
+            Box::into_raw(Box::new(RuntimeHandle(runtime)))
+        }
+        Err(err) => {
+            set_last_error(err.to_string());
+            ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_free(handle: *mut RuntimeHandle) {
+    if handle.is_null() {
+        return;
+    }
+    unsafe {
+        drop(Box::from_raw(handle));
+    }
+    clear_last_error();
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_worker_count(handle: *const RuntimeHandle) -> usize {
+    let runtime = match runtime_from_ptr(handle, "runtime handle") {
+        Some(runtime) => runtime,
+        None => return 0,
+    };
+    clear_last_error();
+    runtime.worker_count()
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_add(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+) -> *mut Tensor {
+    runtime_tensor_binary_op(runtime, lhs, rhs, "runtime_tensor_add", Tensor::add)
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_sub(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+) -> *mut Tensor {
+    runtime_tensor_binary_op(runtime, lhs, rhs, "runtime_tensor_sub", Tensor::sub)
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_scale(
+    runtime: *const RuntimeHandle,
+    handle: *const Tensor,
+    value: f32,
+) -> *mut Tensor {
+    runtime_tensor_unary_op(runtime, handle, "runtime_tensor_scale", move |tensor| {
+        tensor.scale(value)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_transpose(
+    runtime: *const RuntimeHandle,
+    handle: *const Tensor,
+) -> *mut Tensor {
+    runtime_tensor_unary_op(runtime, handle, "runtime_tensor_transpose", |tensor| {
+        Ok(tensor.transpose())
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_reshape(
+    runtime: *const RuntimeHandle,
+    handle: *const Tensor,
+    rows: usize,
+    cols: usize,
+) -> *mut Tensor {
+    runtime_tensor_unary_op(runtime, handle, "runtime_tensor_reshape", move |tensor| {
+        tensor.reshape(rows, cols)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_matmul(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+) -> *mut Tensor {
+    runtime_tensor_binary_op(runtime, lhs, rhs, "runtime_tensor_matmul", Tensor::matmul)
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_hadamard(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+) -> *mut Tensor {
+    runtime_tensor_binary_op(
+        runtime,
+        lhs,
+        rhs,
+        "runtime_tensor_hadamard",
+        Tensor::hadamard,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use libc::c_char;
-    use std::ffi::CStr;
+    use std::ffi::{CStr, CString};
 
     #[test]
     fn version_roundtrip() {
@@ -520,5 +731,38 @@ mod tests {
         spiraltorch_tensor_free(reshaped);
         spiraltorch_tensor_free(transposed);
         spiraltorch_tensor_free(handle);
+    }
+
+    #[test]
+    fn runtime_accelerates_matmul() {
+        let thread_name = CString::new("ffi-golden").expect("thread name");
+        let runtime = unsafe { spiraltorch_runtime_new(2, thread_name.as_ptr()) };
+        assert!(!runtime.is_null());
+
+        let workers = spiraltorch_runtime_worker_count(runtime);
+        assert!(workers >= 1);
+
+        let left_data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let right_data = vec![5.0_f32, 6.0, 7.0, 8.0];
+        let left =
+            unsafe { spiraltorch_tensor_from_dense(2, 2, left_data.as_ptr(), left_data.len()) };
+        let right =
+            unsafe { spiraltorch_tensor_from_dense(2, 2, right_data.as_ptr(), right_data.len()) };
+        assert!(!left.is_null());
+        assert!(!right.is_null());
+
+        let product = spiraltorch_runtime_tensor_matmul(runtime, left, right);
+        assert!(!product.is_null());
+
+        let mut buffer = vec![0.0_f32; 4];
+        let copied =
+            unsafe { spiraltorch_tensor_copy_data(product, buffer.as_mut_ptr(), buffer.len()) };
+        assert!(copied);
+        assert_eq!(buffer, vec![19.0, 22.0, 43.0, 50.0]);
+
+        spiraltorch_tensor_free(product);
+        spiraltorch_tensor_free(right);
+        spiraltorch_tensor_free(left);
+        spiraltorch_runtime_free(runtime);
     }
 }

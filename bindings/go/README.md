@@ -23,7 +23,8 @@ go run ./examples/tensor_dump
 
 The sample demonstrates element-wise arithmetic, Hadamard products, matrix
 multiplication, transposition, and reshaping using the high-level helpers
-exposed by the `Tensor` type.
+exposed by the `Tensor` type. It also spins up the shared `GoldenRuntime` to
+dispatch a `Matmul` on the same worker threads that power the Rust core.
 
 ### Custom linker flags
 
@@ -48,3 +49,7 @@ control flow instead of manual error string inspection.
 - `Data` copies tensor contents into Go slices for inspection or interop.
 - `Transpose` and `Reshape` provide lightweight access to shape manipulation
   without manually flattening and rebuilding tensors.
+- `NewRuntime` constructs the cooperative golden runtime so long-running
+  programs can reuse the same worker threads as the Rust API. Methods such as
+  `Runtime.Matmul`, `Runtime.Add`, and `Runtime.Hadamard` mirror the tensor
+  helpers while scheduling the work on the runtime.

@@ -2629,7 +2629,7 @@ dependencies = [
 
 [[package]]
 name = "spiraltorch-py"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "ndarray",
  "num-complex",
@@ -2657,6 +2657,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "once_cell",
+ "st-core",
  "st-tensor",
 ]
 
