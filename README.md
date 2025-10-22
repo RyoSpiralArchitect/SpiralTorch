@@ -59,7 +59,6 @@ SpiralTorch ships under a dual-license model:
 - **Open-source:** [AGPL-3.0-or-later](docs/licensing.md#open-source-license-agpl-30-or-later) for community contributions and network-transparent deployments.
 - **Commercial:** Flexible subscriptions with priority support for teams that need to keep modifications private or run proprietary SaaS. [Explore tiers and contact details →](docs/licensing.md#commercial-license)
 
-
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
   <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
@@ -767,6 +766,11 @@ while `InterfaceZConductor` drives any number of gauges, aggregates the
 resulting pulses, and hands back a `ZFused` packet with attribution weights and
 event tags alongside the smoothed `SoftlogicZFeedback` record so runtime loops
 can see which layer dominated the decision.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L515】【F:crates/st-core/src/theory/zpulse.rs†L22-L344】
+`MicrolocalGaugeBank` turns that loose collection into a pluggable registry.
+It stores named `InterfaceGauge`s, offers builder-style helpers to register or
+remove probes, runs batch analysis keyed by id, and hands the resulting lineup
+directly to the conductor so runtime code can swap probe sets without rewriting
+fusion logic.【F:crates/st-core/src/theory/microlocal.rs†L100-L220】【F:crates/st-core/src/theory/microlocal.rs†L819-L875】
 
 The conductor can now blend the pulses in both time and frequency: `set_frequency_config`
 installs a power-of-two FFT window and per-source spectral gains so high-frequency
