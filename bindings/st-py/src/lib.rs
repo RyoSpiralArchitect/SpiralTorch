@@ -11,13 +11,13 @@ mod rec;
 mod telemetry;
 mod pure;
 mod planner;
+mod spiralk;
 mod frac;
 mod selfsup;
 mod export;
 mod inference;
 mod hpo;
 mod trainer;
-mod spiralk;
 
 mod extras {
     use super::*;
@@ -188,6 +188,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
         "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
+        "spiralk",
         "nn","frac","selfsup","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
         "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",
         "LinearModel","ModuleTrainer","mean_squared_error",
