@@ -49,7 +49,7 @@ _RENAMED_EXPORTS: dict[str, str] = {
 
 
 def _safe_getattr(obj: _Any, name: str, default: _Any = None) -> _Any:
-    if obj is None:
+    if obj is None or not name:
         return default
     try:
         return getattr(obj, name)
@@ -60,22 +60,12 @@ def _safe_getattr(obj: _Any, name: str, default: _Any = None) -> _Any:
 def _resolve_rs_attr(candidate: str) -> _Any | None:
     if not candidate:
         return None
-    if "." in candidate:
-        module_name, attr_name = candidate.rsplit(".", 1)
-        module = sys.modules.get(f"{__name__}.{module_name}")
-        if module is None:
-            module = globals().get(module_name)
-        if isinstance(module, _ForwardingModule):
-            return module.__dict__.get(attr_name)
-        if isinstance(module, _types.ModuleType):
-            try:
-                return getattr(module, attr_name)
-            except AttributeError:
-                return None
-        return None
-    if _rs is None:
-        return None
-    return _safe_getattr(_rs, candidate)
+    target: _Any = _rs
+    for part in candidate.split("."):
+        target = _safe_getattr(target, part, None)
+        if target is None:
+            return None
+    return target
 
 
 _parent_module = sys.modules[__name__]
@@ -142,9 +132,9 @@ _EXTRAS = [
     "describe_device","hip_probe","z_space_barycenter",
 ]
 for _n in _EXTRAS:
-    value = _safe_getattr(_rs, _n)
-    if value is not None:
-        globals()[_n] = value
+    _value = _safe_getattr(_rs, _n, None)
+    if _value is not None:
+        globals()[_n] = _value
 
 # 後方互換の別名（存在する方を公開名にバインド）
 _COMPAT_ALIAS = {
@@ -155,9 +145,9 @@ _COMPAT_ALIAS = {
 }
 for _pub, _cands in _COMPAT_ALIAS.items():
     for _c in _cands:
-        value = _safe_getattr(_rs, _c)
-        if value is not None:
-            globals()[_pub] = value
+        _value = _safe_getattr(_rs, _c, None)
+        if _value is not None:
+            globals()[_pub] = _value
             break
 
 _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
@@ -1078,7 +1068,7 @@ def _register_module_export(module: _types.ModuleType, name: str) -> None:
 
 
 def _ensure_submodule(name: str, doc: str = "") -> _types.ModuleType:
-    """Return an existing or synthetic child module (supports dotted paths)."""
+    """Return or create a synthetic child module without touching the native core."""
 
     parts = name.split(".")
     fq = __name__
@@ -1089,14 +1079,8 @@ def _ensure_submodule(name: str, doc: str = "") -> _types.ModuleType:
         final = idx == len(parts) - 1
         doc_for_part = doc if final else ""
         if module is None:
-            candidate = getattr(parent, part, None)
-            if isinstance(candidate, _types.ModuleType):
-                module = candidate
-                if doc_for_part and not getattr(module, "__doc__", None):
-                    module.__doc__ = doc_for_part
-            else:
-                key = ".".join(parts[: idx + 1])
-                module = _ForwardingModule(fq, doc_for_part, key)
+            key = ".".join(parts[: idx + 1])
+            module = _ForwardingModule(fq, doc_for_part, key)
             sys.modules[fq] = module
         elif doc_for_part and not getattr(module, "__doc__", None):
             module.__doc__ = doc_for_part
@@ -1138,7 +1122,7 @@ def _mirror_into_module(
                 value = globals()[member]
             if value is None:
                 for candidate in (member, *aliases):
-                    value = _safe_getattr(_rs, candidate)
+                    value = _safe_getattr(_rs, candidate, None)
                     if value is not None:
                         break
         if value is None:
@@ -1223,10 +1207,10 @@ _mirror_into_module(
 )
 _mirror_into_module(
     "frac",
-    [
-        "gl_coeffs_adaptive",
-        "fracdiff_gl_1d",
-    ],
+    {
+        "gl_coeffs_adaptive": ("frac.gl_coeffs_adaptive",),
+        "fracdiff_gl_1d": ("frac.fracdiff_gl_1d",),
+    },
 )
 _mirror_into_module(
     "spiral_rl",
@@ -1413,7 +1397,8 @@ _EXPORTED = {
     "__version__",
 }
 _EXPORTED.update(
-    n for n in _safe_getattr(_rs, "__all__", ())
+    n
+    for n in _safe_getattr(_rs, "__all__", ())
     if isinstance(n, str) and not n.startswith("_")
 )
 __all__ = sorted(_EXPORTED)

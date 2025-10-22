@@ -1,0 +1,160 @@
+:root {
+  color-scheme: dark light;
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  background-color: #0d101b;
+  color: #eef1ff;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  background: radial-gradient(circle at 10% 20%, #101736, #070a16 55%);
+}
+
+main.app {
+  display: grid;
+  grid-template-columns: minmax(26rem, 1fr) minmax(26rem, 1fr);
+  gap: 1.5rem;
+  padding: 2.5rem 3rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1080px) {
+  main.app {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pane {
+  background: rgba(20, 24, 44, 0.72);
+  border-radius: 18px;
+  padding: 1.75rem;
+  box-shadow: 0 18px 45px rgba(2, 6, 28, 0.45);
+  border: 1px solid rgba(90, 110, 200, 0.18);
+}
+
+.pane header h1,
+.pane header h2 {
+  margin: 0 0 0.35rem;
+  font-weight: 700;
+}
+
+.pane header .subtitle {
+  margin: 0;
+  color: rgba(208, 214, 255, 0.7);
+  font-size: 0.95rem;
+}
+
+form fieldset {
+  border: 1px solid rgba(88, 98, 148, 0.6);
+  border-radius: 14px;
+  margin: 0 0 1.2rem;
+  padding: 1rem 1.2rem 1.3rem;
+  background: rgba(14, 18, 38, 0.6);
+}
+
+form legend {
+  padding: 0 0.4rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.92rem;
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+}
+
+input,
+textarea {
+  border-radius: 12px;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(108, 122, 190, 0.4);
+  background: rgba(14, 18, 36, 0.65);
+  color: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(139, 148, 235, 0.85);
+  box-shadow: 0 0 0 3px rgba(80, 104, 198, 0.35);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 6rem;
+}
+
+.inline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+}
+
+.actions {
+  margin-top: 0.5rem;
+}
+
+button {
+  border: none;
+  cursor: pointer;
+  border-radius: 999px;
+  padding: 0.65rem 1.4rem;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+  background: linear-gradient(135deg, #2d3ef5, #6f7dff);
+  color: #f4f6ff;
+  font-weight: 600;
+}
+
+button.primary {
+  background: linear-gradient(135deg, #44bdf6, #6f4dff);
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px rgba(48, 68, 180, 0.35);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.output article {
+  margin-bottom: 1.25rem;
+}
+
+.code {
+  background: rgba(8, 12, 26, 0.8);
+  border-radius: 12px;
+  border: 1px solid rgba(72, 88, 168, 0.35);
+  padding: 0.9rem 1.1rem;
+  overflow: auto;
+  font-family: "JetBrains Mono", "Fira Code", "SFMono-Regular", Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  max-height: 16rem;
+}
+
+#status {
+  color: rgba(138, 200, 255, 0.88);
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+#payload-bytes {
+  font-weight: 600;
+}
