@@ -36,6 +36,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("dataset", "Datasets & loaders"),
     ("linalg", "Linear algebra utilities"),
     ("planner", "Planning & device heuristics"),
+    ("spiralk", "SpiralK DSL & hint bridges"),
     ("spiral_rl", "Reinforcement learning components"),
     ("rec", "Reconstruction / signal processing"),
     ("telemetry", "Telemetry / dashboards / metrics"),
@@ -190,6 +191,17 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "describe_device": (),
         "hip_probe": (),
         "generate_plan_batch_ex": (),
+    },
+    "spiralk": {
+        "FftPlan": (),
+        "MaxwellBridge": (),
+        "MaxwellHint": (),
+        "MaxwellFingerprint": (),
+        "MeaningGate": (),
+        "SequentialZ": (),
+        "MaxwellPulse": (),
+        "MaxwellProjector": (),
+        "required_blocks": (),
     },
     "compat.torch": {
         "to_torch": ("compat_to_torch", "to_torch"),
@@ -1335,6 +1347,24 @@ _mirror_into_module(
 
 
 _mirror_into_module(
+    "spiralk",
+    {
+        "SpiralKFftPlan": (),
+        "MaxwellSpiralKBridge": (),
+        "MaxwellSpiralKHint": (),
+        "SpiralKContext": (),
+        "SpiralKWilsonMetrics": (),
+        "SpiralKHeuristicHint": (),
+        "wilson_lower_bound": (),
+        "should_rewrite": (),
+        "synthesize_program": (),
+        "rewrite_with_wilson": (),
+    },
+    reexport=False,
+)
+
+
+_mirror_into_module(
     "planner",
     {
         "RankPlan": (),
@@ -1343,6 +1373,18 @@ _mirror_into_module(
         "describe_device": (),
         "hip_probe": (),
         "generate_plan_batch_ex": (),
+    },
+    reexport=False,
+)
+
+
+_mirror_into_module(
+    "spiralk",
+    {
+        "FftPlan": (),
+        "MaxwellBridge": (),
+        "MaxwellHint": (),
+        "required_blocks": (),
     },
     reexport=False,
 )
@@ -1438,7 +1480,7 @@ _EXPORTED = {
     *[n for n in _COMPAT_ALIAS if n in globals()],
     "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
     "selfsup","export","compat","hpo","inference","zspace","vision","canvas",
-    "planner",
+    "planner","spiralk",
     "__version__",
 }
 _EXPORTED.update(

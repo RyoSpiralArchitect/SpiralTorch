@@ -11,6 +11,7 @@ mod rec;
 mod telemetry;
 mod pure;
 mod planner;
+mod spiralk;
 mod frac;
 mod selfsup;
 mod export;
@@ -149,6 +150,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     compat::register(py, m)?;
     pure::register(py, m)?;
     planner::register(py, m)?;
+    spiralk::register(py, m)?;
     hpo::register(py, m)?;
     inference::register(py, m)?;
     frac::register(py, m)?;
@@ -186,6 +188,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
         "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
+        "spiralk",
         "nn","frac","selfsup","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
         "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",
         "LinearModel","ModuleTrainer","mean_squared_error",
@@ -193,6 +196,9 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",
         "gl_coeffs_adaptive","fracdiff_gl_1d",
+        "SpiralKFftPlan","MaxwellSpiralKBridge","MaxwellSpiralKHint",
+        "SpiralKContext","SpiralKWilsonMetrics","SpiralKHeuristicHint",
+        "wilson_lower_bound","should_rewrite","synthesize_program","rewrite_with_wilson",
     ])?;
     Ok(())
 }

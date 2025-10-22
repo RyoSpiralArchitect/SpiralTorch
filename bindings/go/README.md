@@ -46,6 +46,10 @@ control flow instead of manual error string inspection.
   originals.
 - `Matmul` executes matrix multiplication (`lhs @ rhs`) using the same backend
   selection heuristics as the Rust runtime.
+- `NewTensorFromMatrix` converts a rectangular `[][]float32` into a tensor without manual flattening.
+- `NewTensorFromColumns` accepts column-major data and converts it into a tensor while handling rectangular validation for you.
+- `Tensor.ToMatrix` materialises tensor contents back into an owned `[][]float32` view.
+- `Tensor.Columns`, `Tensor.Column`, and `Tensor.Row` expose convenient accessors for copying columnar or row slices.
 - `Data` copies tensor contents into Go slices for inspection or interop.
 - `Transpose` and `Reshape` provide lightweight access to shape manipulation
   without manually flattening and rebuilding tensors.

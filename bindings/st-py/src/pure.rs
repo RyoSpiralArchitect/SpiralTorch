@@ -225,9 +225,40 @@ pub(crate) struct PyHypergrad {
 #[pymethods]
 impl PyHypergrad {
     #[new]
-    pub fn new(curvature: f32, learning_rate: f32, rows: usize, cols: usize) -> PyResult<Self> {
+    #[pyo3(signature = (curvature, learning_rate, rows, cols, topos=None))]
+    pub fn new(
+        curvature: f32,
+        learning_rate: f32,
+        rows: usize,
+        cols: usize,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<Self> {
+        let inner = match topos {
+            Some(guard) => AmegaHypergrad::with_topos(
+                curvature,
+                learning_rate,
+                rows,
+                cols,
+                guard.inner.clone(),
+            ),
+            None => AmegaHypergrad::new(curvature, learning_rate, rows, cols),
+        }
+        .map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (curvature, learning_rate, rows, cols, topos))]
+    pub fn with_topos(
+        curvature: f32,
+        learning_rate: f32,
+        rows: usize,
+        cols: usize,
+        topos: &PyOpenCartesianTopos,
+    ) -> PyResult<Self> {
         let inner =
-            AmegaHypergrad::new(curvature, learning_rate, rows, cols).map_err(tensor_err_to_py)?;
+            AmegaHypergrad::with_topos(curvature, learning_rate, rows, cols, topos.inner.clone())
+                .map_err(tensor_err_to_py)?;
         Ok(Self { inner })
     }
 
@@ -295,8 +326,37 @@ impl PyHypergrad {
             .map_err(tensor_err_to_py)
     }
 
+    pub fn accumulate_barycenter_path(
+        &mut self,
+        intermediates: Vec<PyBarycenterIntermediate>,
+    ) -> PyResult<()> {
+        let stages: Vec<BarycenterIntermediate> =
+            intermediates.into_iter().map(|stage| stage.inner).collect();
+        self.inner
+            .accumulate_barycenter_path(&stages)
+            .map_err(tensor_err_to_py)
+    }
+
     pub fn topos(&self) -> PyOpenCartesianTopos {
         PyOpenCartesianTopos::from_topos(self.inner.topos().clone())
+    }
+
+    pub fn accumulate_barycenter_path(
+        &mut self,
+        intermediates: Vec<PyBarycenterIntermediate>,
+    ) -> PyResult<()> {
+        if intermediates.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "barycenter intermediates cannot be empty",
+            ));
+        }
+        let stages: Vec<_> = intermediates
+            .into_iter()
+            .map(|stage| stage.inner.clone())
+            .collect();
+        self.inner
+            .accumulate_barycenter_path(&stages)
+            .map_err(tensor_err_to_py)
     }
 }
 
