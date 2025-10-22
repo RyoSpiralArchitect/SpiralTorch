@@ -97,6 +97,9 @@ reintroduce microlocal calibration later if needed.
   fused `MacroDrive` carrying the projected `InterfaceZPulse`, curvature bundle,
   and predicted normal velocity so Z-space conductors can steer macro evolution
   using the template’s kinetics.【F:crates/st-core/src/theory/macro.rs†L870-L963】
+- `MacroTemplateBank` keeps the cards pluggable: register templates or cards by
+  id, then call `couple_all` with an `InterfaceZLift` to produce a bridge bank
+  aligned with the microlocal gauges currently active in the conductor.【F:crates/st-core/src/theory/macro.rs†L680-L812】
 - `MacroDrive::sharp_interface_ok` reuses the dimensionless dashboard to ensure
   the detected interface still respects the sharp-interface regime before the
   signal is injected back into SpiralFlow.【F:crates/st-core/src/theory/macro.rs†L977-L980】

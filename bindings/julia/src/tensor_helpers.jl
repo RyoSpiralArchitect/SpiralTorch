@@ -105,3 +105,27 @@ function tensor_vector(tensor::Tensor)
     return Vector{Float32}(reshape(array, :))
 end
 
+"""
+    tensor_row(tensor, index)
+
+Return a copy of the selected row as a `Vector{Float32}`. Indices are
+1-based, matching Julia's matrix semantics.
+"""
+function tensor_row(tensor::Tensor, index::Integer)
+    data = to_array(tensor)
+    checkbounds(data, index, :)
+    return Vector{Float32}(data[index, :])
+end
+
+"""
+    tensor_column(tensor, index)
+
+Return a copy of the selected column as a `Vector{Float32}`. The result is
+independent of the tensor and can be mutated.
+"""
+function tensor_column(tensor::Tensor, index::Integer)
+    data = to_array(tensor)
+    checkbounds(data, :, index)
+    return Vector{Float32}(data[:, index])
+end
+

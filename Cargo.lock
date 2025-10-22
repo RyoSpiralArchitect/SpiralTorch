@@ -2743,7 +2743,7 @@ dependencies = [
 
 [[package]]
 name = "spiraltorch-py"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ndarray",
  "num-complex",
@@ -2858,6 +2858,7 @@ dependencies = [
  "julia-ffi-poc",
  "nalgebra 0.32.6",
  "ndarray",
+ "num-complex",
  "once_cell",
  "opentelemetry",
  "pollster",

@@ -247,21 +247,6 @@ impl PyHypergrad {
         Ok(Self { inner })
     }
 
-    #[staticmethod]
-    #[pyo3(signature = (curvature, learning_rate, rows, cols, topos))]
-    pub fn with_topos(
-        curvature: f32,
-        learning_rate: f32,
-        rows: usize,
-        cols: usize,
-        topos: &PyOpenCartesianTopos,
-    ) -> PyResult<Self> {
-        let inner =
-            AmegaHypergrad::with_topos(curvature, learning_rate, rows, cols, topos.inner.clone())
-                .map_err(tensor_err_to_py)?;
-        Ok(Self { inner })
-    }
-
     pub fn curvature(&self) -> f32 {
         self.inner.curvature()
     }
