@@ -325,6 +325,24 @@ impl PyHypergrad {
     pub fn topos(&self) -> PyOpenCartesianTopos {
         PyOpenCartesianTopos::from_topos(self.inner.topos().clone())
     }
+
+    pub fn accumulate_barycenter_path(
+        &mut self,
+        intermediates: Vec<PyBarycenterIntermediate>,
+    ) -> PyResult<()> {
+        if intermediates.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "barycenter intermediates cannot be empty",
+            ));
+        }
+        let stages: Vec<_> = intermediates
+            .into_iter()
+            .map(|stage| stage.inner.clone())
+            .collect();
+        self.inner
+            .accumulate_barycenter_path(&stages)
+            .map_err(tensor_err_to_py)
+    }
 }
 
 #[pyclass(module = "spiraltorch", name = "TensorBiome", unsendable)]

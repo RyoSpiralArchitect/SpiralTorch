@@ -59,7 +59,6 @@ SpiralTorch ships under a dual-license model:
 - **Open-source:** [AGPL-3.0-or-later](docs/licensing.md#open-source-license-agpl-30-or-later) for community contributions and network-transparent deployments.
 - **Commercial:** Flexible subscriptions with priority support for teams that need to keep modifications private or run proprietary SaaS. [Explore tiers and contact details →](docs/licensing.md#commercial-license)
 
-
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-first-orange.svg" alt="Rust first">
   <img src="https://img.shields.io/badge/WGPU-supported-blueviolet.svg" alt="WGPU supported">
@@ -219,27 +218,6 @@ maturin build -m bindings/st-py/Cargo.toml --release --features hip
 # Install the wheel you just built
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 ```
-
----
-
-## What’s New in 0.1.6
-
-- **Stable Python façade**  
-  Missing attributes defer to the Rust extension at runtime → 新しい Rust 側の公開が Python に即時反映。
-- **Planner & device utilities**  
-  `plan`, `plan_topk`, `RankPlan.*`, `describe_device`, `hip_probe`.
-- **Self-supervised helpers**  
-  `selfsup.info_nce(...)`, `selfsup.masked_mse(...)`.
-- **Z-space trainer kit**  
-  `ZSpaceTrainer`, `ZMetrics`, `step_many`
-- **Vision/Canvas micro-orchestrators**  
-  `SpiralTorchVision`, `TemporalResonanceBuffer`, `CanvasTransformer`.
-- **Lightweight NN data utils**  
-  `nn.Dataset` / `nn.DataLoader`.
-- **RL name**  
-  **`stAgent`**。`PpoAgent`, `SacAgent` 
-- **Interop bridges**  
-  `compat.torch/jax/tensorflow` 
 
 ---
 
@@ -466,7 +444,6 @@ A: The type stubs (`spiraltorch.pyi`) reflect the **supported** surface. New Rus
 ## Planning the Ecosystem
 
 - Explore the [Ecosystem Roadmap](docs/ecosystem_roadmap.md) for high-level priorities around documentation, samples, and community building.
-- Study the [Compatibility Strategy](docs/compatibility_strategy.md) to plan incremental migrations from PyTorch/TensorFlow stacks.
 - Review the [Backend Feature Matrix](docs/backend_matrix.md) when validating device support or filing bugs that touch accelerators.
 - **Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
 
@@ -767,6 +744,15 @@ while `InterfaceZConductor` drives any number of gauges, aggregates the
 resulting pulses, and hands back a `ZFused` packet with attribution weights and
 event tags alongside the smoothed `SoftlogicZFeedback` record so runtime loops
 can see which layer dominated the decision.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L515】【F:crates/st-core/src/theory/zpulse.rs†L22-L344】
+`MicrolocalGaugeBank` turns that loose collection into a pluggable registry.
+It stores named `InterfaceGauge`s, offers builder-style helpers to register or
+remove probes, runs batch analysis keyed by id, and hands the resulting lineup
+directly to the conductor so runtime code can swap probe sets without rewriting
+fusion logic.【F:crates/st-core/src/theory/microlocal.rs†L100-L220】【F:crates/st-core/src/theory/microlocal.rs†L819-L875】
+`MacroTemplateBank` mirrors that registry pattern for macro-scale designs: it
+keeps named `MacroModelTemplate`s, accepts cards directly, and couples the whole
+lineup to an `InterfaceZLift` to emit a bridge bank so macro kinetics can travel
+with whatever microlocal gauges are currently wired into the conductor.【F:crates/st-core/src/theory/macro.rs†L680-L812】
 
 The conductor can now blend the pulses in both time and frequency: `set_frequency_config`
 installs a power-of-two FFT window and per-source spectral gains so high-frequency
@@ -2077,6 +2063,68 @@ print(f"z-bias: {diagnostics.z_bias():.3f}")
 ```
 
 [See example](examples/05_new_layers/zspace_coherence_demo.py)
+
+### Plugin Architecture
+
+`ZSpaceCoherenceSequencer` now exposes a lightweight plugin system so other
+subsystems can tap into each stage of the pipeline without forking the core
+implementation. Plugins are notified when tensors move through projection,
+coherence measurement, geometric aggregation, semantic window derivation,
+distribution fusion, and language bridging. They also receive callbacks when
+backends or linguistic profiles change, when contours/reports are emitted, and
+when PSI telemetry is published (with the `psi` feature).
+
+Key stages:
+
+- `Projected`, `CoherenceMeasured`, `Aggregated`
+- `SemanticWindowDerived`, `SemanticDistributionDerived`, `SemanticWindowFused`
+- `LanguageBridged`
+- `BackendConfigured`, `LinguisticProfileRegistered`, `LinguisticProfilesCleared`
+- `LinguisticContourEmitted`, `ChannelsDescribed`
+- `PsiTelemetryPublished` *(when compiled with `psi`)*
+
+Implement the `ZSpaceSequencerPlugin` trait and register it on a sequencer to
+receive callbacks:
+
+```rust
+use st_nn::{
+    zspace_coherence::{
+        CoherenceBackend, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
+    },
+    OpenCartesianTopos, PureResult, Tensor,
+};
+
+struct TelemetryPlugin;
+
+impl ZSpaceSequencerPlugin for TelemetryPlugin {
+    fn name(&self) -> &'static str { "telemetry" }
+
+    fn on_stage(&self, stage: ZSpaceSequencerStage<'_>) -> PureResult<()> {
+        match stage {
+            ZSpaceSequencerStage::Aggregated { diagnostics, .. } => {
+                println!("entropy: {:.2}", diagnostics.coherence_entropy());
+            }
+            ZSpaceSequencerStage::SemanticWindowDerived { window, .. } => {
+                println!("window tokens: {}", window.len());
+            }
+            ZSpaceSequencerStage::BackendConfigured { backend } => {
+                println!("backend -> {}", backend.label());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+fn main() -> PureResult<()> {
+    let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192)?;
+    let mut sequencer = ZSpaceCoherenceSequencer::new(768, 12, -1.0, topos)?;
+    sequencer.register_plugin(TelemetryPlugin);
+    sequencer.set_backend(CoherenceBackend::Fftw)?;
+    let (_out, _, _) = sequencer.forward_with_diagnostics(&Tensor::zeros(1, 768)?);
+    Ok(())
+}
+```
 
 ### Why Not Attention?
 

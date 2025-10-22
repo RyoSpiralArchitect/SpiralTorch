@@ -10,4 +10,6 @@ pub use coherence_engine::{
     BackendCapabilities, CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile,
     LinguisticChannelReport, LinguisticContour,
 };
-pub use sequencer::{CoherenceDiagnostics, ZSpaceCoherenceSequencer};
+pub use sequencer::{
+    CoherenceDiagnostics, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
+};
