@@ -26,7 +26,7 @@
 use super::chrono::{ChronoHarmonics, ChronoSummary};
 use super::maintainer::MaintainerStatus;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// Conceptual framing attached to atlas fragments so downstream consumers can
 /// keep philosophical language—especially around qualia—in the declared scope.
@@ -99,7 +99,7 @@ impl ConceptAnnotation {
     /// Creates a bare annotation for the provided term and sense.
     pub fn new(term: impl Into<String>, sense: ConceptSense) -> Self {
         Self {
-            term: term.into(),
+            term: normalise_text(term),
             sense,
             rationale: None,
         }
@@ -111,12 +111,34 @@ impl ConceptAnnotation {
         sense: ConceptSense,
         rationale: impl Into<String>,
     ) -> Self {
+        let rationale = normalise_optional_text(Some(rationale.into()));
         Self {
-            term: term.into(),
+            term: normalise_text(term),
             sense,
-            rationale: Some(rationale.into()),
+            rationale,
         }
     }
+}
+
+fn normalise_text(input: impl Into<String>) -> String {
+    let text = input.into();
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn normalise_optional_text(input: Option<String>) -> Option<String> {
+    input.and_then(|text| {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }
 
 /// Named scalar surfaced through the atlas projection.
@@ -245,7 +267,11 @@ impl AtlasFragment {
 
     /// Appends a note to the fragment provenance trail.
     pub fn push_note(&mut self, note: impl Into<String>) {
-        self.notes.push(note.into());
+        if let Some(note) = normalise_optional_text(Some(note.into())) {
+            if !note.is_empty() {
+                self.notes.push(note);
+            }
+        }
     }
 
     /// Appends a conceptual annotation to the fragment.
@@ -366,16 +392,20 @@ impl AtlasFrame {
             }
         }
         if let Some(script) = fragment.script_hint {
-            if !script.is_empty() {
-                self.script_hint = Some(script);
+            if let Some(script) = normalise_optional_text(Some(script)) {
+                if !script.is_empty() {
+                    self.script_hint = Some(script);
+                }
             }
         }
         if let Some(status) = fragment.maintainer_status {
             self.maintainer_status = Some(status);
         }
         if let Some(diagnostic) = fragment.maintainer_diagnostic {
-            if !diagnostic.is_empty() {
-                self.maintainer_diagnostic = Some(diagnostic);
+            if let Some(diagnostic) = normalise_optional_text(Some(diagnostic)) {
+                if !diagnostic.is_empty() {
+                    self.maintainer_diagnostic = Some(diagnostic);
+                }
             }
         }
         if let Some(clamp) = fragment.suggested_max_scale {
@@ -388,12 +418,33 @@ impl AtlasFrame {
                 self.suggested_pressure = Some(pressure);
             }
         }
-        self.metrics.extend(fragment.metrics);
-        self.notes.extend(fragment.notes);
-        self.concepts.extend(fragment.concepts);
+        merge_metrics(&mut self.metrics, fragment.metrics);
+        merge_notes(&mut self.notes, fragment.notes);
+        merge_concepts(&mut self.concepts, fragment.concepts);
         if self.timestamp <= 0.0 {
             self.timestamp = f32::EPSILON;
         }
+    }
+
+    /// Retrieves the metric matching the provided identifier, if present.
+    pub fn metric(&self, name: &str) -> Option<&AtlasMetric> {
+        self.metrics.iter().find(|metric| metric.name == name)
+    }
+
+    /// Retrieves the latest scalar value for a metric identifier, if present.
+    pub fn metric_value(&self, name: &str) -> Option<f32> {
+        self.metric(name).map(|metric| metric.value)
+    }
+
+    /// Returns metrics whose identifiers share the provided prefix sorted by name.
+    pub fn metrics_with_prefix(&self, prefix: &str) -> Vec<&AtlasMetric> {
+        let mut metrics: Vec<&AtlasMetric> = self
+            .metrics
+            .iter()
+            .filter(|metric| metric.name.starts_with(prefix))
+            .collect();
+        metrics.sort_by(|a, b| a.name.cmp(&b.name));
+        metrics
     }
 
     /// Groups metrics into named districts following the SpiralTorch atlas map.
@@ -414,6 +465,127 @@ impl AtlasFrame {
             .map(|(name, metrics)| AtlasDistrict::from_metrics(name, metrics))
             .filter(|district| !district.metrics.is_empty())
             .collect()
+    }
+}
+
+fn merge_metrics(dest: &mut Vec<AtlasMetric>, incoming: Vec<AtlasMetric>) {
+    if incoming.is_empty() {
+        return;
+    }
+    let mut index: BTreeMap<(String, Option<String>), usize> = dest
+        .iter()
+        .enumerate()
+        .map(|(idx, metric)| ((metric.name.clone(), metric.district.clone()), idx))
+        .collect();
+    for mut metric in incoming {
+        if !metric.value.is_finite() {
+            continue;
+        }
+        metric.name = normalise_text(metric.name);
+        if metric.name.is_empty() {
+            continue;
+        }
+        metric.district = metric.district.map(|district| normalise_text(district));
+        let key = (metric.name.clone(), metric.district.clone());
+        if let Some(position) = index.get(&key).copied() {
+            dest[position] = metric;
+        } else {
+            let position = dest.len();
+            dest.push(metric);
+            index.insert(key, position);
+        }
+    }
+}
+
+fn merge_notes(dest: &mut Vec<String>, incoming: Vec<String>) {
+    if incoming.is_empty() {
+        return;
+    }
+    let mut seen: BTreeSet<String> = dest.iter().cloned().collect();
+    for note in incoming {
+        if let Some(note) = normalise_optional_text(Some(note)) {
+            if note.is_empty() {
+                continue;
+            }
+            if seen.insert(note.clone()) {
+                dest.push(note);
+            } else if let Some(position) = dest.iter().position(|existing| existing == &note) {
+                let note = dest.remove(position);
+                dest.push(note);
+            }
+        }
+    }
+}
+
+fn merge_concepts(dest: &mut Vec<ConceptAnnotation>, incoming: Vec<ConceptAnnotation>) {
+    if incoming.is_empty() {
+        return;
+    }
+    for mut concept in incoming {
+        concept.term = normalise_text(concept.term);
+        if concept.term.is_empty() {
+            continue;
+        }
+        concept.rationale = normalise_optional_text(concept.rationale);
+        if let Some(existing) = dest
+            .iter_mut()
+            .find(|current| current.term == concept.term && current.sense == concept.sense)
+        {
+            if concept.rationale.is_some() {
+                existing.rationale = concept.rationale.clone();
+            }
+            continue;
+        }
+        dest.push(concept);
+    }
+}
+
+#[derive(Clone, Debug)]
+struct NoteAccumulator {
+    limit: usize,
+    queue: VecDeque<String>,
+    seen: BTreeSet<String>,
+}
+
+impl NoteAccumulator {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit: limit.max(1),
+            queue: VecDeque::new(),
+            seen: BTreeSet::new(),
+        }
+    }
+
+    fn extend(&mut self, notes: &[String]) {
+        for note in notes {
+            if let Some(note) = normalise_optional_text(Some(note.clone())) {
+                if note.is_empty() {
+                    continue;
+                }
+                if self.seen.insert(note.clone()) {
+                    self.queue.push_back(note);
+                } else if let Some(position) =
+                    self.queue.iter().position(|existing| existing == &note)
+                {
+                    if let Some(existing) = self.queue.remove(position) {
+                        self.queue.push_back(existing);
+                    }
+                }
+                self.prune();
+            }
+        }
+    }
+
+    fn prune(&mut self) {
+        while self.queue.len() > self.limit {
+            if let Some(removed) = self.queue.pop_front() {
+                self.seen.remove(&removed);
+            }
+        }
+    }
+
+    fn into_vec(self) -> Vec<String> {
+        self.queue.into_iter().collect()
     }
 }
 
@@ -461,6 +633,7 @@ impl AtlasRoute {
     pub fn summary(&self) -> AtlasRouteSummary {
         let mut summary = AtlasRouteSummary {
             frames: self.frames.len(),
+            loop_min: f32::INFINITY,
             ..AtlasRouteSummary::default()
         };
         if self.frames.is_empty() {
@@ -474,15 +647,26 @@ impl AtlasRoute {
         let mut loop_total = 0.0;
         let mut loop_sq_total = 0.0;
         let mut loop_samples = 0usize;
+        let mut first_loop = None;
+        let mut last_loop = None;
         let mut district_map: BTreeMap<String, DistrictAccumulator> = BTreeMap::new();
         let mut concept_map: BTreeMap<(String, ConceptSense), ConceptAccumulator> = BTreeMap::new();
         let mut first_collapse = None;
         let mut first_z_signal = None;
+        let mut note_accumulator = NoteAccumulator::new(16);
         for frame in &self.frames {
             let support = frame.loop_support.max(0.0);
             loop_total += support;
             loop_sq_total += support * support;
             loop_samples += 1;
+            if first_loop.is_none() {
+                first_loop = Some(support);
+            }
+            last_loop = Some(support);
+            summary.loop_min = summary.loop_min.min(support);
+            summary.loop_max = summary.loop_max.max(support);
+            summary.total_notes += frame.notes.len();
+            note_accumulator.extend(&frame.notes);
             if let Some(total) = frame.collapse_total {
                 if total.is_finite() {
                     if first_collapse.is_none() {
@@ -540,10 +724,19 @@ impl AtlasRoute {
         if summary.frames > 0 {
             summary.mean_loop_support = loop_total / summary.frames as f32;
         }
-        if loop_samples > 0 {
+        if loop_samples > 1 {
             let mean = loop_total / loop_samples as f32;
             let variance = (loop_sq_total / loop_samples as f32) - mean * mean;
             summary.loop_std = variance.max(0.0).sqrt();
+        } else if loop_samples == 1 {
+            summary.loop_std = 0.0;
+        }
+        summary.loop_total = loop_total;
+        if summary.loop_min.is_infinite() {
+            summary.loop_min = 0.0;
+        }
+        if let (Some(first), Some(last)) = (first_loop, last_loop) {
+            summary.loop_trend = Some(last - first);
         }
         if let (Some(first), Some(latest)) = (first_collapse, summary.latest_collapse_total) {
             summary.collapse_trend = Some(latest - first);
@@ -551,6 +744,7 @@ impl AtlasRoute {
         if let (Some(first), Some(latest)) = (first_z_signal, summary.latest_z_signal) {
             summary.z_signal_trend = Some(latest - first);
         }
+        summary.latest_notes = note_accumulator.into_vec();
         summary.districts = district_map
             .into_iter()
             .map(|(name, accumulator)| accumulator.into_summary(name))
@@ -591,6 +785,14 @@ pub struct AtlasRouteSummary {
     pub mean_loop_support: f32,
     /// Standard deviation of loop support across the retained frames.
     pub loop_std: f32,
+    /// Minimum loop support observed across the retained frames.
+    pub loop_min: f32,
+    /// Maximum loop support observed across the retained frames.
+    pub loop_max: f32,
+    /// Total loop support accumulated across the retained frames.
+    pub loop_total: f32,
+    /// Signed drift between the first and latest loop support samples.
+    pub loop_trend: Option<f32>,
     /// Latest collapse total observed within the route.
     pub latest_collapse_total: Option<f32>,
     /// Signed drift between the first and latest collapse totals.
@@ -609,6 +811,10 @@ pub struct AtlasRouteSummary {
     pub suggested_pressure: Option<f32>,
     /// Latest SpiralK script hint emitted by the route.
     pub script_hint: Option<String>,
+    /// Total number of notes surfaced across the retained frames.
+    pub total_notes: usize,
+    /// Latest unique notes retained in chronological order.
+    pub latest_notes: Vec<String>,
     /// District activity summaries accumulated across the route.
     pub districts: Vec<AtlasDistrictSummary>,
     /// Conceptual pulses aggregated across the retained frames.
@@ -650,6 +856,11 @@ impl AtlasRouteSummary {
             .map(AtlasPerspective::from_district)?;
         perspective.apply_focus_filter(focus_prefixes);
         Some(perspective)
+    }
+
+    /// Returns the most recent note captured in the summary, if one exists.
+    pub fn latest_note(&self) -> Option<&str> {
+        self.latest_notes.last().map(|note| note.as_str())
     }
 
     /// Highlights the most dynamic metrics across districts as atlas beacons.
@@ -1126,6 +1337,72 @@ impl ConceptAccumulator {
 }
 
 #[cfg(test)]
+mod frame_tests {
+    use super::*;
+
+    #[test]
+    fn merging_fragments_updates_metric_values() {
+        let mut fragment = AtlasFragment::new();
+        fragment.timestamp = Some(1.0);
+        fragment.push_metric("psi.total", 1.0);
+        let mut frame = AtlasFrame::from_fragment(fragment).expect("frame");
+
+        let mut update = AtlasFragment::new();
+        update.timestamp = Some(2.0);
+        update.push_metric("psi.total", 2.5);
+        update.push_metric("psi.aux", 3.0);
+        frame.merge_fragment(update);
+
+        assert_eq!(frame.metrics.len(), 2);
+        assert_eq!(frame.metric_value("psi.total"), Some(2.5));
+        let names: Vec<&str> = frame
+            .metrics_with_prefix("psi")
+            .into_iter()
+            .map(|metric| metric.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["psi.aux", "psi.total"]);
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    #[test]
+    fn route_summary_tracks_loop_envelope_and_notes() {
+        let mut first = AtlasFragment::new();
+        first.timestamp = Some(1.0);
+        first.loop_support = Some(1.0);
+        first.push_note("alpha");
+        let frame_a = AtlasFrame::from_fragment(first).expect("frame a");
+
+        let mut second = AtlasFragment::new();
+        second.timestamp = Some(2.0);
+        second.loop_support = Some(3.0);
+        second.push_note("beta");
+        second.push_note("alpha");
+        let frame_b = AtlasFrame::from_fragment(second).expect("frame b");
+
+        let mut route = AtlasRoute::new();
+        route.push_bounded(frame_a, 8);
+        route.push_bounded(frame_b, 8);
+
+        let summary = route.summary();
+        assert_eq!(summary.frames, 2);
+        assert!((summary.loop_total - 4.0).abs() <= f32::EPSILON);
+        assert_eq!(summary.loop_min, 1.0);
+        assert_eq!(summary.loop_max, 3.0);
+        assert_eq!(summary.loop_trend, Some(2.0));
+        assert_eq!(summary.total_notes, 3);
+        assert_eq!(
+            summary.latest_notes,
+            vec!["beta".to_string(), "alpha".to_string()]
+        );
+        assert_eq!(summary.latest_note(), Some("alpha"));
+    }
+}
+
+#[cfg(test)]
 mod concept_tests {
     use super::*;
 
@@ -1218,11 +1495,12 @@ fn infer_district(name: &str) -> &'static str {
     let lower = name.to_ascii_lowercase();
     let token = lower.split(['.', ':', '/', '-']).next().unwrap_or("");
     match token {
-        "py" | "python" | "bindings" | "session" | "timeline" => "Surface",
-        "trainer" | "maintainer" | "atlas" | "loop" | "chrono" | "policy" | "resonator" => {
-            "Concourse"
+        "py" | "python" | "bindings" | "session" | "timeline" | "config" | "psychoid" => "Surface",
+        "trainer" | "maintainer" | "atlas" | "loop" | "chrono" | "policy" | "resonator"
+        | "softlogic" | "psi" | "desire" => "Concourse",
+        "tensor" | "backend" | "core" | "z" | "collapse" | "geometry" | "kdsl" | "realgrad" => {
+            "Substrate"
         }
-        "tensor" | "backend" | "core" | "z" | "collapse" | "geometry" | "kdsl" => "Substrate",
         _ => "Unknown",
     }
 }
