@@ -739,6 +739,37 @@ impl ZSpaceVolume {
     }
 }
 
+#[cfg(feature = "wgpu")]
+impl TemporalVolumeLike for ZSpaceVolume {
+    fn depth(&self) -> usize {
+        self.depth
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn harmonic_channels(&self) -> usize {
+        self.harmonic_channels
+    }
+
+    fn voxels(&self) -> &[f32] {
+        &self.voxels
+    }
+
+    fn temporal_harmonics(&self) -> &[f32] {
+        &self.temporal_harmonics
+    }
+
+    fn resonance_decay(&self) -> &[f32] {
+        &self.resonance_decay
+    }
+}
+
 /// Interpolation methods available for Z-space resampling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InterpolationMethod {
