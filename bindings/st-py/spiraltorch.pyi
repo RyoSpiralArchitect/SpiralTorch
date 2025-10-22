@@ -8,6 +8,22 @@ class Tensor:
     @staticmethod
     def zeros(rows: int, cols: int) -> Tensor: ...
     @staticmethod
+    def randn(
+        rows: int,
+        cols: int,
+        mean: float = ...,
+        std: float = ...,
+        seed: int | None = ...,
+    ) -> Tensor: ...
+    @staticmethod
+    def rand(
+        rows: int,
+        cols: int,
+        min: float = ...,
+        max: float = ...,
+        seed: int | None = ...,
+    ) -> Tensor: ...
+    @staticmethod
     def from_dlpack(capsule: object) -> Tensor: ...
     def to_dlpack(self) -> object: ...
     def __dlpack__(self, *, stream: object | None = ...) -> object: ...
