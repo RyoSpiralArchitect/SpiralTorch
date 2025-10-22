@@ -252,6 +252,68 @@ pub unsafe extern "C" fn spiraltorch_tensor_copy_data(
     result.is_ok()
 }
 
+fn as_tensor<'a>(handle: *const Tensor, label: &str) -> Option<&'a Tensor> {
+    let handle = match require_non_null(handle, label) {
+        Ok(handle) => handle,
+        Err(_) => return None,
+    };
+    // SAFETY: we validated the pointer is not null above.
+    Some(unsafe { &*handle })
+}
+
+fn tensor_binary_op(
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    context: &str,
+    op: impl FnOnce(&Tensor, &Tensor) -> PureResult<Tensor>,
+) -> *mut Tensor {
+    let left = match as_tensor(lhs, "lhs tensor") {
+        Some(tensor) => tensor,
+        None => return ptr::null_mut(),
+    };
+    let right = match as_tensor(rhs, "rhs tensor") {
+        Some(tensor) => tensor,
+        None => return ptr::null_mut(),
+    };
+    tensor_from_result_with_message(op(left, right), context)
+}
+
+fn tensor_unary_op(
+    handle: *const Tensor,
+    context: &str,
+    op: impl FnOnce(&Tensor) -> PureResult<Tensor>,
+) -> *mut Tensor {
+    let tensor = match as_tensor(handle, "tensor handle") {
+        Some(tensor) => tensor,
+        None => return ptr::null_mut(),
+    };
+    tensor_from_result_with_message(op(tensor), context)
+}
+
+/// Element-wise tensor addition. Returns `NULL` on failure.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_add(lhs: *const Tensor, rhs: *const Tensor) -> *mut Tensor {
+    tensor_binary_op(lhs, rhs, "tensor_add", Tensor::add)
+}
+
+/// Element-wise tensor subtraction. Returns `NULL` on failure.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_sub(lhs: *const Tensor, rhs: *const Tensor) -> *mut Tensor {
+    tensor_binary_op(lhs, rhs, "tensor_sub", Tensor::sub)
+}
+
+/// Returns a new tensor with every element scaled by `value`.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_scale(handle: *const Tensor, value: f32) -> *mut Tensor {
+    tensor_unary_op(handle, "tensor_scale", |tensor| tensor.scale(value))
+}
+
+/// Matrix multiplication (`lhs @ rhs`). Returns `NULL` on failure.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_matmul(lhs: *const Tensor, rhs: *const Tensor) -> *mut Tensor {
+    tensor_binary_op(lhs, rhs, "tensor_matmul", Tensor::matmul)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,5 +371,69 @@ mod tests {
         assert_eq!(written, len.min(buffer.len() - 1));
         let message = unsafe { CStr::from_ptr(buffer.as_ptr()) };
         assert!(message.to_string_lossy().contains("null"));
+    }
+
+    #[test]
+    fn tensor_add_and_sub() {
+        let a_data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let b_data = vec![5.0_f32, 6.0, 7.0, 8.0];
+        let a = unsafe { spiraltorch_tensor_from_dense(2, 2, a_data.as_ptr(), a_data.len()) };
+        let b = unsafe { spiraltorch_tensor_from_dense(2, 2, b_data.as_ptr(), b_data.len()) };
+        assert!(!a.is_null());
+        assert!(!b.is_null());
+
+        let sum = spiraltorch_tensor_add(a, b);
+        assert!(!sum.is_null());
+        let mut buffer = vec![0.0_f32; 4];
+        let ok = unsafe { spiraltorch_tensor_copy_data(sum, buffer.as_mut_ptr(), buffer.len()) };
+        assert!(ok);
+        assert_eq!(buffer, vec![6.0, 8.0, 10.0, 12.0]);
+
+        let diff = spiraltorch_tensor_sub(sum, a);
+        assert!(!diff.is_null());
+        let mut diff_buffer = vec![0.0_f32; 4];
+        let ok = unsafe {
+            spiraltorch_tensor_copy_data(diff, diff_buffer.as_mut_ptr(), diff_buffer.len())
+        };
+        assert!(ok);
+        assert_eq!(diff_buffer, b_data);
+
+        spiraltorch_tensor_free(diff);
+        spiraltorch_tensor_free(sum);
+        spiraltorch_tensor_free(b);
+        spiraltorch_tensor_free(a);
+    }
+
+    #[test]
+    fn tensor_scale_and_matmul() {
+        let left_data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let right_data = vec![7.0_f32, 8.0, 9.0, 10.0, 11.0, 12.0];
+        let left =
+            unsafe { spiraltorch_tensor_from_dense(2, 3, left_data.as_ptr(), left_data.len()) };
+        let right =
+            unsafe { spiraltorch_tensor_from_dense(3, 2, right_data.as_ptr(), right_data.len()) };
+        assert!(!left.is_null());
+        assert!(!right.is_null());
+
+        let scaled = spiraltorch_tensor_scale(left, 0.5);
+        assert!(!scaled.is_null());
+        let mut buffer = vec![0.0_f32; 6];
+        let ok = unsafe { spiraltorch_tensor_copy_data(scaled, buffer.as_mut_ptr(), buffer.len()) };
+        assert!(ok);
+        assert_eq!(buffer, vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0]);
+
+        let product = spiraltorch_tensor_matmul(left, right);
+        assert!(!product.is_null());
+        let mut product_buffer = vec![0.0_f32; 4];
+        let ok = unsafe {
+            spiraltorch_tensor_copy_data(product, product_buffer.as_mut_ptr(), product_buffer.len())
+        };
+        assert!(ok);
+        assert_eq!(product_buffer, vec![58.0, 64.0, 139.0, 154.0]);
+
+        spiraltorch_tensor_free(product);
+        spiraltorch_tensor_free(scaled);
+        spiraltorch_tensor_free(right);
+        spiraltorch_tensor_free(left);
     }
 }

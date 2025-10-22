@@ -22,9 +22,21 @@ Rust without manual pointer juggling.
    ENV["SPIRALTORCH_SYS_LIBRARY"] = "/path/to/libspiraltorch_sys.so"
    SpiralTorch.version()
    t = SpiralTorch.Tensor(rand(Float32, 2, 2))
-   SpiralTorch.to_array(t)
+   u = SpiralTorch.Tensor(ones(Float32, 2, 2))
+   SpiralTorch.to_array(t + u)
+   SpiralTorch.to_array(0.5f0 * t)
+   SpiralTorch.to_array(t * u)
    ```
 
 The wrapper automatically disposes tensors via finalizers, but you can call
 `SpiralTorch.clear_error!()` to reset the global error slot if you want to
 inspect transient failures.
+
+## Supported operations
+
+- `+` / `-` perform element-wise addition and subtraction, returning new
+  `Tensor` instances.
+- `*` between two tensors dispatches to matrix multiplication while scalar
+  multiplication scales individual elements.
+- `to_array(tensor)` materialises the data into a Julia `Matrix{Float32}` for
+  native manipulation.
