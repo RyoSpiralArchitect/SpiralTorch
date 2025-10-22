@@ -23,6 +23,7 @@
 
 use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
 use super::dashboard::{DashboardFrame, DashboardRing};
+use super::maintainer::MaintainerReport;
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
@@ -30,7 +31,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::{OnceLock, RwLock};
 #[cfg(feature = "psi")]
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
@@ -58,6 +59,16 @@ static LAST_PSI_SPIRAL: Lazy<RwLock<Option<PsiSpiralAdvisory>>> = Lazy::new(|| R
 #[cfg(feature = "psi")]
 static LAST_PSI_SPIRAL_TUNING: Lazy<RwLock<Option<PsiSpiralTuning>>> =
     Lazy::new(|| RwLock::new(None));
+
+#[cfg(feature = "psi")]
+const PSI_COMPONENTS: [PsiComponent; 6] = [
+    PsiComponent::LOSS,
+    PsiComponent::GRAD_NORM,
+    PsiComponent::UPDATE_RATIO,
+    PsiComponent::ACT_DRIFT,
+    PsiComponent::ATTN_ENTROPY,
+    PsiComponent::BAND_ENERGY,
+];
 
 static CONFIG_DIFF_EVENTS: OnceLock<RwLock<Vec<ConfigDiffEvent>>> = OnceLock::new();
 
@@ -97,6 +108,14 @@ pub fn set_last_psi(reading: &PsiReading) {
     if let Ok(mut guard) = LAST_PSI.write() {
         *guard = Some(reading.clone());
     }
+    let mut fragment = AtlasFragment::new();
+    if let Some(timestamp) = psi_step_timestamp(reading.step) {
+        fragment.timestamp = Some(timestamp);
+    }
+    populate_psi_breakdown(&mut fragment, "psi", &reading.breakdown);
+    fragment.push_metric("psi.total", reading.total);
+    fragment.push_note(format!("psi.step:{}", reading.step));
+    merge_atlas_fragment(fragment);
 }
 
 #[cfg(feature = "psi")]
@@ -113,6 +132,14 @@ pub fn set_last_psi_events(events: &[PsiEvent]) {
         guard.clear();
         guard.extend(events.iter().cloned());
     }
+    if events.is_empty() {
+        return;
+    }
+    let mut fragment = AtlasFragment::new();
+    if let Some(step) = annotate_psi_events(&mut fragment, "psi", events) {
+        fragment.timestamp = psi_step_timestamp(step);
+    }
+    merge_atlas_fragment(fragment);
 }
 
 #[cfg(feature = "psi")]
@@ -128,6 +155,22 @@ pub fn set_last_psi_spiral(advisory: &PsiSpiralAdvisory) {
     if let Ok(mut guard) = LAST_PSI_SPIRAL.write() {
         *guard = Some(advisory.clone());
     }
+    let mut fragment = AtlasFragment::new();
+    fragment.push_metric("psi.spiral.mu_eff0", advisory.mu_eff0);
+    fragment.push_metric("psi.spiral.alpha3", advisory.alpha3);
+    fragment.push_metric(
+        "psi.spiral.audit_container_gap",
+        advisory.audit_container_gap,
+    );
+    fragment.push_metric("psi.spiral.audit_cluster", advisory.audit_cluster);
+    fragment.push_metric("psi.spiral.container_cluster", advisory.container_cluster);
+    fragment.push_metric("psi.spiral.stability_score", advisory.stability_score());
+    fragment.push_metric(
+        "psi.spiral.audit_overbias",
+        bool_as_metric(advisory.audit_overbias()),
+    );
+    fragment.push_note(format!("psi.spiral.regime:{:?}", advisory.regime));
+    merge_atlas_fragment(fragment);
 }
 
 #[cfg(feature = "psi")]
@@ -143,6 +186,30 @@ pub fn set_last_psi_spiral_tuning(tuning: &PsiSpiralTuning) {
     if let Ok(mut guard) = LAST_PSI_SPIRAL_TUNING.write() {
         *guard = Some(tuning.clone());
     }
+    let mut fragment = AtlasFragment::new();
+    fragment.push_metric("psi.spiral.tuning.stability", tuning.stability_score);
+    let mut required = 0u32;
+    for &component in PSI_COMPONENTS.iter() {
+        if tuning.required_components.contains(component) {
+            required += 1;
+            fragment.push_note(format!(
+                "psi.spiral.tuning.required:{}",
+                component.to_string()
+            ));
+        }
+        if let Some(delta) = tuning.weight_increments.get(&component) {
+            fragment.push_metric(format!("psi.spiral.tuning.weight.{}", component), *delta);
+        }
+        if let Some(delta) = tuning.threshold_shifts.get(&component) {
+            fragment.push_metric(format!("psi.spiral.tuning.threshold.{}", component), *delta);
+        }
+    }
+    fragment.push_metric("psi.spiral.tuning.required", required as f32);
+    fragment.push_metric(
+        "psi.spiral.tuning.neutral",
+        bool_as_metric(tuning.is_neutral()),
+    );
+    merge_atlas_fragment(fragment);
 }
 
 #[cfg(feature = "psi")]
@@ -160,6 +227,11 @@ pub fn record_config_events(events: &[ConfigDiffEvent]) {
         guard.clear();
         guard.extend(events.iter().cloned());
     }
+    if events.is_empty() {
+        return;
+    }
+    let fragment = fragment_from_config_events(events);
+    merge_atlas_fragment(fragment);
 }
 
 /// Returns the last recorded configuration diff events.
@@ -178,6 +250,8 @@ pub fn set_last_psychoid(reading: &PsychoidReading) {
     if let Ok(mut guard) = LAST_PSYCHOID.write() {
         *guard = Some(reading.clone());
     }
+    let fragment = fragment_from_psychoid_reading(reading);
+    merge_atlas_fragment(fragment);
 }
 
 #[cfg(feature = "psychoid")]
@@ -323,6 +397,11 @@ fn desire_step_cell() -> &'static RwLock<Option<DesireStepTelemetry>> {
 static ATLAS_FRAME: OnceLock<RwLock<Option<AtlasFrame>>> = OnceLock::new();
 static ATLAS_ROUTE: OnceLock<RwLock<VecDeque<AtlasFrame>>> = OnceLock::new();
 static DASHBOARD_FRAMES: OnceLock<RwLock<DashboardRing>> = OnceLock::new();
+static LAST_MAINTAINER_REPORT: OnceLock<RwLock<Option<MaintainerReport>>> = OnceLock::new();
+
+fn maintainer_cell() -> &'static RwLock<Option<MaintainerReport>> {
+    LAST_MAINTAINER_REPORT.get_or_init(|| RwLock::new(None))
+}
 
 fn atlas_cell() -> &'static RwLock<Option<AtlasFrame>> {
     ATLAS_FRAME.get_or_init(|| RwLock::new(None))
@@ -446,11 +525,37 @@ pub fn merge_atlas_fragment(fragment: AtlasFragment) {
     }
 }
 
+/// Stores the latest maintainer report emitted by the temporal maintainer heuristics.
+pub fn set_maintainer_report(report: MaintainerReport) {
+    if let Ok(mut guard) = maintainer_cell().write() {
+        *guard = Some(report.clone());
+    }
+    let fragment = fragment_from_maintainer_report(&report);
+    merge_atlas_fragment(fragment);
+}
+
+/// Returns the latest maintainer report, if one has been recorded.
+pub fn get_maintainer_report() -> Option<MaintainerReport> {
+    maintainer_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
+#[cfg(test)]
+pub(crate) fn clear_maintainer_report_for_test() {
+    if let Ok(mut guard) = maintainer_cell().write() {
+        *guard = None;
+    }
+}
+
 /// Stores the most recent SoftLogic Z feedback sample.
 pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
     if let Ok(mut guard) = softlogic_z_cell().write() {
-        *guard = Some(feedback);
+        *guard = Some(feedback.clone());
     }
+    let fragment = fragment_from_softlogic(&feedback);
+    merge_atlas_fragment(fragment);
 }
 
 /// Returns the latest SoftLogic Z feedback sample if one has been recorded.
@@ -539,6 +644,8 @@ pub fn set_last_realgrad(pulse: &RealGradPulse) {
     if let Ok(mut guard) = realgrad_cell().write() {
         *guard = Some(*pulse);
     }
+    let fragment = fragment_from_realgrad(pulse);
+    merge_atlas_fragment(fragment);
 }
 
 /// Returns the most recent RealGrad pulse, if one has been recorded.
@@ -563,8 +670,22 @@ pub(crate) fn clear_last_realgrad_for_test() {
 #[cfg(feature = "psi")]
 pub fn set_last_desire_step(step: DesireStepTelemetry) {
     if let Ok(mut guard) = desire_step_cell().write() {
-        *guard = Some(step);
+        *guard = Some(step.clone());
     }
+    let mut fragment = fragment_from_desire_step(&step);
+    if let Some(feedback) = &step.z_feedback {
+        populate_softlogic_metrics(&mut fragment, "desire.z_feedback", feedback);
+        fragment.z_signal = Some(feedback.z_signal);
+    }
+    populate_psi_breakdown(&mut fragment, "desire.psi", &step.psi_breakdown);
+    if let Some(total) = step.psi_total {
+        fragment.push_metric("desire.psi.total", total);
+    }
+    if let Some(step_time) = system_time_seconds(step.timestamp) {
+        fragment.timestamp = Some(step_time);
+    }
+    annotate_psi_events(&mut fragment, "desire.psi", &step.psi_events);
+    merge_atlas_fragment(fragment);
 }
 
 #[cfg_attr(
@@ -717,6 +838,443 @@ fn fragment_from_loopback(envelope: &LoopbackEnvelope) -> AtlasFragment {
     fragment
 }
 
+fn fragment_from_maintainer_report(report: &MaintainerReport) -> AtlasFragment {
+    let mut fragment = AtlasFragment::new();
+    fragment.maintainer_status = Some(report.status);
+    if !report.diagnostic.is_empty() {
+        fragment.maintainer_diagnostic = Some(report.diagnostic.clone());
+        fragment.push_note(format!("maintainer.diagnostic:{}", report.diagnostic));
+    }
+    fragment.suggested_max_scale = report.suggested_max_scale.filter(|value| value.is_finite());
+    fragment.suggested_pressure = report.suggested_pressure.filter(|value| value.is_finite());
+    fragment.push_note(format!("maintainer.status:{}", report.status.as_str()));
+    fragment.push_metric("maintainer.average_drift", report.average_drift);
+    fragment.push_metric("maintainer.mean_energy", report.mean_energy);
+    fragment.push_metric("maintainer.mean_decay", report.mean_decay);
+    fragment.push_metric(
+        "maintainer.should_rewrite",
+        bool_as_metric(report.should_rewrite()),
+    );
+    if let Some(peak) = &report.drift_peak {
+        fragment.push_metric("maintainer.drift_peak.frequency", peak.frequency);
+        fragment.push_metric("maintainer.drift_peak.magnitude", peak.magnitude);
+        fragment.push_metric("maintainer.drift_peak.phase", peak.phase);
+    }
+    if let Some(peak) = &report.energy_peak {
+        fragment.push_metric("maintainer.energy_peak.frequency", peak.frequency);
+        fragment.push_metric("maintainer.energy_peak.magnitude", peak.magnitude);
+        fragment.push_metric("maintainer.energy_peak.phase", peak.phase);
+    }
+    #[cfg(feature = "kdsl")]
+    if let Some(script) = report.spiralk_script.as_ref() {
+        if !script.is_empty() {
+            fragment.script_hint = Some(script.clone());
+        }
+    }
+    fragment
+}
+
+fn fragment_from_softlogic(feedback: &SoftlogicZFeedback) -> AtlasFragment {
+    let mut fragment = AtlasFragment::new();
+    fragment.z_signal = Some(feedback.z_signal);
+    populate_softlogic_metrics(&mut fragment, "softlogic", feedback);
+    if let Some(scale) = feedback.scale {
+        fragment.push_note(format!(
+            "softlogic.scale.radius:{:.3}@{:.3}",
+            scale.physical_radius, scale.log_radius
+        ));
+    }
+    fragment
+}
+
+fn populate_softlogic_metrics(
+    fragment: &mut AtlasFragment,
+    prefix: &str,
+    feedback: &SoftlogicZFeedback,
+) {
+    let (above, here, beneath) = feedback.band_energy;
+    fragment.push_metric(format!("{prefix}.psi_total"), feedback.psi_total);
+    fragment.push_metric(format!("{prefix}.weighted_loss"), feedback.weighted_loss);
+    fragment.push_metric(format!("{prefix}.band.above"), above);
+    fragment.push_metric(format!("{prefix}.band.here"), here);
+    fragment.push_metric(format!("{prefix}.band.beneath"), beneath);
+    fragment.push_metric(format!("{prefix}.band.total"), above + here + beneath);
+    fragment.push_metric(format!("{prefix}.drift"), feedback.drift);
+    fragment.push_metric(format!("{prefix}.z_signal"), feedback.z_signal);
+    if let Some(scale) = feedback.scale {
+        fragment.push_metric(format!("{prefix}.scale.physical"), scale.physical_radius);
+        fragment.push_metric(format!("{prefix}.scale.log"), scale.log_radius);
+    }
+    fragment.push_metric(format!("{prefix}.events"), feedback.events.len() as f32);
+    for event in &feedback.events {
+        if !event.is_empty() {
+            fragment.push_note(format!("{prefix}.event:{}", event));
+        }
+    }
+    if !feedback.attributions.is_empty() {
+        let mut total = 0.0;
+        for (source, weight) in &feedback.attributions {
+            let label = z_source_label(source);
+            fragment.push_metric(format!("{prefix}.attribution.{label}"), *weight);
+            total += weight.max(0.0);
+        }
+        fragment.push_metric(format!("{prefix}.attribution.total"), total);
+    }
+}
+
+fn z_source_label(source: &ZSource) -> String {
+    match source {
+        ZSource::Microlocal => "microlocal".to_string(),
+        ZSource::Maxwell => "maxwell".to_string(),
+        ZSource::Graph => "graph".to_string(),
+        ZSource::Desire => "desire".to_string(),
+        ZSource::GW => "gw".to_string(),
+        ZSource::RealGrad => "realgrad".to_string(),
+        ZSource::Other(tag) => format!("other.{}", tag.to_ascii_lowercase()),
+    }
+}
+
+fn fragment_from_realgrad(pulse: &RealGradPulse) -> AtlasFragment {
+    let mut fragment = AtlasFragment::new();
+    if pulse.iterations > 0 {
+        fragment.timestamp = Some(pulse.iterations as f32);
+    }
+    fragment.push_metric("realgrad.lebesgue_measure", pulse.lebesgue_measure);
+    fragment.push_metric("realgrad.monad_energy", pulse.monad_energy);
+    fragment.push_metric("realgrad.z_energy", pulse.z_energy);
+    fragment.push_metric("realgrad.residual_ratio", pulse.residual_ratio);
+    fragment.push_metric("realgrad.lebesgue_ratio", pulse.lebesgue_ratio);
+    fragment.push_metric("realgrad.ramanujan_pi", pulse.ramanujan_pi);
+    fragment.push_metric("realgrad.tolerance", pulse.tolerance);
+    fragment.push_metric("realgrad.convergence_error", pulse.convergence_error);
+    fragment.push_metric("realgrad.iterations", pulse.iterations as f32);
+    fragment.push_metric("realgrad.dominated", bool_as_metric(pulse.dominated));
+    fragment.push_metric("realgrad.converged", bool_as_metric(pulse.converged));
+    fragment.push_metric("realgrad.gradient_norm", pulse.gradient_norm);
+    fragment.push_metric("realgrad.gradient_sparsity", pulse.gradient_sparsity);
+    fragment.push_metric(
+        "realgrad.rolling_gradient_norm",
+        pulse.rolling_gradient_norm,
+    );
+    fragment.push_metric(
+        "realgrad.rolling_residual_ratio",
+        pulse.rolling_residual_ratio,
+    );
+    fragment
+}
+
+fn fragment_from_config_events(events: &[ConfigDiffEvent]) -> AtlasFragment {
+    let mut fragment = AtlasFragment::new();
+    fragment.push_metric("config.diff.total", events.len() as f32);
+    let mut base = 0u32;
+    let mut site = 0u32;
+    let mut run = 0u32;
+    for event in events {
+        match event.layer {
+            ConfigLayer::Base => base += 1,
+            ConfigLayer::Site => site += 1,
+            ConfigLayer::Run => run += 1,
+        }
+        fragment.push_note(format!("config.diff.{}:{}", event.layer, event.path));
+    }
+    if base > 0 {
+        fragment.push_metric("config.diff.base", base as f32);
+    }
+    if site > 0 {
+        fragment.push_metric("config.diff.site", site as f32);
+    }
+    if run > 0 {
+        fragment.push_metric("config.diff.run", run as f32);
+    }
+    fragment
+}
+
+fn bool_as_metric(value: bool) -> f32 {
+    if value {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+#[cfg(feature = "psi")]
+fn psi_step_timestamp(step: u64) -> Option<f32> {
+    if step == 0 {
+        None
+    } else {
+        Some(step as f32)
+    }
+}
+
+#[cfg(feature = "psi")]
+fn populate_psi_breakdown(
+    fragment: &mut AtlasFragment,
+    prefix: &str,
+    breakdown: &HashMap<PsiComponent, f32>,
+) {
+    for &component in PSI_COMPONENTS.iter() {
+        if let Some(value) = breakdown.get(&component) {
+            fragment.push_metric(format!("{prefix}.{}", component), *value);
+        }
+    }
+}
+
+#[cfg(feature = "psi")]
+fn annotate_psi_events(
+    fragment: &mut AtlasFragment,
+    prefix: &str,
+    events: &[PsiEvent],
+) -> Option<u64> {
+    let mut last_step = None;
+    let mut rising = 0u32;
+    let mut falling = 0u32;
+    for event in events {
+        match event {
+            PsiEvent::ThresholdCross {
+                component,
+                value,
+                threshold,
+                up,
+                step,
+            } => {
+                last_step = Some(last_step.map_or(*step, |prev| prev.max(*step)));
+                if *up {
+                    rising += 1;
+                } else {
+                    falling += 1;
+                }
+                let label = component.to_string();
+                fragment.push_note(format!("{prefix}.event:{}", event));
+                fragment.push_metric(format!("{prefix}.event.value.{label}"), *value);
+                fragment.push_metric(format!("{prefix}.event.threshold.{label}"), *threshold);
+                let delta = if *up {
+                    value - threshold
+                } else {
+                    threshold - value
+                };
+                fragment.push_metric(format!("{prefix}.event.delta.{label}"), delta);
+            }
+        }
+    }
+    fragment.push_metric(format!("{prefix}.events.total"), events.len() as f32);
+    if rising > 0 {
+        fragment.push_metric(format!("{prefix}.events.up"), rising as f32);
+    }
+    if falling > 0 {
+        fragment.push_metric(format!("{prefix}.events.down"), falling as f32);
+    }
+    last_step
+}
+
+#[cfg(feature = "psi")]
+fn fragment_from_desire_step(step: &DesireStepTelemetry) -> AtlasFragment {
+    let mut fragment = AtlasFragment::new();
+    fragment.push_metric("desire.entropy", step.entropy);
+    fragment.push_metric("desire.temperature", step.temperature);
+    fragment.push_metric("desire.hypergrad_penalty", step.hypergrad_penalty);
+    fragment.push_metric("desire.avoidance_energy", step.avoidance_energy);
+    fragment.push_metric("desire.logit_energy", step.logit_energy);
+    fragment.push_metric("desire.weights.alpha", step.weights.alpha);
+    fragment.push_metric("desire.weights.beta", step.weights.beta);
+    fragment.push_metric("desire.weights.gamma", step.weights.gamma);
+    fragment.push_metric("desire.weights.lambda", step.weights.lambda);
+    fragment.push_metric("desire.alpha", step.alpha);
+    fragment.push_metric("desire.beta", step.beta);
+    fragment.push_metric("desire.gamma", step.gamma);
+    fragment.push_metric("desire.lambda", step.lambda);
+    fragment.push_metric(
+        "desire.trigger_emitted",
+        bool_as_metric(step.trigger_emitted),
+    );
+    let phase = match step.phase {
+        DesirePhaseTelemetry::Observation => "observation",
+        DesirePhaseTelemetry::Injection => "injection",
+        DesirePhaseTelemetry::Integration => "integration",
+    };
+    fragment.push_note(format!("desire.phase:{phase}"));
+    if let Some(trigger) = &step.trigger {
+        fragment.push_metric("desire.trigger.mean_penalty", trigger.mean_penalty);
+        fragment.push_metric("desire.trigger.mean_entropy", trigger.mean_entropy);
+        fragment.push_metric("desire.trigger.temperature", trigger.temperature);
+        fragment.push_metric("desire.trigger.samples", trigger.samples as f32);
+    }
+    if let Some(avoidance) = &step.avoidance {
+        fragment.push_metric("desire.avoidance.tokens", avoidance.tokens.len() as f32);
+        if !avoidance.scores.is_empty() {
+            let sum: f32 = avoidance.scores.iter().copied().sum();
+            let max = avoidance
+                .scores
+                .iter()
+                .fold(f32::NEG_INFINITY, |acc, value| acc.max(*value));
+            let min = avoidance
+                .scores
+                .iter()
+                .fold(f32::INFINITY, |acc, value| acc.min(*value));
+            let count = avoidance.scores.len() as f32;
+            fragment.push_metric("desire.avoidance.score_mean", sum / count);
+            fragment.push_metric("desire.avoidance.score_max", max);
+            fragment.push_metric("desire.avoidance.score_min", min);
+        }
+    }
+    fragment
+}
+
+#[cfg(feature = "psi")]
+fn system_time_seconds(time: SystemTime) -> Option<f32> {
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs_f64())
+        .and_then(|secs| {
+            if secs.is_finite() {
+                Some(secs as f32)
+            } else {
+                None
+            }
+        })
+}
+
+#[cfg(feature = "psychoid")]
+fn fragment_from_psychoid_reading(reading: &PsychoidReading) -> AtlasFragment {
+    let mut fragment = AtlasFragment::new();
+    if reading.step > 0 {
+        fragment.timestamp = Some(reading.step as f32);
+    }
+    fragment.push_metric("psychoid.cti", reading.cti);
+    fragment.push_metric("psychoid.raw.metrics", reading.raw.len() as f32);
+    fragment.push_metric("psychoid.z.metrics", reading.z_scores.len() as f32);
+    let raw_total: f32 = reading.raw.values().copied().sum();
+    fragment.push_metric("psychoid.raw.total", raw_total);
+    let mut abs_sum = 0.0;
+    let mut max_abs = 0.0;
+    let mut top_key = None;
+    for (key, value) in &reading.z_scores {
+        let magnitude = value.abs();
+        abs_sum += magnitude;
+        if magnitude > max_abs {
+            max_abs = magnitude;
+            top_key = Some(*key);
+        }
+    }
+    if !reading.z_scores.is_empty() {
+        fragment.push_metric(
+            "psychoid.z.abs_mean",
+            abs_sum / reading.z_scores.len() as f32,
+        );
+        fragment.push_metric("psychoid.z.abs_max", max_abs);
+    }
+    if let Some(key) = top_key {
+        fragment.push_note(format!("psychoid.leading_z:{key}"));
+    }
+    fragment
+}
+
+#[cfg(feature = "collapse")]
+fn fragment_from_collapse_pulse(pulse: &CollapsePulse) -> AtlasFragment {
+    let mut fragment = AtlasFragment::new();
+    if pulse.step > 0 {
+        fragment.timestamp = Some(pulse.step as f32);
+    }
+    fragment.collapse_total = Some(pulse.total);
+    fragment.push_metric("collapse.total", pulse.total);
+    fragment.push_metric("collapse.step", pulse.step as f32);
+    fragment.push_note(format!(
+        "collapse.command:{}",
+        collapse_command_label(&pulse.command)
+    ));
+    match &pulse.command {
+        DriveCmd::Collapse {
+            grad_scale,
+            max_norm,
+            lr_decay,
+            due_to_trend,
+            due_to_deviation,
+        } => {
+            fragment.push_metric("collapse.command.grad_scale", *grad_scale);
+            if let Some(norm) = max_norm {
+                fragment.push_metric("collapse.command.max_norm", *norm);
+            }
+            if let Some(decay) = lr_decay {
+                fragment.push_metric("collapse.command.lr_decay", *decay);
+            }
+            fragment.push_metric(
+                "collapse.command.due_to_trend",
+                bool_as_metric(*due_to_trend),
+            );
+            fragment.push_metric(
+                "collapse.command.due_to_deviation",
+                bool_as_metric(*due_to_deviation),
+            );
+        }
+        DriveCmd::Bloom {
+            lr_mul,
+            due_to_trend,
+            due_to_deviation,
+        } => {
+            fragment.push_metric("collapse.command.lr_mul", *lr_mul);
+            fragment.push_metric(
+                "collapse.command.due_to_trend",
+                bool_as_metric(*due_to_trend),
+            );
+            fragment.push_metric(
+                "collapse.command.due_to_deviation",
+                bool_as_metric(*due_to_deviation),
+            );
+        }
+        DriveCmd::None => {}
+    }
+    if let Some(signal) = &pulse.loop_signal {
+        fragment.summary = Some(signal.summary.clone());
+        fragment.harmonics = signal.harmonics.clone();
+        fragment.push_metric("collapse.loop.frames", signal.summary.frames as f32);
+        fragment.push_metric("collapse.loop.energy", signal.summary.mean_energy);
+        fragment.push_metric("collapse.loop.drift", signal.summary.mean_drift);
+    }
+    fragment
+}
+
+#[cfg(feature = "collapse")]
+fn collapse_command_label(cmd: &DriveCmd) -> String {
+    match cmd {
+        DriveCmd::None => "none".to_string(),
+        DriveCmd::Collapse {
+            grad_scale,
+            max_norm,
+            lr_decay,
+            due_to_trend,
+            due_to_deviation,
+        } => {
+            let mut parts = vec![format!("scale={grad_scale:.3}")];
+            if let Some(norm) = max_norm {
+                parts.push(format!("max_norm={norm:.3}"));
+            }
+            if let Some(decay) = lr_decay {
+                parts.push(format!("lr_decay={decay:.3}"));
+            }
+            if *due_to_trend {
+                parts.push("trend".to_string());
+            }
+            if *due_to_deviation {
+                parts.push("deviation".to_string());
+            }
+            format!("collapse({})", parts.join(","))
+        }
+        DriveCmd::Bloom {
+            lr_mul,
+            due_to_trend,
+            due_to_deviation,
+        } => {
+            let mut parts = vec![format!("lr_mul={lr_mul:.3}")];
+            if *due_to_trend {
+                parts.push("trend".to_string());
+            }
+            if *due_to_deviation {
+                parts.push("deviation".to_string());
+            }
+            format!("bloom({})", parts.join(","))
+        }
+    }
+}
+
 /// Drains up to `limit` loopback envelopes from the queue in FIFO order.
 pub fn drain_loopback_envelopes(limit: usize) -> Vec<LoopbackEnvelope> {
     if limit == 0 {
@@ -774,8 +1332,10 @@ fn collapse_cell() -> &'static RwLock<Option<CollapsePulse>> {
 /// Stores the most recent collapse command pulse.
 pub fn set_collapse_pulse(pulse: CollapsePulse) {
     if let Ok(mut guard) = collapse_cell().write() {
-        *guard = Some(pulse);
+        *guard = Some(pulse.clone());
     }
+    let fragment = fragment_from_collapse_pulse(&pulse);
+    merge_atlas_fragment(fragment);
 }
 
 #[cfg(feature = "collapse")]
@@ -792,6 +1352,7 @@ mod tests {
     use super::*;
     use crate::telemetry::chrono::{ChronoHarmonics, ChronoPeak, ChronoSummary};
     use crate::telemetry::dashboard::DashboardMetric;
+    use crate::telemetry::maintainer::MaintainerStatus;
     use std::sync::{Mutex, OnceLock};
     use std::time::SystemTime;
 
@@ -937,6 +1498,100 @@ mod tests {
     }
 
     #[test]
+    fn softlogic_feedback_populates_atlas() {
+        let _guard = atlas_test_lock().lock().unwrap();
+        clear_atlas();
+        clear_atlas_route();
+        let feedback = SoftlogicZFeedback {
+            psi_total: 1.2,
+            weighted_loss: 0.4,
+            band_energy: (0.3, 0.2, 0.1),
+            drift: 0.05,
+            z_signal: 0.6,
+            scale: Some(ZScale::ONE),
+            events: vec!["spike".into()],
+            attributions: vec![(ZSource::Microlocal, 0.7), (ZSource::RealGrad, 0.3)],
+        };
+        let z_signal = feedback.z_signal;
+        set_softlogic_z(feedback);
+        let atlas = get_atlas_frame().expect("softlogic atlas frame");
+        assert_eq!(atlas.z_signal, Some(z_signal));
+        assert!(atlas
+            .metrics
+            .iter()
+            .any(|metric| metric.name == "softlogic.psi_total"));
+        assert!(atlas
+            .notes
+            .iter()
+            .any(|note| note.contains("softlogic.event")));
+    }
+
+    #[test]
+    fn realgrad_pulse_enriches_atlas_metrics() {
+        let _guard = atlas_test_lock().lock().unwrap();
+        clear_atlas();
+        clear_atlas_route();
+        clear_last_realgrad_for_test();
+        let mut pulse = RealGradPulse::default();
+        pulse.lebesgue_measure = 5.0;
+        pulse.monad_energy = 2.0;
+        pulse.z_energy = 3.0;
+        pulse.residual_ratio = 0.6;
+        pulse.lebesgue_ratio = 0.4;
+        pulse.ramanujan_pi = 3.1415;
+        pulse.tolerance = 1.0e-3;
+        pulse.convergence_error = 5.0e-4;
+        pulse.iterations = 4;
+        pulse.dominated = true;
+        pulse.converged = true;
+        pulse.gradient_norm = 1.5;
+        pulse.gradient_sparsity = 0.2;
+        pulse.rolling_gradient_norm = 1.1;
+        pulse.rolling_residual_ratio = 0.3;
+        set_last_realgrad(&pulse);
+        let atlas = get_atlas_frame().expect("realgrad atlas frame");
+        assert!(atlas
+            .metrics
+            .iter()
+            .any(|metric| metric.name == "realgrad.gradient_norm"));
+        assert!(atlas
+            .metrics
+            .iter()
+            .any(|metric| metric.name == "realgrad.converged"));
+    }
+
+    #[test]
+    fn config_diff_events_surface_in_atlas() {
+        let _guard = atlas_test_lock().lock().unwrap();
+        clear_atlas();
+        clear_atlas_route();
+        let events = vec![
+            ConfigDiffEvent {
+                layer: ConfigLayer::Base,
+                path: "core.yml".into(),
+                previous: None,
+                current: Some(serde_json::json!({"learning_rate": 0.1})),
+            },
+            ConfigDiffEvent {
+                layer: ConfigLayer::Run,
+                path: "override.toml".into(),
+                previous: Some(serde_json::json!({"batch_size": 32})),
+                current: Some(serde_json::json!({"batch_size": 64})),
+            },
+        ];
+        record_config_events(&events);
+        let atlas = get_atlas_frame().expect("config atlas frame");
+        assert!(atlas
+            .metrics
+            .iter()
+            .any(|metric| metric.name == "config.diff.total" && metric.value == 2.0));
+        assert!(atlas
+            .notes
+            .iter()
+            .any(|note| note.starts_with("config.diff.base")));
+    }
+
+    #[test]
     fn realgrad_pulse_roundtrips_through_cache() {
         clear_last_realgrad_for_test();
         assert!(get_last_realgrad().is_none());
@@ -996,5 +1651,74 @@ mod tests {
         let expanded = snapshot_dashboard_frames(baseline + 2);
         assert!(expanded.len() >= baseline + 2);
         assert!(snapshot_dashboard_frames(0).is_empty());
+    }
+
+    #[test]
+    fn maintainer_report_merges_into_atlas() {
+        let _guard = atlas_test_lock().lock().unwrap();
+        clear_atlas();
+        clear_atlas_route();
+        clear_maintainer_report_for_test();
+
+        #[allow(unused_mut)]
+        let mut report = MaintainerReport {
+            status: MaintainerStatus::Clamp,
+            average_drift: 0.42,
+            mean_energy: 1.75,
+            mean_decay: -0.08,
+            drift_peak: Some(ChronoPeak {
+                frequency: 0.33,
+                magnitude: 0.55,
+                phase: 0.12,
+            }),
+            energy_peak: Some(ChronoPeak {
+                frequency: 0.21,
+                magnitude: 0.47,
+                phase: -0.04,
+            }),
+            suggested_max_scale: Some(2.4),
+            suggested_pressure: Some(0.18),
+            diagnostic: "Clamp geometry around 2.4 while boosting pressure.".into(),
+            #[cfg(feature = "kdsl")]
+            spiralk_script: None,
+        };
+
+        #[cfg(feature = "kdsl")]
+        {
+            report.spiralk_script = Some("(maintain clamp)".into());
+        }
+
+        set_maintainer_report(report.clone());
+
+        let atlas = get_atlas_frame().expect("maintainer atlas frame");
+        assert_eq!(atlas.maintainer_status, Some(report.status));
+        assert_eq!(
+            atlas.maintainer_diagnostic.as_deref(),
+            Some(report.diagnostic.as_str())
+        );
+        assert_eq!(atlas.suggested_max_scale, report.suggested_max_scale);
+        assert_eq!(atlas.suggested_pressure, report.suggested_pressure);
+        assert!(atlas
+            .metrics
+            .iter()
+            .any(|metric| metric.name == "maintainer.average_drift"));
+        assert!(atlas
+            .notes
+            .iter()
+            .any(|note| note.starts_with("maintainer.status:")));
+
+        let summary = get_atlas_route_summary(Some(1));
+        assert_eq!(summary.maintainer_status, Some(report.status));
+        assert_eq!(summary.suggested_max_scale, report.suggested_max_scale);
+        assert_eq!(summary.suggested_pressure, report.suggested_pressure);
+        assert_eq!(
+            summary.maintainer_diagnostic.as_deref(),
+            Some(report.diagnostic.as_str())
+        );
+        assert!(summary
+            .districts
+            .iter()
+            .flat_map(|district| district.focus.iter())
+            .any(|focus| focus.name.starts_with("maintainer.")));
     }
 }
