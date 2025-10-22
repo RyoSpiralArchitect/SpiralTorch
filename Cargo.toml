@@ -20,10 +20,12 @@ members = [
   "crates/spiral-opt",
   "crates/spiral-hpo",
   "crates/spiral-safety",
+  "bindings/spiraltorch-sys",
   "bindings/st-py",
   "bindings/st-wasm",
   "tools/xai-cli",
   "tools/visualize-z-volume"
+,  "crates/julia-ffi-poc"
 ]
 default-members = [
   "crates/st-core",

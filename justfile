@@ -27,3 +27,21 @@ safety-suite:
     cargo test --manifest-path crates/spiral-safety/Cargo.toml
 
 all: fmt clippy core-build core-test stack
+
+setup-julia:
+    ./scripts/setup_julia_env.sh
+
+setup-go:
+    ./scripts/setup_go_env.sh
+
+julia-lint:
+    ./scripts/run_julia_checks.sh lint
+
+julia-test:
+    ./scripts/run_julia_checks.sh test
+
+go-lint:
+    ./scripts/run_go_checks.sh lint
+
+go-test:
+    ./scripts/run_go_checks.sh test
