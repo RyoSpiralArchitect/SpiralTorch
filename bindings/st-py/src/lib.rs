@@ -17,6 +17,7 @@ mod export;
 mod inference;
 mod hpo;
 mod trainer;
+mod spiralk;
 
 mod extras {
     use super::*;
@@ -149,6 +150,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     compat::register(py, m)?;
     pure::register(py, m)?;
     planner::register(py, m)?;
+    spiralk::register(py, m)?;
     hpo::register(py, m)?;
     inference::register(py, m)?;
     frac::register(py, m)?;
@@ -193,6 +195,9 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",
         "gl_coeffs_adaptive","fracdiff_gl_1d",
+        "SpiralKFftPlan","MaxwellSpiralKBridge","MaxwellSpiralKHint",
+        "SpiralKContext","SpiralKWilsonMetrics","SpiralKHeuristicHint",
+        "wilson_lower_bound","should_rewrite","synthesize_program","rewrite_with_wilson",
     ])?;
     Ok(())
 }

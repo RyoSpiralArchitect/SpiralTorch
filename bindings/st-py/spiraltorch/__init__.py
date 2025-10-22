@@ -1335,6 +1335,24 @@ _mirror_into_module(
 
 
 _mirror_into_module(
+    "spiralk",
+    {
+        "SpiralKFftPlan": (),
+        "MaxwellSpiralKBridge": (),
+        "MaxwellSpiralKHint": (),
+        "SpiralKContext": (),
+        "SpiralKWilsonMetrics": (),
+        "SpiralKHeuristicHint": (),
+        "wilson_lower_bound": (),
+        "should_rewrite": (),
+        "synthesize_program": (),
+        "rewrite_with_wilson": (),
+    },
+    reexport=False,
+)
+
+
+_mirror_into_module(
     "planner",
     {
         "RankPlan": (),
@@ -1396,6 +1414,9 @@ _CORE_EXPORTS = [
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
     "info_nce","masked_mse","mean_squared_error",
+    "SpiralKFftPlan","MaxwellSpiralKBridge","MaxwellSpiralKHint",
+    "SpiralKContext","SpiralKWilsonMetrics","SpiralKHeuristicHint",
+    "wilson_lower_bound","should_rewrite","synthesize_program","rewrite_with_wilson",
 ]
 for _name in _CORE_EXPORTS:
     _expose_from_rs(_name)
@@ -1438,7 +1459,7 @@ _EXPORTED = {
     *[n for n in _COMPAT_ALIAS if n in globals()],
     "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
     "selfsup","export","compat","hpo","inference","zspace","vision","canvas",
-    "planner",
+    "planner","spiralk",
     "__version__",
 }
 _EXPORTED.update(
