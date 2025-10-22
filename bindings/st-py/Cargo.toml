@@ -1,6 +1,6 @@
 [package]
 name = "spiraltorch-py"
-version = "0.1.2"
+version = "0.1.9"
 edition = "2021"
 description = "Python bindings for SpiralTorch heuristics"
 license = "AGPL-3.0-or-later"
@@ -69,9 +69,7 @@ num-complex = { version = "0.4" }
 spiral-safety = { path = "../../crates/spiral-safety" }
 serde_json = "1"
 
-[package.metadata.maturin]
-name = "spiraltorch"
-python-source = "python"
-
-[package.metadata.spiraltorch]
-copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
+[package.metadata]
+pyo3 = { extension-module = true, abi3 = true, abi3-py38 = true }
+maturin = { name = "spiraltorch", python-source = "python" }
+spiraltorch = { copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved" }

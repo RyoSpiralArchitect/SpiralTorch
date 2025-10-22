@@ -8,6 +8,52 @@
 
 use core::fmt;
 
+/// Applies a [`TemporalWarp`] to a collection of timestamps in-place.
+///
+/// # Errors
+///
+/// Returns [`TemporalWarpError::Empty`] when the axis has no samples,
+/// [`TemporalWarpError::NonFinite`] when either the warp parameters or input
+/// values are not finite, and [`TemporalWarpError::Degenerate`] when a
+/// non-identity dilation is requested for a zero-span axis.
+pub fn warp_axis_in_place(axis: &mut [f32], warp: TemporalWarp) -> Result<(), TemporalWarpError> {
+    if axis.is_empty() {
+        return Err(TemporalWarpError::Empty);
+    }
+
+    warp.validate()?;
+
+    let mut min = f32::INFINITY;
+    let mut max = f32::NEG_INFINITY;
+    for value in axis.iter().copied() {
+        if !value.is_finite() {
+            return Err(TemporalWarpError::NonFinite);
+        }
+        min = min.min(value);
+        max = max.max(value);
+    }
+
+    if (max - min).abs() <= f32::EPSILON && warp.scale != 1.0 {
+        return Err(TemporalWarpError::Degenerate);
+    }
+
+    for value in axis.iter_mut() {
+        *value = warp.apply(*value);
+    }
+
+    Ok(())
+}
+
+/// Returns a warped copy of the provided axis, leaving the input untouched.
+///
+/// This is a convenience wrapper around [`warp_axis_in_place`] that first
+/// clones the provided slice into an owned [`Vec`].
+pub fn warped_axis(axis: &[f32], warp: TemporalWarp) -> Result<Vec<f32>, TemporalWarpError> {
+    let mut warped = axis.to_vec();
+    warp_axis_in_place(&mut warped, warp)?;
+    Ok(warped)
+}
+
 /// Affine transform applied to a time axis.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TemporalWarp {
@@ -101,3 +147,45 @@ impl fmt::Display for TemporalWarpError {
 }
 
 impl std::error::Error for TemporalWarpError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warp_axis_in_place_applies_transform() {
+        let mut axis = [0.0, 1.0, 2.0, 3.0];
+        let warp = TemporalWarp {
+            scale: 2.0,
+            offset: 1.0,
+            pivot: 1.0,
+        };
+        warp_axis_in_place(&mut axis, warp).unwrap();
+        assert_eq!(axis, [0.0, 2.0, 4.0, 6.0]);
+    }
+
+    #[test]
+    fn warp_axis_rejects_non_finite_values() {
+        let mut axis = [0.0, f32::NAN];
+        let warp = TemporalWarp::identity();
+        let err = warp_axis_in_place(&mut axis, warp).unwrap_err();
+        assert_eq!(err, TemporalWarpError::NonFinite);
+    }
+
+    #[test]
+    fn warp_axis_detects_degenerate_dilation() {
+        let mut axis = [1.0, 1.0];
+        let warp = TemporalWarp::dilation(2.0);
+        let err = warp_axis_in_place(&mut axis, warp).unwrap_err();
+        assert_eq!(err, TemporalWarpError::Degenerate);
+    }
+
+    #[test]
+    fn warped_axis_returns_new_buffer() {
+        let axis = [0.0, 1.0];
+        let warp = TemporalWarp::translation(2.0);
+        let warped = warped_axis(&axis, warp).unwrap();
+        assert_eq!(warped, vec![2.0, 3.0]);
+        assert_eq!(axis, [0.0, 1.0]);
+    }
+}

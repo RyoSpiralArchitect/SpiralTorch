@@ -158,6 +158,10 @@ pip install -U spiraltorch==0.1.6
 - macOS: Xcode CLT / Linux: build-essentials
 - Optional GPU stacks: CUDA / ROCm / Vulkan as needed
 
+## Julia & Go integration (draft)
+
+- Prototype workflows for future Julia/Go bindings live in [docs/ops/julia_go_development.md](docs/ops/julia_go_development.md). Follow the guide for setup, lint/test commands, and release checklists.
+
 **Workspace build**
 
 ```bash
@@ -512,6 +516,7 @@ optimisers alongside its hypergradient updates.
 - [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
 - [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory, signature geometry with timing elasticities, tipping radii, and direction-aware safe radii, plus how SpiralTorch wires DRL penalties into trainers and governance loops.
 - [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
+- [COBOL web dispatch quickstart](docs/cobol_web_dispatch.md) — structure of the WASM planner and how to shuttle envelopes into MQ or CICS entrypoints.
 
 ---
 
