@@ -97,6 +97,88 @@ func TestHandlePredictValidation(t *testing.T) {
 	}
 }
 
+func TestHandlePredictRejectsEmptyInput(t *testing.T) {
+	srv := newTestServer()
+	payload := PredictionRequest{Input: []float64{}}
+	buf, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("failed to marshal payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/predict", bytes.NewReader(buf))
+	w := httptest.NewRecorder()
+
+	srv.handlePredict(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.StatusCode)
+	}
+
+	var body errorResponse
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if body.Error != "input must include at least one value" {
+		t.Fatalf("unexpected error message: %q", body.Error)
+	}
+}
+
+func TestHandlePredictRejectsUnknownFields(t *testing.T) {
+	srv := newTestServer()
+	buf := []byte(`{"input":[1],"extra":true}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/predict", bytes.NewReader(buf))
+	w := httptest.NewRecorder()
+
+	srv.handlePredict(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.StatusCode)
+	}
+
+	var body errorResponse
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if body.Error != "invalid payload" {
+		t.Fatalf("unexpected error message: %q", body.Error)
+	}
+}
+
+func TestHandlePredictRejectsTrailingData(t *testing.T) {
+	srv := newTestServer()
+	buf := []byte(`{"input":[1]} {}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/predict", bytes.NewReader(buf))
+	w := httptest.NewRecorder()
+
+	srv.handlePredict(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.StatusCode)
+	}
+
+	var body errorResponse
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if body.Error != "invalid payload" {
+		t.Fatalf("unexpected error message: %q", body.Error)
+	}
+}
+
 func TestHandlePredictMethodNotAllowed(t *testing.T) {
 	srv := newTestServer()
 	req := httptest.NewRequest(http.MethodGet, "/predict", nil)

@@ -71,7 +71,7 @@ These commands are safe to run independently of the main workspace because the c
 ### Outcomes
 - Captured concrete use-cases for adopting Go within `examples/` and `tools/` directories.
 - Established an idiomatic Go module layout aligned with Rust's package organization.
-- Delivered a runnable Go↔Rust PoC demonstrating request/response semantics and shared data models.
+- Delivered a runnable Go↔Rust PoC demonstrating request/response semantics, shared data models, and defensive request validation to surface schema drift early.
 
 ### Outstanding questions
 - Authentication and authorization model for cross-language calls.
