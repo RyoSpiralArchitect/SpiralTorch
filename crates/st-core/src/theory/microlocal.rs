@@ -507,6 +507,8 @@ impl InterfaceZPulse {
             z_signal: self.z_bias,
             // [SCALE-TODO] Patch 0 optional tagging
             scale: self.scale,
+            events: Vec::new(),
+            attributions: Vec::new(),
         }
     }
 
@@ -1022,7 +1024,9 @@ impl InterfaceZConductor {
         events.extend(z_fused.events.clone());
 
         let fused_pulse = fused.clone();
-        let feedback = fused.clone().into_softlogic_feedback();
+        let mut feedback = fused.clone().into_softlogic_feedback();
+        feedback.set_events(events.clone());
+        feedback.set_attributions(z_fused.attributions.clone());
         self.previous = Some(fused.clone());
         self.carry = Some(fused.clone());
 

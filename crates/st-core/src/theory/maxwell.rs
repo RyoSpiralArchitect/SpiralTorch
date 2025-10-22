@@ -388,6 +388,8 @@ impl MaxwellZPulse {
             drift: self.mean as f32,
             z_signal: self.z_bias,
             scale: None,
+            events: Vec::new(),
+            attributions: Vec::new(),
         }
     }
 }
@@ -524,10 +526,12 @@ impl MaxwellPsiTelemetryBridge {
         }
         hub::set_last_psi_events(&events);
 
-        let feedback = pulse
+        let mut feedback = pulse
             .clone()
             .into_softlogic_feedback(psi_total, weighted_loss);
-        hub::set_softlogic_z(feedback);
+        feedback.set_events(events.iter().map(|event| event.to_string()));
+        feedback.set_attributions([(ZSource::Maxwell, band_total)]);
+        hub::set_softlogic_z(feedback.clone());
         feedback
     }
 }
