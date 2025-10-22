@@ -88,11 +88,81 @@ function _wrap_tensor(handle::Ptr{Cvoid}, context::AbstractString)
     return _register_finalizer!(Tensor(handle))
 end
 
+mutable struct Runtime
+    handle::Ptr{Cvoid}
+end
+
+function _register_runtime_finalizer!(runtime::Runtime)
+    finalizer(runtime) do obj
+        if obj.handle != C_NULL
+            lib = _lib()
+            ccall((:spiraltorch_runtime_free, lib), Cvoid, (Ptr{Cvoid},), obj.handle)
+            obj.handle = C_NULL
+        end
+    end
+    return runtime
+end
+
+function _wrap_runtime(handle::Ptr{Cvoid}, context::AbstractString)
+    if handle == C_NULL
+        error("$context failed: " * last_error())
+    end
+    clear_error!()
+    return _register_runtime_finalizer!(Runtime(handle))
+end
+
+function _require_runtime(runtime::Runtime, label)
+    if runtime.handle == C_NULL
+        error("$(label) runtime handle is null")
+    end
+    return runtime.handle
+end
+
 function _require_handle(tensor::Tensor, label)
     if tensor.handle == C_NULL
         error("$(label) handle is null")
     end
     return tensor.handle
+end
+
+function Runtime(; worker_threads::Integer=0, thread_name::Union{Nothing,String}=nothing)
+    lib = _lib()
+    name_arg = if thread_name === nothing || thread_name == ""
+        Ptr{UInt8}(C_NULL)
+    else
+        Base.cconvert(Cstring, thread_name)
+    end
+    handle = ccall(
+        (:spiraltorch_runtime_new, lib),
+        Ptr{Cvoid},
+        (Csize_t, Cstring),
+        Csize_t(worker_threads),
+        name_arg,
+    )
+    return _wrap_runtime(handle, "runtime_new")
+end
+
+function Base.close(runtime::Runtime)
+    if runtime.handle == C_NULL
+        return nothing
+    end
+    lib = _lib()
+    ccall((:spiraltorch_runtime_free, lib), Cvoid, (Ptr{Cvoid},), runtime.handle)
+    runtime.handle = C_NULL
+    return nothing
+end
+
+function worker_count(runtime::Runtime)
+    lib = _lib()
+    handle = _require_runtime(runtime, "worker_count")
+    count = ccall((:spiraltorch_runtime_worker_count, lib), Csize_t, (Ptr{Cvoid},), handle)
+    if count == 0
+        err = last_error()
+        if !isempty(err)
+            error("runtime_worker_count failed: " * err)
+        end
+    end
+    return Int(count)
 end
 
 function Tensor(rows::Integer, cols::Integer)
@@ -170,6 +240,33 @@ function matmul(lhs::Tensor, rhs::Tensor)
     return _binary_tensor_op(:spiraltorch_tensor_matmul, lhs, rhs)
 end
 
+function add(runtime::Runtime, lhs::Tensor, rhs::Tensor)
+    lib = _lib()
+    handle = _require_runtime(runtime, "runtime_tensor_add")
+    left = _require_handle(lhs, "runtime_tensor_add lhs")
+    right = _require_handle(rhs, "runtime_tensor_add rhs")
+    result = ccall((:spiraltorch_runtime_tensor_add, lib), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}), handle, left, right)
+    return _wrap_tensor(result, "runtime_tensor_add")
+end
+
+function sub(runtime::Runtime, lhs::Tensor, rhs::Tensor)
+    lib = _lib()
+    handle = _require_runtime(runtime, "runtime_tensor_sub")
+    left = _require_handle(lhs, "runtime_tensor_sub lhs")
+    right = _require_handle(rhs, "runtime_tensor_sub rhs")
+    result = ccall((:spiraltorch_runtime_tensor_sub, lib), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}), handle, left, right)
+    return _wrap_tensor(result, "runtime_tensor_sub")
+end
+
+function matmul(runtime::Runtime, lhs::Tensor, rhs::Tensor)
+    lib = _lib()
+    handle = _require_runtime(runtime, "runtime_tensor_matmul")
+    left = _require_handle(lhs, "runtime_tensor_matmul lhs")
+    right = _require_handle(rhs, "runtime_tensor_matmul rhs")
+    result = ccall((:spiraltorch_runtime_tensor_matmul, lib), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}), handle, left, right)
+    return _wrap_tensor(result, "runtime_tensor_matmul")
+end
+
 function scale(tensor::Tensor, value::Real)
     lib = _lib()
     handle = _require_handle(tensor, "tensor_scale")
@@ -181,6 +278,23 @@ function hadamard(lhs::Tensor, rhs::Tensor)
     return _binary_tensor_op(:spiraltorch_tensor_hadamard, lhs, rhs)
 end
 
+function scale(runtime::Runtime, tensor::Tensor, value::Real)
+    lib = _lib()
+    handle = _require_runtime(runtime, "runtime_tensor_scale")
+    tensor_handle = _require_handle(tensor, "runtime_tensor_scale tensor")
+    result = ccall((:spiraltorch_runtime_tensor_scale, lib), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}, Cfloat), handle, tensor_handle, Float32(value))
+    return _wrap_tensor(result, "runtime_tensor_scale")
+end
+
+function hadamard(runtime::Runtime, lhs::Tensor, rhs::Tensor)
+    lib = _lib()
+    handle = _require_runtime(runtime, "runtime_tensor_hadamard")
+    left = _require_handle(lhs, "runtime_tensor_hadamard lhs")
+    right = _require_handle(rhs, "runtime_tensor_hadamard rhs")
+    result = ccall((:spiraltorch_runtime_tensor_hadamard, lib), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}), handle, left, right)
+    return _wrap_tensor(result, "runtime_tensor_hadamard")
+end
+
 function transpose_tensor(tensor::Tensor)
     lib = _lib()
     handle = _require_handle(tensor, "tensor_transpose")
@@ -188,11 +302,27 @@ function transpose_tensor(tensor::Tensor)
     return _wrap_tensor(result, "tensor_transpose")
 end
 
+function transpose_tensor(runtime::Runtime, tensor::Tensor)
+    lib = _lib()
+    handle = _require_runtime(runtime, "runtime_tensor_transpose")
+    tensor_handle = _require_handle(tensor, "runtime_tensor_transpose tensor")
+    result = ccall((:spiraltorch_runtime_tensor_transpose, lib), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}), handle, tensor_handle)
+    return _wrap_tensor(result, "runtime_tensor_transpose")
+end
+
 function reshape_tensor(tensor::Tensor, rows::Integer, cols::Integer)
     lib = _lib()
     handle = _require_handle(tensor, "tensor_reshape")
     result = ccall((:spiraltorch_tensor_reshape, lib), Ptr{Cvoid}, (Ptr{Cvoid}, Csize_t, Csize_t), handle, Csize_t(rows), Csize_t(cols))
     return _wrap_tensor(result, "tensor_reshape")
+end
+
+function reshape_tensor(runtime::Runtime, tensor::Tensor, rows::Integer, cols::Integer)
+    lib = _lib()
+    handle = _require_runtime(runtime, "runtime_tensor_reshape")
+    tensor_handle = _require_handle(tensor, "runtime_tensor_reshape tensor")
+    result = ccall((:spiraltorch_runtime_tensor_reshape, lib), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}, Csize_t, Csize_t), handle, tensor_handle, Csize_t(rows), Csize_t(cols))
+    return _wrap_tensor(result, "runtime_tensor_reshape")
 end
 
 Base.:+(lhs::Tensor, rhs::Tensor) = add(lhs, rhs)

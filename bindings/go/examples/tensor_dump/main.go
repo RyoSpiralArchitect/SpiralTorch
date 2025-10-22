@@ -10,6 +10,18 @@ func main() {
 	version := spiraltorch.Version()
 	fmt.Printf("SpiralTorch runtime version: %s\n", version)
 
+	rt, err := spiraltorch.NewRuntime(0, "")
+	if err != nil {
+		panic(err)
+	}
+	defer rt.Close()
+
+	workers, err := rt.WorkerCount()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Golden runtime workers: %d\n", workers)
+
 	tensor, err := spiraltorch.NewTensorFromDense(2, 2, []float32{1, 2, 3, 4})
 	if err != nil {
 		panic(err)
@@ -94,4 +106,15 @@ func main() {
 		panic(err)
 	}
 	fmt.Printf("reshape(tensor, 4x1): %v\n", reshapedData)
+
+	runtimeProduct, err := rt.Matmul(tensor, other)
+	if err != nil {
+		panic(err)
+	}
+	defer runtimeProduct.Close()
+	runtimeProductData, err := runtimeProduct.Data()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("runtime.matmul(tensor, other): %v\n", runtimeProductData)
 }
