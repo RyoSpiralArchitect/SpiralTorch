@@ -551,8 +551,14 @@ pub(crate) fn clear_maintainer_report_for_test() {
 
 /// Stores the most recent SoftLogic Z feedback sample.
 pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
-    if let Ok(mut guard) = softlogic_z_cell().write() {
-        *guard = Some(feedback.clone());
+    match softlogic_z_cell().write() {
+        Ok(mut guard) => {
+            *guard = Some(feedback.clone());
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = Some(feedback.clone());
+        }
     }
     let fragment = fragment_from_softlogic(&feedback);
     merge_atlas_fragment(fragment);
@@ -560,10 +566,10 @@ pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
 
 /// Returns the latest SoftLogic Z feedback sample if one has been recorded.
 pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
-    softlogic_z_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    match softlogic_z_cell().read() {
+        Ok(guard) => guard.as_ref().cloned(),
+        Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
+    }
 }
 
 /// Snapshot summarising the latest RealGrad projection applied by the system.
@@ -1025,7 +1031,7 @@ fn annotate_psi_events(
     prefix: &str,
     events: &[PsiEvent],
 ) -> Option<u64> {
-    let mut last_step: Option<u64> = None;
+    let mut last_step = None;
     let mut rising = 0u32;
     let mut falling = 0u32;
     for event in events {
@@ -1037,7 +1043,7 @@ fn annotate_psi_events(
                 up,
                 step,
             } => {
-                last_step = Some(last_step.map_or(*step, |prev| prev.max(*step)));
+                last_step = Some(last_step.map_or(*step, |prev: u64| prev.max(*step)));
                 if *up {
                     rising += 1;
                 } else {
