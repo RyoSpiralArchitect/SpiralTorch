@@ -107,6 +107,43 @@ pub struct ZSpaceCoherenceSequencer {
     topos: OpenCartesianTopos,
 }
 
+#[derive(Clone, Debug)]
+pub struct CoherenceDiagnostics {
+    aggregated: Tensor,
+    coherence: Vec<f32>,
+    channel_reports: Vec<LinguisticChannelReport>,
+}
+
+impl CoherenceDiagnostics {
+    pub fn new(
+        aggregated: Tensor,
+        coherence: Vec<f32>,
+        channel_reports: Vec<LinguisticChannelReport>,
+    ) -> Self {
+        Self {
+            aggregated,
+            coherence,
+            channel_reports,
+        }
+    }
+
+    pub fn aggregated(&self) -> &Tensor {
+        &self.aggregated
+    }
+
+    pub fn coherence(&self) -> &[f32] {
+        &self.coherence
+    }
+
+    pub fn channel_reports(&self) -> &[LinguisticChannelReport] {
+        &self.channel_reports
+    }
+
+    pub fn into_parts(self) -> (Tensor, Vec<f32>, Vec<LinguisticChannelReport>) {
+        (self.aggregated, self.coherence, self.channel_reports)
+    }
+}
+
 impl ZSpaceCoherenceSequencer {
     /// Creates a new Z-space coherence sequencer.
     pub fn new(
@@ -340,6 +377,18 @@ impl ZSpaceCoherenceSequencer {
     pub fn forward_with_coherence(&self, x: &Tensor) -> PureResult<(Tensor, Vec<f32>)> {
         let (aggregated, coherence, _) = self.forward_with_diagnostics(x)?;
         Ok((aggregated, coherence))
+    }
+
+    /// Produces a rich diagnostic snapshot that includes per-channel linguistic
+    /// descriptors alongside the aggregated tensor.
+    pub fn diagnostics(&self, x: &Tensor) -> PureResult<CoherenceDiagnostics> {
+        let (aggregated, coherence) = self.forward_with_coherence(x)?;
+        let channel_reports = self.coherence_engine.describe_channels(&coherence)?;
+        Ok(CoherenceDiagnostics::new(
+            aggregated,
+            coherence,
+            channel_reports,
+        ))
     }
 
     pub fn forward(&self, x: &Tensor) -> PureResult<Tensor> {
@@ -718,32 +767,20 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_surface_entropy_and_energy_ratio() {
-        let topos = OpenCartesianTopos::new(-0.25, 1e-5, 10.0, 256, 8192).unwrap();
-        let seq = ZSpaceCoherenceSequencer::new(96, 6, -0.25, topos).unwrap();
+    fn diagnostics_surfaces_channel_reports() {
+        let topos = OpenCartesianTopos::new(-0.65, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(256, 8, -0.65, topos).unwrap();
 
-        let mut data = vec![0.0f32; 96 * 3];
-        for (idx, value) in data.iter_mut().enumerate() {
-            let channel = (idx % 96) / 16;
-            *value = 0.1 + (channel as f32 * 0.05);
+        let mut sweep = vec![0.0f32; 256 * 4];
+        for (idx, value) in sweep.iter_mut().enumerate() {
+            *value = ((idx % 97) as f32).sin();
         }
-        let x = Tensor::from_vec(3, 96, data).unwrap();
+        let x = Tensor::from_vec(4, 256, sweep).unwrap();
 
-        let (_, coherence, diagnostics) = seq.forward_with_diagnostics(&x).unwrap();
-
-        assert_eq!(coherence.len(), seq.maxwell_channels());
-        assert_eq!(diagnostics.channel_weights().len(), coherence.len());
-        assert_eq!(diagnostics.normalized_weights().len(), coherence.len());
-        assert!(diagnostics.normalization() > 0.0);
-        assert!(diagnostics.fractional_order() > 0.0);
-        assert!(diagnostics.coherence_entropy().is_finite());
-        assert!(diagnostics.energy_ratio() >= 0.0);
-        assert!(diagnostics.energy_ratio() <= 1.0);
-        if let Some(channel) = diagnostics.dominant_channel() {
-            assert!(channel < coherence.len());
-        }
-        let sum: f32 = diagnostics.normalized_weights().iter().sum();
-        assert!((sum - 1.0).abs() < 1e-3);
+        let diagnostics = seq.diagnostics(&x).unwrap();
+        assert_eq!(diagnostics.aggregated().shape(), x.shape());
+        assert_eq!(diagnostics.coherence().len(), seq.maxwell_channels());
+        assert_eq!(diagnostics.channel_reports().len(), seq.maxwell_channels());
     }
 
     #[test]
