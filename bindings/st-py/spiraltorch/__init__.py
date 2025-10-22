@@ -58,7 +58,7 @@ def _safe_getattr(obj: _Any, name: str, default: _Any = None) -> _Any:
 
 
 def _resolve_rs_attr(candidate: str) -> _Any | None:
-    if not candidate or _rs is None:
+    if not candidate:
         return None
     target: _Any = _rs
     for part in candidate.split("."):
