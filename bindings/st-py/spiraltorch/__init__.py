@@ -1335,6 +1335,24 @@ _mirror_into_module(
 
 
 _mirror_into_module(
+    "spiralk",
+    {
+        "SpiralKFftPlan": (),
+        "MaxwellSpiralKBridge": (),
+        "MaxwellSpiralKHint": (),
+        "SpiralKContext": (),
+        "SpiralKWilsonMetrics": (),
+        "SpiralKHeuristicHint": (),
+        "wilson_lower_bound": (),
+        "should_rewrite": (),
+        "synthesize_program": (),
+        "rewrite_with_wilson": (),
+    },
+    reexport=False,
+)
+
+
+_mirror_into_module(
     "planner",
     {
         "RankPlan": (),
@@ -1346,6 +1364,28 @@ _mirror_into_module(
     },
     reexport=False,
 )
+
+
+class SpiralSession:
+    """Lightweight execution context for quick experimentation."""
+
+    backend: str
+    seed: int | None
+    device: str
+
+    def __init__(self, backend: str = "auto", seed: int | None = None) -> None:
+        self.backend = backend
+        self.seed = seed
+        self.device = "wgpu" if backend == "wgpu" else "cpu"
+
+    def plan_topk(self, rows: int, cols: int, k: int):
+        return plan_topk(rows, cols, k, backend=self.backend)
+
+    def close(self) -> None:
+        """Release any session-scoped resources (currently a no-op)."""
+
+
+_EXTRAS.append("SpiralSession")
 
 
 for _key, _hint in _FORWARDING_HINTS.items():
@@ -1360,6 +1400,7 @@ for _key, _hint in _FORWARDING_HINTS.items():
 _CORE_EXPORTS = [
     "Tensor","ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder",
     "GradientSummary","Hypergrad","TensorBiome",
+    "LinearModel",
     "BarycenterIntermediate","ZSpaceBarycenter",
     "QueryPlan","RecEpochReport","Recommender",
     "stAgent","PpoAgent","SacAgent",
@@ -1369,10 +1410,13 @@ _CORE_EXPORTS = [
     "SearchLoop",
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
-    "ZSpaceTrainer","TemporalResonanceBuffer","SpiralTorchVision",
+    "ModuleTrainer","ZSpaceTrainer","TemporalResonanceBuffer","SpiralTorchVision",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
-    "info_nce","masked_mse",
+    "info_nce","masked_mse","mean_squared_error",
+    "SpiralKFftPlan","MaxwellSpiralKBridge","MaxwellSpiralKHint",
+    "SpiralKContext","SpiralKWilsonMetrics","SpiralKHeuristicHint",
+    "wilson_lower_bound","should_rewrite","synthesize_program","rewrite_with_wilson",
 ]
 for _name in _CORE_EXPORTS:
     _expose_from_rs(_name)
@@ -1415,7 +1459,7 @@ _EXPORTED = {
     *[n for n in _COMPAT_ALIAS if n in globals()],
     "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
     "selfsup","export","compat","hpo","inference","zspace","vision","canvas",
-    "planner",
+    "planner","spiralk",
     "__version__",
 }
 _EXPORTED.update(
