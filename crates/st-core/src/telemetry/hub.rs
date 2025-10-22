@@ -1037,7 +1037,7 @@ fn annotate_psi_events(
                 up,
                 step,
             } => {
-                last_step = Some(last_step.map_or(*step, |prev| prev.max(*step)));
+                last_step = Some(last_step.map_or(*step, |prev: u64| prev.max(*step)));
                 if *up {
                     rising += 1;
                 } else {
