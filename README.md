@@ -8,6 +8,9 @@ _(Still under active repair while expanding — API changes hourly.)_
 Unauthorized redistribution, scraping, or resale of this repository
 violates AGPL-3.0 and §13. Any commercial deployment requires a license.
 
+## ⚖️ Attribution Required
+Reuse or redistribution **must retain the SpiralTorch name and authorship** as per AGPL §5 & §13.
+
 ---
 
 ### Why SpiralTorch  
