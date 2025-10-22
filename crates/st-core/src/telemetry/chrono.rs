@@ -33,7 +33,7 @@ use core::f32;
 use core::f32::consts::TAU;
 use std::collections::VecDeque;
 
-use crate::util::timewarp::{TemporalWarp, TemporalWarpError};
+use crate::util::timewarp::{warp_axis_in_place, TemporalWarp, TemporalWarpError};
 
 #[cfg(feature = "kdsl")]
 use st_kdsl::auto::{synthesize_program, HeuristicHint};
@@ -586,18 +586,23 @@ impl ChronoTimeline {
         if self.frames.is_empty() {
             return Err(TemporalWarpError::Empty);
         }
+
         warp.validate()?;
+
         let start = self.axis_origin().unwrap_or(0.0);
-        let mut previous = warp.apply(start);
-        if !previous.is_finite() {
+        if !start.is_finite() {
             return Err(TemporalWarpError::NonFinite);
         }
+
+        let mut axis = Vec::with_capacity(self.frames.len() + 1);
+        axis.push(start);
+        axis.extend(self.frames.iter().map(|frame| frame.timestamp));
+
+        warp_axis_in_place(&mut axis, warp)?;
+
         let scale = warp.scale;
-        for frame in &mut self.frames {
-            let warped_timestamp = warp.apply(frame.timestamp);
-            if !warped_timestamp.is_finite() {
-                return Err(TemporalWarpError::NonFinite);
-            }
+        let mut previous = axis[0];
+        for (frame, warped_timestamp) in self.frames.iter_mut().zip(axis.into_iter().skip(1)) {
             let new_dt = (warped_timestamp - previous).max(f32::EPSILON);
             frame.dt = new_dt;
             frame.timestamp = warped_timestamp;
@@ -615,17 +620,10 @@ impl ChronoTimeline {
 
     /// Shifts all timestamps by the provided offset.
     pub fn shift(&mut self, offset: f32) -> Result<(), TemporalWarpError> {
-        if self.frames.is_empty() {
-            return Err(TemporalWarpError::Empty);
-        }
         if !offset.is_finite() {
             return Err(TemporalWarpError::NonFinite);
         }
-        for frame in &mut self.frames {
-            frame.timestamp += offset;
-        }
-        self.elapsed += offset;
-        Ok(())
+        self.warp_time_axis(TemporalWarp::translation(offset))
     }
 
     /// Rescales the axis so the latest frame aligns with the requested progress.
@@ -648,15 +646,9 @@ impl ChronoTimeline {
             .back()
             .map(|frame| frame.timestamp)
             .unwrap_or(start);
-        let span = (last - start).max(f32::EPSILON);
         let target = (window * progress).max(f32::EPSILON);
-        let factor = target / span;
-        self.dilate(factor)?;
-        let new_start = self.axis_origin().unwrap_or(0.0);
-        if new_start.abs() > f32::EPSILON {
-            self.shift(-new_start)?;
-        }
-        Ok(())
+        let warp = TemporalWarp::fit_span(start, last, 0.0, target)?;
+        self.warp_time_axis(warp)
     }
 
     /// Removes the most recent `steps` frames from the timeline.
