@@ -26,6 +26,9 @@ void *spiraltorch_tensor_add(const void *lhs, const void *rhs);
 void *spiraltorch_tensor_sub(const void *lhs, const void *rhs);
 void *spiraltorch_tensor_scale(const void *tensor, float value);
 void *spiraltorch_tensor_matmul(const void *lhs, const void *rhs);
+void *spiraltorch_tensor_transpose(const void *tensor);
+void *spiraltorch_tensor_reshape(const void *tensor, size_t rows, size_t cols);
+void *spiraltorch_tensor_hadamard(const void *lhs, const void *rhs);
 */
 import "C"
 
@@ -199,6 +202,13 @@ func (t *Tensor) Matmul(other *Tensor) (*Tensor, error) {
 	}, "tensor_matmul")
 }
 
+// Hadamard performs element-wise multiplication and returns a new tensor.
+func (t *Tensor) Hadamard(other *Tensor) (*Tensor, error) {
+	return t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
+		return C.spiraltorch_tensor_hadamard(lhs, rhs)
+	}, "tensor_hadamard")
+}
+
 // Scale multiplies every element by the provided value.
 func (t *Tensor) Scale(value float32) (*Tensor, error) {
 	if t == nil || t.handle == nil {
@@ -206,4 +216,25 @@ func (t *Tensor) Scale(value float32) (*Tensor, error) {
 	}
 	ptr := C.spiraltorch_tensor_scale(t.handle, C.float(value))
 	return wrapTensor(ptr, "tensor_scale")
+}
+
+// Transpose returns a new tensor with flipped dimensions.
+func (t *Tensor) Transpose() (*Tensor, error) {
+	if t == nil || t.handle == nil {
+		return nil, fmt.Errorf("spiraltorch: tensor handle is nil")
+	}
+	ptr := C.spiraltorch_tensor_transpose(t.handle)
+	return wrapTensor(ptr, "tensor_transpose")
+}
+
+// Reshape returns a tensor that views the same data with new `(rows, cols)` dimensions.
+func (t *Tensor) Reshape(rows, cols int) (*Tensor, error) {
+	if t == nil || t.handle == nil {
+		return nil, fmt.Errorf("spiraltorch: tensor handle is nil")
+	}
+	if rows < 0 || cols < 0 {
+		return nil, fmt.Errorf("spiraltorch: reshape dimensions must be non-negative")
+	}
+	ptr := C.spiraltorch_tensor_reshape(t.handle, C.size_t(rows), C.size_t(cols))
+	return wrapTensor(ptr, "tensor_reshape")
 }

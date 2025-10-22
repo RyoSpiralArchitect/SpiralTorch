@@ -61,4 +61,37 @@ func main() {
 		panic(err)
 	}
 	fmt.Printf("tensor @ other: %v\n", productData)
+
+	hadamard, err := tensor.Hadamard(other)
+	if err != nil {
+		panic(err)
+	}
+	defer hadamard.Close()
+	hadamardData, err := hadamard.Data()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("tensor .* other: %v\n", hadamardData)
+
+	transpose, err := tensor.Transpose()
+	if err != nil {
+		panic(err)
+	}
+	defer transpose.Close()
+	transposeData, err := transpose.Data()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("transpose(tensor): %v\n", transposeData)
+
+	reshaped, err := tensor.Reshape(4, 1)
+	if err != nil {
+		panic(err)
+	}
+	defer reshaped.Close()
+	reshapedData, err := reshaped.Data()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("reshape(tensor, 4x1): %v\n", reshapedData)
 }
