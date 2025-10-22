@@ -442,6 +442,15 @@ class _NnDataLoaderIter(Iterable[Tuple[Tensor, Tensor]]):
 
     def __next__(self) -> Tuple[Tensor, Tensor]: ...
 
+class CoherenceChannelReport:
+    channel: int
+    weight: float
+    backend: str
+    dominant_concept: str | None
+    emphasis: float
+    descriptor: str | None
+
+
 class CoherenceDiagnostics:
     channel_weights: List[float]
     normalized_weights: List[float]
@@ -452,6 +461,9 @@ class CoherenceDiagnostics:
     z_bias: float
     energy_ratio: float
     coherence_entropy: float
+    aggregated: Tensor
+    coherence: List[float]
+    channel_reports: List[CoherenceChannelReport]
 
 
 class _ZSpaceCoherenceSequencer:
