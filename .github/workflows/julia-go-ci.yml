@@ -1,0 +1,55 @@
+name: Julia & Go CI Draft
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+
+jobs:
+  julia:
+    name: Julia checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Julia
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+      - name: Run Julia lint & tests
+        env:
+          JULIA_PROJECT_PATH: bindings/julia
+        run: |
+          bash scripts/run_julia_checks.sh lint
+          bash scripts/run_julia_checks.sh test
+      - name: Upload Julia logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: julia-logs
+          path: logs/julia
+
+  go:
+    name: Go checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+            | sh -s -- -b /usr/local/bin v1.55.2
+      - name: Run Go lint & tests
+        env:
+          GO_MODULE_PATH: bindings/go
+        run: |
+          bash scripts/run_go_checks.sh lint
+          bash scripts/run_go_checks.sh test
+      - name: Upload Go logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-logs
+          path: logs/go

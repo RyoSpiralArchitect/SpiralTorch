@@ -19,6 +19,8 @@ pub use cobol::*;
 #[cfg(target_arch = "wasm32")]
 pub use cobol_bridge::*;
 #[cfg(target_arch = "wasm32")]
+pub use cobol_bridge::*;
+#[cfg(target_arch = "wasm32")]
 pub use fft::*;
 #[cfg(target_arch = "wasm32")]
 pub use tuner::*;
