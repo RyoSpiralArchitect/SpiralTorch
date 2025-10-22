@@ -1382,6 +1382,7 @@ for _key, _hint in _FORWARDING_HINTS.items():
 _CORE_EXPORTS = [
     "Tensor","ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder",
     "GradientSummary","Hypergrad","TensorBiome",
+    "LinearModel",
     "BarycenterIntermediate","ZSpaceBarycenter",
     "QueryPlan","RecEpochReport","Recommender",
     "stAgent","PpoAgent","SacAgent",
@@ -1394,7 +1395,7 @@ _CORE_EXPORTS = [
     "ModuleTrainer","ZSpaceTrainer","TemporalResonanceBuffer","SpiralTorchVision",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
-    "info_nce","masked_mse",
+    "info_nce","masked_mse","mean_squared_error",
 ]
 for _name in _CORE_EXPORTS:
     _expose_from_rs(_name)

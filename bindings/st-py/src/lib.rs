@@ -188,7 +188,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
         "nn","frac","selfsup","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
         "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",
-        "ModuleTrainer",
+        "LinearModel","ModuleTrainer","mean_squared_error",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",
