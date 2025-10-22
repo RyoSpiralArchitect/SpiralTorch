@@ -722,41 +722,35 @@ impl Module for Conv6da {
         let mut base_indices = [None; SIX_DA_NEIGHBORS];
         let plane = self.height * self.width;
         let out_cols = out.shape().1;
-        {
-            let out_data = out.data_mut();
-            for b in 0..batch {
-                let row = &input.data()[b * cols..(b + 1) * cols];
-                let out_row = &mut out_data[b * out_cols..(b + 1) * out_cols];
-                for depth_idx in 0..self.depth {
-                    for height_idx in 0..self.height {
-                        for width_idx in 0..self.width {
-                            let cell_index =
-                                depth_idx * plane + height_idx * self.width + width_idx;
-                            let geodesic = self.gather_neighbors(
-                                row,
-                                depth_idx,
-                                height_idx,
-                                width_idx,
-                                &mut neighbors,
-                                &mut base_indices,
-                            );
-                            let density = self.leech_projector.enrich(geodesic) as f32;
-                            for oc in 0..self.out_channels {
-                                let weight_row =
-                                    &weight_data[oc * span..(oc + 1) * span];
-                                let mut acc = bias_data[oc] + density;
-                                for (value, weight) in
-                                    neighbors.iter().zip(weight_row.iter())
-                                {
-                                    acc += value * weight;
-                                }
-                                out_row[oc * volume + cell_index] = acc;
+        let mut out_rows = out.data_mut().chunks_exact_mut(out_cols);
+        let mut input_rows = input.data().chunks_exact(cols);
+        for (row, out_row) in (&mut input_rows).zip(&mut out_rows) {
+            for depth_idx in 0..self.depth {
+                for height_idx in 0..self.height {
+                    for width_idx in 0..self.width {
+                        let cell_index = depth_idx * plane + height_idx * self.width + width_idx;
+                        let geodesic = self.gather_neighbors(
+                            row,
+                            depth_idx,
+                            height_idx,
+                            width_idx,
+                            &mut neighbors,
+                            &mut base_indices,
+                        );
+                        let density = self.leech_projector.enrich(geodesic) as f32;
+                        for (oc, weight_row) in weight_data.chunks_exact(span).enumerate() {
+                            let mut acc = bias_data[oc] + density;
+                            for (value, weight) in neighbors.iter().zip(weight_row.iter()) {
+                                acc += value * weight;
                             }
+                            out_row[oc * volume + cell_index] = acc;
                         }
                     }
                 }
             }
         }
+        debug_assert!(input_rows.remainder().is_empty());
+        debug_assert!(out_rows.into_remainder().is_empty());
         Ok(out)
     }
 
@@ -784,67 +778,59 @@ impl Module for Conv6da {
         let plane = self.height * self.width;
         let volume_per_channel = self.depth * plane;
         let weight = self.weight.value();
-        let weight_data = weight.data();
         let grad_cols = grad_output.shape().1;
         let leech_factor = self.leech_projector.enrich(1.0);
+        let mut grad_input_rows = grad_input.data_mut().chunks_exact_mut(cols);
+        let mut input_rows = input.data().chunks_exact(cols);
+        let mut grad_rows = grad_output.data().chunks_exact(grad_cols);
+        let weight_data = weight.data();
+        for ((row, grad_row), grad_in_row) in (&mut input_rows)
+            .zip(&mut grad_rows)
+            .zip(&mut grad_input_rows)
         {
-            let grad_input_data = grad_input.data_mut();
-            for b in 0..batch {
-                let row = &input.data()[b * cols..(b + 1) * cols];
-                let grad_row =
-                    &grad_output.data()[b * grad_cols..(b + 1) * grad_cols];
-                let grad_in_row =
-                    &mut grad_input_data[b * cols..(b + 1) * cols];
-                for depth_idx in 0..self.depth {
-                    for height_idx in 0..self.height {
-                        for width_idx in 0..self.width {
-                            let cell_index =
-                                depth_idx * plane + height_idx * self.width + width_idx;
-                            let geodesic = self.gather_neighbors(
-                                row,
-                                depth_idx,
-                                height_idx,
-                                width_idx,
-                                &mut neighbors,
-                                &mut base_indices,
-                            );
-                            let mut sum_go = 0.0f64;
-                            for oc in 0..self.out_channels {
-                                let go = grad_row[oc * volume + cell_index];
-                                sum_go += f64::from(go);
-                                grad_bias[oc] += go;
-                                let weight_row =
-                                    &weight_data[oc * span..(oc + 1) * span];
-                                for (idx, &value) in neighbors.iter().enumerate() {
-                                    grad_weight[oc * span + idx] += go * value;
-                                }
-                                for ic in 0..self.in_channels {
-                                    let channel_offset = ic * volume_per_channel;
-                                    for (offset_idx, base_opt) in base_indices.iter().enumerate() {
-                                        if let Some(base) = base_opt {
-                                            let input_index = channel_offset + base;
-                                            let weight_idx =
-                                                offset_idx * self.in_channels + ic;
-                                            grad_in_row[input_index] +=
-                                                go * weight_row[weight_idx];
-                                        }
+            for depth_idx in 0..self.depth {
+                for height_idx in 0..self.height {
+                    for width_idx in 0..self.width {
+                        let cell_index = depth_idx * plane + height_idx * self.width + width_idx;
+                        let geodesic = self.gather_neighbors(
+                            row,
+                            depth_idx,
+                            height_idx,
+                            width_idx,
+                            &mut neighbors,
+                            &mut base_indices,
+                        );
+                        let mut sum_go = 0.0f64;
+                        for (oc, weight_row) in weight_data.chunks_exact(span).enumerate() {
+                            let go = grad_row[oc * volume + cell_index];
+                            sum_go += f64::from(go);
+                            grad_bias[oc] += go;
+                            for (idx, &value) in neighbors.iter().enumerate() {
+                                grad_weight[oc * span + idx] += go * value;
+                            }
+                            for ic in 0..self.in_channels {
+                                let channel_offset = ic * volume_per_channel;
+                                for (offset_idx, base_opt) in base_indices.iter().enumerate() {
+                                    if let Some(base) = base_opt {
+                                        let input_index = channel_offset + base;
+                                        let weight_idx = offset_idx * self.in_channels + ic;
+                                        grad_in_row[input_index] += go * weight_row[weight_idx];
                                     }
                                 }
                             }
-                            if geodesic > 0.0
-                                && leech_factor > f64::EPSILON
-                                && sum_go.abs() > f64::EPSILON
-                            {
-                                let scale = (sum_go * leech_factor / geodesic) as f32;
-                                for ic in 0..self.in_channels {
-                                    let channel_offset = ic * volume_per_channel;
-                                    for (offset_idx, base_opt) in base_indices.iter().enumerate() {
-                                        if let Some(base) = base_opt {
-                                            let input_index = channel_offset + base;
-                                            let value = neighbors
-                                                [offset_idx * self.in_channels + ic];
-                                            grad_in_row[input_index] += scale * value;
-                                        }
+                        }
+                        if geodesic > 0.0
+                            && leech_factor > f64::EPSILON
+                            && sum_go.abs() > f64::EPSILON
+                        {
+                            let scale = (sum_go * leech_factor / geodesic) as f32;
+                            for ic in 0..self.in_channels {
+                                let channel_offset = ic * volume_per_channel;
+                                for (offset_idx, base_opt) in base_indices.iter().enumerate() {
+                                    if let Some(base) = base_opt {
+                                        let input_index = channel_offset + base;
+                                        let value = neighbors[offset_idx * self.in_channels + ic];
+                                        grad_in_row[input_index] += scale * value;
                                     }
                                 }
                             }
@@ -853,6 +839,9 @@ impl Module for Conv6da {
                 }
             }
         }
+        debug_assert!(input_rows.remainder().is_empty());
+        debug_assert!(grad_rows.remainder().is_empty());
+        debug_assert!(grad_input_rows.into_remainder().is_empty());
         let grad_weight_tensor = Tensor::from_vec(self.out_channels, span, grad_weight)?;
         let grad_bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
         self.weight.accumulate_euclidean(&grad_weight_tensor)?;
@@ -1390,11 +1379,8 @@ mod tests {
             (4.0_f64 * 4.0 + 2.0 * 2.0 + 3.0 * 3.0).sqrt(),
         ];
         let base = [6.0f32, 7.0, 8.0, 9.0];
-        for ((out, base_sum), geodesic) in output
-            .data()
-            .iter()
-            .zip(base.iter())
-            .zip(geodesics.iter())
+        for ((out, base_sum), geodesic) in
+            output.data().iter().zip(base.iter()).zip(geodesics.iter())
         {
             let expected = *base_sum + projector.enrich(*geodesic) as f32;
             assert!((out - expected).abs() < 1e-4);
@@ -1422,6 +1408,29 @@ mod tests {
         }
         let bias_grad = conv.bias.gradient().unwrap();
         assert!((bias_grad.data()[0] - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn conv6da_backward_includes_leech_density_contribution() {
+        let mut conv = Conv6da::new("conv6", 1, 1, (1, 1, 1), 24, 2.0).unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 0.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 1, vec![3.0]).unwrap();
+        let grad_output = Tensor::from_vec(1, 1, vec![0.5]).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        let projector = LeechProjector::new(24, 2.0);
+        let expected = grad_output.data()[0] * projector.enrich(1.0) as f32;
+        assert!((grad_input.data()[0] - expected).abs() < 1e-6);
+        let weight_grad = conv.weight.gradient().unwrap();
+        let grads = weight_grad.data();
+        assert!((grads[0] - grad_output.data()[0] * input.data()[0]).abs() < 1e-6);
+        for &value in &grads[1..] {
+            assert!(value.abs() < 1e-6);
+        }
+        let bias_grad = conv.bias.gradient().unwrap();
+        assert!((bias_grad.data()[0] - grad_output.data()[0]).abs() < 1e-6);
     }
 
     #[test]
