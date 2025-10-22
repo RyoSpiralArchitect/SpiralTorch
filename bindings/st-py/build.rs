@@ -207,7 +207,30 @@ fn apply_linkfor_shared(
 
     let mut configured = false;
     let mut tokens = args.split_whitespace().peekable();
+    let mut skip_next = false;
     while let Some(token) = tokens.next() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+
+        let mut should_skip = false;
+        if token == "-stack_size" {
+            should_skip = true;
+            skip_next = true;
+        } else if token.starts_with("-Wl,") {
+            if token
+                .split(',')
+                .any(|component| component.trim_start_matches('-') == "stack_size")
+            {
+                should_skip = true;
+            }
+        }
+
+        if should_skip {
+            continue;
+        }
+
         if token.starts_with("-L") {
             let path = token.trim_start_matches("-L");
             if !path.is_empty() && emitted_searches.insert(format!("native:{path}")) {
