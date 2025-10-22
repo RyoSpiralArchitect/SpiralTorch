@@ -549,6 +549,38 @@ pub(crate) fn clear_maintainer_report_for_test() {
     }
 }
 
+/// Clears the cached PSI reading maintained by the telemetry hub.
+///
+/// This helper is intended for use in tests that need to ensure a clean
+/// telemetry state before exercising code that publishes PSI readings.
+#[cfg(feature = "psi")]
+pub fn clear_last_psi_for_test() {
+    if let Ok(mut guard) = LAST_PSI.write() {
+        *guard = None;
+    }
+}
+
+/// Clears the cached PSI events maintained by the telemetry hub.
+///
+/// This helper is intended for use in tests that need to ensure a clean
+/// telemetry state before exercising code that publishes PSI events.
+#[cfg(feature = "psi")]
+pub fn clear_last_psi_events_for_test() {
+    if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
+        guard.clear();
+    }
+}
+
+/// Clears the cached SoftLogic Z feedback maintained by the telemetry hub.
+///
+/// This helper is intended for use in tests that need to ensure a clean
+/// telemetry state before exercising code that publishes SoftLogic feedback.
+pub fn clear_softlogic_z_for_test() {
+    if let Ok(mut guard) = softlogic_z_cell().write() {
+        *guard = None;
+    }
+}
+
 /// Stores the most recent SoftLogic Z feedback sample.
 pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
     match softlogic_z_cell().write() {

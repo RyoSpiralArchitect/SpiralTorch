@@ -194,12 +194,8 @@ impl ZSpaceCoherenceSequencer {
         x: &Tensor,
         coherence_weights: &[f32],
     ) -> PureResult<(Tensor, CoherenceDiagnostics)> {
-        let (
-            aggregated,
-            normalization,
-            fractional_order,
-            channel_width,
-        ) = self.compute_geometric_aggregate(x, coherence_weights)?;
+        let (aggregated, normalization, fractional_order, channel_width) =
+            self.compute_geometric_aggregate(x, coherence_weights)?;
 
         let diagnostics = self.build_coherence_diagnostics(
             &aggregated,
@@ -276,7 +272,12 @@ impl ZSpaceCoherenceSequencer {
         self.topos
             .guard_tensor("zspace_coherence_geometric_aggregate", &aggregated)?;
 
-        Ok((aggregated, normalization, fractional_order, channel_width.max(1)))
+        Ok((
+            aggregated,
+            normalization,
+            fractional_order,
+            channel_width.max(1),
+        ))
     }
 
     /// Performs coherence-weighted geometric aggregation.
@@ -971,6 +972,10 @@ mod tests {
     fn language_bridges_publish_psi_telemetry() {
         use st_core::telemetry::{hub, psi::PsiComponent};
         use st_core::theory::maxwell::MaxwellPsiTelemetryBridge;
+
+        hub::clear_last_psi_for_test();
+        hub::clear_last_psi_events_for_test();
+        hub::clear_softlogic_z_for_test();
 
         let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
         let seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
