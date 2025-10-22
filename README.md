@@ -749,6 +749,10 @@ It stores named `InterfaceGauge`s, offers builder-style helpers to register or
 remove probes, runs batch analysis keyed by id, and hands the resulting lineup
 directly to the conductor so runtime code can swap probe sets without rewriting
 fusion logic.【F:crates/st-core/src/theory/microlocal.rs†L100-L220】【F:crates/st-core/src/theory/microlocal.rs†L819-L875】
+`MacroTemplateBank` mirrors that registry pattern for macro-scale designs: it
+keeps named `MacroModelTemplate`s, accepts cards directly, and couples the whole
+lineup to an `InterfaceZLift` to emit a bridge bank so macro kinetics can travel
+with whatever microlocal gauges are currently wired into the conductor.【F:crates/st-core/src/theory/macro.rs†L680-L812】
 
 The conductor can now blend the pulses in both time and frequency: `set_frequency_config`
 installs a power-of-two FFT window and per-source spectral gains so high-frequency
@@ -2059,6 +2063,69 @@ print(f"z-bias: {diagnostics.z_bias():.3f}")
 ```
 
 [See example](examples/05_new_layers/zspace_coherence_demo.py)
+
+### Plugin Architecture
+
+`ZSpaceCoherenceSequencer` now exposes a lightweight plugin system so other
+subsystems can tap into each stage of the pipeline without forking the core
+implementation. Plugins are notified when tensors move through projection,
+coherence measurement, geometric aggregation, semantic window derivation,
+canonical concept selection, Maxwell desire emission, distribution fusion, and
+language bridging. They also receive callbacks when backends or linguistic
+profiles change, when contours/reports are emitted, and when PSI telemetry is
+published (with the `psi` feature).
+
+Key stages:
+
+- `Projected`, `CoherenceMeasured`, `Aggregated`
+- `SemanticWindowDerived`, `SemanticDistributionDerived`, `CanonicalConceptSelected`
+- `MaxwellBridgeEmitted`, `SemanticWindowFused`, `LanguageBridged`
+- `BackendConfigured`, `LinguisticProfileRegistered`, `LinguisticProfilesCleared`
+- `LinguisticContourEmitted`, `ChannelsDescribed`
+- `PsiTelemetryPublished` *(when compiled with `psi`)*
+
+Implement the `ZSpaceSequencerPlugin` trait and register it on a sequencer to
+receive callbacks:
+
+```rust
+use st_nn::{
+    zspace_coherence::{
+        CoherenceBackend, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
+    },
+    OpenCartesianTopos, PureResult, Tensor,
+};
+
+struct TelemetryPlugin;
+
+impl ZSpaceSequencerPlugin for TelemetryPlugin {
+    fn name(&self) -> &'static str { "telemetry" }
+
+    fn on_stage(&self, stage: ZSpaceSequencerStage<'_>) -> PureResult<()> {
+        match stage {
+            ZSpaceSequencerStage::Aggregated { diagnostics, .. } => {
+                println!("entropy: {:.2}", diagnostics.coherence_entropy());
+            }
+            ZSpaceSequencerStage::SemanticWindowDerived { window, .. } => {
+                println!("window tokens: {}", window.len());
+            }
+            ZSpaceSequencerStage::BackendConfigured { backend } => {
+                println!("backend -> {}", backend.label());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+fn main() -> PureResult<()> {
+    let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192)?;
+    let mut sequencer = ZSpaceCoherenceSequencer::new(768, 12, -1.0, topos)?;
+    sequencer.register_plugin(TelemetryPlugin);
+    sequencer.set_backend(CoherenceBackend::Fftw)?;
+    let (_out, _, _) = sequencer.forward_with_diagnostics(&Tensor::zeros(1, 768)?);
+    Ok(())
+}
+```
 
 ### Why Not Attention?
 

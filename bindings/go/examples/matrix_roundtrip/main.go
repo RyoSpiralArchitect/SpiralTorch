@@ -37,4 +37,33 @@ func main() {
 
 	fmt.Printf("original matrix: %v\n", matrix)
 	fmt.Printf("recovered matrix (mutated): %v\n", recovered)
+
+	columns, err := tensor.Columns()
+	if err != nil {
+		log.Fatalf("unable to decode columns: %v", err)
+	}
+	fmt.Printf("column copies: %v\n", columns)
+
+	firstColumn, err := tensor.Column(0)
+	if err != nil {
+		log.Fatalf("unable to extract first column: %v", err)
+	}
+	secondRow, err := tensor.Row(1)
+	if err != nil {
+		log.Fatalf("unable to extract second row: %v", err)
+	}
+	fmt.Printf("first column slice: %v\n", firstColumn)
+	fmt.Printf("second row slice: %v\n", secondRow)
+
+	rebuilt, err := spiraltorch.NewTensorFromColumns(columns)
+	if err != nil {
+		log.Fatalf("unable to rebuild from columns: %v", err)
+	}
+	defer rebuilt.Close()
+
+	echo, err := rebuilt.ToMatrix()
+	if err != nil {
+		log.Fatalf("unable to decode rebuilt tensor: %v", err)
+	}
+	fmt.Printf("round-trip via columns: %v\n", echo)
 }

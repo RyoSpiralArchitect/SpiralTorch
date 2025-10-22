@@ -46,6 +46,7 @@ ndarray     = "0.15"
 nalgebra    = "0.32"
 rustc-hash  = "1.1"
 rustfft     = "6"
+num-complex = "0.4"
 
 once_cell   = { version = "1.19", optional = true }
 bytemuck    = { version = "1.16", optional = true, features = ["derive"] }

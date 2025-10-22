@@ -9,6 +9,9 @@ println("tensor size: ", size(tensor))
 cols = tensor_columns(tensor)
 println("first column: ", cols[1])
 
+println("row 2 copy: ", tensor_row(tensor, 2))
+println("column 3 copy: ", tensor_column(tensor, 3))
+
 flattened = tensor_vector(tensor)
 println("flattened view: ", flattened)
 
