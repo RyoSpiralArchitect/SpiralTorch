@@ -8,6 +8,22 @@ class Tensor:
     @staticmethod
     def zeros(rows: int, cols: int) -> Tensor: ...
     @staticmethod
+    def randn(
+        rows: int,
+        cols: int,
+        mean: float = ...,
+        std: float = ...,
+        seed: int | None = ...,
+    ) -> Tensor: ...
+    @staticmethod
+    def rand(
+        rows: int,
+        cols: int,
+        min: float = ...,
+        max: float = ...,
+        seed: int | None = ...,
+    ) -> Tensor: ...
+    @staticmethod
     def from_dlpack(capsule: object) -> Tensor: ...
     def to_dlpack(self) -> object: ...
     def __dlpack__(self, *, stream: object | None = ...) -> object: ...
@@ -77,6 +93,23 @@ class Hypergrad:
     def accumulate_pair(self, prediction: Tensor, target: Tensor) -> None: ...
     def apply(self, weights: Tensor) -> None: ...
     def topos(self) -> OpenCartesianTopos: ...
+
+class ModuleTrainer:
+    def __init__(self, input_dim: int, output_dim: int) -> None: ...
+
+    def train_epoch(
+        self,
+        inputs: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+        learning_rate: float = ...,
+        batch_size: int = ...,
+    ) -> float: ...
+
+    def evaluate(
+        self,
+        inputs: Sequence[Sequence[float]],
+        targets: Sequence[Sequence[float]],
+    ) -> float: ...
 
 class TensorBiome:
     def __init__(self, topos: OpenCartesianTopos) -> None: ...
@@ -218,6 +251,17 @@ def plan_topk(
     shared_mem_per_workgroup: Optional[int] = ...,
 ) -> RankPlan: ...
 
+class SpiralSession:
+    backend: str
+    seed: int | None
+    device: str
+
+    def __init__(self, backend: str = ..., seed: int | None = ...) -> None: ...
+
+    def plan_topk(self, rows: int, cols: int, k: int) -> RankPlan: ...
+
+    def close(self) -> None: ...
+
 def describe_device(
     backend: str = ...,
     *,
@@ -232,6 +276,16 @@ def describe_device(
 ) -> Dict[str, object]: ...
 
 def hip_probe() -> Dict[str, object]: ...
+
+def gl_coeffs_adaptive(alpha: float, tol: float = ..., max_len: int = ...) -> List[float]: ...
+
+def fracdiff_gl_1d(
+    xs: Sequence[float],
+    alpha: float,
+    kernel_len: int,
+    pad: str = ...,
+    pad_constant: Optional[float] = ...,
+) -> List[float]: ...
 
 def info_nce(
     anchors: Sequence[Sequence[float]],
@@ -516,12 +570,11 @@ class _FracModule(ModuleType):
     def gl_coeffs_adaptive(alpha: float, tol: float = ..., max_len: int = ...) -> List[float]: ...
 
     def fracdiff_gl_1d(
-        x: Sequence[float],
+        xs: Sequence[float],
         alpha: float,
         kernel_len: int,
         pad: str = ...,
         pad_constant: Optional[float] = ...,
-        scale: Optional[float] = ...,
     ) -> List[float]: ...
 
 
@@ -721,6 +774,8 @@ class DashboardRing:
 
 __all__ = [
     "Tensor",
+    "ModuleTrainer",
+    "SpiralSession",
     "from_dlpack",
     "to_dlpack",
     "ZSpaceBarycenter",

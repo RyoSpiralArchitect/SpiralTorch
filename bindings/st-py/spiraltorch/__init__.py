@@ -1348,6 +1348,28 @@ _mirror_into_module(
 )
 
 
+class SpiralSession:
+    """Lightweight execution context for quick experimentation."""
+
+    backend: str
+    seed: int | None
+    device: str
+
+    def __init__(self, backend: str = "auto", seed: int | None = None) -> None:
+        self.backend = backend
+        self.seed = seed
+        self.device = "wgpu" if backend == "wgpu" else "cpu"
+
+    def plan_topk(self, rows: int, cols: int, k: int):
+        return plan_topk(rows, cols, k, backend=self.backend)
+
+    def close(self) -> None:
+        """Release any session-scoped resources (currently a no-op)."""
+
+
+_EXTRAS.append("SpiralSession")
+
+
 for _key, _hint in _FORWARDING_HINTS.items():
     _module = _ensure_submodule(_key)
     if not _hint:
@@ -1369,7 +1391,7 @@ _CORE_EXPORTS = [
     "SearchLoop",
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
-    "ZSpaceTrainer","TemporalResonanceBuffer","SpiralTorchVision",
+    "ModuleTrainer","ZSpaceTrainer","TemporalResonanceBuffer","SpiralTorchVision",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
     "info_nce","masked_mse",

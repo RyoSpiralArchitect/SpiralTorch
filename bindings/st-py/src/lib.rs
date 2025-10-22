@@ -11,10 +11,12 @@ mod rec;
 mod telemetry;
 mod pure;
 mod planner;
+mod frac;
 mod selfsup;
 mod export;
 mod inference;
 mod hpo;
+mod trainer;
 
 mod extras {
     use super::*;
@@ -139,46 +141,6 @@ mod extras {
     }
 }
 
-mod frac_bindings {
-    use super::*;
-    use pyo3::wrap_pyfunction; // ← ここでも import
-    use st_frac::{Pad, gl_coeffs_adaptive as gl_coeffs_adaptive_rs, fracdiff_gl_1d as fracdiff_gl_1d_rs};
-
-    #[pyfunction]
-    #[pyo3(signature = (alpha, tol=1e-6, max_len=8192))]
-    fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
-        gl_coeffs_adaptive_rs(alpha, tol, max_len)
-    }
-
-    #[pyfunction]
-    #[pyo3(signature = (x, alpha, kernel_len, pad="zero", pad_constant=None, scale=None))]
-    fn fracdiff_gl_1d(
-        x: Vec<f32>,
-        alpha: f32,
-        kernel_len: usize,
-        pad: &str,
-        pad_constant: Option<f32>,
-        scale: Option<f32>,
-    ) -> PyResult<Vec<f32>> {
-        let pad = match pad.to_ascii_lowercase().as_str() {
-            "zero"     => Pad::Zero,
-            "reflect"  => Pad::Reflect,
-            "constant" => Pad::Constant(pad_constant.unwrap_or(0.0)),
-            other => return Err(pyo3::exceptions::PyValueError::new_err(
-                format!("unknown pad '{other}', expected 'zero'|'reflect'|'constant'")))
-        };
-        fracdiff_gl_1d_rs(&x, alpha, kernel_len, pad, scale)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{e:?}")))
-    }
-
-    pub fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
-        m.add_function(wrap_pyfunction!(gl_coeffs_adaptive, m)?)?;
-        m.add_function(wrap_pyfunction!(fracdiff_gl_1d, m)?)?;
-        m.add("__doc__", "Fractional differencing (Grünwald–Letnikov) and helpers.")?;
-        Ok(())
-    }
-}
-
 // ================// ルート #[pymodule]
 fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     // 1) トップレベル（そのまま import できる）
@@ -189,6 +151,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     planner::register(py, m)?;
     hpo::register(py, m)?;
     inference::register(py, m)?;
+    frac::register(py, m)?;
+    trainer::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;
@@ -199,10 +163,6 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     let export_module = PyModule::new_bound(py, "export")?;
     export::register(py, &export_module)?;
     m.add_submodule(&export_module)?;
-
-    let frac = PyModule::new_bound(py, "frac")?;
-    frac_bindings::register(py, &frac)?; // 実APIを公開
-    m.add_submodule(&frac)?;
 
     let selfsup_mod = PyModule::new_bound(py, "selfsup")?;
     selfsup::register(py, &selfsup_mod)?;
@@ -228,6 +188,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
         "nn","frac","selfsup","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
         "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",
+        "ModuleTrainer",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",
