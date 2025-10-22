@@ -207,7 +207,30 @@ fn apply_linkfor_shared(
 
     let mut configured = false;
     let mut tokens = args.split_whitespace().peekable();
+    let mut skip_next = false;
     while let Some(token) = tokens.next() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+
+        let mut should_skip = false;
+        if token == "-stack_size" {
+            should_skip = true;
+            skip_next = true;
+        } else if token.starts_with("-Wl,") {
+            if token
+                .split(',')
+                .any(|component| component.trim_start_matches('-') == "stack_size")
+            {
+                should_skip = true;
+            }
+        }
+
+        if should_skip {
+            continue;
+        }
+
         if token.starts_with("-L") {
             let path = token.trim_start_matches("-L");
             if !path.is_empty() && emitted_searches.insert(format!("native:{path}")) {
@@ -236,6 +259,20 @@ fn apply_linkfor_shared(
                 println!("cargo:rustc-link-lib={}", lib);
                 configured = true;
             }
+        } else if token.contains(".framework") {
+            if let Some(component) = token.split('/').find(|part| part.ends_with(".framework")) {
+                let name = component.trim_end_matches(".framework");
+                if !name.is_empty() && emitted_frameworks.insert(name.to_string()) {
+                    println!("cargo:rustc-link-lib=framework={}", name);
+                    configured = true;
+                }
+            }
+        } else if token.contains("stack_size") {
+            // macOS' Python distributions sometimes inject `-stack_size` when
+            // building executables. Passing it through while linking a
+            // cdylib causes `ld` to fail because `-stack_size` is only valid
+            // for main executables. Ignore it so we can link the extension.
+            continue;
         } else {
             println!("cargo:rustc-link-arg={}", token);
         }

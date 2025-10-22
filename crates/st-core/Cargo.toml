@@ -26,7 +26,7 @@ psi      = ["dep:bitflags", "dep:once_cell"]
 psychoid = ["dep:once_cell"]
 collapse = ["psi"]
 apply_zscale = []
-golden   = []
+golden   = ["dep:st-tensor"]
 experimental_zpulse = []
 blackcat_v2 = []
 observability-prometheus = ["dep:prometheus"]
@@ -58,6 +58,7 @@ st-softlogic   = { path = "../st-softlogic",   optional = true }
 st-kdsl        = { path = "../st-kdsl",        optional = true }
 st-kv          = { path = "../st-kv",          optional = true }
 st-frac        = { path = "../st-frac" }
+st-tensor      = { path = "../st-tensor", optional = true }
 cudarc         = { version = "0.11", optional = true, features = ["nvrtc"] }
 prometheus     = { version = "0.13", optional = true }
 opentelemetry  = { version = "0.21", optional = true, features = ["metrics"] }

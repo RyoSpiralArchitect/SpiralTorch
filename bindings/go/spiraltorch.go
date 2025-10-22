@@ -9,6 +9,7 @@ package spiraltorch
 #cgo LDFLAGS: -lspiraltorch_sys
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 size_t spiraltorch_version(char *buffer, size_t capacity);
@@ -29,6 +30,22 @@ void *spiraltorch_tensor_matmul(const void *lhs, const void *rhs);
 void *spiraltorch_tensor_transpose(const void *tensor);
 void *spiraltorch_tensor_reshape(const void *tensor, size_t rows, size_t cols);
 void *spiraltorch_tensor_hadamard(const void *lhs, const void *rhs);
+void *spiraltorch_tensor_random_uniform(
+    size_t rows,
+    size_t cols,
+    float min,
+    float max,
+    uint64_t seed,
+    bool has_seed
+);
+void *spiraltorch_tensor_random_normal(
+    size_t rows,
+    size_t cols,
+    float mean,
+    float std,
+    uint64_t seed,
+    bool has_seed
+);
 
 void *spiraltorch_runtime_new(size_t worker_threads, const char *thread_name);
 void spiraltorch_runtime_free(void *runtime);
@@ -40,6 +57,24 @@ void *spiraltorch_runtime_tensor_matmul(const void *runtime, const void *lhs, co
 void *spiraltorch_runtime_tensor_transpose(const void *runtime, const void *tensor);
 void *spiraltorch_runtime_tensor_reshape(const void *runtime, const void *tensor, size_t rows, size_t cols);
 void *spiraltorch_runtime_tensor_hadamard(const void *runtime, const void *lhs, const void *rhs);
+void *spiraltorch_runtime_tensor_random_uniform(
+    const void *runtime,
+    size_t rows,
+    size_t cols,
+    float min,
+    float max,
+    uint64_t seed,
+    bool has_seed
+);
+void *spiraltorch_runtime_tensor_random_normal(
+    const void *runtime,
+    size_t rows,
+    size_t cols,
+    float mean,
+    float std,
+    uint64_t seed,
+    bool has_seed
+);
 */
 import "C"
 
@@ -242,6 +277,66 @@ func (r *Runtime) Matmul(lhs, rhs *Tensor) (*Tensor, error) {
 	return wrapTensor(ptr, "runtime_tensor_matmul")
 }
 
+// RandomUniformTensor schedules construction of a tensor sampled from [min, max).
+// When seed is supplied the results are deterministic.
+func (r *Runtime) RandomUniformTensor(rows, cols int, min, max float32, seed ...uint64) (*Tensor, error) {
+	handle, err := r.requireHandle("runtime_tensor_random_uniform")
+	if err != nil {
+		return nil, err
+	}
+	var (
+		seedValue C.uint64_t
+		hasSeed   C.bool
+	)
+	if len(seed) > 0 {
+		if len(seed) > 1 {
+			return nil, fmt.Errorf("spiraltorch: random_uniform expects at most one seed value")
+		}
+		seedValue = C.uint64_t(seed[0])
+		hasSeed = C.bool(true)
+	}
+	ptr := C.spiraltorch_runtime_tensor_random_uniform(
+		handle,
+		C.size_t(rows),
+		C.size_t(cols),
+		C.float(min),
+		C.float(max),
+		seedValue,
+		hasSeed,
+	)
+	return wrapTensor(ptr, "runtime_tensor_random_uniform")
+}
+
+// RandomNormalTensor schedules construction of a tensor sampled from a normal distribution.
+// When seed is provided sampling becomes deterministic.
+func (r *Runtime) RandomNormalTensor(rows, cols int, mean, std float32, seed ...uint64) (*Tensor, error) {
+	handle, err := r.requireHandle("runtime_tensor_random_normal")
+	if err != nil {
+		return nil, err
+	}
+	var (
+		seedValue C.uint64_t
+		hasSeed   C.bool
+	)
+	if len(seed) > 0 {
+		if len(seed) > 1 {
+			return nil, fmt.Errorf("spiraltorch: random_normal expects at most one seed value")
+		}
+		seedValue = C.uint64_t(seed[0])
+		hasSeed = C.bool(true)
+	}
+	ptr := C.spiraltorch_runtime_tensor_random_normal(
+		handle,
+		C.size_t(rows),
+		C.size_t(cols),
+		C.float(mean),
+		C.float(std),
+		seedValue,
+		hasSeed,
+	)
+	return wrapTensor(ptr, "runtime_tensor_random_normal")
+}
+
 // Scale multiplies all tensor elements by value on the runtime.
 func (r *Runtime) Scale(t *Tensor, value float32) (*Tensor, error) {
 	handle, err := r.requireHandle("runtime_tensor_scale")
@@ -313,6 +408,58 @@ func NewTensorFromDense(rows, cols int, data []float32) (*Tensor, error) {
 		C.size_t(len(data)),
 	)
 	return wrapTensor(ptr, "tensor_from_dense")
+}
+
+// NewRandomUniformTensor constructs a tensor with values sampled from [min, max).
+//
+// When seed is provided the distribution becomes deterministic.
+func NewRandomUniformTensor(rows, cols int, min, max float32, seed ...uint64) (*Tensor, error) {
+	var (
+		seedValue C.uint64_t
+		hasSeed   C.bool
+	)
+	if len(seed) > 0 {
+		if len(seed) > 1 {
+			return nil, fmt.Errorf("spiraltorch: random_uniform expects at most one seed value")
+		}
+		seedValue = C.uint64_t(seed[0])
+		hasSeed = C.bool(true)
+	}
+	ptr := C.spiraltorch_tensor_random_uniform(
+		C.size_t(rows),
+		C.size_t(cols),
+		C.float(min),
+		C.float(max),
+		seedValue,
+		hasSeed,
+	)
+	return wrapTensor(ptr, "tensor_random_uniform")
+}
+
+// NewRandomNormalTensor constructs a tensor with values sampled from a normal distribution.
+//
+// When seed is provided the sampling becomes deterministic.
+func NewRandomNormalTensor(rows, cols int, mean, std float32, seed ...uint64) (*Tensor, error) {
+	var (
+		seedValue C.uint64_t
+		hasSeed   C.bool
+	)
+	if len(seed) > 0 {
+		if len(seed) > 1 {
+			return nil, fmt.Errorf("spiraltorch: random_normal expects at most one seed value")
+		}
+		seedValue = C.uint64_t(seed[0])
+		hasSeed = C.bool(true)
+	}
+	ptr := C.spiraltorch_tensor_random_normal(
+		C.size_t(rows),
+		C.size_t(cols),
+		C.float(mean),
+		C.float(std),
+		seedValue,
+		hasSeed,
+	)
+	return wrapTensor(ptr, "tensor_random_normal")
 }
 
 // Close releases the underlying tensor handle. Subsequent calls are safe.
