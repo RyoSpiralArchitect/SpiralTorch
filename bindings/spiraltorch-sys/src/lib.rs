@@ -308,10 +308,39 @@ pub extern "C" fn spiraltorch_tensor_scale(handle: *const Tensor, value: f32) ->
     tensor_unary_op(handle, "tensor_scale", |tensor| tensor.scale(value))
 }
 
+/// Returns a new tensor that is the transpose of the provided tensor.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_transpose(handle: *const Tensor) -> *mut Tensor {
+    tensor_unary_op(handle, "tensor_transpose", |tensor| Ok(tensor.transpose()))
+}
+
+/// Returns a reshaped view of the tensor with the requested dimensions.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_reshape(
+    handle: *const Tensor,
+    rows: usize,
+    cols: usize,
+) -> *mut Tensor {
+    let tensor = match as_tensor(handle, "tensor handle") {
+        Some(tensor) => tensor,
+        None => return ptr::null_mut(),
+    };
+    tensor_from_result_with_message(tensor.reshape(rows, cols), "tensor_reshape")
+}
+
 /// Matrix multiplication (`lhs @ rhs`). Returns `NULL` on failure.
 #[no_mangle]
 pub extern "C" fn spiraltorch_tensor_matmul(lhs: *const Tensor, rhs: *const Tensor) -> *mut Tensor {
     tensor_binary_op(lhs, rhs, "tensor_matmul", Tensor::matmul)
+}
+
+/// Element-wise tensor multiplication. Returns `NULL` on failure.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_hadamard(
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+) -> *mut Tensor {
+    tensor_binary_op(lhs, rhs, "tensor_hadamard", Tensor::hadamard)
 }
 
 #[cfg(test)]
@@ -435,5 +464,61 @@ mod tests {
         spiraltorch_tensor_free(scaled);
         spiraltorch_tensor_free(right);
         spiraltorch_tensor_free(left);
+    }
+
+    #[test]
+    fn tensor_transpose_reshape_and_hadamard() {
+        let data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let handle = unsafe { spiraltorch_tensor_from_dense(2, 3, data.as_ptr(), data.len()) };
+        assert!(!handle.is_null());
+
+        let transposed = spiraltorch_tensor_transpose(handle);
+        assert!(!transposed.is_null());
+        let mut transposed_shape = (0usize, 0usize);
+        let ok =
+            spiraltorch_tensor_shape(transposed, &mut transposed_shape.0, &mut transposed_shape.1);
+        assert!(ok);
+        assert_eq!(transposed_shape, (3, 2));
+        let mut buffer = vec![0.0_f32; 6];
+        let copied =
+            unsafe { spiraltorch_tensor_copy_data(transposed, buffer.as_mut_ptr(), buffer.len()) };
+        assert!(copied);
+        assert_eq!(buffer, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+
+        let reshaped = spiraltorch_tensor_reshape(handle, 3, 2);
+        assert!(!reshaped.is_null());
+        let mut reshaped_buffer = vec![0.0_f32; 6];
+        let reshaped_ok = unsafe {
+            spiraltorch_tensor_copy_data(
+                reshaped,
+                reshaped_buffer.as_mut_ptr(),
+                reshaped_buffer.len(),
+            )
+        };
+        assert!(reshaped_ok);
+        assert_eq!(reshaped_buffer, data);
+
+        let other_data = vec![1.0_f32, 0.5, 1.5, 2.0, 2.5, 3.0];
+        let other =
+            unsafe { spiraltorch_tensor_from_dense(2, 3, other_data.as_ptr(), other_data.len()) };
+        assert!(!other.is_null());
+        let hadamard = spiraltorch_tensor_hadamard(handle, other);
+        assert!(!hadamard.is_null());
+        let mut hadamard_buffer = vec![0.0_f32; 6];
+        let hadamard_ok = unsafe {
+            spiraltorch_tensor_copy_data(
+                hadamard,
+                hadamard_buffer.as_mut_ptr(),
+                hadamard_buffer.len(),
+            )
+        };
+        assert!(hadamard_ok);
+        assert_eq!(hadamard_buffer, vec![1.0, 1.0, 4.5, 8.0, 12.5, 18.0]);
+
+        spiraltorch_tensor_free(hadamard);
+        spiraltorch_tensor_free(other);
+        spiraltorch_tensor_free(reshaped);
+        spiraltorch_tensor_free(transposed);
+        spiraltorch_tensor_free(handle);
     }
 }

@@ -21,8 +21,9 @@ programs that import `github.com/spiraltorch/spiraltorch-go`:
 go run ./examples/tensor_dump
 ```
 
-The sample demonstrates element-wise addition, scalar scaling, and matrix
-multiplication using the high-level helpers exposed by the `Tensor` type.
+The sample demonstrates element-wise arithmetic, Hadamard products, matrix
+multiplication, transposition, and reshaping using the high-level helpers
+exposed by the `Tensor` type.
 
 ### Custom linker flags
 
@@ -40,7 +41,10 @@ control flow instead of manual error string inspection.
 
 ## Available operations
 
-- `Add`, `Sub`, and `Scale` allocate new tensors while preserving the originals.
+- `Add`, `Sub`, `Scale`, and `Hadamard` allocate new tensors while preserving the
+  originals.
 - `Matmul` executes matrix multiplication (`lhs @ rhs`) using the same backend
   selection heuristics as the Rust runtime.
 - `Data` copies tensor contents into Go slices for inspection or interop.
+- `Transpose` and `Reshape` provide lightweight access to shape manipulation
+  without manually flattening and rebuilding tensors.

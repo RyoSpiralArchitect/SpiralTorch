@@ -2,6 +2,12 @@
 
 This example shows how a minimal Go HTTP service can exchange data with a Rust client.  It is designed to be a discussion starter for future tooling in `examples/` and `tools/`.
 
+The service performs basic request validation to prevent schema drift:
+
+- rejects non-JSON payloads and objects with unknown fields,
+- ensures the `input` array is present and non-empty,
+- returns structured error messages alongside the appropriate HTTP status.
+
 ## Layout
 
 ```
