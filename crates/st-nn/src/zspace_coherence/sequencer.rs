@@ -69,6 +69,63 @@ pub enum ZSpaceSequencerStage<'a> {
         /// Summarised Maxwell pulse used for PSI telemetry and feedback.
         pulse: &'a MaxwellZPulse,
     },
+    /// Fired when the coherence backend has been reconfigured.
+    BackendConfigured {
+        /// Backend that will be used for subsequent coherence measurements.
+        backend: CoherenceBackend,
+    },
+    /// Fired after a linguistic profile has been registered.
+    LinguisticProfileRegistered {
+        /// Profile that will be used to bias coherence weighting.
+        profile: &'a DomainLinguisticProfile,
+    },
+    /// Fired when all linguistic profiles have been cleared.
+    LinguisticProfilesCleared,
+    /// Fired after a semantic window has been derived for language fusion.
+    SemanticWindowDerived {
+        /// Sliding window mapping token indices to weighted energy.
+        window: &'a [(usize, f32)],
+        /// Number of tokens the window was derived against.
+        tokens: usize,
+    },
+    /// Fired after a semantic distribution has been derived from the window.
+    SemanticDistributionDerived {
+        /// Window used for inference.
+        window: &'a [(usize, f32)],
+        /// Semantic distribution normalised for downstream bridges.
+        distribution: &'a [f32],
+    },
+    /// Fired after a linguistic contour has been emitted for downstream stacks.
+    LinguisticContourEmitted {
+        /// Coherence weights that produced the contour.
+        coherence: &'a [f32],
+        /// Contour descriptor returned by the coherence engine.
+        contour: &'a LinguisticContour,
+    },
+    /// Fired after coherence channels have been described.
+    ChannelsDescribed {
+        /// Coherence weights associated with the reports.
+        coherence: &'a [f32],
+        /// Reports emitted by the coherence engine.
+        reports: &'a [LinguisticChannelReport],
+    },
+    /// Fired after a semantic window has been fused into a distribution hint.
+    SemanticWindowFused {
+        /// Resulting fused concept hint produced by bridges.
+        concept: &'a ConceptHint,
+    },
+    /// Fired after PSI telemetry has been published (when enabled).
+    #[cfg(feature = "psi")]
+    PsiTelemetryPublished {
+        /// Pulse used to publish the telemetry.
+        pulse: &'a MaxwellZPulse,
+        /// Reading captured by the PSI bridge, when available.
+        reading: Option<&'a PsiReading>,
+        /// PSI events recorded during publication.
+        events: &'a [PsiEvent],
+        /// Feedback emitted by the SoftLogic Z bridge.
+        feedback: &'a SoftlogicZFeedback,
+    },
 }
 
 /// Trait implemented by plugins that wish to observe or augment the sequencing pipeline.
@@ -487,7 +544,7 @@ impl ZSpaceCoherenceSequencer {
     )> {
         let (aggregated, coherence) = self.forward_with_coherence(x)?;
         let semantic_distribution =
-            self.derive_semantic_distribution(&aggregated, &coherence, semantics);
+            self.derive_semantic_distribution(&aggregated, &coherence, semantics)?;
         let pulse = self.summarise_maxwell_pulse(&aggregated, &coherence);
         let canonical_concept = self.canonical_domain_concept();
         let channel = canonical_concept.label();
@@ -497,9 +554,17 @@ impl ZSpaceCoherenceSequencer {
         {
             let fused =
                 Self::fuse_distributions(&semantic_distribution, &hint.as_distribution(semantics));
-            (ConceptHint::Distribution(fused), narrative)
+            let concept = ConceptHint::Distribution(fused);
+            self.dispatch_plugins(|| ZSpaceSequencerStage::SemanticWindowFused {
+                concept: &concept,
+            })?;
+            (concept, narrative)
         } else {
-            (ConceptHint::Distribution(semantic_distribution), None)
+            let concept = ConceptHint::Distribution(semantic_distribution);
+            self.dispatch_plugins(|| ZSpaceSequencerStage::SemanticWindowFused {
+                concept: &concept,
+            })?;
+            (concept, None)
         };
 
         let narrative_ref = narrative.as_ref();
@@ -540,6 +605,13 @@ impl ZSpaceCoherenceSequencer {
         let psi_reading = hub::get_last_psi();
         let psi_events = hub::get_last_psi_events();
 
+        self.dispatch_plugins(|| ZSpaceSequencerStage::PsiTelemetryPublished {
+            pulse: &pulse,
+            reading: psi_reading.as_ref(),
+            events: psi_events.as_slice(),
+            feedback: &feedback,
+        })?;
+
         Ok((
             aggregated,
             coherence,
@@ -553,8 +625,30 @@ impl ZSpaceCoherenceSequencer {
     }
 
     /// Configures the execution backend for coherence measurement.
-    pub fn set_backend(&mut self, backend: CoherenceBackend) {
-        self.coherence_engine.set_backend(backend);
+    pub fn set_backend(&mut self, backend: CoherenceBackend) -> PureResult<()> {
+        self.coherence_engine.set_backend(backend.clone());
+        self.dispatch_plugins(|| ZSpaceSequencerStage::BackendConfigured {
+            backend: backend.clone(),
+        })?;
+        Ok(())
+    }
+
+    /// Registers a plugin that will receive callbacks across the sequencing pipeline.
+    pub fn register_plugin<P>(&mut self, plugin: P)
+    where
+        P: ZSpaceSequencerPlugin + 'static,
+    {
+        self.plugins.push(Arc::new(plugin));
+    }
+
+    /// Removes all registered plugins.
+    pub fn clear_plugins(&mut self) {
+        self.plugins.clear();
+    }
+
+    /// Returns the descriptive names of the registered plugins.
+    pub fn plugin_names(&self) -> Vec<&'static str> {
+        self.plugins.iter().map(|plugin| plugin.name()).collect()
     }
 
     /// Registers a plugin that will receive callbacks across the sequencing pipeline.
@@ -576,13 +670,24 @@ impl ZSpaceCoherenceSequencer {
     }
 
     /// Registers a domain linguistic profile used to bias coherence weights.
-    pub fn register_linguistic_profile(&mut self, profile: DomainLinguisticProfile) {
+    pub fn register_linguistic_profile(
+        &mut self,
+        profile: DomainLinguisticProfile,
+    ) -> PureResult<()> {
         self.coherence_engine.register_linguistic_profile(profile);
+        if let Some(profile) = self.coherence_engine.linguistic_profiles().last() {
+            self.dispatch_plugins(|| ZSpaceSequencerStage::LinguisticProfileRegistered {
+                profile,
+            })?;
+        }
+        Ok(())
     }
 
     /// Removes all linguistic profiles from the underlying coherence engine.
-    pub fn clear_linguistic_profiles(&mut self) {
+    pub fn clear_linguistic_profiles(&mut self) -> PureResult<()> {
         self.coherence_engine.clear_linguistic_profiles();
+        self.dispatch_plugins(|| ZSpaceSequencerStage::LinguisticProfilesCleared)?;
+        Ok(())
     }
 
     /// Exposes the registered linguistic profiles.
@@ -599,13 +704,25 @@ impl ZSpaceCoherenceSequencer {
     /// used by downstream vocalisation stacks.
     pub fn emit_linguistic_contour(&self, x: &Tensor) -> PureResult<LinguisticContour> {
         let coherence = self.measure_coherence(x)?;
-        self.coherence_engine.derive_linguistic_contour(&coherence)
+        let contour = self
+            .coherence_engine
+            .derive_linguistic_contour(&coherence)?;
+        self.dispatch_plugins(|| ZSpaceSequencerStage::LinguisticContourEmitted {
+            coherence: &coherence,
+            contour: &contour,
+        })?;
+        Ok(contour)
     }
 
     /// Describes each coherence channel, surfacing dominant linguistic concepts per band.
     pub fn describe_channels(&self, x: &Tensor) -> PureResult<Vec<LinguisticChannelReport>> {
         let coherence = self.measure_coherence(x)?;
-        self.coherence_engine.describe_channels(&coherence)
+        let reports = self.coherence_engine.describe_channels(&coherence)?;
+        self.dispatch_plugins(|| ZSpaceSequencerStage::ChannelsDescribed {
+            coherence: &coherence,
+            reports: &reports,
+        })?;
+        Ok(reports)
     }
 
     /// Returns the number of Maxwell coherence channels computed by the engine.
@@ -660,14 +777,27 @@ impl ZSpaceCoherenceSequencer {
         aggregated: &Tensor,
         coherence: &[f32],
         semantics: &SemanticBridge,
-    ) -> Vec<f32> {
-        let window = self.derive_semantic_window(aggregated, coherence, semantics.vocab_size());
-        if window.is_empty() {
+    ) -> PureResult<Vec<f32>> {
+        let tokens = semantics.vocab_size();
+        let window = self.derive_semantic_window(aggregated, coherence, tokens);
+        self.dispatch_plugins(|| ZSpaceSequencerStage::SemanticWindowDerived {
+            window: &window,
+            tokens,
+        })?;
+
+        let distribution = if window.is_empty() {
             let concepts = semantics.concept_count().max(1);
             vec![1.0 / concepts as f32; concepts]
         } else {
             semantics.infer_from_window(&window, 1e-6)
-        }
+        };
+
+        self.dispatch_plugins(|| ZSpaceSequencerStage::SemanticDistributionDerived {
+            window: &window,
+            distribution: &distribution,
+        })?;
+
+        Ok(distribution)
     }
 
     fn derive_semantic_window(
@@ -800,8 +930,12 @@ impl ZSpaceCoherenceSequencer {
     where
         F: FnMut() -> ZSpaceSequencerStage<'a>,
     {
+        if self.plugins.is_empty() {
+            return Ok(());
+        }
+        let event = stage();
         for plugin in &self.plugins {
-            plugin.on_stage(stage())?;
+            plugin.on_stage(event.clone())?;
         }
         Ok(())
     }
@@ -968,9 +1102,10 @@ mod tests {
             DomainLinguisticProfile::new(DomainConcept::Membrane)
                 .with_emphasis(1.2)
                 .unwrap(),
-        );
+        )
+        .unwrap();
         assert_eq!(seq.linguistic_profiles().len(), 1);
-        seq.clear_linguistic_profiles();
+        seq.clear_linguistic_profiles().unwrap();
         assert!(seq.linguistic_profiles().is_empty());
     }
 
@@ -998,7 +1133,8 @@ mod tests {
         seq.register_linguistic_profile(
             DomainLinguisticProfile::new(DomainConcept::DropletCoalescence)
                 .with_descriptor("fluid-lilt"),
-        );
+        )
+        .unwrap();
         let x = Tensor::from_vec(1, 128, vec![0.2; 128]).unwrap();
         let reports = seq.describe_channels(&x).unwrap();
         assert_eq!(reports.len(), seq.coherence_engine.num_channels());
@@ -1088,6 +1224,20 @@ mod tests {
                     ZSpaceSequencerStage::CoherenceMeasured { .. } => "coherence",
                     ZSpaceSequencerStage::Aggregated { .. } => "aggregated",
                     ZSpaceSequencerStage::LanguageBridged { .. } => "language",
+                    ZSpaceSequencerStage::BackendConfigured { .. } => "backend",
+                    ZSpaceSequencerStage::LinguisticProfileRegistered { .. } => {
+                        "profile_registered"
+                    }
+                    ZSpaceSequencerStage::LinguisticProfilesCleared => "profiles_cleared",
+                    ZSpaceSequencerStage::SemanticWindowDerived { .. } => "semantic_window",
+                    ZSpaceSequencerStage::SemanticDistributionDerived { .. } => {
+                        "semantic_distribution"
+                    }
+                    ZSpaceSequencerStage::LinguisticContourEmitted { .. } => "linguistic_contour",
+                    ZSpaceSequencerStage::ChannelsDescribed { .. } => "channels",
+                    ZSpaceSequencerStage::SemanticWindowFused { .. } => "semantic_fused",
+                    #[cfg(feature = "psi")]
+                    ZSpaceSequencerStage::PsiTelemetryPublished { .. } => "psi",
                 };
                 self.events.lock().unwrap().push(label);
                 Ok(())
@@ -1122,11 +1272,102 @@ mod tests {
             .unwrap();
 
         let events = events.lock().unwrap();
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 7);
         assert_eq!(events[0], "projected");
         assert_eq!(events[1], "coherence");
         assert_eq!(events[2], "aggregated");
-        assert_eq!(events[3], "language");
+        assert_eq!(events[3], "semantic_window");
+        assert_eq!(events[4], "semantic_distribution");
+        assert_eq!(events[5], "semantic_fused");
+        assert_eq!(events[6], "language");
+    }
+
+    #[test]
+    fn plugins_observe_backend_and_profiles() {
+        struct RecordingPlugin {
+            events: Arc<Mutex<Vec<&'static str>>>,
+        }
+
+        impl ZSpaceSequencerPlugin for RecordingPlugin {
+            fn name(&self) -> &'static str {
+                "recording"
+            }
+
+            fn on_stage(&self, stage: ZSpaceSequencerStage<'_>) -> PureResult<()> {
+                let label = match stage {
+                    ZSpaceSequencerStage::BackendConfigured { .. } => "backend",
+                    ZSpaceSequencerStage::LinguisticProfileRegistered { .. } => {
+                        "profile_registered"
+                    }
+                    ZSpaceSequencerStage::LinguisticProfilesCleared => "profiles_cleared",
+                    _ => return Ok(()),
+                };
+                self.events.lock().unwrap().push(label);
+                Ok(())
+            }
+        }
+
+        let topos = OpenCartesianTopos::new(-0.75, 1e-5, 10.0, 256, 8192).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(256, 8, -0.75, topos).unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        seq.register_plugin(RecordingPlugin {
+            events: events.clone(),
+        });
+
+        seq.set_backend(CoherenceBackend::Fftw).unwrap();
+        seq.register_linguistic_profile(
+            DomainLinguisticProfile::new(DomainConcept::Membrane).with_descriptor("membrane-test"),
+        )
+        .unwrap();
+        seq.clear_linguistic_profiles().unwrap();
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0], "backend");
+        assert_eq!(events[1], "profile_registered");
+        assert_eq!(events[2], "profiles_cleared");
+    }
+
+    #[test]
+    fn plugins_observe_linguistic_descriptors() {
+        struct RecordingPlugin {
+            events: Arc<Mutex<Vec<&'static str>>>,
+        }
+
+        impl ZSpaceSequencerPlugin for RecordingPlugin {
+            fn name(&self) -> &'static str {
+                "recording"
+            }
+
+            fn on_stage(&self, stage: ZSpaceSequencerStage<'_>) -> PureResult<()> {
+                let label = match stage {
+                    ZSpaceSequencerStage::LinguisticContourEmitted { .. } => "contour",
+                    ZSpaceSequencerStage::ChannelsDescribed { .. } => "channels",
+                    _ => return Ok(()),
+                };
+                self.events.lock().unwrap().push(label);
+                Ok(())
+            }
+        }
+
+        let topos = OpenCartesianTopos::new(-0.55, 1e-5, 10.0, 256, 8192).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(256, 8, -0.55, topos).unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        seq.register_plugin(RecordingPlugin {
+            events: events.clone(),
+        });
+
+        let data = Tensor::from_vec(2, 256, vec![0.03; 512]).unwrap();
+        let contour = seq.emit_linguistic_contour(&data).unwrap();
+        assert!(contour.coherence_strength() >= 0.0);
+        assert!(contour.timbre_spread() >= 0.0);
+        let reports = seq.describe_channels(&data).unwrap();
+        assert_eq!(reports.len(), seq.maxwell_channels());
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], "contour");
+        assert_eq!(events[1], "channels");
     }
 
     #[cfg(feature = "psi")]
@@ -1135,13 +1376,34 @@ mod tests {
         use st_core::telemetry::{hub, psi::PsiComponent};
         use st_core::theory::maxwell::MaxwellPsiTelemetryBridge;
 
+        struct RecordingPlugin {
+            events: Arc<Mutex<Vec<&'static str>>>,
+        }
+
+        impl ZSpaceSequencerPlugin for RecordingPlugin {
+            fn name(&self) -> &'static str {
+                "recording"
+            }
+
+            fn on_stage(&self, stage: ZSpaceSequencerStage<'_>) -> PureResult<()> {
+                if let ZSpaceSequencerStage::PsiTelemetryPublished { .. } = stage {
+                    self.events.lock().unwrap().push("psi");
+                }
+                Ok(())
+            }
+        }
+
         let _guard = hub::psi_telemetry_guard();
         hub::clear_last_psi();
         hub::clear_last_psi_events();
         hub::clear_softlogic_z();
 
         let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
-        let seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        seq.register_plugin(RecordingPlugin {
+            events: events.clone(),
+        });
 
         let concept_kernel =
             SparseKernel::from_dense(vec![vec![0.7, 0.3], vec![0.2, 0.8]], 1e-6).unwrap();
@@ -1192,5 +1454,9 @@ mod tests {
         assert!((stored_feedback.psi_total - feedback.psi_total).abs() <= 1e-6);
         assert!(feedback.weighted_loss >= 0.0);
         assert!(pulse.band_energy.0 >= 0.0);
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], "psi");
     }
 }

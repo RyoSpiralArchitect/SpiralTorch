@@ -2064,13 +2064,29 @@ print(f"z-bias: {diagnostics.z_bias():.3f}")
 
 `ZSpaceCoherenceSequencer` now exposes a lightweight plugin system so other
 subsystems can tap into each stage of the pipeline without forking the core
-implementation. Implement the `ZSpaceSequencerPlugin` trait and register it on a
-sequencer to receive callbacks as tensors move through projection, coherence
-measurement, aggregation, and language fusion stages:
+implementation. Plugins are notified when tensors move through projection,
+coherence measurement, geometric aggregation, semantic window derivation,
+distribution fusion, and language bridging. They also receive callbacks when
+backends or linguistic profiles change, when contours/reports are emitted, and
+when PSI telemetry is published (with the `psi` feature).
+
+Key stages:
+
+- `Projected`, `CoherenceMeasured`, `Aggregated`
+- `SemanticWindowDerived`, `SemanticDistributionDerived`, `SemanticWindowFused`
+- `LanguageBridged`
+- `BackendConfigured`, `LinguisticProfileRegistered`, `LinguisticProfilesCleared`
+- `LinguisticContourEmitted`, `ChannelsDescribed`
+- `PsiTelemetryPublished` *(when compiled with `psi`)*
+
+Implement the `ZSpaceSequencerPlugin` trait and register it on a sequencer to
+receive callbacks:
 
 ```rust
 use st_nn::{
-    zspace_coherence::{ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage},
+    zspace_coherence::{
+        CoherenceBackend, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
+    },
     OpenCartesianTopos, PureResult, Tensor,
 };
 
@@ -2080,8 +2096,17 @@ impl ZSpaceSequencerPlugin for TelemetryPlugin {
     fn name(&self) -> &'static str { "telemetry" }
 
     fn on_stage(&self, stage: ZSpaceSequencerStage<'_>) -> PureResult<()> {
-        if let ZSpaceSequencerStage::Aggregated { diagnostics, .. } = stage {
-            println!("entropy: {:.2}", diagnostics.coherence_entropy());
+        match stage {
+            ZSpaceSequencerStage::Aggregated { diagnostics, .. } => {
+                println!("entropy: {:.2}", diagnostics.coherence_entropy());
+            }
+            ZSpaceSequencerStage::SemanticWindowDerived { window, .. } => {
+                println!("window tokens: {}", window.len());
+            }
+            ZSpaceSequencerStage::BackendConfigured { backend } => {
+                println!("backend -> {}", backend.label());
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -2091,6 +2116,7 @@ fn main() -> PureResult<()> {
     let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192)?;
     let mut sequencer = ZSpaceCoherenceSequencer::new(768, 12, -1.0, topos)?;
     sequencer.register_plugin(TelemetryPlugin);
+    sequencer.set_backend(CoherenceBackend::Fftw)?;
     let (_out, _, _) = sequencer.forward_with_diagnostics(&Tensor::zeros(1, 768)?);
     Ok(())
 }
