@@ -2631,6 +2631,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "spiraltorch-sys"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "once_cell",
+ "st-tensor",
+]
+
+[[package]]
 name = "spiraltorch-wasm"
 version = "0.1.0"
 dependencies = [

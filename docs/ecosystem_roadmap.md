@@ -22,7 +22,7 @@ SpiralTorch already offers a rich Rust-first runtime, a shared hypergrad tape fo
 - **Model hub prototype.** Sketch a minimal artifact registry backed by object storage. Ensure AGPL license metadata and reproducibility manifests are embedded.
 - **Tuning pipelines.** Bundle sample configurations for Optuna and Ray Tune. Show how the hypergrad tape and planner can be wired in without Python-side tensor copying.
 - **Compatibility playbook.** Maintain the [Compatibility Strategy](compatibility_strategy.md) as a living guide for PyTorch/TensorFlow migrations, including API diff tables, operator coverage, and hybrid deployment recipes.
-- **Language expansion.** Pilot Julia and Go bindings following the [integration strategy](julia_go_integration.md). Target inference-first workflows, document ownership semantics, and formalize support levels once telemetry and CI coverage land.
+- **Language expansion.** Land the shared `spiraltorch-sys` ABI crate and pilot Julia and Go bindings following the [integration strategy](julia_go_integration.md). Target inference-first workflows, document ownership semantics, and formalize support levels once telemetry and CI coverage land.
 
 ## Measuring Progress
 - Establish a living changelog that calls out which roadmap items advanced in each release.
