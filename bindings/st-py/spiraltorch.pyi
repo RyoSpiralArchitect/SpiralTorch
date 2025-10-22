@@ -628,7 +628,15 @@ class RecEpochReport:
     regularization_penalty: float
 
 class Recommender:
-    def __init__(self, users: int, items: int, factors: int, learning_rate: float = ..., regularization: float = ..., curvature: float = ...) -> None: ...
+    def __init__(
+        self,
+        users: int,
+        items: int,
+        factors: int,
+        learning_rate: float = ...,
+        regularization: float = ...,
+        curvature: float | None = ...,
+    ) -> None: ...
     def predict(self, user: int, item: int) -> float: ...
     def train_epoch(self, ratings: Sequence[Tuple[int, int, float]]) -> RecEpochReport: ...
     def recommend_top_k(self, user: int, k: int, exclude: Optional[Sequence[int]] = ...) -> List[Tuple[int, float]]: ...
