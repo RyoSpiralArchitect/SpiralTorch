@@ -13,12 +13,16 @@
 use std::fmt;
 
 use nalgebra as na;
+use num_complex::Complex;
 
 /// Alias for a spatial three-vector.
 pub type Vec3 = [f64; 3];
 
 /// Alias for a Minkowski four-vector with signature `(+, -, -, -)`.
 pub type Vec4 = [f64; 4];
+
+/// Alias for a two-component complex Pauli spinor.
+pub type SpinorComponents = [Complex<f64>; 2];
 
 /// Numerical tolerance used when checking symmetry or degeneracy.
 const DEFAULT_TOLERANCE: f64 = 1e-9;
@@ -40,6 +44,119 @@ pub enum StvError {
         "intersection requires positive definite D·Dᵀ (encountered eigenvalue {eigenvalue:.3e})"
     )]
     NonPositiveGamma { eigenvalue: f64 },
+    /// The supplied Pauli spinor had zero norm.
+    #[error("spinor must have non-zero norm")]
+    ZeroSpinor,
+}
+
+/// Normalised Pauli spinor with unit probability mass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PauliSpinor {
+    components: SpinorComponents,
+}
+
+impl PauliSpinor {
+    /// Constructs a new Pauli spinor, normalising the components so that the
+    /// probability amplitude sums to one.
+    pub fn new(components: SpinorComponents) -> Result<Self, StvError> {
+        let norm_squared = components[0].norm_sqr() + components[1].norm_sqr();
+        if norm_squared <= DEFAULT_TOLERANCE {
+            return Err(StvError::ZeroSpinor);
+        }
+        let norm = norm_squared.sqrt();
+        Ok(Self {
+            components: [components[0] / norm, components[1] / norm],
+        })
+    }
+
+    /// Returns the complex components of the spinor.
+    pub fn components(&self) -> SpinorComponents {
+        self.components
+    }
+
+    /// Applies a global phase rotation, preserving the Bloch current.
+    pub fn phase_shift(&self, phase: f64) -> Self {
+        let factor = Complex::from_polar(1.0, phase);
+        Self {
+            components: [self.components[0] * factor, self.components[1] * factor],
+        }
+    }
+
+    /// Computes the Minkowski four-current `(j⁰, **j**)` induced by the Pauli
+    /// spinor. The components are the expectation values of the Pauli matrices.
+    pub fn bloch_current(&self) -> Vec4 {
+        let [a, b] = self.components;
+        let j0 = a.norm_sqr() + b.norm_sqr();
+        let coherence = a * b.conj();
+        let jx = 2.0 * coherence.re;
+        let jy = -2.0 * coherence.im;
+        let jz = a.norm_sqr() - b.norm_sqr();
+        [j0, jx, jy, jz]
+    }
+}
+
+/// Aggregates the Pauli spinor, kernel tensor, and induced vector according to
+/// the SpinoTensorVector formalism.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpinoTensorVector {
+    spinor: PauliSpinor,
+    kernel: SpinoTensorKernel,
+}
+
+impl SpinoTensorVector {
+    /// Constructs a SpinoTensorVector from raw spinor components.
+    pub fn from_components(
+        spinor: SpinorComponents,
+        kernel: SpinoTensorKernel,
+    ) -> Result<Self, StvError> {
+        Ok(Self {
+            spinor: PauliSpinor::new(spinor)?,
+            kernel,
+        })
+    }
+
+    /// Creates a new SpinoTensorVector from a pre-normalised spinor.
+    pub fn new(spinor: PauliSpinor, kernel: SpinoTensorKernel) -> Self {
+        Self { spinor, kernel }
+    }
+
+    /// Returns the stored Pauli spinor.
+    pub fn spinor(&self) -> &PauliSpinor {
+        &self.spinor
+    }
+
+    /// Returns the kernel descriptor.
+    pub fn kernel(&self) -> &SpinoTensorKernel {
+        &self.kernel
+    }
+
+    /// Computes the Bloch current associated with the spinor.
+    pub fn bloch_current(&self) -> Vec4 {
+        self.spinor.bloch_current()
+    }
+
+    /// Applies the kernel tensor to the Bloch current, returning the induced
+    /// Minkowski vector `v = T(j(ψ))`.
+    pub fn induced_vector(&self) -> Vec4 {
+        let current = self.bloch_current();
+        self.kernel.apply_tensor(&current)
+    }
+
+    /// Produces a new SpinoTensorVector with a phase-rotated spinor.
+    pub fn with_phase_shift(&self, phase: f64) -> Self {
+        Self {
+            spinor: self.spinor.phase_shift(phase),
+            kernel: self.kernel.clone(),
+        }
+    }
+
+    /// Produces a new SpinoTensorVector with an updated kernel descriptor.
+    pub fn with_kernel(&self, kernel: SpinoTensorKernel) -> Self {
+        Self {
+            spinor: self.spinor.clone(),
+            kernel,
+        }
+    }
 }
 
 /// Causal classification of the kernel vector.
@@ -481,10 +598,34 @@ impl SpinoTensorKernel {
         self.a.add(&omega_matrix(&self.omega))
     }
 
+    /// Returns the full 4×4 block tensor `T = \begin{pmatrix}s₀ & E^⊤\\ E & D\end{pmatrix}`.
+    pub fn block_tensor(&self) -> [[f64; 4]; 4] {
+        let d = self.d().as_array();
+        [
+            [self.s0, self.e[0], self.e[1], self.e[2]],
+            [self.e[0], d[0][0], d[0][1], d[0][2]],
+            [self.e[1], d[1][0], d[1][1], d[1][2]],
+            [self.e[2], d[2][0], d[2][1], d[2][2]],
+        ]
+    }
+
     /// Returns the matrix `D D^⊤`.
     pub fn dd_t(&self) -> Matrix3 {
         let d = self.d();
         d.mul(&d.transpose())
+    }
+
+    /// Applies the SpinoTensor kernel tensor to a Minkowski vector.
+    pub fn apply_tensor(&self, vector: &Vec4) -> Vec4 {
+        let spatial = [vector[1], vector[2], vector[3]];
+        let rotated = self.d().mul_vec(&spatial);
+        let time = self.s0 * vector[0] + dot(&self.e, &spatial);
+        [
+            time,
+            self.e[0] * vector[0] + rotated[0],
+            self.e[1] * vector[0] + rotated[1],
+            self.e[2] * vector[0] + rotated[2],
+        ]
     }
 
     /// Determinant of `D`.
@@ -763,6 +904,7 @@ impl SpinoTensorKernel {
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
+    use num_complex::Complex;
 
     fn minkowski_norm_sq(v: &Vec4) -> f64 {
         v[0] * v[0] - v[1] * v[1] - v[2] * v[2] - v[3] * v[3]
@@ -794,6 +936,78 @@ mod tests {
 
         assert_abs_diff_eq!(kernel.alpha().unwrap(), 1.5, epsilon = 1e-9);
         assert_abs_diff_eq!(kernel.beta().unwrap(), 1.25, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn pauli_spinor_matches_bloch_coordinates() {
+        let theta = 1.234_f64;
+        let phi = -0.732_f64;
+        let spinor = PauliSpinor::new([
+            Complex::new((theta / 2.0).cos(), 0.0),
+            Complex::from_polar((theta / 2.0).sin(), phi),
+        ])
+        .unwrap();
+
+        let bloch = spinor.bloch_current();
+        assert_abs_diff_eq!(bloch[0], 1.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(bloch[1], theta.sin() * phi.cos(), epsilon = 1e-9);
+        assert_abs_diff_eq!(bloch[2], theta.sin() * phi.sin(), epsilon = 1e-9);
+        assert_abs_diff_eq!(bloch[3], theta.cos(), epsilon = 1e-9);
+    }
+
+    #[test]
+    fn tensor_application_matches_block_matrix() {
+        let kernel = SpinoTensorKernel::new(
+            1.3,
+            diag([1.0, 1.5, 2.0]),
+            [0.4, -0.2, 0.1],
+            [0.1, 0.2, 0.3],
+        )
+        .unwrap();
+        let vector = [1.0, 0.2, -0.4, 0.8];
+
+        let applied = kernel.apply_tensor(&vector);
+        let block = kernel.block_tensor();
+        let mut manual = [0.0; 4];
+        for row in 0..4 {
+            let mut acc = 0.0;
+            for col in 0..4 {
+                acc += block[row][col] * vector[col];
+            }
+            manual[row] = acc;
+        }
+
+        for i in 0..4 {
+            assert_abs_diff_eq!(applied[i], manual[i], epsilon = 1e-9);
+        }
+    }
+
+    #[test]
+    fn spino_tensor_vector_respects_definition() {
+        let kernel = SpinoTensorKernel::new(
+            1.6,
+            diag([2.0, 0.5, 3.0]),
+            [0.1, 0.3, -0.2],
+            [0.0, 0.0, 0.4],
+        )
+        .unwrap();
+        let spinor = PauliSpinor::new([Complex::new(0.9, -0.1), Complex::new(0.3, 0.2)]).unwrap();
+        let stv = SpinoTensorVector::new(spinor.clone(), kernel.clone());
+
+        let bloch = stv.bloch_current();
+        let induced = stv.induced_vector();
+        let expected = kernel.apply_tensor(&bloch);
+        for i in 0..4 {
+            assert_abs_diff_eq!(induced[i], expected[i], epsilon = 1e-9);
+        }
+
+        let rotated = stv.with_phase_shift(0.77);
+        let rotated_bloch = rotated.bloch_current();
+        let rotated_induced = rotated.induced_vector();
+        for i in 0..4 {
+            assert_abs_diff_eq!(rotated_bloch[i], bloch[i], epsilon = 1e-9);
+            assert_abs_diff_eq!(rotated_induced[i], induced[i], epsilon = 1e-9);
+        }
     }
 
     #[test]
@@ -907,5 +1121,11 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, StvError::NonSymmetric { .. }));
+    }
+
+    #[test]
+    fn detect_zero_spinor() {
+        let err = PauliSpinor::new([Complex::new(0.0, 0.0), Complex::new(0.0, 0.0)]).unwrap_err();
+        assert!(matches!(err, StvError::ZeroSpinor));
     }
 }
