@@ -244,6 +244,12 @@ fn apply_linkfor_shared(
                     configured = true;
                 }
             }
+        } else if token.contains("stack_size") {
+            // macOS' Python distributions sometimes inject `-stack_size` when
+            // building executables. Passing it through while linking a
+            // cdylib causes `ld` to fail because `-stack_size` is only valid
+            // for main executables. Ignore it so we can link the extension.
+            continue;
         } else {
             println!("cargo:rustc-link-arg={}", token);
         }
