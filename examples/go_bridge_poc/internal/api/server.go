@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"log"
 	"net/http"
 )
@@ -12,11 +11,17 @@ type PredictionRequest struct {
 }
 
 type PredictionResponse struct {
-	Sum     float64  `json:"sum"`
-	Count   int      `json:"count"`
-	Average float64  `json:"average"`
-	Minimum *float64 `json:"min,omitempty"`
-	Maximum *float64 `json:"max,omitempty"`
+	Sum     float64 `json:"sum"`
+	Count   int     `json:"count"`
+	Average float64 `json:"average"`
+}
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+type healthResponse struct {
+	Status string `json:"status"`
 }
 
 type Server struct {
@@ -33,14 +38,17 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
+	if err := respondJSON(w, http.StatusOK, healthResponse{Status: "ok"}); err != nil {
+		s.logger.Printf("failed to encode health response: %v", err)
+	}
 }
 
 func (s *Server) handlePredict(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Header().Set("Allow", http.MethodPost)
+		if err := respondJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "only POST is supported"}); err != nil {
+			s.logger.Printf("failed to encode method not allowed response: %v", err)
+		}
 		return
 	}
 
@@ -48,50 +56,32 @@ func (s *Server) handlePredict(w http.ResponseWriter, r *http.Request) {
 	var req PredictionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.logger.Printf("failed to decode payload: %v", err)
-		http.Error(w, "invalid payload", http.StatusBadRequest)
+		if err := respondJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid payload"}); err != nil {
+			s.logger.Printf("failed to encode error response: %v", err)
+		}
 		return
 	}
 
-	resp, err := summarize(req.Input)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	var sum float64
+	for _, value := range req.Input {
+		sum += value
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(&resp); err != nil {
+	resp := PredictionResponse{
+		Sum:   sum,
+		Count: len(req.Input),
+	}
+	if resp.Count > 0 {
+		resp.Average = resp.Sum / float64(resp.Count)
+	}
+
+	if err := respondJSON(w, http.StatusOK, &resp); err != nil {
 		s.logger.Printf("failed to encode response: %v", err)
 	}
 }
 
-// summarize calculates aggregate statistics for the provided values.
-func summarize(values []float64) (PredictionResponse, error) {
-	count := len(values)
-	if count == 0 {
-		return PredictionResponse{}, errors.New("input must contain at least one value")
-	}
-
-	var sum float64
-	min := values[0]
-	max := values[0]
-	for _, value := range values {
-		sum += value
-		if value < min {
-			min = value
-		}
-		if value > max {
-			max = value
-		}
-	}
-
-	average := sum / float64(count)
-	minCopy := min
-	maxCopy := max
-	return PredictionResponse{
-		Sum:     sum,
-		Count:   count,
-		Average: average,
-		Minimum: &minCopy,
-		Maximum: &maxCopy,
-	}, nil
+func respondJSON(w http.ResponseWriter, status int, payload interface{}) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	return json.NewEncoder(w).Encode(payload)
 }

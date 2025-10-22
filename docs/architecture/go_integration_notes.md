@@ -46,21 +46,23 @@ Near-term recommendation: keep JSON/HTTP for prototyping, graduate to gRPC once 
 
 ## 3. Proof of Concept summary
 
-- Implemented `examples/go_bridge_poc/cmd/server` – a Go HTTP service exposing `/healthz` and `/predict` (sums numeric arrays, derives min/max/average statistics, and shuts down gracefully on signals).
+- Implemented `examples/go_bridge_poc/cmd/server` – a Go HTTP service exposing `/healthz` and `/predict` (sums numeric arrays and returns aggregate stats).
 - Added `examples/go_bridge_poc/rust_client` – a Rust CLI that sends JSON payloads to the Go service and prints the response using `ureq` and `clap`.
 
 ### CI build & test memo
 
 ```
 # Go formatting and tests (extend `.github/workflows/ci.yml`)
-GO111MODULE=on go fmt ./...
-GO111MODULE=on go test ./...
+GO111MODULE=on GOTOOLCHAIN=local go fmt ./...
+GO111MODULE=on GOTOOLCHAIN=local GOPROXY=off go test ./...
 
 # Rust client lint/test (optional for nightly runs)
 cargo fmt --manifest-path examples/go_bridge_poc/rust_client/Cargo.toml -- --check
 cargo clippy --manifest-path examples/go_bridge_poc/rust_client/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path examples/go_bridge_poc/rust_client/Cargo.toml
 ```
+
+`GOTOOLCHAIN=local` ensures CI reuses the pinned system Go toolchain instead of attempting to download version-specific toolchains, which can stall in restricted network environments.
 
 These commands are safe to run independently of the main workspace because the client is not part of `Cargo.toml`'s workspace members.
 

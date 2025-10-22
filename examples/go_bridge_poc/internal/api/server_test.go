@@ -10,105 +10,108 @@ import (
 	"testing"
 )
 
-func newTestServer(t *testing.T) *Server {
-	t.Helper()
-	logger := log.New(io.Discard, "", log.LstdFlags)
+func newTestServer() *Server {
+	logger := log.New(io.Discard, "", 0)
 	return NewServer(logger)
 }
 
-func TestHealthEndpoint(t *testing.T) {
-	server := newTestServer(t)
-	mux := http.NewServeMux()
-	server.RegisterRoutes(mux)
-
+func TestHandleHealth(t *testing.T) {
+	srv := newTestServer()
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-	rec := httptest.NewRecorder()
+	w := httptest.NewRecorder()
 
-	mux.ServeHTTP(rec, req)
+	srv.handleHealth(w, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, res.StatusCode)
 	}
 
-	if got := rec.Header().Get("Content-Type"); got != "application/json" {
-		t.Fatalf("expected json content type, got %q", got)
+	var body map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if body["status"] != "ok" {
+		t.Fatalf("expected status ok, got %q", body["status"])
 	}
 }
 
-func TestPredictEndpoint(t *testing.T) {
-	server := newTestServer(t)
-	mux := http.NewServeMux()
-	server.RegisterRoutes(mux)
-
-	body := PredictionRequest{Input: []float64{1, 2, 3, 4}}
-	payload, err := json.Marshal(body)
+func TestHandlePredictSuccess(t *testing.T) {
+	srv := newTestServer()
+	payload := PredictionRequest{Input: []float64{1, 2, 3}}
+	buf, err := json.Marshal(payload)
 	if err != nil {
-		t.Fatalf("marshal payload: %v", err)
+		t.Fatalf("failed to marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/predict", bytes.NewReader(payload))
-	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/predict", bytes.NewReader(buf))
+	w := httptest.NewRecorder()
 
-	mux.ServeHTTP(rec, req)
+	srv.handlePredict(w, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
+	res := w.Result()
+	defer res.Body.Close()
 
-	var resp PredictionResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, res.StatusCode)
 	}
 
-	if resp.Sum != 10 {
-		t.Fatalf("unexpected sum: %v", resp.Sum)
+	var body PredictionResponse
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
 	}
-	if resp.Count != 4 {
-		t.Fatalf("unexpected count: %v", resp.Count)
+
+	if body.Sum != 6 || body.Count != 3 {
+		t.Fatalf("unexpected aggregation: %+v", body)
 	}
-	if resp.Average != 2.5 {
-		t.Fatalf("unexpected average: %v", resp.Average)
-	}
-	if resp.Minimum == nil || *resp.Minimum != 1 {
-		t.Fatalf("unexpected min: %v", resp.Minimum)
-	}
-	if resp.Maximum == nil || *resp.Maximum != 4 {
-		t.Fatalf("unexpected max: %v", resp.Maximum)
+
+	if body.Average != 2 {
+		t.Fatalf("expected average 2, got %v", body.Average)
 	}
 }
 
-func TestPredictEndpointRejectsEmptyInput(t *testing.T) {
-	server := newTestServer(t)
-	mux := http.NewServeMux()
-	server.RegisterRoutes(mux)
+func TestHandlePredictValidation(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest(http.MethodPost, "/predict", bytes.NewReader([]byte("not-json")))
+	w := httptest.NewRecorder()
 
-	body := PredictionRequest{Input: []float64{}}
-	payload, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("marshal payload: %v", err)
+	srv.handlePredict(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.StatusCode)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/predict", bytes.NewReader(payload))
-	rec := httptest.NewRecorder()
+	var body errorResponse
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d", rec.Code)
+	if body.Error == "" {
+		t.Fatal("expected error message, got empty string")
 	}
 }
 
-func TestPredictEndpointRejectsWrongMethod(t *testing.T) {
-	server := newTestServer(t)
-	mux := http.NewServeMux()
-	server.RegisterRoutes(mux)
-
+func TestHandlePredictMethodNotAllowed(t *testing.T) {
+	srv := newTestServer()
 	req := httptest.NewRequest(http.MethodGet, "/predict", nil)
-	rec := httptest.NewRecorder()
+	w := httptest.NewRecorder()
 
-	mux.ServeHTTP(rec, req)
+	srv.handlePredict(w, req)
 
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected status 405, got %d", rec.Code)
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status %d, got %d", http.StatusMethodNotAllowed, res.StatusCode)
+	}
+
+	if got := res.Header.Get("Allow"); got != http.MethodPost {
+		t.Fatalf("expected Allow header %s, got %s", http.MethodPost, got)
 	}
 }

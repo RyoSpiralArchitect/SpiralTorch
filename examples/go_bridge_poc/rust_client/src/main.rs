@@ -27,10 +27,6 @@ struct PredictionResponse {
     sum: f64,
     count: usize,
     average: f64,
-    #[serde(default)]
-    min: Option<f64>,
-    #[serde(default)]
-    max: Option<f64>,
 }
 
 fn main() {
@@ -38,29 +34,19 @@ fn main() {
 
     let payload = PredictionRequest { input: args.values };
 
-    let http_response = ureq::post(&args.endpoint)
+    let response: PredictionResponse = ureq::post(&args.endpoint)
         .set("Content-Type", "application/json")
         .send_json(ureq::serde_json::to_value(payload).expect("serialize payload"))
-        .unwrap_or_else(|err| {
-            match err {
-                ureq::Error::Status(code, response) => {
-                    if let Ok(body) = response.into_string() {
-                        eprintln!("request failed with status {code}: {body}");
-                    } else {
-                        eprintln!("request failed with status {code}");
-                    }
-                }
-                ureq::Error::Transport(transport) => {
-                    eprintln!("transport error: {transport}");
-                }
-            }
-            std::process::exit(1);
-        });
-
-    let response: PredictionResponse = http_response.into_json().expect("invalid JSON response");
+        .map_err(|err| {
+            eprintln!("request failed: {err}");
+            err
+        })
+        .unwrap()
+        .into_json()
+        .expect("invalid JSON response");
 
     println!(
-        "Go service responded with: sum={:.3}, count={}, avg={:.3}, min={:?}, max={:?}",
-        response.sum, response.count, response.average, response.min, response.max
+        "Go service responded with: sum={:.3}, count={}, avg={:.3}",
+        response.sum, response.count, response.average
     );
 }

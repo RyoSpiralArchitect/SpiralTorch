@@ -6,8 +6,8 @@ This example shows how a minimal Go HTTP service can exchange data with a Rust c
 
 ```
 examples/go_bridge_poc/
-├── cmd/server          # Entrypoint wiring, logging, graceful shutdown
-├── internal/api        # Request/response types, handlers, and tests
+├── cmd/server          # Entrypoint wiring logging + HTTP server
+├── internal/api        # Request/response types and handlers
 └── rust_client         # Standalone Rust binary that exercises the API
 ```
 
@@ -15,10 +15,8 @@ examples/go_bridge_poc/
 
 ```
 cd examples/go_bridge_poc
-GO111MODULE=on go run ./cmd/server
+GO111MODULE=on GOTOOLCHAIN=local go run ./cmd/server
 ```
-
-The server now supports graceful shutdown on `SIGINT`/`SIGTERM` and validates prediction payloads before responding.
 
 ## Running the Rust client
 
@@ -29,14 +27,13 @@ cd examples/go_bridge_poc/rust_client
 cargo run --release -- --endpoint http://127.0.0.1:8080/predict --values 1 2 3 4
 ```
 
-The client will send a JSON payload and print the computed summary returned by the Go service, including minimum and maximum values.
+## Running tests
 
-## Testing
+To exercise the Go handlers without needing external toolchain downloads, run:
 
-```bash
-cd examples/go_bridge_poc
-GO111MODULE=on go test ./...
-
-cd rust_client
-cargo test
 ```
+cd examples/go_bridge_poc
+GO111MODULE=on GOTOOLCHAIN=local GOPROXY=off go test ./...
+```
+
+The client will send a JSON payload and print the computed summary returned by the Go service.
