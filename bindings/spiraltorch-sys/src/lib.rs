@@ -655,8 +655,6 @@ pub extern "C" fn spiraltorch_runtime_tensor_random_normal(
 ) -> *mut Tensor {
     runtime_tensor_generate(runtime, "runtime_tensor_random_normal", move |runtime| {
         runtime.tensor_random_normal(rows, cols, mean, std, optional_seed(seed, has_seed))
-    runtime_tensor_generate(runtime, "runtime_tensor_random_normal", move || {
-        Tensor::random_normal(rows, cols, mean, std, optional_seed(seed, has_seed))
     })
 }
 
