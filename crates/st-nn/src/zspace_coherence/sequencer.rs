@@ -29,6 +29,67 @@ use st_core::{
 };
 use st_tensor::{OpenCartesianTopos, TensorError};
 
+/// Rich coherence diagnostics surfaced by [`ZSpaceCoherenceSequencer`].
+#[derive(Clone, Debug)]
+pub struct CoherenceDiagnostics {
+    channel_weights: Vec<f32>,
+    normalized_weights: Vec<f32>,
+    normalization: f32,
+    fractional_order: f32,
+    dominant_channel: Option<usize>,
+    mean_coherence: f32,
+    z_bias: f32,
+    energy_ratio: f32,
+    entropy: f32,
+}
+
+impl CoherenceDiagnostics {
+    /// Returns the raw Maxwell coherence weights.
+    pub fn channel_weights(&self) -> &[f32] {
+        &self.channel_weights
+    }
+
+    /// Returns the coherence weights normalised to a probability simplex.
+    pub fn normalized_weights(&self) -> &[f32] {
+        &self.normalized_weights
+    }
+
+    /// Returns the sum used to normalise coherence weights.
+    pub fn normalization(&self) -> f32 {
+        self.normalization
+    }
+
+    /// Fractional order used during bidirectional smoothing.
+    pub fn fractional_order(&self) -> f32 {
+        self.fractional_order
+    }
+
+    /// Index of the dominant coherence channel, if any.
+    pub fn dominant_channel(&self) -> Option<usize> {
+        self.dominant_channel
+    }
+
+    /// Mean coherence value observed across channels.
+    pub fn mean_coherence(&self) -> f32 {
+        self.mean_coherence
+    }
+
+    /// Signed Z-bias derived from the summarised Maxwell pulse.
+    pub fn z_bias(&self) -> f32 {
+        self.z_bias
+    }
+
+    /// Ratio of energy concentrated in the dominant channel band.
+    pub fn energy_ratio(&self) -> f32 {
+        self.energy_ratio
+    }
+
+    /// Shannon entropy of the coherence distribution.
+    pub fn coherence_entropy(&self) -> f32 {
+        self.entropy
+    }
+}
+
 /// Z-space native sequence modeling via coherence and semiotic suturing.
 ///
 /// This layer replaces attention with:
@@ -98,8 +159,12 @@ impl ZSpaceCoherenceSequencer {
         Ok(projected)
     }
 
-    /// Performs coherence-weighted geometric aggregation.
-    fn geometric_aggregate(&self, x: &Tensor, coherence_weights: &[f32]) -> PureResult<Tensor> {
+    /// Performs coherence-weighted geometric aggregation and surfaces diagnostics.
+    fn geometric_aggregate_with_diagnostics(
+        &self,
+        x: &Tensor,
+        coherence_weights: &[f32],
+    ) -> PureResult<(Tensor, CoherenceDiagnostics)> {
         if coherence_weights.is_empty() {
             return Err(TensorError::EmptyInput("coherence_weights").into());
         }
@@ -115,20 +180,7 @@ impl ZSpaceCoherenceSequencer {
         let mut aggregated = Tensor::zeros(rows, cols)?;
         let channel_width = (cols + coherence_weights.len() - 1) / coherence_weights.len();
         let normalization = coherence_weights.iter().copied().sum::<f32>().max(1e-6);
-        let canonical_concept = self.canonical_domain_concept();
-        let fractional_order = match canonical_concept {
-            DomainConcept::Membrane => (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.85),
-            DomainConcept::GrainBoundary => {
-                (1.0 / (1.0 + self.curvature.abs() * 0.8)).clamp(0.15, 0.9)
-            }
-            DomainConcept::NeuronalPattern => {
-                (1.0 / (1.0 + self.curvature.abs() * 0.6)).clamp(0.2, 0.95)
-            }
-            DomainConcept::DropletCoalescence => {
-                (1.0 / (1.0 + self.curvature.abs() * 1.2)).clamp(0.05, 0.8)
-            }
-            DomainConcept::Custom(_) => (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.95),
-        };
+        let fractional_order = self.fractional_order();
         let input = x.data();
         {
             let output = aggregated.data_mut();
@@ -171,10 +223,105 @@ impl ZSpaceCoherenceSequencer {
         self.topos.saturate_slice(aggregated.data_mut());
         self.topos
             .guard_tensor("zspace_coherence_geometric_aggregate", &aggregated)?;
+
+        let diagnostics = self.build_coherence_diagnostics(
+            &aggregated,
+            coherence_weights,
+            channel_width.max(1),
+            normalization,
+            fractional_order,
+        );
+
+        Ok((aggregated, diagnostics))
+    }
+
+    /// Performs coherence-weighted geometric aggregation.
+    fn geometric_aggregate(&self, x: &Tensor, coherence_weights: &[f32]) -> PureResult<Tensor> {
+        let (aggregated, _) = self.geometric_aggregate_with_diagnostics(x, coherence_weights)?;
         Ok(aggregated)
     }
 
-    pub fn forward_with_coherence(&self, x: &Tensor) -> PureResult<(Tensor, Vec<f32>)> {
+    fn build_coherence_diagnostics(
+        &self,
+        aggregated: &Tensor,
+        coherence_weights: &[f32],
+        channel_width: usize,
+        normalization: f32,
+        fractional_order: f32,
+    ) -> CoherenceDiagnostics {
+        let channel_weights = coherence_weights.to_vec();
+        let mut normalized_weights: Vec<f32> =
+            channel_weights.iter().map(|value| value.max(0.0)).collect();
+        let sum = normalized_weights.iter().sum::<f32>();
+        if sum > 0.0 {
+            for value in &mut normalized_weights {
+                *value = (*value / sum).max(1e-6);
+            }
+        } else if !normalized_weights.is_empty() {
+            let fill = 1.0 / normalized_weights.len() as f32;
+            for value in &mut normalized_weights {
+                *value = fill;
+            }
+        }
+
+        let mean_coherence = if channel_weights.is_empty() {
+            0.0
+        } else {
+            channel_weights.iter().copied().sum::<f32>() / channel_weights.len() as f32
+        };
+
+        let dominant_channel = channel_weights
+            .iter()
+            .enumerate()
+            .filter(|(_, weight)| weight.is_finite())
+            .max_by(|(_, lhs), (_, rhs)| lhs.partial_cmp(rhs).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(idx, _)| idx);
+
+        let data = aggregated.data();
+        let (rows, cols) = aggregated.shape();
+        let total_energy = data.iter().map(|value| value.abs()).sum::<f32>().max(1e-6);
+        let mut dominant_energy = 0.0f32;
+        if let Some(channel) = dominant_channel {
+            let start = channel * channel_width;
+            let end = ((channel + 1) * channel_width).min(cols);
+            if start < end {
+                for row in 0..rows {
+                    let offset = row * cols;
+                    for value in &data[offset + start..offset + end] {
+                        dominant_energy += value.abs();
+                    }
+                }
+            }
+        }
+        let energy_ratio = (dominant_energy / total_energy).clamp(0.0, 1.0);
+
+        let entropy = -normalized_weights
+            .iter()
+            .filter(|value| value.is_finite() && **value > 0.0)
+            .map(|value| *value * value.ln())
+            .sum::<f32>();
+
+        let z_bias = self
+            .summarise_maxwell_pulse(aggregated, coherence_weights)
+            .z_bias;
+
+        CoherenceDiagnostics {
+            channel_weights,
+            normalized_weights,
+            normalization,
+            fractional_order,
+            dominant_channel,
+            mean_coherence,
+            z_bias,
+            energy_ratio,
+            entropy,
+        }
+    }
+
+    pub fn forward_with_diagnostics(
+        &self,
+        x: &Tensor,
+    ) -> PureResult<(Tensor, Vec<f32>, CoherenceDiagnostics)> {
         let _ = self.topos.curvature();
         // Step 1: Project to Z-space
         let z_space = self.project_to_zspace(x)?;
@@ -182,15 +329,21 @@ impl ZSpaceCoherenceSequencer {
         // Step 2: Measure Maxwell coherence
         let coherence = self.measure_coherence(&z_space)?;
 
-        // Step 3: Geometric aggregation (replaces attention)
-        let aggregated = self.geometric_aggregate(&z_space, &coherence)?;
+        // Step 3: Geometric aggregation (replaces attention) with diagnostics
+        let (aggregated, diagnostics) =
+            self.geometric_aggregate_with_diagnostics(&z_space, &coherence)?;
 
         // Step 4: Output from Z-space (to Euclidean)
+        Ok((aggregated, coherence, diagnostics))
+    }
+
+    pub fn forward_with_coherence(&self, x: &Tensor) -> PureResult<(Tensor, Vec<f32>)> {
+        let (aggregated, coherence, _) = self.forward_with_diagnostics(x)?;
         Ok((aggregated, coherence))
     }
 
     pub fn forward(&self, x: &Tensor) -> PureResult<Tensor> {
-        let (aggregated, _) = self.forward_with_coherence(x)?;
+        let (aggregated, _, _) = self.forward_with_diagnostics(x)?;
         Ok(aggregated)
     }
 
@@ -332,6 +485,22 @@ impl ZSpaceCoherenceSequencer {
             DomainConcept::NeuronalPattern
         } else {
             DomainConcept::Membrane
+        }
+    }
+
+    fn fractional_order(&self) -> f32 {
+        match self.canonical_domain_concept() {
+            DomainConcept::Membrane => (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.85),
+            DomainConcept::GrainBoundary => {
+                (1.0 / (1.0 + self.curvature.abs() * 0.8)).clamp(0.15, 0.9)
+            }
+            DomainConcept::NeuronalPattern => {
+                (1.0 / (1.0 + self.curvature.abs() * 0.6)).clamp(0.2, 0.95)
+            }
+            DomainConcept::DropletCoalescence => {
+                (1.0 / (1.0 + self.curvature.abs() * 1.2)).clamp(0.05, 0.8)
+            }
+            DomainConcept::Custom(_) => (1.0 / (1.0 + self.curvature.abs())).clamp(0.1, 0.95),
         }
     }
 
@@ -546,6 +715,35 @@ mod tests {
         assert_eq!(with_coherence.data(), standalone.data());
         assert_eq!(weights.len(), seq.maxwell_channels());
         assert!(weights.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn diagnostics_surface_entropy_and_energy_ratio() {
+        let topos = OpenCartesianTopos::new(-0.25, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(96, 6, -0.25, topos).unwrap();
+
+        let mut data = vec![0.0f32; 96 * 3];
+        for (idx, value) in data.iter_mut().enumerate() {
+            let channel = (idx % 96) / 16;
+            *value = 0.1 + (channel as f32 * 0.05);
+        }
+        let x = Tensor::from_vec(3, 96, data).unwrap();
+
+        let (_, coherence, diagnostics) = seq.forward_with_diagnostics(&x).unwrap();
+
+        assert_eq!(coherence.len(), seq.maxwell_channels());
+        assert_eq!(diagnostics.channel_weights().len(), coherence.len());
+        assert_eq!(diagnostics.normalized_weights().len(), coherence.len());
+        assert!(diagnostics.normalization() > 0.0);
+        assert!(diagnostics.fractional_order() > 0.0);
+        assert!(diagnostics.coherence_entropy().is_finite());
+        assert!(diagnostics.energy_ratio() >= 0.0);
+        assert!(diagnostics.energy_ratio() <= 1.0);
+        if let Some(channel) = diagnostics.dominant_channel() {
+            assert!(channel < coherence.len());
+        }
+        let sum: f32 = diagnostics.normalized_weights().iter().sum();
+        assert!((sum - 1.0).abs() < 1e-3);
     }
 
     #[test]

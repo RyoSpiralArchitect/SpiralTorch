@@ -8,6 +8,9 @@ _(Still under active repair while expanding — API changes hourly.)_
 Unauthorized redistribution, scraping, or resale of this repository
 violates AGPL-3.0 and §13. Any commercial deployment requires a license.
 
+## ⚖️ Attribution Required
+Reuse or redistribution **must retain the SpiralTorch name and authorship** as per AGPL §5 & §13.
+
 ---
 
 ### Why SpiralTorch  
@@ -2060,7 +2063,7 @@ Instead of Q·K^T softmax:
 - **Fractional operators** replace dot products
 
 ```python
-from spiraltorch.nn import ZSpaceCoherenceSequencer
+from spiraltorch.nn import CoherenceDiagnostics, ZSpaceCoherenceSequencer
 
 model = ZSpaceCoherenceSequencer(
     dim=768,
@@ -2068,7 +2071,9 @@ model = ZSpaceCoherenceSequencer(
     curvature=-1.0
 )
 
-out = model.forward(x)  # Coherence-weighted aggregation
+out, coherence, diagnostics = model.forward_with_diagnostics(x)
+print(f"dominant channel: {diagnostics.dominant_channel()}")
+print(f"z-bias: {diagnostics.z_bias():.3f}")
 ```
 
 [See example](examples/05_new_layers/zspace_coherence_demo.py)
@@ -2130,7 +2135,7 @@ Instead of Q·K^T softmax:
 - **Fractional operators** replace dot products
 
 ```python
-from spiraltorch.nn import ZSpaceCoherenceSequencer
+from spiraltorch.nn import CoherenceDiagnostics, ZSpaceCoherenceSequencer
 
 model = ZSpaceCoherenceSequencer(
     dim=768,
@@ -2138,7 +2143,7 @@ model = ZSpaceCoherenceSequencer(
     curvature=-1.0
 )
 
-out = model.forward(x)  # Coherence-weighted aggregation
+out, coherence, diagnostics = model.forward_with_diagnostics(x)  # Aggregation + diagnostics
 
 # Derive a linguistic contour descriptor for downstream vocalisation
 contour = model.emit_linguistic_contour(x)
@@ -2148,6 +2153,8 @@ print(contour.prosody_index())
 reports = model.describe_channels(x)
 for report in reports[:3]:
     print(report.channel(), report.dominant_concept(), report.weight())
+
+print("dominant channel:", diagnostics.dominant_channel())
 ```
 
 [See example](examples/05_new_layers/zspace_coherence_demo.py)

@@ -10,7 +10,8 @@ use crate::tensor::{tensor_err_to_py, PyTensor};
 
 #[cfg(feature = "nn")]
 use st_nn::{
-    dataset::DataLoaderBatches, dataset_from_vec, DataLoader, Dataset, ZSpaceCoherenceSequencer,
+    dataset::DataLoaderBatches, dataset_from_vec, CoherenceDiagnostics, DataLoader, Dataset,
+    ZSpaceCoherenceSequencer,
 };
 #[cfg(feature = "nn")]
 use st_tensor::OpenCartesianTopos;
@@ -184,6 +185,93 @@ fn from_samples(samples: Vec<(PyTensor, PyTensor)>) -> PyDataLoader {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "CoherenceDiagnostics", unsendable)]
+pub(crate) struct PyCoherenceDiagnostics {
+    channel_weights: Vec<f32>,
+    normalized_weights: Vec<f32>,
+    normalization: f32,
+    fractional_order: f32,
+    dominant_channel: Option<usize>,
+    mean_coherence: f32,
+    z_bias: f32,
+    energy_ratio: f32,
+    coherence_entropy: f32,
+}
+
+#[cfg(feature = "nn")]
+impl PyCoherenceDiagnostics {
+    fn from_diagnostics(diagnostics: CoherenceDiagnostics) -> Self {
+        Self {
+            channel_weights: diagnostics.channel_weights().to_vec(),
+            normalized_weights: diagnostics.normalized_weights().to_vec(),
+            normalization: diagnostics.normalization(),
+            fractional_order: diagnostics.fractional_order(),
+            dominant_channel: diagnostics.dominant_channel(),
+            mean_coherence: diagnostics.mean_coherence(),
+            z_bias: diagnostics.z_bias(),
+            energy_ratio: diagnostics.energy_ratio(),
+            coherence_entropy: diagnostics.coherence_entropy(),
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyCoherenceDiagnostics {
+    #[getter]
+    fn channel_weights(&self) -> Vec<f32> {
+        self.channel_weights.clone()
+    }
+
+    #[getter]
+    fn normalized_weights(&self) -> Vec<f32> {
+        self.normalized_weights.clone()
+    }
+
+    #[getter]
+    fn normalization(&self) -> f32 {
+        self.normalization
+    }
+
+    #[getter]
+    fn fractional_order(&self) -> f32 {
+        self.fractional_order
+    }
+
+    #[getter]
+    fn dominant_channel(&self) -> Option<usize> {
+        self.dominant_channel
+    }
+
+    #[getter]
+    fn mean_coherence(&self) -> f32 {
+        self.mean_coherence
+    }
+
+    #[getter]
+    fn z_bias(&self) -> f32 {
+        self.z_bias
+    }
+
+    #[getter]
+    fn energy_ratio(&self) -> f32 {
+        self.energy_ratio
+    }
+
+    #[getter]
+    fn coherence_entropy(&self) -> f32 {
+        self.coherence_entropy
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CoherenceDiagnostics(mean={:.4}, entropy={:.4}, dominant_channel={:?})",
+            self.mean_coherence, self.coherence_entropy, self.dominant_channel
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(
     module = "spiraltorch.nn",
     name = "ZSpaceCoherenceSequencer",
@@ -225,6 +313,21 @@ impl PyZSpaceCoherenceSequencer {
             .forward_with_coherence(&x.inner)
             .map_err(tensor_err_to_py)?;
         Ok((PyTensor::from_tensor(output), coherence))
+    }
+
+    pub fn forward_with_diagnostics(
+        &self,
+        x: &PyTensor,
+    ) -> PyResult<(PyTensor, Vec<f32>, PyCoherenceDiagnostics)> {
+        let (output, coherence, diagnostics) = self
+            .inner
+            .forward_with_diagnostics(&x.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok((
+            PyTensor::from_tensor(output),
+            coherence,
+            PyCoherenceDiagnostics::from_diagnostics(diagnostics),
+        ))
     }
 
     pub fn project_to_zspace(&self, x: &PyTensor) -> PyResult<PyTensor> {
@@ -270,6 +373,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyDataset>()?;
     module.add_class::<PyDataLoader>()?;
     module.add_class::<PyDataLoaderIter>()?;
+    module.add_class::<PyCoherenceDiagnostics>()?;
     module.add_class::<PyZSpaceCoherenceSequencer>()?;
     module.add_function(wrap_pyfunction!(from_samples, &module)?)?;
     module.add(
@@ -278,6 +382,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "Dataset",
             "DataLoader",
             "DataLoaderIter",
+            "CoherenceDiagnostics",
             "ZSpaceCoherenceSequencer",
             "from_samples",
         ],

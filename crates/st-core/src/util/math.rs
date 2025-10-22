@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use std::sync::{Mutex, OnceLock};
+use std::f64::consts::PI;
 
 /// Memoises successive approximations of the Ramanujan π series so repeated
 /// callers only pay for the additional iterations they request.
@@ -57,58 +58,15 @@ impl Default for RamanujanCache {
 /// projecting geodesic measurements into a density correction.
 pub const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
 
-static RAMANUJAN_CACHE: OnceLock<Mutex<RamanujanSeries>> = OnceLock::new();
-
-/// Incremental cache for the Ramanujan series that keeps the running sum and
-/// scaling factor so subsequent calls can extend the series in constant time.
-struct RamanujanSeries {
-    values: HashMap<usize, f64>,
-    sum: f64,
-    factor: f64,
-}
-
-impl Default for RamanujanSeries {
-    fn default() -> Self {
-        Self {
-            values: HashMap::with_capacity(4),
-            sum: 0.0,
-            factor: 1.0,
-        }
-    }
-}
-
-impl RamanujanSeries {
-    const PREFAC: f64 = 0.000_288_585_565_222_547_75;
-    const BASE: f64 = 24_591_257_856.0;
-
-    fn ensure(&mut self, iterations: usize) {
-        while self.values.len() < iterations {
-            let k = self.values.len();
-            self.sum += self.factor * (1103.0 + 26390.0 * k as f64);
-            let k1 = (k + 1) as f64;
-            let numerator = (4.0 * k1 - 3.0) * (4.0 * k1 - 2.0) * (4.0 * k1 - 1.0) * (4.0 * k1);
-            let denominator = k1.powi(4) * Self::BASE;
-            self.factor *= numerator / denominator;
-            let value = (Self::PREFAC * self.sum).recip();
-            self.values.insert(k + 1, value);
-        }
-    }
-
-    fn value(&mut self, iterations: usize) -> f64 {
-        self.ensure(iterations);
-        *self.values.get(&iterations).expect("series iteration cached")
-    }
-}
+static RAMANUJAN_CACHE: OnceLock<Mutex<RamanujanCache>> = OnceLock::new();
 
 /// Returns the Ramanujan π approximation using the classical rapidly
 /// converging series. Results are memoised per iteration count so repeated
 /// callers across the ecosystem share the cached values.
 pub fn ramanujan_pi(iterations: usize) -> f64 {
+    let iterations = iterations.max(1);
     let cache = RAMANUJAN_CACHE.get_or_init(|| Mutex::new(RamanujanCache::new()));
     cache.lock().unwrap().value_at(iterations)
-    let iterations = iterations.max(1);
-    let cache = RAMANUJAN_CACHE.get_or_init(|| Mutex::new(RamanujanSeries::default()));
-    cache.lock().unwrap().value(iterations)
 }
 
 /// Computes the Ramanujan π approximation while adaptively increasing the
@@ -121,9 +79,9 @@ pub fn ramanujan_pi_with_tolerance(tolerance: f64, max_iterations: usize) -> (f6
     let max_iterations = max_iterations.max(1);
     let cache = RAMANUJAN_CACHE.get_or_init(|| Mutex::new(RamanujanCache::new()));
     let mut cache = cache.lock().unwrap();
-    let mut previous = cache.value(1);
+    let mut previous = cache.value_at(1);
     for iterations in 2..=max_iterations {
-        let current = cache.value(iterations);
+        let current = cache.value_at(iterations);
         if (current - previous).abs() <= tolerance || (current - PI).abs() <= tolerance {
             return (current, iterations);
         }
