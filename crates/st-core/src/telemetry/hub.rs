@@ -71,6 +71,20 @@ const PSI_COMPONENTS: [PsiComponent; 6] = [
     PsiComponent::BAND_ENERGY,
 ];
 
+#[cfg(feature = "psi")]
+static PSI_TELEMETRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(feature = "psi")]
+fn psi_lock() -> &'static Mutex<()> {
+    PSI_TELEMETRY_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[cfg(feature = "psi")]
+#[must_use]
+pub fn psi_telemetry_guard() -> MutexGuard<'static, ()> {
+    psi_lock().lock().expect("psi telemetry lock")
+}
+
 static CONFIG_DIFF_EVENTS: OnceLock<RwLock<Vec<ConfigDiffEvent>>> = OnceLock::new();
 
 fn config_events_cell() -> &'static RwLock<Vec<ConfigDiffEvent>> {
@@ -207,6 +221,13 @@ pub fn get_last_psi() -> Option<PsiReading> {
 }
 
 #[cfg(feature = "psi")]
+pub fn clear_last_psi() {
+    if let Ok(mut guard) = LAST_PSI.write() {
+        *guard = None;
+    }
+}
+
+#[cfg(feature = "psi")]
 pub fn set_last_psi_events(events: &[PsiEvent]) {
     if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
         guard.clear();
@@ -228,6 +249,13 @@ pub fn get_last_psi_events() -> Vec<PsiEvent> {
         .read()
         .map(|guard| guard.clone())
         .unwrap_or_default()
+}
+
+#[cfg(feature = "psi")]
+pub fn clear_last_psi_events() {
+    if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
+        guard.clear();
+    }
 }
 
 #[cfg(feature = "psi")]
@@ -656,6 +684,19 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
     match softlogic_z_cell().read() {
         Ok(guard) => guard.as_ref().cloned(),
         Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
+    }
+}
+
+#[cfg(feature = "psi")]
+pub fn clear_softlogic_z() {
+    match softlogic_z_cell().write() {
+        Ok(mut guard) => {
+            *guard = None;
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = None;
+        }
     }
 }
 

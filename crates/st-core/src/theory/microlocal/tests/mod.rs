@@ -320,3 +320,58 @@ fn composite_policy_routes_per_source() {
     pulse.source = ZSource::RealGrad;
     assert!((composite.quality(&pulse) - 0.9).abs() < 1e-6);
 }
+
+#[test]
+fn gauge_bank_registers_unique_ids() {
+    let mut bank = MicrolocalGaugeBank::new();
+    assert!(bank.register("fine", InterfaceGauge::new(1.0, 1.0)));
+    assert!(!bank.register("fine", InterfaceGauge::new(1.0, 2.0)));
+    assert!(bank.register("coarse", InterfaceGauge::new(1.0, 3.0)));
+    assert_eq!(bank.len(), 2);
+    assert!(bank.get("fine").is_some());
+    assert!(bank.get_mut("coarse").is_some());
+    let removed = bank.remove("fine");
+    assert!(removed.is_some());
+    assert!(bank.get("fine").is_none());
+    assert_eq!(bank.ids().collect::<Vec<_>>(), vec!["coarse"]);
+}
+
+#[test]
+fn gauge_bank_runs_all_registered_probes() {
+    let mut bank = MicrolocalGaugeBank::new();
+    bank.register("fine", InterfaceGauge::new(1.0, 1.0));
+    bank.register("coarse", InterfaceGauge::new(1.0, 2.0));
+
+    let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+    let signatures = bank.analyze_all(&mask, None);
+    assert_eq!(signatures.len(), 2);
+    let fine = signatures
+        .iter()
+        .find(|(id, _)| id.as_ref() == "fine")
+        .map(|(_, sig)| sig)
+        .expect("fine gauge missing");
+    let coarse = signatures
+        .iter()
+        .find(|(id, _)| id.as_ref() == "coarse")
+        .map(|(_, sig)| sig)
+        .expect("coarse gauge missing");
+    assert!(fine.has_interface());
+    assert!(coarse.has_interface());
+    assert!(fine.physical_radius <= coarse.physical_radius);
+}
+
+#[test]
+fn conductor_can_be_built_from_gauge_bank() {
+    let mut bank = MicrolocalGaugeBank::new();
+    bank.register("default", InterfaceGauge::new(1.0, 1.0));
+    let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+    let conductor = InterfaceZConductor::from_bank(bank.clone(), lift);
+    assert_eq!(conductor.gauge_thresholds(), vec![0.25]);
+
+    bank.get_mut("default")
+        .expect("gauge missing")
+        .scale_threshold(0.5);
+    let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+    let conductor = InterfaceZConductor::from_bank(bank, lift);
+    assert!(conductor.gauge_thresholds()[0] < 0.2);
+}

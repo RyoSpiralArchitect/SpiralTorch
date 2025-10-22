@@ -18,6 +18,10 @@ impl PyRankPlan {
         Self { inner }
     }
 
+    pub(crate) fn inner(&self) -> &RankPlan {
+        &self.inner
+    }
+
     fn merge_kind(&self) -> &'static str {
         match self.inner.choice.mk {
             1 => "shared",
