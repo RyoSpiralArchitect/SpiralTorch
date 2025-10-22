@@ -3,11 +3,11 @@ use std::ffi::{c_void, CStr};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::ffi;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyModule};
+use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
-use st_tensor::{Tensor, TensorError};
+use st_tensor::{MatmulBackend, Tensor, TensorError};
 
 const USED_DLPACK_CAPSULE_NAME: &CStr =
     unsafe { CStr::from_bytes_with_nul_unchecked(b"used_dltensor\0") };
@@ -58,23 +58,17 @@ impl PyTensor {
         std: f32,
         seed: Option<u64>,
     ) -> PyResult<Self> {
-        let tensor = Tensor::random_normal(rows, cols, mean, std, seed)
-            .map_err(tensor_err_to_py)?;
+        let tensor =
+            Tensor::random_normal(rows, cols, mean, std, seed).map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
 
     /// Sample from Uniform[min, max) to create a (rows x cols) tensor.
     #[staticmethod]
     #[pyo3(signature = (rows, cols, min=0.0, max=1.0, seed=None))]
-    pub fn rand(
-        rows: usize,
-        cols: usize,
-        min: f32,
-        max: f32,
-        seed: Option<u64>,
-    ) -> PyResult<Self> {
-        let tensor = Tensor::random_uniform(rows, cols, min, max, seed)
-            .map_err(tensor_err_to_py)?;
+    pub fn rand(rows: usize, cols: usize, min: f32, max: f32, seed: Option<u64>) -> PyResult<Self> {
+        let tensor =
+            Tensor::random_uniform(rows, cols, min, max, seed).map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
 
@@ -122,6 +116,94 @@ impl PyTensor {
         }
         out
     }
+
+    #[pyo3(signature = (other, *, backend=None))]
+    pub fn matmul(&self, other: &PyTensor, backend: Option<&str>) -> PyResult<Self> {
+        let backend = matmul_backend_from_str(backend)?;
+        let tensor = self
+            .inner
+            .matmul_with_backend(&other.inner, backend)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self { inner: tensor })
+    }
+
+    pub fn add(&self, other: &PyTensor) -> PyResult<Self> {
+        let tensor = self.inner.add(&other.inner).map_err(tensor_err_to_py)?;
+        Ok(Self { inner: tensor })
+    }
+
+    pub fn sub(&self, other: &PyTensor) -> PyResult<Self> {
+        let tensor = self.inner.sub(&other.inner).map_err(tensor_err_to_py)?;
+        Ok(Self { inner: tensor })
+    }
+
+    pub fn scale(&self, value: f32) -> PyResult<Self> {
+        let tensor = self.inner.scale(value).map_err(tensor_err_to_py)?;
+        Ok(Self { inner: tensor })
+    }
+
+    pub fn hadamard(&self, other: &PyTensor) -> PyResult<Self> {
+        let tensor = self
+            .inner
+            .hadamard(&other.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self { inner: tensor })
+    }
+
+    #[pyo3(name = "add_scaled_")]
+    pub fn add_scaled_inplace(&mut self, other: &PyTensor, scale: f32) -> PyResult<()> {
+        self.inner
+            .add_scaled(&other.inner, scale)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn add_row_inplace(&mut self, bias: Vec<f32>) -> PyResult<()> {
+        self.inner.add_row_inplace(&bias).map_err(tensor_err_to_py)
+    }
+
+    pub fn transpose(&self) -> Self {
+        Self {
+            inner: self.inner.transpose(),
+        }
+    }
+
+    pub fn reshape(&self, rows: usize, cols: usize) -> PyResult<Self> {
+        let tensor = self.inner.reshape(rows, cols).map_err(tensor_err_to_py)?;
+        Ok(Self { inner: tensor })
+    }
+
+    pub fn sum_axis0(&self) -> Vec<f32> {
+        self.inner.sum_axis0()
+    }
+
+    pub fn squared_l2_norm(&self) -> f32 {
+        self.inner.squared_l2_norm()
+    }
+
+    pub fn project_to_poincare(&self, curvature: f32) -> PyResult<Self> {
+        let tensor = self
+            .inner
+            .project_to_poincare(curvature)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self { inner: tensor })
+    }
+
+    pub fn hyperbolic_distance(&self, other: &PyTensor, curvature: f32) -> PyResult<f32> {
+        self.inner
+            .hyperbolic_distance(&other.inner, curvature)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[staticmethod]
+    pub fn cat_rows(tensors: &Bound<PyList>) -> PyResult<Self> {
+        let mut owned: Vec<Tensor> = Vec::with_capacity(tensors.len());
+        for item in tensors.iter() {
+            let tensor: PyRef<PyTensor> = item.extract()?;
+            owned.push(tensor.inner.clone());
+        }
+        let tensor = Tensor::cat_rows(&owned).map_err(tensor_err_to_py)?;
+        Ok(Self { inner: tensor })
+    }
 }
 
 #[pyfunction]
@@ -152,6 +234,30 @@ pub(crate) fn tensor_err_to_py(err: TensorError) -> PyErr {
         | TensorError::EmptyInput(_)
         | TensorError::DlpackError { .. } => PyValueError::new_err(err.to_string()),
         _ => PyRuntimeError::new_err(err.to_string()),
+    }
+}
+
+fn matmul_backend_from_str(label: Option<&str>) -> PyResult<MatmulBackend> {
+    let name = label.unwrap_or("auto");
+    match name {
+        "auto" => Ok(MatmulBackend::Auto),
+        "faer" => Ok(MatmulBackend::CpuFaer),
+        "naive" => Ok(MatmulBackend::CpuNaive),
+        "wgpu" => {
+            #[cfg(feature = "wgpu")]
+            {
+                Ok(MatmulBackend::GpuWgpu)
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                Err(PyValueError::new_err(
+                    "wgpu backend requested but this build was compiled without GPU support",
+                ))
+            }
+        }
+        other => Err(PyValueError::new_err(format!(
+            "unknown matmul backend '{other}'"
+        ))),
     }
 }
 
