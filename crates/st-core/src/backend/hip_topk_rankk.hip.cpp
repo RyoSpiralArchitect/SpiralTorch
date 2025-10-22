@@ -3,6 +3,7 @@
 // Build with hipcc → HSACO. Shared-heap and warp-heap illustrate structure.
 
 #include <hip/hip_runtime.h>
+#include <cmath>
 #include <limits>
 
 static constexpr int kWavefront = 64;

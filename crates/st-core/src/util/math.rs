@@ -3,8 +3,6 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use std::collections::HashMap;
-use std::f64::consts::PI;
 use std::sync::{Mutex, OnceLock};
 
 /// Packing density of the Leech lattice (Λ₂₄) used as the baseline for
