@@ -194,6 +194,29 @@ impl ZSpaceCoherenceSequencer {
         x: &Tensor,
         coherence_weights: &[f32],
     ) -> PureResult<(Tensor, CoherenceDiagnostics)> {
+        let (
+            aggregated,
+            normalization,
+            fractional_order,
+            channel_width,
+        ) = self.compute_geometric_aggregate(x, coherence_weights)?;
+
+        let diagnostics = self.build_coherence_diagnostics(
+            &aggregated,
+            coherence_weights,
+            channel_width,
+            normalization,
+            fractional_order,
+        );
+
+        Ok((aggregated, diagnostics))
+    }
+
+    fn compute_geometric_aggregate(
+        &self,
+        x: &Tensor,
+        coherence_weights: &[f32],
+    ) -> PureResult<(Tensor, f32, f32, usize)> {
         if coherence_weights.is_empty() {
             return Err(TensorError::EmptyInput("coherence_weights").into());
         }
@@ -253,20 +276,12 @@ impl ZSpaceCoherenceSequencer {
         self.topos
             .guard_tensor("zspace_coherence_geometric_aggregate", &aggregated)?;
 
-        let diagnostics = self.build_coherence_diagnostics(
-            &aggregated,
-            coherence_weights,
-            channel_width.max(1),
-            normalization,
-            fractional_order,
-        );
-
-        Ok((aggregated, diagnostics))
+        Ok((aggregated, normalization, fractional_order, channel_width.max(1)))
     }
 
     /// Performs coherence-weighted geometric aggregation.
-    fn geometric_aggregate(&self, x: &Tensor, coherence_weights: &[f32]) -> PureResult<Tensor> {
-        let (aggregated, _) = self.geometric_aggregate_with_diagnostics(x, coherence_weights)?;
+    pub fn geometric_aggregate(&self, x: &Tensor, coherence_weights: &[f32]) -> PureResult<Tensor> {
+        let (aggregated, _, _, _) = self.compute_geometric_aggregate(x, coherence_weights)?;
         Ok(aggregated)
     }
 
@@ -774,6 +789,29 @@ mod tests {
         assert_eq!(diagnostics.aggregated().shape(), x.shape());
         assert_eq!(diagnostics.coherence().len(), seq.maxwell_channels());
         assert_eq!(diagnostics.channel_reports().len(), seq.maxwell_channels());
+    }
+
+    #[test]
+    fn geometric_aggregate_matches_forward_path() {
+        let topos = OpenCartesianTopos::new(-0.6, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(256, 8, -0.6, topos).unwrap();
+
+        let mut sweep = vec![0.0f32; 256 * 3];
+        for (idx, value) in sweep.iter_mut().enumerate() {
+            *value = (idx as f32 * 0.01).cos();
+        }
+        let x = Tensor::from_vec(3, 256, sweep).unwrap();
+
+        let z_space = seq.project_to_zspace(&x).unwrap();
+        let coherence = seq.measure_coherence(&z_space).unwrap();
+        let aggregated_direct = seq
+            .geometric_aggregate(&z_space, &coherence)
+            .expect("geometric aggregation should succeed");
+
+        let (aggregated_forward, _, _) = seq.forward_with_diagnostics(&x).unwrap();
+
+        assert_eq!(aggregated_direct.shape(), aggregated_forward.shape());
+        assert_eq!(aggregated_direct.data(), aggregated_forward.data());
     }
 
     #[test]
