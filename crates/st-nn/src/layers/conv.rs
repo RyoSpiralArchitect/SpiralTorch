@@ -957,17 +957,15 @@ impl Module for Conv3d {
         let weight = self.weight.value();
         let bias = self.bias.value();
         let weight_data = weight.data();
-        let bias_data = bias.data();
         let kernel_volume = self.kernel_volume()?;
         let out_cols = out.shape().1;
         let plane = self.input_dhw.1 * self.input_dhw.2;
         let area = self.input_dhw.2;
         {
-            let bias_data = bias.data();
-            let contracted_data = contracted.data();
+            let input_data = input.data();
             let out_data = out.data_mut();
             for b in 0..batch {
-                let row = &input.data()[b * cols..(b + 1) * cols];
+                let row = &input_data[b * cols..(b + 1) * cols];
                 let out_row = &mut out_data[b * out_cols..(b + 1) * out_cols];
                 for oc in 0..self.out_channels {
                     let weight_row = &weight_data[oc * (self.in_channels * kernel_volume)
@@ -1031,7 +1029,7 @@ impl Module for Conv3d {
                 }
             }
         }
-        Tensor::from_vec(batch, self.out_channels * spatial, contracted)
+        Ok(out)
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
@@ -1578,7 +1576,6 @@ pub struct Conv6da {
     depth: usize,
     height: usize,
     width: usize,
-    volume: usize,
     neighbor_offsets: Vec<(isize, isize, isize)>,
     neighbor_indices: Vec<Vec<usize>>,
     neighbor_count: usize,
@@ -1625,13 +1622,16 @@ impl Conv6da {
         let name = name.into();
         let neighbor_count = offsets.len();
         let span = in_channels * neighbor_count;
-        let plane = grid.1 * grid.2;
-        let volume = grid.0 * plane;
+        let depth = grid.0;
+        let height = grid.1;
+        let width = grid.2;
+        let plane = height * width;
+        let volume = depth * plane;
         let mut neighbor_indices = vec![vec![INVALID_NEIGHBOR; neighbor_count]; volume];
-        for depth_idx in 0..grid.0 {
-            for height_idx in 0..grid.1 {
-                for width_idx in 0..grid.2 {
-                    let cell_index = depth_idx * plane + height_idx * grid.2 + width_idx;
+        for depth_idx in 0..depth {
+            for height_idx in 0..height {
+                for width_idx in 0..width {
+                    let cell_index = depth_idx * plane + height_idx * width + width_idx;
                     for (offset_idx, (od, oh, ow)) in offsets.iter().enumerate() {
                         let nd = depth_idx as isize + *od;
                         let nh = height_idx as isize + *oh;
@@ -1639,13 +1639,13 @@ impl Conv6da {
                         if nd < 0
                             || nh < 0
                             || nw < 0
-                            || nd >= grid.0 as isize
-                            || nh >= grid.1 as isize
-                            || nw >= grid.2 as isize
+                            || nd >= depth as isize
+                            || nh >= height as isize
+                            || nw >= width as isize
                         {
                             continue;
                         }
-                        let base = nd as usize * plane + nh as usize * grid.2 + nw as usize;
+                        let base = nd as usize * plane + nh as usize * width + nw as usize;
                         neighbor_indices[cell_index][offset_idx] = base;
                     }
                 }
@@ -1663,10 +1663,9 @@ impl Conv6da {
             bias: Parameter::new(format!("{name}::bias"), bias),
             in_channels,
             out_channels,
-            depth: grid.0,
-            height: grid.1,
-            width: grid.2,
-            volume,
+            depth,
+            height,
+            width,
             neighbor_offsets: offsets.to_vec(),
             neighbor_indices,
             neighbor_count,
@@ -1675,11 +1674,11 @@ impl Conv6da {
     }
 
     fn cells(&self) -> usize {
-        self.volume
+        self.depth * self.height * self.width
     }
 
     fn expected_cols(&self) -> usize {
-        self.in_channels * self.volume
+        self.in_channels * self.cells()
     }
 
     pub fn neighbor_count(&self) -> usize {
@@ -1697,7 +1696,7 @@ impl Conv6da {
     fn gather_neighbors(&self, row: &[f32], buffer: &mut [f32], cell_index: usize) -> f64 {
         buffer.fill(0.0);
         let mut geodesic_sq = 0.0f64;
-        let volume = self.volume;
+        let volume = self.cells();
         let indices = &self.neighbor_indices[cell_index];
         for (offset_idx, &base) in indices.iter().enumerate() {
             if base == INVALID_NEIGHBOR {
@@ -1863,30 +1862,34 @@ impl Conv2d {
         let patches = self.im2col(input, batch, oh, ow)?;
         let weight = self.weight.value();
         let bias = self.bias.value();
-        let kernel_elems = self.in_channels * self.kernel.0 * self.kernel.1;
-        let spatial = oh * ow;
-        let (mut contracted, dims) = einsum_contract(
+        let patch_shape = patches.shape();
+        let weight_shape = weight.shape();
+        let left_shape = [patch_shape.0, patch_shape.1];
+        let right_shape = [weight_shape.0, weight_shape.1];
+        let left_axes = ['p', 's'];
+        let right_axes = ['o', 's'];
+        let output_axes = ['p', 'o'];
+        let (contracted_data, contracted_dims) = einsum_contract(
             patches.data(),
-            &[batch, spatial, kernel_elems],
-            &['b', 's', 'k'],
+            &left_shape,
+            &left_axes,
             weight.data(),
-            &[self.out_channels, kernel_elems],
-            &['o', 'k'],
-            &['b', 'o', 's'],
+            &right_shape,
+            &right_axes,
+            &output_axes,
         )?;
-        debug_assert_eq!(dims, vec![batch, self.out_channels, spatial]);
-        let bias_data = bias.data();
-        for b in 0..batch {
-            let batch_offset = b * self.out_channels * spatial;
-            for oc in 0..self.out_channels {
-                let bias = bias_data[oc];
-                let channel_offset = batch_offset + oc * spatial;
-                for idx in 0..spatial {
-                    contracted[channel_offset + idx] += bias;
-                }
+        let mut contracted = match contracted_dims.as_slice() {
+            [rows, cols] => Tensor::from_vec(*rows, *cols, contracted_data)?,
+            _ => {
+                return Err(TensorError::InvalidDimensions {
+                    rows: contracted_dims.len(),
+                    cols: 2,
+                })
             }
-        }
-        Tensor::from_vec(batch, self.out_channels * spatial, contracted)
+        };
+        contracted.add_row_inplace(bias.data())?;
+        let spatial = oh * ow;
+        contracted.reshape(batch, self.out_channels * spatial)
     }
 
     #[cfg(feature = "wgpu")]
