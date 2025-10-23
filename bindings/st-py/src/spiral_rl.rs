@@ -192,7 +192,7 @@ impl PyAgentConfig {
 
 #[cfg(feature = "spiral_rl")]
 fn dqn_state_dict(py: Python<'_>, agent: &DqnAgent) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
+    let dict = PyDict::new_bound(py);
     dict.set_item("state_dim", agent.state_dim())?;
     dict.set_item("action_dim", agent.action_dim())?;
     dict.set_item("discount", agent.discount())?;
@@ -200,7 +200,7 @@ fn dqn_state_dict(py: Python<'_>, agent: &DqnAgent) -> PyResult<PyObject> {
     dict.set_item("epsilon", agent.epsilon())?;
     dict.set_item("table", agent.table().to_vec())?;
     if let Some(schedule) = agent.epsilon_schedule() {
-        let schedule_dict = PyDict::new(py);
+        let schedule_dict = PyDict::new_bound(py);
         let (start, end, steps) = schedule.parameters();
         schedule_dict.set_item("start", start)?;
         schedule_dict.set_item("end", end)?;
@@ -210,42 +210,42 @@ fn dqn_state_dict(py: Python<'_>, agent: &DqnAgent) -> PyResult<PyObject> {
     } else {
         dict.set_item("epsilon_schedule", py.None())?;
     }
-    Ok(dict.into_py(py))
+    Ok(dict.into_any().into_py(py))
 }
 
 #[cfg(feature = "spiral_rl")]
-fn load_dqn_state_dict(py: Python<'_>, agent: &mut DqnAgent, state: &PyAny) -> PyResult<()> {
+fn load_dqn_state_dict(agent: &mut DqnAgent, state: &Bound<'_, PyAny>) -> PyResult<()> {
     let dict = state.downcast::<PyDict>()?;
 
-    if let Some(epsilon) = dict.get_item("epsilon") {
+    if let Ok(Some(epsilon)) = dict.get_item("epsilon") {
         let value: f32 = epsilon.extract()?;
         agent.set_epsilon(value);
     }
 
-    if let Some(table) = dict.get_item("table") {
+    if let Ok(Some(table)) = dict.get_item("table") {
         let values: Vec<f32> = table.extract()?;
         agent.set_table(&values).map_err(rl_err_to_py)?;
     }
 
-    if let Some(schedule_obj) = dict.get_item("epsilon_schedule") {
+    if let Ok(Some(schedule_obj)) = dict.get_item("epsilon_schedule") {
         if schedule_obj.is_none() {
             agent.set_epsilon(agent.epsilon());
         } else {
             let schedule_dict = schedule_obj.downcast::<PyDict>()?;
             let start: f32 = schedule_dict
-                .get_item("start")
+                .get_item("start")?
                 .ok_or_else(|| PyValueError::new_err("epsilon_schedule requires 'start'"))?
                 .extract()?;
             let end: f32 = schedule_dict
-                .get_item("end")
+                .get_item("end")?
                 .ok_or_else(|| PyValueError::new_err("epsilon_schedule requires 'end'"))?
                 .extract()?;
             let steps: u32 = schedule_dict
-                .get_item("steps")
+                .get_item("steps")?
                 .ok_or_else(|| PyValueError::new_err("epsilon_schedule requires 'steps'"))?
                 .extract()?;
             let progress: u32 = schedule_dict
-                .get_item("step")
+                .get_item("step")?
                 .ok_or_else(|| PyValueError::new_err("epsilon_schedule requires 'step'"))?
                 .extract()?;
             let mut schedule = EpsilonGreedySchedule::new(start, end, steps);
@@ -361,7 +361,7 @@ impl PyAgentConfig {
 
     #[getter]
     pub fn replay<'py>(&self, py: Python<'py>) -> PyResult<Option<Py<PyReplayConfig>>> {
-        if let Some(cfg) = &self.inner.replay {
+        if let Some(cfg) = self.as_data().replay.as_ref() {
             Py::new(py, PyReplayConfig { inner: cfg.clone() }).map(Some)
         } else {
             Ok(None)
@@ -370,7 +370,7 @@ impl PyAgentConfig {
 
     #[getter]
     pub fn exploration<'py>(&self, py: Python<'py>) -> PyResult<Option<Py<PyEpsilonGreedy>>> {
-        if let Some(schedule) = &self.inner.exploration {
+        if let Some(schedule) = self.as_data().exploration.as_ref() {
             Py::new(py, PyEpsilonGreedy::from_schedule(schedule.clone())).map(Some)
         } else {
             Ok(None)
@@ -417,6 +417,7 @@ impl PyDqnAgent {
         self.inner.update(state, action, reward, next_state);
     }
 
+    #[pyo3(signature = (states, actions, rewards, next_states, dones=None))]
     pub fn update_batch(
         &mut self,
         states: Vec<usize>,
@@ -438,9 +439,11 @@ impl PyDqnAgent {
 
     #[pyo3(name = "epsilon")]
     pub fn epsilon_method(&self, py: Python<'_>) -> PyResult<f32> {
-        PyErr::warn(
+        let warning_type = py.get_type_bound::<PyDeprecationWarning>();
+        let warning_type_any = warning_type.as_any();
+        PyErr::warn_bound(
             py,
-            PyDeprecationWarning::pytype(py),
+            &warning_type_any,
             "DqnAgent.epsilon() is deprecated; access the epsilon property instead.",
             1,
         )?;
@@ -460,8 +463,8 @@ impl PyDqnAgent {
         dqn_state_dict(py, &self.inner)
     }
 
-    pub fn load_state_dict(&mut self, py: Python<'_>, state: &PyAny) -> PyResult<()> {
-        load_dqn_state_dict(py, &mut self.inner, state)
+    pub fn load_state_dict(&mut self, state: &Bound<'_, PyAny>) -> PyResult<()> {
+        load_dqn_state_dict(&mut self.inner, state)
     }
 }
 
@@ -521,6 +524,7 @@ impl PyAgent {
         self.dqn.update(state, action, reward, next_state);
     }
 
+    #[pyo3(signature = (states, actions, rewards, next_states, dones=None))]
     pub fn update_batch(
         &mut self,
         states: Vec<usize>,
@@ -542,9 +546,11 @@ impl PyAgent {
 
     #[pyo3(name = "epsilon")]
     pub fn epsilon_method(&self, py: Python<'_>) -> PyResult<f32> {
-        PyErr::warn(
+        let warning_type = py.get_type_bound::<PyDeprecationWarning>();
+        let warning_type_any = warning_type.as_any();
+        PyErr::warn_bound(
             py,
-            PyDeprecationWarning::pytype(py),
+            &warning_type_any,
             "Agent.epsilon() is deprecated; access the epsilon property instead.",
             1,
         )?;
@@ -564,8 +570,8 @@ impl PyAgent {
         dqn_state_dict(py, &self.dqn)
     }
 
-    pub fn load_state_dict(&mut self, py: Python<'_>, state: &PyAny) -> PyResult<()> {
-        load_dqn_state_dict(py, &mut self.dqn, state)
+    pub fn load_state_dict(&mut self, state: &Bound<'_, PyAny>) -> PyResult<()> {
+        load_dqn_state_dict(&mut self.dqn, state)
     }
 }
 
