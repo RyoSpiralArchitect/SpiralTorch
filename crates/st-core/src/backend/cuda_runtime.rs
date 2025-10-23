@@ -27,6 +27,8 @@ const SUPPORTED_K: usize = THREADS_PER_BLOCK * THREAD_KEEP;
 
 static COMPILED_PTX: OnceLock<cudarc::nvrtc::Ptx> = OnceLock::new();
 
+static COMPILED_PTX: OnceLock<cudarc::nvrtc::Ptx> = OnceLock::new();
+
 /// Attempt to execute the CUDA kernels for the requested selection.
 /// Falls back to the caller when the selection is not implemented on GPU.
 pub fn run_selection(

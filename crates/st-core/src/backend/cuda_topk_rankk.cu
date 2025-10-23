@@ -5,6 +5,9 @@
 #include <cuda_runtime.h>
 #include <math_constants.h>
 
+#include <cuda_runtime.h>
+#include <math_constants.h>
+
 extern "C" {
 
 __inline__ __device__ float warp_reduce_max(float v) {
