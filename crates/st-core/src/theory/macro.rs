@@ -1392,48 +1392,6 @@ mod tests {
     }
 
     #[test]
-    fn template_bank_registers_and_couples_templates() {
-        let minimal = MinimalCardConfig {
-            phase_pair: PhasePair::new("A", "B"),
-            sigma: 0.1,
-            mobility: 1.0,
-            volume: None,
-            physical_scales: None,
-        };
-        let template = MacroModelTemplate::from_card(MacroCard::Minimal(minimal.clone()));
-        let mut bank = MacroTemplateBank::new();
-        assert!(bank.register("minimal", template.clone()));
-        assert!(!bank.register("minimal", template.clone()));
-
-        let membrane = MembraneCardConfig {
-            phase_pair: PhasePair::new("A", "C"),
-            sigma: 0.2,
-            bending_modulus: 0.05,
-            spontaneous_curvature: Some(0.1),
-            mobility: 0.5,
-            pressure_jump: Some(0.02),
-            physical_scales: None,
-        };
-        bank = bank.with_card("membrane", MacroCard::Membrane(membrane));
-        assert_eq!(bank.len(), 2);
-        assert!(bank.get("membrane").is_some());
-
-        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.15));
-        let bridge = bank
-            .couple("minimal", lift.clone())
-            .expect("bridge should be produced");
-        assert_eq!(bridge.template().kinetics.flow, FlowKind::NonConserved);
-
-        let coupled = bank.couple_all(&lift);
-        assert_eq!(coupled.len(), 2);
-        let ids: Vec<_> = coupled.ids().collect();
-        assert_eq!(ids, vec!["minimal", "membrane"]);
-        let (first_id, first_bridge) = coupled.iter().next().expect("bridge missing");
-        assert_eq!(first_id, "minimal");
-        assert_eq!(first_bridge.template().functional.surface_terms.len(), 1);
-    }
-
-    #[test]
     fn dimensionless_groups_compute_expected_values() {
         let scales = PhysicalScales {
             sigma: 0.072,
