@@ -311,7 +311,7 @@ impl PyAgentConfig {
 
     #[getter]
     pub fn algo(&self) -> &str {
-        &self.as_data().algo
+        self.as_data().algo.as_str()
     }
 
     #[getter]
@@ -336,7 +336,7 @@ impl PyAgentConfig {
 
     #[getter]
     pub fn optimizer(&self) -> &str {
-        &self.as_data().optimizer
+        self.as_data().optimizer.as_str()
     }
 
     #[getter]
