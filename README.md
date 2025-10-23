@@ -250,16 +250,50 @@ t2.mul_(2)                          # in-place
 print("ST sees torch mul_:        ", a2.tolist())
 ```
 
-### 2) Planner & device
+### 2) rl.stAgent
 
 ```python
+import random
 import spiraltorch as st
 
-rp = st.plan_topk(rows=1024, cols=256, k=16, backend="wgpu", subgroup=True)
-print("kind:", rp.kind(), "tile:", rp.tile(), "wg:", rp.workgroup())
+Agent = getattr(st.rl, "stAgent", None)
+if Agent is None:
+    raise SystemExit("st.rl.stAgent not available")
 
-print("device:", st.describe_device(backend="wgpu", cols=1024, tile_hint=16))
-print("hip:", st.hip_probe())  # if supported
+def reward(action):
+    p = 0.6 if action == 0 else 0.4
+    return 1.0 if random.random() < p else 0.0
+
+agent = Agent(state_dim=1, action_dim=2, discount=0.0, learning_rate=5e-2)
+
+T = 2000
+FORCE_EXPLORE = 200
+eps_hi, eps_lo = 0.3, 0.01
+
+wins = 0
+pulls = [0, 0]
+wins_by_arm = [0, 0]
+
+for t in range(1, T + 1):
+    # 最初は強制探索、それ以降は徐々にεを下げる
+    if t <= FORCE_EXPLORE:
+        a = t % 2
+    else:
+        frac = (t - FORCE_EXPLORE) / (T - FORCE_EXPLORE)
+        eps = eps_hi + (eps_lo - eps_hi) * frac
+        agent.set_epsilon(eps)
+        a = agent.select_action(0)   # 状態はダミー
+
+    r = reward(a)
+    wins += r
+    pulls[a] += 1
+    wins_by_arm[a] += r
+    agent.update(0, a, r, 0) 
+
+print(f"total win rate: {wins / T:.3f}")
+for k in range(2):
+    rate = (wins_by_arm[k] / pulls[k]) if pulls[k] else 0.0
+    print(f"arm {k}: pulls={pulls[k]}, empirical p≈{rate:.3f}")
 ```
 
 ### 3) Self-supervised
