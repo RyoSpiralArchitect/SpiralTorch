@@ -21,6 +21,10 @@ with_runtime(worker_threads=1) do runtime
     println("runtime matmul reused buffer: ", product === reuse)
     println("runtime matmul result:\n", product)
 
+    flattened = Vector{Float32}(undef, length(product))
+    matmul(runtime, mat, transpose(mat); materialize_into=flattened)
+    println("runtime matmul flattened copy: ", flattened)
+
     uniform = Matrix{Float32}(undef, 2, 2)
     random_uniform(runtime, (2, 2), -1, 1; seed=42, materialize_into=uniform)
     println("deterministic uniform sample (reused storage):\n", uniform)
