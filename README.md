@@ -228,17 +228,26 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 ## Python Examples
 
-### 1) Core tensor & DLPack
+### 1)　DLPack(You can Zero copy)
 
 ```python
 import spiraltorch as st
+import torch
+from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 
-x = st.Tensor(2, 3, [1,2,3,4,5,6])
-print("shape:", x.shape(), "rows:", x.rows, "cols:", x.cols)
+# ST → Torch
+a = st.Tensor(2, 3, [1,2,3,4,5,6])
+caps = a.to_dlpack()
+t = torch_from_dlpack(caps)  
 
-cap = st.to_dlpack(x)
-x2 = st.from_dlpack(cap)
-print("tolist:", x2.tolist())
+t += 10
+print("ST tolist after torch += 10:", a.tolist())  # ← [11,12,13,14,15,16] is okay
+
+# Torch → ST
+t2 = torch.arange(6, dtype=torch.float32).reshape(2,3)
+a2 = st.Tensor.from_dlpack(t2)      # same buffer
+t2.mul_(2)                          # in-place
+print("ST sees torch mul_:        ", a2.tolist())
 ```
 
 ### 2) Planner & device
