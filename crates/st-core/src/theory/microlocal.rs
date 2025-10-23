@@ -13,6 +13,7 @@
 //! projection, and policy-controlled fusion.
 
 use crate::telemetry::hub::SoftlogicZFeedback;
+use crate::theory::microlocal_bank::GaugeBank;
 use crate::theory::zpulse::{
     ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
 };
@@ -65,6 +66,10 @@ impl InterfaceGauge {
     pub fn with_threshold(mut self, threshold: f32) -> Self {
         self.threshold = threshold.max(0.0);
         self
+    }
+
+    pub fn physical_radius(&self) -> f32 {
+        self.physical_radius
     }
 
     pub fn threshold(&self) -> f32 {
@@ -225,6 +230,119 @@ impl InterfaceGauge {
     }
 }
 
+/// Registry holding named [`InterfaceGauge`] instances.
+#[derive(Clone, Debug)]
+pub struct MicrolocalGaugeBank {
+    inner: GaugeBank<InterfaceGauge>,
+}
+
+impl Default for MicrolocalGaugeBank {
+    fn default() -> Self {
+        Self {
+            inner: GaugeBank::new(),
+        }
+    }
+}
+
+impl MicrolocalGaugeBank {
+    /// Creates an empty gauge registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers a gauge with the provided identifier. Returns `false` if an
+    /// entry with the same identifier already exists.
+    pub fn register(&mut self, id: impl Into<String>, gauge: InterfaceGauge) -> bool {
+        self.inner.register(id, gauge)
+    }
+
+    /// Convenience for registering and returning `self` in a builder-style
+    /// workflow.
+    pub fn with_registered(mut self, id: impl Into<String>, gauge: InterfaceGauge) -> Self {
+        let _ = self.register(id, gauge);
+        self
+    }
+
+    /// Returns an immutable reference to the named gauge.
+    pub fn get(&self, id: &str) -> Option<&InterfaceGauge> {
+        self.inner.get(id)
+    }
+
+    /// Returns a mutable reference to the named gauge.
+    pub fn get_mut(&mut self, id: &str) -> Option<&mut InterfaceGauge> {
+        self.inner.get_mut(id)
+    }
+
+    /// Removes a gauge from the registry and returns it if present.
+    pub fn remove(&mut self, id: &str) -> Option<InterfaceGauge> {
+        self.inner.remove(id)
+    }
+
+    /// Iterates over registered identifiers and gauges in insertion order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &InterfaceGauge)> {
+        self.inner.iter()
+    }
+
+    /// Iterates over registered identifiers and mutable gauges in insertion order.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&str, &mut InterfaceGauge)> {
+        self.inner.iter_mut()
+    }
+
+    /// Returns the registered identifiers.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.inner.ids()
+    }
+
+    /// Number of registered gauges.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Returns `true` when no gauges are registered.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Clones the registered gauges into a vector preserving insertion order.
+    pub fn to_vec(&self) -> Vec<InterfaceGauge> {
+        self.inner.to_vec()
+    }
+
+    /// Consumes the bank and returns the gauges in insertion order.
+    pub fn into_vec(self) -> Vec<InterfaceGauge> {
+        self.inner.into_vec()
+    }
+
+    /// Consumes the bank and returns identifier-gauge pairs in insertion order.
+    pub fn into_entries(self) -> Vec<(Arc<str>, InterfaceGauge)> {
+        self.inner.into_entries()
+    }
+
+    /// Runs every registered gauge against the provided mask and optional
+    /// orientation labels, returning the resulting signatures keyed by id.
+    pub fn analyze_all(
+        &self,
+        mask: &ArrayD<f32>,
+        c_prime: Option<&ArrayD<f32>>,
+    ) -> FxHashMap<Arc<str>, InterfaceSignature> {
+        let mut results = FxHashMap::default();
+        for (id, gauge) in self.inner.entries() {
+            let signature = gauge.analyze_with_label(mask, c_prime);
+            results.insert(Arc::clone(id), signature);
+        }
+        results
+    }
+}
+
+impl IntoIterator for MicrolocalGaugeBank {
+    type Item = InterfaceGauge;
+    type IntoIter = <GaugeBank<InterfaceGauge> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
 fn discrete_laplacian(mask: ArrayViewD<f32>, idx: &IxDyn) -> f32 {
     let mut lap = 0.0f32;
     let dim = mask.ndim();
@@ -270,7 +388,7 @@ fn unit_sphere_area(dim: usize) -> f32 {
 }
 
 /// Projects microlocal signatures into Z-space pulses.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct InterfaceZLift {
     weights: Vec<f32>,
     projector: LeechProjector,
@@ -550,6 +668,9 @@ pub struct InterfaceZFused {
 /// Full report returned by [`InterfaceZConductor::step`].
 #[derive(Clone, Debug)]
 pub struct InterfaceZReport {
+    pub gauge_ids: Vec<Option<Arc<str>>>,
+    pub signatures: Vec<InterfaceSignature>,
+    pub lift: InterfaceZLift,
     pub pulses: Vec<InterfaceZPulse>,
     pub qualities: Vec<f32>,
     pub fused_pulse: InterfaceZPulse,
@@ -561,6 +682,21 @@ pub struct InterfaceZReport {
 impl InterfaceZReport {
     pub fn has_interface(&self) -> bool {
         self.fused_pulse.support > 0.0
+    }
+
+    pub fn gauge_id(&self, index: usize) -> Option<&str> {
+        self.gauge_ids.get(index).and_then(|id| id.as_deref())
+    }
+
+    pub fn signature_for(&self, id: &str) -> Option<&InterfaceSignature> {
+        self.gauge_ids
+            .iter()
+            .position(|candidate| candidate.as_deref() == Some(id))
+            .and_then(|idx| self.signatures.get(idx))
+    }
+
+    pub fn lift(&self) -> InterfaceZLift {
+        self.lift.clone()
     }
 }
 
@@ -835,9 +971,14 @@ impl ZEmitter for MicrolocalEmitter {
 
 /// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
 /// smoothed control signal suitable for Softlogic feedback.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+struct GaugeSlot {
+    id: Option<Arc<str>>,
+    gauge: InterfaceGauge,
+}
+
 pub struct InterfaceZConductor {
-    gauges: Vec<InterfaceGauge>,
+    gauges: Vec<GaugeSlot>,
     lift: InterfaceZLift,
     conductor: ZConductor,
     clock: u64,
@@ -854,6 +995,30 @@ pub struct InterfaceZConductor {
 
 impl InterfaceZConductor {
     pub fn new(gauges: Vec<InterfaceGauge>, lift: InterfaceZLift) -> Self {
+        let slots = gauges
+            .into_iter()
+            .map(|gauge| GaugeSlot { id: None, gauge })
+            .collect();
+        InterfaceZConductor::with_slots(slots, lift)
+    }
+
+    pub fn from_bank(bank: MicrolocalGaugeBank, lift: InterfaceZLift) -> Self {
+        let slots = bank
+            .into_entries()
+            .into_iter()
+            .map(|(id, gauge)| GaugeSlot {
+                id: Some(id),
+                gauge,
+            })
+            .collect();
+        InterfaceZConductor::with_slots(slots, lift)
+    }
+
+    pub fn lift(&self) -> InterfaceZLift {
+        self.lift.clone()
+    }
+
+    fn with_slots(gauges: Vec<GaugeSlot>, lift: InterfaceZLift) -> Self {
         assert!(!gauges.is_empty(), "at least one gauge must be supplied");
         InterfaceZConductor {
             gauges,
@@ -898,8 +1063,8 @@ impl InterfaceZConductor {
     pub fn apply_feedback(&mut self, feedback: &MicrolocalFeedback) {
         if let Some(scale) = feedback.threshold_scale {
             if scale > 0.0 {
-                for gauge in &mut self.gauges {
-                    gauge.scale_threshold(scale);
+                for slot in &mut self.gauges {
+                    slot.gauge.scale_threshold(scale);
                 }
             }
         }
@@ -919,7 +1084,10 @@ impl InterfaceZConductor {
 
     #[cfg(test)]
     pub fn gauge_thresholds(&self) -> Vec<f32> {
-        self.gauges.iter().map(|g| g.threshold()).collect()
+        self.gauges
+            .iter()
+            .map(|slot| slot.gauge.threshold())
+            .collect()
     }
 
     #[cfg(test)]
@@ -944,17 +1112,21 @@ impl InterfaceZConductor {
         tempo_hint: Option<f32>,
         stderr_hint: Option<f32>,
     ) -> InterfaceZReport {
+        let mut gauge_ids = Vec::with_capacity(self.gauges.len());
+        let mut signatures = Vec::with_capacity(self.gauges.len());
         let mut pulses = Vec::with_capacity(self.gauges.len());
         let stderr_base = stderr_hint
             .or(self.default_stderr_hint)
             .map(|stderr| stderr.max(0.0));
-        for gauge in &self.gauges {
-            let signature = gauge.analyze_with_label(mask, c_prime);
+        for slot in &self.gauges {
+            let signature = slot.gauge.analyze_with_label(mask, c_prime);
             let mut pulse = self.lift.project(&signature);
             if let Some(stderr) = stderr_base {
                 pulse.standard_error = Some(stderr);
             }
             pulses.push(pulse);
+            gauge_ids.push(slot.id.clone());
+            signatures.push(signature);
         }
 
         let mut qualities = Vec::with_capacity(pulses.len());
@@ -1040,6 +1212,9 @@ impl InterfaceZConductor {
         };
 
         InterfaceZReport {
+            gauge_ids,
+            signatures,
+            lift: self.lift.clone(),
             pulses,
             qualities,
             fused_pulse,
@@ -1173,5 +1348,60 @@ mod tests {
         assert!((stderr - 0.05).abs() < 1e-6);
         assert!((report.fused_pulse.standard_error.expect("fused stderr") - 0.05).abs() < 1e-6);
         assert!((report.fused_z.pulse.tempo - 1.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gauge_bank_registers_unique_ids() {
+        let mut bank = MicrolocalGaugeBank::new();
+        assert!(bank.register("fine", InterfaceGauge::new(1.0, 1.0)));
+        assert!(!bank.register("fine", InterfaceGauge::new(1.0, 2.0)));
+        assert!(bank.register("coarse", InterfaceGauge::new(1.0, 3.0)));
+        assert_eq!(bank.len(), 2);
+        assert!(bank.get("fine").is_some());
+        assert!(bank.get_mut("coarse").is_some());
+        let removed = bank.remove("fine");
+        assert!(removed.is_some());
+        assert!(bank.get("fine").is_none());
+        assert_eq!(bank.ids().collect::<Vec<_>>(), vec!["coarse"]);
+    }
+
+    #[test]
+    fn gauge_bank_runs_all_registered_probes() {
+        let mut bank = MicrolocalGaugeBank::new();
+        bank.register("fine", InterfaceGauge::new(1.0, 1.0));
+        bank.register("coarse", InterfaceGauge::new(1.0, 2.0));
+
+        let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+        let signatures = bank.analyze_all(&mask, None);
+        assert_eq!(signatures.len(), 2);
+        let fine = signatures
+            .iter()
+            .find(|(id, _)| id.as_ref() == "fine")
+            .map(|(_, sig)| sig)
+            .expect("fine gauge missing");
+        let coarse = signatures
+            .iter()
+            .find(|(id, _)| id.as_ref() == "coarse")
+            .map(|(_, sig)| sig)
+            .expect("coarse gauge missing");
+        assert!(fine.has_interface());
+        assert!(coarse.has_interface());
+        assert!(fine.physical_radius <= coarse.physical_radius);
+    }
+
+    #[test]
+    fn conductor_can_be_built_from_gauge_bank() {
+        let mut bank = MicrolocalGaugeBank::new();
+        bank.register("default", InterfaceGauge::new(1.0, 1.0));
+        let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+        let conductor = InterfaceZConductor::from_bank(bank.clone(), lift);
+        assert_eq!(conductor.gauge_thresholds(), vec![0.25]);
+
+        bank.get_mut("default")
+            .expect("gauge missing")
+            .scale_threshold(0.5);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+        let conductor = InterfaceZConductor::from_bank(bank, lift);
+        assert!(conductor.gauge_thresholds()[0] < 0.2);
     }
 }
