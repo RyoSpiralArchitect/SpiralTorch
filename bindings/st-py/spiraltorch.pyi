@@ -916,6 +916,17 @@ class PreDiscardTelemetry:
     discarded: int
     preserved: int
     used_fallback: bool
+    total: int
+    preserved_ratio: float
+    discarded_ratio: float
+
+
+class PreDiscardSnapshot:
+    step: int
+    telemetry: PreDiscardTelemetry
+    survivors: List[int]
+    discarded: List[int]
+    filtered: List[float]
 
 
 class PreDiscardPolicy:
@@ -956,11 +967,15 @@ class _ZSpaceCoherenceSequencer:
         self,
         dominance_ratio: float,
         *,
-        energy_floor: float | None = ...,
+        energy_floor: float | None = ..., 
         min_channels: int | None = ...,
     ) -> None: ...
 
     def disable_pre_discard(self) -> None: ...
+
+    def configure_pre_discard_memory(self, limit: int) -> None: ...
+
+    def clear_pre_discard_snapshots(self) -> None: ...
 
     def __call__(self, x: Tensor) -> Tensor: ...
 
@@ -969,6 +984,8 @@ class _ZSpaceCoherenceSequencer:
     def num_heads(self) -> int: ...
 
     def pre_discard_policy(self) -> PreDiscardPolicy | None: ...
+
+    def pre_discard_snapshots(self) -> List[PreDiscardSnapshot]: ...
 
     def curvature(self) -> float: ...
 
@@ -983,6 +1000,9 @@ class _NnModule(ModuleType):
     DataLoaderIter: type[_NnDataLoaderIter]
     CoherenceDiagnostics: type[CoherenceDiagnostics]
     ZSpaceCoherenceSequencer: type[_ZSpaceCoherenceSequencer]
+    PreDiscardTelemetry: type[PreDiscardTelemetry]
+    PreDiscardPolicy: type[PreDiscardPolicy]
+    PreDiscardSnapshot: type[PreDiscardSnapshot]
 
     def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...
 

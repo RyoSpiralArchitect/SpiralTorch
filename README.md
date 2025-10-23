@@ -2139,6 +2139,22 @@ model.disable_pre_discard()
 
 The accompanying diagnostics surface `pre_discard` telemetry so you can inspect
 how aggressively the sequencer culled low-credence channels during a pass.
+Every invocation is also journaled so you can study the discard pattern over
+time:
+
+```python
+# Keep the last 32 pre-discard snapshots (default) or dial it up/down.
+model.configure_pre_discard_memory(limit=64)
+
+_ = model.forward_with_diagnostics(x)
+latest = model.pre_discard_snapshots()[-1]
+print("step", latest.step)
+print("survivors", latest.survivors)
+print("discarded ratio", latest.telemetry.discarded_ratio)
+
+# Reset the history whenever you want a fresh view.
+model.clear_pre_discard_snapshots()
+```
 
 [See example](examples/05_new_layers/zspace_coherence_demo.py)
 
@@ -2155,7 +2171,7 @@ published (with the `psi` feature).
 
 Key stages:
 
-- `Projected`, `CoherenceMeasured`, `PreDiscardApplied`, `Aggregated`
+- `Projected`, `CoherenceMeasured`, `PreDiscardApplied` *(with survivor + discard indices)*, `Aggregated`
 - `SemanticWindowDerived`, `SemanticDistributionDerived`, `CanonicalConceptSelected`
 - `MaxwellBridgeEmitted`, `SemanticWindowFused`, `LanguageBridged`
 - `BackendConfigured`, `LinguisticProfileRegistered`, `LinguisticProfilesCleared`

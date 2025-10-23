@@ -13,7 +13,8 @@ use st_nn::{
     dataset::DataLoaderBatches,
     dataset_from_vec,
     zspace_coherence::{
-        CoherenceDiagnostics, LinguisticChannelReport, PreDiscardPolicy, PreDiscardTelemetry,
+        CoherenceDiagnostics, LinguisticChannelReport, PreDiscardPolicy, PreDiscardSnapshot,
+        PreDiscardTelemetry,
     },
     DataLoader, Dataset, ZSpaceCoherenceSequencer,
 };
@@ -311,6 +312,78 @@ impl PyPreDiscardTelemetry {
     fn used_fallback(&self) -> bool {
         self.fallback
     }
+
+    #[getter]
+    fn total(&self) -> usize {
+        self.discarded + self.preserved
+    }
+
+    #[getter]
+    fn preserved_ratio(&self) -> f32 {
+        if self.discarded + self.preserved == 0 {
+            0.0
+        } else {
+            (self.preserved as f32 / (self.discarded + self.preserved) as f32).clamp(0.0, 1.0)
+        }
+    }
+
+    #[getter]
+    fn discarded_ratio(&self) -> f32 {
+        1.0 - self.preserved_ratio()
+    }
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone)]
+#[pyclass(module = "spiraltorch.nn", name = "PreDiscardSnapshot", unsendable)]
+pub(crate) struct PyPreDiscardSnapshot {
+    step: u64,
+    telemetry: PyPreDiscardTelemetry,
+    survivors: Vec<usize>,
+    discarded: Vec<usize>,
+    filtered: Vec<f32>,
+}
+
+#[cfg(feature = "nn")]
+impl PyPreDiscardSnapshot {
+    fn from_snapshot(snapshot: PreDiscardSnapshot) -> Self {
+        Self {
+            step: snapshot.step(),
+            telemetry: PyPreDiscardTelemetry::from_telemetry(snapshot.telemetry().clone()),
+            survivors: snapshot.survivors().to_vec(),
+            discarded: snapshot.discarded().to_vec(),
+            filtered: snapshot.filtered().to_vec(),
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyPreDiscardSnapshot {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.step
+    }
+
+    #[getter]
+    fn telemetry(&self) -> PyPreDiscardTelemetry {
+        self.telemetry.clone()
+    }
+
+    #[getter]
+    fn survivors(&self) -> Vec<usize> {
+        self.survivors.clone()
+    }
+
+    #[getter]
+    fn discarded(&self) -> Vec<usize> {
+        self.discarded.clone()
+    }
+
+    #[getter]
+    fn filtered(&self) -> Vec<f32> {
+        self.filtered.clone()
+    }
 }
 
 #[cfg(feature = "nn")]
@@ -516,6 +589,14 @@ impl PyZSpaceCoherenceSequencer {
         self.inner.disable_pre_discard();
     }
 
+    pub fn configure_pre_discard_memory(&mut self, limit: usize) {
+        self.inner.configure_pre_discard_memory(limit);
+    }
+
+    pub fn clear_pre_discard_snapshots(&self) {
+        self.inner.clear_pre_discard_snapshots();
+    }
+
     pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
     }
@@ -535,6 +616,15 @@ impl PyZSpaceCoherenceSequencer {
         self.inner
             .pre_discard_policy()
             .map(PyPreDiscardPolicy::from_policy)
+    }
+
+    #[getter]
+    pub fn pre_discard_snapshots(&self) -> Vec<PyPreDiscardSnapshot> {
+        self.inner
+            .pre_discard_snapshots()
+            .into_iter()
+            .map(PyPreDiscardSnapshot::from_snapshot)
+            .collect()
     }
 
     #[getter]
@@ -561,6 +651,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyCoherenceChannelReport>()?;
     module.add_class::<PyPreDiscardTelemetry>()?;
     module.add_class::<PyPreDiscardPolicy>()?;
+    module.add_class::<PyPreDiscardSnapshot>()?;
     module.add_class::<PyCoherenceDiagnostics>()?;
     module.add_class::<PyZSpaceCoherenceSequencer>()?;
     module.add_function(wrap_pyfunction!(from_samples, &module)?)?;
@@ -574,6 +665,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "CoherenceDiagnostics",
             "PreDiscardTelemetry",
             "PreDiscardPolicy",
+            "PreDiscardSnapshot",
             "ZSpaceCoherenceSequencer",
             "from_samples",
         ],
