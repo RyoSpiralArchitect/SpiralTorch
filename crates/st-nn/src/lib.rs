@@ -60,7 +60,7 @@ pub use language::{
 };
 #[cfg(feature = "psi")]
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
-pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, Conv6da, MaxPool2d};
+pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, Conv3d, Conv4d, Conv6da, MaxPool2d};
 pub use layers::linear::Linear;
 pub use layers::sequential::Sequential;
 pub use layers::wave_gate::WaveGate;

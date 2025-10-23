@@ -54,6 +54,8 @@ sequenceDiagram
 >
 > **New — Conv6da with Leech enrichment.** `Conv6da` fuses six-directional adjacency with optional Leech lattice density boosts so Z-space fields aggregate neighbors with structure-aware gradients.
 
+> **Expanded — Higher-order convolutions.** Fresh `Conv3d` and `Conv4d` modules now mirror the dilation-aware ergonomics of their 1D/2D siblings so volumetric stacks and temporal cubes slide straight into the same API.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -86,7 +88,7 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-20 07:12 UTC_
+_Last updated: 2025-10-22 05:25 UTC_
 
 **Workspace summary**
 
@@ -95,18 +97,18 @@ _Last updated: 2025-10-20 07:12 UTC_
  Language            Files        Lines         Code     Comments       Blanks
 ===============================================================================
  BASH                    1           54           52            1            1
- C++                     1          166          140            3           23
+ C++                     1          273          234            3           36
  CSS                     1          160          137            0           23
- Go                      6         1059          832           70          157
- HTML                    1          152          152            0            0
+ Go                      9         1742         1367          141          234
+ HTML                    1          166          166            0            0
  JSON                    6          372          372            0            0
- Julia                   2          361          315            0           46
- Python                 33         4482         3762           70          650
+ Julia                   6          739          641            8           90
+ Python                 36         4743         3968           75          700
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   35          817          692           25          100
- TypeScript              7         4607         4045          175          387
+ TOML                   35          825          699           25          101
+ TypeScript              7         4619         4057          175          387
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
  Jupyter Notebooks       2            0            0            0            0
@@ -114,7 +116,7 @@ _Last updated: 2025-10-20 07:12 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               54         5431            0         4280         1151
+ Markdown               54         5486            0         4332         1154
  |- BASH                12          123           94           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
@@ -123,17 +125,18 @@ _Last updated: 2025-10-20 07:12 UTC_
  |- JavaScript           1           26           23            1            2
  |- JSON                 1           11           11            0            0
  |- Julia                1           15           14            0            1
- |- Python               6          668          565           15           88
- |- Rust                 5          732          641           16           75
+ |- Python               6          672          568           15           89
+ |- Rust                 5          773          678           16           79
  |- YAML                 2           62           62            0            0
- (Total)                           7143         1480         4329         1334
+ (Total)                           7243         1520         4381         1342
 -------------------------------------------------------------------------------
- Rust                  299       102681        91375         1527         9779
- |- Markdown           183         4349            0         4247          102
- (Total)                         107030        91375         5774         9881
+ Rust                  304       111881        99698         1536        10647
+ |- Markdown           186         4581            0         4478          103
+ (Total)                         116462        99698         6014        10750
 ===============================================================================
- Total                 459       121329       102171         6699        12459
+ Total                 474       132047       111688         6844        13515
 ===============================================================================
+
 ```
 ---
 
