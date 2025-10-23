@@ -777,7 +777,7 @@ impl Tensor {
                 right: other.shape(),
             });
         }
-        let data = wgpu_dense::matmul(self.data(), other.data(), self.rows, other.cols, self.cols)
+        let data = wgpu_dense::matmul(self.data(), other.data(), self.rows, self.cols, other.cols)
             .map_err(|message| TensorError::BackendFailure {
                 backend: "wgpu",
                 message,
