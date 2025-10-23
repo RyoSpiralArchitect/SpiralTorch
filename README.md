@@ -51,6 +51,10 @@ sequenceDiagram
 ```
 
 > **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
+>
+> **New — Conv6da with Leech enrichment.** `Conv6da` fuses six-directional adjacency with optional Leech lattice density boosts so Z-space fields aggregate neighbors with structure-aware gradients.
+
+> **Expanded — Higher-order convolutions.** Fresh `Conv3d` and `Conv4d` modules now mirror the dilation-aware ergonomics of their 1D/2D siblings so volumetric stacks and temporal cubes slide straight into the same API.
 
 **Licensing**
 
@@ -84,7 +88,7 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-20 07:12 UTC_
+_Last updated: 2025-10-22 05:25 UTC_
 
 **Workspace summary**
 
@@ -93,18 +97,18 @@ _Last updated: 2025-10-20 07:12 UTC_
  Language            Files        Lines         Code     Comments       Blanks
 ===============================================================================
  BASH                    1           54           52            1            1
- C++                     1          166          140            3           23
+ C++                     1          273          234            3           36
  CSS                     1          160          137            0           23
- Go                      6         1059          832           70          157
- HTML                    1          152          152            0            0
+ Go                      9         1742         1367          141          234
+ HTML                    1          166          166            0            0
  JSON                    6          372          372            0            0
- Julia                   2          361          315            0           46
- Python                 33         4482         3762           70          650
+ Julia                   6          739          641            8           90
+ Python                 36         4743         3968           75          700
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   35          817          692           25          100
- TypeScript              7         4607         4045          175          387
+ TOML                   35          825          699           25          101
+ TypeScript              7         4619         4057          175          387
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
  Jupyter Notebooks       2            0            0            0            0
@@ -112,7 +116,7 @@ _Last updated: 2025-10-20 07:12 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               54         5431            0         4280         1151
+ Markdown               54         5486            0         4332         1154
  |- BASH                12          123           94           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
@@ -121,17 +125,18 @@ _Last updated: 2025-10-20 07:12 UTC_
  |- JavaScript           1           26           23            1            2
  |- JSON                 1           11           11            0            0
  |- Julia                1           15           14            0            1
- |- Python               6          668          565           15           88
- |- Rust                 5          732          641           16           75
+ |- Python               6          672          568           15           89
+ |- Rust                 5          773          678           16           79
  |- YAML                 2           62           62            0            0
- (Total)                           7143         1480         4329         1334
+ (Total)                           7243         1520         4381         1342
 -------------------------------------------------------------------------------
- Rust                  299       102681        91375         1527         9779
- |- Markdown           183         4349            0         4247          102
- (Total)                         107030        91375         5774         9881
+ Rust                  304       111881        99698         1536        10647
+ |- Markdown           186         4581            0         4478          103
+ (Total)                         116462        99698         6014        10750
 ===============================================================================
- Total                 459       121329       102171         6699        12459
+ Total                 474       132047       111688         6844        13515
 ===============================================================================
+
 ```
 ---
 
@@ -154,7 +159,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.1.9
+pip install -U spiraltorch==0.2.1
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -749,10 +754,17 @@ It stores named `InterfaceGauge`s, offers builder-style helpers to register or
 remove probes, runs batch analysis keyed by id, and hands the resulting lineup
 directly to the conductor so runtime code can swap probe sets without rewriting
 fusion logic.【F:crates/st-core/src/theory/microlocal.rs†L100-L220】【F:crates/st-core/src/theory/microlocal.rs†L819-L875】
+`InterfaceZConductor::step` now preserves those identifiers, returning an
+`InterfaceZReport` that bundles the raw `InterfaceSignature`s alongside the
+matching ids and a cloned lift so downstream consumers can reuse the same
+projection without re-running the gauges.【F:crates/st-core/src/theory/microlocal.rs†L663-L738】
 `MacroTemplateBank` mirrors that registry pattern for macro-scale designs: it
 keeps named `MacroModelTemplate`s, accepts cards directly, and couples the whole
 lineup to an `InterfaceZLift` to emit a bridge bank so macro kinetics can travel
 with whatever microlocal gauges are currently wired into the conductor.【F:crates/st-core/src/theory/macro.rs†L680-L812】
+It can then call `drive_matched` to produce macro drives only for the gauges
+present in the latest report and merge their microlocal feedback via
+`feedback_from_report` before piping the result back into the conductor.【F:crates/st-core/src/theory/macro.rs†L780-L812】
 
 The conductor can now blend the pulses in both time and frequency: `set_frequency_config`
 installs a power-of-two FFT window and per-source spectral gains so high-frequency

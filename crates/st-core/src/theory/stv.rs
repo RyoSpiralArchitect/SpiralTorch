@@ -87,8 +87,8 @@ impl PauliSpinor {
     }
 
     /// Reconstructs a Pauli spinor from a Bloch vector. The supplied vector is
-    /// normalised to lie on the unit sphere; when the norm underflows the north
-    /// pole is selected.
+    /// normalised to lie on the unit sphere; when the norm underflows an error
+    /// is returned.
     pub fn from_bloch_vector(mut bloch: Vec3) -> Result<Self, StvError> {
         let norm = (bloch[0] * bloch[0] + bloch[1] * bloch[1] + bloch[2] * bloch[2]).sqrt();
         if !norm.is_finite() {
@@ -96,7 +96,7 @@ impl PauliSpinor {
         }
 
         if norm <= DEFAULT_TOLERANCE {
-            return Self::from_bloch_angles(0.0, 0.0);
+            return Err(StvError::InvalidBlochVector { norm });
         }
 
         let inv_norm = 1.0 / norm;
@@ -1095,6 +1095,7 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
     use num_complex::Complex;
+    use std::f64::consts::{FRAC_PI_3, FRAC_PI_4, TAU};
 
     fn minkowski_norm_sq(v: &Vec4) -> f64 {
         v[0] * v[0] - v[1] * v[1] - v[2] * v[2] - v[3] * v[3]
@@ -1108,13 +1109,32 @@ mod tests {
         ]
     }
 
+    fn relative_phase(spinor: &PauliSpinor) -> f64 {
+        let [a, b] = spinor.components();
+        if a.norm_sqr() <= DEFAULT_TOLERANCE {
+            return b.arg();
+        }
+        if b.norm_sqr() <= DEFAULT_TOLERANCE {
+            return 0.0;
+        }
+
+        let mut delta = b.arg() - a.arg();
+        while delta > std::f64::consts::PI {
+            delta -= TAU;
+        }
+        while delta < -std::f64::consts::PI {
+            delta += TAU;
+        }
+        delta
+    }
+
     #[test]
     fn reconstruct_spinor_from_bloch_vector() {
         let theta = FRAC_PI_3;
         let phi = FRAC_PI_4;
         let spinor = PauliSpinor::from_bloch_angles(theta, phi).unwrap();
-        let direction = spinor.bloch_direction();
-        let reconstructed = PauliSpinor::from_bloch_vector(direction).unwrap();
+        let bloch_vector = spinor.bloch_vector();
+        let reconstructed = PauliSpinor::from_bloch_vector(bloch_vector).unwrap();
 
         let (theta_rec, phi_rec) = reconstructed.bloch_angles();
         assert_abs_diff_eq!(theta_rec, theta, epsilon = 1e-9);
@@ -1126,15 +1146,18 @@ mod tests {
             delta_phi += TAU;
         }
         assert_abs_diff_eq!(delta_phi, 0.0, epsilon = 1e-9);
-        assert_abs_diff_eq!(
-            reconstructed.relative_phase(),
-            spinor.relative_phase(),
-            epsilon = 1e-9
-        );
+        let mut delta_phase = relative_phase(&reconstructed) - relative_phase(&spinor);
+        while delta_phase > std::f64::consts::PI {
+            delta_phase -= TAU;
+        }
+        while delta_phase < -std::f64::consts::PI {
+            delta_phase += TAU;
+        }
+        assert_abs_diff_eq!(delta_phase, 0.0, epsilon = 1e-9);
 
         let bloch = reconstructed.bloch_current();
         for i in 0..3 {
-            assert_abs_diff_eq!(bloch[i + 1], direction[i], epsilon = 1e-9);
+            assert_abs_diff_eq!(bloch[i + 1], bloch_vector[i], epsilon = 1e-9);
         }
     }
 
@@ -1145,58 +1168,56 @@ mod tests {
     }
 
     #[test]
-    fn zspace_projection_emits_pulse() {
+    fn z_projection_emits_pulse() {
         let spinor = PauliSpinor::from_bloch_angles(FRAC_PI_3, FRAC_PI_4).unwrap();
         let kernel =
             SpinoTensorKernel::new(1.0, diag([1.0, 1.0, 1.0]), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
                 .unwrap();
         let stv = SpinoTensorVector::new(spinor.clone(), kernel);
-        let projection = stv.zspace_projection();
+        let projection = stv.z_projection().unwrap();
 
-        let direction = spinor.bloch_direction();
-        for i in 0..3 {
-            assert_abs_diff_eq!(projection.direction[i], direction[i], epsilon = 1e-9);
-        }
+        let bloch_current = stv.bloch_current();
+        let spatial_bloch = [bloch_current[1], bloch_current[2], bloch_current[3]];
+        let induced = stv.induced_vector();
+        let spatial = [induced[1], induced[2], induced[3]];
+        let spatial_norm =
+            (spatial[0] * spatial[0] + spatial[1] * spatial[1] + spatial[2] * spatial[2]).sqrt();
+        assert_abs_diff_eq!(f64::from(projection.tempo), spatial_norm, epsilon = 1e-6);
+        let expected_band_energy = normalised_band_energy(spatial, spatial_norm);
+        assert_abs_diff_eq!(projection.band_energy.0, expected_band_energy.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(projection.band_energy.1, expected_band_energy.1, epsilon = 1e-6);
+        assert_abs_diff_eq!(projection.band_energy.2, expected_band_energy.2, epsilon = 1e-6);
+        assert_eq!(projection.support, bloch_support(spatial_bloch));
 
-        let radial = (direction[0] * direction[0] + direction[1] * direction[1]).sqrt();
-        assert_abs_diff_eq!(projection.coherence as f64, radial, epsilon = 1e-6);
-        assert_abs_diff_eq!(projection.z_bias as f64, direction[2], epsilon = 1e-6);
+        let beta = stv.kernel().beta().unwrap();
+        assert_abs_diff_eq!(f64::from(projection.z_bias), 1.0 - beta, epsilon = 1e-6);
+        assert_eq!(projection.scale, Some(z_scale_from_beta(beta)));
+        let expected_quality = match stv.kernel().classify(DEFAULT_TOLERANCE).unwrap() {
+            CausalClass::Timelike => 1.0,
+            CausalClass::Lightlike => 0.75,
+            CausalClass::Spacelike => 0.5,
+        };
+        assert_abs_diff_eq!(projection.quality, expected_quality as f32, epsilon = 1e-6);
         assert_abs_diff_eq!(
-            projection.phase as f64,
-            spinor.relative_phase(),
+            f64::from(projection.stderr),
+            stv.kernel().det_t().abs().sqrt(),
             epsilon = 1e-6
         );
 
-        let pulse = projection.into_pulse(ZSource::Graph, 42, None);
+        let pulse = projection.clone().into_pulse(42, ZSource::Graph);
         assert_eq!(pulse.source, ZSource::Graph);
         assert_eq!(pulse.ts, 42);
-        assert!(pulse.scale.is_none());
+        assert_eq!(pulse.scale, projection.scale);
         assert_eq!(pulse.support, projection.support);
-        assert_abs_diff_eq!(pulse.tempo as f64, 1.0, epsilon = 1e-6);
-        assert_abs_diff_eq!(pulse.quality as f64, radial, epsilon = 1e-6);
-        assert_abs_diff_eq!(pulse.z_bias as f64, direction[2], epsilon = 1e-6);
-        assert_abs_diff_eq!(
-            pulse.drift as f64,
-            projection.band_energy.0 as f64 - projection.band_energy.2 as f64,
-            epsilon = 1e-6
-        );
-        assert_abs_diff_eq!(
-            pulse.band_energy.0 as f64,
-            projection.band_energy.0 as f64,
-            epsilon = 1e-6
-        );
-        assert_abs_diff_eq!(
-            pulse.band_energy.1 as f64,
-            projection.band_energy.1 as f64,
-            epsilon = 1e-6
-        );
-        assert_abs_diff_eq!(
-            pulse.band_energy.2 as f64,
-            projection.band_energy.2 as f64,
-            epsilon = 1e-6
-        );
+        assert_abs_diff_eq!(pulse.tempo, projection.tempo, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.quality, projection.quality, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.z_bias, projection.z_bias, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.drift, projection.drift, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.band_energy.0, projection.band_energy.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.band_energy.1, projection.band_energy.1, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.band_energy.2, projection.band_energy.2, epsilon = 1e-6);
 
-        let via_helper = stv.into_zpulse(ZSource::Graph, 42, None);
+        let via_helper = stv.project_to_zpulse(42, ZSource::Graph).unwrap();
         assert_eq!(pulse, via_helper);
     }
 

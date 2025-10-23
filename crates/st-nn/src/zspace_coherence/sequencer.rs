@@ -1260,9 +1260,9 @@ mod tests {
 
         let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
         let mut seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
-        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded_events = Arc::new(Mutex::new(Vec::new()));
         seq.register_plugin(RecordingPlugin {
-            events: events.clone(),
+            events: recorded_events.clone(),
         });
 
         let concept_kernel =
@@ -1285,7 +1285,7 @@ mod tests {
         seq.forward_with_language_bridges(&x, &semantics, &bridge)
             .unwrap();
 
-        let events = events.lock().unwrap();
+        let events = recorded_events.lock().unwrap();
         assert!(events.len() == 8 || events.len() == 9);
         assert_eq!(events[0], "projected");
         assert_eq!(events[1], "coherence");
@@ -1328,9 +1328,9 @@ mod tests {
 
         let topos = OpenCartesianTopos::new(-0.75, 1e-5, 10.0, 256, 8192).unwrap();
         let mut seq = ZSpaceCoherenceSequencer::new(256, 8, -0.75, topos).unwrap();
-        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded_events = Arc::new(Mutex::new(Vec::new()));
         seq.register_plugin(RecordingPlugin {
-            events: events.clone(),
+            events: recorded_events.clone(),
         });
 
         seq.set_backend(CoherenceBackend::Fftw).unwrap();
@@ -1340,7 +1340,7 @@ mod tests {
         .unwrap();
         seq.clear_linguistic_profiles().unwrap();
 
-        let events = events.lock().unwrap();
+        let events = recorded_events.lock().unwrap();
         assert_eq!(events.len(), 3);
         assert_eq!(events[0], "backend");
         assert_eq!(events[1], "profile_registered");
@@ -1371,9 +1371,9 @@ mod tests {
 
         let topos = OpenCartesianTopos::new(-0.55, 1e-5, 10.0, 256, 8192).unwrap();
         let mut seq = ZSpaceCoherenceSequencer::new(256, 8, -0.55, topos).unwrap();
-        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded_events = Arc::new(Mutex::new(Vec::new()));
         seq.register_plugin(RecordingPlugin {
-            events: events.clone(),
+            events: recorded_events.clone(),
         });
 
         let data = Tensor::from_vec(2, 256, vec![0.03; 512]).unwrap();
@@ -1383,7 +1383,7 @@ mod tests {
         let reports = seq.describe_channels(&data).unwrap();
         assert_eq!(reports.len(), seq.maxwell_channels());
 
-        let events = events.lock().unwrap();
+        let events = recorded_events.lock().unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0], "contour");
         assert_eq!(events[1], "channels");
@@ -1419,9 +1419,9 @@ mod tests {
 
         let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
         let mut seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
-        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded_events = Arc::new(Mutex::new(Vec::new()));
         seq.register_plugin(RecordingPlugin {
-            events: events.clone(),
+            events: recorded_events.clone(),
         });
 
         let concept_kernel =
@@ -1456,7 +1456,16 @@ mod tests {
         }
         let x = Tensor::from_vec(2, 128, data).unwrap();
 
-        let (_aggregated, coherence, _concept_hint, _narrative, pulse, reading, events, feedback) =
+        let (
+            _aggregated,
+            coherence,
+            _concept_hint,
+            _narrative,
+            pulse,
+            reading,
+            emitted_events,
+            feedback,
+        ) =
             seq.forward_with_language_and_psi(&x, &semantics, &bridge, &psi_bridge, 64)
                 .unwrap();
 
@@ -1465,7 +1474,7 @@ mod tests {
         assert_eq!(reading.step, 64);
         assert!(reading.total >= 0.0);
         assert!(reading.breakdown.get(&PsiComponent::BAND_ENERGY).is_some());
-        assert!(events.is_empty());
+        assert!(emitted_events.is_empty());
 
         let stored_reading = hub::get_last_psi().unwrap();
         assert_eq!(stored_reading.step, reading.step);
@@ -1474,7 +1483,7 @@ mod tests {
         assert!(feedback.weighted_loss >= 0.0);
         assert!(pulse.band_energy.0 >= 0.0);
 
-        let events = events.lock().unwrap();
+        let events = recorded_events.lock().unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0], "psi");
     }

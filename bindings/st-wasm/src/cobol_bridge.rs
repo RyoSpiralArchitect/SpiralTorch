@@ -210,6 +210,21 @@ impl CobolDispatchPlanner {
         self.builder.set_dataset_storage_class(storage_class);
     }
 
+    #[wasm_bindgen(js_name = setDatasetMember)]
+    pub fn set_dataset_member(&mut self, member: Option<String>) {
+        self.builder.set_dataset_member(member);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetDisposition)]
+    pub fn set_dataset_disposition(&mut self, disposition: Option<String>) {
+        self.builder.set_dataset_disposition(disposition);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetVolume)]
+    pub fn set_dataset_volume(&mut self, volume: Option<String>) {
+        self.builder.set_dataset_volume(volume);
+    }
+
     #[wasm_bindgen(js_name = clearDataset)]
     pub fn clear_dataset(&mut self) {
         self.builder.clear_dataset();
