@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 #[derive(Clone)]
 pub struct CudaModule {
     device: Arc<CudaDevice>,
-    module_name: String,
+    module_name: &'static str,
 }
 
 #[cfg(feature = "cuda")]
@@ -27,7 +27,7 @@ impl CudaModule {
         &self.device
     }
 
-    pub fn module_name(&self) -> &str {
+    pub fn module_name(&self) -> &'static str {
         &self.module_name
     }
 
@@ -60,24 +60,24 @@ impl ModuleState {
 #[cfg(feature = "cuda")]
 static DEVICE: OnceLock<Arc<CudaDevice>> = OnceLock::new();
 #[cfg(feature = "cuda")]
-static MODULES: OnceLock<Mutex<HashMap<String, ModuleState>>> = OnceLock::new();
+static MODULES: OnceLock<Mutex<HashMap<&'static str, ModuleState>>> = OnceLock::new();
 
 #[cfg(feature = "cuda")]
 fn global_device() -> Result<Arc<CudaDevice>, String> {
     DEVICE
         .get_or_try_init(|| CudaDevice::new(0).map_err(|err| err.to_string()))
-        .map(|device| device.clone())
+        .map(Arc::clone)
 }
 
 #[cfg(feature = "cuda")]
-fn registry() -> &'static Mutex<HashMap<String, ModuleState>> {
+fn registry() -> &'static Mutex<HashMap<&'static str, ModuleState>> {
     MODULES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[cfg(feature = "cuda")]
 pub fn load_ptx_module(
     ptx: &Ptx,
-    module_name: &str,
+    module_name: &'static str,
     functions: &[&'static str],
 ) -> Result<CudaModule, String> {
     let device = global_device()?;
@@ -86,7 +86,7 @@ pub fn load_ptx_module(
         .map_err(|_| "cuda module registry poisoned".to_string())?;
 
     let state = modules
-        .entry(module_name.to_string())
+        .entry(module_name)
         .or_insert_with(ModuleState::new);
 
     let missing: Vec<&'static str> = functions
@@ -111,7 +111,7 @@ pub fn load_ptx_module(
 
     Ok(CudaModule {
         device,
-        module_name: module_name.to_string(),
+        module_name,
     })
 }
 
