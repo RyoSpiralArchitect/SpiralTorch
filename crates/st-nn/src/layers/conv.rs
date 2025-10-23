@@ -6,6 +6,7 @@
 use crate::module::{Module, Parameter};
 use crate::schedule::GradientBands;
 use crate::{PureResult, Tensor, TensorError};
+use st_core::util::math::LeechProjector;
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense;
 use std::cell::RefCell;
@@ -34,6 +35,206 @@ fn dilated_extent(size: usize, dilation: usize) -> PureResult<usize> {
         })
 }
 
+const INVALID_NEIGHBOR: usize = usize::MAX;
+pub const DEFAULT_CONV6DA_OFFSETS: &[(isize, isize, isize)] = &[
+    (0, 0, 0),
+    (1, 0, 0),
+    (-1, 0, 0),
+    (0, 1, 0),
+    (0, -1, 0),
+    (0, 0, 1),
+    (0, 0, -1),
+];
+
+struct AxisState {
+    dims: [usize; 26],
+    has_dim: [bool; 26],
+    values: [usize; 26],
+}
+
+impl AxisState {
+    fn new() -> Self {
+        Self {
+            dims: [0; 26],
+            has_dim: [false; 26],
+            values: [0; 26],
+        }
+    }
+
+    fn register(&mut self, axis: usize, size: usize) -> PureResult<()> {
+        if size == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: 1,
+                cols: size,
+            });
+        }
+        if self.has_dim[axis] {
+            if self.dims[axis] != size {
+                return Err(TensorError::ShapeMismatch {
+                    left: (self.dims[axis], size),
+                    right: (size, self.dims[axis]),
+                });
+            }
+        } else {
+            self.dims[axis] = size;
+            self.has_dim[axis] = true;
+        }
+        Ok(())
+    }
+
+    fn dim(&self, axis: usize) -> PureResult<usize> {
+        if self.has_dim[axis] {
+            Ok(self.dims[axis])
+        } else {
+            Err(TensorError::InvalidValue {
+                label: "einsum_axis",
+            })
+        }
+    }
+
+    fn dim_unchecked(&self, axis: usize) -> usize {
+        debug_assert!(self.has_dim[axis]);
+        self.dims[axis]
+    }
+
+    fn set_value(&mut self, axis: usize, value: usize) {
+        debug_assert!(self.has_dim[axis]);
+        debug_assert!(value < self.dims[axis]);
+        self.values[axis] = value;
+    }
+
+    fn value(&self, axis: usize) -> usize {
+        debug_assert!(self.has_dim[axis]);
+        self.values[axis]
+    }
+}
+
+fn axis_to_index(axis: char) -> PureResult<usize> {
+    if axis.is_ascii_lowercase() {
+        Ok((axis as u8 - b'a') as usize)
+    } else {
+        Err(TensorError::InvalidValue {
+            label: "einsum_axis",
+        })
+    }
+}
+
+fn index_for_operand(spec: &[usize], shape: (usize, usize), state: &AxisState) -> usize {
+    debug_assert_eq!(spec.len(), 2);
+    let row = state.value(spec[0]);
+    let col = state.value(spec[1]);
+    debug_assert!(row < shape.0 && col < shape.1);
+    row * shape.1 + col
+}
+
+fn accumulate_einsum(
+    depth: usize,
+    sum_axes: &[usize],
+    state: &mut AxisState,
+    lhs_spec: &[usize],
+    lhs_shape: (usize, usize),
+    lhs_data: &[f32],
+    rhs_spec: &[usize],
+    rhs_shape: (usize, usize),
+    rhs_data: &[f32],
+) -> f32 {
+    if depth == sum_axes.len() {
+        let lhs_idx = index_for_operand(lhs_spec, lhs_shape, state);
+        let rhs_idx = index_for_operand(rhs_spec, rhs_shape, state);
+        lhs_data[lhs_idx] * rhs_data[rhs_idx]
+    } else {
+        let axis = sum_axes[depth];
+        let dim = state.dim_unchecked(axis);
+        let mut acc = 0.0f32;
+        for value in 0..dim {
+            state.set_value(axis, value);
+            acc += accumulate_einsum(
+                depth + 1,
+                sum_axes,
+                state,
+                lhs_spec,
+                lhs_shape,
+                lhs_data,
+                rhs_spec,
+                rhs_shape,
+                rhs_data,
+            );
+        }
+        acc
+    }
+}
+
+fn einsum_contract(lhs: &Tensor, rhs: &Tensor, equation: &str) -> PureResult<Tensor> {
+    let expression = equation.replace(' ', "");
+    let (inputs, output) = expression
+        .split_once("->")
+        .ok_or(TensorError::InvalidValue {
+            label: "einsum_equation",
+        })?;
+    let (lhs_spec, rhs_spec) = inputs.split_once(',').ok_or(TensorError::InvalidValue {
+        label: "einsum_equation",
+    })?;
+    let lhs_axes: Vec<usize> = lhs_spec
+        .chars()
+        .map(axis_to_index)
+        .collect::<PureResult<_>>()?;
+    let rhs_axes: Vec<usize> = rhs_spec
+        .chars()
+        .map(axis_to_index)
+        .collect::<PureResult<_>>()?;
+    let output_axes: Vec<usize> = output
+        .chars()
+        .map(axis_to_index)
+        .collect::<PureResult<_>>()?;
+    if lhs_axes.len() != 2 || rhs_axes.len() != 2 || output_axes.len() != 2 {
+        return Err(TensorError::InvalidValue {
+            label: "einsum_rank",
+        });
+    }
+    let mut state = AxisState::new();
+    let lhs_shape = lhs.shape();
+    let rhs_shape = rhs.shape();
+    state.register(lhs_axes[0], lhs_shape.0)?;
+    state.register(lhs_axes[1], lhs_shape.1)?;
+    state.register(rhs_axes[0], rhs_shape.0)?;
+    state.register(rhs_axes[1], rhs_shape.1)?;
+    for &axis in &output_axes {
+        state.dim(axis)?;
+    }
+    let mut output_flags = [false; 26];
+    for &axis in &output_axes {
+        output_flags[axis] = true;
+    }
+    let mut seen_sum = [false; 26];
+    let mut sum_axes = Vec::new();
+    for &axis in lhs_axes.iter().chain(rhs_axes.iter()) {
+        if !output_flags[axis] && !seen_sum[axis] {
+            seen_sum[axis] = true;
+            sum_axes.push(axis);
+        }
+    }
+    let out_rows = state.dim(output_axes[0])?;
+    let out_cols = state.dim(output_axes[1])?;
+    let mut result = Tensor::zeros(out_rows, out_cols)?;
+    {
+        let lhs_data = lhs.data();
+        let rhs_data = rhs.data();
+        let out_data = result.data_mut();
+        for row in 0..out_rows {
+            state.set_value(output_axes[0], row);
+            for col in 0..out_cols {
+                state.set_value(output_axes[1], col);
+                let value = accumulate_einsum(
+                    0, &sum_axes, &mut state, &lhs_axes, lhs_shape, lhs_data, &rhs_axes, rhs_shape,
+                    rhs_data,
+                );
+                out_data[row * out_cols + col] = value;
+            }
+        }
+    }
+    Ok(result)
+}
+
 /// One-dimensional convolution with explicit stride and padding controls.
 #[derive(Debug)]
 pub struct Conv1d {
@@ -44,6 +245,7 @@ pub struct Conv1d {
     kernel_size: usize,
     stride: usize,
     padding: usize,
+    dilation: usize,
 }
 
 impl Conv1d {
@@ -76,7 +278,21 @@ impl Conv1d {
             kernel_size,
             stride,
             padding,
+            dilation: 1,
         })
+    }
+
+    /// Overrides the dilation factor applied to the convolution kernel.
+    pub fn set_dilation(&mut self, dilation: usize) -> PureResult<()> {
+        validate_positive(dilation, "dilation")?;
+        self.dilation = dilation;
+        Ok(())
+    }
+
+    /// Builder-style helper returning a new instance configured with dilation.
+    pub fn with_dilation(mut self, dilation: usize) -> PureResult<Self> {
+        self.set_dilation(dilation)?;
+        Ok(self)
     }
 
     fn infer_width(&self, cols: usize) -> PureResult<usize> {
@@ -91,13 +307,14 @@ impl Conv1d {
 
     fn output_width(&self, input_width: usize) -> PureResult<usize> {
         let numer = input_width + 2 * self.padding;
-        if numer < self.kernel_size {
+        let eff_kernel = dilated_extent(self.kernel_size, self.dilation)?;
+        if numer < eff_kernel {
             return Err(TensorError::InvalidDimensions {
                 rows: input_width,
-                cols: self.kernel_size,
+                cols: eff_kernel,
             });
         }
-        Ok((numer - self.kernel_size) / self.stride + 1)
+        Ok((numer - eff_kernel) / self.stride + 1)
     }
 }
 
@@ -127,7 +344,7 @@ impl Module for Conv1d {
                         for ic in 0..self.in_channels {
                             let channel_offset = ic * width;
                             for k in 0..self.kernel_size {
-                                let pos = ow * self.stride + k;
+                                let pos = ow * self.stride + k * self.dilation;
                                 if pos < self.padding {
                                     continue;
                                 }
@@ -182,7 +399,7 @@ impl Module for Conv1d {
                         for ic in 0..self.in_channels {
                             let channel_offset = ic * width;
                             for k in 0..self.kernel_size {
-                                let pos = ow * self.stride + k;
+                                let pos = ow * self.stride + k * self.dilation;
                                 if pos < self.padding {
                                     continue;
                                 }
@@ -595,6 +812,288 @@ impl Module for Conv2d {
     }
 }
 
+#[derive(Debug)]
+pub struct Conv6da {
+    weight: Parameter,
+    bias: Parameter,
+    in_channels: usize,
+    out_channels: usize,
+    depth: usize,
+    height: usize,
+    width: usize,
+    volume: usize,
+    neighbors_per_cell: usize,
+    neighbor_indices: Vec<usize>,
+    leech_projector: LeechProjector,
+}
+
+impl Conv6da {
+    pub fn new(
+        name: impl Into<String>,
+        in_channels: usize,
+        out_channels: usize,
+        grid: (usize, usize, usize),
+        leech_rank: usize,
+        leech_weight: f64,
+    ) -> PureResult<Self> {
+        Self::with_neighbor_offsets(
+            name,
+            in_channels,
+            out_channels,
+            grid,
+            leech_rank,
+            leech_weight,
+            DEFAULT_CONV6DA_OFFSETS,
+        )
+    }
+
+    pub fn with_neighbor_offsets(
+        name: impl Into<String>,
+        in_channels: usize,
+        out_channels: usize,
+        grid: (usize, usize, usize),
+        leech_rank: usize,
+        leech_weight: f64,
+        neighbor_offsets: &[(isize, isize, isize)],
+    ) -> PureResult<Self> {
+        validate_positive(in_channels, "in_channels")?;
+        validate_positive(out_channels, "out_channels")?;
+        validate_positive(grid.0, "depth")?;
+        validate_positive(grid.1, "height")?;
+        validate_positive(grid.2, "width")?;
+        if neighbor_offsets.is_empty() {
+            return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 });
+        }
+        let name = name.into();
+        let neighbors_per_cell = neighbor_offsets.len();
+        let span = in_channels * neighbors_per_cell;
+        let plane = grid.1 * grid.2;
+        let volume = grid.0 * plane;
+        let mut neighbor_indices = vec![INVALID_NEIGHBOR; volume * neighbors_per_cell];
+        for depth_idx in 0..grid.0 {
+            for height_idx in 0..grid.1 {
+                for width_idx in 0..grid.2 {
+                    let cell_index = depth_idx * plane + height_idx * grid.2 + width_idx;
+                    let slice_start = cell_index * neighbors_per_cell;
+                    let slice_end = slice_start + neighbors_per_cell;
+                    let indices = &mut neighbor_indices[slice_start..slice_end];
+                    for (offset_idx, (od, oh, ow)) in neighbor_offsets.iter().enumerate() {
+                        let nd = depth_idx as isize + *od;
+                        let nh = height_idx as isize + *oh;
+                        let nw = width_idx as isize + *ow;
+                        if nd < 0
+                            || nh < 0
+                            || nw < 0
+                            || nd >= grid.0 as isize
+                            || nh >= grid.1 as isize
+                            || nw >= grid.2 as isize
+                        {
+                            continue;
+                        }
+                        let base = nd as usize * plane + nh as usize * grid.2 + nw as usize;
+                        indices[offset_idx] = base;
+                    }
+                }
+            }
+        }
+        let mut seed = 0.01f32;
+        let weight = Tensor::from_fn(out_channels, span, |_r, _c| {
+            let value = seed;
+            seed = (seed * 1.31).rem_euclid(0.2).max(1e-3);
+            value
+        })?;
+        let bias = Tensor::zeros(1, out_channels)?;
+        Ok(Self {
+            weight: Parameter::new(format!("{name}::weight"), weight),
+            bias: Parameter::new(format!("{name}::bias"), bias),
+            in_channels,
+            out_channels,
+            depth: grid.0,
+            height: grid.1,
+            width: grid.2,
+            volume,
+            neighbors_per_cell,
+            neighbor_indices,
+            leech_projector: LeechProjector::new(leech_rank, leech_weight),
+        })
+    }
+
+    fn cells(&self) -> usize {
+        self.volume
+    }
+
+    fn expected_cols(&self) -> usize {
+        self.in_channels * self.volume
+    }
+
+    fn neighbor_span(&self) -> usize {
+        self.in_channels * self.neighbors_per_cell
+    }
+
+    fn neighbor_slice(&self, cell_index: usize) -> &[usize] {
+        let start = cell_index * self.neighbors_per_cell;
+        let end = start + self.neighbors_per_cell;
+        &self.neighbor_indices[start..end]
+    }
+
+    fn gather_neighbors(&self, row: &[f32], buffer: &mut [f32], cell_index: usize) -> f64 {
+        buffer.fill(0.0);
+        let mut geodesic_sq = 0.0f64;
+        let volume = self.volume;
+        let indices = self.neighbor_slice(cell_index);
+        for (offset_idx, &base) in indices.iter().enumerate() {
+            if base == INVALID_NEIGHBOR {
+                continue;
+            }
+            for ic in 0..self.in_channels {
+                let channel_offset = ic * volume;
+                let value = row[channel_offset + base];
+                buffer[offset_idx * self.in_channels + ic] = value;
+                geodesic_sq += f64::from(value) * f64::from(value);
+            }
+        }
+        geodesic_sq.sqrt()
+    }
+}
+
+impl Module for Conv6da {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        if cols != self.expected_cols() {
+            return Err(TensorError::ShapeMismatch {
+                left: (1, cols),
+                right: (1, self.expected_cols()),
+            });
+        }
+        let span = self.neighbor_span();
+        let volume = self.cells();
+        let mut out = Tensor::zeros(batch, self.out_channels * volume)?;
+        let weight = self.weight.value();
+        let bias = self.bias.value();
+        let weight_data = weight.data();
+        let bias_data = bias.data();
+        let mut neighbors = vec![0.0f32; span];
+        let out_cols = out.shape().1;
+        let mut out_rows = out.data_mut().chunks_exact_mut(out_cols);
+        let mut input_rows = input.data().chunks_exact(cols);
+        for (row, out_row) in (&mut input_rows).zip(&mut out_rows) {
+            for cell_index in 0..volume {
+                let geodesic = self.gather_neighbors(row, &mut neighbors, cell_index);
+                let density = self.leech_projector.enrich(geodesic) as f32;
+                for (oc, weight_row) in weight_data.chunks_exact(span).enumerate() {
+                    let mut acc = bias_data[oc] + density;
+                    for (value, weight) in neighbors.iter().zip(weight_row.iter()) {
+                        acc += value * weight;
+                    }
+                    out_row[oc * volume + cell_index] = acc;
+                }
+            }
+        }
+        debug_assert!(input_rows.remainder().is_empty());
+        debug_assert!(out_rows.into_remainder().is_empty());
+        Ok(out)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        if cols != self.expected_cols() {
+            return Err(TensorError::ShapeMismatch {
+                left: (1, cols),
+                right: (1, self.expected_cols()),
+            });
+        }
+        let volume = self.cells();
+        let span = self.neighbor_span();
+        if grad_output.shape() != (batch, self.out_channels * volume) {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: (batch, self.out_channels * volume),
+            });
+        }
+        let mut grad_weight = vec![0.0f32; self.out_channels * span];
+        let mut grad_bias = vec![0.0f32; self.out_channels];
+        let mut grad_input = Tensor::zeros(batch, cols)?;
+        let mut neighbors = vec![0.0f32; span];
+        let volume_per_channel = volume;
+        let weight = self.weight.value();
+        let grad_cols = grad_output.shape().1;
+        let leech_factor = self.leech_projector.enrich(1.0);
+        let mut grad_input_rows = grad_input.data_mut().chunks_exact_mut(cols);
+        let mut input_rows = input.data().chunks_exact(cols);
+        let mut grad_rows = grad_output.data().chunks_exact(grad_cols);
+        let weight_data = weight.data();
+        for ((row, grad_row), grad_in_row) in (&mut input_rows)
+            .zip(&mut grad_rows)
+            .zip(&mut grad_input_rows)
+        {
+            for cell_index in 0..volume {
+                let geodesic = self.gather_neighbors(row, &mut neighbors, cell_index);
+                let indices = self.neighbor_slice(cell_index);
+                let mut sum_go = 0.0f64;
+                for (oc, weight_row) in weight_data.chunks_exact(span).enumerate() {
+                    let go = grad_row[oc * volume + cell_index];
+                    sum_go += f64::from(go);
+                    grad_bias[oc] += go;
+                    for (idx, &value) in neighbors.iter().enumerate() {
+                        grad_weight[oc * span + idx] += go * value;
+                    }
+                    for ic in 0..self.in_channels {
+                        let channel_offset = ic * volume_per_channel;
+                        for (offset_idx, &base) in indices.iter().enumerate() {
+                            if base == INVALID_NEIGHBOR {
+                                continue;
+                            }
+                            let input_index = channel_offset + base;
+                            let weight_idx = offset_idx * self.in_channels + ic;
+                            grad_in_row[input_index] += go * weight_row[weight_idx];
+                        }
+                    }
+                }
+                if geodesic > 0.0 && leech_factor > f64::EPSILON && sum_go.abs() > f64::EPSILON {
+                    let scale = (sum_go * leech_factor / geodesic) as f32;
+                    for ic in 0..self.in_channels {
+                        let channel_offset = ic * volume_per_channel;
+                        for (offset_idx, &base) in indices.iter().enumerate() {
+                            if base == INVALID_NEIGHBOR {
+                                continue;
+                            }
+                            let input_index = channel_offset + base;
+                            let value = neighbors[offset_idx * self.in_channels + ic];
+                            grad_in_row[input_index] += scale * value;
+                        }
+                    }
+                }
+            }
+        }
+        debug_assert!(input_rows.remainder().is_empty());
+        debug_assert!(grad_rows.remainder().is_empty());
+        debug_assert!(grad_input_rows.into_remainder().is_empty());
+        let grad_weight_tensor = Tensor::from_vec(self.out_channels, span, grad_weight)?;
+        let grad_bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
+        self.weight.accumulate_euclidean(&grad_weight_tensor)?;
+        self.bias.accumulate_euclidean(&grad_bias_tensor)?;
+        Ok(grad_input)
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&self.weight)?;
+        visitor(&self.bias)?;
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&mut self.weight)?;
+        visitor(&mut self.bias)?;
+        Ok(())
+    }
+}
+
 impl Conv2d {
     fn forward_cpu(
         &self,
@@ -603,54 +1102,24 @@ impl Conv2d {
         oh: usize,
         ow: usize,
     ) -> PureResult<Tensor> {
-        let mut out = Tensor::zeros(batch, self.out_channels * oh * ow)?;
         let weight = self.weight.value();
         let bias = self.bias.value();
-        let weight_data = weight.data();
-        let bias_data = bias.data();
-        let span = self.in_channels * self.kernel.0 * self.kernel.1;
-        let (h, w) = self.input_hw;
-        let (dilation_h, dilation_w) = self.dilation;
-        let out_cols = out.shape().1;
-        let cols = input.shape().1;
+        let patches = self.im2col(input, batch, oh, ow)?;
+        let contracted = einsum_contract(&patches, &weight, "bs,os->bo")?;
+        let mut out = Tensor::zeros(batch, self.out_channels * oh * ow)?;
+        let spatial = oh * ow;
         {
+            let bias_data = bias.data();
+            let contracted_data = contracted.data();
             let out_data = out.data_mut();
             for b in 0..batch {
-                let row = &input.data()[b * cols..(b + 1) * cols];
-                let (start, end) = (b * out_cols, (b + 1) * out_cols);
-                let out_row = &mut out_data[start..end];
-                for oc in 0..self.out_channels {
-                    let weight_row = &weight_data[oc * span..(oc + 1) * span];
-                    let bias = bias_data[oc];
-                    for oh_idx in 0..oh {
-                        for ow_idx in 0..ow {
-                            let mut acc = bias;
-                            for ic in 0..self.in_channels {
-                                let channel_offset = ic * h * w;
-                                for kh in 0..self.kernel.0 {
-                                    for kw in 0..self.kernel.1 {
-                                        let pos_h = oh_idx * self.stride.0 + kh * dilation_h;
-                                        let pos_w = ow_idx * self.stride.1 + kw * dilation_w;
-                                        let idx_h = pos_h as isize - self.padding.0 as isize;
-                                        let idx_w = pos_w as isize - self.padding.1 as isize;
-                                        if idx_h < 0
-                                            || idx_w < 0
-                                            || idx_h >= h as isize
-                                            || idx_w >= w as isize
-                                        {
-                                            continue;
-                                        }
-                                        let input_idx =
-                                            channel_offset + idx_h as usize * w + idx_w as usize;
-                                        let weight_idx = ic * self.kernel.0 * self.kernel.1
-                                            + kh * self.kernel.1
-                                            + kw;
-                                        acc += row[input_idx] * weight_row[weight_idx];
-                                    }
-                                }
-                            }
-                            out_row[oc * (oh * ow) + oh_idx * ow + ow_idx] = acc;
-                        }
+                for pos in 0..spatial {
+                    let row_index = b * spatial + pos;
+                    for oc in 0..self.out_channels {
+                        let value =
+                            contracted_data[row_index * self.out_channels + oc] + bias_data[oc];
+                        let dst = b * self.out_channels * spatial + oc * spatial + pos;
+                        out_data[dst] = value;
                     }
                 }
             }
@@ -1074,11 +1543,136 @@ mod tests {
     use st_tensor::backend::wgpu_dense;
 
     #[test]
+    fn conv6da_forward_matches_neighbor_sum_without_leech() {
+        let mut conv = Conv6da::new("conv6", 1, 1, (1, 2, 2), 24, 0.0).unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (1, 4));
+        let expected = [6.0f32, 7.0, 8.0, 9.0];
+        for (out, exp) in output.data().iter().zip(expected.iter()) {
+            assert!((out - exp).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn conv6da_forward_injects_leech_density() {
+        let mut conv = Conv6da::new("conv6", 1, 1, (1, 2, 2), 24, 1.0).unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let output = conv.forward(&input).unwrap();
+        let projector = LeechProjector::new(24, 1.0);
+        let geodesics = [
+            (1.0_f64 * 1.0 + 3.0 * 3.0 + 2.0 * 2.0).sqrt(),
+            (2.0_f64 * 2.0 + 4.0 * 4.0 + 1.0 * 1.0).sqrt(),
+            (3.0_f64 * 3.0 + 1.0 * 1.0 + 4.0 * 4.0).sqrt(),
+            (4.0_f64 * 4.0 + 2.0 * 2.0 + 3.0 * 3.0).sqrt(),
+        ];
+        let base = [6.0f32, 7.0, 8.0, 9.0];
+        for ((out, base_sum), geodesic) in
+            output.data().iter().zip(base.iter()).zip(geodesics.iter())
+        {
+            let expected = *base_sum + projector.enrich(*geodesic) as f32;
+            assert!((out - expected).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn conv6da_backward_matches_manual_without_leech() {
+        let mut conv = Conv6da::new("conv6", 1, 1, (1, 2, 2), 24, 0.0).unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let grad_output = Tensor::from_vec(1, 4, vec![1.0; 4]).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        let expected_grad_input = [3.0f32; 4];
+        for (value, expected) in grad_input.data().iter().zip(expected_grad_input.iter()) {
+            assert!((value - expected).abs() < 1e-5);
+        }
+        let weight_grad = conv.weight.gradient().unwrap();
+        let expected_weight = [10.0, 0.0, 0.0, 7.0, 3.0, 6.0, 4.0];
+        for (value, expected) in weight_grad.data().iter().zip(expected_weight.iter()) {
+            assert!((value - expected).abs() < 1e-5);
+        }
+        let bias_grad = conv.bias.gradient().unwrap();
+        assert!((bias_grad.data()[0] - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn conv6da_backward_includes_leech_density_contribution() {
+        let mut conv = Conv6da::new("conv6", 1, 1, (1, 1, 1), 24, 2.0).unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 0.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 1, vec![3.0]).unwrap();
+        let grad_output = Tensor::from_vec(1, 1, vec![0.5]).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        let projector = LeechProjector::new(24, 2.0);
+        let expected = grad_output.data()[0] * projector.enrich(1.0) as f32;
+        assert!((grad_input.data()[0] - expected).abs() < 1e-6);
+        let weight_grad = conv.weight.gradient().unwrap();
+        let grads = weight_grad.data();
+        assert!((grads[0] - grad_output.data()[0] * input.data()[0]).abs() < 1e-6);
+        for &value in &grads[1..] {
+            assert!(value.abs() < 1e-6);
+        }
+        let bias_grad = conv.bias.gradient().unwrap();
+        assert!((bias_grad.data()[0] - grad_output.data()[0]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn conv6da_forward_respects_custom_neighbors() {
+        let offsets = [(0, 0, 0), (0, 0, 1)];
+        let mut conv =
+            Conv6da::with_neighbor_offsets("conv6", 1, 1, (1, 1, 3), 24, 0.0, &offsets).unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 3, vec![1.0, 2.0, 3.0]).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (1, 3));
+        let expected = [3.0f32, 5.0, 3.0];
+        for (&value, &target) in output.data().iter().zip(expected.iter()) {
+            assert!((value - target).abs() < 1e-5);
+        }
+    }
+
+    #[test]
     fn conv1d_forward_matches_manual() {
         let conv = Conv1d::new("conv", 1, 1, 3, 1, 1).unwrap();
         let input = Tensor::from_vec(1, 5, vec![1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
         let output = conv.forward(&input).unwrap();
         assert_eq!(output.shape().0, 1);
+    }
+
+    #[test]
+    fn conv1d_forward_respects_dilation() {
+        let mut conv = Conv1d::new("conv", 1, 1, 3, 1, 0).unwrap();
+        conv.set_dilation(2).unwrap();
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        for (idx, value) in conv.weight.value_mut().data_mut().iter_mut().enumerate() {
+            *value = (idx + 1) as f32;
+        }
+        let input = Tensor::from_vec(1, 5, vec![1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (1, 1));
+        assert!((output.data()[0] - 22.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn conv1d_set_dilation_rejects_zero() {
+        let mut conv = Conv1d::new("conv", 1, 1, 3, 1, 0).unwrap();
+        assert!(conv.set_dilation(0).is_err());
     }
 
     #[cfg(feature = "wgpu")]
@@ -1117,6 +1711,21 @@ mod tests {
         let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
         let out = pool.forward(&input).unwrap();
         assert_eq!(out.data(), &[4.0]);
+    }
+
+    #[test]
+    fn max_pool_propagates_gradients_to_maxima() {
+        let mut pool = MaxPool2d::new(1, (2, 2), (1, 1), (0, 0), (3, 3)).unwrap();
+        let input =
+            Tensor::from_vec(1, 9, vec![1.0, 3.0, 2.0, 4.0, 6.0, 5.0, 0.0, -1.0, -2.0]).unwrap();
+        pool.forward(&input).unwrap();
+        let grad_output = Tensor::from_vec(1, 4, vec![0.5, -1.0, 2.0, 3.0]).unwrap();
+        let grad_input = pool.backward(&input, &grad_output).unwrap();
+        let mut expected = vec![0.0f32; 9];
+        expected[4] = 0.5 - 1.0 + 2.0 + 3.0;
+        for (&value, &target) in grad_input.data().iter().zip(expected.iter()) {
+            assert!((value - target).abs() < 1e-6);
+        }
     }
 
     #[test]
