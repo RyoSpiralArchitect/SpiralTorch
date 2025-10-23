@@ -1127,7 +1127,7 @@ impl Conv2d {
                 }
             }
         }
-        Tensor::from_vec(batch, self.out_channels * spatial, contracted)
+        Ok(out)
     }
 
     #[cfg(feature = "wgpu")]
