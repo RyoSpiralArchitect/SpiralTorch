@@ -10,6 +10,7 @@ use st_core::util::math::LeechProjector;
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense;
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 
 fn validate_positive(value: usize, _label: &str) -> PureResult<()> {
     if value == 0 {
@@ -35,8 +36,8 @@ fn dilated_extent(size: usize, dilation: usize) -> PureResult<usize> {
         })
 }
 
-const SIX_DA_NEIGHBORS: usize = 7;
-const SIX_DA_OFFSETS: [(isize, isize, isize); SIX_DA_NEIGHBORS] = [
+const INVALID_NEIGHBOR: usize = usize::MAX;
+const DEFAULT_CONV6DA_OFFSETS: [(isize, isize, isize); 7] = [
     (0, 0, 0),
     (1, 0, 0),
     (-1, 0, 0),
@@ -45,6 +46,205 @@ const SIX_DA_OFFSETS: [(isize, isize, isize); SIX_DA_NEIGHBORS] = [
     (0, 0, 1),
     (0, 0, -1),
 ];
+
+fn shape_product(shape: &[usize]) -> PureResult<usize> {
+    let mut product = 1usize;
+    for &dim in shape {
+        product = product
+            .checked_mul(dim)
+            .ok_or(TensorError::InvalidDimensions {
+                rows: product,
+                cols: dim,
+            })?;
+    }
+    Ok(product)
+}
+
+fn compute_strides(shape: &[usize]) -> Vec<usize> {
+    if shape.is_empty() {
+        return Vec::new();
+    }
+    let mut strides = vec![1; shape.len()];
+    let mut acc = 1usize;
+    for (idx, &dim) in shape.iter().enumerate().rev() {
+        strides[idx] = acc;
+        acc *= dim;
+    }
+    strides
+}
+
+fn einsum_recursive(
+    depth: usize,
+    sum_axes: &[usize],
+    axis_dims: &[usize],
+    axis_values: &mut [usize],
+    left_axis_ids: &[usize],
+    left_strides: &[usize],
+    left_data: &[f32],
+    right_axis_ids: &[usize],
+    right_strides: &[usize],
+    right_data: &[f32],
+) -> f32 {
+    if depth == sum_axes.len() {
+        let mut left_index = 0usize;
+        for (&axis, &stride) in left_axis_ids.iter().zip(left_strides.iter()) {
+            left_index += axis_values[axis] * stride;
+        }
+        let mut right_index = 0usize;
+        for (&axis, &stride) in right_axis_ids.iter().zip(right_strides.iter()) {
+            right_index += axis_values[axis] * stride;
+        }
+        return left_data[left_index] * right_data[right_index];
+    }
+    let axis = sum_axes[depth];
+    let dim = axis_dims[axis];
+    let mut acc = 0.0f32;
+    for value in 0..dim {
+        axis_values[axis] = value;
+        acc += einsum_recursive(
+            depth + 1,
+            sum_axes,
+            axis_dims,
+            axis_values,
+            left_axis_ids,
+            left_strides,
+            left_data,
+            right_axis_ids,
+            right_strides,
+            right_data,
+        );
+    }
+    acc
+}
+
+fn einsum_contract(
+    left_data: &[f32],
+    left_shape: &[usize],
+    left_axes: &[char],
+    right_data: &[f32],
+    right_shape: &[usize],
+    right_axes: &[char],
+    output_axes: &[char],
+) -> PureResult<(Vec<f32>, Vec<usize>)> {
+    if left_shape.len() != left_axes.len() {
+        return Err(TensorError::InvalidDimensions {
+            rows: left_shape.len(),
+            cols: left_axes.len(),
+        });
+    }
+    if right_shape.len() != right_axes.len() {
+        return Err(TensorError::InvalidDimensions {
+            rows: right_shape.len(),
+            cols: right_axes.len(),
+        });
+    }
+    let expected_left = shape_product(left_shape)?;
+    if expected_left != left_data.len() {
+        return Err(TensorError::DataLength {
+            expected: expected_left,
+            got: left_data.len(),
+        });
+    }
+    let expected_right = shape_product(right_shape)?;
+    if expected_right != right_data.len() {
+        return Err(TensorError::DataLength {
+            expected: expected_right,
+            got: right_data.len(),
+        });
+    }
+
+    let mut axis_positions: HashMap<char, usize> = HashMap::new();
+    let mut axis_dims: Vec<usize> = Vec::new();
+    let mut register_axis = |axis: char, dim: usize| -> PureResult<()> {
+        if let Some(&idx) = axis_positions.get(&axis) {
+            if axis_dims[idx] != dim {
+                return Err(TensorError::InvalidDimensions {
+                    rows: axis_dims[idx],
+                    cols: dim,
+                });
+            }
+        } else {
+            let idx = axis_dims.len();
+            axis_positions.insert(axis, idx);
+            axis_dims.push(dim);
+        }
+        Ok(())
+    };
+
+    for (&axis, &dim) in left_axes.iter().zip(left_shape.iter()) {
+        register_axis(axis, dim)?;
+    }
+    for (&axis, &dim) in right_axes.iter().zip(right_shape.iter()) {
+        register_axis(axis, dim)?;
+    }
+    let mut output_axis_ids = Vec::with_capacity(output_axes.len());
+    for &axis in output_axes {
+        if let Some(&idx) = axis_positions.get(&axis) {
+            output_axis_ids.push(idx);
+        } else {
+            return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 });
+        }
+    }
+
+    let left_axis_ids: Vec<usize> = left_axes.iter().map(|axis| axis_positions[axis]).collect();
+    let right_axis_ids: Vec<usize> = right_axes.iter().map(|axis| axis_positions[axis]).collect();
+
+    let output_dims: Vec<usize> = output_axis_ids
+        .iter()
+        .map(|&axis| axis_dims[axis])
+        .collect();
+    let output_len = shape_product(&output_dims)?;
+    let output_strides = compute_strides(&output_dims);
+
+    let output_axis_set: HashSet<usize> = output_axis_ids.iter().copied().collect();
+    let mut seen_sum = HashSet::new();
+    let mut sum_axes = Vec::new();
+    for &axis in &left_axis_ids {
+        if !output_axis_set.contains(&axis) && seen_sum.insert(axis) {
+            sum_axes.push(axis);
+        }
+    }
+    for &axis in &right_axis_ids {
+        if !output_axis_set.contains(&axis) && seen_sum.insert(axis) {
+            sum_axes.push(axis);
+        }
+    }
+    let left_strides = compute_strides(left_shape);
+    let right_strides = compute_strides(right_shape);
+
+    let mut axis_values = vec![0usize; axis_dims.len()];
+    let mut output = vec![0.0f32; output_len];
+
+    for (linear_idx, value) in output.iter_mut().enumerate() {
+        let mut remainder = linear_idx;
+        for ((&axis, &stride), &dim) in output_axis_ids
+            .iter()
+            .zip(output_strides.iter())
+            .zip(output_dims.iter())
+        {
+            if dim == 0 {
+                return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 });
+            }
+            let coordinate = remainder / stride;
+            remainder %= stride;
+            axis_values[axis] = coordinate;
+        }
+        *value = einsum_recursive(
+            0,
+            &sum_axes,
+            &axis_dims,
+            &mut axis_values,
+            &left_axis_ids,
+            &left_strides,
+            left_data,
+            &right_axis_ids,
+            &right_strides,
+            right_data,
+        );
+    }
+
+    Ok((output, output_dims))
+}
 
 /// One-dimensional convolution with explicit stride and padding controls.
 #[derive(Debug)]
@@ -56,6 +256,7 @@ pub struct Conv1d {
     kernel_size: usize,
     stride: usize,
     padding: usize,
+    dilation: usize,
 }
 
 impl Conv1d {
@@ -66,11 +267,13 @@ impl Conv1d {
         kernel_size: usize,
         stride: usize,
         padding: usize,
+        dilation: usize,
     ) -> PureResult<Self> {
         validate_positive(in_channels, "in_channels")?;
         validate_positive(out_channels, "out_channels")?;
         validate_positive(kernel_size, "kernel_size")?;
         validate_positive(stride, "stride")?;
+        validate_positive(dilation, "dilation")?;
         let name = name.into();
         let span = kernel_span(in_channels, kernel_size);
         let mut seed = 0.01f32;
@@ -88,6 +291,7 @@ impl Conv1d {
             kernel_size,
             stride,
             padding,
+            dilation,
         })
     }
 
@@ -103,13 +307,14 @@ impl Conv1d {
 
     fn output_width(&self, input_width: usize) -> PureResult<usize> {
         let numer = input_width + 2 * self.padding;
-        if numer < self.kernel_size {
+        let effective_kernel = dilated_extent(self.kernel_size, self.dilation)?;
+        if numer < effective_kernel {
             return Err(TensorError::InvalidDimensions {
                 rows: input_width,
-                cols: self.kernel_size,
+                cols: effective_kernel,
             });
         }
-        Ok((numer - self.kernel_size) / self.stride + 1)
+        Ok((numer - effective_kernel) / self.stride + 1)
     }
 }
 
@@ -139,7 +344,7 @@ impl Module for Conv1d {
                         for ic in 0..self.in_channels {
                             let channel_offset = ic * width;
                             for k in 0..self.kernel_size {
-                                let pos = ow * self.stride + k;
+                                let pos = ow * self.stride + k * self.dilation;
                                 if pos < self.padding {
                                     continue;
                                 }
@@ -194,7 +399,7 @@ impl Module for Conv1d {
                         for ic in 0..self.in_channels {
                             let channel_offset = ic * width;
                             for k in 0..self.kernel_size {
-                                let pos = ow * self.stride + k;
+                                let pos = ow * self.stride + k * self.dilation;
                                 if pos < self.padding {
                                     continue;
                                 }
@@ -616,6 +821,10 @@ pub struct Conv6da {
     depth: usize,
     height: usize,
     width: usize,
+    volume: usize,
+    neighbor_offsets: Vec<(isize, isize, isize)>,
+    neighbor_indices: Vec<Vec<usize>>,
+    neighbor_count: usize,
     leech_projector: LeechProjector,
 }
 
@@ -628,13 +837,63 @@ impl Conv6da {
         leech_rank: usize,
         leech_weight: f64,
     ) -> PureResult<Self> {
+        Self::with_neighbors(
+            name,
+            in_channels,
+            out_channels,
+            grid,
+            leech_rank,
+            leech_weight,
+            &DEFAULT_CONV6DA_OFFSETS,
+        )
+    }
+
+    pub fn with_neighbors(
+        name: impl Into<String>,
+        in_channels: usize,
+        out_channels: usize,
+        grid: (usize, usize, usize),
+        leech_rank: usize,
+        leech_weight: f64,
+        offsets: &[(isize, isize, isize)],
+    ) -> PureResult<Self> {
         validate_positive(in_channels, "in_channels")?;
         validate_positive(out_channels, "out_channels")?;
         validate_positive(grid.0, "depth")?;
         validate_positive(grid.1, "height")?;
         validate_positive(grid.2, "width")?;
+        if offsets.is_empty() {
+            return Err(TensorError::EmptyInput("conv6da_neighbors"));
+        }
         let name = name.into();
-        let span = in_channels * SIX_DA_NEIGHBORS;
+        let neighbor_count = offsets.len();
+        let span = in_channels * neighbor_count;
+        let plane = grid.1 * grid.2;
+        let volume = grid.0 * plane;
+        let mut neighbor_indices = vec![vec![INVALID_NEIGHBOR; neighbor_count]; volume];
+        for depth_idx in 0..grid.0 {
+            for height_idx in 0..grid.1 {
+                for width_idx in 0..grid.2 {
+                    let cell_index = depth_idx * plane + height_idx * grid.2 + width_idx;
+                    for (offset_idx, (od, oh, ow)) in offsets.iter().enumerate() {
+                        let nd = depth_idx as isize + *od;
+                        let nh = height_idx as isize + *oh;
+                        let nw = width_idx as isize + *ow;
+                        if nd < 0
+                            || nh < 0
+                            || nw < 0
+                            || nd >= grid.0 as isize
+                            || nh >= grid.1 as isize
+                            || nw >= grid.2 as isize
+                        {
+                            continue;
+                        }
+                        let base = nd as usize * plane + nh as usize * grid.2 + nw as usize;
+                        neighbor_indices[cell_index][offset_idx] = base;
+                    }
+                }
+            }
+        }
         let mut seed = 0.01f32;
         let weight = Tensor::from_fn(out_channels, span, |_r, _c| {
             let value = seed;
@@ -650,47 +909,43 @@ impl Conv6da {
             depth: grid.0,
             height: grid.1,
             width: grid.2,
+            volume,
+            neighbor_offsets: offsets.to_vec(),
+            neighbor_indices,
+            neighbor_count,
             leech_projector: LeechProjector::new(leech_rank, leech_weight),
         })
     }
 
     fn cells(&self) -> usize {
-        self.depth * self.height * self.width
+        self.volume
     }
 
     fn expected_cols(&self) -> usize {
-        self.in_channels * self.cells()
+        self.in_channels * self.volume
     }
 
-    fn gather_neighbors(
-        &self,
-        row: &[f32],
-        depth_idx: usize,
-        height_idx: usize,
-        width_idx: usize,
-        buffer: &mut [f32],
-        base_indices: &mut [Option<usize>],
-    ) -> f64 {
+    pub fn neighbor_count(&self) -> usize {
+        self.neighbor_count
+    }
+
+    pub fn neighbor_offsets(&self) -> &[(isize, isize, isize)] {
+        &self.neighbor_offsets
+    }
+
+    fn neighbor_span(&self) -> usize {
+        self.in_channels * self.neighbor_count
+    }
+
+    fn gather_neighbors(&self, row: &[f32], buffer: &mut [f32], cell_index: usize) -> f64 {
         buffer.fill(0.0);
-        base_indices.fill(None);
-        let plane = self.height * self.width;
-        let volume = self.depth * plane;
         let mut geodesic_sq = 0.0f64;
-        for (offset_idx, (od, oh, ow)) in SIX_DA_OFFSETS.iter().enumerate() {
-            let dd = depth_idx as isize + *od;
-            let hh = height_idx as isize + *oh;
-            let ww = width_idx as isize + *ow;
-            if dd < 0
-                || hh < 0
-                || ww < 0
-                || dd >= self.depth as isize
-                || hh >= self.height as isize
-                || ww >= self.width as isize
-            {
+        let volume = self.volume;
+        let indices = &self.neighbor_indices[cell_index];
+        for (offset_idx, &base) in indices.iter().enumerate() {
+            if base == INVALID_NEIGHBOR {
                 continue;
             }
-            let base = dd as usize * plane + hh as usize * self.width + ww as usize;
-            base_indices[offset_idx] = Some(base);
             for ic in 0..self.in_channels {
                 let channel_offset = ic * volume;
                 let value = row[channel_offset + base];
@@ -711,7 +966,7 @@ impl Module for Conv6da {
                 right: (1, self.expected_cols()),
             });
         }
-        let span = self.in_channels * SIX_DA_NEIGHBORS;
+        let span = self.neighbor_span();
         let volume = self.cells();
         let mut out = Tensor::zeros(batch, self.out_channels * volume)?;
         let weight = self.weight.value();
@@ -719,33 +974,19 @@ impl Module for Conv6da {
         let weight_data = weight.data();
         let bias_data = bias.data();
         let mut neighbors = vec![0.0f32; span];
-        let mut base_indices = [None; SIX_DA_NEIGHBORS];
-        let plane = self.height * self.width;
         let out_cols = out.shape().1;
         let mut out_rows = out.data_mut().chunks_exact_mut(out_cols);
         let mut input_rows = input.data().chunks_exact(cols);
         for (row, out_row) in (&mut input_rows).zip(&mut out_rows) {
-            for depth_idx in 0..self.depth {
-                for height_idx in 0..self.height {
-                    for width_idx in 0..self.width {
-                        let cell_index = depth_idx * plane + height_idx * self.width + width_idx;
-                        let geodesic = self.gather_neighbors(
-                            row,
-                            depth_idx,
-                            height_idx,
-                            width_idx,
-                            &mut neighbors,
-                            &mut base_indices,
-                        );
-                        let density = self.leech_projector.enrich(geodesic) as f32;
-                        for (oc, weight_row) in weight_data.chunks_exact(span).enumerate() {
-                            let mut acc = bias_data[oc] + density;
-                            for (value, weight) in neighbors.iter().zip(weight_row.iter()) {
-                                acc += value * weight;
-                            }
-                            out_row[oc * volume + cell_index] = acc;
-                        }
+            for cell_index in 0..volume {
+                let geodesic = self.gather_neighbors(row, &mut neighbors, cell_index);
+                let density = self.leech_projector.enrich(geodesic) as f32;
+                for (oc, weight_row) in weight_data.chunks_exact(span).enumerate() {
+                    let mut acc = bias_data[oc] + density;
+                    for (value, weight) in neighbors.iter().zip(weight_row.iter()) {
+                        acc += value * weight;
                     }
+                    out_row[oc * volume + cell_index] = acc;
                 }
             }
         }
@@ -763,7 +1004,7 @@ impl Module for Conv6da {
             });
         }
         let volume = self.cells();
-        let span = self.in_channels * SIX_DA_NEIGHBORS;
+        let span = self.neighbor_span();
         if grad_output.shape() != (batch, self.out_channels * volume) {
             return Err(TensorError::ShapeMismatch {
                 left: grad_output.shape(),
@@ -774,9 +1015,7 @@ impl Module for Conv6da {
         let mut grad_bias = vec![0.0f32; self.out_channels];
         let mut grad_input = Tensor::zeros(batch, cols)?;
         let mut neighbors = vec![0.0f32; span];
-        let mut base_indices = [None; SIX_DA_NEIGHBORS];
-        let plane = self.height * self.width;
-        let volume_per_channel = self.depth * plane;
+        let volume_per_channel = volume;
         let weight = self.weight.value();
         let grad_cols = grad_output.shape().1;
         let leech_factor = self.leech_projector.enrich(1.0);
@@ -788,52 +1027,40 @@ impl Module for Conv6da {
             .zip(&mut grad_rows)
             .zip(&mut grad_input_rows)
         {
-            for depth_idx in 0..self.depth {
-                for height_idx in 0..self.height {
-                    for width_idx in 0..self.width {
-                        let cell_index = depth_idx * plane + height_idx * self.width + width_idx;
-                        let geodesic = self.gather_neighbors(
-                            row,
-                            depth_idx,
-                            height_idx,
-                            width_idx,
-                            &mut neighbors,
-                            &mut base_indices,
-                        );
-                        let mut sum_go = 0.0f64;
-                        for (oc, weight_row) in weight_data.chunks_exact(span).enumerate() {
-                            let go = grad_row[oc * volume + cell_index];
-                            sum_go += f64::from(go);
-                            grad_bias[oc] += go;
-                            for (idx, &value) in neighbors.iter().enumerate() {
-                                grad_weight[oc * span + idx] += go * value;
+            for cell_index in 0..volume {
+                let geodesic = self.gather_neighbors(row, &mut neighbors, cell_index);
+                let indices = &self.neighbor_indices[cell_index];
+                let mut sum_go = 0.0f64;
+                for (oc, weight_row) in weight_data.chunks_exact(span).enumerate() {
+                    let go = grad_row[oc * volume + cell_index];
+                    sum_go += f64::from(go);
+                    grad_bias[oc] += go;
+                    for (idx, &value) in neighbors.iter().enumerate() {
+                        grad_weight[oc * span + idx] += go * value;
+                    }
+                    for ic in 0..self.in_channels {
+                        let channel_offset = ic * volume_per_channel;
+                        for (offset_idx, &base) in indices.iter().enumerate() {
+                            if base == INVALID_NEIGHBOR {
+                                continue;
                             }
-                            for ic in 0..self.in_channels {
-                                let channel_offset = ic * volume_per_channel;
-                                for (offset_idx, base_opt) in base_indices.iter().enumerate() {
-                                    if let Some(base) = base_opt {
-                                        let input_index = channel_offset + base;
-                                        let weight_idx = offset_idx * self.in_channels + ic;
-                                        grad_in_row[input_index] += go * weight_row[weight_idx];
-                                    }
-                                }
-                            }
+                            let input_index = channel_offset + base;
+                            let weight_idx = offset_idx * self.in_channels + ic;
+                            grad_in_row[input_index] += go * weight_row[weight_idx];
                         }
-                        if geodesic > 0.0
-                            && leech_factor > f64::EPSILON
-                            && sum_go.abs() > f64::EPSILON
-                        {
-                            let scale = (sum_go * leech_factor / geodesic) as f32;
-                            for ic in 0..self.in_channels {
-                                let channel_offset = ic * volume_per_channel;
-                                for (offset_idx, base_opt) in base_indices.iter().enumerate() {
-                                    if let Some(base) = base_opt {
-                                        let input_index = channel_offset + base;
-                                        let value = neighbors[offset_idx * self.in_channels + ic];
-                                        grad_in_row[input_index] += scale * value;
-                                    }
-                                }
+                    }
+                }
+                if geodesic > 0.0 && leech_factor > f64::EPSILON && sum_go.abs() > f64::EPSILON {
+                    let scale = (sum_go * leech_factor / geodesic) as f32;
+                    for ic in 0..self.in_channels {
+                        let channel_offset = ic * volume_per_channel;
+                        for (offset_idx, &base) in indices.iter().enumerate() {
+                            if base == INVALID_NEIGHBOR {
+                                continue;
                             }
+                            let input_index = channel_offset + base;
+                            let value = neighbors[offset_idx * self.in_channels + ic];
+                            grad_in_row[input_index] += scale * value;
                         }
                     }
                 }
@@ -876,59 +1103,33 @@ impl Conv2d {
         oh: usize,
         ow: usize,
     ) -> PureResult<Tensor> {
-        let mut out = Tensor::zeros(batch, self.out_channels * oh * ow)?;
+        let patches = self.im2col(input, batch, oh, ow)?;
         let weight = self.weight.value();
         let bias = self.bias.value();
-        let weight_data = weight.data();
+        let kernel_elems = self.in_channels * self.kernel.0 * self.kernel.1;
+        let spatial = oh * ow;
+        let (mut contracted, dims) = einsum_contract(
+            patches.data(),
+            &[batch, spatial, kernel_elems],
+            &['b', 's', 'k'],
+            weight.data(),
+            &[self.out_channels, kernel_elems],
+            &['o', 'k'],
+            &['b', 'o', 's'],
+        )?;
+        debug_assert_eq!(dims, vec![batch, self.out_channels, spatial]);
         let bias_data = bias.data();
-        let span = self.in_channels * self.kernel.0 * self.kernel.1;
-        let (h, w) = self.input_hw;
-        let (dilation_h, dilation_w) = self.dilation;
-        let out_cols = out.shape().1;
-        let cols = input.shape().1;
-        {
-            let out_data = out.data_mut();
-            for b in 0..batch {
-                let row = &input.data()[b * cols..(b + 1) * cols];
-                let (start, end) = (b * out_cols, (b + 1) * out_cols);
-                let out_row = &mut out_data[start..end];
-                for oc in 0..self.out_channels {
-                    let weight_row = &weight_data[oc * span..(oc + 1) * span];
-                    let bias = bias_data[oc];
-                    for oh_idx in 0..oh {
-                        for ow_idx in 0..ow {
-                            let mut acc = bias;
-                            for ic in 0..self.in_channels {
-                                let channel_offset = ic * h * w;
-                                for kh in 0..self.kernel.0 {
-                                    for kw in 0..self.kernel.1 {
-                                        let pos_h = oh_idx * self.stride.0 + kh * dilation_h;
-                                        let pos_w = ow_idx * self.stride.1 + kw * dilation_w;
-                                        let idx_h = pos_h as isize - self.padding.0 as isize;
-                                        let idx_w = pos_w as isize - self.padding.1 as isize;
-                                        if idx_h < 0
-                                            || idx_w < 0
-                                            || idx_h >= h as isize
-                                            || idx_w >= w as isize
-                                        {
-                                            continue;
-                                        }
-                                        let input_idx =
-                                            channel_offset + idx_h as usize * w + idx_w as usize;
-                                        let weight_idx = ic * self.kernel.0 * self.kernel.1
-                                            + kh * self.kernel.1
-                                            + kw;
-                                        acc += row[input_idx] * weight_row[weight_idx];
-                                    }
-                                }
-                            }
-                            out_row[oc * (oh * ow) + oh_idx * ow + ow_idx] = acc;
-                        }
-                    }
+        for b in 0..batch {
+            let batch_offset = b * self.out_channels * spatial;
+            for oc in 0..self.out_channels {
+                let bias = bias_data[oc];
+                let channel_offset = batch_offset + oc * spatial;
+                for idx in 0..spatial {
+                    contracted[channel_offset + idx] += bias;
                 }
             }
         }
-        Ok(out)
+        Tensor::from_vec(batch, self.out_channels * spatial, contracted)
     }
 
     #[cfg(feature = "wgpu")]
@@ -1434,11 +1635,44 @@ mod tests {
     }
 
     #[test]
+    fn conv6da_accepts_custom_neighbors() {
+        let offsets = [(0, 0, 0), (0, 1, 0)];
+        let mut conv =
+            Conv6da::with_neighbors("conv6", 1, 1, (1, 2, 2), 24, 0.0, &offsets).unwrap();
+        assert_eq!(conv.neighbor_count(), offsets.len());
+        assert_eq!(conv.neighbor_offsets(), offsets.as_slice());
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (1, 4));
+        let grad_output = Tensor::from_vec(1, 4, vec![1.0; 4]).unwrap();
+        let _ = conv.backward(&input, &grad_output).unwrap();
+        let weight_grad = conv.weight.gradient().unwrap();
+        assert_eq!(weight_grad.shape(), (1, offsets.len()));
+    }
+
+    #[test]
     fn conv1d_forward_matches_manual() {
-        let conv = Conv1d::new("conv", 1, 1, 3, 1, 1).unwrap();
+        let conv = Conv1d::new("conv", 1, 1, 3, 1, 1, 1).unwrap();
         let input = Tensor::from_vec(1, 5, vec![1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
         let output = conv.forward(&input).unwrap();
         assert_eq!(output.shape().0, 1);
+    }
+
+    #[test]
+    fn conv1d_supports_dilation() {
+        let mut conv = Conv1d::new("conv", 1, 1, 2, 1, 0, 2).unwrap();
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        for weight in conv.weight.value_mut().data_mut() {
+            *weight = 1.0;
+        }
+        let input = Tensor::from_vec(1, 5, vec![1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (1, 3));
+        assert_eq!(output.data(), &[4.0, 6.0, 8.0]);
     }
 
     #[cfg(feature = "wgpu")]
@@ -1477,6 +1711,16 @@ mod tests {
         let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
         let out = pool.forward(&input).unwrap();
         assert_eq!(out.data(), &[4.0]);
+    }
+
+    #[test]
+    fn max_pool2d_backward_routes_gradients() {
+        let mut pool = MaxPool2d::new(1, (2, 2), (2, 2), (0, 0), (2, 2)).unwrap();
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let _ = pool.forward(&input).unwrap();
+        let grad_output = Tensor::from_vec(1, 1, vec![2.5]).unwrap();
+        let grad_input = pool.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.data(), &[0.0, 0.0, 0.0, 2.5]);
     }
 
     #[test]
