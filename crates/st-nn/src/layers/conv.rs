@@ -1863,30 +1863,11 @@ impl Conv2d {
         let patches = self.im2col(input, batch, oh, ow)?;
         let weight = self.weight.value();
         let bias = self.bias.value();
-        let kernel_elems = self.in_channels * self.kernel.0 * self.kernel.1;
+        let patches = self.im2col(input, batch, oh, ow)?;
+        let mut contracted = einsum_contract(&patches, &weight, "bs,os->bo")?;
+        contracted.add_row_inplace(bias.data())?;
         let spatial = oh * ow;
-        let (mut contracted, dims) = einsum_contract(
-            patches.data(),
-            &[batch, spatial, kernel_elems],
-            &['b', 's', 'k'],
-            weight.data(),
-            &[self.out_channels, kernel_elems],
-            &['o', 'k'],
-            &['b', 'o', 's'],
-        )?;
-        debug_assert_eq!(dims, vec![batch, self.out_channels, spatial]);
-        let bias_data = bias.data();
-        for b in 0..batch {
-            let batch_offset = b * self.out_channels * spatial;
-            for oc in 0..self.out_channels {
-                let bias = bias_data[oc];
-                let channel_offset = batch_offset + oc * spatial;
-                for idx in 0..spatial {
-                    contracted[channel_offset + idx] += bias;
-                }
-            }
-        }
-        Tensor::from_vec(batch, self.out_channels * spatial, contracted)
+        contracted.reshape(batch, self.out_channels * spatial)
     }
 
     #[cfg(feature = "wgpu")]
