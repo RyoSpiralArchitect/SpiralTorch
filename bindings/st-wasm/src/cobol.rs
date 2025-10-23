@@ -1,4 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::de::{self, Deserializer, MapAccess, Visitor};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -26,7 +28,7 @@ pub struct CobolRoute {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cics: Option<CobolCicsRoute>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub dataset: Option<String>,
+    pub dataset: Option<CobolDatasetRoute>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -55,6 +57,141 @@ pub struct CobolNarratorPayload {
     pub locale: Option<String>,
     #[serde(default)]
     pub coefficients: Vec<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CobolDatasetRoute {
+    pub dataset: String,
+    pub member: Option<String>,
+    pub disposition: Option<String>,
+    pub volume: Option<String>,
+}
+
+impl Default for CobolDatasetRoute {
+    fn default() -> Self {
+        Self {
+            dataset: String::new(),
+            member: None,
+            disposition: None,
+            volume: None,
+        }
+    }
+}
+
+impl Serialize for CobolDatasetRoute {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if self.member.is_none() && self.disposition.is_none() && self.volume.is_none() {
+            serializer.serialize_str(&self.dataset)
+        } else {
+            let mut entries = 1;
+            if self.member.is_some() {
+                entries += 1;
+            }
+            if self.disposition.is_some() {
+                entries += 1;
+            }
+            if self.volume.is_some() {
+                entries += 1;
+            }
+            let mut map = serializer.serialize_map(Some(entries))?;
+            map.serialize_entry("dataset", &self.dataset)?;
+            if let Some(member) = &self.member {
+                map.serialize_entry("member", member)?;
+            }
+            if let Some(disposition) = &self.disposition {
+                map.serialize_entry("disposition", disposition)?;
+            }
+            if let Some(volume) = &self.volume {
+                map.serialize_entry("volume", volume)?;
+            }
+            map.end()
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for CobolDatasetRoute {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct DatasetVisitor;
+
+        impl<'de> Visitor<'de> for DatasetVisitor {
+            type Value = CobolDatasetRoute;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a dataset name string or an object with dataset metadata")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(CobolDatasetRoute {
+                    dataset: value.to_string(),
+                    member: None,
+                    disposition: None,
+                    volume: None,
+                })
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(&value)
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut dataset: Option<String> = None;
+                let mut member: Option<String> = None;
+                let mut disposition: Option<String> = None;
+                let mut volume: Option<String> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "dataset" => {
+                            if dataset.is_some() {
+                                return Err(de::Error::duplicate_field("dataset"));
+                            }
+                            dataset = Some(map.next_value()?);
+                        }
+                        "member" => {
+                            member = map.next_value()?;
+                        }
+                        "disposition" => {
+                            disposition = map.next_value()?;
+                        }
+                        "volume" => {
+                            volume = map.next_value()?;
+                        }
+                        other => {
+                            return Err(de::Error::unknown_field(
+                                other,
+                                &["dataset", "member", "disposition", "volume"],
+                            ));
+                        }
+                    }
+                }
+
+                let dataset = dataset.ok_or_else(|| de::Error::missing_field("dataset"))?;
+                Ok(CobolDatasetRoute {
+                    dataset,
+                    member,
+                    disposition,
+                    volume,
+                })
+            }
+        }
+
+        deserializer.deserialize_any(DatasetVisitor)
+    }
 }
 
 impl Default for CobolNarratorPayload {
@@ -118,6 +255,7 @@ pub enum InitiatorKind {
 
 pub struct CobolEnvelopeBuilder {
     envelope: CobolEnvelope,
+    pending_dataset: Option<CobolDatasetRoute>,
 }
 
 impl CobolEnvelopeBuilder {
@@ -132,6 +270,7 @@ impl CobolEnvelopeBuilder {
                 payload: CobolNarratorPayload::default(),
                 metadata: CobolMetadata::default(),
             },
+            pending_dataset: None,
         };
         sanitize_envelope(&mut builder.envelope);
         ensure_planner_annotation(&mut builder.envelope);
@@ -141,13 +280,17 @@ impl CobolEnvelopeBuilder {
     pub fn from_envelope(mut envelope: CobolEnvelope) -> Self {
         sanitize_envelope(&mut envelope);
         ensure_planner_annotation(&mut envelope);
-        Self { envelope }
+        Self {
+            envelope,
+            pending_dataset: None,
+        }
     }
 
     pub fn load_envelope(&mut self, mut envelope: CobolEnvelope) {
         sanitize_envelope(&mut envelope);
         ensure_planner_annotation(&mut envelope);
         self.envelope = envelope;
+        self.pending_dataset = None;
     }
 
     pub fn set_release_channel(&mut self, channel: impl Into<String>) {
@@ -228,13 +371,104 @@ impl CobolEnvelopeBuilder {
     }
 
     pub fn set_dataset(&mut self, dataset: Option<String>) {
-        self.envelope.route.dataset = dataset.and_then(sanitize);
+        match dataset.and_then(sanitize) {
+            Some(name) => {
+                let mut route = self.envelope.route.dataset.take().unwrap_or_default();
+                route.dataset = name;
+                if let Some(pending) = self.pending_dataset.take() {
+                    merge_dataset_metadata(&mut route, pending);
+                }
+                self.envelope.route.dataset = Some(route);
+            }
+            None => {
+                self.envelope.route.dataset = None;
+                self.pending_dataset = None;
+            }
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_member(&mut self, member: Option<String>) {
+        let member = member.and_then(sanitize);
+        if let Some(route) = self.envelope.route.dataset.as_mut() {
+            route.member = member;
+            sanitize_dataset_route(&mut self.envelope.route.dataset);
+            return;
+        }
+
+        match member {
+            Some(value) => {
+                let pending = self
+                    .pending_dataset
+                    .get_or_insert_with(CobolDatasetRoute::default);
+                pending.member = Some(value);
+            }
+            None => {
+                if let Some(pending) = self.pending_dataset.as_mut() {
+                    pending.member = None;
+                    drop_pending_if_empty(&mut self.pending_dataset);
+                }
+            }
+        }
+    }
+
+    pub fn set_dataset_disposition(&mut self, disposition: Option<String>) {
+        let disposition = disposition.and_then(sanitize);
+        if let Some(route) = self.envelope.route.dataset.as_mut() {
+            route.disposition = disposition;
+            sanitize_dataset_route(&mut self.envelope.route.dataset);
+            return;
+        }
+
+        match disposition {
+            Some(value) => {
+                let pending = self
+                    .pending_dataset
+                    .get_or_insert_with(CobolDatasetRoute::default);
+                pending.disposition = Some(value);
+            }
+            None => {
+                if let Some(pending) = self.pending_dataset.as_mut() {
+                    pending.disposition = None;
+                    drop_pending_if_empty(&mut self.pending_dataset);
+                }
+            }
+        }
+    }
+
+    pub fn set_dataset_volume(&mut self, volume: Option<String>) {
+        let volume = volume.and_then(sanitize);
+        if let Some(route) = self.envelope.route.dataset.as_mut() {
+            route.volume = volume;
+            sanitize_dataset_route(&mut self.envelope.route.dataset);
+            return;
+        }
+
+        match volume {
+            Some(value) => {
+                let pending = self
+                    .pending_dataset
+                    .get_or_insert_with(CobolDatasetRoute::default);
+                pending.volume = Some(value);
+            }
+            None => {
+                if let Some(pending) = self.pending_dataset.as_mut() {
+                    pending.volume = None;
+                    drop_pending_if_empty(&mut self.pending_dataset);
+                }
+            }
+        }
     }
 
     pub fn clear_route(&mut self) {
         self.clear_mq_route();
         self.clear_cics_route();
+        self.clear_dataset();
+    }
+
+    pub fn clear_dataset(&mut self) {
         self.envelope.route.dataset = None;
+        self.pending_dataset = None;
     }
 
     pub fn add_tag(&mut self, tag: impl Into<String>) {
@@ -319,7 +553,13 @@ impl CobolEnvelope {
             issues.push("add at least one initiator before dispatch".to_string());
         }
 
-        if self.route.mq.is_none() && self.route.cics.is_none() && self.route.dataset.is_none() {
+        let dataset_configured = self
+            .route
+            .dataset
+            .as_ref()
+            .map(|route| !route.dataset.is_empty())
+            .unwrap_or(false);
+        if self.route.mq.is_none() && self.route.cics.is_none() && !dataset_configured {
             issues.push("configure a delivery route (MQ, CICS, or dataset)".to_string());
         }
 
@@ -393,7 +633,7 @@ fn sanitize_envelope(envelope: &mut CobolEnvelope) {
         }
     }
 
-    envelope.route.dataset = envelope.route.dataset.take().and_then(sanitize);
+    sanitize_dataset_route(&mut envelope.route.dataset);
 
     sanitize_vec(&mut envelope.metadata.tags);
     sanitize_vec(&mut envelope.metadata.annotations);
@@ -436,6 +676,39 @@ where
 fn sanitize_option(target: &mut Option<String>) {
     if let Some(value) = target.take() {
         *target = sanitize(value);
+    }
+}
+
+fn sanitize_dataset_route(target: &mut Option<CobolDatasetRoute>) {
+    if let Some(mut dataset) = target.take() {
+        let dataset_name = sanitize(dataset.dataset);
+        dataset.member = dataset.member.take().and_then(sanitize);
+        dataset.disposition = dataset.disposition.take().and_then(sanitize);
+        dataset.volume = dataset.volume.take().and_then(sanitize);
+        if let Some(name) = dataset_name {
+            dataset.dataset = name;
+            *target = Some(dataset);
+        }
+    }
+}
+
+fn merge_dataset_metadata(target: &mut CobolDatasetRoute, pending: CobolDatasetRoute) {
+    if target.member.is_none() {
+        target.member = pending.member;
+    }
+    if target.disposition.is_none() {
+        target.disposition = pending.disposition;
+    }
+    if target.volume.is_none() {
+        target.volume = pending.volume;
+    }
+}
+
+fn drop_pending_if_empty(target: &mut Option<CobolDatasetRoute>) {
+    if let Some(route) = target.as_mut() {
+        if route.member.is_none() && route.disposition.is_none() && route.volume.is_none() {
+            *target = None;
+        }
     }
 }
 
@@ -496,6 +769,9 @@ mod tests {
         builder.set_mq_route("QM1", "Q1", Some("sync".into()));
         builder.set_cics_route("CX12", Some("PGM".into()), None);
         builder.set_dataset(Some("HLQ.DATA".into()));
+        builder.set_dataset_member(Some("PAYLOAD".into()));
+        builder.set_dataset_disposition(Some("OLD".into()));
+        builder.set_dataset_volume(Some("VOL001".into()));
         builder.add_tag("browser");
         builder.add_annotation("generated");
         builder.merge_metadata_value(serde_json::json!({"priority": "low"}));
@@ -509,7 +785,11 @@ mod tests {
         assert_eq!(envelope.initiators.len(), 1);
         assert!(envelope.route.mq.is_some());
         assert!(envelope.route.cics.is_some());
-        assert_eq!(envelope.route.dataset.as_deref(), Some("HLQ.DATA"));
+        let dataset_route = envelope.route.dataset.expect("dataset");
+        assert_eq!(dataset_route.dataset, "HLQ.DATA");
+        assert_eq!(dataset_route.member.as_deref(), Some("PAYLOAD"));
+        assert_eq!(dataset_route.disposition.as_deref(), Some("OLD"));
+        assert_eq!(dataset_route.volume.as_deref(), Some("VOL001"));
         assert!(envelope.metadata.tags.contains(&"browser".to_string()));
         assert!(envelope
             .metadata
@@ -527,12 +807,48 @@ mod tests {
         let mut builder = CobolEnvelopeBuilder::new("job-100");
         builder.set_release_channel("   ");
         builder.set_dataset(Some("   ".into()));
+        builder.set_dataset_member(Some("   ".into()));
+        builder.set_dataset_disposition(Some("   ".into()));
+        builder.set_dataset_volume(Some("   ".into()));
         builder.add_tag("  ");
         builder.add_annotation(" ");
         builder.merge_metadata_value(Value::Null);
         assert_eq!(builder.snapshot().release_channel, "production");
         assert!(builder.snapshot().route.dataset.is_none());
         assert!(builder.snapshot().metadata.tags.is_empty());
+    }
+
+    #[test]
+    fn dataset_metadata_survives_partial_updates() {
+        let mut builder = CobolEnvelopeBuilder::new("job-dataset");
+        builder.set_dataset(Some(" HLQ.DATA ".into()));
+        builder.set_dataset_member(Some(" MEMBER ".into()));
+        builder.set_dataset_disposition(Some(" MOD ".into()));
+        builder.set_dataset_volume(Some(" VOL003 ".into()));
+        builder.set_dataset(Some("HLQ.DATA".into()));
+
+        let dataset = builder.snapshot().route.dataset.expect("dataset");
+        assert_eq!(dataset.dataset, "HLQ.DATA");
+        assert_eq!(dataset.member.as_deref(), Some("MEMBER"));
+        assert_eq!(dataset.disposition.as_deref(), Some("MOD"));
+        assert_eq!(dataset.volume.as_deref(), Some("VOL003"));
+    }
+
+    #[test]
+    fn dataset_metadata_applies_when_name_set_last() {
+        let mut builder = CobolEnvelopeBuilder::new("job-staged-dataset");
+        builder.set_dataset_member(Some("PAYLOAD".into()));
+        builder.set_dataset_disposition(Some("SHR".into()));
+        builder.set_dataset_volume(Some("VOL001".into()));
+
+        assert!(builder.snapshot().route.dataset.is_none());
+
+        builder.set_dataset(Some("HLQ.DATA".into()));
+        let dataset = builder.snapshot().route.dataset.expect("dataset");
+        assert_eq!(dataset.dataset, "HLQ.DATA");
+        assert_eq!(dataset.member.as_deref(), Some("PAYLOAD"));
+        assert_eq!(dataset.disposition.as_deref(), Some("SHR"));
+        assert_eq!(dataset.volume.as_deref(), Some("VOL001"));
     }
 
     #[test]
@@ -549,11 +865,12 @@ mod tests {
         builder.set_mq_route("QM2", "QUEUE", None);
         builder.set_cics_route("TRN1", Some("PGM1".into()), Some("CHAN".into()));
         builder.set_dataset(Some("HLQ.DATA".into()));
+        builder.set_dataset_member(Some("COEFFS".into()));
 
         builder.clear_initiators();
         builder.clear_mq_route();
         builder.clear_cics_route();
-        builder.set_dataset(None);
+        builder.clear_dataset();
 
         let envelope = builder.snapshot();
         assert!(envelope.initiators.is_empty());
@@ -564,6 +881,7 @@ mod tests {
         builder.set_mq_route("QM2", "QUEUE", None);
         builder.set_cics_route("TRN1", None, None);
         builder.set_dataset(Some("HLQ.DATA".into()));
+        builder.set_dataset_member(Some("COEFFS".into()));
         builder.clear_route();
         let cleared = builder.snapshot();
         assert!(cleared.route.mq.is_none());
@@ -604,7 +922,12 @@ mod tests {
                     program: Some("  ".to_string()),
                     channel: Some(" CHAN ".to_string()),
                 }),
-                dataset: Some("  DATA.SET  ".to_string()),
+                dataset: Some(CobolDatasetRoute {
+                    dataset: "  DATA.SET  ".to_string(),
+                    member: Some(" MEMBER  ".to_string()),
+                    disposition: Some(" SHR ".to_string()),
+                    volume: None,
+                }),
             },
             payload: CobolNarratorPayload {
                 curvature: 0.7,
@@ -643,7 +966,10 @@ mod tests {
                 .map(|cics| cics.transaction.clone()),
             Some("TRN1".to_string())
         );
-        assert_eq!(snapshot.route.dataset.as_deref(), Some("DATA.SET"));
+        let dataset = snapshot.route.dataset.expect("dataset");
+        assert_eq!(dataset.dataset, "DATA.SET");
+        assert_eq!(dataset.member.as_deref(), Some("MEMBER"));
+        assert_eq!(dataset.disposition.as_deref(), Some("SHR"));
         assert_eq!(snapshot.metadata.tags, vec!["tag-one".to_string()]);
         assert_eq!(
             snapshot.initiators.first().expect("initiator").name,
@@ -731,5 +1057,38 @@ mod tests {
         builder.set_narrator_config(0.6, 0.4, "spiraltorch.default", None);
         assert!(builder.is_valid());
         assert!(builder.validation_issues().is_empty());
+    }
+
+    #[test]
+    fn dataset_route_serialization_supports_string_and_object() {
+        let basic = CobolDatasetRoute {
+            dataset: "HLQ.DATA".to_string(),
+            member: None,
+            disposition: None,
+            volume: None,
+        };
+        let serialized = serde_json::to_string(&basic).expect("serialize");
+        assert_eq!(serialized, "\"HLQ.DATA\"");
+
+        let mut enriched = basic.clone();
+        enriched.member = Some("MEMBER".into());
+        enriched.disposition = Some("SHR".into());
+        let serialized_enriched = serde_json::to_string(&enriched).expect("serialize enriched");
+        assert!(serialized_enriched.contains("\"dataset\":"));
+        assert!(serialized_enriched.contains("\"member\""));
+        assert!(serialized_enriched.contains("\"disposition\""));
+
+        let parsed_basic: CobolDatasetRoute = serde_json::from_str("\"USER.DATA\"").expect("parse");
+        assert_eq!(parsed_basic.dataset, "USER.DATA");
+        assert!(parsed_basic.member.is_none());
+
+        let parsed_enriched: CobolDatasetRoute = serde_json::from_str(
+            "{\"dataset\":\"USER.DATA\",\"member\":\"MEMBER\",\"disposition\":\"SHR\",\"volume\":\"VOL001\"}",
+        )
+        .expect("parse object");
+        assert_eq!(parsed_enriched.dataset, "USER.DATA");
+        assert_eq!(parsed_enriched.member.as_deref(), Some("MEMBER"));
+        assert_eq!(parsed_enriched.disposition.as_deref(), Some("SHR"));
+        assert_eq!(parsed_enriched.volume.as_deref(), Some("VOL001"));
     }
 }

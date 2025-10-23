@@ -27,7 +27,10 @@ An envelope contains five sections:
 2. **Initiators** — a list describing the humans, models, or automation agents
    that collaborated on the narration request.
 3. **Route** — optional MQ, CICS, and dataset selectors that inform the
-   receiving COBOL code where to dispatch the payload.
+   receiving COBOL code where to dispatch the payload. Dataset selectors can
+   now carry richer metadata (PDS member, disposition, and volume serial)
+   so batch writers or GDG loaders can stage the payload precisely without
+   extra glue code in the bridge layer.
 4. **Narrator payload** — curvature, temperature, encoder identifier, locale,
    and coefficient buffer.
 5. **Metadata** — tags, annotations, and an open `extra` field that accepts
@@ -57,6 +60,10 @@ builder.add_initiator(make_initiator(
     Some("validated dataset selection".into()),
 ));
 builder.set_mq_route("MQ1", "NARRATION.INBOUND", Some("sync".into()));
+builder.set_dataset(Some("HLQ.DATA".into()));
+builder.set_dataset_member(Some("NARRATE".into()));
+builder.set_dataset_disposition(Some("SHR".into()));
+builder.set_dataset_volume(Some("VOL001".into()));
 builder.add_tag("browser-ui");
 let envelope = builder.snapshot();
 let json = envelope.to_json_string()?;
@@ -85,6 +92,11 @@ builder.set_mq_route("MQ2", "NARRATION.REROUTED", None);
 `planner_initialized` annotation so downstream tooling can distinguish between
 fresh and imported envelopes.
 
+Metadata setters can run before a dataset name is finalised.  The builder
+stashes the PDS member, disposition, and volume hints until `set_dataset()`
+lands on a non-empty name, so UIs can collect fields in any order without
+losing context.
+
 ## Calling the planner from JavaScript
 
 ```ts
@@ -96,6 +108,10 @@ planner.setNarratorConfig(0.8, 0.35, "spiraltorch.default", null);
 planner.setCoefficients(new Float32Array([0.25, 0.33, 0.48]));
 planner.addHumanInitiator("Analyst", null, "analyst@example", "pilot run");
 planner.setMqRoute("QM1", "SPIRALTORCH.INBOUND", "commit");
+planner.setDataset("HLQ.DATA(+1)");
+planner.setDatasetMember("NARRATE");
+planner.setDatasetDisposition("SHR");
+planner.setDatasetVolume("VOL001");
 const jsonEnvelope = planner.toJson();
 const bytes = planner.toUint8Array();
 
