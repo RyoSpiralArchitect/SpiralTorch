@@ -81,6 +81,14 @@ fn psi_lock() -> &'static Mutex<()> {
     PSI_TELEMETRY_LOCK.get_or_init(|| Mutex::new(()))
 }
 
+#[cfg(all(feature = "psi", debug_assertions))]
+static PSI_SERIAL_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(all(feature = "psi", debug_assertions))]
+fn psi_serial_lock() -> &'static Mutex<()> {
+    PSI_SERIAL_LOCK.get_or_init(|| Mutex::new(()))
+}
+
 #[cfg(feature = "psi")]
 #[must_use]
 pub fn psi_telemetry_guard() -> MutexGuard<'static, ()> {
@@ -201,6 +209,8 @@ pub struct ConfigDiffEvent {
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi(reading: &PsiReading) {
+    #[cfg(all(feature = "psi", debug_assertions))]
+    let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
     if let Ok(mut guard) = LAST_PSI.write() {
         *guard = Some(reading.clone());
     }
@@ -224,6 +234,8 @@ pub fn get_last_psi() -> Option<PsiReading> {
 
 #[cfg(feature = "psi")]
 pub fn clear_last_psi() {
+    #[cfg(all(feature = "psi", debug_assertions))]
+    let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
     if let Ok(mut guard) = LAST_PSI.write() {
         *guard = None;
     }
@@ -231,6 +243,8 @@ pub fn clear_last_psi() {
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi_events(events: &[PsiEvent]) {
+    #[cfg(all(feature = "psi", debug_assertions))]
+    let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
     if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
         guard.clear();
         guard.extend(events.iter().cloned());
@@ -255,6 +269,8 @@ pub fn get_last_psi_events() -> Vec<PsiEvent> {
 
 #[cfg(feature = "psi")]
 pub fn clear_last_psi_events() {
+    #[cfg(all(feature = "psi", debug_assertions))]
+    let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
     if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
         guard.clear();
     }
@@ -668,6 +684,8 @@ pub(crate) fn clear_maintainer_report_for_test() {
 
 /// Stores the most recent SoftLogic Z feedback sample.
 pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
+    #[cfg(all(feature = "psi", debug_assertions))]
+    let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
     match softlogic_z_cell().write() {
         Ok(mut guard) => {
             *guard = Some(feedback.clone());
@@ -691,6 +709,8 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
 
 #[cfg(feature = "psi")]
 pub fn clear_softlogic_z() {
+    #[cfg(all(feature = "psi", debug_assertions))]
+    let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
     match softlogic_z_cell().write() {
         Ok(mut guard) => {
             *guard = None;
