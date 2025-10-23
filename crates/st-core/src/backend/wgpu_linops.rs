@@ -17,7 +17,10 @@ pub struct WgpuOps {
 
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
 impl WgpuOps {
-    pub fn new(ctx: std::sync::Arc<wgpu_rt::WgpuCtx>) -> Self { Self { ctx } }
+    pub fn new(ctx: std::sync::Arc<wgpu_rt::WgpuCtx>) -> Self {
+        wgpu_rt::install_ctx(ctx.clone());
+        Self { ctx }
+    }
 
     pub fn wrap_buffer(&self, buffer: std::sync::Arc<wgpu::Buffer>, len: usize) -> DeviceBuf {
         DeviceBuf::from_wgpu(len, buffer)
@@ -91,6 +94,7 @@ impl DeviceOps for WgpuOps {
         slice.map_async(wgpu::MapMode::Read, move |res| {
             let _ = sender.send(res);
         });
+        self.ctx.device.poll(wgpu::Maintain::Wait);
 
         match receiver
             .recv()
