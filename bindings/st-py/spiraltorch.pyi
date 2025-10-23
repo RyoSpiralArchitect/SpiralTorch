@@ -905,6 +905,31 @@ class CoherenceDiagnostics:
     aggregated: Tensor
     coherence: List[float]
     channel_reports: List[CoherenceChannelReport]
+    preserved_channels: int
+    discarded_channels: int
+    pre_discard: PreDiscardTelemetry | None
+
+
+class PreDiscardTelemetry:
+    dominance_ratio: float
+    energy_floor: float
+    discarded: int
+    preserved: int
+    used_fallback: bool
+
+
+class PreDiscardPolicy:
+    def __init__(
+        self,
+        dominance_ratio: float,
+        *,
+        energy_floor: float | None = ...,
+        min_channels: int | None = ...,
+    ) -> None: ...
+
+    dominance_ratio: float
+    energy_floor: float
+    min_channels: int
 
 
 class _ZSpaceCoherenceSequencer:
@@ -927,11 +952,23 @@ class _ZSpaceCoherenceSequencer:
 
     def project_to_zspace(self, x: Tensor) -> Tensor: ...
 
+    def configure_pre_discard(
+        self,
+        dominance_ratio: float,
+        *,
+        energy_floor: float | None = ...,
+        min_channels: int | None = ...,
+    ) -> None: ...
+
+    def disable_pre_discard(self) -> None: ...
+
     def __call__(self, x: Tensor) -> Tensor: ...
 
     def dim(self) -> int: ...
 
     def num_heads(self) -> int: ...
+
+    def pre_discard_policy(self) -> PreDiscardPolicy | None: ...
 
     def curvature(self) -> float: ...
 
