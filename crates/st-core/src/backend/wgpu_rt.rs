@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-// crates/st-core/src/backend/wgpu_rt.rs  (v1.8.7) — excerpted TopK dispatch
+// crates/st-core/src/backend/wgpu_rt.rs  (v1.9.0) — TopK + linear primitives
 #![allow(unused)]
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
@@ -12,12 +12,22 @@ use std::sync::Arc;
 pub struct WgpuCtx {
     pub device: wgpu::Device,
     pub queue:  wgpu::Queue,
+    // RankK/TopK pipelines
     topk_heap_pl:   OnceCell<wgpu::ComputePipeline>,
     topk_heap_sgintrin_pl: OnceCell<wgpu::ComputePipeline>,
     topk_bit_pl:    OnceCell<wgpu::ComputePipeline>,
     topk_wg_pl:     OnceCell<wgpu::ComputePipeline>,
-    layout_topk: OnceCell<wgpu::BindGroupLayout>,
+    layout_topk:    OnceCell<wgpu::BindGroupLayout>,
+    // Linear primitives
+    lin_axpy_pl:        OnceCell<wgpu::ComputePipeline>,
+    lin_scale_pl:       OnceCell<wgpu::ComputePipeline>,
+    lin_copy_pl:        OnceCell<wgpu::ComputePipeline>,
+    lin_fill_pl:        OnceCell<wgpu::ComputePipeline>,
+    lin_dot_partials_pl:OnceCell<wgpu::ComputePipeline>,
+    lin_dot_finalize_pl:OnceCell<wgpu::ComputePipeline>,
+    layout_lin:         OnceCell<wgpu::BindGroupLayout>,
 }
+
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
 impl WgpuCtx {
     pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
@@ -27,71 +37,208 @@ impl WgpuCtx {
             topk_heap_sgintrin_pl: OnceCell::new(),
             topk_bit_pl:  OnceCell::new(),
             topk_wg_pl:   OnceCell::new(),
-            layout_topk: OnceCell::new(),
+            layout_topk:  OnceCell::new(),
+            lin_axpy_pl:        OnceCell::new(),
+            lin_scale_pl:       OnceCell::new(),
+            lin_copy_pl:        OnceCell::new(),
+            lin_fill_pl:        OnceCell::new(),
+            lin_dot_partials_pl:OnceCell::new(),
+            lin_dot_finalize_pl:OnceCell::new(),
+            layout_lin:         OnceCell::new(),
         }
     }
 }
 
-#[repr(C)] #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Params { rows:u32, cols:u32, k:u32, row_stride:u32, k_lane:u32, tile_cols:u32, radix:u32, segments:u32 }
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Params {
+    rows:u32, cols:u32, k:u32, row_stride:u32,
+    k_lane:u32, tile_cols:u32, radix:u32, segments:u32
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct LinParams {
+    dims: [u32;4],
+    scalars: [f32;4],
+}
 
 static CTX: OnceCell<Arc<WgpuCtx>> = OnceCell::new();
 pub fn install_ctx(ctx: Arc<WgpuCtx>) { let _ = CTX.set(ctx); }
 fn ctx() -> Result<Arc<WgpuCtx>, String> { CTX.get().cloned().ok_or("WGPU ctx not installed".into()) }
+
 const WGSL_RANKK: &str = include_str!("wgpu_kernels_rankk.wgsl");
+const WGSL_LINOPS: &str = include_str!("wgpu_kernels_linops.wgsl");
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
 fn module(ctx:&WgpuCtx, src:&'static str) -> wgpu::ShaderModule {
-    ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor{ label: Some("st.wgsl"), source: wgpu::ShaderSource::Wgsl(src.into()) })
+    ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor{
+        label: Some("st.wgsl"),
+        source: wgpu::ShaderSource::Wgsl(src.into()),
+    })
 }
+
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
 fn ensure_layout_topk(ctx:&WgpuCtx) -> &wgpu::BindGroupLayout {
     ctx.layout_topk.get_or_init(|| {
         ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
             label: Some("st.rankk.layout.topk"),
-            entries: &[ bge_storage(0, true), bge_storage(1, false), bge_storage(2, false), bge_uniform(3) ],
+            entries: &[
+                bge_storage(0, true),
+                bge_storage(1, false),
+                bge_storage(2, false),
+                bge_uniform(3),
+            ],
         })
     })
 }
-#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
-fn bge_storage(binding:u32, read_only:bool)->wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry{
-        binding, visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer{ ty: wgpu::BufferBindingType::Storage{ read_only }, has_dynamic_offset:false, min_binding_size: None },
-        count: None
-    }
-}
-#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
-fn bge_uniform(binding:u32)->wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry{
-        binding, visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer{ ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset:false, min_binding_size: None },
-        count: None
-    }
-}
-#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
-fn pl(ctx:&WgpuCtx, entry:&'static str, layout:&wgpu::BindGroupLayout)->wgpu::ComputePipeline {
-    let module = module(ctx, WGSL_RANKK);
-    let pl_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{ label: Some("st.pl"), bind_group_layouts: &[layout], push_constant_ranges: &[] });
-    ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{ label: Some(entry), layout: Some(&pl_layout), module: &module, entry_point: entry })
-}
-#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
-fn ensure_topk_heap_pl(ctx:&WgpuCtx)->&wgpu::ComputePipeline { ctx.topk_heap_pl.get_or_init(|| pl(ctx, "topk_subgroups_heap_1ce", ensure_layout_topk(ctx))) }
-#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
-fn ensure_topk_heap_sgintrin_pl(ctx:&WgpuCtx)->&wgpu::ComputePipeline { ctx.topk_heap_sgintrin_pl.get_or_init(|| pl(ctx, "topk_subgroups_heap_sgintrin_1ce", ensure_layout_topk(ctx))) }
-#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
-fn ensure_topk_bit_pl(ctx:&WgpuCtx)->&wgpu::ComputePipeline { ctx.topk_bit_pl.get_or_init(|| pl(ctx, "topk_subgroups_bitonic_1ce", ensure_layout_topk(ctx))) }
-#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
-fn ensure_topk_wg_pl(ctx:&WgpuCtx)->&wgpu::ComputePipeline { ctx.topk_wg_pl.get_or_init(|| pl(ctx, "topk_workgroup_1ce", ensure_layout_topk(ctx))) }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
-pub fn dispatch_topk_1ce(rows:u32, cols:u32, k:u32, row_stride:u32, k_lane:u32, x:&wgpu::Buffer, out_vals:&wgpu::Buffer, out_idx:&wgpu::Buffer)->Result<(),String>{
-    use wgpu::util::DeviceExt; use wgpu::Features;
+pub fn ensure_layout_lin(ctx:&WgpuCtx) -> &wgpu::BindGroupLayout {
+    ctx.layout_lin.get_or_init(|| {
+        ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
+            label: Some("st.lin.layout"),
+            entries: &[
+                bge_storage(0, true),
+                bge_storage(1, true),
+                bge_storage_rw(2),
+                bge_uniform(3),
+            ],
+        })
+    })
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn bge_storage(binding:u32, read_only:bool) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry{
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer{ ty: wgpu::BufferBindingType::Storage{ read_only }, has_dynamic_offset:false, min_binding_size: None },
+        count: None,
+    }
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn bge_storage_rw(binding:u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry{
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer{ ty: wgpu::BufferBindingType::Storage{ read_only:false }, has_dynamic_offset:false, min_binding_size: None },
+        count: None,
+    }
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn bge_uniform(binding:u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry{
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer{ ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset:false, min_binding_size: None },
+        count: None,
+    }
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn pl(ctx:&WgpuCtx, entry:&'static str, layout:&wgpu::BindGroupLayout) -> wgpu::ComputePipeline {
+    let module = module(ctx, WGSL_RANKK);
+    let pl_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+        label: Some("st.rankk.pl"),
+        bind_group_layouts: &[layout],
+        push_constant_ranges: &[],
+    });
+    ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{
+        label: Some(entry),
+        layout: Some(&pl_layout),
+        module: &module,
+        entry_point: entry,
+    })
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn lin_pl(ctx:&WgpuCtx, entry:&'static str, layout:&wgpu::BindGroupLayout) -> wgpu::ComputePipeline {
+    let module = module(ctx, WGSL_LINOPS);
+    let pl_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+        label: Some("st.lin.pl"),
+        bind_group_layouts: &[layout],
+        push_constant_ranges: &[],
+    });
+    ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{
+        label: Some(entry),
+        layout: Some(&pl_layout),
+        module: &module,
+        entry_point: entry,
+    })
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_topk_heap_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.topk_heap_pl.get_or_init(|| pl(ctx, "topk_subgroups_heap_1ce", ensure_layout_topk(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_topk_heap_sgintrin_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.topk_heap_sgintrin_pl.get_or_init(|| pl(ctx, "topk_subgroups_heap_sgintrin_1ce", ensure_layout_topk(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_topk_bit_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.topk_bit_pl.get_or_init(|| pl(ctx, "topk_subgroups_bitonic_1ce", ensure_layout_topk(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_topk_wg_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.topk_wg_pl.get_or_init(|| pl(ctx, "topk_workgroup_1ce", ensure_layout_topk(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_lin_axpy_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.lin_axpy_pl.get_or_init(|| lin_pl(ctx, "axpy_inplace", ensure_layout_lin(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_lin_scale_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.lin_scale_pl.get_or_init(|| lin_pl(ctx, "scale_inplace", ensure_layout_lin(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_lin_copy_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.lin_copy_pl.get_or_init(|| lin_pl(ctx, "copy_vec", ensure_layout_lin(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_lin_fill_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.lin_fill_pl.get_or_init(|| lin_pl(ctx, "fill_vec", ensure_layout_lin(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_lin_dot_partials_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.lin_dot_partials_pl.get_or_init(|| lin_pl(ctx, "dot_partials", ensure_layout_lin(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_lin_dot_finalize_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.lin_dot_finalize_pl.get_or_init(|| lin_pl(ctx, "dot_finalize", ensure_layout_lin(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+pub fn dispatch_topk_1ce(
+    rows:u32,
+    cols:u32,
+    k:u32,
+    row_stride:u32,
+    k_lane:u32,
+    x:&wgpu::Buffer,
+    out_vals:&wgpu::Buffer,
+    out_idx:&wgpu::Buffer
+) -> Result<(),String> {
+    use wgpu::util::DeviceExt;
+    use wgpu::Features;
+
     let ctx = ctx()?;
     let mut tile_cols = cols;
     let mut radix_hint: u32 = if k.is_power_of_two() { 4 } else { 2 };
     let mut segments_hint: u32 = if cols > 131_072 { 4 } else if cols > 32_768 { 2 } else { 1 };
-    // SpiralK/Tuner choice for TopK
+
     let has_sub = ctx.device.features().contains(Features::SUBGROUPS);
     let mut algo_hint: u8 = 0;
     let mut ctile_hint: u32 = 0;
@@ -105,48 +252,181 @@ pub fn dispatch_topk_1ce(rows:u32, cols:u32, k:u32, row_stride:u32, k_lane:u32, 
     if ctile_hint != 0 { tile_cols = ctile_hint; }
 
     let params = Params{ rows, cols, k, row_stride, k_lane, tile_cols, radix: radix_hint, segments: segments_hint };
-    let ub = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{ label: Some("st.rankk.params"), contents: bytemuck::bytes_of(&params), usage: wgpu::BufferUsages::UNIFORM });
+    let ub = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        label: Some("st.rankk.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
     let layout = ensure_layout_topk(&ctx);
-    let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor{ label: Some("st.rankk.bg.topk"), layout, entries: &[
-        wgpu::BindGroupEntry{ binding:0, resource: x.as_entire_binding() },
-        wgpu::BindGroupEntry{ binding:1, resource: out_vals.as_entire_binding() },
-        wgpu::BindGroupEntry{ binding:2, resource: out_idx.as_entire_binding()  },
-        wgpu::BindGroupEntry{ binding:3, resource: ub.as_entire_binding() },
-    ]});
+    let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor{
+        label: Some("st.rankk.bg.topk"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry{ binding:0, resource: x.as_entire_binding() },
+            wgpu::BindGroupEntry{ binding:1, resource: out_vals.as_entire_binding() },
+            wgpu::BindGroupEntry{ binding:2, resource: out_idx.as_entire_binding() },
+            wgpu::BindGroupEntry{ binding:3, resource: ub.as_entire_binding() },
+        ],
+    });
+
     let sgc_hint = if has_sub { 8 } else { 1 };
-    let prefer_intrin = std::env::var("ST_USE_SG_INTRIN").ok().as_deref()==Some("1");
+    let prefer_intrin = std::env::var("ST_USE_SG_INTRIN").ok().as_deref() == Some("1");
     let prefer_heap_default = (k <= 32 && cols >= 2048) || (k <= 16 && sgc_hint >= 8);
-    let prefer_heap = match algo_hint {
-        1 => true, 2 => false, _ => prefer_heap_default
+    let prefer_heap = match algo_hint { 1 => true, 2 => false, _ => prefer_heap_default };
+    let pipeline = if has_sub {
+        if prefer_heap {
+            if prefer_intrin { ensure_topk_heap_sgintrin_pl(&ctx) } else { ensure_topk_heap_pl(&ctx) }
+        } else { ensure_topk_bit_pl(&ctx) }
+    } else {
+        ensure_topk_wg_pl(&ctx)
     };
-    let pl =
-        if has_sub {
-            if prefer_heap {
-                if prefer_intrin { ensure_topk_heap_sgintrin_pl(&ctx) } else { ensure_topk_heap_pl(&ctx) }
-            } else { ensure_topk_bit_pl(&ctx) }
-        } else { ensure_topk_wg_pl(&ctx) };
 
     let mut enc = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("st.rankk.enc.topk") });
-    { let mut c = enc.begin_compute_pass(&wgpu::ComputePassDescriptor{ label: Some("st.rankk.pass.topk") });
-      c.set_pipeline(pl); c.set_bind_group(0, &bg, &[]);
-      c.dispatch_workgroups(1, rows.max(1), 1);
+    {
+        let mut c = enc.begin_compute_pass(&wgpu::ComputePassDescriptor{ label: Some("st.rankk.pass.topk") });
+        c.set_pipeline(pipeline);
+        c.set_bind_group(0, &bg, &[]);
+        c.dispatch_workgroups(1, rows.max(1), 1);
     }
-    ctx.queue.submit(Some(enc.finish())); Ok(())
+    ctx.queue.submit(Some(enc.finish()));
+    Ok(())
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
-fn bge_storage(binding:u32, read_only:bool)->wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry{
-        binding, visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer{ ty: wgpu::BufferBindingType::Storage{ read_only }, has_dynamic_offset:false, min_binding_size: None },
-        count: None
-    }
+fn div_ceil_u32(x:u32, d:u32) -> u32 {
+    if x == 0 { 0 } else { (x + d - 1) / d }
 }
+
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
-fn bge_uniform(binding:u32)->wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry{
-        binding, visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer{ ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset:false, min_binding_size: None },
-        count: None
-    }
+fn create_lin_params_buffer(ctx:&WgpuCtx, params:LinParams, label:&str) -> wgpu::Buffer {
+    use wgpu::util::DeviceExt;
+    ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        label: Some(label),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    })
 }
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn create_lin_bind_group(
+    ctx:&WgpuCtx,
+    layout:&wgpu::BindGroupLayout,
+    x:&wgpu::Buffer,
+    y:&wgpu::Buffer,
+    z:&wgpu::Buffer,
+    params:&wgpu::Buffer
+) -> wgpu::BindGroup {
+    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor{
+        label: Some("st.lin.bg"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry{ binding:0, resource: x.as_entire_binding() },
+            wgpu::BindGroupEntry{ binding:1, resource: y.as_entire_binding() },
+            wgpu::BindGroupEntry{ binding:2, resource: z.as_entire_binding() },
+            wgpu::BindGroupEntry{ binding:3, resource: params.as_entire_binding() },
+        ],
+    })
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn dispatch_lin_kernel(
+    ctx:&WgpuCtx,
+    pipeline:&wgpu::ComputePipeline,
+    bind_group:&wgpu::BindGroup,
+    workgroups:u32,
+    label:&str
+) {
+    let mut enc = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some(label) });
+    {
+        let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor{ label: Some("st.lin.pass") });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, bind_group, &[]);
+        if workgroups > 0 {
+            pass.dispatch_workgroups(workgroups, 1, 1);
+        }
+    }
+    ctx.queue.submit(Some(enc.finish()));
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+pub fn dispatch_lin_axpy(n:u32, alpha:f32, x:&wgpu::Buffer, y:&wgpu::Buffer, out:&wgpu::Buffer) -> Result<(), String> {
+    let ctx = ctx()?;
+    let params = LinParams{ dims:[n, 0, 0, 0], scalars:[alpha, 0.0, 0.0, 0.0] };
+    let ub = create_lin_params_buffer(&ctx, params, "st.lin.params.axpy");
+    let layout = ensure_layout_lin(&ctx);
+    let bg = create_lin_bind_group(&ctx, layout, x, y, out, &ub);
+    let wg = div_ceil_u32(n, 256);
+    let pipeline = ensure_lin_axpy_pl(&ctx);
+    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.axpy");
+    Ok(())
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+pub fn dispatch_lin_scale(n:u32, scale:f32, y:&wgpu::Buffer, out:&wgpu::Buffer) -> Result<(), String> {
+    let ctx = ctx()?;
+    let params = LinParams{ dims:[n, 0, 0, 0], scalars:[scale, 0.0, 0.0, 0.0] };
+    let ub = create_lin_params_buffer(&ctx, params, "st.lin.params.scale");
+    let layout = ensure_layout_lin(&ctx);
+    let bg = create_lin_bind_group(&ctx, layout, out, y, out, &ub);
+    let wg = div_ceil_u32(n, 256);
+    let pipeline = ensure_lin_scale_pl(&ctx);
+    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.scale");
+    Ok(())
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+pub fn dispatch_lin_copy(n:u32, src:&wgpu::Buffer, dst:&wgpu::Buffer) -> Result<(), String> {
+    let ctx = ctx()?;
+    let params = LinParams{ dims:[n, 0, 0, 0], scalars:[0.0, 0.0, 0.0, 0.0] };
+    let ub = create_lin_params_buffer(&ctx, params, "st.lin.params.copy");
+    let layout = ensure_layout_lin(&ctx);
+    let bg = create_lin_bind_group(&ctx, layout, src, dst, dst, &ub);
+    let wg = div_ceil_u32(n, 256);
+    let pipeline = ensure_lin_copy_pl(&ctx);
+    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.copy");
+    Ok(())
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+pub fn dispatch_lin_fill(n:u32, value:f32, dst:&wgpu::Buffer) -> Result<(), String> {
+    let ctx = ctx()?;
+    let params = LinParams{ dims:[n, 0, 0, 0], scalars:[0.0, value, 0.0, 0.0] };
+    let ub = create_lin_params_buffer(&ctx, params, "st.lin.params.fill");
+    let layout = ensure_layout_lin(&ctx);
+    let bg = create_lin_bind_group(&ctx, layout, dst, dst, dst, &ub);
+    let wg = div_ceil_u32(n, 256);
+    let pipeline = ensure_lin_fill_pl(&ctx);
+    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.fill");
+    Ok(())
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+pub fn dispatch_lin_dot(n:u32, x:&wgpu::Buffer, y:&wgpu::Buffer, scratch:&wgpu::Buffer) -> Result<(), String> {
+    let ctx = ctx()?;
+    let partials = div_ceil_u32(n, 256);
+
+    let params_partials = LinParams{ dims:[n, 0, 0, 0], scalars:[0.0, 0.0, 0.0, 0.0] };
+    let ub_partials = create_lin_params_buffer(&ctx, params_partials, "st.lin.params.dot.partials");
+    let layout = ensure_layout_lin(&ctx);
+    let bg_partials = create_lin_bind_group(&ctx, layout, x, y, scratch, &ub_partials);
+    let pipeline_partials = ensure_lin_dot_partials_pl(&ctx);
+    dispatch_lin_kernel(&ctx, pipeline_partials, &bg_partials, partials, "st.lin.dot.partials");
+
+    let params_finalize = LinParams{ dims:[n, partials, 0, 0], scalars:[0.0, 0.0, 0.0, 0.0] };
+    let ub_finalize = create_lin_params_buffer(&ctx, params_finalize, "st.lin.params.dot.finalize");
+    let bg_finalize = create_lin_bind_group(&ctx, layout, scratch, scratch, scratch, &ub_finalize);
+    let pipeline_finalize = ensure_lin_dot_finalize_pl(&ctx);
+    let wg_finalize = div_ceil_u32(partials, 256).max(1);
+    dispatch_lin_kernel(&ctx, pipeline_finalize, &bg_finalize, wg_finalize, "st.lin.dot.finalize");
+    Ok(())
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+pub mod util_reexp {
+    pub use wgpu::{BindGroup, BindGroupLayout, Buffer, CommandEncoder, ComputePipeline, Device, Queue};
+    pub use wgpu::util::DeviceExt;
+}
+
+#[cfg(not(all(feature="wgpu", feature="wgpu-rt")))]
+pub mod util_reexp {}

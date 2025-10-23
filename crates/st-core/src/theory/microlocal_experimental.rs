@@ -970,6 +970,10 @@ pub mod experimental {
             }
         }
 
+        pub fn from_bank(bank: MicrolocalGaugeBank, lift: InterfaceZLift) -> Self {
+            Self::new(bank.into_vec(), lift)
+        }
+
         pub fn with_smoothing(mut self, smoothing: f32) -> Self {
             self.smoothing = smoothing.clamp(0.0, 1.0);
             self

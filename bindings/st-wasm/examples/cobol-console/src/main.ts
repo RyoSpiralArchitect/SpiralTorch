@@ -95,6 +95,18 @@ function buildPlanner(): CobolDispatchPlanner {
   if (dataset) {
     planner.setDataset(dataset);
   }
+  const datasetMember = getInputValue("dataset-member");
+  if (datasetMember) {
+    planner.setDatasetMember(datasetMember);
+  }
+  const datasetDisposition = getInputValue("dataset-disposition");
+  if (datasetDisposition) {
+    planner.setDatasetDisposition(datasetDisposition);
+  }
+  const datasetVolume = getInputValue("dataset-volume");
+  if (datasetVolume) {
+    planner.setDatasetVolume(datasetVolume);
+  }
 
   const metadata = getTextareaValue("metadata");
   if (metadata) {

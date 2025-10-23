@@ -51,6 +51,8 @@ sequenceDiagram
 ```
 
 > **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
+>
+> **New — Conv6da with Leech enrichment.** `Conv6da` fuses six-directional adjacency with optional Leech lattice density boosts so Z-space fields aggregate neighbors with structure-aware gradients.
 
 **Licensing**
 
@@ -154,7 +156,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.1.9
+pip install -U spiraltorch==0.2.1
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -218,27 +220,6 @@ maturin build -m bindings/st-py/Cargo.toml --release --features hip
 # Install the wheel you just built
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 ```
-
----
-
-## What’s New in 0.1.6
-
-- **Stable Python façade**  
-  Missing attributes defer to the Rust extension at runtime → 新しい Rust 側の公開が Python に即時反映。
-- **Planner & device utilities**  
-  `plan`, `plan_topk`, `RankPlan.*`, `describe_device`, `hip_probe`.
-- **Self-supervised helpers**  
-  `selfsup.info_nce(...)`, `selfsup.masked_mse(...)`.
-- **Z-space trainer kit**  
-  `ZSpaceTrainer`, `ZMetrics`, `step_many`
-- **Vision/Canvas micro-orchestrators**  
-  `SpiralTorchVision`, `TemporalResonanceBuffer`, `CanvasTransformer`.
-- **Lightweight NN data utils**  
-  `nn.Dataset` / `nn.DataLoader`.
-- **RL name**  
-  **`stAgent`**。`PpoAgent`, `SacAgent` 
-- **Interop bridges**  
-  `compat.torch/jax/tensorflow` 
 
 ---
 
@@ -465,7 +446,6 @@ A: The type stubs (`spiraltorch.pyi`) reflect the **supported** surface. New Rus
 ## Planning the Ecosystem
 
 - Explore the [Ecosystem Roadmap](docs/ecosystem_roadmap.md) for high-level priorities around documentation, samples, and community building.
-- Study the [Compatibility Strategy](docs/compatibility_strategy.md) to plan incremental migrations from PyTorch/TensorFlow stacks.
 - Review the [Backend Feature Matrix](docs/backend_matrix.md) when validating device support or filing bugs that touch accelerators.
 - **Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
 
@@ -2092,6 +2072,69 @@ print(f"z-bias: {diagnostics.z_bias():.3f}")
 ```
 
 [See example](examples/05_new_layers/zspace_coherence_demo.py)
+
+### Plugin Architecture
+
+`ZSpaceCoherenceSequencer` now exposes a lightweight plugin system so other
+subsystems can tap into each stage of the pipeline without forking the core
+implementation. Plugins are notified when tensors move through projection,
+coherence measurement, geometric aggregation, semantic window derivation,
+canonical concept selection, Maxwell desire emission, distribution fusion, and
+language bridging. They also receive callbacks when backends or linguistic
+profiles change, when contours/reports are emitted, and when PSI telemetry is
+published (with the `psi` feature).
+
+Key stages:
+
+- `Projected`, `CoherenceMeasured`, `Aggregated`
+- `SemanticWindowDerived`, `SemanticDistributionDerived`, `CanonicalConceptSelected`
+- `MaxwellBridgeEmitted`, `SemanticWindowFused`, `LanguageBridged`
+- `BackendConfigured`, `LinguisticProfileRegistered`, `LinguisticProfilesCleared`
+- `LinguisticContourEmitted`, `ChannelsDescribed`
+- `PsiTelemetryPublished` *(when compiled with `psi`)*
+
+Implement the `ZSpaceSequencerPlugin` trait and register it on a sequencer to
+receive callbacks:
+
+```rust
+use st_nn::{
+    zspace_coherence::{
+        CoherenceBackend, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
+    },
+    OpenCartesianTopos, PureResult, Tensor,
+};
+
+struct TelemetryPlugin;
+
+impl ZSpaceSequencerPlugin for TelemetryPlugin {
+    fn name(&self) -> &'static str { "telemetry" }
+
+    fn on_stage(&self, stage: ZSpaceSequencerStage<'_>) -> PureResult<()> {
+        match stage {
+            ZSpaceSequencerStage::Aggregated { diagnostics, .. } => {
+                println!("entropy: {:.2}", diagnostics.coherence_entropy());
+            }
+            ZSpaceSequencerStage::SemanticWindowDerived { window, .. } => {
+                println!("window tokens: {}", window.len());
+            }
+            ZSpaceSequencerStage::BackendConfigured { backend } => {
+                println!("backend -> {}", backend.label());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+fn main() -> PureResult<()> {
+    let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192)?;
+    let mut sequencer = ZSpaceCoherenceSequencer::new(768, 12, -1.0, topos)?;
+    sequencer.register_plugin(TelemetryPlugin);
+    sequencer.set_backend(CoherenceBackend::Fftw)?;
+    let (_out, _, _) = sequencer.forward_with_diagnostics(&Tensor::zeros(1, 768)?);
+    Ok(())
+}
+```
 
 ### Why Not Attention?
 
