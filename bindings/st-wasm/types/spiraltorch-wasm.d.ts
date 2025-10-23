@@ -362,10 +362,23 @@ declare module "spiraltorch-wasm" {
         extra?: unknown;
     }
 
+    export interface CobolDatasetRoute {
+        dataset: string;
+        member?: string;
+        disposition?: string;
+        volume?: string;
+        record_format?: string;
+        record_length?: number;
+        block_size?: number;
+        data_class?: string;
+        management_class?: string;
+        storage_class?: string;
+    }
+
     export interface CobolRoutePlan {
         mq?: CobolMqRoute;
         cics?: CobolCicsRoute;
-        dataset?: string;
+        dataset?: string | CobolDatasetRoute;
     }
 
     export interface CobolDispatchEnvelope {
@@ -376,6 +389,28 @@ declare module "spiraltorch-wasm" {
         route: CobolRoutePlan;
         payload: CobolNarratorPayload;
         metadata: CobolMetadata;
+    }
+
+    export interface CobolPreviewDataset {
+        dataset: string;
+        member?: string;
+        disposition?: string;
+        volume?: string;
+        record_format?: string;
+        record_length?: number;
+        block_size?: number;
+        data_class?: string;
+        management_class?: string;
+        storage_class?: string;
+    }
+
+    export interface CobolPreviewEnvelope {
+        job_id: string;
+        curvature: number;
+        temperature: number;
+        coefficient_count: number;
+        release_channel: string;
+        dataset?: CobolPreviewDataset;
     }
 
     export class CobolDispatchPlanner {
@@ -418,7 +453,16 @@ declare module "spiraltorch-wasm" {
             channel?: string | null,
         ): void;
         clearCicsRoute(): void;
-        setDataset(dataset: string): void;
+        setDataset(dataset?: string | null): void;
+        setDatasetMember(member?: string | null): void;
+        setDatasetDisposition(disposition?: string | null): void;
+        setDatasetVolume(volume?: string | null): void;
+        setDatasetRecordFormat(recordFormat?: string | null): void;
+        setDatasetRecordLength(recordLength?: number | null): void;
+        setDatasetBlockSize(blockSize?: number | null): void;
+        setDatasetDataClass(dataClass?: string | null): void;
+        setDatasetManagementClass(managementClass?: string | null): void;
+        setDatasetStorageClass(storageClass?: string | null): void;
         clearDataset(): void;
         clearRoute(): void;
         addTag(tag: string): void;
@@ -436,6 +480,6 @@ declare module "spiraltorch-wasm" {
         readonly createdAt: string;
         mqRoute(): CobolMqRoute | undefined;
         cicsRoute(): CobolCicsRoute | undefined;
-        toCobolPreview(): unknown;
+        toCobolPreview(): CobolPreviewEnvelope;
     }
 }

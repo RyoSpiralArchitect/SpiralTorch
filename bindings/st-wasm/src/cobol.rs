@@ -65,6 +65,12 @@ pub struct CobolDatasetRoute {
     pub member: Option<String>,
     pub disposition: Option<String>,
     pub volume: Option<String>,
+    pub record_format: Option<String>,
+    pub record_length: Option<u32>,
+    pub block_size: Option<u32>,
+    pub data_class: Option<String>,
+    pub management_class: Option<String>,
+    pub storage_class: Option<String>,
 }
 
 impl Default for CobolDatasetRoute {
@@ -74,6 +80,12 @@ impl Default for CobolDatasetRoute {
             member: None,
             disposition: None,
             volume: None,
+            record_format: None,
+            record_length: None,
+            block_size: None,
+            data_class: None,
+            management_class: None,
+            storage_class: None,
         }
     }
 }
@@ -83,7 +95,16 @@ impl Serialize for CobolDatasetRoute {
     where
         S: Serializer,
     {
-        if self.member.is_none() && self.disposition.is_none() && self.volume.is_none() {
+        if self.member.is_none()
+            && self.disposition.is_none()
+            && self.volume.is_none()
+            && self.record_format.is_none()
+            && self.record_length.is_none()
+            && self.block_size.is_none()
+            && self.data_class.is_none()
+            && self.management_class.is_none()
+            && self.storage_class.is_none()
+        {
             serializer.serialize_str(&self.dataset)
         } else {
             let mut entries = 1;
@@ -96,6 +117,24 @@ impl Serialize for CobolDatasetRoute {
             if self.volume.is_some() {
                 entries += 1;
             }
+            if self.record_format.is_some() {
+                entries += 1;
+            }
+            if self.record_length.is_some() {
+                entries += 1;
+            }
+            if self.block_size.is_some() {
+                entries += 1;
+            }
+            if self.data_class.is_some() {
+                entries += 1;
+            }
+            if self.management_class.is_some() {
+                entries += 1;
+            }
+            if self.storage_class.is_some() {
+                entries += 1;
+            }
             let mut map = serializer.serialize_map(Some(entries))?;
             map.serialize_entry("dataset", &self.dataset)?;
             if let Some(member) = &self.member {
@@ -106,6 +145,24 @@ impl Serialize for CobolDatasetRoute {
             }
             if let Some(volume) = &self.volume {
                 map.serialize_entry("volume", volume)?;
+            }
+            if let Some(record_format) = &self.record_format {
+                map.serialize_entry("record_format", record_format)?;
+            }
+            if let Some(record_length) = &self.record_length {
+                map.serialize_entry("record_length", record_length)?;
+            }
+            if let Some(block_size) = &self.block_size {
+                map.serialize_entry("block_size", block_size)?;
+            }
+            if let Some(data_class) = &self.data_class {
+                map.serialize_entry("data_class", data_class)?;
+            }
+            if let Some(management_class) = &self.management_class {
+                map.serialize_entry("management_class", management_class)?;
+            }
+            if let Some(storage_class) = &self.storage_class {
+                map.serialize_entry("storage_class", storage_class)?;
             }
             map.end()
         }
@@ -135,6 +192,12 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                     member: None,
                     disposition: None,
                     volume: None,
+                    record_format: None,
+                    record_length: None,
+                    block_size: None,
+                    data_class: None,
+                    management_class: None,
+                    storage_class: None,
                 })
             }
 
@@ -153,6 +216,12 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                 let mut member: Option<String> = None;
                 let mut disposition: Option<String> = None;
                 let mut volume: Option<String> = None;
+                let mut record_format: Option<String> = None;
+                let mut record_length: Option<u32> = None;
+                let mut block_size: Option<u32> = None;
+                let mut data_class: Option<String> = None;
+                let mut management_class: Option<String> = None;
+                let mut storage_class: Option<String> = None;
 
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
@@ -171,10 +240,39 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                         "volume" => {
                             volume = map.next_value()?;
                         }
+                        "record_format" => {
+                            record_format = map.next_value()?;
+                        }
+                        "record_length" => {
+                            record_length = map.next_value()?;
+                        }
+                        "block_size" => {
+                            block_size = map.next_value()?;
+                        }
+                        "data_class" => {
+                            data_class = map.next_value()?;
+                        }
+                        "management_class" => {
+                            management_class = map.next_value()?;
+                        }
+                        "storage_class" => {
+                            storage_class = map.next_value()?;
+                        }
                         other => {
                             return Err(de::Error::unknown_field(
                                 other,
-                                &["dataset", "member", "disposition", "volume"],
+                                &[
+                                    "dataset",
+                                    "member",
+                                    "disposition",
+                                    "volume",
+                                    "record_format",
+                                    "record_length",
+                                    "block_size",
+                                    "data_class",
+                                    "management_class",
+                                    "storage_class",
+                                ],
                             ));
                         }
                     }
@@ -186,6 +284,12 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                     member,
                     disposition,
                     volume,
+                    record_format,
+                    record_length,
+                    block_size,
+                    data_class,
+                    management_class,
+                    storage_class,
                 })
             }
         }
@@ -426,6 +530,102 @@ impl CobolEnvelopeBuilder {
         sanitize_dataset_route(&mut self.envelope.route.dataset);
     }
 
+    pub fn set_dataset_record_format(&mut self, record_format: Option<String>) {
+        let record_format = record_format.and_then(sanitize);
+        match (self.envelope.route.dataset.as_mut(), record_format) {
+            (Some(route), value) => {
+                route.record_format = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.record_format = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_record_length(&mut self, record_length: Option<u32>) {
+        let record_length = sanitize_positive(record_length);
+        match (self.envelope.route.dataset.as_mut(), record_length) {
+            (Some(route), value) => {
+                route.record_length = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.record_length = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_block_size(&mut self, block_size: Option<u32>) {
+        let block_size = sanitize_positive(block_size);
+        match (self.envelope.route.dataset.as_mut(), block_size) {
+            (Some(route), value) => {
+                route.block_size = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.block_size = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_data_class(&mut self, data_class: Option<String>) {
+        let data_class = data_class.and_then(sanitize);
+        match (self.envelope.route.dataset.as_mut(), data_class) {
+            (Some(route), value) => {
+                route.data_class = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.data_class = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_management_class(&mut self, management_class: Option<String>) {
+        let management_class = management_class.and_then(sanitize);
+        match (self.envelope.route.dataset.as_mut(), management_class) {
+            (Some(route), value) => {
+                route.management_class = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.management_class = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_storage_class(&mut self, storage_class: Option<String>) {
+        let storage_class = storage_class.and_then(sanitize);
+        match (self.envelope.route.dataset.as_mut(), storage_class) {
+            (Some(route), value) => {
+                route.storage_class = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.storage_class = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
     pub fn clear_route(&mut self) {
         self.clear_mq_route();
         self.clear_cics_route();
@@ -528,6 +728,18 @@ impl CobolEnvelope {
             issues.push("configure a delivery route (MQ, CICS, or dataset)".to_string());
         }
 
+        if let Some(dataset) = &self.route.dataset {
+            if let (Some(record_length), Some(block_size)) =
+                (dataset.record_length, dataset.block_size)
+            {
+                if block_size % record_length != 0 {
+                    issues.push(
+                        "dataset block size must be a multiple of the record length".to_string(),
+                    );
+                }
+            }
+        }
+
         if !(NARRATOR_METRIC_MIN..=NARRATOR_METRIC_MAX).contains(&self.payload.curvature) {
             issues.push("curvature must be between 0.0 and 1.0".to_string());
         }
@@ -557,6 +769,10 @@ fn sanitize(value: String) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn sanitize_positive(value: Option<u32>) -> Option<u32> {
+    value.and_then(|candidate| if candidate > 0 { Some(candidate) } else { None })
 }
 
 fn sanitize_envelope(envelope: &mut CobolEnvelope) {
@@ -650,6 +866,12 @@ fn sanitize_dataset_route(target: &mut Option<CobolDatasetRoute>) {
         dataset.member = dataset.member.take().and_then(sanitize);
         dataset.disposition = dataset.disposition.take().and_then(sanitize);
         dataset.volume = dataset.volume.take().and_then(sanitize);
+        dataset.record_format = dataset.record_format.take().and_then(sanitize);
+        dataset.record_length = sanitize_positive(dataset.record_length.take());
+        dataset.block_size = sanitize_positive(dataset.block_size.take());
+        dataset.data_class = dataset.data_class.take().and_then(sanitize);
+        dataset.management_class = dataset.management_class.take().and_then(sanitize);
+        dataset.storage_class = dataset.storage_class.take().and_then(sanitize);
         if let Some(name) = dataset_name {
             dataset.dataset = name;
             *target = Some(dataset);
@@ -717,6 +939,12 @@ mod tests {
         builder.set_dataset_member(Some("PAYLOAD".into()));
         builder.set_dataset_disposition(Some("OLD".into()));
         builder.set_dataset_volume(Some("VOL001".into()));
+        builder.set_dataset_record_format(Some("FB".into()));
+        builder.set_dataset_record_length(Some(512));
+        builder.set_dataset_block_size(Some(4096));
+        builder.set_dataset_data_class(Some("NARRATE".into()));
+        builder.set_dataset_management_class(Some("GDG".into()));
+        builder.set_dataset_storage_class(Some("FASTIO".into()));
         builder.add_tag("browser");
         builder.add_annotation("generated");
         builder.merge_metadata_value(serde_json::json!({"priority": "low"}));
@@ -735,6 +963,12 @@ mod tests {
         assert_eq!(dataset_route.member.as_deref(), Some("PAYLOAD"));
         assert_eq!(dataset_route.disposition.as_deref(), Some("OLD"));
         assert_eq!(dataset_route.volume.as_deref(), Some("VOL001"));
+        assert_eq!(dataset_route.record_format.as_deref(), Some("FB"));
+        assert_eq!(dataset_route.record_length, Some(512));
+        assert_eq!(dataset_route.block_size, Some(4096));
+        assert_eq!(dataset_route.data_class.as_deref(), Some("NARRATE"));
+        assert_eq!(dataset_route.management_class.as_deref(), Some("GDG"));
+        assert_eq!(dataset_route.storage_class.as_deref(), Some("FASTIO"));
         assert!(envelope.metadata.tags.contains(&"browser".to_string()));
         assert!(envelope
             .metadata
@@ -770,6 +1004,12 @@ mod tests {
         builder.set_dataset_member(Some(" MEMBER ".into()));
         builder.set_dataset_disposition(Some(" MOD ".into()));
         builder.set_dataset_volume(Some(" VOL003 ".into()));
+        builder.set_dataset_record_format(Some(" FB ".into()));
+        builder.set_dataset_record_length(Some(2048));
+        builder.set_dataset_block_size(Some(8192));
+        builder.set_dataset_data_class(Some(" PRIME ".into()));
+        builder.set_dataset_management_class(Some(" GDG ".into()));
+        builder.set_dataset_storage_class(Some(" FASTIO ".into()));
         builder.set_dataset(Some("HLQ.DATA".into()));
 
         let dataset = builder.snapshot().route.dataset.expect("dataset");
@@ -777,6 +1017,86 @@ mod tests {
         assert_eq!(dataset.member.as_deref(), Some("MEMBER"));
         assert_eq!(dataset.disposition.as_deref(), Some("MOD"));
         assert_eq!(dataset.volume.as_deref(), Some("VOL003"));
+        assert_eq!(dataset.record_format.as_deref(), Some("FB"));
+        assert_eq!(dataset.record_length, Some(2048));
+        assert_eq!(dataset.block_size, Some(8192));
+        assert_eq!(dataset.data_class.as_deref(), Some("PRIME"));
+        assert_eq!(dataset.management_class.as_deref(), Some("GDG"));
+        assert_eq!(dataset.storage_class.as_deref(), Some("FASTIO"));
+    }
+
+    #[test]
+    fn dataset_fields_can_be_cleared_individually() {
+        let mut builder = CobolEnvelopeBuilder::new("job-dataset-clear");
+        builder.set_dataset(Some("HLQ.DATA".into()));
+        builder.set_dataset_member(Some("PAYLOAD".into()));
+        builder.set_dataset_disposition(Some("SHR".into()));
+        builder.set_dataset_volume(Some("VOL001".into()));
+        builder.set_dataset_record_format(Some("FB".into()));
+        builder.set_dataset_record_length(Some(1024));
+        builder.set_dataset_block_size(Some(4096));
+        builder.set_dataset_data_class(Some("NARR".into()));
+        builder.set_dataset_management_class(Some("GDG".into()));
+        builder.set_dataset_storage_class(Some("FAST".into()));
+
+        builder.set_dataset_member(None);
+        builder.set_dataset_disposition(None);
+        builder.set_dataset_volume(None);
+        builder.set_dataset_record_format(None);
+        builder.set_dataset_record_length(None);
+        builder.set_dataset_block_size(None);
+        builder.set_dataset_data_class(None);
+        builder.set_dataset_management_class(None);
+        builder.set_dataset_storage_class(None);
+
+        let dataset = builder.snapshot().route.dataset.expect("dataset");
+        assert_eq!(dataset.dataset, "HLQ.DATA");
+        assert!(dataset.member.is_none());
+        assert!(dataset.disposition.is_none());
+        assert!(dataset.volume.is_none());
+        assert!(dataset.record_format.is_none());
+        assert!(dataset.record_length.is_none());
+        assert!(dataset.block_size.is_none());
+        assert!(dataset.data_class.is_none());
+        assert!(dataset.management_class.is_none());
+        assert!(dataset.storage_class.is_none());
+
+        builder.set_dataset(None);
+        assert!(builder.snapshot().route.dataset.is_none());
+    }
+
+    #[test]
+    fn dataset_numeric_fields_ignore_non_positive_values() {
+        let mut builder = CobolEnvelopeBuilder::new("job-dataset-numeric");
+        builder.set_dataset(Some("HLQ.DATA".into()));
+        builder.set_dataset_record_length(Some(0));
+        builder.set_dataset_block_size(Some(0));
+        assert!(builder
+            .snapshot()
+            .route
+            .dataset
+            .expect("dataset")
+            .record_length
+            .is_none());
+        assert!(builder
+            .snapshot()
+            .route
+            .dataset
+            .expect("dataset")
+            .block_size
+            .is_none());
+
+        builder.set_dataset_record_length(Some(256));
+        builder.set_dataset_block_size(Some(1024));
+        let dataset = builder.snapshot().route.dataset.expect("dataset");
+        assert_eq!(dataset.record_length, Some(256));
+        assert_eq!(dataset.block_size, Some(1024));
+
+        builder.set_dataset_record_length(Some(0));
+        builder.set_dataset_block_size(Some(0));
+        let cleared = builder.snapshot().route.dataset.expect("dataset");
+        assert!(cleared.record_length.is_none());
+        assert!(cleared.block_size.is_none());
     }
 
     #[test]
@@ -855,6 +1175,12 @@ mod tests {
                     member: Some(" MEMBER  ".to_string()),
                     disposition: Some(" SHR ".to_string()),
                     volume: None,
+                    record_format: Some(" FB ".to_string()),
+                    record_length: Some(2048),
+                    block_size: Some(8192),
+                    data_class: Some(" NARR ".to_string()),
+                    management_class: Some(" GDG ".to_string()),
+                    storage_class: Some(" FASTIO ".to_string()),
                 }),
             },
             payload: CobolNarratorPayload {
@@ -898,6 +1224,12 @@ mod tests {
         assert_eq!(dataset.dataset, "DATA.SET");
         assert_eq!(dataset.member.as_deref(), Some("MEMBER"));
         assert_eq!(dataset.disposition.as_deref(), Some("SHR"));
+        assert_eq!(dataset.record_format.as_deref(), Some("FB"));
+        assert_eq!(dataset.record_length, Some(2048));
+        assert_eq!(dataset.block_size, Some(8192));
+        assert_eq!(dataset.data_class.as_deref(), Some("NARR"));
+        assert_eq!(dataset.management_class.as_deref(), Some("GDG"));
+        assert_eq!(dataset.storage_class.as_deref(), Some("FASTIO"));
         assert_eq!(snapshot.metadata.tags, vec!["tag-one".to_string()]);
         assert_eq!(
             snapshot.initiators.first().expect("initiator").name,
@@ -971,6 +1303,27 @@ mod tests {
     }
 
     #[test]
+    fn validation_catches_inconsistent_dataset_block_size() {
+        let mut builder = CobolEnvelopeBuilder::new("job-dataset-validate");
+        builder.add_initiator(make_initiator(
+            InitiatorKind::Automation,
+            "validator",
+            None,
+            None,
+            None,
+            None,
+        ));
+        builder.set_dataset(Some("HLQ.DATA".into()));
+        builder.set_dataset_record_length(Some(256));
+        builder.set_dataset_block_size(Some(300));
+
+        let issues = builder.validation_issues();
+        assert_eq!(issues.len(), 1);
+        assert!(issues
+            .contains(&"dataset block size must be a multiple of the record length".to_string()));
+    }
+
+    #[test]
     fn validation_succeeds_for_complete_envelope() {
         let mut builder = CobolEnvelopeBuilder::new("job-ready");
         builder.add_initiator(make_initiator(
@@ -994,6 +1347,12 @@ mod tests {
             member: None,
             disposition: None,
             volume: None,
+            record_format: None,
+            record_length: None,
+            block_size: None,
+            data_class: None,
+            management_class: None,
+            storage_class: None,
         };
         let serialized = serde_json::to_string(&basic).expect("serialize");
         assert_eq!(serialized, "\"HLQ.DATA\"");
@@ -1001,22 +1360,29 @@ mod tests {
         let mut enriched = basic.clone();
         enriched.member = Some("MEMBER".into());
         enriched.disposition = Some("SHR".into());
+        enriched.record_format = Some("FB".into());
+        enriched.record_length = Some(512);
+        enriched.block_size = Some(4096);
         let serialized_enriched = serde_json::to_string(&enriched).expect("serialize enriched");
         assert!(serialized_enriched.contains("\"dataset\":"));
         assert!(serialized_enriched.contains("\"member\""));
         assert!(serialized_enriched.contains("\"disposition\""));
+        assert!(serialized_enriched.contains("\"record_length\""));
 
         let parsed_basic: CobolDatasetRoute = serde_json::from_str("\"USER.DATA\"").expect("parse");
         assert_eq!(parsed_basic.dataset, "USER.DATA");
         assert!(parsed_basic.member.is_none());
 
         let parsed_enriched: CobolDatasetRoute = serde_json::from_str(
-            "{\"dataset\":\"USER.DATA\",\"member\":\"MEMBER\",\"disposition\":\"SHR\",\"volume\":\"VOL001\"}",
+            "{\"dataset\":\"USER.DATA\",\"member\":\"MEMBER\",\"disposition\":\"SHR\",\"volume\":\"VOL001\",\"record_format\":\"FB\",\"record_length\":256,\"block_size\":4096}",
         )
         .expect("parse object");
         assert_eq!(parsed_enriched.dataset, "USER.DATA");
         assert_eq!(parsed_enriched.member.as_deref(), Some("MEMBER"));
         assert_eq!(parsed_enriched.disposition.as_deref(), Some("SHR"));
         assert_eq!(parsed_enriched.volume.as_deref(), Some("VOL001"));
+        assert_eq!(parsed_enriched.record_format.as_deref(), Some("FB"));
+        assert_eq!(parsed_enriched.record_length, Some(256));
+        assert_eq!(parsed_enriched.block_size, Some(4096));
     }
 }
