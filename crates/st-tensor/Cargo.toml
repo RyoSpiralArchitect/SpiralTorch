@@ -10,7 +10,7 @@ license = "AGPL-3.0-or-later"
 crate-type = ["rlib", "cdylib"]
 
 [features]
-default = ["cpu"]
+default = ["cpu", "faer"]
 faer = ["dep:faer"]
 
 # CPU execution is always available, but expose a feature so that downstream
