@@ -12,7 +12,10 @@ use crate::tensor::{tensor_err_to_py, PyTensor};
 use st_nn::{
     dataset::DataLoaderBatches,
     dataset_from_vec,
-    zspace_coherence::{CoherenceDiagnostics, LinguisticChannelReport},
+    zspace_coherence::{
+        CoherenceDiagnostics, LinguisticChannelReport, PreDiscardPolicy, PreDiscardSnapshot,
+        PreDiscardTelemetry,
+    },
     DataLoader, Dataset, ZSpaceCoherenceSequencer,
 };
 #[cfg(feature = "nn")]
@@ -255,12 +258,194 @@ pub(crate) struct PyCoherenceDiagnostics {
     aggregated: PyTensor,
     coherence: Vec<f32>,
     channel_reports: Vec<PyCoherenceChannelReport>,
+    pre_discard: Option<PyPreDiscardTelemetry>,
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone)]
+#[pyclass(module = "spiraltorch.nn", name = "PreDiscardTelemetry", unsendable)]
+pub(crate) struct PyPreDiscardTelemetry {
+    dominance_ratio: f32,
+    energy_floor: f32,
+    discarded: usize,
+    preserved: usize,
+    fallback: bool,
+}
+
+#[cfg(feature = "nn")]
+impl PyPreDiscardTelemetry {
+    fn from_telemetry(telemetry: PreDiscardTelemetry) -> Self {
+        Self {
+            dominance_ratio: telemetry.dominance_ratio(),
+            energy_floor: telemetry.energy_floor(),
+            discarded: telemetry.discarded(),
+            preserved: telemetry.preserved(),
+            fallback: telemetry.used_fallback(),
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyPreDiscardTelemetry {
+    #[getter]
+    fn dominance_ratio(&self) -> f32 {
+        self.dominance_ratio
+    }
+
+    #[getter]
+    fn energy_floor(&self) -> f32 {
+        self.energy_floor
+    }
+
+    #[getter]
+    fn discarded(&self) -> usize {
+        self.discarded
+    }
+
+    #[getter]
+    fn preserved(&self) -> usize {
+        self.preserved
+    }
+
+    #[getter]
+    fn used_fallback(&self) -> bool {
+        self.fallback
+    }
+
+    #[getter]
+    fn total(&self) -> usize {
+        self.discarded + self.preserved
+    }
+
+    #[getter]
+    fn preserved_ratio(&self) -> f32 {
+        if self.discarded + self.preserved == 0 {
+            0.0
+        } else {
+            (self.preserved as f32 / (self.discarded + self.preserved) as f32).clamp(0.0, 1.0)
+        }
+    }
+
+    #[getter]
+    fn discarded_ratio(&self) -> f32 {
+        1.0 - self.preserved_ratio()
+    }
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone)]
+#[pyclass(module = "spiraltorch.nn", name = "PreDiscardSnapshot", unsendable)]
+pub(crate) struct PyPreDiscardSnapshot {
+    step: u64,
+    telemetry: PyPreDiscardTelemetry,
+    survivors: Vec<usize>,
+    discarded: Vec<usize>,
+    filtered: Vec<f32>,
+}
+
+#[cfg(feature = "nn")]
+impl PyPreDiscardSnapshot {
+    fn from_snapshot(snapshot: PreDiscardSnapshot) -> Self {
+        Self {
+            step: snapshot.step(),
+            telemetry: PyPreDiscardTelemetry::from_telemetry(snapshot.telemetry().clone()),
+            survivors: snapshot.survivors().to_vec(),
+            discarded: snapshot.discarded().to_vec(),
+            filtered: snapshot.filtered().to_vec(),
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyPreDiscardSnapshot {
+    #[getter]
+    fn step(&self) -> u64 {
+        self.step
+    }
+
+    #[getter]
+    fn telemetry(&self) -> PyPreDiscardTelemetry {
+        self.telemetry.clone()
+    }
+
+    #[getter]
+    fn survivors(&self) -> Vec<usize> {
+        self.survivors.clone()
+    }
+
+    #[getter]
+    fn discarded(&self) -> Vec<usize> {
+        self.discarded.clone()
+    }
+
+    #[getter]
+    fn filtered(&self) -> Vec<f32> {
+        self.filtered.clone()
+    }
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone)]
+#[pyclass(module = "spiraltorch.nn", name = "PreDiscardPolicy", unsendable)]
+pub(crate) struct PyPreDiscardPolicy {
+    dominance_ratio: f32,
+    energy_floor: f32,
+    min_channels: usize,
+}
+
+#[cfg(feature = "nn")]
+impl PyPreDiscardPolicy {
+    fn from_policy(policy: &PreDiscardPolicy) -> Self {
+        Self {
+            dominance_ratio: policy.dominance_ratio(),
+            energy_floor: policy.energy_floor(),
+            min_channels: policy.min_channels(),
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyPreDiscardPolicy {
+    #[new]
+    #[pyo3(signature = (dominance_ratio, *, energy_floor=None, min_channels=None))]
+    fn new(
+        dominance_ratio: f32,
+        energy_floor: Option<f32>,
+        min_channels: Option<usize>,
+    ) -> PyResult<Self> {
+        let mut policy = PreDiscardPolicy::new(dominance_ratio).map_err(tensor_err_to_py)?;
+        if let Some(floor) = energy_floor {
+            policy = policy.with_energy_floor(floor).map_err(tensor_err_to_py)?;
+        }
+        if let Some(min_channels) = min_channels {
+            policy = policy.with_min_channels(min_channels);
+        }
+        Ok(Self::from_policy(&policy))
+    }
+
+    #[getter]
+    fn dominance_ratio(&self) -> f32 {
+        self.dominance_ratio
+    }
+
+    #[getter]
+    fn energy_floor(&self) -> f32 {
+        self.energy_floor
+    }
+
+    #[getter]
+    fn min_channels(&self) -> usize {
+        self.min_channels
+    }
 }
 
 #[cfg(feature = "nn")]
 impl PyCoherenceDiagnostics {
     fn from_diagnostics(diagnostics: CoherenceDiagnostics) -> Self {
-        let (aggregated, coherence, channel_reports) = diagnostics.into_parts();
+        let (aggregated, coherence, channel_reports, pre_discard) = diagnostics.into_parts();
         let channel_reports = channel_reports
             .iter()
             .map(PyCoherenceChannelReport::from_report)
@@ -269,6 +454,7 @@ impl PyCoherenceDiagnostics {
             aggregated: PyTensor::from_tensor(aggregated),
             coherence,
             channel_reports,
+            pre_discard: pre_discard.map(PyPreDiscardTelemetry::from_telemetry),
         }
     }
 }
@@ -289,6 +475,23 @@ impl PyCoherenceDiagnostics {
     #[getter]
     fn channel_reports(&self) -> Vec<PyCoherenceChannelReport> {
         self.channel_reports.clone()
+    }
+
+    #[getter]
+    fn preserved_channels(&self) -> usize {
+        self.coherence.iter().filter(|value| **value > 0.0).count()
+    }
+
+    #[getter]
+    fn discarded_channels(&self) -> usize {
+        self.coherence
+            .len()
+            .saturating_sub(self.preserved_channels())
+    }
+
+    #[getter]
+    fn pre_discard(&self) -> Option<PyPreDiscardTelemetry> {
+        self.pre_discard.clone()
     }
 }
 
@@ -364,6 +567,36 @@ impl PyZSpaceCoherenceSequencer {
         Ok(PyCoherenceDiagnostics::from_diagnostics(diagnostics))
     }
 
+    #[pyo3(signature = (dominance_ratio, *, energy_floor=None, min_channels=None))]
+    pub fn configure_pre_discard(
+        &mut self,
+        dominance_ratio: f32,
+        energy_floor: Option<f32>,
+        min_channels: Option<usize>,
+    ) -> PyResult<()> {
+        let mut policy = PreDiscardPolicy::new(dominance_ratio).map_err(tensor_err_to_py)?;
+        if let Some(floor) = energy_floor {
+            policy = policy.with_energy_floor(floor).map_err(tensor_err_to_py)?;
+        }
+        if let Some(min_channels) = min_channels {
+            policy = policy.with_min_channels(min_channels);
+        }
+        self.inner.enable_pre_discard(policy);
+        Ok(())
+    }
+
+    pub fn disable_pre_discard(&mut self) {
+        self.inner.disable_pre_discard();
+    }
+
+    pub fn configure_pre_discard_memory(&mut self, limit: usize) {
+        self.inner.configure_pre_discard_memory(limit);
+    }
+
+    pub fn clear_pre_discard_snapshots(&self) {
+        self.inner.clear_pre_discard_snapshots();
+    }
+
     pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
         self.forward(x)
     }
@@ -376,6 +609,22 @@ impl PyZSpaceCoherenceSequencer {
     #[getter]
     pub fn num_heads(&self) -> usize {
         self.inner.num_heads
+    }
+
+    #[getter]
+    pub fn pre_discard_policy(&self) -> Option<PyPreDiscardPolicy> {
+        self.inner
+            .pre_discard_policy()
+            .map(PyPreDiscardPolicy::from_policy)
+    }
+
+    #[getter]
+    pub fn pre_discard_snapshots(&self) -> Vec<PyPreDiscardSnapshot> {
+        self.inner
+            .pre_discard_snapshots()
+            .into_iter()
+            .map(PyPreDiscardSnapshot::from_snapshot)
+            .collect()
     }
 
     #[getter]
@@ -400,6 +649,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyDataLoader>()?;
     module.add_class::<PyDataLoaderIter>()?;
     module.add_class::<PyCoherenceChannelReport>()?;
+    module.add_class::<PyPreDiscardTelemetry>()?;
+    module.add_class::<PyPreDiscardPolicy>()?;
+    module.add_class::<PyPreDiscardSnapshot>()?;
     module.add_class::<PyCoherenceDiagnostics>()?;
     module.add_class::<PyZSpaceCoherenceSequencer>()?;
     module.add_function(wrap_pyfunction!(from_samples, &module)?)?;
@@ -411,6 +663,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "DataLoaderIter",
             "CoherenceChannelReport",
             "CoherenceDiagnostics",
+            "PreDiscardTelemetry",
+            "PreDiscardPolicy",
+            "PreDiscardSnapshot",
             "ZSpaceCoherenceSequencer",
             "from_samples",
         ],

@@ -2117,6 +2117,45 @@ print(f"dominant channel: {diagnostics.dominant_channel()}")
 print(f"z-bias: {diagnostics.z_bias():.3f}")
 ```
 
+### 先行破棄 (Pre-Discard) Sequencing
+
+Humans don't wait to evaluate every possibility—they discard the "now impossible"
+branches first and let thought ride whatever remains. The sequencer now mirrors
+that behaviour:
+
+```python
+model.configure_pre_discard(
+    dominance_ratio=0.35,  # keep channels within 35% of the dominant signal
+    energy_floor=1e-3,     # drop negligible bands outright
+    min_channels=3,        # always preserve a minimal braid of possibilities
+)
+
+out, coherence, diagnostics = model.forward_with_diagnostics(x)
+print("discarded", diagnostics.discarded_channels(), "channels pre-aggregation")
+
+# Disable when you want full retention again
+model.disable_pre_discard()
+```
+
+The accompanying diagnostics surface `pre_discard` telemetry so you can inspect
+how aggressively the sequencer culled low-credence channels during a pass.
+Every invocation is also journaled so you can study the discard pattern over
+time:
+
+```python
+# Keep the last 32 pre-discard snapshots (default) or dial it up/down.
+model.configure_pre_discard_memory(limit=64)
+
+_ = model.forward_with_diagnostics(x)
+latest = model.pre_discard_snapshots()[-1]
+print("step", latest.step)
+print("survivors", latest.survivors)
+print("discarded ratio", latest.telemetry.discarded_ratio)
+
+# Reset the history whenever you want a fresh view.
+model.clear_pre_discard_snapshots()
+```
+
 [See example](examples/05_new_layers/zspace_coherence_demo.py)
 
 ### Plugin Architecture
@@ -2132,7 +2171,7 @@ published (with the `psi` feature).
 
 Key stages:
 
-- `Projected`, `CoherenceMeasured`, `Aggregated`
+- `Projected`, `CoherenceMeasured`, `PreDiscardApplied` *(with survivor + discard indices)*, `Aggregated`
 - `SemanticWindowDerived`, `SemanticDistributionDerived`, `CanonicalConceptSelected`
 - `MaxwellBridgeEmitted`, `SemanticWindowFused`, `LanguageBridged`
 - `BackendConfigured`, `LinguisticProfileRegistered`, `LinguisticProfilesCleared`

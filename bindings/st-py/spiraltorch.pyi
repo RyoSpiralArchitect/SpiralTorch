@@ -905,6 +905,42 @@ class CoherenceDiagnostics:
     aggregated: Tensor
     coherence: List[float]
     channel_reports: List[CoherenceChannelReport]
+    preserved_channels: int
+    discarded_channels: int
+    pre_discard: PreDiscardTelemetry | None
+
+
+class PreDiscardTelemetry:
+    dominance_ratio: float
+    energy_floor: float
+    discarded: int
+    preserved: int
+    used_fallback: bool
+    total: int
+    preserved_ratio: float
+    discarded_ratio: float
+
+
+class PreDiscardSnapshot:
+    step: int
+    telemetry: PreDiscardTelemetry
+    survivors: List[int]
+    discarded: List[int]
+    filtered: List[float]
+
+
+class PreDiscardPolicy:
+    def __init__(
+        self,
+        dominance_ratio: float,
+        *,
+        energy_floor: float | None = ...,
+        min_channels: int | None = ...,
+    ) -> None: ...
+
+    dominance_ratio: float
+    energy_floor: float
+    min_channels: int
 
 
 class _ZSpaceCoherenceSequencer:
@@ -927,11 +963,29 @@ class _ZSpaceCoherenceSequencer:
 
     def project_to_zspace(self, x: Tensor) -> Tensor: ...
 
+    def configure_pre_discard(
+        self,
+        dominance_ratio: float,
+        *,
+        energy_floor: float | None = ..., 
+        min_channels: int | None = ...,
+    ) -> None: ...
+
+    def disable_pre_discard(self) -> None: ...
+
+    def configure_pre_discard_memory(self, limit: int) -> None: ...
+
+    def clear_pre_discard_snapshots(self) -> None: ...
+
     def __call__(self, x: Tensor) -> Tensor: ...
 
     def dim(self) -> int: ...
 
     def num_heads(self) -> int: ...
+
+    def pre_discard_policy(self) -> PreDiscardPolicy | None: ...
+
+    def pre_discard_snapshots(self) -> List[PreDiscardSnapshot]: ...
 
     def curvature(self) -> float: ...
 
@@ -946,6 +1000,9 @@ class _NnModule(ModuleType):
     DataLoaderIter: type[_NnDataLoaderIter]
     CoherenceDiagnostics: type[CoherenceDiagnostics]
     ZSpaceCoherenceSequencer: type[_ZSpaceCoherenceSequencer]
+    PreDiscardTelemetry: type[PreDiscardTelemetry]
+    PreDiscardPolicy: type[PreDiscardPolicy]
+    PreDiscardSnapshot: type[PreDiscardSnapshot]
 
     def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...
 
