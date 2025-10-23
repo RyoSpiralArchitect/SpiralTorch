@@ -18,6 +18,7 @@ mod export;
 mod inference;
 mod hpo;
 mod trainer;
+mod vision;
 
 mod extras {
     use super::*;
@@ -155,6 +156,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     inference::register(py, m)?;
     frac::register(py, m)?;
     trainer::register(py, m)?;
+    vision::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;
@@ -192,6 +194,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "nn","frac","selfsup","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
         "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",
         "LinearModel","ModuleTrainer","mean_squared_error",
+        "CanvasTransformer","CanvasSnapshot","apply_vision_update",
+        "ZSpaceCoherenceSequencer",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",

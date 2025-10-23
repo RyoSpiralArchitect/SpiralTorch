@@ -9,6 +9,20 @@ use pyo3::Bound;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
 use st_tensor::{MatmulBackend, Tensor, TensorError};
 
+fn parse_backend(label: Option<&str>) -> MatmulBackend {
+    match label.unwrap_or("auto") {
+        "auto" => MatmulBackend::Auto,
+        "faer" => MatmulBackend::CpuFaer,
+        "naive" => MatmulBackend::CpuNaive,
+        #[cfg(feature = "wgpu")]
+        "wgpu" => MatmulBackend::GpuWgpu,
+        other => {
+            eprintln!("[spiraltorch] unknown backend '{other}', falling back to 'auto'");
+            MatmulBackend::Auto
+        }
+    }
+}
+
 const USED_DLPACK_CAPSULE_NAME: &CStr =
     unsafe { CStr::from_bytes_with_nul_unchecked(b"used_dltensor\0") };
 
@@ -117,19 +131,21 @@ impl PyTensor {
         out
     }
 
+    /// Matrix multiply: self @ other
     #[pyo3(signature = (other, *, backend=None))]
-    pub fn matmul(&self, other: &PyTensor, backend: Option<&str>) -> PyResult<Self> {
-        let backend = matmul_backend_from_str(backend)?;
+    pub fn matmul(&self, other: &PyTensor, backend: Option<&str>) -> PyResult<PyTensor> {
+        let backend = parse_backend(backend);
         let tensor = self
             .inner
             .matmul_with_backend(&other.inner, backend)
             .map_err(tensor_err_to_py)?;
-        Ok(Self { inner: tensor })
+        Ok(PyTensor { inner: tensor })
     }
 
-    pub fn add(&self, other: &PyTensor) -> PyResult<Self> {
+    /// Add (element-wise)
+    pub fn add(&self, other: &PyTensor) -> PyResult<PyTensor> {
         let tensor = self.inner.add(&other.inner).map_err(tensor_err_to_py)?;
-        Ok(Self { inner: tensor })
+        Ok(PyTensor { inner: tensor })
     }
 
     pub fn sub(&self, other: &PyTensor) -> PyResult<Self> {
@@ -142,12 +158,13 @@ impl PyTensor {
         Ok(Self { inner: tensor })
     }
 
-    pub fn hadamard(&self, other: &PyTensor) -> PyResult<Self> {
+    /// Element-wise multiply (Hadamard)
+    pub fn hadamard(&self, other: &PyTensor) -> PyResult<PyTensor> {
         let tensor = self
             .inner
             .hadamard(&other.inner)
             .map_err(tensor_err_to_py)?;
-        Ok(Self { inner: tensor })
+        Ok(PyTensor { inner: tensor })
     }
 
     #[pyo3(name = "add_scaled_")]
@@ -161,10 +178,11 @@ impl PyTensor {
         self.inner.add_row_inplace(&bias).map_err(tensor_err_to_py)
     }
 
-    pub fn transpose(&self) -> Self {
-        Self {
+    /// Transpose
+    pub fn transpose(&self) -> PyResult<PyTensor> {
+        Ok(PyTensor {
             inner: self.inner.transpose(),
-        }
+        })
     }
 
     pub fn reshape(&self, rows: usize, cols: usize) -> PyResult<Self> {
@@ -234,30 +252,6 @@ pub(crate) fn tensor_err_to_py(err: TensorError) -> PyErr {
         | TensorError::EmptyInput(_)
         | TensorError::DlpackError { .. } => PyValueError::new_err(err.to_string()),
         _ => PyRuntimeError::new_err(err.to_string()),
-    }
-}
-
-fn matmul_backend_from_str(label: Option<&str>) -> PyResult<MatmulBackend> {
-    let name = label.unwrap_or("auto");
-    match name {
-        "auto" => Ok(MatmulBackend::Auto),
-        "faer" => Ok(MatmulBackend::CpuFaer),
-        "naive" => Ok(MatmulBackend::CpuNaive),
-        "wgpu" => {
-            #[cfg(feature = "wgpu")]
-            {
-                Ok(MatmulBackend::GpuWgpu)
-            }
-            #[cfg(not(feature = "wgpu"))]
-            {
-                Err(PyValueError::new_err(
-                    "wgpu backend requested but this build was compiled without GPU support",
-                ))
-            }
-        }
-        other => Err(PyValueError::new_err(format!(
-            "unknown matmul backend '{other}'"
-        ))),
     }
 }
 

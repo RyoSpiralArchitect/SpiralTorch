@@ -194,6 +194,36 @@ impl WasmTuner {
         Some(WasmFftPlan::from_choice(choice, subgroup))
     }
 
+    /// Produce a tuned FFT plan encoded as JSON when an override exists.
+    #[wasm_bindgen(js_name = planFftJson)]
+    pub fn plan_fft_json(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> Result<Option<String>, JsValue> {
+        match self.plan_fft(rows, cols, k, subgroup) {
+            Some(plan) => Ok(Some(plan.to_json()?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Produce a tuned FFT plan encoded as a plain JavaScript object when an override exists.
+    #[wasm_bindgen(js_name = planFftObject)]
+    pub fn plan_fft_object(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> Result<Option<JsValue>, JsValue> {
+        match self.plan_fft(rows, cols, k, subgroup) {
+            Some(plan) => Ok(Some(plan.to_object()?)),
+            None => Ok(None),
+        }
+    }
+
     /// Resolve a tuned FFT plan. Falls back to heuristics (or base device caps)
     /// when no explicit override matches.
     #[wasm_bindgen(js_name = planFftWithFallback)]
@@ -206,6 +236,32 @@ impl WasmTuner {
     ) -> WasmFftPlan {
         let (choice, _, _) = self.resolve_fft_choice(rows, cols, k, subgroup);
         WasmFftPlan::from_choice(choice, subgroup)
+    }
+
+    /// Resolve a tuned FFT plan and encode it as JSON.
+    #[wasm_bindgen(js_name = planFftWithFallbackJson)]
+    pub fn plan_fft_with_fallback_json(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> Result<String, JsValue> {
+        let plan = self.plan_fft_with_fallback(rows, cols, k, subgroup);
+        plan.to_json()
+    }
+
+    /// Resolve a tuned FFT plan and encode it as a plain JavaScript object.
+    #[wasm_bindgen(js_name = planFftWithFallbackObject)]
+    pub fn plan_fft_with_fallback_object(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> Result<JsValue, JsValue> {
+        let plan = self.plan_fft_with_fallback(rows, cols, k, subgroup);
+        plan.to_object()
     }
 
     /// Resolve a tuned FFT plan and return metadata describing how the plan was
@@ -223,6 +279,32 @@ impl WasmTuner {
         ResolvedWasmFftPlan::new(plan, source, heuristic_used)
     }
 
+    /// Resolve a tuned FFT plan and encode the metadata report as JSON.
+    #[wasm_bindgen(js_name = planFftResolutionJson)]
+    pub fn plan_fft_resolution_json(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> Result<String, JsValue> {
+        let resolved = self.plan_fft_resolution(rows, cols, k, subgroup);
+        resolved.to_json()
+    }
+
+    /// Resolve a tuned FFT plan and encode the metadata report as a plain JavaScript object.
+    #[wasm_bindgen(js_name = planFftResolutionObject)]
+    pub fn plan_fft_resolution_object(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> Result<JsValue, JsValue> {
+        let resolved = self.plan_fft_resolution(rows, cols, k, subgroup);
+        resolved.to_object()
+    }
+
     /// Resolve a tuned FFT plan and return a JSON-ready report describing how the plan was
     /// assembled (override vs. heuristic vs. fallback).
     #[wasm_bindgen(js_name = planFftReport)]
@@ -233,8 +315,7 @@ impl WasmTuner {
         k: u32,
         subgroup: bool,
     ) -> Result<JsValue, JsValue> {
-        let resolved = self.plan_fft_resolution(rows, cols, k, subgroup);
-        resolved.to_object()
+        self.plan_fft_resolution_object(rows, cols, k, subgroup)
     }
 }
 
@@ -608,5 +689,58 @@ mod tests {
         let object = resolved.to_object().expect("object");
         let roundtrip = ResolvedWasmFftPlan::from_object(&object).expect("from object");
         assert_eq!(roundtrip.override_applied(), resolved.override_applied());
+    }
+
+    #[test]
+    fn plan_fft_json_serialises_override() {
+        let mut tuner = empty_tuner();
+        tuner.table.push_sorted(override_record());
+        let json = tuner
+            .plan_fft_json(512, 4096, 128, true)
+            .expect("json result")
+            .expect("override json");
+        let parsed: WasmFftPlanSerde = serde_json::from_str(&json).expect("parse json");
+        assert_eq!(parsed.tile_cols, 2048);
+        assert_eq!(parsed.radix, 4);
+    }
+
+    #[test]
+    fn plan_fft_json_absent_without_override() {
+        let tuner = empty_tuner();
+        let json = tuner
+            .plan_fft_json(512, 4096, 128, true)
+            .expect("json result");
+        assert!(json.is_none());
+    }
+
+    #[test]
+    fn plan_fft_with_fallback_json_matches_object() {
+        let tuner = empty_tuner();
+        let json = tuner
+            .plan_fft_with_fallback_json(512, 4096, 128, true)
+            .expect("json");
+        let object = tuner
+            .plan_fft_with_fallback_object(512, 4096, 128, true)
+            .expect("object");
+        let parsed_json: WasmFftPlanSerde = serde_json::from_str(&json).expect("parse json");
+        let parsed_object: WasmFftPlanSerde = object.into_serde().expect("parse object");
+        assert_eq!(parsed_json.tile_cols, parsed_object.tile_cols);
+        assert_eq!(parsed_json.radix, parsed_object.radix);
+    }
+
+    #[test]
+    fn plan_fft_resolution_json_matches_report() {
+        let mut tuner = empty_tuner();
+        tuner.table.push_sorted(override_record());
+        let json = tuner
+            .plan_fft_resolution_json(512, 4096, 128, true)
+            .expect("json");
+        let report = tuner
+            .plan_fft_resolution_object(512, 4096, 128, true)
+            .expect("object");
+        let parsed_json: ResolvedPlanSerde = serde_json::from_str(&json).expect("parse json");
+        let parsed_report: ResolvedPlanSerde = report.into_serde().expect("parse object");
+        assert_eq!(parsed_json.plan.tile_cols, parsed_report.plan.tile_cols);
+        assert_eq!(parsed_json.override_applied, parsed_report.override_applied);
     }
 }

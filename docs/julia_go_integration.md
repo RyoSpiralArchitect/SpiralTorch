@@ -32,8 +32,9 @@ reimplementing the runtime.
   garbage-collected `Tensor` wrapper, overloads `+`, `-`, `.*`, and `*` (matrix
   and scalar) and surfaces helpers for transposition, reshaping, and converting
   between Julia matrices and SpiralTorch tensors. A matching `Runtime` type now
-  exposes `worker_count` plus runtime-backed `add`/`sub`/`matmul`/`hadamard`/
-  `scale`/`transpose`/`reshape` helpers so Julia code can hop onto the golden
+  exposes `worker_count`, runtime-backed `add`/`sub`/`matmul`/`hadamard`/
+  `scale`/`transpose`/`reshape` helpers, tuple-friendly random samplers, and a
+  `with_runtime` convenience wrapper so Julia code can hop onto the golden
   scheduler without leaving high-level syntax.
 - Library discovery prefers the `SPIRALTORCH_SYS_LIBRARY` environment variable
   before falling back to bundled paths, making ad-hoc experimentation easy.

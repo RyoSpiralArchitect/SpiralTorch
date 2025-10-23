@@ -1,0 +1,153 @@
+       >>SOURCE FORMAT FREE
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ST-DATASET-WRITER.
+       ENVIRONMENT DIVISION.
+       CONFIGURATION SECTION.
+       SOURCE-COMPUTER. IBM-Z15.
+       OBJECT-COMPUTER. IBM-Z15.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-ROUTE.
+           05  WS-DATASET-NAME        PIC X(44) VALUE 'ST.DATA.NARRATION(+1)'.
+           05  WS-MEMBER              PIC X(8)  VALUE 'NARRATE '.
+           05  WS-DISPOSITION         PIC X(3)  VALUE 'NEW'.
+           05  WS-VOLUME              PIC X(6)  VALUE 'VOL001'.
+           05  WS-RECORD-FORMAT       PIC X(4)  VALUE 'FB'.
+           05  WS-RECORD-LENGTH       PIC 9(5)  VALUE 512.
+           05  WS-BLOCK-SIZE          PIC 9(5)  VALUE 6144.
+           05  WS-DATA-CLASS          PIC X(8)  VALUE 'NARRATE'.
+           05  WS-MANAGEMENT-CLASS    PIC X(8)  VALUE 'GDG'.
+           05  WS-STORAGE-CLASS       PIC X(8)  VALUE 'FASTIO'.
+       01  WS-DSORG                  PIC X(2)  VALUE SPACES.
+       01  WS-TARGET-DSN             PIC X(64) VALUE SPACES.
+       01  WS-TARGET-POINTER         PIC S9(4) COMP VALUE 1.
+       01  WS-ALLOC-CMD              PIC X(256) VALUE SPACES.
+       01  WS-ALLOC-POINTER          PIC S9(4) COMP VALUE 1.
+       01  WS-LENGTH-TEXT            PIC Z(5)   VALUE ZEROES.
+       01  WS-BLOCK-TEXT             PIC Z(5)   VALUE ZEROES.
+       01  WS-RETURN-CODE            PIC S9(9) COMP VALUE ZERO.
+       01  WS-MESSAGE                PIC X(80) VALUE SPACES.
+
+       PROCEDURE DIVISION.
+           *> Determine DSORG based on whether a PDS member was supplied.
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-MEMBER)) > 0
+               MOVE 'PO' TO WS-DSORG
+           ELSE
+               MOVE 'PS' TO WS-DSORG
+           END-IF
+
+           *> Ensure the block size can hold an integral number of records.
+           IF WS-BLOCK-SIZE REM WS-RECORD-LENGTH NOT = 0
+               MOVE 'Invalid block size for the supplied record length.' TO WS-MESSAGE
+               DISPLAY WS-MESSAGE
+               STOP RUN
+           END-IF
+
+           *> Build the fully-qualified dataset name, appending the member when present.
+           MOVE SPACES TO WS-TARGET-DSN
+           MOVE 1 TO WS-TARGET-POINTER
+           STRING
+               FUNCTION TRIM(WS-DATASET-NAME)
+               INTO WS-TARGET-DSN
+               WITH POINTER WS-TARGET-POINTER
+           END-STRING
+
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-MEMBER)) > 0
+               STRING
+                   '('
+                   FUNCTION TRIM(WS-MEMBER)
+                   ')'
+                   INTO WS-TARGET-DSN
+                   WITH POINTER WS-TARGET-POINTER
+               END-STRING
+           END-IF
+
+           *> Convert numeric DCB values to editable strings for BPXWDYN.
+           MOVE WS-RECORD-LENGTH TO WS-LENGTH-TEXT
+           MOVE WS-BLOCK-SIZE TO WS-BLOCK-TEXT
+
+           *> Assemble the BPXWDYN allocation command driven by the WASM planner metadata.
+           MOVE SPACES TO WS-ALLOC-CMD
+           MOVE 1 TO WS-ALLOC-POINTER
+           STRING
+               'ALLOC FI(NARRBUF) DA(''' DELIMITED BY SIZE
+               FUNCTION TRIM(WS-TARGET-DSN) DELIMITED BY SIZE
+               ''') ' DELIMITED BY SIZE
+               INTO WS-ALLOC-CMD
+               WITH POINTER WS-ALLOC-POINTER
+           END-STRING
+
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-DISPOSITION)) > 0
+               STRING
+                   'DISP('
+                   FUNCTION TRIM(WS-DISPOSITION)
+                   ') '
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
+
+           STRING
+               'DSORG(' DELIMITED BY SIZE
+               FUNCTION TRIM(WS-DSORG) DELIMITED BY SIZE
+               ') ' DELIMITED BY SIZE
+               'RECFM(' DELIMITED BY SIZE
+               FUNCTION TRIM(WS-RECORD-FORMAT) DELIMITED BY SIZE
+               ') ' DELIMITED BY SIZE
+               'LRECL(' DELIMITED BY SIZE
+               FUNCTION TRIM(WS-LENGTH-TEXT) DELIMITED BY SIZE
+               ') ' DELIMITED BY SIZE
+               'BLKSIZE(' DELIMITED BY SIZE
+               FUNCTION TRIM(WS-BLOCK-TEXT) DELIMITED BY SIZE
+               ') ' DELIMITED BY SIZE
+               INTO WS-ALLOC-CMD
+               WITH POINTER WS-ALLOC-POINTER
+           END-STRING
+
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-VOLUME)) > 0
+               STRING
+                   'VOL(' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-VOLUME) DELIMITED BY SIZE
+                   ') ' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
+
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-DATA-CLASS)) > 0
+               STRING
+                   'DATACLAS(' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-DATA-CLASS) DELIMITED BY SIZE
+                   ') ' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
+
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-MANAGEMENT-CLASS)) > 0
+               STRING
+                   'MGMTCLAS(' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-MANAGEMENT-CLASS) DELIMITED BY SIZE
+                   ') ' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
+
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-STORAGE-CLASS)) > 0
+               STRING
+                   'STORCLAS(' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-STORAGE-CLASS) DELIMITED BY SIZE
+                   ') ' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
+
+           DISPLAY 'BPXWDYN command built from planner metadata:'
+           DISPLAY '  ' FUNCTION TRIM(WS-ALLOC-CMD)
+
+           *> In production the command would be passed to BPXWDYN to allocate
+           *> the dataset before writing the narration payload. Here we just
+           *> confirm the computed statement.
+           STOP RUN.

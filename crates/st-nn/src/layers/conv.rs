@@ -6,9 +6,11 @@
 use crate::module::{Module, Parameter};
 use crate::schedule::GradientBands;
 use crate::{PureResult, Tensor, TensorError};
+use st_core::util::math::LeechProjector;
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense;
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 
 fn validate_positive(value: usize, _label: &str) -> PureResult<()> {
     if value == 0 {
@@ -34,6 +36,216 @@ fn dilated_extent(size: usize, dilation: usize) -> PureResult<usize> {
         })
 }
 
+const INVALID_NEIGHBOR: usize = usize::MAX;
+const DEFAULT_CONV6DA_OFFSETS: [(isize, isize, isize); 7] = [
+    (0, 0, 0),
+    (1, 0, 0),
+    (-1, 0, 0),
+    (0, 1, 0),
+    (0, -1, 0),
+    (0, 0, 1),
+    (0, 0, -1),
+];
+
+fn shape_product(shape: &[usize]) -> PureResult<usize> {
+    let mut product = 1usize;
+    for &dim in shape {
+        product = product
+            .checked_mul(dim)
+            .ok_or(TensorError::InvalidDimensions {
+                rows: product,
+                cols: dim,
+            })?;
+    }
+    Ok(product)
+}
+
+fn compute_strides(shape: &[usize]) -> Vec<usize> {
+    if shape.is_empty() {
+        return Vec::new();
+    }
+    let mut strides = vec![1; shape.len()];
+    let mut acc = 1usize;
+    for (idx, &dim) in shape.iter().enumerate().rev() {
+        strides[idx] = acc;
+        acc *= dim;
+    }
+    strides
+}
+
+fn einsum_recursive(
+    depth: usize,
+    sum_axes: &[usize],
+    axis_dims: &[usize],
+    axis_values: &mut [usize],
+    left_axis_ids: &[usize],
+    left_strides: &[usize],
+    left_data: &[f32],
+    right_axis_ids: &[usize],
+    right_strides: &[usize],
+    right_data: &[f32],
+) -> f32 {
+    if depth == sum_axes.len() {
+        let mut left_index = 0usize;
+        for (&axis, &stride) in left_axis_ids.iter().zip(left_strides.iter()) {
+            left_index += axis_values[axis] * stride;
+        }
+        let mut right_index = 0usize;
+        for (&axis, &stride) in right_axis_ids.iter().zip(right_strides.iter()) {
+            right_index += axis_values[axis] * stride;
+        }
+        return left_data[left_index] * right_data[right_index];
+    }
+    let axis = sum_axes[depth];
+    let dim = axis_dims[axis];
+    let mut acc = 0.0f32;
+    for value in 0..dim {
+        axis_values[axis] = value;
+        acc += einsum_recursive(
+            depth + 1,
+            sum_axes,
+            axis_dims,
+            axis_values,
+            left_axis_ids,
+            left_strides,
+            left_data,
+            right_axis_ids,
+            right_strides,
+            right_data,
+        );
+    }
+    acc
+}
+
+fn einsum_contract(
+    left_data: &[f32],
+    left_shape: &[usize],
+    left_axes: &[char],
+    right_data: &[f32],
+    right_shape: &[usize],
+    right_axes: &[char],
+    output_axes: &[char],
+) -> PureResult<(Vec<f32>, Vec<usize>)> {
+    if left_shape.len() != left_axes.len() {
+        return Err(TensorError::InvalidDimensions {
+            rows: left_shape.len(),
+            cols: left_axes.len(),
+        });
+    }
+    if right_shape.len() != right_axes.len() {
+        return Err(TensorError::InvalidDimensions {
+            rows: right_shape.len(),
+            cols: right_axes.len(),
+        });
+    }
+    let expected_left = shape_product(left_shape)?;
+    if expected_left != left_data.len() {
+        return Err(TensorError::DataLength {
+            expected: expected_left,
+            got: left_data.len(),
+        });
+    }
+    let expected_right = shape_product(right_shape)?;
+    if expected_right != right_data.len() {
+        return Err(TensorError::DataLength {
+            expected: expected_right,
+            got: right_data.len(),
+        });
+    }
+
+    let mut axis_positions: HashMap<char, usize> = HashMap::new();
+    let mut axis_dims: Vec<usize> = Vec::new();
+    let mut register_axis = |axis: char, dim: usize| -> PureResult<()> {
+        if let Some(&idx) = axis_positions.get(&axis) {
+            if axis_dims[idx] != dim {
+                return Err(TensorError::InvalidDimensions {
+                    rows: axis_dims[idx],
+                    cols: dim,
+                });
+            }
+        } else {
+            let idx = axis_dims.len();
+            axis_positions.insert(axis, idx);
+            axis_dims.push(dim);
+        }
+        Ok(())
+    };
+
+    for (&axis, &dim) in left_axes.iter().zip(left_shape.iter()) {
+        register_axis(axis, dim)?;
+    }
+    for (&axis, &dim) in right_axes.iter().zip(right_shape.iter()) {
+        register_axis(axis, dim)?;
+    }
+    let mut output_axis_ids = Vec::with_capacity(output_axes.len());
+    for &axis in output_axes {
+        if let Some(&idx) = axis_positions.get(&axis) {
+            output_axis_ids.push(idx);
+        } else {
+            return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 });
+        }
+    }
+
+    let left_axis_ids: Vec<usize> = left_axes.iter().map(|axis| axis_positions[axis]).collect();
+    let right_axis_ids: Vec<usize> = right_axes.iter().map(|axis| axis_positions[axis]).collect();
+
+    let output_dims: Vec<usize> = output_axis_ids
+        .iter()
+        .map(|&axis| axis_dims[axis])
+        .collect();
+    let output_len = shape_product(&output_dims)?;
+    let output_strides = compute_strides(&output_dims);
+
+    let output_axis_set: HashSet<usize> = output_axis_ids.iter().copied().collect();
+    let mut seen_sum = HashSet::new();
+    let mut sum_axes = Vec::new();
+    for &axis in &left_axis_ids {
+        if !output_axis_set.contains(&axis) && seen_sum.insert(axis) {
+            sum_axes.push(axis);
+        }
+    }
+    for &axis in &right_axis_ids {
+        if !output_axis_set.contains(&axis) && seen_sum.insert(axis) {
+            sum_axes.push(axis);
+        }
+    }
+    let left_strides = compute_strides(left_shape);
+    let right_strides = compute_strides(right_shape);
+
+    let mut axis_values = vec![0usize; axis_dims.len()];
+    let mut output = vec![0.0f32; output_len];
+
+    for (linear_idx, value) in output.iter_mut().enumerate() {
+        let mut remainder = linear_idx;
+        for ((&axis, &stride), &dim) in output_axis_ids
+            .iter()
+            .zip(output_strides.iter())
+            .zip(output_dims.iter())
+        {
+            if dim == 0 {
+                return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 });
+            }
+            let coordinate = remainder / stride;
+            remainder %= stride;
+            axis_values[axis] = coordinate;
+        }
+        *value = einsum_recursive(
+            0,
+            &sum_axes,
+            &axis_dims,
+            &mut axis_values,
+            &left_axis_ids,
+            &left_strides,
+            left_data,
+            &right_axis_ids,
+            &right_strides,
+            right_data,
+        );
+    }
+
+    Ok((output, output_dims))
+}
+
 /// One-dimensional convolution with explicit stride and padding controls.
 #[derive(Debug)]
 pub struct Conv1d {
@@ -44,6 +256,7 @@ pub struct Conv1d {
     kernel_size: usize,
     stride: usize,
     padding: usize,
+    dilation: usize,
 }
 
 impl Conv1d {
@@ -54,11 +267,13 @@ impl Conv1d {
         kernel_size: usize,
         stride: usize,
         padding: usize,
+        dilation: usize,
     ) -> PureResult<Self> {
         validate_positive(in_channels, "in_channels")?;
         validate_positive(out_channels, "out_channels")?;
         validate_positive(kernel_size, "kernel_size")?;
         validate_positive(stride, "stride")?;
+        validate_positive(dilation, "dilation")?;
         let name = name.into();
         let span = kernel_span(in_channels, kernel_size);
         let mut seed = 0.01f32;
@@ -76,7 +291,21 @@ impl Conv1d {
             kernel_size,
             stride,
             padding,
+            dilation,
         })
+    }
+
+    /// Overrides the dilation factor applied to the convolution kernel.
+    pub fn set_dilation(&mut self, dilation: usize) -> PureResult<()> {
+        validate_positive(dilation, "dilation")?;
+        self.dilation = dilation;
+        Ok(())
+    }
+
+    /// Builder-style helper returning a new instance configured with dilation.
+    pub fn with_dilation(mut self, dilation: usize) -> PureResult<Self> {
+        self.set_dilation(dilation)?;
+        Ok(self)
     }
 
     fn infer_width(&self, cols: usize) -> PureResult<usize> {
@@ -91,13 +320,14 @@ impl Conv1d {
 
     fn output_width(&self, input_width: usize) -> PureResult<usize> {
         let numer = input_width + 2 * self.padding;
-        if numer < self.kernel_size {
+        let effective_kernel = dilated_extent(self.kernel_size, self.dilation)?;
+        if numer < effective_kernel {
             return Err(TensorError::InvalidDimensions {
                 rows: input_width,
-                cols: self.kernel_size,
+                cols: effective_kernel,
             });
         }
-        Ok((numer - self.kernel_size) / self.stride + 1)
+        Ok((numer - effective_kernel) / self.stride + 1)
     }
 }
 
@@ -127,7 +357,7 @@ impl Module for Conv1d {
                         for ic in 0..self.in_channels {
                             let channel_offset = ic * width;
                             for k in 0..self.kernel_size {
-                                let pos = ow * self.stride + k;
+                                let pos = ow * self.stride + k * self.dilation;
                                 if pos < self.padding {
                                     continue;
                                 }
@@ -182,7 +412,7 @@ impl Module for Conv1d {
                         for ic in 0..self.in_channels {
                             let channel_offset = ic * width;
                             for k in 0..self.kernel_size {
-                                let pos = ow * self.stride + k;
+                                let pos = ow * self.stride + k * self.dilation;
                                 if pos < self.padding {
                                     continue;
                                 }
@@ -595,6 +825,1032 @@ impl Module for Conv2d {
     }
 }
 
+#[derive(Debug)]
+pub struct Conv3d {
+    weight: Parameter,
+    bias: Parameter,
+    in_channels: usize,
+    out_channels: usize,
+    kernel: (usize, usize, usize),
+    stride: (usize, usize, usize),
+    padding: (usize, usize, usize),
+    dilation: (usize, usize, usize),
+    input_dhw: (usize, usize, usize),
+}
+
+impl Conv3d {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: impl Into<String>,
+        in_channels: usize,
+        out_channels: usize,
+        kernel: (usize, usize, usize),
+        stride: (usize, usize, usize),
+        padding: (usize, usize, usize),
+        dilation: (usize, usize, usize),
+        input_dhw: (usize, usize, usize),
+    ) -> PureResult<Self> {
+        validate_positive(in_channels, "in_channels")?;
+        validate_positive(out_channels, "out_channels")?;
+        validate_positive(kernel.0, "kernel_d")?;
+        validate_positive(kernel.1, "kernel_h")?;
+        validate_positive(kernel.2, "kernel_w")?;
+        validate_positive(stride.0, "stride_d")?;
+        validate_positive(stride.1, "stride_h")?;
+        validate_positive(stride.2, "stride_w")?;
+        validate_positive(dilation.0, "dilation_d")?;
+        validate_positive(dilation.1, "dilation_h")?;
+        validate_positive(dilation.2, "dilation_w")?;
+        validate_positive(input_dhw.0, "input_depth")?;
+        validate_positive(input_dhw.1, "input_height")?;
+        validate_positive(input_dhw.2, "input_width")?;
+        let name = name.into();
+        let kernel_volume = kernel.0 * kernel.1 * kernel.2;
+        let mut seed = 0.015f32;
+        let weight = Tensor::from_fn(out_channels, in_channels * kernel_volume, |_r, _c| {
+            let value = seed;
+            seed = (seed * 1.41).rem_euclid(0.11).max(3e-3);
+            value
+        })?;
+        let bias = Tensor::zeros(1, out_channels)?;
+        let conv = Self {
+            weight: Parameter::new(format!("{name}::weight"), weight),
+            bias: Parameter::new(format!("{name}::bias"), bias),
+            in_channels,
+            out_channels,
+            kernel,
+            stride,
+            padding,
+            dilation,
+            input_dhw,
+        };
+        conv.output_dhw()?;
+        Ok(conv)
+    }
+
+    pub fn set_dilation(&mut self, dilation: (usize, usize, usize)) -> PureResult<()> {
+        validate_positive(dilation.0, "dilation_d")?;
+        validate_positive(dilation.1, "dilation_h")?;
+        validate_positive(dilation.2, "dilation_w")?;
+        let previous = self.dilation;
+        self.dilation = dilation;
+        if let Err(error) = self.output_dhw() {
+            self.dilation = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub fn with_dilation(mut self, dilation: (usize, usize, usize)) -> PureResult<Self> {
+        self.set_dilation(dilation)?;
+        Ok(self)
+    }
+
+    fn output_dhw(&self) -> PureResult<(usize, usize, usize)> {
+        let (d, h, w) = self.input_dhw;
+        let eff_kd = dilated_extent(self.kernel.0, self.dilation.0)?;
+        let eff_kh = dilated_extent(self.kernel.1, self.dilation.1)?;
+        let eff_kw = dilated_extent(self.kernel.2, self.dilation.2)?;
+        let (pd, ph, pw) = self.padding;
+        let (sd, sh, sw) = self.stride;
+        if d + 2 * pd < eff_kd || h + 2 * ph < eff_kh || w + 2 * pw < eff_kw {
+            return Err(TensorError::InvalidDimensions {
+                rows: d + 2 * pd,
+                cols: eff_kd.max(eff_kh.max(eff_kw)),
+            });
+        }
+        let od = (d + 2 * pd - eff_kd) / sd + 1;
+        let oh = (h + 2 * ph - eff_kh) / sh + 1;
+        let ow = (w + 2 * pw - eff_kw) / sw + 1;
+        Ok((od, oh, ow))
+    }
+
+    fn input_volume(&self) -> PureResult<usize> {
+        shape_product(&[self.input_dhw.0, self.input_dhw.1, self.input_dhw.2])
+    }
+
+    fn kernel_volume(&self) -> PureResult<usize> {
+        shape_product(&[self.kernel.0, self.kernel.1, self.kernel.2])
+    }
+}
+
+impl Module for Conv3d {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        let volume = self.input_volume()?;
+        let expected_cols =
+            self.in_channels
+                .checked_mul(volume)
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: self.in_channels,
+                    cols: volume,
+                })?;
+        if cols != expected_cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (batch, cols),
+                right: (batch, expected_cols),
+            });
+        }
+        let (od, oh, ow) = self.output_dhw()?;
+        let output_volume = od * oh * ow;
+        let mut out = Tensor::zeros(batch, self.out_channels * output_volume)?;
+        let weight = self.weight.value();
+        let bias = self.bias.value();
+        let weight_data = weight.data();
+        let kernel_volume = self.kernel_volume()?;
+        let out_cols = out.shape().1;
+        let plane = self.input_dhw.1 * self.input_dhw.2;
+        let area = self.input_dhw.2;
+        {
+            let input_data = input.data();
+            let out_data = out.data_mut();
+            for b in 0..batch {
+                let row = &input_data[b * cols..(b + 1) * cols];
+                let out_row = &mut out_data[b * out_cols..(b + 1) * out_cols];
+                for oc in 0..self.out_channels {
+                    let weight_row = &weight_data[oc * (self.in_channels * kernel_volume)
+                        ..(oc + 1) * (self.in_channels * kernel_volume)];
+                    let bias = bias_data[oc];
+                    for od_idx in 0..od {
+                        for oh_idx in 0..oh {
+                            for ow_idx in 0..ow {
+                                let mut acc = bias;
+                                for ic in 0..self.in_channels {
+                                    let channel_offset = ic * volume;
+                                    for kd in 0..self.kernel.0 {
+                                        let pos_d = od_idx * self.stride.0 + kd * self.dilation.0;
+                                        if pos_d < self.padding.0 {
+                                            continue;
+                                        }
+                                        let idx_d = pos_d - self.padding.0;
+                                        if idx_d >= self.input_dhw.0 {
+                                            continue;
+                                        }
+                                        for kh in 0..self.kernel.1 {
+                                            let pos_h =
+                                                oh_idx * self.stride.1 + kh * self.dilation.1;
+                                            if pos_h < self.padding.1 {
+                                                continue;
+                                            }
+                                            let idx_h = pos_h - self.padding.1;
+                                            if idx_h >= self.input_dhw.1 {
+                                                continue;
+                                            }
+                                            for kw in 0..self.kernel.2 {
+                                                let pos_w =
+                                                    ow_idx * self.stride.2 + kw * self.dilation.2;
+                                                if pos_w < self.padding.2 {
+                                                    continue;
+                                                }
+                                                let idx_w = pos_w - self.padding.2;
+                                                if idx_w >= self.input_dhw.2 {
+                                                    continue;
+                                                }
+                                                let index = channel_offset
+                                                    + idx_d * plane
+                                                    + idx_h * area
+                                                    + idx_w;
+                                                let input_val = row[index];
+                                                let weight_idx = ic * kernel_volume
+                                                    + kd * (self.kernel.1 * self.kernel.2)
+                                                    + kh * self.kernel.2
+                                                    + kw;
+                                                acc += input_val * weight_row[weight_idx];
+                                            }
+                                        }
+                                    }
+                                }
+                                let out_idx =
+                                    oc * output_volume + od_idx * (oh * ow) + oh_idx * ow + ow_idx;
+                                out_row[out_idx] = acc;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        let volume = self.input_volume()?;
+        let expected_cols =
+            self.in_channels
+                .checked_mul(volume)
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: self.in_channels,
+                    cols: volume,
+                })?;
+        if cols != expected_cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (batch, cols),
+                right: (batch, expected_cols),
+            });
+        }
+        let (od, oh, ow) = self.output_dhw()?;
+        let output_volume = od * oh * ow;
+        if grad_output.shape() != (batch, self.out_channels * output_volume) {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: (batch, self.out_channels * output_volume),
+            });
+        }
+        let kernel_volume = self.kernel_volume()?;
+        let span = self.in_channels * kernel_volume;
+        let mut grad_weight = Tensor::zeros(self.out_channels, span)?;
+        let mut grad_bias = vec![0.0f32; self.out_channels];
+        let mut grad_input = Tensor::zeros(batch, cols)?;
+        let weight = self.weight.value();
+        let weight_data = weight.data();
+        let grad_out_cols = grad_output.shape().1;
+        let grad_input_cols = grad_input.shape().1;
+        let plane = self.input_dhw.1 * self.input_dhw.2;
+        let area = self.input_dhw.2;
+        {
+            let grad_weight_data = grad_weight.data_mut();
+            let grad_input_data = grad_input.data_mut();
+            for b in 0..batch {
+                let row = &input.data()[b * cols..(b + 1) * cols];
+                let grad_row = &grad_output.data()[b * grad_out_cols..(b + 1) * grad_out_cols];
+                let grad_in_row =
+                    &mut grad_input_data[b * grad_input_cols..(b + 1) * grad_input_cols];
+                for oc in 0..self.out_channels {
+                    let weight_row = &weight_data[oc * span..(oc + 1) * span];
+                    for od_idx in 0..od {
+                        for oh_idx in 0..oh {
+                            for ow_idx in 0..ow {
+                                let go = grad_row[oc * output_volume
+                                    + od_idx * (oh * ow)
+                                    + oh_idx * ow
+                                    + ow_idx];
+                                grad_bias[oc] += go;
+                                for ic in 0..self.in_channels {
+                                    let channel_offset = ic * volume;
+                                    for kd in 0..self.kernel.0 {
+                                        let pos_d = od_idx * self.stride.0 + kd * self.dilation.0;
+                                        if pos_d < self.padding.0 {
+                                            continue;
+                                        }
+                                        let idx_d = pos_d - self.padding.0;
+                                        if idx_d >= self.input_dhw.0 {
+                                            continue;
+                                        }
+                                        for kh in 0..self.kernel.1 {
+                                            let pos_h =
+                                                oh_idx * self.stride.1 + kh * self.dilation.1;
+                                            if pos_h < self.padding.1 {
+                                                continue;
+                                            }
+                                            let idx_h = pos_h - self.padding.1;
+                                            if idx_h >= self.input_dhw.1 {
+                                                continue;
+                                            }
+                                            for kw in 0..self.kernel.2 {
+                                                let pos_w =
+                                                    ow_idx * self.stride.2 + kw * self.dilation.2;
+                                                if pos_w < self.padding.2 {
+                                                    continue;
+                                                }
+                                                let idx_w = pos_w - self.padding.2;
+                                                if idx_w >= self.input_dhw.2 {
+                                                    continue;
+                                                }
+                                                let index = channel_offset
+                                                    + idx_d * plane
+                                                    + idx_h * area
+                                                    + idx_w;
+                                                let input_val = row[index];
+                                                let weight_idx = ic * kernel_volume
+                                                    + kd * (self.kernel.1 * self.kernel.2)
+                                                    + kh * self.kernel.2
+                                                    + kw;
+                                                grad_weight_data[oc * span + weight_idx] +=
+                                                    go * input_val;
+                                                grad_in_row[index] += go * weight_row[weight_idx];
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let inv_batch = 1.0 / batch as f32;
+        for value in grad_weight.data_mut() {
+            *value *= inv_batch;
+        }
+        let mut bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
+        bias_tensor = bias_tensor.scale(inv_batch)?;
+        self.weight.accumulate_euclidean(&grad_weight)?;
+        self.bias.accumulate_euclidean(&bias_tensor)?;
+        Ok(grad_input)
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&self.weight)?;
+        visitor(&self.bias)?;
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&mut self.weight)?;
+        visitor(&mut self.bias)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct Conv4d {
+    weight: Parameter,
+    bias: Parameter,
+    in_channels: usize,
+    out_channels: usize,
+    kernel: (usize, usize, usize, usize),
+    stride: (usize, usize, usize, usize),
+    padding: (usize, usize, usize, usize),
+    dilation: (usize, usize, usize, usize),
+    input_dims: (usize, usize, usize, usize),
+}
+
+impl Conv4d {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: impl Into<String>,
+        in_channels: usize,
+        out_channels: usize,
+        kernel: (usize, usize, usize, usize),
+        stride: (usize, usize, usize, usize),
+        padding: (usize, usize, usize, usize),
+        dilation: (usize, usize, usize, usize),
+        input_dims: (usize, usize, usize, usize),
+    ) -> PureResult<Self> {
+        validate_positive(in_channels, "in_channels")?;
+        validate_positive(out_channels, "out_channels")?;
+        validate_positive(kernel.0, "kernel_d")?;
+        validate_positive(kernel.1, "kernel_h")?;
+        validate_positive(kernel.2, "kernel_w")?;
+        validate_positive(kernel.3, "kernel_t")?;
+        validate_positive(stride.0, "stride_d")?;
+        validate_positive(stride.1, "stride_h")?;
+        validate_positive(stride.2, "stride_w")?;
+        validate_positive(stride.3, "stride_t")?;
+        validate_positive(dilation.0, "dilation_d")?;
+        validate_positive(dilation.1, "dilation_h")?;
+        validate_positive(dilation.2, "dilation_w")?;
+        validate_positive(dilation.3, "dilation_t")?;
+        validate_positive(input_dims.0, "input_depth")?;
+        validate_positive(input_dims.1, "input_height")?;
+        validate_positive(input_dims.2, "input_width")?;
+        validate_positive(input_dims.3, "input_time")?;
+        let name = name.into();
+        let kernel_volume = shape_product(&[kernel.0, kernel.1, kernel.2, kernel.3])?;
+        let mut seed = 0.017f32;
+        let weight = Tensor::from_fn(out_channels, in_channels * kernel_volume, |_r, _c| {
+            let value = seed;
+            seed = (seed * 1.29).rem_euclid(0.09).max(2e-3);
+            value
+        })?;
+        let bias = Tensor::zeros(1, out_channels)?;
+        let conv = Self {
+            weight: Parameter::new(format!("{name}::weight"), weight),
+            bias: Parameter::new(format!("{name}::bias"), bias),
+            in_channels,
+            out_channels,
+            kernel,
+            stride,
+            padding,
+            dilation,
+            input_dims,
+        };
+        conv.output_dims()?;
+        Ok(conv)
+    }
+
+    pub fn set_dilation(&mut self, dilation: (usize, usize, usize, usize)) -> PureResult<()> {
+        validate_positive(dilation.0, "dilation_d")?;
+        validate_positive(dilation.1, "dilation_h")?;
+        validate_positive(dilation.2, "dilation_w")?;
+        validate_positive(dilation.3, "dilation_t")?;
+        let previous = self.dilation;
+        self.dilation = dilation;
+        if let Err(error) = self.output_dims() {
+            self.dilation = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub fn with_dilation(mut self, dilation: (usize, usize, usize, usize)) -> PureResult<Self> {
+        self.set_dilation(dilation)?;
+        Ok(self)
+    }
+
+    fn output_dims(&self) -> PureResult<(usize, usize, usize, usize)> {
+        let (d, h, w, t) = self.input_dims;
+        let eff_kd = dilated_extent(self.kernel.0, self.dilation.0)?;
+        let eff_kh = dilated_extent(self.kernel.1, self.dilation.1)?;
+        let eff_kw = dilated_extent(self.kernel.2, self.dilation.2)?;
+        let eff_kt = dilated_extent(self.kernel.3, self.dilation.3)?;
+        let (pd, ph, pw, pt) = self.padding;
+        let (sd, sh, sw, st) = self.stride;
+        if d + 2 * pd < eff_kd || h + 2 * ph < eff_kh || w + 2 * pw < eff_kw || t + 2 * pt < eff_kt
+        {
+            return Err(TensorError::InvalidDimensions {
+                rows: d + 2 * pd,
+                cols: eff_kd.max(eff_kh.max(eff_kw.max(eff_kt))),
+            });
+        }
+        let od = (d + 2 * pd - eff_kd) / sd + 1;
+        let oh = (h + 2 * ph - eff_kh) / sh + 1;
+        let ow = (w + 2 * pw - eff_kw) / sw + 1;
+        let ot = (t + 2 * pt - eff_kt) / st + 1;
+        Ok((od, oh, ow, ot))
+    }
+
+    fn input_volume(&self) -> PureResult<usize> {
+        shape_product(&[
+            self.input_dims.0,
+            self.input_dims.1,
+            self.input_dims.2,
+            self.input_dims.3,
+        ])
+    }
+
+    fn kernel_volume(&self) -> PureResult<usize> {
+        shape_product(&[self.kernel.0, self.kernel.1, self.kernel.2, self.kernel.3])
+    }
+}
+
+impl Module for Conv4d {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        let volume = self.input_volume()?;
+        let expected_cols =
+            self.in_channels
+                .checked_mul(volume)
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: self.in_channels,
+                    cols: volume,
+                })?;
+        if cols != expected_cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (batch, cols),
+                right: (batch, expected_cols),
+            });
+        }
+        let (od, oh, ow, ot) = self.output_dims()?;
+        let output_volume = od * oh * ow * ot;
+        let mut out = Tensor::zeros(batch, self.out_channels * output_volume)?;
+        let weight = self.weight.value();
+        let bias = self.bias.value();
+        let weight_data = weight.data();
+        let bias_data = bias.data();
+        let kernel_volume = self.kernel_volume()?;
+        let out_cols = out.shape().1;
+        let plane = self.input_dims.1 * self.input_dims.2 * self.input_dims.3;
+        let area = self.input_dims.2 * self.input_dims.3;
+        let line = self.input_dims.3;
+        {
+            let out_data = out.data_mut();
+            for b in 0..batch {
+                let row = &input.data()[b * cols..(b + 1) * cols];
+                let out_row = &mut out_data[b * out_cols..(b + 1) * out_cols];
+                for oc in 0..self.out_channels {
+                    let weight_row = &weight_data[oc * (self.in_channels * kernel_volume)
+                        ..(oc + 1) * (self.in_channels * kernel_volume)];
+                    let bias = bias_data[oc];
+                    for od_idx in 0..od {
+                        for oh_idx in 0..oh {
+                            for ow_idx in 0..ow {
+                                for ot_idx in 0..ot {
+                                    let mut acc = bias;
+                                    for ic in 0..self.in_channels {
+                                        let channel_offset = ic * volume;
+                                        for kd in 0..self.kernel.0 {
+                                            let pos_d =
+                                                od_idx * self.stride.0 + kd * self.dilation.0;
+                                            if pos_d < self.padding.0 {
+                                                continue;
+                                            }
+                                            let idx_d = pos_d - self.padding.0;
+                                            if idx_d >= self.input_dims.0 {
+                                                continue;
+                                            }
+                                            for kh in 0..self.kernel.1 {
+                                                let pos_h =
+                                                    oh_idx * self.stride.1 + kh * self.dilation.1;
+                                                if pos_h < self.padding.1 {
+                                                    continue;
+                                                }
+                                                let idx_h = pos_h - self.padding.1;
+                                                if idx_h >= self.input_dims.1 {
+                                                    continue;
+                                                }
+                                                for kw in 0..self.kernel.2 {
+                                                    let pos_w = ow_idx * self.stride.2
+                                                        + kw * self.dilation.2;
+                                                    if pos_w < self.padding.2 {
+                                                        continue;
+                                                    }
+                                                    let idx_w = pos_w - self.padding.2;
+                                                    if idx_w >= self.input_dims.2 {
+                                                        continue;
+                                                    }
+                                                    for kt in 0..self.kernel.3 {
+                                                        let pos_t = ot_idx * self.stride.3
+                                                            + kt * self.dilation.3;
+                                                        if pos_t < self.padding.3 {
+                                                            continue;
+                                                        }
+                                                        let idx_t = pos_t - self.padding.3;
+                                                        if idx_t >= self.input_dims.3 {
+                                                            continue;
+                                                        }
+                                                        let index = channel_offset
+                                                            + idx_d * plane
+                                                            + idx_h * area
+                                                            + idx_w * line
+                                                            + idx_t;
+                                                        let input_val = row[index];
+                                                        let weight_idx = ic * kernel_volume
+                                                            + kd * (self.kernel.1
+                                                                * self.kernel.2
+                                                                * self.kernel.3)
+                                                            + kh * (self.kernel.2 * self.kernel.3)
+                                                            + kw * self.kernel.3
+                                                            + kt;
+                                                        acc += input_val * weight_row[weight_idx];
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    let out_idx = oc * output_volume
+                                        + od_idx * (oh * ow * ot)
+                                        + oh_idx * (ow * ot)
+                                        + ow_idx * ot
+                                        + ot_idx;
+                                    out_row[out_idx] = acc;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        let volume = self.input_volume()?;
+        let expected_cols =
+            self.in_channels
+                .checked_mul(volume)
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: self.in_channels,
+                    cols: volume,
+                })?;
+        if cols != expected_cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (batch, cols),
+                right: (batch, expected_cols),
+            });
+        }
+        let (od, oh, ow, ot) = self.output_dims()?;
+        let output_volume = od * oh * ow * ot;
+        if grad_output.shape() != (batch, self.out_channels * output_volume) {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: (batch, self.out_channels * output_volume),
+            });
+        }
+        let kernel_volume = self.kernel_volume()?;
+        let span = self.in_channels * kernel_volume;
+        let mut grad_weight = Tensor::zeros(self.out_channels, span)?;
+        let mut grad_bias = vec![0.0f32; self.out_channels];
+        let mut grad_input = Tensor::zeros(batch, cols)?;
+        let weight = self.weight.value();
+        let weight_data = weight.data();
+        let grad_out_cols = grad_output.shape().1;
+        let grad_input_cols = grad_input.shape().1;
+        let plane = self.input_dims.1 * self.input_dims.2 * self.input_dims.3;
+        let area = self.input_dims.2 * self.input_dims.3;
+        let line = self.input_dims.3;
+        {
+            let grad_weight_data = grad_weight.data_mut();
+            let grad_input_data = grad_input.data_mut();
+            for b in 0..batch {
+                let row = &input.data()[b * cols..(b + 1) * cols];
+                let grad_row = &grad_output.data()[b * grad_out_cols..(b + 1) * grad_out_cols];
+                let grad_in_row =
+                    &mut grad_input_data[b * grad_input_cols..(b + 1) * grad_input_cols];
+                for oc in 0..self.out_channels {
+                    let weight_row = &weight_data[oc * span..(oc + 1) * span];
+                    for od_idx in 0..od {
+                        for oh_idx in 0..oh {
+                            for ow_idx in 0..ow {
+                                for ot_idx in 0..ot {
+                                    let go = grad_row[oc * output_volume
+                                        + od_idx * (oh * ow * ot)
+                                        + oh_idx * (ow * ot)
+                                        + ow_idx * ot
+                                        + ot_idx];
+                                    grad_bias[oc] += go;
+                                    for ic in 0..self.in_channels {
+                                        let channel_offset = ic * volume;
+                                        for kd in 0..self.kernel.0 {
+                                            let pos_d =
+                                                od_idx * self.stride.0 + kd * self.dilation.0;
+                                            if pos_d < self.padding.0 {
+                                                continue;
+                                            }
+                                            let idx_d = pos_d - self.padding.0;
+                                            if idx_d >= self.input_dims.0 {
+                                                continue;
+                                            }
+                                            for kh in 0..self.kernel.1 {
+                                                let pos_h =
+                                                    oh_idx * self.stride.1 + kh * self.dilation.1;
+                                                if pos_h < self.padding.1 {
+                                                    continue;
+                                                }
+                                                let idx_h = pos_h - self.padding.1;
+                                                if idx_h >= self.input_dims.1 {
+                                                    continue;
+                                                }
+                                                for kw in 0..self.kernel.2 {
+                                                    let pos_w = ow_idx * self.stride.2
+                                                        + kw * self.dilation.2;
+                                                    if pos_w < self.padding.2 {
+                                                        continue;
+                                                    }
+                                                    let idx_w = pos_w - self.padding.2;
+                                                    if idx_w >= self.input_dims.2 {
+                                                        continue;
+                                                    }
+                                                    for kt in 0..self.kernel.3 {
+                                                        let pos_t = ot_idx * self.stride.3
+                                                            + kt * self.dilation.3;
+                                                        if pos_t < self.padding.3 {
+                                                            continue;
+                                                        }
+                                                        let idx_t = pos_t - self.padding.3;
+                                                        if idx_t >= self.input_dims.3 {
+                                                            continue;
+                                                        }
+                                                        let index = channel_offset
+                                                            + idx_d * plane
+                                                            + idx_h * area
+                                                            + idx_w * line
+                                                            + idx_t;
+                                                        let input_val = row[index];
+                                                        let weight_idx = ic * kernel_volume
+                                                            + kd * (self.kernel.1
+                                                                * self.kernel.2
+                                                                * self.kernel.3)
+                                                            + kh * (self.kernel.2 * self.kernel.3)
+                                                            + kw * self.kernel.3
+                                                            + kt;
+                                                        grad_weight_data[oc * span + weight_idx] +=
+                                                            go * input_val;
+                                                        grad_in_row[index] +=
+                                                            go * weight_row[weight_idx];
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let inv_batch = 1.0 / batch as f32;
+        for value in grad_weight.data_mut() {
+            *value *= inv_batch;
+        }
+        let mut bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
+        bias_tensor = bias_tensor.scale(inv_batch)?;
+        self.weight.accumulate_euclidean(&grad_weight)?;
+        self.bias.accumulate_euclidean(&bias_tensor)?;
+        Ok(grad_input)
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&self.weight)?;
+        visitor(&self.bias)?;
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&mut self.weight)?;
+        visitor(&mut self.bias)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct Conv6da {
+    weight: Parameter,
+    bias: Parameter,
+    in_channels: usize,
+    out_channels: usize,
+    depth: usize,
+    height: usize,
+    width: usize,
+    neighbor_offsets: Vec<(isize, isize, isize)>,
+    neighbor_indices: Vec<Vec<usize>>,
+    neighbor_count: usize,
+    leech_projector: LeechProjector,
+}
+
+impl Conv6da {
+    pub fn new(
+        name: impl Into<String>,
+        in_channels: usize,
+        out_channels: usize,
+        grid: (usize, usize, usize),
+        leech_rank: usize,
+        leech_weight: f64,
+    ) -> PureResult<Self> {
+        Self::with_neighbors(
+            name,
+            in_channels,
+            out_channels,
+            grid,
+            leech_rank,
+            leech_weight,
+            &DEFAULT_CONV6DA_OFFSETS,
+        )
+    }
+
+    pub fn with_neighbors(
+        name: impl Into<String>,
+        in_channels: usize,
+        out_channels: usize,
+        grid: (usize, usize, usize),
+        leech_rank: usize,
+        leech_weight: f64,
+        offsets: &[(isize, isize, isize)],
+    ) -> PureResult<Self> {
+        validate_positive(in_channels, "in_channels")?;
+        validate_positive(out_channels, "out_channels")?;
+        validate_positive(grid.0, "depth")?;
+        validate_positive(grid.1, "height")?;
+        validate_positive(grid.2, "width")?;
+        if offsets.is_empty() {
+            return Err(TensorError::EmptyInput("conv6da_neighbors"));
+        }
+        let name = name.into();
+        let neighbor_count = offsets.len();
+        let span = in_channels * neighbor_count;
+        let depth = grid.0;
+        let height = grid.1;
+        let width = grid.2;
+        let plane = height * width;
+        let volume = depth * plane;
+        let mut neighbor_indices = vec![vec![INVALID_NEIGHBOR; neighbor_count]; volume];
+        for depth_idx in 0..depth {
+            for height_idx in 0..height {
+                for width_idx in 0..width {
+                    let cell_index = depth_idx * plane + height_idx * width + width_idx;
+                    for (offset_idx, (od, oh, ow)) in offsets.iter().enumerate() {
+                        let nd = depth_idx as isize + *od;
+                        let nh = height_idx as isize + *oh;
+                        let nw = width_idx as isize + *ow;
+                        if nd < 0
+                            || nh < 0
+                            || nw < 0
+                            || nd >= depth as isize
+                            || nh >= height as isize
+                            || nw >= width as isize
+                        {
+                            continue;
+                        }
+                        let base = nd as usize * plane + nh as usize * width + nw as usize;
+                        neighbor_indices[cell_index][offset_idx] = base;
+                    }
+                }
+            }
+        }
+        let mut seed = 0.01f32;
+        let weight = Tensor::from_fn(out_channels, span, |_r, _c| {
+            let value = seed;
+            seed = (seed * 1.31).rem_euclid(0.2).max(1e-3);
+            value
+        })?;
+        let bias = Tensor::zeros(1, out_channels)?;
+        Ok(Self {
+            weight: Parameter::new(format!("{name}::weight"), weight),
+            bias: Parameter::new(format!("{name}::bias"), bias),
+            in_channels,
+            out_channels,
+            depth,
+            height,
+            width,
+            neighbor_offsets: offsets.to_vec(),
+            neighbor_indices,
+            neighbor_count,
+            leech_projector: LeechProjector::new(leech_rank, leech_weight),
+        })
+    }
+
+    fn cells(&self) -> usize {
+        self.depth * self.height * self.width
+    }
+
+    fn expected_cols(&self) -> usize {
+        self.in_channels * self.cells()
+    }
+
+    pub fn neighbor_count(&self) -> usize {
+        self.neighbor_count
+    }
+
+    pub fn neighbor_offsets(&self) -> &[(isize, isize, isize)] {
+        &self.neighbor_offsets
+    }
+
+    fn neighbor_span(&self) -> usize {
+        self.in_channels * self.neighbor_count
+    }
+
+    fn gather_neighbors(&self, row: &[f32], buffer: &mut [f32], cell_index: usize) -> f64 {
+        buffer.fill(0.0);
+        let mut geodesic_sq = 0.0f64;
+        let volume = self.cells();
+        let indices = &self.neighbor_indices[cell_index];
+        for (offset_idx, &base) in indices.iter().enumerate() {
+            if base == INVALID_NEIGHBOR {
+                continue;
+            }
+            for ic in 0..self.in_channels {
+                let channel_offset = ic * volume;
+                let value = row[channel_offset + base];
+                buffer[offset_idx * self.in_channels + ic] = value;
+                geodesic_sq += f64::from(value) * f64::from(value);
+            }
+        }
+        geodesic_sq.sqrt()
+    }
+}
+
+impl Module for Conv6da {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        if cols != self.expected_cols() {
+            return Err(TensorError::ShapeMismatch {
+                left: (1, cols),
+                right: (1, self.expected_cols()),
+            });
+        }
+        let span = self.neighbor_span();
+        let volume = self.cells();
+        let mut out = Tensor::zeros(batch, self.out_channels * volume)?;
+        let weight = self.weight.value();
+        let bias = self.bias.value();
+        let weight_data = weight.data();
+        let bias_data = bias.data();
+        let mut neighbors = vec![0.0f32; span];
+        let out_cols = out.shape().1;
+        let mut out_rows = out.data_mut().chunks_exact_mut(out_cols);
+        let mut input_rows = input.data().chunks_exact(cols);
+        for (row, out_row) in (&mut input_rows).zip(&mut out_rows) {
+            for cell_index in 0..volume {
+                let geodesic = self.gather_neighbors(row, &mut neighbors, cell_index);
+                let density = self.leech_projector.enrich(geodesic) as f32;
+                for (oc, weight_row) in weight_data.chunks_exact(span).enumerate() {
+                    let mut acc = bias_data[oc] + density;
+                    for (value, weight) in neighbors.iter().zip(weight_row.iter()) {
+                        acc += value * weight;
+                    }
+                    out_row[oc * volume + cell_index] = acc;
+                }
+            }
+        }
+        debug_assert!(input_rows.remainder().is_empty());
+        debug_assert!(out_rows.into_remainder().is_empty());
+        Ok(out)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        if cols != self.expected_cols() {
+            return Err(TensorError::ShapeMismatch {
+                left: (1, cols),
+                right: (1, self.expected_cols()),
+            });
+        }
+        let volume = self.cells();
+        let span = self.neighbor_span();
+        if grad_output.shape() != (batch, self.out_channels * volume) {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: (batch, self.out_channels * volume),
+            });
+        }
+        let mut grad_weight = vec![0.0f32; self.out_channels * span];
+        let mut grad_bias = vec![0.0f32; self.out_channels];
+        let mut grad_input = Tensor::zeros(batch, cols)?;
+        let mut neighbors = vec![0.0f32; span];
+        let volume_per_channel = volume;
+        let weight = self.weight.value();
+        let grad_cols = grad_output.shape().1;
+        let leech_factor = self.leech_projector.enrich(1.0);
+        let mut grad_input_rows = grad_input.data_mut().chunks_exact_mut(cols);
+        let mut input_rows = input.data().chunks_exact(cols);
+        let mut grad_rows = grad_output.data().chunks_exact(grad_cols);
+        let weight_data = weight.data();
+        for ((row, grad_row), grad_in_row) in (&mut input_rows)
+            .zip(&mut grad_rows)
+            .zip(&mut grad_input_rows)
+        {
+            for cell_index in 0..volume {
+                let geodesic = self.gather_neighbors(row, &mut neighbors, cell_index);
+                let indices = &self.neighbor_indices[cell_index];
+                let mut sum_go = 0.0f64;
+                for (oc, weight_row) in weight_data.chunks_exact(span).enumerate() {
+                    let go = grad_row[oc * volume + cell_index];
+                    sum_go += f64::from(go);
+                    grad_bias[oc] += go;
+                    for (idx, &value) in neighbors.iter().enumerate() {
+                        grad_weight[oc * span + idx] += go * value;
+                    }
+                    for ic in 0..self.in_channels {
+                        let channel_offset = ic * volume_per_channel;
+                        for (offset_idx, &base) in indices.iter().enumerate() {
+                            if base == INVALID_NEIGHBOR {
+                                continue;
+                            }
+                            let input_index = channel_offset + base;
+                            let weight_idx = offset_idx * self.in_channels + ic;
+                            grad_in_row[input_index] += go * weight_row[weight_idx];
+                        }
+                    }
+                }
+                if geodesic > 0.0 && leech_factor > f64::EPSILON && sum_go.abs() > f64::EPSILON {
+                    let scale = (sum_go * leech_factor / geodesic) as f32;
+                    for ic in 0..self.in_channels {
+                        let channel_offset = ic * volume_per_channel;
+                        for (offset_idx, &base) in indices.iter().enumerate() {
+                            if base == INVALID_NEIGHBOR {
+                                continue;
+                            }
+                            let input_index = channel_offset + base;
+                            let value = neighbors[offset_idx * self.in_channels + ic];
+                            grad_in_row[input_index] += scale * value;
+                        }
+                    }
+                }
+            }
+        }
+        debug_assert!(input_rows.remainder().is_empty());
+        debug_assert!(grad_rows.remainder().is_empty());
+        debug_assert!(grad_input_rows.into_remainder().is_empty());
+        let grad_weight_tensor = Tensor::from_vec(self.out_channels, span, grad_weight)?;
+        let grad_bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
+        self.weight.accumulate_euclidean(&grad_weight_tensor)?;
+        self.bias.accumulate_euclidean(&grad_bias_tensor)?;
+        Ok(grad_input)
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&self.weight)?;
+        visitor(&self.bias)?;
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&mut self.weight)?;
+        visitor(&mut self.bias)?;
+        Ok(())
+    }
+}
+
 impl Conv2d {
     fn forward_cpu(
         &self,
@@ -603,59 +1859,37 @@ impl Conv2d {
         oh: usize,
         ow: usize,
     ) -> PureResult<Tensor> {
-        let mut out = Tensor::zeros(batch, self.out_channels * oh * ow)?;
+        let patches = self.im2col(input, batch, oh, ow)?;
         let weight = self.weight.value();
         let bias = self.bias.value();
-        let weight_data = weight.data();
-        let bias_data = bias.data();
-        let span = self.in_channels * self.kernel.0 * self.kernel.1;
-        let (h, w) = self.input_hw;
-        let (dilation_h, dilation_w) = self.dilation;
-        let out_cols = out.shape().1;
-        let cols = input.shape().1;
-        {
-            let out_data = out.data_mut();
-            for b in 0..batch {
-                let row = &input.data()[b * cols..(b + 1) * cols];
-                let (start, end) = (b * out_cols, (b + 1) * out_cols);
-                let out_row = &mut out_data[start..end];
-                for oc in 0..self.out_channels {
-                    let weight_row = &weight_data[oc * span..(oc + 1) * span];
-                    let bias = bias_data[oc];
-                    for oh_idx in 0..oh {
-                        for ow_idx in 0..ow {
-                            let mut acc = bias;
-                            for ic in 0..self.in_channels {
-                                let channel_offset = ic * h * w;
-                                for kh in 0..self.kernel.0 {
-                                    for kw in 0..self.kernel.1 {
-                                        let pos_h = oh_idx * self.stride.0 + kh * dilation_h;
-                                        let pos_w = ow_idx * self.stride.1 + kw * dilation_w;
-                                        let idx_h = pos_h as isize - self.padding.0 as isize;
-                                        let idx_w = pos_w as isize - self.padding.1 as isize;
-                                        if idx_h < 0
-                                            || idx_w < 0
-                                            || idx_h >= h as isize
-                                            || idx_w >= w as isize
-                                        {
-                                            continue;
-                                        }
-                                        let input_idx =
-                                            channel_offset + idx_h as usize * w + idx_w as usize;
-                                        let weight_idx = ic * self.kernel.0 * self.kernel.1
-                                            + kh * self.kernel.1
-                                            + kw;
-                                        acc += row[input_idx] * weight_row[weight_idx];
-                                    }
-                                }
-                            }
-                            out_row[oc * (oh * ow) + oh_idx * ow + ow_idx] = acc;
-                        }
-                    }
-                }
+        let patch_shape = patches.shape();
+        let weight_shape = weight.shape();
+        let left_shape = [patch_shape.0, patch_shape.1];
+        let right_shape = [weight_shape.0, weight_shape.1];
+        let left_axes = ['p', 's'];
+        let right_axes = ['o', 's'];
+        let output_axes = ['p', 'o'];
+        let (contracted_data, contracted_dims) = einsum_contract(
+            patches.data(),
+            &left_shape,
+            &left_axes,
+            weight.data(),
+            &right_shape,
+            &right_axes,
+            &output_axes,
+        )?;
+        let mut contracted = match contracted_dims.as_slice() {
+            [rows, cols] => Tensor::from_vec(*rows, *cols, contracted_data)?,
+            _ => {
+                return Err(TensorError::InvalidDimensions {
+                    rows: contracted_dims.len(),
+                    cols: 2,
+                })
             }
-        }
-        Ok(out)
+        };
+        contracted.add_row_inplace(bias.data())?;
+        let spatial = oh * ow;
+        contracted.reshape(batch, self.out_channels * spatial)
     }
 
     #[cfg(feature = "wgpu")]
@@ -1074,11 +2308,238 @@ mod tests {
     use st_tensor::backend::wgpu_dense;
 
     #[test]
+    fn conv3d_forward_matches_manual_sum() {
+        let mut conv = Conv3d::new(
+            "conv3",
+            1,
+            1,
+            (2, 2, 2),
+            (1, 1, 1),
+            (0, 0, 0),
+            (1, 1, 1),
+            (2, 2, 2),
+        )
+        .unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 8, (0..8).map(|v| v as f32).collect()).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (1, 1));
+        assert!((output.data()[0] - 28.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn conv3d_backward_propagates_gradients() {
+        let mut conv = Conv3d::new(
+            "conv3",
+            1,
+            1,
+            (2, 2, 2),
+            (1, 1, 1),
+            (0, 0, 0),
+            (1, 1, 1),
+            (2, 2, 2),
+        )
+        .unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 8, vec![1.0; 8]).unwrap();
+        let grad_output = Tensor::from_vec(1, 1, vec![2.0]).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), input.shape());
+        for value in grad_input.data() {
+            assert!((*value - 2.0).abs() < 1e-6);
+        }
+        let weight_grad = conv.weight.gradient().unwrap();
+        for value in weight_grad.data() {
+            assert!((*value - 2.0).abs() < 1e-6);
+        }
+        let bias_grad = conv.bias.gradient().unwrap();
+        assert!((bias_grad.data()[0] - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn conv4d_forward_preserves_identity_with_unit_kernel() {
+        let mut conv = Conv4d::new(
+            "conv4",
+            1,
+            1,
+            (1, 1, 1, 1),
+            (1, 1, 1, 1),
+            (0, 0, 0, 0),
+            (1, 1, 1, 1),
+            (1, 2, 2, 2),
+        )
+        .unwrap();
+        conv.weight.value_mut().data_mut()[0] = 1.0;
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let values: Vec<f32> = (0..8).map(|v| v as f32 - 3.5).collect();
+        let input = Tensor::from_vec(1, 8, values.clone()).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (1, 8));
+        for (out, expected) in output.data().iter().zip(values.iter()) {
+            assert!((*out - *expected).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn conv4d_backward_tracks_gradients() {
+        let mut conv = Conv4d::new(
+            "conv4",
+            1,
+            1,
+            (1, 1, 1, 1),
+            (1, 1, 1, 1),
+            (0, 0, 0, 0),
+            (1, 1, 1, 1),
+            (1, 2, 2, 2),
+        )
+        .unwrap();
+        conv.weight.value_mut().data_mut()[0] = 1.0;
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 8, vec![0.5; 8]).unwrap();
+        let grad_output = Tensor::from_vec(1, 8, vec![1.5; 8]).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), input.shape());
+        for value in grad_input.data() {
+            assert!((*value - 1.5).abs() < 1e-6);
+        }
+        let weight_grad = conv.weight.gradient().unwrap();
+        assert!((weight_grad.data()[0] - 6.0).abs() < 1e-6);
+        let bias_grad = conv.bias.gradient().unwrap();
+        assert!((bias_grad.data()[0] - 12.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn conv6da_forward_matches_neighbor_sum_without_leech() {
+        let mut conv = Conv6da::new("conv6", 1, 1, (1, 2, 2), 24, 0.0).unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (1, 4));
+        let expected = [6.0f32, 7.0, 8.0, 9.0];
+        for (out, exp) in output.data().iter().zip(expected.iter()) {
+            assert!((out - exp).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn conv6da_forward_injects_leech_density() {
+        let mut conv = Conv6da::new("conv6", 1, 1, (1, 2, 2), 24, 1.0).unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let output = conv.forward(&input).unwrap();
+        let projector = LeechProjector::new(24, 1.0);
+        let geodesics = [
+            (1.0_f64 * 1.0 + 3.0 * 3.0 + 2.0 * 2.0).sqrt(),
+            (2.0_f64 * 2.0 + 4.0 * 4.0 + 1.0 * 1.0).sqrt(),
+            (3.0_f64 * 3.0 + 1.0 * 1.0 + 4.0 * 4.0).sqrt(),
+            (4.0_f64 * 4.0 + 2.0 * 2.0 + 3.0 * 3.0).sqrt(),
+        ];
+        let base = [6.0f32, 7.0, 8.0, 9.0];
+        for ((out, base_sum), geodesic) in
+            output.data().iter().zip(base.iter()).zip(geodesics.iter())
+        {
+            let expected = *base_sum + projector.enrich(*geodesic) as f32;
+            assert!((out - expected).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn conv6da_backward_matches_manual_without_leech() {
+        let mut conv = Conv6da::new("conv6", 1, 1, (1, 2, 2), 24, 0.0).unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let grad_output = Tensor::from_vec(1, 4, vec![1.0; 4]).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        let expected_grad_input = [3.0f32; 4];
+        for (value, expected) in grad_input.data().iter().zip(expected_grad_input.iter()) {
+            assert!((value - expected).abs() < 1e-5);
+        }
+        let weight_grad = conv.weight.gradient().unwrap();
+        let expected_weight = [10.0, 0.0, 0.0, 7.0, 3.0, 6.0, 4.0];
+        for (value, expected) in weight_grad.data().iter().zip(expected_weight.iter()) {
+            assert!((value - expected).abs() < 1e-5);
+        }
+        let bias_grad = conv.bias.gradient().unwrap();
+        assert!((bias_grad.data()[0] - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn conv6da_backward_includes_leech_density_contribution() {
+        let mut conv = Conv6da::new("conv6", 1, 1, (1, 1, 1), 24, 2.0).unwrap();
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 0.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 1, vec![3.0]).unwrap();
+        let grad_output = Tensor::from_vec(1, 1, vec![0.5]).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        let projector = LeechProjector::new(24, 2.0);
+        let expected = grad_output.data()[0] * projector.enrich(1.0) as f32;
+        assert!((grad_input.data()[0] - expected).abs() < 1e-6);
+        let weight_grad = conv.weight.gradient().unwrap();
+        let grads = weight_grad.data();
+        assert!((grads[0] - grad_output.data()[0] * input.data()[0]).abs() < 1e-6);
+        for &value in &grads[1..] {
+            assert!(value.abs() < 1e-6);
+        }
+        let bias_grad = conv.bias.gradient().unwrap();
+        assert!((bias_grad.data()[0] - grad_output.data()[0]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn conv6da_accepts_custom_neighbors() {
+        let offsets = [(0, 0, 0), (0, 1, 0)];
+        let mut conv =
+            Conv6da::with_neighbors("conv6", 1, 1, (1, 2, 2), 24, 0.0, &offsets).unwrap();
+        assert_eq!(conv.neighbor_count(), offsets.len());
+        assert_eq!(conv.neighbor_offsets(), offsets.as_slice());
+        for value in conv.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (1, 4));
+        let grad_output = Tensor::from_vec(1, 4, vec![1.0; 4]).unwrap();
+        let _ = conv.backward(&input, &grad_output).unwrap();
+        let weight_grad = conv.weight.gradient().unwrap();
+        assert_eq!(weight_grad.shape(), (1, offsets.len()));
+    }
+
+    #[test]
     fn conv1d_forward_matches_manual() {
-        let conv = Conv1d::new("conv", 1, 1, 3, 1, 1).unwrap();
+        let conv = Conv1d::new("conv", 1, 1, 3, 1, 1, 1).unwrap();
         let input = Tensor::from_vec(1, 5, vec![1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
         let output = conv.forward(&input).unwrap();
         assert_eq!(output.shape().0, 1);
+    }
+
+    #[test]
+    fn conv1d_supports_dilation() {
+        let mut conv = Conv1d::new("conv", 1, 1, 2, 1, 0, 2).unwrap();
+        conv.bias.value_mut().data_mut()[0] = 0.0;
+        for weight in conv.weight.value_mut().data_mut() {
+            *weight = 1.0;
+        }
+        let input = Tensor::from_vec(1, 5, vec![1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (1, 3));
+        assert_eq!(output.data(), &[4.0, 6.0, 8.0]);
     }
 
     #[cfg(feature = "wgpu")]
@@ -1117,6 +2578,16 @@ mod tests {
         let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
         let out = pool.forward(&input).unwrap();
         assert_eq!(out.data(), &[4.0]);
+    }
+
+    #[test]
+    fn max_pool2d_backward_routes_gradients() {
+        let mut pool = MaxPool2d::new(1, (2, 2), (2, 2), (0, 0), (2, 2)).unwrap();
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let _ = pool.forward(&input).unwrap();
+        let grad_output = Tensor::from_vec(1, 1, vec![2.5]).unwrap();
+        let grad_input = pool.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.data(), &[0.0, 0.0, 0.0, 2.5]);
     }
 
     #[test]

@@ -274,7 +274,11 @@ mod tests {
         assert!(pulse.gradient_sparsity >= 0.0 && pulse.gradient_sparsity <= 1.0);
         assert!(pulse.rolling_gradient_norm >= 0.0);
         assert!(pulse.rolling_residual_ratio >= 0.0);
-        assert_close("gradient_norm", pulse.gradient_norm, local_pulse.gradient_norm);
+        assert_close(
+            "gradient_norm",
+            pulse.gradient_norm,
+            local_pulse.gradient_norm,
+        );
         assert_close(
             "rolling_gradient_norm",
             pulse.rolling_gradient_norm,

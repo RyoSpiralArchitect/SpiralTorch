@@ -16,8 +16,9 @@
 //! pattern-forming interfaces without re-deriving the bookkeeping each time.
 
 use crate::theory::microlocal::{
-    InterfaceSignature, InterfaceZLift, InterfaceZPulse, MicrolocalFeedback,
+    InterfaceSignature, InterfaceZLift, InterfaceZPulse, InterfaceZReport, MicrolocalFeedback,
 };
+use crate::theory::microlocal_bank::GaugeBank;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -679,6 +680,150 @@ pub struct MacroModelTemplate {
     pub numerics: NumericalRecipe,
 }
 
+/// Registry holding named [`MacroModelTemplate`] instances so macro designs can
+/// be swapped in and out alongside microlocal gauge banks.
+#[derive(Clone, Debug, Default)]
+pub struct MacroTemplateBank {
+    inner: GaugeBank<MacroModelTemplate>,
+}
+
+impl MacroTemplateBank {
+    /// Creates an empty template registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers a template with the provided identifier. Returns `false` if an
+    /// entry with the same identifier already exists.
+    pub fn register(&mut self, id: impl Into<String>, template: MacroModelTemplate) -> bool {
+        self.inner.register(id, template)
+    }
+
+    /// Registers a [`MacroCard`] by converting it into a template first.
+    pub fn register_card(&mut self, id: impl Into<String>, card: MacroCard) -> bool {
+        self.register(id, MacroModelTemplate::from_card(card))
+    }
+
+    /// Builder-style registration that returns `self` for chaining.
+    pub fn with_template(mut self, id: impl Into<String>, template: MacroModelTemplate) -> Self {
+        let _ = self.register(id, template);
+        self
+    }
+
+    /// Builder-style helper that accepts a [`MacroCard`].
+    pub fn with_card(mut self, id: impl Into<String>, card: MacroCard) -> Self {
+        let _ = self.register_card(id, card);
+        self
+    }
+
+    /// Returns an immutable reference to the named template.
+    pub fn get(&self, id: &str) -> Option<&MacroModelTemplate> {
+        self.inner.get(id)
+    }
+
+    /// Returns a mutable reference to the named template.
+    pub fn get_mut(&mut self, id: &str) -> Option<&mut MacroModelTemplate> {
+        self.inner.get_mut(id)
+    }
+
+    /// Removes a template from the registry and returns it if present.
+    pub fn remove(&mut self, id: &str) -> Option<MacroModelTemplate> {
+        self.inner.remove(id)
+    }
+
+    /// Iterates over registered identifiers and templates in insertion order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &MacroModelTemplate)> {
+        self.inner.iter()
+    }
+
+    /// Iterates over registered identifiers and mutable templates.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&str, &mut MacroModelTemplate)> {
+        self.inner.iter_mut()
+    }
+
+    /// Returns the registered identifiers.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.inner.ids()
+    }
+
+    /// Number of registered templates.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Returns `true` when no templates are registered.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Clones the registered templates into a vector preserving insertion order.
+    pub fn to_vec(&self) -> Vec<MacroModelTemplate> {
+        self.inner.to_vec()
+    }
+
+    /// Consumes the bank and returns the templates in insertion order.
+    pub fn into_vec(self) -> Vec<MacroModelTemplate> {
+        self.inner.into_vec()
+    }
+
+    /// Couples the named template with the supplied microlocal lift.
+    pub fn couple(&self, id: &str, lift: InterfaceZLift) -> Option<MacroZBridge> {
+        self.get(id)
+            .cloned()
+            .map(|template| template.couple_with(lift))
+    }
+
+    /// Couples every registered template with the supplied microlocal lift and
+    /// returns the resulting bridge registry.
+    pub fn couple_all(&self, lift: &InterfaceZLift) -> GaugeBank<MacroZBridge> {
+        let mut bank = GaugeBank::new();
+        for (id, template) in self.inner.entries() {
+            let bridge = template.clone().couple_with(lift.clone());
+            let _ = bank.register(id.as_ref(), bridge);
+        }
+        bank
+    }
+
+    /// Runs all templates whose identifiers match gauges reported by the conductor
+    /// and returns the resulting drives keyed by template id.
+    pub fn drive_matched(&self, report: &InterfaceZReport) -> GaugeBank<MacroDrive> {
+        let mut drives = GaugeBank::new();
+        let lift = report.lift();
+        for (id, template) in self.inner.iter() {
+            if let Some(signature) = report.signature_for(id) {
+                let bridge = template.clone().couple_with(lift.clone());
+                let drive = bridge.ingest_signature(signature);
+                let _ = drives.register(id, drive);
+            }
+        }
+        drives
+    }
+
+    /// Aggregates microlocal feedback emitted by the matched drives. Returns
+    /// `None` when no templates were matched.
+    pub fn feedback_from_report(&self, report: &InterfaceZReport) -> Option<MicrolocalFeedback> {
+        let drives = self.drive_matched(report);
+        let mut combined: Option<MicrolocalFeedback> = None;
+        for (_, drive) in drives.iter() {
+            let feedback = drive.microlocal_feedback().clone();
+            combined = Some(match combined {
+                Some(existing) => existing.merge(&feedback),
+                None => feedback,
+            });
+        }
+        combined
+    }
+}
+
+impl IntoIterator for MacroTemplateBank {
+    type Item = MacroModelTemplate;
+    type IntoIter = <GaugeBank<MacroModelTemplate> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
 impl MacroModelTemplate {
     pub fn from_card(card: MacroCard) -> Self {
         match card {
@@ -1197,9 +1342,54 @@ pub struct ContactCardConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theory::microlocal::{InterfaceSignature, InterfaceZLift};
+    use crate::theory::microlocal::{
+        InterfaceGauge, InterfaceSignature, InterfaceZConductor, InterfaceZLift,
+        MicrolocalGaugeBank,
+    };
     use crate::util::math::LeechProjector;
-    use ndarray::{ArrayD, IxDyn};
+    use ndarray::{array, ArrayD, IxDyn};
+
+    #[test]
+    fn template_bank_registers_and_couples_templates() {
+        let minimal = MinimalCardConfig {
+            phase_pair: PhasePair::new("A", "B"),
+            sigma: 0.1,
+            mobility: 1.0,
+            volume: None,
+            physical_scales: None,
+        };
+        let template = MacroModelTemplate::from_card(MacroCard::Minimal(minimal.clone()));
+        let mut bank = MacroTemplateBank::new();
+        assert!(bank.register("minimal", template.clone()));
+        assert!(!bank.register("minimal", template.clone()));
+
+        let membrane = MembraneCardConfig {
+            phase_pair: PhasePair::new("A", "C"),
+            sigma: 0.2,
+            bending_modulus: 0.05,
+            spontaneous_curvature: Some(0.1),
+            mobility: 0.5,
+            pressure_jump: Some(0.02),
+            physical_scales: None,
+        };
+        bank = bank.with_card("membrane", MacroCard::Membrane(membrane));
+        assert_eq!(bank.len(), 2);
+        assert!(bank.get("membrane").is_some());
+
+        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.15));
+        let bridge = bank
+            .couple("minimal", lift.clone())
+            .expect("bridge should be produced");
+        assert_eq!(bridge.template().kinetics.flow, FlowKind::NonConserved);
+
+        let coupled = bank.couple_all(&lift);
+        assert_eq!(coupled.len(), 2);
+        let ids: Vec<_> = coupled.ids().collect();
+        assert_eq!(ids, vec!["minimal", "membrane"]);
+        let (first_id, first_bridge) = coupled.iter().next().expect("bridge missing");
+        assert_eq!(first_id, "minimal");
+        assert_eq!(first_bridge.template().functional.surface_terms.len(), 1);
+    }
 
     #[test]
     fn dimensionless_groups_compute_expected_values() {
@@ -1402,5 +1592,45 @@ mod tests {
         assert!((drive.contributions.mean_curvature - 2.0).abs() < 1e-6);
         assert!((anisotropic - 3.0).abs() < 1e-6);
         assert!((drive.velocity - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn drive_matched_emits_feedback_for_matching_gauge() {
+        let mut gauges = MicrolocalGaugeBank::new();
+        gauges.register("minimal", InterfaceGauge::new(1.0, 1.0));
+        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.25));
+        let mut conductor = InterfaceZConductor::from_bank(gauges, lift);
+        let mask = array![[0.0, 0.0], [0.0, 1.0]].into_dyn();
+        let report = conductor.step(&mask, None, None, None);
+        assert_eq!(report.gauge_id(0), Some("minimal"));
+
+        let card = MinimalCardConfig {
+            phase_pair: PhasePair::new("A", "B"),
+            sigma: 0.1,
+            mobility: 1.0,
+            volume: None,
+            physical_scales: None,
+        };
+        let mut templates = MacroTemplateBank::new();
+        templates.register_card("minimal", MacroCard::Minimal(card));
+
+        let drives = templates.drive_matched(&report);
+        assert_eq!(drives.len(), 1);
+        let (_, drive) = drives.iter().next().expect("drive missing");
+        let microlocal_feedback = drive.microlocal_feedback();
+        assert!(
+            microlocal_feedback.threshold_scale.is_some()
+                || microlocal_feedback.bias_gain.is_some()
+        );
+
+        let thresholds_before = conductor.gauge_thresholds();
+        let bias_before = conductor.bias_gain();
+        let feedback = templates
+            .feedback_from_report(&report)
+            .expect("feedback missing");
+        conductor.apply_feedback(&feedback);
+        let thresholds_after = conductor.gauge_thresholds();
+        let bias_after = conductor.bias_gain();
+        assert!(thresholds_before != thresholds_after || (bias_before - bias_after).abs() > 1e-6);
     }
 }

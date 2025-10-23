@@ -160,6 +160,61 @@ impl TextResonator {
         } else {
             text.push_str(&format!(" Energy relaxing at {:+.3}.", summary.mean_decay));
         }
+        if summary.mean_abs_drift.is_finite() {
+            text.push_str(&format!(
+                " Drift magnitude averages {:.3}.",
+                summary.mean_abs_drift
+            ));
+        }
+        if let Some(volatility) = energy_volatility_ratio(&summary) {
+            text.push_str(&format!(
+                " Energy volatility {:.1}% of the mean.",
+                volatility * 100.0
+            ));
+        }
+        if let Some(volatility) = drift_volatility_ratio(&summary) {
+            text.push_str(&format!(
+                " Drift volatility {:.1}% of the mean magnitude.",
+                volatility * 100.0
+            ));
+        }
+        if let Some(swing) = energy_swing_ratio(&summary) {
+            text.push_str(&format!(
+                " Energy swing spans {:.1}% of the mean.",
+                swing * 100.0
+            ));
+        }
+        if let Some((growth, decay, steady)) = energy_change_shares(frames) {
+            text.push_str(&format!(
+                " Growth share {:.1}% vs decay {:.1}% (steady {:.1}%).",
+                growth * 100.0,
+                decay * 100.0,
+                steady * 100.0
+            ));
+        }
+        if let Some((forward, reverse, stalled)) = drift_orientation_shares(frames) {
+            text.push_str(&format!(
+                " Drift orientation {:.1}% forward vs {:.1}% reverse (steady {:.1}%).",
+                forward * 100.0,
+                reverse * 100.0,
+                stalled * 100.0
+            ));
+        }
+        if let Some(delta) = net_energy_change(frames) {
+            text.push_str(&format!(" Net energy change {delta:+.3}."));
+        }
+        if let Some(share) = energy_above_mean_share(frames, summary.mean_energy) {
+            text.push_str(&format!(
+                " {:.1}% of frames sit above the mean energy.",
+                share * 100.0
+            ));
+        }
+        if let Some(persistence) = curvature_persistence(frames) {
+            text.push_str(&format!(
+                " Curvature direction persists {:.1}% of transitions.",
+                persistence * 100.0
+            ));
+        }
         if let Some((min_curvature, max_curvature)) = curvature_envelope(frames) {
             text.push_str(&format!(
                 " Curvature envelope spans {:+.3}→{:+.3}.",
@@ -171,6 +226,18 @@ impl TextResonator {
             format!("max energy {:.3}", summary.max_energy),
             format!("frames {}", summary.frames),
         ];
+        highlights.push(format!("mean |drift| {:.3}", summary.mean_abs_drift));
+        highlights.push(format!("energy σ {:.3}", summary.energy_std));
+        highlights.push(format!("drift σ {:.3}", summary.drift_std));
+        if let Some(volatility) = energy_volatility_ratio(&summary) {
+            highlights.push(format!("energy volatility {:.1}%", volatility * 100.0));
+        }
+        if let Some(volatility) = drift_volatility_ratio(&summary) {
+            highlights.push(format!("drift volatility {:.1}%", volatility * 100.0));
+        }
+        if let Some(swing) = energy_swing_ratio(&summary) {
+            highlights.push(format!("energy swing {:.1}%", swing * 100.0));
+        }
         if let Some(spec) = harmonics {
             if let Some(peak) = spec.dominant_drift {
                 highlights.push(format!(
@@ -229,6 +296,40 @@ impl TextResonator {
         }
         if let Some(churn) = band_churn(frames) {
             highlights.push(format!("band churn {:.1}%/frame", churn * 100.0));
+        }
+        if let Some(flip_rate) = curvature_flip_rate(frames) {
+            highlights.push(format!("curvature flip rate {:.1}%", flip_rate * 100.0));
+        }
+        if let Some(flip_rate) = drift_flip_rate(frames) {
+            highlights.push(format!("drift flip rate {:.1}%", flip_rate * 100.0));
+        }
+        if let Some(surge_ratio) = energy_surge_ratio(frames) {
+            highlights.push(format!("energy surge ratio {:.1}%", surge_ratio * 100.0));
+        }
+        if let Some((growth, decay, steady)) = energy_change_shares(frames) {
+            highlights.push(format!(
+                "growth {:.1}% decay {:.1}% steady {:.1}%",
+                growth * 100.0,
+                decay * 100.0,
+                steady * 100.0
+            ));
+        }
+        if let Some((forward, reverse, stalled)) = drift_orientation_shares(frames) {
+            highlights.push(format!(
+                "drift forward {:.1}% reverse {:.1}% steady {:.1}%",
+                forward * 100.0,
+                reverse * 100.0,
+                stalled * 100.0
+            ));
+        }
+        if let Some(delta) = net_energy_change(frames) {
+            highlights.push(format!("net energy delta {delta:+.3}"));
+        }
+        if let Some(share) = energy_above_mean_share(frames, summary.mean_energy) {
+            highlights.push(format!("frames >mean energy {:.1}%", share * 100.0));
+        }
+        if let Some(persistence) = curvature_persistence(frames) {
+            highlights.push(format!("curvature persistence {:.1}%", persistence * 100.0));
         }
         ResonanceNarrative::new(text, highlights)
     }
@@ -576,10 +677,7 @@ fn band_evenness(percentages: &[f32; 5]) -> f32 {
         return 0.0;
     }
     let uniform = 1.0 / percentages.len() as f32;
-    let l1 = percentages
-        .iter()
-        .map(|p| (p - uniform).abs())
-        .sum::<f32>();
+    let l1 = percentages.iter().map(|p| (p - uniform).abs()).sum::<f32>();
     let max_l1 = 2.0 * (1.0 - uniform);
     if max_l1 <= EPS {
         1.0
@@ -726,83 +824,261 @@ fn frame_band_percentages(frame: &ChronoFrame) -> [f32; 5] {
     ]
 }
 
-fn band_entropy(percentages: &[f32; 5]) -> f32 {
-    const EPS: f32 = 1e-6;
-    percentages
-        .iter()
-        .filter(|p| **p > EPS)
-        .map(|p| {
-            let logp = p.ln();
-            -p * logp
-        })
-        .sum::<f32>()
-        / std::f32::consts::LN_2
-}
-
-fn band_contrast(percentages: &[f32; 5]) -> f32 {
-    let mut sorted = *percentages;
-    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal));
-    if sorted[0] <= 0.0 {
-        0.0
-    } else {
-        (sorted[0] - sorted[1].max(0.0)).max(0.0)
-    }
-}
-
-fn band_spread(percentages: &[f32; 5]) -> f32 {
-    let mean = percentages.iter().sum::<f32>() / percentages.len() as f32;
-    let variance = percentages
-        .iter()
-        .map(|p| {
-            let diff = p - mean;
-            diff * diff
-        })
-        .sum::<f32>()
-        / percentages.len() as f32;
-    variance.sqrt()
-}
-
-fn aggregate_band_percentages(frames: &[ChronoFrame]) -> Option<[f32; 5]> {
-    let mut totals = [0.0f32; 5];
-    let mut energy_total = 0.0f32;
-    for frame in frames {
-        if frame.total_energy <= f32::EPSILON {
-            continue;
-        }
-        let energy = frame.total_energy.max(0.0);
-        totals[0] += frame.homotopy_energy.max(0.0);
-        totals[1] += frame.functor_energy.max(0.0);
-        totals[2] += frame.recursive_energy.max(0.0);
-        totals[3] += frame.projection_energy.max(0.0);
-        totals[4] += frame.infinity_energy.max(0.0);
-        energy_total += energy;
-    }
-    if energy_total <= f32::EPSILON {
+fn curvature_flip_rate(frames: &[ChronoFrame]) -> Option<f32> {
+    if frames.len() < 2 {
         return None;
     }
-    Some([
-        (totals[0] / energy_total).clamp(0.0, 1.0),
-        (totals[1] / energy_total).clamp(0.0, 1.0),
-        (totals[2] / energy_total).clamp(0.0, 1.0),
-        (totals[3] / energy_total).clamp(0.0, 1.0),
-        (totals[4] / energy_total).clamp(0.0, 1.0),
-    ])
-}
-
-fn mean_observed_curvature(frames: &[ChronoFrame]) -> Option<f32> {
-    let mut sum = 0.0f32;
-    let mut count = 0usize;
+    let mut flips = 0usize;
+    let mut transitions = 0usize;
+    let mut previous = None;
     for frame in frames {
         if !frame.observed_curvature.is_finite() {
             continue;
         }
-        sum += frame.observed_curvature;
-        count += 1;
+        let sign = normalised_sign(frame.observed_curvature);
+        if let Some(prev) = previous {
+            transitions += 1;
+            if sign != 0 && prev != 0 && sign != prev {
+                flips += 1;
+            }
+        }
+        previous = Some(sign);
     }
-    if count == 0 {
+    if transitions == 0 {
         None
     } else {
-        Some(sum / count as f32)
+        Some(flips as f32 / transitions as f32)
+    }
+}
+
+fn drift_flip_rate(frames: &[ChronoFrame]) -> Option<f32> {
+    if frames.len() < 2 {
+        return None;
+    }
+    let mut flips = 0usize;
+    let mut transitions = 0usize;
+    let mut previous = None;
+    for frame in frames {
+        if !frame.curvature_drift.is_finite() {
+            continue;
+        }
+        let sign = normalised_sign(frame.curvature_drift);
+        if let Some(prev) = previous {
+            transitions += 1;
+            if sign != 0 && prev != 0 && sign != prev {
+                flips += 1;
+            }
+        }
+        previous = Some(sign);
+    }
+    if transitions == 0 {
+        None
+    } else {
+        Some(flips as f32 / transitions as f32)
+    }
+}
+
+fn normalised_sign(value: f32) -> i8 {
+    const EPS: f32 = 1e-5;
+    if value.abs() < EPS {
+        0
+    } else if value.is_sign_positive() {
+        1
+    } else {
+        -1
+    }
+}
+
+fn energy_surge_ratio(frames: &[ChronoFrame]) -> Option<f32> {
+    if frames.len() < 2 {
+        return None;
+    }
+    let mut surges = 0usize;
+    let mut transitions = 0usize;
+    for window in frames.windows(2) {
+        let left = &window[0];
+        let right = &window[1];
+        if !left.total_energy.is_finite() || !right.total_energy.is_finite() {
+            continue;
+        }
+        let diff = right.total_energy - left.total_energy;
+        let scale = left.total_energy.max(right.total_energy).max(f32::EPSILON);
+        if scale > 0.0 {
+            if diff / scale > 0.05 {
+                surges += 1;
+            }
+            transitions += 1;
+        }
+    }
+    if transitions == 0 {
+        None
+    } else {
+        Some(surges as f32 / transitions as f32)
+    }
+}
+
+fn energy_volatility_ratio(summary: &ChronoSummary) -> Option<f32> {
+    if summary.mean_energy <= f32::EPSILON || !summary.energy_std.is_finite() {
+        None
+    } else {
+        Some((summary.energy_std / summary.mean_energy).max(0.0))
+    }
+}
+
+fn drift_volatility_ratio(summary: &ChronoSummary) -> Option<f32> {
+    if summary.mean_abs_drift <= f32::EPSILON || !summary.drift_std.is_finite() {
+        None
+    } else {
+        Some((summary.drift_std / summary.mean_abs_drift).max(0.0))
+    }
+}
+
+fn energy_swing_ratio(summary: &ChronoSummary) -> Option<f32> {
+    if summary.mean_energy <= f32::EPSILON {
+        return None;
+    }
+    let swing = (summary.max_energy - summary.min_energy).max(0.0);
+    Some((swing / summary.mean_energy).max(0.0))
+}
+
+fn energy_change_shares(frames: &[ChronoFrame]) -> Option<(f32, f32, f32)> {
+    if frames.is_empty() {
+        return None;
+    }
+    const THRESHOLD: f32 = 1e-3;
+    let mut growth = 0usize;
+    let mut decay = 0usize;
+    let mut steady = 0usize;
+    let mut total = 0usize;
+    for frame in frames {
+        if !frame.energy_decay.is_finite() {
+            continue;
+        }
+        total += 1;
+        if frame.energy_decay < -THRESHOLD {
+            growth += 1;
+        } else if frame.energy_decay > THRESHOLD {
+            decay += 1;
+        } else {
+            steady += 1;
+        }
+    }
+    if total == 0 {
+        None
+    } else {
+        Some((
+            growth as f32 / total as f32,
+            decay as f32 / total as f32,
+            steady as f32 / total as f32,
+        ))
+    }
+}
+
+fn drift_orientation_shares(frames: &[ChronoFrame]) -> Option<(f32, f32, f32)> {
+    if frames.is_empty() {
+        return None;
+    }
+    const THRESHOLD: f32 = 1e-3;
+    let mut forward = 0usize;
+    let mut reverse = 0usize;
+    let mut stalled = 0usize;
+    let mut total = 0usize;
+    for frame in frames {
+        if !frame.curvature_drift.is_finite() {
+            continue;
+        }
+        total += 1;
+        if frame.curvature_drift > THRESHOLD {
+            forward += 1;
+        } else if frame.curvature_drift < -THRESHOLD {
+            reverse += 1;
+        } else {
+            stalled += 1;
+        }
+    }
+    if total == 0 {
+        None
+    } else {
+        Some((
+            forward as f32 / total as f32,
+            reverse as f32 / total as f32,
+            stalled as f32 / total as f32,
+        ))
+    }
+}
+
+fn net_energy_change(frames: &[ChronoFrame]) -> Option<f32> {
+    let start = frames
+        .iter()
+        .find_map(|frame| frame.total_energy.is_finite().then_some(frame.total_energy))?;
+    let end = frames
+        .iter()
+        .rev()
+        .find_map(|frame| frame.total_energy.is_finite().then_some(frame.total_energy))?;
+    Some(end - start)
+}
+
+fn energy_above_mean_share(frames: &[ChronoFrame], mean_energy: f32) -> Option<f32> {
+    if frames.is_empty() || !mean_energy.is_finite() {
+        return None;
+    }
+    let mut above = 0usize;
+    let mut total = 0usize;
+    for frame in frames {
+        if !frame.total_energy.is_finite() {
+            continue;
+        }
+        total += 1;
+        if frame.total_energy > mean_energy {
+            above += 1;
+        }
+    }
+    if total == 0 {
+        None
+    } else {
+        Some(above as f32 / total as f32)
+    }
+}
+
+fn curvature_persistence(frames: &[ChronoFrame]) -> Option<f32> {
+    if frames.len() < 2 {
+        return None;
+    }
+    const THRESHOLD: f32 = 1e-3;
+    let mut consistent = 0usize;
+    let mut considered = 0usize;
+    for window in frames.windows(2) {
+        let left = window[0].curvature_drift;
+        let right = window[1].curvature_drift;
+        if !left.is_finite() || !right.is_finite() {
+            continue;
+        }
+        let left_sign = if left > THRESHOLD {
+            1
+        } else if left < -THRESHOLD {
+            -1
+        } else {
+            0
+        };
+        let right_sign = if right > THRESHOLD {
+            1
+        } else if right < -THRESHOLD {
+            -1
+        } else {
+            0
+        };
+        if left_sign == 0 && right_sign == 0 {
+            continue;
+        }
+        considered += 1;
+        if left_sign != 0 && left_sign == right_sign {
+            consistent += 1;
+        }
+    }
+    if considered == 0 {
+        None
+    } else {
+        Some(consistent as f32 / considered as f32)
     }
 }
 
@@ -898,6 +1174,16 @@ mod tests {
             .iter()
             .any(|line| line.contains("band entropy")));
         assert!(narrative.summary.contains("Curvature envelope"));
+        assert!(narrative.summary.contains("Drift magnitude averages"));
+        assert!(narrative.summary.contains("Energy volatility"));
+        assert!(narrative.summary.contains("Energy swing spans"));
+        assert!(narrative.summary.contains("Growth share"));
+        assert!(narrative.summary.contains("Drift orientation"));
+        assert!(narrative.summary.contains("Net energy change"));
+        assert!(narrative
+            .summary
+            .contains("frames sit above the mean energy"));
+        assert!(narrative.summary.contains("Curvature direction persists"));
         assert!(narrative
             .highlights
             .iter()
@@ -906,5 +1192,61 @@ mod tests {
             .highlights
             .iter()
             .any(|line| line.contains("band churn")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("mean |drift|")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("energy σ")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("drift σ")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("energy volatility")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("drift volatility")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("curvature flip rate")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("drift flip rate")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("energy surge ratio")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("energy swing")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("growth")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("drift forward")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("net energy delta")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains(">mean energy")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("curvature persistence")));
     }
 }

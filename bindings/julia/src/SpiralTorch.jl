@@ -166,6 +166,9 @@ function worker_count(runtime::Runtime)
 end
 
 function Tensor(rows::Integer, cols::Integer)
+    if rows < 0 || cols < 0
+        throw(ArgumentError("tensor dimensions must be non-negative"))
+    end
     lib = _lib()
     handle = ccall((:spiraltorch_tensor_zeros, lib), Ptr{Cvoid}, (Csize_t, Csize_t), rows, cols)
     return _wrap_tensor(handle, "tensor_zeros")
@@ -178,6 +181,53 @@ function Tensor(data::AbstractMatrix{<:Real})
     lib = _lib()
     handle = ccall((:spiraltorch_tensor_from_dense, lib), Ptr{Cvoid}, (Csize_t, Csize_t, Ptr{Float32}, Csize_t), rows, cols, pointer(flat), length(flat))
     return _wrap_tensor(handle, "tensor_from_dense")
+end
+
+"""
+    Tensor(dims)
+
+Construct a zero-initialised [`Tensor`](@ref) using the provided `(rows, cols)`
+tuple. Negative dimensions raise an [`ArgumentError`](@ref).
+"""
+function Tensor(dims::Tuple{Integer,Integer})
+    rows, cols = dims
+    return Tensor(rows, cols)
+end
+
+"""
+    Tensor(vector)
+
+Promote the vector to a column [`Tensor`](@ref). When the vector is empty, a
+`0×0` tensor is returned to avoid ambiguity about orientation.
+"""
+function Tensor(data::AbstractVector{<:Real})
+    if isempty(data)
+        return Tensor(0, 0)
+    end
+    matrix = reshape(Float32.(collect(data)), :, 1)
+    return Tensor(matrix)
+end
+
+"""
+    Tensor(vector, dims)
+
+Reshape the vector according to `dims` and construct a [`Tensor`](@ref). The
+vector length must match `prod(dims)`.
+"""
+function Tensor(data::AbstractVector{<:Real}, dims::Tuple{Integer,Integer})
+    rows, cols = dims
+    if rows < 0 || cols < 0
+        throw(ArgumentError("tensor dimensions must be non-negative"))
+    end
+    expected = rows * cols
+    if length(data) != expected
+        throw(ArgumentError("vector length $(length(data)) does not match reshape dimensions $(rows)×$(cols)"))
+    end
+    if expected == 0
+        return Tensor(rows, cols)
+    end
+    matrix = reshape(Float32.(collect(data)), rows, cols)
+    return Tensor(matrix)
 end
 
 function random_uniform(rows::Integer, cols::Integer, min::Real, max::Real; seed::Union{Nothing,Integer}=nothing)
@@ -198,6 +248,10 @@ function random_uniform(rows::Integer, cols::Integer, min::Real, max::Real; seed
     return _wrap_tensor(handle, "tensor_random_uniform")
 end
 
+function random_uniform(dims::Tuple{Integer,Integer}, min::Real, max::Real; seed::Union{Nothing,Integer}=nothing)
+    return random_uniform(dims[1], dims[2], min, max; seed=seed)
+end
+
 function random_normal(rows::Integer, cols::Integer, mean::Real, std::Real; seed::Union{Nothing,Integer}=nothing)
     lib = _lib()
     seed_value = seed === nothing ? UInt64(0) : UInt64(seed)
@@ -214,6 +268,10 @@ function random_normal(rows::Integer, cols::Integer, mean::Real, std::Real; seed
         has_seed,
     )
     return _wrap_tensor(handle, "tensor_random_normal")
+end
+
+function random_normal(dims::Tuple{Integer,Integer}, mean::Real, std::Real; seed::Union{Nothing,Integer}=nothing)
+    return random_normal(dims[1], dims[2], mean, std; seed=seed)
 end
 
 function random_uniform(runtime::Runtime, rows::Integer, cols::Integer, min::Real, max::Real; seed::Union{Nothing,Integer}=nothing)
@@ -256,6 +314,14 @@ function random_normal(runtime::Runtime, rows::Integer, cols::Integer, mean::Rea
     return _wrap_tensor(result, "runtime_tensor_random_normal")
 end
 
+function add(lhs::Tensor, rhs::AbstractMatrix{<:Real})
+    return add(lhs, Tensor(rhs))
+end
+
+function add(lhs::AbstractMatrix{<:Real}, rhs::Tensor)
+    return add(Tensor(lhs), rhs)
+end
+
 function shape(tensor::Tensor)
     lib = _lib()
     rows = Ref{Csize_t}(0)
@@ -279,16 +345,73 @@ function elements(tensor::Tensor)
     return Int(count)
 end
 
-function to_array(tensor::Tensor)
+"""
+    copyto!(dest, tensor)
+
+Copy the contents of `tensor` into the preallocated destination `dest`. When
+`dest` is a `Matrix{Float32}` or `Vector{Float32}` the copy happens without any
+intermediate allocations by streaming data directly from the underlying C
+runtime. Other real-valued destinations receive a converted copy. The function
+returns `dest` for convenience.
+"""
+function Base.copyto!(dest::Matrix{Float32}, tensor::Tensor)
     rows, cols = shape(tensor)
-    len = rows * cols
-    buffer = Vector{Float32}(undef, len)
+    if size(dest, 1) != rows || size(dest, 2) != cols
+        throw(ArgumentError("destination size $(size(dest)) does not match tensor shape $(rows, cols)"))
+    end
+    Base.require_one_based_indexing(dest)
     lib = _lib()
-    ok = ccall((:spiraltorch_tensor_copy_data, lib), Cuchar, (Ptr{Cvoid}, Ptr{Float32}, Csize_t), tensor.handle, pointer(buffer), len)
+    len = rows * cols
+    ok = ccall((:spiraltorch_tensor_copy_data, lib), Cuchar, (Ptr{Cvoid}, Ptr{Float32}, Csize_t), tensor.handle, pointer(dest), len)
     if ok == 0
         error("failed to copy tensor data: " * last_error())
     end
-    return reshape(buffer, rows, cols)
+    return dest
+end
+
+function Base.copyto!(dest::Vector{Float32}, tensor::Tensor)
+    rows, cols = shape(tensor)
+    len = rows * cols
+    if length(dest) != len
+        throw(ArgumentError("destination length $(length(dest)) does not match tensor element count $len"))
+    end
+    Base.require_one_based_indexing(dest)
+    lib = _lib()
+    ok = ccall((:spiraltorch_tensor_copy_data, lib), Cuchar, (Ptr{Cvoid}, Ptr{Float32}, Csize_t), tensor.handle, pointer(dest), len)
+    if ok == 0
+        error("failed to copy tensor data: " * last_error())
+    end
+    return dest
+end
+
+function Base.copyto!(dest::AbstractMatrix{<:Real}, tensor::Tensor)
+    rows, cols = shape(tensor)
+    if size(dest, 1) != rows || size(dest, 2) != cols
+        throw(ArgumentError("destination size $(size(dest)) does not match tensor shape $(rows, cols)"))
+    end
+    buffer = Matrix{Float32}(undef, rows, cols)
+    Base.copyto!(buffer, tensor)
+    Base.copyto!(dest, buffer)
+    return dest
+end
+
+function Base.copyto!(dest::AbstractVector{<:Real}, tensor::Tensor)
+    rows, cols = shape(tensor)
+    len = rows * cols
+    if length(dest) != len
+        throw(ArgumentError("destination length $(length(dest)) does not match tensor element count $len"))
+    end
+    buffer = Vector{Float32}(undef, len)
+    Base.copyto!(buffer, tensor)
+    Base.copyto!(dest, buffer)
+    return dest
+end
+
+function to_array(tensor::Tensor)
+    rows, cols = shape(tensor)
+    buffer = Matrix{Float32}(undef, rows, cols)
+    Base.copyto!(buffer, tensor)
+    return buffer
 end
 
 Base.size(tensor::Tensor) = shape(tensor)
@@ -308,13 +431,38 @@ function add(lhs::Tensor, rhs::Tensor)
     return _binary_tensor_op(:spiraltorch_tensor_add, lhs, rhs)
 end
 
+Base.:+(lhs::Tensor, rhs::AbstractMatrix{<:Real}) = add(lhs, rhs)
+Base.:+(lhs::AbstractMatrix{<:Real}, rhs::Tensor) = add(lhs, rhs)
+
 function sub(lhs::Tensor, rhs::Tensor)
     return _binary_tensor_op(:spiraltorch_tensor_sub, lhs, rhs)
 end
 
+function sub(lhs::Tensor, rhs::AbstractMatrix{<:Real})
+    return sub(lhs, Tensor(rhs))
+end
+
+function sub(lhs::AbstractMatrix{<:Real}, rhs::Tensor)
+    return sub(Tensor(lhs), rhs)
+end
+
+Base.:-(lhs::Tensor, rhs::AbstractMatrix{<:Real}) = sub(lhs, rhs)
+Base.:-(lhs::AbstractMatrix{<:Real}, rhs::Tensor) = sub(lhs, rhs)
+
 function matmul(lhs::Tensor, rhs::Tensor)
     return _binary_tensor_op(:spiraltorch_tensor_matmul, lhs, rhs)
 end
+
+function matmul(lhs::Tensor, rhs::AbstractMatrix{<:Real})
+    return matmul(lhs, Tensor(rhs))
+end
+
+function matmul(lhs::AbstractMatrix{<:Real}, rhs::Tensor)
+    return matmul(Tensor(lhs), rhs)
+end
+
+Base.:*(lhs::Tensor, rhs::AbstractMatrix{<:Real}) = matmul(lhs, rhs)
+Base.:*(lhs::AbstractMatrix{<:Real}, rhs::Tensor) = matmul(lhs, rhs)
 
 function add(runtime::Runtime, lhs::Tensor, rhs::Tensor)
     lib = _lib()
@@ -352,6 +500,14 @@ end
 
 function hadamard(lhs::Tensor, rhs::Tensor)
     return _binary_tensor_op(:spiraltorch_tensor_hadamard, lhs, rhs)
+end
+
+function hadamard(lhs::Tensor, rhs::AbstractMatrix{<:Real})
+    return hadamard(lhs, Tensor(rhs))
+end
+
+function hadamard(lhs::AbstractMatrix{<:Real}, rhs::Tensor)
+    return hadamard(Tensor(lhs), rhs)
 end
 
 function scale(runtime::Runtime, tensor::Tensor, value::Real)
@@ -407,6 +563,8 @@ Base.:*(lhs::Tensor, rhs::Tensor) = matmul(lhs, rhs)
 Base.:*(tensor::Tensor, value::Real) = scale(tensor, value)
 Base.:*(value::Real, tensor::Tensor) = scale(tensor, value)
 Base.:.*(lhs::Tensor, rhs::Tensor) = hadamard(lhs, rhs)
+Base.:.*(lhs::Tensor, rhs::AbstractMatrix{<:Real}) = hadamard(lhs, rhs)
+Base.:.*(lhs::AbstractMatrix{<:Real}, rhs::Tensor) = hadamard(lhs, rhs)
 Base.transpose(tensor::Tensor) = transpose_tensor(tensor)
 
 function Base.reshape(tensor::Tensor, dims::Integer...)
@@ -421,5 +579,6 @@ function Base.reshape(tensor::Tensor, dims::Tuple{Vararg{Integer, 2}})
 end
 
 include("tensor_helpers.jl")
+include("runtime_helpers.jl")
 
 end # module
