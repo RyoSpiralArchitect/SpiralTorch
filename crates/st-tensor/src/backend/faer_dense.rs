@@ -7,7 +7,7 @@
 mod imp {
     use faer::linalg::matmul::matmul as faer_matmul;
     use faer::mat::Mat;
-    use faer::Parallelism;
+    use faer::get_global_parallelism;
 
     pub fn is_available() -> bool {
         true
@@ -39,7 +39,7 @@ mod imp {
             rhs.as_ref(),
             None,
             0.0,
-            Parallelism::Rayon(0),
+            get_global_parallelism(),
         );
 
         let mut buffer = vec![0.0; rows * cols];
