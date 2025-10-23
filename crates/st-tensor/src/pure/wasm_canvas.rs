@@ -279,7 +279,7 @@ impl ColorVectorField {
             compute_fft(&mut chroma_g, inverse)?;
             compute_fft(&mut chroma_b, inverse)?;
 
-            for inner in 0..axis_len {
+            for inner in 0..width {
                 out.push(energy[inner].re);
                 out.push(energy[inner].im);
                 out.push(chroma_r[inner].re);
