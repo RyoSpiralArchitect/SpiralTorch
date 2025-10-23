@@ -10,6 +10,7 @@ use st_core::util::math::LeechProjector;
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense;
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 
 fn validate_positive(value: usize, _label: &str) -> PureResult<()> {
     if value == 0 {
@@ -956,14 +957,12 @@ impl Module for Conv3d {
         let weight = self.weight.value();
         let bias = self.bias.value();
         let weight_data = weight.data();
-        let bias_data = bias.data();
         let kernel_volume = self.kernel_volume()?;
         let out_cols = out.shape().1;
         let plane = self.input_dhw.1 * self.input_dhw.2;
         let area = self.input_dhw.2;
         {
             let bias_data = bias.data();
-            let contracted_data = contracted.data();
             let out_data = out.data_mut();
             for b in 0..batch {
                 let row = &input.data()[b * cols..(b + 1) * cols];
@@ -1030,7 +1029,7 @@ impl Module for Conv3d {
                 }
             }
         }
-        Tensor::from_vec(batch, self.out_channels * spatial, contracted)
+        Ok(out)
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
@@ -1862,8 +1861,37 @@ impl Conv2d {
         let patches = self.im2col(input, batch, oh, ow)?;
         let weight = self.weight.value();
         let bias = self.bias.value();
-        let patches = self.im2col(input, batch, oh, ow)?;
-        let mut contracted = einsum_contract(&patches, &weight, "ps,os->po")?;
+
+        let (patch_rows, patch_cols) = patches.shape();
+        let (weight_rows, weight_cols) = weight.shape();
+        let patch_shape = [patch_rows, patch_cols];
+        let weight_shape = [weight_rows, weight_cols];
+        let left_axes = ['p', 's'];
+        let right_axes = ['o', 's'];
+        let output_axes = ['p', 'o'];
+
+        let (contracted_data, contracted_shape) = einsum_contract(
+            patches.data(),
+            &patch_shape,
+            &left_axes,
+            weight.data(),
+            &weight_shape,
+            &right_axes,
+            &output_axes,
+        )?;
+
+        if contracted_shape.len() != 2 {
+            return Err(TensorError::InvalidDimensions {
+                rows: contracted_shape.get(0).copied().unwrap_or(0),
+                cols: contracted_shape.get(1).copied().unwrap_or(0),
+            });
+        }
+
+        let mut contracted = Tensor::from_vec(
+            contracted_shape[0],
+            contracted_shape[1],
+            contracted_data,
+        )?;
         contracted.add_row_inplace(bias.data())?;
         let spatial = oh * ow;
         contracted.reshape(batch, self.out_channels * spatial)
