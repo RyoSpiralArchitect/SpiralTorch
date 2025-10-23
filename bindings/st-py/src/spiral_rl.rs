@@ -361,7 +361,7 @@ impl PyAgentConfig {
 
     #[getter]
     pub fn replay<'py>(&self, py: Python<'py>) -> PyResult<Option<Py<PyReplayConfig>>> {
-        if let Some(cfg) = &self.inner.replay {
+        if let Some(cfg) = self.as_data().replay.as_ref() {
             Py::new(py, PyReplayConfig { inner: cfg.clone() }).map(Some)
         } else {
             Ok(None)
@@ -370,7 +370,7 @@ impl PyAgentConfig {
 
     #[getter]
     pub fn exploration<'py>(&self, py: Python<'py>) -> PyResult<Option<Py<PyEpsilonGreedy>>> {
-        if let Some(schedule) = &self.inner.exploration {
+        if let Some(schedule) = self.as_data().exploration.as_ref() {
             Py::new(py, PyEpsilonGreedy::from_schedule(schedule.clone())).map(Some)
         } else {
             Ok(None)
