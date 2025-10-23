@@ -7,7 +7,42 @@
 use ndarray::Array1;
 
 #[derive(Clone)]
-pub struct DeviceBuf { pub len: usize }
+pub struct DeviceBuf {
+    pub len: usize,
+    handle: DeviceBufHandle,
+}
+
+#[derive(Clone)]
+enum DeviceBufHandle {
+    Host,
+    #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+    Wgpu(std::sync::Arc<wgpu::Buffer>),
+}
+
+impl DeviceBuf {
+    pub fn host(len: usize) -> Self {
+        Self { len, handle: DeviceBufHandle::Host }
+    }
+
+    pub fn new(len: usize) -> Self { Self::host(len) }
+
+    #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+    pub fn from_wgpu(len: usize, buffer: std::sync::Arc<wgpu::Buffer>) -> Self {
+        Self { len, handle: DeviceBufHandle::Wgpu(buffer) }
+    }
+
+    #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+    pub fn as_wgpu(&self) -> Option<&wgpu::Buffer> {
+        match &self.handle {
+            DeviceBufHandle::Wgpu(buf) => Some(buf.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+impl Default for DeviceBuf {
+    fn default() -> Self { Self::host(0) }
+}
 
 pub trait DeviceLinearOp: Send + Sync {
     fn len(&self) -> usize;
