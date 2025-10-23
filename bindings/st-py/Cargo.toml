@@ -34,7 +34,7 @@ selfsup = ["dep:spiral-selfsup"]
 
 # Backend selection (mirrors the CLI surface expected by maturin builds)
 cpu = []
-wgpu = ["st-core/wgpu", "st-tensor/wgpu_frac"]
+wgpu = ["st-core/wgpu", "st-tensor/wgpu"]
 "wgp" = ["wgpu"]
 "wgpu-rt" = ["st-core/wgpu-rt", "wgpu"]
 mps = ["st-core/mps", "st-tensor/mps"]
