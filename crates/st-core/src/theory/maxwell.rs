@@ -499,21 +499,16 @@ impl MaxwellPsiTelemetryBridge {
     /// the global hub. The returned feedback can be reused immediately by the
     /// caller when additional processing is required.
     pub fn publish(&self, pulse: &MaxwellZPulse, step: u64) -> SoftlogicZFeedback {
-        let (feedback, _, _) = self.publish_with_reading(pulse, step);
-        feedback
+        self.publish_with_reading(pulse, step).into_feedback()
     }
 
     /// Publishes the telemetry and returns the generated PSI reading alongside any events.
-    pub fn publish_with_reading(
-        &self,
-        pulse: &MaxwellZPulse,
-        step: u64,
-    ) -> (SoftlogicZFeedback, PsiReading, Vec<PsiEvent>) {
+    pub fn publish_with_reading(&self, pulse: &MaxwellZPulse, step: u64) -> PublishedPsiTelemetry {
         let (reading, events, feedback) = self.synthesise_feedback(pulse, step);
         hub::set_last_psi(&reading);
         hub::set_last_psi_events(&events);
         hub::set_softlogic_z(feedback.clone());
-        (feedback, reading, events)
+        PublishedPsiTelemetry::new(feedback, reading, events)
     }
 
     fn synthesise_feedback(
@@ -521,10 +516,34 @@ impl MaxwellPsiTelemetryBridge {
         pulse: &MaxwellZPulse,
         step: u64,
     ) -> (PsiReading, Vec<PsiEvent>, SoftlogicZFeedback) {
-        let (above, here, beneath) = pulse.band_energy;
-        let band_total = (above + here + beneath).max(0.0);
-        let psi_total = band_total * self.psi_gain;
-        let weighted_loss = pulse.magnitude() as f32 * self.loss_gain;
+        let sanitise_energy = |value: f32| -> f32 {
+            if value.is_finite() {
+                value.max(0.0)
+            } else {
+                0.0
+            }
+        };
+
+        let (raw_above, raw_here, raw_beneath) = pulse.band_energy;
+        let above = sanitise_energy(raw_above);
+        let here = sanitise_energy(raw_here);
+        let beneath = sanitise_energy(raw_beneath);
+        let band_total = sanitise_energy(above + here + beneath);
+        let psi_total = sanitise_energy(band_total * self.psi_gain);
+
+        let weighted_loss = {
+            let magnitude = pulse.magnitude() as f32;
+            let scaled = (if magnitude.is_finite() {
+                magnitude.max(0.0)
+            } else {
+                0.0
+            }) * self.loss_gain;
+            if scaled.is_finite() {
+                scaled.max(0.0)
+            } else {
+                0.0
+            }
+        };
 
         let mut breakdown = HashMap::new();
         breakdown.insert(PsiComponent::BAND_ENERGY, band_total);
@@ -553,6 +572,52 @@ impl MaxwellPsiTelemetryBridge {
         feedback.set_attributions([(ZSource::Maxwell, band_total)]);
 
         (reading, events, feedback)
+    }
+}
+
+#[cfg(feature = "psi")]
+/// Bundled telemetry emitted by [`MaxwellPsiTelemetryBridge::publish_with_reading`].
+#[derive(Clone, Debug)]
+pub struct PublishedPsiTelemetry {
+    feedback: SoftlogicZFeedback,
+    reading: PsiReading,
+    events: Vec<PsiEvent>,
+}
+
+#[cfg(feature = "psi")]
+impl PublishedPsiTelemetry {
+    /// Creates a new telemetry bundle with the provided components.
+    pub fn new(feedback: SoftlogicZFeedback, reading: PsiReading, events: Vec<PsiEvent>) -> Self {
+        Self {
+            feedback,
+            reading,
+            events,
+        }
+    }
+
+    /// Returns the stored [`SoftlogicZFeedback`] sample.
+    pub fn feedback(&self) -> &SoftlogicZFeedback {
+        &self.feedback
+    }
+
+    /// Returns the stored [`PsiReading`].
+    pub fn reading(&self) -> &PsiReading {
+        &self.reading
+    }
+
+    /// Returns the PSI events captured during publication.
+    pub fn events(&self) -> &[PsiEvent] {
+        self.events.as_slice()
+    }
+
+    /// Consumes the bundle and returns just the feedback packet.
+    pub fn into_feedback(self) -> SoftlogicZFeedback {
+        self.feedback
+    }
+
+    /// Consumes the bundle and exposes all components.
+    pub fn into_parts(self) -> (SoftlogicZFeedback, PsiReading, Vec<PsiEvent>) {
+        (self.feedback, self.reading, self.events)
     }
 }
 
@@ -885,7 +950,7 @@ mod tests {
         hub::clear_last_psi_events();
         hub::clear_softlogic_z();
 
-        let (feedback, reading, events) = bridge.publish_with_reading(&pulse, 42);
+        let (feedback, reading, events) = bridge.publish_with_reading(&pulse, 42).into_parts();
 
         let stored_feedback = hub::get_softlogic_z().expect("softlogic feedback");
         assert_eq!(stored_feedback.z_signal, feedback.z_signal);

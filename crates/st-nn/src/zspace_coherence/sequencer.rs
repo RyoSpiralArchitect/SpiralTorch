@@ -21,7 +21,10 @@ use crate::{
 use st_core::maxwell::MaxwellZPulse;
 #[cfg(feature = "psi")]
 use st_core::{
-    telemetry::{hub::SoftlogicZFeedback, psi::{PsiEvent, PsiReading}},
+    telemetry::{
+        hub::SoftlogicZFeedback,
+        psi::{PsiEvent, PsiReading},
+    },
     theory::maxwell::MaxwellPsiTelemetryBridge,
 };
 use st_tensor::{OpenCartesianTopos, TensorError};
@@ -1323,7 +1326,9 @@ impl ZSpaceCoherenceSequencer {
     )> {
         let (aggregated, coherence, concept_hint, narrative, pulse) =
             self.forward_with_language_bridges(x, semantics, maxwell_bridge)?;
-        let (feedback, psi_reading, psi_events) = psi_bridge.publish_with_reading(&pulse, psi_step);
+        let (feedback, psi_reading, psi_events) = psi_bridge
+            .publish_with_reading(&pulse, psi_step)
+            .into_parts();
 
         self.dispatch_plugins(|| ZSpaceSequencerStage::PsiTelemetryPublished {
             pulse: &pulse,
