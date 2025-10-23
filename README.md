@@ -2606,14 +2606,22 @@ tuner.mergeObject([
   { rows: 512, cols_min: 4096, cols_max: 16383, k_max: 256, sg: true, tile_cols: 1024 },
 ]);
 const overrides = tuner.toObject();
+// Extract overrides and resolved plans as JSON or plain JS objects without
+// constructing intermediate WasmFftPlan instances by hand.
 const fallbackPlan = tuner.planFftWithFallback(512, 4096, 128, true);
+const fallbackJson = tuner.planFftWithFallbackJson(512, 4096, 128, true);
+const fallbackObject = tuner.planFftWithFallbackObject(512, 4096, 128, true);
 const resolution = tuner.planFftResolution(512, 4096, 128, true);
+const resolutionJson = tuner.planFftResolutionJson(512, 4096, 128, true);
+const resolutionObject = tuner.planFftResolutionObject(512, 4096, 128, true);
 if (resolution.source === WasmFftPlanSource.Override) {
   console.log(`override tile=${resolution.plan.tileCols}`);
 }
 const snapshot = resolution.toJson();
 const hydrated = ResolvedWasmFftPlan.fromJson(snapshot);
 const report = tuner.planFftReport(512, 4096, 128, true);
+const overrideJson = tuner.planFftJson(512, 4096, 128, true);
+const overrideObject = tuner.planFftObject(512, 4096, 128, true);
 ```
 
 ---
