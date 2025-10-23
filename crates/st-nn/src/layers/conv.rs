@@ -339,8 +339,8 @@ impl Module for Conv1d {
         let mut out = Tensor::zeros(batch, self.out_channels * out_width)?;
         let weight = self.weight.value();
         let bias = self.bias.value();
-        let weight_data = weight.data();
         let bias_data = bias.data();
+        let weight_data = weight.data();
         let span = kernel_span(self.in_channels, self.kernel_size);
         let out_cols = out.shape().1;
         {
@@ -956,6 +956,7 @@ impl Module for Conv3d {
         let mut out = Tensor::zeros(batch, self.out_channels * output_volume)?;
         let weight = self.weight.value();
         let bias = self.bias.value();
+        let bias_data = bias.data();
         let weight_data = weight.data();
         let kernel_volume = self.kernel_volume()?;
         let out_cols = out.shape().1;
