@@ -919,6 +919,12 @@ class PreDiscardTelemetry:
     total: int
     preserved_ratio: float
     discarded_ratio: float
+    survivor_energy: float
+    discarded_energy: float
+    total_energy: float
+    survivor_energy_ratio: float
+    discarded_energy_ratio: float
+    dominant_weight: float
 
 
 class PreDiscardSnapshot:

@@ -2151,10 +2151,18 @@ latest = model.pre_discard_snapshots()[-1]
 print("step", latest.step)
 print("survivors", latest.survivors)
 print("discarded ratio", latest.telemetry.discarded_ratio)
+print("survivor energy", latest.telemetry.survivor_energy)
+print("dominant weight", latest.telemetry.dominant_weight)
 
 # Reset the history whenever you want a fresh view.
 model.clear_pre_discard_snapshots()
 ```
+
+Telemetry now tracks both survivor/discard counts and their energy share,
+so you can monitor whether the discard policy is merely trimming duplicates or
+aggressively stripping away signal. Snapshot entries expose the raw
+`survivor_energy_ratio`, `discarded_energy`, and even the dominant pre-discard
+weight so plugins can adapt thresholds dynamically.
 
 [See example](examples/05_new_layers/zspace_coherence_demo.py)
 

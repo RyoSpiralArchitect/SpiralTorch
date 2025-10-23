@@ -359,7 +359,7 @@ impl PreDiscardPolicy {
         }
         if weights.is_empty() {
             return Ok(PreDiscardOutcome::fallback(
-                PreDiscardTelemetry::fallback(self, 0, 0),
+                PreDiscardTelemetry::fallback(self, 0, 0, 0.0, 0.0),
                 Vec::new(),
                 Vec::new(),
             ));
@@ -367,52 +367,82 @@ impl PreDiscardPolicy {
 
         let mut indices: Vec<usize> = (0..weights.len()).collect();
         indices.sort_by(|lhs, rhs| {
-            weights[*rhs]
-                .partial_cmp(&weights[*lhs])
+            original[*rhs]
+                .partial_cmp(&original[*lhs])
                 .unwrap_or(Ordering::Equal)
         });
 
-        let dominant = weights[indices[0]].max(1e-6);
+        let mut dominant = original[indices[0]];
+        if !dominant.is_finite() {
+            dominant = 1e-6;
+        }
+        if dominant <= 0.0 {
+            dominant = 1e-6;
+        }
         let mut survivors = vec![false; weights.len()];
-        let mut preserved = 0usize;
         for &idx in &indices {
-            let weight = weights[idx];
+            let mut weight = original[idx];
+            if !weight.is_finite() {
+                weight = 0.0;
+            }
             let survives_ratio = weight >= dominant * self.dominance_ratio;
             let survives_floor = weight >= self.energy_floor;
             if survives_ratio || survives_floor {
                 survivors[idx] = true;
-                preserved += 1;
             }
         }
 
+        let preserved = survivors.iter().filter(|flag| **flag).count();
         if preserved < self.min_channels.min(weights.len()) {
             for &idx in indices.iter().take(self.min_channels.min(weights.len())) {
                 if !survivors[idx] {
                     survivors[idx] = true;
-                    preserved += 1;
                 }
             }
         }
 
-        let mut discarded = 0usize;
         let mut survivor_indices = Vec::new();
         let mut discarded_indices = Vec::new();
         let mut sum = 0.0f32;
+        let mut survivor_energy = 0.0f32;
+        let mut discarded_energy = 0.0f32;
         for (idx, weight) in weights.iter_mut().enumerate() {
             if survivors[idx] {
+                let mut value = original[idx];
+                if !value.is_finite() {
+                    value = 0.0;
+                }
+                *weight = value;
                 sum += *weight;
+                survivor_energy += value;
                 survivor_indices.push(idx);
             } else {
+                let value = if original[idx].is_finite() {
+                    original[idx]
+                } else {
+                    0.0
+                };
+                discarded_energy += value;
                 *weight = 0.0;
-                discarded += 1;
                 discarded_indices.push(idx);
             }
         }
+        let discarded = discarded_indices.len();
 
         if sum <= f32::EPSILON || !sum.is_finite() {
             weights.copy_from_slice(original);
             return Ok(PreDiscardOutcome::fallback(
-                PreDiscardTelemetry::fallback(self, 0, original.len()),
+                PreDiscardTelemetry::fallback(
+                    self,
+                    0,
+                    original.len(),
+                    original
+                        .iter()
+                        .copied()
+                        .filter(|value| value.is_finite())
+                        .sum(),
+                    dominant,
+                ),
                 (0..original.len()).collect(),
                 Vec::new(),
             ));
@@ -425,7 +455,15 @@ impl PreDiscardPolicy {
         }
 
         Ok(PreDiscardOutcome::new(
-            PreDiscardTelemetry::new(self, discarded, weights.len() - discarded, false),
+            PreDiscardTelemetry::new(
+                self,
+                discarded,
+                weights.len() - discarded,
+                false,
+                survivor_energy,
+                discarded_energy,
+                dominant,
+            ),
             survivor_indices,
             discarded_indices,
         ))
@@ -440,21 +478,49 @@ pub struct PreDiscardTelemetry {
     discarded: usize,
     preserved: usize,
     fallback: bool,
+    survivor_energy: f32,
+    discarded_energy: f32,
+    dominant_weight: f32,
 }
 
 impl PreDiscardTelemetry {
-    fn new(policy: &PreDiscardPolicy, discarded: usize, preserved: usize, fallback: bool) -> Self {
+    fn new(
+        policy: &PreDiscardPolicy,
+        discarded: usize,
+        preserved: usize,
+        fallback: bool,
+        survivor_energy: f32,
+        discarded_energy: f32,
+        dominant_weight: f32,
+    ) -> Self {
         Self {
             dominance_ratio: policy.dominance_ratio,
             energy_floor: policy.energy_floor,
             discarded,
             preserved,
             fallback,
+            survivor_energy,
+            discarded_energy,
+            dominant_weight,
         }
     }
 
-    fn fallback(policy: &PreDiscardPolicy, discarded: usize, preserved: usize) -> Self {
-        Self::new(policy, discarded, preserved, true)
+    fn fallback(
+        policy: &PreDiscardPolicy,
+        discarded: usize,
+        preserved: usize,
+        total_energy: f32,
+        dominant_weight: f32,
+    ) -> Self {
+        Self::new(
+            policy,
+            discarded,
+            preserved,
+            true,
+            total_energy,
+            0.0,
+            dominant_weight,
+        )
     }
 
     /// Returns the dominance ratio used during pre-discard.
@@ -496,6 +562,41 @@ impl PreDiscardTelemetry {
     /// Returns the fraction of channels that were discarded.
     pub fn discarded_ratio(&self) -> f32 {
         1.0 - self.preserved_ratio()
+    }
+
+    /// Returns the sum of the original weights that survived the pass.
+    pub fn survivor_energy(&self) -> f32 {
+        self.survivor_energy
+    }
+
+    /// Returns the sum of the original weights that were discarded.
+    pub fn discarded_energy(&self) -> f32 {
+        self.discarded_energy
+    }
+
+    /// Returns the total original weight energy observed during the pass.
+    pub fn total_energy(&self) -> f32 {
+        self.survivor_energy + self.discarded_energy
+    }
+
+    /// Returns the fraction of original energy that survived.
+    pub fn survivor_energy_ratio(&self) -> f32 {
+        let total = self.total_energy();
+        if total <= f32::EPSILON {
+            0.0
+        } else {
+            (self.survivor_energy / total).clamp(0.0, 1.0)
+        }
+    }
+
+    /// Returns the fraction of original energy that was discarded.
+    pub fn discarded_energy_ratio(&self) -> f32 {
+        1.0 - self.survivor_energy_ratio()
+    }
+
+    /// Returns the dominant channel weight observed before discard.
+    pub fn dominant_weight(&self) -> f32 {
+        self.dominant_weight
     }
 }
 
@@ -1610,6 +1711,33 @@ mod tests {
         assert!(latest.telemetry().discarded_ratio() >= 0.0);
         seq.clear_pre_discard_snapshots();
         assert!(seq.pre_discard_snapshots().is_empty());
+    }
+
+    #[test]
+    fn pre_discard_telemetry_captures_energy_distribution() {
+        let policy = PreDiscardPolicy::new(0.5)
+            .unwrap()
+            .with_energy_floor(1e-3)
+            .unwrap();
+        let mut weights = vec![0.8f32, 2.0e-4, 5.0e-5];
+        let original = weights.clone();
+
+        let outcome = policy.apply(&mut weights, &original).unwrap();
+        let telemetry = outcome.telemetry();
+
+        assert_eq!(telemetry.preserved(), 1);
+        assert_eq!(telemetry.discarded(), 2);
+        assert!((telemetry.survivor_energy() - 0.8).abs() < 1e-6);
+        assert!((telemetry.discarded_energy() - 0.00025).abs() < 1e-6);
+        assert!((telemetry.total_energy() - 0.80025).abs() < 1e-6);
+        assert!((telemetry.survivor_energy_ratio() - (0.8 / 0.80025)).abs() < 1e-6);
+        assert!((telemetry.discarded_energy_ratio() - (0.00025 / 0.80025)).abs() < 1e-6);
+        assert!((telemetry.dominant_weight() - 0.8).abs() < 1e-6);
+
+        // The mutated weights should be renormalised after discard.
+        assert!((weights[0] - 1.0).abs() < 1e-6);
+        assert_eq!(weights[1], 0.0);
+        assert_eq!(weights[2], 0.0);
     }
 
     #[test]

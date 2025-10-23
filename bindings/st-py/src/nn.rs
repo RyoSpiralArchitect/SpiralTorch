@@ -270,6 +270,12 @@ pub(crate) struct PyPreDiscardTelemetry {
     discarded: usize,
     preserved: usize,
     fallback: bool,
+    survivor_energy: f32,
+    discarded_energy: f32,
+    total_energy: f32,
+    survivor_energy_ratio: f32,
+    discarded_energy_ratio: f32,
+    dominant_weight: f32,
 }
 
 #[cfg(feature = "nn")]
@@ -281,6 +287,12 @@ impl PyPreDiscardTelemetry {
             discarded: telemetry.discarded(),
             preserved: telemetry.preserved(),
             fallback: telemetry.used_fallback(),
+            survivor_energy: telemetry.survivor_energy(),
+            discarded_energy: telemetry.discarded_energy(),
+            total_energy: telemetry.total_energy(),
+            survivor_energy_ratio: telemetry.survivor_energy_ratio(),
+            discarded_energy_ratio: telemetry.discarded_energy_ratio(),
+            dominant_weight: telemetry.dominant_weight(),
         }
     }
 }
@@ -330,6 +342,36 @@ impl PyPreDiscardTelemetry {
     #[getter]
     fn discarded_ratio(&self) -> f32 {
         1.0 - self.preserved_ratio()
+    }
+
+    #[getter]
+    fn survivor_energy(&self) -> f32 {
+        self.survivor_energy
+    }
+
+    #[getter]
+    fn discarded_energy(&self) -> f32 {
+        self.discarded_energy
+    }
+
+    #[getter]
+    fn total_energy(&self) -> f32 {
+        self.total_energy
+    }
+
+    #[getter]
+    fn survivor_energy_ratio(&self) -> f32 {
+        self.survivor_energy_ratio
+    }
+
+    #[getter]
+    fn discarded_energy_ratio(&self) -> f32 {
+        self.discarded_energy_ratio
+    }
+
+    #[getter]
+    fn dominant_weight(&self) -> f32 {
+        self.dominant_weight
     }
 }
 
