@@ -6,10 +6,7 @@
 include!(concat!(env!("OUT_DIR"), "/build_info.rs"));
 
 pub fn print_build_id() {
-    println!(
-        "SpiralTorch Build ID: {} ({})",
-        BUILD_ID, BUILD_FINGERPRINT
-    );
+    println!("SpiralTorch Build ID: {} ({})", BUILD_ID, BUILD_FINGERPRINT);
 }
 
 pub fn build_manifest_json() -> &'static str {
