@@ -10,7 +10,6 @@ use st_core::util::math::LeechProjector;
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 
 fn validate_positive(value: usize, _label: &str) -> PureResult<()> {
     if value == 0 {
@@ -1864,7 +1863,7 @@ impl Conv2d {
         let weight = self.weight.value();
         let bias = self.bias.value();
         let patches = self.im2col(input, batch, oh, ow)?;
-        let mut contracted = einsum_contract(&patches, &weight, "bs,os->bo")?;
+        let mut contracted = einsum_contract(&patches, &weight, "ps,os->po")?;
         contracted.add_row_inplace(bias.data())?;
         let spatial = oh * ow;
         contracted.reshape(batch, self.out_channels * spatial)
