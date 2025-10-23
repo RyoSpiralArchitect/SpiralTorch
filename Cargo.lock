@@ -705,6 +705,7 @@ dependencies = [
  "num-complex",
  "num-traits",
  "paste",
+ "rayon",
  "reborrow",
 ]
 
@@ -1036,6 +1037,7 @@ dependencies = [
  "paste",
  "pulp",
  "raw-cpuid",
+ "rayon",
  "seq-macro",
  "sysctl",
 ]
@@ -1054,6 +1056,7 @@ dependencies = [
  "num-traits",
  "paste",
  "raw-cpuid",
+ "rayon",
  "seq-macro",
 ]
 

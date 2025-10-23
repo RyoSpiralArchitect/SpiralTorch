@@ -228,29 +228,72 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 ## Python Examples
 
-### 1) Core tensor & DLPack
+### 1)　DLPack(You can Zero copy)
 
 ```python
 import spiraltorch as st
+import torch
+from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 
-x = st.Tensor(2, 3, [1,2,3,4,5,6])
-print("shape:", x.shape(), "rows:", x.rows, "cols:", x.cols)
+# ST → Torch
+a = st.Tensor(2, 3, [1,2,3,4,5,6])
+caps = a.to_dlpack()
+t = torch_from_dlpack(caps)  
 
-cap = st.to_dlpack(x)
-x2 = st.from_dlpack(cap)
-print("tolist:", x2.tolist())
+t += 10
+print("ST tolist after torch += 10:", a.tolist())  # ← [11,12,13,14,15,16] is okay
+
+# Torch → ST
+t2 = torch.arange(6, dtype=torch.float32).reshape(2,3)
+a2 = st.Tensor.from_dlpack(t2)      # same buffer
+t2.mul_(2)                          # in-place
+print("ST sees torch mul_:        ", a2.tolist())
 ```
 
-### 2) Planner & device
+### 2) rl.stAgent
 
 ```python
+import random
 import spiraltorch as st
 
-rp = st.plan_topk(rows=1024, cols=256, k=16, backend="wgpu", subgroup=True)
-print("kind:", rp.kind(), "tile:", rp.tile(), "wg:", rp.workgroup())
+Agent = getattr(st.rl, "stAgent", None)
+if Agent is None:
+    raise SystemExit("st.rl.stAgent not available")
 
-print("device:", st.describe_device(backend="wgpu", cols=1024, tile_hint=16))
-print("hip:", st.hip_probe())  # if supported
+def reward(action):
+    p = 0.6 if action == 0 else 0.4
+    return 1.0 if random.random() < p else 0.0
+
+agent = Agent(state_dim=1, action_dim=2, discount=0.0, learning_rate=5e-2)
+
+T = 2000
+FORCE_EXPLORE = 200
+eps_hi, eps_lo = 0.3, 0.01
+
+wins = 0
+pulls = [0, 0]
+wins_by_arm = [0, 0]
+
+for t in range(1, T + 1):
+    # 最初は強制探索、それ以降は徐々にεを下げる
+    if t <= FORCE_EXPLORE:
+        a = t % 2
+    else:
+        frac = (t - FORCE_EXPLORE) / (T - FORCE_EXPLORE)
+        eps = eps_hi + (eps_lo - eps_hi) * frac
+        agent.set_epsilon(eps)
+        a = agent.select_action(0)   # 状態はダミー
+
+    r = reward(a)
+    wins += r
+    pulls[a] += 1
+    wins_by_arm[a] += r
+    agent.update(0, a, r, 0) 
+
+print(f"total win rate: {wins / T:.3f}")
+for k in range(2):
+    rate = (wins_by_arm[k] / pulls[k]) if pulls[k] else 0.0
+    print(f"arm {k}: pulls={pulls[k]}, empirical p≈{rate:.3f}")
 ```
 
 ### 3) Self-supervised
@@ -2074,6 +2117,45 @@ print(f"dominant channel: {diagnostics.dominant_channel()}")
 print(f"z-bias: {diagnostics.z_bias():.3f}")
 ```
 
+### 先行破棄 (Pre-Discard) Sequencing
+
+Humans don't wait to evaluate every possibility—they discard the "now impossible"
+branches first and let thought ride whatever remains. The sequencer now mirrors
+that behaviour:
+
+```python
+model.configure_pre_discard(
+    dominance_ratio=0.35,  # keep channels within 35% of the dominant signal
+    energy_floor=1e-3,     # drop negligible bands outright
+    min_channels=3,        # always preserve a minimal braid of possibilities
+)
+
+out, coherence, diagnostics = model.forward_with_diagnostics(x)
+print("discarded", diagnostics.discarded_channels(), "channels pre-aggregation")
+
+# Disable when you want full retention again
+model.disable_pre_discard()
+```
+
+The accompanying diagnostics surface `pre_discard` telemetry so you can inspect
+how aggressively the sequencer culled low-credence channels during a pass.
+Every invocation is also journaled so you can study the discard pattern over
+time:
+
+```python
+# Keep the last 32 pre-discard snapshots (default) or dial it up/down.
+model.configure_pre_discard_memory(limit=64)
+
+_ = model.forward_with_diagnostics(x)
+latest = model.pre_discard_snapshots()[-1]
+print("step", latest.step)
+print("survivors", latest.survivors)
+print("discarded ratio", latest.telemetry.discarded_ratio)
+
+# Reset the history whenever you want a fresh view.
+model.clear_pre_discard_snapshots()
+```
+
 [See example](examples/05_new_layers/zspace_coherence_demo.py)
 
 ### Plugin Architecture
@@ -2089,7 +2171,7 @@ published (with the `psi` feature).
 
 Key stages:
 
-- `Projected`, `CoherenceMeasured`, `Aggregated`
+- `Projected`, `CoherenceMeasured`, `PreDiscardApplied` *(with survivor + discard indices)*, `Aggregated`
 - `SemanticWindowDerived`, `SemanticDistributionDerived`, `CanonicalConceptSelected`
 - `MaxwellBridgeEmitted`, `SemanticWindowFused`, `LanguageBridged`
 - `BackendConfigured`, `LinguisticProfileRegistered`, `LinguisticProfilesCleared`
