@@ -345,16 +345,71 @@ function elements(tensor::Tensor)
     return Int(count)
 end
 
-function to_array(tensor::Tensor)
+"""
+    copyto!(dest, tensor)
+
+Copy the contents of `tensor` into the preallocated destination `dest`. When
+`dest` is a `Matrix{Float32}` or `Vector{Float32}` the copy happens without any
+intermediate allocations by streaming data directly from the underlying C
+runtime. Other real-valued destinations receive a converted copy. The function
+returns `dest` for convenience.
+"""
+function Base.copyto!(dest::Matrix{Float32}, tensor::Tensor)
     rows, cols = shape(tensor)
-    len = rows * cols
-    buffer = Vector{Float32}(undef, len)
+    if size(dest, 1) != rows || size(dest, 2) != cols
+        throw(ArgumentError("destination size $(size(dest)) does not match tensor shape $(rows, cols)"))
+    end
     lib = _lib()
-    ok = ccall((:spiraltorch_tensor_copy_data, lib), Cuchar, (Ptr{Cvoid}, Ptr{Float32}, Csize_t), tensor.handle, pointer(buffer), len)
+    len = rows * cols
+    ok = ccall((:spiraltorch_tensor_copy_data, lib), Cuchar, (Ptr{Cvoid}, Ptr{Float32}, Csize_t), tensor.handle, pointer(dest), len)
     if ok == 0
         error("failed to copy tensor data: " * last_error())
     end
-    return reshape(buffer, rows, cols)
+    return dest
+end
+
+function Base.copyto!(dest::Vector{Float32}, tensor::Tensor)
+    rows, cols = shape(tensor)
+    len = rows * cols
+    if length(dest) != len
+        throw(ArgumentError("destination length $(length(dest)) does not match tensor element count $len"))
+    end
+    lib = _lib()
+    ok = ccall((:spiraltorch_tensor_copy_data, lib), Cuchar, (Ptr{Cvoid}, Ptr{Float32}, Csize_t), tensor.handle, pointer(dest), len)
+    if ok == 0
+        error("failed to copy tensor data: " * last_error())
+    end
+    return dest
+end
+
+function Base.copyto!(dest::AbstractMatrix{<:Real}, tensor::Tensor)
+    rows, cols = shape(tensor)
+    if size(dest, 1) != rows || size(dest, 2) != cols
+        throw(ArgumentError("destination size $(size(dest)) does not match tensor shape $(rows, cols)"))
+    end
+    buffer = Matrix{Float32}(undef, rows, cols)
+    Base.copyto!(buffer, tensor)
+    dest .= buffer
+    return dest
+end
+
+function Base.copyto!(dest::AbstractVector{<:Real}, tensor::Tensor)
+    rows, cols = shape(tensor)
+    len = rows * cols
+    if length(dest) != len
+        throw(ArgumentError("destination length $(length(dest)) does not match tensor element count $len"))
+    end
+    buffer = Vector{Float32}(undef, len)
+    Base.copyto!(buffer, tensor)
+    dest .= buffer
+    return dest
+end
+
+function to_array(tensor::Tensor)
+    rows, cols = shape(tensor)
+    buffer = Matrix{Float32}(undef, rows, cols)
+    Base.copyto!(buffer, tensor)
+    return buffer
 end
 
 Base.size(tensor::Tensor) = shape(tensor)

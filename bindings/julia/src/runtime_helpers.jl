@@ -23,7 +23,15 @@ function _as_tensor(data::AbstractMatrix{<:Real})
     return Tensor(data)
 end
 
-function _materialize(result::Tensor, materialize::Bool)
+function _materialize(result::Tensor, materialize::Bool, materialize_into)
+    if materialize_into !== nothing
+        expected = size(result)
+        if size(materialize_into) != expected
+            throw(ArgumentError("materialize_into has size $(size(materialize_into)) but expected $expected"))
+        end
+        Base.copyto!(materialize_into, result)
+        return materialize_into
+    end
     return materialize ? to_array(result) : result
 end
 
@@ -33,11 +41,19 @@ end
 Convert the provided matrices to [`Tensor`](@ref) values and schedule the
 addition on `runtime`. The resulting tensor remains managed by the SpiralTorch
 runtime and can be converted back to a Julia array with [`to_array`](@ref).
-Set `materialize=true` to receive the result immediately as a `Matrix{Float32}`.
+Set `materialize=true` to receive the result immediately as a `Matrix{Float32}`
+or pass an existing array via `materialize_into` to copy the data without
+allocating.
 """
-function add(runtime::Runtime, lhs::AbstractMatrix{<:Real}, rhs::AbstractMatrix{<:Real}; materialize::Bool=false)
+function add(
+    runtime::Runtime,
+    lhs::AbstractMatrix{<:Real},
+    rhs::AbstractMatrix{<:Real};
+    materialize::Bool=false,
+    materialize_into::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+)
     result = add(runtime, _as_tensor(lhs), _as_tensor(rhs))
-    return _materialize(result, materialize)
+    return _materialize(result, materialize, materialize_into)
 end
 
 """
@@ -45,11 +61,17 @@ end
 
 Schedule subtraction on the runtime after promoting the inputs to
 [`Tensor`](@ref) values. Set `materialize=true` to obtain a `Matrix{Float32}`
-directly.
+directly or pass a preallocated array via `materialize_into`.
 """
-function sub(runtime::Runtime, lhs::AbstractMatrix{<:Real}, rhs::AbstractMatrix{<:Real}; materialize::Bool=false)
+function sub(
+    runtime::Runtime,
+    lhs::AbstractMatrix{<:Real},
+    rhs::AbstractMatrix{<:Real};
+    materialize::Bool=false,
+    materialize_into::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+)
     result = sub(runtime, _as_tensor(lhs), _as_tensor(rhs))
-    return _materialize(result, materialize)
+    return _materialize(result, materialize, materialize_into)
 end
 
 """
@@ -57,11 +79,18 @@ end
 
 Compute the element-wise product of the two matrices via the runtime. The
 result is a [`Tensor`](@ref). Use `materialize=true` to convert it to a
-`Matrix{Float32}` automatically.
+`Matrix{Float32}` automatically or supply `materialize_into` to reuse an
+existing workspace.
 """
-function hadamard(runtime::Runtime, lhs::AbstractMatrix{<:Real}, rhs::AbstractMatrix{<:Real}; materialize::Bool=false)
+function hadamard(
+    runtime::Runtime,
+    lhs::AbstractMatrix{<:Real},
+    rhs::AbstractMatrix{<:Real};
+    materialize::Bool=false,
+    materialize_into::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+)
     result = hadamard(runtime, _as_tensor(lhs), _as_tensor(rhs))
-    return _materialize(result, materialize)
+    return _materialize(result, materialize, materialize_into)
 end
 
 """
@@ -69,22 +98,35 @@ end
 
 Multiply the two matrices using the cooperative golden runtime without needing
 manual tensor construction. Pass `materialize=true` to collect the product as a
-`Matrix{Float32}`.
+`Matrix{Float32}` or set `materialize_into` to fill a preallocated array.
 """
-function matmul(runtime::Runtime, lhs::AbstractMatrix{<:Real}, rhs::AbstractMatrix{<:Real}; materialize::Bool=false)
+function matmul(
+    runtime::Runtime,
+    lhs::AbstractMatrix{<:Real},
+    rhs::AbstractMatrix{<:Real};
+    materialize::Bool=false,
+    materialize_into::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+)
     result = matmul(runtime, _as_tensor(lhs), _as_tensor(rhs))
-    return _materialize(result, materialize)
+    return _materialize(result, materialize, materialize_into)
 end
 
 """
     scale(runtime, data, value)
 
 Scale the matrix `data` by `value` using the runtime. Set `materialize=true` to
-obtain the scaled values as a `Matrix{Float32}` in one step.
+obtain the scaled values as a `Matrix{Float32}` in one step or supply
+`materialize_into` to reuse storage.
 """
-function scale(runtime::Runtime, data::AbstractMatrix{<:Real}, value::Real; materialize::Bool=false)
+function scale(
+    runtime::Runtime,
+    data::AbstractMatrix{<:Real},
+    value::Real;
+    materialize::Bool=false,
+    materialize_into::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+)
     result = scale(runtime, _as_tensor(data), value)
-    return _materialize(result, materialize)
+    return _materialize(result, materialize, materialize_into)
 end
 
 """
@@ -92,11 +134,16 @@ end
 
 Transpose the matrix `data` by promoting it to a [`Tensor`](@ref) and executing
 on the runtime. `materialize=true` returns the transposed `Matrix{Float32}`
-directly.
+directly, while `materialize_into` lets you fill an existing destination.
 """
-function transpose_tensor(runtime::Runtime, data::AbstractMatrix{<:Real}; materialize::Bool=false)
+function transpose_tensor(
+    runtime::Runtime,
+    data::AbstractMatrix{<:Real};
+    materialize::Bool=false,
+    materialize_into::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+)
     result = transpose_tensor(runtime, _as_tensor(data))
-    return _materialize(result, materialize)
+    return _materialize(result, materialize, materialize_into)
 end
 
 """
@@ -104,11 +151,19 @@ end
 
 Reshape the provided matrix using the runtime. The number of elements must
 remain unchanged. When `materialize=true` the reshaped data is returned as a
-`Matrix{Float32}`.
+`Matrix{Float32}`. Provide `materialize_into` to copy the reshaped values into a
+preallocated array.
 """
-function reshape_tensor(runtime::Runtime, data::AbstractMatrix{<:Real}, rows::Integer, cols::Integer; materialize::Bool=false)
+function reshape_tensor(
+    runtime::Runtime,
+    data::AbstractMatrix{<:Real},
+    rows::Integer,
+    cols::Integer;
+    materialize::Bool=false,
+    materialize_into::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+)
     result = reshape_tensor(runtime, _as_tensor(data), rows, cols)
-    return _materialize(result, materialize)
+    return _materialize(result, materialize, materialize_into)
 end
 
 """
@@ -116,21 +171,43 @@ end
 
 Reshape the matrix with dimensions provided as a tuple, delegating to
 [`reshape_tensor`](@ref). `materialize=true` returns the reshaped matrix data
-immediately.
+immediately, and `materialize_into` copies the result into an existing array.
 """
-function reshape_tensor(runtime::Runtime, data::AbstractMatrix{<:Real}, dims::Tuple{Integer,Integer}; materialize::Bool=false)
-    return reshape_tensor(runtime, data, dims[1], dims[2]; materialize=materialize)
+function reshape_tensor(
+    runtime::Runtime,
+    data::AbstractMatrix{<:Real},
+    dims::Tuple{Integer,Integer};
+    materialize::Bool=false,
+    materialize_into::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+)
+    return reshape_tensor(
+        runtime,
+        data,
+        dims[1],
+        dims[2];
+        materialize=materialize,
+        materialize_into=materialize_into,
+    )
 end
 
 """
     random_uniform(runtime, dims, min, max; seed=nothing)
 
 Convenience method that dispatches to [`random_uniform`](@ref) using a tuple of
-dimensions. Set `materialize=true` to obtain a sampled `Matrix{Float32}`.
+dimensions. Set `materialize=true` to obtain a sampled `Matrix{Float32}` or
+pass `materialize_into` to reuse a preallocated array.
 """
-function random_uniform(runtime::Runtime, dims::Tuple{Integer,Integer}, min::Real, max::Real; seed::Union{Nothing,Integer}=nothing, materialize::Bool=false)
+function random_uniform(
+    runtime::Runtime,
+    dims::Tuple{Integer,Integer},
+    min::Real,
+    max::Real;
+    seed::Union{Nothing,Integer}=nothing,
+    materialize::Bool=false,
+    materialize_into::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+)
     result = random_uniform(runtime, dims[1], dims[2], min, max; seed=seed)
-    return _materialize(result, materialize)
+    return _materialize(result, materialize, materialize_into)
 end
 
 """
@@ -138,9 +215,17 @@ end
 
 Tuple-friendly wrapper for [`random_normal`](@ref) when requesting tensors from
 the runtime. Use `materialize=true` to receive the samples as a
-`Matrix{Float32}`.
+`Matrix{Float32}` or provide `materialize_into` to copy into existing storage.
 """
-function random_normal(runtime::Runtime, dims::Tuple{Integer,Integer}, mean::Real, std::Real; seed::Union{Nothing,Integer}=nothing, materialize::Bool=false)
+function random_normal(
+    runtime::Runtime,
+    dims::Tuple{Integer,Integer},
+    mean::Real,
+    std::Real;
+    seed::Union{Nothing,Integer}=nothing,
+    materialize::Bool=false,
+    materialize_into::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+)
     result = random_normal(runtime, dims[1], dims[2], mean, std; seed=seed)
-    return _materialize(result, materialize)
+    return _materialize(result, materialize, materialize_into)
 end

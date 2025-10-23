@@ -16,10 +16,22 @@ println("tensor .* matrix: ", to_array(reshaped .* mat))
 
 # Runtime helpers can now materialise results directly.
 with_runtime(worker_threads=1) do runtime
-    product = matmul(runtime, mat, transpose(mat); materialize=true)
-    println("runtime matmul materialised type: ", typeof(product))
+    reuse = Matrix{Float32}(undef, size(mat, 1), size(mat, 1))
+    product = matmul(runtime, mat, transpose(mat); materialize_into=reuse)
+    println("runtime matmul reused buffer: ", product === reuse)
     println("runtime matmul result:\n", product)
 
-    uniform = random_uniform(runtime, (2, 2), -1, 1; seed=42, materialize=true)
-    println("deterministic uniform sample:\n", uniform)
+    uniform = Matrix{Float32}(undef, 2, 2)
+    random_uniform(runtime, (2, 2), -1, 1; seed=42, materialize_into=uniform)
+    println("deterministic uniform sample (reused storage):\n", uniform)
 end
+
+# Direct tensor copies avoid allocations when using preallocated buffers.
+tensor = Tensor(mat)
+preallocated = Matrix{Float32}(undef, size(mat, 1), size(mat, 2))
+copyto!(preallocated, tensor)
+println("copyto! into matrix:\n", preallocated)
+
+flat = Vector{Float32}(undef, length(tensor))
+copyto!(flat, tensor)
+println("copyto! into vector: ", flat)
