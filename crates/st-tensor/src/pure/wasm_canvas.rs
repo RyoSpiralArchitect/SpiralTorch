@@ -251,46 +251,7 @@ impl ColorVectorField {
     /// the layout transformer-friendly while letting WASM consumers reuse the
     /// CPU fallback when no tuned plan is available yet.
     pub fn fft_rows_interleaved(&self, inverse: bool) -> PureResult<Vec<f32>> {
-        let width = self.width;
-        if width == 0 {
-            return Err(TensorError::InvalidDimensions {
-                rows: self.height,
-                cols: 0,
-            });
-        }
-        let mut energy = vec![Complex32::default(); width];
-        let mut chroma_r = vec![Complex32::default(); width];
-        let mut chroma_g = vec![Complex32::default(); width];
-        let mut chroma_b = vec![Complex32::default(); width];
-        let mut out = Vec::with_capacity(self.height * width * 8);
-
-        for row in 0..self.height {
-            for col in 0..width {
-                let vector = self.vectors[row * width + col];
-                energy[col] = Complex32::new(vector[0], 0.0);
-                chroma_r[col] = Complex32::new(vector[1], 0.0);
-                chroma_g[col] = Complex32::new(vector[2], 0.0);
-                chroma_b[col] = Complex32::new(vector[3], 0.0);
-            }
-
-            compute_fft(&mut energy, inverse)?;
-            compute_fft(&mut chroma_r, inverse)?;
-            compute_fft(&mut chroma_g, inverse)?;
-            compute_fft(&mut chroma_b, inverse)?;
-
-            for col in 0..width {
-                out.push(energy[col].re);
-                out.push(energy[col].im);
-                out.push(chroma_r[col].re);
-                out.push(chroma_r[col].im);
-                out.push(chroma_g[col].re);
-                out.push(chroma_g[col].im);
-                out.push(chroma_b[col].re);
-                out.push(chroma_b[col].im);
-            }
-        }
-
-        Ok(out)
+        self.fft_axis_interleaved(FftAxis::Rows, inverse)
     }
 
     /// Convenience wrapper around [`fft_rows_interleaved`] that returns the
@@ -298,6 +259,92 @@ impl ColorVectorField {
     pub fn fft_rows_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let data = self.fft_rows_interleaved(inverse)?;
         Tensor::from_vec(self.height, self.width * 8, data)
+    }
+
+    /// Compute a column-wise FFT over the energy + chroma channels and expose
+    /// the result as interleaved `[re, im]` floats for each component. This is
+    /// the vertical counterpart to [`fft_rows_interleaved`] so WASM callers can
+    /// analyse spectra along either axis without bouncing back to native Rust
+    /// helpers.
+    pub fn fft_cols_interleaved(&self, inverse: bool) -> PureResult<Vec<f32>> {
+        self.fft_axis_interleaved(FftAxis::Columns, inverse)
+    }
+
+    /// Convenience wrapper around [`fft_cols_interleaved`] that returns the
+    /// spectrum as a tensor with shape `(width, height * 8)` laid out in column
+    /// order (one row per column with interleaved complex components).
+    pub fn fft_cols_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        let data = self.fft_cols_interleaved(inverse)?;
+        Tensor::from_vec(self.width, self.height * 8, data)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum FftAxis {
+    Rows,
+    Columns,
+}
+
+impl ColorVectorField {
+    fn fft_axis_interleaved(&self, axis: FftAxis, inverse: bool) -> PureResult<Vec<f32>> {
+        match axis {
+            FftAxis::Rows if self.width == 0 => {
+                return Err(TensorError::InvalidDimensions {
+                    rows: self.height,
+                    cols: 0,
+                });
+            }
+            FftAxis::Columns if self.height == 0 => {
+                return Err(TensorError::InvalidDimensions {
+                    rows: 0,
+                    cols: self.width,
+                });
+            }
+            _ => {}
+        }
+
+        let (axis_len, outer_len) = match axis {
+            FftAxis::Rows => (self.width, self.height),
+            FftAxis::Columns => (self.height, self.width),
+        };
+
+        let mut energy = vec![Complex32::default(); axis_len];
+        let mut chroma_r = vec![Complex32::default(); axis_len];
+        let mut chroma_g = vec![Complex32::default(); axis_len];
+        let mut chroma_b = vec![Complex32::default(); axis_len];
+        let mut out = Vec::with_capacity(self.width * self.height * 8);
+
+        for outer in 0..outer_len {
+            for inner in 0..axis_len {
+                let index = match axis {
+                    FftAxis::Rows => outer * self.width + inner,
+                    FftAxis::Columns => inner * self.width + outer,
+                };
+                let vector = self.vectors[index];
+                energy[inner] = Complex32::new(vector[0], 0.0);
+                chroma_r[inner] = Complex32::new(vector[1], 0.0);
+                chroma_g[inner] = Complex32::new(vector[2], 0.0);
+                chroma_b[inner] = Complex32::new(vector[3], 0.0);
+            }
+
+            compute_fft(&mut energy, inverse)?;
+            compute_fft(&mut chroma_r, inverse)?;
+            compute_fft(&mut chroma_g, inverse)?;
+            compute_fft(&mut chroma_b, inverse)?;
+
+            for inner in 0..axis_len {
+                out.push(energy[inner].re);
+                out.push(energy[inner].im);
+                out.push(chroma_r[inner].re);
+                out.push(chroma_r[inner].im);
+                out.push(chroma_g[inner].re);
+                out.push(chroma_g[inner].im);
+                out.push(chroma_b[inner].re);
+                out.push(chroma_b[inner].im);
+            }
+        }
+
+        Ok(out)
     }
 }
 
@@ -686,6 +733,16 @@ impl CanvasProjector {
         self.vectors.fft_rows_interleaved(inverse)
     }
 
+    /// Refresh the canvas and expose the interleaved FFT spectrum for each
+    /// column (energy + chroma channels). This mirrors
+    /// [`refresh_vector_fft`] but operates along the vertical axis so WASM
+    /// consumers can probe anisotropic structures without reshaping data on the
+    /// JavaScript side.
+    pub fn refresh_vector_fft_columns(&mut self, inverse: bool) -> PureResult<Vec<f32>> {
+        self.render()?;
+        self.vectors.fft_cols_interleaved(inverse)
+    }
+
     /// Accumulate the refreshed tensor into the provided hypergradient tape.
     pub fn accumulate_hypergrad(&mut self, tape: &mut AmegaHypergrad) -> PureResult<()> {
         let tensor = self.refresh_tensor()?;
@@ -732,6 +789,14 @@ impl CanvasProjector {
     /// Access the last computed FFT spectrum without forcing a refresh.
     pub fn vector_fft(&self, inverse: bool) -> PureResult<Vec<f32>> {
         self.vectors.fft_rows_interleaved(inverse)
+    }
+
+    /// Access the last computed column-wise FFT spectrum without forcing a
+    /// refresh. The returned buffer mirrors [`refresh_vector_fft_columns`]
+    /// layout (columns laid out sequentially with interleaved `[re, im]`
+    /// components).
+    pub fn vector_fft_columns(&self, inverse: bool) -> PureResult<Vec<f32>> {
+        self.vectors.fft_cols_interleaved(inverse)
     }
 
     /// Uniform parameters expected by [`vector_fft_wgsl`]. The layout mirrors
@@ -877,6 +942,14 @@ impl CanvasProjector {
     pub fn refresh_vector_fft_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
         self.render()?;
         self.vectors.fft_rows_tensor(inverse)
+    }
+
+    /// Refresh the canvas and return the column-wise FFT spectrum as a tensor.
+    /// The resulting tensor has shape `(width, height * 8)` and matches the
+    /// interleaved layout returned by [`refresh_vector_fft_columns`].
+    pub fn refresh_vector_fft_columns_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
+        self.render()?;
+        self.vectors.fft_cols_tensor(inverse)
     }
 
     /// Emit a Z-space fractal patch built from the colour energy field so
@@ -1161,6 +1234,32 @@ mod tests {
     }
 
     #[test]
+    fn vector_field_fft_columns_emits_interleaved_channels() {
+        let mut field = ColorVectorField::new(1, 4);
+        field.set(0, 1.0, [0.0, 0.0, 0.0]);
+        let spectrum = field.fft_cols_interleaved(false).unwrap();
+        assert_eq!(spectrum.len(), 32);
+        for chunk in spectrum.chunks_exact(8) {
+            assert!((chunk[0] - 1.0).abs() < 1e-6);
+            assert!(chunk[1].abs() < 1e-6);
+            for value in &chunk[2..] {
+                assert!(value.abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn vector_field_fft_columns_handles_non_power_of_two_height() {
+        let mut field = ColorVectorField::new(2, 3);
+        field.set(0, 1.0, [0.0, 0.0, 0.0]);
+        let spectrum = field.fft_cols_interleaved(false).unwrap();
+        assert_eq!(spectrum.len(), 48);
+        for value in spectrum {
+            assert!(value.is_finite());
+        }
+    }
+
+    #[test]
     fn vector_field_fft_handles_non_power_of_two_width() {
         let mut field = ColorVectorField::new(3, 1);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
@@ -1181,6 +1280,17 @@ mod tests {
         let tensor = projector.refresh_tensor().unwrap();
         assert_eq!(tensor.shape(), (2, 2));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_columns_tensor_matches_shape() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+        let tensor = projector.refresh_vector_fft_columns_tensor(false).unwrap();
+        assert_eq!(tensor.shape(), (5, 3 * 8));
     }
 
     #[test]
