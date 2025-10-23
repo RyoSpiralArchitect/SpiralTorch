@@ -359,6 +359,7 @@ function Base.copyto!(dest::Matrix{Float32}, tensor::Tensor)
     if size(dest, 1) != rows || size(dest, 2) != cols
         throw(ArgumentError("destination size $(size(dest)) does not match tensor shape $(rows, cols)"))
     end
+    Base.require_one_based_indexing(dest)
     lib = _lib()
     len = rows * cols
     ok = ccall((:spiraltorch_tensor_copy_data, lib), Cuchar, (Ptr{Cvoid}, Ptr{Float32}, Csize_t), tensor.handle, pointer(dest), len)
@@ -374,6 +375,7 @@ function Base.copyto!(dest::Vector{Float32}, tensor::Tensor)
     if length(dest) != len
         throw(ArgumentError("destination length $(length(dest)) does not match tensor element count $len"))
     end
+    Base.require_one_based_indexing(dest)
     lib = _lib()
     ok = ccall((:spiraltorch_tensor_copy_data, lib), Cuchar, (Ptr{Cvoid}, Ptr{Float32}, Csize_t), tensor.handle, pointer(dest), len)
     if ok == 0
@@ -389,7 +391,7 @@ function Base.copyto!(dest::AbstractMatrix{<:Real}, tensor::Tensor)
     end
     buffer = Matrix{Float32}(undef, rows, cols)
     Base.copyto!(buffer, tensor)
-    dest .= buffer
+    Base.copyto!(dest, buffer)
     return dest
 end
 
@@ -401,7 +403,7 @@ function Base.copyto!(dest::AbstractVector{<:Real}, tensor::Tensor)
     end
     buffer = Vector{Float32}(undef, len)
     Base.copyto!(buffer, tensor)
-    dest .= buffer
+    Base.copyto!(dest, buffer)
     return dest
 end
 
