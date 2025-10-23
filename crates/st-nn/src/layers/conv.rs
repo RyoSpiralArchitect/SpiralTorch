@@ -957,7 +957,6 @@ impl Module for Conv3d {
         let weight = self.weight.value();
         let bias = self.bias.value();
         let weight_data = weight.data();
-        let bias_data = bias.data();
         let kernel_volume = self.kernel_volume()?;
         let out_cols = out.shape().1;
         let plane = self.input_dhw.1 * self.input_dhw.2;
