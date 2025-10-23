@@ -10,7 +10,7 @@
 //! its determinant, closed-form computation of the scalar invariants `α` and
 //! `β`, and causal classification of the resulting kernel vector.
 
-use std::fmt;
+use std::{f64::consts::PI, fmt};
 
 use nalgebra as na;
 use num_complex::Complex;
@@ -49,8 +49,8 @@ pub enum StvError {
     /// The supplied Pauli spinor had zero norm.
     #[error("spinor must have non-zero norm")]
     ZeroSpinor,
-    /// The supplied Bloch vector was invalid.
-    #[error("bloch vector must be finite with non-zero norm (received norm {norm:.3e})")]
+    /// The supplied Bloch vector was not suitable for reconstructing a spinor.
+    #[error("bloch vector must have a finite norm (norm = {norm:.3e})")]
     InvalidBlochVector { norm: f64 },
 }
 
@@ -72,6 +72,40 @@ impl PauliSpinor {
         Ok(Self {
             components: [components[0] / norm, components[1] / norm],
         })
+    }
+
+    /// Constructs a Pauli spinor from Bloch sphere angles `(θ, φ)` using the
+    /// conventional gauge where the first component is real and non-negative.
+    pub fn from_bloch_angles(theta: f64, phi: f64) -> Result<Self, StvError> {
+        let theta = theta.clamp(0.0, PI);
+        let half_theta = 0.5 * theta;
+        let cos = half_theta.cos();
+        let sin = half_theta.sin();
+        let a = Complex::new(cos, 0.0);
+        let b = Complex::from_polar(sin, phi);
+        Self::new([a, b])
+    }
+
+    /// Reconstructs a Pauli spinor from a Bloch vector. The supplied vector is
+    /// normalised to lie on the unit sphere; when the norm underflows an error
+    /// is returned.
+    pub fn from_bloch_vector(mut bloch: Vec3) -> Result<Self, StvError> {
+        let norm = (bloch[0] * bloch[0] + bloch[1] * bloch[1] + bloch[2] * bloch[2]).sqrt();
+        if !norm.is_finite() {
+            return Err(StvError::InvalidBlochVector { norm });
+        }
+
+        if norm <= DEFAULT_TOLERANCE {
+            return Err(StvError::InvalidBlochVector { norm });
+        }
+
+        let inv_norm = 1.0 / norm;
+        bloch[0] *= inv_norm;
+        bloch[1] *= inv_norm;
+        bloch[2] *= inv_norm;
+        let theta = bloch[2].clamp(-1.0, 1.0).acos();
+        let phi = bloch[1].atan2(bloch[0]);
+        Self::from_bloch_angles(theta, phi)
     }
 
     /// Returns the complex components of the spinor.
@@ -99,68 +133,20 @@ impl PauliSpinor {
         [j0, jx, jy, jz]
     }
 
-    /// Returns the spatial Bloch direction `**j** / j⁰`.
-    pub fn bloch_direction(&self) -> Vec3 {
+    /// Returns only the spatial Bloch vector `(jₓ, j_y, j_z)`.
+    pub fn bloch_vector(&self) -> Vec3 {
         let current = self.bloch_current();
-        if current[0].abs() <= DEFAULT_TOLERANCE {
-            [0.0, 0.0, 0.0]
-        } else {
-            [
-                current[1] / current[0],
-                current[2] / current[0],
-                current[3] / current[0],
-            ]
-        }
+        [current[1], current[2], current[3]]
     }
 
-    /// Returns the Bloch sphere angles `(θ, φ)` describing the spinor.
+    /// Computes the Bloch sphere angles `(θ, φ)` associated with the spinor.
+    ///
+    /// The angles satisfy `j_z = cos θ` and `tan φ = j_y / j_x` with `θ ∈ [0, π]`.
     pub fn bloch_angles(&self) -> (f64, f64) {
-        let direction = self.bloch_direction();
-        let z = direction[2].clamp(-1.0, 1.0);
-        let theta = z.acos();
-        let phi = direction[1].atan2(direction[0]);
+        let bloch = self.bloch_vector();
+        let theta = bloch[2].clamp(-1.0, 1.0).acos();
+        let phi = bloch[1].atan2(bloch[0]);
         (theta, phi)
-    }
-
-    /// Returns the relative phase `arg(b) - arg(a)` between the spinor components.
-    pub fn relative_phase(&self) -> f64 {
-        let [a, b] = self.components;
-        b.arg() - a.arg()
-    }
-
-    /// Constructs a Pauli spinor corresponding to the supplied Bloch sphere
-    /// angles `(θ, φ)`.
-    pub fn from_bloch_angles(theta: f64, phi: f64) -> Result<Self, StvError> {
-        if !theta.is_finite() || !phi.is_finite() {
-            return Err(StvError::InvalidBlochVector { norm: f64::NAN });
-        }
-        let half_theta = theta * 0.5;
-        let cos_half = half_theta.cos();
-        let sin_half = half_theta.sin();
-        PauliSpinor::new([
-            Complex::new(cos_half, 0.0),
-            Complex::from_polar(sin_half, phi),
-        ])
-    }
-
-    /// Constructs a Pauli spinor by lifting a Bloch vector back into the spinor
-    /// representation. The vector is projected onto the unit sphere when its
-    /// norm deviates slightly due to numerical errors.
-    pub fn from_bloch_vector(bloch: Vec3) -> Result<Self, StvError> {
-        if !bloch.iter().all(|component| component.is_finite()) {
-            return Err(StvError::InvalidBlochVector { norm: f64::NAN });
-        }
-        let norm_sq = bloch[0] * bloch[0] + bloch[1] * bloch[1] + bloch[2] * bloch[2];
-        if norm_sq <= DEFAULT_TOLERANCE {
-            return Err(StvError::InvalidBlochVector {
-                norm: norm_sq.sqrt(),
-            });
-        }
-        let norm = norm_sq.sqrt();
-        let unit = [bloch[0] / norm, bloch[1] / norm, bloch[2] / norm];
-        let theta = unit[2].clamp(-1.0, 1.0).acos();
-        let phi = unit[1].atan2(unit[0]);
-        PauliSpinor::from_bloch_angles(theta, phi)
     }
 }
 
@@ -204,6 +190,11 @@ impl SpinoTensorVector {
         self.spinor.bloch_current()
     }
 
+    /// Returns only the spatial Bloch vector `(jₓ, j_y, j_z)`.
+    pub fn bloch_vector(&self) -> Vec3 {
+        self.spinor.bloch_vector()
+    }
+
     /// Applies the kernel tensor to the Bloch current, returning the induced
     /// Minkowski vector `v = T(j(ψ))`.
     pub fn induced_vector(&self) -> Vec4 {
@@ -227,77 +218,84 @@ impl SpinoTensorVector {
         }
     }
 
-    /// Projects the Bloch current into a Z-space compatible descriptor.
-    pub fn zspace_projection(&self) -> ZSpaceBlochProjection {
-        let current = self.bloch_current();
-        let j0 = if current[0].abs() <= DEFAULT_TOLERANCE {
-            1.0
-        } else {
-            current[0]
+    /// Returns a new SpinoTensorVector with a spinor reconstructed from the
+    /// requested Bloch vector while reusing the existing kernel descriptor.
+    pub fn with_bloch_vector(&self, bloch: Vec3) -> Result<Self, StvError> {
+        let spinor = PauliSpinor::from_bloch_vector(bloch)?;
+        Ok(Self {
+            spinor,
+            kernel: self.kernel.clone(),
+        })
+    }
+
+    /// Projects the SpinoTensorVector into a Z-space pulse with the supplied
+    /// timestamp and origin source.
+    pub fn project_to_zpulse(&self, ts: u64, source: ZSource) -> Result<ZPulse, StvError> {
+        let projection = self.z_projection()?;
+        Ok(projection.into_pulse(ts, source))
+    }
+
+    /// Computes the Z-space projection descriptors without materialising the
+    /// final [`ZPulse`], enabling callers to fuse the metadata with additional
+    /// signals prior to emission.
+    pub fn z_projection(&self) -> Result<ZProjection, StvError> {
+        let bloch = self.bloch_current();
+        let spatial_bloch = [bloch[1], bloch[2], bloch[3]];
+        let induced = self.induced_vector();
+        let spatial = [induced[1], induced[2], induced[3]];
+        let spatial_norm =
+            (spatial[0] * spatial[0] + spatial[1] * spatial[1] + spatial[2] * spatial[2]).sqrt();
+
+        let band_energy = normalised_band_energy(spatial, spatial_norm);
+        let support = bloch_support(spatial_bloch);
+        let beta = self.kernel.beta()?;
+        let quality = match self.kernel.classify(DEFAULT_TOLERANCE)? {
+            CausalClass::Timelike => 1.0,
+            CausalClass::Lightlike => 0.75,
+            CausalClass::Spacelike => 0.5,
         };
-        let spatial = [current[1] / j0, current[2] / j0, current[3] / j0];
-        let radial = (spatial[0] * spatial[0] + spatial[1] * spatial[1]).sqrt();
-        let leading = ((1.0 + spatial[2]) * 0.5).max(0.0);
-        let trailing = ((1.0 - spatial[2]) * 0.5).max(0.0);
-        let central = radial.max(0.0);
-        let support = ZSupport::new(leading as f32, central as f32, trailing as f32);
-        let band_energy = (
-            (leading * j0).max(0.0) as f32,
-            (radial * j0).max(0.0) as f32,
-            (trailing * j0).max(0.0) as f32,
-        );
-        ZSpaceBlochProjection {
-            direction: spatial,
-            support,
+        let scale = Some(z_scale_from_beta(beta));
+        Ok(ZProjection {
+            tempo: spatial_norm as f32,
             band_energy,
-            z_bias: spatial[2] as f32,
-            tempo: j0 as f32,
-            coherence: radial as f32,
-            phase: self.spinor.relative_phase() as f32,
-        }
-    }
-
-    /// Converts the Bloch/Z-space projection into a [`ZPulse`].
-    pub fn into_zpulse(&self, source: ZSource, ts: u64, scale: Option<ZScale>) -> ZPulse {
-        self.zspace_projection().into_pulse(source, ts, scale)
+            drift: spatial_bloch[2] as f32,
+            z_bias: (1.0 - beta) as f32,
+            support,
+            scale,
+            quality: quality as f32,
+            stderr: self.kernel.det_t().abs().sqrt() as f32,
+        })
     }
 }
 
-/// Z-space compatible descriptor of a Bloch current.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ZSpaceBlochProjection {
-    /// Normalised Bloch direction.
-    pub direction: Vec3,
-    /// Above/Here/Beneath support split compatible with Z pulses.
-    pub support: ZSupport,
-    /// Energy bands derived from the Bloch orientation.
-    pub band_energy: (f32, f32, f32),
-    /// Signed bias along the Z axis.
-    pub z_bias: f32,
-    /// Temporal component of the Bloch current.
+/// Intermediate descriptor bridging a [`SpinoTensorVector`] with the Z-space
+/// pulse representation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ZProjection {
     pub tempo: f32,
-    /// Equatorial coherence magnitude.
-    pub coherence: f32,
-    /// Relative phase of the spinor components (in radians).
-    pub phase: f32,
+    pub band_energy: (f32, f32, f32),
+    pub drift: f32,
+    pub z_bias: f32,
+    pub support: ZSupport,
+    pub scale: Option<ZScale>,
+    pub quality: f32,
+    pub stderr: f32,
 }
 
-impl ZSpaceBlochProjection {
-    /// Converts the projection into a [`ZPulse`], populating quality and drift
-    /// using the Bloch-derived features.
-    pub fn into_pulse(self, source: ZSource, ts: u64, scale: Option<ZScale>) -> ZPulse {
-        let drift = self.band_energy.0 - self.band_energy.2;
+impl ZProjection {
+    /// Materialises a [`ZPulse`] using the stored projection data.
+    pub fn into_pulse(self, ts: u64, source: ZSource) -> ZPulse {
         ZPulse {
             source,
             ts,
             tempo: self.tempo,
             band_energy: self.band_energy,
-            drift,
+            drift: self.drift,
             z_bias: self.z_bias,
             support: self.support,
-            scale,
-            quality: self.coherence.max(0.0),
-            stderr: 0.0,
+            scale: self.scale,
+            quality: self.quality,
+            stderr: self.stderr,
             latency_ms: 0.0,
         }
     }
@@ -672,6 +670,48 @@ fn dot(a: &Vec3, b: &Vec3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
+fn normalised_band_energy(spatial: Vec3, spatial_norm: f64) -> (f32, f32, f32) {
+    let mut energies = [spatial[0].abs(), spatial[2].abs(), spatial[1].abs()];
+    let total = energies.iter().copied().sum::<f64>();
+    if total > DEFAULT_TOLERANCE {
+        for value in energies.iter_mut() {
+            *value /= total;
+        }
+    } else {
+        energies = [0.0, 0.0, 0.0];
+    }
+    let scale = if spatial_norm.is_finite() && spatial_norm > 0.0 {
+        spatial_norm
+    } else {
+        0.0
+    };
+    (
+        (energies[0] * scale) as f32,
+        (energies[1] * scale) as f32,
+        (energies[2] * scale) as f32,
+    )
+}
+
+fn bloch_support(bloch: Vec3) -> ZSupport {
+    let mut weights = [
+        ((bloch[0] + 1.0) / 2.0).clamp(0.0, 1.0),
+        ((bloch[1] + 1.0) / 2.0).clamp(0.0, 1.0),
+        ((bloch[2] + 1.0) / 2.0).clamp(0.0, 1.0),
+    ];
+    let sum = weights.iter().copied().sum::<f64>();
+    if sum > DEFAULT_TOLERANCE {
+        for value in weights.iter_mut() {
+            *value /= sum;
+        }
+    }
+    ZSupport::new(weights[0] as f32, weights[2] as f32, weights[1] as f32)
+}
+
+fn z_scale_from_beta(beta: f64) -> ZScale {
+    let radius = (1.0 + beta).sqrt() as f32;
+    ZScale::new(radius).unwrap_or(ZScale::ONE)
+}
+
 fn omega_matrix(omega: &Vec3) -> Matrix3 {
     Matrix3::new([
         [0.0, -omega[2], omega[1]],
@@ -719,6 +759,12 @@ impl SpinoTensorKernel {
             e,
             omega,
         })
+    }
+
+    /// Provides a Z-scale hint derived from the kernel `β` invariant.
+    pub fn z_scale_hint(&self) -> Result<ZScale, StvError> {
+        let beta = self.beta()?;
+        Ok(z_scale_from_beta(beta))
     }
 
     pub fn s0(&self) -> f64 {
@@ -1051,8 +1097,6 @@ mod tests {
     use num_complex::Complex;
     use std::f64::consts::{FRAC_PI_3, FRAC_PI_4, TAU};
 
-    use crate::theory::zpulse::ZSource;
-
     fn minkowski_norm_sq(v: &Vec4) -> f64 {
         v[0] * v[0] - v[1] * v[1] - v[2] * v[2] - v[3] * v[3]
     }
@@ -1065,13 +1109,32 @@ mod tests {
         ]
     }
 
+    fn relative_phase(spinor: &PauliSpinor) -> f64 {
+        let [a, b] = spinor.components();
+        if a.norm_sqr() <= DEFAULT_TOLERANCE {
+            return b.arg();
+        }
+        if b.norm_sqr() <= DEFAULT_TOLERANCE {
+            return 0.0;
+        }
+
+        let mut delta = b.arg() - a.arg();
+        while delta > std::f64::consts::PI {
+            delta -= TAU;
+        }
+        while delta < -std::f64::consts::PI {
+            delta += TAU;
+        }
+        delta
+    }
+
     #[test]
     fn reconstruct_spinor_from_bloch_vector() {
         let theta = FRAC_PI_3;
         let phi = FRAC_PI_4;
         let spinor = PauliSpinor::from_bloch_angles(theta, phi).unwrap();
-        let direction = spinor.bloch_direction();
-        let reconstructed = PauliSpinor::from_bloch_vector(direction).unwrap();
+        let bloch_vector = spinor.bloch_vector();
+        let reconstructed = PauliSpinor::from_bloch_vector(bloch_vector).unwrap();
 
         let (theta_rec, phi_rec) = reconstructed.bloch_angles();
         assert_abs_diff_eq!(theta_rec, theta, epsilon = 1e-9);
@@ -1083,15 +1146,18 @@ mod tests {
             delta_phi += TAU;
         }
         assert_abs_diff_eq!(delta_phi, 0.0, epsilon = 1e-9);
-        assert_abs_diff_eq!(
-            reconstructed.relative_phase(),
-            spinor.relative_phase(),
-            epsilon = 1e-9
-        );
+        let mut delta_phase = relative_phase(&reconstructed) - relative_phase(&spinor);
+        while delta_phase > std::f64::consts::PI {
+            delta_phase -= TAU;
+        }
+        while delta_phase < -std::f64::consts::PI {
+            delta_phase += TAU;
+        }
+        assert_abs_diff_eq!(delta_phase, 0.0, epsilon = 1e-9);
 
         let bloch = reconstructed.bloch_current();
         for i in 0..3 {
-            assert_abs_diff_eq!(bloch[i + 1], direction[i], epsilon = 1e-9);
+            assert_abs_diff_eq!(bloch[i + 1], bloch_vector[i], epsilon = 1e-9);
         }
     }
 
@@ -1102,58 +1168,56 @@ mod tests {
     }
 
     #[test]
-    fn zspace_projection_emits_pulse() {
+    fn z_projection_emits_pulse() {
         let spinor = PauliSpinor::from_bloch_angles(FRAC_PI_3, FRAC_PI_4).unwrap();
         let kernel =
             SpinoTensorKernel::new(1.0, diag([1.0, 1.0, 1.0]), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
                 .unwrap();
         let stv = SpinoTensorVector::new(spinor.clone(), kernel);
-        let projection = stv.zspace_projection();
+        let projection = stv.z_projection().unwrap();
 
-        let direction = spinor.bloch_direction();
-        for i in 0..3 {
-            assert_abs_diff_eq!(projection.direction[i], direction[i], epsilon = 1e-9);
-        }
+        let bloch_current = stv.bloch_current();
+        let spatial_bloch = [bloch_current[1], bloch_current[2], bloch_current[3]];
+        let induced = stv.induced_vector();
+        let spatial = [induced[1], induced[2], induced[3]];
+        let spatial_norm =
+            (spatial[0] * spatial[0] + spatial[1] * spatial[1] + spatial[2] * spatial[2]).sqrt();
+        assert_abs_diff_eq!(f64::from(projection.tempo), spatial_norm, epsilon = 1e-6);
+        let expected_band_energy = normalised_band_energy(spatial, spatial_norm);
+        assert_abs_diff_eq!(projection.band_energy.0, expected_band_energy.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(projection.band_energy.1, expected_band_energy.1, epsilon = 1e-6);
+        assert_abs_diff_eq!(projection.band_energy.2, expected_band_energy.2, epsilon = 1e-6);
+        assert_eq!(projection.support, bloch_support(spatial_bloch));
 
-        let radial = (direction[0] * direction[0] + direction[1] * direction[1]).sqrt();
-        assert_abs_diff_eq!(projection.coherence as f64, radial, epsilon = 1e-6);
-        assert_abs_diff_eq!(projection.z_bias as f64, direction[2], epsilon = 1e-6);
+        let beta = stv.kernel().beta().unwrap();
+        assert_abs_diff_eq!(f64::from(projection.z_bias), 1.0 - beta, epsilon = 1e-6);
+        assert_eq!(projection.scale, Some(z_scale_from_beta(beta)));
+        let expected_quality = match stv.kernel().classify(DEFAULT_TOLERANCE).unwrap() {
+            CausalClass::Timelike => 1.0,
+            CausalClass::Lightlike => 0.75,
+            CausalClass::Spacelike => 0.5,
+        };
+        assert_abs_diff_eq!(projection.quality, expected_quality as f32, epsilon = 1e-6);
         assert_abs_diff_eq!(
-            projection.phase as f64,
-            spinor.relative_phase(),
+            f64::from(projection.stderr),
+            stv.kernel().det_t().abs().sqrt(),
             epsilon = 1e-6
         );
 
-        let pulse = projection.into_pulse(ZSource::Graph, 42, None);
+        let pulse = projection.clone().into_pulse(42, ZSource::Graph);
         assert_eq!(pulse.source, ZSource::Graph);
         assert_eq!(pulse.ts, 42);
-        assert!(pulse.scale.is_none());
+        assert_eq!(pulse.scale, projection.scale);
         assert_eq!(pulse.support, projection.support);
-        assert_abs_diff_eq!(pulse.tempo as f64, 1.0, epsilon = 1e-6);
-        assert_abs_diff_eq!(pulse.quality as f64, radial, epsilon = 1e-6);
-        assert_abs_diff_eq!(pulse.z_bias as f64, direction[2], epsilon = 1e-6);
-        assert_abs_diff_eq!(
-            pulse.drift as f64,
-            projection.band_energy.0 as f64 - projection.band_energy.2 as f64,
-            epsilon = 1e-6
-        );
-        assert_abs_diff_eq!(
-            pulse.band_energy.0 as f64,
-            projection.band_energy.0 as f64,
-            epsilon = 1e-6
-        );
-        assert_abs_diff_eq!(
-            pulse.band_energy.1 as f64,
-            projection.band_energy.1 as f64,
-            epsilon = 1e-6
-        );
-        assert_abs_diff_eq!(
-            pulse.band_energy.2 as f64,
-            projection.band_energy.2 as f64,
-            epsilon = 1e-6
-        );
+        assert_abs_diff_eq!(pulse.tempo, projection.tempo, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.quality, projection.quality, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.z_bias, projection.z_bias, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.drift, projection.drift, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.band_energy.0, projection.band_energy.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.band_energy.1, projection.band_energy.1, epsilon = 1e-6);
+        assert_abs_diff_eq!(pulse.band_energy.2, projection.band_energy.2, epsilon = 1e-6);
 
-        let via_helper = stv.into_zpulse(ZSource::Graph, 42, None);
+        let via_helper = stv.project_to_zpulse(42, ZSource::Graph).unwrap();
         assert_eq!(pulse, via_helper);
     }
 
@@ -1192,6 +1256,16 @@ mod tests {
         assert_abs_diff_eq!(bloch[1], theta.sin() * phi.cos(), epsilon = 1e-9);
         assert_abs_diff_eq!(bloch[2], theta.sin() * phi.sin(), epsilon = 1e-9);
         assert_abs_diff_eq!(bloch[3], theta.cos(), epsilon = 1e-9);
+    }
+
+    #[test]
+    fn bloch_angles_match_vector() {
+        let spinor = PauliSpinor::new([Complex::new(0.8, 0.3), Complex::new(-0.2, 0.5)]).unwrap();
+
+        let (theta, phi) = spinor.bloch_angles();
+        let bloch = spinor.bloch_vector();
+        assert_abs_diff_eq!(bloch[2], theta.cos(), epsilon = 1e-9);
+        assert_abs_diff_eq!(phi, bloch[1].atan2(bloch[0]), epsilon = 1e-9);
     }
 
     #[test]
@@ -1247,6 +1321,130 @@ mod tests {
             assert_abs_diff_eq!(rotated_bloch[i], bloch[i], epsilon = 1e-9);
             assert_abs_diff_eq!(rotated_induced[i], induced[i], epsilon = 1e-9);
         }
+    }
+
+    #[test]
+    fn reconstruct_spinor_from_bloch_vector_matches_current() {
+        let original = PauliSpinor::new([Complex::new(0.6, -0.2), Complex::new(0.3, 0.7)]).unwrap();
+        let bloch = original.bloch_vector();
+
+        let reconstructed = PauliSpinor::from_bloch_vector(bloch).unwrap();
+        let reconstructed_from_angles = {
+            let (theta, phi) = original.bloch_angles();
+            PauliSpinor::from_bloch_angles(theta, phi).unwrap()
+        };
+
+        let original_current = original.bloch_current();
+        let reconstructed_current = reconstructed.bloch_current();
+        let angle_current = reconstructed_from_angles.bloch_current();
+
+        for i in 0..4 {
+            assert_abs_diff_eq!(
+                reconstructed_current[i],
+                original_current[i],
+                epsilon = 1e-9
+            );
+            assert_abs_diff_eq!(angle_current[i], original_current[i], epsilon = 1e-9);
+        }
+    }
+
+    #[test]
+    fn with_bloch_vector_overrides_spinor() {
+        let kernel = SpinoTensorKernel::new(
+            1.3,
+            diag([1.5, 0.8, 2.1]),
+            [0.2, 0.1, -0.05],
+            [0.0, 0.0, 0.3],
+        )
+        .unwrap();
+        let spinor = PauliSpinor::new([Complex::new(0.8, -0.1), Complex::new(0.2, 0.4)]).unwrap();
+        let stv = SpinoTensorVector::new(spinor, kernel.clone());
+
+        let updated = stv
+            .with_bloch_vector([0.0, 0.0, -1.0])
+            .expect("reconstruction succeeds");
+
+        assert_eq!(updated.kernel(), &kernel);
+        let updated_current = updated.bloch_current();
+        assert_abs_diff_eq!(updated_current[0], 1.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(updated_current[1], 0.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(updated_current[2], 0.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(updated_current[3], -1.0, epsilon = 1e-9);
+
+        let original_current = stv.bloch_current();
+        assert_abs_diff_eq!(original_current[3], stv.bloch_vector()[2], epsilon = 1e-9);
+    }
+
+    #[test]
+    fn z_scale_hint_matches_beta() {
+        let kernel = SpinoTensorKernel::new(
+            1.6,
+            diag([2.0, 0.5, 3.0]),
+            [0.1, 0.3, -0.2],
+            [0.0, 0.0, 0.4],
+        )
+        .unwrap();
+
+        let scale = kernel.z_scale_hint().unwrap();
+        let beta = kernel.beta().unwrap();
+        assert_abs_diff_eq!(
+            f64::from(scale.physical_radius),
+            (1.0 + beta).sqrt(),
+            epsilon = 1e-6
+        );
+    }
+
+    #[test]
+    fn project_to_zpulse_produces_consistent_fields() {
+        let kernel = SpinoTensorKernel::new(
+            1.4,
+            diag([1.2, 0.9, 1.6]),
+            [0.2, 0.1, -0.15],
+            [0.0, 0.0, 0.5],
+        )
+        .unwrap();
+        let spinor = PauliSpinor::new([Complex::new(0.7, -0.1), Complex::new(0.4, 0.2)]).unwrap();
+        let stv = SpinoTensorVector::new(spinor, kernel.clone());
+
+        let pulse = stv
+            .project_to_zpulse(128, ZSource::Graph)
+            .expect("projection succeeds");
+
+        assert_eq!(pulse.source, ZSource::Graph);
+        assert_eq!(pulse.ts, 128);
+        assert!(pulse.tempo > 0.0);
+        assert!(pulse.scale.is_some());
+        let energy_total = pulse.band_energy.0 + pulse.band_energy.1 + pulse.band_energy.2;
+        assert_abs_diff_eq!(energy_total, pulse.tempo, epsilon = 1e-5);
+        assert_abs_diff_eq!(pulse.support.total(), 1.0, epsilon = 1e-5);
+
+        let beta = kernel.beta().unwrap();
+        let expected_bias = 1.0 - beta;
+        assert_abs_diff_eq!(f64::from(pulse.z_bias), expected_bias, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn z_projection_round_trips_into_pulse() {
+        let kernel = SpinoTensorKernel::new(
+            1.1,
+            diag([1.0, 0.9, 1.4]),
+            [0.15, -0.05, 0.2],
+            [0.0, 0.0, 0.45],
+        )
+        .unwrap();
+        let spinor =
+            PauliSpinor::new([Complex::new(0.65, -0.05), Complex::new(0.35, 0.4)]).unwrap();
+        let stv = SpinoTensorVector::new(spinor, kernel);
+
+        let projection = stv.z_projection().expect("projection available");
+        assert!(projection.scale.is_some());
+
+        let pulse_from_projection = projection.clone().into_pulse(64, ZSource::Maxwell);
+        let pulse_direct = stv
+            .project_to_zpulse(64, ZSource::Maxwell)
+            .expect("projection succeeds");
+
+        assert_eq!(pulse_from_projection, pulse_direct);
     }
 
     #[test]

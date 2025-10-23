@@ -1,6 +1,9 @@
-// wgpu_kernels_linops.wgsl (v1.8.0) – dot/axpy
+// wgpu_kernels_linops.wgsl (v1.9.0) – vector primitives (copy/scale/axpy) + dot reduction
 
-struct LParams { n:u32, _pad:u32, _p2:u32, _p3:u32 };
+struct LParams {
+  dims:    vec4<u32>;  // x: length, y: partial_count, z: unused, w: unused
+  scalars: vec4<f32>;  // x: alpha (scale/axpy), others reserved
+};
 @group(0) @binding(0) var<storage, read>  VX: array<f32>;
 @group(0) @binding(1) var<storage, read>  VY: array<f32>;
 @group(0) @binding(2) var<storage, read_write> VZ: array<f32>;
@@ -8,17 +11,69 @@ struct LParams { n:u32, _pad:u32, _p2:u32, _p3:u32 };
 
 var<workgroup> s_part: array<f32, 256u>;
 
-// y += alpha * x  (alpha is passed via VZ[0], then restored)
+fn vec_len()->u32 { return LP.dims.x; }
+fn vec_partial_count()->u32 { return LP.dims.y; }
+fn alpha()->f32 { return LP.scalars.x; }
+
+// z = x
+@compute @workgroup_size(256)
+fn copy_vec(
+  @builtin(global_invocation_id) gid: vec3<u32>,
+  @builtin(local_invocation_id) lid: vec3<u32>
+){
+  var i = gid.x * 256u + lid.x;
+  let n = vec_len();
+  loop {
+    if (i >= n) { break; }
+    VZ[i] = VX[i];
+    i += 256u;
+  }
+}
+
+// z = beta (beta stored in scalars.y)
+@compute @workgroup_size(256)
+fn fill_vec(
+  @builtin(global_invocation_id) gid: vec3<u32>,
+  @builtin(local_invocation_id) lid: vec3<u32>
+){
+  var i = gid.x * 256u + lid.x;
+  let n = vec_len();
+  let value = LP.scalars.y;
+  loop {
+    if (i >= n) { break; }
+    VZ[i] = value;
+    i += 256u;
+  }
+}
+
+// z = alpha * y
+@compute @workgroup_size(256)
+fn scale_inplace(
+  @builtin(global_invocation_id) gid: vec3<u32>,
+  @builtin(local_invocation_id) lid: vec3<u32>
+){
+  var i = gid.x * 256u + lid.x;
+  let n = vec_len();
+  let s = alpha();
+  loop {
+    if (i >= n) { break; }
+    VZ[i] = VY[i] * s;
+    i += 256u;
+  }
+}
+
+// z = y + alpha * x (can be in-place if VZ aliases VY)
 @compute @workgroup_size(256)
 fn axpy_inplace(
   @builtin(global_invocation_id) gid: vec3<u32>,
   @builtin(local_invocation_id) lid: vec3<u32>
 ){
-  let alpha = VZ[0];
+  let s = alpha();
   var i = gid.x * 256u + lid.x;
+  let n = vec_len();
   loop {
-    if (i >= LP.n) { break; }
-    VZ[i] = VY[i] + alpha * VX[i];
+    if (i >= n) { break; }
+    VZ[i] = VY[i] + s * VX[i];
     i += 256u;
   }
 }
@@ -32,8 +87,9 @@ fn dot_partials(
 ){
   var sum: f32 = 0.0;
   var i = wid.x * 256u + lid.x;
+  let n = vec_len();
   loop {
-    if (i >= LP.n) { break; }
+    if (i >= n) { break; }
     sum = sum + VX[i]*VY[i];
     i += 256u;
   }
@@ -58,12 +114,11 @@ fn dot_partials(
 @compute @workgroup_size(256)
 fn dot_finalize(
   @builtin(global_invocation_id) gid: vec3<u32>,
-  @builtin(local_invocation_id) lid: vec3<u32>,
-  @builtin(num_workgroups) nwg: vec3<u32>
+  @builtin(local_invocation_id) lid: vec3<u32>
 ){
   var sum: f32 = 0.0;
   var i = gid.x * 256u + lid.x;
-  let total = nwg.x * 256u;
+  let total = vec_partial_count();
   loop {
     if (i >= total) { break; }
     sum = sum + VZ[i];

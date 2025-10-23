@@ -10,6 +10,7 @@ use st_core::util::math::LeechProjector;
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense;
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 
 fn validate_positive(value: usize, _label: &str) -> PureResult<()> {
     if value == 0 {
@@ -256,11 +257,13 @@ impl Conv1d {
         kernel_size: usize,
         stride: usize,
         padding: usize,
+        dilation: usize,
     ) -> PureResult<Self> {
         validate_positive(in_channels, "in_channels")?;
         validate_positive(out_channels, "out_channels")?;
         validate_positive(kernel_size, "kernel_size")?;
         validate_positive(stride, "stride")?;
+        validate_positive(dilation, "dilation")?;
         let name = name.into();
         let span = kernel_span(in_channels, kernel_size);
         let mut seed = 0.01f32;
@@ -1124,7 +1127,7 @@ impl Conv2d {
                 }
             }
         }
-        Ok(out)
+        Tensor::from_vec(batch, self.out_channels * spatial, contracted)
     }
 
     #[cfg(feature = "wgpu")]
@@ -1649,7 +1652,7 @@ mod tests {
 
     #[test]
     fn conv1d_forward_matches_manual() {
-        let conv = Conv1d::new("conv", 1, 1, 3, 1, 1).unwrap();
+        let conv = Conv1d::new("conv", 1, 1, 3, 1, 1, 1).unwrap();
         let input = Tensor::from_vec(1, 5, vec![1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
         let output = conv.forward(&input).unwrap();
         assert_eq!(output.shape().0, 1);
