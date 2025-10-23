@@ -751,10 +751,17 @@ It stores named `InterfaceGauge`s, offers builder-style helpers to register or
 remove probes, runs batch analysis keyed by id, and hands the resulting lineup
 directly to the conductor so runtime code can swap probe sets without rewriting
 fusion logic.【F:crates/st-core/src/theory/microlocal.rs†L100-L220】【F:crates/st-core/src/theory/microlocal.rs†L819-L875】
+`InterfaceZConductor::step` now preserves those identifiers, returning an
+`InterfaceZReport` that bundles the raw `InterfaceSignature`s alongside the
+matching ids and a cloned lift so downstream consumers can reuse the same
+projection without re-running the gauges.【F:crates/st-core/src/theory/microlocal.rs†L663-L738】
 `MacroTemplateBank` mirrors that registry pattern for macro-scale designs: it
 keeps named `MacroModelTemplate`s, accepts cards directly, and couples the whole
 lineup to an `InterfaceZLift` to emit a bridge bank so macro kinetics can travel
 with whatever microlocal gauges are currently wired into the conductor.【F:crates/st-core/src/theory/macro.rs†L680-L812】
+It can then call `drive_matched` to produce macro drives only for the gauges
+present in the latest report and merge their microlocal feedback via
+`feedback_from_report` before piping the result back into the conductor.【F:crates/st-core/src/theory/macro.rs†L780-L812】
 
 The conductor can now blend the pulses in both time and frequency: `set_frequency_config`
 installs a power-of-two FFT window and per-source spectral gains so high-frequency

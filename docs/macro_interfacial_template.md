@@ -100,6 +100,13 @@ reintroduce microlocal calibration later if needed.
 - `MacroTemplateBank` keeps the cards pluggable: register templates or cards by
   id, then call `couple_all` with an `InterfaceZLift` to produce a bridge bank
   aligned with the microlocal gauges currently active in the conductor.【F:crates/st-core/src/theory/macro.rs†L680-L812】
+- `InterfaceZReport::gauge_id`, `InterfaceZReport::signature_for`, and
+  `InterfaceZReport::lift` expose the matched gauge identifiers, raw
+  signatures, and lift clone so macro banks can reuse the projection without
+  re-running the gauges.【F:crates/st-core/src/theory/microlocal.rs†L663-L738】
+- `MacroTemplateBank::drive_matched` and `feedback_from_report` run only the
+  templates that align with the conductor report and merge their microlocal
+  feedback before sending it back into the conductor.【F:crates/st-core/src/theory/macro.rs†L780-L812】
 - `MacroDrive::sharp_interface_ok` reuses the dimensionless dashboard to ensure
   the detected interface still respects the sharp-interface regime before the
   signal is injected back into SpiralFlow.【F:crates/st-core/src/theory/macro.rs†L977-L980】

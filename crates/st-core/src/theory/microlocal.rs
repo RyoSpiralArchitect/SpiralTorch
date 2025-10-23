@@ -313,6 +313,11 @@ impl MicrolocalGaugeBank {
         self.inner.into_vec()
     }
 
+    /// Consumes the bank and returns identifier-gauge pairs in insertion order.
+    pub fn into_entries(self) -> Vec<(Arc<str>, InterfaceGauge)> {
+        self.inner.into_entries()
+    }
+
     /// Runs every registered gauge against the provided mask and optional
     /// orientation labels, returning the resulting signatures keyed by id.
     pub fn analyze_all(
@@ -383,7 +388,7 @@ fn unit_sphere_area(dim: usize) -> f32 {
 }
 
 /// Projects microlocal signatures into Z-space pulses.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct InterfaceZLift {
     weights: Vec<f32>,
     projector: LeechProjector,
@@ -663,6 +668,9 @@ pub struct InterfaceZFused {
 /// Full report returned by [`InterfaceZConductor::step`].
 #[derive(Clone, Debug)]
 pub struct InterfaceZReport {
+    pub gauge_ids: Vec<Option<Arc<str>>>,
+    pub signatures: Vec<InterfaceSignature>,
+    pub lift: InterfaceZLift,
     pub pulses: Vec<InterfaceZPulse>,
     pub qualities: Vec<f32>,
     pub fused_pulse: InterfaceZPulse,
@@ -674,6 +682,21 @@ pub struct InterfaceZReport {
 impl InterfaceZReport {
     pub fn has_interface(&self) -> bool {
         self.fused_pulse.support > 0.0
+    }
+
+    pub fn gauge_id(&self, index: usize) -> Option<&str> {
+        self.gauge_ids.get(index).and_then(|id| id.as_deref())
+    }
+
+    pub fn signature_for(&self, id: &str) -> Option<&InterfaceSignature> {
+        self.gauge_ids
+            .iter()
+            .position(|candidate| candidate.as_deref() == Some(id))
+            .and_then(|idx| self.signatures.get(idx))
+    }
+
+    pub fn lift(&self) -> InterfaceZLift {
+        self.lift.clone()
     }
 }
 
@@ -948,9 +971,14 @@ impl ZEmitter for MicrolocalEmitter {
 
 /// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
 /// smoothed control signal suitable for Softlogic feedback.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+struct GaugeSlot {
+    id: Option<Arc<str>>,
+    gauge: InterfaceGauge,
+}
+
 pub struct InterfaceZConductor {
-    gauges: Vec<InterfaceGauge>,
+    gauges: Vec<GaugeSlot>,
     lift: InterfaceZLift,
     conductor: ZConductor,
     clock: u64,
@@ -967,6 +995,30 @@ pub struct InterfaceZConductor {
 
 impl InterfaceZConductor {
     pub fn new(gauges: Vec<InterfaceGauge>, lift: InterfaceZLift) -> Self {
+        let slots = gauges
+            .into_iter()
+            .map(|gauge| GaugeSlot { id: None, gauge })
+            .collect();
+        InterfaceZConductor::with_slots(slots, lift)
+    }
+
+    pub fn from_bank(bank: MicrolocalGaugeBank, lift: InterfaceZLift) -> Self {
+        let slots = bank
+            .into_entries()
+            .into_iter()
+            .map(|(id, gauge)| GaugeSlot {
+                id: Some(id),
+                gauge,
+            })
+            .collect();
+        InterfaceZConductor::with_slots(slots, lift)
+    }
+
+    pub fn lift(&self) -> InterfaceZLift {
+        self.lift.clone()
+    }
+
+    fn with_slots(gauges: Vec<GaugeSlot>, lift: InterfaceZLift) -> Self {
         assert!(!gauges.is_empty(), "at least one gauge must be supplied");
         InterfaceZConductor {
             gauges,
@@ -1015,8 +1067,8 @@ impl InterfaceZConductor {
     pub fn apply_feedback(&mut self, feedback: &MicrolocalFeedback) {
         if let Some(scale) = feedback.threshold_scale {
             if scale > 0.0 {
-                for gauge in &mut self.gauges {
-                    gauge.scale_threshold(scale);
+                for slot in &mut self.gauges {
+                    slot.gauge.scale_threshold(scale);
                 }
             }
         }
@@ -1036,7 +1088,10 @@ impl InterfaceZConductor {
 
     #[cfg(test)]
     pub fn gauge_thresholds(&self) -> Vec<f32> {
-        self.gauges.iter().map(|g| g.threshold()).collect()
+        self.gauges
+            .iter()
+            .map(|slot| slot.gauge.threshold())
+            .collect()
     }
 
     #[cfg(test)]
@@ -1061,17 +1116,21 @@ impl InterfaceZConductor {
         tempo_hint: Option<f32>,
         stderr_hint: Option<f32>,
     ) -> InterfaceZReport {
+        let mut gauge_ids = Vec::with_capacity(self.gauges.len());
+        let mut signatures = Vec::with_capacity(self.gauges.len());
         let mut pulses = Vec::with_capacity(self.gauges.len());
         let stderr_base = stderr_hint
             .or(self.default_stderr_hint)
             .map(|stderr| stderr.max(0.0));
-        for gauge in &self.gauges {
-            let signature = gauge.analyze_with_label(mask, c_prime);
+        for slot in &self.gauges {
+            let signature = slot.gauge.analyze_with_label(mask, c_prime);
             let mut pulse = self.lift.project(&signature);
             if let Some(stderr) = stderr_base {
                 pulse.standard_error = Some(stderr);
             }
             pulses.push(pulse);
+            gauge_ids.push(slot.id.clone());
+            signatures.push(signature);
         }
 
         let mut qualities = Vec::with_capacity(pulses.len());
@@ -1157,6 +1216,9 @@ impl InterfaceZConductor {
         };
 
         InterfaceZReport {
+            gauge_ids,
+            signatures,
+            lift: self.lift.clone(),
             pulses,
             qualities,
             fused_pulse,
