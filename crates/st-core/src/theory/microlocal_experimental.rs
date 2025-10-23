@@ -322,6 +322,10 @@ pub mod experimental {
             self.inner.into_vec()
         }
 
+        pub fn into_entries(self) -> Vec<(Arc<str>, InterfaceGauge)> {
+            self.inner.into_entries()
+        }
+
         pub fn analyze_all(
             &self,
             mask: &ArrayD<f32>,
@@ -390,7 +394,7 @@ pub mod experimental {
     }
 
     /// Projects microlocal signatures into Z-space pulses.
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct InterfaceZLift {
         weights: Vec<f32>,
         projector: LeechProjector,
@@ -667,6 +671,9 @@ pub mod experimental {
     /// Full report returned by [`InterfaceZConductor::step`].
     #[derive(Clone, Debug)]
     pub struct InterfaceZReport {
+        pub gauge_ids: Vec<Option<Arc<str>>>,
+        pub signatures: Vec<InterfaceSignature>,
+        pub lift: InterfaceZLift,
         pub pulses: Vec<InterfaceZPulse>,
         pub qualities: Vec<f32>,
         pub fused_pulse: InterfaceZPulse,
@@ -678,6 +685,21 @@ pub mod experimental {
     impl InterfaceZReport {
         pub fn has_interface(&self) -> bool {
             self.fused_pulse.support > 0.0
+        }
+
+        pub fn gauge_id(&self, index: usize) -> Option<&str> {
+            self.gauge_ids.get(index).and_then(|id| id.as_deref())
+        }
+
+        pub fn signature_for(&self, id: &str) -> Option<&InterfaceSignature> {
+            self.gauge_ids
+                .iter()
+                .position(|candidate| candidate.as_deref() == Some(id))
+                .and_then(|idx| self.signatures.get(idx))
+        }
+
+        pub fn lift(&self) -> InterfaceZLift {
+            self.lift.clone()
         }
     }
 
@@ -885,9 +907,15 @@ pub mod experimental {
 
     /// Drives a bank of microlocal gauges and fuses the resulting Z pulses into a
     /// smoothed control signal suitable for Softlogic feedback.
+    #[derive(Clone, Debug)]
+    struct GaugeSlot {
+        id: Option<Arc<str>>,
+        gauge: InterfaceGauge,
+    }
+
     #[derive(Clone)]
     pub struct InterfaceZConductor {
-        gauges: Vec<InterfaceGauge>,
+        gauges: Vec<GaugeSlot>,
         lift: InterfaceZLift,
         conductor: ZConductor,
         clock: u64,
@@ -902,6 +930,30 @@ pub mod experimental {
 
     impl InterfaceZConductor {
         pub fn new(gauges: Vec<InterfaceGauge>, lift: InterfaceZLift) -> Self {
+            let slots = gauges
+                .into_iter()
+                .map(|gauge| GaugeSlot { id: None, gauge })
+                .collect();
+            InterfaceZConductor::with_slots(slots, lift)
+        }
+
+        pub fn from_bank(bank: MicrolocalGaugeBank, lift: InterfaceZLift) -> Self {
+            let slots = bank
+                .into_entries()
+                .into_iter()
+                .map(|(id, gauge)| GaugeSlot {
+                    id: Some(id),
+                    gauge,
+                })
+                .collect();
+            InterfaceZConductor::with_slots(slots, lift)
+        }
+
+        pub fn lift(&self) -> InterfaceZLift {
+            self.lift.clone()
+        }
+
+        fn with_slots(gauges: Vec<GaugeSlot>, lift: InterfaceZLift) -> Self {
             assert!(!gauges.is_empty(), "at least one gauge must be supplied");
             InterfaceZConductor {
                 gauges,
@@ -953,13 +1005,17 @@ pub mod experimental {
             stderr_hint: Option<f32>,
         ) -> InterfaceZReport {
             // 1) lift → InterfaceZPulse 群
+            let mut gauge_ids = Vec::with_capacity(self.gauges.len());
+            let mut signatures = Vec::with_capacity(self.gauges.len());
             let mut pulses = Vec::with_capacity(self.gauges.len());
-            for gauge in &self.gauges {
-                let signature = gauge.analyze_with_label(mask, c_prime);
+            for slot in &self.gauges {
+                let signature = slot.gauge.analyze_with_label(mask, c_prime);
                 let mut pulse = self.lift.project(&signature);
                 if let Some(stderr) = stderr_hint {
                     pulse.standard_error = Some(stderr.max(0.0));
                 }
+                gauge_ids.push(slot.id.clone());
+                signatures.push(signature);
                 pulses.push(pulse);
             }
 
@@ -1035,6 +1091,9 @@ pub mod experimental {
             };
 
             InterfaceZReport {
+                gauge_ids,
+                signatures,
+                lift: self.lift.clone(),
                 pulses,
                 qualities,
                 fused_pulse,

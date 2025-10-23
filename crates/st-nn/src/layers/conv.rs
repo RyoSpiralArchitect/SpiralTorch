@@ -295,6 +295,19 @@ impl Conv1d {
         })
     }
 
+    /// Overrides the dilation factor applied to the convolution kernel.
+    pub fn set_dilation(&mut self, dilation: usize) -> PureResult<()> {
+        validate_positive(dilation, "dilation")?;
+        self.dilation = dilation;
+        Ok(())
+    }
+
+    /// Builder-style helper returning a new instance configured with dilation.
+    pub fn with_dilation(mut self, dilation: usize) -> PureResult<Self> {
+        self.set_dilation(dilation)?;
+        Ok(self)
+    }
+
     fn infer_width(&self, cols: usize) -> PureResult<usize> {
         if cols % self.in_channels != 0 {
             return Err(TensorError::ShapeMismatch {
@@ -950,6 +963,8 @@ impl Module for Conv3d {
         let plane = self.input_dhw.1 * self.input_dhw.2;
         let area = self.input_dhw.2;
         {
+            let bias_data = bias.data();
+            let contracted_data = contracted.data();
             let out_data = out.data_mut();
             for b in 0..batch {
                 let row = &input.data()[b * cols..(b + 1) * cols];
@@ -1016,7 +1031,7 @@ impl Module for Conv3d {
                 }
             }
         }
-        Ok(out)
+        Tensor::from_vec(batch, self.out_channels * spatial, contracted)
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
