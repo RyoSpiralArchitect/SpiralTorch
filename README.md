@@ -151,7 +151,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
-**Current release:** `spiraltorch==0.1.9` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.2.2` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), Metal via WGPU (macOS), Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -159,7 +159,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.2.1
+pip install -U spiraltorch==0.2.2
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -228,17 +228,26 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 ## Python Examples
 
-### 1) Core tensor & DLPack
+### 1)　DLPack(You can Zero copy)
 
 ```python
 import spiraltorch as st
+import torch
+from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 
-x = st.Tensor(2, 3, [1,2,3,4,5,6])
-print("shape:", x.shape(), "rows:", x.rows, "cols:", x.cols)
+# ST → Torch
+a = st.Tensor(2, 3, [1,2,3,4,5,6])
+caps = a.to_dlpack()
+t = torch_from_dlpack(caps)  
 
-cap = st.to_dlpack(x)
-x2 = st.from_dlpack(cap)
-print("tolist:", x2.tolist())
+t += 10
+print("ST tolist after torch += 10:", a.tolist())  # ← [11,12,13,14,15,16] is okay
+
+# Torch → ST
+t2 = torch.arange(6, dtype=torch.float32).reshape(2,3)
+a2 = st.Tensor.from_dlpack(t2)      # same buffer
+t2.mul_(2)                          # in-place
+print("ST sees torch mul_:        ", a2.tolist())
 ```
 
 ### 2) Planner & device
@@ -2606,14 +2615,22 @@ tuner.mergeObject([
   { rows: 512, cols_min: 4096, cols_max: 16383, k_max: 256, sg: true, tile_cols: 1024 },
 ]);
 const overrides = tuner.toObject();
+// Extract overrides and resolved plans as JSON or plain JS objects without
+// constructing intermediate WasmFftPlan instances by hand.
 const fallbackPlan = tuner.planFftWithFallback(512, 4096, 128, true);
+const fallbackJson = tuner.planFftWithFallbackJson(512, 4096, 128, true);
+const fallbackObject = tuner.planFftWithFallbackObject(512, 4096, 128, true);
 const resolution = tuner.planFftResolution(512, 4096, 128, true);
+const resolutionJson = tuner.planFftResolutionJson(512, 4096, 128, true);
+const resolutionObject = tuner.planFftResolutionObject(512, 4096, 128, true);
 if (resolution.source === WasmFftPlanSource.Override) {
   console.log(`override tile=${resolution.plan.tileCols}`);
 }
 const snapshot = resolution.toJson();
 const hydrated = ResolvedWasmFftPlan.fromJson(snapshot);
 const report = tuner.planFftReport(512, 4096, 128, true);
+const overrideJson = tuner.planFftJson(512, 4096, 128, true);
+const overrideObject = tuner.planFftObject(512, 4096, 128, true);
 ```
 
 ---
