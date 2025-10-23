@@ -40,7 +40,7 @@ st-frac = { path = "../st-frac" }
 # automation layers and WASM bindings.
 serde = { version = "1.0", features = ["derive"], default-features = false }
 # High-performance SIMD dense linear algebra for CPU matmul acceleration.
-faer = { version = "0.18", default-features = false, features = ["std"], optional = true }
+faer = { version = "0.18", default-features = false, features = ["std", "rayon"], optional = true }
 # Optional; only needed if building WGPU kernel
 wgpu = { version = "0.19", optional = true }
 bytemuck = { version = "1.15", features = ["derive"], optional = true }
