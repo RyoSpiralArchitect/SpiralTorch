@@ -156,7 +156,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.1.9
+pip install -U spiraltorch==0.2.1
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -2072,15 +2072,16 @@ print(f"z-bias: {diagnostics.z_bias():.3f}")
 subsystems can tap into each stage of the pipeline without forking the core
 implementation. Plugins are notified when tensors move through projection,
 coherence measurement, geometric aggregation, semantic window derivation,
-distribution fusion, and language bridging. They also receive callbacks when
-backends or linguistic profiles change, when contours/reports are emitted, and
-when PSI telemetry is published (with the `psi` feature).
+canonical concept selection, Maxwell desire emission, distribution fusion, and
+language bridging. They also receive callbacks when backends or linguistic
+profiles change, when contours/reports are emitted, and when PSI telemetry is
+published (with the `psi` feature).
 
 Key stages:
 
 - `Projected`, `CoherenceMeasured`, `Aggregated`
-- `SemanticWindowDerived`, `SemanticDistributionDerived`, `SemanticWindowFused`
-- `LanguageBridged`
+- `SemanticWindowDerived`, `SemanticDistributionDerived`, `CanonicalConceptSelected`
+- `MaxwellBridgeEmitted`, `SemanticWindowFused`, `LanguageBridged`
 - `BackendConfigured`, `LinguisticProfileRegistered`, `LinguisticProfilesCleared`
 - `LinguisticContourEmitted`, `ChannelsDescribed`
 - `PsiTelemetryPublished` *(when compiled with `psi`)*

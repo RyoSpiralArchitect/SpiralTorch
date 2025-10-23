@@ -165,9 +165,24 @@ impl CobolDispatchPlanner {
         self.builder.set_dataset(Some(dataset.to_string()));
     }
 
+    #[wasm_bindgen(js_name = setDatasetMember)]
+    pub fn set_dataset_member(&mut self, member: Option<String>) {
+        self.builder.set_dataset_member(member);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetDisposition)]
+    pub fn set_dataset_disposition(&mut self, disposition: Option<String>) {
+        self.builder.set_dataset_disposition(disposition);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetVolume)]
+    pub fn set_dataset_volume(&mut self, volume: Option<String>) {
+        self.builder.set_dataset_volume(volume);
+    }
+
     #[wasm_bindgen(js_name = clearDataset)]
     pub fn clear_dataset(&mut self) {
-        self.builder.set_dataset(None);
+        self.builder.clear_dataset();
     }
 
     #[wasm_bindgen(js_name = clearRoute)]
@@ -288,7 +303,16 @@ impl CobolDispatchPlanner {
             curvature: envelope.payload.curvature,
             temperature: envelope.payload.temperature,
             coefficient_count: envelope.payload.coefficients.len() as u32,
-            dataset: envelope.route.dataset.as_deref(),
+            dataset: envelope
+                .route
+                .dataset
+                .as_ref()
+                .map(|dataset| CobolPreviewDataset {
+                    dataset: dataset.dataset.as_str(),
+                    member: dataset.member.as_deref(),
+                    disposition: dataset.disposition.as_deref(),
+                    volume: dataset.volume.as_deref(),
+                }),
             release_channel: &envelope.release_channel,
         };
         let json = serde_json::to_string(&preview).map_err(js_error)?;
@@ -303,6 +327,17 @@ struct CobolPreview<'a> {
     temperature: f32,
     coefficient_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    dataset: Option<&'a str>,
+    dataset: Option<CobolPreviewDataset<'a>>,
     release_channel: &'a str,
+}
+
+#[derive(serde::Serialize)]
+struct CobolPreviewDataset<'a> {
+    dataset: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    member: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disposition: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    volume: Option<&'a str>,
 }
