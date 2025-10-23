@@ -478,20 +478,32 @@ impl MaxwellPsiTelemetryBridge {
 
     /// Scales the PSI total injected into the telemetry hub.
     pub fn with_psi_gain(mut self, psi_gain: f32) -> Self {
-        self.psi_gain = psi_gain.max(0.0);
+        self.psi_gain = if psi_gain.is_finite() {
+            psi_gain.max(0.0)
+        } else {
+            0.0
+        };
         self
     }
 
     /// Scales the weighted loss recorded alongside the feedback pulse.
     pub fn with_loss_gain(mut self, loss_gain: f32) -> Self {
-        self.loss_gain = loss_gain.max(0.0);
+        self.loss_gain = if loss_gain.is_finite() {
+            loss_gain.max(0.0)
+        } else {
+            0.0
+        };
         self
     }
 
     /// Emits a band-energy threshold crossing event when the accumulated energy
     /// meets or exceeds the provided value. Set to zero to disable.
     pub fn with_band_threshold(mut self, threshold: f32) -> Self {
-        self.band_threshold = threshold.max(0.0);
+        self.band_threshold = if threshold.is_finite() {
+            threshold.max(0.0)
+        } else {
+            0.0
+        };
         self
     }
 
@@ -499,10 +511,49 @@ impl MaxwellPsiTelemetryBridge {
     /// the global hub. The returned feedback can be reused immediately by the
     /// caller when additional processing is required.
     pub fn publish(&self, pulse: &MaxwellZPulse, step: u64) -> SoftlogicZFeedback {
-        let (above, here, beneath) = pulse.band_energy;
-        let band_total = (above + here + beneath).max(0.0);
-        let psi_total = band_total * self.psi_gain;
-        let weighted_loss = pulse.magnitude() as f32 * self.loss_gain;
+        let (feedback, _, _) = self.publish_with_reading(pulse, step);
+        feedback
+    }
+
+    /// Publishes the telemetry and returns the generated PSI reading alongside any events.
+    pub fn publish_with_reading(
+        &self,
+        pulse: &MaxwellZPulse,
+        step: u64,
+    ) -> (SoftlogicZFeedback, PsiReading, Vec<PsiEvent>) {
+        let (reading, events, feedback) = self.synthesise_feedback(pulse, step);
+        hub::set_last_psi(&reading);
+        hub::set_last_psi_events(&events);
+        hub::set_softlogic_z(feedback.clone());
+        (feedback, reading, events)
+    }
+
+    fn synthesise_feedback(
+        &self,
+        pulse: &MaxwellZPulse,
+        step: u64,
+    ) -> (PsiReading, Vec<PsiEvent>, SoftlogicZFeedback) {
+        let sanitized_pulse = MaxwellZPulse {
+            blocks: pulse.blocks,
+            mean: Self::sanitize_scalar(pulse.mean),
+            standard_error: Self::sanitize_scalar(pulse.standard_error),
+            z_score: Self::sanitize_scalar(pulse.z_score),
+            band_energy: (
+                Self::sanitize_non_negative(pulse.band_energy.0),
+                Self::sanitize_non_negative(pulse.band_energy.1),
+                Self::sanitize_non_negative(pulse.band_energy.2),
+            ),
+            z_bias: Self::sanitize_axis(pulse.z_bias),
+        };
+
+        let band_total = sanitized_pulse.band_energy.0
+            + sanitized_pulse.band_energy.1
+            + sanitized_pulse.band_energy.2;
+        let band_total = Self::sanitize_non_negative(band_total);
+        let psi_total = Self::sanitize_non_negative(band_total * self.psi_gain);
+        let magnitude = sanitized_pulse.z_score.abs() as f32;
+        let weighted_loss = Self::sanitize_non_negative(magnitude * self.loss_gain);
+        let pulse_is_up = sanitized_pulse.z_score >= 0.0;
 
         let mut breakdown = HashMap::new();
         breakdown.insert(PsiComponent::BAND_ENERGY, band_total);
@@ -512,7 +563,6 @@ impl MaxwellPsiTelemetryBridge {
             breakdown,
             step,
         };
-        hub::set_last_psi(&reading);
 
         let mut events = Vec::new();
         if self.band_threshold > 0.0 && band_total >= self.band_threshold {
@@ -520,19 +570,40 @@ impl MaxwellPsiTelemetryBridge {
                 component: PsiComponent::BAND_ENERGY,
                 value: band_total,
                 threshold: self.band_threshold,
-                up: pulse.z_score >= 0.0,
+                up: pulse_is_up,
                 step,
             });
         }
-        hub::set_last_psi_events(&events);
 
-        let mut feedback = pulse
-            .clone()
-            .into_softlogic_feedback(psi_total, weighted_loss);
+        let mut feedback = sanitized_pulse.into_softlogic_feedback(psi_total, weighted_loss);
         feedback.set_events(events.iter().map(|event| event.to_string()));
         feedback.set_attributions([(ZSource::Maxwell, band_total)]);
-        hub::set_softlogic_z(feedback.clone());
-        feedback
+
+        (reading, events, feedback)
+    }
+
+    fn sanitize_non_negative(value: f32) -> f32 {
+        if value.is_finite() {
+            value.max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    fn sanitize_scalar(value: f64) -> f64 {
+        if value.is_finite() {
+            value
+        } else {
+            0.0
+        }
+    }
+
+    fn sanitize_axis(value: f32) -> f32 {
+        if value.is_finite() {
+            value
+        } else {
+            0.0
+        }
     }
 }
 
@@ -860,21 +931,89 @@ mod tests {
             .with_loss_gain(0.3)
             .with_band_threshold(1.0);
 
-        let feedback = bridge.publish(&pulse, 42);
+        let _guard = hub::psi_telemetry_guard();
+        hub::clear_last_psi();
+        hub::clear_last_psi_events();
+        hub::clear_softlogic_z();
+
+        let (feedback, reading, events) = bridge.publish_with_reading(&pulse, 42);
 
         let stored_feedback = hub::get_softlogic_z().expect("softlogic feedback");
         assert_eq!(stored_feedback.z_signal, feedback.z_signal);
         assert!((stored_feedback.psi_total - feedback.psi_total).abs() <= f32::EPSILON);
 
-        let reading = hub::get_last_psi().expect("psi reading");
         assert_eq!(reading.step, 42);
         assert!(reading.total > 0.0);
         assert_eq!(reading.breakdown.len(), 1);
 
-        let events = hub::get_last_psi_events();
         if (pulse.band_energy.0 + pulse.band_energy.1 + pulse.band_energy.2) >= 1.0 {
             assert_eq!(events.len(), 1);
+        } else {
+            assert!(events.is_empty());
         }
+
+        let stored_reading = hub::get_last_psi().expect("psi reading");
+        assert_eq!(stored_reading.step, reading.step);
+        assert_eq!(stored_reading.total, reading.total);
+
+        let stored_events = hub::get_last_psi_events();
+        assert_eq!(stored_events.len(), events.len());
+
+        let legacy_feedback = bridge.publish(&pulse, 42);
+        assert_eq!(legacy_feedback.psi_total, feedback.psi_total);
+        assert_eq!(legacy_feedback.weighted_loss, feedback.weighted_loss);
+    }
+
+    #[cfg(feature = "psi")]
+    #[test]
+    fn psi_bridge_sanitizes_non_finite_inputs() {
+        use crate::telemetry::hub;
+
+        let pulse = MaxwellZPulse {
+            blocks: 3,
+            mean: f64::NAN,
+            standard_error: f64::INFINITY,
+            z_score: f64::INFINITY,
+            band_energy: (f32::NAN, -0.25, f32::INFINITY),
+            z_bias: f32::NAN,
+        };
+
+        let bridge = MaxwellPsiTelemetryBridge::new()
+            .with_psi_gain(f32::NAN)
+            .with_loss_gain(f32::INFINITY)
+            .with_band_threshold(f32::NEG_INFINITY);
+
+        let _guard = hub::psi_telemetry_guard();
+        hub::clear_last_psi();
+        hub::clear_last_psi_events();
+        hub::clear_softlogic_z();
+
+        let (feedback, reading, events) = bridge.publish_with_reading(&pulse, 7);
+
+        assert_eq!(reading.step, 7);
+        assert_eq!(reading.total, 0.0);
+        assert!(reading
+            .breakdown
+            .get(&PsiComponent::BAND_ENERGY)
+            .is_some_and(|value| *value == 0.0));
+        assert!(events.is_empty());
+
+        assert_eq!(feedback.psi_total, 0.0);
+        assert_eq!(feedback.weighted_loss, 0.0);
+        assert!(feedback.drift.is_finite());
+        assert!(feedback.z_signal.is_finite());
+        assert!(feedback.events.is_empty());
+        assert!(feedback
+            .attributions
+            .iter()
+            .all(|(_, weight)| *weight >= 0.0));
+
+        let stored_reading = hub::get_last_psi().expect("reading should be stored");
+        assert_eq!(stored_reading.total, reading.total);
+        assert!(hub::get_last_psi_events().is_empty());
+        let stored_feedback = hub::get_softlogic_z().expect("feedback should be stored");
+        assert_eq!(stored_feedback.psi_total, feedback.psi_total);
+        assert_eq!(stored_feedback.weighted_loss, feedback.weighted_loss);
     }
 
     #[test]

@@ -22,7 +22,7 @@ use st_core::maxwell::MaxwellZPulse;
 #[cfg(feature = "psi")]
 use st_core::{
     telemetry::{
-        hub::{self, SoftlogicZFeedback},
+        hub::SoftlogicZFeedback,
         psi::{PsiEvent, PsiReading},
     },
     theory::maxwell::MaxwellPsiTelemetryBridge,
@@ -300,8 +300,9 @@ pub struct PreDiscardPolicy {
 }
 
 impl PreDiscardPolicy {
-    /// Creates a new pre-discard policy. Channels below `dominance_ratio` of the dominant weight
-    /// are discarded unless they clear the absolute `energy_floor` (default 0).
+    /// Creates a new pre-discard policy. Channels that fall more than
+    /// `dominance_ratio` below the dominant weight are discarded unless they
+    /// clear the absolute `energy_floor` (default 0).
     pub fn new(dominance_ratio: f32) -> PureResult<Self> {
         if !dominance_ratio.is_finite() || dominance_ratio < 0.0 {
             return Err(TensorError::NonPositiveCoherence {
@@ -385,8 +386,10 @@ impl PreDiscardPolicy {
             if !weight.is_finite() {
                 weight = 0.0;
             }
-            let survives_ratio = weight >= dominant * self.dominance_ratio;
-            let survives_floor = weight >= self.energy_floor;
+            let tolerance = (1.0 - self.dominance_ratio).max(0.0);
+            let threshold = dominant * tolerance;
+            let survives_ratio = weight >= threshold;
+            let survives_floor = weight >= self.energy_floor && dominant <= self.energy_floor;
             if survives_ratio || survives_floor {
                 survivors[idx] = true;
             }
@@ -770,6 +773,9 @@ impl ZSpaceCoherenceSequencer {
         curvature: f32,
         topos: OpenCartesianTopos,
     ) -> PureResult<Self> {
+        if num_heads == 0 {
+            return Err(st_tensor::TensorError::EmptyInput("maxwell_heads").into());
+        }
         if dim % num_heads != 0 {
             return Err(st_tensor::TensorError::InvalidDimensions {
                 rows: dim,
@@ -785,11 +791,15 @@ impl ZSpaceCoherenceSequencer {
             .into());
         }
 
+        let channel_count = (dim / 8).max(1).max(num_heads);
+        let coherence_engine =
+            CoherenceEngine::new(dim, curvature)?.with_channel_count(channel_count)?;
+
         Ok(Self {
             dim,
             num_heads,
             curvature,
-            coherence_engine: CoherenceEngine::new(dim, curvature)?,
+            coherence_engine,
             topos,
             plugins: Vec::new(),
             pre_discard: None,
@@ -1141,13 +1151,11 @@ impl ZSpaceCoherenceSequencer {
     )> {
         let (aggregated, coherence, concept_hint, narrative, pulse) =
             self.forward_with_language_bridges(x, semantics, maxwell_bridge)?;
-        let feedback = psi_bridge.publish(&pulse, psi_step);
-        let psi_reading = hub::get_last_psi();
-        let psi_events = hub::get_last_psi_events();
+        let (feedback, psi_reading, psi_events) = psi_bridge.publish_with_reading(&pulse, psi_step);
 
         self.dispatch_plugins(|| ZSpaceSequencerStage::PsiTelemetryPublished {
             pulse: &pulse,
-            reading: psi_reading.as_ref(),
+            reading: Some(&psi_reading),
             events: psi_events.as_slice(),
             feedback: &feedback,
         })?;
@@ -1158,7 +1166,7 @@ impl ZSpaceCoherenceSequencer {
             concept_hint,
             narrative,
             pulse,
-            psi_reading,
+            Some(psi_reading),
             psi_events,
             feedback,
         ))
