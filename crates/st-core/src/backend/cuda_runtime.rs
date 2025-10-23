@@ -15,7 +15,9 @@ use std::sync::OnceLock;
 
 const MODULE_NAME: &str = "spiraltorch_rankk";
 const TOPK_KERNEL: &str = "topk_warp_heap_rowwise_kernel";
+const BOTTOMK_KERNEL: &str = "bottomk_warp_heap_rowwise_kernel";
 const BITONIC_KERNEL: &str = "topk_warp_bitonic_rowwise_kernel";
+const MODULE_KERNELS: &[&str] = &[TOPK_KERNEL, BOTTOMK_KERNEL, BITONIC_KERNEL];
 const CUDA_SOURCE: &str = include_str!("cuda_topk_rankk.cu");
 const LANE_COUNT: usize = 32;
 const LANE_KEEP: usize = 8;
@@ -31,17 +33,20 @@ pub fn run_selection(
     buffers: LaunchSlices<'_>,
 ) -> Result<(), String> {
     match selection {
-        Selection::Top => launch_topk(plan, buffers),
-        Selection::Mid | Selection::Bottom => {
-            Err("cuda selection not implemented for mid/bottom".to_string())
-        }
+        Selection::Top => launch_heap_kernel(plan, buffers, TOPK_KERNEL),
+        Selection::Bottom => launch_heap_kernel(plan, buffers, BOTTOMK_KERNEL),
+        Selection::Mid => Err("cuda selection not implemented for mid".to_string()),
     }
 }
 
-fn launch_topk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<(), String> {
+fn launch_heap_kernel(
+    plan: &RankPlan,
+    mut buffers: LaunchSlices<'_>,
+    kernel_name: &'static str,
+) -> Result<(), String> {
     if plan.k as usize > SUPPORTED_K {
         return Err(format!(
-            "cuda topk kernel only supports k ≤ {SUPPORTED_K}, received {}",
+            "cuda heap kernel only supports k ≤ {SUPPORTED_K}, received {}",
             plan.k
         ));
     }
@@ -51,9 +56,9 @@ fn launch_topk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<(), Str
 
     let ptx =
         COMPILED_PTX.get_or_try_init(|| compile_ptx(CUDA_SOURCE).map_err(|err| err.to_string()))?;
-    let module = cuda_loader::load_ptx_module(ptx, MODULE_NAME, &[TOPK_KERNEL, BITONIC_KERNEL])?;
+    let module = cuda_loader::load_ptx_module(ptx, MODULE_NAME, MODULE_KERNELS)?;
     let device = module.device();
-    let func = module.get_func(TOPK_KERNEL)?;
+    let func = module.get_func(kernel_name)?;
 
     let input = device
         .htod_sync_copy(buffers.input)
