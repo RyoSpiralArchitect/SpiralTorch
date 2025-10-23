@@ -949,10 +949,7 @@ impl CanvasProjector {
 
     /// Refresh the canvas and expose column-wise FFT phases as a tensor with
     /// shape `(width, height * 4)`.
-    pub fn refresh_vector_fft_columns_phase_tensor(
-        &mut self,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
+    pub fn refresh_vector_fft_columns_phase_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
         self.render()?;
         self.vectors.fft_cols_phase_tensor(inverse)
     }
@@ -1619,7 +1616,10 @@ mod tests {
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
         let tensor = field.fft_rows_magnitude_tensor(false).unwrap();
         assert_eq!(tensor.shape(), (1, 8));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1646,7 +1646,10 @@ mod tests {
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
         let tensor = field.fft_cols_magnitude_tensor(false).unwrap();
         assert_eq!(tensor.shape(), (1, 8));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1673,7 +1676,10 @@ mod tests {
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
         let tensor = field.fft_2d_magnitude_tensor(false).unwrap();
         assert_eq!(tensor.shape(), (2, 8));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1715,9 +1721,14 @@ mod tests {
             .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
             .unwrap();
         let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
-        let tensor = projector.refresh_vector_fft_magnitude_tensor(false).unwrap();
+        let tensor = projector
+            .refresh_vector_fft_magnitude_tensor(false)
+            .unwrap();
         assert_eq!(tensor.shape(), (2, 4 * 4));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1743,7 +1754,10 @@ mod tests {
             .refresh_vector_fft_columns_magnitude_tensor(false)
             .unwrap();
         assert_eq!(tensor.shape(), (5, 3 * 4));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1771,7 +1785,10 @@ mod tests {
             .refresh_vector_fft_2d_magnitude_tensor(false)
             .unwrap();
         assert_eq!(tensor.shape(), (3, 5 * 4));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1781,9 +1798,7 @@ mod tests {
             .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
             .unwrap();
         let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let tensor = projector
-            .refresh_vector_fft_2d_phase_tensor(false)
-            .unwrap();
+        let tensor = projector.refresh_vector_fft_2d_phase_tensor(false).unwrap();
         assert_eq!(tensor.shape(), (3, 5 * 4));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
     }

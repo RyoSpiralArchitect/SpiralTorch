@@ -499,6 +499,28 @@ impl MaxwellPsiTelemetryBridge {
     /// the global hub. The returned feedback can be reused immediately by the
     /// caller when additional processing is required.
     pub fn publish(&self, pulse: &MaxwellZPulse, step: u64) -> SoftlogicZFeedback {
+        let (feedback, _, _) = self.publish_with_reading(pulse, step);
+        feedback
+    }
+
+    /// Publishes the telemetry and returns the generated PSI reading alongside any events.
+    pub fn publish_with_reading(
+        &self,
+        pulse: &MaxwellZPulse,
+        step: u64,
+    ) -> (SoftlogicZFeedback, PsiReading, Vec<PsiEvent>) {
+        let (reading, events, feedback) = self.synthesise_feedback(pulse, step);
+        hub::set_last_psi(&reading);
+        hub::set_last_psi_events(&events);
+        hub::set_softlogic_z(feedback.clone());
+        (feedback, reading, events)
+    }
+
+    fn synthesise_feedback(
+        &self,
+        pulse: &MaxwellZPulse,
+        step: u64,
+    ) -> (PsiReading, Vec<PsiEvent>, SoftlogicZFeedback) {
         let (above, here, beneath) = pulse.band_energy;
         let band_total = (above + here + beneath).max(0.0);
         let psi_total = band_total * self.psi_gain;
@@ -512,7 +534,6 @@ impl MaxwellPsiTelemetryBridge {
             breakdown,
             step,
         };
-        hub::set_last_psi(&reading);
 
         let mut events = Vec::new();
         if self.band_threshold > 0.0 && band_total >= self.band_threshold {
@@ -524,15 +545,14 @@ impl MaxwellPsiTelemetryBridge {
                 step,
             });
         }
-        hub::set_last_psi_events(&events);
 
         let mut feedback = pulse
             .clone()
             .into_softlogic_feedback(psi_total, weighted_loss);
         feedback.set_events(events.iter().map(|event| event.to_string()));
         feedback.set_attributions([(ZSource::Maxwell, band_total)]);
-        hub::set_softlogic_z(feedback.clone());
-        feedback
+
+        (reading, events, feedback)
     }
 }
 
@@ -860,21 +880,37 @@ mod tests {
             .with_loss_gain(0.3)
             .with_band_threshold(1.0);
 
-        let feedback = bridge.publish(&pulse, 42);
+        let _guard = hub::psi_telemetry_guard();
+        hub::clear_last_psi();
+        hub::clear_last_psi_events();
+        hub::clear_softlogic_z();
+
+        let (feedback, reading, events) = bridge.publish_with_reading(&pulse, 42);
 
         let stored_feedback = hub::get_softlogic_z().expect("softlogic feedback");
         assert_eq!(stored_feedback.z_signal, feedback.z_signal);
         assert!((stored_feedback.psi_total - feedback.psi_total).abs() <= f32::EPSILON);
 
-        let reading = hub::get_last_psi().expect("psi reading");
         assert_eq!(reading.step, 42);
         assert!(reading.total > 0.0);
         assert_eq!(reading.breakdown.len(), 1);
 
-        let events = hub::get_last_psi_events();
         if (pulse.band_energy.0 + pulse.band_energy.1 + pulse.band_energy.2) >= 1.0 {
             assert_eq!(events.len(), 1);
+        } else {
+            assert!(events.is_empty());
         }
+
+        let stored_reading = hub::get_last_psi().expect("psi reading");
+        assert_eq!(stored_reading.step, reading.step);
+        assert_eq!(stored_reading.total, reading.total);
+
+        let stored_events = hub::get_last_psi_events();
+        assert_eq!(stored_events.len(), events.len());
+
+        let legacy_feedback = bridge.publish(&pulse, 42);
+        assert_eq!(legacy_feedback.psi_total, feedback.psi_total);
+        assert_eq!(legacy_feedback.weighted_loss, feedback.weighted_loss);
     }
 
     #[test]
