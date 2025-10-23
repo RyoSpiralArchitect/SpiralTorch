@@ -254,10 +254,7 @@ impl ColorVectorField {
         let width = self.width;
         let height = self.height;
         if width == 0 || height == 0 {
-            return Err(TensorError::InvalidDimensions {
-                rows: height,
-                cols: width,
-            });
+            return Err(TensorError::EmptyInput("canvas_fft"));
         }
         let mut energy = vec![Complex32::default(); width];
         let mut chroma_r = vec![Complex32::default(); width];
@@ -310,10 +307,7 @@ impl ColorVectorField {
         let height = self.height;
         let width = self.width;
         if width == 0 || height == 0 {
-            return Err(TensorError::InvalidDimensions {
-                rows: height,
-                cols: width,
-            });
+            return Err(TensorError::EmptyInput("canvas_fft"));
         }
 
         let mut energy = vec![Complex32::default(); height];
@@ -367,10 +361,7 @@ impl ColorVectorField {
         let width = self.width;
         let height = self.height;
         if width == 0 || height == 0 {
-            return Err(TensorError::InvalidDimensions {
-                rows: height,
-                cols: width,
-            });
+            return Err(TensorError::EmptyInput("canvas_fft"));
         }
 
         let size = width * height;
@@ -1415,6 +1406,33 @@ mod tests {
         for value in spectrum {
             assert!(value.is_finite());
         }
+    }
+
+    #[test]
+    fn vector_field_fft_rows_rejects_empty_dimensions() {
+        let field = ColorVectorField::new(0, 1);
+        assert!(matches!(
+            field.fft_rows_interleaved(false),
+            Err(TensorError::EmptyInput("canvas_fft"))
+        ));
+    }
+
+    #[test]
+    fn vector_field_fft_columns_rejects_empty_dimensions() {
+        let field = ColorVectorField::new(1, 0);
+        assert!(matches!(
+            field.fft_cols_interleaved(false),
+            Err(TensorError::EmptyInput("canvas_fft"))
+        ));
+    }
+
+    #[test]
+    fn vector_field_fft_2d_rejects_empty_dimensions() {
+        let field = ColorVectorField::new(0, 0);
+        assert!(matches!(
+            field.fft_2d_interleaved(false),
+            Err(TensorError::EmptyInput("canvas_fft"))
+        ));
     }
 
     #[test]
