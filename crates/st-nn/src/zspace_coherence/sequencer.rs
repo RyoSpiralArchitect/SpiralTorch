@@ -22,7 +22,7 @@ use st_core::maxwell::MaxwellZPulse;
 #[cfg(feature = "psi")]
 use st_core::{
     telemetry::{
-        hub::{self, SoftlogicZFeedback},
+        hub::SoftlogicZFeedback,
         psi::{PsiEvent, PsiReading},
     },
     theory::maxwell::MaxwellPsiTelemetryBridge,
@@ -1375,13 +1375,13 @@ impl ZSpaceCoherenceSequencer {
     )> {
         let (aggregated, coherence, concept_hint, narrative, pulse) =
             self.forward_with_language_bridges(x, semantics, maxwell_bridge)?;
-        let feedback = psi_bridge.publish(&pulse, psi_step);
-        let psi_reading = hub::get_last_psi();
-        let psi_events = hub::get_last_psi_events();
+        let (feedback, psi_reading, psi_events) = psi_bridge
+            .publish_with_reading(&pulse, psi_step)
+            .into_parts();
 
         self.dispatch_plugins(|| ZSpaceSequencerStage::PsiTelemetryPublished {
             pulse: &pulse,
-            reading: psi_reading.as_ref(),
+            reading: Some(&psi_reading),
             events: psi_events.as_slice(),
             feedback: &feedback,
         })?;
@@ -1392,7 +1392,7 @@ impl ZSpaceCoherenceSequencer {
             concept_hint,
             narrative,
             pulse,
-            psi_reading,
+            Some(psi_reading),
             psi_events,
             feedback,
         ))
