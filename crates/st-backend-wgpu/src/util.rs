@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use std::{
+    borrow::Cow,
     collections::{hash_map::Entry, HashMap},
     fs,
     path::{Path, PathBuf},
@@ -25,6 +26,14 @@ pub enum ShaderLoadError {
         source: std::io::Error,
         /// The path that could not be read.
         path: PathBuf,
+    },
+    /// A requested pipeline override constant was not found in the WGSL source.
+    #[error("shader override '{name}' not found in '{file}'")]
+    OverrideNotFound {
+        /// The override constant name that could not be located.
+        name: String,
+        /// The WGSL file path searched for the override.
+        file: PathBuf,
     },
 }
 
@@ -101,10 +110,34 @@ impl ShaderCache {
         entry_point: &str,
         layout: Option<&wgpu::PipelineLayout>,
     ) -> Result<ComputePipeline, ShaderLoadError> {
-        let source = self.source(file)?;
+        self.load_compute_pipeline_with_layout_and_overrides(
+            device,
+            file,
+            label,
+            entry_point,
+            layout,
+            &[],
+        )
+    }
+
+    /// Variant of [`ShaderCache::load_compute_pipeline_with_layout`] that applies WGSL overrides.
+    pub fn load_compute_pipeline_with_layout_and_overrides(
+        &mut self,
+        device: &Device,
+        file: &str,
+        label: &str,
+        entry_point: &str,
+        layout: Option<&wgpu::PipelineLayout>,
+        overrides: &[(&str, u32)],
+    ) -> Result<ComputePipeline, ShaderLoadError> {
+        let specialized = if overrides.is_empty() {
+            Cow::Borrowed(self.source(file)?)
+        } else {
+            Cow::Owned(apply_overrides(self.source(file)?, file, overrides)?)
+        };
         let module = device.create_shader_module(ShaderModuleDescriptor {
             label: Some(label),
-            source: ShaderSource::Wgsl(source.into()),
+            source: ShaderSource::Wgsl(specialized),
         });
         Ok(device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some(label),
@@ -162,6 +195,51 @@ pub fn load_compute_pipeline_with_layout(
         module: &module,
         entry_point,
     }))
+}
+
+fn apply_overrides(
+    source: &str,
+    file: &str,
+    overrides: &[(&str, u32)],
+) -> Result<String, ShaderLoadError> {
+    let mut output = String::with_capacity(source.len() + overrides.len() * 16);
+    let mut remaining: Vec<(&str, u32, bool)> = overrides
+        .iter()
+        .map(|(name, value)| (*name, *value, false))
+        .collect();
+
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("override ") {
+            let mut replaced = false;
+            for (name, value, seen) in remaining.iter_mut() {
+                let target = format!("override {name} ");
+                if trimmed.starts_with(&target) {
+                    let prefix_len = line.len() - trimmed.len();
+                    output.push_str(&line[..prefix_len]);
+                    output.push_str(&format!("override {name} : u32 = {value}u;"));
+                    replaced = true;
+                    *seen = true;
+                    break;
+                }
+            }
+            if !replaced {
+                output.push_str(line);
+            }
+        } else {
+            output.push_str(line);
+        }
+        output.push('\n');
+    }
+
+    if let Some((name, _, _)) = remaining.iter().find(|(_, _, seen)| !*seen) {
+        return Err(ShaderLoadError::OverrideNotFound {
+            name: (*name).to_string(),
+            file: PathBuf::from(file),
+        });
+    }
+
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -233,5 +311,27 @@ mod tests {
 
         assert_eq!(cache.source("a.wgsl").unwrap(), "// A\n");
         assert_eq!(cache.source("b.wgsl").unwrap(), "// B\n");
+    }
+
+    #[test]
+    fn apply_overrides_replaces_matching_constants() {
+        let shader = "override WG_ROWS : u32 = 16u;\noverride WG_COLS : u32 = 16u;\n";
+        let specialized = apply_overrides(shader, "test.wgsl", &[("WG_ROWS", 32), ("WG_COLS", 8)])
+            .expect("override application");
+        assert!(specialized.contains("override WG_ROWS : u32 = 32u;"));
+        assert!(specialized.contains("override WG_COLS : u32 = 8u;"));
+    }
+
+    #[test]
+    fn apply_overrides_errors_when_constant_missing() {
+        let shader = "override WG_ROWS : u32 = 16u;\n";
+        let err = apply_overrides(shader, "test.wgsl", &[("WG_COLS", 8)]).unwrap_err();
+        match err {
+            ShaderLoadError::OverrideNotFound { name, file } => {
+                assert_eq!(name, "WG_COLS");
+                assert_eq!(file, PathBuf::from("test.wgsl"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }
