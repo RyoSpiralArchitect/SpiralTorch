@@ -14,3 +14,6 @@ pub mod wgpu_dense;
 
 #[cfg(feature = "wgpu")]
 pub mod wgpu_util;
+
+#[cfg(feature = "hip")]
+pub mod hip_dense;

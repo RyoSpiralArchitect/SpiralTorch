@@ -1255,7 +1255,13 @@ class SpiralSession:
     def __init__(self, backend: str = "auto", seed: int | None = None) -> None:
         self.backend = backend
         self.seed = seed
-        self.device = "wgpu" if backend == "wgpu" else "cpu"
+        if backend == "hip":
+            init_backend("hip")
+            self.device = "hip"
+        elif backend == "wgpu":
+            self.device = "wgpu"
+        else:
+            self.device = "cpu"
 
     def plan_topk(self, rows: int, cols: int, k: int):
         return plan_topk(rows, cols, k, backend=self.backend)
@@ -1294,6 +1300,7 @@ _CORE_EXPORTS = [
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
     "info_nce","masked_mse","mean_squared_error",
+    "init_backend",
 ]
 for _name in _CORE_EXPORTS:
     _expose_from_rs(_name)

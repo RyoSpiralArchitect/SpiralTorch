@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from types import ModuleType
 
+def init_backend(backend: str) -> bool: ...
+
 class Tensor:
     def __init__(self, rows: int, cols: int, data: Optional[Sequence[float]] = ...) -> None: ...
     @staticmethod

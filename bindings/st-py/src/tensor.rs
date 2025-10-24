@@ -4,6 +4,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::{Bound, PyRef, PyRefMut};
+#[cfg(feature = "hip")]
+use st_backend_hip as hip_backend;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
 use st_tensor::{AttentionBackend, MatmulBackend, SoftmaxBackend, Tensor, TensorError};
 use std::ffi::{c_void, CStr};
@@ -19,6 +21,8 @@ fn parse_backend(label: Option<&str>) -> MatmulBackend {
         "naive" => MatmulBackend::CpuNaive,
         #[cfg(feature = "wgpu")]
         "wgpu" => MatmulBackend::GpuWgpu,
+        #[cfg(feature = "hip")]
+        "hip" => MatmulBackend::GpuHip,
         other => {
             warn!(
                 backend = other,
@@ -619,10 +623,31 @@ fn tensor_to_dlpack(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
     tensor.to_dlpack(py)
 }
 
+#[pyfunction]
+fn init_backend(label: &str) -> PyResult<bool> {
+    match label {
+        #[cfg(feature = "hip")]
+        "hip" => hip_backend::init()
+            .map(|_| true)
+            .map_err(|err| PyRuntimeError::new_err(err.to_string())),
+        #[cfg(not(feature = "hip"))]
+        "hip" => Err(PyRuntimeError::new_err(
+            "SpiralTorch was built without HIP support; rebuild with the 'hip' feature",
+        )),
+        "auto" | "cpu" | "faer" | "simd" | "cpu-simd" | "naive" => Ok(true),
+        #[cfg(feature = "wgpu")]
+        "wgpu" => Ok(true),
+        other => Err(PyValueError::new_err(format!(
+            "unknown backend label '{other}'"
+        ))),
+    }
+}
+
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyTensor>()?;
     m.add_function(wrap_pyfunction!(tensor_from_dlpack, m)?)?;
     m.add_function(wrap_pyfunction!(tensor_to_dlpack, m)?)?;
+    m.add_function(wrap_pyfunction!(init_backend, m)?)?;
     m.add("__doc__", "Tensor helpers and DLPack interop.")?;
     let _ = py;
     Ok(())
