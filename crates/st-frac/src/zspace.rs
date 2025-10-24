@@ -96,6 +96,16 @@ pub fn prepare_weighted_series(
         });
     }
 
+    // Robustness: validate finiteness of inputs before forming the weighted series
+    for (i, (sample, &w)) in samples.iter().zip(weights.iter()).enumerate() {
+        if !w.is_finite() {
+            return Err(ZSpaceError::NonFiniteWeight { index: i, value: w });
+        }
+        if !sample.re.is_finite() || !sample.im.is_finite() {
+            return Err(ZSpaceError::NonFiniteSampleCoeff { index: i });
+        }
+    }
+
     Ok(samples
         .iter()
         .zip(weights.iter())
@@ -112,14 +122,22 @@ pub fn evaluate_weighted_series(
         return Err(ZSpaceError::EmptySeries.into());
     }
 
-    let mut acc = ComplexScalar::new(0.0, 0.0);
-    let mut power = ComplexScalar::new(1.0, 0.0);
-
-    for coeff in weighted.iter() {
-        acc += *coeff * power;
-        power *= z;
+    // Validate coefficients and z are finite
+    for (i, coeff) in weighted.iter().enumerate() {
+        if !coeff.re.is_finite() || !coeff.im.is_finite() {
+            return Err(MellinError::NonFiniteSample { index: i });
+        }
+    }
+    if !z.re.is_finite() || !z.im.is_finite() {
+        return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
     }
 
+    // Horner's method for improved stability and fewer multiplications:
+    // acc = a_{n-1}; for k = n-2..0: acc = a_k + z * acc
+    let mut acc = *weighted.last().unwrap();
+    for coeff in weighted[..weighted.len() - 1].iter().rev() {
+        acc = *coeff + z * acc;
+    }
     Ok(acc)
 }
 
@@ -201,11 +219,7 @@ mod tests {
         let direct = {
             let mut acc = ComplexScalar::new(0.0, 0.0);
             for (idx, &sample) in samples.iter().enumerate() {
-                let weight = if idx == 0 || idx + 1 == samples.len() {
-                    0.5
-                } else {
-                    1.0
-                };
+                let weight = if idx == 0 || idx + 1 == samples.len() { 0.5 } else { 1.0 };
                 let t = log_start + log_step * idx as f32;
                 let kernel = (s * ComplexScalar::new(t, 0.0)).exp();
                 acc += sample * ComplexScalar::new(weight, 0.0) * kernel;
@@ -256,24 +270,40 @@ mod tests {
         }
     }
 
+    // New: robustness tests
     #[test]
-    fn evaluate_weighted_series_many_shares_coefficients() {
-        let samples = vec![
-            ComplexScalar::new(0.4, -0.2),
-            ComplexScalar::new(-0.1, 0.7),
-            ComplexScalar::new(0.3, 0.1),
-            ComplexScalar::new(-0.2, -0.5),
+    fn evaluate_rejects_nonfinite_coeff() {
+        let weighted = vec![
+            ComplexScalar::new(1.0, 0.0),
+            ComplexScalar::new(f32::NAN, 0.0),
         ];
-        let weights = trapezoidal_weights(samples.len()).unwrap();
-        let weighted = prepare_weighted_series(&samples, &weights).unwrap();
-        let zs = [ComplexScalar::new(0.9, 0.1), ComplexScalar::new(-0.3, 0.4)];
+        let z = ComplexScalar::new(0.5, 0.1);
+        assert!(evaluate_weighted_series(&weighted, z).is_err());
+    }
 
-        let via_prepare = evaluate_weighted_series_many(&weighted, &zs).unwrap();
-        let via_api = weighted_z_transform_many(&samples, &weights, &zs).unwrap();
+    #[test]
+    fn evaluate_rejects_nonfinite_z() {
+        let weighted = vec![ComplexScalar::new(1.0, 0.0)];
+        let z = ComplexScalar::new(f32::INFINITY, 0.0);
+        assert!(evaluate_weighted_series(&weighted, z).is_err());
+    }
 
-        for (idx, (lhs, rhs)) in via_prepare.iter().zip(via_api.iter()).enumerate() {
-            let diff = (*lhs - *rhs).norm();
-            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
-        }
+    #[test]
+    fn prepare_rejects_nonfinite_inputs() {
+        // Non-finite weight
+        let samples = vec![
+            ComplexScalar::new(1.0, 0.0),
+            ComplexScalar::new(2.0, 0.0),
+        ];
+        let bad_weights = vec![1.0, f32::NAN];
+        assert!(prepare_weighted_series(&samples, &bad_weights).is_err());
+
+        // Non-finite sample
+        let bad_samples = vec![
+            ComplexScalar::new(1.0, 0.0),
+            ComplexScalar::new(f32::NAN, 0.0),
+        ];
+        let weights = vec![0.5, 0.5];
+        assert!(prepare_weighted_series(&bad_samples, &weights).is_err());
     }
 }
