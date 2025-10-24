@@ -1195,11 +1195,79 @@ impl ColorVectorField {
         cols: usize,
         spectrum: &[f32],
     ) -> PureResult<Tensor> {
-        Self::map_power_tensor_from_interleaved(rows, cols, spectrum, |power| {
-            let clamped = power.max(Self::POWER_DB_EPSILON);
-            let db = 10.0 * clamped.log10();
-            db.max(Self::POWER_DB_FLOOR)
-        })
+        Self::map_power_tensor_from_interleaved(rows, cols, spectrum, Self::map_power_to_db)
+    }
+
+    fn power_and_power_db_tensors_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<(Tensor, Tensor)> {
+        let expected_pairs =
+            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
+        let mut linear = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        let mut decibel = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            let [energy, chroma_r, chroma_g, chroma_b] =
+                Self::power_channels_from_interleaved_chunk(chunk);
+
+            linear.push(energy);
+            linear.push(chroma_r);
+            linear.push(chroma_g);
+            linear.push(chroma_b);
+
+            decibel.push(Self::map_power_to_db(energy));
+            decibel.push(Self::map_power_to_db(chroma_r));
+            decibel.push(Self::map_power_to_db(chroma_g));
+            decibel.push(Self::map_power_to_db(chroma_b));
+        }
+
+        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, linear)?;
+        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, decibel)?;
+        Ok((power, power_db))
+    }
+
+    fn map_power_to_db(power: f32) -> f32 {
+        let clamped = power.max(Self::POWER_DB_EPSILON);
+        let db = 10.0 * clamped.log10();
+        db.max(Self::POWER_DB_FLOOR)
+    }
+
+    fn validate_power_interleaved_dimensions(
+        rows: usize,
+        cols: usize,
+        len: usize,
+    ) -> PureResult<usize> {
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+
+        let expected_pairs = rows
+            .checked_mul(cols)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft",
+                volume: rows.saturating_mul(cols),
+                max_volume: usize::MAX,
+            })?;
+        let expected_len = expected_pairs * Self::FFT_INTERLEAVED_STRIDE;
+        if len != expected_len {
+            return Err(TensorError::DataLength {
+                expected: expected_len,
+                got: len,
+            });
+        }
+
+        Ok(expected_pairs)
+    }
+
+    fn power_channels_from_interleaved_chunk(chunk: &[f32]) -> [f32; 4] {
+        debug_assert!(chunk.len() == Self::FFT_INTERLEAVED_STRIDE);
+        let energy = chunk[0].mul_add(chunk[0], chunk[1] * chunk[1]);
+        let chroma_r = chunk[2].mul_add(chunk[2], chunk[3] * chunk[3]);
+        let chroma_g = chunk[4].mul_add(chunk[4], chunk[5] * chunk[5]);
+        let chroma_b = chunk[6].mul_add(chunk[6], chunk[7] * chunk[7]);
+        [energy, chroma_r, chroma_g, chroma_b]
     }
 
     fn power_and_power_db_tensors_from_interleaved(
