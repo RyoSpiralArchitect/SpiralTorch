@@ -829,6 +829,7 @@ struct ConvGemmParams {
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
+    _pad3: u32,
 }
 
 pub fn matmul(
@@ -1541,6 +1542,8 @@ pub fn conv_im2col_gemm(
         out_channels: out_channels as u32,
         _pad0: 0,
         _pad1: 0,
+        _pad2: 0,
+        _pad3: 0,
     };
     let conv_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("st.tensor.wgpu_dense.conv.params"),
