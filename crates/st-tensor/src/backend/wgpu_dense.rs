@@ -89,7 +89,6 @@ enum FusedActivation {
 struct DenseContext {
     device: Arc<Device>,
     queue: Arc<Queue>,
-    features: wgpu::Features,
     bind_layout: BindGroupLayout,
     pipeline_layout: PipelineLayout,
     matmul_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
@@ -104,7 +103,6 @@ struct DenseContext {
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
     softmax_layout: BindGroupLayout,
-    softmax_pipeline_layout: PipelineLayout,
     softmax_subgroup_pipeline: Option<Arc<ComputePipeline>>,
 }
 
@@ -138,7 +136,6 @@ impl DenseContext {
         })
         .map_err(|err| err.to_string())?;
 
-        let features = device.features();
         let device: Arc<Device> = Arc::new(device);
         let queue: Arc<Queue> = Arc::new(queue);
 
@@ -428,19 +425,20 @@ impl DenseContext {
                 label: Some("st.tensor.wgpu_dense.softmax_row_subgroup"),
                 source: wgpu::ShaderSource::Wgsl(ROW_SOFTMAX_WGSL.into()),
             });
-            Arc::new(device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("st.tensor.wgpu_dense.softmax_row_subgroup"),
-                layout: Some(&softmax_pipeline_layout),
-                module: &shader,
-                entry_point: "main_cs",
-            }))
+            Arc::new(
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("st.tensor.wgpu_dense.softmax_row_subgroup"),
+                    layout: Some(&softmax_pipeline_layout),
+                    module: &shader,
+                    entry_point: "main_cs",
+                }),
+            )
         }))
         .ok();
 
         Ok(Self {
             device,
             queue,
-            features,
             bind_layout,
             pipeline_layout,
             matmul_pipelines: Mutex::new(HashMap::new()),
@@ -454,7 +452,6 @@ impl DenseContext {
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
             softmax_layout,
-            softmax_pipeline_layout,
             softmax_subgroup_pipeline,
         })
     }
