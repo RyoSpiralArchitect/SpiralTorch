@@ -40,6 +40,9 @@ impl Gelu {
 impl Module for Gelu {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::EmptyInput("gelu forward input"));
+        }
         let mut data = Vec::with_capacity(rows * cols);
         for value in input.data() {
             data.push(Self::gelu(*value));
@@ -48,7 +51,28 @@ impl Module for Gelu {
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
-        input.gelu_backward(grad_output)
+        let (rows, cols) = input.shape();
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::EmptyInput("gelu backward input"));
+        }
+        if input.shape() != grad_output.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: input.shape(),
+                right: grad_output.shape(),
+            });
+        }
+
+        match input.gelu_backward(grad_output) {
+            Ok(tensor) => Ok(tensor),
+            Err(TensorError::BackendFailure { .. }) => {
+                let mut data = Vec::with_capacity(rows * cols);
+                for (z, g) in input.data().iter().zip(grad_output.data().iter()) {
+                    data.push(Self::gelu_derivative(*z) * g);
+                }
+                Tensor::from_vec(rows, cols, data)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     fn visit_parameters(

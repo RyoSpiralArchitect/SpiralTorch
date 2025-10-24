@@ -611,8 +611,11 @@ impl GpuContext {
                 push_constant_ranges: &[],
             });
 
-        let fused_gelu_back_shader_source =
-            instantiate_fused_gelu_back_template(FUSED_GELU_BACK_WG_ROWS, FUSED_GELU_BACK_WG_COLS);
+        let fused_gelu_back_shader_source = instantiate_fused_gelu_back_template(
+            FUSED_GELU_BACK_WGSL_TEMPLATE,
+            FUSED_GELU_BACK_WG_ROWS,
+            FUSED_GELU_BACK_WG_COLS,
+        );
         let fused_gelu_back_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("st.tensor.wgpu_dense.fused_gelu_back"),
             source: wgpu::ShaderSource::Wgsl(fused_gelu_back_shader_source.into()),
@@ -669,8 +672,11 @@ impl GpuContext {
                 push_constant_ranges: &[],
             });
 
-        let reduce_db_shader_source =
-            instantiate_reduce_db_template(FUSED_GELU_BACK_WG_COLS, REDUCE_DB_WORKGROUP);
+        let reduce_db_shader_source = instantiate_reduce_db_template(
+            REDUCE_DB_WGSL_TEMPLATE,
+            FUSED_GELU_BACK_WG_COLS,
+            REDUCE_DB_WORKGROUP,
+        );
         let reduce_db_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("st.tensor.wgpu_dense.reduce_db"),
             source: wgpu::ShaderSource::Wgsl(reduce_db_shader_source.into()),
@@ -1259,6 +1265,8 @@ struct FusedGeluBackUniforms {
     num_wg_x: u32,
     num_wg_y: u32,
     add_dr: u32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 #[repr(C, align(16))]
@@ -1267,6 +1275,7 @@ struct ReduceDbUniforms {
     o: u32,
     num_wg_x: u32,
     num_wg_y: u32,
+    _pad0: u32,
 }
 
 #[repr(C, align(16))]
@@ -2122,7 +2131,7 @@ pub fn fused_gelu_backward(
     });
     let gz_buf = allocate_output(device, "st.tensor.wgpu_dense.gelu_back.gz", expected);
 
-    let mut residual_data = match residual_grad {
+    let residual_data = match residual_grad {
         Some(data) => data.to_vec(),
         None => vec![0.0; expected],
     };
@@ -2151,6 +2160,8 @@ pub fn fused_gelu_backward(
         num_wg_x,
         num_wg_y,
         add_dr: if residual_grad.is_some() { 1 } else { 0 },
+        _pad0: 0,
+        _pad1: 0,
     };
     let fused_uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("st.tensor.wgpu_dense.gelu_back.uniforms"),
@@ -2162,6 +2173,7 @@ pub fn fused_gelu_backward(
         o: cols_u32,
         num_wg_x,
         num_wg_y,
+        _pad0: 0,
     };
     let reduce_uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("st.tensor.wgpu_dense.gelu_back.reduce_uniforms"),
