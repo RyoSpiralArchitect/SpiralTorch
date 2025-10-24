@@ -12,6 +12,76 @@ use std::{
     sync::Arc,
 };
 
+// ===== SpiralTorch: WGPU runtime hardening additions (non-breaking) =====
+#[derive(Debug, thiserror::Error)]
+pub enum WgpuRtError {
+    #[error("queue submit timed out after {0:?}")]
+    SubmitTimeout(std::time::Duration),
+    #[error("buffer map failed: {0}")]
+    MapFailed(String),
+}
+
+/// Submit command buffers and actively poll until completion or timeout.
+/// 呼び出し側で既存の `queue.submit(cmd_bufs)` をこれで置換可能。
+#[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+pub fn st_submit_with_timeout(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    cmd_bufs: &[wgpu::CommandBuffer],
+    timeout: std::time::Duration,
+) -> Result<(), WgpuRtError> {
+    use std::sync::mpsc;
+    let (tx, rx) = mpsc::channel();
+    queue.submit(cmd_bufs.iter().cloned());
+    queue.on_submitted_work_done(move || {
+        let _ = tx.send(());
+    });
+
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        device.poll(wgpu::Maintain::Poll);
+        if rx.try_recv().is_ok() {
+            return Ok(());
+        }
+        std::thread::yield_now();
+    }
+    Err(WgpuRtError::SubmitTimeout(timeout))
+}
+
+/// MAP_READ バッファを安全に読み出す（タイムアウト付き）
+#[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+pub fn st_map_read_with_timeout(
+    device: &wgpu::Device,
+    buffer: &wgpu::Buffer,
+    range: std::ops::Range<u64>,
+    timeout: std::time::Duration,
+) -> Result<Vec<u8>, WgpuRtError> {
+    use std::sync::mpsc::channel;
+    let (tx, rx) = channel();
+    buffer
+        .slice(range.clone())
+        .map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
+    let start = std::time::Instant::now();
+    loop {
+        device.poll(wgpu::Maintain::Poll);
+        if let Ok(res) = rx.try_recv() {
+            res.map_err(|e| WgpuRtError::MapFailed(format!("{e:?}")))?;
+            let view = buffer.slice(range.clone()).get_mapped_range();
+            let data = view.to_vec();
+            drop(view);
+            buffer.unmap();
+            return Ok(data);
+        }
+        if start.elapsed() >= timeout {
+            return Err(WgpuRtError::SubmitTimeout(timeout));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+// ===== end additions =====
+
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
 pub struct WgpuCtx {
     pub device: wgpu::Device,
@@ -373,8 +443,15 @@ pub fn dispatch_topk_1ce(
         c.set_bind_group(0, &bg, &[]);
         c.dispatch_workgroups(1, rows.max(1), 1);
     }
-    ctx.queue.submit(Some(enc.finish()));
-    Ok(())
+    let cmd = enc.finish();
+    let cmd_bufs = [cmd];
+    st_submit_with_timeout(
+        &ctx.device,
+        &ctx.queue,
+        &cmd_bufs,
+        std::time::Duration::from_secs(30),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
@@ -420,7 +497,7 @@ fn dispatch_lin_kernel(
     bind_group:&wgpu::BindGroup,
     workgroups:u32,
     label:&str
-) {
+) -> Result<(), String> {
     let mut enc = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some(label) });
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor{ label: Some("st.lin.pass") });
@@ -430,7 +507,15 @@ fn dispatch_lin_kernel(
             pass.dispatch_workgroups(workgroups, 1, 1);
         }
     }
-    ctx.queue.submit(Some(enc.finish()));
+    let cmd = enc.finish();
+    let cmd_bufs = [cmd];
+    st_submit_with_timeout(
+        &ctx.device,
+        &ctx.queue,
+        &cmd_bufs,
+        std::time::Duration::from_secs(30),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
@@ -442,8 +527,7 @@ pub fn dispatch_lin_axpy(n:u32, alpha:f32, x:&wgpu::Buffer, y:&wgpu::Buffer, out
     let bg = create_lin_bind_group(&ctx, layout, x, y, out, &ub);
     let wg = div_ceil_u32(n, 256);
     let pipeline = ensure_lin_axpy_pl(&ctx)?;
-    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.axpy");
-    Ok(())
+    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.axpy")
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
@@ -455,8 +539,7 @@ pub fn dispatch_lin_scale(n:u32, scale:f32, y:&wgpu::Buffer, out:&wgpu::Buffer) 
     let bg = create_lin_bind_group(&ctx, layout, out, y, out, &ub);
     let wg = div_ceil_u32(n, 256);
     let pipeline = ensure_lin_scale_pl(&ctx)?;
-    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.scale");
-    Ok(())
+    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.scale")
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
@@ -468,8 +551,7 @@ pub fn dispatch_lin_copy(n:u32, src:&wgpu::Buffer, dst:&wgpu::Buffer) -> Result<
     let bg = create_lin_bind_group(&ctx, layout, src, dst, dst, &ub);
     let wg = div_ceil_u32(n, 256);
     let pipeline = ensure_lin_copy_pl(&ctx)?;
-    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.copy");
-    Ok(())
+    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.copy")
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
@@ -481,8 +563,7 @@ pub fn dispatch_lin_fill(n:u32, value:f32, dst:&wgpu::Buffer) -> Result<(), Stri
     let bg = create_lin_bind_group(&ctx, layout, dst, dst, dst, &ub);
     let wg = div_ceil_u32(n, 256);
     let pipeline = ensure_lin_fill_pl(&ctx)?;
-    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.fill");
-    Ok(())
+    dispatch_lin_kernel(&ctx, pipeline, &bg, wg, "st.lin.fill")
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
@@ -508,7 +589,7 @@ pub fn dispatch_lin_dot(n:u32, x:&wgpu::Buffer, y:&wgpu::Buffer, scratch:&wgpu::
     } else {
         "st.lin.dot.partials"
     };
-    dispatch_lin_kernel(&ctx, pipeline_partials, &bg_partials, partials, label_partials);
+    dispatch_lin_kernel(&ctx, pipeline_partials, &bg_partials, partials, label_partials)?;
 
     let params_finalize = LinParams{ dims:[n, partials, 0, 0], scalars:[0.0, 0.0, 0.0, 0.0] };
     let ub_finalize = create_lin_params_buffer(&ctx, params_finalize, "st.lin.params.dot.finalize");
@@ -524,8 +605,7 @@ pub fn dispatch_lin_dot(n:u32, x:&wgpu::Buffer, y:&wgpu::Buffer, scratch:&wgpu::
     } else {
         "st.lin.dot.finalize"
     };
-    dispatch_lin_kernel(&ctx, pipeline_finalize, &bg_finalize, wg_finalize, label_finalize);
-    Ok(())
+    dispatch_lin_kernel(&ctx, pipeline_finalize, &bg_finalize, wg_finalize, label_finalize)
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]

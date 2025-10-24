@@ -14,6 +14,67 @@ use std::collections::HashMap;
 #[cfg(feature = "cuda")]
 use std::sync::{Arc, Mutex, OnceLock};
 
+// ===== SpiralTorch: CUDA NVRTC compile helpers (feature-gated) =====
+#[derive(Debug, thiserror::Error)]
+pub enum StCudaNvrtcError {
+    #[error("NVRTC unavailable (build without 'nvrtc' feature)")]
+    NvrtcUnavailable,
+    #[error("NVRTC compile failed: {0}")]
+    Nvrtc(String),
+    #[error("empty PTX output")]
+    EmptyPtx,
+}
+
+pub struct NvrtcOptions<'a> {
+    pub arch: &'a str,        // e.g. "compute_80"
+    pub code: &'a str,        // e.g. "sm_80"
+    pub std: &'a str,         // "c++14" / "c++17"
+    pub maxrreg: Option<u32>, // optional register cap
+}
+
+pub fn default_nvrtc_options<'a>() -> NvrtcOptions<'a> {
+    NvrtcOptions {
+        arch: "compute_80",
+        code: "sm_80",
+        std: "c++14",
+        maxrreg: None,
+    }
+}
+
+/// Compile CUDA source to PTX with NVRTC (実体はリポの FFI に繋いでください)
+pub fn st_compile_with_nvrtc(src: &str, opts: &NvrtcOptions) -> Result<String, StCudaNvrtcError> {
+    #[cfg(feature = "nvrtc")]
+    {
+        let mut flags = vec![
+            format!("--gpu-architecture={}", opts.arch),
+            format!("--gpu-code={}", opts.code),
+            format!("--std={}", opts.std),
+            "--use_fast_math".into(),
+            "-default-device".into(),
+            "-D__CUDA_NO_HALF_OPERATORS__".into(),
+        ];
+        if let Some(r) = opts.maxrreg {
+            flags.push(format!("--maxrregcount={}", r));
+        }
+        let ptx = nvrtc_compile_shim(src, &flags).map_err(StCudaNvrtcError::Nvrtc)?;
+        if ptx.trim().is_empty() {
+            return Err(StCudaNvrtcError::EmptyPtx);
+        }
+        Ok(ptx)
+    }
+    #[cfg(not(feature = "nvrtc"))]
+    {
+        Err(StCudaNvrtcError::NvrtcUnavailable)
+    }
+}
+
+#[cfg(feature = "nvrtc")]
+fn nvrtc_compile_shim(_src: &str, _flags: &[String]) -> Result<String, String> {
+    // 実環境ではここを既存の NVRTC FFI 呼び出しに置換
+    Err("nvrtc shim not wired".into())
+}
+// ===== end additions =====
+
 #[cfg(feature = "cuda")]
 #[derive(Clone)]
 pub struct CudaModule {
