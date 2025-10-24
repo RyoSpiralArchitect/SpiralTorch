@@ -2918,6 +2918,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "futures",
+ "num-complex",
  "rand",
  "serde",
  "serde_json",
