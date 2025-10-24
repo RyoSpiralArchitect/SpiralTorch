@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -42,9 +43,93 @@ pub mod rccl_comm;
 #[cfg(feature = "hip-real")]
 pub mod real;
 
+#[derive(Debug, Clone)]
+pub struct HipProbe {
+    pub available: bool,
+    pub initialized: bool,
+    pub devices: Vec<DeviceInfo>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct HipRuntime {
+    devices: Vec<DeviceInfo>,
+}
+
+impl HipRuntime {
+    fn new(devices: Vec<DeviceInfo>) -> Self {
+        Self { devices }
+    }
+
+    pub fn devices(&self) -> &[DeviceInfo] {
+        &self.devices
+    }
+
+    pub fn device_count(&self) -> usize {
+        self.devices.len()
+    }
+}
+
+fn runtime_slot() -> &'static Mutex<Option<Arc<HipRuntime>>> {
+    static RUNTIME: OnceLock<Mutex<Option<Arc<HipRuntime>>>> = OnceLock::new();
+    RUNTIME.get_or_init(|| Mutex::new(None))
+}
+
+pub fn runtime() -> Option<Arc<HipRuntime>> {
+    runtime_slot()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(Arc::clone))
+}
+
+pub fn init() -> Result<Arc<HipRuntime>, HipErr> {
+    if let Some(existing) = runtime() {
+        return Ok(existing);
+    }
+
+    let runtime = Arc::new(build_runtime()?);
+
+    let mut guard = runtime_slot()
+        .lock()
+        .map_err(|_| HipErr::Other("failed to lock HIP runtime slot".into()))?;
+    if let Some(existing) = guard.as_ref() {
+        return Ok(existing.clone());
+    }
+    *guard = Some(runtime.clone());
+    Ok(runtime)
+}
+
+#[cfg(test)]
+fn reset_runtime_for_tests() {
+    if let Ok(mut guard) = runtime_slot().lock() {
+        guard.take();
+    }
+}
+
+pub fn probe() -> HipProbe {
+    let available = hip_env_available();
+    match init() {
+        Ok(runtime) => HipProbe {
+            available: true,
+            initialized: true,
+            devices: runtime.devices().to_vec(),
+            error: None,
+        },
+        Err(err) => {
+            let devices = finalize_devices(collect_env_devices(), available);
+            HipProbe {
+                available,
+                initialized: false,
+                devices,
+                error: Some(err.to_string()),
+            }
+        }
+    }
+}
+
 #[cfg(not(feature = "hip-real"))]
 pub mod stub {
-    use super::{hip_env_available, DeviceInfo};
+    use super::{collect_env_devices, finalize_devices, hip_env_available, DeviceInfo};
 
     /// Returns `true` when the process appears to have access to a ROCm runtime.
     ///
@@ -61,8 +146,19 @@ pub mod stub {
     /// higher layers can keep their Z-space heuristics engaged while running on
     /// CPU-only development machines.
     pub fn device_info() -> Vec<DeviceInfo> {
-        super::probe_from_env()
+        finalize_devices(collect_env_devices(), hip_env_available())
     }
+}
+
+fn build_runtime() -> Result<HipRuntime, HipErr> {
+    if !hip_env_available() {
+        return Err(HipErr::Other(
+            "HIP runtime not detected; set SPIRALTORCH_FORCE_HIP=1 or install ROCm".into(),
+        ));
+    }
+
+    let devices = finalize_devices(collect_env_devices(), true);
+    Ok(HipRuntime::new(devices))
 }
 
 fn hip_env_available() -> bool {
@@ -270,6 +366,57 @@ mod tests {
 
         restore_env("PATH", prev_path);
     }
+
+    #[test]
+    fn init_requires_detectable_runtime() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        clear_force_flag();
+
+        let prev_rocm = std::env::var_os("ROCM_PATH");
+        std::env::remove_var("ROCM_PATH");
+        let prev_path = std::env::var_os("PATH");
+        std::env::set_var("PATH", "");
+
+        assert!(super::init().is_err());
+
+        restore_env("PATH", prev_path);
+        restore_env("ROCM_PATH", prev_rocm);
+        super::reset_runtime_for_tests();
+    }
+
+    #[test]
+    fn init_succeeds_when_forced() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let runtime = super::init().expect("runtime should initialise when forced");
+        assert!(runtime.device_count() >= 1);
+        assert!(runtime.devices().iter().any(|device| device.id == 0));
+
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
+
+    #[test]
+    fn gemm_stub_matches_reference_matmul() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let lhs = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let rhs = vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
+        let mut out = vec![0.0; 4];
+        super::gemm_f32(2, 2, 3, &lhs, &rhs, &mut out).expect("gemm stub should succeed");
+        let expected = vec![58.0, 64.0, 139.0, 154.0];
+        assert_eq!(out, expected);
+
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
 }
 
 fn collect_env_devices() -> Vec<DeviceInfo> {
@@ -295,11 +442,8 @@ fn collect_env_devices() -> Vec<DeviceInfo> {
     devices
 }
 
-#[allow(dead_code)]
-fn probe_from_env() -> Vec<DeviceInfo> {
-    let mut devices = collect_env_devices();
-
-    if devices.is_empty() && hip_env_available() {
+fn finalize_devices(mut devices: Vec<DeviceInfo>, available: bool) -> Vec<DeviceInfo> {
+    if devices.is_empty() && available {
         devices.push(DeviceInfo::new(
             0,
             std::borrow::Cow::Borrowed("rocm-probe"),
@@ -316,6 +460,108 @@ pub use stub::{device_info, hip_available};
 #[cfg(feature = "hip-real")]
 pub fn hip_available() -> bool {
     hip_env_available()
+}
+
+fn validate_gemm_dimensions(
+    m: usize,
+    n: usize,
+    k: usize,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    let expected_lhs = m
+        .checked_mul(k)
+        .ok_or_else(|| HipErr::Other("gemm dimensions overflow while validating lhs".into()))?;
+    let expected_rhs = k
+        .checked_mul(n)
+        .ok_or_else(|| HipErr::Other("gemm dimensions overflow while validating rhs".into()))?;
+    let expected_out = m
+        .checked_mul(n)
+        .ok_or_else(|| HipErr::Other("gemm dimensions overflow while validating output".into()))?;
+
+    if lhs.len() != expected_lhs {
+        return Err(HipErr::Other(format!(
+            "lhs buffer length {} does not match m*k={}",
+            lhs.len(),
+            expected_lhs
+        )));
+    }
+    if rhs.len() != expected_rhs {
+        return Err(HipErr::Other(format!(
+            "rhs buffer length {} does not match k*n={}",
+            rhs.len(),
+            expected_rhs
+        )));
+    }
+    if out.len() != expected_out {
+        return Err(HipErr::Other(format!(
+            "output buffer length {} does not match m*n={}",
+            out.len(),
+            expected_out
+        )));
+    }
+
+    Ok(())
+}
+
+fn gemm_stub(m: usize, n: usize, k: usize, lhs: &[f32], rhs: &[f32], out: &mut [f32]) {
+    out.fill(0.0);
+    for row in 0..m {
+        for col in 0..n {
+            let mut acc = 0.0f32;
+            for inner in 0..k {
+                let lhs_index = row * k + inner;
+                let rhs_index = inner * n + col;
+                acc += lhs[lhs_index] * rhs[rhs_index];
+            }
+            out[row * n + col] = acc;
+        }
+    }
+}
+
+pub fn gemm_f32(
+    m: usize,
+    n: usize,
+    k: usize,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    init()?;
+    validate_gemm_dimensions(m, n, k, lhs, rhs, out)?;
+    gemm_stub(m, n, k, lhs, rhs, out);
+    Ok(())
+}
+
+pub unsafe fn gemm_f32_raw(
+    m: usize,
+    n: usize,
+    k: usize,
+    lhs: *const f32,
+    rhs: *const f32,
+    out: *mut f32,
+) -> Result<(), HipErr> {
+    if lhs.is_null() || rhs.is_null() || out.is_null() {
+        return Err(HipErr::Other(
+            "gemm received a null pointer; provide contiguous row-major buffers".into(),
+        ));
+    }
+
+    let lhs_len = m.checked_mul(k).ok_or_else(|| {
+        HipErr::Other("gemm dimensions overflow while constructing lhs slice".into())
+    })?;
+    let rhs_len = k.checked_mul(n).ok_or_else(|| {
+        HipErr::Other("gemm dimensions overflow while constructing rhs slice".into())
+    })?;
+    let out_len = m.checked_mul(n).ok_or_else(|| {
+        HipErr::Other("gemm dimensions overflow while constructing output slice".into())
+    })?;
+
+    let lhs_slice = std::slice::from_raw_parts(lhs, lhs_len);
+    let rhs_slice = std::slice::from_raw_parts(rhs, rhs_len);
+    let out_slice = std::slice::from_raw_parts_mut(out, out_len);
+    gemm_f32(m, n, k, lhs_slice, rhs_slice, out_slice)
 }
 
 #[cfg(feature = "hip-real")]

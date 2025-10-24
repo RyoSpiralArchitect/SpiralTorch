@@ -29,7 +29,7 @@ wgpu = ["wgpu_frac"]
 # Cargo feature resolution failures.
 mps = []
 cuda = []
-hip = []
+hip = ["dep:st-backend-hip"]
 
 [dependencies]
 # Deterministic sampling helpers for pure tensor stochastic initialisers.
@@ -50,6 +50,7 @@ bytemuck = { version = "1.15", features = ["derive"], optional = true }
 pollster = { version = "0.3", optional = true }
 futures-intrusive = { version = "0.5", optional = true }
 futures-lite = { version = "1.13", optional = true }
+st-backend-hip = { path = "../st-backend-hip", optional = true }
 
 [dev-dependencies]
 # Used in tests to validate conversions against ndarray utilities.
