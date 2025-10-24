@@ -55,7 +55,8 @@ impl Module for Linear {
                 right: self.weight.value().shape(),
             });
         }
-        let mut out = input.matmul(self.weight.value())?;
+        let pack = self.weight.ensure_matmul_pack()?;
+        let mut out = input.matmul_prepacked(&pack)?;
         out.add_row_inplace(self.bias.value().data())?;
         Ok(out)
     }
@@ -75,8 +76,8 @@ impl Module for Linear {
         let grad_b = Tensor::from_vec(1, summed.len(), summed)?.scale(1.0 / batch)?;
         self.bias.accumulate_euclidean(&grad_b)?;
 
-        let weight_t = self.weight.value().transpose();
-        let grad_input = grad_output.matmul(&weight_t)?;
+        let pack_t = self.weight.ensure_matmul_transpose_pack()?;
+        let grad_input = grad_output.matmul_prepacked(&pack_t)?;
         Ok(grad_input)
     }
 

@@ -238,6 +238,9 @@ impl Module for SpiralRnn {
         let mut state = anchor.clone();
         stabilise_tensor("spiral_rnn_state_initial", &mut state, anchor_topos)?;
         guard_slice("spiral_rnn_input", input.data(), anchor_topos)?;
+        let input_pack = self.input_kernel.ensure_matmul_pack()?;
+        let state_pack = self.state_kernel.ensure_matmul_pack()?;
+        let phase_pack = self.phase_kernel.ensure_matmul_pack()?;
         let mut caches = Vec::with_capacity(self.steps);
         for step in 0..self.steps {
             stabilise_tensor("spiral_rnn_state_loop", &mut state, anchor_topos)?;
@@ -248,9 +251,9 @@ impl Module for SpiralRnn {
             }
             let mut input_step = Tensor::from_vec(batch, self.input_dim, step_input)?;
             stabilise_tensor("spiral_rnn_input_step", &mut input_step, anchor_topos)?;
-            let mut input_proj = input_step.matmul(self.input_kernel.value())?;
+            let mut input_proj = input_step.matmul_prepacked(&input_pack)?;
             stabilise_tensor("spiral_rnn_input_proj", &mut input_proj, anchor_topos)?;
-            let mut state_proj = state.matmul(self.state_kernel.value())?;
+            let mut state_proj = state.matmul_prepacked(&state_pack)?;
             stabilise_tensor("spiral_rnn_state_proj", &mut state_proj, anchor_topos)?;
             let mut combined = input_proj.add(&state_proj)?;
             combined.add_row_inplace(self.bias.value().data())?;
@@ -260,7 +263,7 @@ impl Module for SpiralRnn {
             stabilise_tensor("spiral_rnn_reset_pre", &mut reset_pre, anchor_topos)?;
             let mut drive_act = tanh_tensor(&drive_pre)?;
             stabilise_tensor("spiral_rnn_drive_act", &mut drive_act, anchor_topos)?;
-            let mut state_phase = state.matmul(self.phase_kernel.value())?;
+            let mut state_phase = state.matmul_prepacked(&phase_pack)?;
             stabilise_tensor("spiral_rnn_state_phase", &mut state_phase, anchor_topos)?;
             let mut gate_pre = state_phase.add(&reset_pre)?;
             gate_pre.add_row_inplace(self.phase_bias.value().data())?;
@@ -321,6 +324,9 @@ impl Module for SpiralRnn {
         let mut grad_state = grad_output.clone();
         stabilise_tensor("spiral_rnn_grad_state_init", &mut grad_state, anchor_topos)?;
         guard_slice("spiral_rnn_grad_output", grad_output.data(), anchor_topos)?;
+        let input_pack_t = self.input_kernel.ensure_matmul_transpose_pack()?;
+        let state_pack_t = self.state_kernel.ensure_matmul_transpose_pack()?;
+        let phase_pack_t = self.phase_kernel.ensure_matmul_transpose_pack()?;
         let mut grad_input_data = vec![0.0f32; cache.batch * cache.input_dim * cache.steps_count];
         let mut grad_input_kernel = Tensor::zeros(self.input_dim, self.hidden_dim * 2)?;
         let mut grad_state_kernel = Tensor::zeros(self.hidden_dim, self.hidden_dim * 2)?;
@@ -470,15 +476,13 @@ impl Module for SpiralRnn {
             grad_bias.add_scaled(&grad_bias_step, 1.0)?;
             stabilise_tensor("spiral_rnn_grad_bias", &mut grad_bias, anchor_topos)?;
 
-            let mut grad_input_proj =
-                grad_combined.matmul(&self.input_kernel.value().transpose())?;
+            let mut grad_input_proj = grad_combined.matmul_prepacked(&input_pack_t)?;
             stabilise_tensor(
                 "spiral_rnn_grad_input_proj",
                 &mut grad_input_proj,
                 anchor_topos,
             )?;
-            let mut grad_state_proj =
-                grad_combined.matmul(&self.state_kernel.value().transpose())?;
+            let mut grad_state_proj = grad_combined.matmul_prepacked(&state_pack_t)?;
             stabilise_tensor(
                 "spiral_rnn_grad_state_proj",
                 &mut grad_state_proj,
@@ -540,8 +544,7 @@ impl Module for SpiralRnn {
                 anchor_topos,
             )?;
 
-            let mut grad_state_from_phase =
-                grad_state_phase.matmul(&self.phase_kernel.value().transpose())?;
+            let mut grad_state_from_phase = grad_state_phase.matmul_prepacked(&phase_pack_t)?;
             stabilise_tensor(
                 "spiral_rnn_grad_state_from_phase",
                 &mut grad_state_from_phase,

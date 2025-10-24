@@ -46,6 +46,7 @@ use rand::SeedableRng;
 #[allow(unused_imports)]
 use rand_distr::StandardNormal;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::error::Error;
 use std::f32::consts::PI;
@@ -120,6 +121,8 @@ pub enum TensorError {
     PorosityOutOfRange { porosity: f32 },
     /// Generic configuration violation for pure-language helpers.
     InvalidValue { label: &'static str },
+    /// The tensor orientation is not supported by the requested computation.
+    UnsupportedLayout { label: &'static str },
     /// Interoperability bridge encountered an unsupported or malformed DLPack tensor.
     DlpackError { message: String },
 }
@@ -239,6 +242,12 @@ impl fmt::Display for TensorError {
             }
             TensorError::InvalidValue { label } => {
                 write!(f, "invalid value: {label}")
+            }
+            TensorError::UnsupportedLayout { label } => {
+                write!(
+                    f,
+                    "requested operation requires a different tensor layout ({label})"
+                )
             }
             TensorError::DlpackError { message } => {
                 write!(f, "dlpack error: {message}")
@@ -361,6 +370,13 @@ impl TensorBuffer {
             TensorBacking::Foreign(foreign) => ExportData::Foreign(foreign.clone()),
         }
     }
+
+    fn try_clone_owned(&self) -> Option<Arc<Vec<f32>>> {
+        match &self.backing {
+            TensorBacking::Owned(vec) => Some(Arc::clone(vec)),
+            TensorBacking::Foreign(_) => None,
+        }
+    }
 }
 
 impl Deref for TensorBuffer {
@@ -383,18 +399,201 @@ impl PartialEq for TensorBuffer {
     }
 }
 
-/// A simple row-major 2D tensor backed by a reference-counted buffer.
+/// Orientation tag for tensors and packed buffers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Layout {
+    RowMajor,
+    ColMajor,
+    Tiled { tm: u32, tn: u32, tk: u32 },
+}
+
+impl Layout {
+    #[inline]
+    fn expect_row_major(self, label: &'static str) -> PureResult<()> {
+        if matches!(self, Layout::RowMajor) {
+            Ok(())
+        } else {
+            Err(TensorError::UnsupportedLayout { label })
+        }
+    }
+
+    #[inline]
+    fn to_dense(self, rows: usize, cols: usize) -> Result<faer_dense::DenseLayout, TensorError> {
+        let _ = (rows, cols);
+        match self {
+            Layout::RowMajor => Ok(faer_dense::DenseLayout::RowMajor),
+            Layout::ColMajor => Ok(faer_dense::DenseLayout::ColMajor),
+            Layout::Tiled { .. } => Err(TensorError::UnsupportedLayout {
+                label: "tiled layout is not yet supported by the dense kernels",
+            }),
+        }
+    }
+}
+
+/// Tile configuration used when preparing packed matrices for matmul.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Tile {
+    pub tm: u32,
+    pub tn: u32,
+    pub tk: u32,
+}
+
+impl Tile {
+    pub const fn new(tm: u32, tn: u32, tk: u32) -> Self {
+        Self { tm, tn, tk }
+    }
+
+    pub const fn col_major() -> Self {
+        Self::new(1, 1, 1)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PackedLayout {
+    ColMajor,
+    Tiled { tm: u32, tn: u32, tk: u32 },
+}
+
+impl PackedLayout {
+    fn to_dense(self) -> faer_dense::DenseLayout {
+        match self {
+            PackedLayout::ColMajor => faer_dense::DenseLayout::ColMajor,
+            PackedLayout::Tiled { .. } => faer_dense::DenseLayout::ColMajor,
+        }
+    }
+}
+
+/// Prepacked representation of the right-hand side operand used by matmul.
+#[derive(Clone, Debug)]
+pub struct PackedB {
+    cols: usize,
+    inner: usize,
+    tile: Tile,
+    layout: PackedLayout,
+    buf: Arc<Vec<f32>>,
+}
+
+impl PackedB {
+    pub fn from_tensor(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
+        match tensor.layout {
+            Layout::RowMajor => Self::from_row_major(tensor, tile),
+            Layout::ColMajor => Ok(Self::from_col_major(tensor, tile)),
+            Layout::Tiled { .. } => Err(TensorError::UnsupportedLayout {
+                label: "packing tiled tensors is not yet supported",
+            }),
+        }
+    }
+
+    fn from_row_major(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
+        let rows = tensor.rows;
+        let cols = tensor.cols;
+        let mut packed = vec![0.0; rows * cols];
+        let data = tensor.data();
+        for r in 0..rows {
+            let offset = r * cols;
+            for c in 0..cols {
+                packed[c * rows + r] = data[offset + c];
+            }
+        }
+        Ok(Self {
+            cols,
+            inner: rows,
+            tile,
+            layout: PackedLayout::ColMajor,
+            buf: Arc::new(packed),
+        })
+    }
+
+    fn from_col_major(tensor: &Tensor, tile: Tile) -> Self {
+        let rows = tensor.rows;
+        let cols = tensor.cols;
+        let buf = tensor
+            .data
+            .try_clone_owned()
+            .unwrap_or_else(|| Arc::new(tensor.data().to_vec()));
+        Self {
+            cols,
+            inner: rows,
+            tile,
+            layout: PackedLayout::ColMajor,
+            buf,
+        }
+    }
+
+    pub fn from_tensor_transpose(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
+        match tensor.layout {
+            Layout::RowMajor => Self::from_row_major_transpose(tensor, tile),
+            Layout::ColMajor => Self::from_col_major_transpose(tensor, tile),
+            Layout::Tiled { .. } => Err(TensorError::UnsupportedLayout {
+                label: "packing tiled tensors is not yet supported",
+            }),
+        }
+    }
+
+    fn from_row_major_transpose(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
+        let rows = tensor.rows;
+        let cols = tensor.cols;
+        let buf = tensor
+            .data
+            .try_clone_owned()
+            .unwrap_or_else(|| Arc::new(tensor.data().to_vec()));
+        Ok(Self {
+            cols: rows,
+            inner: cols,
+            tile,
+            layout: PackedLayout::ColMajor,
+            buf,
+        })
+    }
+
+    fn from_col_major_transpose(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
+        let transposed = tensor.transpose();
+        let mut packed = PackedB::from_row_major(&transposed, tile)?;
+        packed.cols = tensor.rows;
+        packed.inner = tensor.cols;
+        Ok(packed)
+    }
+
+    #[inline]
+    pub fn cols(&self) -> usize {
+        self.cols
+    }
+
+    #[inline]
+    pub fn inner(&self) -> usize {
+        self.inner
+    }
+
+    #[inline]
+    pub fn tile(&self) -> Tile {
+        self.tile
+    }
+
+    #[inline]
+    pub fn layout(&self) -> PackedLayout {
+        self.layout
+    }
+
+    #[inline]
+    pub fn as_slice(&self) -> &[f32] {
+        self.buf.as_slice()
+    }
+}
+
+/// A simple 2D tensor backed by a reference-counted buffer with explicit layout metadata.
 #[derive(Clone, Debug)]
 pub struct Tensor {
     data: Arc<TensorBuffer>,
     rows: usize,
     cols: usize,
+    layout: Layout,
 }
 
 impl PartialEq for Tensor {
     fn eq(&self, other: &Self) -> bool {
         self.rows == other.rows
             && self.cols == other.cols
+            && self.layout == other.layout
             && self.data.as_slice() == other.data.as_slice()
     }
 }
@@ -416,6 +615,7 @@ impl Tensor {
             data: Arc::new(TensorBuffer::from_vec(vec![0.0; rows * cols])),
             rows,
             cols,
+            layout: Layout::RowMajor,
         })
     }
 
@@ -436,6 +636,7 @@ impl Tensor {
             data: Arc::new(TensorBuffer::from_vec(data)),
             rows,
             cols,
+            layout: Layout::RowMajor,
         })
     }
 
@@ -516,6 +717,11 @@ impl Tensor {
         (self.rows, self.cols)
     }
 
+    /// Returns the layout descriptor attached to the tensor.
+    pub fn layout(&self) -> Layout {
+        self.layout
+    }
+
     /// Returns a read-only view of the underlying buffer.
     pub fn data(&self) -> &[f32] {
         self.data.as_slice()
@@ -536,6 +742,7 @@ impl Tensor {
 
     /// Export the tensor as a managed DLPack tensor.
     pub fn to_dlpack(&self) -> PureResult<*mut DLManagedTensor> {
+        self.layout.expect_row_major("dlpack export")?;
         let rows_i64 = i64::try_from(self.rows).map_err(|_| TensorError::DlpackError {
             message: "tensor rows exceed i64 range".to_string(),
         })?;
@@ -743,6 +950,7 @@ impl Tensor {
             data: Arc::new(TensorBuffer::from_foreign(foreign)),
             rows,
             cols,
+            layout: Layout::RowMajor,
         })
     }
 
@@ -795,27 +1003,140 @@ impl Tensor {
             });
         }
 
+        self.layout.expect_row_major("matmul lhs")?;
+        dst.layout.expect_row_major("matmul destination")?;
+        dst.layout = Layout::RowMajor;
+
         let lhs = self.data();
-        let rhs = other.data();
         let dst_slice = dst.data_mut();
 
         match backend {
             MatmulBackend::Auto => self.matmul_auto_into(other, dst_slice, rows, inner, cols)?,
             MatmulBackend::CpuNaive => {
-                matmul_naive_into(dst_slice, lhs, rhs, rows, inner, cols);
+                let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
             }
             MatmulBackend::CpuFaer => {
-                faer_dense::matmul_into(dst_slice, lhs, rhs, rows, inner, cols).map_err(
-                    |message| TensorError::BackendFailure {
-                        backend: "faer",
-                        message,
-                    },
-                )?;
+                let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                let lhs_layout = self.layout.to_dense(rows, inner)?;
+                let rhs_layout = packed.layout().to_dense();
+                faer_dense::matmul_oriented_into(
+                    dst_slice,
+                    lhs,
+                    lhs_layout,
+                    packed.as_slice(),
+                    rhs_layout,
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "faer",
+                    message,
+                })?;
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
+                if !matches!(other.layout, Layout::RowMajor) {
+                    return Err(TensorError::UnsupportedLayout {
+                        label: "wgpu matmul expects row-major rhs",
+                    });
+                }
+                let rhs = other.data();
                 let buffer = matmul_wgpu(lhs, rhs, rows, inner, cols)?;
                 dst_slice.copy_from_slice(&buffer);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Matrix multiply using a prepacked right-hand side operand.
+    pub fn matmul_prepacked(&self, packed: &PackedB) -> PureResult<Tensor> {
+        self.matmul_prepacked_with_backend(packed, MatmulBackend::Auto)
+    }
+
+    /// Matrix multiply against a prepacked operand with an explicit backend selection.
+    pub fn matmul_prepacked_with_backend(
+        &self,
+        packed: &PackedB,
+        backend: MatmulBackend,
+    ) -> PureResult<Tensor> {
+        let rows = self.rows;
+        let cols = packed.cols();
+        let mut tensor = Tensor::zeros(rows, cols)?;
+        self.matmul_prepacked_into_with_backend(packed, &mut tensor, backend)?;
+        Ok(tensor)
+    }
+
+    /// Matrix multiply into an existing tensor buffer using a prepacked operand.
+    pub fn matmul_prepacked_into_with_backend(
+        &self,
+        packed: &PackedB,
+        dst: &mut Tensor,
+        backend: MatmulBackend,
+    ) -> PureResult<()> {
+        if self.cols != packed.inner() {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: (packed.inner(), packed.cols()),
+            });
+        }
+
+        let rows = self.rows;
+        let cols = packed.cols();
+        let inner = packed.inner();
+
+        if dst.rows != rows || dst.cols != cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (rows, cols),
+                right: dst.shape(),
+            });
+        }
+
+        if Arc::ptr_eq(&self.data, &dst.data) {
+            return Err(TensorError::InvalidValue {
+                label: "matmul_out_alias",
+            });
+        }
+
+        self.layout.expect_row_major("matmul lhs")?;
+        dst.layout.expect_row_major("matmul destination")?;
+        dst.layout = Layout::RowMajor;
+
+        let lhs = self.data();
+        let dst_slice = dst.data_mut();
+
+        match backend {
+            MatmulBackend::Auto => {
+                self.matmul_prepacked_auto_into(packed, dst_slice, rows, inner, cols)?;
+            }
+            MatmulBackend::CpuNaive => {
+                matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, packed);
+            }
+            MatmulBackend::CpuFaer => {
+                let lhs_layout = self.layout.to_dense(rows, inner)?;
+                let rhs_layout = packed.layout().to_dense();
+                faer_dense::matmul_oriented_into(
+                    dst_slice,
+                    lhs,
+                    lhs_layout,
+                    packed.as_slice(),
+                    rhs_layout,
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "faer",
+                    message,
+                })?;
+            }
+            #[cfg(feature = "wgpu")]
+            MatmulBackend::GpuWgpu => {
+                return Err(TensorError::UnsupportedLayout {
+                    label: "wgpu matmul does not accept prepacked operands",
+                });
             }
         }
 
@@ -837,7 +1158,10 @@ impl Tensor {
     ) -> PureResult<()> {
         #[cfg(feature = "wgpu")]
         {
-            if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
+            if matches!(other.layout, Layout::RowMajor)
+                && wgpu_dense::is_available()
+                && wgpu_dense::should_use(rows, inner, cols)
+            {
                 if let Ok(buffer) = wgpu_dense::matmul(self.data(), other.data(), rows, inner, cols)
                 {
                     dst.copy_from_slice(&buffer);
@@ -846,15 +1170,34 @@ impl Tensor {
             }
         }
 
+        let packed = PackedB::from_tensor(other, Tile::col_major())?;
+        self.matmul_prepacked_auto_into(&packed, dst, rows, inner, cols)
+    }
+
+    fn matmul_prepacked_auto_into(
+        &self,
+        packed: &PackedB,
+        dst: &mut [f32],
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) -> PureResult<()> {
         if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
-            if let Ok(()) =
-                faer_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
-            {
+            if let Ok(()) = faer_dense::matmul_oriented_into(
+                dst,
+                self.data(),
+                self.layout.to_dense(rows, inner)?,
+                packed.as_slice(),
+                packed.layout().to_dense(),
+                rows,
+                inner,
+                cols,
+            ) {
                 return Ok(());
             }
         }
 
-        matmul_naive_into(dst, self.data(), other.data(), rows, inner, cols);
+        matmul_naive_packed_into(dst, self.data(), rows, inner, cols, packed);
         Ok(())
     }
 
@@ -1554,6 +1897,7 @@ impl Tensor {
             data: Arc::new(TensorBuffer::from_vec(data)),
             rows: self.cols,
             cols: self.rows,
+            layout: Layout::RowMajor,
         }
     }
 
@@ -1690,6 +2034,7 @@ pub fn mean_squared_error(predictions: &Tensor, targets: &Tensor) -> PureResult<
 pub struct LinearModel {
     weights: Tensor,
     bias: Vec<f32>,
+    packed_weights: RefCell<Option<PackedB>>,
 }
 
 impl LinearModel {
@@ -1710,6 +2055,7 @@ impl LinearModel {
         Ok(Self {
             weights,
             bias: vec![0.0; output_dim],
+            packed_weights: RefCell::new(None),
         })
     }
 
@@ -1721,7 +2067,8 @@ impl LinearModel {
                 right: self.weights.shape(),
             });
         }
-        let mut out = inputs.matmul(&self.weights)?;
+        let pack = self.ensure_packed_weights()?;
+        let mut out = inputs.matmul_prepacked(&pack)?;
         out.add_row_inplace(&self.bias)?;
         Ok(out)
     }
@@ -1746,7 +2093,9 @@ impl LinearModel {
             });
         }
         let batch_size = inputs.shape().0 as f32;
-        let predictions = self.forward(inputs)?;
+        let pack = self.ensure_packed_weights()?;
+        let mut predictions = inputs.matmul_prepacked(&pack)?;
+        predictions.add_row_inplace(&self.bias)?;
         let diff = predictions.sub(targets)?;
         let inputs_t = inputs.transpose();
         let grad_w = inputs_t.matmul(&diff)?.scale(1.0 / batch_size)?;
@@ -1758,6 +2107,7 @@ impl LinearModel {
         for (b, g) in self.bias.iter_mut().zip(grad_b.iter()) {
             *b -= learning_rate * g;
         }
+        self.packed_weights.borrow_mut().take();
         Ok(mean_squared_error_from_diff(&diff))
     }
 
@@ -1769,6 +2119,15 @@ impl LinearModel {
     /// Returns a reference to the model bias.
     pub fn bias(&self) -> &[f32] {
         &self.bias
+    }
+
+    fn ensure_packed_weights(&self) -> PureResult<PackedB> {
+        if let Some(existing) = self.packed_weights.borrow().clone() {
+            return Ok(existing);
+        }
+        let pack = PackedB::from_tensor(&self.weights, Tile::col_major())?;
+        *self.packed_weights.borrow_mut() = Some(pack.clone());
+        Ok(pack)
     }
 }
 
@@ -3290,6 +3649,34 @@ fn matmul_naive_into(
     }
 }
 
+fn matmul_naive_packed_into(
+    dst: &mut [f32],
+    lhs: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    packed: &PackedB,
+) {
+    debug_assert_eq!(dst.len(), rows * cols);
+    debug_assert_eq!(inner, packed.inner());
+    dst.fill(0.0);
+    let rhs = packed.as_slice();
+    for r in 0..rows {
+        for c in 0..cols {
+            let mut sum = 0.0f32;
+            for k in 0..inner {
+                let lhs_value = lhs[r * inner + k];
+                let rhs_index = match packed.layout() {
+                    PackedLayout::ColMajor => c * inner + k,
+                    PackedLayout::Tiled { .. } => c * inner + k,
+                };
+                sum += lhs_value * rhs[rhs_index];
+            }
+            dst[r * cols + c] = sum;
+        }
+    }
+}
+
 fn matmul_naive(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize) -> Vec<f32> {
     let mut out = vec![0.0; rows * cols];
     matmul_naive_into(&mut out, lhs, rhs, rows, inner, cols);
@@ -3547,6 +3934,56 @@ mod tests {
             .unwrap();
         let expected_sum = Tensor::from_vec(2, 2, vec![59.0, 65.0, 140.0, 155.0]).unwrap();
         assert_eq!(sum, expected_sum);
+    }
+
+    #[test]
+    fn matmul_prepacked_matches_standard() {
+        let lhs = Tensor::from_vec(
+            4,
+            3,
+            vec![
+                1.0, -0.5, 2.0, 0.25, 1.5, -1.25, 0.75, 0.5, -0.75, 1.0, -1.5, 0.33,
+            ],
+        )
+        .unwrap();
+        let rhs = Tensor::from_vec(
+            3,
+            5,
+            vec![
+                0.5, -1.0, 0.25, 1.5, -0.75, 1.0, 0.5, -0.5, 0.75, -1.25, 0.66, 0.8, -0.2, 1.2,
+                -0.4,
+            ],
+        )
+        .unwrap();
+        let packed = PackedB::from_tensor(&rhs, Tile::col_major()).unwrap();
+        let standard = lhs.matmul(&rhs).unwrap();
+        let prepacked = lhs.matmul_prepacked(&packed).unwrap();
+        assert_eq!(standard, prepacked);
+    }
+
+    #[test]
+    fn matmul_prepacked_transpose_matches_standard() {
+        let lhs = Tensor::from_vec(
+            4,
+            3,
+            vec![
+                0.2, -0.4, 0.6, 1.1, -0.9, 0.7, 0.3, -0.2, 0.5, -1.3, 0.8, -0.1,
+            ],
+        )
+        .unwrap();
+        let rhs = Tensor::from_vec(
+            5,
+            3,
+            vec![
+                0.1, 0.2, -0.3, 0.4, -0.5, 0.6, -0.7, 0.8, -0.9, 1.0, -1.1, 1.2, -1.3, 1.4, -1.5,
+            ],
+        )
+        .unwrap();
+        let rhs_t = rhs.transpose();
+        let packed_t = PackedB::from_tensor_transpose(&rhs, Tile::col_major()).unwrap();
+        let standard = lhs.matmul(&rhs_t).unwrap();
+        let prepacked = lhs.matmul_prepacked(&packed_t).unwrap();
+        assert_eq!(standard, prepacked);
     }
 
     #[test]
