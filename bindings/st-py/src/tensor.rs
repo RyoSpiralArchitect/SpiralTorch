@@ -14,6 +14,8 @@ fn parse_backend(label: Option<&str>) -> MatmulBackend {
         "auto" => MatmulBackend::Auto,
         "faer" => MatmulBackend::CpuFaer,
         "cpu" => MatmulBackend::CpuFaer,
+        "simd" => MatmulBackend::CpuSimd,
+        "cpu-simd" => MatmulBackend::CpuSimd,
         "naive" => MatmulBackend::CpuNaive,
         #[cfg(feature = "wgpu")]
         "wgpu" => MatmulBackend::GpuWgpu,

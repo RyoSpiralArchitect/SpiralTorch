@@ -32,9 +32,9 @@ pub use self::topos::{
     RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas, ZBox, ZBoxSite,
 };
 
-use crate::backend::faer_dense;
 #[cfg(feature = "wgpu")]
 use crate::backend::wgpu_dense;
+use crate::backend::{cpu_dense, faer_dense};
 use crate::dlpack::{
     call_managed_deleter, drop_exported_state, DLDataType, DLDataTypeCode, DLDevice, DLDeviceType,
     DLManagedTensor, DLTensor, ExportData, ForeignTensor, ManagedTensorState,
@@ -266,6 +266,8 @@ pub enum MatmulBackend {
     Auto,
     /// Force the SIMD-accelerated faer kernel.
     CpuFaer,
+    /// Use the built-in tiled SIMD micro-kernel.
+    CpuSimd,
     /// Always fallback to the scalar implementation.
     CpuNaive,
     /// Force the compute-path GEMM running through WGPU.
@@ -278,6 +280,7 @@ impl MatmulBackend {
         match self {
             MatmulBackend::Auto => "auto",
             MatmulBackend::CpuFaer => "faer",
+            MatmulBackend::CpuSimd => "simd",
             MatmulBackend::CpuNaive => "naive",
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => "wgpu",
@@ -968,6 +971,19 @@ impl Tensor {
 
         match backend {
             MatmulBackend::Auto => self.matmul_auto_into(other, dst_slice, rows, inner, cols)?,
+            MatmulBackend::CpuSimd => {
+                if !matches!(other.layout, Layout::RowMajor) {
+                    return Err(TensorError::UnsupportedLayout {
+                        label: "simd matmul expects row-major rhs",
+                    });
+                }
+                cpu_dense::matmul_into(dst_slice, lhs, other.data(), rows, inner, cols).map_err(
+                    |message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
+                        message,
+                    },
+                )?;
+            }
             MatmulBackend::CpuNaive => {
                 let packed = PackedB::from_tensor(other, Tile::col_major())?;
                 matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
@@ -1067,6 +1083,18 @@ impl Tensor {
             MatmulBackend::Auto => {
                 self.matmul_prepacked_auto_into(packed, dst_slice, rows, inner, cols)?;
             }
+            MatmulBackend::CpuSimd => {
+                if !matches!(packed.layout(), PackedLayout::ColMajor) {
+                    return Err(TensorError::UnsupportedLayout {
+                        label: "simd matmul expects col-major packed rhs",
+                    });
+                }
+                cpu_dense::matmul_packed_into(dst_slice, lhs, packed.as_slice(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
+                        message,
+                    })?;
+            }
             MatmulBackend::CpuNaive => {
                 matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, packed);
             }
@@ -1126,6 +1154,14 @@ impl Tensor {
             }
         }
 
+        if matches!(other.layout, Layout::RowMajor) && cpu_dense::should_use(rows, inner, cols) {
+            if let Ok(()) =
+                cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
+            {
+                return Ok(());
+            }
+        }
+
         let packed = PackedB::from_tensor(other, Tile::col_major())?;
         self.matmul_prepacked_auto_into(&packed, dst, rows, inner, cols)
     }
@@ -1138,6 +1174,21 @@ impl Tensor {
         inner: usize,
         cols: usize,
     ) -> PureResult<()> {
+        if matches!(packed.layout(), PackedLayout::ColMajor)
+            && cpu_dense::should_use(rows, inner, cols)
+        {
+            if let Ok(()) = cpu_dense::matmul_packed_into(
+                dst,
+                self.data(),
+                packed.as_slice(),
+                rows,
+                inner,
+                cols,
+            ) {
+                return Ok(());
+            }
+        }
+
         if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
             if let Ok(()) = faer_dense::matmul_oriented_into(
                 dst,
@@ -1289,6 +1340,14 @@ impl Tensor {
             MatmulBackend::Auto => {
                 self.matmul_bias_relu_into_auto(other, bias, dst_slice, rows, inner, cols)?;
             }
+            MatmulBackend::CpuSimd => {
+                cpu_dense::matmul_into(dst_slice, self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
+                        message,
+                    })?;
+                add_bias_relu_inplace(dst_slice, rows, cols, bias);
+            }
             MatmulBackend::CpuNaive => {
                 matmul_naive_into(dst_slice, self.data(), other.data(), rows, inner, cols);
                 add_bias_relu_inplace(dst_slice, rows, cols, bias);
@@ -1343,6 +1402,15 @@ impl Tensor {
             }
         }
 
+        if cpu_dense::should_use(rows, inner, cols) {
+            if let Ok(()) =
+                cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
+            {
+                add_bias_relu_inplace(dst, rows, cols, bias);
+                return Ok(());
+            }
+        }
+
         if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
             if let Ok(()) =
                 faer_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
@@ -1388,6 +1456,16 @@ impl Tensor {
 
         let data = match backend {
             MatmulBackend::Auto => self.matmul_bias_gelu_auto(other, bias, rows, inner, cols)?,
+            MatmulBackend::CpuSimd => {
+                let mut buffer = vec![0.0; rows * cols];
+                cpu_dense::matmul_into(&mut buffer, self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                    backend: "cpu_simd",
+                    message,
+                })?;
+                add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+                buffer
+            }
             MatmulBackend::CpuNaive => {
                 let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
@@ -1431,6 +1509,16 @@ impl Tensor {
                 {
                     return Ok(buffer);
                 }
+            }
+        }
+
+        if cpu_dense::should_use(rows, inner, cols) {
+            let mut buffer = vec![0.0; rows * cols];
+            if cpu_dense::matmul_into(&mut buffer, self.data(), other.data(), rows, inner, cols)
+                .is_ok()
+            {
+                add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+                return Ok(buffer);
             }
         }
 
@@ -1543,6 +1631,14 @@ impl Tensor {
                     other, bias, residual, dst_slice, rows, inner, cols,
                 )?;
             }
+            MatmulBackend::CpuSimd => {
+                cpu_dense::matmul_into(dst_slice, self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
+                        message,
+                    })?;
+                add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
+            }
             MatmulBackend::CpuNaive => {
                 matmul_naive_into(dst_slice, self.data(), other.data(), rows, inner, cols);
                 add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
@@ -1605,6 +1701,15 @@ impl Tensor {
             }
         }
 
+        if cpu_dense::should_use(rows, inner, cols) {
+            if let Ok(()) =
+                cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
+            {
+                add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
+                return Ok(());
+            }
+        }
+
         if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
             if let Ok(()) =
                 faer_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
@@ -1664,6 +1769,16 @@ impl Tensor {
             MatmulBackend::Auto => {
                 self.matmul_bias_add_gelu_auto(other, bias, residual, rows, inner, cols)?
             }
+            MatmulBackend::CpuSimd => {
+                let mut buffer = vec![0.0; rows * cols];
+                cpu_dense::matmul_into(&mut buffer, self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                    backend: "cpu_simd",
+                    message,
+                })?;
+                add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
+                buffer
+            }
             MatmulBackend::CpuNaive => {
                 let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
@@ -1720,6 +1835,16 @@ impl Tensor {
                 ) {
                     return Ok(buffer);
                 }
+            }
+        }
+
+        if cpu_dense::should_use(rows, inner, cols) {
+            let mut buffer = vec![0.0; rows * cols];
+            if cpu_dense::matmul_into(&mut buffer, self.data(), other.data(), rows, inner, cols)
+                .is_ok()
+            {
+                add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
+                return Ok(buffer);
             }
         }
 
