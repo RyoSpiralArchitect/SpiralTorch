@@ -1052,60 +1052,6 @@ impl ColorVectorField {
         Ok((magnitude, phase))
     }
 
-    fn map_power_tensor_from_interleaved<F>(
-        rows: usize,
-        cols: usize,
-        spectrum: &[f32],
-        mut map: F,
-    ) -> PureResult<Tensor>
-    where
-        F: FnMut(f32) -> f32,
-    {
-        let expected_pairs = rows
-            .checked_mul(cols)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_power",
-                volume: rows.saturating_mul(cols),
-                max_volume: usize::MAX,
-            })?;
-        let expected_len = expected_pairs
-            .checked_mul(Self::FFT_INTERLEAVED_STRIDE)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_power",
-                volume: rows
-                    .saturating_mul(cols)
-                    .saturating_mul(Self::FFT_INTERLEAVED_STRIDE),
-                max_volume: usize::MAX,
-            })?;
-
-        if spectrum.len() != expected_len {
-            return Err(TensorError::DataLength {
-                expected: expected_len,
-                got: spectrum.len(),
-            });
-        }
-
-        let mut power = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            let (re_energy, im_energy) = (chunk[0], chunk[1]);
-            let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
-            let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
-            let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
-
-            let energy = re_energy.mul_add(re_energy, im_energy * im_energy);
-            let chroma_r = re_chroma_r.mul_add(re_chroma_r, im_chroma_r * im_chroma_r);
-            let chroma_g = re_chroma_g.mul_add(re_chroma_g, im_chroma_g * im_chroma_g);
-            let chroma_b = re_chroma_b.mul_add(re_chroma_b, im_chroma_b * im_chroma_b);
-
-            power.push(map(energy));
-            power.push(map(chroma_r));
-            power.push(map(chroma_g));
-            power.push(map(chroma_b));
-        }
-
-        Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power)
-    }
-
     fn validate_power_interleaved_dimensions(
         rows: usize,
         cols: usize,
@@ -1157,7 +1103,8 @@ impl ColorVectorField {
         cols: usize,
         spectrum: &[f32],
     ) -> PureResult<Tensor> {
-        Self::map_power_tensor_from_interleaved(rows, cols, spectrum, |power| power)
+        Self::power_and_power_db_tensors_from_interleaved(rows, cols, spectrum)
+            .map(|(power, _)| power)
     }
 
     fn power_db_tensor_from_interleaved(
@@ -1165,7 +1112,8 @@ impl ColorVectorField {
         cols: usize,
         spectrum: &[f32],
     ) -> PureResult<Tensor> {
-        Self::map_power_tensor_from_interleaved(rows, cols, spectrum, Self::map_power_to_db)
+        Self::power_and_power_db_tensors_from_interleaved(rows, cols, spectrum)
+            .map(|(_, power_db)| power_db)
     }
 
     fn power_and_power_db_tensors_from_interleaved(
@@ -1179,18 +1127,10 @@ impl ColorVectorField {
         let mut decibel = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
 
         for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            let [energy, chroma_r, chroma_g, chroma_b] =
-                Self::power_channels_from_interleaved_chunk(chunk);
-
-            linear.push(energy);
-            linear.push(chroma_r);
-            linear.push(chroma_g);
-            linear.push(chroma_b);
-
-            decibel.push(Self::map_power_to_db(energy));
-            decibel.push(Self::map_power_to_db(chroma_r));
-            decibel.push(Self::map_power_to_db(chroma_g));
-            decibel.push(Self::map_power_to_db(chroma_b));
+            for value in Self::power_channels_from_interleaved_chunk(chunk) {
+                linear.push(value);
+                decibel.push(Self::map_power_to_db(value));
+            }
         }
 
         let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, linear)?;

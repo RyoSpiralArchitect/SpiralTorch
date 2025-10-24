@@ -6,11 +6,12 @@
 #![cfg(feature = "wgpu")]
 
 use crate::backend::wgpu_util::WgpuContext;
+use crate::pure::{PackedB, PackedLayout};
 use crate::util::readback_f32;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::panic::AssertUnwindSafe;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, PipelineLayout, Queue};
 
@@ -40,6 +41,21 @@ const FUSED_ATTENTION_FLAG_USE_ATTN_BIAS: u32 = 1 << 1;
 enum ScalarType {
     F32,
     QuantizedI8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum WeightDType {
+    F32,
+    Int8,
+}
+
+impl WeightDType {
+    fn to_scalar(self) -> ScalarType {
+        match self {
+            WeightDType::F32 => ScalarType::F32,
+            WeightDType::Int8 => ScalarType::QuantizedI8,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -176,6 +192,124 @@ impl TileConfig {
     }
 }
 
+fn div_ceil_usize(lhs: usize, rhs: usize) -> usize {
+    if rhs == 0 {
+        0
+    } else {
+        (lhs + rhs - 1) / rhs
+    }
+}
+
+fn compute_rhs_tile_meta(
+    inner: usize,
+    cols: usize,
+    tile: TileConfig,
+) -> (usize, usize, usize, usize, usize) {
+    let tile_k = tile.tile_k() as usize;
+    let tile_n = tile.tile_n() as usize;
+    let tiles_k = div_ceil_usize(inner, tile_k);
+    let tiles_n = div_ceil_usize(cols, tile_n);
+    let tile_elems = tile_k * tile_n;
+    let total_tiles = tiles_k * tiles_n;
+    let total_elems = total_tiles * tile_elems;
+    (tile_k, tile_n, tiles_k, tiles_n, total_elems)
+}
+
+fn pack_rhs_f32(packed: &PackedB, tile: TileConfig) -> (Vec<f32>, usize) {
+    let inner = packed.inner();
+    let cols = packed.cols();
+    let (tile_k, tile_n, tiles_k, tiles_n, total_elems) = compute_rhs_tile_meta(inner, cols, tile);
+    let mut tiled = vec![0.0f32; total_elems];
+    let slice = packed.as_slice();
+    let layout = packed.layout();
+
+    for tile_n_index in 0..tiles_n {
+        for tile_k_index in 0..tiles_k {
+            let tile_offset = (tile_n_index * tiles_k + tile_k_index) * tile_k * tile_n;
+            for local_n in 0..tile_n {
+                let col = tile_n_index * tile_n + local_n;
+                for local_k in 0..tile_k {
+                    let k = tile_k_index * tile_k + local_k;
+                    let dst_index = tile_offset + local_n * tile_k + local_k;
+                    if col < cols && k < inner {
+                        let value = match layout {
+                            PackedLayout::ColMajor => slice[col * inner + k],
+                            PackedLayout::Tiled { .. } => slice[col * inner + k],
+                        };
+                        tiled[dst_index] = value;
+                    }
+                }
+            }
+        }
+    }
+
+    (tiled, total_elems)
+}
+
+fn pack_rhs_int8(packed: &PackedB, tile: TileConfig) -> (Vec<i32>, Vec<f32>, usize) {
+    let inner = packed.inner();
+    let cols = packed.cols();
+    let (tile_k, tile_n, tiles_k, tiles_n, total_elems) = compute_rhs_tile_meta(inner, cols, tile);
+    let mut quantized = Vec::with_capacity((total_elems + 3) / 4);
+    let mut accumulator: u32 = 0;
+    let mut lane: u32 = 0;
+    let slice = packed.as_slice();
+    let layout = packed.layout();
+
+    let mut scales = vec![0.0f32; cols];
+    for col in 0..cols {
+        let mut max_abs = 0.0f32;
+        for k in 0..inner {
+            let value = match layout {
+                PackedLayout::ColMajor => slice[col * inner + k],
+                PackedLayout::Tiled { .. } => slice[col * inner + k],
+            };
+            let abs = value.abs();
+            if abs > max_abs {
+                max_abs = abs;
+            }
+        }
+        scales[col] = if max_abs == 0.0 { 1.0 } else { max_abs / 127.0 };
+    }
+
+    for tile_n_index in 0..tiles_n {
+        for tile_k_index in 0..tiles_k {
+            for local_n in 0..tile_n {
+                let col = tile_n_index * tile_n + local_n;
+                let scale = if col < cols { scales[col] } else { 1.0 };
+                let inv_scale = 1.0 / scale;
+                for local_k in 0..tile_k {
+                    let k = tile_k_index * tile_k + local_k;
+                    let mut quant = 0i32;
+                    if col < cols && k < inner {
+                        let raw = match layout {
+                            PackedLayout::ColMajor => slice[col * inner + k],
+                            PackedLayout::Tiled { .. } => slice[col * inner + k],
+                        };
+                        let scaled = (raw * inv_scale).round();
+                        let clamped = scaled.clamp(-127.0, 127.0);
+                        quant = clamped as i32;
+                    }
+                    let byte = (quant as i8) as u8 as u32;
+                    accumulator |= byte << (lane * 8);
+                    lane += 1;
+                    if lane == 4 {
+                        quantized.push(accumulator as i32);
+                        accumulator = 0;
+                        lane = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    if lane != 0 {
+        quantized.push(accumulator as i32);
+    }
+
+    (quantized, scales, total_elems)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum FusedActivation {
     Relu,
@@ -185,6 +319,7 @@ enum FusedActivation {
 struct GpuContext {
     context: WgpuContext,
     pipeline_cache: PipelineCache,
+    weights_cache: Mutex<HashMap<RhsCacheKey, Weak<GpuPackedRhs>>>,
     bind_layout: Arc<BindGroupLayout>,
     pipeline_layout: Arc<PipelineLayout>,
     zero_storage: OnceLock<Arc<Buffer>>,
@@ -549,6 +684,7 @@ impl GpuContext {
         Ok(Self {
             context: WgpuContext::new(device.clone(), queue.clone()),
             pipeline_cache: PipelineCache::new(device.clone()),
+            weights_cache: Mutex::new(HashMap::new()),
             bind_layout,
             pipeline_layout,
             zero_storage: OnceLock::new(),
@@ -616,6 +752,79 @@ impl GpuContext {
 
     fn softmax_pipeline(&self) -> Option<Arc<ComputePipeline>> {
         self.softmax_pipeline.as_ref().map(Arc::clone)
+    }
+
+    fn rhs_from_packed(
+        &self,
+        packed: &PackedB,
+        tile: TileConfig,
+    ) -> Result<Arc<GpuPackedRhs>, String> {
+        if packed.inner() == 0 || packed.cols() == 0 {
+            return Err("packed matrix dimensions must be positive".into());
+        }
+
+        let dtype = if should_quantize(packed.inner(), packed.cols()) {
+            ScalarType::QuantizedI8
+        } else {
+            ScalarType::F32
+        };
+        let key = RhsCacheKey::new(packed, tile, dtype);
+        if let Some(existing) = self
+            .weights_cache
+            .lock()
+            .unwrap()
+            .get(&key)
+            .and_then(|weak| weak.upgrade())
+        {
+            return Ok(existing);
+        }
+
+        let (buffer, scales) = match dtype {
+            ScalarType::QuantizedI8 => {
+                let (quantized, scales_vec, _total) = pack_rhs_int8(packed, tile);
+                let buffer = Arc::new(self.device().create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("st.tensor.wgpu_dense.packed_rhs.int8"),
+                        contents: bytemuck::cast_slice(&quantized),
+                        usage: wgpu::BufferUsages::STORAGE,
+                    },
+                ));
+                let scales = Arc::new(self.device().create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("st.tensor.wgpu_dense.packed_rhs.scales"),
+                        contents: bytemuck::cast_slice(&scales_vec),
+                        usage: wgpu::BufferUsages::STORAGE,
+                    },
+                ));
+                (buffer, Some(scales))
+            }
+            ScalarType::F32 => {
+                let (values, _total) = pack_rhs_f32(packed, tile);
+                let buffer = Arc::new(self.device().create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("st.tensor.wgpu_dense.packed_rhs.f32"),
+                        contents: bytemuck::cast_slice(&values),
+                        usage: wgpu::BufferUsages::STORAGE,
+                    },
+                ));
+                (buffer, None)
+            }
+        };
+
+        let prepared = Arc::new(GpuPackedRhs {
+            tile,
+            dtype,
+            buffer,
+            scales,
+            _cols: packed.cols(),
+            _inner: packed.inner(),
+        });
+
+        self.weights_cache
+            .lock()
+            .unwrap()
+            .insert(key, Arc::downgrade(&prepared));
+        Ok(prepared)
     }
 
     fn fused_attention_kernel(&self) -> Option<&FusedAttentionKernel> {
@@ -842,14 +1051,18 @@ struct ConvGemmParams {
 }
 
 struct WeightBuffers {
-    buffer: Buffer,
+    buffer: Arc<Buffer>,
     dtype: ScalarType,
-    scales: Option<Buffer>,
+    scales: Option<Arc<Buffer>>,
 }
 
 impl WeightBuffers {
     fn as_binding(&self) -> (&Buffer, ScalarType, Option<&Buffer>) {
-        (&self.buffer, self.dtype, self.scales.as_ref())
+        (
+            self.buffer.as_ref(),
+            self.dtype,
+            self.scales.as_ref().map(Arc::as_ref),
+        )
     }
 }
 
@@ -940,30 +1153,81 @@ impl QuantizedWeights {
     }
 }
 
+#[derive(Clone)]
+struct GpuPackedRhs {
+    tile: TileConfig,
+    dtype: ScalarType,
+    buffer: Arc<Buffer>,
+    scales: Option<Arc<Buffer>>,
+    _cols: usize,
+    _inner: usize,
+}
+
+impl GpuPackedRhs {
+    fn buffer(&self) -> Arc<Buffer> {
+        Arc::clone(&self.buffer)
+    }
+
+    fn scales(&self) -> Option<Arc<Buffer>> {
+        self.scales.as_ref().map(Arc::clone)
+    }
+
+    fn dtype(&self) -> ScalarType {
+        self.dtype
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct RhsCacheKey {
+    data_ptr: usize,
+    cols: usize,
+    inner: usize,
+    tile: TileConfig,
+    dtype: ScalarType,
+}
+
+impl RhsCacheKey {
+    fn new(packed: &PackedB, tile: TileConfig, dtype: ScalarType) -> Self {
+        Self {
+            data_ptr: packed.as_slice().as_ptr() as usize,
+            cols: packed.cols(),
+            inner: packed.inner(),
+            tile,
+            dtype,
+        }
+    }
+}
+
 fn upload_weights(device: &Device, rhs: &[f32], inner: usize, cols: usize) -> WeightBuffers {
     if should_quantize(inner, cols) {
         let quantized = QuantizedWeights::from_f32(rhs, inner, cols);
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("st.tensor.wgpu_dense.rhs.quantized"),
-            contents: bytemuck::cast_slice(quantized.packed.as_slice()),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let scales = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("st.tensor.wgpu_dense.rhs.scales"),
-            contents: bytemuck::cast_slice(quantized.scales.as_slice()),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let buffer = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("st.tensor.wgpu_dense.rhs.quantized"),
+                contents: bytemuck::cast_slice(quantized.packed.as_slice()),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let scales = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("st.tensor.wgpu_dense.rhs.scales"),
+                contents: bytemuck::cast_slice(quantized.scales.as_slice()),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
         WeightBuffers {
             buffer,
             dtype: ScalarType::QuantizedI8,
             scales: Some(scales),
         }
     } else {
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("st.tensor.wgpu_dense.rhs"),
-            contents: bytemuck::cast_slice(rhs),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let buffer = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("st.tensor.wgpu_dense.rhs"),
+                contents: bytemuck::cast_slice(rhs),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
         WeightBuffers {
             buffer,
             dtype: ScalarType::F32,
@@ -1101,6 +1365,121 @@ fn dispatch_matmul(
     }
 }
 
+#[allow(dead_code)]
+fn dispatch_matmul_with_options(
+    ctx: &GpuContext,
+    encoder: &mut wgpu::CommandEncoder,
+    lhs: &Buffer,
+    rhs: &Buffer,
+    bias: Option<&Buffer>,
+    residual: Option<&Buffer>,
+    scales: Option<&Buffer>,
+    out: &Buffer,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    tile: TileConfig,
+    fused_ops_mask: u32,
+    dtype: WeightDType,
+) {
+    let rhs_buffers = WeightBuffers {
+        buffer: Arc::new(rhs.clone()),
+        dtype: dtype.to_scalar(),
+        scales: scales.map(|buf| Arc::new(buf.clone())),
+    };
+    let bias_arc = bias.map(|buf| Arc::new(buf.clone()));
+    let residual_arc = residual.map(|buf| Arc::new(buf.clone()));
+    dispatch_matmul(
+        ctx,
+        encoder,
+        lhs,
+        &rhs_buffers,
+        out,
+        rows,
+        inner,
+        cols,
+        tile,
+        bias.is_some(),
+        fused_ops_mask,
+        bias_arc.as_ref().map(Arc::as_ref),
+        residual_arc.as_ref().map(Arc::as_ref),
+    );
+}
+
+#[allow(dead_code)]
+fn dispatch_fused_linear(
+    ctx: &GpuContext,
+    encoder: &mut wgpu::CommandEncoder,
+    lhs: &Buffer,
+    rhs: &Buffer,
+    bias: &Buffer,
+    out: &Buffer,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    tile: TileConfig,
+    activation: FusedActivation,
+) {
+    let mask = match activation {
+        FusedActivation::Relu => FUSED_OP_RELU,
+        FusedActivation::Gelu => FUSED_OP_GELU,
+    };
+    dispatch_matmul_with_options(
+        ctx,
+        encoder,
+        lhs,
+        rhs,
+        Some(bias),
+        None,
+        None,
+        out,
+        rows,
+        inner,
+        cols,
+        tile,
+        mask,
+        WeightDType::F32,
+    );
+}
+
+#[allow(dead_code)]
+fn dispatch_fused_linear_with_residual(
+    ctx: &GpuContext,
+    encoder: &mut wgpu::CommandEncoder,
+    lhs: &Buffer,
+    rhs: &Buffer,
+    bias: &Buffer,
+    residual: &Buffer,
+    out: &Buffer,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    tile: TileConfig,
+    activation: FusedActivation,
+) {
+    let mut mask = match activation {
+        FusedActivation::Relu => FUSED_OP_RELU,
+        FusedActivation::Gelu => FUSED_OP_GELU,
+    };
+    mask |= FUSED_OP_RESIDUAL;
+    dispatch_matmul_with_options(
+        ctx,
+        encoder,
+        lhs,
+        rhs,
+        Some(bias),
+        Some(residual),
+        None,
+        out,
+        rows,
+        inner,
+        cols,
+        tile,
+        mask,
+        WeightDType::F32,
+    );
+}
+
 fn upload_lhs(device: &Device, label: &str, data: &[f32]) -> Buffer {
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(label),
@@ -1160,6 +1539,71 @@ pub fn matmul(
         &mut encoder,
         &lhs_buf,
         &rhs_buf,
+        &out_buf,
+        rows,
+        inner,
+        cols,
+        tile,
+        false,
+        0,
+        None,
+        None,
+    );
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &out_buf, rows * cols)
+}
+
+pub fn matmul_prepacked(
+    lhs: &[f32],
+    packed_rhs: &PackedB,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if lhs.len() != rows * inner {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            rows * inner,
+            lhs.len()
+        ));
+    }
+    if packed_rhs.inner() != inner {
+        return Err("packed rhs inner dimension mismatch".into());
+    }
+    if packed_rhs.cols() != cols {
+        return Err("packed rhs column dimension mismatch".into());
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let lhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.prepacked.lhs"),
+        contents: bytemuck::cast_slice(lhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let out_buf = allocate_output(device, "st.tensor.wgpu_dense.prepacked.out", rows * cols);
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.prepacked.encoder"),
+    });
+    let tile = select_tile_config(rows, inner, cols);
+    let weights = ctx.rhs_from_packed(packed_rhs, tile)?;
+    let rhs_buffers = WeightBuffers {
+        buffer: weights.buffer(),
+        dtype: weights.dtype(),
+        scales: weights.scales(),
+    };
+    dispatch_matmul(
+        &ctx,
+        &mut encoder,
+        &lhs_buf,
+        &rhs_buffers,
         &out_buf,
         rows,
         inner,
