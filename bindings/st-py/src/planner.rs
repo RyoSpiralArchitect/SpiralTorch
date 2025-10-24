@@ -152,7 +152,12 @@ impl PyRankPlan {
 }
 
 fn parse_backend(name: Option<&str>) -> PyResult<BackendKind> {
-    match name.unwrap_or("wgpu").to_ascii_lowercase().as_str() {
+    let raw = name.unwrap_or("wgpu");
+    if raw.eq_ignore_ascii_case("auto") {
+        return Ok(BackendKind::Wgpu);
+    }
+
+    match raw.to_ascii_lowercase().as_str() {
         "wgpu" | "webgpu" => Ok(BackendKind::Wgpu),
         "cuda" => Ok(BackendKind::Cuda),
         "hip" | "rocm" => Ok(BackendKind::Hip),
