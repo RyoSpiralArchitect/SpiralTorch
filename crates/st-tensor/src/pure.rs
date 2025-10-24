@@ -32,6 +32,8 @@ pub use self::topos::{
     RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas, ZBox, ZBoxSite,
 };
 
+#[cfg(feature = "hip")]
+use crate::backend::hip_dense;
 #[cfg(feature = "wgpu")]
 use crate::backend::wgpu_dense;
 use crate::backend::{cpu_dense, faer_dense};
@@ -273,6 +275,9 @@ pub enum MatmulBackend {
     /// Force the compute-path GEMM running through WGPU.
     #[cfg(feature = "wgpu")]
     GpuWgpu,
+    /// Execute GEMM via the HIP backend when available.
+    #[cfg(feature = "hip")]
+    GpuHip,
 }
 
 impl MatmulBackend {
@@ -284,6 +289,8 @@ impl MatmulBackend {
             MatmulBackend::CpuNaive => "naive",
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => "wgpu",
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => "hip",
         }
     }
 }
@@ -1062,6 +1069,21 @@ impl Tensor {
                 let buffer = matmul_wgpu(lhs, rhs, rows, inner, cols)?;
                 dst_slice.copy_from_slice(&buffer);
             }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                if !matches!(other.layout, Layout::RowMajor) {
+                    return Err(TensorError::UnsupportedLayout {
+                        label: "hip matmul expects row-major rhs",
+                    });
+                }
+                let rhs = other.data();
+                hip_dense::matmul_into(lhs, rhs, dst_slice, rows, inner, cols).map_err(
+                    |message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    },
+                )?;
+            }
         }
 
         Ok(())
@@ -1166,6 +1188,13 @@ impl Tensor {
                     label: "wgpu matmul does not accept prepacked operands",
                 });
             }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                return Err(TensorError::BackendFailure {
+                    backend: "hip",
+                    message: "hip matmul does not yet support prepacked operands".into(),
+                });
+            }
         }
 
         Ok(())
@@ -1193,6 +1222,19 @@ impl Tensor {
                 if let Ok(buffer) = wgpu_dense::matmul(self.data(), other.data(), rows, inner, cols)
                 {
                     dst.copy_from_slice(&buffer);
+                    return Ok(());
+                }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if matches!(other.layout, Layout::RowMajor)
+                && hip_dense::is_available()
+                && hip_dense::should_use(rows, inner, cols)
+            {
+                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
+                {
                     return Ok(());
                 }
             }
@@ -1420,6 +1462,15 @@ impl Tensor {
                 })?;
                 dst_slice.copy_from_slice(&data);
             }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                hip_dense::matmul_into(self.data(), other.data(), dst_slice, rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    })?;
+                add_bias_relu_inplace(dst_slice, rows, cols, bias);
+            }
         }
 
         Ok(())
@@ -1441,6 +1492,17 @@ impl Tensor {
                     wgpu_dense::matmul_bias_relu(self.data(), other.data(), bias, rows, inner, cols)
                 {
                     dst.copy_from_slice(&buffer);
+                    return Ok(());
+                }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
+                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
+                {
+                    add_bias_relu_inplace(dst, rows, cols, bias);
                     return Ok(());
                 }
             }
@@ -1532,6 +1594,16 @@ impl Tensor {
                         message,
                     })?
             }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                let mut buffer = hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    })?;
+                add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+                buffer
+            }
         };
 
         Tensor::from_vec(rows, cols, data)
@@ -1551,6 +1623,18 @@ impl Tensor {
                 if let Ok(buffer) =
                     wgpu_dense::matmul_bias_gelu(self.data(), other.data(), bias, rows, inner, cols)
                 {
+                    return Ok(buffer);
+                }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
+                if let Ok(mut buffer) =
+                    hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                {
+                    add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
                     return Ok(buffer);
                 }
             }
@@ -1712,6 +1796,15 @@ impl Tensor {
                 })?;
                 dst_slice.copy_from_slice(&data);
             }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                hip_dense::matmul_into(self.data(), other.data(), dst_slice, rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    })?;
+                add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
+            }
         }
 
         Ok(())
@@ -1740,6 +1833,17 @@ impl Tensor {
                     cols,
                 ) {
                     dst.copy_from_slice(&buffer);
+                    return Ok(());
+                }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
+                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
+                {
+                    add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
                     return Ok(());
                 }
             }
@@ -1851,6 +1955,16 @@ impl Tensor {
                 backend: "wgpu",
                 message,
             })?,
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                let mut buffer = hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    })?;
+                add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
+                buffer
+            }
         };
 
         Tensor::from_vec(rows, cols, data)
@@ -1877,6 +1991,18 @@ impl Tensor {
                     inner,
                     cols,
                 ) {
+                    return Ok(buffer);
+                }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
+                if let Ok(mut buffer) =
+                    hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                {
+                    add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
                     return Ok(buffer);
                 }
             }
