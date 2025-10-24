@@ -37,6 +37,8 @@ pub struct AttentionConfig {
     pub head_dim: u32,
     /// Optional scale applied to the dot-product (defaults to 1/sqrt(head_dim)).
     pub scale: Option<f32>,
+    /// Whether to apply causal masking (mask out keys greater than the current query).
+    pub causal: bool,
 }
 
 impl AttentionConfig {
@@ -83,6 +85,7 @@ pub struct AttentionSlices<'a> {
     pub queries: &'a [f32],
     pub keys: &'a [f32],
     pub values: &'a [f32],
+    pub context_lengths: Option<&'a [u32]>,
     pub z_bias: Option<&'a [f32]>,
     pub attn_bias: Option<&'a [f32]>,
     pub output: &'a mut [f32],
@@ -128,6 +131,21 @@ impl<'a> AttentionSlices<'a> {
                 self.output.len(),
                 expected_len
             ));
+        }
+        if let Some(lengths) = self.context_lengths {
+            if lengths.len() != contexts {
+                return Err(format!(
+                    "context_lengths length {} does not match contexts {}",
+                    lengths.len(),
+                    contexts
+                ));
+            }
+            if let Some(invalid) = lengths.iter().position(|&len| len > cfg.sequence_len) {
+                return Err(format!(
+                    "context_lengths[{}] = {} exceeds sequence length {}",
+                    invalid, lengths[invalid], cfg.sequence_len
+                ));
+            }
         }
         if let Some(bias) = self.z_bias {
             if bias.len() != tokens {
@@ -189,6 +207,17 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
             .map_err(|err| err.to_string())?
     };
 
+    let use_context_lengths = slices.context_lengths.is_some();
+    let context_lengths = if let Some(lengths) = slices.context_lengths {
+        device
+            .htod_sync_copy(lengths)
+            .map_err(|err| err.to_string())?
+    } else {
+        device
+            .alloc_zeros::<u32>(1)
+            .map_err(|err| err.to_string())?
+    };
+
     let use_attn_bias = slices.attn_bias.is_some();
     let attn_bias = if let Some(mask) = slices.attn_bias {
         device.htod_sync_copy(mask).map_err(|err| err.to_string())?
@@ -216,6 +245,7 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
                 &queries,
                 &keys,
                 &values,
+                &context_lengths,
                 &z_bias,
                 &attn_bias,
                 &mut output,
@@ -224,7 +254,9 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
                 cfg.head_dim as i32,
                 cfg.scale(),
                 use_z_bias as i32,
+                use_context_lengths as i32,
                 use_attn_bias as i32,
+                cfg.causal as i32,
             ),
         )
         .map_err(|err| err.to_string())?;
@@ -307,6 +339,7 @@ mod tests {
             sequence_len: 16,
             head_dim: 64,
             scale: None,
+            causal: false,
         };
         let scale = cfg.scale();
         assert!((scale - (1.0f32 / 64.0f32).sqrt()).abs() < 1e-6);
@@ -321,6 +354,7 @@ mod tests {
             sequence_len: 3,
             head_dim: 4,
             scale: Some(1.0),
+            causal: false,
         };
         let contexts = cfg.contexts();
         let seq = cfg.sequence_len as usize;
@@ -333,6 +367,7 @@ mod tests {
             queries: &vec![0.0; len],
             keys: &vec![0.0; len],
             values: &vec![0.0; len],
+            context_lengths: Some(&vec![seq as u32; contexts]),
             z_bias: Some(&vec![0.0; bias_len]),
             attn_bias: Some(&vec![0.0; mask_len]),
             output: &mut output,
