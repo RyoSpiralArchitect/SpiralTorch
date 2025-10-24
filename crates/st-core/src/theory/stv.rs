@@ -1184,9 +1184,21 @@ mod tests {
             (spatial[0] * spatial[0] + spatial[1] * spatial[1] + spatial[2] * spatial[2]).sqrt();
         assert_abs_diff_eq!(f64::from(projection.tempo), spatial_norm, epsilon = 1e-6);
         let expected_band_energy = normalised_band_energy(spatial, spatial_norm);
-        assert_abs_diff_eq!(projection.band_energy.0, expected_band_energy.0, epsilon = 1e-6);
-        assert_abs_diff_eq!(projection.band_energy.1, expected_band_energy.1, epsilon = 1e-6);
-        assert_abs_diff_eq!(projection.band_energy.2, expected_band_energy.2, epsilon = 1e-6);
+        assert_abs_diff_eq!(
+            projection.band_energy.0,
+            expected_band_energy.0,
+            epsilon = 1e-6
+        );
+        assert_abs_diff_eq!(
+            projection.band_energy.1,
+            expected_band_energy.1,
+            epsilon = 1e-6
+        );
+        assert_abs_diff_eq!(
+            projection.band_energy.2,
+            expected_band_energy.2,
+            epsilon = 1e-6
+        );
         assert_eq!(projection.support, bloch_support(spatial_bloch));
 
         let beta = stv.kernel().beta().unwrap();
@@ -1213,9 +1225,21 @@ mod tests {
         assert_abs_diff_eq!(pulse.quality, projection.quality, epsilon = 1e-6);
         assert_abs_diff_eq!(pulse.z_bias, projection.z_bias, epsilon = 1e-6);
         assert_abs_diff_eq!(pulse.drift, projection.drift, epsilon = 1e-6);
-        assert_abs_diff_eq!(pulse.band_energy.0, projection.band_energy.0, epsilon = 1e-6);
-        assert_abs_diff_eq!(pulse.band_energy.1, projection.band_energy.1, epsilon = 1e-6);
-        assert_abs_diff_eq!(pulse.band_energy.2, projection.band_energy.2, epsilon = 1e-6);
+        assert_abs_diff_eq!(
+            pulse.band_energy.0,
+            projection.band_energy.0,
+            epsilon = 1e-6
+        );
+        assert_abs_diff_eq!(
+            pulse.band_energy.1,
+            projection.band_energy.1,
+            epsilon = 1e-6
+        );
+        assert_abs_diff_eq!(
+            pulse.band_energy.2,
+            projection.band_energy.2,
+            epsilon = 1e-6
+        );
 
         let via_helper = stv.project_to_zpulse(42, ZSource::Graph).unwrap();
         assert_eq!(pulse, via_helper);

@@ -7,7 +7,7 @@ use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
-use st_tensor::{MatmulBackend, Tensor, TensorError};
+use st_tensor::{MatmulBackend, SoftmaxBackend, Tensor, TensorError};
 
 fn parse_backend(label: Option<&str>) -> MatmulBackend {
     match label.unwrap_or("auto") {
@@ -19,6 +19,19 @@ fn parse_backend(label: Option<&str>) -> MatmulBackend {
         other => {
             eprintln!("[spiraltorch] unknown backend '{other}', falling back to 'auto'");
             MatmulBackend::Auto
+        }
+    }
+}
+
+fn parse_softmax_backend(label: Option<&str>) -> SoftmaxBackend {
+    match label.unwrap_or("auto") {
+        "auto" => SoftmaxBackend::Auto,
+        "cpu" => SoftmaxBackend::Cpu,
+        #[cfg(feature = "wgpu")]
+        "wgpu" => SoftmaxBackend::GpuWgpu,
+        other => {
+            eprintln!("[spiraltorch] unknown softmax backend '{other}', falling back to 'auto'");
+            SoftmaxBackend::Auto
         }
     }
 }
@@ -138,6 +151,72 @@ impl PyTensor {
         let tensor = self
             .inner
             .matmul_with_backend(&other.inner, backend)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
+    /// Matrix multiply with bias and ReLU fusion.
+    #[pyo3(signature = (other, bias, *, backend=None))]
+    pub fn matmul_bias_relu(
+        &self,
+        other: &PyTensor,
+        bias: Vec<f32>,
+        backend: Option<&str>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_backend(backend);
+        let tensor = self
+            .inner
+            .matmul_bias_relu_with_backend(&other.inner, &bias, backend)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
+    /// Matrix multiply fused with bias addition and GELU activation.
+    #[pyo3(signature = (other, bias, *, backend=None))]
+    pub fn matmul_bias_gelu(
+        &self,
+        other: &PyTensor,
+        bias: Vec<f32>,
+        backend: Option<&str>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_backend(backend);
+        let tensor = self
+            .inner
+            .matmul_bias_gelu_with_backend(&other.inner, &bias, backend)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
+    /// Matrix multiply fused with bias, residual addition, and ReLU activation.
+    #[pyo3(signature = (other, bias, residual, *, backend=None))]
+    pub fn matmul_bias_add_relu(
+        &self,
+        other: &PyTensor,
+        bias: Vec<f32>,
+        residual: &PyTensor,
+        backend: Option<&str>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_backend(backend);
+        let tensor = self
+            .inner
+            .matmul_bias_add_relu_with_backend(&other.inner, &bias, &residual.inner, backend)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
+    /// Matrix multiply fused with bias, residual addition, and GELU activation.
+    #[pyo3(signature = (other, bias, residual, *, backend=None))]
+    pub fn matmul_bias_add_gelu(
+        &self,
+        other: &PyTensor,
+        bias: Vec<f32>,
+        residual: &PyTensor,
+        backend: Option<&str>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_backend(backend);
+        let tensor = self
+            .inner
+            .matmul_bias_add_gelu_with_backend(&other.inner, &bias, &residual.inner, backend)
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
