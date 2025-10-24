@@ -429,6 +429,36 @@ impl ColorVectorField {
         Self::power_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
+    /// Compute both the linear and logarithmic power spectra for the row-wise
+    /// FFT in a single pass. This avoids decoding the interleaved spectrum
+    /// twice when WASM callers need both representations.
+    pub fn fft_rows_power_with_db_tensors(
+        &self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_rows_interleaved(inverse)?;
+        Self::power_and_power_db_tensors_from_interleaved(
+            self.height,
+            self.width,
+            &spectrum,
+        )
+    }
+
+    /// Row-wise FFT helper that returns both the linear and logarithmic power
+    /// tensors after applying a window function prior to the transform.
+    pub fn fft_rows_power_with_db_tensors_with_window(
+        &self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_rows_interleaved_with_window(window, inverse)?;
+        Self::power_and_power_db_tensors_from_interleaved(
+            self.height,
+            self.width,
+            &spectrum,
+        )
+    }
+
     /// Row-wise FFT log-power helper mirroring [`fft_rows_power_tensor`]. The
     /// returned tensor has shape `(height, width * 4)` storing the decibel-scaled
     /// magnitude with a floor at [`Self::POWER_DB_FLOOR`] to keep zeros finite.
@@ -618,6 +648,35 @@ impl ColorVectorField {
     ) -> PureResult<Tensor> {
         let spectrum = self.fft_cols_interleaved_with_window(window, inverse)?;
         Self::power_tensor_from_interleaved(self.width, self.height, &spectrum)
+    }
+
+    /// Column-wise FFT helper returning both the linear and logarithmic power
+    /// tensors in a single pass.
+    pub fn fft_cols_power_with_db_tensors(
+        &self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_cols_interleaved(inverse)?;
+        Self::power_and_power_db_tensors_from_interleaved(
+            self.width,
+            self.height,
+            &spectrum,
+        )
+    }
+
+    /// Column-wise FFT helper returning both power tensors after windowing the
+    /// input prior to the transform.
+    pub fn fft_cols_power_with_db_tensors_with_window(
+        &self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_cols_interleaved_with_window(window, inverse)?;
+        Self::power_and_power_db_tensors_from_interleaved(
+            self.width,
+            self.height,
+            &spectrum,
+        )
     }
 
     /// Column-wise FFT log-power helper that mirrors [`fft_cols_power_tensor`].
@@ -869,6 +928,35 @@ impl ColorVectorField {
     ) -> PureResult<Tensor> {
         let spectrum = self.fft_2d_interleaved_with_window(window, inverse)?;
         Self::power_tensor_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    /// Compute both the linear and logarithmic power tensors for the full 2D
+    /// FFT using a single interleaved decode.
+    pub fn fft_2d_power_with_db_tensors(
+        &self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        Self::power_and_power_db_tensors_from_interleaved(
+            self.height,
+            self.width,
+            &spectrum,
+        )
+    }
+
+    /// 2D FFT helper returning both power tensors after applying a window
+    /// across the field prior to the transform.
+    pub fn fft_2d_power_with_db_tensors_with_window(
+        &self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_2d_interleaved_with_window(window, inverse)?;
+        Self::power_and_power_db_tensors_from_interleaved(
+            self.height,
+            self.width,
+            &spectrum,
+        )
     }
 
     /// 2D FFT log-power helper mirroring [`fft_2d_power_tensor`]. Returns a
@@ -1595,6 +1683,28 @@ impl CanvasProjector {
             .fft_rows_power_db_tensor_with_window(window, inverse)
     }
 
+    /// Refresh the canvas and expose both the linear and logarithmic row-wise
+    /// FFT power tensors without decoding the spectrum twice.
+    pub fn refresh_vector_fft_power_with_db_tensors(
+        &mut self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors.fft_rows_power_with_db_tensors(inverse)
+    }
+
+    /// Refresh and expose the paired row-wise power tensors with a window
+    /// applied before the FFT.
+    pub fn refresh_vector_fft_power_with_db_tensors_with_window(
+        &mut self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors
+            .fft_rows_power_with_db_tensors_with_window(window, inverse)
+    }
+
     /// Refresh the canvas and expose the row-wise FFT phases as a tensor with
     /// shape `(height, width * 4)`.
     pub fn refresh_vector_fft_phase_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
@@ -1692,6 +1802,28 @@ impl CanvasProjector {
         self.render()?;
         self.vectors
             .fft_cols_power_tensor_with_window(window, inverse)
+    }
+
+    /// Refresh the canvas and expose both the linear and logarithmic column
+    /// power tensors.
+    pub fn refresh_vector_fft_columns_power_with_db_tensors(
+        &mut self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors.fft_cols_power_with_db_tensors(inverse)
+    }
+
+    /// Refresh and expose the paired column power tensors when a window is
+    /// applied ahead of the FFT.
+    pub fn refresh_vector_fft_columns_power_with_db_tensors_with_window(
+        &mut self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors
+            .fft_cols_power_with_db_tensors_with_window(window, inverse)
     }
 
     /// Refresh the canvas and expose the column-wise FFT log-power (decibel)
@@ -1807,6 +1939,27 @@ impl CanvasProjector {
         self.render()?;
         self.vectors
             .fft_2d_power_tensor_with_window(window, inverse)
+    }
+
+    /// Refresh the canvas and expose both the linear and logarithmic 2D FFT
+    /// power tensors.
+    pub fn refresh_vector_fft_2d_power_with_db_tensors(
+        &mut self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors.fft_2d_power_with_db_tensors(inverse)
+    }
+
+    /// Refresh and expose the paired 2D FFT power tensors with windowing.
+    pub fn refresh_vector_fft_2d_power_with_db_tensors_with_window(
+        &mut self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors
+            .fft_2d_power_with_db_tensors_with_window(window, inverse)
     }
 
     /// Refresh the canvas and expose the 2D FFT log-power (decibel) tensor with

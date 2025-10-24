@@ -129,6 +129,11 @@ impl Plan {
         self
     }
 
+    /// Validate the current configuration without materialising GPU resources.
+    pub fn validate_config(&self) -> Result<(), PlanError> {
+        self.validate()
+    }
+
     /// Materialise the WGSL shader and compute pipeline for the described plan.
     pub fn build(
         self,
@@ -333,8 +338,6 @@ pub fn fused_attention() -> Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-
     #[test]
     fn params_layout_is_32_bytes() {
         assert_eq!(std::mem::size_of::<Params>(), 32);
@@ -342,41 +345,19 @@ mod tests {
 
     #[test]
     fn rejects_multiple_query_tiles() {
-        let shader_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/shaders");
-        let plan = Plan::new().tile(2, 1, 128);
-        let err = plan.build(&dummy_device(), shader_dir).unwrap_err();
+        let err = Plan::new()
+            .tile(2, 1, 128)
+            .validate_config()
+            .expect_err("expected invalid tile configuration");
         assert!(matches!(err, PlanError::InvalidTile(_)));
     }
 
     #[test]
     fn rejects_unsupported_dtype() {
-        let shader_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/shaders");
         let err = Plan::new()
             .dtype(AccumulatorPrecision::F16AccF32)
-            .build(&dummy_device(), shader_dir)
-            .unwrap_err();
+            .validate_config()
+            .expect_err("expected dtype validation to fail");
         assert!(matches!(err, PlanError::UnsupportedDType { .. }));
-    }
-
-    fn dummy_device() -> Device {
-        // Create a minimal headless device for validation-only tests. The
-        // fallback adapter is requested so CI environments without a hardware
-        // GPU can still instantiate the pipeline layout builders.
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let adapter = pollster::block_on(async {
-            instance
-                .request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::LowPower,
-                    compatible_surface: None,
-                    force_fallback_adapter: true,
-                })
-                .expect("no WGPU adapter available")
-        });
-        pollster::block_on(async move {
-            adapter
-                .request_device(&wgpu::DeviceDescriptor::default(), None)
-                .await
-                .expect("failed to request dummy device")
-        })
     }
 }

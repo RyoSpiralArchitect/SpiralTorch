@@ -560,9 +560,6 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                         "log" => {
                             log = map.next_value()?;
                         }
-                        "unit" => {
-                            unit = map.next_value()?;
-                        }
                         "unit_count" => {
                             unit_count = map.next_value()?;
                         }
@@ -574,9 +571,6 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                         }
                         "unit" => {
                             unit = map.next_value()?;
-                        }
-                        "average_record_unit" => {
-                            average_record_unit = map.next_value()?;
                         }
                         "retention_period" => {
                             retention_period = map.next_value()?;
