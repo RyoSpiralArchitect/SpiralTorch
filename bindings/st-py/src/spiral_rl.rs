@@ -316,52 +316,52 @@ impl PyAgentConfig {
 
     #[getter]
     pub fn algo(&self) -> &str {
-        &self.inner.algo
+        self.as_data().algo.as_str()
     }
 
     #[getter]
     pub fn state_dim(&self) -> usize {
-        self.inner.state_dim
+        self.as_data().state_dim
     }
 
     #[getter]
     pub fn action_dim(&self) -> usize {
-        self.inner.action_dim
+        self.as_data().action_dim
     }
 
     #[getter]
     pub fn gamma(&self) -> f32 {
-        self.inner.discount
+        self.as_data().discount
     }
 
     #[getter]
     pub fn lr(&self) -> f32 {
-        self.inner.learning_rate
+        self.as_data().learning_rate
     }
 
     #[getter]
     pub fn optimizer(&self) -> &str {
-        &self.inner.optimizer
+        self.as_data().optimizer.as_str()
     }
 
     #[getter]
     pub fn clip_grad(&self) -> Option<f32> {
-        self.inner.clip_grad
+        self.as_data().clip_grad
     }
 
     #[getter]
     pub fn target_sync(&self) -> Option<usize> {
-        self.inner.target_sync
+        self.as_data().target_sync
     }
 
     #[getter]
     pub fn n_step(&self) -> Option<usize> {
-        self.inner.n_step
+        self.as_data().n_step
     }
 
     #[getter]
     pub fn seed(&self) -> Option<u64> {
-        self.inner.seed
+        self.as_data().seed
     }
 
     #[getter]

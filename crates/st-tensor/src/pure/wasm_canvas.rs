@@ -334,6 +334,14 @@ impl ColorVectorField {
         Tensor::from_vec(self.height, self.width * 4, phases)
     }
 
+    /// Compute both the magnitude and phase spectra for the row-wise FFT in a
+    /// single pass. Returns `(magnitude, phase)` tensors, each with shape
+    /// `(height, width * 4)`.
+    pub fn fft_rows_polar_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_rows_interleaved(inverse)?;
+        Self::polar_tensors_from_interleaved(self.height, self.width, &spectrum)
+    }
+
     /// Compute a column-wise FFT over the energy + chroma channels and expose
     /// the result as interleaved `[re, im]` floats for each component. This is
     /// the vertical counterpart to [`fft_rows_interleaved`] so WASM callers can
@@ -414,6 +422,14 @@ impl ColorVectorField {
             phases.push(chunk[7].atan2(chunk[6]));
         }
         Tensor::from_vec(self.width, self.height * 4, phases)
+    }
+
+    /// Compute both the magnitude and phase spectra for the column-wise FFT in
+    /// a single pass. Returns `(magnitude, phase)` tensors, each with shape
+    /// `(width, height * 4)`.
+    pub fn fft_cols_polar_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_cols_interleaved(inverse)?;
+        Self::polar_tensors_from_interleaved(self.width, self.height, &spectrum)
     }
 
     /// Compute a 2D FFT over the energy + chroma channels. The returned buffer
@@ -525,6 +541,45 @@ impl ColorVectorField {
             phases.push(chunk[7].atan2(chunk[6]));
         }
         Tensor::from_vec(self.height, self.width * 4, phases)
+    }
+
+    /// Compute both the magnitude and phase spectra for the 2D FFT in a single
+    /// pass. Returns `(magnitude, phase)` tensors, each with shape
+    /// `(height, width * 4)`.
+    pub fn fft_2d_polar_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        Self::polar_tensors_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    fn polar_tensors_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<(Tensor, Tensor)> {
+        let mut magnitudes = Vec::with_capacity(rows * cols * 4);
+        let mut phases = Vec::with_capacity(rows * cols * 4);
+        for chunk in spectrum.chunks_exact(8) {
+            let (re_energy, im_energy) = (chunk[0], chunk[1]);
+            let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
+            let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
+            let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
+
+            magnitudes.push(re_energy.hypot(im_energy));
+            phases.push(im_energy.atan2(re_energy));
+
+            magnitudes.push(re_chroma_r.hypot(im_chroma_r));
+            phases.push(im_chroma_r.atan2(re_chroma_r));
+
+            magnitudes.push(re_chroma_g.hypot(im_chroma_g));
+            phases.push(im_chroma_g.atan2(re_chroma_g));
+
+            magnitudes.push(re_chroma_b.hypot(im_chroma_b));
+            phases.push(im_chroma_b.atan2(re_chroma_b));
+        }
+
+        let magnitude = Tensor::from_vec(rows, cols * 4, magnitudes)?;
+        let phase = Tensor::from_vec(rows, cols * 4, phases)?;
+        Ok((magnitude, phase))
     }
 }
 
@@ -927,6 +982,16 @@ impl CanvasProjector {
         self.vectors.fft_rows_phase_tensor(inverse)
     }
 
+    /// Refresh the canvas and expose both the row-wise FFT magnitudes and
+    /// phases as tensors with shape `(height, width * 4)`.
+    pub fn refresh_vector_fft_polar_tensors(
+        &mut self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors.fft_rows_polar_tensors(inverse)
+    }
+
     /// Refresh the canvas and expose the interleaved FFT spectrum for each
     /// column (energy + chroma channels). This mirrors
     /// [`refresh_vector_fft`] but operates along the vertical axis so WASM
@@ -949,12 +1014,19 @@ impl CanvasProjector {
 
     /// Refresh the canvas and expose column-wise FFT phases as a tensor with
     /// shape `(width, height * 4)`.
-    pub fn refresh_vector_fft_columns_phase_tensor(
-        &mut self,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
+    pub fn refresh_vector_fft_columns_phase_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
         self.render()?;
         self.vectors.fft_cols_phase_tensor(inverse)
+    }
+
+    /// Refresh the canvas and expose both the column-wise FFT magnitudes and
+    /// phases as tensors with shape `(width, height * 4)`.
+    pub fn refresh_vector_fft_columns_polar_tensors(
+        &mut self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors.fft_cols_polar_tensors(inverse)
     }
 
     /// Refresh the canvas and expose the full 2D FFT spectrum (energy + chroma
@@ -978,6 +1050,16 @@ impl CanvasProjector {
     pub fn refresh_vector_fft_2d_phase_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
         self.render()?;
         self.vectors.fft_2d_phase_tensor(inverse)
+    }
+
+    /// Refresh the canvas and expose both the 2D FFT magnitudes and phases as
+    /// tensors with shape `(height, width * 4)`.
+    pub fn refresh_vector_fft_2d_polar_tensors(
+        &mut self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors.fft_2d_polar_tensors(inverse)
     }
 
     /// Accumulate the refreshed tensor into the provided hypergradient tape.
@@ -1038,6 +1120,13 @@ impl CanvasProjector {
         self.vectors.fft_rows_phase_tensor(inverse)
     }
 
+    /// Access both the row-wise FFT magnitudes and phases without forcing a
+    /// refresh. Returns `(magnitude, phase)` tensors with shape
+    /// `(height, width * 4)`.
+    pub fn vector_fft_polar_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        self.vectors.fft_rows_polar_tensors(inverse)
+    }
+
     /// Access the last computed column-wise FFT spectrum without forcing a
     /// refresh. The returned buffer mirrors [`refresh_vector_fft_columns`]
     /// layout (columns laid out sequentially with interleaved `[re, im]`
@@ -1058,6 +1147,13 @@ impl CanvasProjector {
         self.vectors.fft_cols_phase_tensor(inverse)
     }
 
+    /// Access both the column-wise FFT magnitudes and phases without forcing a
+    /// refresh. Returns `(magnitude, phase)` tensors with shape
+    /// `(width, height * 4)`.
+    pub fn vector_fft_columns_polar_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        self.vectors.fft_cols_polar_tensors(inverse)
+    }
+
     /// Access the last computed 2D FFT spectrum without forcing a refresh. The
     /// returned buffer matches [`refresh_vector_fft_2d`] and can be fed
     /// directly into GPU upload pipelines.
@@ -1073,6 +1169,12 @@ impl CanvasProjector {
     /// Access the last computed 2D FFT phases without forcing a refresh.
     pub fn vector_fft_2d_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         self.vectors.fft_2d_phase_tensor(inverse)
+    }
+
+    /// Access both the 2D FFT magnitudes and phases without forcing a refresh.
+    /// Returns `(magnitude, phase)` tensors with shape `(height, width * 4)`.
+    pub fn vector_fft_2d_polar_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        self.vectors.fft_2d_polar_tensors(inverse)
     }
 
     /// Uniform parameters expected by [`vector_fft_wgsl`]. The layout mirrors
@@ -1619,7 +1721,10 @@ mod tests {
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
         let tensor = field.fft_rows_magnitude_tensor(false).unwrap();
         assert_eq!(tensor.shape(), (1, 8));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1629,6 +1734,34 @@ mod tests {
         let tensor = field.fft_rows_phase_tensor(false).unwrap();
         assert_eq!(tensor.shape(), (1, 8));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn vector_field_fft_rows_polar_tensors_align_with_components() {
+        let mut field = ColorVectorField::new(3, 2);
+        for idx in 0..6 {
+            let energy = 0.25 * idx as f32;
+            let chroma = [
+                0.1 * (idx as f32 + 1.0),
+                -0.05 * idx as f32,
+                0.075 * (idx as f32 - 1.0),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (magnitude, phase) = field.fft_rows_polar_tensors(false).unwrap();
+        let magnitude_only = field.fft_rows_magnitude_tensor(false).unwrap();
+        let phase_only = field.fft_rows_phase_tensor(false).unwrap();
+
+        assert_eq!(magnitude.shape(), magnitude_only.shape());
+        assert_eq!(phase.shape(), phase_only.shape());
+
+        for (lhs, rhs) in magnitude.data().iter().zip(magnitude_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in phase.data().iter().zip(phase_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
     }
 
     #[test]
@@ -1646,7 +1779,10 @@ mod tests {
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
         let tensor = field.fft_cols_magnitude_tensor(false).unwrap();
         assert_eq!(tensor.shape(), (1, 8));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1656,6 +1792,34 @@ mod tests {
         let tensor = field.fft_cols_phase_tensor(false).unwrap();
         assert_eq!(tensor.shape(), (1, 8));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn vector_field_fft_columns_polar_tensors_align_with_components() {
+        let mut field = ColorVectorField::new(2, 3);
+        for idx in 0..6 {
+            let energy = 0.3 * idx as f32;
+            let chroma = [
+                0.2 * (idx as f32 + 0.5),
+                0.1 * (idx as f32 - 0.5),
+                -0.15 * idx as f32,
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (magnitude, phase) = field.fft_cols_polar_tensors(false).unwrap();
+        let magnitude_only = field.fft_cols_magnitude_tensor(false).unwrap();
+        let phase_only = field.fft_cols_phase_tensor(false).unwrap();
+
+        assert_eq!(magnitude.shape(), magnitude_only.shape());
+        assert_eq!(phase.shape(), phase_only.shape());
+
+        for (lhs, rhs) in magnitude.data().iter().zip(magnitude_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in phase.data().iter().zip(phase_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
     }
 
     #[test]
@@ -1673,7 +1837,10 @@ mod tests {
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
         let tensor = field.fft_2d_magnitude_tensor(false).unwrap();
         assert_eq!(tensor.shape(), (2, 8));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1683,6 +1850,34 @@ mod tests {
         let tensor = field.fft_2d_phase_tensor(false).unwrap();
         assert_eq!(tensor.shape(), (2, 8));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn vector_field_fft_2d_polar_tensors_align_with_components() {
+        let mut field = ColorVectorField::new(3, 2);
+        for idx in 0..6 {
+            let energy = 0.15 * idx as f32;
+            let chroma = [
+                -0.05 * (idx as f32 + 1.0),
+                0.08 * (idx as f32 + 0.25),
+                0.06 * (idx as f32 - 0.75),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (magnitude, phase) = field.fft_2d_polar_tensors(false).unwrap();
+        let magnitude_only = field.fft_2d_magnitude_tensor(false).unwrap();
+        let phase_only = field.fft_2d_phase_tensor(false).unwrap();
+
+        assert_eq!(magnitude.shape(), magnitude_only.shape());
+        assert_eq!(phase.shape(), phase_only.shape());
+
+        for (lhs, rhs) in magnitude.data().iter().zip(magnitude_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in phase.data().iter().zip(phase_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
     }
 
     #[test]
@@ -1715,9 +1910,14 @@ mod tests {
             .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
             .unwrap();
         let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
-        let tensor = projector.refresh_vector_fft_magnitude_tensor(false).unwrap();
+        let tensor = projector
+            .refresh_vector_fft_magnitude_tensor(false)
+            .unwrap();
         assert_eq!(tensor.shape(), (2, 4 * 4));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1733,6 +1933,30 @@ mod tests {
     }
 
     #[test]
+    fn projector_refresh_vector_fft_polar_tensors_align_with_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
+        let (magnitude, phase) = projector.refresh_vector_fft_polar_tensors(false).unwrap();
+        let magnitude_only = projector
+            .refresh_vector_fft_magnitude_tensor(false)
+            .unwrap();
+        let phase_only = projector.refresh_vector_fft_phase_tensor(false).unwrap();
+
+        assert_eq!(magnitude.shape(), (2, 4 * 4));
+        assert_eq!(phase.shape(), (2, 4 * 4));
+
+        for (lhs, rhs) in magnitude.data().iter().zip(magnitude_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in phase.data().iter().zip(phase_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn projector_refresh_vector_fft_columns_magnitude_tensor_matches_shape() {
         let scheduler = UringFractalScheduler::new(4).unwrap();
         scheduler
@@ -1743,7 +1967,10 @@ mod tests {
             .refresh_vector_fft_columns_magnitude_tensor(false)
             .unwrap();
         assert_eq!(tensor.shape(), (5, 3 * 4));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1761,6 +1988,34 @@ mod tests {
     }
 
     #[test]
+    fn projector_refresh_vector_fft_columns_polar_tensors_align_with_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+        let (magnitude, phase) = projector
+            .refresh_vector_fft_columns_polar_tensors(false)
+            .unwrap();
+        let magnitude_only = projector
+            .refresh_vector_fft_columns_magnitude_tensor(false)
+            .unwrap();
+        let phase_only = projector
+            .refresh_vector_fft_columns_phase_tensor(false)
+            .unwrap();
+
+        assert_eq!(magnitude.shape(), (5, 3 * 4));
+        assert_eq!(phase.shape(), (5, 3 * 4));
+
+        for (lhs, rhs) in magnitude.data().iter().zip(magnitude_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in phase.data().iter().zip(phase_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn projector_refresh_vector_fft_2d_magnitude_tensor_matches_shape() {
         let scheduler = UringFractalScheduler::new(4).unwrap();
         scheduler
@@ -1771,7 +2026,10 @@ mod tests {
             .refresh_vector_fft_2d_magnitude_tensor(false)
             .unwrap();
         assert_eq!(tensor.shape(), (3, 5 * 4));
-        assert!(tensor.data().iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(tensor
+            .data()
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
     }
 
     #[test]
@@ -1781,11 +2039,35 @@ mod tests {
             .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
             .unwrap();
         let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let tensor = projector
-            .refresh_vector_fft_2d_phase_tensor(false)
-            .unwrap();
+        let tensor = projector.refresh_vector_fft_2d_phase_tensor(false).unwrap();
         assert_eq!(tensor.shape(), (3, 5 * 4));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_2d_polar_tensors_align_with_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+        let (magnitude, phase) = projector
+            .refresh_vector_fft_2d_polar_tensors(false)
+            .unwrap();
+        let magnitude_only = projector
+            .refresh_vector_fft_2d_magnitude_tensor(false)
+            .unwrap();
+        let phase_only = projector.refresh_vector_fft_2d_phase_tensor(false).unwrap();
+
+        assert_eq!(magnitude.shape(), (3, 5 * 4));
+        assert_eq!(phase.shape(), (3, 5 * 4));
+
+        for (lhs, rhs) in magnitude.data().iter().zip(magnitude_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in phase.data().iter().zip(phase_only.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
     }
 
     #[test]
