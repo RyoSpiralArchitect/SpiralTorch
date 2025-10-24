@@ -432,19 +432,29 @@ impl PreDiscardPolicy {
         }
         let discarded = discarded_indices.len();
 
+        let mut total_energy = survivor_energy + discarded_energy;
+        if !total_energy.is_finite() {
+            total_energy = original
+                .iter()
+                .copied()
+                .filter(|value| value.is_finite())
+                .sum();
+        }
+
         if sum <= f32::EPSILON || !sum.is_finite() {
             weights.copy_from_slice(original);
+            let dominant_share = if total_energy.is_finite() && total_energy > f32::EPSILON {
+                (dominant / total_energy).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             return Ok(PreDiscardOutcome::fallback(
                 PreDiscardTelemetry::fallback(
                     self,
                     0,
                     original.len(),
-                    original
-                        .iter()
-                        .copied()
-                        .filter(|value| value.is_finite())
-                        .sum(),
-                    dominant,
+                    total_energy,
+                    dominant_share,
                 ),
                 (0..original.len()).collect(),
                 Vec::new(),
@@ -457,6 +467,12 @@ impl PreDiscardPolicy {
             }
         }
 
+        let dominant_share = if total_energy.is_finite() && total_energy > f32::EPSILON {
+            (dominant / total_energy).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
         Ok(PreDiscardOutcome::new(
             PreDiscardTelemetry::new(
                 self,
@@ -465,7 +481,7 @@ impl PreDiscardPolicy {
                 false,
                 survivor_energy,
                 discarded_energy,
-                dominant,
+                dominant_share,
             ),
             survivor_indices,
             discarded_indices,
@@ -865,6 +881,16 @@ impl PreDiscardTelemetry {
         discarded_energy: f32,
         dominant_weight: f32,
     ) -> Self {
+        let mut dominant_weight = if dominant_weight.is_finite() {
+            dominant_weight.max(0.0).min(1.0)
+        } else {
+            0.0
+        };
+
+        if dominant_weight <= f32::EPSILON {
+            dominant_weight = 0.0;
+        }
+
         Self {
             dominance_ratio: policy.dominance_ratio,
             energy_floor: policy.energy_floor,
@@ -966,7 +992,7 @@ impl PreDiscardTelemetry {
         1.0 - self.survivor_energy_ratio()
     }
 
-    /// Returns the dominant channel weight observed before discard.
+    /// Returns the dominant channel's share of the total pre-discard energy.
     pub fn dominant_weight(&self) -> f32 {
         self.dominant_weight
     }
@@ -2168,7 +2194,7 @@ mod tests {
         assert!((telemetry.total_energy() - 0.80025).abs() < 1e-6);
         assert!((telemetry.survivor_energy_ratio() - (0.8 / 0.80025)).abs() < 1e-6);
         assert!((telemetry.discarded_energy_ratio() - (0.00025 / 0.80025)).abs() < 1e-6);
-        assert!((telemetry.dominant_weight() - 0.8).abs() < 1e-6);
+        assert!((telemetry.dominant_weight() - (0.8 / 0.80025)).abs() < 1e-6);
 
         // The mutated weights should be renormalised after discard.
         assert!((weights[0] - 1.0).abs() < 1e-6);
