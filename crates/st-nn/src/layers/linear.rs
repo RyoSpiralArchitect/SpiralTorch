@@ -55,7 +55,8 @@ impl Module for Linear {
                 right: self.weight.value().shape(),
             });
         }
-        let mut out = input.matmul(self.weight.value())?;
+        let pack = self.weight.ensure_matmul_pack()?;
+        let mut out = input.matmul_prepacked(&pack)?;
         out.add_row_inplace(self.bias.value().data())?;
         Ok(out)
     }

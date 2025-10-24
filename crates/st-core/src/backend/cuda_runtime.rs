@@ -50,9 +50,7 @@ pub fn run_selection(
     }
 
     match selection {
-        Selection::Top if plan.k == 1 => {
-            launch_bitonic_kernel(plan, buffers, TOP_BITONIC_KERNEL)
-        }
+        Selection::Top if plan.k == 1 => launch_bitonic_kernel(plan, buffers, TOP_BITONIC_KERNEL),
         Selection::Bottom if plan.k == 1 => {
             launch_bitonic_kernel(plan, buffers, BOTTOM_BITONIC_KERNEL)
         }
@@ -82,14 +80,7 @@ fn launch_bitonic_kernel(
     buffers: LaunchSlices<'_>,
     kernel: &'static str,
 ) -> Result<(), String> {
-    launch_cuda_kernel(
-        plan,
-        buffers,
-        kernel,
-        (WARP_LANES as u32, 1, 1),
-        0,
-        Some(1),
-    )
+    launch_cuda_kernel(plan, buffers, kernel, (WARP_LANES as u32, 1, 1), 0, Some(1))
 }
 
 fn launch_cuda_kernel(

@@ -1060,15 +1060,14 @@ impl ColorVectorField {
                 volume: rows.saturating_mul(cols),
                 max_volume: usize::MAX,
             })?;
-        let expected_len = expected_pairs
-            .checked_mul(8)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_polar",
-                volume: rows
-                    .saturating_mul(cols)
-                    .saturating_mul(8),
-                max_volume: usize::MAX,
-            })?;
+        let expected_len =
+            expected_pairs
+                .checked_mul(8)
+                .ok_or(TensorError::TensorVolumeExceeded {
+                    label: "canvas_fft_polar",
+                    volume: rows.saturating_mul(cols).saturating_mul(8),
+                    max_volume: usize::MAX,
+                })?;
 
         if spectrum.len() != expected_len {
             return Err(TensorError::DataLength {
@@ -1115,15 +1114,14 @@ impl ColorVectorField {
                 volume: rows.saturating_mul(cols),
                 max_volume: usize::MAX,
             })?;
-        let expected_len = expected_pairs
-            .checked_mul(8)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_power",
-                volume: rows
-                    .saturating_mul(cols)
-                    .saturating_mul(8),
-                max_volume: usize::MAX,
-            })?;
+        let expected_len =
+            expected_pairs
+                .checked_mul(8)
+                .ok_or(TensorError::TensorVolumeExceeded {
+                    label: "canvas_fft_power",
+                    volume: rows.saturating_mul(cols).saturating_mul(8),
+                    max_volume: usize::MAX,
+                })?;
 
         if spectrum.len() != expected_len {
             return Err(TensorError::DataLength {
@@ -1594,10 +1592,7 @@ impl CanvasProjector {
 
     /// Refresh the canvas and expose column-wise FFT power as a tensor with
     /// shape `(width, height * 4)`.
-    pub fn refresh_vector_fft_columns_power_tensor(
-        &mut self,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
+    pub fn refresh_vector_fft_columns_power_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
         self.render()?;
         self.vectors.fft_cols_power_tensor(inverse)
     }
@@ -2733,9 +2728,7 @@ mod tests {
             .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
             .unwrap();
         let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
-        let power = projector
-            .refresh_vector_fft_power_tensor(false)
-            .unwrap();
+        let power = projector.refresh_vector_fft_power_tensor(false).unwrap();
         let magnitude = projector
             .refresh_vector_fft_magnitude_tensor(false)
             .unwrap();
@@ -2935,9 +2928,7 @@ mod tests {
             .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
             .unwrap();
         let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let power = projector
-            .refresh_vector_fft_2d_power_tensor(false)
-            .unwrap();
+        let power = projector.refresh_vector_fft_2d_power_tensor(false).unwrap();
         let magnitude = projector
             .refresh_vector_fft_2d_magnitude_tensor(false)
             .unwrap();

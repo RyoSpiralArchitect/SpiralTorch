@@ -9,6 +9,12 @@ mod imp {
     use faer::linalg::matmul::matmul as faer_matmul;
     use faer::mat::{from_raw_parts, from_raw_parts_mut, MatMut, MatRef};
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum DenseLayout {
+        RowMajor,
+        ColMajor,
+    }
+
     unsafe fn row_major_ref<'a>(
         ptr: *const f32,
         rows: usize,
@@ -49,7 +55,16 @@ mod imp {
             return Ok(vec![0.0; rows * cols]);
         }
         let mut buffer = vec![0.0; rows * cols];
-        matmul_into(&mut buffer, lhs, rhs, rows, inner, cols)?;
+        matmul_oriented_into(
+            &mut buffer,
+            lhs,
+            DenseLayout::RowMajor,
+            rhs,
+            DenseLayout::RowMajor,
+            rows,
+            inner,
+            cols,
+        )?;
         Ok(buffer)
     }
 
@@ -74,8 +89,54 @@ mod imp {
             return Ok(());
         }
 
-        let lhs = unsafe { row_major_ref(lhs.as_ptr(), rows, inner, inner as isize, 1) };
-        let rhs = unsafe { row_major_ref(rhs.as_ptr(), inner, cols, cols as isize, 1) };
+        matmul_oriented_into(
+            dst,
+            lhs,
+            DenseLayout::RowMajor,
+            rhs,
+            DenseLayout::RowMajor,
+            rows,
+            inner,
+            cols,
+        )
+    }
+
+    pub fn matmul_oriented_into(
+        dst: &mut [f32],
+        lhs: &[f32],
+        lhs_layout: DenseLayout,
+        rhs: &[f32],
+        rhs_layout: DenseLayout,
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) -> Result<(), String> {
+        if dst.len() != rows * cols {
+            return Err(format!(
+                "destination length mismatch: expected {} elements, got {}",
+                rows * cols,
+                dst.len()
+            ));
+        }
+
+        if rows == 0 || cols == 0 || inner == 0 {
+            dst.fill(0.0);
+            return Ok(());
+        }
+
+        let (lhs_row_stride, lhs_col_stride) = match lhs_layout {
+            DenseLayout::RowMajor => (inner as isize, 1),
+            DenseLayout::ColMajor => (1, rows as isize),
+        };
+        let (rhs_row_stride, rhs_col_stride) = match rhs_layout {
+            DenseLayout::RowMajor => (cols as isize, 1),
+            DenseLayout::ColMajor => (1, inner as isize),
+        };
+
+        let lhs =
+            unsafe { row_major_ref(lhs.as_ptr(), rows, inner, lhs_row_stride, lhs_col_stride) };
+        let rhs =
+            unsafe { row_major_ref(rhs.as_ptr(), inner, cols, rhs_row_stride, rhs_col_stride) };
 
         dst.fill(0.0);
         let out = unsafe { row_major_mut(dst.as_mut_ptr(), rows, cols, cols as isize, 1) };
@@ -87,6 +148,12 @@ mod imp {
 
 #[cfg(not(feature = "faer"))]
 mod imp {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum DenseLayout {
+        RowMajor,
+        ColMajor,
+    }
+
     pub fn is_available() -> bool {
         false
     }
@@ -111,6 +178,21 @@ mod imp {
         _dst: &mut [f32],
         _lhs: &[f32],
         _rhs: &[f32],
+        rows: usize,
+        _inner: usize,
+        cols: usize,
+    ) -> Result<(), String> {
+        Err(format!(
+            "faer backend disabled at compile time (requested {rows}x{cols} multiply)"
+        ))
+    }
+
+    pub fn matmul_oriented_into(
+        _dst: &mut [f32],
+        _lhs: &[f32],
+        _lhs_layout: DenseLayout,
+        _rhs: &[f32],
+        _rhs_layout: DenseLayout,
         rows: usize,
         _inner: usize,
         cols: usize,
