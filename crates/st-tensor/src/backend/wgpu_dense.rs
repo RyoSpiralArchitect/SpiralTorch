@@ -1254,34 +1254,6 @@ pub fn matmul_bias_relu(
     readback_f32(device, queue, &out_buf, rows * cols)
 }
 
-pub fn matmul_bias_gelu(
-    lhs: &[f32],
-    rhs: &[f32],
-    bias: &[f32],
-    rows: usize,
-    inner: usize,
-    cols: usize,
-) -> Result<Vec<f32>, String> {
-    if rows == 0 || inner == 0 || cols == 0 {
-        return Err("matrix dimensions must be positive".into());
-    });
-    let tile_config = select_tile_config(rows, inner, cols);
-    dispatch_matmul(
-        &ctx,
-        &mut encoder,
-        &a_buf,
-        &b_buf,
-        &c_buf,
-        rows,
-        inner,
-        cols,
-        tile_config,
-    );
-    queue.submit(Some(encoder.finish()));
-
-    readback_f32(device, queue, &c_buf, rows * cols)
-}
-
 pub fn matmul_bias_relu(
     lhs: &[f32],
     rhs: &[f32],
