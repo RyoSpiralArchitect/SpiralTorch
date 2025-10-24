@@ -222,6 +222,7 @@ __device__ __forceinline__ void heap_select_rowwise_kernel_impl(
       out_vals[out_base + oi] = CUDART_NAN_F;
       out_idx[out_base + oi] = -1;
     }
+    __syncthreads();
   }
 }
 
