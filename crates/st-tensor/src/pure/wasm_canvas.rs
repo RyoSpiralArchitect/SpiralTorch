@@ -727,9 +727,7 @@ impl ColorVectorField {
             db.max(Self::POWER_DB_FLOOR)
         })
     }
-
 }
-
 /// Byte layout metadata for the WGSL canvas FFT pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CanvasFftLayout {
