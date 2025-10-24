@@ -29,8 +29,9 @@ An envelope contains five sections:
 3. **Route** — optional MQ, CICS, and dataset selectors that inform the
    receiving COBOL code where to dispatch the payload. Dataset selectors can
    now carry richer metadata (PDS member, disposition, volume serial, DCB
-   attributes, and SMS class hints) so batch writers or GDG loaders can stage
-   the payload precisely without extra glue code in the bridge layer.
+   attributes, SMS class hints, SPACE allocations, DSNTYPE, and LIKE templates)
+   so batch writers or GDG loaders can stage the payload precisely without
+   extra glue code in the bridge layer.
 4. **Narrator payload** — curvature, temperature, encoder identifier, locale,
    and coefficient buffer.
 5. **Metadata** — tags, annotations, and an open `extra` field that accepts
@@ -70,6 +71,12 @@ builder.set_dataset_block_size(Some(6144));
 builder.set_dataset_data_class(Some("NARRATE".into()));
 builder.set_dataset_management_class(Some("GDG".into()));
 builder.set_dataset_storage_class(Some("FASTIO".into()));
+builder.set_dataset_space_primary(Some(15));
+builder.set_dataset_space_secondary(Some(5));
+builder.set_dataset_space_unit(Some("CYL".into()));
+builder.set_dataset_directory_blocks(Some(30));
+builder.set_dataset_type(Some("LIBRARY".into()));
+builder.set_dataset_like(Some("ST.DATA.TEMPLATE".into()));
 builder.add_tag("browser-ui");
 let envelope = builder.snapshot();
 let json = envelope.to_json_string()?;
@@ -119,6 +126,12 @@ planner.setDatasetBlockSize(6144);
 planner.setDatasetDataClass("NARRATE");
 planner.setDatasetManagementClass("GDG");
 planner.setDatasetStorageClass("FASTIO");
+planner.setDatasetSpacePrimary(15);
+planner.setDatasetSpaceSecondary(5);
+planner.setDatasetSpaceUnit("CYL");
+planner.setDatasetDirectoryBlocks(30);
+planner.setDatasetType("LIBRARY");
+planner.setDatasetLike("ST.DATA.TEMPLATE");
 const jsonEnvelope = planner.toJson();
 const bytes = planner.toUint8Array();
 
@@ -170,8 +183,11 @@ needed.  Browser callers can mirror the same workflow with
 initiators, absent routes, narrator settings outside the 0–1 range, and jobs
 that still rely on the default `job` placeholder identifier.
 Dataset hints must also remain internally consistent: the planner warns when a
-block size is not a clean multiple of the record length so SMS allocations do
-not fail at runtime.
+block size is not a clean multiple of the record length, when SPACE units lack
+matching allocations, when secondary extents appear without a primary, when
+directory blocks are provided for non-partitioned targets, or when DSNTYPE is
+outside the supported set. These checks surface problems before SMS allocation
+commands reach BPXWDYN.
 
 ## Dispatching to mainframe bridges
 

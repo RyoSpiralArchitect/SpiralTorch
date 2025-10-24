@@ -17,8 +17,14 @@ use std::sync::OnceLock;
 const MODULE_NAME: &str = "spiraltorch_rankk";
 const TOPK_KERNEL: &str = "topk_warp_heap_rowwise_kernel";
 const BOTTOMK_KERNEL: &str = "bottomk_warp_heap_rowwise_kernel";
-const BITONIC_KERNEL: &str = "topk_warp_bitonic_rowwise_kernel";
-const MODULE_KERNELS: &[&str] = &[TOPK_KERNEL, BOTTOMK_KERNEL, BITONIC_KERNEL];
+const TOP_BITONIC_KERNEL: &str = "topk_warp_bitonic_rowwise_kernel";
+const BOTTOM_BITONIC_KERNEL: &str = "bottomk_warp_bitonic_rowwise_kernel";
+const MODULE_KERNELS: &[&str] = &[
+    TOPK_KERNEL,
+    BOTTOMK_KERNEL,
+    TOP_BITONIC_KERNEL,
+    BOTTOM_BITONIC_KERNEL,
+];
 const CUDA_SOURCE: &str = include_str!("cuda_topk_rankk.cu");
 const WARP_LANES: usize = 32;
 const BLOCK_WARPS: usize = 4;
@@ -44,7 +50,12 @@ pub fn run_selection(
     }
 
     match selection {
-        Selection::Top if plan.k == 1 => launch_top1_kernel(plan, buffers),
+        Selection::Top if plan.k == 1 => {
+            launch_bitonic_kernel(plan, buffers, TOP_BITONIC_KERNEL)
+        }
+        Selection::Bottom if plan.k == 1 => {
+            launch_bitonic_kernel(plan, buffers, BOTTOM_BITONIC_KERNEL)
+        }
         Selection::Top => launch_heap_kernel(plan, buffers, TOPK_KERNEL),
         Selection::Bottom => launch_heap_kernel(plan, buffers, BOTTOMK_KERNEL),
         Selection::Mid => Err("cuda selection not implemented for mid".to_string()),
@@ -66,11 +77,15 @@ fn launch_heap_kernel(
     )
 }
 
-fn launch_top1_kernel(plan: &RankPlan, buffers: LaunchSlices<'_>) -> Result<(), String> {
+fn launch_bitonic_kernel(
+    plan: &RankPlan,
+    buffers: LaunchSlices<'_>,
+    kernel: &'static str,
+) -> Result<(), String> {
     launch_cuda_kernel(
         plan,
         buffers,
-        BITONIC_KERNEL,
+        kernel,
         (WARP_LANES as u32, 1, 1),
         0,
         Some(1),
@@ -113,11 +128,7 @@ fn launch_cuda_kernel(
         .alloc_zeros::<i32>(rows * k)
         .map_err(|err| err.to_string())?;
 
-    let grid = (1, plan.rows, 1);
-    let block = (THREADS_PER_BLOCK as u32, 1, 1);
-    let shared_bytes = (THREADS_PER_BLOCK * PER_THREAD_KEEP * std::mem::size_of::<f32>()
-        + THREADS_PER_BLOCK * PER_THREAD_KEEP * std::mem::size_of::<i32>())
-        as u32;
+    let grid = grid_for_rows(plan.rows);
     let cfg = LaunchConfig {
         grid_dim: grid,
         block_dim,

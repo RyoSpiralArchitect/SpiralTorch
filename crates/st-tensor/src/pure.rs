@@ -526,6 +526,14 @@ impl Tensor {
         Arc::make_mut(&mut self.data).make_mut_slice()
     }
 
+    /// Return the DLPack device descriptor for this tensor.
+    pub fn dlpack_device(&self) -> DLDevice {
+        DLDevice {
+            device_type: DLDeviceType::Cpu as i32,
+            device_id: 0,
+        }
+    }
+
     /// Export the tensor as a managed DLPack tensor.
     pub fn to_dlpack(&self) -> PureResult<*mut DLManagedTensor> {
         let rows_i64 = i64::try_from(self.rows).map_err(|_| TensorError::DlpackError {
@@ -749,6 +757,20 @@ impl Tensor {
         other: &Tensor,
         backend: MatmulBackend,
     ) -> PureResult<Tensor> {
+        let rows = self.rows;
+        let cols = other.cols;
+        let mut tensor = Tensor::zeros(rows, cols)?;
+        self.matmul_into_with_backend(other, &mut tensor, backend)?;
+        Ok(tensor)
+    }
+
+    /// Matrix multiply into an existing tensor buffer.
+    pub fn matmul_into_with_backend(
+        &self,
+        other: &Tensor,
+        dst: &mut Tensor,
+        backend: MatmulBackend,
+    ) -> PureResult<()> {
         if self.cols != other.rows {
             return Err(TensorError::ShapeMismatch {
                 left: self.shape(),
@@ -760,41 +782,109 @@ impl Tensor {
         let cols = other.cols;
         let inner = self.cols;
 
-        let data = match backend {
-            MatmulBackend::Auto => self.matmul_auto(other, rows, inner, cols)?,
-            MatmulBackend::CpuNaive => matmul_naive(self.data(), other.data(), rows, inner, cols),
-            MatmulBackend::CpuFaer => matmul_faer(self.data(), other.data(), rows, inner, cols)?,
-            #[cfg(feature = "wgpu")]
-            MatmulBackend::GpuWgpu => matmul_wgpu(self.data(), other.data(), rows, inner, cols)?,
-        };
+        if dst.rows != rows || dst.cols != cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (rows, cols),
+                right: dst.shape(),
+            });
+        }
 
-        Tensor::from_vec(rows, cols, data)
+        if Arc::ptr_eq(&self.data, &dst.data) || Arc::ptr_eq(&other.data, &dst.data) {
+            return Err(TensorError::InvalidValue {
+                label: "matmul_out_alias",
+            });
+        }
+
+        let lhs = self.data();
+        let rhs = other.data();
+        let dst_slice = dst.data_mut();
+
+        match backend {
+            MatmulBackend::Auto => self.matmul_auto_into(other, dst_slice, rows, inner, cols)?,
+            MatmulBackend::CpuNaive => {
+                matmul_naive_into(dst_slice, lhs, rhs, rows, inner, cols);
+            }
+            MatmulBackend::CpuFaer => {
+                faer_dense::matmul_into(dst_slice, lhs, rhs, rows, inner, cols).map_err(
+                    |message| TensorError::BackendFailure {
+                        backend: "faer",
+                        message,
+                    },
+                )?;
+            }
+            #[cfg(feature = "wgpu")]
+            MatmulBackend::GpuWgpu => {
+                let buffer = matmul_wgpu(lhs, rhs, rows, inner, cols)?;
+                dst_slice.copy_from_slice(&buffer);
+            }
+        }
+
+        Ok(())
     }
 
-    fn matmul_auto(
+    /// Matrix multiply writing into an existing tensor using automatic backend selection.
+    pub fn matmul_into(&self, other: &Tensor, dst: &mut Tensor) -> PureResult<()> {
+        self.matmul_into_with_backend(other, dst, MatmulBackend::Auto)
+    }
+
+    fn matmul_auto_into(
         &self,
         other: &Tensor,
+        dst: &mut [f32],
         rows: usize,
         inner: usize,
         cols: usize,
-    ) -> PureResult<Vec<f32>> {
+    ) -> PureResult<()> {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
                 if let Ok(buffer) = wgpu_dense::matmul(self.data(), other.data(), rows, inner, cols)
                 {
-                    return Ok(buffer);
+                    dst.copy_from_slice(&buffer);
+                    return Ok(());
                 }
             }
         }
 
         if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
-            if let Ok(buffer) = faer_dense::matmul(self.data(), other.data(), rows, inner, cols) {
-                return Ok(buffer);
+            if let Ok(()) =
+                faer_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
+            {
+                return Ok(());
             }
         }
 
-        Ok(matmul_naive(self.data(), other.data(), rows, inner, cols))
+        matmul_naive_into(dst, self.data(), other.data(), rows, inner, cols);
+        Ok(())
+    }
+
+    /// Row-wise softmax using automatic backend selection.
+    pub fn row_softmax(&self) -> PureResult<Tensor> {
+        self.row_softmax_with_backend(SoftmaxBackend::Auto)
+    }
+
+    /// Row-wise softmax with explicit backend control.
+    pub fn row_softmax_with_backend(&self, backend: SoftmaxBackend) -> PureResult<Tensor> {
+        let rows = self.rows;
+        let cols = self.cols;
+
+        match backend {
+            SoftmaxBackend::Auto => self.row_softmax_auto(rows, cols),
+            SoftmaxBackend::Cpu => {
+                let buffer = row_softmax_cpu(self.data(), rows, cols);
+                Tensor::from_vec(rows, cols, buffer)
+            }
+            #[cfg(feature = "wgpu")]
+            SoftmaxBackend::GpuWgpu => {
+                let data = wgpu_dense::row_softmax(self.data(), rows, cols).map_err(|message| {
+                    TensorError::BackendFailure {
+                        backend: "wgpu",
+                        message,
+                    }
+                })?;
+                Tensor::from_vec(rows, cols, data)
+            }
+        }
     }
 
     fn row_softmax_auto(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
@@ -855,45 +945,62 @@ impl Tensor {
 
         let rows = self.rows;
         let cols = other.cols;
+        let mut tensor = Tensor::zeros(rows, cols)?;
+        self.matmul_bias_relu_into_with_backend(other, bias, &mut tensor, backend)?;
+        Ok(tensor)
+    }
+
+    pub fn matmul_bias_relu_into_with_backend(
+        &self,
+        other: &Tensor,
+        bias: &[f32],
+        dst: &mut Tensor,
+        backend: MatmulBackend,
+    ) -> PureResult<()> {
+        if self.cols != other.rows {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: other.shape(),
+            });
+        }
+        if dst.rows != self.rows || dst.cols != other.cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (self.rows, other.cols),
+                right: dst.shape(),
+            });
+        }
+        if other.cols != bias.len() {
+            return Err(TensorError::DataLength {
+                expected: other.cols,
+                got: bias.len(),
+            });
+        }
+        if Arc::ptr_eq(&self.data, &dst.data) || Arc::ptr_eq(&other.data, &dst.data) {
+            return Err(TensorError::InvalidValue {
+                label: "matmul_out_alias",
+            });
+        }
+
+        let rows = self.rows;
+        let cols = other.cols;
         let inner = self.cols;
+        let dst_slice = dst.data_mut();
 
         match backend {
             MatmulBackend::Auto => {
-                #[cfg(feature = "wgpu")]
-                {
-                    if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
-                        if let Ok(buffer) = wgpu_dense::matmul_bias_relu(
-                            self.data(),
-                            other.data(),
-                            bias,
-                            rows,
-                            inner,
-                            cols,
-                        ) {
-                            return Tensor::from_vec(rows, cols, buffer);
-                        }
-                    }
-                }
-
-                if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
-                    if let Ok(tensor) =
-                        self.matmul_bias_relu_with_backend(other, bias, MatmulBackend::CpuFaer)
-                    {
-                        return Ok(tensor);
-                    }
-                }
-
-                self.matmul_bias_relu_with_backend(other, bias, MatmulBackend::CpuNaive)
+                self.matmul_bias_relu_into_auto(other, bias, dst_slice, rows, inner, cols)?;
             }
             MatmulBackend::CpuNaive => {
-                let mut data = matmul_naive(self.data(), other.data(), rows, inner, cols);
-                add_bias_relu_inplace(&mut data, rows, cols, bias);
-                Tensor::from_vec(rows, cols, data)
+                matmul_naive_into(dst_slice, self.data(), other.data(), rows, inner, cols);
+                add_bias_relu_inplace(dst_slice, rows, cols, bias);
             }
             MatmulBackend::CpuFaer => {
-                let mut data = matmul_faer(self.data(), other.data(), rows, inner, cols)?;
-                add_bias_relu_inplace(&mut data, rows, cols, bias);
-                Tensor::from_vec(rows, cols, data)
+                faer_dense::matmul_into(dst_slice, self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "faer",
+                        message,
+                    })?;
+                add_bias_relu_inplace(dst_slice, rows, cols, bias);
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
@@ -909,9 +1016,46 @@ impl Tensor {
                     backend: "wgpu",
                     message,
                 })?;
-                Tensor::from_vec(rows, cols, data)
+                dst_slice.copy_from_slice(&data);
             }
         }
+
+        Ok(())
+    }
+
+    fn matmul_bias_relu_into_auto(
+        &self,
+        other: &Tensor,
+        bias: &[f32],
+        dst: &mut [f32],
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) -> PureResult<()> {
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
+                if let Ok(buffer) =
+                    wgpu_dense::matmul_bias_relu(self.data(), other.data(), bias, rows, inner, cols)
+                {
+                    dst.copy_from_slice(&buffer);
+                    return Ok(());
+                }
+            }
+        }
+
+        if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
+            if let Ok(()) =
+                faer_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
+            {
+                add_bias_relu_inplace(dst, rows, cols, bias);
+                return Ok(());
+            }
+        }
+
+        matmul_naive_into(dst, self.data(), other.data(), rows, inner, cols);
+        add_bias_relu_inplace(dst, rows, cols, bias);
+        Ok(())
     }
 
     /// Matrix multiply followed by bias addition and GELU activation.
@@ -943,61 +1087,65 @@ impl Tensor {
         let cols = other.cols;
         let inner = self.cols;
 
-        match backend {
-            MatmulBackend::Auto => {
-                #[cfg(feature = "wgpu")]
-                {
-                    if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
-                        if let Ok(buffer) = wgpu_dense::matmul_bias_gelu(
-                            self.data(),
-                            other.data(),
-                            bias,
-                            rows,
-                            inner,
-                            cols,
-                        ) {
-                            return Tensor::from_vec(rows, cols, buffer);
-                        }
-                    }
-                }
-
-                if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
-                    if let Ok(tensor) =
-                        self.matmul_bias_gelu_with_backend(other, bias, MatmulBackend::CpuFaer)
-                    {
-                        return Ok(tensor);
-                    }
-                }
-
-                self.matmul_bias_gelu_with_backend(other, bias, MatmulBackend::CpuNaive)
-            }
+        let data = match backend {
+            MatmulBackend::Auto => self.matmul_bias_gelu_auto(other, bias, rows, inner, cols)?,
             MatmulBackend::CpuNaive => {
-                let mut data = matmul_naive(self.data(), other.data(), rows, inner, cols);
-                add_bias_gelu_inplace(&mut data, rows, cols, bias);
-                Tensor::from_vec(rows, cols, data)
+                let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
+                add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+                buffer
             }
             MatmulBackend::CpuFaer => {
-                let mut data = matmul_faer(self.data(), other.data(), rows, inner, cols)?;
-                add_bias_gelu_inplace(&mut data, rows, cols, bias);
-                Tensor::from_vec(rows, cols, data)
+                let mut buffer = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                    backend: "faer",
+                    message,
+                })?;
+                add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+                buffer
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
-                let data = wgpu_dense::matmul_bias_gelu(
-                    self.data(),
-                    other.data(),
-                    bias,
-                    rows,
-                    inner,
-                    cols,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "wgpu",
-                    message,
-                })?;
-                Tensor::from_vec(rows, cols, data)
+                wgpu_dense::matmul_bias_gelu(self.data(), other.data(), bias, rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "wgpu",
+                        message,
+                    })?
+            }
+        };
+
+        Tensor::from_vec(rows, cols, data)
+    }
+
+    fn matmul_bias_gelu_auto(
+        &self,
+        other: &Tensor,
+        bias: &[f32],
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) -> PureResult<Vec<f32>> {
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
+                if let Ok(buffer) =
+                    wgpu_dense::matmul_bias_gelu(self.data(), other.data(), bias, rows, inner, cols)
+                {
+                    return Ok(buffer);
+                }
             }
         }
+
+        if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
+            if let Ok(mut buffer) = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
+            {
+                add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+                return Ok(buffer);
+            }
+        }
+
+        let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
+        add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+        Ok(buffer)
     }
 
     /// Matrix multiply with bias, residual addition, and ReLU activation.
@@ -1039,54 +1187,74 @@ impl Tensor {
 
         let rows = self.rows;
         let cols = other.cols;
+        let mut tensor = Tensor::zeros(rows, cols)?;
+        self.matmul_bias_add_relu_into_with_backend(other, bias, residual, &mut tensor, backend)?;
+        Ok(tensor)
+    }
+
+    pub fn matmul_bias_add_relu_into_with_backend(
+        &self,
+        other: &Tensor,
+        bias: &[f32],
+        residual: &Tensor,
+        dst: &mut Tensor,
+        backend: MatmulBackend,
+    ) -> PureResult<()> {
+        if self.cols != other.rows {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: other.shape(),
+            });
+        }
+        if dst.rows != self.rows || dst.cols != other.cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (self.rows, other.cols),
+                right: dst.shape(),
+            });
+        }
+        if other.cols != bias.len() {
+            return Err(TensorError::DataLength {
+                expected: other.cols,
+                got: bias.len(),
+            });
+        }
+        if residual.shape() != (self.rows, other.cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: residual.shape(),
+                right: (self.rows, other.cols),
+            });
+        }
+        if Arc::ptr_eq(&self.data, &dst.data)
+            || Arc::ptr_eq(&other.data, &dst.data)
+            || Arc::ptr_eq(&residual.data, &dst.data)
+        {
+            return Err(TensorError::InvalidValue {
+                label: "matmul_out_alias",
+            });
+        }
+
+        let rows = self.rows;
+        let cols = other.cols;
         let inner = self.cols;
+        let dst_slice = dst.data_mut();
 
         match backend {
             MatmulBackend::Auto => {
-                #[cfg(feature = "wgpu")]
-                {
-                    if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
-                        if let Ok(buffer) = wgpu_dense::matmul_bias_add_relu(
-                            self.data(),
-                            other.data(),
-                            bias,
-                            residual.data(),
-                            rows,
-                            inner,
-                            cols,
-                        ) {
-                            return Tensor::from_vec(rows, cols, buffer);
-                        }
-                    }
-                }
-
-                if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
-                    if let Ok(tensor) = self.matmul_bias_add_relu_with_backend(
-                        other,
-                        bias,
-                        residual,
-                        MatmulBackend::CpuFaer,
-                    ) {
-                        return Ok(tensor);
-                    }
-                }
-
-                self.matmul_bias_add_relu_with_backend(
-                    other,
-                    bias,
-                    residual,
-                    MatmulBackend::CpuNaive,
-                )
+                self.matmul_bias_add_relu_into_auto(
+                    other, bias, residual, dst_slice, rows, inner, cols,
+                )?;
             }
             MatmulBackend::CpuNaive => {
-                let mut data = matmul_naive(self.data(), other.data(), rows, inner, cols);
-                add_bias_residual_relu_inplace(&mut data, rows, cols, bias, residual.data());
-                Tensor::from_vec(rows, cols, data)
+                matmul_naive_into(dst_slice, self.data(), other.data(), rows, inner, cols);
+                add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
             }
             MatmulBackend::CpuFaer => {
-                let mut data = matmul_faer(self.data(), other.data(), rows, inner, cols)?;
-                add_bias_residual_relu_inplace(&mut data, rows, cols, bias, residual.data());
-                Tensor::from_vec(rows, cols, data)
+                faer_dense::matmul_into(dst_slice, self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "faer",
+                        message,
+                    })?;
+                add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
@@ -1103,9 +1271,53 @@ impl Tensor {
                     backend: "wgpu",
                     message,
                 })?;
-                Tensor::from_vec(rows, cols, data)
+                dst_slice.copy_from_slice(&data);
             }
         }
+
+        Ok(())
+    }
+
+    fn matmul_bias_add_relu_into_auto(
+        &self,
+        other: &Tensor,
+        bias: &[f32],
+        residual: &Tensor,
+        dst: &mut [f32],
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) -> PureResult<()> {
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
+                if let Ok(buffer) = wgpu_dense::matmul_bias_add_relu(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    residual.data(),
+                    rows,
+                    inner,
+                    cols,
+                ) {
+                    dst.copy_from_slice(&buffer);
+                    return Ok(());
+                }
+            }
+        }
+
+        if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
+            if let Ok(()) =
+                faer_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
+            {
+                add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
+                return Ok(());
+            }
+        }
+
+        matmul_naive_into(dst, self.data(), other.data(), rows, inner, cols);
+        add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
+        Ok(())
     }
 
     /// Matrix multiply with bias, residual addition, and GELU activation.
@@ -1149,56 +1361,56 @@ impl Tensor {
         let cols = other.cols;
         let inner = self.cols;
 
-        match backend {
+        let data = match backend {
             MatmulBackend::Auto => {
-                #[cfg(feature = "wgpu")]
-                {
-                    if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
-                        if let Ok(buffer) = wgpu_dense::matmul_bias_add_gelu(
-                            self.data(),
-                            other.data(),
-                            bias,
-                            residual.data(),
-                            rows,
-                            inner,
-                            cols,
-                        ) {
-                            return Tensor::from_vec(rows, cols, buffer);
-                        }
-                    }
-                }
-
-                if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
-                    if let Ok(tensor) = self.matmul_bias_add_gelu_with_backend(
-                        other,
-                        bias,
-                        residual,
-                        MatmulBackend::CpuFaer,
-                    ) {
-                        return Ok(tensor);
-                    }
-                }
-
-                self.matmul_bias_add_gelu_with_backend(
-                    other,
-                    bias,
-                    residual,
-                    MatmulBackend::CpuNaive,
-                )
+                self.matmul_bias_add_gelu_auto(other, bias, residual, rows, inner, cols)?
             }
             MatmulBackend::CpuNaive => {
-                let mut data = matmul_naive(self.data(), other.data(), rows, inner, cols);
-                add_bias_residual_gelu_inplace(&mut data, rows, cols, bias, residual.data());
-                Tensor::from_vec(rows, cols, data)
+                let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
+                add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
+                buffer
             }
             MatmulBackend::CpuFaer => {
-                let mut data = matmul_faer(self.data(), other.data(), rows, inner, cols)?;
-                add_bias_residual_gelu_inplace(&mut data, rows, cols, bias, residual.data());
-                Tensor::from_vec(rows, cols, data)
+                let mut buffer = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                    backend: "faer",
+                    message,
+                })?;
+                add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
+                buffer
             }
             #[cfg(feature = "wgpu")]
-            MatmulBackend::GpuWgpu => {
-                let data = wgpu_dense::matmul_bias_add_gelu(
+            MatmulBackend::GpuWgpu => wgpu_dense::matmul_bias_add_gelu(
+                self.data(),
+                other.data(),
+                bias,
+                residual.data(),
+                rows,
+                inner,
+                cols,
+            )
+            .map_err(|message| TensorError::BackendFailure {
+                backend: "wgpu",
+                message,
+            })?,
+        };
+
+        Tensor::from_vec(rows, cols, data)
+    }
+
+    fn matmul_bias_add_gelu_auto(
+        &self,
+        other: &Tensor,
+        bias: &[f32],
+        residual: &Tensor,
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) -> PureResult<Vec<f32>> {
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
+                if let Ok(buffer) = wgpu_dense::matmul_bias_add_gelu(
                     self.data(),
                     other.data(),
                     bias,
@@ -1206,14 +1418,23 @@ impl Tensor {
                     rows,
                     inner,
                     cols,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "wgpu",
-                    message,
-                })?;
-                Tensor::from_vec(rows, cols, data)
+                ) {
+                    return Ok(buffer);
+                }
             }
         }
+
+        if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
+            if let Ok(mut buffer) = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
+            {
+                add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
+                return Ok(buffer);
+            }
+        }
+
+        let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
+        add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
+        Ok(buffer)
     }
 
     /// Element-wise addition.
@@ -3047,6 +3268,34 @@ impl AmegaRealgrad {
     }
 }
 
+fn matmul_naive_into(
+    dst: &mut [f32],
+    lhs: &[f32],
+    rhs: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) {
+    debug_assert_eq!(dst.len(), rows * cols);
+    dst.fill(0.0);
+    for r in 0..rows {
+        let dst_row = &mut dst[r * cols..(r + 1) * cols];
+        for k in 0..inner {
+            let a = lhs[r * inner + k];
+            let rhs_row = &rhs[k * cols..(k + 1) * cols];
+            for (dst_value, &b) in dst_row.iter_mut().zip(rhs_row.iter()) {
+                *dst_value += a * b;
+            }
+        }
+    }
+}
+
+fn matmul_naive(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize) -> Vec<f32> {
+    let mut out = vec![0.0; rows * cols];
+    matmul_naive_into(&mut out, lhs, rhs, rows, inner, cols);
+    out
+}
+
 fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     let mut out = vec![0.0; rows * cols];
     if cols == 0 {
@@ -3070,20 +3319,6 @@ fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         let inv_sum = if sum > 0.0 { 1.0 / sum } else { 0.0 };
         for c in 0..cols {
             out[offset + c] *= inv_sum;
-        }
-    }
-    out
-}
-
-fn matmul_naive(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize) -> Vec<f32> {
-    let mut out = vec![0.0; rows * cols];
-    for r in 0..rows {
-        for k in 0..inner {
-            let a = lhs[r * inner + k];
-            let row_offset = k * cols;
-            for c in 0..cols {
-                out[r * cols + c] += a * rhs[row_offset + c];
-            }
         }
     }
     out
@@ -3150,19 +3385,6 @@ fn add_bias_residual_gelu_inplace(
             data[index] = gelu(sum);
         }
     }
-}
-
-fn matmul_faer(
-    lhs: &[f32],
-    rhs: &[f32],
-    rows: usize,
-    inner: usize,
-    cols: usize,
-) -> PureResult<Vec<f32>> {
-    faer_dense::matmul(lhs, rhs, rows, inner, cols).map_err(|message| TensorError::BackendFailure {
-        backend: "faer",
-        message,
-    })
 }
 
 #[cfg(feature = "wgpu")]
