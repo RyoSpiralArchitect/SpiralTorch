@@ -373,6 +373,13 @@ impl TensorBuffer {
             TensorBacking::Foreign(foreign) => ExportData::Foreign(foreign.clone()),
         }
     }
+
+    fn try_clone_owned(&self) -> Option<Arc<Vec<f32>>> {
+        match &self.backing {
+            TensorBacking::Owned(vec) => Some(Arc::clone(vec)),
+            TensorBacking::Foreign(_) => None,
+        }
+    }
 }
 
 impl Deref for TensorBuffer {
@@ -466,7 +473,7 @@ pub struct PackedB {
     inner: usize,
     tile: Tile,
     layout: PackedLayout,
-    buf: Arc<[f32]>,
+    buf: Arc<Vec<f32>>,
 }
 
 impl PackedB {
@@ -496,14 +503,17 @@ impl PackedB {
             inner: rows,
             tile,
             layout: PackedLayout::ColMajor,
-            buf: Arc::from(packed.into_boxed_slice()),
+            buf: Arc::new(packed),
         })
     }
 
     fn from_col_major(tensor: &Tensor, tile: Tile) -> Self {
         let rows = tensor.rows;
         let cols = tensor.cols;
-        let buf = Arc::from(tensor.data().to_vec().into_boxed_slice());
+        let buf = tensor
+            .data
+            .try_clone_owned()
+            .unwrap_or_else(|| Arc::new(tensor.data().to_vec()));
         Self {
             cols,
             inner: rows,
@@ -511,6 +521,40 @@ impl PackedB {
             layout: PackedLayout::ColMajor,
             buf,
         }
+    }
+
+    pub fn from_tensor_transpose(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
+        match tensor.layout {
+            Layout::RowMajor => Self::from_row_major_transpose(tensor, tile),
+            Layout::ColMajor => Self::from_col_major_transpose(tensor, tile),
+            Layout::Tiled { .. } => Err(TensorError::UnsupportedLayout {
+                label: "packing tiled tensors is not yet supported",
+            }),
+        }
+    }
+
+    fn from_row_major_transpose(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
+        let rows = tensor.rows;
+        let cols = tensor.cols;
+        let buf = tensor
+            .data
+            .try_clone_owned()
+            .unwrap_or_else(|| Arc::new(tensor.data().to_vec()));
+        Ok(Self {
+            cols: rows,
+            inner: cols,
+            tile,
+            layout: PackedLayout::ColMajor,
+            buf,
+        })
+    }
+
+    fn from_col_major_transpose(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
+        let transposed = tensor.transpose();
+        let mut packed = PackedB::from_row_major(&transposed, tile)?;
+        packed.cols = tensor.rows;
+        packed.inner = tensor.cols;
+        Ok(packed)
     }
 
     #[inline]
@@ -535,7 +579,7 @@ impl PackedB {
 
     #[inline]
     pub fn as_slice(&self) -> &[f32] {
-        &self.buf
+        self.buf.as_slice()
     }
 }
 
@@ -4039,6 +4083,31 @@ mod tests {
         let packed = PackedB::from_tensor(&rhs, Tile::col_major()).unwrap();
         let standard = lhs.matmul(&rhs).unwrap();
         let prepacked = lhs.matmul_prepacked(&packed).unwrap();
+        assert_eq!(standard, prepacked);
+    }
+
+    #[test]
+    fn matmul_prepacked_transpose_matches_standard() {
+        let lhs = Tensor::from_vec(
+            4,
+            3,
+            vec![
+                0.2, -0.4, 0.6, 1.1, -0.9, 0.7, 0.3, -0.2, 0.5, -1.3, 0.8, -0.1,
+            ],
+        )
+        .unwrap();
+        let rhs = Tensor::from_vec(
+            5,
+            3,
+            vec![
+                0.1, 0.2, -0.3, 0.4, -0.5, 0.6, -0.7, 0.8, -0.9, 1.0, -1.1, 1.2, -1.3, 1.4, -1.5,
+            ],
+        )
+        .unwrap();
+        let rhs_t = rhs.transpose();
+        let packed_t = PackedB::from_tensor_transpose(&rhs, Tile::col_major()).unwrap();
+        let standard = lhs.matmul(&rhs_t).unwrap();
+        let prepacked = lhs.matmul_prepacked(&packed_t).unwrap();
         assert_eq!(standard, prepacked);
     }
 

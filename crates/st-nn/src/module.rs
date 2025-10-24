@@ -41,6 +41,7 @@ pub struct Parameter {
     hypergrad: Option<AmegaHypergrad>,
     realgrad: Option<AmegaRealgrad>,
     packed_matmul: RefCell<Option<PackedB>>,
+    packed_matmul_transpose: RefCell<Option<PackedB>>,
 }
 
 impl core::fmt::Debug for Parameter {
@@ -69,6 +70,7 @@ impl Parameter {
             hypergrad: None,
             realgrad: None,
             packed_matmul: RefCell::new(None),
+            packed_matmul_transpose: RefCell::new(None),
         }
     }
 
@@ -355,8 +357,19 @@ impl Parameter {
         Ok(pack)
     }
 
+    /// Ensures a prepacked representation of the parameter transpose is available for matmul.
+    pub fn ensure_matmul_transpose_pack(&self) -> PureResult<PackedB> {
+        if let Some(existing) = self.packed_matmul_transpose.borrow().clone() {
+            return Ok(existing);
+        }
+        let pack = PackedB::from_tensor_transpose(self.value(), Tile::col_major())?;
+        *self.packed_matmul_transpose.borrow_mut() = Some(pack.clone());
+        Ok(pack)
+    }
+
     fn invalidate_matmul_pack(&self) {
         self.packed_matmul.borrow_mut().take();
+        self.packed_matmul_transpose.borrow_mut().take();
     }
 
     /// Replaces the parameter value with the provided tensor.
