@@ -323,6 +323,33 @@ impl fmt::Display for SoftmaxBackend {
     }
 }
 
+/// Explicit backend selection for fused attention.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttentionBackend {
+    /// Allow SpiralTorch to pick the most appropriate backend.
+    Auto,
+    /// Force the pure Rust implementation.
+    Cpu,
+    /// Execute on the WGPU fused kernel when available.
+    GpuWgpu,
+}
+
+impl AttentionBackend {
+    fn label(self) -> &'static str {
+        match self {
+            AttentionBackend::Auto => "auto",
+            AttentionBackend::Cpu => "cpu",
+            AttentionBackend::GpuWgpu => "wgpu",
+        }
+    }
+}
+
+impl fmt::Display for AttentionBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 #[derive(Clone, Debug)]
 enum TensorBacking {
     Owned(Arc<Vec<f32>>),
@@ -1293,6 +1320,191 @@ impl Tensor {
 
         let buffer = row_softmax_cpu(self.data(), rows, cols);
         Tensor::from_vec(rows, cols, buffer)
+    }
+
+    /// Scaled dot-product attention using automatic backend selection.
+    pub fn scaled_dot_attention(
+        &self,
+        keys: &Tensor,
+        values: &Tensor,
+        contexts: usize,
+        sequence: usize,
+        scale: f32,
+    ) -> PureResult<Tensor> {
+        self.scaled_dot_attention_with_backend(
+            keys,
+            values,
+            contexts,
+            sequence,
+            scale,
+            None,
+            None,
+            AttentionBackend::Auto,
+        )
+    }
+
+    /// Scaled dot-product attention with optional biases and backend override.
+    #[allow(clippy::too_many_arguments)]
+    pub fn scaled_dot_attention_with_backend(
+        &self,
+        keys: &Tensor,
+        values: &Tensor,
+        contexts: usize,
+        sequence: usize,
+        scale: f32,
+        z_bias: Option<&Tensor>,
+        attn_bias: Option<&Tensor>,
+        backend: AttentionBackend,
+    ) -> PureResult<Tensor> {
+        if contexts == 0 || sequence == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: contexts,
+                cols: sequence,
+            });
+        }
+        if self.cols == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: self.rows,
+                cols: self.cols,
+            });
+        }
+
+        let expected_rows =
+            contexts
+                .checked_mul(sequence)
+                .ok_or_else(|| TensorError::TensorVolumeExceeded {
+                    label: "attention contexts*sequence",
+                    volume: contexts,
+                    max_volume: usize::MAX / sequence.max(1),
+                })?;
+
+        if self.rows != expected_rows {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: (expected_rows, self.cols),
+            });
+        }
+        if keys.rows != expected_rows || keys.cols != self.cols {
+            return Err(TensorError::ShapeMismatch {
+                left: keys.shape(),
+                right: (expected_rows, self.cols),
+            });
+        }
+        if values.rows != expected_rows || values.cols != self.cols {
+            return Err(TensorError::ShapeMismatch {
+                left: values.shape(),
+                right: (expected_rows, self.cols),
+            });
+        }
+
+        let z_bias_slice = if let Some(bias) = z_bias {
+            let (rows, cols) = bias.shape();
+            if rows != contexts || cols != sequence {
+                return Err(TensorError::ShapeMismatch {
+                    left: bias.shape(),
+                    right: (contexts, sequence),
+                });
+            }
+            Some(bias.data())
+        } else {
+            None
+        };
+
+        let attn_bias_slice = if let Some(bias) = attn_bias {
+            let (rows, cols) = bias.shape();
+            if rows != expected_rows || cols != sequence {
+                return Err(TensorError::ShapeMismatch {
+                    left: bias.shape(),
+                    right: (expected_rows, sequence),
+                });
+            }
+            Some(bias.data())
+        } else {
+            None
+        };
+
+        let head_dim = self.cols;
+        let queries = self.data();
+        let keys_data = keys.data();
+        let values_data = values.data();
+
+        let make_tensor = |buffer: Vec<f32>| Tensor::from_vec(expected_rows, head_dim, buffer);
+
+        match backend {
+            AttentionBackend::Auto => {
+                #[cfg(feature = "wgpu")]
+                {
+                    if wgpu_dense::is_available()
+                        && wgpu_dense::supports_fused_attention(contexts, sequence, head_dim)
+                    {
+                        if let Ok(buffer) = wgpu_dense::fused_attention(
+                            queries,
+                            keys_data,
+                            values_data,
+                            contexts,
+                            sequence,
+                            head_dim,
+                            scale,
+                            z_bias_slice,
+                            attn_bias_slice,
+                        ) {
+                            return make_tensor(buffer);
+                        }
+                    }
+                }
+
+                let buffer = fused_attention_cpu(
+                    queries,
+                    keys_data,
+                    values_data,
+                    contexts,
+                    sequence,
+                    head_dim,
+                    scale,
+                    z_bias_slice,
+                    attn_bias_slice,
+                );
+                make_tensor(buffer)
+            }
+            AttentionBackend::Cpu => {
+                let buffer = fused_attention_cpu(
+                    queries,
+                    keys_data,
+                    values_data,
+                    contexts,
+                    sequence,
+                    head_dim,
+                    scale,
+                    z_bias_slice,
+                    attn_bias_slice,
+                );
+                make_tensor(buffer)
+            }
+            #[cfg(feature = "wgpu")]
+            AttentionBackend::GpuWgpu => {
+                let data = wgpu_dense::fused_attention(
+                    queries,
+                    keys_data,
+                    values_data,
+                    contexts,
+                    sequence,
+                    head_dim,
+                    scale,
+                    z_bias_slice,
+                    attn_bias_slice,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "wgpu",
+                    message,
+                })?;
+                make_tensor(data)
+            }
+            #[cfg(not(feature = "wgpu"))]
+            AttentionBackend::GpuWgpu => Err(TensorError::BackendFailure {
+                backend: "wgpu",
+                message: "wgpu backend disabled at compile time".into(),
+            }),
+        }
     }
 
     /// Matrix multiply using the WGPU backend when available.
@@ -3806,6 +4018,71 @@ fn matmul_naive(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize
     let mut out = vec![0.0; rows * cols];
     matmul_naive_into(&mut out, lhs, rhs, rows, inner, cols);
     out
+}
+
+fn fused_attention_cpu(
+    queries: &[f32],
+    keys: &[f32],
+    values: &[f32],
+    contexts: usize,
+    sequence: usize,
+    head_dim: usize,
+    scale: f32,
+    z_bias: Option<&[f32]>,
+    attn_bias: Option<&[f32]>,
+) -> Vec<f32> {
+    let total = contexts * sequence * head_dim;
+    let mut output = vec![0.0f32; total];
+    let mut accum = vec![0.0f32; head_dim];
+
+    for context in 0..contexts {
+        let context_offset = context * sequence;
+        for query_idx in 0..sequence {
+            accum.iter_mut().for_each(|value| *value = 0.0);
+            let mut running_max = f32::NEG_INFINITY;
+            let mut running_sum = 0.0f32;
+            let query_row = context_offset + query_idx;
+            let query_offset = query_row * head_dim;
+
+            for key_idx in 0..sequence {
+                let key_row = context_offset + key_idx;
+                let key_offset = key_row * head_dim;
+                let mut dot = 0.0f32;
+                for dim in 0..head_dim {
+                    dot += queries[query_offset + dim] * keys[key_offset + dim];
+                }
+
+                let mut logit = dot * scale;
+                if let Some(bias) = z_bias {
+                    logit += bias[context_offset + key_idx];
+                }
+                if let Some(bias) = attn_bias {
+                    logit += bias[query_row * sequence + key_idx];
+                }
+
+                let new_max = running_max.max(logit);
+                let scaled_sum = if running_sum > 0.0 {
+                    running_sum * (running_max - new_max).exp()
+                } else {
+                    0.0
+                };
+                let exp_curr = (logit - new_max).exp();
+                let denom = scaled_sum + exp_curr;
+                let alpha = if denom > 0.0 { scaled_sum / denom } else { 0.0 };
+                let weight = if denom > 0.0 { exp_curr / denom } else { 0.0 };
+                running_max = new_max;
+                running_sum = denom;
+
+                for dim in 0..head_dim {
+                    accum[dim] = accum[dim] * alpha + weight * values[key_offset + dim];
+                }
+            }
+
+            output[query_offset..query_offset + head_dim].copy_from_slice(&accum);
+        }
+    }
+
+    output
 }
 
 fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
