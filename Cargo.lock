@@ -3008,10 +3008,8 @@ dependencies = [
  "rand_distr",
  "rayon",
  "serde",
- "st-backend-hip",
  "st-frac",
  "wgpu",
- "wide",
 ]
 
 [[package]]
