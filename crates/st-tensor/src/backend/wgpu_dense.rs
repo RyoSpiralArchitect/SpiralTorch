@@ -1361,7 +1361,12 @@ impl GpuContext {
     }
 }
 
-static CONTEXT: OnceCell<Arc<DenseContext>> = OnceCell::new();
+fn instantiate_tile_template(template: &str, config: TileConfig) -> String {
+    let tile_m = config.tile_m();
+    let tile_n = config.tile_n();
+    let tile_k = config.tile_k();
+    let tile_mk = tile_m * tile_k;
+    let tile_nk = tile_n * tile_k;
 
     template
         .replace("{tile_m}", &tile_m.to_string())

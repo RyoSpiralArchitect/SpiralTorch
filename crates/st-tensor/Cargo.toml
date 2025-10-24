@@ -29,7 +29,7 @@ wgpu = ["wgpu_frac"]
 # Cargo feature resolution failures.
 mps = []
 cuda = []
-hip = ["dep:st-backend-hip"]
+hip = []
 
 [dependencies]
 # Deterministic sampling helpers for pure tensor stochastic initialisers.
