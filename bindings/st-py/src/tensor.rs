@@ -1,5 +1,3 @@
-use std::ffi::{c_void, CStr};
-
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::ffi;
 use pyo3::prelude::*;
@@ -7,7 +5,9 @@ use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::{Bound, PyRef, PyRefMut};
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
-use st_tensor::{MatmulBackend, SoftmaxBackend, Tensor, TensorError};
+use st_tensor::{MatmulBackend, Tensor, TensorError};
+use std::ffi::{c_void, CStr};
+use tracing::warn;
 
 fn parse_backend(label: Option<&str>) -> MatmulBackend {
     match label.unwrap_or("auto") {
@@ -17,79 +17,64 @@ fn parse_backend(label: Option<&str>) -> MatmulBackend {
         #[cfg(feature = "wgpu")]
         "wgpu" => MatmulBackend::GpuWgpu,
         other => {
-            tracing::warn!("[spiraltorch] unknown backend '{other}', falling back to 'auto'");
+            warn!(
+                backend = other,
+                "unknown backend label, falling back to auto"
+            );
             MatmulBackend::Auto
         }
     }
 }
 
+enum F32Input {
 enum BorrowedF32 {
     Tensor(Tensor),
     Owned(Vec<f32>),
 }
 
-impl BorrowedF32 {
+unsafe impl Send for F32Input {}
+
+fn with_out_tensor<F>(out: &PyCell<PyTensor>, f: F) -> PyResult<PyTensor>
+where
+    F: FnOnce(&mut Tensor) -> Result<(), TensorError>,
+{
+    let mut borrow = out
+        .try_borrow_mut()
+        .map_err(|_| PyRuntimeError::new_err("out tensor is already borrowed"))?;
+    f(&mut borrow.inner).map_err(tensor_err_to_py)?;
+    Ok(PyTensor {
+        inner: borrow.inner.clone(),
+    })
+}
+
+impl F32Input {
+    fn from_py(any: &PyAny) -> PyResult<Self> {
+        if let Ok(tensor_cell) = any.downcast::<PyCell<PyTensor>>() {
+            let tensor = tensor_cell.try_borrow()?.inner.clone();
+            return Ok(Self::Tensor(tensor));
+        }
+
+        if let Ok(list) = any.downcast::<PyList>() {
+            let mut owned = Vec::with_capacity(list.len());
+            for item in list {
+                owned.push(item.extract::<f32>()?);
+            }
+            return Ok(Self::Owned(owned));
+        }
+
+        if let Ok(vector) = any.extract::<Vec<f32>>() {
+            return Ok(Self::Owned(vector));
+        }
+
+        Err(PyTypeError::new_err(
+            "expected a PyTensor or iterable of floats",
+        ))
+    }
+
     fn as_slice(&self) -> &[f32] {
         match self {
-            BorrowedF32::Tensor(tensor) => tensor.data(),
-            BorrowedF32::Owned(values) => values.as_slice(),
-        }
-    }
-}
-
-#[derive(Copy, Clone)]
-struct TensorOutPtr(usize);
-
-unsafe impl Send for TensorOutPtr {}
-
-impl TensorOutPtr {
-    unsafe fn as_mut_ptr(self) -> *mut Tensor {
-        self.0 as *mut Tensor
-    }
-
-    unsafe fn clone_tensor(self) -> Tensor {
-        (&*(self.0 as *mut Tensor)).clone()
-    }
-}
-
-fn try_extract_tensor_from_dlpack(py: Python<'_>, any: &Bound<PyAny>) -> PyResult<Option<Tensor>> {
-    match ensure_dlpack_capsule(py, any) {
-        Ok(capsule) => {
-            let capsule = capsule.bind(py);
-            let tensor = from_dlpack_impl(py, &capsule)?;
-            Ok(Some(tensor.inner))
-        }
-        Err(err) => {
-            if err.is_instance_of::<PyTypeError>(py) {
-                Ok(None)
-            } else {
-                Err(err)
-            }
-        }
-    }
-}
-
-fn borrow_f32_argument(any: &Bound<PyAny>) -> PyResult<BorrowedF32> {
-    let py = any.py();
-    if let Ok(tensor) = any.extract::<PyRef<PyTensor>>() {
-        return Ok(BorrowedF32::Tensor(tensor.inner.clone()));
-    }
-
-    if let Some(tensor) = try_extract_tensor_from_dlpack(py, any)? {
-        return Ok(BorrowedF32::Tensor(tensor));
-    }
-
-    let values: Vec<f32> = any.extract()?;
-    Ok(BorrowedF32::Owned(values))
-fn parse_softmax_backend(label: Option<&str>) -> SoftmaxBackend {
-    match label.unwrap_or("auto") {
-        "auto" => SoftmaxBackend::Auto,
-        "cpu" => SoftmaxBackend::Cpu,
-        #[cfg(feature = "wgpu")]
-        "wgpu" => SoftmaxBackend::GpuWgpu,
-        other => {
-            eprintln!("[spiraltorch] unknown softmax backend '{other}', falling back to 'auto'");
-            SoftmaxBackend::Auto
+            Self::Tensor(tensor) => tensor.data(),
+            Self::Owned(vec) => vec.as_slice(),
         }
     }
 }
@@ -308,11 +293,33 @@ impl PyTensor {
         other: &PyTensor,
         bias: Vec<f32>,
         backend: Option<&str>,
+        out: Option<&PyCell<PyTensor>>,
+        py: Python<'_>,
     ) -> PyResult<PyTensor> {
         let backend = parse_backend(backend);
-        let tensor = self
-            .inner
-            .matmul_bias_gelu_with_backend(&other.inner, &bias, backend)
+        let bias_input = F32Input::from_py(bias)?;
+        if let Some(dst) = out {
+            let bias_input = bias_input;
+            return with_out_tensor(dst, move |tensor| {
+                self.inner.matmul_bias_relu_into_with_backend(
+                    &other.inner,
+                    bias_input.as_slice(),
+                    tensor,
+                    backend,
+                )
+            });
+        }
+        let tensor = py
+            .allow_threads({
+                let bias_input = bias_input;
+                move || {
+                    self.inner.matmul_bias_relu_with_backend(
+                        &other.inner,
+                        bias_input.as_slice(),
+                        backend,
+                    )
+                }
+            })
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
@@ -375,6 +382,37 @@ impl PyTensor {
     pub fn matmul_bias_add_gelu(
         &self,
         other: &PyTensor,
+        bias: &PyAny,
+        residual: &PyTensor,
+        backend: Option<&str>,
+        out: Option<&PyCell<PyTensor>>,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_backend(backend);
+        let bias_input = F32Input::from_py(bias)?;
+        if let Some(dst) = out {
+            let bias_input = bias_input;
+            return with_out_tensor(dst, move |tensor| {
+                self.inner.matmul_bias_add_gelu_into_with_backend(
+                    &other.inner,
+                    bias_input.as_slice(),
+                    &residual.inner,
+                    tensor,
+                    backend,
+                )
+            });
+        }
+        let tensor = py
+            .allow_threads({
+                let bias_input = bias_input;
+                move || {
+                    self.inner.matmul_bias_add_gelu_with_backend(
+                        &other.inner,
+                        bias_input.as_slice(),
+                        &residual.inner,
+                        backend,
+                    )
+                }
         bias: &Bound<PyAny>,
         residual: &PyTensor,
         backend: Option<&str>,
@@ -509,6 +547,7 @@ impl PyTensor {
     }
 
     #[staticmethod]
+    pub fn cat_rows(tensors: &Bound<PyList>, py: Python<'_>) -> PyResult<Self> {
     pub fn cat_rows(py: Python<'_>, tensors: &Bound<PyList>) -> PyResult<Self> {
         let mut owned: Vec<Tensor> = Vec::with_capacity(tensors.len());
         for item in tensors.iter() {
