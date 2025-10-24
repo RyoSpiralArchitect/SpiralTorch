@@ -7,7 +7,7 @@ use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::{Bound, PyRef, PyRefMut};
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
-use st_tensor::{MatmulBackend, Tensor, TensorError};
+use st_tensor::{MatmulBackend, SoftmaxBackend, Tensor, TensorError};
 
 fn parse_backend(label: Option<&str>) -> MatmulBackend {
     match label.unwrap_or("auto") {
@@ -81,6 +81,17 @@ fn borrow_f32_argument(any: &Bound<PyAny>) -> PyResult<BorrowedF32> {
 
     let values: Vec<f32> = any.extract()?;
     Ok(BorrowedF32::Owned(values))
+fn parse_softmax_backend(label: Option<&str>) -> SoftmaxBackend {
+    match label.unwrap_or("auto") {
+        "auto" => SoftmaxBackend::Auto,
+        "cpu" => SoftmaxBackend::Cpu,
+        #[cfg(feature = "wgpu")]
+        "wgpu" => SoftmaxBackend::GpuWgpu,
+        other => {
+            eprintln!("[spiraltorch] unknown softmax backend '{other}', falling back to 'auto'");
+            SoftmaxBackend::Auto
+        }
+    }
 }
 
 const USED_DLPACK_CAPSULE_NAME: &CStr =
@@ -286,6 +297,22 @@ impl PyTensor {
                 self.inner
                     .matmul_bias_relu_with_backend(&other.inner, slice, backend)
             })
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
+    /// Matrix multiply fused with bias addition and GELU activation.
+    #[pyo3(signature = (other, bias, *, backend=None))]
+    pub fn matmul_bias_gelu(
+        &self,
+        other: &PyTensor,
+        bias: Vec<f32>,
+        backend: Option<&str>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_backend(backend);
+        let tensor = self
+            .inner
+            .matmul_bias_gelu_with_backend(&other.inner, &bias, backend)
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }

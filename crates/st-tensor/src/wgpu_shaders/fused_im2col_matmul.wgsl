@@ -29,10 +29,12 @@ struct ConvGemmParams {
 @group(0) @binding(2) var<storage, read_write> output_tensor : array<f32>;
 @group(0) @binding(3) var<uniform> params : ConvGemmParams;
 
-override TILE_SIZE : u32 = {tile_size}u;
+override TILE_M : u32 = {tile_m}u;
+override TILE_N : u32 = {tile_n}u;
+override TILE_K : u32 = {tile_k}u;
 
-var<workgroup> lhs_tile : array<f32, TILE_SIZE * TILE_SIZE>;
-var<workgroup> rhs_tile : array<f32, TILE_SIZE * TILE_SIZE>;
+var<workgroup> lhs_tile : array<f32, TILE_M * TILE_K>;
+var<workgroup> rhs_tile_T : array<f32, TILE_N * TILE_K>;
 
 fn load_patch_value(
     batch_index: u32,
@@ -69,57 +71,97 @@ fn load_patch_value(
     return input_tensor[index];
 }
 
-@compute @workgroup_size(TILE_SIZE, TILE_SIZE, 1)
+fn decode_row(index: u32) -> vec3<u32> {
+    let spatial = params.out_h * params.out_w;
+    let batch_index = index / spatial;
+    let rem = index - batch_index * spatial;
+    let out_y = rem / params.out_w;
+    let out_x = rem % params.out_w;
+    return vec3<u32>(batch_index, out_y, out_x);
+}
+
+@compute @workgroup_size(TILE_N, TILE_M, 1)
 fn main(
-    @builtin(global_invocation_id) gid : vec3<u32>,
+    @builtin(workgroup_id) wid : vec3<u32>,
     @builtin(local_invocation_id) lid : vec3<u32>,
 ) {
-    let row = gid.y;
-    let col = gid.x;
+    let local_m = lid.y;
+    let local_n = lid.x;
+    let tile_row_origin = wid.y * TILE_M;
+    let tile_col_origin = wid.x * TILE_N;
+    let row = tile_row_origin + local_m;
+    let col = tile_col_origin + local_n;
     let total_rows = params.batch * params.out_h * params.out_w;
     if (row >= total_rows || col >= params.out_channels) {
         return;
     }
 
-    let spatial = params.out_h * params.out_w;
-    let batch_index = row / spatial;
-    let spatial_index = row - batch_index * spatial;
-    let out_y = spatial_index / params.out_w;
-    let out_x = spatial_index % params.out_w;
-
-    let local_row = lid.y;
-    let local_col = lid.x;
-
     var acc : f32 = 0.0;
-    let tiles = (params.span + TILE_SIZE - 1u) / TILE_SIZE;
+    let tiles = (params.span + TILE_K - 1u) / TILE_K;
     var tile_index : u32 = 0u;
     loop {
         if (tile_index >= tiles) {
             break;
         }
 
-        let k_base = tile_index * TILE_SIZE;
+        let k_base = tile_index * TILE_K;
 
-        let lhs_k = k_base + local_col;
-        lhs_tile[local_row * TILE_SIZE + local_col] =
-            load_patch_value(batch_index, out_y, out_x, lhs_k);
-
-        let rhs_k = k_base + local_row;
-        var rhs_value : f32 = 0.0;
-        if (rhs_k < params.span) {
-            rhs_value = weights[col * params.span + rhs_k];
+        var tm : u32 = local_m;
+        loop {
+            if (tm >= TILE_M) {
+                break;
+            }
+            var tk : u32 = local_n;
+            loop {
+                if (tk >= TILE_K) {
+                    break;
+                }
+                let global_row = tile_row_origin + tm;
+                let global_k = k_base + tk;
+                var lhs_value : f32 = 0.0;
+                if (global_row < total_rows && global_k < params.span) {
+                    let coords = decode_row(global_row);
+                    lhs_value = load_patch_value(coords.x, coords.y, coords.z, global_k);
+                }
+                lhs_tile[tm * TILE_K + tk] = lhs_value;
+                tk = tk + TILE_N;
+            }
+            tm = tm + TILE_M;
         }
-        rhs_tile[local_row * TILE_SIZE + local_col] = rhs_value;
+
+        var tn : u32 = local_n;
+        loop {
+            if (tn >= TILE_N) {
+                break;
+            }
+            var tk : u32 = local_m;
+            loop {
+                if (tk >= TILE_K) {
+                    break;
+                }
+                let global_k = k_base + tk;
+                let global_col = tile_col_origin + tn;
+                var rhs_value : f32 = 0.0;
+                if (global_k < params.span && global_col < params.out_channels) {
+                    rhs_value = weights[global_col * params.span + global_k];
+                }
+                rhs_tile_T[tn * TILE_K + tk] = rhs_value;
+                tk = tk + TILE_M;
+            }
+            tn = tn + TILE_N;
+        }
 
         workgroupBarrier();
 
+        let remaining = params.span - min(params.span, k_base);
+        let k_limit = min(TILE_K, remaining);
         var k : u32 = 0u;
         loop {
-            if (k >= TILE_SIZE) {
+            if (k >= k_limit) {
                 break;
             }
-            let lhs_val = lhs_tile[local_row * TILE_SIZE + k];
-            let rhs_val = rhs_tile[k * TILE_SIZE + local_col];
+            let lhs_val = lhs_tile[local_m * TILE_K + k];
+            let rhs_val = rhs_tile_T[local_n * TILE_K + k];
             acc = acc + lhs_val * rhs_val;
             k = k + 1u;
         }
