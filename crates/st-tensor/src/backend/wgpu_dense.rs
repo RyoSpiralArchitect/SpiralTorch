@@ -52,6 +52,7 @@ struct DenseContext {
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
+    zero_bias: Arc<Buffer>,
 }
 
 impl DenseContext {
@@ -227,7 +228,7 @@ impl DenseContext {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -235,6 +236,16 @@ impl DenseContext {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -264,6 +275,13 @@ impl DenseContext {
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
+            zero_bias: Arc::new(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("st.tensor.wgpu_dense.zero_bias"),
+                    contents: bytemuck::cast_slice(&[0.0f32]),
+                    usage: wgpu::BufferUsages::STORAGE,
+                }),
+            ),
         })
     }
 
@@ -273,6 +291,10 @@ impl DenseContext {
 
     fn queue(&self) -> &Queue {
         self.queue.as_ref()
+    }
+
+    fn zero_bias(&self) -> &Buffer {
+        self.zero_bias.as_ref()
     }
 
     fn pipeline_for(&self, config: TileConfig) -> Arc<ComputePipeline> {
@@ -439,6 +461,7 @@ impl DenseContext {
         &self,
         input: &Buffer,
         weights: &Buffer,
+        bias: &Buffer,
         output: &Buffer,
         params: &Buffer,
     ) -> BindGroup {
@@ -456,10 +479,14 @@ impl DenseContext {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: output.as_entire_binding(),
+                    resource: bias.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
+                    resource: output.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
                     resource: params.as_entire_binding(),
                 },
             ],
@@ -497,8 +524,8 @@ struct ConvGemmParams {
     out_w: u32,
     span: u32,
     out_channels: u32,
+    has_bias: u32,
     _pad0: u32,
-    _pad1: u32,
 }
 
 pub fn matmul(
@@ -749,6 +776,7 @@ pub fn conv_im2col_gemm(
     dilation_h: usize,
     dilation_w: usize,
     weight_t: &[f32],
+    bias: Option<&[f32]>,
     out_channels: usize,
     out_h: usize,
     out_w: usize,
@@ -777,6 +805,11 @@ pub fn conv_im2col_gemm(
     if weight_t.len() != span * out_channels {
         return Err("transposed weight buffer length mismatch".into());
     }
+    if let Some(bias) = bias {
+        if bias.len() != out_channels {
+            return Err("bias length mismatch".into());
+        }
+    }
 
     let ctx = dense_context()?;
     let device = ctx.device();
@@ -787,6 +820,21 @@ pub fn conv_im2col_gemm(
         contents: bytemuck::cast_slice(input),
         usage: wgpu::BufferUsages::STORAGE,
     });
+    let (bias_buffer, has_bias) = if let Some(slice) = bias {
+        (
+            Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("st.tensor.wgpu_dense.conv.bias"),
+                    contents: bytemuck::cast_slice(slice),
+                    usage: wgpu::BufferUsages::STORAGE,
+                }),
+            ),
+            1u32,
+        )
+    } else {
+        (None, 0u32)
+    };
+
     let conv_params = ConvGemmParams {
         batch: batch as u32,
         in_channels: in_channels as u32,
@@ -804,8 +852,8 @@ pub fn conv_im2col_gemm(
         out_w: out_w as u32,
         span: span as u32,
         out_channels: out_channels as u32,
+        has_bias,
         _pad0: 0,
-        _pad1: 0,
     };
     let conv_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("st.tensor.wgpu_dense.conv.params"),
@@ -830,8 +878,17 @@ pub fn conv_im2col_gemm(
     });
     let tile_config = select_tile_config(rows, span, out_channels);
     let fused_pipeline = ctx.fused_conv_pipeline_for(tile_config);
-    let fused_bind_group =
-        ctx.fused_conv_bind_group(&input_buf, &weight_buf, &output_buf, &conv_params_buf);
+    let bias_binding = bias_buffer
+        .as_ref()
+        .map(|buffer| buffer.as_ref())
+        .unwrap_or_else(|| ctx.zero_bias());
+    let fused_bind_group = ctx.fused_conv_bind_group(
+        &input_buf,
+        &weight_buf,
+        bias_binding,
+        &output_buf,
+        &conv_params_buf,
+    );
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("st.tensor.wgpu_dense.conv.fused_pass"),
