@@ -370,6 +370,7 @@ mod tests {
                     compatible_surface: None,
                     force_fallback_adapter: true,
                 })
+                .await
                 .expect("no WGPU adapter available")
         });
         pollster::block_on(async move {
@@ -377,6 +378,7 @@ mod tests {
                 .request_device(&wgpu::DeviceDescriptor::default(), None)
                 .await
                 .expect("failed to request dummy device")
+                .0
         })
     }
 }
