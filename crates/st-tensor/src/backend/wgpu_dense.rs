@@ -15,6 +15,8 @@ const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wg
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
 const FUSED_LINEAR_WGSL_TEMPLATE: &str =
     include_str!("../wgpu_shaders/fused_matmul_bias_relu.wgsl");
+const FUSED_LINEAR_GELU_WGSL_TEMPLATE: &str =
+    include_str!("../wgpu_shaders/fused_matmul_bias_gelu.wgsl");
 const FUSED_LINEAR_RESIDUAL_WGSL_TEMPLATE: &str =
     include_str!("../wgpu_shaders/fused_matmul_bias_residual_relu.wgsl");
 const FUSED_LINEAR_RESIDUAL_GELU_WGSL_TEMPLATE: &str =
@@ -31,37 +33,60 @@ struct MatmulParams {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct TileConfig {
-    tile_size: u32,
+    tile_m: u32,
+    tile_n: u32,
+    tile_k: u32,
 }
 
 impl TileConfig {
-    const fn new(tile_size: u32) -> Self {
-        Self { tile_size }
+    const fn new(tile_m: u32, tile_n: u32, tile_k: u32) -> Self {
+        Self {
+            tile_m,
+            tile_n,
+            tile_k,
+        }
     }
 
-    const fn tile_size(&self) -> u32 {
-        self.tile_size
+    const fn tile_m(&self) -> u32 {
+        self.tile_m
     }
+
+    const fn tile_n(&self) -> u32 {
+        self.tile_n
+    }
+
+    const fn tile_k(&self) -> u32 {
+        self.tile_k
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum FusedActivation {
+    Relu,
+    Gelu,
 }
 
 struct DenseContext {
     device: Arc<Device>,
     queue: Arc<Queue>,
+    device_limits: wgpu::Limits,
+    features: wgpu::Features,
     bind_layout: BindGroupLayout,
     pipeline_layout: PipelineLayout,
     matmul_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
     fused_linear_layout: BindGroupLayout,
     fused_linear_pipeline_layout: PipelineLayout,
-    fused_linear_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
+    fused_linear_pipelines: Mutex<HashMap<(TileConfig, FusedActivation), Arc<ComputePipeline>>>,
     fused_linear_residual_layout: BindGroupLayout,
     fused_linear_residual_pipeline_layout: PipelineLayout,
-    fused_linear_residual_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
-    fused_linear_residual_gelu_layout: BindGroupLayout,
-    fused_linear_residual_gelu_pipeline_layout: PipelineLayout,
-    fused_linear_residual_gelu_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
+    fused_linear_residual_pipelines:
+        Mutex<HashMap<(TileConfig, FusedActivation), Arc<ComputePipeline>>>,
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
+    softmax_layout: BindGroupLayout,
+    softmax_pipeline_layout: PipelineLayout,
+    softmax_subgroup_pipeline: Option<Arc<ComputePipeline>>,
 }
 
 impl DenseContext {
@@ -78,12 +103,19 @@ impl DenseContext {
         })
         .ok_or_else(|| "no suitable WGPU adapter".to_string())?;
 
+        let adapter_features = adapter.features();
+        let requested_features = if adapter_features.contains(wgpu::Features::SUBGROUPS) {
+            wgpu::Features::SUBGROUPS
+        } else {
+            wgpu::Features::empty()
+        };
+
         let (device, queue) = pollster::block_on(async {
             adapter
                 .request_device(
                     &wgpu::DeviceDescriptor {
                         label: None,
-                        required_features: wgpu::Features::empty(),
+                        required_features: requested_features,
                         required_limits: adapter.limits(),
                     },
                     None,
@@ -92,6 +124,8 @@ impl DenseContext {
         })
         .map_err(|err| err.to_string())?;
 
+        let device_limits = device.limits();
+        let features = device.features();
         let device: Arc<Device> = Arc::new(device);
         let queue: Arc<Queue> = Arc::new(queue);
 
@@ -283,79 +317,6 @@ impl DenseContext {
                 push_constant_ranges: &[],
             });
 
-        let fused_linear_residual_gelu_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu_layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-        let fused_linear_residual_gelu_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu_pipeline_layout"),
-                bind_group_layouts: &[&fused_linear_residual_gelu_layout],
-                push_constant_ranges: &[],
-            });
-
         let fused_conv_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("st.tensor.wgpu_dense.fused_conv_layout"),
             entries: &[
@@ -408,9 +369,85 @@ impl DenseContext {
                 push_constant_ranges: &[],
             });
 
+        let softmax_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let fused_conv_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_conv_pipeline_layout"),
+                bind_group_layouts: &[&fused_conv_layout],
+                push_constant_ranges: &[],
+            });
+        let softmax_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.softmax_pipeline_layout"),
+                bind_group_layouts: &[&softmax_layout],
+                push_constant_ranges: &[],
+            });
+        let softmax_subgroup_pipeline = if features.contains(wgpu::Features::SUBGROUPS) {
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("st.tensor.wgpu_dense.softmax_row_subgroup"),
+                source: wgpu::ShaderSource::Wgsl(ROW_SOFTMAX_WGSL.into()),
+            });
+            Some(Arc::new(device.create_compute_pipeline(
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("st.tensor.wgpu_dense.softmax_row_subgroup"),
+                    layout: Some(&softmax_pipeline_layout),
+                    module: &shader,
+                    entry_point: "main_cs",
+                },
+            )))
+        } else {
+            None
+        };
+
         Ok(Self {
             device,
             queue,
+            device_limits,
+            features,
             bind_layout,
             pipeline_layout,
             matmul_pipelines: Mutex::new(HashMap::new()),
@@ -420,12 +457,12 @@ impl DenseContext {
             fused_linear_residual_layout,
             fused_linear_residual_pipeline_layout,
             fused_linear_residual_pipelines: Mutex::new(HashMap::new()),
-            fused_linear_residual_gelu_layout,
-            fused_linear_residual_gelu_pipeline_layout,
-            fused_linear_residual_gelu_pipelines: Mutex::new(HashMap::new()),
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
+            softmax_layout,
+            softmax_pipeline_layout,
+            softmax_subgroup_pipeline,
         })
     }
 
@@ -437,8 +474,88 @@ impl DenseContext {
         self.queue.as_ref()
     }
 
-    fn zero_bias(&self) -> &Buffer {
-        self.zero_bias.as_ref()
+    fn supports_tile_config(&self, config: TileConfig) -> bool {
+        if config.tile_m() == 0 || config.tile_n() == 0 || config.tile_k() == 0 {
+            return false;
+        }
+
+        let limits = &self.device_limits;
+        if config.tile_n() > limits.max_compute_workgroup_size_x
+            || config.tile_m() > limits.max_compute_workgroup_size_y
+        {
+            return false;
+        }
+
+        let invocations = config.tile_m().saturating_mul(config.tile_n());
+        if invocations > limits.max_compute_invocations_per_workgroup {
+            return false;
+        }
+
+        let shared_floats = config
+            .tile_m()
+            .saturating_mul(config.tile_k())
+            .saturating_add(config.tile_n().saturating_mul(config.tile_k()))
+            .saturating_add(config.tile_n());
+        let shared_bytes = shared_floats.saturating_mul(4);
+        if shared_bytes > limits.max_compute_workgroup_storage_size {
+            return false;
+        }
+
+        true
+    }
+
+    fn select_tile_config(&self, rows: usize, inner: usize, cols: usize) -> TileConfig {
+        let mut candidates: Vec<TileConfig> = Vec::new();
+        let mut push_unique = |cfg: TileConfig| {
+            if !candidates.contains(&cfg) {
+                candidates.push(cfg);
+            }
+        };
+
+        let rows = rows as u32;
+        let cols = cols as u32;
+        let inner = inner as u32;
+
+        if rows <= 32 && cols <= 32 {
+            push_unique(TileConfig::new(8, 16, 8));
+            push_unique(TileConfig::new(8, 8, 8));
+        }
+
+        if cols >= rows {
+            push_unique(TileConfig::new(16, 32, 8));
+            push_unique(TileConfig::new(8, 32, 16));
+            push_unique(TileConfig::new(16, 16, 16));
+            push_unique(TileConfig::new(16, 16, 8));
+        } else {
+            push_unique(TileConfig::new(32, 16, 8));
+            push_unique(TileConfig::new(32, 8, 16));
+            push_unique(TileConfig::new(16, 16, 16));
+            push_unique(TileConfig::new(16, 16, 8));
+        }
+
+        if inner <= 64 {
+            push_unique(TileConfig::new(8, 16, 8));
+            push_unique(TileConfig::new(8, 8, 8));
+        }
+
+        for fallback in [
+            TileConfig::new(8, 8, 8),
+            TileConfig::new(8, 8, 4),
+            TileConfig::new(4, 8, 4),
+            TileConfig::new(4, 4, 4),
+            TileConfig::new(2, 4, 4),
+            TileConfig::new(1, 1, 1),
+        ] {
+            push_unique(fallback);
+        }
+
+        for candidate in candidates {
+            if self.supports_tile_config(candidate) {
+                return candidate;
+            }
+        }
+
+        TileConfig::new(1, 1, 1)
     }
 
     fn pipeline_for(&self, config: TileConfig) -> Arc<ComputePipeline> {
@@ -447,10 +564,22 @@ impl DenseContext {
             return pipeline.clone();
         }
 
-        let shader_source = format!(MATMUL_WGSL_TEMPLATE, tile_size = config.tile_size());
+        debug_assert!(
+            self.supports_tile_config(config),
+            "requested unsupported tile config"
+        );
+
+        let shader_source = format!(
+            MATMUL_WGSL_TEMPLATE,
+            tile_m = config.tile_m(),
+            tile_n = config.tile_n(),
+            tile_k = config.tile_k(),
+        );
         let shader_label = format!(
-            "st.tensor.wgpu_dense.matmul_shader.tile{}",
-            config.tile_size()
+            "st.tensor.wgpu_dense.matmul_shader.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
         );
         let shader = self
             .device
@@ -459,8 +588,10 @@ impl DenseContext {
                 source: wgpu::ShaderSource::Wgsl(shader_source.into()),
             });
         let pipeline_label = format!(
-            "st.tensor.wgpu_dense.matmul_pipeline.tile{}",
-            config.tile_size()
+            "st.tensor.wgpu_dense.matmul_pipeline.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
         );
         let pipeline = Arc::new(self.device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
@@ -474,16 +605,37 @@ impl DenseContext {
         pipeline
     }
 
-    fn fused_linear_pipeline_for(&self, config: TileConfig) -> Arc<ComputePipeline> {
+    fn fused_linear_pipeline_for(
+        &self,
+        config: TileConfig,
+        activation: FusedActivation,
+    ) -> Arc<ComputePipeline> {
         let mut pipelines = self.fused_linear_pipelines.lock().unwrap();
-        if let Some(pipeline) = pipelines.get(&config) {
+        let key = (config, activation);
+        if let Some(pipeline) = pipelines.get(&key) {
             return pipeline.clone();
         }
 
-        let shader_source = format!(FUSED_LINEAR_WGSL_TEMPLATE, tile_size = config.tile_size());
+        debug_assert!(
+            self.supports_tile_config(config),
+            "requested unsupported tile config"
+        );
+
+        let (shader_template, activation_label) = match activation {
+            FusedActivation::Relu => (FUSED_LINEAR_WGSL_TEMPLATE, "relu"),
+            FusedActivation::Gelu => (FUSED_LINEAR_GELU_WGSL_TEMPLATE, "gelu"),
+        };
+        let shader_source = format!(
+            shader_template,
+            tile_m = config.tile_m(),
+            tile_n = config.tile_n(),
+            tile_k = config.tile_k(),
+        );
         let shader_label = format!(
-            "st.tensor.wgpu_dense.fused_linear_shader.tile{}",
-            config.tile_size()
+            "st.tensor.wgpu_dense.fused_linear_shader.{activation_label}.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
         );
         let shader = self
             .device
@@ -492,8 +644,10 @@ impl DenseContext {
                 source: wgpu::ShaderSource::Wgsl(shader_source.into()),
             });
         let pipeline_label = format!(
-            "st.tensor.wgpu_dense.fused_linear_pipeline.tile{}",
-            config.tile_size()
+            "st.tensor.wgpu_dense.fused_linear_pipeline.{activation_label}.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
         );
         let pipeline = Arc::new(self.device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
@@ -503,23 +657,41 @@ impl DenseContext {
                 entry_point: "main",
             },
         ));
-        pipelines.insert(config, pipeline.clone());
+        pipelines.insert(key, pipeline.clone());
         pipeline
     }
 
-    fn fused_linear_with_residual_pipeline_for(&self, config: TileConfig) -> Arc<ComputePipeline> {
+    fn fused_linear_with_residual_pipeline_for(
+        &self,
+        config: TileConfig,
+        activation: FusedActivation,
+    ) -> Arc<ComputePipeline> {
         let mut pipelines = self.fused_linear_residual_pipelines.lock().unwrap();
-        if let Some(pipeline) = pipelines.get(&config) {
+        let key = (config, activation);
+        if let Some(pipeline) = pipelines.get(&key) {
             return pipeline.clone();
         }
 
+        debug_assert!(
+            self.supports_tile_config(config),
+            "requested unsupported tile config"
+        );
+
+        let (shader_template, activation_label) = match activation {
+            FusedActivation::Relu => (FUSED_LINEAR_RESIDUAL_WGSL_TEMPLATE, "relu"),
+            FusedActivation::Gelu => (FUSED_LINEAR_RESIDUAL_GELU_WGSL_TEMPLATE, "gelu"),
+        };
         let shader_source = format!(
-            FUSED_LINEAR_RESIDUAL_WGSL_TEMPLATE,
-            tile_size = config.tile_size()
+            shader_template,
+            tile_m = config.tile_m(),
+            tile_n = config.tile_n(),
+            tile_k = config.tile_k(),
         );
         let shader_label = format!(
-            "st.tensor.wgpu_dense.fused_linear_residual_shader.tile{}",
-            config.tile_size()
+            "st.tensor.wgpu_dense.fused_linear_residual_shader.{activation_label}.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
         );
         let shader = self
             .device
@@ -528,8 +700,10 @@ impl DenseContext {
                 source: wgpu::ShaderSource::Wgsl(shader_source.into()),
             });
         let pipeline_label = format!(
-            "st.tensor.wgpu_dense.fused_linear_residual_pipeline.tile{}",
-            config.tile_size()
+            "st.tensor.wgpu_dense.fused_linear_residual_pipeline.{activation_label}.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
         );
         let pipeline = Arc::new(self.device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
@@ -539,26 +713,56 @@ impl DenseContext {
                 entry_point: "main",
             },
         ));
-        pipelines.insert(config, pipeline.clone());
+        pipelines.insert(key, pipeline.clone());
         pipeline
     }
 
-    fn fused_linear_with_residual_gelu_pipeline_for(
-        &self,
-        config: TileConfig,
-    ) -> Arc<ComputePipeline> {
-        let mut pipelines = self.fused_linear_residual_gelu_pipelines.lock().unwrap();
+    fn supports_softmax(&self) -> bool {
+        self.softmax_subgroup_pipeline.is_some()
+    }
+
+    fn softmax_pipeline(&self) -> Option<Arc<ComputePipeline>> {
+        self.softmax_subgroup_pipeline.as_ref().map(Arc::clone)
+    }
+
+    fn softmax_bind_group(&self, input: &Buffer, output: &Buffer, params: &Buffer) -> BindGroup {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax_bind_group"),
+            layout: &self.softmax_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: input.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    fn pipeline_for(&self, config: TileConfig) -> Arc<ComputePipeline> {
+        let mut pipelines = self.matmul_pipelines.lock().unwrap();
         if let Some(pipeline) = pipelines.get(&config) {
             return pipeline.clone();
         }
 
         let shader_source = format!(
-            FUSED_LINEAR_RESIDUAL_GELU_WGSL_TEMPLATE,
-            tile_size = config.tile_size()
+            MATMUL_WGSL_TEMPLATE,
+            tile_m = config.tile_m(),
+            tile_n = config.tile_n(),
+            tile_k = config.tile_k(),
         );
         let shader_label = format!(
-            "st.tensor.wgpu_dense.fused_linear_residual_gelu_shader.tile{}",
-            config.tile_size()
+            "st.tensor.wgpu_dense.matmul_shader.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
         );
         let shader = self
             .device
@@ -567,18 +771,122 @@ impl DenseContext {
                 source: wgpu::ShaderSource::Wgsl(shader_source.into()),
             });
         let pipeline_label = format!(
-            "st.tensor.wgpu_dense.fused_linear_residual_gelu_pipeline.tile{}",
-            config.tile_size()
+            "st.tensor.wgpu_dense.matmul_pipeline.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
         );
         let pipeline = Arc::new(self.device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
                 label: Some(&pipeline_label),
-                layout: Some(&self.fused_linear_residual_gelu_pipeline_layout),
+                layout: Some(&self.pipeline_layout),
                 module: &shader,
                 entry_point: "main",
             },
         ));
         pipelines.insert(config, pipeline.clone());
+        pipeline
+    }
+
+    fn fused_linear_pipeline_for(
+        &self,
+        config: TileConfig,
+        activation: FusedActivation,
+    ) -> Arc<ComputePipeline> {
+        let mut pipelines = self.fused_linear_pipelines.lock().unwrap();
+        let key = (config, activation);
+        if let Some(pipeline) = pipelines.get(&key) {
+            return pipeline.clone();
+        }
+
+        let (shader_template, activation_label) = match activation {
+            FusedActivation::Relu => (FUSED_LINEAR_WGSL_TEMPLATE, "relu"),
+            FusedActivation::Gelu => (FUSED_LINEAR_GELU_WGSL_TEMPLATE, "gelu"),
+        };
+        let shader_source = format!(
+            shader_template,
+            tile_m = config.tile_m(),
+            tile_n = config.tile_n(),
+            tile_k = config.tile_k(),
+        );
+        let shader_label = format!(
+            "st.tensor.wgpu_dense.fused_linear_shader.{activation_label}.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
+        );
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(&shader_label),
+                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+            });
+        let pipeline_label = format!(
+            "st.tensor.wgpu_dense.fused_linear_pipeline.{activation_label}.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
+        );
+        let pipeline = Arc::new(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some(&pipeline_label),
+                layout: Some(&self.fused_linear_pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+            },
+        ));
+        pipelines.insert(key, pipeline.clone());
+        pipeline
+    }
+
+    fn fused_linear_with_residual_pipeline_for(
+        &self,
+        config: TileConfig,
+        activation: FusedActivation,
+    ) -> Arc<ComputePipeline> {
+        let mut pipelines = self.fused_linear_residual_pipelines.lock().unwrap();
+        let key = (config, activation);
+        if let Some(pipeline) = pipelines.get(&key) {
+            return pipeline.clone();
+        }
+
+        let (shader_template, activation_label) = match activation {
+            FusedActivation::Relu => (FUSED_LINEAR_RESIDUAL_WGSL_TEMPLATE, "relu"),
+            FusedActivation::Gelu => (FUSED_LINEAR_RESIDUAL_GELU_WGSL_TEMPLATE, "gelu"),
+        };
+        let shader_source = format!(
+            shader_template,
+            tile_m = config.tile_m(),
+            tile_n = config.tile_n(),
+            tile_k = config.tile_k(),
+        );
+        let shader_label = format!(
+            "st.tensor.wgpu_dense.fused_linear_residual_shader.{activation_label}.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
+        );
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(&shader_label),
+                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+            });
+        let pipeline_label = format!(
+            "st.tensor.wgpu_dense.fused_linear_residual_pipeline.{activation_label}.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
+        );
+        let pipeline = Arc::new(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some(&pipeline_label),
+                layout: Some(&self.fused_linear_residual_pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+            },
+        ));
+        pipelines.insert(key, pipeline.clone());
         pipeline
     }
 
@@ -588,10 +896,22 @@ impl DenseContext {
             return pipeline.clone();
         }
 
-        let shader_source = format!(FUSED_CONV_WGSL_TEMPLATE, tile_size = config.tile_size());
+        debug_assert!(
+            self.supports_tile_config(config),
+            "requested unsupported tile config"
+        );
+
+        let shader_source = format!(
+            FUSED_CONV_WGSL_TEMPLATE,
+            tile_m = config.tile_m(),
+            tile_n = config.tile_n(),
+            tile_k = config.tile_k(),
+        );
         let shader_label = format!(
-            "st.tensor.wgpu_dense.fused_conv_shader.tile{}",
-            config.tile_size()
+            "st.tensor.wgpu_dense.fused_conv_shader.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
         );
         let shader = self
             .device
@@ -600,8 +920,10 @@ impl DenseContext {
                 source: wgpu::ShaderSource::Wgsl(shader_source.into()),
             });
         let pipeline_label = format!(
-            "st.tensor.wgpu_dense.fused_conv_pipeline.tile{}",
-            config.tile_size()
+            "st.tensor.wgpu_dense.fused_conv_pipeline.tile{}x{}x{}",
+            config.tile_m(),
+            config.tile_n(),
+            config.tile_k(),
         );
         let pipeline = Arc::new(self.device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
@@ -688,47 +1010,6 @@ impl DenseContext {
         self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("st.tensor.wgpu_dense.fused_linear_residual_bind_group"),
             layout: &self.fused_linear_residual_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: lhs.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: rhs.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: bias.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: residual.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: out.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: params.as_entire_binding(),
-                },
-            ],
-        })
-    }
-
-    fn fused_linear_with_residual_gelu_bind_group(
-        &self,
-        lhs: &Buffer,
-        rhs: &Buffer,
-        bias: &Buffer,
-        residual: &Buffer,
-        out: &Buffer,
-        params: &Buffer,
-    ) -> BindGroup {
-        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu_bind_group"),
-            layout: &self.fused_linear_residual_gelu_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -874,6 +1155,116 @@ pub fn matmul(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.encoder"),
     });
+    let tile_config = ctx.select_tile_config(rows, inner, cols);
+    dispatch_matmul(
+        &ctx,
+        &mut encoder,
+        &a_buf,
+        &b_buf,
+        &c_buf,
+        rows,
+        inner,
+        cols,
+        tile_config,
+    );
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &c_buf, rows * cols)
+}
+
+pub fn matmul_bias_relu(
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if lhs.len() != rows * inner {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            rows * inner,
+            lhs.len()
+        ));
+    }
+    if rhs.len() != inner * cols {
+        return Err(format!(
+            "rhs buffer length mismatch: expected {} elements, got {}",
+            inner * cols,
+            rhs.len()
+        ));
+    }
+    if bias.len() != cols {
+        return Err(format!(
+            "bias length mismatch: expected {} elements, got {}",
+            cols,
+            bias.len()
+        ));
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let lhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear.lhs"),
+        contents: bytemuck::cast_slice(lhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let rhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear.rhs"),
+        contents: bytemuck::cast_slice(rhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let bias_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear.bias"),
+        contents: bytemuck::cast_slice(bias),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let result_size = (rows * cols * std::mem::size_of::<f32>()) as u64;
+    let out_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear.out"),
+        size: result_size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear.encoder"),
+    });
+    let tile_config = ctx.select_tile_config(rows, inner, cols);
+    dispatch_fused_linear(
+        &ctx,
+        &mut encoder,
+        &lhs_buf,
+        &rhs_buf,
+        &bias_buf,
+        &out_buf,
+        rows,
+        inner,
+        cols,
+        tile_config,
+        FusedActivation::Relu,
+    );
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &out_buf, rows * cols)
+}
+
+pub fn matmul_bias_gelu(
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    });
     let tile_config = select_tile_config(rows, inner, cols);
     dispatch_matmul(
         &ctx,
@@ -966,6 +1357,89 @@ pub fn matmul_bias_relu(
         inner,
         cols,
         tile_config,
+        FusedActivation::Relu,
+    );
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &out_buf, rows * cols)
+}
+
+pub fn matmul_bias_gelu(
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if lhs.len() != rows * inner {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            rows * inner,
+            lhs.len()
+        ));
+    }
+    if rhs.len() != inner * cols {
+        return Err(format!(
+            "rhs buffer length mismatch: expected {} elements, got {}",
+            inner * cols,
+            rhs.len()
+        ));
+    }
+    if bias.len() != cols {
+        return Err(format!(
+            "bias length mismatch: expected {} elements, got {}",
+            cols,
+            bias.len()
+        ));
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let lhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_gelu.lhs"),
+        contents: bytemuck::cast_slice(lhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let rhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_gelu.rhs"),
+        contents: bytemuck::cast_slice(rhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let bias_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_gelu.bias"),
+        contents: bytemuck::cast_slice(bias),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let result_size = (rows * cols * std::mem::size_of::<f32>()) as u64;
+    let out_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_gelu.out"),
+        size: result_size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_gelu.encoder"),
+    });
+    let tile_config = select_tile_config(rows, inner, cols);
+    dispatch_fused_linear(
+        &ctx,
+        &mut encoder,
+        &lhs_buf,
+        &rhs_buf,
+        &bias_buf,
+        &out_buf,
+        rows,
+        inner,
+        cols,
+        tile_config,
+        FusedActivation::Gelu,
     );
     queue.submit(Some(encoder.finish()));
 
@@ -1061,6 +1535,7 @@ pub fn matmul_bias_add_relu(
         inner,
         cols,
         tile_config,
+        FusedActivation::Relu,
     );
     queue.submit(Some(encoder.finish()));
 
@@ -1144,7 +1619,7 @@ pub fn matmul_bias_add_gelu(
         label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu.encoder"),
     });
     let tile_config = select_tile_config(rows, inner, cols);
-    dispatch_fused_linear_with_residual_gelu(
+    dispatch_fused_linear_with_residual(
         &ctx,
         &mut encoder,
         &lhs_buf,
@@ -1156,6 +1631,333 @@ pub fn matmul_bias_add_gelu(
         inner,
         cols,
         tile_config,
+        FusedActivation::Gelu,
+    );
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &out_buf, rows * cols)
+}
+
+pub fn row_softmax(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
+    if rows == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if input.len() != rows * cols {
+        return Err(format!(
+            "input length mismatch: expected {} elements, got {}",
+            rows * cols,
+            input.len()
+        ));
+    }
+
+    let rows_u32 = u32::try_from(rows).map_err(|_| "rows exceed u32::MAX".to_string())?;
+    let cols_u32 = u32::try_from(cols).map_err(|_| "cols exceed u32::MAX".to_string())?;
+
+    let ctx = dense_context()?;
+    if !ctx.supports_softmax() {
+        return Err("wgpu device lacks subgroup row softmax support".into());
+    }
+
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let input_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.softmax.input"),
+        contents: bytemuck::cast_slice(input),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let output_size = (rows * cols * std::mem::size_of::<f32>()) as u64;
+    let output_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("st.tensor.wgpu_dense.softmax.output"),
+        size: output_size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    let params = RowSoftmaxParams {
+        rows: rows_u32,
+        cols: cols_u32,
+        in_stride: cols_u32,
+        out_stride: cols_u32,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.softmax.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = ctx.softmax_bind_group(&input_buf, &output_buf, &params_buf);
+    let pipeline = ctx
+        .softmax_pipeline()
+        .ok_or_else(|| "row softmax pipeline unavailable".to_string())?;
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.softmax.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(rows_u32, 1, 1);
+    }
+    if lhs.len() != rows * inner {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            rows * inner,
+            lhs.len()
+        ));
+    }
+    if rhs.len() != inner * cols {
+        return Err(format!(
+            "rhs buffer length mismatch: expected {} elements, got {}",
+            inner * cols,
+            rhs.len()
+        ));
+    }
+    if bias.len() != cols {
+        return Err(format!(
+            "bias length mismatch: expected {} elements, got {}",
+            cols,
+            bias.len()
+        ));
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let lhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_gelu.lhs"),
+        contents: bytemuck::cast_slice(lhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let rhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_gelu.rhs"),
+        contents: bytemuck::cast_slice(rhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let bias_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_gelu.bias"),
+        contents: bytemuck::cast_slice(bias),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let result_size = (rows * cols * std::mem::size_of::<f32>()) as u64;
+    let out_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_gelu.out"),
+        size: result_size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_gelu.encoder"),
+    });
+    let tile_config = ctx.select_tile_config(rows, inner, cols);
+    dispatch_fused_linear(
+        &ctx,
+        &mut encoder,
+        &lhs_buf,
+        &rhs_buf,
+        &bias_buf,
+        &out_buf,
+        rows,
+        inner,
+        cols,
+        tile_config,
+        FusedActivation::Gelu,
+    );
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &out_buf, rows * cols)
+}
+
+pub fn matmul_bias_add_relu(
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    residual: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if lhs.len() != rows * inner {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            rows * inner,
+            lhs.len()
+        ));
+    }
+    if rhs.len() != inner * cols {
+        return Err(format!(
+            "rhs buffer length mismatch: expected {} elements, got {}",
+            inner * cols,
+            rhs.len()
+        ));
+    }
+    if bias.len() != cols {
+        return Err(format!(
+            "bias length mismatch: expected {} elements, got {}",
+            cols,
+            bias.len()
+        ));
+    }
+    if residual.len() != rows * cols {
+        return Err(format!(
+            "residual length mismatch: expected {} elements, got {}",
+            rows * cols,
+            residual.len()
+        ));
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let lhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual.lhs"),
+        contents: bytemuck::cast_slice(lhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let rhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual.rhs"),
+        contents: bytemuck::cast_slice(rhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let bias_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual.bias"),
+        contents: bytemuck::cast_slice(bias),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let residual_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual.residual"),
+        contents: bytemuck::cast_slice(residual),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let result_size = (rows * cols * std::mem::size_of::<f32>()) as u64;
+    let out_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual.out"),
+        size: result_size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual.encoder"),
+    });
+    let tile_config = ctx.select_tile_config(rows, inner, cols);
+    dispatch_fused_linear_with_residual(
+        &ctx,
+        &mut encoder,
+        &lhs_buf,
+        &rhs_buf,
+        &bias_buf,
+        &residual_buf,
+        &out_buf,
+        rows,
+        inner,
+        cols,
+        tile_config,
+        FusedActivation::Relu,
+    );
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &out_buf, rows * cols)
+}
+
+pub fn matmul_bias_add_gelu(
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    residual: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if lhs.len() != rows * inner {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            rows * inner,
+            lhs.len()
+        ));
+    }
+    if rhs.len() != inner * cols {
+        return Err(format!(
+            "rhs buffer length mismatch: expected {} elements, got {}",
+            inner * cols,
+            rhs.len()
+        ));
+    }
+    if bias.len() != cols {
+        return Err(format!(
+            "bias length mismatch: expected {} elements, got {}",
+            cols,
+            bias.len()
+        ));
+    }
+    if residual.len() != rows * cols {
+        return Err(format!(
+            "residual length mismatch: expected {} elements, got {}",
+            rows * cols,
+            residual.len()
+        ));
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let lhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu.lhs"),
+        contents: bytemuck::cast_slice(lhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let rhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu.rhs"),
+        contents: bytemuck::cast_slice(rhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let bias_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu.bias"),
+        contents: bytemuck::cast_slice(bias),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let residual_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu.residual"),
+        contents: bytemuck::cast_slice(residual),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let result_size = (rows * cols * std::mem::size_of::<f32>()) as u64;
+    let out_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu.out"),
+        size: result_size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu.encoder"),
+    });
+    let tile_config = ctx.select_tile_config(rows, inner, cols);
+    dispatch_fused_linear_with_residual(
+        &ctx,
+        &mut encoder,
+        &lhs_buf,
+        &rhs_buf,
+        &bias_buf,
+        &residual_buf,
+        &out_buf,
+        rows,
+        inner,
+        cols,
+        tile_config,
+        FusedActivation::Gelu,
     );
     queue.submit(Some(encoder.finish()));
 
@@ -1164,6 +1966,20 @@ pub fn matmul_bias_add_gelu(
 
 pub fn is_available() -> bool {
     dense_context().is_ok()
+}
+
+pub fn supports_row_softmax(rows: usize, cols: usize) -> bool {
+    if rows == 0 || cols == 0 {
+        return false;
+    }
+    if rows > u32::MAX as usize || cols > u32::MAX as usize {
+        return false;
+    }
+    if let Ok(ctx) = dense_context() {
+        ctx.supports_softmax()
+    } else {
+        false
+    }
 }
 
 fn dispatch_matmul(
@@ -1199,9 +2015,8 @@ fn dispatch_matmul(
         });
         pass.set_pipeline(pipeline.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
-        let tile_size = tile.tile_size();
-        let groups_x = ((cols as u32) + tile_size - 1) / tile_size;
-        let groups_y = ((rows as u32) + tile_size - 1) / tile_size;
+        let groups_x = ((cols as u32) + tile.tile_n() - 1) / tile.tile_n();
+        let groups_y = ((rows as u32) + tile.tile_m() - 1) / tile.tile_m();
         pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
     }
 }
@@ -1217,6 +2032,7 @@ fn dispatch_fused_linear(
     inner: usize,
     cols: usize,
     tile: TileConfig,
+    activation: FusedActivation,
 ) {
     let params = MatmulParams {
         rows: rows as u32,
@@ -1232,7 +2048,7 @@ fn dispatch_fused_linear(
             usage: wgpu::BufferUsages::UNIFORM,
         });
     let bind_group = ctx.fused_linear_bind_group(lhs, rhs, bias, out, &params_buf);
-    let pipeline = ctx.fused_linear_pipeline_for(tile);
+    let pipeline = ctx.fused_linear_pipeline_for(tile, activation);
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("st.tensor.wgpu_dense.fused_linear.pass"),
@@ -1240,9 +2056,8 @@ fn dispatch_fused_linear(
         });
         pass.set_pipeline(pipeline.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
-        let tile_size = tile.tile_size();
-        let groups_x = ((cols as u32) + tile_size - 1) / tile_size;
-        let groups_y = ((rows as u32) + tile_size - 1) / tile_size;
+        let groups_x = ((cols as u32) + tile.tile_n() - 1) / tile.tile_n();
+        let groups_y = ((rows as u32) + tile.tile_m() - 1) / tile.tile_m();
         pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
     }
 }
@@ -1259,6 +2074,7 @@ fn dispatch_fused_linear_with_residual(
     inner: usize,
     cols: usize,
     tile: TileConfig,
+    activation: FusedActivation,
 ) {
     let params = MatmulParams {
         rows: rows as u32,
@@ -1275,7 +2091,7 @@ fn dispatch_fused_linear_with_residual(
         });
     let bind_group =
         ctx.fused_linear_with_residual_bind_group(lhs, rhs, bias, residual, out, &params_buf);
-    let pipeline = ctx.fused_linear_with_residual_pipeline_for(tile);
+    let pipeline = ctx.fused_linear_with_residual_pipeline_for(tile, activation);
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("st.tensor.wgpu_dense.fused_linear_residual.pass"),
@@ -1283,52 +2099,8 @@ fn dispatch_fused_linear_with_residual(
         });
         pass.set_pipeline(pipeline.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
-        let tile_size = tile.tile_size();
-        let groups_x = ((cols as u32) + tile_size - 1) / tile_size;
-        let groups_y = ((rows as u32) + tile_size - 1) / tile_size;
-        pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
-    }
-}
-
-fn dispatch_fused_linear_with_residual_gelu(
-    ctx: &DenseContext,
-    encoder: &mut wgpu::CommandEncoder,
-    lhs: &Buffer,
-    rhs: &Buffer,
-    bias: &Buffer,
-    residual: &Buffer,
-    out: &Buffer,
-    rows: usize,
-    inner: usize,
-    cols: usize,
-    tile: TileConfig,
-) {
-    let params = MatmulParams {
-        rows: rows as u32,
-        cols: cols as u32,
-        inner: inner as u32,
-        _pad: 0,
-    };
-    let params_buf = ctx
-        .device()
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu.params"),
-            contents: bytemuck::bytes_of(&params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-    let bind_group =
-        ctx.fused_linear_with_residual_gelu_bind_group(lhs, rhs, bias, residual, out, &params_buf);
-    let pipeline = ctx.fused_linear_with_residual_gelu_pipeline_for(tile);
-    {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("st.tensor.wgpu_dense.fused_linear_residual_gelu.pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(pipeline.as_ref());
-        pass.set_bind_group(0, &bind_group, &[]);
-        let tile_size = tile.tile_size();
-        let groups_x = ((cols as u32) + tile_size - 1) / tile_size;
-        let groups_y = ((rows as u32) + tile_size - 1) / tile_size;
+        let groups_x = ((cols as u32) + tile.tile_n() - 1) / tile.tile_n();
+        let groups_y = ((rows as u32) + tile.tile_m() - 1) / tile.tile_m();
         pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
     }
 }
@@ -1433,7 +2205,7 @@ pub fn conv_im2col_gemm(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.conv.encoder"),
     });
-    let tile_config = select_tile_config(rows, span, out_channels);
+    let tile_config = ctx.select_tile_config(rows, span, out_channels);
     let fused_pipeline = ctx.fused_conv_pipeline_for(tile_config);
     let fused_bind_group =
         ctx.fused_conv_bind_group(&input_buf, &weight_buf, &output_buf, &conv_params_buf);
@@ -1444,9 +2216,8 @@ pub fn conv_im2col_gemm(
         });
         pass.set_pipeline(fused_pipeline.as_ref());
         pass.set_bind_group(0, &fused_bind_group, &[]);
-        let tile_size = tile_config.tile_size();
-        let groups_x = ((out_channels as u32) + tile_size - 1) / tile_size;
-        let groups_y = ((rows as u32) + tile_size - 1) / tile_size;
+        let groups_x = ((out_channels as u32) + tile_config.tile_n() - 1) / tile_config.tile_n();
+        let groups_y = ((rows as u32) + tile_config.tile_m() - 1) / tile_config.tile_m();
         pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
     }
 
@@ -1456,12 +2227,33 @@ pub fn conv_im2col_gemm(
 }
 
 fn select_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
-    let max_dim = rows.max(cols);
-    if max_dim <= 64 || inner <= 64 {
-        TileConfig::new(8)
-    } else {
-        TileConfig::new(16)
+    let rows = rows as u32;
+    let cols = cols as u32;
+    let inner = inner as u32;
+
+    if rows <= 32 && cols <= 32 {
+        return TileConfig::new(8, 8, 8);
     }
+
+    if inner <= 64 {
+        if rows > cols.saturating_mul(2) {
+            return TileConfig::new(32, 8, 8);
+        }
+        if cols > rows.saturating_mul(2) {
+            return TileConfig::new(8, 32, 8);
+        }
+        return TileConfig::new(16, 16, 8);
+    }
+
+    if rows > cols.saturating_mul(2) {
+        return TileConfig::new(32, 8, 16);
+    }
+
+    if cols > rows.saturating_mul(2) {
+        return TileConfig::new(8, 32, 16);
+    }
+
+    TileConfig::new(16, 16, 16)
 }
 
 pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {

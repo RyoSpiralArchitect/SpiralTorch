@@ -3,36 +3,47 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-//! Row-wise softmax pipelines optimised with subgroup operations.
-//! The builder mirrors the style used by the keep-k kernels and only
-//! materialises subgroup variants when the device exposes the relevant
-//! WGPU features. The shader itself performs a fused max-reduce,
-//! exponentiation and normalisation in a single pass without temporary
-//! buffers, matching the fusion requirements outlined for SpiralTorch's
-//! Level 2 optimisation roadmap.
+//! WGPU softmax kernels with optional subgroup acceleration.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use wgpu::{ComputePipeline, Device};
+use bytemuck::{Pod, Zeroable};
+use wgpu::{
+    BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer,
+    BufferUsages, ComputePipeline, Device, PipelineLayoutDescriptor, Queue, ShaderStages,
+};
 
 use crate::{ShaderCache, ShaderLoadError};
 
-/// Collection of compute pipelines implementing row-wise softmax.
-#[derive(Debug)]
-pub struct Pipelines {
-    /// Subgroup-accelerated implementation. Present when the target device
-    /// advertises subgroup operations via `wgpu::Features::SUBGROUPS`.
-    pub row_softmax_subgroup: Option<ComputePipeline>,
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Debug)]
+pub struct Params {
+    pub rows: u32,
+    pub cols: u32,
+    pub in_stride: u32,
+    pub out_stride: u32,
 }
 
-impl Pipelines {
-    /// Return the subgroup accelerated pipeline if it was constructed.
-    pub fn subgroup(&self) -> Option<&ComputePipeline> {
-        self.row_softmax_subgroup.as_ref()
+impl Params {
+    pub fn as_bytes(&self) -> &[u8] {
+        bytemuck::bytes_of(self)
     }
 }
 
-/// Builder for the row-wise softmax pipelines.
+#[derive(Debug)]
+pub struct Pipelines {
+    pub bind_layout: BindGroupLayout,
+    pub workgroup: ComputePipeline,
+    pub subgroup: Option<ComputePipeline>,
+}
+
+impl Pipelines {
+    /// Pick the best available pipeline depending on subgroup support.
+    pub fn best(&self) -> &ComputePipeline {
+        self.subgroup.as_ref().unwrap_or(&self.workgroup)
+    }
+}
+
 pub struct Builder<'a> {
     device: &'a Device,
     cache: ShaderCache,
@@ -40,12 +51,10 @@ pub struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    /// Create a builder rooted at the provided shader directory.
     pub fn new(device: &'a Device, shader_dir: impl Into<PathBuf>) -> Self {
         Self::with_cache(device, ShaderCache::new(shader_dir))
     }
 
-    /// Create a builder from an existing cache instance.
     pub fn with_cache(device: &'a Device, cache: ShaderCache) -> Self {
         Self {
             device,
@@ -54,64 +63,146 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Toggle subgroup pipeline generation.
-    pub fn supports_subgroup(mut self, supports_subgroup: bool) -> Self {
-        self.supports_subgroup = supports_subgroup;
+    pub fn supports_subgroup(mut self, supports: bool) -> Self {
+        self.supports_subgroup = supports;
         self
     }
 
-    /// Borrow the underlying cache for custom shader loading sequences.
     pub fn cache_mut(&mut self) -> &mut ShaderCache {
         &mut self.cache
     }
 
-    /// Consume the builder and return the cache without constructing pipelines.
     pub fn into_cache(self) -> ShaderCache {
         self.cache
     }
 
-    fn assemble(&mut self) -> Result<Pipelines, ShaderLoadError> {
-        let row_softmax_subgroup = self
+    pub fn build(mut self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
+        let bind_layout = self
+            .device
+            .create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("st.backend.softmax.bind_layout"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("st.backend.softmax.pipeline_layout"),
+                bind_group_layouts: &[&bind_layout],
+                push_constant_ranges: &[],
+            });
+
+        self.cache
+            .prefetch(["softmax_workgroup.wgsl", "softmax_subgroup.wgsl"])?;
+
+        let workgroup = self.cache.load_compute_pipeline_with_layout(
+            self.device,
+            "softmax_workgroup.wgsl",
+            "st.softmax.workgroup",
+            "main_cs",
+            Some(&pipeline_layout),
+        )?;
+
+        let subgroup = self
             .supports_subgroup
             .then(|| {
-                self.cache.load_compute_pipeline(
+                self.cache.load_compute_pipeline_with_layout(
                     self.device,
-                    "row_softmax_subgroup.wgsl",
-                    "row_softmax_subgroup",
+                    "softmax_subgroup.wgsl",
+                    "st.softmax.subgroup",
                     "main_cs",
+                    Some(&pipeline_layout),
                 )
             })
             .transpose()?;
 
-        Ok(Pipelines {
-            row_softmax_subgroup,
-        })
-    }
-
-    /// Consume the builder, loading the requested shaders and producing pipeline handles.
-    pub fn build(mut self) -> Result<Pipelines, ShaderLoadError> {
-        self.assemble()
-    }
-
-    /// Build pipelines while returning the underlying [`ShaderCache`] for reuse.
-    pub fn build_with_cache(mut self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
-        let pipelines = self.assemble()?;
-        Ok((pipelines, self.cache))
+        Ok((
+            Pipelines {
+                bind_layout,
+                workgroup,
+                subgroup,
+            },
+            self.cache,
+        ))
     }
 }
 
-/// Convenience helper to build the softmax pipelines in one call.
+#[derive(Clone, Copy, Debug)]
+pub struct Dispatch {
+    pub rows: u32,
+}
+
+impl Dispatch {
+    pub fn workgroups(&self) -> (u32, u32, u32) {
+        (self.rows, 1, 1)
+    }
+}
+
+pub fn upload_params(device: &Device, queue: &Queue, params: &Params) -> Buffer {
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("st.backend.softmax.params"),
+        size: std::mem::size_of::<Params>() as u64,
+        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&buffer, 0, params.as_bytes());
+    buffer
+}
+
 pub fn create_pipelines(
     device: &Device,
-    shader_dir: &str,
+    shader_dir: impl AsRef<Path>,
     supports_subgroup: bool,
 ) -> Result<Pipelines, ShaderLoadError> {
-    Builder::new(device, shader_dir)
+    let (pipelines, _) = Builder::new(device, shader_dir.as_ref().to_path_buf())
         .supports_subgroup(supports_subgroup)
-        .build()
+        .build()?;
+    Ok(pipelines)
 }
 
-// Tests are omitted intentionally: instantiating a `wgpu::Device` in CI without a
-// hardware adapter is brittle and distracts from the primary goal of providing the
-// shader plumbing. Integration coverage should live in higher level crates that own
-// the actual backend context.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn params_layout_is_16_bytes() {
+        assert_eq!(std::mem::size_of::<Params>(), 16);
+    }
+
+    #[test]
+    fn dispatch_matches_rows() {
+        let dispatch = Dispatch { rows: 42 };
+        assert_eq!(dispatch.workgroups(), (42, 1, 1));
+    }
+}

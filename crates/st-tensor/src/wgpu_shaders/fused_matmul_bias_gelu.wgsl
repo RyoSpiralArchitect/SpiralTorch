@@ -24,6 +24,13 @@ var<workgroup> lhs_tile : array<f32, TILE_M * TILE_K>;
 var<workgroup> rhs_tile_T : array<f32, TILE_N * TILE_K>;
 var<workgroup> bias_tile : array<f32, TILE_N>;
 
+fn gelu(x : f32) -> f32 {
+    let coeff : f32 = 0.044715;
+    let sqrt_2_over_pi : f32 = 0.7978845608028654;
+    let x_cubed = x * x * x;
+    return 0.5 * x * (1.0 + tanh(sqrt_2_over_pi * (x + coeff * x_cubed)));
+}
+
 @compute @workgroup_size(TILE_N, TILE_M, 1)
 fn main(
     @builtin(workgroup_id) wid : vec3<u32>,
@@ -122,7 +129,7 @@ fn main(
     workgroupBarrier();
     let bias_value = bias_tile[local_n];
 
+    let sum = acc + bias_value;
     let out_index = row * params.cols + col;
-    let activated = max(acc + bias_value, 0.0);
-    out[out_index] = activated;
+    out[out_index] = gelu(sum);
 }

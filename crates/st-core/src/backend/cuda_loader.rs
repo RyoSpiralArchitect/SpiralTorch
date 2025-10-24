@@ -85,7 +85,9 @@ pub fn load_ptx_module(
         .lock()
         .map_err(|_| "cuda module registry poisoned".to_string())?;
 
-    let state = modules.entry(module_name).or_insert_with(ModuleState::new);
+    let state = modules
+        .entry(module_name)
+        .or_insert_with(ModuleState::new);
 
     let missing: Vec<&'static str> = functions
         .iter()
@@ -112,3 +114,4 @@ pub fn load_ptx_module(
         module_name,
     })
 }
+
