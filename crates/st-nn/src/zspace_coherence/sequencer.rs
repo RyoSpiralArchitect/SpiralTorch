@@ -476,13 +476,14 @@ impl PreDiscardPolicy {
 /// Adapts pre-discard behaviour across timesteps so low-credence channels are culled
 /// proactively instead of reactively. The regulator maintains exponential moving averages
 /// over recent discard telemetry, blends preservation and energy errors with configurable
-/// weights, and nudges the dominance ratio toward configured targets while penalising
-/// repeated fallbacks.
+/// weights, anticipates trending deviations with a momentum term, and nudges the dominance
+/// ratio toward configured targets while penalising repeated fallbacks.
 #[derive(Clone, Debug)]
 pub struct PreDiscardRegulator {
     target_preserved_ratio: f32,
     target_survivor_energy_ratio: f32,
     smoothing: f32,
+    trend_smoothing: f32,
     aggressiveness: f32,
     max_step: f32,
     min_offset: f32,
@@ -490,9 +491,14 @@ pub struct PreDiscardRegulator {
     channel_weight: f32,
     energy_weight: f32,
     fallback_penalty: f32,
+    momentum: f32,
+    deadband: f32,
+    equilibrium_decay: f32,
     offset: f32,
     preserved_ema: Option<f32>,
     energy_ema: Option<f32>,
+    trend_ema: Option<f32>,
+    last_error: Option<f32>,
     observations: u64,
 }
 
@@ -515,6 +521,7 @@ impl PreDiscardRegulator {
             target_preserved_ratio: target_preserved_ratio.min(1.0),
             target_survivor_energy_ratio: target_survivor_energy_ratio.min(1.0),
             smoothing: 0.25,
+            trend_smoothing: 0.5,
             aggressiveness: 0.5,
             max_step: 0.2,
             min_offset: -0.5,
@@ -522,9 +529,14 @@ impl PreDiscardRegulator {
             channel_weight: 0.5,
             energy_weight: 0.5,
             fallback_penalty: 0.1,
+            momentum: 0.0,
+            deadband: 0.0,
+            equilibrium_decay: 0.0,
             offset: 0.0,
             preserved_ema: None,
             energy_ema: None,
+            trend_ema: None,
+            last_error: None,
             observations: 0,
         })
     }
@@ -544,7 +556,11 @@ impl PreDiscardRegulator {
 
     /// Configures how preservation versus energy errors are blended. Both weights must be
     /// finite and the sum must be greater than zero.
-    pub fn with_error_weights(mut self, channel_weight: f32, energy_weight: f32) -> PureResult<Self> {
+    pub fn with_error_weights(
+        mut self,
+        channel_weight: f32,
+        energy_weight: f32,
+    ) -> PureResult<Self> {
         if !channel_weight.is_finite()
             || !energy_weight.is_finite()
             || channel_weight < 0.0
@@ -564,10 +580,7 @@ impl PreDiscardRegulator {
     /// Configures an additional penalty applied when the pre-discard policy has to fall back.
     pub fn with_fallback_penalty(mut self, penalty: f32) -> PureResult<Self> {
         if !penalty.is_finite() || penalty < 0.0 {
-            return Err(TensorError::NonPositiveCoherence {
-                coherence: penalty,
-            }
-            .into());
+            return Err(TensorError::NonPositiveCoherence { coherence: penalty }.into());
         }
         self.fallback_penalty = penalty;
         Ok(self)
@@ -582,6 +595,19 @@ impl PreDiscardRegulator {
             .into());
         }
         self.aggressiveness = aggressiveness;
+        Ok(self)
+    }
+
+    /// Configures the smoothing factor used when tracking error trends. Values are clamped to
+    /// the \[0, 1] interval.
+    pub fn with_trend_smoothing(mut self, smoothing: f32) -> PureResult<Self> {
+        if !smoothing.is_finite() || smoothing < 0.0 || smoothing > 1.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: smoothing,
+            }
+            .into());
+        }
+        self.trend_smoothing = smoothing;
         Ok(self)
     }
 
@@ -607,6 +633,41 @@ impl PreDiscardRegulator {
         }
         self.min_offset = min_offset;
         self.max_offset = max_offset;
+        Ok(self)
+    }
+
+    /// Configures the magnitude of anticipatory momentum applied when telemetry errors trend in a
+    /// particular direction.
+    pub fn with_momentum(mut self, momentum: f32) -> PureResult<Self> {
+        if !momentum.is_finite() || momentum < 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: momentum,
+            }
+            .into());
+        }
+        self.momentum = momentum;
+        Ok(self)
+    }
+
+    /// Suppresses adjustments when the combined error falls within the specified symmetric range.
+    pub fn with_deadband(mut self, deadband: f32) -> PureResult<Self> {
+        if !deadband.is_finite() || deadband < 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: deadband,
+            }
+            .into());
+        }
+        self.deadband = deadband;
+        Ok(self)
+    }
+
+    /// Applies exponential decay towards the neutral offset when the regulator observes equilibrium.
+    /// The decay factor must lie in the [0, 1] interval.
+    pub fn with_equilibrium_decay(mut self, decay: f32) -> PureResult<Self> {
+        if !decay.is_finite() || decay < 0.0 || decay > 1.0 {
+            return Err(TensorError::NonPositiveCoherence { coherence: decay }.into());
+        }
+        self.equilibrium_decay = decay;
         Ok(self)
     }
 
@@ -678,19 +739,52 @@ impl PreDiscardRegulator {
         let preserved_error = preserved - self.target_preserved_ratio;
         let energy_error = energy - self.target_survivor_energy_ratio;
         let total_weight = self.channel_weight + self.energy_weight;
-        let combined_error = if total_weight <= f32::EPSILON {
+        let raw_error = if total_weight <= f32::EPSILON {
             0.0
         } else {
             (self.channel_weight * preserved_error + self.energy_weight * energy_error)
                 / total_weight
         };
+        let combined_error = if self.deadband > 0.0 && raw_error.abs() <= self.deadband {
+            0.0
+        } else {
+            raw_error
+        };
+        let trend = if let Some(previous) = self.last_error {
+            let delta = combined_error - previous;
+            let tracked = Self::update_ema(&mut self.trend_ema, delta, self.trend_smoothing);
+            if tracked.is_finite() {
+                tracked
+            } else {
+                0.0
+            }
+        } else {
+            self.trend_ema = Some(0.0);
+            0.0
+        };
+        self.last_error = Some(combined_error);
+
         let mut step = -self.aggressiveness * combined_error;
+        if self.momentum > 0.0 {
+            step += -self.aggressiveness * self.momentum * trend;
+        }
         if telemetry.used_fallback() {
             step -= self.fallback_penalty;
         }
         let step = step.clamp(-self.max_step, self.max_step);
 
-        self.offset = (self.offset + step).clamp(self.min_offset, self.max_offset);
+        let mut next_offset = (self.offset + step).clamp(self.min_offset, self.max_offset);
+        if self.equilibrium_decay > 0.0
+            && combined_error.abs() <= f32::EPSILON
+            && !telemetry.used_fallback()
+        {
+            next_offset *= 1.0 - self.equilibrium_decay;
+            if next_offset.abs() < 1e-6 {
+                next_offset = 0.0;
+            }
+        }
+
+        self.offset = next_offset;
         self.observations = self.observations.saturating_add(1);
     }
 }
@@ -2067,6 +2161,102 @@ mod tests {
 
         regulator.observe(outcome.telemetry());
         assert!(regulator.offset() < 0.0);
+    }
+
+    #[test]
+    fn pre_discard_regulator_deadband_suppresses_small_adjustments() {
+        let base = PreDiscardPolicy::new(0.75).unwrap();
+        let mut regulator = PreDiscardRegulator::new(0.55, 0.6)
+            .unwrap()
+            .with_aggressiveness(0.8)
+            .unwrap()
+            .with_max_step(0.3)
+            .unwrap()
+            .with_deadband(0.05)
+            .unwrap();
+
+        let telemetry = PreDiscardTelemetry::new(&base, 4, 6, false, 0.64, 0.36, 0.72);
+        regulator.observe(&telemetry);
+
+        assert_eq!(regulator.offset(), 0.0);
+        assert_eq!(regulator.observations(), 1);
+    }
+
+    #[test]
+    fn pre_discard_regulator_momentum_accelerates_trend() {
+        let base = PreDiscardPolicy::new(0.8).unwrap();
+        let mut baseline = PreDiscardRegulator::new(0.45, 0.55)
+            .unwrap()
+            .with_aggressiveness(0.6)
+            .unwrap()
+            .with_max_step(0.25)
+            .unwrap();
+        let mut momentum = PreDiscardRegulator::new(0.45, 0.55)
+            .unwrap()
+            .with_aggressiveness(0.6)
+            .unwrap()
+            .with_max_step(0.25)
+            .unwrap()
+            .with_momentum(0.75)
+            .unwrap()
+            .with_trend_smoothing(0.4)
+            .unwrap();
+
+        let telemetry_a = PreDiscardTelemetry::new(&base, 3, 7, false, 0.72, 0.28, 0.6);
+        let telemetry_b = PreDiscardTelemetry::new(&base, 2, 9, false, 0.88, 0.12, 0.62);
+
+        baseline.observe(&telemetry_a);
+        momentum.observe(&telemetry_a);
+        assert!((baseline.offset() - momentum.offset()).abs() < 1e-6);
+
+        baseline.observe(&telemetry_b);
+        momentum.observe(&telemetry_b);
+
+        assert!(momentum.offset() < baseline.offset());
+    }
+
+    #[test]
+    fn pre_discard_regulator_equilibrium_decay_relaxes_offset() {
+        let base = PreDiscardPolicy::new(0.7).unwrap();
+        let mut regulator = PreDiscardRegulator::new(0.4, 0.5)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.9)
+            .unwrap()
+            .with_max_step(0.4)
+            .unwrap()
+            .with_equilibrium_decay(0.3)
+            .unwrap();
+
+        let skewed = PreDiscardTelemetry::new(&base, 8, 2, false, 0.18, 0.82, 0.68);
+        regulator.observe(&skewed);
+        let biased_offset = regulator.offset();
+        assert!(biased_offset.abs() > 0.0);
+
+        let equilibrium = PreDiscardTelemetry::new(&base, 6, 4, false, 0.5, 0.5, 0.7);
+        regulator.observe(&equilibrium);
+
+        assert!(regulator.offset().abs() < biased_offset.abs());
+    }
+
+    #[test]
+    fn pre_discard_regulator_trend_configuration_validated() {
+        let regulator = PreDiscardRegulator::new(0.4, 0.5).unwrap();
+        assert!(regulator.clone().with_trend_smoothing(1.2).is_err());
+        assert!(regulator.clone().with_momentum(-0.1).is_err());
+        assert!(regulator.clone().with_deadband(-0.01).is_err());
+        assert!(regulator.clone().with_equilibrium_decay(1.5).is_err());
+        assert!(regulator
+            .clone()
+            .with_trend_smoothing(0.0)
+            .unwrap()
+            .with_momentum(0.0)
+            .unwrap()
+            .with_deadband(0.0)
+            .unwrap()
+            .with_equilibrium_decay(0.5)
+            .is_ok());
     }
 
     #[test]
