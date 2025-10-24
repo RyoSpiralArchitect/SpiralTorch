@@ -211,8 +211,14 @@ pub struct ConfigDiffEvent {
 pub fn set_last_psi(reading: &PsiReading) {
     #[cfg(all(feature = "psi", debug_assertions))]
     let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
-    if let Ok(mut guard) = LAST_PSI.write() {
-        *guard = Some(reading.clone());
+    match LAST_PSI.write() {
+        Ok(mut guard) => {
+            *guard = Some(reading.clone());
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = Some(reading.clone());
+        }
     }
     let mut fragment = AtlasFragment::new();
     if let Some(timestamp) = psi_step_timestamp(reading.step) {
@@ -226,18 +232,24 @@ pub fn set_last_psi(reading: &PsiReading) {
 
 #[cfg(feature = "psi")]
 pub fn get_last_psi() -> Option<PsiReading> {
-    LAST_PSI
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    match LAST_PSI.read() {
+        Ok(guard) => guard.as_ref().cloned(),
+        Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
+    }
 }
 
 #[cfg(feature = "psi")]
 pub fn clear_last_psi() {
     #[cfg(all(feature = "psi", debug_assertions))]
     let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
-    if let Ok(mut guard) = LAST_PSI.write() {
-        *guard = None;
+    match LAST_PSI.write() {
+        Ok(mut guard) => {
+            *guard = None;
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = None;
+        }
     }
 }
 
@@ -245,9 +257,16 @@ pub fn clear_last_psi() {
 pub fn set_last_psi_events(events: &[PsiEvent]) {
     #[cfg(all(feature = "psi", debug_assertions))]
     let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
-    if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
-        guard.clear();
-        guard.extend(events.iter().cloned());
+    match LAST_PSI_EVENTS.write() {
+        Ok(mut guard) => {
+            guard.clear();
+            guard.extend(events.iter().cloned());
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            guard.clear();
+            guard.extend(events.iter().cloned());
+        }
     }
     if events.is_empty() {
         return;
@@ -271,15 +290,27 @@ pub fn get_last_psi_events() -> Vec<PsiEvent> {
 pub fn clear_last_psi_events() {
     #[cfg(all(feature = "psi", debug_assertions))]
     let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
-    if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
-        guard.clear();
+    match LAST_PSI_EVENTS.write() {
+        Ok(mut guard) => {
+            guard.clear();
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            guard.clear();
+        }
     }
 }
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi_spiral(advisory: &PsiSpiralAdvisory) {
-    if let Ok(mut guard) = LAST_PSI_SPIRAL.write() {
-        *guard = Some(advisory.clone());
+    match LAST_PSI_SPIRAL.write() {
+        Ok(mut guard) => {
+            *guard = Some(advisory.clone());
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = Some(advisory.clone());
+        }
     }
     let mut fragment = AtlasFragment::new();
     fragment.push_metric("psi.spiral.mu_eff0", advisory.mu_eff0);
@@ -301,16 +332,22 @@ pub fn set_last_psi_spiral(advisory: &PsiSpiralAdvisory) {
 
 #[cfg(feature = "psi")]
 pub fn get_last_psi_spiral() -> Option<PsiSpiralAdvisory> {
-    LAST_PSI_SPIRAL
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    match LAST_PSI_SPIRAL.read() {
+        Ok(guard) => guard.as_ref().cloned(),
+        Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
+    }
 }
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi_spiral_tuning(tuning: &PsiSpiralTuning) {
-    if let Ok(mut guard) = LAST_PSI_SPIRAL_TUNING.write() {
-        *guard = Some(tuning.clone());
+    match LAST_PSI_SPIRAL_TUNING.write() {
+        Ok(mut guard) => {
+            *guard = Some(tuning.clone());
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = Some(tuning.clone());
+        }
     }
     let mut fragment = AtlasFragment::new();
     fragment.push_metric("psi.spiral.tuning.stability", tuning.stability_score);
@@ -340,10 +377,10 @@ pub fn set_last_psi_spiral_tuning(tuning: &PsiSpiralTuning) {
 
 #[cfg(feature = "psi")]
 pub fn get_last_psi_spiral_tuning() -> Option<PsiSpiralTuning> {
-    LAST_PSI_SPIRAL_TUNING
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    match LAST_PSI_SPIRAL_TUNING.read() {
+        Ok(guard) => guard.as_ref().cloned(),
+        Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
+    }
 }
 
 /// Records the most recent configuration diff events produced when loading
@@ -362,10 +399,10 @@ pub fn record_config_events(events: &[ConfigDiffEvent]) {
 
 /// Returns the last recorded configuration diff events.
 pub fn get_config_events() -> Vec<ConfigDiffEvent> {
-    config_events_cell()
-        .read()
-        .map(|guard| guard.clone())
-        .unwrap_or_default()
+    match config_events_cell().read() {
+        Ok(guard) => guard.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    }
 }
 
 #[cfg(feature = "psychoid")]
@@ -382,10 +419,10 @@ pub fn set_last_psychoid(reading: &PsychoidReading) {
 
 #[cfg(feature = "psychoid")]
 pub fn get_last_psychoid() -> Option<PsychoidReading> {
-    LAST_PSYCHOID
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    match LAST_PSYCHOID.read() {
+        Ok(guard) => guard.as_ref().cloned(),
+        Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
+    }
 }
 
 /// Latest SoftLogic-derived telemetry that has been fed back into the "Z" control space.
@@ -552,10 +589,10 @@ pub fn push_dashboard_frame(frame: DashboardFrame) {
 
 /// Returns the latest dashboard frame if one has been recorded.
 pub fn latest_dashboard_frame() -> Option<DashboardFrame> {
-    dashboard_ring()
-        .read()
-        .ok()
-        .and_then(|guard| guard.latest().cloned())
+    match dashboard_ring().read() {
+        Ok(guard) => guard.latest().cloned(),
+        Err(poisoned) => poisoned.into_inner().latest().cloned(),
+    }
 }
 
 /// Returns up to `limit` frames from the ring, newest first.
@@ -563,10 +600,16 @@ pub fn snapshot_dashboard_frames(limit: usize) -> Vec<DashboardFrame> {
     if limit == 0 {
         return Vec::new();
     }
-    dashboard_ring()
-        .read()
-        .map(|guard| guard.iter().rev().take(limit).cloned().collect())
-        .unwrap_or_default()
+    match dashboard_ring().read() {
+        Ok(guard) => guard.iter().rev().take(limit).cloned().collect(),
+        Err(poisoned) => poisoned
+            .into_inner()
+            .iter()
+            .rev()
+            .take(limit)
+            .cloned()
+            .collect(),
+    }
 }
 
 fn push_atlas_route(frame: &AtlasFrame) {
@@ -607,27 +650,29 @@ pub fn clear_atlas_route() {
 
 /// Returns the latest atlas frame if one has been recorded.
 pub fn get_atlas_frame() -> Option<AtlasFrame> {
-    atlas_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    match atlas_cell().read() {
+        Ok(guard) => guard.as_ref().cloned(),
+        Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
+    }
 }
 
 /// Returns the chronological atlas route up to the requested limit.
 pub fn get_atlas_route(limit: Option<usize>) -> AtlasRoute {
     let mut route = AtlasRoute::new();
-    if let Ok(guard) = atlas_route_cell().read() {
-        let limit = limit.unwrap_or(usize::MAX);
-        if limit == 0 {
-            return route;
-        }
-        let mut frames: Vec<AtlasFrame> = guard.iter().cloned().collect();
-        if frames.len() > limit {
-            let start = frames.len() - limit;
-            frames.drain(0..start);
-        }
-        route.frames = frames;
+    let reader = match atlas_route_cell().read() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let limit = limit.unwrap_or(usize::MAX);
+    if limit == 0 {
+        return route;
     }
+    let mut frames: Vec<AtlasFrame> = reader.iter().cloned().collect();
+    if frames.len() > limit {
+        let start = frames.len() - limit;
+        frames.drain(0..start);
+    }
+    route.frames = frames;
     route
 }
 
@@ -669,10 +714,10 @@ pub fn set_maintainer_report(report: MaintainerReport) {
 
 /// Returns the latest maintainer report, if one has been recorded.
 pub fn get_maintainer_report() -> Option<MaintainerReport> {
-    maintainer_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    match maintainer_cell().read() {
+        Ok(guard) => guard.as_ref().cloned(),
+        Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
+    }
 }
 
 #[cfg(test)]
@@ -806,10 +851,10 @@ pub fn set_last_realgrad(pulse: &RealGradPulse) {
 
 /// Returns the most recent RealGrad pulse, if one has been recorded.
 pub fn get_last_realgrad() -> Option<RealGradPulse> {
-    realgrad_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().copied())
+    match realgrad_cell().read() {
+        Ok(guard) => guard.as_ref().copied(),
+        Err(poisoned) => poisoned.into_inner().as_ref().copied(),
+    }
 }
 
 #[cfg(test)]
@@ -861,10 +906,10 @@ pub fn clear_last_desire_step() {
 )]
 #[cfg(feature = "psi")]
 pub fn get_last_desire_step() -> Option<DesireStepTelemetry> {
-    desire_step_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    match desire_step_cell().read() {
+        Ok(guard) => guard.as_ref().cloned(),
+        Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
+    }
 }
 
 static LAST_CHRONO_LOOP: OnceLock<RwLock<Option<ChronoLoopSignal>>> = OnceLock::new();
@@ -882,10 +927,10 @@ pub fn set_chrono_loop(signal: ChronoLoopSignal) {
 
 /// Returns the latest chrono loop signal, if any has been recorded.
 pub fn get_chrono_loop() -> Option<ChronoLoopSignal> {
-    chrono_loop_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    match chrono_loop_cell().read() {
+        Ok(guard) => guard.as_ref().cloned(),
+        Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
+    }
 }
 
 /// Envelope combining chrono loop telemetry with collapse/Z feedback so other nodes can replay it.
@@ -1497,10 +1542,10 @@ pub fn set_collapse_pulse(pulse: CollapsePulse) {
 #[cfg(feature = "collapse")]
 /// Returns the most recent collapse pulse, if any.
 pub fn get_collapse_pulse() -> Option<CollapsePulse> {
-    collapse_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    match collapse_cell().read() {
+        Ok(guard) => guard.as_ref().cloned(),
+        Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
+    }
 }
 
 #[cfg(test)]

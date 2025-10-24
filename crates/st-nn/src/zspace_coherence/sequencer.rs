@@ -21,7 +21,10 @@ use crate::{
 use st_core::maxwell::MaxwellZPulse;
 #[cfg(feature = "psi")]
 use st_core::{
-    telemetry::{hub::SoftlogicZFeedback, psi::{PsiEvent, PsiReading}},
+    telemetry::{
+        hub::SoftlogicZFeedback,
+        psi::{PsiEvent, PsiReading},
+    },
     theory::maxwell::MaxwellPsiTelemetryBridge,
 };
 use st_tensor::{OpenCartesianTopos, TensorError};
