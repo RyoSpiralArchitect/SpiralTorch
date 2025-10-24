@@ -210,19 +210,34 @@ impl CobolDispatchPlanner {
         self.builder.set_dataset_storage_class(storage_class);
     }
 
-    #[wasm_bindgen(js_name = setDatasetMember)]
-    pub fn set_dataset_member(&mut self, member: Option<String>) {
-        self.builder.set_dataset_member(member);
+    #[wasm_bindgen(js_name = setDatasetSpacePrimary)]
+    pub fn set_dataset_space_primary(&mut self, space_primary: Option<u32>) {
+        self.builder.set_dataset_space_primary(space_primary);
     }
 
-    #[wasm_bindgen(js_name = setDatasetDisposition)]
-    pub fn set_dataset_disposition(&mut self, disposition: Option<String>) {
-        self.builder.set_dataset_disposition(disposition);
+    #[wasm_bindgen(js_name = setDatasetSpaceSecondary)]
+    pub fn set_dataset_space_secondary(&mut self, space_secondary: Option<u32>) {
+        self.builder.set_dataset_space_secondary(space_secondary);
     }
 
-    #[wasm_bindgen(js_name = setDatasetVolume)]
-    pub fn set_dataset_volume(&mut self, volume: Option<String>) {
-        self.builder.set_dataset_volume(volume);
+    #[wasm_bindgen(js_name = setDatasetSpaceUnit)]
+    pub fn set_dataset_space_unit(&mut self, space_unit: Option<String>) {
+        self.builder.set_dataset_space_unit(space_unit);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetDirectoryBlocks)]
+    pub fn set_dataset_directory_blocks(&mut self, directory_blocks: Option<u32>) {
+        self.builder.set_dataset_directory_blocks(directory_blocks);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetType)]
+    pub fn set_dataset_type(&mut self, dataset_type: Option<String>) {
+        self.builder.set_dataset_type(dataset_type);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetLike)]
+    pub fn set_dataset_like(&mut self, like_dataset: Option<String>) {
+        self.builder.set_dataset_like(like_dataset);
     }
 
     #[wasm_bindgen(js_name = clearDataset)]
@@ -363,6 +378,12 @@ impl CobolDispatchPlanner {
                     data_class: dataset.data_class.as_deref(),
                     management_class: dataset.management_class.as_deref(),
                     storage_class: dataset.storage_class.as_deref(),
+                    space_primary: dataset.space_primary,
+                    space_secondary: dataset.space_secondary,
+                    space_unit: dataset.space_unit.as_deref(),
+                    directory_blocks: dataset.directory_blocks,
+                    dataset_type: dataset.dataset_type.as_deref(),
+                    like_dataset: dataset.like_dataset.as_deref(),
                 }),
             release_channel: &envelope.release_channel,
         };
@@ -403,4 +424,16 @@ struct CobolPreviewDataset<'a> {
     management_class: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     storage_class: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    space_primary: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    space_secondary: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    space_unit: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    directory_blocks: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dataset_type: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    like_dataset: Option<&'a str>,
 }
