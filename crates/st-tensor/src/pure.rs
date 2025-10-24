@@ -282,6 +282,35 @@ impl fmt::Display for MatmulBackend {
     }
 }
 
+/// Explicit backend selection for row-wise softmax.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SoftmaxBackend {
+    /// Allow SpiralTorch to pick the most appropriate backend.
+    Auto,
+    /// Force the pure Rust implementation.
+    Cpu,
+    /// Execute on the WGPU accelerator backend when available.
+    #[cfg(feature = "wgpu")]
+    GpuWgpu,
+}
+
+impl SoftmaxBackend {
+    fn label(self) -> &'static str {
+        match self {
+            SoftmaxBackend::Auto => "auto",
+            SoftmaxBackend::Cpu => "cpu",
+            #[cfg(feature = "wgpu")]
+            SoftmaxBackend::GpuWgpu => "wgpu",
+        }
+    }
+}
+
+impl fmt::Display for SoftmaxBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 #[derive(Clone, Debug)]
 enum TensorBacking {
     Owned(Arc<Vec<f32>>),
@@ -768,6 +797,20 @@ impl Tensor {
         Ok(matmul_naive(self.data(), other.data(), rows, inner, cols))
     }
 
+    fn row_softmax_auto(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available() && wgpu_dense::supports_row_softmax(rows, cols) {
+                if let Ok(buffer) = wgpu_dense::row_softmax(self.data(), rows, cols) {
+                    return Tensor::from_vec(rows, cols, buffer);
+                }
+            }
+        }
+
+        let buffer = row_softmax_cpu(self.data(), rows, cols);
+        Tensor::from_vec(rows, cols, buffer)
+    }
+
     /// Matrix multiply using the WGPU backend when available.
     #[cfg(feature = "wgpu")]
     pub fn matmul_wgpu(&self, other: &Tensor) -> PureResult<Tensor> {
@@ -867,6 +910,35 @@ impl Tensor {
                     message,
                 })?;
                 Tensor::from_vec(rows, cols, data)
+            }
+        }
+    }
+
+    /// Apply a numerically stable row-wise softmax with backend selection.
+    pub fn row_softmax(&self) -> PureResult<Tensor> {
+        self.row_softmax_with_backend(SoftmaxBackend::Auto)
+    }
+
+    /// Apply a numerically stable row-wise softmax using the requested backend.
+    pub fn row_softmax_with_backend(&self, backend: SoftmaxBackend) -> PureResult<Tensor> {
+        let (rows, cols) = self.shape();
+
+        match backend {
+            SoftmaxBackend::Auto => self.row_softmax_auto(rows, cols),
+            SoftmaxBackend::Cpu => {
+                let buffer = row_softmax_cpu(self.data(), rows, cols);
+                Tensor::from_vec(rows, cols, buffer)
+            }
+            #[cfg(feature = "wgpu")]
+            SoftmaxBackend::GpuWgpu => {
+                let buffer =
+                    wgpu_dense::row_softmax(self.data(), rows, cols).map_err(|message| {
+                        TensorError::BackendFailure {
+                            backend: "wgpu",
+                            message,
+                        }
+                    })?;
+                Tensor::from_vec(rows, cols, buffer)
             }
         }
     }
@@ -2694,6 +2766,34 @@ impl AmegaRealgrad {
     }
 }
 
+fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut out = vec![0.0; rows * cols];
+    if cols == 0 {
+        return out;
+    }
+    for r in 0..rows {
+        let offset = r * cols;
+        let row_slice = &data[offset..offset + cols];
+        let mut max_value = -1.0e30_f32;
+        for &value in row_slice {
+            if value > max_value {
+                max_value = value;
+            }
+        }
+        let mut sum = 0.0_f32;
+        for c in 0..cols {
+            let exp_value = (row_slice[c] - max_value).exp();
+            out[offset + c] = exp_value;
+            sum += exp_value;
+        }
+        let inv_sum = if sum > 0.0 { 1.0 / sum } else { 0.0 };
+        for c in 0..cols {
+            out[offset + c] *= inv_sum;
+        }
+    }
+    out
+}
+
 fn matmul_naive(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize) -> Vec<f32> {
     let mut out = vec![0.0; rows * cols];
     for r in 0..rows {
@@ -2765,6 +2865,37 @@ mod tests {
 
         assert_eq!(fused.shape(), reference.shape());
         for (a, b) in fused.data().iter().zip(reference.data().iter()) {
+            assert!((a - b).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn row_softmax_rows_sum_to_one() {
+        let tensor = Tensor::from_vec(2, 3, vec![1.0, -1.5, 0.25, 0.5, 0.0, -2.0]).unwrap();
+        let softmax = tensor.row_softmax().unwrap();
+        let (_, cols) = tensor.shape();
+        for row in softmax.data().chunks(cols) {
+            let sum: f32 = row.iter().copied().sum();
+            assert!((sum - 1.0).abs() < 1e-5, "row sum = {}", sum);
+        }
+    }
+
+    #[test]
+    fn row_softmax_cpu_backend_matches_auto() {
+        let tensor = Tensor::from_vec(
+            3,
+            4,
+            vec![
+                0.5, -0.75, 1.25, 0.0, -1.0, 0.2, 0.4, -0.6, 1.2, -0.5, 0.3, -1.8,
+            ],
+        )
+        .unwrap();
+        let auto = tensor.row_softmax().unwrap();
+        let cpu = tensor
+            .row_softmax_with_backend(SoftmaxBackend::Cpu)
+            .unwrap();
+
+        for (a, b) in auto.data().iter().zip(cpu.data().iter()) {
             assert!((a - b).abs() < 1e-6);
         }
     }

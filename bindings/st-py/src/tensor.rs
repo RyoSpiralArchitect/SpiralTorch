@@ -7,7 +7,7 @@ use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
-use st_tensor::{MatmulBackend, Tensor, TensorError};
+use st_tensor::{MatmulBackend, SoftmaxBackend, Tensor, TensorError};
 
 fn parse_backend(label: Option<&str>) -> MatmulBackend {
     match label.unwrap_or("auto") {
@@ -19,6 +19,19 @@ fn parse_backend(label: Option<&str>) -> MatmulBackend {
         other => {
             eprintln!("[spiraltorch] unknown backend '{other}', falling back to 'auto'");
             MatmulBackend::Auto
+        }
+    }
+}
+
+fn parse_softmax_backend(label: Option<&str>) -> SoftmaxBackend {
+    match label.unwrap_or("auto") {
+        "auto" => SoftmaxBackend::Auto,
+        "cpu" => SoftmaxBackend::Cpu,
+        #[cfg(feature = "wgpu")]
+        "wgpu" => SoftmaxBackend::GpuWgpu,
+        other => {
+            eprintln!("[spiraltorch] unknown softmax backend '{other}', falling back to 'auto'");
+            SoftmaxBackend::Auto
         }
     }
 }
@@ -154,6 +167,17 @@ impl PyTensor {
         let tensor = self
             .inner
             .matmul_bias_relu_with_backend(&other.inner, &bias, backend)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
+    /// Row-wise softmax with optional backend selection.
+    #[pyo3(signature = (*, backend=None))]
+    pub fn row_softmax(&self, backend: Option<&str>) -> PyResult<PyTensor> {
+        let backend = parse_softmax_backend(backend);
+        let tensor = self
+            .inner
+            .row_softmax_with_backend(backend)
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }

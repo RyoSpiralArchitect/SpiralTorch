@@ -8,7 +8,6 @@ mod imp {
     use faer::get_global_parallelism;
     use faer::linalg::matmul::matmul as faer_matmul;
     use faer::mat::{from_raw_parts, Mat, MatRef};
-    use faer::get_global_parallelism;
 
     pub fn is_available() -> bool {
         true
