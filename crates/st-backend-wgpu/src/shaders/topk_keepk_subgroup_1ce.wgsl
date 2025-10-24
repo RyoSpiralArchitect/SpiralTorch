@@ -1,8 +1,8 @@
 enable chromium_experimental_subgroups;
 
-struct InP  { data: array<u32>; }; // u64 packed [lo(idx), hi(f32_bits)]
-struct OutV { data: array<f32>; };
-struct OutI { data: array<i32>; };
+struct InP  { data: array<u32>, }; // u64 packed [lo(idx), hi(f32_bits)]
+struct OutV { data: array<f32>, };
+struct OutI { data: array<i32>, };
 
 // rows, total(cols), k_final, reserved
 @group(0) @binding(3) var<uniform> P : vec4<u32>;

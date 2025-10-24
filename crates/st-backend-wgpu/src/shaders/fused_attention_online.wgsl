@@ -2,14 +2,14 @@ const WORKGROUP_SIZE : u32 = {WORKGROUP_SIZE}u;
 const MAX_HEAD_DIM : u32 = {MAX_HEAD_DIM}u;
 
 struct Params {
-    contexts: u32;
-    sequence: u32;
-    head_dim: u32;
-    flags: u32;
-    scale: f32;
-    _pad0: f32;
-    _pad1: f32;
-    _pad2: f32;
+    contexts: u32,
+    sequence: u32,
+    head_dim: u32,
+    flags: u32,
+    scale: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 };
 
 const FLAG_USE_Z_BIAS : u32 = 1u << 0u;

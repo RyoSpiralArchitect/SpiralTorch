@@ -6,10 +6,10 @@
 const WORKGROUP_SIZE: u32 = 256u;
 
 struct Params {
-    rows: u32;
-    cols: u32;
-    in_stride: u32;
-    out_stride: u32;
+    rows: u32,
+    cols: u32,
+    in_stride: u32,
+    out_stride: u32,
 };
 
 @group(0) @binding(0)

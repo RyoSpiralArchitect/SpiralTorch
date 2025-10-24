@@ -1,9 +1,9 @@
 // Scan Pass: compute exclusive prefix sums of flags over row tiles.
 // Writes per-tile counts to a side buffer for a second pass to compute block offsets.
-struct InV { data: array<f32>; }
-struct Param { rows:u32, cols:u32, low:f32, high:f32, tiles_per_row:u32 }
-struct OutFlags { data: array<u32>; }     // flags per element (0/1), same shape as input (optional)
-struct OutTileCnt { data: array<u32>; }   // per tile count (rows * tiles_per_row)
+struct InV { data: array<f32>, }
+struct Param { rows:u32, cols:u32, low:f32, high:f32, tiles_per_row:u32, }
+struct OutFlags { data: array<u32>, }     // flags per element (0/1), same shape as input (optional)
+struct OutTileCnt { data: array<u32>, }   // per tile count (rows * tiles_per_row)
 @group(0) @binding(0) var<storage, read> vin  : InV;
 @group(0) @binding(1) var<storage, read_write> flags: OutFlags;
 @group(0) @binding(2) var<storage, read_write> tilecnt: OutTileCnt;

@@ -16,7 +16,7 @@ struct Params {
 @group(0) @binding(3) var<uniform> P: Params;
 
 struct CParams {
-  rows: u32, cols: u32, row_stride: u32, kind: u32, tiles_x: u32, _pad: u32, _pad2: u32, _pad3: u32
+  rows: u32, cols: u32, row_stride: u32, kind: u32, tiles_x: u32, _pad: u32, _pad2: u32, _pad3: u32,
 };
 @group(0) @binding(0) var<storage, read>  CX: array<f32>;
 @group(0) @binding(1) var<storage, read>  CMASK: array<u32>;

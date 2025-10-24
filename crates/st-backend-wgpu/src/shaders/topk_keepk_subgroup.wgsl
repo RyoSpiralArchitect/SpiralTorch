@@ -1,8 +1,8 @@
 enable chromium_experimental_subgroups;
 
-struct InBuf { data: array<u32>; };    // packed u64 as 2x u32
-struct OutVal { data: array<f32>; };
-struct OutIdx { data: array<i32>; };
+struct InBuf { data: array<u32>, };    // packed u64 as 2x u32
+struct OutVal { data: array<f32>, };
+struct OutIdx { data: array<i32>, };
 
 @group(0) @binding(0) var<storage, read>  packed: InBuf;
 @group(0) @binding(1) var<storage, read_write> out_vals: OutVal;
