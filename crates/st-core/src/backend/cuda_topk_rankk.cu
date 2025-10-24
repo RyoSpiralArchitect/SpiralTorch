@@ -21,14 +21,18 @@ struct HeapEntry {
   int tid;
 };
 
-__device__ __forceinline__ HeapEntry reduce_top_warp(HeapEntry entry) {
-  unsigned mask = 0xffffffffu;
+template <typename Comparator>
+__device__ __forceinline__ HeapEntry reduce_warp(HeapEntry entry, Comparator cmp) {
+  unsigned mask = __activemask();
+  int lane = threadIdx.x & (WARP_LANES - 1);
   for (int offset = WARP_LANES / 2; offset > 0; offset >>= 1) {
+    int src_lane = lane + offset;
+    bool other_active = (src_lane < WARP_LANES) && ((mask >> src_lane) & 1u);
     float other_value = __shfl_down_sync(mask, entry.value, offset);
     int other_col = __shfl_down_sync(mask, entry.column, offset);
     int other_slot = __shfl_down_sync(mask, entry.slot, offset);
     int other_tid = __shfl_down_sync(mask, entry.tid, offset);
-    if (other_value > entry.value) {
+    if (other_active && cmp(other_value, entry.value)) {
       entry.value = other_value;
       entry.column = other_col;
       entry.slot = other_slot;
@@ -38,21 +42,20 @@ __device__ __forceinline__ HeapEntry reduce_top_warp(HeapEntry entry) {
   return entry;
 }
 
+struct GreaterThan {
+  __device__ bool operator()(float lhs, float rhs) const { return lhs > rhs; }
+};
+
+struct LessThan {
+  __device__ bool operator()(float lhs, float rhs) const { return lhs < rhs; }
+};
+
+__device__ __forceinline__ HeapEntry reduce_top_warp(HeapEntry entry) {
+  return reduce_warp(entry, GreaterThan{});
+}
+
 __device__ __forceinline__ HeapEntry reduce_bottom_warp(HeapEntry entry) {
-  unsigned mask = 0xffffffffu;
-  for (int offset = WARP_LANES / 2; offset > 0; offset >>= 1) {
-    float other_value = __shfl_down_sync(mask, entry.value, offset);
-    int other_col = __shfl_down_sync(mask, entry.column, offset);
-    int other_slot = __shfl_down_sync(mask, entry.slot, offset);
-    int other_tid = __shfl_down_sync(mask, entry.tid, offset);
-    if (other_value < entry.value) {
-      entry.value = other_value;
-      entry.column = other_col;
-      entry.slot = other_slot;
-      entry.tid = other_tid;
-    }
-  }
-  return entry;
+  return reduce_warp(entry, LessThan{});
 }
 
 __global__ void topk_warp_heap_rowwise_kernel(
