@@ -494,6 +494,8 @@ pub struct PreDiscardRegulator {
     momentum: f32,
     deadband: f32,
     equilibrium_decay: f32,
+    confidence_floor: f32,
+    confidence_gain: f32,
     offset: f32,
     preserved_ema: Option<f32>,
     energy_ema: Option<f32>,
@@ -532,6 +534,8 @@ impl PreDiscardRegulator {
             momentum: 0.0,
             deadband: 0.0,
             equilibrium_decay: 0.0,
+            confidence_floor: 0.0,
+            confidence_gain: 0.0,
             offset: 0.0,
             preserved_ema: None,
             energy_ema: None,
@@ -671,6 +675,33 @@ impl PreDiscardRegulator {
         Ok(self)
     }
 
+    /// Scales corrective steps according to the dominant channel weight observed during telemetry.
+    /// When the observed weight falls below the configured floor, the correction is proportionally
+    /// attenuated. When it rises above the floor, an optional gain amplifies the response. Both the
+    /// floor and gain must be finite, with the floor constrained to the [0, 1] interval and the gain
+    /// constrained to non-negative values.
+    pub fn with_confidence_scaling(
+        mut self,
+        confidence_floor: f32,
+        confidence_gain: f32,
+    ) -> PureResult<Self> {
+        if !confidence_floor.is_finite()
+            || !confidence_gain.is_finite()
+            || confidence_floor < 0.0
+            || confidence_floor > 1.0
+            || confidence_gain < 0.0
+        {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: confidence_floor.min(confidence_gain),
+            }
+            .into());
+        }
+
+        self.confidence_floor = confidence_floor;
+        self.confidence_gain = confidence_gain;
+        Ok(self)
+    }
+
     /// Returns the configured target survivor channel ratio.
     pub fn target_preserved_ratio(&self) -> f32 {
         self.target_preserved_ratio
@@ -770,6 +801,28 @@ impl PreDiscardRegulator {
         }
         if telemetry.used_fallback() {
             step -= self.fallback_penalty;
+        }
+
+        if self.confidence_floor > 0.0 || self.confidence_gain > 0.0 {
+            let mut confidence = telemetry.dominant_weight();
+            if !confidence.is_finite() {
+                confidence = 0.0;
+            }
+            confidence = confidence.clamp(0.0, 1.0);
+
+            let mut scale = 1.0;
+            if self.confidence_floor > 0.0 {
+                if confidence < self.confidence_floor {
+                    let floor = self.confidence_floor.max(f32::EPSILON);
+                    scale *= (confidence / floor).clamp(0.0, 1.0);
+                } else if self.confidence_gain > 0.0 {
+                    scale *= 1.0 + self.confidence_gain * (confidence - self.confidence_floor);
+                }
+            } else if self.confidence_gain > 0.0 {
+                scale *= 1.0 + self.confidence_gain * confidence;
+            }
+
+            step *= scale;
         }
         let step = step.clamp(-self.max_step, self.max_step);
 
@@ -2247,6 +2300,11 @@ mod tests {
         assert!(regulator.clone().with_momentum(-0.1).is_err());
         assert!(regulator.clone().with_deadband(-0.01).is_err());
         assert!(regulator.clone().with_equilibrium_decay(1.5).is_err());
+        assert!(regulator.clone().with_confidence_scaling(1.2, 0.0).is_err());
+        assert!(regulator
+            .clone()
+            .with_confidence_scaling(0.4, -0.1)
+            .is_err());
         assert!(regulator
             .clone()
             .with_trend_smoothing(0.0)
@@ -2256,7 +2314,51 @@ mod tests {
             .with_deadband(0.0)
             .unwrap()
             .with_equilibrium_decay(0.5)
+            .unwrap()
+            .with_confidence_scaling(0.6, 0.3)
             .is_ok());
+    }
+
+    #[test]
+    fn pre_discard_regulator_confidence_scaling_dampens_low_signal() {
+        let base = PreDiscardPolicy::new(0.7).unwrap();
+        let telemetry = PreDiscardTelemetry::new(&base, 4, 6, false, 0.62, 0.38, 0.2);
+
+        let mut baseline = PreDiscardRegulator::new(0.45, 0.55)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.9)
+            .unwrap()
+            .with_max_step(0.4)
+            .unwrap();
+        let mut confidence = baseline.clone().with_confidence_scaling(0.6, 0.0).unwrap();
+
+        baseline.observe(&telemetry);
+        confidence.observe(&telemetry);
+
+        assert!(confidence.offset().abs() < baseline.offset().abs());
+    }
+
+    #[test]
+    fn pre_discard_regulator_confidence_scaling_accelerates_high_signal() {
+        let base = PreDiscardPolicy::new(0.7).unwrap();
+        let telemetry = PreDiscardTelemetry::new(&base, 2, 8, false, 0.85, 0.15, 0.92);
+
+        let mut baseline = PreDiscardRegulator::new(0.35, 0.45)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.75)
+            .unwrap()
+            .with_max_step(0.6)
+            .unwrap();
+        let mut confidence = baseline.clone().with_confidence_scaling(0.5, 0.8).unwrap();
+
+        baseline.observe(&telemetry);
+        confidence.observe(&telemetry);
+
+        assert!(confidence.offset().abs() > baseline.offset().abs());
     }
 
     #[test]
