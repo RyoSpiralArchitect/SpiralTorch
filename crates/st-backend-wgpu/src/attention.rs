@@ -10,7 +10,7 @@
 //! the values — all without materialising intermediate logits. The online
 //! softmax fusion keeps the kernel memory-bound rather than launch-bound.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
