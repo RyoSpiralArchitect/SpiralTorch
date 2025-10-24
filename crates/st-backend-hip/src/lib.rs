@@ -161,6 +161,43 @@ fn build_runtime() -> Result<HipRuntime, HipErr> {
     Ok(HipRuntime::new(devices))
 }
 
+fn build_runtime() -> Result<HipRuntime, HipErr> {
+    if !hip_env_available() {
+        return Err(HipErr::Other(
+            "HIP runtime not detected; set SPIRALTORCH_FORCE_HIP=1 or install ROCm".into(),
+        ));
+    }
+
+    #[allow(unused_mut)]
+    let mut devices = finalize_devices(collect_env_devices(), true);
+
+    #[cfg(feature = "hip-real")]
+    if devices.is_empty() {
+        match crate::real::enumerate_devices() {
+            Ok(runtime_devices) if !runtime_devices.is_empty() => {
+                devices = runtime_devices;
+            }
+            Ok(_) => {
+                devices.push(DeviceInfo::new(
+                    0,
+                    std::borrow::Cow::Borrowed("hip-runtime"),
+                    true,
+                ));
+            }
+            Err(err) => {
+                eprintln!("[hip] failed to enumerate runtime devices: {err}");
+                devices.push(DeviceInfo::new(
+                    0,
+                    std::borrow::Cow::Borrowed("hip-runtime"),
+                    true,
+                ));
+            }
+        }
+    }
+
+    Ok(HipRuntime::new(devices))
+}
+
 fn hip_env_available() -> bool {
     if std::env::var("SPIRALTORCH_FORCE_HIP")
         .map(|flag| matches!(flag.as_str(), "1" | "true" | "TRUE"))
@@ -530,6 +567,30 @@ pub fn gemm_f32(
 ) -> Result<(), HipErr> {
     init()?;
     validate_gemm_dimensions(m, n, k, lhs, rhs, out)?;
+    gemm_backend(m, n, k, lhs, rhs, out)
+}
+
+#[cfg(feature = "hip-real")]
+fn gemm_backend(
+    m: usize,
+    n: usize,
+    k: usize,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    crate::real::gemm_f32(m, n, k, lhs, rhs, out)
+}
+
+#[cfg(not(feature = "hip-real"))]
+fn gemm_backend(
+    m: usize,
+    n: usize,
+    k: usize,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
     gemm_stub(m, n, k, lhs, rhs, out);
     Ok(())
 }

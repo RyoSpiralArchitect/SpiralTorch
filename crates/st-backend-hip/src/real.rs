@@ -4,7 +4,10 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use crate::{DeviceInfo, HipErr};
+use libloading::Library;
+use std::convert::TryFrom;
 use std::ffi::{c_char, c_void, CStr};
+use std::sync::{Mutex, OnceLock};
 
 pub type HipPtr = *mut c_void;
 type hipError_t = i32;
@@ -338,6 +341,306 @@ pub fn enumerate_devices() -> Result<Vec<DeviceInfo>, HipErr> {
         devices.push(DeviceInfo::new(device as u32, name, total > 1));
     }
     Ok(devices)
+}
+
+mod rocblas {
+    use super::{
+        hipStream_t, read_cstring, HipErr, HipPtr, HipStream, Library, Mutex, OnceLock, TryFrom,
+    };
+    use std::ffi::c_char;
+    use std::ptr;
+
+    type RocblasHandle = *mut std::ffi::c_void;
+    type RocblasStatus = i32;
+
+    const ROCBLAS_STATUS_SUCCESS: RocblasStatus = 0;
+
+    #[repr(i32)]
+    #[derive(Copy, Clone)]
+    enum Operation {
+        None = 111,
+        Transpose = 112,
+        ConjugateTranspose = 113,
+    }
+
+    struct Symbols {
+        create_handle: unsafe extern "C" fn(*mut RocblasHandle) -> RocblasStatus,
+        set_stream: unsafe extern "C" fn(RocblasHandle, hipStream_t) -> RocblasStatus,
+        sgemm: unsafe extern "C" fn(
+            RocblasHandle,
+            Operation,
+            Operation,
+            i32,
+            i32,
+            i32,
+            *const f32,
+            *const f32,
+            i32,
+            *const f32,
+            i32,
+            *const f32,
+            *mut f32,
+            i32,
+        ) -> RocblasStatus,
+        status_to_string: Option<unsafe extern "C" fn(RocblasStatus) -> *const c_char>,
+    }
+
+    struct HandleState {
+        handle: RocblasHandle,
+        current_stream: hipStream_t,
+    }
+
+    fn library() -> Result<&'static Library, HipErr> {
+        static LIB: OnceLock<Result<&'static Library, String>> = OnceLock::new();
+        LIB.get_or_init(|| unsafe {
+            Library::new("librocblas.so")
+                .or_else(|_| Library::new("librocblas.so.0"))
+                .map(|lib| Box::leak(Box::new(lib)))
+                .map_err(|err| err.to_string())
+        })
+        .as_ref()
+        .map_err(|err| HipErr::Other(format!("failed to load rocBLAS: {err}")))
+    }
+
+    unsafe fn load_symbols() -> Result<Symbols, HipErr> {
+        let lib = library()?;
+        let create_handle = *lib
+            .get::<unsafe extern "C" fn(*mut RocblasHandle) -> RocblasStatus>(
+                b"rocblas_create_handle\0",
+            )
+            .map_err(|err| HipErr::Other(format!("failed to load rocblas_create_handle: {err}")))?;
+        let set_stream = *lib
+            .get::<unsafe extern "C" fn(RocblasHandle, hipStream_t) -> RocblasStatus>(
+                b"rocblas_set_stream\0",
+            )
+            .map_err(|err| HipErr::Other(format!("failed to load rocblas_set_stream: {err}")))?;
+        let sgemm = *lib
+            .get::<unsafe extern "C" fn(
+                RocblasHandle,
+                Operation,
+                Operation,
+                i32,
+                i32,
+                i32,
+                *const f32,
+                *const f32,
+                i32,
+                *const f32,
+                i32,
+                *const f32,
+                *mut f32,
+                i32,
+            ) -> RocblasStatus>(b"rocblas_sgemm\0")
+            .map_err(|err| HipErr::Other(format!("failed to load rocblas_sgemm: {err}")))?;
+        let status_to_string = lib
+            .get::<unsafe extern "C" fn(RocblasStatus) -> *const c_char>(
+                b"rocblas_status_to_string\0",
+            )
+            .map(|sym| *sym)
+            .ok();
+
+        Ok(Symbols {
+            create_handle,
+            set_stream,
+            sgemm,
+            status_to_string,
+        })
+    }
+
+    fn symbols() -> Result<&'static Symbols, HipErr> {
+        static SYMBOLS: OnceLock<Result<Symbols, String>> = OnceLock::new();
+        SYMBOLS
+            .get_or_init(|| unsafe { load_symbols().map_err(|err| err.to_string()) })
+            .as_ref()
+            .map_err(|err| HipErr::Other(err.clone()))
+    }
+
+    fn handle_slot() -> &'static Mutex<Option<HandleState>> {
+        static HANDLE: OnceLock<Mutex<Option<HandleState>>> = OnceLock::new();
+        HANDLE.get_or_init(|| Mutex::new(None))
+    }
+
+    fn create_handle(symbols: &Symbols) -> Result<RocblasHandle, HipErr> {
+        let mut handle: RocblasHandle = ptr::null_mut();
+        rocblas_result(
+            (symbols.create_handle)(&mut handle),
+            "rocblas_create_handle",
+            symbols,
+        )?;
+        if handle.is_null() {
+            return Err(HipErr::Other("rocBLAS returned a null handle".into()));
+        }
+        Ok(handle)
+    }
+
+    fn rocblas_result(status: RocblasStatus, ctx: &str, symbols: &Symbols) -> Result<(), HipErr> {
+        if status == ROCBLAS_STATUS_SUCCESS {
+            return Ok(());
+        }
+        let description = symbols
+            .status_to_string
+            .map(|func| unsafe { func(status) })
+            .filter(|ptr| !ptr.is_null())
+            .map(read_cstring)
+            .unwrap_or_else(|| format!("rocBLAS status {status}"));
+        Err(HipErr::Other(format!("{ctx}: {description}")))
+    }
+
+    fn with_handle<F, R>(stream: &HipStream, mut f: F) -> Result<R, HipErr>
+    where
+        F: FnMut(RocblasHandle, &Symbols) -> Result<R, HipErr>,
+    {
+        let symbols = symbols()?;
+        let slot = handle_slot();
+        let mut guard = slot
+            .lock()
+            .map_err(|_| HipErr::Other("failed to lock rocBLAS handle slot".into()))?;
+        if guard.is_none() {
+            let handle = create_handle(symbols)?;
+            *guard = Some(HandleState {
+                handle,
+                current_stream: ptr::null_mut(),
+            });
+        }
+        let state = guard
+            .as_mut()
+            .expect("rocBLAS handle must be initialised after creation");
+        if state.current_stream != stream.raw() {
+            rocblas_result(
+                (symbols.set_stream)(state.handle, stream.raw()),
+                "rocblas_set_stream",
+                symbols,
+            )?;
+            state.current_stream = stream.raw();
+        }
+        f(state.handle, symbols)
+    }
+
+    pub fn sgemm(
+        stream: &HipStream,
+        m: usize,
+        n: usize,
+        k: usize,
+        lhs: HipPtr,
+        rhs: HipPtr,
+        out: HipPtr,
+    ) -> Result<(), HipErr> {
+        let m_i32 =
+            i32::try_from(n).map_err(|_| HipErr::Other("rocBLAS: n dimension overflow".into()))?;
+        let n_i32 =
+            i32::try_from(m).map_err(|_| HipErr::Other("rocBLAS: m dimension overflow".into()))?;
+        let k_i32 =
+            i32::try_from(k).map_err(|_| HipErr::Other("rocBLAS: k dimension overflow".into()))?;
+        let lda = m_i32;
+        let ldb = k_i32;
+        let ldc = m_i32;
+
+        with_handle(stream, |handle, symbols| {
+            let alpha = 1.0f32;
+            let beta = 0.0f32;
+            rocblas_result(
+                (symbols.sgemm)(
+                    handle,
+                    Operation::None,
+                    Operation::None,
+                    m_i32,
+                    n_i32,
+                    k_i32,
+                    &alpha,
+                    rhs as *const f32,
+                    lda,
+                    lhs as *const f32,
+                    ldb,
+                    &beta,
+                    out as *mut f32,
+                    ldc,
+                ),
+                "rocblas_sgemm",
+                symbols,
+            )
+        })
+    }
+}
+
+struct DeviceBuffer(HipPtr);
+
+impl DeviceBuffer {
+    fn new(size: usize) -> Result<Self, HipErr> {
+        Ok(Self(super::malloc(size)?))
+    }
+
+    fn as_ptr(&self) -> HipPtr {
+        self.0
+    }
+}
+
+impl Drop for DeviceBuffer {
+    fn drop(&mut self) {
+        let _ = super::free(self.0);
+    }
+}
+
+pub fn gemm_f32(
+    m: usize,
+    n: usize,
+    k: usize,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    let lhs_bytes = lhs
+        .len()
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or_else(|| HipErr::Other("lhs buffer byte length overflow".into()))?;
+    let rhs_bytes = rhs
+        .len()
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or_else(|| HipErr::Other("rhs buffer byte length overflow".into()))?;
+    let out_bytes = out
+        .len()
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or_else(|| HipErr::Other("output buffer byte length overflow".into()))?;
+
+    let stream = HipStream::create()?;
+    let lhs_dev = DeviceBuffer::new(lhs_bytes)?;
+    let rhs_dev = DeviceBuffer::new(rhs_bytes)?;
+    let out_dev = DeviceBuffer::new(out_bytes)?;
+
+    unsafe {
+        super::memcpy_h2d_async(
+            lhs_dev.as_ptr(),
+            lhs.as_ptr() as *const u8,
+            lhs_bytes,
+            &stream,
+        )?;
+        super::memcpy_h2d_async(
+            rhs_dev.as_ptr(),
+            rhs.as_ptr() as *const u8,
+            rhs_bytes,
+            &stream,
+        )?;
+    }
+
+    rocblas::sgemm(
+        &stream,
+        m,
+        n,
+        k,
+        lhs_dev.as_ptr(),
+        rhs_dev.as_ptr(),
+        out_dev.as_ptr(),
+    )?;
+
+    unsafe {
+        super::memcpy_d2h_async(
+            out.as_mut_ptr() as *mut u8,
+            out_dev.as_ptr(),
+            out_bytes,
+            &stream,
+        )?;
+    }
+    super::stream_synchronize(&stream)?;
+    Ok(())
 }
 
 pub fn pack_vals_idx_u64(
