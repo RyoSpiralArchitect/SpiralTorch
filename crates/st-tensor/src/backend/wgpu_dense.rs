@@ -5,16 +5,19 @@
 
 #![cfg(feature = "wgpu")]
 
-use crate::backend::wgpu_util::WgpuContext;
+use crate::pure::{PackedB, PackedLayout};
 use crate::util::readback_f32;
+use once_cell::sync::OnceCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::panic::AssertUnwindSafe;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, Weak};
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, PipelineLayout, Queue};
+use wgpu::{
+    BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, PipelineLayout, Queue,
+    ShaderModule,
+};
 
-const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
 const ROW_SOFTMAX_WGSL: &str =
     include_str!("../../../st-backend-wgpu/src/shaders/softmax_workgroup.wgsl");
@@ -176,24 +179,747 @@ impl TileConfig {
     }
 }
 
+const FUSED_OP_RELU: u32 = 1 << 0;
+const FUSED_OP_GELU: u32 = 1 << 1;
+const FUSED_OP_RESIDUAL: u32 = 1 << 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum WeightDType {
+    F32,
+    Int8,
+}
+
+impl WeightDType {
+    fn label(self) -> &'static str {
+        match self {
+            WeightDType::F32 => "f32",
+            WeightDType::Int8 => "int8",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PipelineKey {
+    dtype: WeightDType,
+    tile: TileConfig,
+    subgroup: bool,
+    use_f16: bool,
+    use_bias: bool,
+    fused_ops_mask: u32,
+}
+
+impl PipelineKey {
+    fn has_residual(&self) -> bool {
+        (self.fused_ops_mask & FUSED_OP_RESIDUAL) != 0
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct BindingIndices {
+    lhs: u32,
+    rhs: u32,
+    out: u32,
+    params: u32,
+    bias: Option<u32>,
+    residual: Option<u32>,
+    scales: Option<u32>,
+}
+
+struct PipelineArtifact {
+    _key: PipelineKey,
+    _shader: Arc<ShaderModule>,
+    bind_layout: Arc<BindGroupLayout>,
+    _pipeline_layout: Arc<PipelineLayout>,
+    pipeline: Arc<ComputePipeline>,
+    bindings: BindingIndices,
+}
+
+struct MatmulBindings<'a> {
+    lhs: &'a Buffer,
+    rhs: &'a Buffer,
+    out: &'a Buffer,
+    params: &'a Buffer,
+    bias: Option<&'a Buffer>,
+    residual: Option<&'a Buffer>,
+    scales: Option<&'a Buffer>,
+}
+
+#[derive(Clone)]
+struct GpuPackedRhs {
+    _tile: TileConfig,
+    dtype: WeightDType,
+    buffer: Arc<Buffer>,
+    scales: Option<Arc<Buffer>>,
+    _cols: usize,
+    _inner: usize,
+}
+
+impl GpuPackedRhs {
+    fn buffer(&self) -> &Buffer {
+        self.buffer.as_ref()
+    }
+
+    fn scales(&self) -> Option<&Buffer> {
+        self.scales.as_ref().map(Arc::as_ref)
+    }
+
+    fn dtype(&self) -> WeightDType {
+        self.dtype
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct RhsCacheKey {
+    data_ptr: usize,
+    cols: usize,
+    inner: usize,
+    tile: TileConfig,
+    dtype: WeightDType,
+}
+
+impl RhsCacheKey {
+    fn new(packed: &PackedB, tile: TileConfig, dtype: WeightDType) -> Self {
+        Self {
+            data_ptr: packed.as_slice().as_ptr() as usize,
+            cols: packed.cols(),
+            inner: packed.inner(),
+            tile,
+            dtype,
+        }
+    }
+}
+
+struct PipelineCache {
+    device: Arc<Device>,
+    entries: Mutex<HashMap<PipelineKey, Arc<PipelineArtifact>>>,
+}
+
+impl PipelineArtifact {
+    fn create_bind_group(&self, device: &Device, buffers: &MatmulBindings<'_>) -> BindGroup {
+        let mut entries = Vec::new();
+        entries.push(wgpu::BindGroupEntry {
+            binding: self.bindings.lhs,
+            resource: buffers.lhs.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: self.bindings.rhs,
+            resource: buffers.rhs.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: self.bindings.out,
+            resource: buffers.out.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: self.bindings.params,
+            resource: buffers.params.as_entire_binding(),
+        });
+
+        if let Some(index) = self.bindings.bias {
+            let bias = buffers
+                .bias
+                .expect("bias buffer required by pipeline but missing");
+            entries.push(wgpu::BindGroupEntry {
+                binding: index,
+                resource: bias.as_entire_binding(),
+            });
+        }
+
+        if let Some(index) = self.bindings.residual {
+            let residual = buffers
+                .residual
+                .expect("residual buffer required by pipeline but missing");
+            entries.push(wgpu::BindGroupEntry {
+                binding: index,
+                resource: residual.as_entire_binding(),
+            });
+        }
+
+        if let Some(index) = self.bindings.scales {
+            let scales = buffers
+                .scales
+                .expect("scale buffer required by pipeline but missing");
+            entries.push(wgpu::BindGroupEntry {
+                binding: index,
+                resource: scales.as_entire_binding(),
+            });
+        }
+
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.matmul.bind_group"),
+            layout: self.bind_layout.as_ref(),
+            entries: &entries,
+        })
+    }
+}
+
+impl PipelineCache {
+    fn new(device: Arc<Device>) -> Self {
+        Self {
+            device,
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn get(&self, key: PipelineKey) -> Arc<PipelineArtifact> {
+        if let Some(existing) = self.entries.lock().unwrap().get(&key) {
+            return existing.clone();
+        }
+
+        let artifact = self.create_artifact(key);
+        let mut guard = self.entries.lock().unwrap();
+        guard.entry(key).or_insert_with(|| artifact.clone()).clone()
+    }
+
+    fn create_artifact(&self, key: PipelineKey) -> Arc<PipelineArtifact> {
+        let shader_source = generate_matmul_shader(key);
+        let shader_label = format!(
+            "st.tensor.wgpu_dense.matmul.{}.tile{}x{}x{}.{}.{:02x}",
+            key.dtype.label(),
+            key.tile.tile_m(),
+            key.tile.tile_n(),
+            key.tile.tile_k(),
+            if key.use_f16 { "f16" } else { "f32" },
+            key.fused_ops_mask
+        );
+        let shader = Arc::new(
+            self.device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some(&shader_label),
+                    source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+                }),
+        );
+
+        let mut layout_entries = Vec::new();
+        let mut indices = BindingIndices::default();
+        indices.lhs = layout_entries.len() as u32;
+        layout_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: indices.lhs,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+        indices.rhs = layout_entries.len() as u32;
+        layout_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: indices.rhs,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+        indices.out = layout_entries.len() as u32;
+        layout_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: indices.out,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+        indices.params = layout_entries.len() as u32;
+        layout_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: indices.params,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+
+        if key.use_bias {
+            let binding = layout_entries.len() as u32;
+            indices.bias = Some(binding);
+            layout_entries.push(wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            });
+        }
+
+        if key.has_residual() {
+            let binding = layout_entries.len() as u32;
+            indices.residual = Some(binding);
+            layout_entries.push(wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            });
+        }
+
+        if let WeightDType::Int8 = key.dtype {
+            let binding = layout_entries.len() as u32;
+            indices.scales = Some(binding);
+            layout_entries.push(wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            });
+        }
+
+        let bind_layout = Arc::new(self.device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.matmul.bind_layout"),
+                entries: &layout_entries,
+            },
+        ));
+
+        let pipeline_layout = Arc::new(self.device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.matmul.pipeline_layout"),
+                bind_group_layouts: &[bind_layout.as_ref()],
+                push_constant_ranges: &[],
+            },
+        ));
+
+        let pipeline_label = format!(
+            "st.tensor.wgpu_dense.matmul.pipeline.{}.tile{}x{}x{}",
+            key.dtype.label(),
+            key.tile.tile_m(),
+            key.tile.tile_n(),
+            key.tile.tile_k()
+        );
+        let pipeline = Arc::new(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some(&pipeline_label),
+                layout: Some(pipeline_layout.as_ref()),
+                module: shader.as_ref(),
+                entry_point: "main",
+            },
+        ));
+
+        Arc::new(PipelineArtifact {
+            _key: key,
+            _shader: shader,
+            bind_layout,
+            _pipeline_layout: pipeline_layout,
+            pipeline,
+            bindings: indices,
+        })
+    }
+}
+
+fn div_ceil_usize(value: usize, divisor: usize) -> usize {
+    if divisor == 0 {
+        return 0;
+    }
+    (value + divisor - 1) / divisor
+}
+
+fn compute_rhs_tile_meta(
+    inner: usize,
+    cols: usize,
+    tile: TileConfig,
+) -> (usize, usize, usize, usize, usize) {
+    let tile_k = tile.tile_k() as usize;
+    let tile_n = tile.tile_n() as usize;
+    let tiles_k = div_ceil_usize(inner, tile_k);
+    let tiles_n = div_ceil_usize(cols, tile_n);
+    let tile_elems = tile_k * tile_n;
+    let total_tiles = tiles_k * tiles_n;
+    let total_elems = total_tiles * tile_elems;
+    (tile_k, tile_n, tiles_k, tiles_n, total_elems)
+}
+
+fn pack_rhs_f32(packed: &PackedB, tile: TileConfig) -> (Vec<f32>, usize) {
+    let inner = packed.inner();
+    let cols = packed.cols();
+    let (tile_k, tile_n, tiles_k, tiles_n, total_elems) = compute_rhs_tile_meta(inner, cols, tile);
+    let mut tiled = vec![0.0f32; total_elems];
+    let slice = packed.as_slice();
+    let layout = packed.layout();
+
+    for tile_n_index in 0..tiles_n {
+        for tile_k_index in 0..tiles_k {
+            let tile_offset = (tile_n_index * tiles_k + tile_k_index) * tile_k * tile_n;
+            for local_n in 0..tile_n {
+                let col = tile_n_index * tile_n + local_n;
+                for local_k in 0..tile_k {
+                    let k = tile_k_index * tile_k + local_k;
+                    let dst_index = tile_offset + local_n * tile_k + local_k;
+                    if col < cols && k < inner {
+                        let value = match layout {
+                            PackedLayout::ColMajor => slice[col * inner + k],
+                            PackedLayout::Tiled { .. } => slice[col * inner + k],
+                        };
+                        tiled[dst_index] = value;
+                    }
+                }
+            }
+        }
+    }
+
+    (tiled, total_elems)
+}
+
+fn pack_rhs_int8(packed: &PackedB, tile: TileConfig) -> (Vec<i32>, Vec<f32>, usize) {
+    let inner = packed.inner();
+    let cols = packed.cols();
+    let (tile_k, tile_n, tiles_k, tiles_n, total_elems) = compute_rhs_tile_meta(inner, cols, tile);
+    let mut quantized = Vec::with_capacity((total_elems + 3) / 4);
+    let mut accumulator: u32 = 0;
+    let mut lane: u32 = 0;
+    let slice = packed.as_slice();
+    let layout = packed.layout();
+
+    let mut scales = vec![0.0f32; cols];
+    for col in 0..cols {
+        let mut max_abs = 0.0f32;
+        for k in 0..inner {
+            let value = match layout {
+                PackedLayout::ColMajor => slice[col * inner + k],
+                PackedLayout::Tiled { .. } => slice[col * inner + k],
+            };
+            let abs = value.abs();
+            if abs > max_abs {
+                max_abs = abs;
+            }
+        }
+        scales[col] = if max_abs == 0.0 { 1.0 } else { max_abs / 127.0 };
+    }
+
+    for tile_n_index in 0..tiles_n {
+        for tile_k_index in 0..tiles_k {
+            for local_n in 0..tile_n {
+                let col = tile_n_index * tile_n + local_n;
+                let scale = if col < cols { scales[col] } else { 1.0 };
+                let inv_scale = 1.0 / scale;
+                for local_k in 0..tile_k {
+                    let k = tile_k_index * tile_k + local_k;
+                    let mut quant = 0i32;
+                    if col < cols && k < inner {
+                        let raw = match layout {
+                            PackedLayout::ColMajor => slice[col * inner + k],
+                            PackedLayout::Tiled { .. } => slice[col * inner + k],
+                        };
+                        let scaled = (raw * inv_scale).round();
+                        let clamped = scaled.clamp(-127.0, 127.0);
+                        quant = clamped as i32;
+                    }
+                    let byte = (quant as i8) as u8 as u32;
+                    accumulator |= byte << (lane * 8);
+                    lane += 1;
+                    if lane == 4 {
+                        quantized.push(accumulator as i32);
+                        accumulator = 0;
+                        lane = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    if lane != 0 {
+        quantized.push(accumulator as i32);
+    }
+
+    (quantized, scales, total_elems)
+}
+
+fn generate_matmul_shader(key: PipelineKey) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(String::from(
+        "// Generated by SpiralTorch WGPU pipeline cache",
+    ));
+    if key.use_f16 {
+        lines.push(String::from("enable f16;"));
+        lines.push(String::new());
+    }
+    lines.push(String::from("struct MatmulParams {"));
+    lines.push(String::from("    rows: u32;"));
+    lines.push(String::from("    cols: u32;"));
+    lines.push(String::from("    inner: u32;"));
+    lines.push(String::from("    _pad: u32;"));
+    lines.push(String::from("};"));
+    lines.push(String::new());
+    lines.push(String::from(
+        "@group(0) @binding(0) var<storage, read> lhs : array<f32>;",
+    ));
+    let rhs_decl = match key.dtype {
+        WeightDType::F32 => "array<f32>",
+        WeightDType::Int8 => "array<i32>",
+    };
+    lines.push(format!(
+        "@group(0) @binding(1) var<storage, read> rhs : {};",
+        rhs_decl
+    ));
+    lines.push(String::from(
+        "@group(0) @binding(2) var<storage, read_write> out : array<f32>;",
+    ));
+    lines.push(String::from(
+        "@group(0) @binding(3) var<uniform> params : MatmulParams;",
+    ));
+    let mut next_binding = 4u32;
+    if key.use_bias {
+        lines.push(format!(
+            "@group(0) @binding({}) var<storage, read> bias : array<f32>;",
+            next_binding
+        ));
+        next_binding += 1;
+    }
+    if key.has_residual() {
+        lines.push(format!(
+            "@group(0) @binding({}) var<storage, read> residual : array<f32>;",
+            next_binding
+        ));
+        next_binding += 1;
+    }
+    if matches!(key.dtype, WeightDType::Int8) {
+        lines.push(format!(
+            "@group(0) @binding({}) var<storage, read> weight_scales : array<f32>;",
+            next_binding
+        ));
+    }
+    lines.push(String::new());
+    let tile_m = key.tile.tile_m();
+    let tile_n = key.tile.tile_n();
+    let tile_k = key.tile.tile_k();
+    let tile_scalar = if key.use_f16 { "f16" } else { "f32" };
+    lines.push(format!("const TILE_M : u32 = {}u;", tile_m));
+    lines.push(format!("const TILE_N : u32 = {}u;", tile_n));
+    lines.push(format!("const TILE_K : u32 = {}u;", tile_k));
+    lines.push(String::new());
+    lines.push(format!(
+        "var<workgroup> lhs_tile : array<{}, {}u>;",
+        tile_scalar,
+        tile_m * tile_k
+    ));
+    lines.push(format!(
+        "var<workgroup> rhs_tile : array<{}, {}u>;",
+        tile_scalar,
+        tile_n * tile_k
+    ));
+    lines.push(String::new());
+    if (key.fused_ops_mask & FUSED_OP_GELU) != 0 {
+        lines.push(String::from("fn gelu(x : f32) -> f32 {"));
+        lines.push(String::from("    let coeff : f32 = 0.044715;"));
+        lines.push(String::from(
+            "    let sqrt_2_over_pi : f32 = 0.7978845608028654;",
+        ));
+        lines.push(String::from("    let x_cubed = x * x * x;"));
+        lines.push(String::from(
+            "    return 0.5 * x * (1.0 + tanh(sqrt_2_over_pi * (x + coeff * x_cubed)));",
+        ));
+        lines.push(String::from("}"));
+        lines.push(String::new());
+    }
+    let lhs_store = if key.use_f16 {
+        "lhs_tile[load_index] = f16(lhs_value);"
+    } else {
+        "lhs_tile[load_index] = lhs_value;"
+    };
+    let rhs_store = if key.use_f16 {
+        "rhs_tile[load_rhs] = f16(rhs_value);"
+    } else {
+        "rhs_tile[load_rhs] = rhs_value;"
+    };
+    let lhs_read = if key.use_f16 {
+        "f32(lhs_tile[lid.y * TILE_K + k])"
+    } else {
+        "lhs_tile[lid.y * TILE_K + k]"
+    };
+    let rhs_read = if key.use_f16 {
+        "f32(rhs_tile[lid.x * TILE_K + k])"
+    } else {
+        "rhs_tile[lid.x * TILE_K + k]"
+    };
+    let rhs_value_load = match key.dtype {
+        WeightDType::F32 => {
+            vec![
+                "                let element_index = rhs_tile_offset + load_rhs;".into(),
+                "                rhs_value = rhs[element_index];".into(),
+            ]
+        }
+        WeightDType::Int8 => {
+            vec![
+                "                let element_index = rhs_tile_offset + load_rhs;".into(),
+                "                let packed_index = element_index / 4u;".into(),
+                "                let lane = element_index & 3u;".into(),
+                "                let packed = rhs[packed_index];".into(),
+                "                let shift = (3u - lane) * 8u;".into(),
+                "                let shifted = packed << shift;".into(),
+                "                let quant = shifted >> 24;".into(),
+                "                rhs_value = f32(quant) * weight_scales[global_col];".into(),
+            ]
+        }
+    };
+    lines.push(String::from("@compute @workgroup_size(TILE_N, TILE_M, 1)"));
+    lines.push(String::from("fn main("));
+    lines.push(String::from("    @builtin(workgroup_id) wid : vec3<u32>,"));
+    lines.push(String::from(
+        "    @builtin(local_invocation_id) lid : vec3<u32>,",
+    ));
+    lines.push(String::from(") {"));
+    lines.push(String::from("    let tile_row_origin = wid.y * TILE_M;"));
+    lines.push(String::from("    let tile_col_origin = wid.x * TILE_N;"));
+    lines.push(String::from(
+        "    let local_index = lid.y * TILE_N + lid.x;",
+    ));
+    lines.push(String::from("    let threads = TILE_M * TILE_N;"));
+    lines.push(String::from("    let row = tile_row_origin + lid.y;"));
+    lines.push(String::from("    let col = tile_col_origin + lid.x;"));
+    lines.push(String::from(
+        "    if (row >= params.rows || col >= params.cols) {",
+    ));
+    lines.push(String::from("        return;"));
+    lines.push(String::from("    }"));
+    lines.push(String::new());
+    lines.push(String::from("    var acc : f32 = 0.0;"));
+    lines.push(String::from(
+        "    let tiles = (params.inner + TILE_K - 1u) / TILE_K;",
+    ));
+    lines.push(String::from("    var tile_index : u32 = 0u;"));
+    lines.push(String::from("    loop {"));
+    lines.push(String::from("        if (tile_index >= tiles) {"));
+    lines.push(String::from("            break;"));
+    lines.push(String::from("        }"));
+    lines.push(String::from("        let k_base = tile_index * TILE_K;"));
+    lines.push(String::from(
+        "        let rhs_tile_offset = (wid.x * tiles + tile_index) * TILE_N * TILE_K;",
+    ));
+    lines.push(String::new());
+    lines.push(String::from("        var load_index : u32 = local_index;"));
+    lines.push(String::from("        loop {"));
+    lines.push(String::from(
+        "            if (load_index >= TILE_M * TILE_K) {",
+    ));
+    lines.push(String::from("                break;"));
+    lines.push(String::from("            }"));
+    lines.push(String::from(
+        "            let load_row = load_index / TILE_K;",
+    ));
+    lines.push(String::from(
+        "            let load_k = load_index - load_row * TILE_K;",
+    ));
+    lines.push(String::from(
+        "            let global_row = tile_row_origin + load_row;",
+    ));
+    lines.push(String::from("            let global_k = k_base + load_k;"));
+    lines.push(String::from("            var lhs_value : f32 = 0.0;"));
+    lines.push(String::from(
+        "            if (global_row < params.rows && global_k < params.inner) {",
+    ));
+    lines.push(String::from(
+        "                lhs_value = lhs[global_row * params.inner + global_k];",
+    ));
+    lines.push(String::from("            }"));
+    lines.push(format!("            {}", lhs_store));
+    lines.push(String::from(
+        "            load_index = load_index + threads;",
+    ));
+    lines.push(String::from("        }"));
+    lines.push(String::new());
+    lines.push(String::from("        var load_rhs : u32 = local_index;"));
+    lines.push(String::from("        loop {"));
+    lines.push(String::from(
+        "            if (load_rhs >= TILE_N * TILE_K) {",
+    ));
+    lines.push(String::from("                break;"));
+    lines.push(String::from("            }"));
+    lines.push(String::from(
+        "            let load_col = load_rhs / TILE_K;",
+    ));
+    lines.push(String::from(
+        "            let load_k = load_rhs - load_col * TILE_K;",
+    ));
+    lines.push(String::from(
+        "            let global_col = tile_col_origin + load_col;",
+    ));
+    lines.push(String::from("            let global_k = k_base + load_k;"));
+    lines.push(String::from("            var rhs_value : f32 = 0.0;"));
+    lines.push(String::from(
+        "            if (global_k < params.inner && global_col < params.cols) {",
+    ));
+    for rhs_line in rhs_value_load {
+        lines.push(rhs_line);
+    }
+    lines.push(String::from("            }"));
+    lines.push(format!("            {}", rhs_store));
+    lines.push(String::from("            load_rhs = load_rhs + threads;"));
+    lines.push(String::from("        }"));
+    lines.push(String::new());
+    lines.push(String::from("        workgroupBarrier();"));
+    lines.push(String::new());
+    lines.push(String::from(
+        "        let remaining = params.inner - min(params.inner, k_base);",
+    ));
+    lines.push(String::from(
+        "        let k_limit = min(TILE_K, remaining);",
+    ));
+    lines.push(String::from("        var k : u32 = 0u;"));
+    lines.push(String::from("        loop {"));
+    lines.push(String::from("            if (k >= k_limit) {"));
+    lines.push(String::from("                break;"));
+    lines.push(String::from("            }"));
+    lines.push(format!("            let lhs_val = {};", lhs_read));
+    lines.push(format!("            let rhs_val = {};", rhs_read));
+    lines.push(String::from("            acc = acc + lhs_val * rhs_val;"));
+    lines.push(String::from("            k = k + 1u;"));
+    lines.push(String::from("        }"));
+    lines.push(String::new());
+    lines.push(String::from("        workgroupBarrier();"));
+    lines.push(String::from("        tile_index = tile_index + 1u;"));
+    lines.push(String::from("    }"));
+    lines.push(String::new());
+    lines.push(String::from("    var value = acc;"));
+    if key.use_bias {
+        lines.push(String::from("    value = value + bias[col];"));
+    }
+    if key.has_residual() {
+        lines.push(String::from(
+            "    value = value + residual[row * params.cols + col];",
+        ));
+    }
+    if (key.fused_ops_mask & FUSED_OP_GELU) != 0 {
+        lines.push(String::from("    value = gelu(value);"));
+    } else if (key.fused_ops_mask & FUSED_OP_RELU) != 0 {
+        lines.push(String::from("    value = max(value, 0.0);"));
+    }
+    lines.push(String::from("    out[row * params.cols + col] = value;"));
+    lines.push(String::from("}"));
+    lines.join(
+        "
+",
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum FusedActivation {
     Relu,
     Gelu,
 }
 
-struct GpuContext {
-    context: WgpuContext,
+struct DenseContext {
+    device: Arc<Device>,
+    queue: Arc<Queue>,
     pipeline_cache: PipelineCache,
-    bind_layout: Arc<BindGroupLayout>,
-    pipeline_layout: Arc<PipelineLayout>,
-    zero_storage: OnceLock<Arc<Buffer>>,
-    zero_scales: OnceLock<Arc<Buffer>>,
-    shader_f16: bool,
-    supports_subgroup: bool,
-    softmax_layout: BindGroupLayout,
-    softmax_pipeline: Option<Arc<ComputePipeline>>,
-    fused_attention: Option<FusedAttentionKernel>,
+    weights_cache: Mutex<HashMap<RhsCacheKey, Weak<GpuPackedRhs>>>,
+    prefer_f16: bool,
+    use_subgroup: bool,
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
@@ -221,11 +947,12 @@ impl GpuContext {
 
         let adapter_features = adapter.features();
         let mut requested_features = wgpu::Features::empty();
-        let shader_f16 = adapter_features.contains(wgpu::Features::SHADER_F16);
-        if shader_f16 {
+        if adapter_features.contains(wgpu::Features::SHADER_F16) {
             requested_features |= wgpu::Features::SHADER_F16;
         }
-        let supports_subgroup = false;
+        // TODO: enable subgroup-aware kernels once wgpu exposes the
+        // corresponding feature flags.
+        let use_subgroup = false;
 
         let (device, queue) = pollster::block_on(async {
             adapter
@@ -241,257 +968,14 @@ impl GpuContext {
         })
         .map_err(|err| err.to_string())?;
 
-        let device = Arc::new(device);
-        let queue = Arc::new(queue);
+        let device_features = device.features();
+        let prefer_f16 = device_features.contains(wgpu::Features::SHADER_F16);
 
-        let bind_layout = Arc::new(device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                label: Some("st.tensor.wgpu_dense.bind_layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 6,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            },
-        ));
+        let device: Arc<Device> = Arc::new(device);
+        let queue: Arc<Queue> = Arc::new(queue);
 
-        let pipeline_layout = Arc::new(device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
-                label: Some("st.tensor.wgpu_dense.pipeline_layout"),
-                bind_group_layouts: &[bind_layout.as_ref()],
-                push_constant_ranges: &[],
-            },
-        ));
-
-        let softmax_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("st.tensor.wgpu_dense.softmax_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let softmax_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("st.tensor.wgpu_dense.softmax.pipeline_layout"),
-                bind_group_layouts: &[&softmax_layout],
-                push_constant_ranges: &[],
-            });
-
-        let softmax_pipeline = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("st.tensor.wgpu_dense.softmax"),
-                source: wgpu::ShaderSource::Wgsl(ROW_SOFTMAX_WGSL.into()),
-            });
-            Arc::new(
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("st.tensor.wgpu_dense.softmax"),
-                    layout: Some(&softmax_pipeline_layout),
-                    module: &shader,
-                    entry_point: "main_cs",
-                }),
-            )
-        }))
-        .ok();
-
-        let fused_attention = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            let shader_source = FUSED_ATTENTION_WGSL_TEMPLATE
-                .replace("{WORKGROUP_SIZE}", &FUSED_ATTENTION_WORKGROUP.to_string())
-                .replace("{MAX_HEAD_DIM}", &FUSED_ATTENTION_MAX_HEAD_DIM.to_string());
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("st.tensor.wgpu_dense.fused_attention.shader"),
-                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
-            });
-            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("st.tensor.wgpu_dense.fused_attention.layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 6,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("st.tensor.wgpu_dense.fused_attention.pipeline_layout"),
-                bind_group_layouts: &[&layout],
-                push_constant_ranges: &[],
-            });
-            let pipeline = Arc::new(device.create_compute_pipeline(
-                &wgpu::ComputePipelineDescriptor {
-                    label: Some("st.tensor.wgpu_dense.fused_attention"),
-                    layout: Some(&pipeline_layout),
-                    module: &shader,
-                    entry_point: "main",
-                },
-            ));
-            FusedAttentionKernel {
-                layout,
-                pipeline,
-                max_head_dim: FUSED_ATTENTION_MAX_HEAD_DIM,
-            }
-        }))
-        .ok();
+        let pipeline_cache = PipelineCache::new(device.clone());
+        let weights_cache = Mutex::new(HashMap::new());
 
         let fused_conv_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("st.tensor.wgpu_dense.fused_conv_layout"),
@@ -666,6 +1150,41 @@ impl GpuContext {
                     resource: params.as_entire_binding(),
                 },
             ],
+        });
+        let softmax_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.softmax_pipeline_layout"),
+                bind_group_layouts: &[&softmax_layout],
+                push_constant_ranges: &[],
+            });
+        let softmax_pipeline = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("st.tensor.wgpu_dense.softmax_workgroup"),
+                source: wgpu::ShaderSource::Wgsl(ROW_SOFTMAX_WGSL.into()),
+            });
+            Arc::new(
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("st.tensor.wgpu_dense.softmax_workgroup"),
+                    layout: Some(&softmax_pipeline_layout),
+                    module: &shader,
+                    entry_point: "main_cs",
+                }),
+            )
+        }))
+        .ok();
+
+        Ok(Self {
+            device,
+            queue,
+            pipeline_cache,
+            weights_cache,
+            prefer_f16,
+            use_subgroup,
+            fused_conv_layout,
+            fused_conv_pipeline_layout,
+            fused_conv_pipelines: Mutex::new(HashMap::new()),
+            softmax_layout,
+            softmax_pipeline,
         })
     }
 
@@ -688,6 +1207,89 @@ impl GpuContext {
                 },
             ],
         })
+    }
+
+    fn pipeline_entry(&self, key: PipelineKey) -> Arc<PipelineArtifact> {
+        self.pipeline_cache.get(key)
+    }
+
+    fn rhs_from_packed(
+        &self,
+        packed: &PackedB,
+        tile: TileConfig,
+    ) -> Result<Arc<GpuPackedRhs>, String> {
+        if packed.inner() == 0 || packed.cols() == 0 {
+            return Err("packed matrix dimensions must be positive".into());
+        }
+
+        let quantize = true;
+        let dtype = if quantize {
+            WeightDType::Int8
+        } else {
+            WeightDType::F32
+        };
+        let key = RhsCacheKey::new(packed, tile, dtype);
+        if let Some(existing) = self
+            .weights_cache
+            .lock()
+            .unwrap()
+            .get(&key)
+            .and_then(|weak| weak.upgrade())
+        {
+            return Ok(existing);
+        }
+
+        let (buffer, scales, _elements) = if matches!(dtype, WeightDType::Int8) {
+            let (quantized, scales_vec, total) = pack_rhs_int8(packed, tile);
+            let buffer = Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("st.tensor.wgpu_dense.packed_rhs.int8"),
+                    contents: bytemuck::cast_slice(&quantized),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            ));
+            let scales = Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("st.tensor.wgpu_dense.packed_rhs.scales"),
+                    contents: bytemuck::cast_slice(&scales_vec),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            ));
+            (buffer, Some(scales), total)
+        } else {
+            let (values, total) = pack_rhs_f32(packed, tile);
+            let buffer = Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("st.tensor.wgpu_dense.packed_rhs.f32"),
+                    contents: bytemuck::cast_slice(&values),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            ));
+            (buffer, None, total)
+        };
+
+        let prepared = Arc::new(GpuPackedRhs {
+            _tile: tile,
+            dtype,
+            buffer,
+            scales,
+            _cols: packed.cols(),
+            _inner: packed.inner(),
+        });
+
+        self.weights_cache
+            .lock()
+            .unwrap()
+            .insert(key, Arc::downgrade(&prepared));
+        Ok(prepared)
+    }
+
+    fn prefer_f16(&self) -> bool {
+        self.prefer_f16
+    }
+
+    fn use_subgroup(&self) -> bool {
+        self.use_subgroup
     }
 
     fn fused_conv_pipeline_for(&self, config: TileConfig) -> Arc<ComputePipeline> {
@@ -759,12 +1361,7 @@ impl GpuContext {
     }
 }
 
-fn instantiate_tile_template(template: &str, config: TileConfig) -> String {
-    let tile_m = config.tile_m();
-    let tile_n = config.tile_n();
-    let tile_k = config.tile_k();
-    let tile_mk = tile_m * tile_k;
-    let tile_nk = tile_n * tile_k;
+static CONTEXT: OnceCell<Arc<DenseContext>> = OnceCell::new();
 
     template
         .replace("{tile_m}", &tile_m.to_string())
@@ -898,9 +1495,106 @@ fn generate_matmul_shader(key: &PipelineKey) -> String {
         .replace("{fma_line}", fma_line)
 }
 
-fn should_quantize(inner: usize, cols: usize) -> bool {
-    inner.saturating_mul(cols) >= QUANTIZATION_MIN_VOLUME
+pub fn matmul_prepacked(
+    lhs: &[f32],
+    packed_rhs: &PackedB,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if lhs.len() != rows * inner {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            rows * inner,
+            lhs.len()
+        ));
+    }
+    if packed_rhs.inner() != inner {
+        return Err("packed rhs inner dimension mismatch".into());
+    }
+    if packed_rhs.cols() != cols {
+        return Err("packed rhs column dimension mismatch".into());
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let lhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.prepacked.lhs"),
+        contents: bytemuck::cast_slice(lhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let result_size = (rows * cols * std::mem::size_of::<f32>()) as u64;
+    let out_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("st.tensor.wgpu_dense.prepacked.out"),
+        size: result_size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.prepacked.encoder"),
+    });
+    let tile_config = select_tile_config(rows, inner, cols);
+    let weights = ctx.rhs_from_packed(packed_rhs, tile_config)?;
+    let scales = weights.scales();
+    dispatch_matmul_with_options(
+        &ctx,
+        &mut encoder,
+        &lhs_buf,
+        weights.buffer(),
+        None,
+        None,
+        scales,
+        &out_buf,
+        rows,
+        inner,
+        cols,
+        tile_config,
+        0,
+        weights.dtype(),
+    );
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &out_buf, rows * cols)
 }
+
+pub fn matmul_bias_relu(
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if lhs.len() != rows * inner {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            rows * inner,
+            lhs.len()
+        ));
+    }
+    if rhs.len() != inner * cols {
+        return Err(format!(
+            "rhs buffer length mismatch: expected {} elements, got {}",
+            inner * cols,
+            rhs.len()
+        ));
+    }
+    if bias.len() != cols {
+        return Err(format!(
+            "bias length mismatch: expected {} elements, got {}",
+            cols,
+            bias.len()
+        ));
+    }
 
 struct QuantizedWeights {
     packed: Vec<u32>,
@@ -1435,182 +2129,164 @@ pub fn supports_row_softmax(rows: usize, cols: usize) -> bool {
     }
 }
 
-pub fn fused_attention(
-    queries: &[f32],
-    keys: &[f32],
-    values: &[f32],
-    contexts: usize,
-    sequence: usize,
-    head_dim: usize,
-    scale: f32,
-    z_bias: Option<&[f32]>,
-    attn_bias: Option<&[f32]>,
-) -> Result<Vec<f32>, String> {
-    if contexts == 0 || sequence == 0 || head_dim == 0 {
-        return Err("attention dimensions must be positive".into());
-    }
-
-    let volume = contexts
-        .checked_mul(sequence)
-        .and_then(|v| v.checked_mul(head_dim))
-        .ok_or_else(|| "attention volume exceeds usize range".to_string())?;
-
-    if queries.len() != volume {
-        return Err(format!(
-            "query buffer length mismatch: expected {} elements, got {}",
-            volume,
-            queries.len()
-        ));
-    }
-    if keys.len() != volume {
-        return Err(format!(
-            "key buffer length mismatch: expected {} elements, got {}",
-            volume,
-            keys.len()
-        ));
-    }
-    if values.len() != volume {
-        return Err(format!(
-            "value buffer length mismatch: expected {} elements, got {}",
-            volume,
-            values.len()
-        ));
-    }
-
-    if let Some(bias) = z_bias {
-        let expected = contexts * sequence;
-        if bias.len() != expected {
-            return Err(format!(
-                "z-bias length mismatch: expected {} elements, got {}",
-                expected,
-                bias.len()
-            ));
-        }
-    }
-
-    if let Some(bias) = attn_bias {
-        let expected = contexts
-            .checked_mul(sequence)
-            .and_then(|v| v.checked_mul(sequence))
-            .ok_or_else(|| "attention bias volume exceeds usize range".to_string())?;
-        if bias.len() != expected {
-            return Err(format!(
-                "attention bias length mismatch: expected {} elements, got {}",
-                expected,
-                bias.len()
-            ));
-        }
-    }
-
-    if contexts > u32::MAX as usize || sequence > u32::MAX as usize || head_dim > u32::MAX as usize
-    {
-        return Err("attention dimensions exceed u32 dispatch range".into());
-    }
-
-    let ctx = dense_context()?;
-    let kernel = ctx
-        .fused_attention_kernel()
-        .ok_or_else(|| "fused attention kernel unavailable on this device".to_string())?;
-
-    if (head_dim as u32) > kernel.max_head_dim {
-        return Err(format!(
-            "head dimension {} exceeds templated maximum {}",
-            head_dim, kernel.max_head_dim
-        ));
-    }
-
-    let device = ctx.device();
-    let queue = ctx.queue();
-
-    let query_buf = upload_lhs(device, "st.tensor.wgpu_dense.attn.queries", queries);
-    let key_buf = upload_lhs(device, "st.tensor.wgpu_dense.attn.keys", keys);
-    let value_buf = upload_lhs(device, "st.tensor.wgpu_dense.attn.values", values);
-    let output_buf = allocate_output(device, "st.tensor.wgpu_dense.attn.output", volume);
-
-    let z_bias_buf =
-        z_bias.map(|data| upload_lhs(device, "st.tensor.wgpu_dense.attn.z_bias", data));
-    let attn_bias_buf =
-        attn_bias.map(|data| upload_lhs(device, "st.tensor.wgpu_dense.attn.attn_bias", data));
-    let zero_storage = ctx.zero_storage_buffer();
-    let z_binding = z_bias_buf
-        .as_ref()
-        .map(|buf| buf)
-        .unwrap_or_else(|| zero_storage.as_ref());
-    let attn_binding = attn_bias_buf
-        .as_ref()
-        .map(|buf| buf)
-        .unwrap_or_else(|| zero_storage.as_ref());
-
-    let flags = {
-        let mut mask = 0u32;
-        if z_bias.is_some() {
-            mask |= FUSED_ATTENTION_FLAG_USE_Z_BIAS;
-        }
-        if attn_bias.is_some() {
-            mask |= FUSED_ATTENTION_FLAG_USE_ATTN_BIAS;
-        }
-        mask
+fn dispatch_matmul_with_options(
+    ctx: &DenseContext,
+    encoder: &mut wgpu::CommandEncoder,
+    lhs: &Buffer,
+    rhs: &Buffer,
+    bias: Option<&Buffer>,
+    residual: Option<&Buffer>,
+    scales: Option<&Buffer>,
+    out: &Buffer,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    tile: TileConfig,
+    fused_ops_mask: u32,
+    dtype: WeightDType,
+) {
+    let params = MatmulParams {
+        rows: rows as u32,
+        cols: cols as u32,
+        inner: inner as u32,
+        _pad: 0,
     };
-
-    let params = FusedAttentionParams {
-        contexts: contexts as u32,
-        sequence: sequence as u32,
-        head_dim: head_dim as u32,
-        flags,
-        scale,
-        _pad0: 0.0,
-        _pad1: 0.0,
-        _pad2: 0.0,
-    };
-    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("st.tensor.wgpu_dense.attn.params"),
-        contents: bytemuck::bytes_of(&params),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-
-    let bind_group = ctx.fused_attention_bind_group(
-        kernel,
-        &query_buf,
-        &key_buf,
-        &value_buf,
-        z_binding,
-        attn_binding,
-        &output_buf,
-        &params_buf,
-    );
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("st.tensor.wgpu_dense.attn.encoder"),
-    });
-    {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("st.tensor.wgpu_dense.attn.pass"),
-            timestamp_writes: None,
+    let params_buf = ctx
+        .device()
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("st.tensor.wgpu_dense.matmul.params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
         });
-        pass.set_pipeline(kernel.pipeline.as_ref());
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.dispatch_workgroups(sequence as u32, contexts as u32, 1);
-    }
-    queue.submit(Some(encoder.finish()));
-
-    readback_f32(device, queue, &output_buf, volume)
+    let key = PipelineKey {
+        dtype,
+        tile,
+        subgroup: ctx.use_subgroup(),
+        use_f16: ctx.prefer_f16(),
+        use_bias: bias.is_some(),
+        fused_ops_mask,
+    };
+    let artifact = ctx.pipeline_entry(key);
+    let bindings = MatmulBindings {
+        lhs,
+        rhs,
+        out,
+        params: &params_buf,
+        bias,
+        residual,
+        scales,
+    };
+    let bind_group = artifact.create_bind_group(ctx.device(), &bindings);
+    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        label: Some("st.tensor.wgpu_dense.matmul_pass"),
+        timestamp_writes: None,
+    });
+    pass.set_pipeline(artifact.pipeline.as_ref());
+    pass.set_bind_group(0, &bind_group, &[]);
+    let groups_x = ((cols as u32) + tile.tile_n() - 1) / tile.tile_n();
+    let groups_y = ((rows as u32) + tile.tile_m() - 1) / tile.tile_m();
+    pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
 }
 
-pub fn supports_fused_attention(contexts: usize, sequence: usize, head_dim: usize) -> bool {
-    if contexts == 0 || sequence == 0 || head_dim == 0 {
-        return false;
-    }
-    if contexts > u32::MAX as usize || sequence > u32::MAX as usize || head_dim > u32::MAX as usize
-    {
-        return false;
-    }
-    if let Ok(ctx) = dense_context() {
-        ctx.fused_attention_kernel()
-            .filter(|kernel| (head_dim as u32) <= kernel.max_head_dim)
-            .is_some()
-    } else {
-        false
-    }
+fn dispatch_matmul(
+    ctx: &DenseContext,
+    encoder: &mut wgpu::CommandEncoder,
+    lhs: &Buffer,
+    rhs: &Buffer,
+    out: &Buffer,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    tile: TileConfig,
+) {
+    dispatch_matmul_with_options(
+        ctx,
+        encoder,
+        lhs,
+        rhs,
+        None,
+        None,
+        None,
+        out,
+        rows,
+        inner,
+        cols,
+        tile,
+        0,
+        WeightDType::F32,
+    );
+}
+
+fn dispatch_fused_linear(
+    ctx: &DenseContext,
+    encoder: &mut wgpu::CommandEncoder,
+    lhs: &Buffer,
+    rhs: &Buffer,
+    bias: &Buffer,
+    out: &Buffer,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    tile: TileConfig,
+    activation: FusedActivation,
+) {
+    let mask = match activation {
+        FusedActivation::Relu => FUSED_OP_RELU,
+        FusedActivation::Gelu => FUSED_OP_GELU,
+    };
+    dispatch_matmul_with_options(
+        ctx,
+        encoder,
+        lhs,
+        rhs,
+        Some(bias),
+        None,
+        None,
+        out,
+        rows,
+        inner,
+        cols,
+        tile,
+        mask,
+        WeightDType::F32,
+    );
+}
+
+fn dispatch_fused_linear_with_residual(
+    ctx: &DenseContext,
+    encoder: &mut wgpu::CommandEncoder,
+    lhs: &Buffer,
+    rhs: &Buffer,
+    bias: &Buffer,
+    residual: &Buffer,
+    out: &Buffer,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    tile: TileConfig,
+    activation: FusedActivation,
+) {
+    let mut mask = match activation {
+        FusedActivation::Relu => FUSED_OP_RELU,
+        FusedActivation::Gelu => FUSED_OP_GELU,
+    };
+    mask |= FUSED_OP_RESIDUAL;
+    dispatch_matmul_with_options(
+        ctx,
+        encoder,
+        lhs,
+        rhs,
+        Some(bias),
+        Some(residual),
+        None,
+        out,
+        rows,
+        inner,
+        cols,
+        tile,
+        mask,
+        WeightDType::F32,
+    );
 }
 
 pub fn conv_im2col_gemm(

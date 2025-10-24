@@ -1287,18 +1287,15 @@ impl Tensor {
         inner: usize,
         cols: usize,
     ) -> PureResult<()> {
-        if matches!(packed.layout(), PackedLayout::ColMajor)
-            && cpu_dense::should_use(rows, inner, cols)
+        #[cfg(feature = "wgpu")]
         {
-            if let Ok(()) = cpu_dense::matmul_packed_into(
-                dst,
-                self.data(),
-                packed.as_slice(),
-                rows,
-                inner,
-                cols,
-            ) {
-                return Ok(());
+            if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
+                if let Ok(buffer) =
+                    wgpu_dense::matmul_prepacked(self.data(), packed, rows, inner, cols)
+                {
+                    dst.copy_from_slice(&buffer);
+                    return Ok(());
+                }
             }
         }
 

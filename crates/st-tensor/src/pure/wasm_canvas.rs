@@ -392,32 +392,19 @@ impl ColorVectorField {
         Tensor::from_vec(self.height, self.width * Self::FFT_INTERLEAVED_STRIDE, data)
     }
 
-    /// Row-wise FFT tensor helper that applies `window` prior to transformation.
-    pub fn fft_rows_tensor_with_window(
-        &self,
-        window: CanvasWindow,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
-        let data = self.fft_rows_interleaved_with_window(window, inverse)?;
-        Tensor::from_vec(self.height, self.width * Self::FFT_INTERLEAVED_STRIDE, data)
-    }
-
     /// Convenience wrapper that converts the row-wise FFT into magnitude space.
     /// The returned tensor has shape `(height, width * 4)` where each pixel packs
     /// the magnitude of the energy and chroma channels in order.
     pub fn fft_rows_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_rows_interleaved(inverse)?;
-        Self::magnitude_tensor_from_interleaved(self.height, self.width, &spectrum)
-    }
-
-    /// Row-wise FFT magnitude helper with a pre-transform window.
-    pub fn fft_rows_magnitude_tensor_with_window(
-        &self,
-        window: CanvasWindow,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
-        let spectrum = self.fft_rows_interleaved_with_window(window, inverse)?;
-        Self::magnitude_tensor_from_interleaved(self.height, self.width, &spectrum)
+        let mut magnitudes = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            magnitudes.push(chunk[0].hypot(chunk[1]));
+            magnitudes.push(chunk[2].hypot(chunk[3]));
+            magnitudes.push(chunk[4].hypot(chunk[5]));
+            magnitudes.push(chunk[6].hypot(chunk[7]));
+        }
+        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, magnitudes)
     }
 
     /// Row-wise FFT power helper mirroring [`fft_rows_interleaved`]. The
@@ -462,17 +449,14 @@ impl ColorVectorField {
     /// radians using `atan2(im, re)` for each channel.
     pub fn fft_rows_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_rows_interleaved(inverse)?;
-        Self::phase_tensor_from_interleaved(self.height, self.width, &spectrum)
-    }
-
-    /// Row-wise FFT phase helper with a window applied before transformation.
-    pub fn fft_rows_phase_tensor_with_window(
-        &self,
-        window: CanvasWindow,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
-        let spectrum = self.fft_rows_interleaved_with_window(window, inverse)?;
-        Self::phase_tensor_from_interleaved(self.height, self.width, &spectrum)
+        let mut phases = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            phases.push(chunk[1].atan2(chunk[0]));
+            phases.push(chunk[3].atan2(chunk[2]));
+            phases.push(chunk[5].atan2(chunk[4]));
+            phases.push(chunk[7].atan2(chunk[6]));
+        }
+        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, phases)
     }
 
     /// Compute both the magnitude and phase spectra for the row-wise FFT in a
@@ -593,33 +577,20 @@ impl ColorVectorField {
         Tensor::from_vec(self.width, self.height * Self::FFT_INTERLEAVED_STRIDE, data)
     }
 
-    /// Column-wise FFT tensor helper that applies `window` prior to transformation.
-    pub fn fft_cols_tensor_with_window(
-        &self,
-        window: CanvasWindow,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
-        let data = self.fft_cols_interleaved_with_window(window, inverse)?;
-        Tensor::from_vec(self.width, self.height * Self::FFT_INTERLEAVED_STRIDE, data)
-    }
-
     /// Column-wise FFT magnitude helper mirroring
     /// [`fft_rows_magnitude_tensor`]. The returned tensor has shape
     /// `(width, height * 4)` where each row corresponds to a column in the
     /// original canvas.
     pub fn fft_cols_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_cols_interleaved(inverse)?;
-        Self::magnitude_tensor_from_interleaved(self.width, self.height, &spectrum)
-    }
-
-    /// Column-wise FFT magnitude helper with a pre-transform window.
-    pub fn fft_cols_magnitude_tensor_with_window(
-        &self,
-        window: CanvasWindow,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
-        let spectrum = self.fft_cols_interleaved_with_window(window, inverse)?;
-        Self::magnitude_tensor_from_interleaved(self.width, self.height, &spectrum)
+        let mut magnitudes = Vec::with_capacity(self.width * self.height * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            magnitudes.push(chunk[0].hypot(chunk[1]));
+            magnitudes.push(chunk[2].hypot(chunk[3]));
+            magnitudes.push(chunk[4].hypot(chunk[5]));
+            magnitudes.push(chunk[6].hypot(chunk[7]));
+        }
+        Tensor::from_vec(self.width, self.height * Self::FFT_CHANNELS, magnitudes)
     }
 
     /// Column-wise FFT power helper mirroring [`fft_cols_interleaved`]. The
@@ -661,17 +632,14 @@ impl ColorVectorField {
     /// Column-wise FFT phase helper mirroring [`fft_rows_phase_tensor`].
     pub fn fft_cols_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_cols_interleaved(inverse)?;
-        Self::phase_tensor_from_interleaved(self.width, self.height, &spectrum)
-    }
-
-    /// Column-wise FFT phase helper with an explicit window.
-    pub fn fft_cols_phase_tensor_with_window(
-        &self,
-        window: CanvasWindow,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
-        let spectrum = self.fft_cols_interleaved_with_window(window, inverse)?;
-        Self::phase_tensor_from_interleaved(self.width, self.height, &spectrum)
+        let mut phases = Vec::with_capacity(self.width * self.height * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            phases.push(chunk[1].atan2(chunk[0]));
+            phases.push(chunk[3].atan2(chunk[2]));
+            phases.push(chunk[5].atan2(chunk[4]));
+            phases.push(chunk[7].atan2(chunk[6]));
+        }
+        Tensor::from_vec(self.width, self.height * Self::FFT_CHANNELS, phases)
     }
 
     /// Compute both the magnitude and phase spectra for the column-wise FFT in
@@ -856,31 +824,18 @@ impl ColorVectorField {
         Tensor::from_vec(self.height, self.width * Self::FFT_INTERLEAVED_STRIDE, data)
     }
 
-    /// 2D FFT tensor helper that applies `window` prior to transformation.
-    pub fn fft_2d_tensor_with_window(
-        &self,
-        window: CanvasWindow,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
-        let data = self.fft_2d_interleaved_with_window(window, inverse)?;
-        Tensor::from_vec(self.height, self.width * Self::FFT_INTERLEAVED_STRIDE, data)
-    }
-
     /// 2D FFT magnitude helper mirroring [`fft_2d_interleaved`]. The returned
     /// tensor has shape `(height, width * 4)` with magnitudes for each channel.
     pub fn fft_2d_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_2d_interleaved(inverse)?;
-        Self::magnitude_tensor_from_interleaved(self.height, self.width, &spectrum)
-    }
-
-    /// 2D FFT magnitude helper with windowing.
-    pub fn fft_2d_magnitude_tensor_with_window(
-        &self,
-        window: CanvasWindow,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
-        let spectrum = self.fft_2d_interleaved_with_window(window, inverse)?;
-        Self::magnitude_tensor_from_interleaved(self.height, self.width, &spectrum)
+        let mut magnitudes = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            magnitudes.push(chunk[0].hypot(chunk[1]));
+            magnitudes.push(chunk[2].hypot(chunk[3]));
+            magnitudes.push(chunk[4].hypot(chunk[5]));
+            magnitudes.push(chunk[6].hypot(chunk[7]));
+        }
+        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, magnitudes)
     }
 
     /// 2D FFT power helper mirroring [`fft_2d_interleaved`]. The returned tensor
@@ -924,17 +879,14 @@ impl ColorVectorField {
     /// has shape `(height, width * 4)` storing per-channel phase angles.
     pub fn fft_2d_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_2d_interleaved(inverse)?;
-        Self::phase_tensor_from_interleaved(self.height, self.width, &spectrum)
-    }
-
-    /// 2D FFT phase helper with windowing.
-    pub fn fft_2d_phase_tensor_with_window(
-        &self,
-        window: CanvasWindow,
-        inverse: bool,
-    ) -> PureResult<Tensor> {
-        let spectrum = self.fft_2d_interleaved_with_window(window, inverse)?;
-        Self::phase_tensor_from_interleaved(self.height, self.width, &spectrum)
+        let mut phases = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            phases.push(chunk[1].atan2(chunk[0]));
+            phases.push(chunk[3].atan2(chunk[2]));
+            phases.push(chunk[5].atan2(chunk[4]));
+            phases.push(chunk[7].atan2(chunk[6]));
+        }
+        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, phases)
     }
 
     /// Compute both the magnitude and phase spectra for the 2D FFT in a single
