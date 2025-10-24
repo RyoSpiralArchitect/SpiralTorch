@@ -27,8 +27,9 @@ use st_core::backend::device_caps::DeviceCaps;
 use st_core::telemetry::psychoid::PsychoidSample;
 use st_tensor::{
     topos::OpenCartesianTopos, AmegaHypergrad, AmegaRealgrad, ComplexTensor, LanguageWaveEncoder,
-    PureResult, Tensor, TensorError,
+    PackedB, PureResult, Tensor, TensorError, Tile,
 };
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// Trainable parameter that can either rely on the hypergrad tape or fall back
@@ -39,6 +40,7 @@ pub struct Parameter {
     gradient: Option<Tensor>,
     hypergrad: Option<AmegaHypergrad>,
     realgrad: Option<AmegaRealgrad>,
+    packed_matmul: RefCell<Option<PackedB>>,
 }
 
 impl core::fmt::Debug for Parameter {
@@ -66,6 +68,7 @@ impl Parameter {
             gradient: None,
             hypergrad: None,
             realgrad: None,
+            packed_matmul: RefCell::new(None),
         }
     }
 
@@ -86,6 +89,7 @@ impl Parameter {
 
     /// Provides a mutable view into the underlying tensor value.
     pub fn value_mut(&mut self) -> &mut Tensor {
+        self.invalidate_matmul_pack();
         &mut self.value
     }
 
@@ -267,6 +271,7 @@ impl Parameter {
                 }
             }
         }
+        self.invalidate_matmul_pack();
         Ok(())
     }
 
@@ -338,6 +343,20 @@ impl Parameter {
         if let Some(tape) = self.realgrad.as_mut() {
             tape.scale_learning_rate(factor);
         }
+    }
+
+    /// Ensures a prepacked representation of the parameter is available for matmul.
+    pub fn ensure_matmul_pack(&self) -> PureResult<PackedB> {
+        if let Some(existing) = self.packed_matmul.borrow().clone() {
+            return Ok(existing);
+        }
+        let pack = PackedB::from_tensor(self.value(), Tile::col_major())?;
+        *self.packed_matmul.borrow_mut() = Some(pack.clone());
+        Ok(pack)
+    }
+
+    fn invalidate_matmul_pack(&self) {
+        self.packed_matmul.borrow_mut().take();
     }
 
     /// Replaces the parameter value with the provided tensor.
