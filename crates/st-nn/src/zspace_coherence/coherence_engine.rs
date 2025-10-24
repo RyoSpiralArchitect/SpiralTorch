@@ -323,6 +323,15 @@ impl CoherenceEngine {
         })
     }
 
+    /// Overrides the number of Maxwell channels used for coherence measurement.
+    pub fn with_channel_count(mut self, num_channels: usize) -> PureResult<Self> {
+        if num_channels == 0 {
+            return Err(TensorError::EmptyInput("maxwell_channels").into());
+        }
+        self.num_channels = num_channels;
+        Ok(self)
+    }
+
     /// Overrides the execution backend.
     pub fn set_backend(&mut self, backend: CoherenceBackend) {
         self.backend = backend;

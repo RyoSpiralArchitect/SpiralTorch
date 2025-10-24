@@ -60,7 +60,7 @@ pub use language::{
 };
 #[cfg(feature = "psi")]
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
-pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, Conv6da, MaxPool2d};
+pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, Conv3d, Conv4d, Conv6da, MaxPool2d};
 pub use layers::linear::Linear;
 pub use layers::sequential::Sequential;
 pub use layers::wave_gate::WaveGate;
@@ -86,7 +86,8 @@ pub use st_core::runtime::blackcat::{
 pub use trainer::{EpochStats, ModuleTrainer};
 pub use zspace_coherence::{
     BackendCapabilities, CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile,
-    LinguisticChannelReport, LinguisticContour, ZSpaceCoherenceSequencer,
+    LinguisticChannelReport, LinguisticContour, PreDiscardPolicy, PreDiscardRegulator,
+    ZSpaceCoherenceSequencer,
 };
 
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};

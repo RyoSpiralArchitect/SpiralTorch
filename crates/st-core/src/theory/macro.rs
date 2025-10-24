@@ -16,7 +16,7 @@
 //! pattern-forming interfaces without re-deriving the bookkeeping each time.
 
 use crate::theory::microlocal::{
-    InterfaceSignature, InterfaceZLift, InterfaceZPulse, MicrolocalFeedback,
+    InterfaceSignature, InterfaceZLift, InterfaceZPulse, InterfaceZReport, MicrolocalFeedback,
 };
 use crate::theory::microlocal_bank::GaugeBank;
 use ndarray::{indices, ArrayD, Dimension, IxDyn};
@@ -783,6 +783,36 @@ impl MacroTemplateBank {
         }
         bank
     }
+
+    /// Runs all templates whose identifiers match gauges reported by the conductor
+    /// and returns the resulting drives keyed by template id.
+    pub fn drive_matched(&self, report: &InterfaceZReport) -> GaugeBank<MacroDrive> {
+        let mut drives = GaugeBank::new();
+        let lift = report.lift();
+        for (id, template) in self.inner.iter() {
+            if let Some(signature) = report.signature_for(id) {
+                let bridge = template.clone().couple_with(lift.clone());
+                let drive = bridge.ingest_signature(signature);
+                let _ = drives.register(id, drive);
+            }
+        }
+        drives
+    }
+
+    /// Aggregates microlocal feedback emitted by the matched drives. Returns
+    /// `None` when no templates were matched.
+    pub fn feedback_from_report(&self, report: &InterfaceZReport) -> Option<MicrolocalFeedback> {
+        let drives = self.drive_matched(report);
+        let mut combined: Option<MicrolocalFeedback> = None;
+        for (_, drive) in drives.iter() {
+            let feedback = drive.microlocal_feedback().clone();
+            combined = Some(match combined {
+                Some(existing) => existing.merge(&feedback),
+                None => feedback,
+            });
+        }
+        combined
+    }
 }
 
 impl IntoIterator for MacroTemplateBank {
@@ -1312,9 +1342,12 @@ pub struct ContactCardConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theory::microlocal::{InterfaceSignature, InterfaceZLift};
+    use crate::theory::microlocal::{
+        InterfaceGauge, InterfaceSignature, InterfaceZConductor, InterfaceZLift,
+        MicrolocalGaugeBank,
+    };
     use crate::util::math::LeechProjector;
-    use ndarray::{ArrayD, IxDyn};
+    use ndarray::{array, ArrayD, IxDyn};
 
     #[test]
     fn template_bank_registers_and_couples_templates() {
@@ -1559,5 +1592,45 @@ mod tests {
         assert!((drive.contributions.mean_curvature - 2.0).abs() < 1e-6);
         assert!((anisotropic - 3.0).abs() < 1e-6);
         assert!((drive.velocity - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn drive_matched_emits_feedback_for_matching_gauge() {
+        let mut gauges = MicrolocalGaugeBank::new();
+        gauges.register("minimal", InterfaceGauge::new(1.0, 1.0));
+        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.25));
+        let mut conductor = InterfaceZConductor::from_bank(gauges, lift);
+        let mask = array![[0.0, 0.0], [0.0, 1.0]].into_dyn();
+        let report = conductor.step(&mask, None, None, None);
+        assert_eq!(report.gauge_id(0), Some("minimal"));
+
+        let card = MinimalCardConfig {
+            phase_pair: PhasePair::new("A", "B"),
+            sigma: 0.1,
+            mobility: 1.0,
+            volume: None,
+            physical_scales: None,
+        };
+        let mut templates = MacroTemplateBank::new();
+        templates.register_card("minimal", MacroCard::Minimal(card));
+
+        let drives = templates.drive_matched(&report);
+        assert_eq!(drives.len(), 1);
+        let (_, drive) = drives.iter().next().expect("drive missing");
+        let microlocal_feedback = drive.microlocal_feedback();
+        assert!(
+            microlocal_feedback.threshold_scale.is_some()
+                || microlocal_feedback.bias_gain.is_some()
+        );
+
+        let thresholds_before = conductor.gauge_thresholds();
+        let bias_before = conductor.bias_gain();
+        let feedback = templates
+            .feedback_from_report(&report)
+            .expect("feedback missing");
+        conductor.apply_feedback(&feedback);
+        let thresholds_after = conductor.gauge_thresholds();
+        let bias_after = conductor.bias_gain();
+        assert!(thresholds_before != thresholds_after || (bias_before - bias_after).abs() > 1e-6);
     }
 }

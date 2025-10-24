@@ -72,6 +72,10 @@ fn conductor_rollout_preserves_neutral_scale() {
 
     let report = conductor.step(&mask, None, None, None);
 
+    assert_eq!(report.signatures.len(), report.pulses.len());
+    assert!(report.gauge_ids.iter().all(|id| id.is_none()));
+    assert!((report.lift().bias_gain() - conductor.bias_gain()).abs() < 1e-6);
+
     for pulse in &report.pulses {
         assert_neutral_scale(pulse.scale);
     }
@@ -173,6 +177,8 @@ fn conductor_fuses_multiscale_pulses_with_smoothing() {
     assert!(first.fused_pulse.z_bias > 0.0);
     assert_eq!(first.qualities.len(), first.pulses.len());
     assert!(first.budget_scale > 0.0);
+    assert_eq!(first.signatures.len(), first.pulses.len());
+    assert!(first.gauge_ids.iter().all(|id| id.is_none()));
 
     let second = conductor.step(&flipped, Some(&c_prime_neg), None, None);
     let raw_second = InterfaceZPulse::aggregate(&second.pulses);
@@ -183,6 +189,8 @@ fn conductor_fuses_multiscale_pulses_with_smoothing() {
     assert_eq!(second.feedback.band_energy, second.fused_pulse.band_energy);
     assert_eq!(second.qualities.len(), second.pulses.len());
     assert!(second.budget_scale > 0.0);
+    assert_eq!(second.signatures.len(), second.pulses.len());
+    assert!(second.gauge_ids.iter().all(|id| id.is_none()));
 }
 
 #[derive(Debug)]
@@ -363,8 +371,13 @@ fn conductor_can_be_built_from_gauge_bank() {
     let mut bank = MicrolocalGaugeBank::new();
     bank.register("default", InterfaceGauge::new(1.0, 1.0));
     let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
-    let conductor = InterfaceZConductor::from_bank(bank.clone(), lift);
+    let mut conductor = InterfaceZConductor::from_bank(bank.clone(), lift);
     assert_eq!(conductor.gauge_thresholds(), vec![0.25]);
+
+    let mask = array![[0.0, 0.0], [0.0, 1.0]].into_dyn();
+    let report = conductor.step(&mask, None, None, None);
+    assert_eq!(report.gauge_id(0), Some("default"));
+    assert!(report.signature_for("default").is_some());
 
     bank.get_mut("default")
         .expect("gauge missing")

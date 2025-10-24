@@ -55,6 +55,7 @@ impl WaveRnn {
             kernel_size,
             stride,
             padding,
+            1,
         )?;
         let gate = WaveGate::new(format!("{name}::gate"), hidden_dim, curvature, temperature)?;
         let mut seed = 0.005f32;
