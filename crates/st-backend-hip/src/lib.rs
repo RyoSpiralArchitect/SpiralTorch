@@ -148,6 +148,8 @@ pub mod stub {
     pub fn device_info() -> Vec<DeviceInfo> {
         finalize_devices(collect_env_devices(), hip_env_available())
     }
+
+    Ok(HipRuntime::new(devices))
 }
 
 fn build_runtime() -> Result<HipRuntime, HipErr> {

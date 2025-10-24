@@ -20,7 +20,7 @@ Modern ML stacks were built around CUDA—fast, but closed and rigid.
 It keeps the expressive PyTorch-style API that researchers already know, but runs on **WGPU** (Metal / Vulkan / DX12), so the same code works across macOS, Windows, and Linux without vendor lock-in.  
 
 Where frameworks chase throughput, SpiralTorch chases **fidelity**: exact spectral operators, stable autodiff at microlocal scales, and a cooperative scheduler designed for reproducible research.  
-You can start with existing PyTorch checkpoints via `spiraltorch.compat.torch`, move training loops unchanged, and gradually adopt SpiralTorch’s runtime for fine-grained control over kernels and device orchestration.  
+You can start with existing PyTorch checkpoints via `spiraltorch.compat.torch`, move training loops unchanged, and gradually adopt SpiralTorch’s runtime for fine-grained control over kernels and device orchestration. Attention, softmax, and related primitives are being fused in the WGPU backend so PyTorch users can migrate critical kernels one pass at a time without sacrificing stability.
 
 It’s not just an engine—it’s a **bridge** between the pragmatism of deep-learning frameworks and the precision of computational geometry.  
 
@@ -55,8 +55,18 @@ sequenceDiagram
 > **New — Conv6da with Leech enrichment.** `Conv6da` fuses six-directional adjacency with optional Leech lattice density boosts so Z-space fields aggregate neighbors with structure-aware gradients.
 
 > **Expanded — Higher-order convolutions.** Fresh `Conv3d` and `Conv4d` modules now mirror the dilation-aware ergonomics of their 1D/2D siblings so volumetric stacks and temporal cubes slide straight into the same API.
+>
+> **New — Online-softmax fused attention.** A single-kernel QKᵀ + mask + softmax + V pipeline now lands in the WGPU backend, slashing bandwidth for multi-head attention while matching PyTorch semantics for drop-in migrations.
 
-> **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, and optional Z-bias/attention bias so Z-space transformers can mix ragged batches without leaving the GPU hot path.
+> **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and an opt-in attention-probability readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
+
+> **In progress — Fused attention for PyTorch migrations.** The new single-kernel Q·Kᵀ + softmax + V planner keeps intermediate logits on-chip, so PyTorch users can co-train or stage migrations while retaining numerically stable attention/softmax semantics.
+
+> **In progress — Fused attention for Torch migrations.** The new single-kernel Q·Kᵀ + softmax + V planner keeps intermediate logits on-chip, so PyTorch users can co-train or stage migrations while retaining numerically stable attention/softmax semantics.
+>
+> **New — Python `Tensor.scaled_dot_attention`.** The fused kernel is now exposed to Python callers with a CPU fallback, so migration experiments can drop directly into WGPU-backed attention without leaving the high-level API.
+
+> **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and opt-in attention probability/logit readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
 
 **Licensing**
 
@@ -86,10 +96,6 @@ SpiralTorch ships under a dual-license model:
   Azure and AWS deployment blueprints.
 - **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors. Any network-facing use must comply with AGPL §13.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
-
-### Performance roadmap
-
-- [Level 2 GPU optimisation roadmap](docs/performance/level2_gpu_roadmap.md) — subgroup primitives, Chimera layouts, fusion IR, and runtime-guided codegen to push SpiralTorch past PyTorch on portable GPUs.
 
 ## Code stats
 
@@ -2105,10 +2111,6 @@ let exec = WgpuExecutor::default();
 // launch
 execute_rank(&exec, &plan)?;
 ```
-**Modules**
-- `Linear`, `Conv1d`, `WaveRnn`, `ReLU`, `ZSpaceProjector`
-- `Sequential` composition and `ModuleTrainer`
-- Fully Rust-native, Python-accessible via wheels
 
 ## 🌀 New: ZSpaceCoherenceSequencer
 
@@ -2134,7 +2136,7 @@ print(f"dominant channel: {diagnostics.dominant_channel()}")
 print(f"z-bias: {diagnostics.z_bias():.3f}")
 ```
 
-### 先行破棄 (Pre-Discard) Sequencing
+### Pre-Discard Sequencing
 
 Humans don't wait to evaluate every possibility—they discard the "now impossible"
 branches first and let thought ride whatever remains. The sequencer now mirrors
@@ -2291,135 +2293,6 @@ let dataset = vec![
 let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
 println!("roundtable avg loss: {:.6}", stats.average_loss);
 ```
-
-## 🌀 New: ZSpaceCoherenceSequencer
-
-**NOT Attention. NOT Transformer.**
-
-Instead of Q·K^T softmax:
-- **Maxwell pulses** detect phase synchronization
-- **Desire Lagrangian** applies linguistic bias (no RLHF needed)
-- **Hyperbolic geometry** naturally encodes hierarchy
-- **Fractional operators** replace dot products
-
-```python
-from spiraltorch.nn import CoherenceDiagnostics, ZSpaceCoherenceSequencer
-
-model = ZSpaceCoherenceSequencer(
-    dim=768,
-    num_heads=12,
-    curvature=-1.0
-)
-
-out, coherence, diagnostics = model.forward_with_diagnostics(x)  # Aggregation + diagnostics
-
-# Derive a linguistic contour descriptor for downstream vocalisation
-contour = model.emit_linguistic_contour(x)
-print(contour.prosody_index())
-
-# Inspect channel-level linguistic reports for bridging into external runtimes
-reports = model.describe_channels(x)
-for report in reports[:3]:
-    print(report.channel(), report.dominant_concept(), report.weight())
-
-print("dominant channel:", diagnostics.dominant_channel())
-```
-
-[See example](examples/05_new_layers/zspace_coherence_demo.py)
-
-### Why Not Attention?
-
-| Aspect | Attention | ZSpaceCoherence |
-|--------|-----------|-----------------|
-| Token weighting | Q·K^T softmax | Maxwell pulses |
-| Geometry | Euclidean (dot product) | Hyperbolic (geodesic) |
-| Linguistic bias | External (RLHF/DPO) | Intrinsic (Desire Lagrangian) |
-| Operators | Softmax | Fractional calculus |
-| Hierarchy | Implicit | Explicit (curvature) |
-
-### Distributed roundtable consensus
-
-SpiralTorch's roundtable now runs with a Blackcat moderator sitting between
-local workers and the shared heuristics log:
-
-1. **Local roundtable** — every worker runs the A/B/C negotiation locally and
-   emits compact `DecisionEvent`s containing the winning band, score, and
-   ψ-derived reliability. ψ stays internal to the trainer and is only used for
-   automation.
-2. **Blackcat meta moderator** — summaries flow into the moderator, which uses
-   a dedicated Blackcat runtime to score support, publish moderator minutes,
-   and forward evidence to the embedded `MetaConductor`. Once enough support
-   accumulates a `GlobalProposal` is broadcast.
-3. **heur.kdsl op-log** — proposals arrive as deterministic `HeurOp` entries
-   that append soft rules, retract stale hints, or annotate strategies. The
-   op-log is CRDT-safe so multiple nodes can merge without conflicts.
-
-```rust
-use st_core::backend::device_caps::DeviceCaps;
-use st_nn::{DistConfig, ModuleTrainer, RoundtableConfig, Sequential, Linear, MeanSquaredError};
-
-let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
-use st_core::ecosystem::CloudConnector;
-
-let dist = DistConfig {
-    node_id: "node-a".into(),
-    mode: st_nn::DistMode::PeriodicMeta,
-    push_interval: std::time::Duration::from_secs(15),
-    meta_endpoints: vec!["tcp://meta:5005".into()],
-    summary_window: 8,
-    cloud_targets: vec![
-        CloudConnector::AzureEventHub {
-            namespace: "spiral-meta".into(),
-            hub: "roundtable".into(),
-        },
-        CloudConnector::AwsKinesis {
-            region: "us-east-1".into(),
-            stream: "spiral-roundtable".into(),
-        },
-    ],
-};
-trainer.configure_distribution(dist);
-trainer.install_blackcat_moderator(0.75, 2);
-
-let mut model = Sequential::new();
-model.push(Linear::new("encoder", 4, 4)?);
-trainer.prepare(&mut model)?;
-
-let mut cfg = RoundtableConfig::default();
-#[cfg(feature = "psi")]
-{
-    cfg = cfg.enable_psi();
-}
-let schedule = trainer.roundtable(1, 4, cfg);
-let mut loss = MeanSquaredError::new();
-let dataset = vec![
-    (
-        Tensor::from_vec(1, 4, vec![0.0, 0.0, 0.0, 0.0])?,
-        Tensor::from_vec(1, 4, vec![0.0, 0.0, 0.0, 0.0])?,
-    ),
-];
-trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
-
-// Inspect the deterministic op-log and the moderator minutes.
-for op in trainer.heuristics_log().entries() {
-    println!("meta op {:?}", op.kind);
-}
-for minute in trainer.blackcat_minutes() {
-    println!("moderator: {} -> {:?} (support {:.2})", minute.plan_signature, minute.winner, minute.support);
-}
-for entry in trainer.blackcat_scoreboard() {
-    println!(
-        "scoreboard: {} obs={} reward={:.3}",
-        entry.plan_signature,
-        entry.observations,
-        entry.mean_reward
-    );
-}
-```
-
-The `cloud_targets` catalogue surfaces Azure Event Hub / Storage Queue and AWS Kinesis /
-SQS integrations to telemetry consumers, ensuring roundtable connectors advertise which
-cloud fabrics receive summaries and proposals.
 
 **BlackCat runtime tap-in**
 

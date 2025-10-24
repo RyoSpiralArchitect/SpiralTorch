@@ -8,18 +8,20 @@ extern "C" {
 
 constexpr int WARP_LANES = 32;
 constexpr int THREADS_PER_BLOCK = 128;
-constexpr int SCRATCH_SIZE = THREADS_PER_BLOCK / WARP_LANES;
+constexpr int SCRATCH_SIZE = (THREADS_PER_BLOCK + WARP_LANES - 1) / WARP_LANES;
 
 __device__ __forceinline__ float warp_reduce_sum(float value) {
+  unsigned mask = __activemask();
   for (int offset = WARP_LANES / 2; offset > 0; offset >>= 1) {
-    value += __shfl_down_sync(0xFFFFFFFF, value, offset);
+    value += __shfl_down_sync(mask, value, offset);
   }
   return value;
 }
 
 __device__ __forceinline__ float warp_reduce_max(float value) {
+  unsigned mask = __activemask();
   for (int offset = WARP_LANES / 2; offset > 0; offset >>= 1) {
-    float other = __shfl_down_sync(0xFFFFFFFF, value, offset);
+    float other = __shfl_down_sync(mask, value, offset);
     value = value > other ? value : other;
   }
   return value;
@@ -32,7 +34,7 @@ __device__ __forceinline__ float block_reduce_sum(float value, float* scratch, i
   value = warp_reduce_sum(value);
   __syncthreads();
 
-  if (lane == 0) {
+  if (lane == 0 && warp < warp_count) {
     scratch[warp] = value;
   }
   __syncthreads();
@@ -57,7 +59,7 @@ __device__ __forceinline__ float block_reduce_max(float value, float* scratch, i
   value = warp_reduce_max(value);
   __syncthreads();
 
-  if (lane == 0) {
+  if (lane == 0 && warp < warp_count) {
     scratch[warp] = value;
   }
   __syncthreads();
@@ -82,6 +84,8 @@ __global__ void scaled_dot_attention_kernel(
     const unsigned int* __restrict__ context_lengths,
     const float* __restrict__ z_bias,
     const float* __restrict__ attn_bias,
+    float* __restrict__ attn_probs,
+    float* __restrict__ attn_logits,
     float* __restrict__ out,
     int contexts,
     int seq_len,
@@ -90,7 +94,9 @@ __global__ void scaled_dot_attention_kernel(
     int use_z_bias,
     int use_context_lengths,
     int use_attn_bias,
-    int causal_mask) {
+    int causal_mask,
+    int use_attn_probs,
+    int use_attn_logits) {
   int context = blockIdx.y + blockIdx.z * gridDim.y;
   int query = blockIdx.x;
   if (context >= contexts || query >= seq_len) {
@@ -105,6 +111,8 @@ __global__ void scaled_dot_attention_kernel(
   int context_offset = context * seq_len;
   size_t q_offset = static_cast<size_t>(context_offset + query) * static_cast<size_t>(head_dim);
   size_t kv_offset = static_cast<size_t>(context_offset) * static_cast<size_t>(head_dim);
+  size_t row_offset = (static_cast<size_t>(context_offset) + static_cast<size_t>(query)) *
+                      static_cast<size_t>(seq_len);
 
   int context_length = seq_len;
   if (use_context_lengths) {
@@ -120,11 +128,31 @@ __global__ void scaled_dot_attention_kernel(
     for (int d = threadIdx.x; d < head_dim; d += blockDim.x) {
       out[q_offset + d] = 0.0f;
     }
+    if (use_attn_probs) {
+      for (int key = threadIdx.x; key < seq_len; key += blockDim.x) {
+        attn_probs[row_offset + key] = 0.0f;
+      }
+    }
+    if (use_attn_logits) {
+      for (int key = threadIdx.x; key < seq_len; key += blockDim.x) {
+        attn_logits[row_offset + key] = -CUDART_INF_F;
+      }
+    }
     return;
   }
   if (query >= context_length) {
     for (int d = threadIdx.x; d < head_dim; d += blockDim.x) {
       out[q_offset + d] = 0.0f;
+    }
+    if (use_attn_probs) {
+      for (int key = threadIdx.x; key < seq_len; key += blockDim.x) {
+        attn_probs[row_offset + key] = 0.0f;
+      }
+    }
+    if (use_attn_logits) {
+      for (int key = threadIdx.x; key < seq_len; key += blockDim.x) {
+        attn_logits[row_offset + key] = -CUDART_INF_F;
+      }
     }
     return;
   }
@@ -138,6 +166,16 @@ __global__ void scaled_dot_attention_kernel(
   if (key_limit <= 0) {
     for (int d = threadIdx.x; d < head_dim; d += blockDim.x) {
       out[q_offset + d] = 0.0f;
+    }
+    if (use_attn_probs) {
+      for (int key = threadIdx.x; key < seq_len; key += blockDim.x) {
+        attn_probs[row_offset + key] = 0.0f;
+      }
+    }
+    if (use_attn_logits) {
+      for (int key = threadIdx.x; key < seq_len; key += blockDim.x) {
+        attn_logits[row_offset + key] = -CUDART_INF_F;
+      }
     }
     return;
   }
@@ -164,12 +202,18 @@ __global__ void scaled_dot_attention_kernel(
         biased += attn_bias[bias_idx];
       }
       scores[key] = biased;
+      if (use_attn_logits) {
+        attn_logits[row_offset + key] = biased;
+      }
     }
     __syncthreads();
   }
 
   for (int key = key_limit + threadIdx.x; key < seq_len; key += blockDim.x) {
     scores[key] = -CUDART_INF_F;
+    if (use_attn_logits) {
+      attn_logits[row_offset + key] = -CUDART_INF_F;
+    }
   }
   __syncthreads();
 
@@ -204,6 +248,12 @@ __global__ void scaled_dot_attention_kernel(
       acc += weight * value_vec[d];
     }
     out[q_offset + d] = acc;
+  }
+
+  if (use_attn_probs) {
+    for (int key = threadIdx.x; key < seq_len; key += blockDim.x) {
+      attn_probs[row_offset + key] = (key < key_limit) ? scores[key] : 0.0f;
+    }
   }
 }
 

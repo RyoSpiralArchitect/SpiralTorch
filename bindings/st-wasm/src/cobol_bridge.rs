@@ -240,15 +240,74 @@ impl CobolDispatchPlanner {
         self.builder.set_dataset_like(like_dataset);
     }
 
+    #[wasm_bindgen(js_name = setDatasetOrganization)]
+    pub fn set_dataset_organization(&mut self, organization: Option<String>) {
+        self.builder.set_dataset_organization(organization);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetKeyLength)]
+    pub fn set_dataset_key_length(&mut self, key_length: Option<u32>) {
+        self.builder.set_dataset_key_length(key_length);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetKeyOffset)]
+    pub fn set_dataset_key_offset(&mut self, key_offset: Option<u32>) {
+        self.builder.set_dataset_key_offset(key_offset);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetControlIntervalSize)]
+    pub fn set_dataset_control_interval_size(&mut self, control_interval_size: Option<u32>) {
+        self.builder
+            .set_dataset_control_interval_size(control_interval_size);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetShareOptionsCrossRegion)]
+    pub fn set_dataset_share_options_cross_region(
+        &mut self,
+        share_options_cross_region: Option<u32>,
+    ) {
+        self.builder
+            .set_dataset_share_options_cross_region(share_options_cross_region);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetShareOptionsCrossSystem)]
+    pub fn set_dataset_share_options_cross_system(
+        &mut self,
+        share_options_cross_system: Option<u32>,
+    ) {
+        self.builder
+            .set_dataset_share_options_cross_system(share_options_cross_system);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetReuse)]
+    pub fn set_dataset_reuse(&mut self, reuse: Option<bool>) {
+        self.builder.set_dataset_reuse(reuse);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetLog)]
+    pub fn set_dataset_log(&mut self, log: Option<bool>) {
+        self.builder.set_dataset_log(log);
+    }
+
     #[wasm_bindgen(js_name = setDatasetUnit)]
     pub fn set_dataset_unit(&mut self, unit: Option<String>) {
         self.builder.set_dataset_unit(unit);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetUnitCount)]
+    pub fn set_dataset_unit_count(&mut self, unit_count: Option<u32>) {
+        self.builder.set_dataset_unit_count(unit_count);
     }
 
     #[wasm_bindgen(js_name = setDatasetAverageRecordUnit)]
     pub fn set_dataset_average_record_unit(&mut self, average_record_unit: Option<String>) {
         self.builder
             .set_dataset_average_record_unit(average_record_unit);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetCatalogBehavior)]
+    pub fn set_dataset_catalog_behavior(&mut self, catalog_behavior: Option<String>) {
+        self.builder.set_dataset_catalog_behavior(catalog_behavior);
     }
 
     #[wasm_bindgen(js_name = setDatasetRetentionPeriod)]
@@ -259,6 +318,11 @@ impl CobolDispatchPlanner {
     #[wasm_bindgen(js_name = setDatasetReleaseSpace)]
     pub fn set_dataset_release_space(&mut self, release_space: Option<bool>) {
         self.builder.set_dataset_release_space(release_space);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetEraseOnDelete)]
+    pub fn set_dataset_erase_on_delete(&mut self, erase_on_delete: Option<bool>) {
+        self.builder.set_dataset_erase_on_delete(erase_on_delete);
     }
 
     #[wasm_bindgen(js_name = setDatasetExpirationDate)]
@@ -410,10 +474,21 @@ impl CobolDispatchPlanner {
                     directory_blocks: dataset.directory_blocks,
                     dataset_type: dataset.dataset_type.as_deref(),
                     like_dataset: dataset.like_dataset.as_deref(),
+                    organization: dataset.organization.as_deref(),
+                    key_length: dataset.key_length,
+                    key_offset: dataset.key_offset,
+                    control_interval_size: dataset.control_interval_size,
+                    share_options_cross_region: dataset.share_options_cross_region,
+                    share_options_cross_system: dataset.share_options_cross_system,
+                    reuse: dataset.reuse,
+                    log: dataset.log,
                     unit: dataset.unit.as_deref(),
+                    unit_count: dataset.unit_count,
                     average_record_unit: dataset.average_record_unit.as_deref(),
+                    catalog_behavior: dataset.catalog_behavior.as_deref(),
                     retention_period: dataset.retention_period,
                     release_space: dataset.release_space,
+                    erase_on_delete: dataset.erase_on_delete,
                     expiration_date: dataset.expiration_date.as_deref(),
                 }),
             release_channel: &envelope.release_channel,
@@ -468,13 +543,35 @@ struct CobolPreviewDataset<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     like_dataset: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    organization: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key_length: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key_offset: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    control_interval_size: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    share_options_cross_region: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    share_options_cross_system: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reuse: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    log: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     unit: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    unit_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     average_record_unit: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    catalog_behavior: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     retention_period: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     release_space: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    erase_on_delete: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     expiration_date: Option<&'a str>,
 }

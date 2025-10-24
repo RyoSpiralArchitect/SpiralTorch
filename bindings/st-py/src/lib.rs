@@ -186,7 +186,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
 
     // 3) __all__
     m.add("__all__", vec![
-        "Tensor","from_dlpack","to_dlpack",
+        "Tensor","from_dlpack","to_dlpack","CpuSimdPackedRhs","cpu_simd_prepack_rhs",
         "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
         "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",

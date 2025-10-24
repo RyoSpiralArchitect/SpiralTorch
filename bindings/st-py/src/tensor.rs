@@ -7,8 +7,9 @@ use pyo3::{Bound, PyRef, PyRefMut};
 #[cfg(feature = "hip")]
 use st_backend_hip as hip_backend;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
-use st_tensor::{MatmulBackend, SoftmaxBackend, Tensor, TensorError};
+use st_tensor::{backend::cpu_dense, Layout, MatmulBackend, SoftmaxBackend, Tensor, TensorError};
 use std::ffi::{c_void, CStr};
+use std::sync::Arc;
 use tracing::warn;
 
 fn parse_backend(label: Option<&str>) -> MatmulBackend {
@@ -49,6 +50,22 @@ fn parse_softmax_backend(label: Option<&str>) -> SoftmaxBackend {
     }
 }
 
+fn parse_attention_backend(label: Option<&str>) -> AttentionBackend {
+    match label.unwrap_or("auto") {
+        "auto" => AttentionBackend::Auto,
+        "cpu" => AttentionBackend::Cpu,
+        #[cfg(feature = "wgpu")]
+        "wgpu" => AttentionBackend::GpuWgpu,
+        other => {
+            warn!(
+                backend = other,
+                "unknown attention backend label, falling back to auto",
+            );
+            AttentionBackend::Auto
+        }
+    }
+}
+
 enum F32Input {
     Tensor(Tensor),
     Owned(Vec<f32>),
@@ -69,6 +86,45 @@ impl TensorOutPtr {
 
     unsafe fn clone_tensor(self) -> Tensor {
         (*self.as_mut_ptr()).clone()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "CpuSimdPackedRhs")]
+#[derive(Clone)]
+pub(crate) struct PyCpuSimdPackedRhs {
+    inner: usize,
+    cols: usize,
+    data: Arc<[f32]>,
+}
+
+impl PyCpuSimdPackedRhs {
+    fn new(inner: usize, cols: usize, data: Vec<f32>) -> Self {
+        Self {
+            inner,
+            cols,
+            data: Arc::from(data.into_boxed_slice()),
+        }
+    }
+}
+
+#[pymethods]
+impl PyCpuSimdPackedRhs {
+    #[getter]
+    fn inner(&self) -> usize {
+        self.inner
+    }
+
+    #[getter]
+    fn cols(&self) -> usize {
+        self.cols
+    }
+
+    fn __len__(&self) -> PyResult<usize> {
+        Ok(self.data.len())
+    }
+
+    fn tolist(&self) -> Vec<f32> {
+        self.data.to_vec()
     }
 }
 
@@ -221,6 +277,95 @@ impl PyTensor {
             out.push(data[start..start + cols].to_vec());
         }
         out
+    }
+
+    #[pyo3(signature = (packed, *, out=None))]
+    pub fn matmul_simd_prepacked(
+        &self,
+        packed: &PyCpuSimdPackedRhs,
+        out: Option<&Bound<PyAny>>,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
+        if !matches!(self.inner.layout(), Layout::RowMajor) {
+            return Err(PyValueError::new_err(
+                "cpu-simd matmul expects a row-major left-hand side tensor",
+            ));
+        }
+
+        let (rows, inner) = self.inner.shape();
+        if inner != packed.inner {
+            return Err(PyValueError::new_err(format!(
+                "lhs inner dimension {} does not match packed rhs inner {}",
+                inner, packed.inner
+            )));
+        }
+
+        let cols = packed.cols;
+        let packed_buf = packed.data.clone();
+        let lhs = self.inner.clone();
+
+        if let Some(cell) = out {
+            let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
+            if dst.inner.shape() != (rows, cols) {
+                return Err(PyValueError::new_err(format!(
+                    "destination shape {:?} does not match ({}, {})",
+                    dst.inner.shape(),
+                    rows,
+                    cols
+                )));
+            }
+            if !matches!(dst.inner.layout(), Layout::RowMajor) {
+                return Err(PyValueError::new_err(
+                    "cpu-simd matmul expects a row-major destination tensor",
+                ));
+            }
+
+            let dst_ptr = TensorOutPtr((&mut dst.inner as *mut Tensor) as usize);
+            drop(dst);
+
+            let rows_cl = rows;
+            let inner_cl = inner;
+            let cols_cl = cols;
+            let dst_ptr_closure = dst_ptr;
+
+            py.allow_threads(move || unsafe {
+                let tensor = &mut *dst_ptr_closure.as_mut_ptr();
+                cpu_dense::matmul_packed_into(
+                    tensor.data_mut(),
+                    lhs.data(),
+                    packed_buf.as_ref(),
+                    rows_cl,
+                    inner_cl,
+                    cols_cl,
+                )
+            })
+            .map_err(|message| PyRuntimeError::new_err(message))?;
+
+            let tensor = unsafe { dst_ptr.clone_tensor() };
+            return Ok(PyTensor { inner: tensor });
+        }
+
+        let mut dst_tensor = Tensor::zeros(rows, cols).map_err(tensor_err_to_py)?;
+        let dst_ptr = TensorOutPtr((&mut dst_tensor as *mut Tensor) as usize);
+        let rows_cl = rows;
+        let inner_cl = inner;
+        let cols_cl = cols;
+        let dst_ptr_closure = dst_ptr;
+
+        py.allow_threads(move || unsafe {
+            let tensor = &mut *dst_ptr_closure.as_mut_ptr();
+            cpu_dense::matmul_packed_into(
+                tensor.data_mut(),
+                lhs.data(),
+                packed_buf.as_ref(),
+                rows_cl,
+                inner_cl,
+                cols_cl,
+            )
+        })
+        .map_err(|message| PyRuntimeError::new_err(message))?;
+
+        Ok(PyTensor { inner: dst_tensor })
     }
 
     /// Matrix multiply: self @ other
@@ -466,6 +611,37 @@ impl PyTensor {
         Ok(PyTensor { inner: tensor })
     }
 
+    #[pyo3(signature = (keys, values, *, contexts, sequence, scale, z_bias=None, attn_bias=None, backend=None))]
+    pub fn scaled_dot_attention(
+        &self,
+        keys: &PyTensor,
+        values: &PyTensor,
+        contexts: usize,
+        sequence: usize,
+        scale: f32,
+        z_bias: Option<&PyTensor>,
+        attn_bias: Option<&PyTensor>,
+        backend: Option<&str>,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_attention_backend(backend);
+        let tensor = py
+            .allow_threads(|| {
+                self.inner.scaled_dot_attention_with_backend(
+                    &keys.inner,
+                    &values.inner,
+                    contexts,
+                    sequence,
+                    scale,
+                    z_bias.map(|tensor| &tensor.inner),
+                    attn_bias.map(|tensor| &tensor.inner),
+                    backend,
+                )
+            })
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
     /// Add (element-wise)
     pub fn add(&self, other: &PyTensor, py: Python<'_>) -> PyResult<PyTensor> {
         let tensor = py
@@ -571,9 +747,58 @@ fn tensor_from_dlpack(py: Python<'_>, capsule: PyObject) -> PyResult<PyTensor> {
 }
 
 #[pyfunction]
-#[pyo3(name = "to_dlpack")]
-fn tensor_to_dlpack(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
-    tensor.to_dlpack(py)
+fn cpu_simd_prepack_rhs(py: Python<'_>, rhs: &PyTensor) -> PyResult<PyCpuSimdPackedRhs> {
+    if !matches!(rhs.inner.layout(), Layout::RowMajor) {
+        return Err(PyValueError::new_err(
+            "cpu-simd prepack expects a row-major tensor",
+        ));
+    }
+
+    let (inner, cols) = rhs.inner.shape();
+    let packed = py
+        .allow_threads(|| cpu_dense::prepack_rhs(rhs.inner.data(), inner, cols))
+        .map_err(|message| PyRuntimeError::new_err(message))?;
+
+    Ok(PyCpuSimdPackedRhs::new(inner, cols, packed))
+  
+#[pyfunction]
+fn init_backend(label: &str) -> PyResult<bool> {
+    match label {
+        #[cfg(feature = "hip")]
+        "hip" => hip_backend::init()
+            .map(|_| true)
+            .map_err(|err| PyRuntimeError::new_err(err.to_string())),
+        #[cfg(not(feature = "hip"))]
+        "hip" => Err(PyRuntimeError::new_err(
+            "SpiralTorch was built without HIP support; rebuild with the 'hip' feature",
+        )),
+        "auto" | "cpu" | "faer" | "simd" | "cpu-simd" | "naive" => Ok(true),
+        #[cfg(feature = "wgpu")]
+        "wgpu" => Ok(true),
+        other => Err(PyValueError::new_err(format!(
+            "unknown backend label '{other}'"
+        ))),
+    }
+}
+
+#[pyfunction]
+fn init_backend(label: &str) -> PyResult<bool> {
+    match label {
+        #[cfg(feature = "hip")]
+        "hip" => hip_backend::init()
+            .map(|_| true)
+            .map_err(|err| PyRuntimeError::new_err(err.to_string())),
+        #[cfg(not(feature = "hip"))]
+        "hip" => Err(PyRuntimeError::new_err(
+            "SpiralTorch was built without HIP support; rebuild with the 'hip' feature",
+        )),
+        "auto" | "cpu" | "faer" | "simd" | "cpu-simd" | "naive" => Ok(true),
+        #[cfg(feature = "wgpu")]
+        "wgpu" => Ok(true),
+        other => Err(PyValueError::new_err(format!(
+            "unknown backend label '{other}'"
+        ))),
+    }
 }
 
 #[pyfunction]
@@ -598,6 +823,7 @@ fn init_backend(label: &str) -> PyResult<bool> {
 
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyTensor>()?;
+    m.add_class::<PyCpuSimdPackedRhs>()?;
     m.add_function(wrap_pyfunction!(tensor_from_dlpack, m)?)?;
     m.add_function(wrap_pyfunction!(tensor_to_dlpack, m)?)?;
     m.add_function(wrap_pyfunction!(init_backend, m)?)?;

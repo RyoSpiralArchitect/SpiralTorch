@@ -7,26 +7,57 @@ use rayon::prelude::*;
 
 const TM: usize = 8;
 const TN: usize = 12;
+const L2_TARGET_BYTES: usize = 64 * 1024;
 
 #[cfg(feature = "simd")]
-use wide::f32x8;
+use core::simd::Simd;
+
+#[cfg(feature = "simd")]
+type Simd8 = Simd<f32, TM>;
+
+#[inline(always)]
+fn row_tile_size(rows: usize, inner: usize) -> usize {
+    if rows <= TM {
+        return TM;
+    }
+
+    let row_bytes = inner.saturating_mul(core::mem::size_of::<f32>());
+    if row_bytes == 0 {
+        return TM;
+    }
+
+    let mut tile = (L2_TARGET_BYTES / row_bytes).max(1);
+    tile = tile.min(rows);
+
+    let tile = tile / TM * TM;
+    if tile == 0 {
+        TM
+    } else {
+        tile
+    }
+}
 
 #[inline]
-fn pack_b_block(
+fn pack_b_block_into(
+    dst: &mut [f32],
     rhs: &[f32],
     inner: usize,
     cols: usize,
     col_start: usize,
     width: usize,
-) -> Vec<f32> {
-    let mut packed = vec![0.0; width * inner];
-    for k in 0..inner {
-        let src = &rhs[k * cols + col_start..k * cols + col_start + width];
-        for (j, value) in src.iter().enumerate() {
-            packed[j * inner + k] = *value;
+) {
+    debug_assert_eq!(dst.len(), width * inner);
+
+    unsafe {
+        for col in 0..width {
+            let dst_col = dst.as_mut_ptr().add(col * inner);
+            let mut rhs_ptr = rhs.as_ptr().add(col_start + col);
+            for offset in 0..inner {
+                *dst_col.add(offset) = *rhs_ptr;
+                rhs_ptr = rhs_ptr.add(cols);
+            }
         }
     }
-    packed
 }
 
 #[inline]
@@ -57,6 +88,23 @@ fn scalar_block_with_packed(
 }
 
 #[inline]
+fn pack_a_block(src: &[f32], inner: usize, dst: &mut [f32]) {
+    debug_assert_eq!(src.len(), TM * inner);
+    debug_assert_eq!(dst.len(), TM * inner);
+
+    unsafe {
+        for k in 0..inner {
+            let dst_col = dst.as_mut_ptr().add(k * TM);
+            let mut src_ptr = src.as_ptr().add(k);
+            for row in 0..TM {
+                *dst_col.add(row) = *src_ptr;
+                src_ptr = src_ptr.add(inner);
+            }
+        }
+    }
+}
+
+#[inline]
 fn compute_with_packed_block(
     dst: &mut [f32],
     lhs: &[f32],
@@ -75,19 +123,30 @@ fn compute_with_packed_block(
             let prefix_rows = full_row_blocks * TM;
             let lhs_prefix = &lhs[..prefix_rows * inner];
             let dst_prefix = &mut dst[..prefix_rows * cols];
+            let row_tile = row_tile_size(prefix_rows, inner);
+
             dst_prefix
-                .par_chunks_mut(cols * TM)
-                .zip(lhs_prefix.par_chunks(TM * inner))
-                .for_each(|(dst_chunk, lhs_chunk)| unsafe {
-                    microkernel_8x12(
-                        lhs_chunk.as_ptr(),
-                        packed_block.as_ptr(),
-                        dst_chunk.as_mut_ptr().add(col_start),
-                        inner,
-                        inner,
-                        cols,
-                        inner,
-                    );
+                .par_chunks_mut(cols * row_tile)
+                .zip(lhs_prefix.par_chunks(row_tile * inner))
+                .for_each(|(dst_chunk, lhs_chunk)| {
+                    let local_rows = lhs_chunk.len() / inner;
+                    let mut packed_a = vec![0.0f32; TM * inner];
+
+                    for offset in (0..local_rows).step_by(TM) {
+                        let lhs_panel = &lhs_chunk[offset * inner..(offset + TM) * inner];
+                        pack_a_block(lhs_panel, inner, &mut packed_a);
+                        unsafe {
+                            microkernel_8x12(
+                                packed_a.as_ptr(),
+                                packed_block.as_ptr(),
+                                dst_chunk.as_mut_ptr().add(offset * cols + col_start),
+                                TM,
+                                inner,
+                                cols,
+                                inner,
+                            );
+                        }
+                    }
                 });
         }
 
@@ -152,27 +211,26 @@ unsafe fn microkernel_8x12_simd(
     ldc: usize,
     k: usize,
 ) {
-    let mut acc = [f32x8::splat(0.0); TN];
+    let mut acc = [Simd8::splat(0.0); TN];
 
     for p in 0..k {
-        let mut a_values = [0.0f32; TM];
-        for r in 0..TM {
-            a_values[r] = *a.add(r * lda + p);
-        }
-        let a_vec = f32x8::from(a_values);
+        let a_slice = core::slice::from_raw_parts(a.add(p * lda), TM);
+        let a_vec = Simd8::from_slice(a_slice);
 
+        let mut b_ptr = b.add(p);
         for col in 0..TN {
-            let b_val = *b.add(col * ldb + p);
-            let b_vec = f32x8::splat(b_val);
-            acc[col] = acc[col] + a_vec * b_vec;
+            let b_vec = Simd8::splat(*b_ptr);
+            acc[col] += a_vec * b_vec;
+            b_ptr = b_ptr.add(ldb);
         }
     }
 
     for col in 0..TN {
-        let values = acc[col].to_array();
+        let mut dst_ptr = c.add(col);
+        let col_vec = acc[col];
         for row in 0..TM {
-            let dst_ptr = c.add(row * ldc + col);
-            *dst_ptr += values[row];
+            *dst_ptr += col_vec[row];
+            dst_ptr = dst_ptr.add(ldc);
         }
     }
 }
@@ -188,26 +246,25 @@ unsafe fn microkernel_8x12_scalar(
     ldc: usize,
     k: usize,
 ) {
-    let mut acc = [[0.0f32; TM]; TN];
+    let mut acc = [[0.0f32; TN]; TM];
 
     for p in 0..k {
-        let mut a_values = [0.0f32; TM];
-        for r in 0..TM {
-            a_values[r] = *a.add(r * lda + p);
-        }
-
+        let mut b_ptr = b.add(p);
         for col in 0..TN {
-            let b_val = *b.add(col * ldb + p);
+            let b_val = *b_ptr;
+            b_ptr = b_ptr.add(ldb);
             for row in 0..TM {
-                acc[col][row] += a_values[row] * b_val;
+                let a_val = *a.add(p * lda + row);
+                acc[row][col] += a_val * b_val;
             }
         }
     }
 
-    for col in 0..TN {
-        for row in 0..TM {
-            let dst_ptr = c.add(row * ldc + col);
-            *dst_ptr += acc[col][row];
+    for row in 0..TM {
+        let row_acc = acc[row];
+        let dst_row = c.add(row * ldc);
+        for col in 0..TN {
+            *dst_row.add(col) += row_acc[col];
         }
     }
 }
@@ -218,7 +275,7 @@ pub fn is_available() -> bool {
 
 pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {
     let volume = rows * inner * cols;
-    volume >= TM * TN * 4 && inner >= 4
+    volume >= TM * TN * 4 && rows >= TM && inner >= TM && cols >= TN
 }
 
 pub fn matmul_into(
@@ -263,9 +320,11 @@ pub fn matmul_into(
     let full_blocks = cols / TN;
     let tail = cols % TN;
 
+    let mut packed_panel = vec![0.0f32; TN * inner];
+
     for block in 0..full_blocks {
         let col_start = block * TN;
-        let packed = pack_b_block(rhs, inner, cols, col_start, TN);
+        pack_b_block_into(packed_panel.as_mut_slice(), rhs, inner, cols, col_start, TN);
         compute_with_packed_block(
             dst,
             lhs,
@@ -274,13 +333,20 @@ pub fn matmul_into(
             cols,
             col_start,
             TN,
-            packed.as_slice(),
+            packed_panel.as_slice(),
         );
     }
 
     if tail > 0 {
         let col_start = full_blocks * TN;
-        let packed = pack_b_block(rhs, inner, cols, col_start, tail);
+        pack_b_block_into(
+            &mut packed_panel[..tail * inner],
+            rhs,
+            inner,
+            cols,
+            col_start,
+            tail,
+        );
         compute_with_packed_block(
             dst,
             lhs,
@@ -289,7 +355,7 @@ pub fn matmul_into(
             cols,
             col_start,
             tail,
-            packed.as_slice(),
+            &packed_panel[..tail * inner],
         );
     }
 
@@ -351,4 +417,32 @@ pub fn matmul_packed_into(
     }
 
     Ok(())
+}
+
+pub fn prepack_rhs(rhs: &[f32], inner: usize, cols: usize) -> Result<Vec<f32>, String> {
+    if rhs.len() != inner * cols {
+        return Err(format!(
+            "rhs length mismatch: expected {} elements, got {}",
+            inner * cols,
+            rhs.len()
+        ));
+    }
+
+    let mut packed = vec![0.0f32; inner * cols];
+    let full_blocks = cols / TN;
+    let tail = cols % TN;
+
+    for block in 0..full_blocks {
+        let col_start = block * TN;
+        let dst = &mut packed[col_start * inner..(col_start + TN) * inner];
+        pack_b_block_into(dst, rhs, inner, cols, col_start, TN);
+    }
+
+    if tail > 0 {
+        let col_start = full_blocks * TN;
+        let dst = &mut packed[col_start * inner..(col_start + tail) * inner];
+        pack_b_block_into(dst, rhs, inner, cols, col_start, tail);
+    }
+
+    Ok(packed)
 }
