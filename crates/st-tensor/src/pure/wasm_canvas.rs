@@ -727,6 +727,72 @@ impl ColorVectorField {
             db.max(Self::POWER_DB_FLOOR)
         })
     }
+
+    fn power_and_power_db_tensors_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<(Tensor, Tensor)> {
+        let expected_pairs =
+            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
+        let mut power = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        let mut power_db = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            let channels = Self::power_channels_from_interleaved_chunk(chunk);
+            for value in channels {
+                power.push(value);
+                let clamped = value.max(Self::POWER_DB_EPSILON);
+                let db = 10.0 * clamped.log10();
+                power_db.push(db.max(Self::POWER_DB_FLOOR));
+            }
+        }
+
+        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power)?;
+        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power_db)?;
+        Ok((power, power_db))
+    }
+
+    fn validate_power_interleaved_dimensions(
+        rows: usize,
+        cols: usize,
+        spectrum_len: usize,
+    ) -> PureResult<usize> {
+        let expected_pairs = rows
+            .checked_mul(cols)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_power",
+                volume: rows.saturating_mul(cols),
+                max_volume: usize::MAX,
+            })?;
+        let expected_len = expected_pairs
+            .checked_mul(Self::FFT_INTERLEAVED_STRIDE)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_power",
+                volume: expected_pairs.saturating_mul(Self::FFT_INTERLEAVED_STRIDE),
+                max_volume: usize::MAX,
+            })?;
+
+        if spectrum_len != expected_len {
+            return Err(TensorError::DataLength {
+                expected: expected_len,
+                got: spectrum_len,
+            });
+        }
+
+        Ok(expected_pairs)
+    }
+
+    fn power_channels_from_interleaved_chunk(chunk: &[f32]) -> [f32; 4] {
+        debug_assert_eq!(chunk.len(), Self::FFT_INTERLEAVED_STRIDE);
+
+        let energy = chunk[0].mul_add(chunk[0], chunk[1] * chunk[1]);
+        let chroma_r = chunk[2].mul_add(chunk[2], chunk[3] * chunk[3]);
+        let chroma_g = chunk[4].mul_add(chunk[4], chunk[5] * chunk[5]);
+        let chroma_b = chunk[6].mul_add(chunk[6], chunk[7] * chunk[7]);
+
+        [energy, chroma_r, chroma_g, chroma_b]
+    }
 }
 /// Byte layout metadata for the WGSL canvas FFT pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
