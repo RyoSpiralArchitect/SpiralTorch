@@ -222,6 +222,75 @@ __device__ __forceinline__ void heap_select_rowwise_kernel_impl(
       out_vals[out_base + oi] = CUDART_NAN_F;
       out_idx[out_base + oi] = -1;
     }
+
+    HeapEntry entry = reduce_warp(thread_best, cmp);
+    if (lane == 0) {
+      warp_entries[warp] = entry;
+    }
+    __syncthreads();
+
+    if (warp == 0) {
+      HeapEntry block_entry;
+      if (lane < BLOCK_WARPS) {
+        block_entry = warp_entries[lane];
+      } else {
+        block_entry = HeapEntry{sentinel, -1, -1, -1};
+      }
+      block_entry = reduce_warp(block_entry, cmp);
+      if (lane == 0) {
+        *block_choice = block_entry;
+      }
+    }
+    __syncthreads();
+
+    HeapEntry chosen = *block_choice;
+    if (tid == chosen.tid && chosen.slot >= 0) {
+      s_vals[base + chosen.slot] = sentinel;
+      s_idx[base + chosen.slot] = -1;
+    }
+    if (tid == 0) {
+      out_vals[row * k + oi] = chosen.value;
+      out_idx[row * k + oi] = chosen.column;
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0) {
+    for (int oi = take; oi < k; ++oi) {
+      out_vals[row * k + oi] = CUDART_NAN_F;
+      out_idx[row * k + oi] = -1;
+    }
+
+    HeapEntry entry = reduce_warp(thread_best, cmp);
+    if (lane == 0) {
+      warp_entries[warp] = entry;
+    }
+    __syncthreads();
+
+    if (warp == 0) {
+      HeapEntry block_entry;
+      if (lane < BLOCK_WARPS) {
+        block_entry = warp_entries[lane];
+      } else {
+        block_entry = HeapEntry{sentinel, -1, -1, -1};
+      }
+      block_entry = reduce_warp(block_entry, cmp);
+      if (lane == 0) {
+        *block_choice = block_entry;
+      }
+    }
+    __syncthreads();
+
+    HeapEntry chosen = *block_choice;
+    if (tid == chosen.tid && chosen.slot >= 0) {
+      s_vals[base + chosen.slot] = sentinel;
+      s_idx[base + chosen.slot] = -1;
+    }
+    if (tid == 0) {
+      out_vals[row * k + oi] = chosen.value;
+      out_idx[row * k + oi] = chosen.column;
+    }
+    __syncthreads();
   }
 }
 
