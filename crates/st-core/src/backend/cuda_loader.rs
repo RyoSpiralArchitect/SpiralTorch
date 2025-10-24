@@ -74,7 +74,6 @@ pub fn load_ptx_module(
     functions: &[&'static str],
 ) -> Result<CudaModule, String> {
     let device = global_device()?;
-    let mut load_names: Vec<&'static str> = Vec::new();
 
     {
         let mut modules = registry()
@@ -83,43 +82,32 @@ pub fn load_ptx_module(
 
         let state = modules.entry(module_name).or_insert_with(ModuleState::new);
 
-        if state.functions.is_empty() {
-            load_names.extend(functions.iter().copied());
+        let mut to_register: Vec<&'static str> = if state.functions.is_empty() {
+            functions.iter().copied().collect()
         } else {
-            let mut missing: Vec<&'static str> = functions
+            functions
                 .iter()
                 .copied()
                 .filter(|name| !state.functions.contains_key(name))
-                .collect();
+                .collect()
+        };
 
-            if !missing.is_empty() {
-                load_names.extend(state.functions.keys().copied());
-                load_names.append(&mut missing);
+        if !to_register.is_empty() {
+            to_register.sort_unstable();
+            to_register.dedup();
+
+            device
+                .load_ptx(ptx.clone(), module_name, &to_register)
+                .map_err(|err| err.to_string())?;
+
+            for &name in &to_register {
+                let func = device.get_func(module_name, name).ok_or_else(|| {
+                    format!(
+                        "cuda function `{name}` not registered in module `{module_name}`"
+                    )
+                })?;
+                state.functions.insert(name, Arc::new(func));
             }
-        }
-    }
-
-    if !load_names.is_empty() {
-        load_names.sort_unstable();
-        load_names.dedup();
-
-        device
-            .load_ptx(ptx.clone(), module_name, &load_names)
-            .map_err(|err| err.to_string())?;
-
-        let mut modules = registry()
-            .lock()
-            .map_err(|_| "cuda module registry poisoned".to_string())?;
-        let state = modules
-            .get_mut(module_name)
-            .ok_or_else(|| format!("cuda module `{module_name}` missing after load"))?;
-
-        state.functions.clear();
-        for &name in &load_names {
-            let func = device.get_func(module_name, name).ok_or_else(|| {
-                format!("cuda function `{name}` not registered in module `{module_name}`")
-            })?;
-            state.functions.insert(name, Arc::new(func));
         }
     }
 
