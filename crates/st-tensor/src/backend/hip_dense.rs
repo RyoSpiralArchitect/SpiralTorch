@@ -45,6 +45,28 @@ pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {
     volume >= 256 && inner >= 16
 }
 
+pub fn matmul_into(
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<(), String> {
+    ensure_runtime()?;
+    let expected = rows
+        .checked_mul(cols)
+        .ok_or_else(|| "matmul rows*cols overflow".to_string())?;
+    if out.len() != expected {
+        return Err(format!(
+            "output buffer length {} does not match rows*cols={}",
+            out.len(),
+            expected
+        ));
+    }
+    hip::gemm_f32(rows, cols, inner, lhs, rhs, out).map_err(|err| err.to_string())
+}
+
 pub fn matmul(
     lhs: &[f32],
     rhs: &[f32],
@@ -52,8 +74,7 @@ pub fn matmul(
     inner: usize,
     cols: usize,
 ) -> Result<Vec<f32>, String> {
-    ensure_runtime()?;
     let mut out = vec![0.0f32; rows * cols];
-    hip::gemm_f32(rows, cols, inner, lhs, rhs, &mut out).map_err(|err| err.to_string())?;
+    matmul_into(lhs, rhs, &mut out, rows, inner, cols)?;
     Ok(out)
 }

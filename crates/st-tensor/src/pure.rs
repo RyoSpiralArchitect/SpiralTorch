@@ -1104,13 +1104,12 @@ impl Tensor {
                     });
                 }
                 let rhs = other.data();
-                let buffer = hip_dense::matmul(lhs, rhs, rows, inner, cols).map_err(|message| {
-                    TensorError::BackendFailure {
+                hip_dense::matmul_into(lhs, rhs, dst_slice, rows, inner, cols).map_err(
+                    |message| TensorError::BackendFailure {
                         backend: "hip",
                         message,
-                    }
-                })?;
-                dst_slice.copy_from_slice(&buffer);
+                    },
+                )?;
             }
         }
 
@@ -1261,9 +1260,8 @@ impl Tensor {
                 && hip_dense::is_available()
                 && hip_dense::should_use(rows, inner, cols)
             {
-                if let Ok(buffer) = hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
                 {
-                    dst.copy_from_slice(&buffer);
                     return Ok(());
                 }
             }
@@ -1678,13 +1676,12 @@ impl Tensor {
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
-                let mut data = hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                hip_dense::matmul_into(self.data(), other.data(), dst_slice, rows, inner, cols)
                     .map_err(|message| TensorError::BackendFailure {
                         backend: "hip",
                         message,
                     })?;
-                add_bias_relu_inplace(&mut data, rows, cols, bias);
-                dst_slice.copy_from_slice(&data);
+                add_bias_relu_inplace(dst_slice, rows, cols, bias);
             }
         }
 
@@ -1715,11 +1712,9 @@ impl Tensor {
         #[cfg(feature = "hip")]
         {
             if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
-                if let Ok(mut buffer) =
-                    hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
                 {
-                    add_bias_relu_inplace(&mut buffer, rows, cols, bias);
-                    dst.copy_from_slice(&buffer);
+                    add_bias_relu_inplace(dst, rows, cols, bias);
                     return Ok(());
                 }
             }
@@ -2015,13 +2010,12 @@ impl Tensor {
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
-                let mut data = hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                hip_dense::matmul_into(self.data(), other.data(), dst_slice, rows, inner, cols)
                     .map_err(|message| TensorError::BackendFailure {
                         backend: "hip",
                         message,
                     })?;
-                add_bias_residual_relu_inplace(&mut data, rows, cols, bias, residual.data());
-                dst_slice.copy_from_slice(&data);
+                add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
             }
         }
 
@@ -2059,11 +2053,9 @@ impl Tensor {
         #[cfg(feature = "hip")]
         {
             if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
-                if let Ok(mut buffer) =
-                    hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
                 {
-                    add_bias_residual_relu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                    dst.copy_from_slice(&buffer);
+                    add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
                     return Ok(());
                 }
             }

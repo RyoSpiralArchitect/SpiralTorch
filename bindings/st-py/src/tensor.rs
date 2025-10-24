@@ -801,6 +801,26 @@ fn init_backend(label: &str) -> PyResult<bool> {
     }
 }
 
+#[pyfunction]
+fn init_backend(label: &str) -> PyResult<bool> {
+    match label {
+        #[cfg(feature = "hip")]
+        "hip" => hip_backend::init()
+            .map(|_| true)
+            .map_err(|err| PyRuntimeError::new_err(err.to_string())),
+        #[cfg(not(feature = "hip"))]
+        "hip" => Err(PyRuntimeError::new_err(
+            "SpiralTorch was built without HIP support; rebuild with the 'hip' feature",
+        )),
+        "auto" | "cpu" | "faer" | "simd" | "cpu-simd" | "naive" => Ok(true),
+        #[cfg(feature = "wgpu")]
+        "wgpu" => Ok(true),
+        other => Err(PyValueError::new_err(format!(
+            "unknown backend label '{other}'"
+        ))),
+    }
+}
+
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyTensor>()?;
     m.add_class::<PyCpuSimdPackedRhs>()?;

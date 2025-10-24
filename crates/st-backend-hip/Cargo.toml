@@ -22,8 +22,5 @@ libloading = { version = "0.8", optional = true }
 [dev-dependencies]
 tempfile = "3"
 
-[dev-dependencies]
-tempfile = "3"
-
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

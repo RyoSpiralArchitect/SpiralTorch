@@ -148,16 +148,7 @@ pub mod stub {
     pub fn device_info() -> Vec<DeviceInfo> {
         finalize_devices(collect_env_devices(), hip_env_available())
     }
-}
 
-fn build_runtime() -> Result<HipRuntime, HipErr> {
-    if !hip_env_available() {
-        return Err(HipErr::Other(
-            "HIP runtime not detected; set SPIRALTORCH_FORCE_HIP=1 or install ROCm".into(),
-        ));
-    }
-
-    let devices = finalize_devices(collect_env_devices(), true);
     Ok(HipRuntime::new(devices))
 }
 
