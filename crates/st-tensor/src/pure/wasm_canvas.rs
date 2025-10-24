@@ -1995,6 +1995,17 @@ impl CanvasProjector {
             .fft_cols_polar_tensors_with_window(window, inverse)
     }
 
+    /// Refresh and expose the column-wise FFT magnitude/phase with windowing.
+    pub fn refresh_vector_fft_columns_polar_tensors_with_window(
+        &mut self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors
+            .fft_cols_polar_tensors_with_window(window, inverse)
+    }
+
     /// Refresh the canvas and expose the full 2D FFT spectrum (energy + chroma
     /// channels). This applies the row and column transforms sequentially so
     /// integrators can probe anisotropic features without piecing together two
