@@ -37,6 +37,13 @@ fn main(
         return;
     }
 
+    let local_m = lid.y;
+    let local_n = lid.x;
+    let local_linear = local_m * TILE_N + local_n;
+    let threads = TILE_M * TILE_N;
+    let tile_row_origin = gid.y - local_m;
+    let tile_col_origin = gid.x - local_n;
+
     var acc : f32 = 0.0;
     let tiles = (params.inner + TILE_K - 1u) / TILE_K;
     var tile_index : u32 = 0u;

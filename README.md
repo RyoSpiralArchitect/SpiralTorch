@@ -85,6 +85,10 @@ SpiralTorch ships under a dual-license model:
 - **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors. Any network-facing use must comply with AGPL §13.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
+### Performance roadmap
+
+- [Level 2 GPU optimisation roadmap](docs/performance/level2_gpu_roadmap.md) — subgroup primitives, Chimera layouts, fusion IR, and runtime-guided codegen to push SpiralTorch past PyTorch on portable GPUs.
+
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
@@ -248,6 +252,18 @@ t2 = torch.arange(6, dtype=torch.float32).reshape(2,3)
 a2 = st.Tensor.from_dlpack(t2)      # same buffer
 t2.mul_(2)                          # in-place
 print("ST sees torch mul_:        ", a2.tolist())
+```
+
+### 1b) Row softmax (GPU-accelerated when available)
+
+```python
+import spiraltorch as st
+
+logits = st.Tensor(2, 4, [3.0, 1.0, -2.0, 0.5, -0.25, 0.0, 1.5, -1.0])
+print("CPU row softmax:", logits.row_softmax().tolist())
+
+# Opt into the WGPU backend (falls back to CPU if the device lacks subgroups)
+print("WGPU row softmax:", logits.row_softmax(backend="wgpu").tolist())
 ```
 
 ### 2) rl.stAgent

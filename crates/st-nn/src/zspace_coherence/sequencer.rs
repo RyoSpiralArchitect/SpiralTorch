@@ -432,19 +432,29 @@ impl PreDiscardPolicy {
         }
         let discarded = discarded_indices.len();
 
+        let mut total_energy = survivor_energy + discarded_energy;
+        if !total_energy.is_finite() {
+            total_energy = original
+                .iter()
+                .copied()
+                .filter(|value| value.is_finite())
+                .sum();
+        }
+
         if sum <= f32::EPSILON || !sum.is_finite() {
             weights.copy_from_slice(original);
+            let dominant_share = if total_energy.is_finite() && total_energy > f32::EPSILON {
+                (dominant / total_energy).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             return Ok(PreDiscardOutcome::fallback(
                 PreDiscardTelemetry::fallback(
                     self,
                     0,
                     original.len(),
-                    original
-                        .iter()
-                        .copied()
-                        .filter(|value| value.is_finite())
-                        .sum(),
-                    dominant,
+                    total_energy,
+                    dominant_share,
                 ),
                 (0..original.len()).collect(),
                 Vec::new(),
@@ -457,6 +467,12 @@ impl PreDiscardPolicy {
             }
         }
 
+        let dominant_share = if total_energy.is_finite() && total_energy > f32::EPSILON {
+            (dominant / total_energy).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
         Ok(PreDiscardOutcome::new(
             PreDiscardTelemetry::new(
                 self,
@@ -465,7 +481,7 @@ impl PreDiscardPolicy {
                 false,
                 survivor_energy,
                 discarded_energy,
-                dominant,
+                dominant_share,
             ),
             survivor_indices,
             discarded_indices,
@@ -478,6 +494,11 @@ impl PreDiscardPolicy {
 /// over recent discard telemetry, blends preservation and energy errors with configurable
 /// weights, anticipates trending deviations with a momentum term, and nudges the dominance
 /// ratio toward configured targets while penalising repeated fallbacks.
+///
+/// Confidence scaling allows corrections to respond to high-certainty passes, while an
+/// optional fallback memory keeps pressure on the policy until stability returns. Integral
+/// control accumulates lingering errors so steady-state bias continues to unwind even when
+/// proportional responses have tapered off.
 #[derive(Clone, Debug)]
 pub struct PreDiscardRegulator {
     target_preserved_ratio: f32,
@@ -491,13 +512,22 @@ pub struct PreDiscardRegulator {
     channel_weight: f32,
     energy_weight: f32,
     fallback_penalty: f32,
+    fallback_gain: f32,
+    fallback_smoothing: f32,
     momentum: f32,
     deadband: f32,
     equilibrium_decay: f32,
+    confidence_floor: f32,
+    confidence_gain: f32,
+    integral_gain: f32,
+    integral_limit: f32,
+    integral_decay: f32,
     offset: f32,
     preserved_ema: Option<f32>,
     energy_ema: Option<f32>,
     trend_ema: Option<f32>,
+    fallback_state: Option<f32>,
+    integral_state: Option<f32>,
     last_error: Option<f32>,
     observations: u64,
 }
@@ -529,13 +559,22 @@ impl PreDiscardRegulator {
             channel_weight: 0.5,
             energy_weight: 0.5,
             fallback_penalty: 0.1,
+            fallback_gain: 0.0,
+            fallback_smoothing: 0.0,
             momentum: 0.0,
             deadband: 0.0,
             equilibrium_decay: 0.0,
+            confidence_floor: 0.0,
+            confidence_gain: 0.0,
+            integral_gain: 0.0,
+            integral_limit: 0.0,
+            integral_decay: 0.0,
             offset: 0.0,
             preserved_ema: None,
             energy_ema: None,
             trend_ema: None,
+            fallback_state: None,
+            integral_state: None,
             last_error: None,
             observations: 0,
         })
@@ -583,6 +622,27 @@ impl PreDiscardRegulator {
             return Err(TensorError::NonPositiveCoherence { coherence: penalty }.into());
         }
         self.fallback_penalty = penalty;
+        Ok(self)
+    }
+
+    /// Configures a decaying memory of fallback events that increases pressure on the base
+    /// policy until stability returns. The gain scales how much the memory contributes
+    /// alongside immediate fallbacks, while the smoothing factor controls the decay rate of
+    /// past events. Both arguments must be finite, with the gain constrained to non-negative
+    /// values and the smoothing factor restricted to the [0, 1] interval.
+    pub fn with_fallback_memory(mut self, gain: f32, smoothing: f32) -> PureResult<Self> {
+        if !gain.is_finite() || gain < 0.0 {
+            return Err(TensorError::NonPositiveCoherence { coherence: gain }.into());
+        }
+        if !smoothing.is_finite() || smoothing < 0.0 || smoothing > 1.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: smoothing,
+            }
+            .into());
+        }
+
+        self.fallback_gain = gain;
+        self.fallback_smoothing = smoothing;
         Ok(self)
     }
 
@@ -668,6 +728,61 @@ impl PreDiscardRegulator {
             return Err(TensorError::NonPositiveCoherence { coherence: decay }.into());
         }
         self.equilibrium_decay = decay;
+        Ok(self)
+    }
+
+    /// Scales corrective steps according to the dominant channel weight observed during telemetry.
+    /// When the observed weight falls below the configured floor, the correction is proportionally
+    /// attenuated. When it rises above the floor, an optional gain amplifies the response. Both the
+    /// floor and gain must be finite, with the floor constrained to the [0, 1] interval and the gain
+    /// constrained to non-negative values.
+    pub fn with_confidence_scaling(
+        mut self,
+        confidence_floor: f32,
+        confidence_gain: f32,
+    ) -> PureResult<Self> {
+        if !confidence_floor.is_finite()
+            || !confidence_gain.is_finite()
+            || confidence_floor < 0.0
+            || confidence_floor > 1.0
+            || confidence_gain < 0.0
+        {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: confidence_floor.min(confidence_gain),
+            }
+            .into());
+        }
+
+        self.confidence_floor = confidence_floor;
+        self.confidence_gain = confidence_gain;
+        Ok(self)
+    }
+
+    /// Enables integral control so persistent steady-state errors continue to influence the
+    /// dominance ratio even when proportional adjustments become small. The gain scales how
+    /// strongly the accumulated error contributes, the limit constrains integral wind-up, and the
+    /// decay factor gradually releases stored bias during equilibrium. All values must be finite,
+    /// with the gain and limit constrained to non-negative values and the decay restricted to the
+    /// [0, 1] interval.
+    pub fn with_integral_control(
+        mut self,
+        gain: f32,
+        limit: f32,
+        decay: f32,
+    ) -> PureResult<Self> {
+        if !gain.is_finite() || gain < 0.0 {
+            return Err(TensorError::NonPositiveCoherence { coherence: gain }.into());
+        }
+        if !limit.is_finite() || limit < 0.0 {
+            return Err(TensorError::NonPositiveCoherence { coherence: limit }.into());
+        }
+        if !decay.is_finite() || decay < 0.0 || decay > 1.0 {
+            return Err(TensorError::NonPositiveCoherence { coherence: decay }.into());
+        }
+
+        self.integral_gain = gain;
+        self.integral_limit = limit;
+        self.integral_decay = decay;
         Ok(self)
     }
 
@@ -768,8 +883,62 @@ impl PreDiscardRegulator {
         if self.momentum > 0.0 {
             step += -self.aggressiveness * self.momentum * trend;
         }
-        if telemetry.used_fallback() {
-            step -= self.fallback_penalty;
+        if self.confidence_floor > 0.0 || self.confidence_gain > 0.0 {
+            let mut confidence = telemetry.dominant_weight();
+            if !confidence.is_finite() {
+                confidence = 0.0;
+            }
+            confidence = confidence.clamp(0.0, 1.0);
+
+            let mut scale = 1.0;
+            if self.confidence_floor > 0.0 {
+                if confidence < self.confidence_floor {
+                    let floor = self.confidence_floor.max(f32::EPSILON);
+                    scale *= (confidence / floor).clamp(0.0, 1.0);
+                } else if self.confidence_gain > 0.0 {
+                    scale *= 1.0 + self.confidence_gain * (confidence - self.confidence_floor);
+                }
+            } else if self.confidence_gain > 0.0 {
+                scale *= 1.0 + self.confidence_gain * confidence;
+            }
+
+            step *= scale;
+        }
+        if self.integral_gain > 0.0 {
+            let mut integral = self.integral_state.unwrap_or(0.0) + combined_error;
+            if self.integral_limit > 0.0 {
+                integral = integral.clamp(-self.integral_limit, self.integral_limit);
+            }
+            if self.integral_decay > 0.0
+                && combined_error.abs() <= f32::EPSILON
+                && !telemetry.used_fallback()
+            {
+                integral *= 1.0 - self.integral_decay;
+                if integral.abs() < 1e-6 {
+                    integral = 0.0;
+                }
+            }
+            self.integral_state = Some(integral);
+            step += -self.aggressiveness * self.integral_gain * integral;
+        }
+        let fallback_signal = if telemetry.used_fallback() { 1.0 } else { 0.0 };
+        let fallback_state = if self.fallback_gain > 0.0 || self.fallback_smoothing > 0.0 {
+            if self.fallback_smoothing <= f32::EPSILON {
+                self.fallback_state = Some(fallback_signal);
+                fallback_signal
+            } else {
+                Self::update_ema(
+                    &mut self.fallback_state,
+                    fallback_signal,
+                    self.fallback_smoothing,
+                )
+            }
+        } else {
+            fallback_signal
+        };
+        let fallback_pressure = fallback_signal + self.fallback_gain * fallback_state;
+        if fallback_pressure > 0.0 {
+            step -= self.fallback_penalty * fallback_pressure;
         }
         let step = step.clamp(-self.max_step, self.max_step);
 
@@ -812,6 +981,16 @@ impl PreDiscardTelemetry {
         discarded_energy: f32,
         dominant_weight: f32,
     ) -> Self {
+        let mut dominant_weight = if dominant_weight.is_finite() {
+            dominant_weight.max(0.0).min(1.0)
+        } else {
+            0.0
+        };
+
+        if dominant_weight <= f32::EPSILON {
+            dominant_weight = 0.0;
+        }
+
         Self {
             dominance_ratio: policy.dominance_ratio,
             energy_floor: policy.energy_floor,
@@ -913,7 +1092,7 @@ impl PreDiscardTelemetry {
         1.0 - self.survivor_energy_ratio()
     }
 
-    /// Returns the dominant channel weight observed before discard.
+    /// Returns the dominant channel's share of the total pre-discard energy.
     pub fn dominant_weight(&self) -> f32 {
         self.dominant_weight
     }
@@ -2115,7 +2294,7 @@ mod tests {
         assert!((telemetry.total_energy() - 0.80025).abs() < 1e-6);
         assert!((telemetry.survivor_energy_ratio() - (0.8 / 0.80025)).abs() < 1e-6);
         assert!((telemetry.discarded_energy_ratio() - (0.00025 / 0.80025)).abs() < 1e-6);
-        assert!((telemetry.dominant_weight() - 0.8).abs() < 1e-6);
+        assert!((telemetry.dominant_weight() - (0.8 / 0.80025)).abs() < 1e-6);
 
         // The mutated weights should be renormalised after discard.
         assert!((weights[0] - 1.0).abs() < 1e-6);
@@ -2161,6 +2340,34 @@ mod tests {
 
         regulator.observe(outcome.telemetry());
         assert!(regulator.offset() < 0.0);
+    }
+
+    #[test]
+    fn pre_discard_regulator_fallback_memory_accumulates_pressure() {
+        let base = PreDiscardPolicy::new(0.85).unwrap();
+        let telemetry = PreDiscardTelemetry::new(&base, 5, 5, true, 0.6, 0.4, 0.7);
+
+        let mut baseline = PreDiscardRegulator::new(0.5, 0.5)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.8)
+            .unwrap()
+            .with_max_step(0.4)
+            .unwrap()
+            .with_bounds(-1.0, 0.5)
+            .unwrap()
+            .with_fallback_penalty(0.2)
+            .unwrap();
+
+        let mut memory = baseline.clone().with_fallback_memory(1.2, 0.6).unwrap();
+
+        for _ in 0..2 {
+            baseline.observe(&telemetry);
+            memory.observe(&telemetry);
+        }
+
+        assert!(memory.offset() < baseline.offset());
     }
 
     #[test]
@@ -2247,6 +2454,25 @@ mod tests {
         assert!(regulator.clone().with_momentum(-0.1).is_err());
         assert!(regulator.clone().with_deadband(-0.01).is_err());
         assert!(regulator.clone().with_equilibrium_decay(1.5).is_err());
+        assert!(regulator.clone().with_confidence_scaling(1.2, 0.0).is_err());
+        assert!(regulator
+            .clone()
+            .with_confidence_scaling(0.4, -0.1)
+            .is_err());
+        assert!(regulator.clone().with_fallback_memory(-0.2, 0.3).is_err());
+        assert!(regulator.clone().with_fallback_memory(0.8, 1.5).is_err());
+        assert!(regulator
+            .clone()
+            .with_integral_control(-0.1, 0.5, 0.3)
+            .is_err());
+        assert!(regulator
+            .clone()
+            .with_integral_control(0.4, -0.1, 0.3)
+            .is_err());
+        assert!(regulator
+            .clone()
+            .with_integral_control(0.4, 0.5, 1.2)
+            .is_err());
         assert!(regulator
             .clone()
             .with_trend_smoothing(0.0)
@@ -2256,7 +2482,149 @@ mod tests {
             .with_deadband(0.0)
             .unwrap()
             .with_equilibrium_decay(0.5)
+            .unwrap()
+            .with_confidence_scaling(0.6, 0.3)
+            .unwrap()
+            .with_fallback_memory(0.9, 0.4)
+            .unwrap()
+            .with_integral_control(0.4, 0.6, 0.2)
             .is_ok());
+    }
+
+    #[test]
+    fn pre_discard_regulator_confidence_scaling_dampens_low_signal() {
+        let base = PreDiscardPolicy::new(0.7).unwrap();
+        let telemetry = PreDiscardTelemetry::new(&base, 4, 6, false, 0.62, 0.38, 0.2);
+
+        let mut baseline = PreDiscardRegulator::new(0.45, 0.55)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.9)
+            .unwrap()
+            .with_max_step(0.4)
+            .unwrap();
+        let mut confidence = baseline.clone().with_confidence_scaling(0.6, 0.0).unwrap();
+
+        baseline.observe(&telemetry);
+        confidence.observe(&telemetry);
+
+        assert!(confidence.offset().abs() < baseline.offset().abs());
+    }
+
+    #[test]
+    fn pre_discard_regulator_confidence_scaling_accelerates_high_signal() {
+        let base = PreDiscardPolicy::new(0.7).unwrap();
+        let telemetry = PreDiscardTelemetry::new(&base, 2, 8, false, 0.85, 0.15, 0.92);
+
+        let mut baseline = PreDiscardRegulator::new(0.35, 0.45)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.75)
+            .unwrap()
+            .with_max_step(0.6)
+            .unwrap();
+        let mut confidence = baseline.clone().with_confidence_scaling(0.5, 0.8).unwrap();
+
+        baseline.observe(&telemetry);
+        confidence.observe(&telemetry);
+
+        assert!(confidence.offset().abs() > baseline.offset().abs());
+    }
+
+    #[test]
+    fn pre_discard_regulator_fallback_memory_decays_without_events() {
+        let base = PreDiscardPolicy::new(0.8).unwrap();
+        let fallback = PreDiscardTelemetry::new(&base, 6, 4, true, 0.55, 0.45, 0.6);
+        let recovery = PreDiscardTelemetry::new(&base, 4, 6, false, 0.58, 0.42, 0.6);
+
+        let mut baseline = PreDiscardRegulator::new(0.5, 0.55)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.7)
+            .unwrap()
+            .with_max_step(0.3)
+            .unwrap()
+            .with_fallback_penalty(0.25)
+            .unwrap();
+
+        let mut memory = baseline.clone().with_fallback_memory(0.9, 0.5).unwrap();
+
+        baseline.observe(&fallback);
+        memory.observe(&fallback);
+        baseline.observe(&recovery);
+        memory.observe(&recovery);
+
+        assert!(memory.offset() < baseline.offset());
+        assert!(memory.offset() < 0.0);
+    }
+
+    #[test]
+    fn pre_discard_regulator_integral_accumulates_persistent_error() {
+        let base = PreDiscardPolicy::new(0.8).unwrap();
+        let telemetry = PreDiscardTelemetry::new(&base, 3, 7, false, 0.66, 0.34, 0.7);
+
+        let mut proportional = PreDiscardRegulator::new(0.5, 0.55)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.35)
+            .unwrap()
+            .with_max_step(0.2)
+            .unwrap()
+            .with_bounds(-2.0, 0.5)
+            .unwrap();
+
+        let mut integral = proportional
+            .clone()
+            .with_integral_control(0.6, 0.4, 0.0)
+            .unwrap();
+
+        for _ in 0..12 {
+            proportional.observe(&telemetry);
+            integral.observe(&telemetry);
+        }
+
+        assert!(integral.offset() < proportional.offset());
+        assert!(integral.offset() < 0.0);
+    }
+
+    #[test]
+    fn pre_discard_regulator_integral_decay_relaxes_pressure() {
+        let base = PreDiscardPolicy::new(0.75).unwrap();
+        let biased = PreDiscardTelemetry::new(&base, 4, 6, false, 0.63, 0.37, 0.68);
+        let equilibrium = PreDiscardTelemetry::new(&base, 11, 9, false, 0.5, 0.5, 0.7);
+
+        let mut persistent = PreDiscardRegulator::new(0.45, 0.5)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.4)
+            .unwrap()
+            .with_max_step(0.2)
+            .unwrap()
+            .with_bounds(-2.0, 0.5)
+            .unwrap()
+            .with_integral_control(0.5, 0.6, 0.0)
+            .unwrap();
+
+        let mut decaying = persistent
+            .clone()
+            .with_integral_control(0.5, 0.6, 0.5)
+            .unwrap();
+
+        for _ in 0..8 {
+            persistent.observe(&biased);
+            decaying.observe(&biased);
+        }
+
+        persistent.observe(&equilibrium);
+        decaying.observe(&equilibrium);
+
+        assert!(decaying.offset() > persistent.offset());
+        assert!(decaying.offset() <= 0.0);
     }
 
     #[test]
