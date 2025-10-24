@@ -6,7 +6,12 @@ use pyo3::Bound;
 use st_backend_hip as hip_backend;
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
+
+#[cfg(feature = "kdsl")]
+use crate::spiralk::{spiralk_err_to_py, PySpiralKContext};
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
+#[cfg(feature = "kdsl")]
+use st_kdsl::{self, Ctx as SpiralKCtx, Hard as SpiralKHard};
 
 #[pyclass(module = "spiraltorch", name = "RankPlan")]
 pub(crate) struct PyRankPlan {
@@ -39,6 +44,89 @@ impl PyRankPlan {
             5 => "warp_bitonic",
             _ => "auto",
         }
+    }
+}
+
+#[cfg(feature = "kdsl")]
+fn spiralk_ctx_from_plan(plan: &RankPlan) -> SpiralKCtx {
+    let subgroup_capacity = if plan.choice.subgroup {
+        plan.choice.kl.max(1)
+    } else {
+        1
+    };
+    let kernel_capacity = if plan.k <= 1_024 {
+        1
+    } else if plan.k <= 16_384 {
+        2
+    } else {
+        3
+    };
+    let tile_cols = if plan.choice.fft_tile != 0 {
+        plan.choice.fft_tile
+    } else {
+        let tiles = (plan.cols.max(1) + 255) / 256;
+        tiles.max(1) * 256
+    };
+    let radix = if plan.choice.fft_radix != 0 {
+        plan.choice.fft_radix
+    } else if plan.k.is_power_of_two() {
+        4
+    } else {
+        2
+    };
+    let segments = if plan.choice.fft_segments != 0 {
+        plan.choice.fft_segments
+    } else if plan.cols > 131_072 {
+        4
+    } else if plan.cols > 32_768 {
+        2
+    } else {
+        1
+    };
+    SpiralKCtx {
+        r: plan.rows,
+        c: plan.cols,
+        k: plan.k,
+        sg: plan.choice.subgroup,
+        sgc: subgroup_capacity,
+        kc: kernel_capacity,
+        tile_cols,
+        radix,
+        segments,
+    }
+}
+
+#[cfg(feature = "kdsl")]
+fn apply_spiralk_overrides(
+    choice: &mut st_core::backend::unison_heuristics::Choice,
+    hard: &SpiralKHard,
+) {
+    if let Some(flag) = hard.use_2ce {
+        choice.use_2ce = flag;
+    }
+    if let Some(value) = hard.wg {
+        choice.wg = value.max(1);
+    }
+    if let Some(value) = hard.kl {
+        choice.kl = value.max(1);
+    }
+    if let Some(value) = hard.ch {
+        choice.ch = value;
+    }
+    if let Some(value) = hard.algo {
+        choice.mkd = value as u32;
+    }
+    if let Some(value) = hard.ctile {
+        choice.ctile = value;
+    }
+    if let Some(value) = hard.tile_cols {
+        choice.fft_tile = value.max(1);
+    }
+    if let Some(value) = hard.radix {
+        choice.fft_radix = value.max(1);
+    }
+    if let Some(value) = hard.segments {
+        choice.fft_segments = value.max(1);
     }
 }
 
@@ -148,6 +236,36 @@ impl PyRankPlan {
 
     fn fft_spiralk_hint(&self) -> String {
         self.inner.fft_spiralk_hint()
+    }
+
+    #[cfg(feature = "kdsl")]
+    fn spiralk_context(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let ctx = spiralk_ctx_from_plan(self.plan());
+        let wrapper = PySpiralKContext::from_ctx(ctx);
+        Ok(Py::new(py, wrapper)?.into_py(py))
+    }
+
+    #[cfg(not(feature = "kdsl"))]
+    fn spiralk_context(&self, _py: Python<'_>) -> PyResult<PyObject> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "SpiralK support requires enabling the 'kdsl' feature",
+        ))
+    }
+
+    #[cfg(feature = "kdsl")]
+    fn rewrite_with_spiralk(&self, script: &str) -> PyResult<PyRankPlan> {
+        let ctx = spiralk_ctx_from_plan(self.plan());
+        let out = st_kdsl::eval_program(script, &ctx).map_err(spiralk_err_to_py)?;
+        let mut updated = self.inner.clone();
+        apply_spiralk_overrides(&mut updated.choice, &out.hard);
+        Ok(PyRankPlan::from_plan(updated))
+    }
+
+    #[cfg(not(feature = "kdsl"))]
+    fn rewrite_with_spiralk(&self, _script: &str) -> PyResult<PyRankPlan> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "SpiralK support requires enabling the 'kdsl' feature",
+        ))
     }
 }
 
