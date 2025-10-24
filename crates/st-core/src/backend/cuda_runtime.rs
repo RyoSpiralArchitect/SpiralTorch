@@ -5,7 +5,7 @@
 
 #![cfg(feature = "cuda")]
 
-use crate::backend::cuda_loader;
+use crate::backend::cuda_loader::{self, CudaModule};
 use crate::backend::rankk_launch::LaunchSlices;
 use crate::backend::rankk_software::Selection;
 use crate::ops::rank_entry::RankPlan;
@@ -33,6 +33,7 @@ const PER_THREAD_KEEP: usize = 8;
 const SUPPORTED_K: usize = THREADS_PER_BLOCK * PER_THREAD_KEEP;
 
 static COMPILED_PTX: OnceLock<cudarc::nvrtc::Ptx> = OnceLock::new();
+static CUDA_MODULE: OnceLock<CudaModule> = OnceLock::new();
 
 /// Attempt to execute the CUDA kernels for the requested selection.
 /// Falls back to the caller when the selection is not implemented on GPU.
@@ -103,9 +104,7 @@ fn launch_cuda_kernel(
     let rows = plan.rows as usize;
     let k = plan.k as usize;
 
-    let ptx =
-        COMPILED_PTX.get_or_try_init(|| compile_ptx(CUDA_SOURCE).map_err(|err| err.to_string()))?;
-    let module = cuda_loader::load_ptx_module(ptx, MODULE_NAME, MODULE_KERNELS)?;
+    let module = cuda_module()?;
     let device = module.device();
     let func = module.get_func(kernel_name)?;
 
@@ -154,6 +153,12 @@ fn launch_cuda_kernel(
     buffers.out_idx.copy_from_slice(&host_idx);
 
     Ok(())
+}
+
+fn cuda_module() -> Result<&'static CudaModule, String> {
+    let ptx =
+        COMPILED_PTX.get_or_try_init(|| compile_ptx(CUDA_SOURCE).map_err(|err| err.to_string()))?;
+    CUDA_MODULE.get_or_try_init(|| cuda_loader::load_ptx_module(ptx, MODULE_NAME, MODULE_KERNELS))
 }
 
 fn fill_empty_columns(buffers: &mut LaunchSlices<'_>) {

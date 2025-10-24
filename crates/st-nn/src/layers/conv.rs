@@ -648,7 +648,8 @@ impl Conv2d {
         let bias_sums = grad_matrix.sum_axis0();
         let mut bias_tensor = Tensor::from_vec(1, self.out_channels, bias_sums)?;
         bias_tensor = bias_tensor.scale(1.0 / batch as f32)?;
-        let grad_patches = grad_matrix.matmul(self.weight.value())?;
+        let pack = self.weight.ensure_matmul_pack()?;
+        let grad_patches = grad_matrix.matmul_prepacked(&pack)?;
         let grad_input = self.col2im(&grad_patches, batch, oh, ow)?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;

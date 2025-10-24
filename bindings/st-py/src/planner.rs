@@ -491,10 +491,9 @@ fn describe_device(
 
 #[pyfunction]
 fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
-    let available = hip_backend::hip_available();
-    let devices = hip_backend::device_info();
+    let probe = hip_backend::probe();
     let py_devices = PyList::empty_bound(py);
-    for device in devices {
+    for device in probe.devices.iter() {
         let info = PyDict::new_bound(py);
         info.set_item("id", device.id)?;
         info.set_item("name", device.name.to_string())?;
@@ -502,8 +501,13 @@ fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
         py_devices.append(info)?;
     }
     let out = PyDict::new_bound(py);
-    out.set_item("available", available)?;
+    out.set_item("available", probe.available)?;
+    out.set_item("initialized", probe.initialized)?;
     out.set_item("devices", py_devices)?;
+    match &probe.error {
+        Some(message) => out.set_item("error", message)?,
+        None => out.set_item("error", py.None())?,
+    }
     Ok(out.into_py(py))
 }
 

@@ -32,9 +32,11 @@ pub use self::topos::{
     RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas, ZBox, ZBoxSite,
 };
 
-use crate::backend::faer_dense;
+#[cfg(feature = "hip")]
+use crate::backend::hip_dense;
 #[cfg(feature = "wgpu")]
 use crate::backend::wgpu_dense;
+use crate::backend::{cpu_dense, faer_dense};
 use crate::dlpack::{
     call_managed_deleter, drop_exported_state, DLDataType, DLDataTypeCode, DLDevice, DLDeviceType,
     DLManagedTensor, DLTensor, ExportData, ForeignTensor, ManagedTensorState,
@@ -266,11 +268,16 @@ pub enum MatmulBackend {
     Auto,
     /// Force the SIMD-accelerated faer kernel.
     CpuFaer,
+    /// Use the built-in tiled SIMD micro-kernel.
+    CpuSimd,
     /// Always fallback to the scalar implementation.
     CpuNaive,
     /// Force the compute-path GEMM running through WGPU.
     #[cfg(feature = "wgpu")]
     GpuWgpu,
+    /// Execute GEMM via the HIP backend when available.
+    #[cfg(feature = "hip")]
+    GpuHip,
 }
 
 impl MatmulBackend {
@@ -278,9 +285,12 @@ impl MatmulBackend {
         match self {
             MatmulBackend::Auto => "auto",
             MatmulBackend::CpuFaer => "faer",
+            MatmulBackend::CpuSimd => "simd",
             MatmulBackend::CpuNaive => "naive",
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => "wgpu",
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => "hip",
         }
     }
 }
@@ -315,6 +325,33 @@ impl SoftmaxBackend {
 }
 
 impl fmt::Display for SoftmaxBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+/// Explicit backend selection for fused attention.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttentionBackend {
+    /// Allow SpiralTorch to pick the most appropriate backend.
+    Auto,
+    /// Force the pure Rust implementation.
+    Cpu,
+    /// Execute on the WGPU fused kernel when available.
+    GpuWgpu,
+}
+
+impl AttentionBackend {
+    fn label(self) -> &'static str {
+        match self {
+            AttentionBackend::Auto => "auto",
+            AttentionBackend::Cpu => "cpu",
+            AttentionBackend::GpuWgpu => "wgpu",
+        }
+    }
+}
+
+impl fmt::Display for AttentionBackend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.label())
     }
@@ -368,6 +405,13 @@ impl TensorBuffer {
         match &self.backing {
             TensorBacking::Owned(vec) => ExportData::Owned(Arc::clone(vec)),
             TensorBacking::Foreign(foreign) => ExportData::Foreign(foreign.clone()),
+        }
+    }
+
+    fn try_clone_owned(&self) -> Option<Arc<Vec<f32>>> {
+        match &self.backing {
+            TensorBacking::Owned(vec) => Some(Arc::clone(vec)),
+            TensorBacking::Foreign(_) => None,
         }
     }
 }
@@ -463,7 +507,7 @@ pub struct PackedB {
     inner: usize,
     tile: Tile,
     layout: PackedLayout,
-    buf: Arc<[f32]>,
+    buf: Arc<Vec<f32>>,
 }
 
 impl PackedB {
@@ -493,14 +537,17 @@ impl PackedB {
             inner: rows,
             tile,
             layout: PackedLayout::ColMajor,
-            buf: Arc::from(packed.into_boxed_slice()),
+            buf: Arc::new(packed),
         })
     }
 
     fn from_col_major(tensor: &Tensor, tile: Tile) -> Self {
         let rows = tensor.rows;
         let cols = tensor.cols;
-        let buf = Arc::from(tensor.data().to_vec().into_boxed_slice());
+        let buf = tensor
+            .data
+            .try_clone_owned()
+            .unwrap_or_else(|| Arc::new(tensor.data().to_vec()));
         Self {
             cols,
             inner: rows,
@@ -508,6 +555,40 @@ impl PackedB {
             layout: PackedLayout::ColMajor,
             buf,
         }
+    }
+
+    pub fn from_tensor_transpose(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
+        match tensor.layout {
+            Layout::RowMajor => Self::from_row_major_transpose(tensor, tile),
+            Layout::ColMajor => Self::from_col_major_transpose(tensor, tile),
+            Layout::Tiled { .. } => Err(TensorError::UnsupportedLayout {
+                label: "packing tiled tensors is not yet supported",
+            }),
+        }
+    }
+
+    fn from_row_major_transpose(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
+        let rows = tensor.rows;
+        let cols = tensor.cols;
+        let buf = tensor
+            .data
+            .try_clone_owned()
+            .unwrap_or_else(|| Arc::new(tensor.data().to_vec()));
+        Ok(Self {
+            cols: rows,
+            inner: cols,
+            tile,
+            layout: PackedLayout::ColMajor,
+            buf,
+        })
+    }
+
+    fn from_col_major_transpose(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
+        let transposed = tensor.transpose();
+        let mut packed = PackedB::from_row_major(&transposed, tile)?;
+        packed.cols = tensor.rows;
+        packed.inner = tensor.cols;
+        Ok(packed)
     }
 
     #[inline]
@@ -532,7 +613,7 @@ impl PackedB {
 
     #[inline]
     pub fn as_slice(&self) -> &[f32] {
-        &self.buf
+        self.buf.as_slice()
     }
 }
 
@@ -968,6 +1049,19 @@ impl Tensor {
 
         match backend {
             MatmulBackend::Auto => self.matmul_auto_into(other, dst_slice, rows, inner, cols)?,
+            MatmulBackend::CpuSimd => {
+                if !matches!(other.layout, Layout::RowMajor) {
+                    return Err(TensorError::UnsupportedLayout {
+                        label: "simd matmul expects row-major rhs",
+                    });
+                }
+                cpu_dense::matmul_into(dst_slice, lhs, other.data(), rows, inner, cols).map_err(
+                    |message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
+                        message,
+                    },
+                )?;
+            }
             MatmulBackend::CpuNaive => {
                 let packed = PackedB::from_tensor(other, Tile::col_major())?;
                 matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
@@ -1001,6 +1095,21 @@ impl Tensor {
                 let rhs = other.data();
                 let buffer = matmul_wgpu(lhs, rhs, rows, inner, cols)?;
                 dst_slice.copy_from_slice(&buffer);
+            }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                if !matches!(other.layout, Layout::RowMajor) {
+                    return Err(TensorError::UnsupportedLayout {
+                        label: "hip matmul expects row-major rhs",
+                    });
+                }
+                let rhs = other.data();
+                hip_dense::matmul_into(lhs, rhs, dst_slice, rows, inner, cols).map_err(
+                    |message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    },
+                )?;
             }
         }
 
@@ -1067,6 +1176,18 @@ impl Tensor {
             MatmulBackend::Auto => {
                 self.matmul_prepacked_auto_into(packed, dst_slice, rows, inner, cols)?;
             }
+            MatmulBackend::CpuSimd => {
+                if !matches!(packed.layout(), PackedLayout::ColMajor) {
+                    return Err(TensorError::UnsupportedLayout {
+                        label: "simd matmul expects col-major packed rhs",
+                    });
+                }
+                cpu_dense::matmul_packed_into(dst_slice, lhs, packed.as_slice(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
+                        message,
+                    })?;
+            }
             MatmulBackend::CpuNaive => {
                 matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, packed);
             }
@@ -1092,6 +1213,13 @@ impl Tensor {
             MatmulBackend::GpuWgpu => {
                 return Err(TensorError::UnsupportedLayout {
                     label: "wgpu matmul does not accept prepacked operands",
+                });
+            }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                return Err(TensorError::BackendFailure {
+                    backend: "hip",
+                    message: "hip matmul does not yet support prepacked operands".into(),
                 });
             }
         }
@@ -1123,6 +1251,27 @@ impl Tensor {
                     dst.copy_from_slice(&buffer);
                     return Ok(());
                 }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if matches!(other.layout, Layout::RowMajor)
+                && hip_dense::is_available()
+                && hip_dense::should_use(rows, inner, cols)
+            {
+                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
+                {
+                    return Ok(());
+                }
+            }
+        }
+
+        if matches!(other.layout, Layout::RowMajor) && cpu_dense::should_use(rows, inner, cols) {
+            if let Ok(()) =
+                cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
+            {
+                return Ok(());
             }
         }
 
@@ -1210,6 +1359,191 @@ impl Tensor {
 
         let buffer = row_softmax_cpu(self.data(), rows, cols);
         Tensor::from_vec(rows, cols, buffer)
+    }
+
+    /// Scaled dot-product attention using automatic backend selection.
+    pub fn scaled_dot_attention(
+        &self,
+        keys: &Tensor,
+        values: &Tensor,
+        contexts: usize,
+        sequence: usize,
+        scale: f32,
+    ) -> PureResult<Tensor> {
+        self.scaled_dot_attention_with_backend(
+            keys,
+            values,
+            contexts,
+            sequence,
+            scale,
+            None,
+            None,
+            AttentionBackend::Auto,
+        )
+    }
+
+    /// Scaled dot-product attention with optional biases and backend override.
+    #[allow(clippy::too_many_arguments)]
+    pub fn scaled_dot_attention_with_backend(
+        &self,
+        keys: &Tensor,
+        values: &Tensor,
+        contexts: usize,
+        sequence: usize,
+        scale: f32,
+        z_bias: Option<&Tensor>,
+        attn_bias: Option<&Tensor>,
+        backend: AttentionBackend,
+    ) -> PureResult<Tensor> {
+        if contexts == 0 || sequence == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: contexts,
+                cols: sequence,
+            });
+        }
+        if self.cols == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: self.rows,
+                cols: self.cols,
+            });
+        }
+
+        let expected_rows =
+            contexts
+                .checked_mul(sequence)
+                .ok_or_else(|| TensorError::TensorVolumeExceeded {
+                    label: "attention contexts*sequence",
+                    volume: contexts,
+                    max_volume: usize::MAX / sequence.max(1),
+                })?;
+
+        if self.rows != expected_rows {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: (expected_rows, self.cols),
+            });
+        }
+        if keys.rows != expected_rows || keys.cols != self.cols {
+            return Err(TensorError::ShapeMismatch {
+                left: keys.shape(),
+                right: (expected_rows, self.cols),
+            });
+        }
+        if values.rows != expected_rows || values.cols != self.cols {
+            return Err(TensorError::ShapeMismatch {
+                left: values.shape(),
+                right: (expected_rows, self.cols),
+            });
+        }
+
+        let z_bias_slice = if let Some(bias) = z_bias {
+            let (rows, cols) = bias.shape();
+            if rows != contexts || cols != sequence {
+                return Err(TensorError::ShapeMismatch {
+                    left: bias.shape(),
+                    right: (contexts, sequence),
+                });
+            }
+            Some(bias.data())
+        } else {
+            None
+        };
+
+        let attn_bias_slice = if let Some(bias) = attn_bias {
+            let (rows, cols) = bias.shape();
+            if rows != expected_rows || cols != sequence {
+                return Err(TensorError::ShapeMismatch {
+                    left: bias.shape(),
+                    right: (expected_rows, sequence),
+                });
+            }
+            Some(bias.data())
+        } else {
+            None
+        };
+
+        let head_dim = self.cols;
+        let queries = self.data();
+        let keys_data = keys.data();
+        let values_data = values.data();
+
+        let make_tensor = |buffer: Vec<f32>| Tensor::from_vec(expected_rows, head_dim, buffer);
+
+        match backend {
+            AttentionBackend::Auto => {
+                #[cfg(feature = "wgpu")]
+                {
+                    if wgpu_dense::is_available()
+                        && wgpu_dense::supports_fused_attention(contexts, sequence, head_dim)
+                    {
+                        if let Ok(buffer) = wgpu_dense::fused_attention(
+                            queries,
+                            keys_data,
+                            values_data,
+                            contexts,
+                            sequence,
+                            head_dim,
+                            scale,
+                            z_bias_slice,
+                            attn_bias_slice,
+                        ) {
+                            return make_tensor(buffer);
+                        }
+                    }
+                }
+
+                let buffer = fused_attention_cpu(
+                    queries,
+                    keys_data,
+                    values_data,
+                    contexts,
+                    sequence,
+                    head_dim,
+                    scale,
+                    z_bias_slice,
+                    attn_bias_slice,
+                );
+                make_tensor(buffer)
+            }
+            AttentionBackend::Cpu => {
+                let buffer = fused_attention_cpu(
+                    queries,
+                    keys_data,
+                    values_data,
+                    contexts,
+                    sequence,
+                    head_dim,
+                    scale,
+                    z_bias_slice,
+                    attn_bias_slice,
+                );
+                make_tensor(buffer)
+            }
+            #[cfg(feature = "wgpu")]
+            AttentionBackend::GpuWgpu => {
+                let data = wgpu_dense::fused_attention(
+                    queries,
+                    keys_data,
+                    values_data,
+                    contexts,
+                    sequence,
+                    head_dim,
+                    scale,
+                    z_bias_slice,
+                    attn_bias_slice,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "wgpu",
+                    message,
+                })?;
+                make_tensor(data)
+            }
+            #[cfg(not(feature = "wgpu"))]
+            AttentionBackend::GpuWgpu => Err(TensorError::BackendFailure {
+                backend: "wgpu",
+                message: "wgpu backend disabled at compile time".into(),
+            }),
+        }
     }
 
     /// Matrix multiply using the WGPU backend when available.
@@ -1301,6 +1635,14 @@ impl Tensor {
             MatmulBackend::Auto => {
                 self.matmul_bias_relu_into_auto(other, bias, dst_slice, rows, inner, cols)?;
             }
+            MatmulBackend::CpuSimd => {
+                cpu_dense::matmul_into(dst_slice, self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
+                        message,
+                    })?;
+                add_bias_relu_inplace(dst_slice, rows, cols, bias);
+            }
             MatmulBackend::CpuNaive => {
                 matmul_naive_into(dst_slice, self.data(), other.data(), rows, inner, cols);
                 add_bias_relu_inplace(dst_slice, rows, cols, bias);
@@ -1329,6 +1671,15 @@ impl Tensor {
                 })?;
                 dst_slice.copy_from_slice(&data);
             }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                hip_dense::matmul_into(self.data(), other.data(), dst_slice, rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    })?;
+                add_bias_relu_inplace(dst_slice, rows, cols, bias);
+            }
         }
 
         Ok(())
@@ -1352,6 +1703,26 @@ impl Tensor {
                     dst.copy_from_slice(&buffer);
                     return Ok(());
                 }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
+                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
+                {
+                    add_bias_relu_inplace(dst, rows, cols, bias);
+                    return Ok(());
+                }
+            }
+        }
+
+        if cpu_dense::should_use(rows, inner, cols) {
+            if let Ok(()) =
+                cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
+            {
+                add_bias_relu_inplace(dst, rows, cols, bias);
+                return Ok(());
             }
         }
 
@@ -1400,6 +1771,16 @@ impl Tensor {
 
         let data = match backend {
             MatmulBackend::Auto => self.matmul_bias_gelu_auto(other, bias, rows, inner, cols)?,
+            MatmulBackend::CpuSimd => {
+                let mut buffer = vec![0.0; rows * cols];
+                cpu_dense::matmul_into(&mut buffer, self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                    backend: "cpu_simd",
+                    message,
+                })?;
+                add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+                buffer
+            }
             MatmulBackend::CpuNaive => {
                 let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
@@ -1422,6 +1803,16 @@ impl Tensor {
                         message,
                     })?
             }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                let mut buffer = hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    })?;
+                add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+                buffer
+            }
         };
 
         Tensor::from_vec(rows, cols, data)
@@ -1443,6 +1834,28 @@ impl Tensor {
                 {
                     return Ok(buffer);
                 }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
+                if let Ok(mut buffer) =
+                    hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                {
+                    add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+                    return Ok(buffer);
+                }
+            }
+        }
+
+        if cpu_dense::should_use(rows, inner, cols) {
+            let mut buffer = vec![0.0; rows * cols];
+            if cpu_dense::matmul_into(&mut buffer, self.data(), other.data(), rows, inner, cols)
+                .is_ok()
+            {
+                add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+                return Ok(buffer);
             }
         }
 
@@ -1555,6 +1968,14 @@ impl Tensor {
                     other, bias, residual, dst_slice, rows, inner, cols,
                 )?;
             }
+            MatmulBackend::CpuSimd => {
+                cpu_dense::matmul_into(dst_slice, self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
+                        message,
+                    })?;
+                add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
+            }
             MatmulBackend::CpuNaive => {
                 matmul_naive_into(dst_slice, self.data(), other.data(), rows, inner, cols);
                 add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
@@ -1583,6 +2004,15 @@ impl Tensor {
                     message,
                 })?;
                 dst_slice.copy_from_slice(&data);
+            }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                hip_dense::matmul_into(self.data(), other.data(), dst_slice, rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    })?;
+                add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
             }
         }
 
@@ -1614,6 +2044,26 @@ impl Tensor {
                     dst.copy_from_slice(&buffer);
                     return Ok(());
                 }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
+                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
+                {
+                    add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
+                    return Ok(());
+                }
+            }
+        }
+
+        if cpu_dense::should_use(rows, inner, cols) {
+            if let Ok(()) =
+                cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
+            {
+                add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
+                return Ok(());
             }
         }
 
@@ -1676,6 +2126,16 @@ impl Tensor {
             MatmulBackend::Auto => {
                 self.matmul_bias_add_gelu_auto(other, bias, residual, rows, inner, cols)?
             }
+            MatmulBackend::CpuSimd => {
+                let mut buffer = vec![0.0; rows * cols];
+                cpu_dense::matmul_into(&mut buffer, self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                    backend: "cpu_simd",
+                    message,
+                })?;
+                add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
+                buffer
+            }
             MatmulBackend::CpuNaive => {
                 let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
@@ -1704,6 +2164,16 @@ impl Tensor {
                 backend: "wgpu",
                 message,
             })?,
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                let mut buffer = hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    })?;
+                add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
+                buffer
+            }
         };
 
         Tensor::from_vec(rows, cols, data)
@@ -1732,6 +2202,28 @@ impl Tensor {
                 ) {
                     return Ok(buffer);
                 }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
+                if let Ok(mut buffer) =
+                    hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
+                {
+                    add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
+                    return Ok(buffer);
+                }
+            }
+        }
+
+        if cpu_dense::should_use(rows, inner, cols) {
+            let mut buffer = vec![0.0; rows * cols];
+            if cpu_dense::matmul_into(&mut buffer, self.data(), other.data(), rows, inner, cols)
+                .is_ok()
+            {
+                add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
+                return Ok(buffer);
             }
         }
 
@@ -3651,6 +4143,71 @@ fn matmul_naive(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize
     out
 }
 
+fn fused_attention_cpu(
+    queries: &[f32],
+    keys: &[f32],
+    values: &[f32],
+    contexts: usize,
+    sequence: usize,
+    head_dim: usize,
+    scale: f32,
+    z_bias: Option<&[f32]>,
+    attn_bias: Option<&[f32]>,
+) -> Vec<f32> {
+    let total = contexts * sequence * head_dim;
+    let mut output = vec![0.0f32; total];
+    let mut accum = vec![0.0f32; head_dim];
+
+    for context in 0..contexts {
+        let context_offset = context * sequence;
+        for query_idx in 0..sequence {
+            accum.iter_mut().for_each(|value| *value = 0.0);
+            let mut running_max = f32::NEG_INFINITY;
+            let mut running_sum = 0.0f32;
+            let query_row = context_offset + query_idx;
+            let query_offset = query_row * head_dim;
+
+            for key_idx in 0..sequence {
+                let key_row = context_offset + key_idx;
+                let key_offset = key_row * head_dim;
+                let mut dot = 0.0f32;
+                for dim in 0..head_dim {
+                    dot += queries[query_offset + dim] * keys[key_offset + dim];
+                }
+
+                let mut logit = dot * scale;
+                if let Some(bias) = z_bias {
+                    logit += bias[context_offset + key_idx];
+                }
+                if let Some(bias) = attn_bias {
+                    logit += bias[query_row * sequence + key_idx];
+                }
+
+                let new_max = running_max.max(logit);
+                let scaled_sum = if running_sum > 0.0 {
+                    running_sum * (running_max - new_max).exp()
+                } else {
+                    0.0
+                };
+                let exp_curr = (logit - new_max).exp();
+                let denom = scaled_sum + exp_curr;
+                let alpha = if denom > 0.0 { scaled_sum / denom } else { 0.0 };
+                let weight = if denom > 0.0 { exp_curr / denom } else { 0.0 };
+                running_max = new_max;
+                running_sum = denom;
+
+                for dim in 0..head_dim {
+                    accum[dim] = accum[dim] * alpha + weight * values[key_offset + dim];
+                }
+            }
+
+            output[query_offset..query_offset + head_dim].copy_from_slice(&accum);
+        }
+    }
+
+    output
+}
+
 fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     let mut out = vec![0.0; rows * cols];
     if cols == 0 {
@@ -3926,6 +4483,31 @@ mod tests {
         let packed = PackedB::from_tensor(&rhs, Tile::col_major()).unwrap();
         let standard = lhs.matmul(&rhs).unwrap();
         let prepacked = lhs.matmul_prepacked(&packed).unwrap();
+        assert_eq!(standard, prepacked);
+    }
+
+    #[test]
+    fn matmul_prepacked_transpose_matches_standard() {
+        let lhs = Tensor::from_vec(
+            4,
+            3,
+            vec![
+                0.2, -0.4, 0.6, 1.1, -0.9, 0.7, 0.3, -0.2, 0.5, -1.3, 0.8, -0.1,
+            ],
+        )
+        .unwrap();
+        let rhs = Tensor::from_vec(
+            5,
+            3,
+            vec![
+                0.1, 0.2, -0.3, 0.4, -0.5, 0.6, -0.7, 0.8, -0.9, 1.0, -1.1, 1.2, -1.3, 1.4, -1.5,
+            ],
+        )
+        .unwrap();
+        let rhs_t = rhs.transpose();
+        let packed_t = PackedB::from_tensor_transpose(&rhs, Tile::col_major()).unwrap();
+        let standard = lhs.matmul(&rhs_t).unwrap();
+        let prepacked = lhs.matmul_prepacked(&packed_t).unwrap();
         assert_eq!(standard, prepacked);
     }
 

@@ -12,6 +12,7 @@ crate-type = ["rlib", "cdylib"]
 [features]
 default = ["cpu", "faer"]
 faer = ["dep:faer"]
+simd = []
 
 # CPU execution is always available, but expose a feature so that downstream
 # crates can opt into a uniform interface when selecting backends.
@@ -28,7 +29,7 @@ wgpu = ["wgpu_frac"]
 # Cargo feature resolution failures.
 mps = []
 cuda = []
-hip = []
+hip = ["dep:st-backend-hip"]
 
 [dependencies]
 # Deterministic sampling helpers for pure tensor stochastic initialisers.
@@ -41,6 +42,8 @@ st-frac = { path = "../st-frac" }
 serde = { version = "1.0", features = ["derive"], default-features = false }
 # High-performance SIMD dense linear algebra for CPU matmul acceleration.
 faer = { version = "0.18", default-features = false, features = ["std", "rayon"], optional = true }
+# Parallel execution for tiled CPU kernels.
+rayon = { version = "1.10" }
 # Optional; only needed if building WGPU kernel
 wgpu = { version = "0.19", optional = true }
 bytemuck = { version = "1.15", features = ["derive"], optional = true }
