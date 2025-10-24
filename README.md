@@ -66,6 +66,8 @@ sequenceDiagram
 >
 > **New — Python `Tensor.scaled_dot_attention`.** The fused kernel is now exposed to Python callers with a CPU fallback, so migration experiments can drop directly into WGPU-backed attention without leaving the high-level API.
 
+> **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and opt-in attention probability/logit readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:

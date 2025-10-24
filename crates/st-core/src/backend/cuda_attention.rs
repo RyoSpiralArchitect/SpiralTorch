@@ -17,7 +17,16 @@ const MODULE_KERNELS: &[&str] = &[KERNEL_NAME];
 const CUDA_SOURCE: &str = include_str!("cuda_attention.cu");
 const THREADS_PER_BLOCK: u32 = 128;
 const WARP_LANES: u32 = 32;
-const SCRATCH_SIZE: usize = (THREADS_PER_BLOCK as usize / WARP_LANES as usize).max(1);
+const SCRATCH_SIZE: usize = {
+    let lanes = WARP_LANES as usize;
+    let threads = THREADS_PER_BLOCK as usize;
+    let per_warp = (threads + lanes - 1) / lanes;
+    if per_warp == 0 {
+        1
+    } else {
+        per_warp
+    }
+};
 
 static COMPILED_PTX: OnceLock<cudarc::nvrtc::Ptx> = OnceLock::new();
 static CUDA_MODULE: OnceLock<CudaModule> = OnceLock::new();
@@ -89,6 +98,7 @@ pub struct AttentionSlices<'a> {
     pub z_bias: Option<&'a [f32]>,
     pub attn_bias: Option<&'a [f32]>,
     pub attn_probs: Option<&'a mut [f32]>,
+    pub attn_logits: Option<&'a mut [f32]>,
     pub output: &'a mut [f32],
 }
 
@@ -181,6 +191,18 @@ impl<'a> AttentionSlices<'a> {
                 ));
             }
         }
+        if let Some(logits) = self.attn_logits.as_ref() {
+            let expected = tokens
+                .checked_mul(seq)
+                .ok_or_else(|| "attention logits dimensions overflow".to_string())?;
+            if logits.len() != expected {
+                return Err(format!(
+                    "attention logits length {} does not match contexts×seq×seq {}",
+                    logits.len(),
+                    expected
+                ));
+            }
+        }
         Ok(self)
     }
 }
@@ -195,6 +217,7 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
         z_bias,
         attn_bias,
         attn_probs,
+        mut attn_logits,
         output,
     } = slices.validate(&cfg)?;
 
@@ -247,6 +270,21 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
             .map_err(|err| err.to_string())?
     };
 
+    let use_attn_logits = attn_logits.is_some();
+    let mut attn_logits_device = if use_attn_logits {
+        let expected = contexts
+            .checked_mul(seq)
+            .and_then(|v| v.checked_mul(seq))
+            .ok_or_else(|| "attention logits dimensions overflow device".to_string())?;
+        device
+            .alloc_zeros::<f32>(expected)
+            .map_err(|err| err.to_string())?
+    } else {
+        device
+            .alloc_zeros::<f32>(1)
+            .map_err(|err| err.to_string())?
+    };
+
     let mut attn_probs = attn_probs;
     let use_attn_probs = attn_probs.is_some();
     let mut attn_probs_device = if use_attn_probs {
@@ -285,6 +323,7 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
                 &z_bias,
                 &attn_bias,
                 &mut attn_probs_device,
+                &mut attn_logits_device,
                 &mut output,
                 contexts_i32,
                 cfg.sequence_len as i32,
@@ -295,6 +334,7 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
                 use_attn_bias as i32,
                 cfg.causal as i32,
                 use_attn_probs as i32,
+                use_attn_logits as i32,
             ),
         )
         .map_err(|err| err.to_string())?;
@@ -310,6 +350,13 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
             .dtoh_sync_copy(&attn_probs_device)
             .map_err(|err| err.to_string())?;
         probs.copy_from_slice(&host_probs);
+    }
+
+    if let Some(logits) = attn_logits.as_deref_mut() {
+        let host_logits: Vec<f32> = device
+            .dtoh_sync_copy(&attn_logits_device)
+            .map_err(|err| err.to_string())?;
+        logits.copy_from_slice(&host_logits);
     }
 
     Ok(())
@@ -416,6 +463,7 @@ mod tests {
             z_bias: Some(&vec![0.0; bias_len]),
             attn_bias: Some(&vec![0.0; mask_len]),
             attn_probs: None,
+            attn_logits: None,
             output: &mut output,
         };
         slices.validate(&cfg).unwrap();
@@ -446,6 +494,38 @@ mod tests {
             z_bias: None,
             attn_bias: None,
             attn_probs: Some(&mut probs),
+            attn_logits: None,
+            output: &mut output,
+        };
+        slices.validate(&cfg).unwrap();
+    }
+
+    #[test]
+    fn slices_validate_attn_logits_length() {
+        let cfg = AttentionConfig {
+            batch: 3,
+            heads: 2,
+            z_levels: 2,
+            sequence_len: 5,
+            head_dim: 4,
+            scale: Some(1.0),
+            causal: false,
+        };
+        let contexts = cfg.contexts();
+        let seq = cfg.sequence_len as usize;
+        let dim = cfg.head_dim as usize;
+        let len = contexts * seq * dim;
+        let mut output = vec![0.0f32; len];
+        let mut logits = vec![0.0f32; contexts * seq * seq];
+        let slices = AttentionSlices {
+            queries: &vec![0.0; len],
+            keys: &vec![0.0; len],
+            values: &vec![0.0; len],
+            context_lengths: None,
+            z_bias: None,
+            attn_bias: None,
+            attn_probs: None,
+            attn_logits: Some(&mut logits),
             output: &mut output,
         };
         slices.validate(&cfg).unwrap();
