@@ -325,19 +325,7 @@ impl ColorVectorField {
     /// energy without recomputing it on the JavaScript side.
     pub fn fft_rows_power_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_rows_interleaved(inverse)?;
-        let mut power = Vec::with_capacity(self.height * self.width * 4);
-        for chunk in spectrum.chunks_exact(8) {
-            let (re_energy, im_energy) = (chunk[0], chunk[1]);
-            let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
-            let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
-            let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
-
-            power.push(re_energy.mul_add(re_energy, im_energy * im_energy));
-            power.push(re_chroma_r.mul_add(re_chroma_r, im_chroma_r * im_chroma_r));
-            power.push(re_chroma_g.mul_add(re_chroma_g, im_chroma_g * im_chroma_g));
-            power.push(re_chroma_b.mul_add(re_chroma_b, im_chroma_b * im_chroma_b));
-        }
-        Tensor::from_vec(self.height, self.width * 4, power)
+        Self::power_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
     /// Row-wise FFT phase helper mirroring [`fft_rows_magnitude_tensor`]. The
@@ -437,19 +425,7 @@ impl ColorVectorField {
     /// magnitudes per channel for direct spectral energy sampling.
     pub fn fft_cols_power_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_cols_interleaved(inverse)?;
-        let mut power = Vec::with_capacity(self.width * self.height * 4);
-        for chunk in spectrum.chunks_exact(8) {
-            let (re_energy, im_energy) = (chunk[0], chunk[1]);
-            let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
-            let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
-            let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
-
-            power.push(re_energy.mul_add(re_energy, im_energy * im_energy));
-            power.push(re_chroma_r.mul_add(re_chroma_r, im_chroma_r * im_chroma_r));
-            power.push(re_chroma_g.mul_add(re_chroma_g, im_chroma_g * im_chroma_g));
-            power.push(re_chroma_b.mul_add(re_chroma_b, im_chroma_b * im_chroma_b));
-        }
-        Tensor::from_vec(self.width, self.height * 4, power)
+        Self::power_tensor_from_interleaved(self.width, self.height, &spectrum)
     }
 
     /// Column-wise FFT phase helper mirroring [`fft_rows_phase_tensor`].
@@ -575,19 +551,7 @@ impl ColorVectorField {
     /// integrators can probe energy across both axes without recomputing.
     pub fn fft_2d_power_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_2d_interleaved(inverse)?;
-        let mut power = Vec::with_capacity(self.height * self.width * 4);
-        for chunk in spectrum.chunks_exact(8) {
-            let (re_energy, im_energy) = (chunk[0], chunk[1]);
-            let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
-            let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
-            let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
-
-            power.push(re_energy.mul_add(re_energy, im_energy * im_energy));
-            power.push(re_chroma_r.mul_add(re_chroma_r, im_chroma_r * im_chroma_r));
-            power.push(re_chroma_g.mul_add(re_chroma_g, im_chroma_g * im_chroma_g));
-            power.push(re_chroma_b.mul_add(re_chroma_b, im_chroma_b * im_chroma_b));
-        }
-        Tensor::from_vec(self.height, self.width * 4, power)
+        Self::power_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
     /// 2D FFT phase helper mirroring [`fft_2d_interleaved`]. The returned tensor
@@ -665,6 +629,51 @@ impl ColorVectorField {
         let magnitude = Tensor::from_vec(rows, cols * 4, magnitudes)?;
         let phase = Tensor::from_vec(rows, cols * 4, phases)?;
         Ok((magnitude, phase))
+    }
+
+    fn power_tensor_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<Tensor> {
+        let expected_pairs = rows
+            .checked_mul(cols)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_power",
+                volume: rows.saturating_mul(cols),
+                max_volume: usize::MAX,
+            })?;
+        let expected_len = expected_pairs
+            .checked_mul(8)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_power",
+                volume: rows
+                    .saturating_mul(cols)
+                    .saturating_mul(8),
+                max_volume: usize::MAX,
+            })?;
+
+        if spectrum.len() != expected_len {
+            return Err(TensorError::DataLength {
+                expected: expected_len,
+                got: spectrum.len(),
+            });
+        }
+
+        let mut power = Vec::with_capacity(expected_pairs * 4);
+        for chunk in spectrum.chunks_exact(8) {
+            let (re_energy, im_energy) = (chunk[0], chunk[1]);
+            let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
+            let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
+            let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
+
+            power.push(re_energy.mul_add(re_energy, im_energy * im_energy));
+            power.push(re_chroma_r.mul_add(re_chroma_r, im_chroma_r * im_chroma_r));
+            power.push(re_chroma_g.mul_add(re_chroma_g, im_chroma_g * im_chroma_g));
+            power.push(re_chroma_b.mul_add(re_chroma_b, im_chroma_b * im_chroma_b));
+        }
+
+        Tensor::from_vec(rows, cols * 4, power)
     }
 }
 
