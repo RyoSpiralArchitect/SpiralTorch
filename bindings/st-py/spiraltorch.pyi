@@ -598,6 +598,8 @@ class RankPlan:
     def to_unison_script(self) -> str: ...
     def fft_wgsl(self) -> str: ...
     def fft_spiralk_hint(self) -> str: ...
+    def spiralk_context(self) -> SpiralKContext: ...
+    def rewrite_with_spiralk(self, script: str) -> RankPlan: ...
 
 def from_dlpack(capsule: object) -> Tensor: ...
 
@@ -905,6 +907,48 @@ class CoherenceDiagnostics:
     aggregated: Tensor
     coherence: List[float]
     channel_reports: List[CoherenceChannelReport]
+    preserved_channels: int
+    discarded_channels: int
+    pre_discard: PreDiscardTelemetry | None
+
+
+class PreDiscardTelemetry:
+    dominance_ratio: float
+    energy_floor: float
+    discarded: int
+    preserved: int
+    used_fallback: bool
+    total: int
+    preserved_ratio: float
+    discarded_ratio: float
+    survivor_energy: float
+    discarded_energy: float
+    total_energy: float
+    survivor_energy_ratio: float
+    discarded_energy_ratio: float
+    dominant_weight: float
+
+
+class PreDiscardSnapshot:
+    step: int
+    telemetry: PreDiscardTelemetry
+    survivors: List[int]
+    discarded: List[int]
+    filtered: List[float]
+
+
+class PreDiscardPolicy:
+    def __init__(
+        self,
+        dominance_ratio: float,
+        *,
+        energy_floor: float | None = ...,
+        min_channels: int | None = ...,
+    ) -> None: ...
+
+    dominance_ratio: float
+    energy_floor: float
+    min_channels: int
 
 
 class _ZSpaceCoherenceSequencer:
@@ -927,11 +971,29 @@ class _ZSpaceCoherenceSequencer:
 
     def project_to_zspace(self, x: Tensor) -> Tensor: ...
 
+    def configure_pre_discard(
+        self,
+        dominance_ratio: float,
+        *,
+        energy_floor: float | None = ..., 
+        min_channels: int | None = ...,
+    ) -> None: ...
+
+    def disable_pre_discard(self) -> None: ...
+
+    def configure_pre_discard_memory(self, limit: int) -> None: ...
+
+    def clear_pre_discard_snapshots(self) -> None: ...
+
     def __call__(self, x: Tensor) -> Tensor: ...
 
     def dim(self) -> int: ...
 
     def num_heads(self) -> int: ...
+
+    def pre_discard_policy(self) -> PreDiscardPolicy | None: ...
+
+    def pre_discard_snapshots(self) -> List[PreDiscardSnapshot]: ...
 
     def curvature(self) -> float: ...
 
@@ -946,6 +1008,9 @@ class _NnModule(ModuleType):
     DataLoaderIter: type[_NnDataLoaderIter]
     CoherenceDiagnostics: type[CoherenceDiagnostics]
     ZSpaceCoherenceSequencer: type[_ZSpaceCoherenceSequencer]
+    PreDiscardTelemetry: type[PreDiscardTelemetry]
+    PreDiscardPolicy: type[PreDiscardPolicy]
+    PreDiscardSnapshot: type[PreDiscardSnapshot]
 
     def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...
 
@@ -1124,10 +1189,125 @@ class Recommender:
     @property
     def factors(self) -> int: ...
 
+class EpsilonGreedy:
+    def __init__(self, start: float, end: float, decay_steps: int) -> None: ...
+    @property
+    def start(self) -> float: ...
+    @property
+    def end(self) -> float: ...
+    @property
+    def decay_steps(self) -> int: ...
+    @property
+    def step(self) -> int: ...
+    def value(self) -> float: ...
+    def advance(self) -> float: ...
+
+class Replay:
+    def __init__(
+        self,
+        capacity: int,
+        batch_size: int,
+        prioritized: bool = ...,
+        alpha: float = ...,
+        beta0: float = ...,
+    ) -> None: ...
+    @property
+    def capacity(self) -> int: ...
+    @property
+    def batch_size(self) -> int: ...
+    @property
+    def prioritized(self) -> bool: ...
+    @property
+    def alpha(self) -> float: ...
+    @property
+    def beta0(self) -> float: ...
+
+class AgentConfig:
+    def __init__(
+        self,
+        algo: str,
+        state_dim: int,
+        action_dim: int,
+        gamma: float,
+        lr: float,
+        exploration: EpsilonGreedy | None = ...,
+        optimizer: str = ...,
+        clip_grad: float | None = ...,
+        replay: Replay | None = ...,
+        target_sync: int | None = ...,
+        n_step: int | None = ...,
+        seed: int | None = ...,
+    ) -> None: ...
+    @property
+    def algo(self) -> str: ...
+    @property
+    def state_dim(self) -> int: ...
+    @property
+    def action_dim(self) -> int: ...
+    @property
+    def gamma(self) -> float: ...
+    @property
+    def lr(self) -> float: ...
+    @property
+    def optimizer(self) -> str: ...
+    @property
+    def clip_grad(self) -> float | None: ...
+    @property
+    def replay(self) -> Replay | None: ...
+    @property
+    def target_sync(self) -> int | None: ...
+    @property
+    def n_step(self) -> int | None: ...
+    @property
+    def seed(self) -> int | None: ...
+    @property
+    def exploration(self) -> EpsilonGreedy | None: ...
+
+class Agent:
+    def __init__(self, config: AgentConfig) -> None: ...
+    @property
+    def config(self) -> AgentConfig: ...
+    @property
+    def algo(self) -> str: ...
+    def select_action(self, state: int) -> int: ...
+    def select_actions(self, states: Sequence[int]) -> List[int]: ...
+    def update(self, state: int, action: int, reward: float, next_state: int) -> None: ...
+    def update_batch(
+        self,
+        states: Sequence[int],
+        actions: Sequence[int],
+        rewards: Sequence[float],
+        next_states: Sequence[int],
+        dones: Optional[Sequence[bool]] = ...,
+    ) -> None: ...
+    @property
+    def epsilon(self) -> float: ...
+    def epsilon(self) -> float: ...
+    def set_epsilon(self, epsilon: float) -> None: ...
+    def set_exploration(self, schedule: EpsilonGreedy) -> None: ...
+    def state_dict(self) -> Dict[str, object]: ...
+    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
+
 class stAgent:
     def __init__(self, state_dim: int, action_dim: int, discount: float, learning_rate: float) -> None: ...
     def select_action(self, state: int) -> int: ...
+    def select_actions(self, states: Sequence[int]) -> List[int]: ...
     def update(self, state: int, action: int, reward: float, next_state: int) -> None: ...
+    def update_batch(
+        self,
+        states: Sequence[int],
+        actions: Sequence[int],
+        rewards: Sequence[float],
+        next_states: Sequence[int],
+        dones: Optional[Sequence[bool]] = ...,
+    ) -> None: ...
+    @property
+    def epsilon(self) -> float: ...
+    def epsilon(self) -> float: ...
+    def set_epsilon(self, epsilon: float) -> None: ...
+    def set_exploration(self, schedule: EpsilonGreedy) -> None: ...
+    def state_dict(self) -> Dict[str, object]: ...
+    def load_state_dict(self, state: Mapping[str, object]) -> None: ...
 
 DqnAgent = stAgent
 
@@ -1211,6 +1391,10 @@ __all__ = [
     "QueryPlan",
     "RecEpochReport",
     "Recommender",
+    "Agent",
+    "AgentConfig",
+    "EpsilonGreedy",
+    "Replay",
     "stAgent",
     "DqnAgent",
     "PpoAgent",

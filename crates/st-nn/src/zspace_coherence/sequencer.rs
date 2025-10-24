@@ -22,13 +22,15 @@ use st_core::maxwell::MaxwellZPulse;
 #[cfg(feature = "psi")]
 use st_core::{
     telemetry::{
-        hub::{self, SoftlogicZFeedback},
+        hub::SoftlogicZFeedback,
         psi::{PsiEvent, PsiReading},
     },
     theory::maxwell::MaxwellPsiTelemetryBridge,
 };
 use st_tensor::{OpenCartesianTopos, TensorError};
-use std::sync::Arc;
+use std::cmp::Ordering;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Identifies a stage in the Z-space sequencing pipeline for plugin callbacks.
 #[derive(Debug, Clone)]
@@ -55,6 +57,19 @@ pub enum ZSpaceSequencerStage<'a> {
         coherence: &'a [f32],
         /// Rich diagnostics captured during aggregation.
         diagnostics: &'a CoherenceDiagnostics,
+    },
+    /// Fired after a pre-discard policy has filtered coherence weights.
+    PreDiscardApplied {
+        /// Coherence weights before pre-discard was applied.
+        original: &'a [f32],
+        /// Coherence weights after pre-discard has been applied.
+        filtered: &'a [f32],
+        /// Telemetry describing the pre-discard outcome.
+        telemetry: &'a PreDiscardTelemetry,
+        /// Indices of channels that survived the pre-discard pass.
+        survivors: &'a [usize],
+        /// Indices of channels that were discarded by the pass.
+        discarded: &'a [usize],
     },
     /// Fired after language bridges have fused semantics and narratives.
     LanguageBridged {
@@ -170,6 +185,7 @@ pub struct CoherenceDiagnostics {
     aggregated: Tensor,
     coherence: Vec<f32>,
     channel_reports: Vec<LinguisticChannelReport>,
+    pre_discard: Option<PreDiscardTelemetry>,
 }
 
 impl CoherenceDiagnostics {
@@ -239,9 +255,809 @@ impl CoherenceDiagnostics {
         self
     }
 
+    /// Returns telemetry describing any pre-discard that was applied.
+    pub fn pre_discard(&self) -> Option<&PreDiscardTelemetry> {
+        self.pre_discard.as_ref()
+    }
+
+    /// Returns the number of channels that survived pre-discard.
+    pub fn preserved_channels(&self) -> usize {
+        self.coherence.iter().filter(|value| **value > 0.0).count()
+    }
+
+    /// Returns the number of channels removed by pre-discard when available.
+    pub fn discarded_channels(&self) -> usize {
+        self.pre_discard
+            .as_ref()
+            .map(|telemetry| telemetry.discarded())
+            .unwrap_or(0)
+    }
+
     /// Destructures the diagnostics into their core components.
-    pub fn into_parts(self) -> (Tensor, Vec<f32>, Vec<LinguisticChannelReport>) {
-        (self.aggregated, self.coherence, self.channel_reports)
+    pub fn into_parts(
+        self,
+    ) -> (
+        Tensor,
+        Vec<f32>,
+        Vec<LinguisticChannelReport>,
+        Option<PreDiscardTelemetry>,
+    ) {
+        (
+            self.aggregated,
+            self.coherence,
+            self.channel_reports,
+            self.pre_discard,
+        )
+    }
+}
+
+/// Configuration describing how coherence weights are culled before aggregation.
+#[derive(Clone, Debug)]
+pub struct PreDiscardPolicy {
+    dominance_ratio: f32,
+    energy_floor: f32,
+    min_channels: usize,
+}
+
+impl PreDiscardPolicy {
+    /// Creates a new pre-discard policy. Channels that fall more than
+    /// `dominance_ratio` below the dominant weight are discarded unless they
+    /// clear the absolute `energy_floor` (default 0).
+    pub fn new(dominance_ratio: f32) -> PureResult<Self> {
+        if !dominance_ratio.is_finite() || dominance_ratio < 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: dominance_ratio,
+            }
+            .into());
+        }
+        Ok(Self {
+            dominance_ratio: dominance_ratio.min(1.0),
+            energy_floor: 0.0,
+            min_channels: 1,
+        })
+    }
+
+    /// Sets an absolute floor that channels must reach to survive pre-discard.
+    pub fn with_energy_floor(mut self, energy_floor: f32) -> PureResult<Self> {
+        if !energy_floor.is_finite() || energy_floor < 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: energy_floor,
+            }
+            .into());
+        }
+        self.energy_floor = energy_floor;
+        Ok(self)
+    }
+
+    /// Ensures a minimum number of channels survive every pre-discard pass.
+    pub fn with_min_channels(mut self, min_channels: usize) -> Self {
+        self.min_channels = min_channels.max(1);
+        self
+    }
+
+    /// Returns the configured dominance ratio.
+    pub fn dominance_ratio(&self) -> f32 {
+        self.dominance_ratio
+    }
+
+    /// Returns the configured absolute floor.
+    pub fn energy_floor(&self) -> f32 {
+        self.energy_floor
+    }
+
+    /// Returns the minimum number of channels that will survive.
+    pub fn min_channels(&self) -> usize {
+        self.min_channels
+    }
+
+    fn apply(&self, weights: &mut [f32], original: &[f32]) -> PureResult<PreDiscardOutcome> {
+        if weights.len() != original.len() {
+            return Err(TensorError::DataLength {
+                expected: original.len(),
+                got: weights.len(),
+            }
+            .into());
+        }
+        if weights.is_empty() {
+            return Ok(PreDiscardOutcome::fallback(
+                PreDiscardTelemetry::fallback(self, 0, 0, 0.0, 0.0),
+                Vec::new(),
+                Vec::new(),
+            ));
+        }
+
+        let mut indices: Vec<usize> = (0..weights.len()).collect();
+        indices.sort_by(|lhs, rhs| {
+            original[*rhs]
+                .partial_cmp(&original[*lhs])
+                .unwrap_or(Ordering::Equal)
+        });
+
+        let mut dominant = original[indices[0]];
+        if !dominant.is_finite() {
+            dominant = 1e-6;
+        }
+        if dominant <= 0.0 {
+            dominant = 1e-6;
+        }
+        let mut survivors = vec![false; weights.len()];
+        for &idx in &indices {
+            let mut weight = original[idx];
+            if !weight.is_finite() {
+                weight = 0.0;
+            }
+            let tolerance = (1.0 - self.dominance_ratio).max(0.0);
+            let threshold = dominant * tolerance;
+            let survives_ratio = weight >= threshold;
+            let survives_floor = weight >= self.energy_floor && dominant <= self.energy_floor;
+            if survives_ratio || survives_floor {
+                survivors[idx] = true;
+            }
+        }
+
+        let preserved = survivors.iter().filter(|flag| **flag).count();
+        if preserved < self.min_channels.min(weights.len()) {
+            for &idx in indices.iter().take(self.min_channels.min(weights.len())) {
+                if !survivors[idx] {
+                    survivors[idx] = true;
+                }
+            }
+        }
+
+        let mut survivor_indices = Vec::new();
+        let mut discarded_indices = Vec::new();
+        let mut sum = 0.0f32;
+        let mut survivor_energy = 0.0f32;
+        let mut discarded_energy = 0.0f32;
+        for (idx, weight) in weights.iter_mut().enumerate() {
+            if survivors[idx] {
+                let mut value = original[idx];
+                if !value.is_finite() {
+                    value = 0.0;
+                }
+                *weight = value;
+                sum += *weight;
+                survivor_energy += value;
+                survivor_indices.push(idx);
+            } else {
+                let value = if original[idx].is_finite() {
+                    original[idx]
+                } else {
+                    0.0
+                };
+                discarded_energy += value;
+                *weight = 0.0;
+                discarded_indices.push(idx);
+            }
+        }
+        let discarded = discarded_indices.len();
+
+        if sum <= f32::EPSILON || !sum.is_finite() {
+            weights.copy_from_slice(original);
+            return Ok(PreDiscardOutcome::fallback(
+                PreDiscardTelemetry::fallback(
+                    self,
+                    0,
+                    original.len(),
+                    original
+                        .iter()
+                        .copied()
+                        .filter(|value| value.is_finite())
+                        .sum(),
+                    dominant,
+                ),
+                (0..original.len()).collect(),
+                Vec::new(),
+            ));
+        }
+
+        for weight in weights.iter_mut() {
+            if *weight > 0.0 {
+                *weight /= sum;
+            }
+        }
+
+        Ok(PreDiscardOutcome::new(
+            PreDiscardTelemetry::new(
+                self,
+                discarded,
+                weights.len() - discarded,
+                false,
+                survivor_energy,
+                discarded_energy,
+                dominant,
+            ),
+            survivor_indices,
+            discarded_indices,
+        ))
+    }
+}
+
+/// Adapts pre-discard behaviour across timesteps so low-credence channels are culled
+/// proactively instead of reactively. The regulator maintains exponential moving averages
+/// over recent discard telemetry, blends preservation and energy errors with configurable
+/// weights, anticipates trending deviations with a momentum term, and nudges the dominance
+/// ratio toward configured targets while penalising repeated fallbacks.
+#[derive(Clone, Debug)]
+pub struct PreDiscardRegulator {
+    target_preserved_ratio: f32,
+    target_survivor_energy_ratio: f32,
+    smoothing: f32,
+    trend_smoothing: f32,
+    aggressiveness: f32,
+    max_step: f32,
+    min_offset: f32,
+    max_offset: f32,
+    channel_weight: f32,
+    energy_weight: f32,
+    fallback_penalty: f32,
+    momentum: f32,
+    deadband: f32,
+    equilibrium_decay: f32,
+    offset: f32,
+    preserved_ema: Option<f32>,
+    energy_ema: Option<f32>,
+    trend_ema: Option<f32>,
+    last_error: Option<f32>,
+    observations: u64,
+}
+
+impl PreDiscardRegulator {
+    /// Creates a new regulator targeting the provided survivor ratios. Targets are clamped to
+    /// the \[0, 1] interval.
+    pub fn new(target_preserved_ratio: f32, target_survivor_energy_ratio: f32) -> PureResult<Self> {
+        if !target_preserved_ratio.is_finite()
+            || !target_survivor_energy_ratio.is_finite()
+            || target_preserved_ratio < 0.0
+            || target_survivor_energy_ratio < 0.0
+        {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: target_preserved_ratio.min(target_survivor_energy_ratio),
+            }
+            .into());
+        }
+
+        Ok(Self {
+            target_preserved_ratio: target_preserved_ratio.min(1.0),
+            target_survivor_energy_ratio: target_survivor_energy_ratio.min(1.0),
+            smoothing: 0.25,
+            trend_smoothing: 0.5,
+            aggressiveness: 0.5,
+            max_step: 0.2,
+            min_offset: -0.5,
+            max_offset: 0.5,
+            channel_weight: 0.5,
+            energy_weight: 0.5,
+            fallback_penalty: 0.1,
+            momentum: 0.0,
+            deadband: 0.0,
+            equilibrium_decay: 0.0,
+            offset: 0.0,
+            preserved_ema: None,
+            energy_ema: None,
+            trend_ema: None,
+            last_error: None,
+            observations: 0,
+        })
+    }
+
+    /// Configures the smoothing factor used for the internal exponential moving averages.
+    /// Values are clamped to the \[0, 1] interval.
+    pub fn with_smoothing(mut self, smoothing: f32) -> PureResult<Self> {
+        if !smoothing.is_finite() || smoothing < 0.0 || smoothing > 1.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: smoothing,
+            }
+            .into());
+        }
+        self.smoothing = smoothing;
+        Ok(self)
+    }
+
+    /// Configures how preservation versus energy errors are blended. Both weights must be
+    /// finite and the sum must be greater than zero.
+    pub fn with_error_weights(
+        mut self,
+        channel_weight: f32,
+        energy_weight: f32,
+    ) -> PureResult<Self> {
+        if !channel_weight.is_finite()
+            || !energy_weight.is_finite()
+            || channel_weight < 0.0
+            || energy_weight < 0.0
+            || (channel_weight + energy_weight) <= f32::EPSILON
+        {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: channel_weight.min(energy_weight),
+            }
+            .into());
+        }
+        self.channel_weight = channel_weight;
+        self.energy_weight = energy_weight;
+        Ok(self)
+    }
+
+    /// Configures an additional penalty applied when the pre-discard policy has to fall back.
+    pub fn with_fallback_penalty(mut self, penalty: f32) -> PureResult<Self> {
+        if !penalty.is_finite() || penalty < 0.0 {
+            return Err(TensorError::NonPositiveCoherence { coherence: penalty }.into());
+        }
+        self.fallback_penalty = penalty;
+        Ok(self)
+    }
+
+    /// Configures how aggressively the regulator reacts to deviations from the target ratios.
+    pub fn with_aggressiveness(mut self, aggressiveness: f32) -> PureResult<Self> {
+        if !aggressiveness.is_finite() || aggressiveness <= 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: aggressiveness,
+            }
+            .into());
+        }
+        self.aggressiveness = aggressiveness;
+        Ok(self)
+    }
+
+    /// Configures the smoothing factor used when tracking error trends. Values are clamped to
+    /// the \[0, 1] interval.
+    pub fn with_trend_smoothing(mut self, smoothing: f32) -> PureResult<Self> {
+        if !smoothing.is_finite() || smoothing < 0.0 || smoothing > 1.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: smoothing,
+            }
+            .into());
+        }
+        self.trend_smoothing = smoothing;
+        Ok(self)
+    }
+
+    /// Limits how far a single observation can push the dominance ratio.
+    pub fn with_max_step(mut self, max_step: f32) -> PureResult<Self> {
+        if !max_step.is_finite() || max_step <= 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: max_step,
+            }
+            .into());
+        }
+        self.max_step = max_step.min(1.0);
+        Ok(self)
+    }
+
+    /// Sets bounds for the adaptive dominance ratio offset applied to the base policy.
+    pub fn with_bounds(mut self, min_offset: f32, max_offset: f32) -> PureResult<Self> {
+        if !min_offset.is_finite() || !max_offset.is_finite() || min_offset > max_offset {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: min_offset.min(max_offset),
+            }
+            .into());
+        }
+        self.min_offset = min_offset;
+        self.max_offset = max_offset;
+        Ok(self)
+    }
+
+    /// Configures the magnitude of anticipatory momentum applied when telemetry errors trend in a
+    /// particular direction.
+    pub fn with_momentum(mut self, momentum: f32) -> PureResult<Self> {
+        if !momentum.is_finite() || momentum < 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: momentum,
+            }
+            .into());
+        }
+        self.momentum = momentum;
+        Ok(self)
+    }
+
+    /// Suppresses adjustments when the combined error falls within the specified symmetric range.
+    pub fn with_deadband(mut self, deadband: f32) -> PureResult<Self> {
+        if !deadband.is_finite() || deadband < 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: deadband,
+            }
+            .into());
+        }
+        self.deadband = deadband;
+        Ok(self)
+    }
+
+    /// Applies exponential decay towards the neutral offset when the regulator observes equilibrium.
+    /// The decay factor must lie in the [0, 1] interval.
+    pub fn with_equilibrium_decay(mut self, decay: f32) -> PureResult<Self> {
+        if !decay.is_finite() || decay < 0.0 || decay > 1.0 {
+            return Err(TensorError::NonPositiveCoherence { coherence: decay }.into());
+        }
+        self.equilibrium_decay = decay;
+        Ok(self)
+    }
+
+    /// Returns the configured target survivor channel ratio.
+    pub fn target_preserved_ratio(&self) -> f32 {
+        self.target_preserved_ratio
+    }
+
+    /// Returns the configured target survivor energy ratio.
+    pub fn target_survivor_energy_ratio(&self) -> f32 {
+        self.target_survivor_energy_ratio
+    }
+
+    /// Returns the number of telemetry observations that have influenced the regulator.
+    pub fn observations(&self) -> u64 {
+        self.observations
+    }
+
+    /// Returns the current offset applied to the base policy's dominance ratio.
+    pub fn offset(&self) -> f32 {
+        self.offset
+    }
+
+    fn update_ema(current: &mut Option<f32>, value: f32, smoothing: f32) -> f32 {
+        if let Some(previous) = current {
+            let updated = if smoothing <= f32::EPSILON {
+                value
+            } else {
+                *previous + smoothing * (value - *previous)
+            };
+            *previous = updated;
+            updated
+        } else {
+            *current = Some(value);
+            value
+        }
+    }
+
+    fn clamped_offset(&self, base_ratio: f32) -> f32 {
+        let ratio = (base_ratio + self.offset).clamp(0.0, 1.0);
+        ratio
+    }
+
+    /// Derives the policy that should be applied next given the base configuration.
+    pub fn next_policy(&self, base: &PreDiscardPolicy) -> PureResult<PreDiscardPolicy> {
+        let ratio = self.clamped_offset(base.dominance_ratio());
+        let mut policy = PreDiscardPolicy::new(ratio)?;
+        if base.energy_floor() > 0.0 {
+            policy = policy.with_energy_floor(base.energy_floor())?;
+        }
+        policy = policy.with_min_channels(base.min_channels());
+        Ok(policy)
+    }
+
+    /// Observes telemetry from the latest pre-discard pass and updates the offset that will be
+    /// applied to the base policy during the next timestep.
+    pub fn observe(&mut self, telemetry: &PreDiscardTelemetry) {
+        let preserved = Self::update_ema(
+            &mut self.preserved_ema,
+            telemetry.preserved_ratio(),
+            self.smoothing,
+        );
+        let energy = Self::update_ema(
+            &mut self.energy_ema,
+            telemetry.survivor_energy_ratio(),
+            self.smoothing,
+        );
+
+        let preserved_error = preserved - self.target_preserved_ratio;
+        let energy_error = energy - self.target_survivor_energy_ratio;
+        let total_weight = self.channel_weight + self.energy_weight;
+        let raw_error = if total_weight <= f32::EPSILON {
+            0.0
+        } else {
+            (self.channel_weight * preserved_error + self.energy_weight * energy_error)
+                / total_weight
+        };
+        let combined_error = if self.deadband > 0.0 && raw_error.abs() <= self.deadband {
+            0.0
+        } else {
+            raw_error
+        };
+        let trend = if let Some(previous) = self.last_error {
+            let delta = combined_error - previous;
+            let tracked = Self::update_ema(&mut self.trend_ema, delta, self.trend_smoothing);
+            if tracked.is_finite() {
+                tracked
+            } else {
+                0.0
+            }
+        } else {
+            self.trend_ema = Some(0.0);
+            0.0
+        };
+        self.last_error = Some(combined_error);
+
+        let mut step = -self.aggressiveness * combined_error;
+        if self.momentum > 0.0 {
+            step += -self.aggressiveness * self.momentum * trend;
+        }
+        if telemetry.used_fallback() {
+            step -= self.fallback_penalty;
+        }
+        let step = step.clamp(-self.max_step, self.max_step);
+
+        let mut next_offset = (self.offset + step).clamp(self.min_offset, self.max_offset);
+        if self.equilibrium_decay > 0.0
+            && combined_error.abs() <= f32::EPSILON
+            && !telemetry.used_fallback()
+        {
+            next_offset *= 1.0 - self.equilibrium_decay;
+            if next_offset.abs() < 1e-6 {
+                next_offset = 0.0;
+            }
+        }
+
+        self.offset = next_offset;
+        self.observations = self.observations.saturating_add(1);
+    }
+}
+
+/// Telemetry describing a pre-discard pass.
+#[derive(Clone, Debug)]
+pub struct PreDiscardTelemetry {
+    dominance_ratio: f32,
+    energy_floor: f32,
+    discarded: usize,
+    preserved: usize,
+    fallback: bool,
+    survivor_energy: f32,
+    discarded_energy: f32,
+    dominant_weight: f32,
+}
+
+impl PreDiscardTelemetry {
+    fn new(
+        policy: &PreDiscardPolicy,
+        discarded: usize,
+        preserved: usize,
+        fallback: bool,
+        survivor_energy: f32,
+        discarded_energy: f32,
+        dominant_weight: f32,
+    ) -> Self {
+        Self {
+            dominance_ratio: policy.dominance_ratio,
+            energy_floor: policy.energy_floor,
+            discarded,
+            preserved,
+            fallback,
+            survivor_energy,
+            discarded_energy,
+            dominant_weight,
+        }
+    }
+
+    fn fallback(
+        policy: &PreDiscardPolicy,
+        discarded: usize,
+        preserved: usize,
+        total_energy: f32,
+        dominant_weight: f32,
+    ) -> Self {
+        Self::new(
+            policy,
+            discarded,
+            preserved,
+            true,
+            total_energy,
+            0.0,
+            dominant_weight,
+        )
+    }
+
+    /// Returns the dominance ratio used during pre-discard.
+    pub fn dominance_ratio(&self) -> f32 {
+        self.dominance_ratio
+    }
+
+    /// Returns the absolute energy floor used during pre-discard.
+    pub fn energy_floor(&self) -> f32 {
+        self.energy_floor
+    }
+
+    /// Returns the number of channels that were discarded.
+    pub fn discarded(&self) -> usize {
+        self.discarded
+    }
+
+    /// Returns the number of channels that survived the pass.
+    pub fn preserved(&self) -> usize {
+        self.preserved
+    }
+
+    /// Indicates whether the policy had to fall back to the original distribution.
+    pub fn used_fallback(&self) -> bool {
+        self.fallback
+    }
+
+    /// Returns the total number of channels that were considered.
+    pub fn total(&self) -> usize {
+        self.discarded + self.preserved
+    }
+
+    /// Returns the fraction of channels that survived the pass.
+    pub fn preserved_ratio(&self) -> f32 {
+        let total = self.total().max(1) as f32;
+        (self.preserved as f32 / total).clamp(0.0, 1.0)
+    }
+
+    /// Returns the fraction of channels that were discarded.
+    pub fn discarded_ratio(&self) -> f32 {
+        1.0 - self.preserved_ratio()
+    }
+
+    /// Returns the sum of the original weights that survived the pass.
+    pub fn survivor_energy(&self) -> f32 {
+        self.survivor_energy
+    }
+
+    /// Returns the sum of the original weights that were discarded.
+    pub fn discarded_energy(&self) -> f32 {
+        self.discarded_energy
+    }
+
+    /// Returns the total original weight energy observed during the pass.
+    pub fn total_energy(&self) -> f32 {
+        self.survivor_energy + self.discarded_energy
+    }
+
+    /// Returns the fraction of original energy that survived.
+    pub fn survivor_energy_ratio(&self) -> f32 {
+        let total = self.total_energy();
+        if total <= f32::EPSILON {
+            0.0
+        } else {
+            (self.survivor_energy / total).clamp(0.0, 1.0)
+        }
+    }
+
+    /// Returns the fraction of original energy that was discarded.
+    pub fn discarded_energy_ratio(&self) -> f32 {
+        1.0 - self.survivor_energy_ratio()
+    }
+
+    /// Returns the dominant channel weight observed before discard.
+    pub fn dominant_weight(&self) -> f32 {
+        self.dominant_weight
+    }
+}
+
+/// Detailed outcome of a pre-discard pass, including survivor indexing.
+#[derive(Clone, Debug)]
+pub struct PreDiscardOutcome {
+    telemetry: PreDiscardTelemetry,
+    survivors: Vec<usize>,
+    discarded: Vec<usize>,
+}
+
+impl PreDiscardOutcome {
+    fn new(telemetry: PreDiscardTelemetry, survivors: Vec<usize>, discarded: Vec<usize>) -> Self {
+        Self {
+            telemetry,
+            survivors,
+            discarded,
+        }
+    }
+
+    fn fallback(
+        telemetry: PreDiscardTelemetry,
+        survivors: Vec<usize>,
+        discarded: Vec<usize>,
+    ) -> Self {
+        Self::new(telemetry, survivors, discarded)
+    }
+
+    /// Returns the telemetry emitted by the pass.
+    pub fn telemetry(&self) -> &PreDiscardTelemetry {
+        &self.telemetry
+    }
+
+    /// Returns indices of channels that survived.
+    pub fn survivors(&self) -> &[usize] {
+        &self.survivors
+    }
+
+    /// Returns indices of channels that were discarded.
+    pub fn discarded(&self) -> &[usize] {
+        &self.discarded
+    }
+}
+
+/// Snapshot of a pre-discard pass preserved in the sequencer journal.
+#[derive(Clone, Debug)]
+pub struct PreDiscardSnapshot {
+    step: u64,
+    telemetry: PreDiscardTelemetry,
+    survivors: Vec<usize>,
+    discarded: Vec<usize>,
+    filtered: Vec<f32>,
+}
+
+impl PreDiscardSnapshot {
+    fn new(
+        step: u64,
+        telemetry: PreDiscardTelemetry,
+        survivors: Vec<usize>,
+        discarded: Vec<usize>,
+        filtered: Vec<f32>,
+    ) -> Self {
+        Self {
+            step,
+            telemetry,
+            survivors,
+            discarded,
+            filtered,
+        }
+    }
+
+    /// Returns the journal step associated with the snapshot.
+    pub fn step(&self) -> u64 {
+        self.step
+    }
+
+    /// Returns telemetry captured during the pass.
+    pub fn telemetry(&self) -> &PreDiscardTelemetry {
+        &self.telemetry
+    }
+
+    /// Returns the indices that survived the pass.
+    pub fn survivors(&self) -> &[usize] {
+        &self.survivors
+    }
+
+    /// Returns the indices that were discarded by the pass.
+    pub fn discarded(&self) -> &[usize] {
+        &self.discarded
+    }
+
+    /// Returns the filtered coherence weights after pre-discard.
+    pub fn filtered(&self) -> &[f32] {
+        &self.filtered
+    }
+}
+
+#[derive(Debug)]
+struct PreDiscardJournal {
+    next_step: u64,
+    limit: usize,
+    entries: VecDeque<PreDiscardSnapshot>,
+}
+
+impl PreDiscardJournal {
+    fn new(limit: usize) -> Self {
+        Self {
+            next_step: 0,
+            limit: limit.max(1),
+            entries: VecDeque::new(),
+        }
+    }
+
+    fn push(
+        &mut self,
+        telemetry: PreDiscardTelemetry,
+        survivors: Vec<usize>,
+        discarded: Vec<usize>,
+        filtered: Vec<f32>,
+    ) {
+        let snapshot =
+            PreDiscardSnapshot::new(self.next_step, telemetry, survivors, discarded, filtered);
+        self.next_step = self.next_step.wrapping_add(1);
+        self.entries.push_back(snapshot);
+        while self.entries.len() > self.limit {
+            self.entries.pop_front();
+        }
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    fn set_limit(&mut self, limit: usize) {
+        self.limit = limit.max(1);
+        while self.entries.len() > self.limit {
+            self.entries.pop_front();
+        }
+    }
+
+    fn snapshots(&self) -> Vec<PreDiscardSnapshot> {
+        self.entries.iter().cloned().collect()
     }
 }
 
@@ -261,6 +1077,9 @@ pub struct ZSpaceCoherenceSequencer {
     coherence_engine: CoherenceEngine,
     topos: OpenCartesianTopos,
     plugins: Vec<Arc<dyn ZSpaceSequencerPlugin>>,
+    pre_discard: Option<PreDiscardPolicy>,
+    pre_discard_journal: Arc<Mutex<PreDiscardJournal>>,
+    pre_discard_regulator: Option<Arc<Mutex<PreDiscardRegulator>>>,
 }
 
 impl ZSpaceCoherenceSequencer {
@@ -271,6 +1090,9 @@ impl ZSpaceCoherenceSequencer {
         curvature: f32,
         topos: OpenCartesianTopos,
     ) -> PureResult<Self> {
+        if num_heads == 0 {
+            return Err(st_tensor::TensorError::EmptyInput("maxwell_heads").into());
+        }
         if dim % num_heads != 0 {
             return Err(st_tensor::TensorError::InvalidDimensions {
                 rows: dim,
@@ -286,13 +1108,20 @@ impl ZSpaceCoherenceSequencer {
             .into());
         }
 
+        let channel_count = (dim / 8).max(1).max(num_heads);
+        let coherence_engine =
+            CoherenceEngine::new(dim, curvature)?.with_channel_count(channel_count)?;
+
         Ok(Self {
             dim,
             num_heads,
             curvature,
-            coherence_engine: CoherenceEngine::new(dim, curvature)?,
+            coherence_engine,
             topos,
             plugins: Vec::new(),
+            pre_discard: None,
+            pre_discard_journal: Arc::new(Mutex::new(PreDiscardJournal::new(32))),
+            pre_discard_regulator: None,
         })
     }
 
@@ -321,6 +1150,7 @@ impl ZSpaceCoherenceSequencer {
         &self,
         x: &Tensor,
         coherence_weights: &[f32],
+        pre_discard: Option<PreDiscardTelemetry>,
     ) -> PureResult<(Tensor, CoherenceDiagnostics)> {
         let (aggregated, normalization, fractional_order, channel_width) =
             self.compute_geometric_aggregate(x, coherence_weights)?;
@@ -331,6 +1161,7 @@ impl ZSpaceCoherenceSequencer {
             channel_width,
             normalization,
             fractional_order,
+            pre_discard,
         );
 
         Ok((aggregated, diagnostics))
@@ -421,6 +1252,7 @@ impl ZSpaceCoherenceSequencer {
         channel_width: usize,
         normalization: f32,
         fractional_order: f32,
+        pre_discard: Option<PreDiscardTelemetry>,
     ) -> CoherenceDiagnostics {
         let channel_weights = coherence_weights.to_vec();
         let mut normalized_weights: Vec<f32> =
@@ -491,6 +1323,7 @@ impl ZSpaceCoherenceSequencer {
             aggregated: aggregated.clone(),
             coherence: channel_weights,
             channel_reports: Vec::new(),
+            pre_discard,
         }
     }
 
@@ -507,15 +1340,20 @@ impl ZSpaceCoherenceSequencer {
         })?;
 
         // Step 2: Measure Maxwell coherence
-        let coherence = self.measure_coherence(&z_space)?;
+        let mut coherence = self.measure_coherence(&z_space)?;
         self.dispatch_plugins(|| ZSpaceSequencerStage::CoherenceMeasured {
             z_space: &z_space,
             coherence: &coherence,
         })?;
 
+        let pre_discard_state = self.run_pre_discard(&mut coherence)?;
+
         // Step 3: Geometric aggregation (replaces attention) with diagnostics
-        let (aggregated, diagnostics) =
-            self.geometric_aggregate_with_diagnostics(&z_space, &coherence)?;
+        let (aggregated, diagnostics) = self.geometric_aggregate_with_diagnostics(
+            &z_space,
+            &coherence,
+            pre_discard_state.clone(),
+        )?;
 
         let channel_reports = self.coherence_engine.describe_channels(&coherence)?;
         let diagnostics = diagnostics.with_channel_reports(channel_reports);
@@ -631,13 +1469,13 @@ impl ZSpaceCoherenceSequencer {
     )> {
         let (aggregated, coherence, concept_hint, narrative, pulse) =
             self.forward_with_language_bridges(x, semantics, maxwell_bridge)?;
-        let feedback = psi_bridge.publish(&pulse, psi_step);
-        let psi_reading = hub::get_last_psi();
-        let psi_events = hub::get_last_psi_events();
+        let (feedback, psi_reading, psi_events) = psi_bridge
+            .publish_with_reading(&pulse, psi_step)
+            .into_parts();
 
         self.dispatch_plugins(|| ZSpaceSequencerStage::PsiTelemetryPublished {
             pulse: &pulse,
-            reading: psi_reading.as_ref(),
+            reading: Some(&psi_reading),
             events: psi_events.as_slice(),
             feedback: &feedback,
         })?;
@@ -648,7 +1486,7 @@ impl ZSpaceCoherenceSequencer {
             concept_hint,
             narrative,
             pulse,
-            psi_reading,
+            Some(psi_reading),
             psi_events,
             feedback,
         ))
@@ -661,6 +1499,70 @@ impl ZSpaceCoherenceSequencer {
             backend: backend.clone(),
         })?;
         Ok(())
+    }
+
+    /// Enables a pre-discard policy so low-credence channels are culled before aggregation.
+    pub fn enable_pre_discard(&mut self, policy: PreDiscardPolicy) {
+        self.pre_discard = Some(policy);
+    }
+
+    /// Enables a pre-discard policy with an adaptive regulator that anticipates low-credence channels.
+    pub fn enable_pre_discard_with_regulator(
+        &mut self,
+        policy: PreDiscardPolicy,
+        regulator: PreDiscardRegulator,
+    ) {
+        self.pre_discard = Some(policy);
+        self.pre_discard_regulator = Some(Arc::new(Mutex::new(regulator)));
+    }
+
+    /// Installs or replaces the adaptive regulator used for pre-discard decisions.
+    pub fn set_pre_discard_regulator(&mut self, regulator: PreDiscardRegulator) {
+        self.pre_discard_regulator = Some(Arc::new(Mutex::new(regulator)));
+    }
+
+    /// Clears any adaptive regulator, reverting to the base pre-discard policy.
+    pub fn clear_pre_discard_regulator(&mut self) {
+        self.pre_discard_regulator = None;
+    }
+
+    /// Disables any active pre-discard policy.
+    pub fn disable_pre_discard(&mut self) {
+        self.pre_discard = None;
+        self.pre_discard_regulator = None;
+    }
+
+    /// Returns the active pre-discard policy, when configured.
+    pub fn pre_discard_policy(&self) -> Option<&PreDiscardPolicy> {
+        self.pre_discard.as_ref()
+    }
+
+    /// Returns the adaptive regulator driving pre-discard, when configured.
+    pub fn pre_discard_regulator(&self) -> Option<PreDiscardRegulator> {
+        self.pre_discard_regulator
+            .as_ref()
+            .map(|regulator| match regulator.lock() {
+                Ok(guard) => guard.clone(),
+                Err(poisoned) => poisoned.into_inner().clone(),
+            })
+    }
+
+    /// Configures how many pre-discard snapshots are retained in memory.
+    pub fn configure_pre_discard_memory(&mut self, limit: usize) {
+        let mut journal = self.lock_pre_discard_journal();
+        journal.set_limit(limit);
+    }
+
+    /// Returns the recorded pre-discard snapshots in chronological order.
+    pub fn pre_discard_snapshots(&self) -> Vec<PreDiscardSnapshot> {
+        let journal = self.lock_pre_discard_journal();
+        journal.snapshots()
+    }
+
+    /// Clears all retained pre-discard snapshots.
+    pub fn clear_pre_discard_snapshots(&self) {
+        let mut journal = self.lock_pre_discard_journal();
+        journal.clear();
     }
 
     /// Registers a plugin that will receive callbacks across the sequencing pipeline.
@@ -715,7 +1617,8 @@ impl ZSpaceCoherenceSequencer {
     /// Converts coherence weights into a linguistic contour descriptor that can be
     /// used by downstream vocalisation stacks.
     pub fn emit_linguistic_contour(&self, x: &Tensor) -> PureResult<LinguisticContour> {
-        let coherence = self.measure_coherence(x)?;
+        let mut coherence = self.measure_coherence(x)?;
+        let _ = self.run_pre_discard(&mut coherence)?;
         let contour = self
             .coherence_engine
             .derive_linguistic_contour(&coherence)?;
@@ -728,7 +1631,8 @@ impl ZSpaceCoherenceSequencer {
 
     /// Describes each coherence channel, surfacing dominant linguistic concepts per band.
     pub fn describe_channels(&self, x: &Tensor) -> PureResult<Vec<LinguisticChannelReport>> {
-        let coherence = self.measure_coherence(x)?;
+        let mut coherence = self.measure_coherence(x)?;
+        let _ = self.run_pre_discard(&mut coherence)?;
         let reports = self.coherence_engine.describe_channels(&coherence)?;
         self.dispatch_plugins(|| ZSpaceSequencerStage::ChannelsDescribed {
             coherence: &coherence,
@@ -938,6 +1842,74 @@ impl ZSpaceCoherenceSequencer {
         fused
     }
 
+    fn run_pre_discard(&self, coherence: &mut Vec<f32>) -> PureResult<Option<PreDiscardTelemetry>> {
+        let base_policy = match &self.pre_discard {
+            Some(policy) => policy.clone(),
+            None => return Ok(None),
+        };
+        let mut policy = base_policy.clone();
+        if self.pre_discard_regulator.is_some() {
+            let policy_candidate = {
+                let regulator = self.lock_pre_discard_regulator();
+                regulator.next_policy(&base_policy)?
+            };
+            policy = policy_candidate;
+        }
+        let original = coherence.clone();
+        let outcome = policy.apply(coherence, &original)?;
+        let telemetry = outcome.telemetry().clone();
+        if self.pre_discard_regulator.is_some() {
+            let mut regulator = self.lock_pre_discard_regulator();
+            regulator.observe(&telemetry);
+        }
+        let survivors: Vec<usize> = outcome.survivors().to_vec();
+        let discarded: Vec<usize> = outcome.discarded().to_vec();
+        self.dispatch_plugins(|| ZSpaceSequencerStage::PreDiscardApplied {
+            original: &original,
+            filtered: coherence,
+            telemetry: &telemetry,
+            survivors: &survivors,
+            discarded: &discarded,
+        })?;
+        self.record_pre_discard_snapshot(
+            coherence.clone(),
+            telemetry.clone(),
+            survivors,
+            discarded,
+        );
+        Ok(Some(telemetry))
+    }
+
+    fn record_pre_discard_snapshot(
+        &self,
+        filtered: Vec<f32>,
+        telemetry: PreDiscardTelemetry,
+        survivors: Vec<usize>,
+        discarded: Vec<usize>,
+    ) {
+        let mut journal = self.lock_pre_discard_journal();
+        journal.push(telemetry, survivors, discarded, filtered);
+    }
+
+    fn lock_pre_discard_journal(&self) -> MutexGuard<'_, PreDiscardJournal> {
+        match self.pre_discard_journal.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn lock_pre_discard_regulator(&self) -> MutexGuard<'_, PreDiscardRegulator> {
+        match self
+            .pre_discard_regulator
+            .as_ref()
+            .expect("pre-discard regulator missing")
+            .lock()
+        {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
     fn dispatch_plugins<'a, F>(&'a self, mut stage: F) -> PureResult<()>
     where
         F: FnMut() -> ZSpaceSequencerStage<'a>,
@@ -1040,6 +2012,291 @@ mod tests {
         assert_eq!(diagnostics.aggregated().shape(), x.shape());
         assert_eq!(diagnostics.coherence().len(), seq.maxwell_channels());
         assert_eq!(diagnostics.channel_reports().len(), seq.maxwell_channels());
+    }
+
+    #[test]
+    fn pre_discard_culls_low_credence_channels() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(128, 8, -1.0, topos).unwrap();
+        let policy = PreDiscardPolicy::new(0.35)
+            .unwrap()
+            .with_energy_floor(1e-4)
+            .unwrap()
+            .with_min_channels(2);
+        seq.enable_pre_discard(policy);
+
+        let mut data = vec![0.02f32; 128];
+        for value in &mut data[96..] {
+            *value = 0.9;
+        }
+        let x = Tensor::from_vec(1, 128, data).unwrap();
+
+        let (_, _, diagnostics) = seq.forward_with_diagnostics(&x).unwrap();
+        assert!(diagnostics.discarded_channels() > 0);
+        assert!(diagnostics.preserved_channels() < seq.maxwell_channels());
+        let telemetry = diagnostics.pre_discard().expect("telemetry missing");
+        assert!(telemetry.discarded() > 0);
+        assert!(!telemetry.used_fallback());
+    }
+
+    #[test]
+    fn disabling_pre_discard_restores_full_distribution() {
+        let topos = OpenCartesianTopos::new(-0.9, 1e-5, 10.0, 256, 8192).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(128, 8, -0.9, topos).unwrap();
+        let policy = PreDiscardPolicy::new(0.2).unwrap().with_min_channels(1);
+        seq.enable_pre_discard(policy);
+
+        let mut data = vec![0.1f32; 128];
+        for (idx, value) in data.iter_mut().enumerate() {
+            if idx % 5 == 0 {
+                *value = 0.6;
+            }
+        }
+        let x = Tensor::from_vec(1, 128, data).unwrap();
+
+        let (_, _, diagnostics) = seq.forward_with_diagnostics(&x).unwrap();
+        assert!(diagnostics.discarded_channels() > 0);
+        seq.disable_pre_discard();
+        let (_, _, diagnostics_after) = seq.forward_with_diagnostics(&x).unwrap();
+        assert_eq!(diagnostics_after.discarded_channels(), 0);
+        assert!(diagnostics_after.pre_discard().is_none());
+    }
+
+    #[test]
+    fn pre_discard_journal_records_history() {
+        let topos = OpenCartesianTopos::new(-0.85, 1e-5, 10.0, 256, 8192).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(160, 10, -0.85, topos).unwrap();
+        seq.configure_pre_discard_memory(4);
+        let policy = PreDiscardPolicy::new(0.3)
+            .unwrap()
+            .with_energy_floor(5e-4)
+            .unwrap()
+            .with_min_channels(2);
+        seq.enable_pre_discard(policy);
+
+        let mut stimulus = vec![0.0f32; 160];
+        for (idx, value) in stimulus.iter_mut().enumerate() {
+            *value = if idx % 17 == 0 { 0.75 } else { 0.05 };
+        }
+        let x = Tensor::from_vec(1, 160, stimulus).unwrap();
+
+        for _ in 0..3 {
+            let _ = seq.forward_with_diagnostics(&x).unwrap();
+        }
+
+        let snapshots = seq.pre_discard_snapshots();
+        assert!(!snapshots.is_empty());
+        let latest = snapshots.last().unwrap();
+        assert_eq!(latest.filtered().len(), seq.maxwell_channels());
+        assert_eq!(latest.telemetry().total(), seq.maxwell_channels());
+        assert_eq!(latest.discarded().len(), latest.telemetry().discarded());
+        assert_eq!(latest.survivors().len(), latest.telemetry().preserved());
+        assert!(latest.telemetry().discarded_ratio() >= 0.0);
+        seq.clear_pre_discard_snapshots();
+        assert!(seq.pre_discard_snapshots().is_empty());
+    }
+
+    #[test]
+    fn pre_discard_telemetry_captures_energy_distribution() {
+        let policy = PreDiscardPolicy::new(0.5)
+            .unwrap()
+            .with_energy_floor(1e-3)
+            .unwrap();
+        let mut weights = vec![0.8f32, 2.0e-4, 5.0e-5];
+        let original = weights.clone();
+
+        let outcome = policy.apply(&mut weights, &original).unwrap();
+        let telemetry = outcome.telemetry();
+
+        assert_eq!(telemetry.preserved(), 1);
+        assert_eq!(telemetry.discarded(), 2);
+        assert!((telemetry.survivor_energy() - 0.8).abs() < 1e-6);
+        assert!((telemetry.discarded_energy() - 0.00025).abs() < 1e-6);
+        assert!((telemetry.total_energy() - 0.80025).abs() < 1e-6);
+        assert!((telemetry.survivor_energy_ratio() - (0.8 / 0.80025)).abs() < 1e-6);
+        assert!((telemetry.discarded_energy_ratio() - (0.00025 / 0.80025)).abs() < 1e-6);
+        assert!((telemetry.dominant_weight() - 0.8).abs() < 1e-6);
+
+        // The mutated weights should be renormalised after discard.
+        assert!((weights[0] - 1.0).abs() < 1e-6);
+        assert_eq!(weights[1], 0.0);
+        assert_eq!(weights[2], 0.0);
+    }
+
+    #[test]
+    fn pre_discard_regulator_reduces_ratio_when_survivors_exceed_target() {
+        let base = PreDiscardPolicy::new(0.7).unwrap().with_min_channels(1);
+        let mut regulator = PreDiscardRegulator::new(0.35, 0.45)
+            .unwrap()
+            .with_aggressiveness(0.9)
+            .unwrap()
+            .with_max_step(0.25)
+            .unwrap();
+
+        let mut weights = vec![0.5f32, 0.35, 0.15];
+        let original = weights.clone();
+        let outcome = base.clone().apply(&mut weights, &original).unwrap();
+        regulator.observe(outcome.telemetry());
+        let adjusted = regulator.next_policy(&base).unwrap();
+
+        assert!(adjusted.dominance_ratio() < base.dominance_ratio());
+        assert!(regulator.observations() >= 1);
+        assert!(regulator.offset() <= 0.0);
+    }
+
+    #[test]
+    fn pre_discard_regulator_penalises_fallbacks() {
+        let base = PreDiscardPolicy::new(0.9).unwrap().with_min_channels(1);
+        let mut regulator = PreDiscardRegulator::new(0.6, 0.4)
+            .unwrap()
+            .with_error_weights(0.3, 0.7)
+            .unwrap()
+            .with_fallback_penalty(0.15)
+            .unwrap();
+
+        let mut weights = vec![0.0f32, 0.0, 0.0];
+        let original = weights.clone();
+        let outcome = base.clone().apply(&mut weights, &original).unwrap();
+        assert!(outcome.telemetry().used_fallback());
+
+        regulator.observe(outcome.telemetry());
+        assert!(regulator.offset() < 0.0);
+    }
+
+    #[test]
+    fn pre_discard_regulator_deadband_suppresses_small_adjustments() {
+        let base = PreDiscardPolicy::new(0.75).unwrap();
+        let mut regulator = PreDiscardRegulator::new(0.55, 0.6)
+            .unwrap()
+            .with_aggressiveness(0.8)
+            .unwrap()
+            .with_max_step(0.3)
+            .unwrap()
+            .with_deadband(0.05)
+            .unwrap();
+
+        let telemetry = PreDiscardTelemetry::new(&base, 4, 6, false, 0.64, 0.36, 0.72);
+        regulator.observe(&telemetry);
+
+        assert_eq!(regulator.offset(), 0.0);
+        assert_eq!(regulator.observations(), 1);
+    }
+
+    #[test]
+    fn pre_discard_regulator_momentum_accelerates_trend() {
+        let base = PreDiscardPolicy::new(0.8).unwrap();
+        let mut baseline = PreDiscardRegulator::new(0.45, 0.55)
+            .unwrap()
+            .with_aggressiveness(0.6)
+            .unwrap()
+            .with_max_step(0.25)
+            .unwrap();
+        let mut momentum = PreDiscardRegulator::new(0.45, 0.55)
+            .unwrap()
+            .with_aggressiveness(0.6)
+            .unwrap()
+            .with_max_step(0.25)
+            .unwrap()
+            .with_momentum(0.75)
+            .unwrap()
+            .with_trend_smoothing(0.4)
+            .unwrap();
+
+        let telemetry_a = PreDiscardTelemetry::new(&base, 3, 7, false, 0.72, 0.28, 0.6);
+        let telemetry_b = PreDiscardTelemetry::new(&base, 2, 9, false, 0.88, 0.12, 0.62);
+
+        baseline.observe(&telemetry_a);
+        momentum.observe(&telemetry_a);
+        assert!((baseline.offset() - momentum.offset()).abs() < 1e-6);
+
+        baseline.observe(&telemetry_b);
+        momentum.observe(&telemetry_b);
+
+        assert!(momentum.offset() < baseline.offset());
+    }
+
+    #[test]
+    fn pre_discard_regulator_equilibrium_decay_relaxes_offset() {
+        let base = PreDiscardPolicy::new(0.7).unwrap();
+        let mut regulator = PreDiscardRegulator::new(0.4, 0.5)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.9)
+            .unwrap()
+            .with_max_step(0.4)
+            .unwrap()
+            .with_equilibrium_decay(0.3)
+            .unwrap();
+
+        let skewed = PreDiscardTelemetry::new(&base, 8, 2, false, 0.18, 0.82, 0.68);
+        regulator.observe(&skewed);
+        let biased_offset = regulator.offset();
+        assert!(biased_offset.abs() > 0.0);
+
+        let equilibrium = PreDiscardTelemetry::new(&base, 6, 4, false, 0.5, 0.5, 0.7);
+        regulator.observe(&equilibrium);
+
+        assert!(regulator.offset().abs() < biased_offset.abs());
+    }
+
+    #[test]
+    fn pre_discard_regulator_trend_configuration_validated() {
+        let regulator = PreDiscardRegulator::new(0.4, 0.5).unwrap();
+        assert!(regulator.clone().with_trend_smoothing(1.2).is_err());
+        assert!(regulator.clone().with_momentum(-0.1).is_err());
+        assert!(regulator.clone().with_deadband(-0.01).is_err());
+        assert!(regulator.clone().with_equilibrium_decay(1.5).is_err());
+        assert!(regulator
+            .clone()
+            .with_trend_smoothing(0.0)
+            .unwrap()
+            .with_momentum(0.0)
+            .unwrap()
+            .with_deadband(0.0)
+            .unwrap()
+            .with_equilibrium_decay(0.5)
+            .is_ok());
+    }
+
+    #[test]
+    fn adaptive_pre_discard_regulator_adjusts_over_time() {
+        let topos = OpenCartesianTopos::new(-0.8, 1e-5, 10.0, 256, 8192).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(192, 6, -0.8, topos).unwrap();
+        let policy = PreDiscardPolicy::new(0.85).unwrap().with_min_channels(2);
+        let regulator = PreDiscardRegulator::new(0.4, 0.5)
+            .unwrap()
+            .with_aggressiveness(0.95)
+            .unwrap()
+            .with_max_step(0.3)
+            .unwrap();
+        seq.enable_pre_discard_with_regulator(policy, regulator);
+
+        let mut stimulus = vec![0.25f32; 192];
+        for (idx, value) in stimulus.iter_mut().enumerate() {
+            if idx % 3 == 0 {
+                *value = 0.8;
+            }
+        }
+        let x = Tensor::from_vec(1, 192, stimulus).unwrap();
+
+        let mut observed_ratios = Vec::new();
+        for _ in 0..5 {
+            let (_, _, diagnostics) = seq.forward_with_diagnostics(&x).unwrap();
+            let telemetry = diagnostics
+                .pre_discard()
+                .expect("pre-discard telemetry should be present");
+            observed_ratios.push(telemetry.dominance_ratio());
+        }
+
+        assert!(observed_ratios.len() >= 2);
+        assert!(observed_ratios
+            .windows(2)
+            .any(|window| window[1] < window[0] - 1e-4));
+        let regulator_state = seq
+            .pre_discard_regulator()
+            .expect("regulator should remain configured");
+        assert!(regulator_state.observations() >= observed_ratios.len() as u64 - 1);
     }
 
     #[test]
@@ -1234,6 +2491,7 @@ mod tests {
                 let label = match stage {
                     ZSpaceSequencerStage::Projected { .. } => "projected",
                     ZSpaceSequencerStage::CoherenceMeasured { .. } => "coherence",
+                    ZSpaceSequencerStage::PreDiscardApplied { .. } => "pre_discard",
                     ZSpaceSequencerStage::Aggregated { .. } => "aggregated",
                     ZSpaceSequencerStage::LanguageBridged { .. } => "language",
                     ZSpaceSequencerStage::BackendConfigured { .. } => "backend",
@@ -1465,9 +2723,9 @@ mod tests {
             reading,
             emitted_events,
             feedback,
-        ) =
-            seq.forward_with_language_and_psi(&x, &semantics, &bridge, &psi_bridge, 64)
-                .unwrap();
+        ) = seq
+            .forward_with_language_and_psi(&x, &semantics, &bridge, &psi_bridge, 64)
+            .unwrap();
 
         assert_eq!(coherence.len(), seq.maxwell_channels());
         let reading = reading.expect("psi reading should be available");

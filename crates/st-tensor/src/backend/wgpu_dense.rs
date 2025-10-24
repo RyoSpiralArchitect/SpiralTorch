@@ -286,10 +286,10 @@ pub fn matmul(
     a: &[f32],
     b: &[f32],
     rows: usize,
-    cols: usize,
     inner: usize,
+    cols: usize,
 ) -> Result<Vec<f32>, String> {
-    if rows == 0 || cols == 0 || inner == 0 {
+    if rows == 0 || inner == 0 || cols == 0 {
         return Err("matrix dimensions must be positive".into());
     }
     if a.len() != rows * inner {

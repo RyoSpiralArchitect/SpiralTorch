@@ -5,9 +5,9 @@
 
 #[cfg(feature = "faer")]
 mod imp {
-    use faer::linalg::matmul::matmul;
+    use faer::get_global_parallelism;
+    use faer::linalg::matmul::matmul as faer_matmul;
     use faer::mat::Mat;
-    use faer::Parallelism;
 
     pub fn is_available() -> bool {
         true
@@ -33,13 +33,13 @@ mod imp {
         let rhs = Mat::from_fn(inner, cols, |r, c| rhs[r * cols + c]);
         let mut out = Mat::<f32>::zeros(rows, cols);
 
-        matmul(
-            Parallelism::Rayon,
+        faer_matmul(
             out.as_mut(),
             lhs.as_ref(),
             rhs.as_ref(),
-            1.0,
+            None,
             0.0,
+            get_global_parallelism(),
         );
 
         let mut buffer = vec![0.0; rows * cols];
