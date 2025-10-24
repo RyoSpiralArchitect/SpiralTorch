@@ -1932,6 +1932,8 @@ impl Conv2d {
             }
         }
 
+        let bias_value = self.bias.value();
+        let bias_data = bias_value.data();
         let maybe = wgpu_dense::conv_im2col_gemm(
             input.data(),
             batch,
@@ -1947,6 +1949,7 @@ impl Conv2d {
             self.dilation.0,
             self.dilation.1,
             &weight_t,
+            Some(bias_data),
             self.out_channels,
             oh,
             ow,
@@ -1956,29 +1959,10 @@ impl Conv2d {
             Ok(buffer) => buffer,
             Err(_) => return Ok(None),
         };
-
-        let mut out = Tensor::zeros(batch, self.out_channels * oh * ow)?;
-        let bias_data = self.bias.value().data();
-        let spatial = oh * ow;
-        {
-            let out_data = out.data_mut();
-            for b in 0..batch {
-                for oh_idx in 0..oh {
-                    for ow_idx in 0..ow {
-                        let row_index = b * spatial + oh_idx * ow + ow_idx;
-                        let row_start = row_index * self.out_channels;
-                        for oc in 0..self.out_channels {
-                            let target = b * self.out_channels * spatial
-                                + oc * spatial
-                                + oh_idx * ow
-                                + ow_idx;
-                            out_data[target] = buffer[row_start + oc] + bias_data[oc];
-                        }
-                    }
-                }
-            }
+        match Tensor::from_vec(batch, self.out_channels * oh * ow, buffer) {
+            Ok(tensor) => Ok(Some(tensor)),
+            Err(_) => Ok(None),
         }
-        Ok(Some(out))
     }
 }
 

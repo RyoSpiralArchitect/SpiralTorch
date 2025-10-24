@@ -1300,6 +1300,7 @@ pub fn conv_im2col_gemm(
     dilation_h: usize,
     dilation_w: usize,
     weight_t: &[f32],
+    bias: Option<&[f32]>,
     out_channels: usize,
     out_h: usize,
     out_w: usize,
@@ -1327,6 +1328,11 @@ pub fn conv_im2col_gemm(
     }
     if weight_t.len() != span * out_channels {
         return Err("transposed weight buffer length mismatch".into());
+    }
+    if let Some(bias) = bias {
+        if bias.len() != out_channels {
+            return Err("bias length mismatch".into());
+        }
     }
 
     let ctx = dense_context()?;
