@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Sequence
 from types import MappingProxyType
+from typing import Any, Dict
 
 __all__ = [
     "ZSpaceDecoded",
@@ -13,7 +14,11 @@ __all__ = [
     "ZSpacePosterior",
     "decode_zspace_embedding",
     "infer_from_partial",
+    "infer_with_trainer",
 ]
+
+
+_DEFAULT_ALPHA = 0.35
 
 
 _METRIC_ALIASES: Mapping[str, str] = MappingProxyType(
@@ -212,10 +217,27 @@ class ZSpaceInference:
 class ZSpacePosterior:
     """Posterior over Z-space metrics conditioned on a latent state."""
 
-    def __init__(self, z_state: Sequence[float], *, alpha: float = 0.35) -> None:
+    def __init__(self, z_state: Sequence[float], *, alpha: float = _DEFAULT_ALPHA) -> None:
         self._z_state = tuple(_ensure_vector(z_state))
         self._alpha = max(1e-6, float(alpha))
         self._decoded: ZSpaceDecoded | None = None
+
+    @classmethod
+    def from_state(
+        cls,
+        source: Any,
+        *,
+        alpha: float | None = None,
+    ) -> "ZSpacePosterior":
+        """Build a posterior from an existing trainer, posterior, or latent vector."""
+
+        if isinstance(source, cls) and (alpha is None or math.isclose(alpha, source.alpha, rel_tol=1e-6, abs_tol=1e-6)):
+            return source
+        if isinstance(source, cls):
+            return cls(source.z_state, alpha=alpha if alpha is not None else source.alpha)
+        latent = _resolve_z_state(source)
+        resolved_alpha = alpha if alpha is not None else _extract_alpha_hint(source, _DEFAULT_ALPHA)
+        return cls(latent, alpha=resolved_alpha)
 
     @property
     def z_state(self) -> list[float]:
@@ -287,22 +309,80 @@ class ZSpacePosterior:
         )
 
 
-def decode_zspace_embedding(z_state: Sequence[float], *, alpha: float = 0.35) -> ZSpaceDecoded:
+def decode_zspace_embedding(
+    z_state: Sequence[float] | ZSpacePosterior | Any,
+    *,
+    alpha: float = _DEFAULT_ALPHA,
+) -> ZSpaceDecoded:
     """Decode latent coordinates into a structured metric bundle."""
 
-    return ZSpacePosterior(z_state, alpha=alpha).decode()
+    posterior = ZSpacePosterior.from_state(z_state, alpha=alpha)
+    return posterior.decode()
 
 
 def infer_from_partial(
-    z_state: Sequence[float],
+    z_state: Sequence[float] | ZSpacePosterior | Any,
     partial: Mapping[str, Any] | None,
     *,
-    alpha: float = 0.35,
+    alpha: float = _DEFAULT_ALPHA,
     smoothing: float = 0.35,
 ) -> ZSpaceInference:
     """Fuse partial metric observations with a latent state to complete Z-space inference."""
 
-    posterior = ZSpacePosterior(z_state, alpha=alpha)
+    posterior = ZSpacePosterior.from_state(z_state, alpha=alpha)
     return posterior.project(partial, smoothing=smoothing)
+
+
+def infer_with_trainer(
+    trainer: Any,
+    partial: Mapping[str, Any] | None,
+    *,
+    smoothing: float = 0.35,
+    alpha: float | None = None,
+) -> ZSpaceInference:
+    """Shortcut for running inference from a :class:`~spiraltorch.ZSpaceTrainer` instance."""
+
+    posterior = ZSpacePosterior.from_state(trainer, alpha=alpha)
+    return posterior.project(partial, smoothing=smoothing)
+
+
+def _resolve_z_state(source: Any) -> tuple[float, ...]:
+    if isinstance(source, ZSpacePosterior):
+        return tuple(source.z_state)
+    if isinstance(source, Sequence) and not isinstance(source, (str, bytes, bytearray)):
+        return tuple(_ensure_vector(source))
+    for attr in ("z_state", "state"):
+        value = getattr(source, attr, None)
+        if value is None:
+            continue
+        if callable(value):
+            try:
+                value = value()
+            except TypeError:
+                continue
+        try:
+            return tuple(_ensure_vector(value))
+        except (TypeError, ValueError):
+            continue
+    raise TypeError("object does not provide a latent Z-state")
+
+
+def _extract_alpha_hint(source: Any, default: float) -> float:
+    for attr in ("alpha", "_alpha"):
+        value = getattr(source, attr, None)
+        if value is None:
+            continue
+        if callable(value):
+            try:
+                value = value()
+            except TypeError:
+                continue
+        try:
+            alpha = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(alpha):
+            return max(1e-6, alpha)
+    return default
 
 

@@ -151,9 +151,9 @@ from .zspace_inference import (
     ZSpacePosterior,
     decode_zspace_embedding,
     infer_from_partial,
+    infer_with_trainer,
 )
 
-# 追加API（Rust側でエクスポート済みのやつだけ拾う）
 _EXTRAS = [
     "golden_ratio","golden_angle","set_global_seed",
     "capture","share","compat",
@@ -167,7 +167,6 @@ for _n in _EXTRAS:
     if _value is not None:
         globals()[_n] = _value
 
-# 後方互換の別名（存在する方を公開名にバインド）
 _COMPAT_ALIAS = {
     "Tensor":   ("Tensor", "PyTensor"),
     "Device":   ("Device", "PyDevice"),
@@ -1286,6 +1285,7 @@ _EXTRAS.extend(
         "ZSpacePosterior",
         "decode_zspace_embedding",
         "infer_from_partial",
+        "infer_with_trainer",
     ]
 )
 

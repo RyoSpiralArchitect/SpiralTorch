@@ -6,7 +6,13 @@ import pytest
 
 pytest.importorskip("spiraltorch")
 
-from spiraltorch import ZSpacePosterior, decode_zspace_embedding, infer_from_partial
+from spiraltorch import (
+    ZSpacePosterior,
+    ZSpaceTrainer,
+    decode_zspace_embedding,
+    infer_from_partial,
+    infer_with_trainer,
+)
 
 
 def test_decode_produces_expected_structure():
@@ -49,3 +55,19 @@ def test_posterior_project_matches_helper():
     assert math.isclose(direct.residual, helper.residual)
     assert math.isclose(direct.confidence, helper.confidence)
     assert direct.metrics == helper.metrics
+
+
+def test_decode_accepts_trainer_state():
+    trainer = ZSpaceTrainer(z_dim=4)
+    trainer.step({"speed": 0.6, "memory": -0.2, "stability": 0.3})
+    decoded = decode_zspace_embedding(trainer)
+    assert tuple(decoded.z_state) == tuple(trainer.state)
+    assert set(decoded.metrics) == {"speed", "memory", "stability", "frac", "drs"}
+
+
+def test_infer_with_trainer_reflects_partial_updates():
+    trainer = ZSpaceTrainer(z_dim=4)
+    trainer.step({"speed": 0.4, "memory": 0.1, "stability": 0.2})
+    result = infer_with_trainer(trainer, {"stab": 0.9})
+    assert math.isclose(result.metrics["stability"], 0.9)
+    assert tuple(result.prior.z_state) == tuple(trainer.state)
