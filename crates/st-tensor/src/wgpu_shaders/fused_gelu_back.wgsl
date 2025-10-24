@@ -6,12 +6,12 @@ const WG_ROWS : u32 = {WG_ROWS}u;
 const WG_COLS : u32 = {WG_COLS}u;
 
 struct Uniforms {
-  B: u32;
-  O: u32;
-  stride: u32;
-  num_wg_x: u32;
-  num_wg_y: u32;
-  add_dR: u32;
+  B: u32,
+  O: u32,
+  stride: u32,
+  num_wg_x: u32,
+  num_wg_y: u32,
+  add_dR: u32,
 };
 
 @group(0) @binding(0) var<storage, read>       Z:           array<f32>;
