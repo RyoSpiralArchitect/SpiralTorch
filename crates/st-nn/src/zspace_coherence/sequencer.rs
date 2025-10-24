@@ -22,7 +22,7 @@ use st_core::maxwell::MaxwellZPulse;
 #[cfg(feature = "psi")]
 use st_core::{
     telemetry::{
-        hub::{self, SoftlogicZFeedback},
+        hub::SoftlogicZFeedback,
         psi::{PsiEvent, PsiReading},
     },
     theory::maxwell::MaxwellPsiTelemetryBridge,
@@ -432,19 +432,29 @@ impl PreDiscardPolicy {
         }
         let discarded = discarded_indices.len();
 
+        let mut total_energy = survivor_energy + discarded_energy;
+        if !total_energy.is_finite() {
+            total_energy = original
+                .iter()
+                .copied()
+                .filter(|value| value.is_finite())
+                .sum();
+        }
+
         if sum <= f32::EPSILON || !sum.is_finite() {
             weights.copy_from_slice(original);
+            let dominant_share = if total_energy.is_finite() && total_energy > f32::EPSILON {
+                (dominant / total_energy).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             return Ok(PreDiscardOutcome::fallback(
                 PreDiscardTelemetry::fallback(
                     self,
                     0,
                     original.len(),
-                    original
-                        .iter()
-                        .copied()
-                        .filter(|value| value.is_finite())
-                        .sum(),
-                    dominant,
+                    total_energy,
+                    dominant_share,
                 ),
                 (0..original.len()).collect(),
                 Vec::new(),
@@ -457,6 +467,12 @@ impl PreDiscardPolicy {
             }
         }
 
+        let dominant_share = if total_energy.is_finite() && total_energy > f32::EPSILON {
+            (dominant / total_energy).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
         Ok(PreDiscardOutcome::new(
             PreDiscardTelemetry::new(
                 self,
@@ -465,11 +481,380 @@ impl PreDiscardPolicy {
                 false,
                 survivor_energy,
                 discarded_energy,
-                dominant,
+                dominant_share,
             ),
             survivor_indices,
             discarded_indices,
         ))
+    }
+}
+
+/// Adapts pre-discard behaviour across timesteps so low-credence channels are culled
+/// proactively instead of reactively. The regulator maintains exponential moving averages
+/// over recent discard telemetry, blends preservation and energy errors with configurable
+/// weights, anticipates trending deviations with a momentum term, and nudges the dominance
+/// ratio toward configured targets while penalising repeated fallbacks.
+#[derive(Clone, Debug)]
+pub struct PreDiscardRegulator {
+    target_preserved_ratio: f32,
+    target_survivor_energy_ratio: f32,
+    smoothing: f32,
+    trend_smoothing: f32,
+    aggressiveness: f32,
+    max_step: f32,
+    min_offset: f32,
+    max_offset: f32,
+    channel_weight: f32,
+    energy_weight: f32,
+    fallback_penalty: f32,
+    momentum: f32,
+    deadband: f32,
+    equilibrium_decay: f32,
+    confidence_floor: f32,
+    confidence_gain: f32,
+    offset: f32,
+    preserved_ema: Option<f32>,
+    energy_ema: Option<f32>,
+    trend_ema: Option<f32>,
+    last_error: Option<f32>,
+    observations: u64,
+}
+
+impl PreDiscardRegulator {
+    /// Creates a new regulator targeting the provided survivor ratios. Targets are clamped to
+    /// the \[0, 1] interval.
+    pub fn new(target_preserved_ratio: f32, target_survivor_energy_ratio: f32) -> PureResult<Self> {
+        if !target_preserved_ratio.is_finite()
+            || !target_survivor_energy_ratio.is_finite()
+            || target_preserved_ratio < 0.0
+            || target_survivor_energy_ratio < 0.0
+        {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: target_preserved_ratio.min(target_survivor_energy_ratio),
+            }
+            .into());
+        }
+
+        Ok(Self {
+            target_preserved_ratio: target_preserved_ratio.min(1.0),
+            target_survivor_energy_ratio: target_survivor_energy_ratio.min(1.0),
+            smoothing: 0.25,
+            trend_smoothing: 0.5,
+            aggressiveness: 0.5,
+            max_step: 0.2,
+            min_offset: -0.5,
+            max_offset: 0.5,
+            channel_weight: 0.5,
+            energy_weight: 0.5,
+            fallback_penalty: 0.1,
+            momentum: 0.0,
+            deadband: 0.0,
+            equilibrium_decay: 0.0,
+            confidence_floor: 0.0,
+            confidence_gain: 0.0,
+            offset: 0.0,
+            preserved_ema: None,
+            energy_ema: None,
+            trend_ema: None,
+            last_error: None,
+            observations: 0,
+        })
+    }
+
+    /// Configures the smoothing factor used for the internal exponential moving averages.
+    /// Values are clamped to the \[0, 1] interval.
+    pub fn with_smoothing(mut self, smoothing: f32) -> PureResult<Self> {
+        if !smoothing.is_finite() || smoothing < 0.0 || smoothing > 1.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: smoothing,
+            }
+            .into());
+        }
+        self.smoothing = smoothing;
+        Ok(self)
+    }
+
+    /// Configures how preservation versus energy errors are blended. Both weights must be
+    /// finite and the sum must be greater than zero.
+    pub fn with_error_weights(
+        mut self,
+        channel_weight: f32,
+        energy_weight: f32,
+    ) -> PureResult<Self> {
+        if !channel_weight.is_finite()
+            || !energy_weight.is_finite()
+            || channel_weight < 0.0
+            || energy_weight < 0.0
+            || (channel_weight + energy_weight) <= f32::EPSILON
+        {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: channel_weight.min(energy_weight),
+            }
+            .into());
+        }
+        self.channel_weight = channel_weight;
+        self.energy_weight = energy_weight;
+        Ok(self)
+    }
+
+    /// Configures an additional penalty applied when the pre-discard policy has to fall back.
+    pub fn with_fallback_penalty(mut self, penalty: f32) -> PureResult<Self> {
+        if !penalty.is_finite() || penalty < 0.0 {
+            return Err(TensorError::NonPositiveCoherence { coherence: penalty }.into());
+        }
+        self.fallback_penalty = penalty;
+        Ok(self)
+    }
+
+    /// Configures how aggressively the regulator reacts to deviations from the target ratios.
+    pub fn with_aggressiveness(mut self, aggressiveness: f32) -> PureResult<Self> {
+        if !aggressiveness.is_finite() || aggressiveness <= 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: aggressiveness,
+            }
+            .into());
+        }
+        self.aggressiveness = aggressiveness;
+        Ok(self)
+    }
+
+    /// Configures the smoothing factor used when tracking error trends. Values are clamped to
+    /// the \[0, 1] interval.
+    pub fn with_trend_smoothing(mut self, smoothing: f32) -> PureResult<Self> {
+        if !smoothing.is_finite() || smoothing < 0.0 || smoothing > 1.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: smoothing,
+            }
+            .into());
+        }
+        self.trend_smoothing = smoothing;
+        Ok(self)
+    }
+
+    /// Limits how far a single observation can push the dominance ratio.
+    pub fn with_max_step(mut self, max_step: f32) -> PureResult<Self> {
+        if !max_step.is_finite() || max_step <= 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: max_step,
+            }
+            .into());
+        }
+        self.max_step = max_step.min(1.0);
+        Ok(self)
+    }
+
+    /// Sets bounds for the adaptive dominance ratio offset applied to the base policy.
+    pub fn with_bounds(mut self, min_offset: f32, max_offset: f32) -> PureResult<Self> {
+        if !min_offset.is_finite() || !max_offset.is_finite() || min_offset > max_offset {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: min_offset.min(max_offset),
+            }
+            .into());
+        }
+        self.min_offset = min_offset;
+        self.max_offset = max_offset;
+        Ok(self)
+    }
+
+    /// Configures the magnitude of anticipatory momentum applied when telemetry errors trend in a
+    /// particular direction.
+    pub fn with_momentum(mut self, momentum: f32) -> PureResult<Self> {
+        if !momentum.is_finite() || momentum < 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: momentum,
+            }
+            .into());
+        }
+        self.momentum = momentum;
+        Ok(self)
+    }
+
+    /// Suppresses adjustments when the combined error falls within the specified symmetric range.
+    pub fn with_deadband(mut self, deadband: f32) -> PureResult<Self> {
+        if !deadband.is_finite() || deadband < 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: deadband,
+            }
+            .into());
+        }
+        self.deadband = deadband;
+        Ok(self)
+    }
+
+    /// Applies exponential decay towards the neutral offset when the regulator observes equilibrium.
+    /// The decay factor must lie in the [0, 1] interval.
+    pub fn with_equilibrium_decay(mut self, decay: f32) -> PureResult<Self> {
+        if !decay.is_finite() || decay < 0.0 || decay > 1.0 {
+            return Err(TensorError::NonPositiveCoherence { coherence: decay }.into());
+        }
+        self.equilibrium_decay = decay;
+        Ok(self)
+    }
+
+    /// Scales corrective steps according to the dominant channel weight observed during telemetry.
+    /// When the observed weight falls below the configured floor, the correction is proportionally
+    /// attenuated. When it rises above the floor, an optional gain amplifies the response. Both the
+    /// floor and gain must be finite, with the floor constrained to the [0, 1] interval and the gain
+    /// constrained to non-negative values.
+    pub fn with_confidence_scaling(
+        mut self,
+        confidence_floor: f32,
+        confidence_gain: f32,
+    ) -> PureResult<Self> {
+        if !confidence_floor.is_finite()
+            || !confidence_gain.is_finite()
+            || confidence_floor < 0.0
+            || confidence_floor > 1.0
+            || confidence_gain < 0.0
+        {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: confidence_floor.min(confidence_gain),
+            }
+            .into());
+        }
+
+        self.confidence_floor = confidence_floor;
+        self.confidence_gain = confidence_gain;
+        Ok(self)
+    }
+
+    /// Returns the configured target survivor channel ratio.
+    pub fn target_preserved_ratio(&self) -> f32 {
+        self.target_preserved_ratio
+    }
+
+    /// Returns the configured target survivor energy ratio.
+    pub fn target_survivor_energy_ratio(&self) -> f32 {
+        self.target_survivor_energy_ratio
+    }
+
+    /// Returns the number of telemetry observations that have influenced the regulator.
+    pub fn observations(&self) -> u64 {
+        self.observations
+    }
+
+    /// Returns the current offset applied to the base policy's dominance ratio.
+    pub fn offset(&self) -> f32 {
+        self.offset
+    }
+
+    fn update_ema(current: &mut Option<f32>, value: f32, smoothing: f32) -> f32 {
+        if let Some(previous) = current {
+            let updated = if smoothing <= f32::EPSILON {
+                value
+            } else {
+                *previous + smoothing * (value - *previous)
+            };
+            *previous = updated;
+            updated
+        } else {
+            *current = Some(value);
+            value
+        }
+    }
+
+    fn clamped_offset(&self, base_ratio: f32) -> f32 {
+        let ratio = (base_ratio + self.offset).clamp(0.0, 1.0);
+        ratio
+    }
+
+    /// Derives the policy that should be applied next given the base configuration.
+    pub fn next_policy(&self, base: &PreDiscardPolicy) -> PureResult<PreDiscardPolicy> {
+        let ratio = self.clamped_offset(base.dominance_ratio());
+        let mut policy = PreDiscardPolicy::new(ratio)?;
+        if base.energy_floor() > 0.0 {
+            policy = policy.with_energy_floor(base.energy_floor())?;
+        }
+        policy = policy.with_min_channels(base.min_channels());
+        Ok(policy)
+    }
+
+    /// Observes telemetry from the latest pre-discard pass and updates the offset that will be
+    /// applied to the base policy during the next timestep.
+    pub fn observe(&mut self, telemetry: &PreDiscardTelemetry) {
+        let preserved = Self::update_ema(
+            &mut self.preserved_ema,
+            telemetry.preserved_ratio(),
+            self.smoothing,
+        );
+        let energy = Self::update_ema(
+            &mut self.energy_ema,
+            telemetry.survivor_energy_ratio(),
+            self.smoothing,
+        );
+
+        let preserved_error = preserved - self.target_preserved_ratio;
+        let energy_error = energy - self.target_survivor_energy_ratio;
+        let total_weight = self.channel_weight + self.energy_weight;
+        let raw_error = if total_weight <= f32::EPSILON {
+            0.0
+        } else {
+            (self.channel_weight * preserved_error + self.energy_weight * energy_error)
+                / total_weight
+        };
+        let combined_error = if self.deadband > 0.0 && raw_error.abs() <= self.deadband {
+            0.0
+        } else {
+            raw_error
+        };
+        let trend = if let Some(previous) = self.last_error {
+            let delta = combined_error - previous;
+            let tracked = Self::update_ema(&mut self.trend_ema, delta, self.trend_smoothing);
+            if tracked.is_finite() {
+                tracked
+            } else {
+                0.0
+            }
+        } else {
+            self.trend_ema = Some(0.0);
+            0.0
+        };
+        self.last_error = Some(combined_error);
+
+        let mut step = -self.aggressiveness * combined_error;
+        if self.momentum > 0.0 {
+            step += -self.aggressiveness * self.momentum * trend;
+        }
+        if telemetry.used_fallback() {
+            step -= self.fallback_penalty;
+        }
+
+        if self.confidence_floor > 0.0 || self.confidence_gain > 0.0 {
+            let mut confidence = telemetry.dominant_weight();
+            if !confidence.is_finite() {
+                confidence = 0.0;
+            }
+            confidence = confidence.clamp(0.0, 1.0);
+
+            let mut scale = 1.0;
+            if self.confidence_floor > 0.0 {
+                if confidence < self.confidence_floor {
+                    let floor = self.confidence_floor.max(f32::EPSILON);
+                    scale *= (confidence / floor).clamp(0.0, 1.0);
+                } else if self.confidence_gain > 0.0 {
+                    scale *= 1.0 + self.confidence_gain * (confidence - self.confidence_floor);
+                }
+            } else if self.confidence_gain > 0.0 {
+                scale *= 1.0 + self.confidence_gain * confidence;
+            }
+
+            step *= scale;
+        }
+        let step = step.clamp(-self.max_step, self.max_step);
+
+        let mut next_offset = (self.offset + step).clamp(self.min_offset, self.max_offset);
+        if self.equilibrium_decay > 0.0
+            && combined_error.abs() <= f32::EPSILON
+            && !telemetry.used_fallback()
+        {
+            next_offset *= 1.0 - self.equilibrium_decay;
+            if next_offset.abs() < 1e-6 {
+                next_offset = 0.0;
+            }
+        }
+
+        self.offset = next_offset;
+        self.observations = self.observations.saturating_add(1);
     }
 }
 
@@ -496,6 +881,16 @@ impl PreDiscardTelemetry {
         discarded_energy: f32,
         dominant_weight: f32,
     ) -> Self {
+        let mut dominant_weight = if dominant_weight.is_finite() {
+            dominant_weight.max(0.0).min(1.0)
+        } else {
+            0.0
+        };
+
+        if dominant_weight <= f32::EPSILON {
+            dominant_weight = 0.0;
+        }
+
         Self {
             dominance_ratio: policy.dominance_ratio,
             energy_floor: policy.energy_floor,
@@ -597,7 +992,7 @@ impl PreDiscardTelemetry {
         1.0 - self.survivor_energy_ratio()
     }
 
-    /// Returns the dominant channel weight observed before discard.
+    /// Returns the dominant channel's share of the total pre-discard energy.
     pub fn dominant_weight(&self) -> f32 {
         self.dominant_weight
     }
@@ -763,6 +1158,7 @@ pub struct ZSpaceCoherenceSequencer {
     plugins: Vec<Arc<dyn ZSpaceSequencerPlugin>>,
     pre_discard: Option<PreDiscardPolicy>,
     pre_discard_journal: Arc<Mutex<PreDiscardJournal>>,
+    pre_discard_regulator: Option<Arc<Mutex<PreDiscardRegulator>>>,
 }
 
 impl ZSpaceCoherenceSequencer {
@@ -804,6 +1200,7 @@ impl ZSpaceCoherenceSequencer {
             plugins: Vec::new(),
             pre_discard: None,
             pre_discard_journal: Arc::new(Mutex::new(PreDiscardJournal::new(32))),
+            pre_discard_regulator: None,
         })
     }
 
@@ -1151,13 +1548,13 @@ impl ZSpaceCoherenceSequencer {
     )> {
         let (aggregated, coherence, concept_hint, narrative, pulse) =
             self.forward_with_language_bridges(x, semantics, maxwell_bridge)?;
-        let feedback = psi_bridge.publish(&pulse, psi_step);
-        let psi_reading = hub::get_last_psi();
-        let psi_events = hub::get_last_psi_events();
+        let (feedback, psi_reading, psi_events) = psi_bridge
+            .publish_with_reading(&pulse, psi_step)
+            .into_parts();
 
         self.dispatch_plugins(|| ZSpaceSequencerStage::PsiTelemetryPublished {
             pulse: &pulse,
-            reading: psi_reading.as_ref(),
+            reading: Some(&psi_reading),
             events: psi_events.as_slice(),
             feedback: &feedback,
         })?;
@@ -1168,7 +1565,7 @@ impl ZSpaceCoherenceSequencer {
             concept_hint,
             narrative,
             pulse,
-            psi_reading,
+            Some(psi_reading),
             psi_events,
             feedback,
         ))
@@ -1188,14 +1585,45 @@ impl ZSpaceCoherenceSequencer {
         self.pre_discard = Some(policy);
     }
 
+    /// Enables a pre-discard policy with an adaptive regulator that anticipates low-credence channels.
+    pub fn enable_pre_discard_with_regulator(
+        &mut self,
+        policy: PreDiscardPolicy,
+        regulator: PreDiscardRegulator,
+    ) {
+        self.pre_discard = Some(policy);
+        self.pre_discard_regulator = Some(Arc::new(Mutex::new(regulator)));
+    }
+
+    /// Installs or replaces the adaptive regulator used for pre-discard decisions.
+    pub fn set_pre_discard_regulator(&mut self, regulator: PreDiscardRegulator) {
+        self.pre_discard_regulator = Some(Arc::new(Mutex::new(regulator)));
+    }
+
+    /// Clears any adaptive regulator, reverting to the base pre-discard policy.
+    pub fn clear_pre_discard_regulator(&mut self) {
+        self.pre_discard_regulator = None;
+    }
+
     /// Disables any active pre-discard policy.
     pub fn disable_pre_discard(&mut self) {
         self.pre_discard = None;
+        self.pre_discard_regulator = None;
     }
 
     /// Returns the active pre-discard policy, when configured.
     pub fn pre_discard_policy(&self) -> Option<&PreDiscardPolicy> {
         self.pre_discard.as_ref()
+    }
+
+    /// Returns the adaptive regulator driving pre-discard, when configured.
+    pub fn pre_discard_regulator(&self) -> Option<PreDiscardRegulator> {
+        self.pre_discard_regulator
+            .as_ref()
+            .map(|regulator| match regulator.lock() {
+                Ok(guard) => guard.clone(),
+                Err(poisoned) => poisoned.into_inner().clone(),
+            })
     }
 
     /// Configures how many pre-discard snapshots are retained in memory.
@@ -1494,13 +1922,25 @@ impl ZSpaceCoherenceSequencer {
     }
 
     fn run_pre_discard(&self, coherence: &mut Vec<f32>) -> PureResult<Option<PreDiscardTelemetry>> {
-        let policy = match &self.pre_discard {
-            Some(policy) => policy,
+        let base_policy = match &self.pre_discard {
+            Some(policy) => policy.clone(),
             None => return Ok(None),
         };
+        let mut policy = base_policy.clone();
+        if self.pre_discard_regulator.is_some() {
+            let policy_candidate = {
+                let regulator = self.lock_pre_discard_regulator();
+                regulator.next_policy(&base_policy)?
+            };
+            policy = policy_candidate;
+        }
         let original = coherence.clone();
         let outcome = policy.apply(coherence, &original)?;
         let telemetry = outcome.telemetry().clone();
+        if self.pre_discard_regulator.is_some() {
+            let mut regulator = self.lock_pre_discard_regulator();
+            regulator.observe(&telemetry);
+        }
         let survivors: Vec<usize> = outcome.survivors().to_vec();
         let discarded: Vec<usize> = outcome.discarded().to_vec();
         self.dispatch_plugins(|| ZSpaceSequencerStage::PreDiscardApplied {
@@ -1532,6 +1972,18 @@ impl ZSpaceCoherenceSequencer {
 
     fn lock_pre_discard_journal(&self) -> MutexGuard<'_, PreDiscardJournal> {
         match self.pre_discard_journal.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn lock_pre_discard_regulator(&self) -> MutexGuard<'_, PreDiscardRegulator> {
+        match self
+            .pre_discard_regulator
+            .as_ref()
+            .expect("pre-discard regulator missing")
+            .lock()
+        {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         }
@@ -1742,12 +2194,237 @@ mod tests {
         assert!((telemetry.total_energy() - 0.80025).abs() < 1e-6);
         assert!((telemetry.survivor_energy_ratio() - (0.8 / 0.80025)).abs() < 1e-6);
         assert!((telemetry.discarded_energy_ratio() - (0.00025 / 0.80025)).abs() < 1e-6);
-        assert!((telemetry.dominant_weight() - 0.8).abs() < 1e-6);
+        assert!((telemetry.dominant_weight() - (0.8 / 0.80025)).abs() < 1e-6);
 
         // The mutated weights should be renormalised after discard.
         assert!((weights[0] - 1.0).abs() < 1e-6);
         assert_eq!(weights[1], 0.0);
         assert_eq!(weights[2], 0.0);
+    }
+
+    #[test]
+    fn pre_discard_regulator_reduces_ratio_when_survivors_exceed_target() {
+        let base = PreDiscardPolicy::new(0.7).unwrap().with_min_channels(1);
+        let mut regulator = PreDiscardRegulator::new(0.35, 0.45)
+            .unwrap()
+            .with_aggressiveness(0.9)
+            .unwrap()
+            .with_max_step(0.25)
+            .unwrap();
+
+        let mut weights = vec![0.5f32, 0.35, 0.15];
+        let original = weights.clone();
+        let outcome = base.clone().apply(&mut weights, &original).unwrap();
+        regulator.observe(outcome.telemetry());
+        let adjusted = regulator.next_policy(&base).unwrap();
+
+        assert!(adjusted.dominance_ratio() < base.dominance_ratio());
+        assert!(regulator.observations() >= 1);
+        assert!(regulator.offset() <= 0.0);
+    }
+
+    #[test]
+    fn pre_discard_regulator_penalises_fallbacks() {
+        let base = PreDiscardPolicy::new(0.9).unwrap().with_min_channels(1);
+        let mut regulator = PreDiscardRegulator::new(0.6, 0.4)
+            .unwrap()
+            .with_error_weights(0.3, 0.7)
+            .unwrap()
+            .with_fallback_penalty(0.15)
+            .unwrap();
+
+        let mut weights = vec![0.0f32, 0.0, 0.0];
+        let original = weights.clone();
+        let outcome = base.clone().apply(&mut weights, &original).unwrap();
+        assert!(outcome.telemetry().used_fallback());
+
+        regulator.observe(outcome.telemetry());
+        assert!(regulator.offset() < 0.0);
+    }
+
+    #[test]
+    fn pre_discard_regulator_deadband_suppresses_small_adjustments() {
+        let base = PreDiscardPolicy::new(0.75).unwrap();
+        let mut regulator = PreDiscardRegulator::new(0.55, 0.6)
+            .unwrap()
+            .with_aggressiveness(0.8)
+            .unwrap()
+            .with_max_step(0.3)
+            .unwrap()
+            .with_deadband(0.05)
+            .unwrap();
+
+        let telemetry = PreDiscardTelemetry::new(&base, 4, 6, false, 0.64, 0.36, 0.72);
+        regulator.observe(&telemetry);
+
+        assert_eq!(regulator.offset(), 0.0);
+        assert_eq!(regulator.observations(), 1);
+    }
+
+    #[test]
+    fn pre_discard_regulator_momentum_accelerates_trend() {
+        let base = PreDiscardPolicy::new(0.8).unwrap();
+        let mut baseline = PreDiscardRegulator::new(0.45, 0.55)
+            .unwrap()
+            .with_aggressiveness(0.6)
+            .unwrap()
+            .with_max_step(0.25)
+            .unwrap();
+        let mut momentum = PreDiscardRegulator::new(0.45, 0.55)
+            .unwrap()
+            .with_aggressiveness(0.6)
+            .unwrap()
+            .with_max_step(0.25)
+            .unwrap()
+            .with_momentum(0.75)
+            .unwrap()
+            .with_trend_smoothing(0.4)
+            .unwrap();
+
+        let telemetry_a = PreDiscardTelemetry::new(&base, 3, 7, false, 0.72, 0.28, 0.6);
+        let telemetry_b = PreDiscardTelemetry::new(&base, 2, 9, false, 0.88, 0.12, 0.62);
+
+        baseline.observe(&telemetry_a);
+        momentum.observe(&telemetry_a);
+        assert!((baseline.offset() - momentum.offset()).abs() < 1e-6);
+
+        baseline.observe(&telemetry_b);
+        momentum.observe(&telemetry_b);
+
+        assert!(momentum.offset() < baseline.offset());
+    }
+
+    #[test]
+    fn pre_discard_regulator_equilibrium_decay_relaxes_offset() {
+        let base = PreDiscardPolicy::new(0.7).unwrap();
+        let mut regulator = PreDiscardRegulator::new(0.4, 0.5)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.9)
+            .unwrap()
+            .with_max_step(0.4)
+            .unwrap()
+            .with_equilibrium_decay(0.3)
+            .unwrap();
+
+        let skewed = PreDiscardTelemetry::new(&base, 8, 2, false, 0.18, 0.82, 0.68);
+        regulator.observe(&skewed);
+        let biased_offset = regulator.offset();
+        assert!(biased_offset.abs() > 0.0);
+
+        let equilibrium = PreDiscardTelemetry::new(&base, 6, 4, false, 0.5, 0.5, 0.7);
+        regulator.observe(&equilibrium);
+
+        assert!(regulator.offset().abs() < biased_offset.abs());
+    }
+
+    #[test]
+    fn pre_discard_regulator_trend_configuration_validated() {
+        let regulator = PreDiscardRegulator::new(0.4, 0.5).unwrap();
+        assert!(regulator.clone().with_trend_smoothing(1.2).is_err());
+        assert!(regulator.clone().with_momentum(-0.1).is_err());
+        assert!(regulator.clone().with_deadband(-0.01).is_err());
+        assert!(regulator.clone().with_equilibrium_decay(1.5).is_err());
+        assert!(regulator.clone().with_confidence_scaling(1.2, 0.0).is_err());
+        assert!(regulator
+            .clone()
+            .with_confidence_scaling(0.4, -0.1)
+            .is_err());
+        assert!(regulator
+            .clone()
+            .with_trend_smoothing(0.0)
+            .unwrap()
+            .with_momentum(0.0)
+            .unwrap()
+            .with_deadband(0.0)
+            .unwrap()
+            .with_equilibrium_decay(0.5)
+            .unwrap()
+            .with_confidence_scaling(0.6, 0.3)
+            .is_ok());
+    }
+
+    #[test]
+    fn pre_discard_regulator_confidence_scaling_dampens_low_signal() {
+        let base = PreDiscardPolicy::new(0.7).unwrap();
+        let telemetry = PreDiscardTelemetry::new(&base, 4, 6, false, 0.62, 0.38, 0.2);
+
+        let mut baseline = PreDiscardRegulator::new(0.45, 0.55)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.9)
+            .unwrap()
+            .with_max_step(0.4)
+            .unwrap();
+        let mut confidence = baseline.clone().with_confidence_scaling(0.6, 0.0).unwrap();
+
+        baseline.observe(&telemetry);
+        confidence.observe(&telemetry);
+
+        assert!(confidence.offset().abs() < baseline.offset().abs());
+    }
+
+    #[test]
+    fn pre_discard_regulator_confidence_scaling_accelerates_high_signal() {
+        let base = PreDiscardPolicy::new(0.7).unwrap();
+        let telemetry = PreDiscardTelemetry::new(&base, 2, 8, false, 0.85, 0.15, 0.92);
+
+        let mut baseline = PreDiscardRegulator::new(0.35, 0.45)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.75)
+            .unwrap()
+            .with_max_step(0.6)
+            .unwrap();
+        let mut confidence = baseline.clone().with_confidence_scaling(0.5, 0.8).unwrap();
+
+        baseline.observe(&telemetry);
+        confidence.observe(&telemetry);
+
+        assert!(confidence.offset().abs() > baseline.offset().abs());
+    }
+
+    #[test]
+    fn adaptive_pre_discard_regulator_adjusts_over_time() {
+        let topos = OpenCartesianTopos::new(-0.8, 1e-5, 10.0, 256, 8192).unwrap();
+        let mut seq = ZSpaceCoherenceSequencer::new(192, 6, -0.8, topos).unwrap();
+        let policy = PreDiscardPolicy::new(0.85).unwrap().with_min_channels(2);
+        let regulator = PreDiscardRegulator::new(0.4, 0.5)
+            .unwrap()
+            .with_aggressiveness(0.95)
+            .unwrap()
+            .with_max_step(0.3)
+            .unwrap();
+        seq.enable_pre_discard_with_regulator(policy, regulator);
+
+        let mut stimulus = vec![0.25f32; 192];
+        for (idx, value) in stimulus.iter_mut().enumerate() {
+            if idx % 3 == 0 {
+                *value = 0.8;
+            }
+        }
+        let x = Tensor::from_vec(1, 192, stimulus).unwrap();
+
+        let mut observed_ratios = Vec::new();
+        for _ in 0..5 {
+            let (_, _, diagnostics) = seq.forward_with_diagnostics(&x).unwrap();
+            let telemetry = diagnostics
+                .pre_discard()
+                .expect("pre-discard telemetry should be present");
+            observed_ratios.push(telemetry.dominance_ratio());
+        }
+
+        assert!(observed_ratios.len() >= 2);
+        assert!(observed_ratios
+            .windows(2)
+            .any(|window| window[1] < window[0] - 1e-4));
+        let regulator_state = seq
+            .pre_discard_regulator()
+            .expect("regulator should remain configured");
+        assert!(regulator_state.observations() >= observed_ratios.len() as u64 - 1);
     }
 
     #[test]
