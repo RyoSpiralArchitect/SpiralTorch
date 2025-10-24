@@ -107,6 +107,102 @@
               Dataset/GDG target
               <input id="dataset" name="dataset" placeholder="ST.DATA.NARRATION(+1)" />
             </label>
+            <div class="inline">
+              <label>
+                PDS member (optional)
+                <input id="dataset-member" name="dataset-member" placeholder="NARRATE" />
+              </label>
+              <label>
+                Disposition
+                <input id="dataset-disposition" name="dataset-disposition" placeholder="SHR" />
+              </label>
+              <label>
+                Volume serial
+                <input id="dataset-volume" name="dataset-volume" placeholder="VOL001" />
+              </label>
+            </div>
+            <div class="inline">
+              <label>
+                Record format
+                <input id="dataset-record-format" name="dataset-record-format" placeholder="FB" />
+              </label>
+              <label>
+                Record length
+                <input id="dataset-record-length" name="dataset-record-length" placeholder="512" />
+              </label>
+              <label>
+                Block size
+                <input id="dataset-block-size" name="dataset-block-size" placeholder="6144" />
+              </label>
+            </div>
+            <div class="inline">
+              <label>
+                Data class
+                <input id="dataset-data-class" name="dataset-data-class" placeholder="NARRATE" />
+              </label>
+              <label>
+                Management class
+                <input
+                  id="dataset-management-class"
+                  name="dataset-management-class"
+                  placeholder="GDG"
+                />
+              </label>
+              <label>
+                Storage class
+                <input id="dataset-storage-class" name="dataset-storage-class" placeholder="FASTIO" />
+              </label>
+            </div>
+            <div class="inline">
+              <label>
+                Primary space
+                <input
+                  id="dataset-space-primary"
+                  name="dataset-space-primary"
+                  type="number"
+                  min="1"
+                  placeholder="15"
+                />
+              </label>
+              <label>
+                Secondary space
+                <input
+                  id="dataset-space-secondary"
+                  name="dataset-space-secondary"
+                  type="number"
+                  min="1"
+                  placeholder="5"
+                />
+              </label>
+              <label>
+                Space unit
+                <input id="dataset-space-unit" name="dataset-space-unit" placeholder="CYL" />
+              </label>
+            </div>
+            <div class="inline">
+              <label>
+                Directory blocks
+                <input
+                  id="dataset-directory-blocks"
+                  name="dataset-directory-blocks"
+                  type="number"
+                  min="1"
+                  placeholder="45"
+                />
+              </label>
+              <label>
+                Dataset type (DSNTYPE)
+                <input id="dataset-type" name="dataset-type" placeholder="LIBRARY" />
+              </label>
+              <label>
+                Like dataset
+                <input
+                  id="dataset-like"
+                  name="dataset-like"
+                  placeholder="ST.DATA.TEMPLATE"
+                />
+              </label>
+            </div>
           </fieldset>
           <fieldset>
             <legend>Dispatch</legend>

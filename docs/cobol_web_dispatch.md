@@ -27,7 +27,11 @@ An envelope contains five sections:
 2. **Initiators** — a list describing the humans, models, or automation agents
    that collaborated on the narration request.
 3. **Route** — optional MQ, CICS, and dataset selectors that inform the
-   receiving COBOL code where to dispatch the payload.
+   receiving COBOL code where to dispatch the payload. Dataset selectors can
+   now carry richer metadata (PDS member, disposition, volume serial, DCB
+   attributes, SMS class hints, SPACE allocations, DSNTYPE, and LIKE templates)
+   so batch writers or GDG loaders can stage the payload precisely without
+   extra glue code in the bridge layer.
 4. **Narrator payload** — curvature, temperature, encoder identifier, locale,
    and coefficient buffer.
 5. **Metadata** — tags, annotations, and an open `extra` field that accepts
@@ -57,6 +61,22 @@ builder.add_initiator(make_initiator(
     Some("validated dataset selection".into()),
 ));
 builder.set_mq_route("MQ1", "NARRATION.INBOUND", Some("sync".into()));
+builder.set_dataset(Some("HLQ.DATA".into()));
+builder.set_dataset_member(Some("NARRATE".into()));
+builder.set_dataset_disposition(Some("SHR".into()));
+builder.set_dataset_volume(Some("VOL001".into()));
+builder.set_dataset_record_format(Some("FB".into()));
+builder.set_dataset_record_length(Some(512));
+builder.set_dataset_block_size(Some(6144));
+builder.set_dataset_data_class(Some("NARRATE".into()));
+builder.set_dataset_management_class(Some("GDG".into()));
+builder.set_dataset_storage_class(Some("FASTIO".into()));
+builder.set_dataset_space_primary(Some(15));
+builder.set_dataset_space_secondary(Some(5));
+builder.set_dataset_space_unit(Some("CYL".into()));
+builder.set_dataset_directory_blocks(Some(30));
+builder.set_dataset_type(Some("LIBRARY".into()));
+builder.set_dataset_like(Some("ST.DATA.TEMPLATE".into()));
 builder.add_tag("browser-ui");
 let envelope = builder.snapshot();
 let json = envelope.to_json_string()?;
@@ -96,6 +116,22 @@ planner.setNarratorConfig(0.8, 0.35, "spiraltorch.default", null);
 planner.setCoefficients(new Float32Array([0.25, 0.33, 0.48]));
 planner.addHumanInitiator("Analyst", null, "analyst@example", "pilot run");
 planner.setMqRoute("QM1", "SPIRALTORCH.INBOUND", "commit");
+planner.setDataset("HLQ.DATA(+1)");
+planner.setDatasetMember("NARRATE");
+planner.setDatasetDisposition("SHR");
+planner.setDatasetVolume("VOL001");
+planner.setDatasetRecordFormat("FB");
+planner.setDatasetRecordLength(512);
+planner.setDatasetBlockSize(6144);
+planner.setDatasetDataClass("NARRATE");
+planner.setDatasetManagementClass("GDG");
+planner.setDatasetStorageClass("FASTIO");
+planner.setDatasetSpacePrimary(15);
+planner.setDatasetSpaceSecondary(5);
+planner.setDatasetSpaceUnit("CYL");
+planner.setDatasetDirectoryBlocks(30);
+planner.setDatasetType("LIBRARY");
+planner.setDatasetLike("ST.DATA.TEMPLATE");
 const jsonEnvelope = planner.toJson();
 const bytes = planner.toUint8Array();
 
@@ -115,6 +151,10 @@ const imported = CobolDispatchPlanner.fromJson(savedJson);
 imported.setReleaseChannel("staging");
 ```
 
+Passing `null`/`undefined` into `setDataset` or any of the dataset metadata
+setters clears the previous value, which is useful when a UI allows operators to
+remove fields without rebuilding the planner instance.
+
 `toJson()` returns a pretty-printed string suited for debugging UIs while
 `toUint8Array()` yields raw bytes ready for HTTP bridges or MQ payloads.
 
@@ -129,6 +169,10 @@ UI can call `setCreatedAt()` with an explicit value or `resetCreatedAt()` to
 request a new server-side default.  These helpers keep the WebAssembly layer in
 sync with the Rust builder’s semantics.
 
+When it comes time to consume the metadata on z/OS, refer to
+`examples/cobol/st_dataset_writer.cbl` for a concrete BPXWDYN allocation
+example driven entirely by the planner's dataset hints.
+
 ## Validating envelopes
 
 Before dispatching, both the Rust builder and the WebAssembly planner can audit
@@ -138,6 +182,12 @@ needed.  Browser callers can mirror the same workflow with
 `planner.validationIssues()` and `planner.isValid()`.  The checks flag missing
 initiators, absent routes, narrator settings outside the 0–1 range, and jobs
 that still rely on the default `job` placeholder identifier.
+Dataset hints must also remain internally consistent: the planner warns when a
+block size is not a clean multiple of the record length, when SPACE units lack
+matching allocations, when secondary extents appear without a primary, when
+directory blocks are provided for non-partitioned targets, or when DSNTYPE is
+outside the supported set. These checks surface problems before SMS allocation
+commands reach BPXWDYN.
 
 ## Dispatching to mainframe bridges
 
