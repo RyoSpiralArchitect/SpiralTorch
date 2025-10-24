@@ -98,12 +98,19 @@ impl DenseContext {
         })
         .ok_or_else(|| "no suitable WGPU adapter".to_string())?;
 
+        let adapter_features = adapter.features();
+        let requested_features = if adapter_features.contains(wgpu::Features::SUBGROUPS) {
+            wgpu::Features::SUBGROUPS
+        } else {
+            wgpu::Features::empty()
+        };
+
         let (device, queue) = pollster::block_on(async {
             adapter
                 .request_device(
                     &wgpu::DeviceDescriptor {
                         label: None,
-                        required_features: wgpu::Features::empty(),
+                        required_features: requested_features,
                         required_limits: adapter.limits(),
                     },
                     None,
@@ -112,6 +119,7 @@ impl DenseContext {
         })
         .map_err(|err| err.to_string())?;
 
+        let features = device.features();
         let device: Arc<Device> = Arc::new(device);
         let queue: Arc<Queue> = Arc::new(queue);
 
@@ -1162,6 +1170,20 @@ pub fn is_available() -> bool {
     dense_context().is_ok()
 }
 
+pub fn supports_row_softmax(rows: usize, cols: usize) -> bool {
+    if rows == 0 || cols == 0 {
+        return false;
+    }
+    if rows > u32::MAX as usize || cols > u32::MAX as usize {
+        return false;
+    }
+    if let Ok(ctx) = dense_context() {
+        ctx.supports_softmax()
+    } else {
+        false
+    }
+}
+
 fn dispatch_matmul(
     ctx: &DenseContext,
     encoder: &mut wgpu::CommandEncoder,
@@ -1300,6 +1322,7 @@ pub fn conv_im2col_gemm(
     dilation_h: usize,
     dilation_w: usize,
     weight_t: &[f32],
+    bias: Option<&[f32]>,
     out_channels: usize,
     out_h: usize,
     out_w: usize,
@@ -1327,6 +1350,11 @@ pub fn conv_im2col_gemm(
     }
     if weight_t.len() != span * out_channels {
         return Err("transposed weight buffer length mismatch".into());
+    }
+    if let Some(bias) = bias {
+        if bias.len() != out_channels {
+            return Err("bias length mismatch".into());
+        }
     }
 
     let ctx = dense_context()?;
