@@ -225,6 +225,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Limit the number of pairs processed after optional shuffling.",
     )
     hypergrad.add_argument(
+        "--pairs-offset",
+        type=int,
+        default=0,
+        help="Skip the first N pairs after optional shuffling.",
+    )
+    hypergrad.add_argument(
+        "--pairs-every",
+        type=int,
+        default=None,
+        help="Retain every Nth pair after applying --pairs-offset (1 keeps all).",
+    )
+    hypergrad.add_argument(
         "--pairs-stdin",
         action="store_true",
         help="Read prediction/target pairs from stdin (JSON array or 'pred|target' per line).",
@@ -302,6 +314,18 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Limit the number of text samples absorbed after optional shuffling.",
+    )
+    hypergrad.add_argument(
+        "--text-offset",
+        type=int,
+        default=0,
+        help="Skip the first N text samples after optional shuffling.",
+    )
+    hypergrad.add_argument(
+        "--text-every",
+        type=int,
+        default=None,
+        help="Retain every Nth text sample after applying --text-offset (1 keeps all).",
     )
     hypergrad.add_argument(
         "--text-stdin",
@@ -429,17 +453,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if stdin_cache is None:
                 stdin_cache = sys.stdin.read()
             text_samples.extend(_load_texts_from_text(stdin_cache))
-        if args.pairs_shuffle or args.pairs_limit is not None:
+        if (
+            args.pairs_shuffle
+            or args.pairs_limit is not None
+            or args.pairs_offset
+            or args.pairs_every is not None
+        ):
             try:
                 pairs = select_entries(
                     pairs,
                     shuffle=args.pairs_shuffle,
                     limit=args.pairs_limit,
                     seed=args.seed,
+                    offset=args.pairs_offset,
+                    every=args.pairs_every,
                 )
             except ValueError as exc:
                 parser.error(str(exc))
-        if args.text_shuffle or args.text_limit is not None:
+        if (
+            args.text_shuffle
+            or args.text_limit is not None
+            or args.text_offset
+            or args.text_every is not None
+        ):
             text_seed = None if args.seed is None else args.seed + 1
             try:
                 text_samples = select_entries(
@@ -447,6 +483,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     shuffle=args.text_shuffle,
                     limit=args.text_limit,
                     seed=text_seed,
+                    offset=args.text_offset,
+                    every=args.text_every,
                 )
             except ValueError as exc:
                 parser.error(str(exc))
