@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
-from collections.abc import Iterable as IterableABC, Mapping, Sequence as SequenceABC
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence
 
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parent))
@@ -23,6 +21,16 @@ if __package__ in (None, ""):
         PurePythonBridge,
         resolve_library_path,
     )
+    from pure_bridge_io import (  # type: ignore[no-redef]
+        FloatPair,
+        load_pairs_from_path,
+        load_pairs_from_text,
+        load_weights_from_path,
+        load_weights_from_text,
+        parse_float_sequence,
+        reshape,
+        summarize,
+    )
 else:
     from .pure_bridge import (
         LibraryLoadError,
@@ -30,43 +38,21 @@ else:
         PurePythonBridge,
         resolve_library_path,
     )
-
-FloatPair = Tuple[List[float], List[float]]
-
-
-def _float_sequence_from_obj(obj: Any) -> List[float]:
-    if isinstance(obj, str):
-        return _parse_float_sequence(obj)
-    if isinstance(obj, Mapping):
-        raise ValueError("Mapping inputs must expose 'prediction'/'target' keys, not nested maps")
-    if isinstance(obj, SequenceABC):
-        return [float(item) for item in obj]
-    if isinstance(obj, IterableABC):
-        return [float(item) for item in obj]
-    raise ValueError("Expected a list of numbers or a comma/JSON encoded string")
-
-
-def _parse_float_sequence(raw: str) -> List[float]:
-    text = raw.strip()
-    if not text:
-        return []
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        items = [segment.strip() for segment in text.split(",") if segment.strip()]
-    else:
-        if not isinstance(data, (list, tuple)):
-            raise ValueError("Expected an array of numbers")
-        items = data
-    floats: List[float] = []
-    for item in items:
-        floats.append(float(item))
-    return floats
+    from .pure_bridge_io import (
+        FloatPair,
+        load_pairs_from_path,
+        load_pairs_from_text,
+        load_weights_from_path,
+        load_weights_from_text,
+        parse_float_sequence,
+        reshape,
+        summarize,
+    )
 
 
 def _float_sequence_argument(value: str) -> List[float]:
     try:
-        return _parse_float_sequence(value)
+        return parse_float_sequence(value)
     except ValueError as exc:  # pragma: no cover - argparse maps to CLI error
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
@@ -77,119 +63,37 @@ def _pair_argument(value: str) -> FloatPair:
     except ValueError as exc:  # pragma: no cover - CLI validation
         raise argparse.ArgumentTypeError(f"Invalid pair '{value}': {exc}") from exc
     try:
-        return _parse_float_sequence(prediction_raw), _parse_float_sequence(target_raw)
+        return parse_float_sequence(prediction_raw), parse_float_sequence(target_raw)
     except ValueError as exc:  # pragma: no cover - CLI validation
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _load_pairs_from_file(path: Path) -> List[FloatPair]:
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise argparse.ArgumentTypeError(f"Failed to read pairs file '{path}': {exc}") from exc
-
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        return [_pair_argument(line) for line in lines]
-
-    if not isinstance(data, list):
-        raise argparse.ArgumentTypeError("Pairs file must contain a JSON array")
-
-    parsed: List[FloatPair] = []
-    for idx, item in enumerate(data):
-        if isinstance(item, dict):
-            if "prediction" in item and "target" in item:
-                pred = _float_sequence_from_obj(item["prediction"])
-                tgt = _float_sequence_from_obj(item["target"])
-            elif "pred" in item and "tgt" in item:
-                pred = _float_sequence_from_obj(item["pred"])
-                tgt = _float_sequence_from_obj(item["tgt"])
-            else:
-                raise argparse.ArgumentTypeError(
-                    f"Entry {idx} missing 'prediction'/'target' keys"
-                )
-        elif isinstance(item, (list, tuple)) and len(item) == 2:
-            pred = _float_sequence_from_obj(item[0])
-            tgt = _float_sequence_from_obj(item[1])
-        else:
-            raise argparse.ArgumentTypeError(
-                f"Entry {idx} must be [prediction, target] or have prediction/target keys"
-            )
-        parsed.append((pred, tgt))
-    return parsed
+        return load_pairs_from_path(path)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _load_pairs_from_text(text: str) -> List[FloatPair]:
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return [_pair_argument(line) for line in lines]
-
-    if not isinstance(data, list):
-        raise argparse.ArgumentTypeError("Pairs input must be a JSON array when read from stdin")
-
-    parsed: List[FloatPair] = []
-    for idx, item in enumerate(data):
-        if isinstance(item, dict):
-            if "prediction" in item and "target" in item:
-                pred = _float_sequence_from_obj(item["prediction"])
-                tgt = _float_sequence_from_obj(item["target"])
-            elif "pred" in item and "tgt" in item:
-                pred = _float_sequence_from_obj(item["pred"])
-                tgt = _float_sequence_from_obj(item["tgt"])
-            else:
-                raise argparse.ArgumentTypeError(
-                    f"Entry {idx} missing 'prediction'/'target' keys"
-                )
-        elif isinstance(item, (list, tuple)) and len(item) == 2:
-            pred = _float_sequence_from_obj(item[0])
-            tgt = _float_sequence_from_obj(item[1])
-        else:
-            raise argparse.ArgumentTypeError(
-                f"Entry {idx} must contain prediction and target sequences"
-            )
-        parsed.append((pred, tgt))
-    return parsed
+        return load_pairs_from_text(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _load_weights_from_file(path: Path) -> List[float]:
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise argparse.ArgumentTypeError(f"Failed to read weights file '{path}': {exc}") from exc
-    return _float_sequence_argument(text)
+        return load_weights_from_path(path)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _load_weights_from_text(text: str) -> List[float]:
-    return _float_sequence_argument(text)
-
-
-def _summarize(values: Sequence[float]) -> Dict[str, Union[float, int, None]]:
-    if not values:
-        return {
-            "count": 0,
-            "min": None,
-            "max": None,
-            "mean": None,
-            "l1": 0.0,
-            "l2": 0.0,
-        }
-
-    count = len(values)
-    total = sum(values)
-    l1 = sum(abs(value) for value in values)
-    l2 = math.sqrt(sum(value * value for value in values))
-    return {
-        "count": count,
-        "min": min(values),
-        "max": max(values),
-        "mean": total / float(count),
-        "l1": l1,
-        "l2": l2,
-    }
+    try:
+        return load_weights_from_text(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _emit_json(data: Any, indent: Optional[int], output: Optional[Path]) -> None:
@@ -291,6 +195,16 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include summary statistics alongside the gradient output.",
     )
+    hypergrad.add_argument(
+        "--matrix",
+        action="store_true",
+        help="Reshape the gradient using the provided rows/cols before emission.",
+    )
+    hypergrad.add_argument(
+        "--emit-weights",
+        action="store_true",
+        help="Include the final weight vector in the JSON payload when applying weights.",
+    )
     topos_group = hypergrad.add_argument_group(
         "topos",
         "Optional OpenCartesianTopos parameters to couple the hypergrad against",
@@ -385,6 +299,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 if stdin_cache is None:
                     stdin_cache = sys.stdin.read()
                 weights = _load_weights_from_text(stdin_cache)
+            applied_weights: Optional[List[float]] = None
             with bridge.hypergrad(
                 args.curvature,
                 args.learning_rate,
@@ -395,16 +310,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 for prediction, target in pairs:
                     hypergrad.accumulate_pair(prediction, target)
                 if weights is not None:
-                    hypergrad.apply(weights)
+                    applied_weights = hypergrad.apply(weights)
                 gradient = hypergrad.gradient()
-            if args.summarize:
-                payload = {
-                    "gradient": gradient,
-                    "summary": _summarize(gradient),
-                }
+            if args.summarize or args.matrix or args.emit_weights:
+                payload: Dict[str, object] = {"gradient": gradient}
+                if args.matrix:
+                    try:
+                        payload["matrix"] = reshape(gradient, args.rows, args.cols)
+                    except ValueError as exc:
+                        parser.error(str(exc))
+                if args.summarize:
+                    payload["summary"] = summarize(gradient)
+                if args.emit_weights and applied_weights is not None:
+                    payload["weights"] = applied_weights
+                elif args.emit_weights:
+                    payload["weights"] = None
+                _emit_json(payload, args.indent, args.output)
             else:
-                payload = gradient
-            _emit_json(payload, args.indent, args.output)
+                _emit_json(gradient, args.indent, args.output)
             return 0
 
     parser.error(f"Unknown command: {args.command}")
