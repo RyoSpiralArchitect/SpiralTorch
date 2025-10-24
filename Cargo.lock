@@ -2819,6 +2819,7 @@ dependencies = [
  "base64 0.21.7",
  "cc",
  "serde",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
