@@ -3003,6 +3003,7 @@ dependencies = [
  "pollster",
  "rand",
  "rand_distr",
+ "rayon",
  "serde",
  "st-frac",
  "wgpu",
