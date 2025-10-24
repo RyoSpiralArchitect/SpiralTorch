@@ -8,8 +8,8 @@
 enable subgroups;
 
 struct LParams {
-  dims:    vec4<u32>;  // x: length, y: partial_count, z: unused, w: unused
-  scalars: vec4<f32>;  // x: alpha (scale/axpy), others reserved
+  dims:    vec4<u32>,  // x: length, y: partial_count, z: unused, w: unused
+  scalars: vec4<f32>,  // x: alpha (scale/axpy), others reserved
 };
 
 @group(0) @binding(0) var<storage, read>  VX: array<f32>;

@@ -1,9 +1,9 @@
 {f16_enable}
 struct MatmulUniforms {
-    rows: u32;
-    cols: u32;
-    inner: u32;
-    flags: u32;
+    rows: u32,
+    cols: u32,
+    inner: u32,
+    flags: u32,
 };
 
 const FLAG_USE_BIAS: u32 = 1u << 0u;

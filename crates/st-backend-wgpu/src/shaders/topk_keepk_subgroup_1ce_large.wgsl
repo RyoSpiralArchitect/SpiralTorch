@@ -1,12 +1,12 @@
 enable chromium_experimental_subgroups;
 
 // Packed input: u64 as 2x u32 (lo=index bits, hi=f32 bits)
-struct InP { data: array<u32>; };
-struct OutV { data: array<f32>; };
-struct OutI { data: array<i32>; };
+struct InP { data: array<u32>, };
+struct OutV { data: array<f32>, };
+struct OutI { data: array<i32>, };
 
 // P: rows, cols, k_final, tile_cols
-struct Params { rows:u32, cols:u32, k:u32, tile:u32; }
+struct Params { rows:u32, cols:u32, k:u32, tile:u32, }
 
 @group(0) @binding(0) var<storage, read>       packed : InP;
 @group(0) @binding(1) var<storage, read_write> out_v  : OutV;

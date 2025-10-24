@@ -1,8 +1,8 @@
 // wgpu_kernels_linops.wgsl (v1.9.0) – vector primitives (copy/scale/axpy) + dot reduction
 
 struct LParams {
-  dims:    vec4<u32>;  // x: length, y: partial_count, z: unused, w: unused
-  scalars: vec4<f32>;  // x: alpha (scale/axpy), others reserved
+  dims:    vec4<u32>,  // x: length, y: partial_count, z: unused, w: unused
+  scalars: vec4<f32>,  // x: alpha (scale/axpy), others reserved
 };
 @group(0) @binding(0) var<storage, read>  VX: array<f32>;
 @group(0) @binding(1) var<storage, read>  VY: array<f32>;

@@ -1,11 +1,11 @@
 // Apply Pass: computes row block offsets from tilecnt, then scatters kept items.
-struct InV { data: array<f32>; }
-struct InI { data: array<i32>; }
-struct Param { rows:u32, cols:u32, low:f32, high:f32, tiles_per_row:u32 }
-struct Flags { data: array<u32>; }
-struct TileCnt { data: array<u32>; }
-struct OutV { data: array<f32>; }
-struct OutI { data: array<i32>; }
+struct InV { data: array<f32>, }
+struct InI { data: array<i32>, }
+struct Param { rows:u32, cols:u32, low:f32, high:f32, tiles_per_row:u32, }
+struct Flags { data: array<u32>, }
+struct TileCnt { data: array<u32>, }
+struct OutV { data: array<f32>, }
+struct OutI { data: array<i32>, }
 @group(0) @binding(0) var<storage, read>   vin   : InV;
 @group(0) @binding(1) var<storage, read>   iin   : InI;
 @group(0) @binding(2) var<storage, read>   flags : Flags;

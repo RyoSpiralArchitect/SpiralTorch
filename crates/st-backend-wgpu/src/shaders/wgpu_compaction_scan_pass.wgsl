@@ -1,8 +1,8 @@
 // Scan pass: compute per-element exclusive positions for kept elements within [low, high].
 // One WG (256) per row; tiles across columns.
-struct InV { data: array<f32>; }
-struct Pos { data: array<u32>; }
-struct Param { rows:u32, cols:u32, low:f32, high:f32, tile:u32 }
+struct InV { data: array<f32>, }
+struct Pos { data: array<u32>, }
+struct Param { rows:u32, cols:u32, low:f32, high:f32, tile:u32, }
 
 @group(0) @binding(0) var<storage, read>   vin : InV;
 @group(0) @binding(1) var<storage, read_write> pos: Pos;
