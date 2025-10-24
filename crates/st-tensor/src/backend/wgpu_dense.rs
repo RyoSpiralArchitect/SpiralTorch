@@ -6,12 +6,13 @@
 #![cfg(feature = "wgpu")]
 
 use crate::util::readback_f32;
-use std::sync::{Arc, OnceLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Queue};
+use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, PipelineLayout, Queue};
 
-const MATMUL_WGSL: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
-const IM2COL_WGSL: &str = include_str!("../wgpu_shaders/im2col_5d.wgsl");
+const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
+const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -22,13 +23,30 @@ struct MatmulParams {
     _pad: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct TileConfig {
+    tile_size: u32,
+}
+
+impl TileConfig {
+    const fn new(tile_size: u32) -> Self {
+        Self { tile_size }
+    }
+
+    const fn tile_size(&self) -> u32 {
+        self.tile_size
+    }
+}
+
 struct DenseContext {
     device: Arc<Device>,
     queue: Arc<Queue>,
-    pipeline: ComputePipeline,
     bind_layout: BindGroupLayout,
-    im2col_pipeline: ComputePipeline,
-    im2col_layout: BindGroupLayout,
+    pipeline_layout: PipelineLayout,
+    matmul_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
+    fused_conv_layout: BindGroupLayout,
+    fused_conv_pipeline_layout: PipelineLayout,
+    fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
 }
 
 impl DenseContext {
@@ -113,19 +131,9 @@ impl DenseContext {
             bind_group_layouts: &[&bind_layout],
             push_constant_ranges: &[],
         });
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("st.tensor.wgpu_dense.shader"),
-            source: wgpu::ShaderSource::Wgsl(MATMUL_WGSL.into()),
-        });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("st.tensor.wgpu_dense.pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "main",
-        });
 
-        let im2col_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("st.tensor.wgpu_dense.im2col_layout"),
+        let fused_conv_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("st.tensor.wgpu_dense.fused_conv_layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -141,7 +149,7 @@ impl DenseContext {
                     binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -149,6 +157,16 @@ impl DenseContext {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -159,31 +177,22 @@ impl DenseContext {
                 },
             ],
         });
-
-        let im2col_pipeline_layout =
+        let fused_conv_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("st.tensor.wgpu_dense.im2col_pipeline_layout"),
-                bind_group_layouts: &[&im2col_layout],
+                label: Some("st.tensor.wgpu_dense.fused_conv_pipeline_layout"),
+                bind_group_layouts: &[&fused_conv_layout],
                 push_constant_ranges: &[],
             });
-        let im2col_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("st.tensor.wgpu_dense.im2col_shader"),
-            source: wgpu::ShaderSource::Wgsl(IM2COL_WGSL.into()),
-        });
-        let im2col_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("st.tensor.wgpu_dense.im2col_pipeline"),
-            layout: Some(&im2col_pipeline_layout),
-            module: &im2col_shader,
-            entry_point: "main",
-        });
 
         Ok(Self {
             device,
             queue,
-            pipeline,
             bind_layout,
-            im2col_pipeline,
-            im2col_layout,
+            pipeline_layout,
+            matmul_pipelines: Mutex::new(HashMap::new()),
+            fused_conv_layout,
+            fused_conv_pipeline_layout,
+            fused_conv_pipelines: Mutex::new(HashMap::new()),
         })
     }
 
@@ -195,12 +204,70 @@ impl DenseContext {
         self.queue.as_ref()
     }
 
-    fn pipeline(&self) -> &ComputePipeline {
-        &self.pipeline
+    fn pipeline_for(&self, config: TileConfig) -> Arc<ComputePipeline> {
+        let mut pipelines = self.matmul_pipelines.lock().unwrap();
+        if let Some(pipeline) = pipelines.get(&config) {
+            return pipeline.clone();
+        }
+
+        let shader_source = format!(MATMUL_WGSL_TEMPLATE, tile_size = config.tile_size());
+        let shader_label = format!(
+            "st.tensor.wgpu_dense.matmul_shader.tile{}",
+            config.tile_size()
+        );
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(&shader_label),
+                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+            });
+        let pipeline_label = format!(
+            "st.tensor.wgpu_dense.matmul_pipeline.tile{}",
+            config.tile_size()
+        );
+        let pipeline = Arc::new(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some(&pipeline_label),
+                layout: Some(&self.pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+            },
+        ));
+        pipelines.insert(config, pipeline.clone());
+        pipeline
     }
 
-    fn im2col_pipeline(&self) -> &ComputePipeline {
-        &self.im2col_pipeline
+    fn fused_conv_pipeline_for(&self, config: TileConfig) -> Arc<ComputePipeline> {
+        let mut pipelines = self.fused_conv_pipelines.lock().unwrap();
+        if let Some(pipeline) = pipelines.get(&config) {
+            return pipeline.clone();
+        }
+
+        let shader_source = format!(FUSED_CONV_WGSL_TEMPLATE, tile_size = config.tile_size());
+        let shader_label = format!(
+            "st.tensor.wgpu_dense.fused_conv_shader.tile{}",
+            config.tile_size()
+        );
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(&shader_label),
+                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+            });
+        let pipeline_label = format!(
+            "st.tensor.wgpu_dense.fused_conv_pipeline.tile{}",
+            config.tile_size()
+        );
+        let pipeline = Arc::new(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some(&pipeline_label),
+                layout: Some(&self.fused_conv_pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+            },
+        ));
+        pipelines.insert(config, pipeline.clone());
+        pipeline
     }
 
     fn bind_group(&self, a: &Buffer, b: &Buffer, c: &Buffer, params: &Buffer) -> BindGroup {
@@ -228,10 +295,16 @@ impl DenseContext {
         })
     }
 
-    fn im2col_bind_group(&self, input: &Buffer, patches: &Buffer, params: &Buffer) -> BindGroup {
+    fn fused_conv_bind_group(
+        &self,
+        input: &Buffer,
+        weights: &Buffer,
+        output: &Buffer,
+        params: &Buffer,
+    ) -> BindGroup {
         self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("st.tensor.wgpu_dense.im2col_bind_group"),
-            layout: &self.im2col_layout,
+            label: Some("st.tensor.wgpu_dense.fused_conv_bind_group"),
+            layout: &self.fused_conv_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -239,10 +312,14 @@ impl DenseContext {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: patches.as_entire_binding(),
+                    resource: weights.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
+                    resource: output.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
                     resource: params.as_entire_binding(),
                 },
             ],
@@ -263,7 +340,7 @@ fn dense_context() -> Result<Arc<DenseContext>, String> {
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Im2ColParams {
+struct ConvGemmParams {
     batch: u32,
     in_channels: u32,
     input_h: u32,
@@ -279,7 +356,9 @@ struct Im2ColParams {
     out_h: u32,
     out_w: u32,
     span: u32,
-    _pad: u32,
+    out_channels: u32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 pub fn matmul(
@@ -329,36 +408,21 @@ pub fn matmul(
         mapped_at_creation: false,
     });
 
-    let params = MatmulParams {
-        rows: rows as u32,
-        cols: cols as u32,
-        inner: inner as u32,
-        _pad: 0,
-    };
-    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("st.tensor.wgpu_dense.params"),
-        contents: bytemuck::bytes_of(&params),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-
-    let bind_group = ctx.bind_group(&a_buf, &b_buf, &c_buf, &params_buf);
-
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.encoder"),
     });
-    {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("st.tensor.wgpu_dense.pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(&ctx.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        let wg_x = 16u32;
-        let wg_y = 16u32;
-        let groups_x = ((cols as u32) + wg_x - 1) / wg_x;
-        let groups_y = ((rows as u32) + wg_y - 1) / wg_y;
-        pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
-    }
+    let tile_config = select_tile_config(rows, inner, cols);
+    dispatch_matmul(
+        &ctx,
+        &mut encoder,
+        &a_buf,
+        &b_buf,
+        &c_buf,
+        rows,
+        inner,
+        cols,
+        tile_config,
+    );
     queue.submit(Some(encoder.finish()));
 
     readback_f32(device, queue, &c_buf, rows * cols)
@@ -377,6 +441,7 @@ fn dispatch_matmul(
     rows: usize,
     inner: usize,
     cols: usize,
+    tile: TileConfig,
 ) {
     let params = MatmulParams {
         rows: rows as u32,
@@ -392,17 +457,17 @@ fn dispatch_matmul(
             usage: wgpu::BufferUsages::UNIFORM,
         });
     let bind_group = ctx.bind_group(lhs, rhs, out, &params_buf);
+    let pipeline = ctx.pipeline_for(tile);
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("st.tensor.wgpu_dense.matmul_pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(ctx.pipeline());
+        pass.set_pipeline(pipeline.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
-        let wg_x = 16u32;
-        let wg_y = 16u32;
-        let groups_x = ((cols as u32) + wg_x - 1) / wg_x;
-        let groups_y = ((rows as u32) + wg_y - 1) / wg_y;
+        let tile_size = tile.tile_size();
+        let groups_x = ((cols as u32) + tile_size - 1) / tile_size;
+        let groups_y = ((rows as u32) + tile_size - 1) / tile_size;
         pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
     }
 }
@@ -460,15 +525,7 @@ pub fn conv_im2col_gemm(
         contents: bytemuck::cast_slice(input),
         usage: wgpu::BufferUsages::STORAGE,
     });
-    let patches_size = (rows * span * std::mem::size_of::<f32>()) as u64;
-    let patches_buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("st.tensor.wgpu_dense.conv.patches"),
-        size: patches_size,
-        usage: wgpu::BufferUsages::STORAGE,
-        mapped_at_creation: false,
-    });
-
-    let im2col_params = Im2ColParams {
+    let conv_params = ConvGemmParams {
         batch: batch as u32,
         in_channels: in_channels as u32,
         input_h: input_h as u32,
@@ -484,15 +541,15 @@ pub fn conv_im2col_gemm(
         out_h: out_h as u32,
         out_w: out_w as u32,
         span: span as u32,
-        _pad: 0,
+        out_channels: out_channels as u32,
+        _pad0: 0,
+        _pad1: 0,
     };
-    let im2col_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("st.tensor.wgpu_dense.conv.im2col_params"),
-        contents: bytemuck::bytes_of(&im2col_params),
+    let conv_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.params"),
+        contents: bytemuck::bytes_of(&conv_params),
         usage: wgpu::BufferUsages::UNIFORM,
     });
-    let im2col_bind_group = ctx.im2col_bind_group(&input_buf, &patches_buf, &im2col_params_buf);
-
     let weight_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("st.tensor.wgpu_dense.conv.weight_t"),
         contents: bytemuck::cast_slice(weight_t),
@@ -509,34 +566,35 @@ pub fn conv_im2col_gemm(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.conv.encoder"),
     });
+    let tile_config = select_tile_config(rows, span, out_channels);
+    let fused_pipeline = ctx.fused_conv_pipeline_for(tile_config);
+    let fused_bind_group =
+        ctx.fused_conv_bind_group(&input_buf, &weight_buf, &output_buf, &conv_params_buf);
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("st.tensor.wgpu_dense.conv.im2col_pass"),
+            label: Some("st.tensor.wgpu_dense.conv.fused_pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(ctx.im2col_pipeline());
-        pass.set_bind_group(0, &im2col_bind_group, &[]);
-        let wg_x = 8u32;
-        let wg_y = 8u32;
-        let groups_x = ((out_w as u32) + wg_x - 1) / wg_x;
-        let groups_y = ((out_h as u32) + wg_y - 1) / wg_y;
-        pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), batch as u32);
+        pass.set_pipeline(fused_pipeline.as_ref());
+        pass.set_bind_group(0, &fused_bind_group, &[]);
+        let tile_size = tile_config.tile_size();
+        let groups_x = ((out_channels as u32) + tile_size - 1) / tile_size;
+        let groups_y = ((rows as u32) + tile_size - 1) / tile_size;
+        pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
     }
-
-    dispatch_matmul(
-        &ctx,
-        &mut encoder,
-        &patches_buf,
-        &weight_buf,
-        &output_buf,
-        rows,
-        span,
-        out_channels,
-    );
 
     queue.submit(Some(encoder.finish()));
 
     readback_f32(device, queue, &output_buf, rows * out_channels)
+}
+
+fn select_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
+    let max_dim = rows.max(cols);
+    if max_dim <= 64 || inner <= 64 {
+        TileConfig::new(8)
+    } else {
+        TileConfig::new(16)
+    }
 }
 
 pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {
