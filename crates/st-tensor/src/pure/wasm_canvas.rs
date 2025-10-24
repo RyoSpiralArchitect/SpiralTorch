@@ -2867,6 +2867,34 @@ mod tests {
     }
 
     #[test]
+    fn vector_field_fft_rows_power_with_db_tensors_match_components() {
+        let mut field = ColorVectorField::new(4, 3);
+        for idx in 0..12 {
+            let energy = (idx as f32 * 0.1).cos();
+            let chroma = [
+                0.05 * (idx as f32 + 1.5),
+                -0.03 * (idx as f32 - 2.0),
+                (0.02 * idx as f32).sin(),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (power, power_db) = field.fft_rows_power_with_db_tensors(false).unwrap();
+        let solo_power = field.fft_rows_power_tensor(false).unwrap();
+        let solo_power_db = field.fft_rows_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn vector_field_fft_rows_phase_tensor_matches_shape() {
         let mut field = ColorVectorField::new(2, 1);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
@@ -2985,6 +3013,34 @@ mod tests {
     }
 
     #[test]
+    fn vector_field_fft_columns_power_with_db_tensors_match_components() {
+        let mut field = ColorVectorField::new(3, 4);
+        for idx in 0..12 {
+            let energy = (idx as f32 * 0.07).sin();
+            let chroma = [
+                0.04 * (idx as f32 - 1.0),
+                0.06 * (idx as f32 + 0.25),
+                (-0.05 * idx as f32).cos(),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (power, power_db) = field.fft_cols_power_with_db_tensors(false).unwrap();
+        let solo_power = field.fft_cols_power_tensor(false).unwrap();
+        let solo_power_db = field.fft_cols_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn vector_field_fft_columns_phase_tensor_matches_shape() {
         let mut field = ColorVectorField::new(1, 2);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
@@ -3085,6 +3141,34 @@ mod tests {
             let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
                 .max(ColorVectorField::POWER_DB_FLOOR);
             assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn vector_field_fft_2d_power_with_db_tensors_match_components() {
+        let mut field = ColorVectorField::new(4, 3);
+        for idx in 0..12 {
+            let energy = 0.12 * (idx as f32 + 0.5);
+            let chroma = [
+                (-0.03 * idx as f32).sin(),
+                0.08 * (idx as f32 - 1.2),
+                (0.09 * idx as f32).cos(),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (power, power_db) = field.fft_2d_power_with_db_tensors(false).unwrap();
+        let solo_power = field.fft_2d_power_tensor(false).unwrap();
+        let solo_power_db = field.fft_2d_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
         }
     }
 
@@ -3202,6 +3286,31 @@ mod tests {
     }
 
     #[test]
+    fn projector_refresh_vector_fft_power_with_db_tensors_match_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
+
+        let (power, power_db) = projector
+            .refresh_vector_fft_power_with_db_tensors(false)
+            .unwrap();
+        let solo_power = projector.vector_fft_power_tensor(false).unwrap();
+        let solo_power_db = projector.vector_fft_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn projector_refresh_vector_fft_phase_tensor_matches_shape() {
         let scheduler = UringFractalScheduler::new(4).unwrap();
         scheduler
@@ -3293,6 +3402,31 @@ mod tests {
             let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
                 .max(ColorVectorField::POWER_DB_FLOOR);
             assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_columns_power_with_db_tensors_match_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+
+        let (power, power_db) = projector
+            .refresh_vector_fft_columns_power_with_db_tensors(false)
+            .unwrap();
+        let solo_power = projector.vector_fft_columns_power_tensor(false).unwrap();
+        let solo_power_db = projector.vector_fft_columns_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
         }
     }
 
@@ -3390,6 +3524,31 @@ mod tests {
             let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
                 .max(ColorVectorField::POWER_DB_FLOOR);
             assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_2d_power_with_db_tensors_match_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+
+        let (power, power_db) = projector
+            .refresh_vector_fft_2d_power_with_db_tensors(false)
+            .unwrap();
+        let solo_power = projector.vector_fft_2d_power_tensor(false).unwrap();
+        let solo_power_db = projector.vector_fft_2d_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
         }
     }
 
