@@ -1,44 +1,72 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
-// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
-// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
-
-struct MatmulParams {
-    rows: u32,
-    cols: u32,
-    inner: u32,
-    _pad: u32,
+{f16_enable}
+struct MatmulUniforms {
+    rows: u32;
+    cols: u32;
+    inner: u32;
+    flags: u32;
 };
 
+const FLAG_USE_BIAS: u32 = 1u << 0u;
+const FLAG_FUSED_RELU: u32 = 1u << 1u;
+const FLAG_FUSED_GELU: u32 = 1u << 2u;
+const FLAG_FUSED_RESIDUAL: u32 = 1u << 3u;
+
 @group(0) @binding(0) var<storage, read> lhs : array<f32>;
-@group(0) @binding(1) var<storage, read> rhs : array<f32>;
+@group(0) @binding(1) var<storage, read> rhs_packed : {rhs_storage_type};
 @group(0) @binding(2) var<storage, read_write> out : array<f32>;
-@group(0) @binding(3) var<uniform> params : MatmulParams;
+@group(0) @binding(3) var<storage, read> bias : array<f32>;
+@group(0) @binding(4) var<storage, read> residual : array<f32>;
+@group(0) @binding(5) var<storage, read> scales : array<f32>;
+@group(0) @binding(6) var<uniform> params : MatmulUniforms;
 
-override TILE_M : u32 = {tile_m}u;
-override TILE_N : u32 = {tile_n}u;
-override TILE_K : u32 = {tile_k}u;
+const TILE_M : u32 = {tile_m}u;
+const TILE_N : u32 = {tile_n}u;
+const TILE_K : u32 = {tile_k}u;
+const WG_SIZE_X : u32 = {workgroup_size_x}u;
+const WG_SIZE_Y : u32 = {workgroup_size_y}u;
 
-var<workgroup> lhs_tile : array<f32, TILE_M * TILE_K>;
-var<workgroup> rhs_tile : array<f32, TILE_K * TILE_N>;
+var<workgroup> tile_a : array<f32, TILE_M * TILE_K>;
+var<workgroup> tile_b : array<f32, TILE_N * TILE_K>;
 
-@compute @workgroup_size(TILE_N, TILE_M, 1)
+fn load_rhs_value(k : u32, col : u32) -> f32 {{
+    {rhs_load_body}
+}}
+
+fn apply_fusions(acc: f32, index: u32, col: u32) -> f32 {{
+    var value = acc;
+    if ((params.flags & FLAG_USE_BIAS) != 0u) {{
+        value = value + bias[col];
+    }}
+    if ((params.flags & FLAG_FUSED_RESIDUAL) != 0u) {{
+        value = value + residual[index];
+    }}
+    if ((params.flags & FLAG_FUSED_GELU) != 0u) {{
+        let x = value;
+        let coeff = 0.044715;
+        let sqrt_two_over_pi = 0.7978845834732056;
+        let y = sqrt_two_over_pi * (x + coeff * x * x * x);
+        value = 0.5 * x * (1.0 + tanh(y));
+    }} else if ((params.flags & FLAG_FUSED_RELU) != 0u) {{
+        value = max(value, 0.0);
+    }}
+    return value;
+}}
+
+@compute @workgroup_size({workgroup_size_x}, {workgroup_size_y}, 1)
 fn main(
-    @builtin(global_invocation_id) gid : vec3<u32>,
+    @builtin(workgroup_id) wid : vec3<u32>,
     @builtin(local_invocation_id) lid : vec3<u32>,
 ) {
-    let row = gid.y;
-    let col = gid.x;
-    if (row >= params.rows || col >= params.cols) {
+    let tile_row = wid.y * TILE_M;
+    let tile_col = wid.x * TILE_N;
+    let local_row = lid.y;
+    let local_col = lid.x;
+    let global_row = tile_row + local_row;
+    let global_col = tile_col + local_col;
+
+    if (global_row >= params.rows || global_col >= params.cols) {
         return;
     }
-
-    let local_m = lid.y;
-    let local_n = lid.x;
-    let local_linear = local_m * TILE_N + local_n;
-    let threads = TILE_M * TILE_N;
-    let tile_row_origin = gid.y - local_m;
-    let tile_col_origin = gid.x - local_n;
 
     var acc : f32 = 0.0;
     let tiles = (params.inner + TILE_K - 1u) / TILE_K;
@@ -47,53 +75,62 @@ fn main(
         if (tile_index >= tiles) {
             break;
         }
-
         let k_base = tile_index * TILE_K;
 
-        var lhs_iter : u32 = local_linear;
+        var load_row = local_row;
         loop {
-            if (lhs_iter >= TILE_M * TILE_K) {
+            if (load_row >= TILE_M) {
                 break;
             }
-            let tile_row = lhs_iter / TILE_K;
-            let tile_k = lhs_iter % TILE_K;
-            let global_row = tile_row_origin + tile_row;
-            let global_k = k_base + tile_k;
-            var lhs_value : f32 = 0.0;
-            if (global_row < params.rows && global_k < params.inner) {
-                lhs_value = lhs[global_row * params.inner + global_k];
+            var load_k = local_col;
+            loop {
+                if (load_k >= TILE_K) {
+                    break;
+                }
+                let a_row = tile_row + load_row;
+                let a_k = k_base + load_k;
+                var value = 0.0;
+                if (a_row < params.rows && a_k < params.inner) {
+                    value = lhs[a_row * params.inner + a_k];
+                }
+                tile_a[load_row * TILE_K + load_k] = value;
+                load_k = load_k + WG_SIZE_X;
             }
-            lhs_tile[lhs_iter] = lhs_value;
-            lhs_iter = lhs_iter + threads;
+            load_row = load_row + WG_SIZE_Y;
         }
 
-        var rhs_iter : u32 = local_linear;
+        var load_col = local_col;
         loop {
-            if (rhs_iter >= TILE_K * TILE_N) {
+            if (load_col >= TILE_N) {
                 break;
             }
-            let tile_k = rhs_iter / TILE_N;
-            let tile_col = rhs_iter % TILE_N;
-            let global_k = k_base + tile_k;
-            let global_col = tile_col_origin + tile_col;
-            var rhs_value : f32 = 0.0;
-            if (global_k < params.inner && global_col < params.cols) {
-                rhs_value = rhs[global_k * params.cols + global_col];
+            var load_k = local_row;
+            loop {
+                if (load_k >= TILE_K) {
+                    break;
+                }
+                let b_k = k_base + load_k;
+                let b_col = tile_col + load_col;
+                var value = 0.0;
+                if (b_k < params.inner && b_col < params.cols) {
+                    value = load_rhs_value(b_k, b_col);
+                }
+                tile_b[load_col * TILE_K + load_k] = value;
+                load_k = load_k + WG_SIZE_Y;
             }
-            rhs_tile[rhs_iter] = rhs_value;
-            rhs_iter = rhs_iter + threads;
+            load_col = load_col + WG_SIZE_X;
         }
 
         workgroupBarrier();
 
         var k : u32 = 0u;
         loop {
-            if (k >= TILE_K) {
+            if (k >= TILE_K || (k_base + k) >= params.inner) {
                 break;
             }
-            let lhs_tile_value = lhs_tile[local_m * TILE_K + k];
-            let rhs_tile_value = rhs_tile[k * TILE_N + local_n];
-            acc = acc + lhs_tile_value * rhs_tile_value;
+            let lhs_val = tile_a[local_row * TILE_K + k];
+            let rhs_val = tile_b[local_col * TILE_K + k];
+            {fma_line}
             k = k + 1u;
         }
 
@@ -101,6 +138,6 @@ fn main(
         tile_index = tile_index + 1u;
     }
 
-    let out_index = row * params.cols + col;
-    out[out_index] = acc;
+    let index = global_row * params.cols + global_col;
+    out[index] = apply_fusions(acc, index, global_col);
 }
