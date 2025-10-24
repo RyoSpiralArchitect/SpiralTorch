@@ -56,6 +56,8 @@ sequenceDiagram
 
 > **Expanded — Higher-order convolutions.** Fresh `Conv3d` and `Conv4d` modules now mirror the dilation-aware ergonomics of their 1D/2D siblings so volumetric stacks and temporal cubes slide straight into the same API.
 
+> **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and an opt-in attention-probability readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
