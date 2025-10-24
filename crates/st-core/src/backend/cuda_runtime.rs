@@ -113,7 +113,11 @@ fn launch_cuda_kernel(
         .alloc_zeros::<i32>(rows * k)
         .map_err(|err| err.to_string())?;
 
-    let grid = grid_for_rows(plan.rows);
+    let grid = (1, plan.rows, 1);
+    let block = (THREADS_PER_BLOCK as u32, 1, 1);
+    let shared_bytes = (THREADS_PER_BLOCK * PER_THREAD_KEEP * std::mem::size_of::<f32>()
+        + THREADS_PER_BLOCK * PER_THREAD_KEEP * std::mem::size_of::<i32>())
+        as u32;
     let cfg = LaunchConfig {
         grid_dim: grid,
         block_dim,

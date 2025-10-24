@@ -158,6 +158,40 @@ impl PyTensor {
         Ok(PyTensor { inner: tensor })
     }
 
+    /// Matrix multiply fused with bias, residual addition, and ReLU activation.
+    #[pyo3(signature = (other, bias, residual, *, backend=None))]
+    pub fn matmul_bias_add_relu(
+        &self,
+        other: &PyTensor,
+        bias: Vec<f32>,
+        residual: &PyTensor,
+        backend: Option<&str>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_backend(backend);
+        let tensor = self
+            .inner
+            .matmul_bias_add_relu_with_backend(&other.inner, &bias, &residual.inner, backend)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
+    /// Matrix multiply fused with bias, residual addition, and GELU activation.
+    #[pyo3(signature = (other, bias, residual, *, backend=None))]
+    pub fn matmul_bias_add_gelu(
+        &self,
+        other: &PyTensor,
+        bias: Vec<f32>,
+        residual: &PyTensor,
+        backend: Option<&str>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_backend(backend);
+        let tensor = self
+            .inner
+            .matmul_bias_add_gelu_with_backend(&other.inner, &bias, &residual.inner, backend)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
     /// Add (element-wise)
     pub fn add(&self, other: &PyTensor) -> PyResult<PyTensor> {
         let tensor = self.inner.add(&other.inner).map_err(tensor_err_to_py)?;
