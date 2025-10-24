@@ -1203,7 +1203,6 @@ impl ColorVectorField {
         let db = 10.0 * clamped.log10();
         db.max(Self::POWER_DB_FLOOR)
     }
-
 }
 
 /// Byte layout metadata for the WGSL canvas FFT pipeline.
