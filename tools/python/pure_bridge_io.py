@@ -86,6 +86,37 @@ def load_weights_from_text(text: str) -> List[float]:
     return parse_float_sequence(text)
 
 
+def load_texts_from_path(path: Path) -> List[str]:
+    """Load newline or JSON encoded text samples from disk."""
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Failed to read text file '{path}': {exc}") from exc
+    return load_texts_from_text(text)
+
+
+def load_texts_from_text(text: str) -> List[str]:
+    """Load text samples from stdin or CLI input."""
+
+    stripped_lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return stripped_lines
+
+    if not isinstance(data, list):
+        raise ValueError("Text input must be a JSON array")
+
+    samples: List[str] = []
+    for idx, item in enumerate(data):
+        if not isinstance(item, str):
+            raise ValueError(f"Entry {idx}: expected a string")
+        samples.append(item)
+    return samples
+
+
 def summarize(values: Sequence[float]) -> dict:
     """Return basic statistics over a sequence of floats."""
 
@@ -161,6 +192,8 @@ __all__ = [
     "load_pairs_from_text",
     "load_weights_from_path",
     "load_weights_from_text",
+    "load_texts_from_path",
+    "load_texts_from_text",
     "parse_float_sequence",
     "reshape",
     "summarize",

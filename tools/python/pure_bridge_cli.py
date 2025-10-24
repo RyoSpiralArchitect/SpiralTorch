@@ -27,6 +27,8 @@ if __package__ in (None, ""):
         load_pairs_from_text,
         load_weights_from_path,
         load_weights_from_text,
+        load_texts_from_path,
+        load_texts_from_text,
         parse_float_sequence,
         reshape,
         summarize,
@@ -44,6 +46,8 @@ else:
         load_pairs_from_text,
         load_weights_from_path,
         load_weights_from_text,
+        load_texts_from_path,
+        load_texts_from_text,
         parse_float_sequence,
         reshape,
         summarize,
@@ -92,6 +96,20 @@ def _load_weights_from_file(path: Path) -> List[float]:
 def _load_weights_from_text(text: str) -> List[float]:
     try:
         return load_weights_from_text(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _load_texts_from_file(path: Path) -> List[str]:
+    try:
+        return load_texts_from_path(path)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _load_texts_from_text(text: str) -> List[str]:
+    try:
+        return load_texts_from_text(text)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
@@ -167,7 +185,9 @@ def _build_parser() -> argparse.ArgumentParser:
     hypergrad.add_argument(
         "--pairs-file",
         type=Path,
-        help="Load prediction/target pairs from a file (JSON array or 'pred|target' per line).",
+        action="append",
+        default=[],
+        help="Load prediction/target pairs from file(s) (JSON array or 'pred|target' per line).",
     )
     hypergrad.add_argument(
         "--pairs-stdin",
@@ -205,6 +225,25 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include the final weight vector in the JSON payload when applying weights.",
     )
+    hypergrad.add_argument(
+        "--text",
+        action="append",
+        default=[],
+        metavar="SAMPLE",
+        help="Text sample to absorb via the encoder before sampling the gradient.",
+    )
+    hypergrad.add_argument(
+        "--text-file",
+        type=Path,
+        action="append",
+        default=[],
+        help="Load text samples from file(s) (JSON array or one entry per line).",
+    )
+    hypergrad.add_argument(
+        "--text-stdin",
+        action="store_true",
+        help="Read text samples from stdin (JSON array or one entry per line).",
+    )
     topos_group = hypergrad.add_argument_group(
         "topos",
         "Optional OpenCartesianTopos parameters to couple the hypergrad against",
@@ -214,6 +253,23 @@ def _build_parser() -> argparse.ArgumentParser:
     topos_group.add_argument("--topos-saturation", type=float)
     topos_group.add_argument("--topos-max-depth", type=int)
     topos_group.add_argument("--topos-max-volume", type=int)
+
+    encoder_group = hypergrad.add_argument_group(
+        "encoder",
+        "LanguageWaveEncoder parameters for --text inputs",
+    )
+    encoder_group.add_argument(
+        "--encoder-curvature",
+        type=float,
+        default=None,
+        help="Curvature to use when constructing the encoder (defaults to hypergrad curvature).",
+    )
+    encoder_group.add_argument(
+        "--encoder-temperature",
+        type=float,
+        default=0.5,
+        help="Temperature to use when constructing the encoder (default: 0.5).",
+    )
 
     return parser
 
@@ -256,17 +312,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     pairs: List[FloatPair] = []
+    text_samples: List[str] = []
     topos_values = None
     stdin_cache: Optional[str] = None
     if args.command == "hypergrad":
         pairs = list(args.pairs)
-        if args.pairs_file is not None:
-            pairs.extend(_load_pairs_from_file(args.pairs_file))
+        for path in args.pairs_file:
+            pairs.extend(_load_pairs_from_file(path))
+        text_samples = list(args.text)
+        for path in args.text_file:
+            text_samples.extend(_load_texts_from_file(path))
+        stdin_flags = [args.pairs_stdin, args.weights_stdin, args.text_stdin]
+        if sum(1 for flag in stdin_flags if flag) > 1:
+            parser.error(
+                "At most one of --pairs-stdin, --weights-stdin, or --text-stdin may read from stdin"
+            )
         if args.pairs_stdin:
-            if args.weights_stdin:
-                parser.error("Cannot combine --pairs-stdin with --weights-stdin")
             stdin_cache = sys.stdin.read()
             pairs.extend(_load_pairs_from_text(stdin_cache))
+        if args.text_stdin:
+            if stdin_cache is None:
+                stdin_cache = sys.stdin.read()
+            text_samples.extend(_load_texts_from_text(stdin_cache))
         topos_values = _validate_topos_arguments(args, parser)
 
     with ExitStack() as stack:
@@ -309,6 +376,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             ) as hypergrad:
                 for prediction, target in pairs:
                     hypergrad.accumulate_pair(prediction, target)
+                if text_samples:
+                    encoder_curvature = (
+                        args.encoder_curvature
+                        if args.encoder_curvature is not None
+                        else args.curvature
+                    )
+                    encoder_temperature = args.encoder_temperature
+                    with bridge.encoder(encoder_curvature, encoder_temperature) as encoder:
+                        for sample in text_samples:
+                            hypergrad.absorb_text(encoder, sample)
                 if weights is not None:
                     applied_weights = hypergrad.apply(weights)
                 gradient = hypergrad.gradient()
