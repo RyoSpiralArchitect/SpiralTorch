@@ -129,6 +129,27 @@ function buildPlanner(): CobolDispatchPlanner {
   planner.setDatasetManagementClass(datasetManagementClass || undefined);
   const datasetStorageClass = getInputValue("dataset-storage-class");
   planner.setDatasetStorageClass(datasetStorageClass || undefined);
+  const datasetSpacePrimary = parsePositiveInteger(
+    getInputValue("dataset-space-primary"),
+    "Primary space",
+  );
+  planner.setDatasetSpacePrimary(datasetSpacePrimary ?? undefined);
+  const datasetSpaceSecondary = parsePositiveInteger(
+    getInputValue("dataset-space-secondary"),
+    "Secondary space",
+  );
+  planner.setDatasetSpaceSecondary(datasetSpaceSecondary ?? undefined);
+  const datasetSpaceUnit = getInputValue("dataset-space-unit");
+  planner.setDatasetSpaceUnit(datasetSpaceUnit || undefined);
+  const datasetDirectoryBlocks = parsePositiveInteger(
+    getInputValue("dataset-directory-blocks"),
+    "Directory blocks",
+  );
+  planner.setDatasetDirectoryBlocks(datasetDirectoryBlocks ?? undefined);
+  const datasetType = getInputValue("dataset-type");
+  planner.setDatasetType(datasetType || undefined);
+  const datasetLike = getInputValue("dataset-like");
+  planner.setDatasetLike(datasetLike || undefined);
 
   const metadata = getTextareaValue("metadata");
   if (metadata) {

@@ -10,7 +10,7 @@ use cudarc::driver::{CudaDevice, CudaFunction};
 #[cfg(feature = "cuda")]
 use cudarc::nvrtc::Ptx;
 #[cfg(feature = "cuda")]
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 #[cfg(feature = "cuda")]
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -31,28 +31,35 @@ impl CudaModule {
         &self.module_name
     }
 
-    pub fn get_func(&self, func_name: &'static str) -> Result<CudaFunction, String> {
-        self.device
-            .get_func(&self.module_name, func_name)
-            .ok_or_else(|| {
-                format!(
-                    "cuda function `{func_name}` not registered in module `{}`",
-                    self.module_name
-                )
-            })
+    pub fn get_func(&self, func_name: &'static str) -> Result<Arc<CudaFunction>, String> {
+        module_state_get_func(self.module_name, func_name)
     }
 }
 
 #[cfg(feature = "cuda")]
 struct ModuleState {
-    registered: HashSet<&'static str>,
+    functions: HashMap<&'static str, Arc<CudaFunction>>,
 }
 
 #[cfg(feature = "cuda")]
 impl ModuleState {
     fn new() -> Self {
         Self {
-            registered: HashSet::new(),
+            functions: HashMap::new(),
+        }
+    }
+}
+
+#[cfg(feature = "cuda")]
+struct ModuleEntry {
+    state: Mutex<ModuleState>,
+}
+
+#[cfg(feature = "cuda")]
+impl ModuleEntry {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(ModuleState::new()),
         }
     }
 }
@@ -60,7 +67,7 @@ impl ModuleState {
 #[cfg(feature = "cuda")]
 static DEVICE: OnceLock<Arc<CudaDevice>> = OnceLock::new();
 #[cfg(feature = "cuda")]
-static MODULES: OnceLock<Mutex<HashMap<&'static str, ModuleState>>> = OnceLock::new();
+static MODULES: OnceLock<Mutex<HashMap<&'static str, Arc<ModuleEntry>>>> = OnceLock::new();
 
 #[cfg(feature = "cuda")]
 fn global_device() -> Result<Arc<CudaDevice>, String> {
@@ -70,7 +77,7 @@ fn global_device() -> Result<Arc<CudaDevice>, String> {
 }
 
 #[cfg(feature = "cuda")]
-fn registry() -> &'static Mutex<HashMap<&'static str, ModuleState>> {
+fn registry() -> &'static Mutex<HashMap<&'static str, Arc<ModuleEntry>>> {
     MODULES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -81,32 +88,52 @@ pub fn load_ptx_module(
     functions: &[&'static str],
 ) -> Result<CudaModule, String> {
     let device = global_device()?;
-    let mut modules = registry()
+
+    let entry = {
+        let mut modules = registry()
+            .lock()
+            .map_err(|_| "cuda module registry poisoned".to_string())?;
+        modules
+            .entry(module_name)
+            .or_insert_with(|| Arc::new(ModuleEntry::new()))
+            .clone()
+    };
+
+    let mut state = entry
+        .state
         .lock()
-        .map_err(|_| "cuda module registry poisoned".to_string())?;
+        .map_err(|_| "cuda module state poisoned".to_string())?;
 
-    let state = modules
-        .entry(module_name)
-        .or_insert_with(ModuleState::new);
-
-    let missing: Vec<&'static str> = functions
+    if functions
         .iter()
-        .copied()
-        .filter(|name| !state.registered.contains(name))
-        .collect();
+        .all(|name| state.functions.contains_key(name))
+    {
+        return Ok(CudaModule {
+            device,
+            module_name,
+        });
+    }
 
-    if state.registered.is_empty() {
-        device
-            .load_ptx(ptx.clone(), module_name, functions)
-            .map_err(|err| err.to_string())?;
-        state.registered.extend(functions.iter().copied());
-    } else if !missing.is_empty() {
-        let mut names: Vec<&'static str> = state.registered.iter().copied().collect();
-        names.extend(missing.iter().copied());
-        device
-            .load_ptx(ptx.clone(), module_name, &names)
-            .map_err(|err| err.to_string())?;
-        state.registered.extend(missing);
+    let mut requested: Vec<&'static str> = functions.iter().copied().collect();
+    requested.sort_unstable();
+    requested.dedup();
+
+    let mut union: Vec<&'static str> = state.functions.keys().copied().collect();
+    union.extend(requested);
+    union.sort_unstable();
+    union.dedup();
+
+    device
+        .load_ptx(ptx.clone(), module_name, &union)
+        .map_err(|err| err.to_string())?;
+
+    state.functions.clear();
+
+    for &name in &union {
+        let func = device.get_func(module_name, name).ok_or_else(|| {
+            format!("cuda function `{name}` not registered in module `{module_name}`")
+        })?;
+        state.functions.insert(name, Arc::new(func));
     }
 
     Ok(CudaModule {
@@ -115,3 +142,27 @@ pub fn load_ptx_module(
     })
 }
 
+#[cfg(feature = "cuda")]
+fn module_state_get_func(
+    module_name: &'static str,
+    func_name: &'static str,
+) -> Result<Arc<CudaFunction>, String> {
+    let entry = {
+        let modules = registry()
+            .lock()
+            .map_err(|_| "cuda module registry poisoned".to_string())?;
+        modules
+            .get(&module_name)
+            .cloned()
+            .ok_or_else(|| format!("cuda module `{module_name}` not loaded"))?
+    };
+
+    let state = entry
+        .state
+        .lock()
+        .map_err(|_| "cuda module state poisoned".to_string())?;
+
+    state.functions.get(func_name).cloned().ok_or_else(|| {
+        format!("cuda function `{func_name}` not registered in module `{module_name}`")
+    })
+}
