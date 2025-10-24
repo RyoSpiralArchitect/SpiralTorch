@@ -222,6 +222,28 @@ __device__ __forceinline__ void heap_select_rowwise_kernel_impl(
       out_vals[out_base + oi] = CUDART_NAN_F;
       out_idx[out_base + oi] = -1;
     }
+    __syncthreads();
+
+    HeapEntry chosen = *block_choice;
+    if (tid == chosen.tid && chosen.slot >= 0) {
+      s_vals[base + chosen.slot] = sentinel;
+      s_idx[base + chosen.slot] = -1;
+    }
+    if (tid == 0) {
+      size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+      out_vals[out_base + oi] = chosen.value;
+      out_idx[out_base + oi] = chosen.column;
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0 && take < k) {
+    size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+    for (int oi = take; oi < k; ++oi) {
+      out_vals[out_base + oi] = CUDART_NAN_F;
+      out_idx[out_base + oi] = -1;
+    }
+    __syncthreads();
   }
 }
 

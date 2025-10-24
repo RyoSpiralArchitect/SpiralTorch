@@ -409,6 +409,17 @@ declare module "spiraltorch-wasm" {
         data_class?: string;
         management_class?: string;
         storage_class?: string;
+        space_primary?: number;
+        space_secondary?: number;
+        space_unit?: string;
+        directory_blocks?: number;
+        dataset_type?: string;
+        like_dataset?: string;
+        unit?: string;
+        average_record_unit?: string;
+        retention_period?: number;
+        release_space?: boolean;
+        expiration_date?: string;
     }
 
     export interface CobolRoutePlan {
@@ -438,6 +449,17 @@ declare module "spiraltorch-wasm" {
         data_class?: string;
         management_class?: string;
         storage_class?: string;
+        space_primary?: number;
+        space_secondary?: number;
+        space_unit?: string;
+        directory_blocks?: number;
+        dataset_type?: string;
+        like_dataset?: string;
+        unit?: string;
+        average_record_unit?: string;
+        retention_period?: number;
+        release_space?: boolean;
+        expiration_date?: string;
     }
 
     export interface CobolPreviewEnvelope {
@@ -499,6 +521,17 @@ declare module "spiraltorch-wasm" {
         setDatasetDataClass(dataClass?: string | null): void;
         setDatasetManagementClass(managementClass?: string | null): void;
         setDatasetStorageClass(storageClass?: string | null): void;
+        setDatasetSpacePrimary(spacePrimary?: number | null): void;
+        setDatasetSpaceSecondary(spaceSecondary?: number | null): void;
+        setDatasetSpaceUnit(spaceUnit?: string | null): void;
+        setDatasetDirectoryBlocks(directoryBlocks?: number | null): void;
+        setDatasetType(datasetType?: string | null): void;
+        setDatasetLike(likeDataset?: string | null): void;
+        setDatasetUnit(unit?: string | null): void;
+        setDatasetAverageRecordUnit(averageRecordUnit?: string | null): void;
+        setDatasetRetentionPeriod(retentionPeriod?: number | null): void;
+        setDatasetReleaseSpace(releaseSpace?: boolean | null): void;
+        setDatasetExpirationDate(expirationDate?: string | null): void;
         clearDataset(): void;
         clearRoute(): void;
         addTag(tag: string): void;

@@ -58,6 +58,8 @@ sequenceDiagram
 
 > **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and an opt-in attention-probability readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
 
+> **In progress — Fused attention for PyTorch migrations.** The new single-kernel Q·Kᵀ + softmax + V planner keeps intermediate logits on-chip, so PyTorch users can co-train or stage migrations while retaining numerically stable attention/softmax semantics.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -87,30 +89,33 @@ SpiralTorch ships under a dual-license model:
 - **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors. Any network-facing use must comply with AGPL §13.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
+### Performance roadmap
+
+- [Level 2 GPU optimisation roadmap](docs/performance/level2_gpu_roadmap.md) — subgroup primitives, Chimera layouts, fusion IR, and runtime-guided codegen to push SpiralTorch past PyTorch on portable GPUs.
+
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-22 05:25 UTC_
-
-**Workspace summary**
+_Last updated: 2025-10-24 08:50 UTC_
 
 ```text
 ===============================================================================
  Language            Files        Lines         Code     Comments       Blanks
 ===============================================================================
  BASH                    1           54           52            1            1
- C++                     1          273          234            3           36
+ COBOL                   1          153          131            8           14
+ C++                     1          327          286            3           38
  CSS                     1          160          137            0           23
  Go                      9         1742         1367          141          234
- HTML                    1          166          166            0            0
+ HTML                    1          198          198            0            0
  JSON                    6          372          372            0            0
- Julia                   6          739          641            8           90
- Python                 36         4743         3968           75          700
+ Julia                   8         1077          938           14          125
+ Python                 36         5060         4232           71          757
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   35          825          699           25          101
- TypeScript              7         4619         4057          175          387
+ TOML                   35          827          701           25          101
+ TypeScript              7         4721         4155          175          391
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
  Jupyter Notebooks       2            0            0            0            0
@@ -118,25 +123,25 @@ _Last updated: 2025-10-22 05:25 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               54         5486            0         4332         1154
+ Markdown               55         5603            0         4412         1191
  |- BASH                12          123           94           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
  |- Dockerfile           1            6            6            0            0
  |- HTML                 1           18           18            0            0
- |- JavaScript           1           26           23            1            2
+ |- JavaScript           1           34           29            3            2
  |- JSON                 1           11           11            0            0
  |- Julia                1           15           14            0            1
- |- Python               6          672          568           15           89
- |- Rust                 5          773          678           16           79
+ |- Python               6          746          622           22          102
+ |- Rust                 5          779          684           16           79
  |- YAML                 2           62           62            0            0
- (Total)                           7243         1520         4381         1342
+ (Total)                           7448         1586         4470         1392
 -------------------------------------------------------------------------------
- Rust                  304       111881        99698         1536        10647
- |- Markdown           186         4581            0         4478          103
- (Total)                         116462        99698         6014        10750
+ Rust                  306       119978       107001         1561        11416
+ |- Markdown           188         4818            0         4714          104
+ (Total)                         124796       107001         6275        11520
 ===============================================================================
- Total                 474       132047       111688         6844        13515
+ Total                 480       141259       119867         6959        14433
 ===============================================================================
 
 ```
@@ -153,7 +158,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
-**Current release:** `spiraltorch==0.2.2` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.2.3` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), Metal via WGPU (macOS), Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -161,7 +166,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.2.2
+pip install -U spiraltorch==0.2.3
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -250,6 +255,18 @@ t2 = torch.arange(6, dtype=torch.float32).reshape(2,3)
 a2 = st.Tensor.from_dlpack(t2)      # same buffer
 t2.mul_(2)                          # in-place
 print("ST sees torch mul_:        ", a2.tolist())
+```
+
+### 1b) Row softmax (GPU-accelerated when available)
+
+```python
+import spiraltorch as st
+
+logits = st.Tensor(2, 4, [3.0, 1.0, -2.0, 0.5, -0.25, 0.0, 1.5, -1.0])
+print("CPU row softmax:", logits.row_softmax().tolist())
+
+# Opt into the WGPU backend (falls back to CPU if the device lacks subgroups)
+print("WGPU row softmax:", logits.row_softmax(backend="wgpu").tolist())
 ```
 
 ### 2) rl.stAgent
