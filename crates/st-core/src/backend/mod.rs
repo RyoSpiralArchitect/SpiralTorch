@@ -5,6 +5,10 @@
 
 pub mod consensus;
 #[cfg(feature = "cuda")]
+pub mod cuda_attention;
+#[cfg(feature = "cuda")]
+pub mod cuda_loader;
+#[cfg(feature = "cuda")]
 pub mod cuda_runtime;
 pub mod device_caps;
 #[cfg(feature = "hip-real")]

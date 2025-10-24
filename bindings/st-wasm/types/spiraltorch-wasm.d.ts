@@ -280,18 +280,54 @@ declare module "spiraltorch-wasm" {
             k: number,
             subgroup: boolean,
         ): WasmFftPlan | undefined;
+        planFftJson(
+            rows: number,
+            cols: number,
+            k: number,
+            subgroup: boolean,
+        ): string | undefined;
+        planFftObject(
+            rows: number,
+            cols: number,
+            k: number,
+            subgroup: boolean,
+        ): WasmFftPlanObject | undefined;
         planFftWithFallback(
             rows: number,
             cols: number,
             k: number,
             subgroup: boolean,
         ): WasmFftPlan;
+        planFftWithFallbackJson(
+            rows: number,
+            cols: number,
+            k: number,
+            subgroup: boolean,
+        ): string;
+        planFftWithFallbackObject(
+            rows: number,
+            cols: number,
+            k: number,
+            subgroup: boolean,
+        ): WasmFftPlanObject;
         planFftResolution(
             rows: number,
             cols: number,
             k: number,
             subgroup: boolean,
         ): ResolvedWasmFftPlan;
+        planFftResolutionJson(
+            rows: number,
+            cols: number,
+            k: number,
+            subgroup: boolean,
+        ): string;
+        planFftResolutionObject(
+            rows: number,
+            cols: number,
+            k: number,
+            subgroup: boolean,
+        ): ResolvedFftPlanReport;
         planFftReport(
             rows: number,
             cols: number,

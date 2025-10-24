@@ -55,6 +55,7 @@ impl WaveRnn {
             kernel_size,
             stride,
             padding,
+            1,
         )?;
         let gate = WaveGate::new(format!("{name}::gate"), hidden_dim, curvature, temperature)?;
         let mut seed = 0.005f32;
@@ -101,7 +102,8 @@ impl Module for WaveRnn {
                     .copy_from_slice(&source[src_offset..src_offset + self.hidden_dim]);
             }
         }
-        let mut output = final_hidden.matmul(self.readout.value())?;
+        let pack = self.readout.ensure_matmul_pack()?;
+        let mut output = final_hidden.matmul_prepacked(&pack)?;
         output.add_row_inplace(self.readout_bias.value().data())?;
         *self.cache.borrow_mut() = Some(WaveRnnCache {
             input: input.clone(),
@@ -137,8 +139,8 @@ impl Module for WaveRnn {
         };
         self.readout.accumulate_euclidean(&grad_readout)?;
         self.readout_bias.accumulate_euclidean(&grad_bias)?;
-        let readout_t = self.readout.value().transpose();
-        let grad_final = grad_output.matmul(&readout_t)?;
+        let pack_t = self.readout.ensure_matmul_transpose_pack()?;
+        let grad_final = grad_output.matmul_prepacked(&pack_t)?;
         let mut grad_gate_out = Tensor::zeros(cache.batch, self.hidden_dim * cache.out_steps)?;
         {
             let src = grad_final.data();

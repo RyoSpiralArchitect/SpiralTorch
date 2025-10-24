@@ -362,6 +362,12 @@ impl Serialize for CobolDatasetRoute {
             if let Some(catalog_behavior) = &self.catalog_behavior {
                 map.serialize_entry("catalog_behavior", catalog_behavior)?;
             }
+            if let Some(unit) = &self.unit {
+                map.serialize_entry("unit", unit)?;
+            }
+            if let Some(avg) = &self.average_record_unit {
+                map.serialize_entry("average_record_unit", avg)?;
+            }
             if let Some(retention) = &self.retention_period {
                 map.serialize_entry("retention_period", retention)?;
             }
@@ -565,6 +571,12 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                         }
                         "catalog_behavior" => {
                             catalog_behavior = map.next_value()?;
+                        }
+                        "unit" => {
+                            unit = map.next_value()?;
+                        }
+                        "average_record_unit" => {
+                            average_record_unit = map.next_value()?;
                         }
                         "retention_period" => {
                             retention_period = map.next_value()?;

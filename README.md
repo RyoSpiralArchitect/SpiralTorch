@@ -20,7 +20,7 @@ Modern ML stacks were built around CUDA—fast, but closed and rigid.
 It keeps the expressive PyTorch-style API that researchers already know, but runs on **WGPU** (Metal / Vulkan / DX12), so the same code works across macOS, Windows, and Linux without vendor lock-in.  
 
 Where frameworks chase throughput, SpiralTorch chases **fidelity**: exact spectral operators, stable autodiff at microlocal scales, and a cooperative scheduler designed for reproducible research.  
-You can start with existing PyTorch checkpoints via `spiraltorch.compat.torch`, move training loops unchanged, and gradually adopt SpiralTorch’s runtime for fine-grained control over kernels and device orchestration.  
+You can start with existing PyTorch checkpoints via `spiraltorch.compat.torch`, move training loops unchanged, and gradually adopt SpiralTorch’s runtime for fine-grained control over kernels and device orchestration. Attention, softmax, and related primitives are being fused in the WGPU backend so PyTorch users can migrate critical kernels one pass at a time without sacrificing stability.
 
 It’s not just an engine—it’s a **bridge** between the pragmatism of deep-learning frameworks and the precision of computational geometry.  
 
@@ -51,6 +51,16 @@ sequenceDiagram
 ```
 
 > **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
+>
+> **New — Conv6da with Leech enrichment.** `Conv6da` fuses six-directional adjacency with optional Leech lattice density boosts so Z-space fields aggregate neighbors with structure-aware gradients.
+
+> **Expanded — Higher-order convolutions.** Fresh `Conv3d` and `Conv4d` modules now mirror the dilation-aware ergonomics of their 1D/2D siblings so volumetric stacks and temporal cubes slide straight into the same API.
+>
+> **New — Online-softmax fused attention.** A single-kernel QKᵀ + mask + softmax + V pipeline now lands in the WGPU backend, slashing bandwidth for multi-head attention while matching PyTorch semantics for drop-in migrations.
+
+> **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and an opt-in attention-probability readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
+
+> **In progress — Fused attention for PyTorch migrations.** The new single-kernel Q·Kᵀ + softmax + V planner keeps intermediate logits on-chip, so PyTorch users can co-train or stage migrations while retaining numerically stable attention/softmax semantics.
 
 **Licensing**
 
@@ -84,27 +94,26 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-20 07:12 UTC_
-
-**Workspace summary**
+_Last updated: 2025-10-24 08:50 UTC_
 
 ```text
 ===============================================================================
  Language            Files        Lines         Code     Comments       Blanks
 ===============================================================================
  BASH                    1           54           52            1            1
- C++                     1          166          140            3           23
+ COBOL                   1          153          131            8           14
+ C++                     1          327          286            3           38
  CSS                     1          160          137            0           23
- Go                      6         1059          832           70          157
- HTML                    1          152          152            0            0
+ Go                      9         1742         1367          141          234
+ HTML                    1          198          198            0            0
  JSON                    6          372          372            0            0
- Julia                   2          361          315            0           46
- Python                 33         4482         3762           70          650
+ Julia                   8         1077          938           14          125
+ Python                 36         5060         4232           71          757
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   35          817          692           25          100
- TypeScript              7         4607         4045          175          387
+ TOML                   35          827          701           25          101
+ TypeScript              7         4721         4155          175          391
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
  Jupyter Notebooks       2            0            0            0            0
@@ -112,26 +121,27 @@ _Last updated: 2025-10-20 07:12 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               54         5431            0         4280         1151
+ Markdown               55         5603            0         4412         1191
  |- BASH                12          123           94           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
  |- Dockerfile           1            6            6            0            0
  |- HTML                 1           18           18            0            0
- |- JavaScript           1           26           23            1            2
+ |- JavaScript           1           34           29            3            2
  |- JSON                 1           11           11            0            0
  |- Julia                1           15           14            0            1
- |- Python               6          668          565           15           88
- |- Rust                 5          732          641           16           75
+ |- Python               6          746          622           22          102
+ |- Rust                 5          779          684           16           79
  |- YAML                 2           62           62            0            0
- (Total)                           7143         1480         4329         1334
+ (Total)                           7448         1586         4470         1392
 -------------------------------------------------------------------------------
- Rust                  299       102681        91375         1527         9779
- |- Markdown           183         4349            0         4247          102
- (Total)                         107030        91375         5774         9881
+ Rust                  306       119978       107001         1561        11416
+ |- Markdown           188         4818            0         4714          104
+ (Total)                         124796       107001         6275        11520
 ===============================================================================
- Total                 459       121329       102171         6699        12459
+ Total                 480       141259       119867         6959        14433
 ===============================================================================
+
 ```
 ---
 
@@ -146,7 +156,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
-**Current release:** `spiraltorch==0.1.9` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.2.3` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), Metal via WGPU (macOS), Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -154,7 +164,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.1.9
+pip install -U spiraltorch==0.2.3
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -223,29 +233,84 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 ## Python Examples
 
-### 1) Core tensor & DLPack
+### 1)　DLPack(You can Zero copy)
 
 ```python
 import spiraltorch as st
+import torch
+from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 
-x = st.Tensor(2, 3, [1,2,3,4,5,6])
-print("shape:", x.shape(), "rows:", x.rows, "cols:", x.cols)
+# ST → Torch
+a = st.Tensor(2, 3, [1,2,3,4,5,6])
+caps = a.to_dlpack()
+t = torch_from_dlpack(caps)  
 
-cap = st.to_dlpack(x)
-x2 = st.from_dlpack(cap)
-print("tolist:", x2.tolist())
+t += 10
+print("ST tolist after torch += 10:", a.tolist())  # ← [11,12,13,14,15,16] is okay
+
+# Torch → ST
+t2 = torch.arange(6, dtype=torch.float32).reshape(2,3)
+a2 = st.Tensor.from_dlpack(t2)      # same buffer
+t2.mul_(2)                          # in-place
+print("ST sees torch mul_:        ", a2.tolist())
 ```
 
-### 2) Planner & device
+### 1b) Row softmax (GPU-accelerated when available)
 
 ```python
 import spiraltorch as st
 
-rp = st.plan_topk(rows=1024, cols=256, k=16, backend="wgpu", subgroup=True)
-print("kind:", rp.kind(), "tile:", rp.tile(), "wg:", rp.workgroup())
+logits = st.Tensor(2, 4, [3.0, 1.0, -2.0, 0.5, -0.25, 0.0, 1.5, -1.0])
+print("CPU row softmax:", logits.row_softmax().tolist())
 
-print("device:", st.describe_device(backend="wgpu", cols=1024, tile_hint=16))
-print("hip:", st.hip_probe())  # if supported
+# Opt into the WGPU backend (falls back to CPU if the device lacks subgroups)
+print("WGPU row softmax:", logits.row_softmax(backend="wgpu").tolist())
+```
+
+### 2) rl.stAgent
+
+```python
+import random
+import spiraltorch as st
+
+Agent = getattr(st.rl, "stAgent", None)
+if Agent is None:
+    raise SystemExit("st.rl.stAgent not available")
+
+def reward(action):
+    p = 0.6 if action == 0 else 0.4
+    return 1.0 if random.random() < p else 0.0
+
+agent = Agent(state_dim=1, action_dim=2, discount=0.0, learning_rate=5e-2)
+
+T = 2000
+FORCE_EXPLORE = 200
+eps_hi, eps_lo = 0.3, 0.01
+
+wins = 0
+pulls = [0, 0]
+wins_by_arm = [0, 0]
+
+for t in range(1, T + 1):
+    # 最初は強制探索、それ以降は徐々にεを下げる
+    if t <= FORCE_EXPLORE:
+        a = t % 2
+    else:
+        frac = (t - FORCE_EXPLORE) / (T - FORCE_EXPLORE)
+        eps = eps_hi + (eps_lo - eps_hi) * frac
+        agent.set_epsilon(eps)
+        a = agent.select_action(0)   # 状態はダミー
+
+    r = reward(a)
+    wins += r
+    pulls[a] += 1
+    wins_by_arm[a] += r
+    agent.update(0, a, r, 0) 
+
+print(f"total win rate: {wins / T:.3f}")
+for k in range(2):
+    rate = (wins_by_arm[k] / pulls[k]) if pulls[k] else 0.0
+    print(f"arm {k}: pulls={pulls[k]}, empirical p≈{rate:.3f}")
 ```
 
 ### 3) Self-supervised
@@ -749,10 +814,17 @@ It stores named `InterfaceGauge`s, offers builder-style helpers to register or
 remove probes, runs batch analysis keyed by id, and hands the resulting lineup
 directly to the conductor so runtime code can swap probe sets without rewriting
 fusion logic.【F:crates/st-core/src/theory/microlocal.rs†L100-L220】【F:crates/st-core/src/theory/microlocal.rs†L819-L875】
+`InterfaceZConductor::step` now preserves those identifiers, returning an
+`InterfaceZReport` that bundles the raw `InterfaceSignature`s alongside the
+matching ids and a cloned lift so downstream consumers can reuse the same
+projection without re-running the gauges.【F:crates/st-core/src/theory/microlocal.rs†L663-L738】
 `MacroTemplateBank` mirrors that registry pattern for macro-scale designs: it
 keeps named `MacroModelTemplate`s, accepts cards directly, and couples the whole
 lineup to an `InterfaceZLift` to emit a bridge bank so macro kinetics can travel
 with whatever microlocal gauges are currently wired into the conductor.【F:crates/st-core/src/theory/macro.rs†L680-L812】
+It can then call `drive_matched` to produce macro drives only for the gauges
+present in the latest report and merge their microlocal feedback via
+`feedback_from_report` before piping the result back into the conductor.【F:crates/st-core/src/theory/macro.rs†L780-L812】
 
 The conductor can now blend the pulses in both time and frequency: `set_frequency_config`
 installs a power-of-two FFT window and per-source spectral gains so high-frequency
@@ -2033,10 +2105,6 @@ let exec = WgpuExecutor::default();
 // launch
 execute_rank(&exec, &plan)?;
 ```
-**Modules**
-- `Linear`, `Conv1d`, `WaveRnn`, `ReLU`, `ZSpaceProjector`
-- `Sequential` composition and `ModuleTrainer`
-- Fully Rust-native, Python-accessible via wheels
 
 ## 🌀 New: ZSpaceCoherenceSequencer
 
@@ -2062,6 +2130,53 @@ print(f"dominant channel: {diagnostics.dominant_channel()}")
 print(f"z-bias: {diagnostics.z_bias():.3f}")
 ```
 
+### Pre-Discard Sequencing
+
+Humans don't wait to evaluate every possibility—they discard the "now impossible"
+branches first and let thought ride whatever remains. The sequencer now mirrors
+that behaviour:
+
+```python
+model.configure_pre_discard(
+    dominance_ratio=0.35,  # keep channels within 35% of the dominant signal
+    energy_floor=1e-3,     # drop negligible bands outright
+    min_channels=3,        # always preserve a minimal braid of possibilities
+)
+
+out, coherence, diagnostics = model.forward_with_diagnostics(x)
+print("discarded", diagnostics.discarded_channels(), "channels pre-aggregation")
+
+# Disable when you want full retention again
+model.disable_pre_discard()
+```
+
+The accompanying diagnostics surface `pre_discard` telemetry so you can inspect
+how aggressively the sequencer culled low-credence channels during a pass.
+Every invocation is also journaled so you can study the discard pattern over
+time:
+
+```python
+# Keep the last 32 pre-discard snapshots (default) or dial it up/down.
+model.configure_pre_discard_memory(limit=64)
+
+_ = model.forward_with_diagnostics(x)
+latest = model.pre_discard_snapshots()[-1]
+print("step", latest.step)
+print("survivors", latest.survivors)
+print("discarded ratio", latest.telemetry.discarded_ratio)
+print("survivor energy", latest.telemetry.survivor_energy)
+print("dominant weight", latest.telemetry.dominant_weight)
+
+# Reset the history whenever you want a fresh view.
+model.clear_pre_discard_snapshots()
+```
+
+Telemetry now tracks both survivor/discard counts and their energy share,
+so you can monitor whether the discard policy is merely trimming duplicates or
+aggressively stripping away signal. Snapshot entries expose the raw
+`survivor_energy_ratio`, `discarded_energy`, and even the dominant pre-discard
+weight so plugins can adapt thresholds dynamically.
+
 [See example](examples/05_new_layers/zspace_coherence_demo.py)
 
 ### Plugin Architecture
@@ -2077,7 +2192,7 @@ published (with the `psi` feature).
 
 Key stages:
 
-- `Projected`, `CoherenceMeasured`, `Aggregated`
+- `Projected`, `CoherenceMeasured`, `PreDiscardApplied` *(with survivor + discard indices)*, `Aggregated`
 - `SemanticWindowDerived`, `SemanticDistributionDerived`, `CanonicalConceptSelected`
 - `MaxwellBridgeEmitted`, `SemanticWindowFused`, `LanguageBridged`
 - `BackendConfigured`, `LinguisticProfileRegistered`, `LinguisticProfilesCleared`
@@ -2172,135 +2287,6 @@ let dataset = vec![
 let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
 println!("roundtable avg loss: {:.6}", stats.average_loss);
 ```
-
-## 🌀 New: ZSpaceCoherenceSequencer
-
-**NOT Attention. NOT Transformer.**
-
-Instead of Q·K^T softmax:
-- **Maxwell pulses** detect phase synchronization
-- **Desire Lagrangian** applies linguistic bias (no RLHF needed)
-- **Hyperbolic geometry** naturally encodes hierarchy
-- **Fractional operators** replace dot products
-
-```python
-from spiraltorch.nn import CoherenceDiagnostics, ZSpaceCoherenceSequencer
-
-model = ZSpaceCoherenceSequencer(
-    dim=768,
-    num_heads=12,
-    curvature=-1.0
-)
-
-out, coherence, diagnostics = model.forward_with_diagnostics(x)  # Aggregation + diagnostics
-
-# Derive a linguistic contour descriptor for downstream vocalisation
-contour = model.emit_linguistic_contour(x)
-print(contour.prosody_index())
-
-# Inspect channel-level linguistic reports for bridging into external runtimes
-reports = model.describe_channels(x)
-for report in reports[:3]:
-    print(report.channel(), report.dominant_concept(), report.weight())
-
-print("dominant channel:", diagnostics.dominant_channel())
-```
-
-[See example](examples/05_new_layers/zspace_coherence_demo.py)
-
-### Why Not Attention?
-
-| Aspect | Attention | ZSpaceCoherence |
-|--------|-----------|-----------------|
-| Token weighting | Q·K^T softmax | Maxwell pulses |
-| Geometry | Euclidean (dot product) | Hyperbolic (geodesic) |
-| Linguistic bias | External (RLHF/DPO) | Intrinsic (Desire Lagrangian) |
-| Operators | Softmax | Fractional calculus |
-| Hierarchy | Implicit | Explicit (curvature) |
-
-### Distributed roundtable consensus
-
-SpiralTorch's roundtable now runs with a Blackcat moderator sitting between
-local workers and the shared heuristics log:
-
-1. **Local roundtable** — every worker runs the A/B/C negotiation locally and
-   emits compact `DecisionEvent`s containing the winning band, score, and
-   ψ-derived reliability. ψ stays internal to the trainer and is only used for
-   automation.
-2. **Blackcat meta moderator** — summaries flow into the moderator, which uses
-   a dedicated Blackcat runtime to score support, publish moderator minutes,
-   and forward evidence to the embedded `MetaConductor`. Once enough support
-   accumulates a `GlobalProposal` is broadcast.
-3. **heur.kdsl op-log** — proposals arrive as deterministic `HeurOp` entries
-   that append soft rules, retract stale hints, or annotate strategies. The
-   op-log is CRDT-safe so multiple nodes can merge without conflicts.
-
-```rust
-use st_core::backend::device_caps::DeviceCaps;
-use st_nn::{DistConfig, ModuleTrainer, RoundtableConfig, Sequential, Linear, MeanSquaredError};
-
-let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -1.0, 0.05, 0.01);
-use st_core::ecosystem::CloudConnector;
-
-let dist = DistConfig {
-    node_id: "node-a".into(),
-    mode: st_nn::DistMode::PeriodicMeta,
-    push_interval: std::time::Duration::from_secs(15),
-    meta_endpoints: vec!["tcp://meta:5005".into()],
-    summary_window: 8,
-    cloud_targets: vec![
-        CloudConnector::AzureEventHub {
-            namespace: "spiral-meta".into(),
-            hub: "roundtable".into(),
-        },
-        CloudConnector::AwsKinesis {
-            region: "us-east-1".into(),
-            stream: "spiral-roundtable".into(),
-        },
-    ],
-};
-trainer.configure_distribution(dist);
-trainer.install_blackcat_moderator(0.75, 2);
-
-let mut model = Sequential::new();
-model.push(Linear::new("encoder", 4, 4)?);
-trainer.prepare(&mut model)?;
-
-let mut cfg = RoundtableConfig::default();
-#[cfg(feature = "psi")]
-{
-    cfg = cfg.enable_psi();
-}
-let schedule = trainer.roundtable(1, 4, cfg);
-let mut loss = MeanSquaredError::new();
-let dataset = vec![
-    (
-        Tensor::from_vec(1, 4, vec![0.0, 0.0, 0.0, 0.0])?,
-        Tensor::from_vec(1, 4, vec![0.0, 0.0, 0.0, 0.0])?,
-    ),
-];
-trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
-
-// Inspect the deterministic op-log and the moderator minutes.
-for op in trainer.heuristics_log().entries() {
-    println!("meta op {:?}", op.kind);
-}
-for minute in trainer.blackcat_minutes() {
-    println!("moderator: {} -> {:?} (support {:.2})", minute.plan_signature, minute.winner, minute.support);
-}
-for entry in trainer.blackcat_scoreboard() {
-    println!(
-        "scoreboard: {} obs={} reward={:.3}",
-        entry.plan_signature,
-        entry.observations,
-        entry.mean_reward
-    );
-}
-```
-
-The `cloud_targets` catalogue surfaces Azure Event Hub / Storage Queue and AWS Kinesis /
-SQS integrations to telemetry consumers, ensuring roundtable connectors advertise which
-cloud fabrics receive summaries and proposals.
 
 **BlackCat runtime tap-in**
 
@@ -2594,14 +2580,22 @@ tuner.mergeObject([
   { rows: 512, cols_min: 4096, cols_max: 16383, k_max: 256, sg: true, tile_cols: 1024 },
 ]);
 const overrides = tuner.toObject();
+// Extract overrides and resolved plans as JSON or plain JS objects without
+// constructing intermediate WasmFftPlan instances by hand.
 const fallbackPlan = tuner.planFftWithFallback(512, 4096, 128, true);
+const fallbackJson = tuner.planFftWithFallbackJson(512, 4096, 128, true);
+const fallbackObject = tuner.planFftWithFallbackObject(512, 4096, 128, true);
 const resolution = tuner.planFftResolution(512, 4096, 128, true);
+const resolutionJson = tuner.planFftResolutionJson(512, 4096, 128, true);
+const resolutionObject = tuner.planFftResolutionObject(512, 4096, 128, true);
 if (resolution.source === WasmFftPlanSource.Override) {
   console.log(`override tile=${resolution.plan.tileCols}`);
 }
 const snapshot = resolution.toJson();
 const hydrated = ResolvedWasmFftPlan.fromJson(snapshot);
 const report = tuner.planFftReport(512, 4096, 128, true);
+const overrideJson = tuner.planFftJson(512, 4096, 128, true);
+const overrideObject = tuner.planFftObject(512, 4096, 128, true);
 ```
 
 ---

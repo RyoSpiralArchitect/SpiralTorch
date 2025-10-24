@@ -298,7 +298,8 @@ impl Module for ZSpaceGraphConvolution {
                 self.record_forward_flows(flows);
             }
         }
-        let mut out = aggregated.support().matmul(self.weight.value())?;
+        let pack = self.weight.ensure_matmul_pack()?;
+        let mut out = aggregated.support().matmul_prepacked(&pack)?;
         out.add_row_inplace(self.bias.value().data())?;
         Ok(out)
     }
@@ -329,7 +330,8 @@ impl Module for ZSpaceGraphConvolution {
             self.record_backward_updates(weight_norm, bias_norm);
         }
 
-        let grad_support = grad_output.matmul(&self.weight.value().transpose())?;
+        let pack_t = self.weight.ensure_matmul_transpose_pack()?;
+        let grad_support = grad_output.matmul_prepacked(&pack_t)?;
         let weights = aggregated.into_weights();
         self.backpropagate_through_aggregation(&grad_support, &weights)
     }

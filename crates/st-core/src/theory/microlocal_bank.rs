@@ -129,6 +129,14 @@ impl<T> GaugeBank<T> {
     pub fn into_vec(self) -> Vec<T> {
         self.entries.into_iter().map(|entry| entry.value).collect()
     }
+
+    /// Consumes the bank and returns identifier-value pairs in insertion order.
+    pub fn into_entries(self) -> Vec<(Arc<str>, T)> {
+        self.entries
+            .into_iter()
+            .map(|entry| (entry.id, entry.value))
+            .collect()
+    }
 }
 
 impl<T> IntoIterator for GaugeBank<T> {

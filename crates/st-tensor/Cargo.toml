@@ -10,8 +10,9 @@ license = "AGPL-3.0-or-later"
 crate-type = ["rlib", "cdylib"]
 
 [features]
-default = ["cpu"]
+default = ["cpu", "faer"]
 faer = ["dep:faer"]
+simd = []
 
 # CPU execution is always available, but expose a feature so that downstream
 # crates can opt into a uniform interface when selecting backends.
@@ -28,7 +29,7 @@ wgpu = ["wgpu_frac"]
 # Cargo feature resolution failures.
 mps = []
 cuda = []
-hip = []
+hip = ["dep:st-backend-hip"]
 
 [dependencies]
 # Deterministic sampling helpers for pure tensor stochastic initialisers.
@@ -40,13 +41,16 @@ st-frac = { path = "../st-frac" }
 # automation layers and WASM bindings.
 serde = { version = "1.0", features = ["derive"], default-features = false }
 # High-performance SIMD dense linear algebra for CPU matmul acceleration.
-faer = { version = "0.18", default-features = false, features = ["std"], optional = true }
+faer = { version = "0.18", default-features = false, features = ["std", "rayon"], optional = true }
+# Parallel execution for tiled CPU kernels.
+rayon = { version = "1.10" }
 # Optional; only needed if building WGPU kernel
 wgpu = { version = "0.19", optional = true }
 bytemuck = { version = "1.15", features = ["derive"], optional = true }
 pollster = { version = "0.3", optional = true }
 futures-intrusive = { version = "0.5", optional = true }
 futures-lite = { version = "1.13", optional = true }
+st-backend-hip = { path = "../st-backend-hip", optional = true }
 
 [dev-dependencies]
 # Used in tests to validate conversions against ndarray utilities.
