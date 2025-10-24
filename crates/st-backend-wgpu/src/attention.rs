@@ -17,10 +17,13 @@ use thiserror::Error;
 use wgpu::{
     BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType,
     BufferBindingType, ComputePipeline, ComputePipelineDescriptor, Device, PipelineLayout,
-    PipelineLayoutDescriptor, ShaderModuleDescriptor, ShaderStages,
+    PipelineLayoutDescriptor, ShaderStages,
 };
 
-use crate::{util::read_wgsl, ShaderLoadError};
+use crate::{
+    util::{create_inline_module, read_wgsl},
+    ShaderLoadError,
+};
 
 const TEMPLATE_FILE: &str = "fused_attention_online.wgsl";
 
@@ -143,10 +146,7 @@ impl Plan {
         self.validate()?;
 
         let shader_source = self.generate_shader(shader_dir.into())?;
-        let module = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("st.backend.fused_attention"),
-            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
-        });
+        let module = create_inline_module(device, "st.backend.fused_attention", shader_source)?;
 
         let bind_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("st.backend.fused_attention.bind_layout"),
@@ -233,8 +233,9 @@ impl Plan {
         let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("st.backend.fused_attention.pipeline"),
             layout: Some(&pipeline_layout),
-            module: &module,
+            module: module.as_ref(),
             entry_point: "main",
+            compilation_options: Default::default(),
         });
 
         Ok(Kernel {
