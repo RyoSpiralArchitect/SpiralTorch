@@ -203,6 +203,48 @@
                 />
               </label>
             </div>
+            <div class="inline">
+              <label>
+                Allocation unit (UNIT)
+                <input id="dataset-unit" name="dataset-unit" placeholder="SYSDA" />
+              </label>
+              <label>
+                Average record unit (AVGREC)
+                <input
+                  id="dataset-average-record-unit"
+                  name="dataset-average-record-unit"
+                  placeholder="K"
+                />
+              </label>
+              <label>
+                Retention days
+                <input
+                  id="dataset-retention-period"
+                  name="dataset-retention-period"
+                  type="number"
+                  min="1"
+                  placeholder="30"
+                />
+              </label>
+            </div>
+            <div class="inline">
+              <label class="toggle">
+                <input
+                  type="checkbox"
+                  id="dataset-release-space"
+                  name="dataset-release-space"
+                />
+                Release space on close (RLSE)
+              </label>
+              <label>
+                Expiration date (YYYYDDD)
+                <input
+                  id="dataset-expiration-date"
+                  name="dataset-expiration-date"
+                  placeholder="2025123"
+                />
+              </label>
+            </div>
           </fieldset>
           <fieldset>
             <legend>Dispatch</legend>

@@ -24,13 +24,21 @@ const FUSED_LINEAR_RESIDUAL_WGSL_TEMPLATE: &str =
 const FUSED_LINEAR_RESIDUAL_GELU_WGSL_TEMPLATE: &str =
     include_str!("../wgpu_shaders/fused_matmul_bias_residual_gelu.wgsl");
 const ROW_SOFTMAX_WGSL: &str =
-    include_str!("../../../st-backend-wgpu/src/shaders/row_softmax_subgroup.wgsl");
+    include_str!("../../../st-backend-wgpu/src/shaders/softmax_workgroup.wgsl");
 
 fn instantiate_tile_template(template: &str, config: TileConfig) -> String {
+    let tile_m = config.tile_m();
+    let tile_n = config.tile_n();
+    let tile_k = config.tile_k();
+    let tile_mk = tile_m * tile_k;
+    let tile_nk = tile_n * tile_k;
+
     template
-        .replace("{tile_m}", &config.tile_m().to_string())
-        .replace("{tile_n}", &config.tile_n().to_string())
-        .replace("{tile_k}", &config.tile_k().to_string())
+        .replace("{tile_m}", &tile_m.to_string())
+        .replace("{tile_n}", &tile_n.to_string())
+        .replace("{tile_k}", &tile_k.to_string())
+        .replace("{tile_mk}", &(tile_mk.to_string() + "u"))
+        .replace("{tile_nk}", &(tile_nk.to_string() + "u"))
 }
 
 #[repr(C)]
@@ -103,7 +111,7 @@ struct DenseContext {
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
     softmax_layout: BindGroupLayout,
-    softmax_subgroup_pipeline: Option<Arc<ComputePipeline>>,
+    softmax_pipeline: Option<Arc<ComputePipeline>>,
 }
 
 impl DenseContext {
@@ -420,14 +428,14 @@ impl DenseContext {
                 bind_group_layouts: &[&softmax_layout],
                 push_constant_ranges: &[],
             });
-        let softmax_subgroup_pipeline = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let softmax_pipeline = std::panic::catch_unwind(AssertUnwindSafe(|| {
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("st.tensor.wgpu_dense.softmax_row_subgroup"),
+                label: Some("st.tensor.wgpu_dense.softmax_workgroup"),
                 source: wgpu::ShaderSource::Wgsl(ROW_SOFTMAX_WGSL.into()),
             });
             Arc::new(
                 device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("st.tensor.wgpu_dense.softmax_row_subgroup"),
+                    label: Some("st.tensor.wgpu_dense.softmax_workgroup"),
                     layout: Some(&softmax_pipeline_layout),
                     module: &shader,
                     entry_point: "main_cs",
@@ -452,7 +460,7 @@ impl DenseContext {
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
             softmax_layout,
-            softmax_subgroup_pipeline,
+            softmax_pipeline,
         })
     }
 
@@ -465,11 +473,11 @@ impl DenseContext {
     }
 
     fn supports_softmax(&self) -> bool {
-        self.softmax_subgroup_pipeline.is_some()
+        self.softmax_pipeline.is_some()
     }
 
     fn softmax_pipeline(&self) -> Option<Arc<ComputePipeline>> {
-        self.softmax_subgroup_pipeline.as_ref().map(Arc::clone)
+        self.softmax_pipeline.as_ref().map(Arc::clone)
     }
 
     fn softmax_bind_group(&self, input: &Buffer, output: &Buffer, params: &Buffer) -> BindGroup {

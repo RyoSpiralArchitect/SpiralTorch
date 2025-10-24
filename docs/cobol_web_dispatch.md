@@ -29,9 +29,10 @@ An envelope contains five sections:
 3. **Route** — optional MQ, CICS, and dataset selectors that inform the
    receiving COBOL code where to dispatch the payload. Dataset selectors can
    now carry richer metadata (PDS member, disposition, volume serial, DCB
-   attributes, SMS class hints, SPACE allocations, DSNTYPE, and LIKE templates)
-   so batch writers or GDG loaders can stage the payload precisely without
-   extra glue code in the bridge layer.
+   attributes, SMS class hints, SPACE allocations, DSNTYPE, LIKE templates,
+   UNIT/AVGREC hints, retention periods, RLSE, and expiration dates) so batch
+   writers or GDG loaders can stage the payload precisely without extra glue
+   code in the bridge layer.
 4. **Narrator payload** — curvature, temperature, encoder identifier, locale,
    and coefficient buffer.
 5. **Metadata** — tags, annotations, and an open `extra` field that accepts
@@ -77,6 +78,11 @@ builder.set_dataset_space_unit(Some("CYL".into()));
 builder.set_dataset_directory_blocks(Some(30));
 builder.set_dataset_type(Some("LIBRARY".into()));
 builder.set_dataset_like(Some("ST.DATA.TEMPLATE".into()));
+builder.set_dataset_unit(Some("SYSDA".into()));
+builder.set_dataset_average_record_unit(Some("K".into()));
+builder.set_dataset_retention_period(Some(45));
+builder.set_dataset_release_space(Some(true));
+builder.set_dataset_expiration_date(Some("2025123".into()));
 builder.add_tag("browser-ui");
 let envelope = builder.snapshot();
 let json = envelope.to_json_string()?;
@@ -132,6 +138,11 @@ planner.setDatasetSpaceUnit("CYL");
 planner.setDatasetDirectoryBlocks(30);
 planner.setDatasetType("LIBRARY");
 planner.setDatasetLike("ST.DATA.TEMPLATE");
+planner.setDatasetUnit("SYSDA");
+planner.setDatasetAverageRecordUnit("K");
+planner.setDatasetRetentionPeriod(45);
+planner.setDatasetReleaseSpace(true);
+planner.setDatasetExpirationDate("2025123");
 const jsonEnvelope = planner.toJson();
 const bytes = planner.toUint8Array();
 
@@ -185,9 +196,10 @@ that still rely on the default `job` placeholder identifier.
 Dataset hints must also remain internally consistent: the planner warns when a
 block size is not a clean multiple of the record length, when SPACE units lack
 matching allocations, when secondary extents appear without a primary, when
-directory blocks are provided for non-partitioned targets, or when DSNTYPE is
-outside the supported set. These checks surface problems before SMS allocation
-commands reach BPXWDYN.
+directory blocks are provided for non-partitioned targets, when DSNTYPE or
+AVGREC fall outside the supported sets, when retention days exceed SMS limits,
+or when expiration dates are malformed. These checks surface problems before
+SMS allocation commands reach BPXWDYN.
 
 ## Dispatching to mainframe bridges
 

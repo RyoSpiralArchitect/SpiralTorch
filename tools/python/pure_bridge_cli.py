@@ -24,10 +24,12 @@ if __package__ in (None, ""):
     from pure_bridge_io import (  # type: ignore[no-redef]
         FloatPair,
         load_pairs_from_path,
+        load_pairs_from_sources,
         load_pairs_from_text,
         load_weights_from_path,
         load_weights_from_text,
         load_texts_from_path,
+        load_texts_from_sources,
         load_texts_from_text,
         parse_float_sequence,
         reshape,
@@ -43,10 +45,12 @@ else:
     from .pure_bridge_io import (
         FloatPair,
         load_pairs_from_path,
+        load_pairs_from_sources,
         load_pairs_from_text,
         load_weights_from_path,
         load_weights_from_text,
         load_texts_from_path,
+        load_texts_from_sources,
         load_texts_from_text,
         parse_float_sequence,
         reshape,
@@ -190,6 +194,24 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Load prediction/target pairs from file(s) (JSON array or 'pred|target' per line).",
     )
     hypergrad.add_argument(
+        "--pairs-dir",
+        type=Path,
+        action="append",
+        default=[],
+        help="Load pairs from every file inside a directory (supports glob patterns).",
+    )
+    hypergrad.add_argument(
+        "--pairs-pattern",
+        action="append",
+        metavar="GLOB",
+        help="Glob pattern(s) to match when scanning --pairs-dir directories (default: *.json, *.txt).",
+    )
+    hypergrad.add_argument(
+        "--pairs-recursive",
+        action="store_true",
+        help="Recurse into subdirectories when scanning --pairs-dir directories.",
+    )
+    hypergrad.add_argument(
         "--pairs-stdin",
         action="store_true",
         help="Read prediction/target pairs from stdin (JSON array or 'pred|target' per line).",
@@ -238,6 +260,24 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Load text samples from file(s) (JSON array or one entry per line).",
+    )
+    hypergrad.add_argument(
+        "--text-dir",
+        type=Path,
+        action="append",
+        default=[],
+        help="Load text samples from every file inside a directory (supports glob patterns).",
+    )
+    hypergrad.add_argument(
+        "--text-pattern",
+        action="append",
+        metavar="GLOB",
+        help="Glob pattern(s) when scanning --text-dir directories (default: *.txt, *.json).",
+    )
+    hypergrad.add_argument(
+        "--text-recursive",
+        action="store_true",
+        help="Recurse into subdirectories when scanning --text-dir directories.",
     )
     hypergrad.add_argument(
         "--text-stdin",
@@ -319,9 +359,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         pairs = list(args.pairs)
         for path in args.pairs_file:
             pairs.extend(_load_pairs_from_file(path))
+        if args.pairs_dir:
+            pair_patterns = args.pairs_pattern or ["*.json", "*.txt"]
+            try:
+                pairs.extend(
+                    load_pairs_from_sources(
+                        args.pairs_dir,
+                        patterns=pair_patterns,
+                        recursive=args.pairs_recursive,
+                    )
+                )
+            except ValueError as exc:
+                parser.error(str(exc))
         text_samples = list(args.text)
         for path in args.text_file:
             text_samples.extend(_load_texts_from_file(path))
+        if args.text_dir:
+            text_patterns = args.text_pattern or ["*.txt", "*.json"]
+            try:
+                text_samples.extend(
+                    load_texts_from_sources(
+                        args.text_dir,
+                        patterns=text_patterns,
+                        recursive=args.text_recursive,
+                    )
+                )
+            except ValueError as exc:
+                parser.error(str(exc))
         stdin_flags = [args.pairs_stdin, args.weights_stdin, args.text_stdin]
         if sum(1 for flag in stdin_flags if flag) > 1:
             parser.error(

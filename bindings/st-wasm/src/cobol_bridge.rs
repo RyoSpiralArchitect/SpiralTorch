@@ -240,6 +240,32 @@ impl CobolDispatchPlanner {
         self.builder.set_dataset_like(like_dataset);
     }
 
+    #[wasm_bindgen(js_name = setDatasetUnit)]
+    pub fn set_dataset_unit(&mut self, unit: Option<String>) {
+        self.builder.set_dataset_unit(unit);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetAverageRecordUnit)]
+    pub fn set_dataset_average_record_unit(&mut self, average_record_unit: Option<String>) {
+        self.builder
+            .set_dataset_average_record_unit(average_record_unit);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetRetentionPeriod)]
+    pub fn set_dataset_retention_period(&mut self, retention_period: Option<u32>) {
+        self.builder.set_dataset_retention_period(retention_period);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetReleaseSpace)]
+    pub fn set_dataset_release_space(&mut self, release_space: Option<bool>) {
+        self.builder.set_dataset_release_space(release_space);
+    }
+
+    #[wasm_bindgen(js_name = setDatasetExpirationDate)]
+    pub fn set_dataset_expiration_date(&mut self, expiration_date: Option<String>) {
+        self.builder.set_dataset_expiration_date(expiration_date);
+    }
+
     #[wasm_bindgen(js_name = clearDataset)]
     pub fn clear_dataset(&mut self) {
         self.builder.clear_dataset();
@@ -384,6 +410,11 @@ impl CobolDispatchPlanner {
                     directory_blocks: dataset.directory_blocks,
                     dataset_type: dataset.dataset_type.as_deref(),
                     like_dataset: dataset.like_dataset.as_deref(),
+                    unit: dataset.unit.as_deref(),
+                    average_record_unit: dataset.average_record_unit.as_deref(),
+                    retention_period: dataset.retention_period,
+                    release_space: dataset.release_space,
+                    expiration_date: dataset.expiration_date.as_deref(),
                 }),
             release_channel: &envelope.release_channel,
         };
@@ -436,4 +467,14 @@ struct CobolPreviewDataset<'a> {
     dataset_type: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     like_dataset: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unit: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    average_record_unit: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retention_period: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    release_space: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expiration_date: Option<&'a str>,
 }

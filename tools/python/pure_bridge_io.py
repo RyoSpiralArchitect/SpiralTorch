@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple, Union
+from typing import Iterable, Iterator, List, Sequence, Tuple, Union
 
 FloatPair = Tuple[List[float], List[float]]
 
@@ -46,6 +46,21 @@ def load_pairs_from_path(path: Path) -> List[FloatPair]:
     except OSError as exc:
         raise ValueError(f"Failed to read pairs file '{path}': {exc}") from exc
     return load_pairs_from_text(text)
+
+
+def load_pairs_from_sources(
+    sources: Sequence[Path],
+    *,
+    patterns: Sequence[str] | None = None,
+    recursive: bool = False,
+) -> List[FloatPair]:
+    """Load prediction/target pairs from the provided files or directories."""
+
+    files = _collect_data_files(sources, patterns=patterns, recursive=recursive)
+    pairs: List[FloatPair] = []
+    for path in files:
+        pairs.extend(load_pairs_from_path(path))
+    return pairs
 
 
 def load_pairs_from_text(text: str) -> List[FloatPair]:
@@ -94,6 +109,21 @@ def load_texts_from_path(path: Path) -> List[str]:
     except OSError as exc:
         raise ValueError(f"Failed to read text file '{path}': {exc}") from exc
     return load_texts_from_text(text)
+
+
+def load_texts_from_sources(
+    sources: Sequence[Path],
+    *,
+    patterns: Sequence[str] | None = None,
+    recursive: bool = False,
+) -> List[str]:
+    """Load newline or JSON encoded samples from the provided files or directories."""
+
+    files = _collect_data_files(sources, patterns=patterns, recursive=recursive)
+    samples: List[str] = []
+    for path in files:
+        samples.extend(load_texts_from_path(path))
+    return samples
 
 
 def load_texts_from_text(text: str) -> List[str]:
@@ -160,6 +190,56 @@ def reshape(values: Sequence[float], rows: int, cols: int) -> List[List[float]]:
     return matrix
 
 
+def _collect_data_files(
+    sources: Sequence[Path],
+    *,
+    patterns: Sequence[str] | None,
+    recursive: bool,
+) -> List[Path]:
+    """Return a stable list of files collected from ``sources``.
+
+    Each entry in ``sources`` may refer to a file or directory.  Directories are
+    scanned using the provided glob ``patterns``.  Duplicate files are skipped
+    while preserving the order they are first encountered.
+    """
+
+    expanded: List[Path] = []
+    for source in sources:
+        expanded.append(source.expanduser().resolve())
+
+    patterns = [pattern for pattern in (patterns or ["*"]) if pattern]
+    seen: set[Path] = set()
+    collected: List[Path] = []
+
+    for source in expanded:
+        if source.is_file():
+            if source not in seen:
+                seen.add(source)
+                collected.append(source)
+            continue
+        if source.is_dir():
+            iterator: Iterator[Path]
+            for pattern in patterns:
+                iterator = source.rglob(pattern) if recursive else source.glob(pattern)
+                for candidate in iterator:
+                    candidate = candidate.resolve()
+                    if candidate.is_file() and candidate not in seen:
+                        seen.add(candidate)
+                        collected.append(candidate)
+            continue
+        raise ValueError(f"Data source '{source}' does not exist or is not accessible")
+
+    if not collected:
+        roots = ", ".join(str(path) for path in expanded) or "<none>"
+        pattern_text = ", ".join(patterns)
+        raise ValueError(
+            "No files matched the provided data sources."
+            f" Sources: {roots}. Patterns: {pattern_text}."
+        )
+
+    return collected
+
+
 def _parse_pair_line(value: str) -> FloatPair:
     try:
         pred_raw, tgt_raw = value.split("|", 1)
@@ -188,10 +268,12 @@ def _pair_from_obj(obj: object) -> FloatPair:
 
 __all__ = [
     "FloatPair",
+    "load_pairs_from_sources",
     "load_pairs_from_path",
     "load_pairs_from_text",
     "load_weights_from_path",
     "load_weights_from_text",
+    "load_texts_from_sources",
     "load_texts_from_path",
     "load_texts_from_text",
     "parse_float_sequence",

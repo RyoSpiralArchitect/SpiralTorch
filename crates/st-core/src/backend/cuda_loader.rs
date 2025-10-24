@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 pub struct CudaModule {
     device: Arc<CudaDevice>,
     module_name: &'static str,
+    entry: Arc<ModuleEntry>,
 }
 
 #[cfg(feature = "cuda")]
@@ -32,7 +33,18 @@ impl CudaModule {
     }
 
     pub fn get_func(&self, func_name: &'static str) -> Result<Arc<CudaFunction>, String> {
-        module_state_get_func(self.module_name, func_name)
+        let state = self
+            .entry
+            .state
+            .lock()
+            .map_err(|_| "cuda module state poisoned".to_string())?;
+
+        state.functions.get(func_name).cloned().ok_or_else(|| {
+            format!(
+                "cuda function `{func_name}` not registered in module `{}`",
+                self.module_name
+            )
+        })
     }
 }
 
@@ -108,9 +120,11 @@ pub fn load_ptx_module(
         .iter()
         .all(|name| state.functions.contains_key(name))
     {
+        drop(state);
         return Ok(CudaModule {
             device,
             module_name,
+            entry,
         });
     }
 
@@ -139,30 +153,6 @@ pub fn load_ptx_module(
     Ok(CudaModule {
         device,
         module_name,
-    })
-}
-
-#[cfg(feature = "cuda")]
-fn module_state_get_func(
-    module_name: &'static str,
-    func_name: &'static str,
-) -> Result<Arc<CudaFunction>, String> {
-    let entry = {
-        let modules = registry()
-            .lock()
-            .map_err(|_| "cuda module registry poisoned".to_string())?;
-        modules
-            .get(&module_name)
-            .cloned()
-            .ok_or_else(|| format!("cuda module `{module_name}` not loaded"))?
-    };
-
-    let state = entry
-        .state
-        .lock()
-        .map_err(|_| "cuda module state poisoned".to_string())?;
-
-    state.functions.get(func_name).cloned().ok_or_else(|| {
-        format!("cuda function `{func_name}` not registered in module `{module_name}`")
+        entry,
     })
 }

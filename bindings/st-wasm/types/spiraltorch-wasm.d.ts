@@ -415,6 +415,11 @@ declare module "spiraltorch-wasm" {
         directory_blocks?: number;
         dataset_type?: string;
         like_dataset?: string;
+        unit?: string;
+        average_record_unit?: string;
+        retention_period?: number;
+        release_space?: boolean;
+        expiration_date?: string;
     }
 
     export interface CobolRoutePlan {
@@ -450,6 +455,11 @@ declare module "spiraltorch-wasm" {
         directory_blocks?: number;
         dataset_type?: string;
         like_dataset?: string;
+        unit?: string;
+        average_record_unit?: string;
+        retention_period?: number;
+        release_space?: boolean;
+        expiration_date?: string;
     }
 
     export interface CobolPreviewEnvelope {
@@ -517,6 +527,11 @@ declare module "spiraltorch-wasm" {
         setDatasetDirectoryBlocks(directoryBlocks?: number | null): void;
         setDatasetType(datasetType?: string | null): void;
         setDatasetLike(likeDataset?: string | null): void;
+        setDatasetUnit(unit?: string | null): void;
+        setDatasetAverageRecordUnit(averageRecordUnit?: string | null): void;
+        setDatasetRetentionPeriod(retentionPeriod?: number | null): void;
+        setDatasetReleaseSpace(releaseSpace?: boolean | null): void;
+        setDatasetExpirationDate(expirationDate?: string | null): void;
         clearDataset(): void;
         clearRoute(): void;
         addTag(tag: string): void;

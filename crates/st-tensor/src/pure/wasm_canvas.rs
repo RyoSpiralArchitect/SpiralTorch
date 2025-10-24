@@ -179,6 +179,12 @@ pub struct ColorVectorField {
 }
 
 impl ColorVectorField {
+    const FFT_CHANNELS: usize = 4;
+    const FFT_COMPLEX_STRIDE: usize = 2;
+    const FFT_INTERLEAVED_STRIDE: usize = Self::FFT_CHANNELS * Self::FFT_COMPLEX_STRIDE;
+    const POWER_DB_EPSILON: f32 = 1e-12;
+    const POWER_DB_FLOOR: f32 = -160.0;
+
     pub fn new(width: usize, height: usize) -> Self {
         let mut field = Self {
             width,
@@ -266,7 +272,7 @@ impl ColorVectorField {
         let mut chroma_r = vec![Complex32::default(); width];
         let mut chroma_g = vec![Complex32::default(); width];
         let mut chroma_b = vec![Complex32::default(); width];
-        let mut out = Vec::with_capacity(self.height * width * 8);
+        let mut out = Vec::with_capacity(self.height * width * Self::FFT_INTERLEAVED_STRIDE);
 
         for row in 0..height {
             for col in 0..width {
@@ -301,7 +307,7 @@ impl ColorVectorField {
     /// spectrum as a tensor with shape `(height, width * 8)`.
     pub fn fft_rows_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let data = self.fft_rows_interleaved(inverse)?;
-        Tensor::from_vec(self.height, self.width * 8, data)
+        Tensor::from_vec(self.height, self.width * Self::FFT_INTERLEAVED_STRIDE, data)
     }
 
     /// Convenience wrapper that converts the row-wise FFT into magnitude space.
@@ -309,14 +315,14 @@ impl ColorVectorField {
     /// the magnitude of the energy and chroma channels in order.
     pub fn fft_rows_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_rows_interleaved(inverse)?;
-        let mut magnitudes = Vec::with_capacity(self.height * self.width * 4);
-        for chunk in spectrum.chunks_exact(8) {
+        let mut magnitudes = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
             magnitudes.push(chunk[0].hypot(chunk[1]));
             magnitudes.push(chunk[2].hypot(chunk[3]));
             magnitudes.push(chunk[4].hypot(chunk[5]));
             magnitudes.push(chunk[6].hypot(chunk[7]));
         }
-        Tensor::from_vec(self.height, self.width * 4, magnitudes)
+        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, magnitudes)
     }
 
     /// Row-wise FFT power helper mirroring [`fft_rows_interleaved`]. The
@@ -328,19 +334,35 @@ impl ColorVectorField {
         Self::power_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
+    /// Row-wise FFT log-power helper mirroring [`fft_rows_power_tensor`]. The
+    /// returned tensor has shape `(height, width * 4)` storing the decibel-scaled
+    /// magnitude with a floor at [`Self::POWER_DB_FLOOR`] to keep zeros finite.
+    pub fn fft_rows_power_db_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        let spectrum = self.fft_rows_interleaved(inverse)?;
+        Self::power_db_tensor_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    /// Compute both the linear power and log-power (decibel) spectra for the
+    /// row-wise FFT in a single pass. Returns `(power, power_db)` tensors with
+    /// shape `(height, width * 4)`.
+    pub fn fft_rows_power_with_db_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_rows_interleaved(inverse)?;
+        Self::power_and_power_db_tensors_from_interleaved(self.height, self.width, &spectrum)
+    }
+
     /// Row-wise FFT phase helper mirroring [`fft_rows_magnitude_tensor`]. The
     /// returned tensor has shape `(height, width * 4)` and stores phases in
     /// radians using `atan2(im, re)` for each channel.
     pub fn fft_rows_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_rows_interleaved(inverse)?;
-        let mut phases = Vec::with_capacity(self.height * self.width * 4);
-        for chunk in spectrum.chunks_exact(8) {
+        let mut phases = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
             phases.push(chunk[1].atan2(chunk[0]));
             phases.push(chunk[3].atan2(chunk[2]));
             phases.push(chunk[5].atan2(chunk[4]));
             phases.push(chunk[7].atan2(chunk[6]));
         }
-        Tensor::from_vec(self.height, self.width * 4, phases)
+        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, phases)
     }
 
     /// Compute both the magnitude and phase spectra for the row-wise FFT in a
@@ -365,7 +387,7 @@ impl ColorVectorField {
         let mut chroma_r = vec![Complex32::default(); height];
         let mut chroma_g = vec![Complex32::default(); height];
         let mut chroma_b = vec![Complex32::default(); height];
-        let mut out = Vec::with_capacity(self.height * self.width * 8);
+        let mut out = Vec::with_capacity(self.height * self.width * Self::FFT_INTERLEAVED_STRIDE);
 
         for col in 0..width {
             for row in 0..height {
@@ -401,7 +423,7 @@ impl ColorVectorField {
     /// order (one row per column with interleaved complex components).
     pub fn fft_cols_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let data = self.fft_cols_interleaved(inverse)?;
-        Tensor::from_vec(self.width, self.height * 8, data)
+        Tensor::from_vec(self.width, self.height * Self::FFT_INTERLEAVED_STRIDE, data)
     }
 
     /// Column-wise FFT magnitude helper mirroring
@@ -410,14 +432,14 @@ impl ColorVectorField {
     /// original canvas.
     pub fn fft_cols_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_cols_interleaved(inverse)?;
-        let mut magnitudes = Vec::with_capacity(self.width * self.height * 4);
-        for chunk in spectrum.chunks_exact(8) {
+        let mut magnitudes = Vec::with_capacity(self.width * self.height * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
             magnitudes.push(chunk[0].hypot(chunk[1]));
             magnitudes.push(chunk[2].hypot(chunk[3]));
             magnitudes.push(chunk[4].hypot(chunk[5]));
             magnitudes.push(chunk[6].hypot(chunk[7]));
         }
-        Tensor::from_vec(self.width, self.height * 4, magnitudes)
+        Tensor::from_vec(self.width, self.height * Self::FFT_CHANNELS, magnitudes)
     }
 
     /// Column-wise FFT power helper mirroring [`fft_cols_interleaved`]. The
@@ -428,17 +450,33 @@ impl ColorVectorField {
         Self::power_tensor_from_interleaved(self.width, self.height, &spectrum)
     }
 
+    /// Column-wise FFT log-power helper that mirrors [`fft_cols_power_tensor`].
+    /// The returned tensor has shape `(width, height * 4)` storing decibel-scaled
+    /// spectral energy for each channel.
+    pub fn fft_cols_power_db_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        let spectrum = self.fft_cols_interleaved(inverse)?;
+        Self::power_db_tensor_from_interleaved(self.width, self.height, &spectrum)
+    }
+
+    /// Column-wise FFT helper that returns both the power and log-power
+    /// spectra in one pass. The returned tensors have shape `(width, height *
+    /// 4)`.
+    pub fn fft_cols_power_with_db_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_cols_interleaved(inverse)?;
+        Self::power_and_power_db_tensors_from_interleaved(self.width, self.height, &spectrum)
+    }
+
     /// Column-wise FFT phase helper mirroring [`fft_rows_phase_tensor`].
     pub fn fft_cols_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_cols_interleaved(inverse)?;
-        let mut phases = Vec::with_capacity(self.width * self.height * 4);
-        for chunk in spectrum.chunks_exact(8) {
+        let mut phases = Vec::with_capacity(self.width * self.height * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
             phases.push(chunk[1].atan2(chunk[0]));
             phases.push(chunk[3].atan2(chunk[2]));
             phases.push(chunk[5].atan2(chunk[4]));
             phases.push(chunk[7].atan2(chunk[6]));
         }
-        Tensor::from_vec(self.width, self.height * 4, phases)
+        Tensor::from_vec(self.width, self.height * Self::FFT_CHANNELS, phases)
     }
 
     /// Compute both the magnitude and phase spectra for the column-wise FFT in
@@ -510,7 +548,7 @@ impl ColorVectorField {
             }
         }
 
-        let mut out = Vec::with_capacity(size * 8);
+        let mut out = Vec::with_capacity(size * Self::FFT_INTERLEAVED_STRIDE);
         for idx in 0..size {
             out.push(energy[idx].re);
             out.push(energy[idx].im);
@@ -529,7 +567,245 @@ impl ColorVectorField {
     /// spectrum as a tensor with shape `(height, width * 8)`.
     pub fn fft_2d_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let data = self.fft_2d_interleaved(inverse)?;
-        Tensor::from_vec(self.height, self.width * 8, data)
+        Tensor::from_vec(self.height, self.width * Self::FFT_INTERLEAVED_STRIDE, data)
+    }
+
+    /// 2D FFT magnitude helper mirroring [`fft_2d_interleaved`]. The returned
+    /// tensor has shape `(height, width * 4)` with magnitudes for each channel.
+    pub fn fft_2d_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        let mut magnitudes = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            magnitudes.push(chunk[0].hypot(chunk[1]));
+            magnitudes.push(chunk[2].hypot(chunk[3]));
+            magnitudes.push(chunk[4].hypot(chunk[5]));
+            magnitudes.push(chunk[6].hypot(chunk[7]));
+        }
+        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, magnitudes)
+    }
+
+    /// 2D FFT power helper mirroring [`fft_2d_interleaved`]. The returned tensor
+    /// has shape `(height, width * 4)` storing squared magnitudes per channel so
+    /// integrators can probe energy across both axes without recomputing.
+    pub fn fft_2d_power_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        Self::power_tensor_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    /// 2D FFT log-power helper mirroring [`fft_2d_power_tensor`]. Returns a
+    /// tensor with shape `(height, width * 4)` packed with decibel-scaled
+    /// spectral energy for each channel so WASM integrations can visualise
+    /// logarithmic energy without extra processing.
+    pub fn fft_2d_power_db_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        Self::power_db_tensor_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    /// 2D FFT helper that returns both the power and log-power spectra in one
+    /// pass. Each tensor has shape `(height, width * 4)`.
+    pub fn fft_2d_power_with_db_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        Self::power_and_power_db_tensors_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    /// 2D FFT phase helper mirroring [`fft_2d_interleaved`]. The returned tensor
+    /// has shape `(height, width * 4)` storing per-channel phase angles.
+    pub fn fft_2d_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        let mut phases = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            phases.push(chunk[1].atan2(chunk[0]));
+            phases.push(chunk[3].atan2(chunk[2]));
+            phases.push(chunk[5].atan2(chunk[4]));
+            phases.push(chunk[7].atan2(chunk[6]));
+        }
+        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, phases)
+    }
+
+    /// Compute both the magnitude and phase spectra for the 2D FFT in a single
+    /// pass. Returns `(magnitude, phase)` tensors, each with shape
+    /// `(height, width * 4)`.
+    pub fn fft_2d_polar_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        Self::polar_tensors_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    fn polar_tensors_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<(Tensor, Tensor)> {
+        let expected_pairs = rows
+            .checked_mul(cols)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_polar",
+                volume: rows.saturating_mul(cols),
+                max_volume: usize::MAX,
+            })?;
+        let expected_len =
+            expected_pairs
+                .checked_mul(8)
+                .ok_or(TensorError::TensorVolumeExceeded {
+                    label: "canvas_fft_polar",
+                    volume: rows.saturating_mul(cols).saturating_mul(8),
+                    max_volume: usize::MAX,
+                })?;
+
+        if spectrum.len() != expected_len {
+            return Err(TensorError::DataLength {
+                expected: expected_len,
+                got: spectrum.len(),
+            });
+        }
+
+        let mut magnitudes = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        let mut phases = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            let (re_energy, im_energy) = (chunk[0], chunk[1]);
+            let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
+            let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
+            let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
+
+            magnitudes.push(re_energy.hypot(im_energy));
+            phases.push(im_energy.atan2(re_energy));
+
+            magnitudes.push(re_chroma_r.hypot(im_chroma_r));
+            phases.push(im_chroma_r.atan2(re_chroma_r));
+
+            magnitudes.push(re_chroma_g.hypot(im_chroma_g));
+            phases.push(im_chroma_g.atan2(re_chroma_g));
+
+            magnitudes.push(re_chroma_b.hypot(im_chroma_b));
+            phases.push(im_chroma_b.atan2(re_chroma_b));
+        }
+
+        let magnitude = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, magnitudes)?;
+        let phase = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, phases)?;
+        Ok((magnitude, phase))
+    }
+
+    fn map_power_tensor_from_interleaved<F>(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+        mut map: F,
+    ) -> PureResult<Tensor>
+    where
+        F: FnMut(f32) -> f32,
+    {
+        let expected_pairs =
+            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
+        let mut power = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            let [energy, chroma_r, chroma_g, chroma_b] =
+                Self::power_channels_from_interleaved_chunk(chunk);
+            power.push(map(energy));
+            power.push(map(chroma_r));
+            power.push(map(chroma_g));
+            power.push(map(chroma_b));
+        }
+
+        Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power)
+    }
+
+    fn power_tensor_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<Tensor> {
+        Self::map_power_tensor_from_interleaved(rows, cols, spectrum, |power| power)
+    }
+
+    fn power_db_tensor_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<Tensor> {
+        Self::map_power_tensor_from_interleaved(rows, cols, spectrum, Self::power_to_db)
+    }
+
+    fn power_and_power_db_tensors_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<(Tensor, Tensor)> {
+        let expected_pairs =
+            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
+        let mut linear = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        let mut log = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            let [energy, chroma_r, chroma_g, chroma_b] =
+                Self::power_channels_from_interleaved_chunk(chunk);
+
+            linear.push(energy);
+            linear.push(chroma_r);
+            linear.push(chroma_g);
+            linear.push(chroma_b);
+
+            log.push(Self::power_to_db(energy));
+            log.push(Self::power_to_db(chroma_r));
+            log.push(Self::power_to_db(chroma_g));
+            log.push(Self::power_to_db(chroma_b));
+        }
+
+        let linear_tensor = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, linear)?;
+        let log_tensor = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, log)?;
+        Ok((linear_tensor, log_tensor))
+    }
+
+    #[inline]
+    fn validate_power_interleaved_dimensions(
+        rows: usize,
+        cols: usize,
+        spectrum_len: usize,
+    ) -> PureResult<usize> {
+        let expected_pairs = rows
+            .checked_mul(cols)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_power",
+                volume: rows.saturating_mul(cols),
+                max_volume: usize::MAX,
+            })?;
+        let expected_len =
+            expected_pairs
+                .checked_mul(8)
+                .ok_or(TensorError::TensorVolumeExceeded {
+                    label: "canvas_fft_power",
+                    volume: rows.saturating_mul(cols).saturating_mul(8),
+                    max_volume: usize::MAX,
+                })?;
+
+        if spectrum_len != expected_len {
+            return Err(TensorError::DataLength {
+                expected: expected_len,
+                got: spectrum_len,
+            });
+        }
+
+        Ok(expected_pairs)
+    }
+
+    #[inline]
+    fn power_channels_from_interleaved_chunk(chunk: &[f32]) -> [f32; 4] {
+        let (re_energy, im_energy) = (chunk[0], chunk[1]);
+        let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
+        let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
+        let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
+
+        [
+            re_energy.mul_add(re_energy, im_energy * im_energy),
+            re_chroma_r.mul_add(re_chroma_r, im_chroma_r * im_chroma_r),
+            re_chroma_g.mul_add(re_chroma_g, im_chroma_g * im_chroma_g),
+            re_chroma_b.mul_add(re_chroma_b, im_chroma_b * im_chroma_b),
+        ]
+    }
+
+    #[inline]
+    fn power_to_db(power: f32) -> f32 {
+        let clamped = power.max(Self::POWER_DB_EPSILON);
+        let db = 10.0 * clamped.log10();
+        db.max(Self::POWER_DB_FLOOR)
     }
 
     /// 2D FFT magnitude helper mirroring [`fft_2d_interleaved`]. The returned
@@ -1074,6 +1350,23 @@ impl CanvasProjector {
         self.vectors.fft_rows_power_tensor(inverse)
     }
 
+    /// Refresh the canvas and expose the row-wise FFT log-power (decibel) tensor
+    /// with shape `(height, width * 4)`.
+    pub fn refresh_vector_fft_power_db_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
+        self.render()?;
+        self.vectors.fft_rows_power_db_tensor(inverse)
+    }
+
+    /// Refresh the canvas and expose both the row-wise FFT power and log-power
+    /// tensors with shape `(height, width * 4)`.
+    pub fn refresh_vector_fft_power_with_db_tensors(
+        &mut self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors.fft_rows_power_with_db_tensors(inverse)
+    }
+
     /// Refresh the canvas and expose the row-wise FFT phases as a tensor with
     /// shape `(height, width * 4)`.
     pub fn refresh_vector_fft_phase_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
@@ -1118,6 +1411,26 @@ impl CanvasProjector {
         self.vectors.fft_cols_power_tensor(inverse)
     }
 
+    /// Refresh the canvas and expose the column-wise FFT log-power (decibel)
+    /// tensor with shape `(width, height * 4)`.
+    pub fn refresh_vector_fft_columns_power_db_tensor(
+        &mut self,
+        inverse: bool,
+    ) -> PureResult<Tensor> {
+        self.render()?;
+        self.vectors.fft_cols_power_db_tensor(inverse)
+    }
+
+    /// Refresh the canvas and expose both the column-wise FFT power and
+    /// log-power tensors with shape `(width, height * 4)`.
+    pub fn refresh_vector_fft_columns_power_with_db_tensors(
+        &mut self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors.fft_cols_power_with_db_tensors(inverse)
+    }
+
     /// Refresh the canvas and expose column-wise FFT phases as a tensor with
     /// shape `(width, height * 4)`.
     pub fn refresh_vector_fft_columns_phase_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
@@ -1156,6 +1469,23 @@ impl CanvasProjector {
     pub fn refresh_vector_fft_2d_power_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
         self.render()?;
         self.vectors.fft_2d_power_tensor(inverse)
+    }
+
+    /// Refresh the canvas and expose the 2D FFT log-power (decibel) tensor with
+    /// shape `(height, width * 4)`.
+    pub fn refresh_vector_fft_2d_power_db_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
+        self.render()?;
+        self.vectors.fft_2d_power_db_tensor(inverse)
+    }
+
+    /// Refresh the canvas and expose both the 2D FFT power and log-power
+    /// tensors with shape `(height, width * 4)`.
+    pub fn refresh_vector_fft_2d_power_with_db_tensors(
+        &mut self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors.fft_2d_power_with_db_tensors(inverse)
     }
 
     /// Refresh the canvas and expose the 2D FFT phases as a tensor with shape
@@ -1233,6 +1563,18 @@ impl CanvasProjector {
         self.vectors.fft_rows_power_tensor(inverse)
     }
 
+    /// Last computed row-wise FFT log-power tensor without forcing a refresh.
+    pub fn vector_fft_power_db_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        self.vectors.fft_rows_power_db_tensor(inverse)
+    }
+
+    /// Access both the row-wise FFT power and log-power tensors without
+    /// forcing a refresh. Returns `(power, power_db)` with shape
+    /// `(height, width * 4)`.
+    pub fn vector_fft_power_with_db_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        self.vectors.fft_rows_power_with_db_tensors(inverse)
+    }
+
     /// Last computed row-wise FFT phases without forcing a refresh.
     pub fn vector_fft_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         self.vectors.fft_rows_phase_tensor(inverse)
@@ -1264,6 +1606,22 @@ impl CanvasProjector {
         self.vectors.fft_cols_power_tensor(inverse)
     }
 
+    /// Access the last computed column-wise FFT log-power tensor without
+    /// forcing a refresh.
+    pub fn vector_fft_columns_power_db_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        self.vectors.fft_cols_power_db_tensor(inverse)
+    }
+
+    /// Access both the column-wise FFT power and log-power tensors without
+    /// forcing a refresh. Returns `(power, power_db)` with shape `(width, height
+    /// * 4)`.
+    pub fn vector_fft_columns_power_with_db_tensors(
+        &self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.vectors.fft_cols_power_with_db_tensors(inverse)
+    }
+
     /// Access the last computed column-wise FFT phases without forcing a
     /// refresh.
     pub fn vector_fft_columns_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
@@ -1292,6 +1650,20 @@ impl CanvasProjector {
     /// Access the last computed 2D FFT power without forcing a refresh.
     pub fn vector_fft_2d_power_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         self.vectors.fft_2d_power_tensor(inverse)
+    }
+
+    /// Access the last computed 2D FFT log-power tensor without forcing a refresh.
+    pub fn vector_fft_2d_power_db_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        self.vectors.fft_2d_power_db_tensor(inverse)
+    }
+
+    /// Access both the 2D FFT power and log-power tensors without forcing a
+    /// refresh. Returns `(power, power_db)` with shape `(height, width * 4)`.
+    pub fn vector_fft_2d_power_with_db_tensors(
+        &self,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.vectors.fft_2d_power_with_db_tensors(inverse)
     }
 
     /// Access the last computed 2D FFT phases without forcing a refresh.
@@ -1878,6 +2250,58 @@ mod tests {
     }
 
     #[test]
+    fn vector_field_fft_rows_power_db_tensor_matches_logarithmic_projection() {
+        let mut field = ColorVectorField::new(3, 2);
+        for idx in 0..6 {
+            let energy = 0.25 * idx as f32;
+            let chroma = [
+                (-0.05 * idx as f32).sin(),
+                0.1 * (idx as f32 + 0.5),
+                0.075 * (idx as f32 - 1.0),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let power = field.fft_rows_power_tensor(false).unwrap();
+        let power_db = field.fft_rows_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), power_db.shape());
+        for (&linear, &db) in power.data().iter().zip(power_db.data()) {
+            let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
+                .max(ColorVectorField::POWER_DB_FLOOR);
+            assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn vector_field_fft_rows_power_with_db_tensors_match_components() {
+        let mut field = ColorVectorField::new(4, 3);
+        for idx in 0..12 {
+            let energy = (idx as f32 * 0.1).cos();
+            let chroma = [
+                0.05 * (idx as f32 + 1.5),
+                -0.03 * (idx as f32 - 2.0),
+                (0.02 * idx as f32).sin(),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (power, power_db) = field.fft_rows_power_with_db_tensors(false).unwrap();
+        let solo_power = field.fft_rows_power_tensor(false).unwrap();
+        let solo_power_db = field.fft_rows_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn vector_field_fft_rows_phase_tensor_matches_shape() {
         let mut field = ColorVectorField::new(2, 1);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
@@ -1972,6 +2396,58 @@ mod tests {
     }
 
     #[test]
+    fn vector_field_fft_columns_power_db_tensor_matches_logarithmic_projection() {
+        let mut field = ColorVectorField::new(2, 3);
+        for idx in 0..6 {
+            let energy = 0.18 * idx as f32;
+            let chroma = [
+                0.12 * (idx as f32 + 0.25),
+                -0.07 * (idx as f32 - 0.5),
+                0.05 * (idx as f32 - 1.75),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let power = field.fft_cols_power_tensor(false).unwrap();
+        let power_db = field.fft_cols_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), power_db.shape());
+        for (&linear, &db) in power.data().iter().zip(power_db.data()) {
+            let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
+                .max(ColorVectorField::POWER_DB_FLOOR);
+            assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn vector_field_fft_columns_power_with_db_tensors_match_components() {
+        let mut field = ColorVectorField::new(3, 4);
+        for idx in 0..12 {
+            let energy = (idx as f32 * 0.07).sin();
+            let chroma = [
+                0.04 * (idx as f32 - 1.0),
+                0.06 * (idx as f32 + 0.25),
+                (-0.05 * idx as f32).cos(),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (power, power_db) = field.fft_cols_power_with_db_tensors(false).unwrap();
+        let solo_power = field.fft_cols_power_tensor(false).unwrap();
+        let solo_power_db = field.fft_cols_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn vector_field_fft_columns_phase_tensor_matches_shape() {
         let mut field = ColorVectorField::new(1, 2);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
@@ -2048,6 +2524,58 @@ mod tests {
         assert_eq!(power.shape(), magnitude.shape());
         for (p, m) in power.data().iter().zip(magnitude.data()) {
             assert!((p - m * m).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn vector_field_fft_2d_power_db_tensor_matches_logarithmic_projection() {
+        let mut field = ColorVectorField::new(3, 2);
+        for idx in 0..6 {
+            let energy = 0.35 * idx as f32;
+            let chroma = [
+                0.21 * (idx as f32 + 0.25),
+                -0.14 * (idx as f32 - 0.75),
+                0.09 * (idx as f32 - 1.25),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let power = field.fft_2d_power_tensor(false).unwrap();
+        let power_db = field.fft_2d_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), power_db.shape());
+        for (&linear, &db) in power.data().iter().zip(power_db.data()) {
+            let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
+                .max(ColorVectorField::POWER_DB_FLOOR);
+            assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn vector_field_fft_2d_power_with_db_tensors_match_components() {
+        let mut field = ColorVectorField::new(4, 3);
+        for idx in 0..12 {
+            let energy = 0.12 * (idx as f32 + 0.5);
+            let chroma = [
+                (-0.03 * idx as f32).sin(),
+                0.08 * (idx as f32 - 1.2),
+                (0.09 * idx as f32).cos(),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (power, power_db) = field.fft_2d_power_with_db_tensors(false).unwrap();
+        let solo_power = field.fft_2d_power_tensor(false).unwrap();
+        let solo_power_db = field.fft_2d_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
         }
     }
 
@@ -2147,6 +2675,49 @@ mod tests {
     }
 
     #[test]
+    fn projector_refresh_vector_fft_power_db_tensor_matches_logarithmic_projection() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
+        let power = projector.refresh_vector_fft_power_tensor(false).unwrap();
+        let power_db = projector.refresh_vector_fft_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), power_db.shape());
+        for (&linear, &db) in power.data().iter().zip(power_db.data()) {
+            let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
+                .max(ColorVectorField::POWER_DB_FLOOR);
+            assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_power_with_db_tensors_match_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
+
+        let (power, power_db) = projector
+            .refresh_vector_fft_power_with_db_tensors(false)
+            .unwrap();
+        let solo_power = projector.vector_fft_power_tensor(false).unwrap();
+        let solo_power_db = projector.vector_fft_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn projector_refresh_vector_fft_phase_tensor_matches_shape() {
         let scheduler = UringFractalScheduler::new(4).unwrap();
         scheduler
@@ -2216,6 +2787,53 @@ mod tests {
         assert_eq!(power.shape(), magnitude.shape());
         for (p, m) in power.data().iter().zip(magnitude.data()) {
             assert!((p - m * m).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_columns_power_db_tensor_matches_logarithmic_projection() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+        let power = projector
+            .refresh_vector_fft_columns_power_tensor(false)
+            .unwrap();
+        let power_db = projector
+            .refresh_vector_fft_columns_power_db_tensor(false)
+            .unwrap();
+
+        assert_eq!(power.shape(), power_db.shape());
+        for (&linear, &db) in power.data().iter().zip(power_db.data()) {
+            let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
+                .max(ColorVectorField::POWER_DB_FLOOR);
+            assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_columns_power_with_db_tensors_match_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+
+        let (power, power_db) = projector
+            .refresh_vector_fft_columns_power_with_db_tensors(false)
+            .unwrap();
+        let solo_power = projector.vector_fft_columns_power_tensor(false).unwrap();
+        let solo_power_db = projector.vector_fft_columns_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
         }
     }
 
@@ -2293,6 +2911,51 @@ mod tests {
         assert_eq!(power.shape(), magnitude.shape());
         for (p, m) in power.data().iter().zip(magnitude.data()) {
             assert!((p - m * m).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_2d_power_db_tensor_matches_logarithmic_projection() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+        let power = projector.refresh_vector_fft_2d_power_tensor(false).unwrap();
+        let power_db = projector
+            .refresh_vector_fft_2d_power_db_tensor(false)
+            .unwrap();
+
+        assert_eq!(power.shape(), power_db.shape());
+        for (&linear, &db) in power.data().iter().zip(power_db.data()) {
+            let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
+                .max(ColorVectorField::POWER_DB_FLOOR);
+            assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_2d_power_with_db_tensors_match_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+
+        let (power, power_db) = projector
+            .refresh_vector_fft_2d_power_with_db_tensors(false)
+            .unwrap();
+        let solo_power = projector.vector_fft_2d_power_tensor(false).unwrap();
+        let solo_power_db = projector.vector_fft_2d_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
         }
     }
 
