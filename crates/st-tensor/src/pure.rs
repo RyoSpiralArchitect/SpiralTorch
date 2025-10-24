@@ -282,6 +282,35 @@ impl fmt::Display for MatmulBackend {
     }
 }
 
+/// Explicit backend selection for row-wise softmax.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SoftmaxBackend {
+    /// Allow SpiralTorch to pick the most appropriate backend.
+    Auto,
+    /// Force the pure Rust implementation.
+    Cpu,
+    /// Execute on the WGPU accelerator backend when available.
+    #[cfg(feature = "wgpu")]
+    GpuWgpu,
+}
+
+impl SoftmaxBackend {
+    fn label(self) -> &'static str {
+        match self {
+            SoftmaxBackend::Auto => "auto",
+            SoftmaxBackend::Cpu => "cpu",
+            #[cfg(feature = "wgpu")]
+            SoftmaxBackend::GpuWgpu => "wgpu",
+        }
+    }
+}
+
+impl fmt::Display for SoftmaxBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 #[derive(Clone, Debug)]
 enum TensorBacking {
     Owned(Arc<Vec<f32>>),
@@ -766,6 +795,20 @@ impl Tensor {
         }
 
         Ok(matmul_naive(self.data(), other.data(), rows, inner, cols))
+    }
+
+    fn row_softmax_auto(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available() && wgpu_dense::supports_row_softmax(rows, cols) {
+                if let Ok(buffer) = wgpu_dense::row_softmax(self.data(), rows, cols) {
+                    return Tensor::from_vec(rows, cols, buffer);
+                }
+            }
+        }
+
+        let buffer = row_softmax_cpu(self.data(), rows, cols);
+        Tensor::from_vec(rows, cols, buffer)
     }
 
     /// Matrix multiply using the WGPU backend when available.
@@ -3002,6 +3045,34 @@ impl AmegaRealgrad {
         self.reset();
         Ok(())
     }
+}
+
+fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut out = vec![0.0; rows * cols];
+    if cols == 0 {
+        return out;
+    }
+    for r in 0..rows {
+        let offset = r * cols;
+        let row_slice = &data[offset..offset + cols];
+        let mut max_value = -1.0e30_f32;
+        for &value in row_slice {
+            if value > max_value {
+                max_value = value;
+            }
+        }
+        let mut sum = 0.0_f32;
+        for c in 0..cols {
+            let exp_value = (row_slice[c] - max_value).exp();
+            out[offset + c] = exp_value;
+            sum += exp_value;
+        }
+        let inv_sum = if sum > 0.0 { 1.0 / sum } else { 0.0 };
+        for c in 0..cols {
+            out[offset + c] *= inv_sum;
+        }
+    }
+    out
 }
 
 fn matmul_naive(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize) -> Vec<f32> {

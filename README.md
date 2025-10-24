@@ -254,6 +254,18 @@ t2.mul_(2)                          # in-place
 print("ST sees torch mul_:        ", a2.tolist())
 ```
 
+### 1b) Row softmax (GPU-accelerated when available)
+
+```python
+import spiraltorch as st
+
+logits = st.Tensor(2, 4, [3.0, 1.0, -2.0, 0.5, -0.25, 0.0, 1.5, -1.0])
+print("CPU row softmax:", logits.row_softmax().tolist())
+
+# Opt into the WGPU backend (falls back to CPU if the device lacks subgroups)
+print("WGPU row softmax:", logits.row_softmax(backend="wgpu").tolist())
+```
+
 ### 2) rl.stAgent
 
 ```python
