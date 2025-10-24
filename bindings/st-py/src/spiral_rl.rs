@@ -210,7 +210,7 @@ fn dqn_state_dict(py: Python<'_>, agent: &DqnAgent) -> PyResult<PyObject> {
     } else {
         dict.set_item("epsilon_schedule", py.None())?;
     }
-    Ok(dict.into_any().into_py(py))
+    Ok(dict.unbind().into_py(py))
 }
 
 #[cfg(feature = "spiral_rl")]
@@ -232,22 +232,10 @@ fn load_dqn_state_dict(agent: &mut DqnAgent, state: &Bound<'_, PyAny>) -> PyResu
             agent.set_epsilon(agent.epsilon());
         } else {
             let schedule_dict = schedule_obj.downcast::<PyDict>()?;
-            let start: f32 = schedule_dict
-                .get_item("start")?
-                .ok_or_else(|| PyValueError::new_err("epsilon_schedule requires 'start'"))?
-                .extract()?;
-            let end: f32 = schedule_dict
-                .get_item("end")?
-                .ok_or_else(|| PyValueError::new_err("epsilon_schedule requires 'end'"))?
-                .extract()?;
-            let steps: u32 = schedule_dict
-                .get_item("steps")?
-                .ok_or_else(|| PyValueError::new_err("epsilon_schedule requires 'steps'"))?
-                .extract()?;
-            let progress: u32 = schedule_dict
-                .get_item("step")?
-                .ok_or_else(|| PyValueError::new_err("epsilon_schedule requires 'step'"))?
-                .extract()?;
+            let start: f32 = required_schedule_field(&schedule_dict, "start")?;
+            let end: f32 = required_schedule_field(&schedule_dict, "end")?;
+            let steps: u32 = required_schedule_field(&schedule_dict, "steps")?;
+            let progress: u32 = required_schedule_field(&schedule_dict, "step")?;
             let mut schedule = EpsilonGreedySchedule::new(start, end, steps);
             schedule.set_step(progress);
             agent.configure_epsilon_schedule(schedule);
@@ -255,6 +243,23 @@ fn load_dqn_state_dict(agent: &mut DqnAgent, state: &Bound<'_, PyAny>) -> PyResu
     }
 
     Ok(())
+}
+
+#[cfg(feature = "spiral_rl")]
+fn required_schedule_field<'py, T>(dict: &Bound<'py, PyDict>, key: &str) -> PyResult<T>
+where
+    T: FromPyObject<'py>,
+{
+    dict.get_item(key)?
+        .ok_or_else(|| PyValueError::new_err(format!("epsilon_schedule requires '{key}'")))?
+        .extract()
+}
+
+#[cfg(feature = "spiral_rl")]
+fn warn_epsilon_deprecated(py: Python<'_>, message: &str) -> PyResult<()> {
+    let warning_type = py.get_type_bound::<PyDeprecationWarning>();
+    let warning_type_any = warning_type.as_any();
+    PyErr::warn_bound(py, &warning_type_any, message, 1)
 }
 
 #[cfg(feature = "spiral_rl")]
@@ -311,57 +316,57 @@ impl PyAgentConfig {
 
     #[getter]
     pub fn algo(&self) -> &str {
-        &self.inner.algo
+        self.as_data().algo.as_str()
     }
 
     #[getter]
     pub fn state_dim(&self) -> usize {
-        self.inner.state_dim
+        self.as_data().state_dim
     }
 
     #[getter]
     pub fn action_dim(&self) -> usize {
-        self.inner.action_dim
+        self.as_data().action_dim
     }
 
     #[getter]
     pub fn gamma(&self) -> f32 {
-        self.inner.discount
+        self.as_data().discount
     }
 
     #[getter]
     pub fn lr(&self) -> f32 {
-        self.inner.learning_rate
+        self.as_data().learning_rate
     }
 
     #[getter]
     pub fn optimizer(&self) -> &str {
-        &self.inner.optimizer
+        self.as_data().optimizer.as_str()
     }
 
     #[getter]
     pub fn clip_grad(&self) -> Option<f32> {
-        self.inner.clip_grad
+        self.as_data().clip_grad
     }
 
     #[getter]
     pub fn target_sync(&self) -> Option<usize> {
-        self.inner.target_sync
+        self.as_data().target_sync
     }
 
     #[getter]
     pub fn n_step(&self) -> Option<usize> {
-        self.inner.n_step
+        self.as_data().n_step
     }
 
     #[getter]
     pub fn seed(&self) -> Option<u64> {
-        self.inner.seed
+        self.as_data().seed
     }
 
     #[getter]
     pub fn replay<'py>(&self, py: Python<'py>) -> PyResult<Option<Py<PyReplayConfig>>> {
-        if let Some(cfg) = &self.inner.replay {
+        if let Some(cfg) = self.as_data().replay.as_ref() {
             Py::new(py, PyReplayConfig { inner: cfg.clone() }).map(Some)
         } else {
             Ok(None)
@@ -370,7 +375,7 @@ impl PyAgentConfig {
 
     #[getter]
     pub fn exploration<'py>(&self, py: Python<'py>) -> PyResult<Option<Py<PyEpsilonGreedy>>> {
-        if let Some(schedule) = &self.inner.exploration {
+        if let Some(schedule) = self.as_data().exploration.as_ref() {
             Py::new(py, PyEpsilonGreedy::from_schedule(schedule.clone())).map(Some)
         } else {
             Ok(None)
@@ -439,13 +444,9 @@ impl PyDqnAgent {
 
     #[pyo3(name = "epsilon")]
     pub fn epsilon_method(&self, py: Python<'_>) -> PyResult<f32> {
-        let warning_type = py.get_type_bound::<PyDeprecationWarning>();
-        let warning_type_any = warning_type.as_any();
-        PyErr::warn_bound(
+        warn_epsilon_deprecated(
             py,
-            &warning_type_any,
             "DqnAgent.epsilon() is deprecated; access the epsilon property instead.",
-            1,
         )?;
         Ok(self.inner.epsilon())
     }
@@ -546,13 +547,9 @@ impl PyAgent {
 
     #[pyo3(name = "epsilon")]
     pub fn epsilon_method(&self, py: Python<'_>) -> PyResult<f32> {
-        let warning_type = py.get_type_bound::<PyDeprecationWarning>();
-        let warning_type_any = warning_type.as_any();
-        PyErr::warn_bound(
+        warn_epsilon_deprecated(
             py,
-            &warning_type_any,
             "Agent.epsilon() is deprecated; access the epsilon property instead.",
-            1,
         )?;
         Ok(self.dqn.epsilon())
     }
