@@ -1136,6 +1136,52 @@ impl ColorVectorField {
         Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power)
     }
 
+    fn validate_power_interleaved_dimensions(
+        rows: usize,
+        cols: usize,
+        spectrum_len: usize,
+    ) -> PureResult<usize> {
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+
+        let expected_pairs = rows
+            .checked_mul(cols)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_power",
+                volume: rows.saturating_mul(cols),
+                max_volume: usize::MAX,
+            })?;
+        let expected_len = expected_pairs
+            .checked_mul(Self::FFT_INTERLEAVED_STRIDE)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_power",
+                volume: rows
+                    .saturating_mul(cols)
+                    .saturating_mul(Self::FFT_INTERLEAVED_STRIDE),
+                max_volume: usize::MAX,
+            })?;
+
+        if spectrum_len != expected_len {
+            return Err(TensorError::DataLength {
+                expected: expected_len,
+                got: spectrum_len,
+            });
+        }
+
+        Ok(expected_pairs)
+    }
+
+    #[inline]
+    fn power_channels_from_interleaved_chunk(chunk: &[f32]) -> [f32; 4] {
+        debug_assert_eq!(chunk.len(), Self::FFT_INTERLEAVED_STRIDE);
+        let energy = chunk[0].mul_add(chunk[0], chunk[1] * chunk[1]);
+        let chroma_r = chunk[2].mul_add(chunk[2], chunk[3] * chunk[3]);
+        let chroma_g = chunk[4].mul_add(chunk[4], chunk[5] * chunk[5]);
+        let chroma_b = chunk[6].mul_add(chunk[6], chunk[7] * chunk[7]);
+        [energy, chroma_r, chroma_g, chroma_b]
+    }
+
     fn power_tensor_from_interleaved(
         rows: usize,
         cols: usize,
@@ -1149,11 +1195,195 @@ impl ColorVectorField {
         cols: usize,
         spectrum: &[f32],
     ) -> PureResult<Tensor> {
-        Self::map_power_tensor_from_interleaved(rows, cols, spectrum, |power| {
-            let clamped = power.max(Self::POWER_DB_EPSILON);
-            let db = 10.0 * clamped.log10();
-            db.max(Self::POWER_DB_FLOOR)
-        })
+        Self::map_power_tensor_from_interleaved(rows, cols, spectrum, Self::map_power_to_db)
+    }
+
+    fn power_and_power_db_tensors_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<(Tensor, Tensor)> {
+        let expected_pairs =
+            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
+        let mut linear = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        let mut decibel = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            let [energy, chroma_r, chroma_g, chroma_b] =
+                Self::power_channels_from_interleaved_chunk(chunk);
+
+            linear.push(energy);
+            linear.push(chroma_r);
+            linear.push(chroma_g);
+            linear.push(chroma_b);
+
+            decibel.push(Self::map_power_to_db(energy));
+            decibel.push(Self::map_power_to_db(chroma_r));
+            decibel.push(Self::map_power_to_db(chroma_g));
+            decibel.push(Self::map_power_to_db(chroma_b));
+        }
+
+        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, linear)?;
+        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, decibel)?;
+        Ok((power, power_db))
+    }
+
+    fn map_power_to_db(power: f32) -> f32 {
+        let clamped = power.max(Self::POWER_DB_EPSILON);
+        let db = 10.0 * clamped.log10();
+        db.max(Self::POWER_DB_FLOOR)
+    }
+
+    fn validate_power_interleaved_dimensions(
+        rows: usize,
+        cols: usize,
+        len: usize,
+    ) -> PureResult<usize> {
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+
+        let expected_pairs = rows
+            .checked_mul(cols)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft",
+                volume: rows.saturating_mul(cols),
+                max_volume: usize::MAX,
+            })?;
+        let expected_len = expected_pairs * Self::FFT_INTERLEAVED_STRIDE;
+        if len != expected_len {
+            return Err(TensorError::DataLength {
+                expected: expected_len,
+                got: len,
+            });
+        }
+
+        Ok(expected_pairs)
+    }
+
+    fn power_channels_from_interleaved_chunk(chunk: &[f32]) -> [f32; 4] {
+        debug_assert!(chunk.len() == Self::FFT_INTERLEAVED_STRIDE);
+        let energy = chunk[0].mul_add(chunk[0], chunk[1] * chunk[1]);
+        let chroma_r = chunk[2].mul_add(chunk[2], chunk[3] * chunk[3]);
+        let chroma_g = chunk[4].mul_add(chunk[4], chunk[5] * chunk[5]);
+        let chroma_b = chunk[6].mul_add(chunk[6], chunk[7] * chunk[7]);
+        [energy, chroma_r, chroma_g, chroma_b]
+    }
+
+    fn power_and_power_db_tensors_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<(Tensor, Tensor)> {
+        let expected_pairs =
+            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
+        let mut linear = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        let mut logarithmic = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            let [energy, chroma_r, chroma_g, chroma_b] =
+                Self::power_channels_from_interleaved_chunk(chunk);
+            for &component in [energy, chroma_r, chroma_g, chroma_b].iter() {
+                linear.push(component);
+                let clamped = component.max(Self::POWER_DB_EPSILON);
+                let db = 10.0 * clamped.log10();
+                logarithmic.push(db.max(Self::POWER_DB_FLOOR));
+            }
+        }
+
+        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, linear)?;
+        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, logarithmic)?;
+        Ok((power, power_db))
+    }
+
+    fn power_and_power_db_tensors_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<(Tensor, Tensor)> {
+        let expected_pairs =
+            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
+        let mut power = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        let mut power_db = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            let channels = Self::power_channels_from_interleaved_chunk(chunk);
+            for value in channels {
+                power.push(value);
+                let clamped = value.max(Self::POWER_DB_EPSILON);
+                let db = 10.0 * clamped.log10();
+                power_db.push(db.max(Self::POWER_DB_FLOOR));
+            }
+        }
+
+        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power)?;
+        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power_db)?;
+        Ok((power, power_db))
+    }
+
+    fn validate_power_interleaved_dimensions(
+        rows: usize,
+        cols: usize,
+        spectrum_len: usize,
+    ) -> PureResult<usize> {
+        let expected_pairs = rows
+            .checked_mul(cols)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_power",
+                volume: rows.saturating_mul(cols),
+                max_volume: usize::MAX,
+            })?;
+        let expected_len = expected_pairs
+            .checked_mul(Self::FFT_INTERLEAVED_STRIDE)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_power",
+                volume: expected_pairs.saturating_mul(Self::FFT_INTERLEAVED_STRIDE),
+                max_volume: usize::MAX,
+            })?;
+
+        if spectrum_len != expected_len {
+            return Err(TensorError::DataLength {
+                expected: expected_len,
+                got: spectrum_len,
+            });
+        }
+
+        Ok(expected_pairs)
+    }
+
+    fn power_channels_from_interleaved_chunk(chunk: &[f32]) -> [f32; 4] {
+        debug_assert_eq!(chunk.len(), Self::FFT_INTERLEAVED_STRIDE);
+
+        let energy = chunk[0].mul_add(chunk[0], chunk[1] * chunk[1]);
+        let chroma_r = chunk[2].mul_add(chunk[2], chunk[3] * chunk[3]);
+        let chroma_g = chunk[4].mul_add(chunk[4], chunk[5] * chunk[5]);
+        let chroma_b = chunk[6].mul_add(chunk[6], chunk[7] * chunk[7]);
+
+        [energy, chroma_r, chroma_g, chroma_b]
+    }
+
+    fn power_and_power_db_tensors_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<(Tensor, Tensor)> {
+        let expected_pairs =
+            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
+        let mut linear = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        let mut logarithmic = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            let [energy, chroma_r, chroma_g, chroma_b] =
+                Self::power_channels_from_interleaved_chunk(chunk);
+            for &component in [energy, chroma_r, chroma_g, chroma_b].iter() {
+                linear.push(component);
+                let clamped = component.max(Self::POWER_DB_EPSILON);
+                let db = 10.0 * clamped.log10();
+                logarithmic.push(db.max(Self::POWER_DB_FLOOR));
+            }
+        }
+
+        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, linear)?;
+        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, logarithmic)?;
+        Ok((power, power_db))
     }
 }
 /// Byte layout metadata for the WGSL canvas FFT pipeline.
@@ -1752,6 +1982,17 @@ impl CanvasProjector {
     ) -> PureResult<(Tensor, Tensor)> {
         self.render()?;
         self.vectors.fft_cols_polar_tensors(inverse)
+    }
+
+    /// Refresh and expose the column-wise FFT magnitude/phase with windowing.
+    pub fn refresh_vector_fft_columns_polar_tensors_with_window(
+        &mut self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<(Tensor, Tensor)> {
+        self.render()?;
+        self.vectors
+            .fft_cols_polar_tensors_with_window(window, inverse)
     }
 
     /// Refresh and expose the column-wise FFT magnitude/phase with windowing.
@@ -2867,6 +3108,34 @@ mod tests {
     }
 
     #[test]
+    fn vector_field_fft_rows_power_with_db_tensors_match_components() {
+        let mut field = ColorVectorField::new(4, 3);
+        for idx in 0..12 {
+            let energy = (idx as f32 * 0.1).cos();
+            let chroma = [
+                0.05 * (idx as f32 + 1.5),
+                -0.03 * (idx as f32 - 2.0),
+                (0.02 * idx as f32).sin(),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (power, power_db) = field.fft_rows_power_with_db_tensors(false).unwrap();
+        let solo_power = field.fft_rows_power_tensor(false).unwrap();
+        let solo_power_db = field.fft_rows_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn vector_field_fft_rows_phase_tensor_matches_shape() {
         let mut field = ColorVectorField::new(2, 1);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
@@ -2985,6 +3254,34 @@ mod tests {
     }
 
     #[test]
+    fn vector_field_fft_columns_power_with_db_tensors_match_components() {
+        let mut field = ColorVectorField::new(3, 4);
+        for idx in 0..12 {
+            let energy = (idx as f32 * 0.07).sin();
+            let chroma = [
+                0.04 * (idx as f32 - 1.0),
+                0.06 * (idx as f32 + 0.25),
+                (-0.05 * idx as f32).cos(),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (power, power_db) = field.fft_cols_power_with_db_tensors(false).unwrap();
+        let solo_power = field.fft_cols_power_tensor(false).unwrap();
+        let solo_power_db = field.fft_cols_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn vector_field_fft_columns_phase_tensor_matches_shape() {
         let mut field = ColorVectorField::new(1, 2);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
@@ -3085,6 +3382,34 @@ mod tests {
             let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
                 .max(ColorVectorField::POWER_DB_FLOOR);
             assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn vector_field_fft_2d_power_with_db_tensors_match_components() {
+        let mut field = ColorVectorField::new(4, 3);
+        for idx in 0..12 {
+            let energy = 0.12 * (idx as f32 + 0.5);
+            let chroma = [
+                (-0.03 * idx as f32).sin(),
+                0.08 * (idx as f32 - 1.2),
+                (0.09 * idx as f32).cos(),
+            ];
+            field.set(idx, energy, chroma);
+        }
+
+        let (power, power_db) = field.fft_2d_power_with_db_tensors(false).unwrap();
+        let solo_power = field.fft_2d_power_tensor(false).unwrap();
+        let solo_power_db = field.fft_2d_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
         }
     }
 
@@ -3202,6 +3527,31 @@ mod tests {
     }
 
     #[test]
+    fn projector_refresh_vector_fft_power_with_db_tensors_match_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
+
+        let (power, power_db) = projector
+            .refresh_vector_fft_power_with_db_tensors(false)
+            .unwrap();
+        let solo_power = projector.vector_fft_power_tensor(false).unwrap();
+        let solo_power_db = projector.vector_fft_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn projector_refresh_vector_fft_phase_tensor_matches_shape() {
         let scheduler = UringFractalScheduler::new(4).unwrap();
         scheduler
@@ -3293,6 +3643,31 @@ mod tests {
             let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
                 .max(ColorVectorField::POWER_DB_FLOOR);
             assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_columns_power_with_db_tensors_match_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+
+        let (power, power_db) = projector
+            .refresh_vector_fft_columns_power_with_db_tensors(false)
+            .unwrap();
+        let solo_power = projector.vector_fft_columns_power_tensor(false).unwrap();
+        let solo_power_db = projector.vector_fft_columns_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
         }
     }
 
@@ -3390,6 +3765,31 @@ mod tests {
             let expected = (10.0 * linear.max(ColorVectorField::POWER_DB_EPSILON).log10())
                 .max(ColorVectorField::POWER_DB_FLOOR);
             assert!((expected - db).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn projector_refresh_vector_fft_2d_power_with_db_tensors_match_components() {
+        let scheduler = UringFractalScheduler::new(4).unwrap();
+        scheduler
+            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
+            .unwrap();
+        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+
+        let (power, power_db) = projector
+            .refresh_vector_fft_2d_power_with_db_tensors(false)
+            .unwrap();
+        let solo_power = projector.vector_fft_2d_power_tensor(false).unwrap();
+        let solo_power_db = projector.vector_fft_2d_power_db_tensor(false).unwrap();
+
+        assert_eq!(power.shape(), solo_power.shape());
+        assert_eq!(power_db.shape(), solo_power_db.shape());
+
+        for (lhs, rhs) in power.data().iter().zip(solo_power.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+        for (lhs, rhs) in power_db.data().iter().zip(solo_power_db.data()) {
+            assert!((lhs - rhs).abs() < 1e-6);
         }
     }
 

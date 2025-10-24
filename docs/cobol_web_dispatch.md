@@ -78,10 +78,21 @@ builder.set_dataset_space_unit(Some("CYL".into()));
 builder.set_dataset_directory_blocks(Some(30));
 builder.set_dataset_type(Some("LIBRARY".into()));
 builder.set_dataset_like(Some("ST.DATA.TEMPLATE".into()));
+builder.set_dataset_organization(Some("PO".into()));
+builder.set_dataset_key_length(Some(64));
+builder.set_dataset_key_offset(Some(8));
+builder.set_dataset_control_interval_size(Some(4096));
+builder.set_dataset_share_options_cross_region(Some(3));
+builder.set_dataset_share_options_cross_system(Some(3));
+builder.set_dataset_reuse(Some(true));
+builder.set_dataset_log(Some(true));
 builder.set_dataset_unit(Some("SYSDA".into()));
+builder.set_dataset_unit_count(Some(3));
 builder.set_dataset_average_record_unit(Some("K".into()));
+builder.set_dataset_catalog_behavior(Some("CATALOG".into()));
 builder.set_dataset_retention_period(Some(45));
 builder.set_dataset_release_space(Some(true));
+builder.set_dataset_erase_on_delete(Some(true));
 builder.set_dataset_expiration_date(Some("2025123".into()));
 builder.add_tag("browser-ui");
 let envelope = builder.snapshot();
@@ -138,10 +149,21 @@ planner.setDatasetSpaceUnit("CYL");
 planner.setDatasetDirectoryBlocks(30);
 planner.setDatasetType("LIBRARY");
 planner.setDatasetLike("ST.DATA.TEMPLATE");
+planner.setDatasetOrganization("PO");
+planner.setDatasetKeyLength(64);
+planner.setDatasetKeyOffset(8);
+planner.setDatasetControlIntervalSize(4096);
+planner.setDatasetShareOptionsCrossRegion(3);
+planner.setDatasetShareOptionsCrossSystem(3);
+planner.setDatasetReuse(true);
+planner.setDatasetLog(false);
 planner.setDatasetUnit("SYSDA");
+planner.setDatasetUnitCount(3);
 planner.setDatasetAverageRecordUnit("K");
+planner.setDatasetCatalogBehavior("CATALOG");
 planner.setDatasetRetentionPeriod(45);
 planner.setDatasetReleaseSpace(true);
+planner.setDatasetEraseOnDelete(true);
 planner.setDatasetExpirationDate("2025123");
 const jsonEnvelope = planner.toJson();
 const bytes = planner.toUint8Array();
@@ -196,10 +218,14 @@ that still rely on the default `job` placeholder identifier.
 Dataset hints must also remain internally consistent: the planner warns when a
 block size is not a clean multiple of the record length, when SPACE units lack
 matching allocations, when secondary extents appear without a primary, when
-directory blocks are provided for non-partitioned targets, when DSNTYPE or
-AVGREC fall outside the supported sets, when retention days exceed SMS limits,
-or when expiration dates are malformed. These checks surface problems before
-SMS allocation commands reach BPXWDYN.
+directory blocks are provided for non-partitioned targets, when DSNTYPE/DSORG or
+AVGREC fall outside the supported sets, when VSAM key metadata exceeds the
+record length, when CI sizes are not BPXWDYN-friendly, when share options exceed
+VSAM limits or appear without DSORG VS, when reuse/log hints are applied to
+non-VSAM datasets, when unit counts omit a UNIT, when catalog directives are
+unknown, when retention days exceed SMS limits, or when expiration dates are
+malformed. These checks surface problems before SMS allocation commands reach
+BPXWDYN.
 
 ## Dispatching to mainframe bridges
 

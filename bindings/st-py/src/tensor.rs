@@ -4,6 +4,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::{Bound, PyRef, PyRefMut};
+#[cfg(feature = "hip")]
+use st_backend_hip as hip_backend;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
 use st_tensor::{backend::cpu_dense, Layout, MatmulBackend, SoftmaxBackend, Tensor, TensorError};
 use std::ffi::{c_void, CStr};
@@ -20,6 +22,8 @@ fn parse_backend(label: Option<&str>) -> MatmulBackend {
         "naive" => MatmulBackend::CpuNaive,
         #[cfg(feature = "wgpu")]
         "wgpu" => MatmulBackend::GpuWgpu,
+        #[cfg(feature = "hip")]
+        "hip" => MatmulBackend::GpuHip,
         other => {
             warn!(
                 backend = other,
@@ -42,6 +46,22 @@ fn parse_softmax_backend(label: Option<&str>) -> SoftmaxBackend {
                 "unknown softmax backend label, falling back to auto"
             );
             SoftmaxBackend::Auto
+        }
+    }
+}
+
+fn parse_attention_backend(label: Option<&str>) -> AttentionBackend {
+    match label.unwrap_or("auto") {
+        "auto" => AttentionBackend::Auto,
+        "cpu" => AttentionBackend::Cpu,
+        #[cfg(feature = "wgpu")]
+        "wgpu" => AttentionBackend::GpuWgpu,
+        other => {
+            warn!(
+                backend = other,
+                "unknown attention backend label, falling back to auto",
+            );
+            AttentionBackend::Auto
         }
     }
 }
@@ -591,6 +611,37 @@ impl PyTensor {
         Ok(PyTensor { inner: tensor })
     }
 
+    #[pyo3(signature = (keys, values, *, contexts, sequence, scale, z_bias=None, attn_bias=None, backend=None))]
+    pub fn scaled_dot_attention(
+        &self,
+        keys: &PyTensor,
+        values: &PyTensor,
+        contexts: usize,
+        sequence: usize,
+        scale: f32,
+        z_bias: Option<&PyTensor>,
+        attn_bias: Option<&PyTensor>,
+        backend: Option<&str>,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_attention_backend(backend);
+        let tensor = py
+            .allow_threads(|| {
+                self.inner.scaled_dot_attention_with_backend(
+                    &keys.inner,
+                    &values.inner,
+                    contexts,
+                    sequence,
+                    scale,
+                    z_bias.map(|tensor| &tensor.inner),
+                    attn_bias.map(|tensor| &tensor.inner),
+                    backend,
+                )
+            })
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
     /// Add (element-wise)
     pub fn add(&self, other: &PyTensor, py: Python<'_>) -> PyResult<PyTensor> {
         let tensor = py
@@ -696,12 +747,6 @@ fn tensor_from_dlpack(py: Python<'_>, capsule: PyObject) -> PyResult<PyTensor> {
 }
 
 #[pyfunction]
-#[pyo3(name = "to_dlpack")]
-fn tensor_to_dlpack(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
-    tensor.to_dlpack(py)
-}
-
-#[pyfunction]
 fn cpu_simd_prepack_rhs(py: Python<'_>, rhs: &PyTensor) -> PyResult<PyCpuSimdPackedRhs> {
     if !matches!(rhs.inner.layout(), Layout::RowMajor) {
         return Err(PyValueError::new_err(
@@ -715,6 +760,25 @@ fn cpu_simd_prepack_rhs(py: Python<'_>, rhs: &PyTensor) -> PyResult<PyCpuSimdPac
         .map_err(|message| PyRuntimeError::new_err(message))?;
 
     Ok(PyCpuSimdPackedRhs::new(inner, cols, packed))
+  
+#[pyfunction]
+fn init_backend(label: &str) -> PyResult<bool> {
+    match label {
+        #[cfg(feature = "hip")]
+        "hip" => hip_backend::init()
+            .map(|_| true)
+            .map_err(|err| PyRuntimeError::new_err(err.to_string())),
+        #[cfg(not(feature = "hip"))]
+        "hip" => Err(PyRuntimeError::new_err(
+            "SpiralTorch was built without HIP support; rebuild with the 'hip' feature",
+        )),
+        "auto" | "cpu" | "faer" | "simd" | "cpu-simd" | "naive" => Ok(true),
+        #[cfg(feature = "wgpu")]
+        "wgpu" => Ok(true),
+        other => Err(PyValueError::new_err(format!(
+            "unknown backend label '{other}'"
+        ))),
+    }
 }
 
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {

@@ -170,8 +170,10 @@ With the header installed, the COBOL side can look like:
 A more complete example that turns dataset metadata into a BPXWDYN allocation
 statement lives in `examples/cobol/st_dataset_writer.cbl`. The program consumes
 the planner's record format, lengths, SMS classes, SPACE allocations, DSNTYPE,
-LIKE templates, UNIT/AVGREC hints, retention days, RLSE, and expiration dates to
-stage a dataset before writing the narration payload.
+LIKE templates, DSORG overrides, VSAM key length/offset/CI hints, share options,
+reuse/log directives, UNIT/AVGREC settings, catalog behaviors, unit counts,
+retention days, RLSE/ERASE flags, and expiration dates to stage a dataset before
+writing the narration payload.
 
 GnuCOBOL users can compile the snippet with
 

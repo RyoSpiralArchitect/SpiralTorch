@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable, Iterator, List, Sequence, Tuple, Union
+from random import Random
+from typing import Iterable, Iterator, List, Sequence, Tuple, TypeVar, Union
 
 FloatPair = Tuple[List[float], List[float]]
+T = TypeVar("T")
 
 
 def parse_float_sequence(raw: Union[str, Sequence[float], Iterable[float]]) -> List[float]:
@@ -190,6 +192,42 @@ def reshape(values: Sequence[float], rows: int, cols: int) -> List[List[float]]:
     return matrix
 
 
+def select_entries(
+    values: Sequence[T],
+    *,
+    limit: int | None = None,
+    shuffle: bool = False,
+    seed: int | None = None,
+    offset: int = 0,
+    every: int | None = None,
+) -> List[T]:
+    """Return a possibly shuffled and truncated list of ``values``.
+
+    The parameters apply in the following order: shuffle (if requested), offset,
+    stride (``every``), and finally the limit.  ``offset`` and ``every`` allow
+    selecting deterministic slices (e.g. skip headers, take every Nth entry)
+    independently from shuffling.
+    """
+
+    if offset < 0:
+        raise ValueError("Offset must be a non-negative integer")
+    if every is not None and every <= 0:
+        raise ValueError("Every must be a positive integer when provided")
+
+    items = list(values)
+    if shuffle:
+        Random(seed).shuffle(items)
+    if offset:
+        items = items[offset:]
+    if every is not None:
+        items = items[::every]
+    if limit is not None:
+        if limit < 0:
+            raise ValueError("Limit must be a non-negative integer")
+        items = items[:limit]
+    return items
+
+
 def _collect_data_files(
     sources: Sequence[Path],
     *,
@@ -278,6 +316,7 @@ __all__ = [
     "load_texts_from_text",
     "parse_float_sequence",
     "reshape",
+    "select_entries",
     "summarize",
 ]
 

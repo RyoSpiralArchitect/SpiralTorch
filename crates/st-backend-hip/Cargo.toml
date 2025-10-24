@@ -18,5 +18,8 @@ thiserror = "1"
 serde = { version = "1", features = ["derive"] }
 base64 = "0.21"
 
+[dev-dependencies]
+tempfile = "3"
+
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
