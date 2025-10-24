@@ -19,9 +19,13 @@ const BOTTOMK_KERNEL: &str = "bottomk_warp_heap_rowwise_kernel";
 const BITONIC_KERNEL: &str = "topk_warp_bitonic_rowwise_kernel";
 const MODULE_KERNELS: &[&str] = &[TOPK_KERNEL, BOTTOMK_KERNEL, BITONIC_KERNEL];
 const CUDA_SOURCE: &str = include_str!("cuda_topk_rankk.cu");
-const LANE_COUNT: usize = 32;
-const LANE_KEEP: usize = 8;
-const SUPPORTED_K: usize = LANE_COUNT * LANE_KEEP;
+const WARP_LANES: usize = 32;
+const BLOCK_WARPS: usize = 4;
+const THREADS_PER_BLOCK: usize = WARP_LANES * BLOCK_WARPS;
+const THREAD_KEEP: usize = 8;
+const SUPPORTED_K: usize = THREADS_PER_BLOCK * THREAD_KEEP;
+
+static COMPILED_PTX: OnceLock<cudarc::nvrtc::Ptx> = OnceLock::new();
 
 static COMPILED_PTX: OnceLock<cudarc::nvrtc::Ptx> = OnceLock::new();
 
@@ -71,9 +75,9 @@ fn launch_heap_kernel(
         .map_err(|err| err.to_string())?;
 
     let grid = (1, plan.rows, 1);
-    let block = (LANE_COUNT as u32 * 4, 1, 1);
-    let shared_bytes = (LANE_COUNT * LANE_KEEP * std::mem::size_of::<f32>()
-        + LANE_COUNT * LANE_KEEP * std::mem::size_of::<i32>()) as u32;
+    let block = (THREADS_PER_BLOCK as u32, 1, 1);
+    let shared_bytes = (THREADS_PER_BLOCK * THREAD_KEEP * std::mem::size_of::<f32>()
+        + THREADS_PER_BLOCK * THREAD_KEEP * std::mem::size_of::<i32>()) as u32;
     let cfg = LaunchConfig {
         grid_dim: grid,
         block_dim: block,

@@ -27,12 +27,12 @@ use super::maintainer::MaintainerReport;
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
+use parking_lot::{ReentrantMutex, ReentrantMutexGuard};
+#[cfg(feature = "psi")]
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
-#[cfg(feature = "psi")]
-use std::sync::{Mutex, MutexGuard};
 #[cfg(feature = "psi")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -74,25 +74,17 @@ const PSI_COMPONENTS: [PsiComponent; 6] = [
 ];
 
 #[cfg(feature = "psi")]
-static PSI_TELEMETRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static PSI_TELEMETRY_LOCK: OnceLock<ReentrantMutex<()>> = OnceLock::new();
 
 #[cfg(feature = "psi")]
-fn psi_lock() -> &'static Mutex<()> {
-    PSI_TELEMETRY_LOCK.get_or_init(|| Mutex::new(()))
-}
-
-#[cfg(all(feature = "psi", debug_assertions))]
-static PSI_SERIAL_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-#[cfg(all(feature = "psi", debug_assertions))]
-fn psi_serial_lock() -> &'static Mutex<()> {
-    PSI_SERIAL_LOCK.get_or_init(|| Mutex::new(()))
+fn psi_lock() -> &'static ReentrantMutex<()> {
+    PSI_TELEMETRY_LOCK.get_or_init(|| ReentrantMutex::new(()))
 }
 
 #[cfg(feature = "psi")]
 #[must_use]
-pub fn psi_telemetry_guard() -> MutexGuard<'static, ()> {
-    psi_lock().lock().expect("psi telemetry lock")
+pub fn psi_telemetry_guard() -> ReentrantMutexGuard<'static, ()> {
+    psi_lock().lock()
 }
 
 static CONFIG_DIFF_EVENTS: OnceLock<RwLock<Vec<ConfigDiffEvent>>> = OnceLock::new();
@@ -280,6 +272,7 @@ pub fn set_last_psi_events(events: &[PsiEvent]) {
 
 #[cfg(feature = "psi")]
 pub fn get_last_psi_events() -> Vec<PsiEvent> {
+    let _guard = psi_lock().lock();
     LAST_PSI_EVENTS
         .read()
         .map(|guard| guard.clone())
@@ -729,8 +722,9 @@ pub(crate) fn clear_maintainer_report_for_test() {
 
 /// Stores the most recent SoftLogic Z feedback sample.
 pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
-    #[cfg(all(feature = "psi", debug_assertions))]
-    let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
+    #[cfg(feature = "psi")]
+    let _psi_guard = psi_lock().lock();
+
     match softlogic_z_cell().write() {
         Ok(mut guard) => {
             *guard = Some(feedback.clone());
@@ -740,22 +734,33 @@ pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
             *guard = Some(feedback.clone());
         }
     }
+
+    #[cfg(feature = "psi")]
+    drop(_psi_guard);
+
     let fragment = fragment_from_softlogic(&feedback);
     merge_atlas_fragment(fragment);
 }
 
 /// Returns the latest SoftLogic Z feedback sample if one has been recorded.
 pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
-    match softlogic_z_cell().read() {
+    #[cfg(feature = "psi")]
+    let _psi_guard = psi_lock().lock();
+
+    let result = match softlogic_z_cell().read() {
         Ok(guard) => guard.as_ref().cloned(),
         Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
-    }
+    };
+
+    #[cfg(feature = "psi")]
+    drop(_psi_guard);
+
+    result
 }
 
 #[cfg(feature = "psi")]
 pub fn clear_softlogic_z() {
-    #[cfg(all(feature = "psi", debug_assertions))]
-    let _serial_guard = psi_serial_lock().lock().expect("psi serial lock");
+    let _guard = psi_lock().lock();
     match softlogic_z_cell().write() {
         Ok(mut guard) => {
             *guard = None;
