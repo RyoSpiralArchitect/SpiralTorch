@@ -30,6 +30,47 @@ function parseCoefficients(raw: string): Float32Array {
   return new Float32Array(floats);
 }
 
+function parsePositiveInteger(raw: string, label: string): number | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeInteger(raw: string, label: string): number | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return parsed;
+}
+
+function parseBoundedInteger(
+  raw: string,
+  label: string,
+  min: number,
+  max: number,
+): number | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${label} must be between ${min} and ${max}`);
+  }
+  return parsed;
+}
+
 function parseMetadata(raw: string): unknown | null {
   const trimmed = raw.trim();
   if (!trimmed) {
@@ -92,9 +133,93 @@ function buildPlanner(): CobolDispatchPlanner {
   }
 
   const dataset = getInputValue("dataset");
-  if (dataset) {
-    planner.setDataset(dataset);
-  }
+  planner.setDataset(dataset || undefined);
+  const datasetMember = getInputValue("dataset-member");
+  planner.setDatasetMember(datasetMember || undefined);
+  const datasetDisposition = getInputValue("dataset-disposition");
+  planner.setDatasetDisposition(datasetDisposition || undefined);
+  const datasetVolume = getInputValue("dataset-volume");
+  planner.setDatasetVolume(datasetVolume || undefined);
+  const datasetRecordFormat = getInputValue("dataset-record-format");
+  planner.setDatasetRecordFormat(datasetRecordFormat || undefined);
+  const datasetRecordLength = parsePositiveInteger(
+    getInputValue("dataset-record-length"),
+    "Record length",
+  );
+  planner.setDatasetRecordLength(datasetRecordLength ?? undefined);
+  const datasetBlockSize = parsePositiveInteger(
+    getInputValue("dataset-block-size"),
+    "Block size",
+  );
+  planner.setDatasetBlockSize(datasetBlockSize ?? undefined);
+  const datasetBufferCount = parsePositiveInteger(
+    getInputValue("dataset-buffer-count"),
+    "Buffer count",
+  );
+  planner.setDatasetBufferCount(datasetBufferCount ?? undefined);
+  const datasetKeyLength = parsePositiveInteger(
+    getInputValue("dataset-key-length"),
+    "Key length",
+  );
+  planner.setDatasetKeyLength(datasetKeyLength ?? undefined);
+  const datasetKeyOffset = parseNonNegativeInteger(
+    getInputValue("dataset-key-offset"),
+    "Key offset",
+  );
+  planner.setDatasetKeyOffset(datasetKeyOffset ?? undefined);
+  const datasetDataClass = getInputValue("dataset-data-class");
+  planner.setDatasetDataClass(datasetDataClass || undefined);
+  const datasetManagementClass = getInputValue("dataset-management-class");
+  planner.setDatasetManagementClass(datasetManagementClass || undefined);
+  const datasetStorageClass = getInputValue("dataset-storage-class");
+  planner.setDatasetStorageClass(datasetStorageClass || undefined);
+  const datasetSpacePrimary = parsePositiveInteger(
+    getInputValue("dataset-space-primary"),
+    "Primary space",
+  );
+  planner.setDatasetSpacePrimary(datasetSpacePrimary ?? undefined);
+  const datasetSpaceSecondary = parsePositiveInteger(
+    getInputValue("dataset-space-secondary"),
+    "Secondary space",
+  );
+  planner.setDatasetSpaceSecondary(datasetSpaceSecondary ?? undefined);
+  const datasetSpaceUnit = getInputValue("dataset-space-unit");
+  planner.setDatasetSpaceUnit(datasetSpaceUnit || undefined);
+  const datasetDirectoryBlocks = parsePositiveInteger(
+    getInputValue("dataset-directory-blocks"),
+    "Directory blocks",
+  );
+  planner.setDatasetDirectoryBlocks(datasetDirectoryBlocks ?? undefined);
+  const datasetType = getInputValue("dataset-type");
+  planner.setDatasetType(datasetType || undefined);
+  const datasetLike = getInputValue("dataset-like");
+  planner.setDatasetLike(datasetLike || undefined);
+  const datasetUnit = getInputValue("dataset-unit");
+  planner.setDatasetUnit(datasetUnit || undefined);
+  const datasetAverageRecordUnit = getInputValue("dataset-average-record-unit");
+  planner.setDatasetAverageRecordUnit(datasetAverageRecordUnit || undefined);
+  const datasetCcsid = parseBoundedInteger(
+    getInputValue("dataset-ccsid"),
+    "CCSID",
+    1,
+    65535,
+  );
+  planner.setDatasetCcsid(datasetCcsid ?? undefined);
+  const retentionDays = parsePositiveInteger(
+    getInputValue("dataset-retention-period"),
+    "Retention days",
+  );
+  planner.setDatasetRetentionPeriod(retentionDays ?? undefined);
+  const releaseCheckbox = document.querySelector<HTMLInputElement>(
+    "#dataset-release-space",
+  );
+  planner.setDatasetReleaseSpace(releaseCheckbox?.checked ? true : undefined);
+  const compressCheckbox = document.querySelector<HTMLInputElement>(
+    "#dataset-compress-data",
+  );
+  planner.setDatasetCompress(compressCheckbox?.checked ? true : undefined);
+  const expirationDate = getInputValue("dataset-expiration-date");
+  planner.setDatasetExpirationDate(expirationDate || undefined);
 
   const metadata = getTextareaValue("metadata");
   if (metadata) {
