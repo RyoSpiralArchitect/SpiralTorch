@@ -33,6 +33,7 @@ if __package__ in (None, ""):
         load_texts_from_text,
         parse_float_sequence,
         reshape,
+        select_entries,
         summarize,
     )
 else:
@@ -54,6 +55,7 @@ else:
         load_texts_from_text,
         parse_float_sequence,
         reshape,
+        select_entries,
         summarize,
     )
 
@@ -179,7 +181,7 @@ def _build_parser() -> argparse.ArgumentParser:
     hypergrad.add_argument("--rows", type=int, required=True)
     hypergrad.add_argument("--cols", type=int, required=True)
     hypergrad.add_argument(
-        "--pairs",
+        "--pairs", 
         action="append",
         type=_pair_argument,
         default=[],
@@ -210,6 +212,29 @@ def _build_parser() -> argparse.ArgumentParser:
         "--pairs-recursive",
         action="store_true",
         help="Recurse into subdirectories when scanning --pairs-dir directories.",
+    )
+    hypergrad.add_argument(
+        "--pairs-shuffle",
+        action="store_true",
+        help="Shuffle loaded pairs before accumulation (requires deterministic seed for reproducibility).",
+    )
+    hypergrad.add_argument(
+        "--pairs-limit",
+        type=int,
+        default=None,
+        help="Limit the number of pairs processed after optional shuffling.",
+    )
+    hypergrad.add_argument(
+        "--pairs-offset",
+        type=int,
+        default=0,
+        help="Skip the first N pairs after optional shuffling.",
+    )
+    hypergrad.add_argument(
+        "--pairs-every",
+        type=int,
+        default=None,
+        help="Retain every Nth pair after applying --pairs-offset (1 keeps all).",
     )
     hypergrad.add_argument(
         "--pairs-stdin",
@@ -280,6 +305,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Recurse into subdirectories when scanning --text-dir directories.",
     )
     hypergrad.add_argument(
+        "--text-shuffle",
+        action="store_true",
+        help="Shuffle loaded text samples before absorption (requires deterministic seed for reproducibility).",
+    )
+    hypergrad.add_argument(
+        "--text-limit",
+        type=int,
+        default=None,
+        help="Limit the number of text samples absorbed after optional shuffling.",
+    )
+    hypergrad.add_argument(
+        "--text-offset",
+        type=int,
+        default=0,
+        help="Skip the first N text samples after optional shuffling.",
+    )
+    hypergrad.add_argument(
+        "--text-every",
+        type=int,
+        default=None,
+        help="Retain every Nth text sample after applying --text-offset (1 keeps all).",
+    )
+    hypergrad.add_argument(
         "--text-stdin",
         action="store_true",
         help="Read text samples from stdin (JSON array or one entry per line).",
@@ -309,6 +357,13 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.5,
         help="Temperature to use when constructing the encoder (default: 0.5).",
+    )
+
+    hypergrad.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Seed to use when shuffling pairs or text samples for deterministic ordering.",
     )
 
     return parser
@@ -398,6 +453,41 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if stdin_cache is None:
                 stdin_cache = sys.stdin.read()
             text_samples.extend(_load_texts_from_text(stdin_cache))
+        if (
+            args.pairs_shuffle
+            or args.pairs_limit is not None
+            or args.pairs_offset
+            or args.pairs_every is not None
+        ):
+            try:
+                pairs = select_entries(
+                    pairs,
+                    shuffle=args.pairs_shuffle,
+                    limit=args.pairs_limit,
+                    seed=args.seed,
+                    offset=args.pairs_offset,
+                    every=args.pairs_every,
+                )
+            except ValueError as exc:
+                parser.error(str(exc))
+        if (
+            args.text_shuffle
+            or args.text_limit is not None
+            or args.text_offset
+            or args.text_every is not None
+        ):
+            text_seed = None if args.seed is None else args.seed + 1
+            try:
+                text_samples = select_entries(
+                    text_samples,
+                    shuffle=args.text_shuffle,
+                    limit=args.text_limit,
+                    seed=text_seed,
+                    offset=args.text_offset,
+                    every=args.text_every,
+                )
+            except ValueError as exc:
+                parser.error(str(exc))
         topos_values = _validate_topos_arguments(args, parser)
 
     with ExitStack() as stack:

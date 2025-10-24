@@ -76,8 +76,8 @@ impl Module for Linear {
         let grad_b = Tensor::from_vec(1, summed.len(), summed)?.scale(1.0 / batch)?;
         self.bias.accumulate_euclidean(&grad_b)?;
 
-        let weight_t = self.weight.value().transpose();
-        let grad_input = grad_output.matmul(&weight_t)?;
+        let pack_t = self.weight.ensure_matmul_transpose_pack()?;
+        let grad_input = grad_output.matmul_prepacked(&pack_t)?;
         Ok(grad_input)
     }
 

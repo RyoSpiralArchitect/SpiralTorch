@@ -2819,6 +2819,7 @@ dependencies = [
  "base64 0.21.7",
  "cc",
  "serde",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
@@ -3007,6 +3008,7 @@ dependencies = [
  "serde",
  "st-frac",
  "wgpu",
+ "wide",
 ]
 
 [[package]]
