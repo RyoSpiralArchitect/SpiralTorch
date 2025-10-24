@@ -32,6 +32,10 @@ const FLAG_FUSED_RESIDUAL: u32 = 1 << 3;
 const FLAG_USE_INT8: u32 = 1 << 4;
 const FLAG_USE_F16: u32 = 1 << 5;
 
+const FUSED_OP_RELU: u32 = FLAG_FUSED_RELU;
+const FUSED_OP_GELU: u32 = FLAG_FUSED_GELU;
+const FUSED_OP_RESIDUAL: u32 = FLAG_FUSED_RESIDUAL;
+
 const QUANTIZATION_MIN_VOLUME: usize = 64 * 64;
 
 const FUSED_ATTENTION_FLAG_USE_Z_BIAS: u32 = 1 << 0;
@@ -764,11 +768,11 @@ impl GpuContext {
         }
 
         let dtype = if should_quantize(packed.inner(), packed.cols()) {
-            ScalarType::QuantizedI8
+            WeightDType::Int8
         } else {
-            ScalarType::F32
+            WeightDType::F32
         };
-        let key = RhsCacheKey::new(packed, tile, dtype);
+        let key = RhsCacheKey::new(packed, tile, dtype.to_scalar());
         if let Some(existing) = self
             .weights_cache
             .lock()
@@ -780,7 +784,7 @@ impl GpuContext {
         }
 
         let (buffer, scales) = match dtype {
-            ScalarType::QuantizedI8 => {
+            WeightDType::Int8 => {
                 let (quantized, scales_vec, _total) = pack_rhs_int8(packed, tile);
                 let buffer = Arc::new(self.device().create_buffer_init(
                     &wgpu::util::BufferInitDescriptor {
@@ -798,7 +802,7 @@ impl GpuContext {
                 ));
                 (buffer, Some(scales))
             }
-            ScalarType::F32 => {
+            WeightDType::F32 => {
                 let (values, _total) = pack_rhs_f32(packed, tile);
                 let buffer = Arc::new(self.device().create_buffer_init(
                     &wgpu::util::BufferInitDescriptor {
@@ -813,7 +817,7 @@ impl GpuContext {
 
         let prepared = Arc::new(GpuPackedRhs {
             tile,
-            dtype,
+            dtype: dtype.to_scalar(),
             buffer,
             scales,
             _cols: packed.cols(),
@@ -1175,6 +1179,10 @@ impl GpuPackedRhs {
     fn dtype(&self) -> ScalarType {
         self.dtype
     }
+
+    fn tile(&self) -> TileConfig {
+        self.tile
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1296,7 +1304,9 @@ fn dispatch_matmul(
     ctx: &GpuContext,
     encoder: &mut wgpu::CommandEncoder,
     lhs: &Buffer,
-    rhs: &WeightBuffers,
+    rhs_buffer: &Buffer,
+    rhs_dtype: ScalarType,
+    rhs_scales: Option<&Buffer>,
     out: &Buffer,
     rows: usize,
     inner: usize,
@@ -1307,10 +1317,9 @@ fn dispatch_matmul(
     bias: Option<&Buffer>,
     residual: Option<&Buffer>,
 ) {
-    let (rhs_buffer, dtype, scales) = rhs.as_binding();
     let use_f16 = ctx.shader_f16;
     let key = PipelineKey::new(
-        dtype,
+        rhs_dtype,
         tile,
         ctx.supports_subgroup,
         use_f16,
@@ -1321,7 +1330,7 @@ fn dispatch_matmul(
     if use_bias {
         flags |= FLAG_USE_BIAS;
     }
-    if matches!(dtype, ScalarType::QuantizedI8) {
+    if matches!(rhs_dtype, ScalarType::QuantizedI8) {
         flags |= FLAG_USE_INT8;
     }
     if use_f16 {
@@ -1348,7 +1357,7 @@ fn dispatch_matmul(
         out,
         bias,
         residual,
-        scales,
+        rhs_scales,
         &params_buf,
     );
     let pipeline = ctx.pipeline_cache.pipeline(key, ctx.pipeline_layout());
@@ -1382,27 +1391,24 @@ fn dispatch_matmul_with_options(
     fused_ops_mask: u32,
     dtype: WeightDType,
 ) {
-    let rhs_buffers = WeightBuffers {
-        buffer: Arc::new(rhs.clone()),
-        dtype: dtype.to_scalar(),
-        scales: scales.map(|buf| Arc::new(buf.clone())),
-    };
-    let bias_arc = bias.map(|buf| Arc::new(buf.clone()));
-    let residual_arc = residual.map(|buf| Arc::new(buf.clone()));
+    let rhs_dtype = dtype.to_scalar();
+    let use_bias = bias.is_some();
     dispatch_matmul(
         ctx,
         encoder,
         lhs,
-        &rhs_buffers,
+        rhs,
+        rhs_dtype,
+        scales,
         out,
         rows,
         inner,
         cols,
         tile,
-        bias.is_some(),
+        use_bias,
         fused_ops_mask,
-        bias_arc.as_ref().map(Arc::as_ref),
-        residual_arc.as_ref().map(Arc::as_ref),
+        bias,
+        residual,
     );
 }
 
@@ -1534,11 +1540,14 @@ pub fn matmul(
         label: Some("st.tensor.wgpu_dense.matmul.encoder"),
     });
     let tile = select_tile_config(rows, inner, cols);
+    let (rhs_buffer, rhs_dtype, rhs_scales) = rhs_buf.as_binding();
     dispatch_matmul(
         &ctx,
         &mut encoder,
         &lhs_buf,
-        &rhs_buf,
+        rhs_buffer,
+        rhs_dtype,
+        rhs_scales,
         &out_buf,
         rows,
         inner,
@@ -1592,18 +1601,22 @@ pub fn matmul_prepacked(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.prepacked.encoder"),
     });
-    let tile = select_tile_config(rows, inner, cols);
-    let weights = ctx.rhs_from_packed(packed_rhs, tile)?;
+    let requested_tile = select_tile_config(rows, inner, cols);
+    let weights = ctx.rhs_from_packed(packed_rhs, requested_tile)?;
+    let tile = weights.tile();
     let rhs_buffers = WeightBuffers {
         buffer: weights.buffer(),
         dtype: weights.dtype(),
         scales: weights.scales(),
     };
+    let (rhs_buffer, rhs_dtype, rhs_scales) = rhs_buffers.as_binding();
     dispatch_matmul(
         &ctx,
         &mut encoder,
         &lhs_buf,
-        &rhs_buffers,
+        rhs_buffer,
+        rhs_dtype,
+        rhs_scales,
         &out_buf,
         rows,
         inner,
@@ -1779,11 +1792,14 @@ fn matmul_with_bias_activation(
     if residual_buf.is_some() {
         fused_mask |= FLAG_FUSED_RESIDUAL;
     }
+    let (rhs_buffer, rhs_dtype, rhs_scales) = rhs_buf.as_binding();
     dispatch_matmul(
         &ctx,
         &mut encoder,
         &lhs_buf,
-        &rhs_buf,
+        rhs_buffer,
+        rhs_dtype,
+        rhs_scales,
         &out_buf,
         rows,
         inner,
@@ -1792,7 +1808,7 @@ fn matmul_with_bias_activation(
         true,
         fused_mask,
         Some(&bias_buf),
-        residual_buf.as_ref().map(|buf| buf),
+        residual_buf.as_ref(),
     );
     queue.submit(Some(encoder.finish()));
 

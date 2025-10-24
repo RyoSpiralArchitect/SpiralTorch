@@ -7,7 +7,15 @@ use pyo3::{Bound, PyRef, PyRefMut};
 #[cfg(feature = "hip")]
 use st_backend_hip as hip_backend;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
-use st_tensor::{backend::cpu_dense, Layout, MatmulBackend, SoftmaxBackend, Tensor, TensorError};
+use st_tensor::{
+    backend::cpu_dense,
+    AttentionBackend,
+    Layout,
+    MatmulBackend,
+    SoftmaxBackend,
+    Tensor,
+    TensorError,
+};
 use std::ffi::{c_void, CStr};
 use std::sync::Arc;
 use tracing::warn;
@@ -747,6 +755,12 @@ fn tensor_from_dlpack(py: Python<'_>, capsule: PyObject) -> PyResult<PyTensor> {
 }
 
 #[pyfunction]
+#[pyo3(name = "to_dlpack")]
+fn tensor_to_dlpack(py: Python<'_>, tensor: PyRef<PyTensor>) -> PyResult<PyObject> {
+    tensor.to_dlpack(py)
+}
+
+#[pyfunction]
 fn cpu_simd_prepack_rhs(py: Python<'_>, rhs: &PyTensor) -> PyResult<PyCpuSimdPackedRhs> {
     if !matches!(rhs.inner.layout(), Layout::RowMajor) {
         return Err(PyValueError::new_err(
@@ -787,6 +801,7 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyCpuSimdPackedRhs>()?;
     m.add_function(wrap_pyfunction!(tensor_from_dlpack, m)?)?;
     m.add_function(wrap_pyfunction!(tensor_to_dlpack, m)?)?;
+    m.add_function(wrap_pyfunction!(cpu_simd_prepack_rhs, m)?)?;
     m.add_function(wrap_pyfunction!(init_backend, m)?)?;
     m.add("__doc__", "Tensor helpers and DLPack interop.")?;
     let _ = py;
