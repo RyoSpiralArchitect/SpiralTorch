@@ -10,7 +10,7 @@ use cudarc::driver::{CudaDevice, CudaFunction};
 #[cfg(feature = "cuda")]
 use cudarc::nvrtc::Ptx;
 #[cfg(feature = "cuda")]
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 #[cfg(feature = "cuda")]
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -31,28 +31,21 @@ impl CudaModule {
         &self.module_name
     }
 
-    pub fn get_func(&self, func_name: &'static str) -> Result<CudaFunction, String> {
-        self.device
-            .get_func(&self.module_name, func_name)
-            .ok_or_else(|| {
-                format!(
-                    "cuda function `{func_name}` not registered in module `{}`",
-                    self.module_name
-                )
-            })
+    pub fn get_func(&self, func_name: &'static str) -> Result<Arc<CudaFunction>, String> {
+        module_state_get_func(self.module_name, func_name)
     }
 }
 
 #[cfg(feature = "cuda")]
 struct ModuleState {
-    registered: HashSet<&'static str>,
+    functions: HashMap<&'static str, Arc<CudaFunction>>,
 }
 
 #[cfg(feature = "cuda")]
 impl ModuleState {
     fn new() -> Self {
         Self {
-            registered: HashSet::new(),
+            functions: HashMap::new(),
         }
     }
 }
@@ -81,34 +74,64 @@ pub fn load_ptx_module(
     functions: &[&'static str],
 ) -> Result<CudaModule, String> {
     let device = global_device()?;
-    let mut modules = registry()
-        .lock()
-        .map_err(|_| "cuda module registry poisoned".to_string())?;
 
-    let state = modules.entry(module_name).or_insert_with(ModuleState::new);
+    {
+        let mut modules = registry()
+            .lock()
+            .map_err(|_| "cuda module registry poisoned".to_string())?;
 
-    let missing: Vec<&'static str> = functions
-        .iter()
-        .copied()
-        .filter(|name| !state.registered.contains(name))
-        .collect();
+        let state = modules.entry(module_name).or_insert_with(ModuleState::new);
 
-    if state.registered.is_empty() {
-        device
-            .load_ptx(ptx.clone(), module_name, functions)
-            .map_err(|err| err.to_string())?;
-        state.registered.extend(functions.iter().copied());
-    } else if !missing.is_empty() {
-        let mut names: Vec<&'static str> = state.registered.iter().copied().collect();
-        names.extend(missing.iter().copied());
-        device
-            .load_ptx(ptx.clone(), module_name, &names)
-            .map_err(|err| err.to_string())?;
-        state.registered.extend(missing);
+        let mut to_register: Vec<&'static str> = if state.functions.is_empty() {
+            functions.iter().copied().collect()
+        } else {
+            functions
+                .iter()
+                .copied()
+                .filter(|name| !state.functions.contains_key(name))
+                .collect()
+        };
+
+        if !to_register.is_empty() {
+            to_register.sort_unstable();
+            to_register.dedup();
+
+            device
+                .load_ptx(ptx.clone(), module_name, &to_register)
+                .map_err(|err| err.to_string())?;
+
+            for &name in &to_register {
+                let func = device.get_func(module_name, name).ok_or_else(|| {
+                    format!(
+                        "cuda function `{name}` not registered in module `{module_name}`"
+                    )
+                })?;
+                state.functions.insert(name, Arc::new(func));
+            }
+        }
     }
 
     Ok(CudaModule {
         device,
         module_name,
     })
+}
+
+#[cfg(feature = "cuda")]
+fn module_state_get_func(
+    module_name: &'static str,
+    func_name: &'static str,
+) -> Result<Arc<CudaFunction>, String> {
+    let modules = registry()
+        .lock()
+        .map_err(|_| "cuda module registry poisoned".to_string())?;
+    modules
+        .get(&module_name)
+        .ok_or_else(|| format!("cuda module `{module_name}` not loaded"))?
+        .functions
+        .get(func_name)
+        .cloned()
+        .ok_or_else(|| {
+            format!("cuda function `{func_name}` not registered in module `{module_name}`")
+        })
 }

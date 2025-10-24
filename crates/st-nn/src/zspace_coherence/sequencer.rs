@@ -764,12 +764,7 @@ impl PreDiscardRegulator {
     /// decay factor gradually releases stored bias during equilibrium. All values must be finite,
     /// with the gain and limit constrained to non-negative values and the decay restricted to the
     /// [0, 1] interval.
-    pub fn with_integral_control(
-        mut self,
-        gain: f32,
-        limit: f32,
-        decay: f32,
-    ) -> PureResult<Self> {
+    pub fn with_integral_control(mut self, gain: f32, limit: f32, decay: f32) -> PureResult<Self> {
         if !gain.is_finite() || gain < 0.0 {
             return Err(TensorError::NonPositiveCoherence { coherence: gain }.into());
         }
