@@ -24,7 +24,14 @@ const FUSED_LINEAR_RESIDUAL_WGSL_TEMPLATE: &str =
 const FUSED_LINEAR_RESIDUAL_GELU_WGSL_TEMPLATE: &str =
     include_str!("../wgpu_shaders/fused_matmul_bias_residual_gelu.wgsl");
 const ROW_SOFTMAX_WGSL: &str =
-    include_str!("../../st-backend-wgpu/src/shaders/row_softmax_subgroup.wgsl");
+    include_str!("../../../st-backend-wgpu/src/shaders/row_softmax_subgroup.wgsl");
+
+fn instantiate_tile_template(template: &str, config: TileConfig) -> String {
+    template
+        .replace("{tile_m}", &config.tile_m().to_string())
+        .replace("{tile_n}", &config.tile_n().to_string())
+        .replace("{tile_k}", &config.tile_k().to_string())
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -495,12 +502,7 @@ impl DenseContext {
             return pipeline.clone();
         }
 
-        let shader_source = format!(
-            MATMUL_WGSL_TEMPLATE,
-            tile_m = config.tile_m(),
-            tile_n = config.tile_n(),
-            tile_k = config.tile_k(),
-        );
+        let shader_source = instantiate_tile_template(MATMUL_WGSL_TEMPLATE, config);
         let shader_label = format!(
             "st.tensor.wgpu_dense.matmul_shader.tile{}x{}x{}",
             config.tile_m(),
@@ -546,12 +548,7 @@ impl DenseContext {
             FusedActivation::Relu => (FUSED_LINEAR_WGSL_TEMPLATE, "relu"),
             FusedActivation::Gelu => (FUSED_LINEAR_GELU_WGSL_TEMPLATE, "gelu"),
         };
-        let shader_source = format!(
-            shader_template,
-            tile_m = config.tile_m(),
-            tile_n = config.tile_n(),
-            tile_k = config.tile_k(),
-        );
+        let shader_source = instantiate_tile_template(shader_template, config);
         let shader_label = format!(
             "st.tensor.wgpu_dense.fused_linear_shader.{activation_label}.tile{}x{}x{}",
             config.tile_m(),
@@ -597,12 +594,7 @@ impl DenseContext {
             FusedActivation::Relu => (FUSED_LINEAR_RESIDUAL_WGSL_TEMPLATE, "relu"),
             FusedActivation::Gelu => (FUSED_LINEAR_RESIDUAL_GELU_WGSL_TEMPLATE, "gelu"),
         };
-        let shader_source = format!(
-            shader_template,
-            tile_m = config.tile_m(),
-            tile_n = config.tile_n(),
-            tile_k = config.tile_k(),
-        );
+        let shader_source = instantiate_tile_template(shader_template, config);
         let shader_label = format!(
             "st.tensor.wgpu_dense.fused_linear_residual_shader.{activation_label}.tile{}x{}x{}",
             config.tile_m(),
@@ -639,12 +631,7 @@ impl DenseContext {
             return pipeline.clone();
         }
 
-        let shader_source = format!(
-            FUSED_CONV_WGSL_TEMPLATE,
-            tile_m = config.tile_m(),
-            tile_n = config.tile_n(),
-            tile_k = config.tile_k(),
-        );
+        let shader_source = instantiate_tile_template(FUSED_CONV_WGSL_TEMPLATE, config);
         let shader_label = format!(
             "st.tensor.wgpu_dense.fused_conv_shader.tile{}x{}x{}",
             config.tile_m(),
@@ -841,6 +828,7 @@ struct ConvGemmParams {
     out_channels: u32,
     _pad0: u32,
     _pad1: u32,
+    _pad2: u32,
 }
 
 pub fn matmul(
