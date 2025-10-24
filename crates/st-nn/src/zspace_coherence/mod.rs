@@ -11,5 +11,6 @@ pub use coherence_engine::{
     LinguisticChannelReport, LinguisticContour,
 };
 pub use sequencer::{
-    CoherenceDiagnostics, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
+    CoherenceDiagnostics, PreDiscardPolicy, PreDiscardRegulator, PreDiscardSnapshot,
+    PreDiscardTelemetry, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
 };

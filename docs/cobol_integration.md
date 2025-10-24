@@ -163,9 +163,14 @@ With the header installed, the COBOL side can look like:
      if status-code not = 0
          display "description failed" stop run
      end-if.
-     call "st_cobol_free_string" using by value summary-pointer.
-     stop run.
+    call "st_cobol_free_string" using by value summary-pointer.
+    stop run.
 ```
+
+A more complete example that turns dataset metadata into a BPXWDYN allocation
+statement lives in `examples/cobol/st_dataset_writer.cbl`. The program consumes
+the planner's record format, lengths, SMS classes, SPACE allocations, DSNTYPE,
+and LIKE templates to stage a dataset before writing the narration payload.
 
 GnuCOBOL users can compile the snippet with
 
