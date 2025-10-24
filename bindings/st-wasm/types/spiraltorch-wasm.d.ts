@@ -362,10 +362,34 @@ declare module "spiraltorch-wasm" {
         extra?: unknown;
     }
 
+    export interface CobolDatasetRoute {
+        dataset: string;
+        member?: string;
+        disposition?: string;
+        volume?: string;
+        record_format?: string;
+        record_length?: number;
+        block_size?: number;
+        data_class?: string;
+        management_class?: string;
+        storage_class?: string;
+        space_primary?: number;
+        space_secondary?: number;
+        space_unit?: string;
+        directory_blocks?: number;
+        dataset_type?: string;
+        like_dataset?: string;
+        unit?: string;
+        average_record_unit?: string;
+        retention_period?: number;
+        release_space?: boolean;
+        expiration_date?: string;
+    }
+
     export interface CobolRoutePlan {
         mq?: CobolMqRoute;
         cics?: CobolCicsRoute;
-        dataset?: string;
+        dataset?: string | CobolDatasetRoute;
     }
 
     export interface CobolDispatchEnvelope {
@@ -376,6 +400,39 @@ declare module "spiraltorch-wasm" {
         route: CobolRoutePlan;
         payload: CobolNarratorPayload;
         metadata: CobolMetadata;
+    }
+
+    export interface CobolPreviewDataset {
+        dataset: string;
+        member?: string;
+        disposition?: string;
+        volume?: string;
+        record_format?: string;
+        record_length?: number;
+        block_size?: number;
+        data_class?: string;
+        management_class?: string;
+        storage_class?: string;
+        space_primary?: number;
+        space_secondary?: number;
+        space_unit?: string;
+        directory_blocks?: number;
+        dataset_type?: string;
+        like_dataset?: string;
+        unit?: string;
+        average_record_unit?: string;
+        retention_period?: number;
+        release_space?: boolean;
+        expiration_date?: string;
+    }
+
+    export interface CobolPreviewEnvelope {
+        job_id: string;
+        curvature: number;
+        temperature: number;
+        coefficient_count: number;
+        release_channel: string;
+        dataset?: CobolPreviewDataset;
     }
 
     export class CobolDispatchPlanner {
@@ -418,7 +475,27 @@ declare module "spiraltorch-wasm" {
             channel?: string | null,
         ): void;
         clearCicsRoute(): void;
-        setDataset(dataset: string): void;
+        setDataset(dataset?: string | null): void;
+        setDatasetMember(member?: string | null): void;
+        setDatasetDisposition(disposition?: string | null): void;
+        setDatasetVolume(volume?: string | null): void;
+        setDatasetRecordFormat(recordFormat?: string | null): void;
+        setDatasetRecordLength(recordLength?: number | null): void;
+        setDatasetBlockSize(blockSize?: number | null): void;
+        setDatasetDataClass(dataClass?: string | null): void;
+        setDatasetManagementClass(managementClass?: string | null): void;
+        setDatasetStorageClass(storageClass?: string | null): void;
+        setDatasetSpacePrimary(spacePrimary?: number | null): void;
+        setDatasetSpaceSecondary(spaceSecondary?: number | null): void;
+        setDatasetSpaceUnit(spaceUnit?: string | null): void;
+        setDatasetDirectoryBlocks(directoryBlocks?: number | null): void;
+        setDatasetType(datasetType?: string | null): void;
+        setDatasetLike(likeDataset?: string | null): void;
+        setDatasetUnit(unit?: string | null): void;
+        setDatasetAverageRecordUnit(averageRecordUnit?: string | null): void;
+        setDatasetRetentionPeriod(retentionPeriod?: number | null): void;
+        setDatasetReleaseSpace(releaseSpace?: boolean | null): void;
+        setDatasetExpirationDate(expirationDate?: string | null): void;
         clearDataset(): void;
         clearRoute(): void;
         addTag(tag: string): void;
@@ -436,6 +513,6 @@ declare module "spiraltorch-wasm" {
         readonly createdAt: string;
         mqRoute(): CobolMqRoute | undefined;
         cicsRoute(): CobolCicsRoute | undefined;
-        toCobolPreview(): unknown;
+        toCobolPreview(): CobolPreviewEnvelope;
     }
 }
