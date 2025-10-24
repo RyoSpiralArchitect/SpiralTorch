@@ -88,8 +88,6 @@ for _name, _doc in _PREDECLARED_SUBMODULES:
     setattr(_parent_module, _name, _module)
     globals()[_name] = _module
 
-# --- begin: preseed shim for legacy init that looks for `spiral_rl.DqnAgent` ---
-# 一部の初期化コードが `spiral_rl.DqnAgent` を触るので、先に偽モジュールを噛ませる
 if "spiral_rl" not in sys.modules:
     _shim = _types.ModuleType("spiral_rl")
     # 参照される両方の候補名を用意しておく（実体は後で本物に差し替え）
@@ -99,9 +97,7 @@ if "spiral_rl" not in sys.modules:
 # ついでに第三者パッケージの `rl` が入り込む事故を防止
 if "rl" not in sys.modules:
     sys.modules["rl"] = _types.ModuleType("rl")
-# --- end: preseed shim ---
 
-# Rust拡張の本体
 try:
     _rs = import_module("spiraltorch.spiraltorch")
 except ModuleNotFoundError as exc:
@@ -120,11 +116,7 @@ try:
         if hasattr(_spiral_rl, "stAgent") and not hasattr(_spiral_rl, "DqnAgent"):
             setattr(_spiral_rl, "DqnAgent", getattr(_spiral_rl, "stAgent"))
 except Exception:
-    # フェイルセーフ（失敗しても致命ではない）
     pass
-# --- end: promote ---
-
-# パッケージ版
 try:
     __version__ = _pkg_version("spiraltorch")
 except PackageNotFoundError:
@@ -149,17 +141,21 @@ from .zspace_inference import (
     ZSpaceDecoded,
     ZSpaceInference,
     ZSpacePosterior,
+    ZSpacePartialBundle,
+    ZSpaceInferencePipeline,
     canvas_partial_from_snapshot,
+    canvas_coherence_partial,
     coherence_partial_from_diagnostics,
     decode_zspace_embedding,
+    blend_zspace_partials,
     infer_canvas_snapshot,
     infer_canvas_transformer,
     infer_coherence_diagnostics,
     infer_coherence_from_sequencer,
+    infer_canvas_with_coherence,
+    infer_with_partials,
     infer_from_partial,
 )
-
-# 追加API（Rust側でエクスポート済みのやつだけ拾う）
 _EXTRAS = [
     "golden_ratio","golden_angle","set_global_seed",
     "capture","share","compat",

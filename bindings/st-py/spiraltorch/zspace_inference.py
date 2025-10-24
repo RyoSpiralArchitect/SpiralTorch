@@ -12,16 +12,22 @@ __all__ = [
     "ZSpaceDecoded",
     "ZSpaceInference",
     "ZSpacePosterior",
+    "ZSpacePartialBundle",
     "ZSpaceInferenceRuntime",
+    "ZSpaceInferencePipeline",
     "decode_zspace_embedding",
     "infer_from_partial",
+    "infer_with_partials",
     "compile_inference",
+    "blend_zspace_partials",
     "canvas_partial_from_snapshot",
+    "canvas_coherence_partial",
     "infer_canvas_snapshot",
     "infer_canvas_transformer",
     "coherence_partial_from_diagnostics",
     "infer_coherence_diagnostics",
     "infer_coherence_from_sequencer",
+    "infer_canvas_with_coherence",
 ]
 
 
@@ -138,6 +144,20 @@ def _normalise_gradient(values: Sequence[float], length: int) -> list[float]:
     return [math.tanh(v / scale) for v in grad]
 
 
+@dataclass(frozen=True)
+class ZSpacePartialBundle:
+    """Container describing a partial observation and its relative weight."""
+
+    metrics: Mapping[str, Any]
+    weight: float = 1.0
+    origin: str | None = None
+
+    def resolved(self) -> dict[str, Any]:
+        """Return the canonicalised metric mapping."""
+
+        return _canonicalise_inputs(self.metrics)
+
+
 def _canonicalise_inputs(partial: Mapping[str, Any] | None) -> dict[str, Any]:
     if partial is None:
         return {}
@@ -150,6 +170,123 @@ def _canonicalise_inputs(partial: Mapping[str, Any] | None) -> dict[str, Any]:
             raise KeyError(f"unknown metric '{key}'")
         resolved[canonical] = value
     return resolved
+
+
+def _ensure_iterable(values: Any) -> list[float]:
+    if isinstance(values, Mapping):
+        values = values.values()
+    if not isinstance(values, Iterable):
+        return []
+    result: list[float] = []
+    for value in values:
+        try:
+            result.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def _resolve_partial(
+    partial: Mapping[str, Any] | ZSpacePartialBundle | None,
+    *,
+    fallback_weight: float = 1.0,
+) -> tuple[dict[str, Any], float] | None:
+    if partial is None:
+        return None
+    weight = fallback_weight
+    if isinstance(partial, ZSpacePartialBundle):
+        weight = float(partial.weight)
+        mapping = partial.resolved()
+    else:
+        mapping = _canonicalise_inputs(partial)
+    if weight <= 0.0:
+        return None
+    return mapping, weight
+
+
+def blend_zspace_partials(
+    partials: Sequence[Mapping[str, Any] | ZSpacePartialBundle | None],
+    *,
+    weights: Sequence[float] | None = None,
+    strategy: str = "mean",
+) -> dict[str, Any]:
+    """Fuse several partial observations into a single mapping.
+
+    Parameters
+    ----------
+    partials:
+        Sequence of mappings or :class:`ZSpacePartialBundle` instances. ``None``
+        entries are ignored.
+    weights:
+        Optional per-partial weighting that overrides the bundle's intrinsic
+        weight. Negative or zero weights suppress that partial.
+    strategy:
+        Reduction strategy used when multiple partials define the same metric.
+        Supported values are ``"mean"`` (default), ``"last"``, ``"max"`` and
+        ``"min"``.
+    """
+
+    if not isinstance(partials, Sequence):
+        raise TypeError("partials must be provided as a sequence")
+
+    def _reduce(values: list[tuple[float, float]]) -> float:
+        if not values:
+            return 0.0
+        if strategy == "last":
+            return values[-1][0]
+        if strategy == "max":
+            return max(value for value, _ in values)
+        if strategy == "min":
+            return min(value for value, _ in values)
+        # default: weighted mean
+        total_weight = sum(weight for _, weight in values)
+        if total_weight <= 0.0:
+            return values[-1][0]
+        return sum(value * weight for value, weight in values) / total_weight
+
+    aggregated: dict[str, list[tuple[float, float]]] = {}
+    gradients: list[tuple[list[float], float]] = []
+    default_weight = 1.0
+    for index, partial in enumerate(partials):
+        weight_override = None
+        if weights is not None:
+            try:
+                weight_override = float(weights[index])
+            except (IndexError, TypeError, ValueError):
+                weight_override = None
+        resolved = _resolve_partial(
+            partial, fallback_weight=weight_override if weight_override is not None else default_weight
+        )
+        if resolved is None:
+            continue
+        mapping, weight = resolved
+        gradient = mapping.pop("gradient", None)
+        for key, value in mapping.items():
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            aggregated.setdefault(key, []).append((numeric, weight))
+        if gradient is not None:
+            gradients.append((_ensure_iterable(gradient), weight))
+
+    merged = {key: _reduce(values) for key, values in aggregated.items()}
+
+    if gradients:
+        length = max((len(values) for values, _ in gradients), default=0)
+        if length:
+            total_weight = 0.0
+            accumulator = [0.0] * length
+            for values, weight in gradients:
+                padded = list(values) + [0.0] * (length - len(values))
+                for idx in range(length):
+                    accumulator[idx] += padded[idx] * weight
+                total_weight += weight
+            if total_weight > 0.0:
+                merged["gradient"] = [value / total_weight for value in accumulator]
+            else:
+                merged["gradient"] = gradients[-1][0]
+    return merged
 
 
 def _barycentric_from_metrics(metrics: Mapping[str, float]) -> tuple[float, float, float]:
@@ -412,6 +549,99 @@ class ZSpaceInferenceRuntime:
         return self.update(partial)
 
 
+class ZSpaceInferencePipeline:
+    """Composable pipeline that blends heterogeneous partials before inference."""
+
+    def __init__(
+        self,
+        z_state: Sequence[float],
+        *,
+        alpha: float = 0.35,
+        smoothing: float = 0.35,
+        strategy: str = "mean",
+    ) -> None:
+        self._runtime = ZSpaceInferenceRuntime(
+            z_state, alpha=alpha, smoothing=smoothing, accumulate=False
+        )
+        self._strategy = strategy
+        self._partials: list[ZSpacePartialBundle] = []
+
+    @property
+    def strategy(self) -> str:
+        """Return the blending strategy used for partial fusion."""
+
+        return self._strategy
+
+    @property
+    def posterior(self) -> ZSpacePosterior:
+        """Expose the underlying :class:`ZSpacePosterior`."""
+
+        return self._runtime.posterior
+
+    @property
+    def smoothing(self) -> float:
+        """Smoothing factor applied during barycentric blending."""
+
+        return self._runtime.smoothing
+
+    def add_partial(
+        self,
+        partial: Mapping[str, Any] | ZSpacePartialBundle,
+        *,
+        weight: float | None = None,
+        origin: str | None = None,
+    ) -> ZSpacePartialBundle:
+        """Register a new partial observation to be included in the next inference."""
+
+        if isinstance(partial, ZSpacePartialBundle):
+            bundle = partial
+        else:
+            bundle = ZSpacePartialBundle(
+                partial, weight=1.0 if weight is None else weight, origin=origin
+            )
+        self._partials.append(bundle)
+        return bundle
+
+    def add_canvas_snapshot(self, snapshot: Any, **kwargs: Any) -> ZSpacePartialBundle:
+        """Derive and register metrics from a Canvas snapshot."""
+
+        partial = canvas_partial_from_snapshot(snapshot, **kwargs)
+        return self.add_partial(partial, origin="canvas")
+
+    def add_coherence_diagnostics(
+        self, diagnostics: Any, **kwargs: Any
+    ) -> ZSpacePartialBundle:
+        """Derive and register metrics from coherence diagnostics."""
+
+        partial = coherence_partial_from_diagnostics(diagnostics, **kwargs)
+        return self.add_partial(partial, origin="coherence")
+
+    def clear(self) -> None:
+        """Discard any buffered partial observations."""
+
+        self._partials.clear()
+
+    def infer(
+        self,
+        *,
+        strategy: str | None = None,
+        weights: Sequence[float] | None = None,
+        clear: bool = True,
+    ) -> ZSpaceInference:
+        """Blend registered partials and compute the Z-space inference."""
+
+        chosen_strategy = strategy or self._strategy
+        blended = blend_zspace_partials(
+            self._partials, strategy=chosen_strategy, weights=weights
+        )
+        inference = self._runtime.posterior.project(
+            blended, smoothing=self._runtime.smoothing
+        )
+        if clear:
+            self.clear()
+        return inference
+
+
 def decode_zspace_embedding(z_state: Sequence[float], *, alpha: float = 0.35) -> ZSpaceDecoded:
     """Decode latent coordinates into a structured metric bundle."""
 
@@ -429,6 +659,20 @@ def infer_from_partial(
 
     posterior = ZSpacePosterior(z_state, alpha=alpha)
     return posterior.project(partial, smoothing=smoothing)
+
+
+def infer_with_partials(
+    z_state: Sequence[float],
+    *partials: Mapping[str, Any] | ZSpacePartialBundle | None,
+    alpha: float = 0.35,
+    smoothing: float = 0.35,
+    strategy: str = "mean",
+    weights: Sequence[float] | None = None,
+) -> ZSpaceInference:
+    """Infer Z-space metrics from multiple partial observations."""
+
+    blended = blend_zspace_partials(partials, weights=weights, strategy=strategy)
+    return infer_from_partial(z_state, blended, alpha=alpha, smoothing=smoothing)
 
 
 def compile_inference(
@@ -632,6 +876,36 @@ def canvas_partial_from_snapshot(
             }
         )
     return partial
+
+
+def canvas_coherence_partial(
+    snapshot: Any,
+    diagnostics: Any,
+    *,
+    coherence: Any = None,
+    contour: Any = None,
+    strategy: str = "mean",
+    weights: Sequence[float] | None = None,
+    canvas_kwargs: Mapping[str, Any] | None = None,
+    coherence_kwargs: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Blend Canvas and coherence-derived partials into a single mapping."""
+
+    canvas_kwargs = dict(canvas_kwargs or {})
+    coherence_kwargs = dict(coherence_kwargs or {})
+    if coherence is not None:
+        coherence_kwargs.setdefault("coherence", coherence)
+    if contour is not None:
+        coherence_kwargs.setdefault("contour", contour)
+    canvas_partial = canvas_partial_from_snapshot(snapshot, **canvas_kwargs)
+    coherence_partial = coherence_partial_from_diagnostics(
+        diagnostics, **coherence_kwargs
+    )
+    bundles = [
+        ZSpacePartialBundle(canvas_partial, origin="canvas"),
+        ZSpacePartialBundle(coherence_partial, origin="coherence"),
+    ]
+    return blend_zspace_partials(bundles, strategy=strategy, weights=weights)
 
 
 def infer_canvas_snapshot(
@@ -862,5 +1136,34 @@ def infer_coherence_from_sequencer(
     if return_outputs:
         return inference, outputs
     return inference
+
+
+def infer_canvas_with_coherence(
+    z_state: Sequence[float],
+    snapshot: Any,
+    diagnostics: Any,
+    *,
+    coherence: Any = None,
+    contour: Any = None,
+    alpha: float = 0.35,
+    smoothing: float = 0.35,
+    strategy: str = "mean",
+    weights: Sequence[float] | None = None,
+    canvas_kwargs: Mapping[str, Any] | None = None,
+    coherence_kwargs: Mapping[str, Any] | None = None,
+) -> ZSpaceInference:
+    """Fuse Canvas and coherence diagnostics before projecting into Z-space."""
+
+    partial = canvas_coherence_partial(
+        snapshot,
+        diagnostics,
+        coherence=coherence,
+        contour=contour,
+        strategy=strategy,
+        weights=weights,
+        canvas_kwargs=canvas_kwargs,
+        coherence_kwargs=coherence_kwargs,
+    )
+    return infer_from_partial(z_state, partial, alpha=alpha, smoothing=smoothing)
 
 
