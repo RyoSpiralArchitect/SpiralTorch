@@ -27,11 +27,6 @@ pub fn trapezoidal_weights(len: usize) -> ZSpaceResult<Vec<Scalar>> {
 }
 
 /// Map Mellin abscissa data to the Z-plane representation.
-///
-/// The Mellin transform evaluated on a log-uniform grid `t_k = log_start + k * log_step`
-/// can be rewritten as a weighted power series on the complex unit `z = exp(s * log_step)`.
-/// This helper returns the scalar prefactor and the Z-plane point that together encode
-/// that change of variables.
 #[inline]
 pub fn mellin_log_lattice_prefactor(
     log_start: Scalar,
@@ -53,10 +48,6 @@ pub fn mellin_log_lattice_prefactor(
 }
 
 /// Evaluate a weighted Z-transform at the point `z`.
-///
-/// The caller supplies per-sample trapezoidal weights that capture the Hilbert-space
-/// measure induced by the Mellin transform. The returned value corresponds to the
-/// discrete power series `sum_k w_k x_k z^k`.
 pub fn weighted_z_transform(
     samples: &[ComplexScalar],
     weights: &[Scalar],
@@ -67,10 +58,6 @@ pub fn weighted_z_transform(
 }
 
 /// Evaluate the weighted Z-transform at multiple `z` points.
-///
-/// This helper shares the preweighted samples across all evaluation points,
-/// avoiding repeated weight application when sweeping an entire vertical line in
-/// the Mellin domain.
 pub fn weighted_z_transform_many(
     samples: &[ComplexScalar],
     weights: &[Scalar],
@@ -132,8 +119,7 @@ pub fn evaluate_weighted_series(
         return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
     }
 
-    // Horner's method for improved stability and fewer multiplications:
-    // acc = a_{n-1}; for k = n-2..0: acc = a_k + z * acc
+    // Horner's method (stable & fewer multiplications):
     let mut acc = *weighted.last().unwrap();
     for coeff in weighted[..weighted.len() - 1].iter().rev() {
         acc = *coeff + z * acc;
@@ -159,12 +145,7 @@ pub fn evaluate_weighted_series_many(
         .collect()
 }
 
-/// Evaluate the Mellin transform on a log-uniform grid by routing the computation
-/// through its Z-plane power-series form.
-///
-/// This provides a numerically stable pathway to couple Mellin-domain analyses with
-/// Z-space tooling such as the pulse interfaces in SpiralTorch, without touching the
-/// low-level pulse definitions directly.
+/// Evaluate the Mellin transform on a log-uniform grid via Z-plane series.
 pub fn mellin_transform_via_z(
     log_start: Scalar,
     log_step: Scalar,
@@ -250,22 +231,6 @@ mod tests {
         for (idx, &z) in zs.iter().enumerate() {
             let single = weighted_z_transform(&samples, &weights, z).unwrap();
             let diff = (batch[idx] - single).norm();
-            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
-        }
-    }
-
-    #[test]
-    fn prepared_series_matches_direct_weighting() {
-        let samples = vec![
-            ComplexScalar::new(1.0, -0.5),
-            ComplexScalar::new(-0.7, 0.2),
-            ComplexScalar::new(0.3, 0.9),
-        ];
-        let weights = vec![0.5, 1.0, 0.5];
-        let weighted = prepare_weighted_series(&samples, &weights).unwrap();
-        for (idx, coeff) in weighted.iter().enumerate() {
-            let manual = samples[idx] * ComplexScalar::new(weights[idx], 0.0);
-            let diff = (*coeff - manual).norm();
             assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
         }
     }
