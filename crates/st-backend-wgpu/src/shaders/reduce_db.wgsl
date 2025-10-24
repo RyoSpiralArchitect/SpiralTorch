@@ -7,9 +7,9 @@ override WG_COLS : u32 = 16u;
 override REDUCE_WG : u32 = 256u;
 
 struct ReduceUniforms {
-  O: u32;
-  num_wg_x: u32;
-  num_wg_y: u32;
+  O: u32,
+  num_wg_x: u32,
+  num_wg_y: u32,
 };
 
 @group(0) @binding(0) var<storage, read>       db_partials: array<f32>;

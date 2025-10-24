@@ -5,6 +5,8 @@
 
 #![cfg(feature = "wgpu")]
 
+use std::any::Any;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::OnceLock;
 
 use bytemuck::{cast_slice, Pod, Zeroable};
@@ -26,6 +28,8 @@ pub enum MellinGpuError {
     NoAdapter,
     #[error("failed to acquire WGPU device: {0}")]
     RequestDevice(String),
+    #[error("failed to compile Mellin WGSL shader: {0}")]
+    Shader(String),
     #[error("failed to map GPU buffer for readback")]
     Map,
 }
@@ -135,16 +139,20 @@ impl MellinGpuExecutor {
             push_constant_ranges: &[],
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("st.mellin.gpu.shader"),
-            source: wgpu::ShaderSource::Wgsl(MELLIN_WGSL.into()),
-        });
+        let shader = catch_unwind(AssertUnwindSafe(|| {
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("st.mellin.gpu.shader"),
+                source: wgpu::ShaderSource::Wgsl(MELLIN_WGSL.into()),
+            })
+        }))
+        .map_err(|payload| MellinGpuError::Shader(panic_payload_to_string(payload)))?;
 
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("st.mellin.gpu.pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: "main",
+            compilation_options: Default::default(),
         });
 
         Ok(Self {
@@ -266,6 +274,16 @@ impl MellinGpuExecutor {
         staging_buffer.unmap();
 
         Ok(result)
+    }
+}
+
+fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
+    if let Some(msg) = payload.downcast_ref::<&str>() {
+        msg.to_string()
+    } else if let Some(msg) = payload.downcast_ref::<String>() {
+        msg.clone()
+    } else {
+        "unknown panic".to_string()
     }
 }
 
