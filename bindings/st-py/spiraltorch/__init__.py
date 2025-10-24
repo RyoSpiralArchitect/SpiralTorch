@@ -173,7 +173,6 @@ for _n in _EXTRAS:
     if _value is not None:
         globals()[_n] = _value
 
-# 後方互換の別名（存在する方を公開名にバインド）
 _COMPAT_ALIAS = {
     "Tensor":   ("Tensor", "PyTensor"),
     "Device":   ("Device", "PyDevice"),

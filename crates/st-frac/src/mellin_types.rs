@@ -22,6 +22,11 @@ pub enum ZSpaceError {
     EmptySeries,
     #[error("z-values must not be empty")]
     EmptyZValues,
+    // New: explicit finiteness checks for robustness
+    #[error("weight[{index}] is not finite: {value}")]
+    NonFiniteWeight { index: usize, value: Scalar },
+    #[error("sample[{index}] coefficient is not finite")]
+    NonFiniteSampleCoeff { index: usize },
 }
 
 #[derive(Debug, Error)]
@@ -40,10 +45,9 @@ pub enum MellinError {
     NonFiniteFunctionValue { x: Scalar },
     #[error("sample {index} produced a non-finite value")]
     NonFiniteSample { index: usize },
-    #[error("lattice mismatch: log_start/log_step/length must match exactly")]
-    LatticeMismatch,
-    #[error("inner product produced a negative real component: {value}")]
-    NegativeInnerProduct { value: ComplexScalar },
+    // New: explicit invalid z
+    #[error("z value is not finite: re={re}, im={im}")]
+    NonFiniteZ { re: Scalar, im: Scalar },
     #[error(transparent)]
     ZSpace(#[from] ZSpaceError),
     #[cfg(feature = "wgpu")]
