@@ -1,7 +1,7 @@
 struct ColorJitterParams {
-    dims: vec4<u32>;
-    factors: vec4<f32>;
-    means: vec4<f32>;
+    dims: vec4<u32>,
+    factors: vec4<f32>,
+    means: vec4<f32>,
 };
 
 @group(0) @binding(0)

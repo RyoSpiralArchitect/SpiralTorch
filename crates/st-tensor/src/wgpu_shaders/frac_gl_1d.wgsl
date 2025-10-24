@@ -1,5 +1,10 @@
 // crates/st-tensor/src/wgpu_shaders/frac_gl_1d.wgsl
-struct Params { n:u32, m:u32, h_alpha:f32; _pad:f32; };
+struct Params {
+    n: u32,
+    m: u32,
+    h_alpha: f32,
+    _pad: f32,
+};
 
 @group(0) @binding(0) var<storage, read>  X : array<f32>;
 @group(0) @binding(1) var<storage, read>  W : array<f32>;

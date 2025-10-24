@@ -18,7 +18,7 @@ num-complex = "0.4"
 libm = "0.2"
 bytemuck = { version = "1", optional = true, features = ["derive"] }
 pollster = { version = "0.3", optional = true }
-wgpu = { version = "0.19", optional = true, features = ["wgsl"] }
+wgpu = { version = "0.20", optional = true, default-features = false, features = ["wgsl"] }
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

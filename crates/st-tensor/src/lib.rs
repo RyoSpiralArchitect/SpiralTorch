@@ -18,7 +18,7 @@ pub use backend::faer_dense;
 #[cfg(feature = "wgpu_frac")]
 pub use backend::wgpu_frac;
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 pub use backend::wgpu_dense;
 
 mod pure;

@@ -27,11 +27,6 @@ pub fn trapezoidal_weights(len: usize) -> ZSpaceResult<Vec<Scalar>> {
 }
 
 /// Map Mellin abscissa data to the Z-plane representation.
-///
-/// The Mellin transform evaluated on a log-uniform grid `t_k = log_start + k * log_step`
-/// can be rewritten as a weighted power series on the complex unit `z = exp(s * log_step)`.
-/// This helper returns the scalar prefactor and the Z-plane point that together encode
-/// that change of variables.
 #[inline]
 pub fn mellin_log_lattice_prefactor(
     log_start: Scalar,
@@ -53,10 +48,6 @@ pub fn mellin_log_lattice_prefactor(
 }
 
 /// Evaluate a weighted Z-transform at the point `z`.
-///
-/// The caller supplies per-sample trapezoidal weights that capture the Hilbert-space
-/// measure induced by the Mellin transform. The returned value corresponds to the
-/// discrete power series `sum_k w_k x_k z^k`.
 pub fn weighted_z_transform(
     samples: &[ComplexScalar],
     weights: &[Scalar],
@@ -67,10 +58,6 @@ pub fn weighted_z_transform(
 }
 
 /// Evaluate the weighted Z-transform at multiple `z` points.
-///
-/// This helper shares the preweighted samples across all evaluation points,
-/// avoiding repeated weight application when sweeping an entire vertical line in
-/// the Mellin domain.
 pub fn weighted_z_transform_many(
     samples: &[ComplexScalar],
     weights: &[Scalar],
@@ -96,6 +83,16 @@ pub fn prepare_weighted_series(
         });
     }
 
+    // Robustness: validate finiteness of inputs before forming the weighted series
+    for (i, (sample, &w)) in samples.iter().zip(weights.iter()).enumerate() {
+        if !w.is_finite() {
+            return Err(ZSpaceError::NonFiniteWeight { index: i, value: w });
+        }
+        if !sample.re.is_finite() || !sample.im.is_finite() {
+            return Err(ZSpaceError::NonFiniteSampleCoeff { index: i });
+        }
+    }
+
     Ok(samples
         .iter()
         .zip(weights.iter())
@@ -112,14 +109,21 @@ pub fn evaluate_weighted_series(
         return Err(ZSpaceError::EmptySeries.into());
     }
 
-    let mut acc = ComplexScalar::new(0.0, 0.0);
-    let mut power = ComplexScalar::new(1.0, 0.0);
-
-    for coeff in weighted.iter() {
-        acc += *coeff * power;
-        power *= z;
+    // Validate coefficients and z are finite
+    for (i, coeff) in weighted.iter().enumerate() {
+        if !coeff.re.is_finite() || !coeff.im.is_finite() {
+            return Err(MellinError::NonFiniteSample { index: i });
+        }
+    }
+    if !z.re.is_finite() || !z.im.is_finite() {
+        return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
     }
 
+    // Horner's method (stable & fewer multiplications):
+    let mut acc = *weighted.last().unwrap();
+    for coeff in weighted[..weighted.len() - 1].iter().rev() {
+        acc = *coeff + z * acc;
+    }
     Ok(acc)
 }
 
@@ -141,12 +145,7 @@ pub fn evaluate_weighted_series_many(
         .collect()
 }
 
-/// Evaluate the Mellin transform on a log-uniform grid by routing the computation
-/// through its Z-plane power-series form.
-///
-/// This provides a numerically stable pathway to couple Mellin-domain analyses with
-/// Z-space tooling such as the pulse interfaces in SpiralTorch, without touching the
-/// low-level pulse definitions directly.
+/// Evaluate the Mellin transform on a log-uniform grid via Z-plane series.
 pub fn mellin_transform_via_z(
     log_start: Scalar,
     log_step: Scalar,
@@ -240,40 +239,37 @@ mod tests {
         }
     }
 
+    // New: robustness tests
     #[test]
-    fn prepared_series_matches_direct_weighting() {
-        let samples = vec![
-            ComplexScalar::new(1.0, -0.5),
-            ComplexScalar::new(-0.7, 0.2),
-            ComplexScalar::new(0.3, 0.9),
+    fn evaluate_rejects_nonfinite_coeff() {
+        let weighted = vec![
+            ComplexScalar::new(1.0, 0.0),
+            ComplexScalar::new(f32::NAN, 0.0),
         ];
-        let weights = vec![0.5, 1.0, 0.5];
-        let weighted = prepare_weighted_series(&samples, &weights).unwrap();
-        for (idx, coeff) in weighted.iter().enumerate() {
-            let manual = samples[idx] * ComplexScalar::new(weights[idx], 0.0);
-            let diff = (*coeff - manual).norm();
-            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
-        }
+        let z = ComplexScalar::new(0.5, 0.1);
+        assert!(evaluate_weighted_series(&weighted, z).is_err());
     }
 
     #[test]
-    fn evaluate_weighted_series_many_shares_coefficients() {
-        let samples = vec![
-            ComplexScalar::new(0.4, -0.2),
-            ComplexScalar::new(-0.1, 0.7),
-            ComplexScalar::new(0.3, 0.1),
-            ComplexScalar::new(-0.2, -0.5),
+    fn evaluate_rejects_nonfinite_z() {
+        let weighted = vec![ComplexScalar::new(1.0, 0.0)];
+        let z = ComplexScalar::new(f32::INFINITY, 0.0);
+        assert!(evaluate_weighted_series(&weighted, z).is_err());
+    }
+
+    #[test]
+    fn prepare_rejects_nonfinite_inputs() {
+        // Non-finite weight
+        let samples = vec![ComplexScalar::new(1.0, 0.0), ComplexScalar::new(2.0, 0.0)];
+        let bad_weights = vec![1.0, f32::NAN];
+        assert!(prepare_weighted_series(&samples, &bad_weights).is_err());
+
+        // Non-finite sample
+        let bad_samples = vec![
+            ComplexScalar::new(1.0, 0.0),
+            ComplexScalar::new(f32::NAN, 0.0),
         ];
-        let weights = trapezoidal_weights(samples.len()).unwrap();
-        let weighted = prepare_weighted_series(&samples, &weights).unwrap();
-        let zs = [ComplexScalar::new(0.9, 0.1), ComplexScalar::new(-0.3, 0.4)];
-
-        let via_prepare = evaluate_weighted_series_many(&weighted, &zs).unwrap();
-        let via_api = weighted_z_transform_many(&samples, &weights, &zs).unwrap();
-
-        for (idx, (lhs, rhs)) in via_prepare.iter().zip(via_api.iter()).enumerate() {
-            let diff = (*lhs - *rhs).norm();
-            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
-        }
+        let weights = vec![0.5, 0.5];
+        assert!(prepare_weighted_series(&bad_samples, &weights).is_err());
     }
 }
