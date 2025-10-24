@@ -1,13 +1,13 @@
-use std::ffi::{c_void, CStr};
-
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
-use pyo3::Bound;
+use pyo3::{Bound, PyRef, PyRefMut};
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
-use st_tensor::{MatmulBackend, SoftmaxBackend, Tensor, TensorError};
+use st_tensor::{MatmulBackend, Tensor, TensorError};
+use std::ffi::{c_void, CStr};
+use tracing::warn;
 
 fn parse_backend(label: Option<&str>) -> MatmulBackend {
     match label.unwrap_or("auto") {
@@ -17,21 +17,64 @@ fn parse_backend(label: Option<&str>) -> MatmulBackend {
         #[cfg(feature = "wgpu")]
         "wgpu" => MatmulBackend::GpuWgpu,
         other => {
-            eprintln!("[spiraltorch] unknown backend '{other}', falling back to 'auto'");
+            warn!(
+                backend = other,
+                "unknown backend label, falling back to auto"
+            );
             MatmulBackend::Auto
         }
     }
 }
 
-fn parse_softmax_backend(label: Option<&str>) -> SoftmaxBackend {
-    match label.unwrap_or("auto") {
-        "auto" => SoftmaxBackend::Auto,
-        "cpu" => SoftmaxBackend::Cpu,
-        #[cfg(feature = "wgpu")]
-        "wgpu" => SoftmaxBackend::GpuWgpu,
-        other => {
-            eprintln!("[spiraltorch] unknown softmax backend '{other}', falling back to 'auto'");
-            SoftmaxBackend::Auto
+enum F32Input {
+enum BorrowedF32 {
+    Tensor(Tensor),
+    Owned(Vec<f32>),
+}
+
+unsafe impl Send for F32Input {}
+
+fn with_out_tensor<F>(out: &PyCell<PyTensor>, f: F) -> PyResult<PyTensor>
+where
+    F: FnOnce(&mut Tensor) -> Result<(), TensorError>,
+{
+    let mut borrow = out
+        .try_borrow_mut()
+        .map_err(|_| PyRuntimeError::new_err("out tensor is already borrowed"))?;
+    f(&mut borrow.inner).map_err(tensor_err_to_py)?;
+    Ok(PyTensor {
+        inner: borrow.inner.clone(),
+    })
+}
+
+impl F32Input {
+    fn from_py(any: &PyAny) -> PyResult<Self> {
+        if let Ok(tensor_cell) = any.downcast::<PyCell<PyTensor>>() {
+            let tensor = tensor_cell.try_borrow()?.inner.clone();
+            return Ok(Self::Tensor(tensor));
+        }
+
+        if let Ok(list) = any.downcast::<PyList>() {
+            let mut owned = Vec::with_capacity(list.len());
+            for item in list {
+                owned.push(item.extract::<f32>()?);
+            }
+            return Ok(Self::Owned(owned));
+        }
+
+        if let Ok(vector) = any.extract::<Vec<f32>>() {
+            return Ok(Self::Owned(vector));
+        }
+
+        Err(PyTypeError::new_err(
+            "expected a PyTensor or iterable of floats",
+        ))
+    }
+
+    fn as_slice(&self) -> &[f32] {
+        match self {
+            Self::Tensor(tensor) => tensor.data(),
+            Self::Owned(vec) => vec.as_slice(),
         }
     }
 }
@@ -111,12 +154,23 @@ impl PyTensor {
 
     #[pyo3(signature = (*, stream=None))]
     pub fn __dlpack__(&self, py: Python<'_>, stream: Option<PyObject>) -> PyResult<PyObject> {
-        let _ = stream;
+        if let Some(stream_obj) = stream {
+            let stream = stream_obj.bind(py);
+            if !stream.is_none() {
+                let value: isize = stream
+                    .extract()
+                    .map_err(|_| PyValueError::new_err("CPU tensors expect stream=None or 0"))?;
+                if value != 0 {
+                    return Err(PyValueError::new_err("CPU tensors expect stream=None or 0"));
+                }
+            }
+        }
         self.to_dlpack(py)
     }
 
     pub fn __dlpack_device__(&self) -> (i32, i32) {
-        (1, 0)
+        let device = self.inner.dlpack_device();
+        (device.device_type, device.device_id)
     }
 
     #[getter]
@@ -145,28 +199,89 @@ impl PyTensor {
     }
 
     /// Matrix multiply: self @ other
-    #[pyo3(signature = (other, *, backend=None))]
-    pub fn matmul(&self, other: &PyTensor, backend: Option<&str>) -> PyResult<PyTensor> {
+    #[pyo3(signature = (other, *, backend=None, out=None))]
+    pub fn matmul(
+        &self,
+        other: &PyTensor,
+        backend: Option<&str>,
+        out: Option<&Bound<PyAny>>,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
         let backend = parse_backend(backend);
-        let tensor = self
-            .inner
-            .matmul_with_backend(&other.inner, backend)
+        if let Some(cell) = out {
+            let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
+            let dst_ptr = TensorOutPtr((&mut dst.inner as *mut Tensor) as usize);
+            drop(dst);
+
+            // SAFETY: `dst_ptr` points to the destination tensor owned by the Python
+            // object. We drop the `PyRefMut` before releasing the GIL, ensuring there
+            // are no outstanding Rust borrows when the computation runs.
+            let dst_ptr_closure = dst_ptr;
+            py.allow_threads(move || unsafe {
+                self.inner.matmul_into_with_backend(
+                    &other.inner,
+                    &mut *dst_ptr_closure.as_mut_ptr(),
+                    backend,
+                )
+            })
+            .map_err(tensor_err_to_py)?;
+
+            // SAFETY: `dst_ptr` still references the tensor stored in the Python
+            // object. Cloning after the computation completes is sound and gives us
+            // a handle to return to Python while leaving the buffer in place.
+            let tensor = unsafe { dst_ptr.clone_tensor() };
+            return Ok(PyTensor { inner: tensor });
+        }
+
+        let tensor = py
+            .allow_threads(|| self.inner.matmul_with_backend(&other.inner, backend))
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
 
     /// Matrix multiply with bias and ReLU fusion.
-    #[pyo3(signature = (other, bias, *, backend=None))]
+    #[pyo3(signature = (other, bias, *, backend=None, out=None))]
     pub fn matmul_bias_relu(
         &self,
         other: &PyTensor,
-        bias: Vec<f32>,
+        bias: &Bound<PyAny>,
         backend: Option<&str>,
+        out: Option<&Bound<PyAny>>,
+        py: Python<'_>,
     ) -> PyResult<PyTensor> {
         let backend = parse_backend(backend);
-        let tensor = self
-            .inner
-            .matmul_bias_relu_with_backend(&other.inner, &bias, backend)
+        let bias = borrow_f32_argument(bias)?;
+
+        if let Some(cell) = out {
+            let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
+            let dst_ptr = TensorOutPtr((&mut dst.inner as *mut Tensor) as usize);
+            drop(dst);
+
+            let slice = bias.as_slice();
+            // SAFETY: see the explanation in `matmul`; we drop the borrow before
+            // releasing the GIL and only touch the tensor through `dst_ptr`.
+            let dst_ptr_closure = dst_ptr;
+            py.allow_threads(move || unsafe {
+                self.inner.matmul_bias_relu_into_with_backend(
+                    &other.inner,
+                    slice,
+                    &mut *dst_ptr_closure.as_mut_ptr(),
+                    backend,
+                )
+            })
+            .map_err(tensor_err_to_py)?;
+
+            // SAFETY: `dst_ptr` remains valid for the duration of the call.
+            let tensor = unsafe { dst_ptr.clone_tensor() };
+            return Ok(PyTensor { inner: tensor });
+        }
+
+        let slice = bias.as_slice();
+        let tensor = py
+            .allow_threads(|| {
+                self.inner
+                    .matmul_bias_relu_with_backend(&other.inner, slice, backend)
+            })
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
@@ -178,94 +293,231 @@ impl PyTensor {
         other: &PyTensor,
         bias: Vec<f32>,
         backend: Option<&str>,
+        out: Option<&PyCell<PyTensor>>,
+        py: Python<'_>,
     ) -> PyResult<PyTensor> {
         let backend = parse_backend(backend);
-        let tensor = self
-            .inner
-            .matmul_bias_gelu_with_backend(&other.inner, &bias, backend)
+        let bias_input = F32Input::from_py(bias)?;
+        if let Some(dst) = out {
+            let bias_input = bias_input;
+            return with_out_tensor(dst, move |tensor| {
+                self.inner.matmul_bias_relu_into_with_backend(
+                    &other.inner,
+                    bias_input.as_slice(),
+                    tensor,
+                    backend,
+                )
+            });
+        }
+        let tensor = py
+            .allow_threads({
+                let bias_input = bias_input;
+                move || {
+                    self.inner.matmul_bias_relu_with_backend(
+                        &other.inner,
+                        bias_input.as_slice(),
+                        backend,
+                    )
+                }
+            })
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
 
     /// Matrix multiply fused with bias, residual addition, and ReLU activation.
-    #[pyo3(signature = (other, bias, residual, *, backend=None))]
+    #[pyo3(signature = (other, bias, residual, *, backend=None, out=None))]
     pub fn matmul_bias_add_relu(
         &self,
         other: &PyTensor,
-        bias: Vec<f32>,
+        bias: &Bound<PyAny>,
         residual: &PyTensor,
         backend: Option<&str>,
+        out: Option<&Bound<PyAny>>,
+        py: Python<'_>,
     ) -> PyResult<PyTensor> {
         let backend = parse_backend(backend);
-        let tensor = self
-            .inner
-            .matmul_bias_add_relu_with_backend(&other.inner, &bias, &residual.inner, backend)
+        let bias = borrow_f32_argument(bias)?;
+
+        if let Some(cell) = out {
+            let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
+            let dst_ptr = TensorOutPtr((&mut dst.inner as *mut Tensor) as usize);
+            drop(dst);
+
+            let slice = bias.as_slice();
+            // SAFETY: identical reasoning to `matmul` — the raw pointer targets the
+            // tensor inside `out` and no Rust borrow lives across the GIL release.
+            let dst_ptr_closure = dst_ptr;
+            py.allow_threads(move || unsafe {
+                self.inner.matmul_bias_add_relu_into_with_backend(
+                    &other.inner,
+                    slice,
+                    &residual.inner,
+                    &mut *dst_ptr_closure.as_mut_ptr(),
+                    backend,
+                )
+            })
+            .map_err(tensor_err_to_py)?;
+
+            // SAFETY: `dst_ptr` still points to the tensor owned by Python.
+            let tensor = unsafe { dst_ptr.clone_tensor() };
+            return Ok(PyTensor { inner: tensor });
+        }
+
+        let slice = bias.as_slice();
+        let tensor = py
+            .allow_threads(|| {
+                self.inner.matmul_bias_add_relu_with_backend(
+                    &other.inner,
+                    slice,
+                    &residual.inner,
+                    backend,
+                )
+            })
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
 
     /// Matrix multiply fused with bias, residual addition, and GELU activation.
-    #[pyo3(signature = (other, bias, residual, *, backend=None))]
+    #[pyo3(signature = (other, bias, residual, *, backend=None, out=None))]
     pub fn matmul_bias_add_gelu(
         &self,
         other: &PyTensor,
-        bias: Vec<f32>,
+        bias: &PyAny,
         residual: &PyTensor,
         backend: Option<&str>,
+        out: Option<&PyCell<PyTensor>>,
+        py: Python<'_>,
     ) -> PyResult<PyTensor> {
         let backend = parse_backend(backend);
-        let tensor = self
-            .inner
-            .matmul_bias_add_gelu_with_backend(&other.inner, &bias, &residual.inner, backend)
+        let bias_input = F32Input::from_py(bias)?;
+        if let Some(dst) = out {
+            let bias_input = bias_input;
+            return with_out_tensor(dst, move |tensor| {
+                self.inner.matmul_bias_add_gelu_into_with_backend(
+                    &other.inner,
+                    bias_input.as_slice(),
+                    &residual.inner,
+                    tensor,
+                    backend,
+                )
+            });
+        }
+        let tensor = py
+            .allow_threads({
+                let bias_input = bias_input;
+                move || {
+                    self.inner.matmul_bias_add_gelu_with_backend(
+                        &other.inner,
+                        bias_input.as_slice(),
+                        &residual.inner,
+                        backend,
+                    )
+                }
+        bias: &Bound<PyAny>,
+        residual: &PyTensor,
+        backend: Option<&str>,
+        out: Option<&Bound<PyAny>>,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_backend(backend);
+        let bias = borrow_f32_argument(bias)?;
+
+        if let Some(cell) = out {
+            let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
+            let dst_ptr = TensorOutPtr((&mut dst.inner as *mut Tensor) as usize);
+            drop(dst);
+
+            let slice = bias.as_slice();
+            // SAFETY: identical reasoning to the other `out=` helpers; the pointer is
+            // valid for the duration of the computation and no borrow is held across
+            // the GIL release.
+            let dst_ptr_closure = dst_ptr;
+            py.allow_threads(move || unsafe {
+                self.inner.matmul_bias_add_gelu_into_with_backend(
+                    &other.inner,
+                    slice,
+                    &residual.inner,
+                    &mut *dst_ptr_closure.as_mut_ptr(),
+                    backend,
+                )
+            })
+            .map_err(tensor_err_to_py)?;
+
+            // SAFETY: `dst_ptr` still points to the tensor owned by Python.
+            let tensor = unsafe { dst_ptr.clone_tensor() };
+            return Ok(PyTensor { inner: tensor });
+        }
+
+        let slice = bias.as_slice();
+        let tensor = py
+            .allow_threads(|| {
+                self.inner.matmul_bias_add_gelu_with_backend(
+                    &other.inner,
+                    slice,
+                    &residual.inner,
+                    backend,
+                )
+            })
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
 
     /// Add (element-wise)
-    pub fn add(&self, other: &PyTensor) -> PyResult<PyTensor> {
-        let tensor = self.inner.add(&other.inner).map_err(tensor_err_to_py)?;
+    pub fn add(&self, other: &PyTensor, py: Python<'_>) -> PyResult<PyTensor> {
+        let tensor = py
+            .allow_threads(|| self.inner.add(&other.inner))
+            .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
 
-    pub fn sub(&self, other: &PyTensor) -> PyResult<Self> {
-        let tensor = self.inner.sub(&other.inner).map_err(tensor_err_to_py)?;
+    pub fn sub(&self, other: &PyTensor, py: Python<'_>) -> PyResult<Self> {
+        let tensor = py
+            .allow_threads(|| self.inner.sub(&other.inner))
+            .map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
 
-    pub fn scale(&self, value: f32) -> PyResult<Self> {
-        let tensor = self.inner.scale(value).map_err(tensor_err_to_py)?;
+    pub fn scale(&self, value: f32, py: Python<'_>) -> PyResult<Self> {
+        let tensor = py
+            .allow_threads(|| self.inner.scale(value))
+            .map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
 
     /// Element-wise multiply (Hadamard)
-    pub fn hadamard(&self, other: &PyTensor) -> PyResult<PyTensor> {
-        let tensor = self
-            .inner
-            .hadamard(&other.inner)
+    pub fn hadamard(&self, other: &PyTensor, py: Python<'_>) -> PyResult<PyTensor> {
+        let tensor = py
+            .allow_threads(|| self.inner.hadamard(&other.inner))
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
 
     #[pyo3(name = "add_scaled_")]
-    pub fn add_scaled_inplace(&mut self, other: &PyTensor, scale: f32) -> PyResult<()> {
-        self.inner
-            .add_scaled(&other.inner, scale)
+    pub fn add_scaled_inplace(
+        &mut self,
+        other: &PyTensor,
+        scale: f32,
+        py: Python<'_>,
+    ) -> PyResult<()> {
+        py.allow_threads(|| self.inner.add_scaled(&other.inner, scale))
             .map_err(tensor_err_to_py)
     }
 
-    pub fn add_row_inplace(&mut self, bias: Vec<f32>) -> PyResult<()> {
-        self.inner.add_row_inplace(&bias).map_err(tensor_err_to_py)
+    pub fn add_row_inplace(&mut self, bias: Vec<f32>, py: Python<'_>) -> PyResult<()> {
+        py.allow_threads(|| self.inner.add_row_inplace(&bias))
+            .map_err(tensor_err_to_py)
     }
 
     /// Transpose
-    pub fn transpose(&self) -> PyResult<PyTensor> {
-        Ok(PyTensor {
-            inner: self.inner.transpose(),
-        })
+    pub fn transpose(&self, py: Python<'_>) -> PyResult<PyTensor> {
+        let tensor = py.allow_threads(|| self.inner.transpose());
+        Ok(PyTensor { inner: tensor })
     }
 
-    pub fn reshape(&self, rows: usize, cols: usize) -> PyResult<Self> {
-        let tensor = self.inner.reshape(rows, cols).map_err(tensor_err_to_py)?;
+    pub fn reshape(&self, rows: usize, cols: usize, py: Python<'_>) -> PyResult<Self> {
+        let tensor = py
+            .allow_threads(|| self.inner.reshape(rows, cols))
+            .map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
 
@@ -277,28 +529,34 @@ impl PyTensor {
         self.inner.squared_l2_norm()
     }
 
-    pub fn project_to_poincare(&self, curvature: f32) -> PyResult<Self> {
-        let tensor = self
-            .inner
-            .project_to_poincare(curvature)
+    pub fn project_to_poincare(&self, curvature: f32, py: Python<'_>) -> PyResult<Self> {
+        let tensor = py
+            .allow_threads(|| self.inner.project_to_poincare(curvature))
             .map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
 
-    pub fn hyperbolic_distance(&self, other: &PyTensor, curvature: f32) -> PyResult<f32> {
-        self.inner
-            .hyperbolic_distance(&other.inner, curvature)
+    pub fn hyperbolic_distance(
+        &self,
+        other: &PyTensor,
+        curvature: f32,
+        py: Python<'_>,
+    ) -> PyResult<f32> {
+        py.allow_threads(|| self.inner.hyperbolic_distance(&other.inner, curvature))
             .map_err(tensor_err_to_py)
     }
 
     #[staticmethod]
-    pub fn cat_rows(tensors: &Bound<PyList>) -> PyResult<Self> {
+    pub fn cat_rows(tensors: &Bound<PyList>, py: Python<'_>) -> PyResult<Self> {
+    pub fn cat_rows(py: Python<'_>, tensors: &Bound<PyList>) -> PyResult<Self> {
         let mut owned: Vec<Tensor> = Vec::with_capacity(tensors.len());
         for item in tensors.iter() {
             let tensor: PyRef<PyTensor> = item.extract()?;
             owned.push(tensor.inner.clone());
         }
-        let tensor = Tensor::cat_rows(&owned).map_err(tensor_err_to_py)?;
+        let tensor = py
+            .allow_threads(|| Tensor::cat_rows(&owned))
+            .map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
 }

@@ -222,74 +222,6 @@ __device__ __forceinline__ void heap_select_rowwise_kernel_impl(
       out_vals[out_base + oi] = CUDART_NAN_F;
       out_idx[out_base + oi] = -1;
     }
-
-    HeapEntry entry = reduce_warp(thread_best, cmp);
-    if (lane == 0) {
-      warp_entries[warp] = entry;
-    }
-    __syncthreads();
-
-    if (warp == 0) {
-      HeapEntry block_entry;
-      if (lane < BLOCK_WARPS) {
-        block_entry = warp_entries[lane];
-      } else {
-        block_entry = HeapEntry{sentinel, -1, -1, -1};
-      }
-      block_entry = reduce_warp(block_entry, cmp);
-      if (lane == 0) {
-        *block_choice = block_entry;
-      }
-    }
-    __syncthreads();
-
-    HeapEntry chosen = *block_choice;
-    if (tid == chosen.tid && chosen.slot >= 0) {
-      s_vals[base + chosen.slot] = sentinel;
-      s_idx[base + chosen.slot] = -1;
-    }
-    if (tid == 0) {
-      out_vals[row * k + oi] = chosen.value;
-      out_idx[row * k + oi] = chosen.column;
-    }
-    __syncthreads();
-  }
-
-  if (tid == 0) {
-    for (int oi = take; oi < k; ++oi) {
-      out_vals[row * k + oi] = CUDART_NAN_F;
-      out_idx[row * k + oi] = -1;
-    }
-
-    HeapEntry entry = reduce_warp(thread_best, cmp);
-    if (lane == 0) {
-      warp_entries[warp] = entry;
-    }
-    __syncthreads();
-
-    if (warp == 0) {
-      HeapEntry block_entry;
-      if (lane < BLOCK_WARPS) {
-        block_entry = warp_entries[lane];
-      } else {
-        block_entry = HeapEntry{sentinel, -1, -1, -1};
-      }
-      block_entry = reduce_warp(block_entry, cmp);
-      if (lane == 0) {
-        *block_choice = block_entry;
-      }
-    }
-    __syncthreads();
-
-    HeapEntry chosen = *block_choice;
-    if (tid == chosen.tid && chosen.slot >= 0) {
-      s_vals[base + chosen.slot] = sentinel;
-      s_idx[base + chosen.slot] = -1;
-    }
-    if (tid == 0) {
-      out_vals[row * k + oi] = chosen.value;
-      out_idx[row * k + oi] = chosen.column;
-    }
     __syncthreads();
   }
 }
@@ -357,6 +289,59 @@ __global__ void topk_warp_bitonic_rowwise_kernel(
     float ov = __shfl_down_sync(mask, best, offset);
     int oc = __shfl_down_sync(mask, bestc, offset);
     if (ov > best || (ov == best && (oc >= 0 && (bestc < 0 || oc < bestc)))) {
+      best = ov;
+      bestc = oc;
+    }
+  }
+
+  if (lane == 0) {
+    size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+    out_vals[out_base + 0] = best;
+    out_idx[out_base + 0] = bestc;
+    for (int oi = 1; oi < k; ++oi) {
+      out_vals[out_base + oi] = CUDART_NAN_F;
+      out_idx[out_base + oi] = -1;
+    }
+  }
+}
+
+__global__ void bottomk_warp_bitonic_rowwise_kernel(
+    const float* __restrict__ X, int rows, int cols, int k,
+    float* __restrict__ out_vals, int* __restrict__ out_idx)
+{
+  int row = linear_row_index();
+  if (row >= rows) return;
+  if (k <= 0) return;
+
+  unsigned mask = __activemask();
+  int lane = threadIdx.x & (WARP_LANES - 1);
+  const float* row_ptr = X + static_cast<size_t>(row) * static_cast<size_t>(cols);
+
+  if (cols <= 0) {
+    if (lane == 0) {
+      size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+      for (int oi = 0; oi < k; ++oi) {
+        out_vals[out_base + oi] = CUDART_NAN_F;
+        out_idx[out_base + oi] = -1;
+      }
+    }
+    return;
+  }
+
+  float best = CUDART_INF_F;
+  int bestc = -1;
+  for (int c = lane; c < cols; c += WARP_LANES) {
+    float v = row_ptr[c];
+    if (v < best || (v == best && (bestc < 0 || c < bestc))) {
+      best = v;
+      bestc = c;
+    }
+  }
+
+  for (int offset = WARP_LANES / 2; offset > 0; offset >>= 1) {
+    float ov = __shfl_down_sync(mask, best, offset);
+    int oc = __shfl_down_sync(mask, bestc, offset);
+    if (ov < best || (ov == best && (oc >= 0 && (bestc < 0 || oc < bestc)))) {
       best = ov;
       bestc = oc;
     }

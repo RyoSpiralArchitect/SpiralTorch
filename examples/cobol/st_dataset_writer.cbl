@@ -18,6 +18,12 @@
            05  WS-DATA-CLASS          PIC X(8)  VALUE 'NARRATE'.
            05  WS-MANAGEMENT-CLASS    PIC X(8)  VALUE 'GDG'.
            05  WS-STORAGE-CLASS       PIC X(8)  VALUE 'FASTIO'.
+           05  WS-SPACE-PRIMARY       PIC 9(5)  VALUE 15.
+           05  WS-SPACE-SECONDARY     PIC 9(5)  VALUE 5.
+           05  WS-SPACE-UNIT          PIC X(3)  VALUE 'CYL'.
+           05  WS-DIRECTORY-BLOCKS    PIC 9(5)  VALUE 30.
+           05  WS-DATASET-TYPE        PIC X(8)  VALUE 'LIBRARY'.
+           05  WS-LIKE-DATASET        PIC X(44) VALUE 'ST.DATA.TEMPLATE'.
        01  WS-DSORG                  PIC X(2)  VALUE SPACES.
        01  WS-TARGET-DSN             PIC X(64) VALUE SPACES.
        01  WS-TARGET-POINTER         PIC S9(4) COMP VALUE 1.
@@ -25,6 +31,9 @@
        01  WS-ALLOC-POINTER          PIC S9(4) COMP VALUE 1.
        01  WS-LENGTH-TEXT            PIC Z(5)   VALUE ZEROES.
        01  WS-BLOCK-TEXT             PIC Z(5)   VALUE ZEROES.
+       01  WS-PRIMARY-TEXT           PIC 9(5)   VALUE ZEROES.
+       01  WS-SECONDARY-TEXT         PIC 9(5)   VALUE ZEROES.
+       01  WS-DIRECTORY-TEXT         PIC 9(5)   VALUE ZEROES.
        01  WS-RETURN-CODE            PIC S9(9) COMP VALUE ZERO.
        01  WS-MESSAGE                PIC X(80) VALUE SPACES.
 
@@ -65,6 +74,9 @@
            *> Convert numeric DCB values to editable strings for BPXWDYN.
            MOVE WS-RECORD-LENGTH TO WS-LENGTH-TEXT
            MOVE WS-BLOCK-SIZE TO WS-BLOCK-TEXT
+           MOVE WS-SPACE-PRIMARY TO WS-PRIMARY-TEXT
+           MOVE WS-SPACE-SECONDARY TO WS-SECONDARY-TEXT
+           MOVE WS-DIRECTORY-BLOCKS TO WS-DIRECTORY-TEXT
 
            *> Assemble the BPXWDYN allocation command driven by the WASM planner metadata.
            MOVE SPACES TO WS-ALLOC-CMD
@@ -139,6 +151,63 @@
                    'STORCLAS(' DELIMITED BY SIZE
                    FUNCTION TRIM(WS-STORAGE-CLASS) DELIMITED BY SIZE
                    ') ' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
+
+           IF WS-SPACE-PRIMARY > 0 OR WS-SPACE-SECONDARY > 0
+               STRING
+                   'SPACE((' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-PRIMARY-TEXT) DELIMITED BY SIZE
+                   ' ' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-SECONDARY-TEXT) DELIMITED BY SIZE
+                   ')' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+               IF FUNCTION LENGTH(FUNCTION TRIM(WS-SPACE-UNIT)) > 0
+                   STRING
+                       ' ' DELIMITED BY SIZE
+                       FUNCTION TRIM(WS-SPACE-UNIT) DELIMITED BY SIZE
+                       ') ' DELIMITED BY SIZE
+                       INTO WS-ALLOC-CMD
+                       WITH POINTER WS-ALLOC-POINTER
+                   END-STRING
+               ELSE
+                   STRING
+                       ') ' DELIMITED BY SIZE
+                       INTO WS-ALLOC-CMD
+                       WITH POINTER WS-ALLOC-POINTER
+                   END-STRING
+               END-IF
+           END-IF
+
+           IF WS-DIRECTORY-BLOCKS > 0
+               STRING
+                   'DIR(' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-DIRECTORY-TEXT) DELIMITED BY SIZE
+                   ') ' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
+
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-DATASET-TYPE)) > 0
+               STRING
+                   'DSNTYPE(' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-DATASET-TYPE) DELIMITED BY SIZE
+                   ') ' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
+
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-LIKE-DATASET)) > 0
+               STRING
+                   'LIKE(''' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-LIKE-DATASET) DELIMITED BY SIZE
+                   ''') ' DELIMITED BY SIZE
                    INTO WS-ALLOC-CMD
                    WITH POINTER WS-ALLOC-POINTER
                END-STRING

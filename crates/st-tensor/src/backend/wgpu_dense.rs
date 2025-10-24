@@ -8,6 +8,7 @@
 use crate::util::readback_f32;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, OnceLock};
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, PipelineLayout, Queue};
@@ -22,6 +23,15 @@ const FUSED_LINEAR_RESIDUAL_WGSL_TEMPLATE: &str =
     include_str!("../wgpu_shaders/fused_matmul_bias_residual_relu.wgsl");
 const FUSED_LINEAR_RESIDUAL_GELU_WGSL_TEMPLATE: &str =
     include_str!("../wgpu_shaders/fused_matmul_bias_residual_gelu.wgsl");
+const ROW_SOFTMAX_WGSL: &str =
+    include_str!("../../../st-backend-wgpu/src/shaders/row_softmax_subgroup.wgsl");
+
+fn instantiate_tile_template(template: &str, config: TileConfig) -> String {
+    template
+        .replace("{tile_m}", &config.tile_m().to_string())
+        .replace("{tile_n}", &config.tile_n().to_string())
+        .replace("{tile_k}", &config.tile_k().to_string())
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -112,12 +122,7 @@ impl DenseContext {
         })
         .ok_or_else(|| "no suitable WGPU adapter".to_string())?;
 
-        let adapter_features = adapter.features();
-        let requested_features = if adapter_features.contains(wgpu::Features::SUBGROUPS) {
-            wgpu::Features::SUBGROUPS
-        } else {
-            wgpu::Features::empty()
-        };
+        let requested_features = wgpu::Features::empty();
 
         let (device, queue) = pollster::block_on(async {
             adapter
@@ -418,22 +423,19 @@ impl DenseContext {
                 bind_group_layouts: &[&softmax_layout],
                 push_constant_ranges: &[],
             });
-        let softmax_subgroup_pipeline = if features.contains(wgpu::Features::SUBGROUPS) {
+        let softmax_subgroup_pipeline = std::panic::catch_unwind(AssertUnwindSafe(|| {
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("st.tensor.wgpu_dense.softmax_row_subgroup"),
                 source: wgpu::ShaderSource::Wgsl(ROW_SOFTMAX_WGSL.into()),
             });
-            Some(Arc::new(device.create_compute_pipeline(
-                &wgpu::ComputePipelineDescriptor {
-                    label: Some("st.tensor.wgpu_dense.softmax_row_subgroup"),
-                    layout: Some(&softmax_pipeline_layout),
-                    module: &shader,
-                    entry_point: "main_cs",
-                },
-            )))
-        } else {
-            None
-        };
+            Arc::new(device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("st.tensor.wgpu_dense.softmax_row_subgroup"),
+                layout: Some(&softmax_pipeline_layout),
+                module: &shader,
+                entry_point: "main_cs",
+            }))
+        }))
+        .ok();
 
         Ok(Self {
             device,
@@ -500,12 +502,7 @@ impl DenseContext {
             return pipeline.clone();
         }
 
-        let shader_source = format!(
-            MATMUL_WGSL_TEMPLATE,
-            tile_m = config.tile_m(),
-            tile_n = config.tile_n(),
-            tile_k = config.tile_k(),
-        );
+        let shader_source = instantiate_tile_template(MATMUL_WGSL_TEMPLATE, config);
         let shader_label = format!(
             "st.tensor.wgpu_dense.matmul_shader.tile{}x{}x{}",
             config.tile_m(),
@@ -551,12 +548,7 @@ impl DenseContext {
             FusedActivation::Relu => (FUSED_LINEAR_WGSL_TEMPLATE, "relu"),
             FusedActivation::Gelu => (FUSED_LINEAR_GELU_WGSL_TEMPLATE, "gelu"),
         };
-        let shader_source = format!(
-            shader_template,
-            tile_m = config.tile_m(),
-            tile_n = config.tile_n(),
-            tile_k = config.tile_k(),
-        );
+        let shader_source = instantiate_tile_template(shader_template, config);
         let shader_label = format!(
             "st.tensor.wgpu_dense.fused_linear_shader.{activation_label}.tile{}x{}x{}",
             config.tile_m(),
@@ -602,12 +594,7 @@ impl DenseContext {
             FusedActivation::Relu => (FUSED_LINEAR_RESIDUAL_WGSL_TEMPLATE, "relu"),
             FusedActivation::Gelu => (FUSED_LINEAR_RESIDUAL_GELU_WGSL_TEMPLATE, "gelu"),
         };
-        let shader_source = format!(
-            shader_template,
-            tile_m = config.tile_m(),
-            tile_n = config.tile_n(),
-            tile_k = config.tile_k(),
-        );
+        let shader_source = instantiate_tile_template(shader_template, config);
         let shader_label = format!(
             "st.tensor.wgpu_dense.fused_linear_residual_shader.{activation_label}.tile{}x{}x{}",
             config.tile_m(),
@@ -644,12 +631,7 @@ impl DenseContext {
             return pipeline.clone();
         }
 
-        let shader_source = format!(
-            FUSED_CONV_WGSL_TEMPLATE,
-            tile_m = config.tile_m(),
-            tile_n = config.tile_n(),
-            tile_k = config.tile_k(),
-        );
+        let shader_source = instantiate_tile_template(FUSED_CONV_WGSL_TEMPLATE, config);
         let shader_label = format!(
             "st.tensor.wgpu_dense.fused_conv_shader.tile{}x{}x{}",
             config.tile_m(),
@@ -846,6 +828,8 @@ struct ConvGemmParams {
     out_channels: u32,
     _pad0: u32,
     _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
 }
 
 pub fn matmul(
@@ -1558,6 +1542,8 @@ pub fn conv_im2col_gemm(
         out_channels: out_channels as u32,
         _pad0: 0,
         _pad1: 0,
+        _pad2: 0,
+        _pad3: 0,
     };
     let conv_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("st.tensor.wgpu_dense.conv.params"),
