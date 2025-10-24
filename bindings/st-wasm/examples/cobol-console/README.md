@@ -46,8 +46,11 @@ Open the printed URL (defaults to `http://localhost:5173/`) and populate the for
 * **Narrator configuration:** Adjust curvature/temperature, pick the encoder key, and paste
   resonance coefficients. Use the “Seed with demo buffer” button to generate a deterministic
   Float32 series inside the browser (through WASM) when you want to test the pipeline.
-* **Mainframe routing:** Configure MQ/CICS/dataset sinks. Any field you leave blank is
-  omitted from the envelope so legacy programs can decide how to route the narration.
+* **Mainframe routing:** Configure MQ/CICS/dataset sinks. Populate dataset members, DCB
+  attributes (record format/length, block size), SMS classes, SPACE allocations, DSNTYPE,
+  LIKE templates, UNIT/AVGREC hints, retention days, RLSE, and expiration dates when staging
+  GDGs or sequential files. Any field you leave blank is omitted from the envelope so legacy
+  programs can decide how to route the narration.
 * **Dispatch:** Supply the HTTP bridge endpoint that proxies requests into the mainframe. On
   submission the console shows the JSON envelope, a COBOL pointer preview, and the raw byte
   count. Hitting “Send to bridge” POSTs the `Uint8Array` returned by

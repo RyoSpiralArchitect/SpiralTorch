@@ -288,15 +288,15 @@ impl ColorVectorField {
             compute_fft(&mut chroma_g, inverse)?;
             compute_fft(&mut chroma_b, inverse)?;
 
-            for col in 0..width {
-                out.push(energy[col].re);
-                out.push(energy[col].im);
-                out.push(chroma_r[col].re);
-                out.push(chroma_r[col].im);
-                out.push(chroma_g[col].re);
-                out.push(chroma_g[col].im);
-                out.push(chroma_b[col].re);
-                out.push(chroma_b[col].im);
+            for inner in 0..width {
+                out.push(energy[inner].re);
+                out.push(energy[inner].im);
+                out.push(chroma_r[inner].re);
+                out.push(chroma_r[inner].im);
+                out.push(chroma_g[inner].re);
+                out.push(chroma_g[inner].im);
+                out.push(chroma_b[inner].re);
+                out.push(chroma_b[inner].im);
             }
         }
 
@@ -808,6 +808,148 @@ impl ColorVectorField {
         let clamped = power.max(Self::POWER_DB_EPSILON);
         let db = 10.0 * clamped.log10();
         db.max(Self::POWER_DB_FLOOR)
+    }
+
+    /// 2D FFT magnitude helper mirroring [`fft_2d_interleaved`]. The returned
+    /// tensor has shape `(height, width * 4)` with magnitudes for each channel.
+    pub fn fft_2d_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        let mut magnitudes = Vec::with_capacity(self.height * self.width * 4);
+        for chunk in spectrum.chunks_exact(8) {
+            magnitudes.push(chunk[0].hypot(chunk[1]));
+            magnitudes.push(chunk[2].hypot(chunk[3]));
+            magnitudes.push(chunk[4].hypot(chunk[5]));
+            magnitudes.push(chunk[6].hypot(chunk[7]));
+        }
+        Tensor::from_vec(self.height, self.width * 4, magnitudes)
+    }
+
+    /// 2D FFT power helper mirroring [`fft_2d_interleaved`]. The returned tensor
+    /// has shape `(height, width * 4)` storing squared magnitudes per channel so
+    /// integrators can probe energy across both axes without recomputing.
+    pub fn fft_2d_power_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        Self::power_tensor_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    /// 2D FFT phase helper mirroring [`fft_2d_interleaved`]. The returned tensor
+    /// has shape `(height, width * 4)` storing per-channel phase angles.
+    pub fn fft_2d_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        let mut phases = Vec::with_capacity(self.height * self.width * 4);
+        for chunk in spectrum.chunks_exact(8) {
+            phases.push(chunk[1].atan2(chunk[0]));
+            phases.push(chunk[3].atan2(chunk[2]));
+            phases.push(chunk[5].atan2(chunk[4]));
+            phases.push(chunk[7].atan2(chunk[6]));
+        }
+        Tensor::from_vec(self.height, self.width * 4, phases)
+    }
+
+    /// Compute both the magnitude and phase spectra for the 2D FFT in a single
+    /// pass. Returns `(magnitude, phase)` tensors, each with shape
+    /// `(height, width * 4)`.
+    pub fn fft_2d_polar_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
+        let spectrum = self.fft_2d_interleaved(inverse)?;
+        Self::polar_tensors_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    fn polar_tensors_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<(Tensor, Tensor)> {
+        let expected_pairs = rows
+            .checked_mul(cols)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_polar",
+                volume: rows.saturating_mul(cols),
+                max_volume: usize::MAX,
+            })?;
+        let expected_len =
+            expected_pairs
+                .checked_mul(8)
+                .ok_or(TensorError::TensorVolumeExceeded {
+                    label: "canvas_fft_polar",
+                    volume: rows.saturating_mul(cols).saturating_mul(8),
+                    max_volume: usize::MAX,
+                })?;
+
+        if spectrum.len() != expected_len {
+            return Err(TensorError::DataLength {
+                expected: expected_len,
+                got: spectrum.len(),
+            });
+        }
+
+        let mut magnitudes = Vec::with_capacity(expected_pairs * 4);
+        let mut phases = Vec::with_capacity(expected_pairs * 4);
+        for chunk in spectrum.chunks_exact(8) {
+            let (re_energy, im_energy) = (chunk[0], chunk[1]);
+            let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
+            let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
+            let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
+
+            magnitudes.push(re_energy.hypot(im_energy));
+            phases.push(im_energy.atan2(re_energy));
+
+            magnitudes.push(re_chroma_r.hypot(im_chroma_r));
+            phases.push(im_chroma_r.atan2(re_chroma_r));
+
+            magnitudes.push(re_chroma_g.hypot(im_chroma_g));
+            phases.push(im_chroma_g.atan2(re_chroma_g));
+
+            magnitudes.push(re_chroma_b.hypot(im_chroma_b));
+            phases.push(im_chroma_b.atan2(re_chroma_b));
+        }
+
+        let magnitude = Tensor::from_vec(rows, cols * 4, magnitudes)?;
+        let phase = Tensor::from_vec(rows, cols * 4, phases)?;
+        Ok((magnitude, phase))
+    }
+
+    fn power_tensor_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<Tensor> {
+        let expected_pairs = rows
+            .checked_mul(cols)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_power",
+                volume: rows.saturating_mul(cols),
+                max_volume: usize::MAX,
+            })?;
+        let expected_len =
+            expected_pairs
+                .checked_mul(8)
+                .ok_or(TensorError::TensorVolumeExceeded {
+                    label: "canvas_fft_power",
+                    volume: rows.saturating_mul(cols).saturating_mul(8),
+                    max_volume: usize::MAX,
+                })?;
+
+        if spectrum.len() != expected_len {
+            return Err(TensorError::DataLength {
+                expected: expected_len,
+                got: spectrum.len(),
+            });
+        }
+
+        let mut power = Vec::with_capacity(expected_pairs * 4);
+        for chunk in spectrum.chunks_exact(8) {
+            let (re_energy, im_energy) = (chunk[0], chunk[1]);
+            let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
+            let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
+            let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
+
+            power.push(re_energy.mul_add(re_energy, im_energy * im_energy));
+            power.push(re_chroma_r.mul_add(re_chroma_r, im_chroma_r * im_chroma_r));
+            power.push(re_chroma_g.mul_add(re_chroma_g, im_chroma_g * im_chroma_g));
+            power.push(re_chroma_b.mul_add(re_chroma_b, im_chroma_b * im_chroma_b));
+        }
+
+        Tensor::from_vec(rows, cols * 4, power)
     }
 }
 

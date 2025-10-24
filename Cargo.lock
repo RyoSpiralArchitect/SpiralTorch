@@ -705,6 +705,7 @@ dependencies = [
  "num-complex",
  "num-traits",
  "paste",
+ "rayon",
  "reborrow",
 ]
 
@@ -1036,6 +1037,7 @@ dependencies = [
  "paste",
  "pulp",
  "raw-cpuid",
+ "rayon",
  "seq-macro",
  "sysctl",
 ]
@@ -1054,6 +1056,7 @@ dependencies = [
  "num-traits",
  "paste",
  "raw-cpuid",
+ "rayon",
  "seq-macro",
 ]
 
@@ -2743,7 +2746,7 @@ dependencies = [
 
 [[package]]
 name = "spiraltorch-py"
-version = "0.2.1"
+version = "0.2.4"
 dependencies = [
  "ndarray",
  "num-complex",
@@ -2763,6 +2766,7 @@ dependencies = [
  "st-spiral-rl",
  "st-tensor",
  "st-text",
+ "tracing",
 ]
 
 [[package]]
@@ -2861,6 +2865,7 @@ dependencies = [
  "num-complex",
  "once_cell",
  "opentelemetry",
+ "parking_lot",
  "pollster",
  "prometheus",
  "rand",
