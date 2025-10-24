@@ -47,7 +47,7 @@ pub enum MellinError {
     NonFiniteSample { index: usize },
     #[error("mellin lattices do not match")]
     LatticeMismatch,
-    #[error("hilbert inner product was negative: {value}")]
+    #[error("hilbert inner product became negative: {value}")]
     NegativeInnerProduct { value: ComplexScalar },
     // New: explicit invalid z
     #[error("z value is not finite: re={re}, im={im}")]

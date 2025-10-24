@@ -200,7 +200,11 @@ mod tests {
         let direct = {
             let mut acc = ComplexScalar::new(0.0, 0.0);
             for (idx, &sample) in samples.iter().enumerate() {
-                let weight = if idx == 0 || idx + 1 == samples.len() { 0.5 } else { 1.0 };
+                let weight = if idx == 0 || idx + 1 == samples.len() {
+                    0.5
+                } else {
+                    1.0
+                };
                 let t = log_start + log_step * idx as f32;
                 let kernel = (s * ComplexScalar::new(t, 0.0)).exp();
                 acc += sample * ComplexScalar::new(weight, 0.0) * kernel;
@@ -256,10 +260,7 @@ mod tests {
     #[test]
     fn prepare_rejects_nonfinite_inputs() {
         // Non-finite weight
-        let samples = vec![
-            ComplexScalar::new(1.0, 0.0),
-            ComplexScalar::new(2.0, 0.0),
-        ];
+        let samples = vec![ComplexScalar::new(1.0, 0.0), ComplexScalar::new(2.0, 0.0)];
         let bad_weights = vec![1.0, f32::NAN];
         assert!(prepare_weighted_series(&samples, &bad_weights).is_err());
 
