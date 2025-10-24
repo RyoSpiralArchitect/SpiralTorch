@@ -22,10 +22,8 @@ const CUDA_SOURCE: &str = include_str!("cuda_topk_rankk.cu");
 const WARP_LANES: usize = 32;
 const BLOCK_WARPS: usize = 4;
 const THREADS_PER_BLOCK: usize = WARP_LANES * BLOCK_WARPS;
-const THREAD_KEEP: usize = 8;
-const SUPPORTED_K: usize = THREADS_PER_BLOCK * THREAD_KEEP;
-
-static COMPILED_PTX: OnceLock<cudarc::nvrtc::Ptx> = OnceLock::new();
+const PER_THREAD_KEEP: usize = 8;
+const SUPPORTED_K: usize = THREADS_PER_BLOCK * PER_THREAD_KEEP;
 
 static COMPILED_PTX: OnceLock<cudarc::nvrtc::Ptx> = OnceLock::new();
 
@@ -76,8 +74,8 @@ fn launch_heap_kernel(
 
     let grid = (1, plan.rows, 1);
     let block = (THREADS_PER_BLOCK as u32, 1, 1);
-    let shared_bytes = (THREADS_PER_BLOCK * THREAD_KEEP * std::mem::size_of::<f32>()
-        + THREADS_PER_BLOCK * THREAD_KEEP * std::mem::size_of::<i32>()) as u32;
+    let shared_bytes = (THREADS_PER_BLOCK * PER_THREAD_KEEP * std::mem::size_of::<f32>()
+        + THREADS_PER_BLOCK * PER_THREAD_KEEP * std::mem::size_of::<i32>()) as u32;
     let cfg = LaunchConfig {
         grid_dim: grid,
         block_dim: block,
