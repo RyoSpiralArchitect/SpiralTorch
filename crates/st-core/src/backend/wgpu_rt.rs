@@ -25,6 +25,8 @@ pub struct WgpuCtx {
     lin_fill_pl:        OnceCell<wgpu::ComputePipeline>,
     lin_dot_partials_pl:OnceCell<wgpu::ComputePipeline>,
     lin_dot_finalize_pl:OnceCell<wgpu::ComputePipeline>,
+    lin_dot_partials_subgroup_pl:OnceCell<wgpu::ComputePipeline>,
+    lin_dot_finalize_subgroup_pl:OnceCell<wgpu::ComputePipeline>,
     layout_lin:         OnceCell<wgpu::BindGroupLayout>,
 }
 
@@ -44,6 +46,8 @@ impl WgpuCtx {
             lin_fill_pl:        OnceCell::new(),
             lin_dot_partials_pl:OnceCell::new(),
             lin_dot_finalize_pl:OnceCell::new(),
+            lin_dot_partials_subgroup_pl:OnceCell::new(),
+            lin_dot_finalize_subgroup_pl:OnceCell::new(),
             layout_lin:         OnceCell::new(),
         }
     }
@@ -69,6 +73,7 @@ fn ctx() -> Result<Arc<WgpuCtx>, String> { CTX.get().cloned().ok_or("WGPU ctx no
 
 const WGSL_RANKK: &str = include_str!("wgpu_kernels_rankk.wgsl");
 const WGSL_LINOPS: &str = include_str!("wgpu_kernels_linops.wgsl");
+const WGSL_LINOPS_SUBGROUP: &str = include_str!("wgpu_kernels_linops_subgroup.wgsl");
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
 fn module(ctx:&WgpuCtx, src:&'static str) -> wgpu::ShaderModule {
@@ -171,6 +176,22 @@ fn lin_pl(ctx:&WgpuCtx, entry:&'static str, layout:&wgpu::BindGroupLayout) -> wg
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn lin_subgroup_pl(ctx:&WgpuCtx, entry:&'static str, layout:&wgpu::BindGroupLayout) -> wgpu::ComputePipeline {
+    let module = module(ctx, WGSL_LINOPS_SUBGROUP);
+    let pl_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
+        label: Some("st.lin.pl.subgroup"),
+        bind_group_layouts: &[layout],
+        push_constant_ranges: &[],
+    });
+    ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{
+        label: Some(entry),
+        layout: Some(&pl_layout),
+        module: &module,
+        entry_point: entry,
+    })
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
 fn ensure_topk_heap_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
     ctx.topk_heap_pl.get_or_init(|| pl(ctx, "topk_subgroups_heap_1ce", ensure_layout_topk(ctx)))
 }
@@ -218,6 +239,18 @@ fn ensure_lin_dot_partials_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
 fn ensure_lin_dot_finalize_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
     ctx.lin_dot_finalize_pl.get_or_init(|| lin_pl(ctx, "dot_finalize", ensure_layout_lin(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_lin_dot_partials_subgroup_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.lin_dot_partials_subgroup_pl
+        .get_or_init(|| lin_subgroup_pl(ctx, "dot_partials_subgroup", ensure_layout_lin(ctx)))
+}
+
+#[cfg(all(feature="wgpu", feature="wgpu-rt"))]
+fn ensure_lin_dot_finalize_subgroup_pl(ctx:&WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.lin_dot_finalize_subgroup_pl
+        .get_or_init(|| lin_subgroup_pl(ctx, "dot_finalize_subgroup", ensure_layout_lin(ctx)))
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
@@ -405,20 +438,42 @@ pub fn dispatch_lin_fill(n:u32, value:f32, dst:&wgpu::Buffer) -> Result<(), Stri
 pub fn dispatch_lin_dot(n:u32, x:&wgpu::Buffer, y:&wgpu::Buffer, scratch:&wgpu::Buffer) -> Result<(), String> {
     let ctx = ctx()?;
     let partials = div_ceil_u32(n, 256);
+    let has_subgroups = {
+        use wgpu::Features;
+        ctx.device.features().contains(Features::SUBGROUPS)
+    };
 
     let params_partials = LinParams{ dims:[n, 0, 0, 0], scalars:[0.0, 0.0, 0.0, 0.0] };
     let ub_partials = create_lin_params_buffer(&ctx, params_partials, "st.lin.params.dot.partials");
     let layout = ensure_layout_lin(&ctx);
     let bg_partials = create_lin_bind_group(&ctx, layout, x, y, scratch, &ub_partials);
-    let pipeline_partials = ensure_lin_dot_partials_pl(&ctx);
-    dispatch_lin_kernel(&ctx, pipeline_partials, &bg_partials, partials, "st.lin.dot.partials");
+    let pipeline_partials = if has_subgroups {
+        ensure_lin_dot_partials_subgroup_pl(&ctx)
+    } else {
+        ensure_lin_dot_partials_pl(&ctx)
+    };
+    let label_partials = if has_subgroups {
+        "st.lin.dot.partials.sg"
+    } else {
+        "st.lin.dot.partials"
+    };
+    dispatch_lin_kernel(&ctx, pipeline_partials, &bg_partials, partials, label_partials);
 
     let params_finalize = LinParams{ dims:[n, partials, 0, 0], scalars:[0.0, 0.0, 0.0, 0.0] };
     let ub_finalize = create_lin_params_buffer(&ctx, params_finalize, "st.lin.params.dot.finalize");
     let bg_finalize = create_lin_bind_group(&ctx, layout, scratch, scratch, scratch, &ub_finalize);
-    let pipeline_finalize = ensure_lin_dot_finalize_pl(&ctx);
+    let pipeline_finalize = if has_subgroups {
+        ensure_lin_dot_finalize_subgroup_pl(&ctx)
+    } else {
+        ensure_lin_dot_finalize_pl(&ctx)
+    };
     let wg_finalize = div_ceil_u32(partials, 256).max(1);
-    dispatch_lin_kernel(&ctx, pipeline_finalize, &bg_finalize, wg_finalize, "st.lin.dot.finalize");
+    let label_finalize = if has_subgroups {
+        "st.lin.dot.finalize.sg"
+    } else {
+        "st.lin.dot.finalize"
+    };
+    dispatch_lin_kernel(&ctx, pipeline_finalize, &bg_finalize, wg_finalize, label_finalize);
     Ok(())
 }
 

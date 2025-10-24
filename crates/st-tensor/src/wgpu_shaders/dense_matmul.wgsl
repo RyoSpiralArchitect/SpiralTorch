@@ -15,27 +15,106 @@ struct MatmulParams {
 @group(0) @binding(2) var<storage, read_write> out : array<f32>;
 @group(0) @binding(3) var<uniform> params : MatmulParams;
 
-const TILE_X : u32 = 16u;
-const TILE_Y : u32 = 16u;
+const TILE_M : u32 = {tile_m}u;
+const TILE_N : u32 = {tile_n}u;
+const TILE_K : u32 = {tile_k}u;
 
-@compute @workgroup_size(TILE_X, TILE_Y, 1)
-fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
-    let row = gid.y;
-    let col = gid.x;
+var<workgroup> lhs_tile : array<f32, {tile_mk}>;
+var<workgroup> rhs_tile_T : array<f32, {tile_nk}>;
+
+@compute @workgroup_size(TILE_N, TILE_M, 1)
+fn main(
+    @builtin(workgroup_id) wid : vec3<u32>,
+    @builtin(local_invocation_id) lid : vec3<u32>,
+) {
+    let local_m = lid.y;
+    let local_n = lid.x;
+    let tile_row_origin = wid.y * TILE_M;
+    let tile_col_origin = wid.x * TILE_N;
+    let row = tile_row_origin + local_m;
+    let col = tile_col_origin + local_n;
     if (row >= params.rows || col >= params.cols) {
         return;
     }
 
+    let local_m = lid.y;
+    let local_n = lid.x;
+    let local_linear = local_m * TILE_N + local_n;
+    let threads = TILE_M * TILE_N;
+    let tile_row_origin = gid.y - local_m;
+    let tile_col_origin = gid.x - local_n;
+
     var acc : f32 = 0.0;
-    var k : u32 = 0u;
+    let tiles = (params.inner + TILE_K - 1u) / TILE_K;
+    var tile_index : u32 = 0u;
     loop {
-        if (k >= params.inner) {
+        if (tile_index >= tiles) {
             break;
         }
-        let lhs_index = row * params.inner + k;
-        let rhs_index = k * params.cols + col;
-        acc = acc + lhs[lhs_index] * rhs[rhs_index];
-        k = k + 1u;
+
+        let k_base = tile_index * TILE_K;
+
+        var tm : u32 = local_m;
+        loop {
+            if (tm >= TILE_M) {
+                break;
+            }
+            var tk : u32 = local_n;
+            loop {
+                if (tk >= TILE_K) {
+                    break;
+                }
+                let global_row = tile_row_origin + tm;
+                let global_k = k_base + tk;
+                var lhs_value : f32 = 0.0;
+                if (global_row < params.rows && global_k < params.inner) {
+                    lhs_value = lhs[global_row * params.inner + global_k];
+                }
+                lhs_tile[tm * TILE_K + tk] = lhs_value;
+                tk = tk + TILE_N;
+            }
+            tm = tm + TILE_M;
+        }
+
+        var tn : u32 = local_n;
+        loop {
+            if (tn >= TILE_N) {
+                break;
+            }
+            var tk : u32 = local_m;
+            loop {
+                if (tk >= TILE_K) {
+                    break;
+                }
+                let global_k = k_base + tk;
+                let global_col = tile_col_origin + tn;
+                var rhs_value : f32 = 0.0;
+                if (global_k < params.inner && global_col < params.cols) {
+                    rhs_value = rhs[global_k * params.cols + global_col];
+                }
+                rhs_tile_T[tn * TILE_K + tk] = rhs_value;
+                tk = tk + TILE_M;
+            }
+            tn = tn + TILE_N;
+        }
+
+        workgroupBarrier();
+
+        let remaining = params.inner - min(params.inner, k_base);
+        let k_limit = min(TILE_K, remaining);
+        var k : u32 = 0u;
+        loop {
+            if (k >= k_limit) {
+                break;
+            }
+            let lhs_tile_value = lhs_tile[local_m * TILE_K + k];
+            let rhs_tile_value = rhs_tile_T[local_n * TILE_K + k];
+            acc = acc + lhs_tile_value * rhs_tile_value;
+            k = k + 1u;
+        }
+
+        workgroupBarrier();
+        tile_index = tile_index + 1u;
     }
 
     let out_index = row * params.cols + col;

@@ -1382,11 +1382,6 @@ mod tests {
         builder.set_dataset_directory_blocks(Some(40));
         builder.set_dataset_type(Some("library".into()));
         builder.set_dataset_like(Some("HLQ.MODEL.DATA".into()));
-        builder.set_dataset_unit(Some("sysda".into()));
-        builder.set_dataset_average_record_unit(Some("k".into()));
-        builder.set_dataset_retention_period(Some(45));
-        builder.set_dataset_release_space(Some(true));
-        builder.set_dataset_expiration_date(Some("2025123".into()));
         builder.add_tag("browser");
         builder.add_annotation("generated");
         builder.merge_metadata_value(serde_json::json!({"priority": "low"}));

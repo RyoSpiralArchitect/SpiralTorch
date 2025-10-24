@@ -10,6 +10,7 @@ use st_tensor::{AmegaHypergrad, DifferentialResonance, Tensor, TensorError};
 
 pub mod algorithms;
 mod geometry;
+pub mod schedules;
 
 pub use algorithms::{DqnAgent, PpoAgent, SacAgent};
 pub use geometry::{
@@ -34,6 +35,20 @@ pub enum SpiralRlError {
     InvalidAction { action: usize, actions: usize },
     /// Discount factor must stay within the closed interval [0, 1].
     InvalidDiscount { discount: f32 },
+    /// Batched updates received tensors with mismatched lengths.
+    InvalidBatch {
+        expected: usize,
+        actions: usize,
+        rewards: usize,
+        next_states: usize,
+        dones: Option<usize>,
+    },
+    /// State dictionary restore encountered a mismatched tensor length.
+    StateDictShape {
+        field: &'static str,
+        expected: usize,
+        received: usize,
+    },
 }
 
 impl fmt::Display for SpiralRlError {
@@ -61,6 +76,25 @@ impl fmt::Display for SpiralRlError {
             SpiralRlError::InvalidDiscount { discount } => {
                 write!(f, "discount factor must lie in [0, 1]; received {discount}")
             }
+            SpiralRlError::InvalidBatch {
+                expected,
+                actions,
+                rewards,
+                next_states,
+                dones,
+            } => write!(
+                f,
+                "batch inputs must have consistent length {expected}; received actions={actions}, rewards={rewards}, next_states={next_states}, dones={:?}",
+                dones
+            ),
+            SpiralRlError::StateDictShape {
+                field,
+                expected,
+                received,
+            } => write!(
+                f,
+                "state dictionary field '{field}' expected length {expected} but received {received}",
+            ),
         }
     }
 }
