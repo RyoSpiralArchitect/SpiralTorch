@@ -14,6 +14,7 @@ hypergradient computations or encoder invocations directly.
 from __future__ import annotations
 
 import os
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Sequence
@@ -161,11 +162,15 @@ def encode_text(
     curvature: float = -1.0,
     temperature: float = 0.5,
     library: Optional[os.PathLike[str]] = None,
+    bridge: PurePythonBridge | None = None,
 ) -> List[float]:
     """Encode ``text`` into z-space coordinates via the pure bridge."""
 
-    with PurePythonBridge(library) as bridge:
-        with bridge.encoder(curvature, temperature) as encoder:
+    if bridge is not None and library is not None:
+        raise ValueError("Provide either 'bridge' or 'library', not both")
+
+    with _bridge_context(bridge, library) as active:
+        with active.encoder(curvature, temperature) as encoder:
             return encoder.encode_z_space(text)
 
 
@@ -173,9 +178,13 @@ def run_hypergrad(
     request: HypergradRequest,
     *,
     library: Optional[os.PathLike[str]] = None,
+    bridge: PurePythonBridge | None = None,
     text_seed_offset: int = 1,
 ) -> HypergradResult:
     """Execute a hypergradient accumulation using the provided ``request``."""
+
+    if bridge is not None and library is not None:
+        raise ValueError("Provide either 'bridge' or 'library', not both")
 
     pairs = _gather_pairs(request.pairs)
     if request.pairs.selection.applies():
@@ -205,9 +214,9 @@ def run_hypergrad(
     applied_weights: List[float] | None = None
     gradient: List[float] = []
 
-    with PurePythonBridge(library) as bridge:
-        with _maybe_topos(bridge, request.topos) as topos:
-            with bridge.hypergrad(
+    with _bridge_context(bridge, library) as active_bridge:
+        with _maybe_topos(active_bridge, request.topos) as topos:
+            with active_bridge.hypergrad(
                 request.curvature,
                 request.learning_rate,
                 request.rows,
@@ -224,7 +233,9 @@ def run_hypergrad(
                         if encoder_cfg.curvature is not None
                         else request.curvature
                     )
-                    with bridge.encoder(encoder_curvature, encoder_cfg.temperature) as encoder:
+                    with active_bridge.encoder(
+                        encoder_curvature, encoder_cfg.temperature
+                    ) as encoder:
                         for sample in text_samples:
                             hypergrad.absorb_text(encoder, sample)
 
@@ -329,10 +340,101 @@ def _maybe_topos(bridge: PurePythonBridge, config: ToposConfig | None) -> _Topos
     return _ToposContext(bridge, config)
 
 
+class _BridgeContext:
+    def __init__(
+        self,
+        bridge: PurePythonBridge | None,
+        library: Optional[os.PathLike[str]],
+    ) -> None:
+        self._external = bridge
+        self._library = library
+        self._owned: PurePythonBridge | None = None
+
+    def __enter__(self) -> PurePythonBridge:
+        if self._external is not None:
+            return self._external
+
+        owned = PurePythonBridge(self._library)
+        owned.__enter__()
+        self._owned = owned
+        return owned
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self._owned is not None:
+            self._owned.__exit__(exc_type, exc, tb)
+            self._owned = None
+
+
+def _bridge_context(
+    bridge: PurePythonBridge | None, library: Optional[os.PathLike[str]]
+) -> _BridgeContext:
+    return _BridgeContext(bridge, library)
+
+
+class PureBridgeSession:
+    """Context manager that keeps a bridge loaded for multiple operations."""
+
+    def __init__(self, library: Optional[os.PathLike[str]] = None) -> None:
+        self._library = library
+        self._stack: ExitStack | None = None
+        self._bridge: PurePythonBridge | None = None
+
+    def __enter__(self) -> "PureBridgeSession":
+        stack = ExitStack()
+        self._stack = stack
+        self._bridge = stack.enter_context(PurePythonBridge(self._library))
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self._stack is not None:
+            self._stack.close()
+            self._stack = None
+        self._bridge = None
+
+    @property
+    def bridge(self) -> PurePythonBridge:
+        if self._bridge is None:
+            raise RuntimeError("Session has not been entered")
+        return self._bridge
+
+    def encode_text(
+        self,
+        text: str,
+        *,
+        curvature: float = -1.0,
+        temperature: float = 0.5,
+    ) -> List[float]:
+        return encode_text(
+            text,
+            curvature=curvature,
+            temperature=temperature,
+            bridge=self.bridge,
+        )
+
+    def run_hypergrad(
+        self,
+        request: HypergradRequest,
+        *,
+        text_seed_offset: int = 1,
+    ) -> HypergradResult:
+        return run_hypergrad(
+            request,
+            bridge=self.bridge,
+            text_seed_offset=text_seed_offset,
+        )
+
+    def open_topos(self, config: ToposConfig) -> OpenCartesianTopos:
+        if self._stack is None:
+            raise RuntimeError("Session has not been entered")
+        topos = config.instantiate(self.bridge)
+        return self._stack.enter_context(topos)
+
+
 __all__ = [
     "EncoderConfig",
     "HypergradRequest",
     "HypergradResult",
+    "PureBridgeSession",
     "PairSources",
     "SelectionOptions",
     "TextSources",
