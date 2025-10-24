@@ -1,3 +1,4 @@
+#![cfg_attr(feature = "simd", feature(portable_simd))]
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
