@@ -151,7 +151,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
-**Current release:** `spiraltorch==0.2.2` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.2.3` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), Metal via WGPU (macOS), Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -159,7 +159,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.2.2
+pip install -U spiraltorch==0.2.3
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
