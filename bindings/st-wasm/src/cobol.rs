@@ -9,6 +9,10 @@ const PLANNER_INITIALIZED_ANNOTATION: &str = "planner_initialized";
 const NARRATOR_METRIC_MIN: f32 = 0.0;
 const NARRATOR_METRIC_MAX: f32 = 1.0;
 const FALLBACK_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
+const ALLOWED_SPACE_UNITS: &[&str] = &["CYL", "TRK", "MB", "KB"];
+const ALLOWED_DATASET_TYPES: &[&str] = &[
+    "BASIC", "LARGE", "LIBRARY", "EXTREQ", "EXTPREF", "PDS", "HFS",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CobolEnvelope {
@@ -71,6 +75,12 @@ pub struct CobolDatasetRoute {
     pub data_class: Option<String>,
     pub management_class: Option<String>,
     pub storage_class: Option<String>,
+    pub space_primary: Option<u32>,
+    pub space_secondary: Option<u32>,
+    pub space_unit: Option<String>,
+    pub directory_blocks: Option<u32>,
+    pub dataset_type: Option<String>,
+    pub like_dataset: Option<String>,
 }
 
 impl Default for CobolDatasetRoute {
@@ -86,6 +96,12 @@ impl Default for CobolDatasetRoute {
             data_class: None,
             management_class: None,
             storage_class: None,
+            space_primary: None,
+            space_secondary: None,
+            space_unit: None,
+            directory_blocks: None,
+            dataset_type: None,
+            like_dataset: None,
         }
     }
 }
@@ -104,6 +120,12 @@ impl Serialize for CobolDatasetRoute {
             && self.data_class.is_none()
             && self.management_class.is_none()
             && self.storage_class.is_none()
+            && self.space_primary.is_none()
+            && self.space_secondary.is_none()
+            && self.space_unit.is_none()
+            && self.directory_blocks.is_none()
+            && self.dataset_type.is_none()
+            && self.like_dataset.is_none()
         {
             serializer.serialize_str(&self.dataset)
         } else {
@@ -135,6 +157,24 @@ impl Serialize for CobolDatasetRoute {
             if self.storage_class.is_some() {
                 entries += 1;
             }
+            if self.space_primary.is_some() {
+                entries += 1;
+            }
+            if self.space_secondary.is_some() {
+                entries += 1;
+            }
+            if self.space_unit.is_some() {
+                entries += 1;
+            }
+            if self.directory_blocks.is_some() {
+                entries += 1;
+            }
+            if self.dataset_type.is_some() {
+                entries += 1;
+            }
+            if self.like_dataset.is_some() {
+                entries += 1;
+            }
             let mut map = serializer.serialize_map(Some(entries))?;
             map.serialize_entry("dataset", &self.dataset)?;
             if let Some(member) = &self.member {
@@ -163,6 +203,24 @@ impl Serialize for CobolDatasetRoute {
             }
             if let Some(storage_class) = &self.storage_class {
                 map.serialize_entry("storage_class", storage_class)?;
+            }
+            if let Some(space_primary) = &self.space_primary {
+                map.serialize_entry("space_primary", space_primary)?;
+            }
+            if let Some(space_secondary) = &self.space_secondary {
+                map.serialize_entry("space_secondary", space_secondary)?;
+            }
+            if let Some(space_unit) = &self.space_unit {
+                map.serialize_entry("space_unit", space_unit)?;
+            }
+            if let Some(directory_blocks) = &self.directory_blocks {
+                map.serialize_entry("directory_blocks", directory_blocks)?;
+            }
+            if let Some(dataset_type) = &self.dataset_type {
+                map.serialize_entry("dataset_type", dataset_type)?;
+            }
+            if let Some(like_dataset) = &self.like_dataset {
+                map.serialize_entry("like_dataset", like_dataset)?;
             }
             map.end()
         }
@@ -198,6 +256,12 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                     data_class: None,
                     management_class: None,
                     storage_class: None,
+                    space_primary: None,
+                    space_secondary: None,
+                    space_unit: None,
+                    directory_blocks: None,
+                    dataset_type: None,
+                    like_dataset: None,
                 })
             }
 
@@ -222,6 +286,12 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                 let mut data_class: Option<String> = None;
                 let mut management_class: Option<String> = None;
                 let mut storage_class: Option<String> = None;
+                let mut space_primary: Option<u32> = None;
+                let mut space_secondary: Option<u32> = None;
+                let mut space_unit: Option<String> = None;
+                let mut directory_blocks: Option<u32> = None;
+                let mut dataset_type: Option<String> = None;
+                let mut like_dataset: Option<String> = None;
 
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
@@ -258,6 +328,24 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                         "storage_class" => {
                             storage_class = map.next_value()?;
                         }
+                        "space_primary" => {
+                            space_primary = map.next_value()?;
+                        }
+                        "space_secondary" => {
+                            space_secondary = map.next_value()?;
+                        }
+                        "space_unit" => {
+                            space_unit = map.next_value()?;
+                        }
+                        "directory_blocks" => {
+                            directory_blocks = map.next_value()?;
+                        }
+                        "dataset_type" => {
+                            dataset_type = map.next_value()?;
+                        }
+                        "like_dataset" => {
+                            like_dataset = map.next_value()?;
+                        }
                         other => {
                             return Err(de::Error::unknown_field(
                                 other,
@@ -272,6 +360,12 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                                     "data_class",
                                     "management_class",
                                     "storage_class",
+                                    "space_primary",
+                                    "space_secondary",
+                                    "space_unit",
+                                    "directory_blocks",
+                                    "dataset_type",
+                                    "like_dataset",
                                 ],
                             ));
                         }
@@ -290,6 +384,12 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                     data_class,
                     management_class,
                     storage_class,
+                    space_primary,
+                    space_secondary,
+                    space_unit,
+                    directory_blocks,
+                    dataset_type,
+                    like_dataset,
                 })
             }
         }
@@ -626,6 +726,102 @@ impl CobolEnvelopeBuilder {
         sanitize_dataset_route(&mut self.envelope.route.dataset);
     }
 
+    pub fn set_dataset_space_primary(&mut self, space_primary: Option<u32>) {
+        let space_primary = sanitize_positive(space_primary);
+        match (self.envelope.route.dataset.as_mut(), space_primary) {
+            (Some(route), value) => {
+                route.space_primary = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.space_primary = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_space_secondary(&mut self, space_secondary: Option<u32>) {
+        let space_secondary = sanitize_positive(space_secondary);
+        match (self.envelope.route.dataset.as_mut(), space_secondary) {
+            (Some(route), value) => {
+                route.space_secondary = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.space_secondary = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_space_unit(&mut self, space_unit: Option<String>) {
+        let space_unit = sanitize_uppercase(space_unit);
+        match (self.envelope.route.dataset.as_mut(), space_unit) {
+            (Some(route), value) => {
+                route.space_unit = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.space_unit = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_directory_blocks(&mut self, directory_blocks: Option<u32>) {
+        let directory_blocks = sanitize_positive(directory_blocks);
+        match (self.envelope.route.dataset.as_mut(), directory_blocks) {
+            (Some(route), value) => {
+                route.directory_blocks = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.directory_blocks = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_type(&mut self, dataset_type: Option<String>) {
+        let dataset_type = sanitize_uppercase(dataset_type);
+        match (self.envelope.route.dataset.as_mut(), dataset_type) {
+            (Some(route), value) => {
+                route.dataset_type = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.dataset_type = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_like(&mut self, like_dataset: Option<String>) {
+        let like_dataset = like_dataset.and_then(sanitize);
+        match (self.envelope.route.dataset.as_mut(), like_dataset) {
+            (Some(route), value) => {
+                route.like_dataset = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.like_dataset = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
     pub fn clear_route(&mut self) {
         self.clear_mq_route();
         self.clear_cics_route();
@@ -738,6 +934,42 @@ impl CobolEnvelope {
                     );
                 }
             }
+            if let Some(unit) = dataset.space_unit.as_deref() {
+                if !ALLOWED_SPACE_UNITS.contains(&unit) {
+                    issues.push(format!(
+                        "dataset space unit must be one of {}",
+                        ALLOWED_SPACE_UNITS.join(", ")
+                    ));
+                }
+                if dataset.space_primary.is_none() && dataset.space_secondary.is_none() {
+                    issues.push(
+                        "specify primary or secondary space when providing a space unit"
+                            .to_string(),
+                    );
+                }
+            }
+            if dataset.space_secondary.is_some() && dataset.space_primary.is_none() {
+                issues.push("dataset secondary space requires a primary allocation".to_string());
+            }
+            if let Some(dataset_type) = dataset.dataset_type.as_deref() {
+                if !ALLOWED_DATASET_TYPES.contains(&dataset_type) {
+                    issues.push(format!(
+                        "dataset type must be one of {}",
+                        ALLOWED_DATASET_TYPES.join(", ")
+                    ));
+                }
+            }
+            if let Some(directory_blocks) = dataset.directory_blocks {
+                if directory_blocks > 0
+                    && dataset.member.is_none()
+                    && !matches!(dataset.dataset_type.as_deref(), Some("LIBRARY" | "PDS"))
+                {
+                    issues.push(
+                        "directory blocks are only valid for partitioned dataset allocations"
+                            .to_string(),
+                    );
+                }
+            }
         }
 
         if !(NARRATOR_METRIC_MIN..=NARRATOR_METRIC_MAX).contains(&self.payload.curvature) {
@@ -773,6 +1005,10 @@ fn sanitize(value: String) -> Option<String> {
 
 fn sanitize_positive(value: Option<u32>) -> Option<u32> {
     value.and_then(|candidate| if candidate > 0 { Some(candidate) } else { None })
+}
+
+fn sanitize_uppercase(value: Option<String>) -> Option<String> {
+    value.and_then(|candidate| sanitize(candidate).map(|clean| clean.to_ascii_uppercase()))
 }
 
 fn sanitize_envelope(envelope: &mut CobolEnvelope) {
@@ -872,6 +1108,12 @@ fn sanitize_dataset_route(target: &mut Option<CobolDatasetRoute>) {
         dataset.data_class = dataset.data_class.take().and_then(sanitize);
         dataset.management_class = dataset.management_class.take().and_then(sanitize);
         dataset.storage_class = dataset.storage_class.take().and_then(sanitize);
+        dataset.space_primary = sanitize_positive(dataset.space_primary.take());
+        dataset.space_secondary = sanitize_positive(dataset.space_secondary.take());
+        dataset.space_unit = sanitize_uppercase(dataset.space_unit.take());
+        dataset.directory_blocks = sanitize_positive(dataset.directory_blocks.take());
+        dataset.dataset_type = sanitize_uppercase(dataset.dataset_type.take());
+        dataset.like_dataset = dataset.like_dataset.take().and_then(sanitize);
         if let Some(name) = dataset_name {
             dataset.dataset = name;
             *target = Some(dataset);
@@ -945,6 +1187,12 @@ mod tests {
         builder.set_dataset_data_class(Some("NARRATE".into()));
         builder.set_dataset_management_class(Some("GDG".into()));
         builder.set_dataset_storage_class(Some("FASTIO".into()));
+        builder.set_dataset_space_primary(Some(15));
+        builder.set_dataset_space_secondary(Some(5));
+        builder.set_dataset_space_unit(Some("cyl".into()));
+        builder.set_dataset_directory_blocks(Some(40));
+        builder.set_dataset_type(Some("library".into()));
+        builder.set_dataset_like(Some("HLQ.MODEL.DATA".into()));
         builder.add_tag("browser");
         builder.add_annotation("generated");
         builder.merge_metadata_value(serde_json::json!({"priority": "low"}));
@@ -969,6 +1217,15 @@ mod tests {
         assert_eq!(dataset_route.data_class.as_deref(), Some("NARRATE"));
         assert_eq!(dataset_route.management_class.as_deref(), Some("GDG"));
         assert_eq!(dataset_route.storage_class.as_deref(), Some("FASTIO"));
+        assert_eq!(dataset_route.space_primary, Some(15));
+        assert_eq!(dataset_route.space_secondary, Some(5));
+        assert_eq!(dataset_route.space_unit.as_deref(), Some("CYL"));
+        assert_eq!(dataset_route.directory_blocks, Some(40));
+        assert_eq!(dataset_route.dataset_type.as_deref(), Some("LIBRARY"));
+        assert_eq!(
+            dataset_route.like_dataset.as_deref(),
+            Some("HLQ.MODEL.DATA")
+        );
         assert!(envelope.metadata.tags.contains(&"browser".to_string()));
         assert!(envelope
             .metadata
@@ -1010,6 +1267,12 @@ mod tests {
         builder.set_dataset_data_class(Some(" PRIME ".into()));
         builder.set_dataset_management_class(Some(" GDG ".into()));
         builder.set_dataset_storage_class(Some(" FASTIO ".into()));
+        builder.set_dataset_space_primary(Some(20));
+        builder.set_dataset_space_secondary(Some(4));
+        builder.set_dataset_space_unit(Some(" trk ".into()));
+        builder.set_dataset_directory_blocks(Some(8));
+        builder.set_dataset_type(Some(" pdS ".into()));
+        builder.set_dataset_like(Some("  HLQ.TEMPLATE.DATA  ".into()));
         builder.set_dataset(Some("HLQ.DATA".into()));
 
         let dataset = builder.snapshot().route.dataset.expect("dataset");
@@ -1023,6 +1286,12 @@ mod tests {
         assert_eq!(dataset.data_class.as_deref(), Some("PRIME"));
         assert_eq!(dataset.management_class.as_deref(), Some("GDG"));
         assert_eq!(dataset.storage_class.as_deref(), Some("FASTIO"));
+        assert_eq!(dataset.space_primary, Some(20));
+        assert_eq!(dataset.space_secondary, Some(4));
+        assert_eq!(dataset.space_unit.as_deref(), Some("TRK"));
+        assert_eq!(dataset.directory_blocks, Some(8));
+        assert_eq!(dataset.dataset_type.as_deref(), Some("PDS"));
+        assert_eq!(dataset.like_dataset.as_deref(), Some("HLQ.TEMPLATE.DATA"));
     }
 
     #[test]
@@ -1038,6 +1307,12 @@ mod tests {
         builder.set_dataset_data_class(Some("NARR".into()));
         builder.set_dataset_management_class(Some("GDG".into()));
         builder.set_dataset_storage_class(Some("FAST".into()));
+        builder.set_dataset_space_primary(Some(12));
+        builder.set_dataset_space_secondary(Some(4));
+        builder.set_dataset_space_unit(Some("cyl".into()));
+        builder.set_dataset_directory_blocks(Some(24));
+        builder.set_dataset_type(Some("library".into()));
+        builder.set_dataset_like(Some("HLQ.TEMPLATE.DATA".into()));
 
         builder.set_dataset_member(None);
         builder.set_dataset_disposition(None);
@@ -1048,6 +1323,12 @@ mod tests {
         builder.set_dataset_data_class(None);
         builder.set_dataset_management_class(None);
         builder.set_dataset_storage_class(None);
+        builder.set_dataset_space_primary(None);
+        builder.set_dataset_space_secondary(None);
+        builder.set_dataset_space_unit(None);
+        builder.set_dataset_directory_blocks(None);
+        builder.set_dataset_type(None);
+        builder.set_dataset_like(None);
 
         let dataset = builder.snapshot().route.dataset.expect("dataset");
         assert_eq!(dataset.dataset, "HLQ.DATA");
@@ -1060,6 +1341,12 @@ mod tests {
         assert!(dataset.data_class.is_none());
         assert!(dataset.management_class.is_none());
         assert!(dataset.storage_class.is_none());
+        assert!(dataset.space_primary.is_none());
+        assert!(dataset.space_secondary.is_none());
+        assert!(dataset.space_unit.is_none());
+        assert!(dataset.directory_blocks.is_none());
+        assert!(dataset.dataset_type.is_none());
+        assert!(dataset.like_dataset.is_none());
 
         builder.set_dataset(None);
         assert!(builder.snapshot().route.dataset.is_none());
@@ -1181,6 +1468,12 @@ mod tests {
                     data_class: Some(" NARR ".to_string()),
                     management_class: Some(" GDG ".to_string()),
                     storage_class: Some(" FASTIO ".to_string()),
+                    space_primary: Some(12),
+                    space_secondary: Some(4),
+                    space_unit: Some(" cyl ".to_string()),
+                    directory_blocks: Some(30),
+                    dataset_type: Some(" library ".to_string()),
+                    like_dataset: Some("  TEMPLATE.DATA  ".to_string()),
                 }),
             },
             payload: CobolNarratorPayload {
@@ -1324,6 +1617,53 @@ mod tests {
     }
 
     #[test]
+    fn validation_flags_dataset_space_rules() {
+        let mut builder = CobolEnvelopeBuilder::new("job-dataset-space");
+        builder.add_initiator(make_initiator(
+            InitiatorKind::Automation,
+            "allocator",
+            None,
+            None,
+            None,
+            None,
+        ));
+        builder.set_dataset(Some("HLQ.DATA".into()));
+
+        builder.set_dataset_space_unit(Some("trk".into()));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("specify primary or secondary space")));
+
+        builder.set_dataset_space_secondary(Some(3));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset secondary space requires a primary")));
+
+        builder.set_dataset_space_primary(Some(10));
+        builder.set_dataset_space_unit(Some("blocks".into()));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset space unit must be one of")));
+
+        builder.set_dataset_space_unit(Some("cyl".into()));
+        builder.set_dataset_directory_blocks(Some(12));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("directory blocks are only valid")));
+
+        builder.set_dataset_member(Some("PAYLOAD".into()));
+        builder.set_dataset_type(Some("unsupported".into()));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset type must be one of")));
+    }
+
+    #[test]
     fn validation_succeeds_for_complete_envelope() {
         let mut builder = CobolEnvelopeBuilder::new("job-ready");
         builder.add_initiator(make_initiator(
@@ -1353,6 +1693,12 @@ mod tests {
             data_class: None,
             management_class: None,
             storage_class: None,
+            space_primary: None,
+            space_secondary: None,
+            space_unit: None,
+            directory_blocks: None,
+            dataset_type: None,
+            like_dataset: None,
         };
         let serialized = serde_json::to_string(&basic).expect("serialize");
         assert_eq!(serialized, "\"HLQ.DATA\"");
@@ -1363,18 +1709,26 @@ mod tests {
         enriched.record_format = Some("FB".into());
         enriched.record_length = Some(512);
         enriched.block_size = Some(4096);
+        enriched.space_primary = Some(15);
+        enriched.space_secondary = Some(5);
+        enriched.space_unit = Some("CYL".into());
+        enriched.directory_blocks = Some(30);
+        enriched.dataset_type = Some("LIBRARY".into());
+        enriched.like_dataset = Some("HLQ.TEMPLATE".into());
         let serialized_enriched = serde_json::to_string(&enriched).expect("serialize enriched");
         assert!(serialized_enriched.contains("\"dataset\":"));
         assert!(serialized_enriched.contains("\"member\""));
         assert!(serialized_enriched.contains("\"disposition\""));
         assert!(serialized_enriched.contains("\"record_length\""));
+        assert!(serialized_enriched.contains("\"space_primary\""));
+        assert!(serialized_enriched.contains("\"dataset_type\""));
 
         let parsed_basic: CobolDatasetRoute = serde_json::from_str("\"USER.DATA\"").expect("parse");
         assert_eq!(parsed_basic.dataset, "USER.DATA");
         assert!(parsed_basic.member.is_none());
 
         let parsed_enriched: CobolDatasetRoute = serde_json::from_str(
-            "{\"dataset\":\"USER.DATA\",\"member\":\"MEMBER\",\"disposition\":\"SHR\",\"volume\":\"VOL001\",\"record_format\":\"FB\",\"record_length\":256,\"block_size\":4096}",
+            "{\"dataset\":\"USER.DATA\",\"member\":\"MEMBER\",\"disposition\":\"SHR\",\"volume\":\"VOL001\",\"record_format\":\"FB\",\"record_length\":256,\"block_size\":4096,\"space_primary\":20,\"space_unit\":\"CYL\",\"directory_blocks\":12,\"dataset_type\":\"LIBRARY\",\"like_dataset\":\"USER.MODEL\"}",
         )
         .expect("parse object");
         assert_eq!(parsed_enriched.dataset, "USER.DATA");
@@ -1384,5 +1738,11 @@ mod tests {
         assert_eq!(parsed_enriched.record_format.as_deref(), Some("FB"));
         assert_eq!(parsed_enriched.record_length, Some(256));
         assert_eq!(parsed_enriched.block_size, Some(4096));
+        assert_eq!(parsed_enriched.space_primary, Some(20));
+        assert!(parsed_enriched.space_secondary.is_none());
+        assert_eq!(parsed_enriched.space_unit.as_deref(), Some("CYL"));
+        assert_eq!(parsed_enriched.directory_blocks, Some(12));
+        assert_eq!(parsed_enriched.dataset_type.as_deref(), Some("LIBRARY"));
+        assert_eq!(parsed_enriched.like_dataset.as_deref(), Some("USER.MODEL"));
     }
 }

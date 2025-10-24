@@ -5,9 +5,10 @@
 
 """Minimal ctypes helpers for driving the pure SpiralTorch stack from Python.
 
-This module purposefully avoids NumPy and PyTorch so pure CPython environments can
-pair with the zero-dependency Rust pipeline. Only the standard library is used
-and buffers are exchanged as Python lists.
+The previous revision of this module bundled a quick CLI entry point alongside
+the bridge primitives. To keep the bridge importable without argparse baggage
+we now focus the module purely on resource wrappers while exposing helpers that
+other tools (notably :mod:`tools.python.pure_bridge_cli`) can reuse.
 """
 from __future__ import annotations
 
@@ -16,58 +17,92 @@ import ctypes
 import json
 import os
 import sys
-from contextlib import nullcontext
+from ctypes.util import find_library
 from pathlib import Path
-from typing import Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
+
+
+class LibraryLoadError(RuntimeError):
+    """Raised when the SpiralTorch cdylib cannot be located."""
+
+
+def _default_library_name() -> str:
+    if sys.platform.startswith("linux"):
+        return "libst_tensor.so"
+    if sys.platform == "darwin":
+        return "libst_tensor.dylib"
+    if sys.platform in ("win32", "cygwin"):
+        return "st_tensor.dll"
+    raise RuntimeError(f"Unsupported platform: {sys.platform}")
+
+
+def _candidate_directories() -> Iterable[Path]:
+    """Yield directories that may contain the compiled pure bridge library."""
+
+    root = Path(__file__).resolve().parents[2]
+    target = root / "target"
+
+    # Common cargo build output locations.
+    yield target / "release"
+    yield target / "debug"
+    yield target / "release" / "deps"
+    yield target / "debug" / "deps"
+
+    # Maturin/maturin develop builds when working on the Python bindings.
+    python_bindings = root / "bindings" / "python"
+    yield python_bindings / "target" / "release"
+    yield python_bindings / "target" / "debug"
+
+    # `just build-python` targets emit wheels into maturin/targets.
+    maturin_dir = root / "maturin"
+    for profile in ("release", "debug"):
+        yield maturin_dir / "target" / profile
+
+
+def resolve_library_path(explicit: Optional[os.PathLike[str]] = None) -> Path:
+    """Resolve the path to the pure bridge shared library.
+
+    The resolution order favours caller intent and then falls back to common
+    build directories.  Users may also provide ``SPIRALTORCH_PURE_LIB`` to
+    override the discovery logic when embedding the module in standalone tools.
+    """
+
+    candidates: List[Path] = []
+    if explicit is not None:
+        candidates.append(Path(explicit).expanduser().resolve())
+
+    env_override = os.environ.get("SPIRALTORCH_PURE_LIB")
+    if env_override:
+        candidates.append(Path(env_override).expanduser().resolve())
+
+    name = _default_library_name()
+
+    for directory in _candidate_directories():
+        candidates.append((directory / name).resolve())
+
+    located = find_library("st_tensor")
+    if located:
+        candidates.append(Path(located).resolve())
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    searched = "\n".join(str(path) for path in candidates)
+    raise LibraryLoadError(
+        "Unable to locate the SpiralTorch pure bridge cdylib.\n"
+        "Searched:\n"
+        f"{searched}\n"
+        "Build the library via 'cargo build -p st-tensor --release' or set\n"
+        "SPIRALTORCH_PURE_LIB to the compiled artifact."
+    )
 
 
 class _Lib:
     def __init__(self, path: Optional[os.PathLike[str]] = None) -> None:
-        resolved = self._resolve_path(path)
-        self._path = resolved
+        resolved = resolve_library_path(path)
         self._cdll = ctypes.CDLL(str(resolved))
         self._configure()
-
-    @staticmethod
-    def _resolve_path(path: Optional[os.PathLike[str]]) -> Path:
-        if path is not None:
-            candidate = Path(path).expanduser().resolve()
-            if candidate.exists():
-                return candidate
-            raise FileNotFoundError(f"Explicit library path does not exist: {candidate}")
-
-        env_candidate = os.getenv("SPIRALTORCH_PURE_LIB") or os.getenv("ST_TENSOR_LIB")
-        if env_candidate:
-            candidate = Path(env_candidate).expanduser().resolve()
-            if candidate.exists():
-                return candidate
-            raise FileNotFoundError(
-                f"Environment variable pointed to missing library: {candidate}"
-            )
-
-        root = Path(__file__).resolve().parents[2]
-        targets = [root / "target" / profile for profile in ("release", "debug")]
-        if sys.platform.startswith("linux"):
-            name = "libst_tensor.so"
-        elif sys.platform == "darwin":
-            name = "libst_tensor.dylib"
-        elif sys.platform in ("win32", "cygwin"):
-            name = "st_tensor.dll"
-        else:
-            raise RuntimeError(f"Unsupported platform: {sys.platform}")
-        for target in targets:
-            candidate = target / name
-            if candidate.exists():
-                return candidate
-        raise FileNotFoundError(
-            "Could not locate the SpiralTorch cdylib."
-            " Build the cdylib with 'cargo build --release -p st-tensor'"
-            " or set SPIRALTORCH_PURE_LIB to the compiled artifact."
-        )
-
-    @property
-    def path(self) -> Path:
-        return self._path
 
     def _configure(self) -> None:
         lib = self._cdll
@@ -337,10 +372,6 @@ class PurePythonBridge:
     def close(self) -> None:
         """Release any outstanding resources."""
         self._lib.clear()
-
-    @property
-    def library_path(self) -> Path:
-        return self._lib.path
 
     def encoder(self, curvature: float, temperature: float) -> LanguageWaveEncoder:
         return LanguageWaveEncoder(self._lib, curvature, temperature)
@@ -630,6 +661,8 @@ __all__ = [
     "LanguageWaveEncoder",
     "OpenCartesianTopos",
     "PurePythonBridge",
+    "LibraryLoadError",
+    "resolve_library_path",
 ]
 
 
