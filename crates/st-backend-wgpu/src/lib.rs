@@ -27,3 +27,9 @@ pub use util::{
     load_compute_pipeline, load_compute_pipeline_with_layout, read_wgsl, ShaderCache,
     ShaderLoadError,
 };
+
+pub use softmax::{
+    create_pipelines as create_softmax_pipelines, upload_params as upload_softmax_params,
+    Builder as SoftmaxBuilder, Dispatch as SoftmaxDispatch, Params as SoftmaxParams,
+    Pipelines as SoftmaxPipelines,
+};

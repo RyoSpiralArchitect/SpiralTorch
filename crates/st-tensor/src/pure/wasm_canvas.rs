@@ -309,13 +309,14 @@ impl ColorVectorField {
     /// the magnitude of the energy and chroma channels in order.
     pub fn fft_rows_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_rows_interleaved(inverse)?;
-        let mut magnitudes = Vec::with_capacity(self.height * self.width * 4);
-        for chunk in spectrum.chunks_exact(8) {
-            magnitudes.push(chunk[0].hypot(chunk[1]));
-            magnitudes.push(chunk[2].hypot(chunk[3]));
-            magnitudes.push(chunk[4].hypot(chunk[5]));
-            magnitudes.push(chunk[6].hypot(chunk[7]));
-        }
+        let mut magnitudes = Vec::new();
+        Self::accumulate_polar_components(
+            self.height,
+            self.width,
+            &spectrum,
+            Some(&mut magnitudes),
+            None,
+        )?;
         Tensor::from_vec(self.height, self.width * 4, magnitudes)
     }
 
@@ -324,13 +325,14 @@ impl ColorVectorField {
     /// radians using `atan2(im, re)` for each channel.
     pub fn fft_rows_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_rows_interleaved(inverse)?;
-        let mut phases = Vec::with_capacity(self.height * self.width * 4);
-        for chunk in spectrum.chunks_exact(8) {
-            phases.push(chunk[1].atan2(chunk[0]));
-            phases.push(chunk[3].atan2(chunk[2]));
-            phases.push(chunk[5].atan2(chunk[4]));
-            phases.push(chunk[7].atan2(chunk[6]));
-        }
+        let mut phases = Vec::new();
+        Self::accumulate_polar_components(
+            self.height,
+            self.width,
+            &spectrum,
+            None,
+            Some(&mut phases),
+        )?;
         Tensor::from_vec(self.height, self.width * 4, phases)
     }
 
@@ -401,26 +403,28 @@ impl ColorVectorField {
     /// original canvas.
     pub fn fft_cols_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_cols_interleaved(inverse)?;
-        let mut magnitudes = Vec::with_capacity(self.width * self.height * 4);
-        for chunk in spectrum.chunks_exact(8) {
-            magnitudes.push(chunk[0].hypot(chunk[1]));
-            magnitudes.push(chunk[2].hypot(chunk[3]));
-            magnitudes.push(chunk[4].hypot(chunk[5]));
-            magnitudes.push(chunk[6].hypot(chunk[7]));
-        }
+        let mut magnitudes = Vec::new();
+        Self::accumulate_polar_components(
+            self.width,
+            self.height,
+            &spectrum,
+            Some(&mut magnitudes),
+            None,
+        )?;
         Tensor::from_vec(self.width, self.height * 4, magnitudes)
     }
 
     /// Column-wise FFT phase helper mirroring [`fft_rows_phase_tensor`].
     pub fn fft_cols_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_cols_interleaved(inverse)?;
-        let mut phases = Vec::with_capacity(self.width * self.height * 4);
-        for chunk in spectrum.chunks_exact(8) {
-            phases.push(chunk[1].atan2(chunk[0]));
-            phases.push(chunk[3].atan2(chunk[2]));
-            phases.push(chunk[5].atan2(chunk[4]));
-            phases.push(chunk[7].atan2(chunk[6]));
-        }
+        let mut phases = Vec::new();
+        Self::accumulate_polar_components(
+            self.width,
+            self.height,
+            &spectrum,
+            None,
+            Some(&mut phases),
+        )?;
         Tensor::from_vec(self.width, self.height * 4, phases)
     }
 
@@ -519,13 +523,14 @@ impl ColorVectorField {
     /// tensor has shape `(height, width * 4)` with magnitudes for each channel.
     pub fn fft_2d_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_2d_interleaved(inverse)?;
-        let mut magnitudes = Vec::with_capacity(self.height * self.width * 4);
-        for chunk in spectrum.chunks_exact(8) {
-            magnitudes.push(chunk[0].hypot(chunk[1]));
-            magnitudes.push(chunk[2].hypot(chunk[3]));
-            magnitudes.push(chunk[4].hypot(chunk[5]));
-            magnitudes.push(chunk[6].hypot(chunk[7]));
-        }
+        let mut magnitudes = Vec::new();
+        Self::accumulate_polar_components(
+            self.height,
+            self.width,
+            &spectrum,
+            Some(&mut magnitudes),
+            None,
+        )?;
         Tensor::from_vec(self.height, self.width * 4, magnitudes)
     }
 
@@ -533,13 +538,14 @@ impl ColorVectorField {
     /// has shape `(height, width * 4)` storing per-channel phase angles.
     pub fn fft_2d_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_2d_interleaved(inverse)?;
-        let mut phases = Vec::with_capacity(self.height * self.width * 4);
-        for chunk in spectrum.chunks_exact(8) {
-            phases.push(chunk[1].atan2(chunk[0]));
-            phases.push(chunk[3].atan2(chunk[2]));
-            phases.push(chunk[5].atan2(chunk[4]));
-            phases.push(chunk[7].atan2(chunk[6]));
-        }
+        let mut phases = Vec::new();
+        Self::accumulate_polar_components(
+            self.height,
+            self.width,
+            &spectrum,
+            None,
+            Some(&mut phases),
+        )?;
         Tensor::from_vec(self.height, self.width * 4, phases)
     }
 
@@ -556,30 +562,88 @@ impl ColorVectorField {
         cols: usize,
         spectrum: &[f32],
     ) -> PureResult<(Tensor, Tensor)> {
-        let mut magnitudes = Vec::with_capacity(rows * cols * 4);
-        let mut phases = Vec::with_capacity(rows * cols * 4);
-        for chunk in spectrum.chunks_exact(8) {
-            let (re_energy, im_energy) = (chunk[0], chunk[1]);
-            let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
-            let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
-            let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
-
-            magnitudes.push(re_energy.hypot(im_energy));
-            phases.push(im_energy.atan2(re_energy));
-
-            magnitudes.push(re_chroma_r.hypot(im_chroma_r));
-            phases.push(im_chroma_r.atan2(re_chroma_r));
-
-            magnitudes.push(re_chroma_g.hypot(im_chroma_g));
-            phases.push(im_chroma_g.atan2(re_chroma_g));
-
-            magnitudes.push(re_chroma_b.hypot(im_chroma_b));
-            phases.push(im_chroma_b.atan2(re_chroma_b));
-        }
+        let mut magnitudes = Vec::new();
+        let mut phases = Vec::new();
+        Self::accumulate_polar_components(
+            rows,
+            cols,
+            spectrum,
+            Some(&mut magnitudes),
+            Some(&mut phases),
+        )?;
 
         let magnitude = Tensor::from_vec(rows, cols * 4, magnitudes)?;
         let phase = Tensor::from_vec(rows, cols * 4, phases)?;
         Ok((magnitude, phase))
+    }
+
+    fn accumulate_polar_components(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+        mut magnitudes_out: Option<&mut Vec<f32>>,
+        mut phases_out: Option<&mut Vec<f32>>,
+    ) -> PureResult<()> {
+        let complex_components = rows
+            .checked_mul(cols)
+            .and_then(|value| value.checked_mul(8))
+            .ok_or_else(|| TensorError::TensorVolumeExceeded {
+                label: "canvas_fft_polar",
+                volume: rows.saturating_mul(cols).saturating_mul(8),
+                max_volume: usize::MAX,
+            })?;
+
+        if spectrum.len() != complex_components {
+            return Err(TensorError::DataLength {
+                expected: complex_components,
+                got: spectrum.len(),
+            });
+        }
+
+        let real_components = complex_components / 2;
+
+        if let Some(magnitudes) = magnitudes_out.as_mut() {
+            magnitudes.reserve(real_components);
+        }
+        if let Some(phases) = phases_out.as_mut() {
+            phases.reserve(real_components);
+        }
+
+        for chunk in spectrum.chunks_exact(8) {
+            let (re_energy, im_energy) = (chunk[0], chunk[1]);
+            if let Some(magnitudes) = magnitudes_out.as_mut() {
+                magnitudes.push(re_energy.hypot(im_energy));
+            }
+            if let Some(phases) = phases_out.as_mut() {
+                phases.push(im_energy.atan2(re_energy));
+            }
+
+            let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
+            if let Some(magnitudes) = magnitudes_out.as_mut() {
+                magnitudes.push(re_chroma_r.hypot(im_chroma_r));
+            }
+            if let Some(phases) = phases_out.as_mut() {
+                phases.push(im_chroma_r.atan2(re_chroma_r));
+            }
+
+            let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
+            if let Some(magnitudes) = magnitudes_out.as_mut() {
+                magnitudes.push(re_chroma_g.hypot(im_chroma_g));
+            }
+            if let Some(phases) = phases_out.as_mut() {
+                phases.push(im_chroma_g.atan2(re_chroma_g));
+            }
+
+            let (re_chroma_b, im_chroma_b) = (chunk[6], chunk[7]);
+            if let Some(magnitudes) = magnitudes_out.as_mut() {
+                magnitudes.push(re_chroma_b.hypot(im_chroma_b));
+            }
+            if let Some(phases) = phases_out.as_mut() {
+                phases.push(im_chroma_b.atan2(re_chroma_b));
+            }
+        }
+
+        Ok(())
     }
 }
 
