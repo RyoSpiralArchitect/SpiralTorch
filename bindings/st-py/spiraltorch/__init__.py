@@ -145,6 +145,20 @@ def build_manifest() -> dict[str, _Any]:
 
     return dict(BUILD_MANIFEST)
 
+from .zspace_inference import (
+    ZSpaceDecoded,
+    ZSpaceInference,
+    ZSpacePosterior,
+    canvas_partial_from_snapshot,
+    coherence_partial_from_diagnostics,
+    decode_zspace_embedding,
+    infer_canvas_snapshot,
+    infer_canvas_transformer,
+    infer_coherence_diagnostics,
+    infer_coherence_from_sequencer,
+    infer_from_partial,
+)
+
 # 追加API（Rust側でエクスポート済みのやつだけ拾う）
 _EXTRAS = [
     "golden_ratio","golden_angle","set_global_seed",
@@ -1271,6 +1285,17 @@ class SpiralSession:
 
 
 _EXTRAS.append("SpiralSession")
+_EXTRAS.extend(
+    [
+        "ZSpaceDecoded",
+        "ZSpaceInference",
+        "ZSpacePosterior",
+        "ZSpaceInferenceRuntime",
+        "decode_zspace_embedding",
+        "infer_from_partial",
+        "compile_inference",
+    ]
+)
 
 
 for _key, _hint in _FORWARDING_HINTS.items():
