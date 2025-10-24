@@ -757,48 +757,9 @@ fn cpu_simd_prepack_rhs(py: Python<'_>, rhs: &PyTensor) -> PyResult<PyCpuSimdPac
     let (inner, cols) = rhs.inner.shape();
     let packed = py
         .allow_threads(|| cpu_dense::prepack_rhs(rhs.inner.data(), inner, cols))
-        .map_err(|message| PyRuntimeError::new_err(message))?;
+        .map_err(PyRuntimeError::new_err)?;
 
     Ok(PyCpuSimdPackedRhs::new(inner, cols, packed))
-  
-#[pyfunction]
-fn init_backend(label: &str) -> PyResult<bool> {
-    match label {
-        #[cfg(feature = "hip")]
-        "hip" => hip_backend::init()
-            .map(|_| true)
-            .map_err(|err| PyRuntimeError::new_err(err.to_string())),
-        #[cfg(not(feature = "hip"))]
-        "hip" => Err(PyRuntimeError::new_err(
-            "SpiralTorch was built without HIP support; rebuild with the 'hip' feature",
-        )),
-        "auto" | "cpu" | "faer" | "simd" | "cpu-simd" | "naive" => Ok(true),
-        #[cfg(feature = "wgpu")]
-        "wgpu" => Ok(true),
-        other => Err(PyValueError::new_err(format!(
-            "unknown backend label '{other}'"
-        ))),
-    }
-}
-
-#[pyfunction]
-fn init_backend(label: &str) -> PyResult<bool> {
-    match label {
-        #[cfg(feature = "hip")]
-        "hip" => hip_backend::init()
-            .map(|_| true)
-            .map_err(|err| PyRuntimeError::new_err(err.to_string())),
-        #[cfg(not(feature = "hip"))]
-        "hip" => Err(PyRuntimeError::new_err(
-            "SpiralTorch was built without HIP support; rebuild with the 'hip' feature",
-        )),
-        "auto" | "cpu" | "faer" | "simd" | "cpu-simd" | "naive" => Ok(true),
-        #[cfg(feature = "wgpu")]
-        "wgpu" => Ok(true),
-        other => Err(PyValueError::new_err(format!(
-            "unknown backend label '{other}'"
-        ))),
-    }
 }
 
 #[pyfunction]

@@ -397,14 +397,17 @@ impl ColorVectorField {
     /// the magnitude of the energy and chroma channels in order.
     pub fn fft_rows_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_rows_interleaved(inverse)?;
-        let mut magnitudes = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            magnitudes.push(chunk[0].hypot(chunk[1]));
-            magnitudes.push(chunk[2].hypot(chunk[3]));
-            magnitudes.push(chunk[4].hypot(chunk[5]));
-            magnitudes.push(chunk[6].hypot(chunk[7]));
-        }
-        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, magnitudes)
+        Self::magnitude_tensor_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    /// Row-wise FFT magnitude helper with an explicit window.
+    pub fn fft_rows_magnitude_tensor_with_window(
+        &self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<Tensor> {
+        let spectrum = self.fft_rows_interleaved_with_window(window, inverse)?;
+        Self::magnitude_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
     /// Row-wise FFT power helper mirroring [`fft_rows_interleaved`]. The
@@ -449,14 +452,17 @@ impl ColorVectorField {
     /// radians using `atan2(im, re)` for each channel.
     pub fn fft_rows_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_rows_interleaved(inverse)?;
-        let mut phases = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            phases.push(chunk[1].atan2(chunk[0]));
-            phases.push(chunk[3].atan2(chunk[2]));
-            phases.push(chunk[5].atan2(chunk[4]));
-            phases.push(chunk[7].atan2(chunk[6]));
-        }
-        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, phases)
+        Self::phase_tensor_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    /// Row-wise FFT phase helper with an explicit window.
+    pub fn fft_rows_phase_tensor_with_window(
+        &self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<Tensor> {
+        let spectrum = self.fft_rows_interleaved_with_window(window, inverse)?;
+        Self::phase_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
     /// Compute both the magnitude and phase spectra for the row-wise FFT in a
@@ -583,14 +589,17 @@ impl ColorVectorField {
     /// original canvas.
     pub fn fft_cols_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_cols_interleaved(inverse)?;
-        let mut magnitudes = Vec::with_capacity(self.width * self.height * Self::FFT_CHANNELS);
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            magnitudes.push(chunk[0].hypot(chunk[1]));
-            magnitudes.push(chunk[2].hypot(chunk[3]));
-            magnitudes.push(chunk[4].hypot(chunk[5]));
-            magnitudes.push(chunk[6].hypot(chunk[7]));
-        }
-        Tensor::from_vec(self.width, self.height * Self::FFT_CHANNELS, magnitudes)
+        Self::magnitude_tensor_from_interleaved(self.width, self.height, &spectrum)
+    }
+
+    /// Column-wise FFT magnitude helper with windowing.
+    pub fn fft_cols_magnitude_tensor_with_window(
+        &self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<Tensor> {
+        let spectrum = self.fft_cols_interleaved_with_window(window, inverse)?;
+        Self::magnitude_tensor_from_interleaved(self.width, self.height, &spectrum)
     }
 
     /// Column-wise FFT power helper mirroring [`fft_cols_interleaved`]. The
@@ -632,14 +641,17 @@ impl ColorVectorField {
     /// Column-wise FFT phase helper mirroring [`fft_rows_phase_tensor`].
     pub fn fft_cols_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_cols_interleaved(inverse)?;
-        let mut phases = Vec::with_capacity(self.width * self.height * Self::FFT_CHANNELS);
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            phases.push(chunk[1].atan2(chunk[0]));
-            phases.push(chunk[3].atan2(chunk[2]));
-            phases.push(chunk[5].atan2(chunk[4]));
-            phases.push(chunk[7].atan2(chunk[6]));
-        }
-        Tensor::from_vec(self.width, self.height * Self::FFT_CHANNELS, phases)
+        Self::phase_tensor_from_interleaved(self.width, self.height, &spectrum)
+    }
+
+    /// Column-wise FFT phase helper with windowing.
+    pub fn fft_cols_phase_tensor_with_window(
+        &self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<Tensor> {
+        let spectrum = self.fft_cols_interleaved_with_window(window, inverse)?;
+        Self::phase_tensor_from_interleaved(self.width, self.height, &spectrum)
     }
 
     /// Compute both the magnitude and phase spectra for the column-wise FFT in
@@ -828,14 +840,17 @@ impl ColorVectorField {
     /// tensor has shape `(height, width * 4)` with magnitudes for each channel.
     pub fn fft_2d_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_2d_interleaved(inverse)?;
-        let mut magnitudes = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            magnitudes.push(chunk[0].hypot(chunk[1]));
-            magnitudes.push(chunk[2].hypot(chunk[3]));
-            magnitudes.push(chunk[4].hypot(chunk[5]));
-            magnitudes.push(chunk[6].hypot(chunk[7]));
-        }
-        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, magnitudes)
+        Self::magnitude_tensor_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    /// 2D FFT magnitude helper with windowing along both axes.
+    pub fn fft_2d_magnitude_tensor_with_window(
+        &self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<Tensor> {
+        let spectrum = self.fft_2d_interleaved_with_window(window, inverse)?;
+        Self::magnitude_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
     /// 2D FFT power helper mirroring [`fft_2d_interleaved`]. The returned tensor
@@ -879,14 +894,17 @@ impl ColorVectorField {
     /// has shape `(height, width * 4)` storing per-channel phase angles.
     pub fn fft_2d_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_2d_interleaved(inverse)?;
-        let mut phases = Vec::with_capacity(self.height * self.width * Self::FFT_CHANNELS);
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            phases.push(chunk[1].atan2(chunk[0]));
-            phases.push(chunk[3].atan2(chunk[2]));
-            phases.push(chunk[5].atan2(chunk[4]));
-            phases.push(chunk[7].atan2(chunk[6]));
-        }
-        Tensor::from_vec(self.height, self.width * Self::FFT_CHANNELS, phases)
+        Self::phase_tensor_from_interleaved(self.height, self.width, &spectrum)
+    }
+
+    /// 2D FFT phase helper with windowing across both axes.
+    pub fn fft_2d_phase_tensor_with_window(
+        &self,
+        window: CanvasWindow,
+        inverse: bool,
+    ) -> PureResult<Tensor> {
+        let spectrum = self.fft_2d_interleaved_with_window(window, inverse)?;
+        Self::phase_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
     /// Compute both the magnitude and phase spectra for the 2D FFT in a single
@@ -1185,291 +1203,8 @@ impl ColorVectorField {
         let db = 10.0 * clamped.log10();
         db.max(Self::POWER_DB_FLOOR)
     }
-
-    fn validate_power_interleaved_dimensions(
-        rows: usize,
-        cols: usize,
-        len: usize,
-    ) -> PureResult<usize> {
-        if rows == 0 || cols == 0 {
-            return Err(TensorError::InvalidDimensions { rows, cols });
-        }
-
-        let expected_pairs = rows
-            .checked_mul(cols)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft",
-                volume: rows.saturating_mul(cols),
-                max_volume: usize::MAX,
-            })?;
-        let expected_len = expected_pairs * Self::FFT_INTERLEAVED_STRIDE;
-        if len != expected_len {
-            return Err(TensorError::DataLength {
-                expected: expected_len,
-                got: len,
-            });
-        }
-
-        Ok(expected_pairs)
-    }
-
-    fn power_channels_from_interleaved_chunk(chunk: &[f32]) -> [f32; 4] {
-        debug_assert!(chunk.len() == Self::FFT_INTERLEAVED_STRIDE);
-        let energy = chunk[0].mul_add(chunk[0], chunk[1] * chunk[1]);
-        let chroma_r = chunk[2].mul_add(chunk[2], chunk[3] * chunk[3]);
-        let chroma_g = chunk[4].mul_add(chunk[4], chunk[5] * chunk[5]);
-        let chroma_b = chunk[6].mul_add(chunk[6], chunk[7] * chunk[7]);
-        [energy, chroma_r, chroma_g, chroma_b]
-    }
-
-    fn power_and_power_db_tensors_from_interleaved(
-        rows: usize,
-        cols: usize,
-        spectrum: &[f32],
-    ) -> PureResult<(Tensor, Tensor)> {
-        let expected_pairs =
-            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
-        let mut linear = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-        let mut logarithmic = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            let [energy, chroma_r, chroma_g, chroma_b] =
-                Self::power_channels_from_interleaved_chunk(chunk);
-            for &component in [energy, chroma_r, chroma_g, chroma_b].iter() {
-                linear.push(component);
-                let clamped = component.max(Self::POWER_DB_EPSILON);
-                let db = 10.0 * clamped.log10();
-                logarithmic.push(db.max(Self::POWER_DB_FLOOR));
-            }
-        }
-
-        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, linear)?;
-        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, logarithmic)?;
-        Ok((power, power_db))
-    }
-
-    fn power_and_power_db_tensors_from_interleaved(
-        rows: usize,
-        cols: usize,
-        spectrum: &[f32],
-    ) -> PureResult<(Tensor, Tensor)> {
-        let expected_pairs =
-            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
-        let mut power = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-        let mut power_db = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            let channels = Self::power_channels_from_interleaved_chunk(chunk);
-            for value in channels {
-                power.push(value);
-                let clamped = value.max(Self::POWER_DB_EPSILON);
-                let db = 10.0 * clamped.log10();
-                power_db.push(db.max(Self::POWER_DB_FLOOR));
-            }
-        }
-
-        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power)?;
-        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power_db)?;
-        Ok((power, power_db))
-    }
-
-    fn validate_power_interleaved_dimensions(
-        rows: usize,
-        cols: usize,
-        spectrum_len: usize,
-    ) -> PureResult<usize> {
-        let expected_pairs = rows
-            .checked_mul(cols)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_power",
-                volume: rows.saturating_mul(cols),
-                max_volume: usize::MAX,
-            })?;
-        let expected_len = expected_pairs
-            .checked_mul(Self::FFT_INTERLEAVED_STRIDE)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_power",
-                volume: expected_pairs.saturating_mul(Self::FFT_INTERLEAVED_STRIDE),
-                max_volume: usize::MAX,
-            })?;
-
-        if spectrum_len != expected_len {
-            return Err(TensorError::DataLength {
-                expected: expected_len,
-                got: spectrum_len,
-            });
-        }
-
-        Ok(expected_pairs)
-    }
-
-    fn power_channels_from_interleaved_chunk(chunk: &[f32]) -> [f32; 4] {
-        debug_assert_eq!(chunk.len(), Self::FFT_INTERLEAVED_STRIDE);
-
-        let energy = chunk[0].mul_add(chunk[0], chunk[1] * chunk[1]);
-        let chroma_r = chunk[2].mul_add(chunk[2], chunk[3] * chunk[3]);
-        let chroma_g = chunk[4].mul_add(chunk[4], chunk[5] * chunk[5]);
-        let chroma_b = chunk[6].mul_add(chunk[6], chunk[7] * chunk[7]);
-
-        [energy, chroma_r, chroma_g, chroma_b]
-    }
-
-    fn power_and_power_db_tensors_from_interleaved(
-        rows: usize,
-        cols: usize,
-        spectrum: &[f32],
-    ) -> PureResult<(Tensor, Tensor)> {
-        let expected_pairs =
-            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
-        let mut linear = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-        let mut logarithmic = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            let [energy, chroma_r, chroma_g, chroma_b] =
-                Self::power_channels_from_interleaved_chunk(chunk);
-            for &component in [energy, chroma_r, chroma_g, chroma_b].iter() {
-                linear.push(component);
-                let clamped = component.max(Self::POWER_DB_EPSILON);
-                let db = 10.0 * clamped.log10();
-                logarithmic.push(db.max(Self::POWER_DB_FLOOR));
-            }
-        }
-
-        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, linear)?;
-        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, logarithmic)?;
-        Ok((power, power_db))
-    }
-
-    fn power_and_power_db_tensors_from_interleaved(
-        rows: usize,
-        cols: usize,
-        spectrum: &[f32],
-    ) -> PureResult<(Tensor, Tensor)> {
-        let expected_pairs =
-            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
-        let mut power = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-        let mut power_db = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            let channels = Self::power_channels_from_interleaved_chunk(chunk);
-            for value in channels {
-                power.push(value);
-                let clamped = value.max(Self::POWER_DB_EPSILON);
-                let db = 10.0 * clamped.log10();
-                power_db.push(db.max(Self::POWER_DB_FLOOR));
-            }
-        }
-
-        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power)?;
-        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power_db)?;
-        Ok((power, power_db))
-    }
-
-    fn validate_power_interleaved_dimensions(
-        rows: usize,
-        cols: usize,
-        spectrum_len: usize,
-    ) -> PureResult<usize> {
-        let expected_pairs = rows
-            .checked_mul(cols)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_power",
-                volume: rows.saturating_mul(cols),
-                max_volume: usize::MAX,
-            })?;
-        let expected_len = expected_pairs
-            .checked_mul(Self::FFT_INTERLEAVED_STRIDE)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_power",
-                volume: expected_pairs.saturating_mul(Self::FFT_INTERLEAVED_STRIDE),
-                max_volume: usize::MAX,
-            })?;
-
-        if spectrum_len != expected_len {
-            return Err(TensorError::DataLength {
-                expected: expected_len,
-                got: spectrum_len,
-            });
-        }
-
-        Ok(expected_pairs)
-    }
-
-    fn power_channels_from_interleaved_chunk(chunk: &[f32]) -> [f32; 4] {
-        debug_assert_eq!(chunk.len(), Self::FFT_INTERLEAVED_STRIDE);
-
-        let energy = chunk[0].mul_add(chunk[0], chunk[1] * chunk[1]);
-        let chroma_r = chunk[2].mul_add(chunk[2], chunk[3] * chunk[3]);
-        let chroma_g = chunk[4].mul_add(chunk[4], chunk[5] * chunk[5]);
-        let chroma_b = chunk[6].mul_add(chunk[6], chunk[7] * chunk[7]);
-
-        [energy, chroma_r, chroma_g, chroma_b]
-    }
-
-    fn power_and_power_db_tensors_from_interleaved(
-        rows: usize,
-        cols: usize,
-        spectrum: &[f32],
-    ) -> PureResult<(Tensor, Tensor)> {
-        let expected_pairs =
-            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
-        let mut power = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-        let mut power_db = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
-            let channels = Self::power_channels_from_interleaved_chunk(chunk);
-            for value in channels {
-                power.push(value);
-                let clamped = value.max(Self::POWER_DB_EPSILON);
-                let db = 10.0 * clamped.log10();
-                power_db.push(db.max(Self::POWER_DB_FLOOR));
-            }
-        }
-
-        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power)?;
-        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, power_db)?;
-        Ok((power, power_db))
-    }
-
-    fn validate_power_interleaved_dimensions(
-        rows: usize,
-        cols: usize,
-        spectrum_len: usize,
-    ) -> PureResult<usize> {
-        let expected_pairs = rows
-            .checked_mul(cols)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_power",
-                volume: rows.saturating_mul(cols),
-                max_volume: usize::MAX,
-            })?;
-        let expected_len = expected_pairs
-            .checked_mul(Self::FFT_INTERLEAVED_STRIDE)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_power",
-                volume: expected_pairs.saturating_mul(Self::FFT_INTERLEAVED_STRIDE),
-                max_volume: usize::MAX,
-            })?;
-
-        if spectrum_len != expected_len {
-            return Err(TensorError::DataLength {
-                expected: expected_len,
-                got: spectrum_len,
-            });
-        }
-
-        Ok(expected_pairs)
-    }
-
-    fn power_channels_from_interleaved_chunk(chunk: &[f32]) -> [f32; 4] {
-        debug_assert_eq!(chunk.len(), Self::FFT_INTERLEAVED_STRIDE);
-
-        let energy = chunk[0].mul_add(chunk[0], chunk[1] * chunk[1]);
-        let chroma_r = chunk[2].mul_add(chunk[2], chunk[3] * chunk[3]);
-        let chroma_g = chunk[4].mul_add(chunk[4], chunk[5] * chunk[5]);
-        let chroma_b = chunk[6].mul_add(chunk[6], chunk[7] * chunk[7]);
-
-        [energy, chroma_r, chroma_g, chroma_b]
-    }
 }
+
 /// Byte layout metadata for the WGSL canvas FFT pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CanvasFftLayout {
@@ -2066,17 +1801,6 @@ impl CanvasProjector {
     ) -> PureResult<(Tensor, Tensor)> {
         self.render()?;
         self.vectors.fft_cols_polar_tensors(inverse)
-    }
-
-    /// Refresh and expose the column-wise FFT magnitude/phase with windowing.
-    pub fn refresh_vector_fft_columns_polar_tensors_with_window(
-        &mut self,
-        window: CanvasWindow,
-        inverse: bool,
-    ) -> PureResult<(Tensor, Tensor)> {
-        self.render()?;
-        self.vectors
-            .fft_cols_polar_tensors_with_window(window, inverse)
     }
 
     /// Refresh and expose the column-wise FFT magnitude/phase with windowing.
