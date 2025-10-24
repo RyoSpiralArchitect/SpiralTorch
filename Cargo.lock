@@ -2999,6 +2999,7 @@ dependencies = [
  "futures-intrusive",
  "futures-lite",
  "ndarray",
+ "once_cell",
  "plotters",
  "pollster",
  "rand",
