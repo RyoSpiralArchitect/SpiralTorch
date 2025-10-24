@@ -494,6 +494,9 @@ impl PreDiscardPolicy {
 /// over recent discard telemetry, blends preservation and energy errors with configurable
 /// weights, anticipates trending deviations with a momentum term, and nudges the dominance
 /// ratio toward configured targets while penalising repeated fallbacks.
+///
+/// Confidence scaling allows corrections to respond to high-certainty passes, while an
+/// optional fallback memory keeps pressure on the policy until stability returns.
 #[derive(Clone, Debug)]
 pub struct PreDiscardRegulator {
     target_preserved_ratio: f32,
@@ -507,6 +510,8 @@ pub struct PreDiscardRegulator {
     channel_weight: f32,
     energy_weight: f32,
     fallback_penalty: f32,
+    fallback_gain: f32,
+    fallback_smoothing: f32,
     momentum: f32,
     deadband: f32,
     equilibrium_decay: f32,
@@ -516,6 +521,7 @@ pub struct PreDiscardRegulator {
     preserved_ema: Option<f32>,
     energy_ema: Option<f32>,
     trend_ema: Option<f32>,
+    fallback_state: Option<f32>,
     last_error: Option<f32>,
     observations: u64,
 }
@@ -547,6 +553,8 @@ impl PreDiscardRegulator {
             channel_weight: 0.5,
             energy_weight: 0.5,
             fallback_penalty: 0.1,
+            fallback_gain: 0.0,
+            fallback_smoothing: 0.0,
             momentum: 0.0,
             deadband: 0.0,
             equilibrium_decay: 0.0,
@@ -556,6 +564,7 @@ impl PreDiscardRegulator {
             preserved_ema: None,
             energy_ema: None,
             trend_ema: None,
+            fallback_state: None,
             last_error: None,
             observations: 0,
         })
@@ -603,6 +612,27 @@ impl PreDiscardRegulator {
             return Err(TensorError::NonPositiveCoherence { coherence: penalty }.into());
         }
         self.fallback_penalty = penalty;
+        Ok(self)
+    }
+
+    /// Configures a decaying memory of fallback events that increases pressure on the base
+    /// policy until stability returns. The gain scales how much the memory contributes
+    /// alongside immediate fallbacks, while the smoothing factor controls the decay rate of
+    /// past events. Both arguments must be finite, with the gain constrained to non-negative
+    /// values and the smoothing factor restricted to the [0, 1] interval.
+    pub fn with_fallback_memory(mut self, gain: f32, smoothing: f32) -> PureResult<Self> {
+        if !gain.is_finite() || gain < 0.0 {
+            return Err(TensorError::NonPositiveCoherence { coherence: gain }.into());
+        }
+        if !smoothing.is_finite() || smoothing < 0.0 || smoothing > 1.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: smoothing,
+            }
+            .into());
+        }
+
+        self.fallback_gain = gain;
+        self.fallback_smoothing = smoothing;
         Ok(self)
     }
 
@@ -815,10 +845,6 @@ impl PreDiscardRegulator {
         if self.momentum > 0.0 {
             step += -self.aggressiveness * self.momentum * trend;
         }
-        if telemetry.used_fallback() {
-            step -= self.fallback_penalty;
-        }
-
         if self.confidence_floor > 0.0 || self.confidence_gain > 0.0 {
             let mut confidence = telemetry.dominant_weight();
             if !confidence.is_finite() {
@@ -839,6 +865,25 @@ impl PreDiscardRegulator {
             }
 
             step *= scale;
+        }
+        let fallback_signal = if telemetry.used_fallback() { 1.0 } else { 0.0 };
+        let fallback_state = if self.fallback_gain > 0.0 || self.fallback_smoothing > 0.0 {
+            if self.fallback_smoothing <= f32::EPSILON {
+                self.fallback_state = Some(fallback_signal);
+                fallback_signal
+            } else {
+                Self::update_ema(
+                    &mut self.fallback_state,
+                    fallback_signal,
+                    self.fallback_smoothing,
+                )
+            }
+        } else {
+            fallback_signal
+        };
+        let fallback_pressure = fallback_signal + self.fallback_gain * fallback_state;
+        if fallback_pressure > 0.0 {
+            step -= self.fallback_penalty * fallback_pressure;
         }
         let step = step.clamp(-self.max_step, self.max_step);
 
@@ -2243,6 +2288,34 @@ mod tests {
     }
 
     #[test]
+    fn pre_discard_regulator_fallback_memory_accumulates_pressure() {
+        let base = PreDiscardPolicy::new(0.85).unwrap();
+        let telemetry = PreDiscardTelemetry::new(&base, 5, 5, true, 0.6, 0.4, 0.7);
+
+        let mut baseline = PreDiscardRegulator::new(0.5, 0.5)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.8)
+            .unwrap()
+            .with_max_step(0.4)
+            .unwrap()
+            .with_bounds(-1.0, 0.5)
+            .unwrap()
+            .with_fallback_penalty(0.2)
+            .unwrap();
+
+        let mut memory = baseline.clone().with_fallback_memory(1.2, 0.6).unwrap();
+
+        for _ in 0..2 {
+            baseline.observe(&telemetry);
+            memory.observe(&telemetry);
+        }
+
+        assert!(memory.offset() < baseline.offset());
+    }
+
+    #[test]
     fn pre_discard_regulator_deadband_suppresses_small_adjustments() {
         let base = PreDiscardPolicy::new(0.75).unwrap();
         let mut regulator = PreDiscardRegulator::new(0.55, 0.6)
@@ -2331,6 +2404,8 @@ mod tests {
             .clone()
             .with_confidence_scaling(0.4, -0.1)
             .is_err());
+        assert!(regulator.clone().with_fallback_memory(-0.2, 0.3).is_err());
+        assert!(regulator.clone().with_fallback_memory(0.8, 1.5).is_err());
         assert!(regulator
             .clone()
             .with_trend_smoothing(0.0)
@@ -2342,6 +2417,8 @@ mod tests {
             .with_equilibrium_decay(0.5)
             .unwrap()
             .with_confidence_scaling(0.6, 0.3)
+            .unwrap()
+            .with_fallback_memory(0.9, 0.4)
             .is_ok());
     }
 
@@ -2385,6 +2462,34 @@ mod tests {
         confidence.observe(&telemetry);
 
         assert!(confidence.offset().abs() > baseline.offset().abs());
+    }
+
+    #[test]
+    fn pre_discard_regulator_fallback_memory_decays_without_events() {
+        let base = PreDiscardPolicy::new(0.8).unwrap();
+        let fallback = PreDiscardTelemetry::new(&base, 6, 4, true, 0.55, 0.45, 0.6);
+        let recovery = PreDiscardTelemetry::new(&base, 4, 6, false, 0.58, 0.42, 0.6);
+
+        let mut baseline = PreDiscardRegulator::new(0.5, 0.55)
+            .unwrap()
+            .with_smoothing(1.0)
+            .unwrap()
+            .with_aggressiveness(0.7)
+            .unwrap()
+            .with_max_step(0.3)
+            .unwrap()
+            .with_fallback_penalty(0.25)
+            .unwrap();
+
+        let mut memory = baseline.clone().with_fallback_memory(0.9, 0.5).unwrap();
+
+        baseline.observe(&fallback);
+        memory.observe(&fallback);
+        baseline.observe(&recovery);
+        memory.observe(&recovery);
+
+        assert!(memory.offset() < baseline.offset());
+        assert!(memory.offset() < 0.0);
     }
 
     #[test]
