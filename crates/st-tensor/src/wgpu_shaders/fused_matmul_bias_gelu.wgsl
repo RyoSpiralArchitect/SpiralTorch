@@ -13,9 +13,8 @@ struct MatmulParams {
 @group(0) @binding(0) var<storage, read> lhs : array<f32>;
 @group(0) @binding(1) var<storage, read> rhs : array<f32>;
 @group(0) @binding(2) var<storage, read> bias : array<f32>;
-@group(0) @binding(3) var<storage, read> residual : array<f32>;
-@group(0) @binding(4) var<storage, read_write> out : array<f32>;
-@group(0) @binding(5) var<uniform> params : MatmulParams;
+@group(0) @binding(3) var<storage, read_write> out : array<f32>;
+@group(0) @binding(4) var<uniform> params : MatmulParams;
 
 override TILE_M : u32 = {tile_m}u;
 override TILE_N : u32 = {tile_n}u;
@@ -24,6 +23,13 @@ override TILE_K : u32 = {tile_k}u;
 var<workgroup> lhs_tile : array<f32, TILE_M * TILE_K>;
 var<workgroup> rhs_tile : array<f32, TILE_K * TILE_N>;
 var<workgroup> bias_tile : array<f32, TILE_N>;
+
+fn gelu(x : f32) -> f32 {
+    let coeff : f32 = 0.044715;
+    let sqrt_2_over_pi : f32 = 0.7978845608028654;
+    let x_cubed = x * x * x;
+    return 0.5 * x * (1.0 + tanh(sqrt_2_over_pi * (x + coeff * x_cubed)));
+}
 
 @compute @workgroup_size(TILE_N, TILE_M, 1)
 fn main(
@@ -114,9 +120,7 @@ fn main(
     workgroupBarrier();
     let bias_value = bias_tile[local_n];
 
+    let sum = acc + bias_value;
     let out_index = row * params.cols + col;
-    let residual_value = residual[out_index];
-    let sum = acc + bias_value + residual_value;
-    let activated = max(sum, 0.0);
-    out[out_index] = activated;
+    out[out_index] = gelu(sum);
 }

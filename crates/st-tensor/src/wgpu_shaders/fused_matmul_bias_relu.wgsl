@@ -3,8 +3,6 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-enable subgroups;
-
 struct MatmulParams {
     rows: u32,
     cols: u32,
@@ -18,16 +16,18 @@ struct MatmulParams {
 @group(0) @binding(3) var<storage, read_write> out : array<f32>;
 @group(0) @binding(4) var<uniform> params : MatmulParams;
 
-override TILE_SIZE : u32 = {tile_size}u;
+override TILE_M : u32 = {tile_m}u;
+override TILE_N : u32 = {tile_n}u;
+override TILE_K : u32 = {tile_k}u;
 
-var<workgroup> lhs_tile : array<f32, TILE_SIZE * TILE_SIZE>;
-var<workgroup> rhs_tile : array<f32, TILE_SIZE * TILE_SIZE>;
+var<workgroup> lhs_tile : array<f32, TILE_M * TILE_K>;
+var<workgroup> rhs_tile : array<f32, TILE_K * TILE_N>;
+var<workgroup> bias_tile : array<f32, TILE_N>;
 
-@compute @workgroup_size(TILE_SIZE, TILE_SIZE, 1)
+@compute @workgroup_size(TILE_N, TILE_M, 1)
 fn main(
     @builtin(global_invocation_id) gid : vec3<u32>,
     @builtin(local_invocation_id) lid : vec3<u32>,
-    @builtin(subgroup_invocation_id) subgroup_id : u32,
 ) {
     let row = gid.y;
     let col = gid.x;
@@ -35,42 +35,66 @@ fn main(
         return;
     }
 
-    let local_row = lid.y;
-    let local_col = lid.x;
+    let local_m = lid.y;
+    let local_n = lid.x;
+    let local_linear = local_m * TILE_N + local_n;
+    let threads = TILE_M * TILE_N;
+    let tile_row_origin = gid.y - local_m;
+    let tile_col_origin = gid.x - local_n;
 
     var acc : f32 = 0.0;
-    let tiles = (params.inner + TILE_SIZE - 1u) / TILE_SIZE;
+    let tiles = (params.inner + TILE_K - 1u) / TILE_K;
     var tile_index : u32 = 0u;
     loop {
         if (tile_index >= tiles) {
             break;
         }
 
-        let k_base = tile_index * TILE_SIZE;
+        let k_base = tile_index * TILE_K;
 
-        var lhs_value : f32 = 0.0;
-        let lhs_k = k_base + local_col;
-        if (lhs_k < params.inner) {
-            lhs_value = lhs[row * params.inner + lhs_k];
+        var lhs_iter : u32 = local_linear;
+        loop {
+            if (lhs_iter >= TILE_M * TILE_K) {
+                break;
+            }
+            let tile_row = lhs_iter / TILE_K;
+            let tile_k = lhs_iter % TILE_K;
+            let global_row = tile_row_origin + tile_row;
+            let global_k = k_base + tile_k;
+            var lhs_value : f32 = 0.0;
+            if (global_row < params.rows && global_k < params.inner) {
+                lhs_value = lhs[global_row * params.inner + global_k];
+            }
+            lhs_tile[lhs_iter] = lhs_value;
+            lhs_iter = lhs_iter + threads;
         }
-        lhs_tile[local_row * TILE_SIZE + local_col] = lhs_value;
 
-        var rhs_value : f32 = 0.0;
-        let rhs_k = k_base + local_row;
-        if (rhs_k < params.inner) {
-            rhs_value = rhs[rhs_k * params.cols + col];
+        var rhs_iter : u32 = local_linear;
+        loop {
+            if (rhs_iter >= TILE_K * TILE_N) {
+                break;
+            }
+            let tile_k = rhs_iter / TILE_N;
+            let tile_col = rhs_iter % TILE_N;
+            let global_k = k_base + tile_k;
+            let global_col = tile_col_origin + tile_col;
+            var rhs_value : f32 = 0.0;
+            if (global_k < params.inner && global_col < params.cols) {
+                rhs_value = rhs[global_k * params.cols + global_col];
+            }
+            rhs_tile[rhs_iter] = rhs_value;
+            rhs_iter = rhs_iter + threads;
         }
-        rhs_tile[local_row * TILE_SIZE + local_col] = rhs_value;
 
         workgroupBarrier();
 
         var k : u32 = 0u;
         loop {
-            if (k >= TILE_SIZE) {
+            if (k >= TILE_K) {
                 break;
             }
-            let lhs_tile_value = lhs_tile[local_row * TILE_SIZE + k];
-            let rhs_tile_value = rhs_tile[k * TILE_SIZE + local_col];
+            let lhs_tile_value = lhs_tile[local_m * TILE_K + k];
+            let rhs_tile_value = rhs_tile[k * TILE_N + local_n];
             acc = acc + lhs_tile_value * rhs_tile_value;
             k = k + 1u;
         }
@@ -79,15 +103,15 @@ fn main(
         tile_index = tile_index + 1u;
     }
 
-    let subgroup_width = max(subgroupSize(), 1u);
-    let rows_per_subgroup = max(subgroup_width / TILE_SIZE, 1u);
-
-    var bias_lane : f32 = 0.0;
-    if ((local_row % rows_per_subgroup) == 0u) {
-        bias_lane = bias[col];
+    if (local_m == 0u) {
+        var bias_value : f32 = 0.0;
+        if (col < params.cols) {
+            bias_value = bias[col];
+        }
+        bias_tile[local_n] = bias_value;
     }
-    let source_lane = subgroup_id % TILE_SIZE;
-    let bias_value = subgroupShuffle(bias_lane, source_lane);
+    workgroupBarrier();
+    let bias_value = bias_tile[local_n];
 
     let out_index = row * params.cols + col;
     let activated = max(acc + bias_value, 0.0);
