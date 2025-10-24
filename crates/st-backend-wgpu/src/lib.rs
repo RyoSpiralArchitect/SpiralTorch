@@ -2,6 +2,7 @@
 //! The module exposes helper routines to load WGSL shaders from disk and
 //! construct the compute pipelines that power higher level tensor operators.
 
+pub mod attention;
 pub mod compaction;
 pub mod compaction2ce;
 pub mod compaction_2ce;
@@ -26,6 +27,12 @@ pub use midk_bottomk::{
 pub use util::{
     load_compute_pipeline, load_compute_pipeline_with_layout, read_wgsl, ShaderCache,
     ShaderLoadError,
+};
+
+pub use attention::{
+    fused_attention, AccumulatorPrecision as FusedAttentionAccumulatorPrecision,
+    Kernel as FusedAttentionKernel, Params as FusedAttentionParams, Plan as FusedAttentionPlan,
+    PlanError as FusedAttentionPlanError, FLAG_USE_ATTN_BIAS, FLAG_USE_Z_BIAS,
 };
 
 pub use softmax::{
