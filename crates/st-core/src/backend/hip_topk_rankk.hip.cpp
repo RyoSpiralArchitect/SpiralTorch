@@ -4,6 +4,7 @@
 
 #include <hip/hip_runtime.h>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 
 static constexpr int kWavefront = 64;
@@ -54,7 +55,36 @@ __device__ inline void lane_insert(float v, int id, float* vals, int* idx,
 }
 
 __device__ inline int compute_row_index() {
-  return blockIdx.y + blockIdx.x * gridDim.y;
+  long long gx = static_cast<long long>(gridDim.x);
+  long long gy = static_cast<long long>(gridDim.y);
+  long long x = static_cast<long long>(blockIdx.x);
+  long long y = static_cast<long long>(blockIdx.y);
+  long long z = static_cast<long long>(blockIdx.z);
+  long long row = x + y * gx + z * gx * gy;
+  return static_cast<int>(row);
+}
+
+__device__ inline void fill_row_with_nan(int row, int k, float* out_vals, int* out_idx) {
+  if (k <= 0) {
+    return;
+  }
+  size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+  for (int oi = 0; oi < k; ++oi) {
+    out_vals[out_base + oi] = nanf("");
+    out_idx[out_base + oi] = -1;
+  }
+}
+
+__device__ inline void fill_tail_with_nan(
+    int row, int start, int k, float* out_vals, int* out_idx) {
+  if (start >= k) {
+    return;
+  }
+  size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+  for (int oi = start; oi < k; ++oi) {
+    out_vals[out_base + oi] = nanf("");
+    out_idx[out_base + oi] = -1;
+  }
 }
 
 }  // namespace
@@ -75,6 +105,16 @@ __global__ void topk_shared_heap_rowwise_kernel(
   if (row >= rows) return;
   int lane = threadIdx.x & 63;
   int lane_keep = lane_keep_for_k(k);
+  if (k <= 0) {
+    return;
+  }
+  if (cols <= 0) {
+    if (threadIdx.x == 0) {
+      fill_row_with_nan(row, k, out_vals, out_idx);
+    }
+    return;
+  }
+  int take = k < cols ? k : cols;
   __shared__ float s_vals[64*kLaneKeep];
   __shared__ int   s_idx [64*kLaneKeep];
 
@@ -93,15 +133,17 @@ __global__ void topk_shared_heap_rowwise_kernel(
 
   if (threadIdx.x==0){
     int total = 64*lane_keep;
-    for (int oi=0; oi<k; ++oi) {
+    for (int oi=0; oi<take; ++oi) {
       float best_v = -INFINITY; int best_j=0;
       for (int j=0; j<total; ++j) {
         if (s_vals[j]>best_v) { best_v=s_vals[j]; best_j=j; }
       }
-      out_vals[row*k + oi] = best_v;
-      out_idx[row*k + oi]  = s_idx[best_j];
+      size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+      out_vals[out_base + oi] = best_v;
+      out_idx[out_base + oi]  = s_idx[best_j];
       s_vals[best_j] = -INFINITY;
     }
+    fill_tail_with_nan(row, take, k, out_vals, out_idx);
   }
 }
 
@@ -120,6 +162,16 @@ __global__ void topk_warp_heap_rowwise_kernel(
     float v = X[row*cols + c];
     lane_insert(v, c, vbuf, ibuf, lane_keep);
   }
+  if (k <= 0) {
+    return;
+  }
+  if (cols <= 0) {
+    if (threadIdx.x == 0) {
+      fill_row_with_nan(row, k, out_vals, out_idx);
+    }
+    return;
+  }
+  int take = k < cols ? k : cols;
   extern __shared__ unsigned char smem[];
   float* s_vals = (float*)smem;
   int lane_stride = lane_keep;
@@ -131,13 +183,15 @@ __global__ void topk_warp_heap_rowwise_kernel(
 
   if (threadIdx.x==0){
     int total = 64*lane_keep;
-    for (int oi=0; oi<k; ++oi) {
+    for (int oi=0; oi<take; ++oi) {
       float best_v = -INFINITY; int best_j=0;
       for (int j=0; j<total; ++j) { if (s_vals[j]>best_v) { best_v=s_vals[j]; best_j=j; } }
-      out_vals[row*k + oi] = best_v;
-      out_idx[row*k + oi]  = s_idx[best_j];
+      size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+      out_vals[out_base + oi] = best_v;
+      out_idx[out_base + oi]  = s_idx[best_j];
       s_vals[best_j] = -INFINITY;
     }
+    fill_tail_with_nan(row, take, k, out_vals, out_idx);
   }
 }
 
