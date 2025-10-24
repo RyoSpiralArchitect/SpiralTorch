@@ -149,11 +149,17 @@ from .zspace_inference import (
     ZSpaceDecoded,
     ZSpaceInference,
     ZSpacePosterior,
+    canvas_partial_from_snapshot,
+    coherence_partial_from_diagnostics,
     decode_zspace_embedding,
+    infer_canvas_snapshot,
+    infer_canvas_transformer,
+    infer_coherence_diagnostics,
+    infer_coherence_from_sequencer,
     infer_from_partial,
-    infer_with_trainer,
 )
 
+# 追加API（Rust側でエクスポート済みのやつだけ拾う）
 _EXTRAS = [
     "golden_ratio","golden_angle","set_global_seed",
     "capture","share","compat",
@@ -1283,9 +1289,10 @@ _EXTRAS.extend(
         "ZSpaceDecoded",
         "ZSpaceInference",
         "ZSpacePosterior",
+        "ZSpaceInferenceRuntime",
         "decode_zspace_embedding",
         "infer_from_partial",
-        "infer_with_trainer",
+        "compile_inference",
     ]
 )
 
