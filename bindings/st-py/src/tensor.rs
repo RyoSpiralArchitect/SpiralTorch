@@ -7,7 +7,7 @@ use pyo3::{Bound, PyRef, PyRefMut};
 #[cfg(feature = "hip")]
 use st_backend_hip as hip_backend;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
-use st_tensor::{MatmulBackend, SoftmaxBackend, Tensor, TensorError};
+use st_tensor::{AttentionBackend, MatmulBackend, SoftmaxBackend, Tensor, TensorError};
 use std::ffi::{c_void, CStr};
 use tracing::warn;
 
@@ -45,6 +45,22 @@ fn parse_softmax_backend(label: Option<&str>) -> SoftmaxBackend {
                 "unknown softmax backend label, falling back to auto"
             );
             SoftmaxBackend::Auto
+        }
+    }
+}
+
+fn parse_attention_backend(label: Option<&str>) -> AttentionBackend {
+    match label.unwrap_or("auto") {
+        "auto" => AttentionBackend::Auto,
+        "cpu" => AttentionBackend::Cpu,
+        #[cfg(feature = "wgpu")]
+        "wgpu" => AttentionBackend::GpuWgpu,
+        other => {
+            warn!(
+                backend = other,
+                "unknown attention backend label, falling back to auto",
+            );
+            AttentionBackend::Auto
         }
     }
 }
@@ -462,6 +478,37 @@ impl PyTensor {
         let backend = parse_softmax_backend(backend);
         let tensor = py
             .allow_threads(|| self.inner.row_softmax_with_backend(backend))
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
+    #[pyo3(signature = (keys, values, *, contexts, sequence, scale, z_bias=None, attn_bias=None, backend=None))]
+    pub fn scaled_dot_attention(
+        &self,
+        keys: &PyTensor,
+        values: &PyTensor,
+        contexts: usize,
+        sequence: usize,
+        scale: f32,
+        z_bias: Option<&PyTensor>,
+        attn_bias: Option<&PyTensor>,
+        backend: Option<&str>,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_attention_backend(backend);
+        let tensor = py
+            .allow_threads(|| {
+                self.inner.scaled_dot_attention_with_backend(
+                    &keys.inner,
+                    &values.inner,
+                    contexts,
+                    sequence,
+                    scale,
+                    z_bias.map(|tensor| &tensor.inner),
+                    attn_bias.map(|tensor| &tensor.inner),
+                    backend,
+                )
+            })
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }

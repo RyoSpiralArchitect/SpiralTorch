@@ -100,17 +100,21 @@ fn main(
         partials[lane] = partial;
         workgroupBarrier();
 
-        if (lane == 0u) {
-            var dot = 0.0;
-            var idx = 0u;
-            loop {
-                if (idx >= WORKGROUP_SIZE) {
-                    break;
-                }
-                dot = dot + partials[idx];
-                idx = idx + 1u;
+        var active = WORKGROUP_SIZE;
+        loop {
+            if (active <= 1u) {
+                break;
             }
-            var logit = dot * params.scale;
+            let half = (active + 1u) >> 1u;
+            if (lane < half && lane + half < active) {
+                partials[lane] = partials[lane] + partials[lane + half];
+            }
+            active = half;
+            workgroupBarrier();
+        }
+
+        if (lane == 0u) {
+            var logit = partials[0u] * params.scale;
             if ((params.flags & FLAG_USE_Z_BIAS) != 0u) {
                 logit = logit + z_bias[context_offset + key];
             }

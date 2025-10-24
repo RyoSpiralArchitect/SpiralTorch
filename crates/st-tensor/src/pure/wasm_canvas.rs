@@ -1360,6 +1360,31 @@ impl ColorVectorField {
 
         [energy, chroma_r, chroma_g, chroma_b]
     }
+
+    fn power_and_power_db_tensors_from_interleaved(
+        rows: usize,
+        cols: usize,
+        spectrum: &[f32],
+    ) -> PureResult<(Tensor, Tensor)> {
+        let expected_pairs =
+            Self::validate_power_interleaved_dimensions(rows, cols, spectrum.len())?;
+        let mut linear = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        let mut logarithmic = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
+        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+            let [energy, chroma_r, chroma_g, chroma_b] =
+                Self::power_channels_from_interleaved_chunk(chunk);
+            for &component in [energy, chroma_r, chroma_g, chroma_b].iter() {
+                linear.push(component);
+                let clamped = component.max(Self::POWER_DB_EPSILON);
+                let db = 10.0 * clamped.log10();
+                logarithmic.push(db.max(Self::POWER_DB_FLOOR));
+            }
+        }
+
+        let power = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, linear)?;
+        let power_db = Tensor::from_vec(rows, cols * Self::FFT_CHANNELS, logarithmic)?;
+        Ok((power, power_db))
+    }
 }
 /// Byte layout metadata for the WGSL canvas FFT pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
