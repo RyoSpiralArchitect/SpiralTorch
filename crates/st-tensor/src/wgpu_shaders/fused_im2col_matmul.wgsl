@@ -33,8 +33,8 @@ const TILE_M : u32 = {tile_m}u;
 const TILE_N : u32 = {tile_n}u;
 const TILE_K : u32 = {tile_k}u;
 
-var<workgroup> lhs_tile : array<f32, TILE_M * TILE_K>;
-var<workgroup> rhs_tile_T : array<f32, TILE_N * TILE_K>;
+var<workgroup> lhs_tile : array<f32, {tile_mk}>;
+var<workgroup> rhs_tile_T : array<f32, {tile_nk}>;
 
 fn load_patch_value(
     batch_index: u32,
