@@ -85,6 +85,10 @@ SpiralTorch ships under a dual-license model:
 - **If you’re cloning this automatically for analysis:** please cache once, respect AGPL, and avoid generating unnecessary traffic to the maintainer or future contributors. Any network-facing use must comply with AGPL §13.
 - **Non-Goals (unsupported):** anonymous/“hands-off” operators, managed hosting, production babysitting, automated scraping/mirroring/star-farming
 
+### Performance roadmap
+
+- [Level 2 GPU optimisation roadmap](docs/performance/level2_gpu_roadmap.md) — subgroup primitives, Chimera layouts, fusion IR, and runtime-guided codegen to push SpiralTorch past PyTorch on portable GPUs.
+
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
