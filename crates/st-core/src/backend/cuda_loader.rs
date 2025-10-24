@@ -104,30 +104,36 @@ pub fn load_ptx_module(
         .lock()
         .map_err(|_| "cuda module state poisoned".to_string())?;
 
-    let mut to_register: Vec<&'static str> = if state.functions.is_empty() {
-        functions.iter().copied().collect()
-    } else {
-        functions
-            .iter()
-            .copied()
-            .filter(|name| !state.functions.contains_key(name))
-            .collect()
-    };
+    if functions
+        .iter()
+        .all(|name| state.functions.contains_key(name))
+    {
+        return Ok(CudaModule {
+            device,
+            module_name,
+        });
+    }
 
-    if !to_register.is_empty() {
-        to_register.sort_unstable();
-        to_register.dedup();
+    let mut requested: Vec<&'static str> = functions.iter().copied().collect();
+    requested.sort_unstable();
+    requested.dedup();
 
-        device
-            .load_ptx(ptx.clone(), module_name, &to_register)
-            .map_err(|err| err.to_string())?;
+    let mut union: Vec<&'static str> = state.functions.keys().copied().collect();
+    union.extend(requested);
+    union.sort_unstable();
+    union.dedup();
 
-        for &name in &to_register {
-            let func = device.get_func(module_name, name).ok_or_else(|| {
-                format!("cuda function `{name}` not registered in module `{module_name}`")
-            })?;
-            state.functions.insert(name, Arc::new(func));
-        }
+    device
+        .load_ptx(ptx.clone(), module_name, &union)
+        .map_err(|err| err.to_string())?;
+
+    state.functions.clear();
+
+    for &name in &union {
+        let func = device.get_func(module_name, name).ok_or_else(|| {
+            format!("cuda function `{name}` not registered in module `{module_name}`")
+        })?;
+        state.functions.insert(name, Arc::new(func));
     }
 
     Ok(CudaModule {
