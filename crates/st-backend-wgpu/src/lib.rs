@@ -9,6 +9,7 @@ pub mod midk_bottomk;
 pub mod nd_indexer;
 pub mod nerf;
 pub mod render;
+pub mod softmax;
 pub mod topk_keepk;
 pub mod transform;
 

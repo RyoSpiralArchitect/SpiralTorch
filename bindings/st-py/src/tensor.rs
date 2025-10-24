@@ -142,6 +142,22 @@ impl PyTensor {
         Ok(PyTensor { inner: tensor })
     }
 
+    /// Matrix multiply with bias and ReLU fusion.
+    #[pyo3(signature = (other, bias, *, backend=None))]
+    pub fn matmul_bias_relu(
+        &self,
+        other: &PyTensor,
+        bias: Vec<f32>,
+        backend: Option<&str>,
+    ) -> PyResult<PyTensor> {
+        let backend = parse_backend(backend);
+        let tensor = self
+            .inner
+            .matmul_bias_relu_with_backend(&other.inner, &bias, backend)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
     /// Add (element-wise)
     pub fn add(&self, other: &PyTensor) -> PyResult<PyTensor> {
         let tensor = self.inner.add(&other.inner).map_err(tensor_err_to_py)?;
