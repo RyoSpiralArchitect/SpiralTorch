@@ -8,12 +8,7 @@ use pyo3::{Bound, PyRef, PyRefMut};
 use st_backend_hip as hip_backend;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
 use st_tensor::{
-    backend::cpu_dense,
-    AttentionBackend,
-    Layout,
-    MatmulBackend,
-    SoftmaxBackend,
-    Tensor,
+    backend::cpu_dense, AttentionBackend, Layout, MatmulBackend, SoftmaxBackend, Tensor,
     TensorError,
 };
 use std::ffi::{c_void, CStr};

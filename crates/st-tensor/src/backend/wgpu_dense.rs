@@ -17,6 +17,8 @@ use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Pipeline
 
 const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
+const FUSED_GELU_BACK_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_gelu_back.wgsl");
+const REDUCE_DB_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/reduce_db.wgsl");
 const ROW_SOFTMAX_WGSL: &str =
     include_str!("../../../st-backend-wgpu/src/shaders/softmax_workgroup.wgsl");
 const FUSED_ATTENTION_WGSL_TEMPLATE: &str =
@@ -24,6 +26,9 @@ const FUSED_ATTENTION_WGSL_TEMPLATE: &str =
 
 const FUSED_ATTENTION_WORKGROUP: u32 = 128;
 const FUSED_ATTENTION_MAX_HEAD_DIM: u32 = 256;
+const FUSED_GELU_BACK_WG_ROWS: u32 = 16;
+const FUSED_GELU_BACK_WG_COLS: u32 = 16;
+const REDUCE_DB_WORKGROUP: u32 = 256;
 
 const FLAG_USE_BIAS: u32 = 1 << 0;
 const FLAG_FUSED_RELU: u32 = 1 << 1;
@@ -333,6 +338,10 @@ struct GpuContext {
     softmax_layout: BindGroupLayout,
     softmax_pipeline: Option<Arc<ComputePipeline>>,
     fused_attention: Option<FusedAttentionKernel>,
+    fused_gelu_back_layout: BindGroupLayout,
+    fused_gelu_back_pipeline: Arc<ComputePipeline>,
+    reduce_db_layout: BindGroupLayout,
+    reduce_db_pipeline: Arc<ComputePipeline>,
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
@@ -528,6 +537,153 @@ impl GpuContext {
         }))
         .ok();
 
+        let fused_gelu_back_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_gelu_back_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let fused_gelu_back_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_gelu_back.pipeline_layout"),
+                bind_group_layouts: &[&fused_gelu_back_layout],
+                push_constant_ranges: &[],
+            });
+
+        let fused_gelu_back_shader_source =
+            instantiate_fused_gelu_back_template(FUSED_GELU_BACK_WG_ROWS, FUSED_GELU_BACK_WG_COLS);
+        let fused_gelu_back_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("st.tensor.wgpu_dense.fused_gelu_back"),
+            source: wgpu::ShaderSource::Wgsl(fused_gelu_back_shader_source.into()),
+        });
+        let fused_gelu_back_pipeline = Arc::new(device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_gelu_back"),
+                layout: Some(&fused_gelu_back_pipeline_layout),
+                module: &fused_gelu_back_shader,
+                entry_point: "main",
+            },
+        ));
+
+        let reduce_db_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("st.tensor.wgpu_dense.reduce_db_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let reduce_db_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.reduce_db.pipeline_layout"),
+                bind_group_layouts: &[&reduce_db_layout],
+                push_constant_ranges: &[],
+            });
+
+        let reduce_db_shader_source =
+            instantiate_reduce_db_template(FUSED_GELU_BACK_WG_COLS, REDUCE_DB_WORKGROUP);
+        let reduce_db_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("st.tensor.wgpu_dense.reduce_db"),
+            source: wgpu::ShaderSource::Wgsl(reduce_db_shader_source.into()),
+        });
+        let reduce_db_pipeline = Arc::new(device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("st.tensor.wgpu_dense.reduce_db"),
+                layout: Some(&reduce_db_pipeline_layout),
+                module: &reduce_db_shader,
+                entry_point: "reduce",
+            },
+        ));
+
         let fused_attention = std::panic::catch_unwind(AssertUnwindSafe(|| {
             let shader_source = FUSED_ATTENTION_WGSL_TEMPLATE
                 .replace("{WORKGROUP_SIZE}", &FUSED_ATTENTION_WORKGROUP.to_string())
@@ -698,6 +854,10 @@ impl GpuContext {
             softmax_layout,
             softmax_pipeline,
             fused_attention,
+            fused_gelu_back_layout,
+            fused_gelu_back_pipeline,
+            reduce_db_layout,
+            reduce_db_pipeline,
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
@@ -903,6 +1063,68 @@ impl GpuContext {
         })
     }
 
+    fn fused_gelu_back_bind_group(
+        &self,
+        z: &Buffer,
+        g: &Buffer,
+        gz_out: &Buffer,
+        dr: &Buffer,
+        partials: &Buffer,
+        uniforms: &Buffer,
+    ) -> BindGroup {
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.fused_gelu_back.bind_group"),
+            layout: &self.fused_gelu_back_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: z.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: g.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: gz_out.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: dr.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: partials.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: uniforms.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    fn reduce_db_bind_group(&self, partials: &Buffer, db: &Buffer, uniforms: &Buffer) -> BindGroup {
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.reduce_db.bind_group"),
+            layout: &self.reduce_db_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: partials.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: db.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: uniforms.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
     fn fused_conv_pipeline_for(&self, config: TileConfig) -> Arc<ComputePipeline> {
         let mut pipelines = self.fused_conv_pipelines.lock().unwrap();
         if let Some(pipeline) = pipelines.get(&config) {
@@ -987,6 +1209,18 @@ fn instantiate_tile_template(template: &str, config: TileConfig) -> String {
         .replace("{tile_nk}", &(tile_nk.to_string() + "u"))
 }
 
+fn instantiate_fused_gelu_back_template(template: &str, wg_rows: u32, wg_cols: u32) -> String {
+    template
+        .replace("{WG_ROWS}", &wg_rows.to_string())
+        .replace("{WG_COLS}", &wg_cols.to_string())
+}
+
+fn instantiate_reduce_db_template(template: &str, wg_cols: u32, reduce_wg: u32) -> String {
+    template
+        .replace("{WG_COLS}", &wg_cols.to_string())
+        .replace("{REDUCE_WG}", &reduce_wg.to_string())
+}
+
 static CONTEXT: OnceLock<Arc<GpuContext>> = OnceLock::new();
 
 fn dense_context() -> Result<Arc<GpuContext>, String> {
@@ -1014,6 +1248,25 @@ struct RowSoftmaxParams {
     cols: u32,
     in_stride: u32,
     out_stride: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct FusedGeluBackUniforms {
+    b: u32,
+    o: u32,
+    stride: u32,
+    num_wg_x: u32,
+    num_wg_y: u32,
+    add_dr: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct ReduceDbUniforms {
+    o: u32,
+    num_wg_x: u32,
+    num_wg_y: u32,
 }
 
 #[repr(C, align(16))]
@@ -1813,6 +2066,164 @@ fn matmul_with_bias_activation(
     queue.submit(Some(encoder.finish()));
 
     readback_f32(device, queue, &out_buf, rows * cols)
+}
+
+pub fn fused_gelu_backward(
+    z: &[f32],
+    grad: &[f32],
+    residual_grad: Option<&[f32]>,
+    rows: usize,
+    cols: usize,
+) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
+    if rows == 0 || cols == 0 {
+        return Err("tensor dimensions must be positive".into());
+    }
+    let expected = rows * cols;
+    if z.len() != expected {
+        return Err(format!(
+            "z length mismatch: expected {} elements, got {}",
+            expected,
+            z.len()
+        ));
+    }
+    if grad.len() != expected {
+        return Err(format!(
+            "grad length mismatch: expected {} elements, got {}",
+            expected,
+            grad.len()
+        ));
+    }
+    if let Some(residual) = residual_grad {
+        if residual.len() != expected {
+            return Err(format!(
+                "residual gradient length mismatch: expected {} elements, got {}",
+                expected,
+                residual.len()
+            ));
+        }
+    }
+
+    let rows_u32 = u32::try_from(rows).map_err(|_| "rows exceed u32::MAX".to_string())?;
+    let cols_u32 = u32::try_from(cols).map_err(|_| "cols exceed u32::MAX".to_string())?;
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let z_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.gelu_back.z"),
+        contents: bytemuck::cast_slice(z),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let grad_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.gelu_back.grad"),
+        contents: bytemuck::cast_slice(grad),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let gz_buf = allocate_output(device, "st.tensor.wgpu_dense.gelu_back.gz", expected);
+
+    let mut residual_data = match residual_grad {
+        Some(data) => data.to_vec(),
+        None => vec![0.0; expected],
+    };
+    let dr_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.gelu_back.dr"),
+        contents: bytemuck::cast_slice(&residual_data),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+
+    let num_wg_x = (cols_u32 + FUSED_GELU_BACK_WG_COLS - 1) / FUSED_GELU_BACK_WG_COLS;
+    let num_wg_y = (rows_u32 + FUSED_GELU_BACK_WG_ROWS - 1) / FUSED_GELU_BACK_WG_ROWS;
+    let partial_len = (num_wg_x * num_wg_y * FUSED_GELU_BACK_WG_COLS) as usize;
+    let partials_zero = vec![0.0f32; partial_len];
+    let partials_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.gelu_back.partials"),
+        contents: bytemuck::cast_slice(&partials_zero),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+
+    let db_buf = allocate_output(device, "st.tensor.wgpu_dense.gelu_back.db", cols);
+
+    let fused_uniforms = FusedGeluBackUniforms {
+        b: rows_u32,
+        o: cols_u32,
+        stride: cols_u32,
+        num_wg_x,
+        num_wg_y,
+        add_dr: if residual_grad.is_some() { 1 } else { 0 },
+    };
+    let fused_uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.gelu_back.uniforms"),
+        contents: bytemuck::bytes_of(&fused_uniforms),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let reduce_uniforms = ReduceDbUniforms {
+        o: cols_u32,
+        num_wg_x,
+        num_wg_y,
+    };
+    let reduce_uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.gelu_back.reduce_uniforms"),
+        contents: bytemuck::bytes_of(&reduce_uniforms),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let fused_bind_group = ctx.fused_gelu_back_bind_group(
+        &z_buf,
+        &grad_buf,
+        &gz_buf,
+        &dr_buf,
+        &partials_buf,
+        &fused_uniform_buf,
+    );
+    let reduce_bind_group = ctx.reduce_db_bind_group(&partials_buf, &db_buf, &reduce_uniform_buf);
+
+    let fused_pipeline = ctx.fused_gelu_back_pipeline.clone();
+    let reduce_pipeline = ctx.reduce_db_pipeline.clone();
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.gelu_back.encoder"),
+    });
+
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.gelu_back.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(fused_pipeline.as_ref());
+        pass.set_bind_group(0, &fused_bind_group, &[]);
+        pass.dispatch_workgroups(num_wg_x, num_wg_y, 1);
+    }
+
+    let reduce_groups = (cols_u32 + REDUCE_DB_WORKGROUP - 1) / REDUCE_DB_WORKGROUP;
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.gelu_back.reduce"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(reduce_pipeline.as_ref());
+        pass.set_bind_group(0, &reduce_bind_group, &[]);
+        pass.dispatch_workgroups(reduce_groups, 1, 1);
+    }
+
+    queue.submit(Some(encoder.finish()));
+
+    let gz = readback_f32(device, queue, &gz_buf, expected)?;
+    let dr_out = readback_f32(device, queue, &dr_buf, expected)?;
+    let db = readback_f32(device, queue, &db_buf, cols)?;
+
+    Ok((gz, dr_out, db))
+}
+
+pub fn gelu_backward(
+    z: &[f32],
+    grad: &[f32],
+    rows: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    let (gz, _dr, _db) = fused_gelu_backward(z, grad, None, rows, cols)?;
+    Ok(gz)
 }
 
 pub fn row_softmax(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {

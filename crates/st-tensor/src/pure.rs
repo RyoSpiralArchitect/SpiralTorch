@@ -2345,6 +2345,34 @@ impl Tensor {
         }
     }
 
+    /// Applies the derivative of GELU to the provided gradient tensor.
+    pub fn gelu_backward(&self, grad_output: &Tensor) -> PureResult<Tensor> {
+        if self.shape() != grad_output.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: grad_output.shape(),
+            });
+        }
+        let (rows, cols) = self.shape();
+
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available() {
+                if let Ok(buffer) =
+                    wgpu_dense::gelu_backward(self.data(), grad_output.data(), rows, cols)
+                {
+                    return Tensor::from_vec(rows, cols, buffer);
+                }
+            }
+        }
+
+        let mut data = Vec::with_capacity(rows * cols);
+        for (z, g) in self.data().iter().zip(grad_output.data().iter()) {
+            data.push(gelu_prime(*z) * g);
+        }
+        Tensor::from_vec(rows, cols, data)
+    }
+
     /// Returns the transpose of the tensor.
     pub fn transpose(&self) -> Tensor {
         let mut data = vec![0.0; self.rows * self.cols];
@@ -4254,6 +4282,15 @@ fn gelu(x: f32) -> f32 {
     0.5 * x * (1.0 + (SQRT_2_OVER_PI * (x + COEFF * x_cubed)).tanh())
 }
 
+fn gelu_prime(x: f32) -> f32 {
+    const SQRT_2_OVER_PI: f32 = 0.797_884_560_802_865_4;
+    const KAPPA: f32 = 0.044_715;
+    let x2 = x * x;
+    let inner = SQRT_2_OVER_PI * (x + KAPPA * x * x2);
+    let t = inner.tanh();
+    0.5 * (1.0 + t) + 0.5 * x * (1.0 - t * t) * SQRT_2_OVER_PI * (1.0 + 3.0 * KAPPA * x2)
+}
+
 fn add_bias_gelu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {
     for r in 0..rows {
         let offset = r * cols;
@@ -4394,6 +4431,57 @@ mod tests {
         assert_eq!(fused.shape(), reference.shape());
         for (a, b) in fused.data().iter().zip(reference.data().iter()) {
             assert!((a - b).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn tensor_gelu_backward_matches_manual() {
+        let input = Tensor::from_vec(2, 3, vec![-1.0, 0.25, 0.75, -0.5, 0.0, 1.25]).unwrap();
+        let grad = Tensor::from_vec(2, 3, vec![0.5, -0.75, 0.3, -0.2, 0.4, 0.1]).unwrap();
+        let result = input.gelu_backward(&grad).unwrap();
+        for ((z, g), value) in input
+            .data()
+            .iter()
+            .zip(grad.data().iter())
+            .zip(result.data().iter())
+        {
+            let expected = gelu_prime(*z) * g;
+            assert!((expected - value).abs() < 1e-6);
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn wgpu_fused_gelu_backward_matches_cpu() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let rows = 4;
+        let cols = 5;
+        let z: Vec<f32> = (0..rows * cols).map(|i| (i as f32 * 0.1) - 1.0).collect();
+        let grad: Vec<f32> = (0..rows * cols)
+            .map(|i| ((i as f32 % 7.0) - 3.0) * 0.2)
+            .collect();
+        let residual: Vec<f32> = vec![0.05; rows * cols];
+        let (gz, dr, db) =
+            wgpu_dense::fused_gelu_backward(&z, &grad, Some(&residual), rows, cols).unwrap();
+
+        for ((z_val, g_val), gz_val) in z.iter().zip(grad.iter()).zip(gz.iter()) {
+            let expected = gelu_prime(*z_val) * g_val;
+            assert!((expected - gz_val).abs() < 1e-5);
+        }
+
+        for ((gz_val, residual_val), dr_val) in gz.iter().zip(residual.iter()).zip(dr.iter()) {
+            let expected = gz_val + residual_val;
+            assert!((expected - dr_val).abs() < 1e-5);
+        }
+
+        for c in 0..cols {
+            let mut expected = 0.0f32;
+            for r in 0..rows {
+                expected += gz[r * cols + c];
+            }
+            assert!((expected - db[c]).abs() < 1e-4);
         }
     }
 
