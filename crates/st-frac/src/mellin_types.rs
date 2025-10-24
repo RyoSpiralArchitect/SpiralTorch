@@ -41,10 +41,14 @@ pub enum MellinError {
     EmptySamples,
     #[error("at least two samples required for trapezoidal rule")]
     InsufficientSamples,
+    #[error("mellin lattices differ (length/start/step mismatch)")]
+    LatticeMismatch,
     #[error("function evaluated to a non-finite value at x={x}")]
     NonFiniteFunctionValue { x: Scalar },
     #[error("sample {index} produced a non-finite value")]
     NonFiniteSample { index: usize },
+    #[error("inner product evaluated negative: {value:?}")]
+    NegativeInnerProduct { value: ComplexScalar },
     // New: explicit invalid z
     #[error("z value is not finite: re={re}, im={im}")]
     NonFiniteZ { re: Scalar, im: Scalar },
