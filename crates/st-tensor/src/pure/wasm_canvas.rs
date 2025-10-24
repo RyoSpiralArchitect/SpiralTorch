@@ -642,15 +642,14 @@ impl ColorVectorField {
                 volume: rows.saturating_mul(cols),
                 max_volume: usize::MAX,
             })?;
-        let expected_len = expected_pairs
-            .checked_mul(Self::FFT_INTERLEAVED_STRIDE)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_polar",
-                volume: rows
-                    .saturating_mul(cols)
-                    .saturating_mul(Self::FFT_INTERLEAVED_STRIDE),
-                max_volume: usize::MAX,
-            })?;
+        let expected_len =
+            expected_pairs
+                .checked_mul(8)
+                .ok_or(TensorError::TensorVolumeExceeded {
+                    label: "canvas_fft_polar",
+                    volume: rows.saturating_mul(cols).saturating_mul(8),
+                    max_volume: usize::MAX,
+                })?;
 
         if spectrum.len() != expected_len {
             return Err(TensorError::DataLength {
@@ -768,15 +767,14 @@ impl ColorVectorField {
                 volume: rows.saturating_mul(cols),
                 max_volume: usize::MAX,
             })?;
-        let expected_len = expected_pairs
-            .checked_mul(Self::FFT_INTERLEAVED_STRIDE)
-            .ok_or(TensorError::TensorVolumeExceeded {
-                label: "canvas_fft_power",
-                volume: rows
-                    .saturating_mul(cols)
-                    .saturating_mul(Self::FFT_INTERLEAVED_STRIDE),
-                max_volume: usize::MAX,
-            })?;
+        let expected_len =
+            expected_pairs
+                .checked_mul(8)
+                .ok_or(TensorError::TensorVolumeExceeded {
+                    label: "canvas_fft_power",
+                    volume: rows.saturating_mul(cols).saturating_mul(8),
+                    max_volume: usize::MAX,
+                })?;
 
         if spectrum_len != expected_len {
             return Err(TensorError::DataLength {
