@@ -768,11 +768,11 @@ impl GpuContext {
         }
 
         let dtype = if should_quantize(packed.inner(), packed.cols()) {
-            ScalarType::QuantizedI8
+            WeightDType::Int8
         } else {
-            ScalarType::F32
+            WeightDType::F32
         };
-        let key = RhsCacheKey::new(packed, tile, dtype);
+        let key = RhsCacheKey::new(packed, tile, dtype.to_scalar());
         if let Some(existing) = self
             .weights_cache
             .lock()
@@ -784,7 +784,7 @@ impl GpuContext {
         }
 
         let (buffer, scales) = match dtype {
-            ScalarType::QuantizedI8 => {
+            WeightDType::Int8 => {
                 let (quantized, scales_vec, _total) = pack_rhs_int8(packed, tile);
                 let buffer = Arc::new(self.device().create_buffer_init(
                     &wgpu::util::BufferInitDescriptor {
@@ -802,7 +802,7 @@ impl GpuContext {
                 ));
                 (buffer, Some(scales))
             }
-            ScalarType::F32 => {
+            WeightDType::F32 => {
                 let (values, _total) = pack_rhs_f32(packed, tile);
                 let buffer = Arc::new(self.device().create_buffer_init(
                     &wgpu::util::BufferInitDescriptor {
@@ -817,7 +817,7 @@ impl GpuContext {
 
         let prepared = Arc::new(GpuPackedRhs {
             tile,
-            dtype,
+            dtype: dtype.to_scalar(),
             buffer,
             scales,
             _cols: packed.cols(),
@@ -1178,6 +1178,10 @@ impl GpuPackedRhs {
 
     fn dtype(&self) -> ScalarType {
         self.dtype
+    }
+
+    fn tile(&self) -> TileConfig {
+        self.tile
     }
 }
 
@@ -1597,8 +1601,9 @@ pub fn matmul_prepacked(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.prepacked.encoder"),
     });
-    let tile = select_tile_config(rows, inner, cols);
-    let weights = ctx.rhs_from_packed(packed_rhs, tile)?;
+    let requested_tile = select_tile_config(rows, inner, cols);
+    let weights = ctx.rhs_from_packed(packed_rhs, requested_tile)?;
+    let tile = weights.tile();
     let rhs_buffers = WeightBuffers {
         buffer: weights.buffer(),
         dtype: weights.dtype(),
