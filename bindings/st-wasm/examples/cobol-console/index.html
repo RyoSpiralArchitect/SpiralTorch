@@ -205,6 +205,100 @@
             </div>
             <div class="inline">
               <label>
+                Dataset organization (DSORG)
+                <input
+                  id="dataset-organization"
+                  name="dataset-organization"
+                  placeholder="PO"
+                />
+              </label>
+              <label>
+                Key length
+                <input
+                  id="dataset-key-length"
+                  name="dataset-key-length"
+                  type="number"
+                  min="1"
+                  placeholder="64"
+                />
+              </label>
+              <label>
+                Key offset
+                <input
+                  id="dataset-key-offset"
+                  name="dataset-key-offset"
+                  type="number"
+                  min="0"
+                  placeholder="0"
+                />
+              </label>
+            </div>
+            <div class="inline">
+              <label>
+                Control interval size
+                <input
+                  id="dataset-ci-size"
+                  name="dataset-ci-size"
+                  type="number"
+                  min="512"
+                  step="512"
+                  placeholder="4096"
+                />
+              </label>
+              <label>
+                Unit count
+                <input
+                  id="dataset-unit-count"
+                  name="dataset-unit-count"
+                  type="number"
+                  min="1"
+                  placeholder="3"
+                />
+              </label>
+              <label>
+                Catalog behavior
+                <select id="dataset-catalog-behavior" name="dataset-catalog-behavior">
+                  <option value="">System default</option>
+                  <option value="CATALOG">CATALOG</option>
+                  <option value="UNCATALOG">UNCATALOG</option>
+                  <option value="NOCAT">NOCAT</option>
+                </select>
+              </label>
+            </div>
+            <div class="inline">
+              <label>
+                Share option (cross-region)
+                <input
+                  id="dataset-share-cross-region"
+                  name="dataset-share-cross-region"
+                  type="number"
+                  min="1"
+                  max="4"
+                  placeholder="3"
+                />
+              </label>
+              <label>
+                Share option (cross-system)
+                <input
+                  id="dataset-share-cross-system"
+                  name="dataset-share-cross-system"
+                  type="number"
+                  min="1"
+                  max="4"
+                  placeholder="3"
+                />
+              </label>
+              <label>
+                VSAM reuse behavior
+                <select id="dataset-reuse" name="dataset-reuse">
+                  <option value="">System default</option>
+                  <option value="REUSE">REUSE</option>
+                  <option value="NOREUSE">NOREUSE</option>
+                </select>
+              </label>
+            </div>
+            <div class="inline">
+              <label>
                 Allocation unit (UNIT)
                 <input id="dataset-unit" name="dataset-unit" placeholder="SYSDA" />
               </label>
@@ -235,6 +329,18 @@
                   name="dataset-release-space"
                 />
                 Release space on close (RLSE)
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="dataset-erase" name="dataset-erase" />
+                Erase dataset on delete (ERASE)
+              </label>
+              <label>
+                VSAM logging
+                <select id="dataset-log" name="dataset-log">
+                  <option value="">System default</option>
+                  <option value="LOG">LOG</option>
+                  <option value="NOLOG">NOLOG</option>
+                </select>
               </label>
               <label>
                 Expiration date (YYYYDDD)

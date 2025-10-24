@@ -12,7 +12,7 @@ crate-type = ["rlib", "cdylib"]
 [features]
 default = ["cpu", "faer"]
 faer = ["dep:faer"]
-simd = ["dep:wide"]
+simd = []
 
 # CPU execution is always available, but expose a feature so that downstream
 # crates can opt into a uniform interface when selecting backends.
@@ -44,8 +44,6 @@ serde = { version = "1.0", features = ["derive"], default-features = false }
 faer = { version = "0.18", default-features = false, features = ["std", "rayon"], optional = true }
 # Parallel execution for tiled CPU kernels.
 rayon = { version = "1.10" }
-# Portable SIMD vector types backing the tiled micro-kernel.
-wide = { version = "0.7", optional = true }
 # Optional; only needed if building WGPU kernel
 wgpu = { version = "0.19", optional = true }
 bytemuck = { version = "1.15", features = ["derive"], optional = true }

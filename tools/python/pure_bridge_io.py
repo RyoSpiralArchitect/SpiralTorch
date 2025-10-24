@@ -198,12 +198,29 @@ def select_entries(
     limit: int | None = None,
     shuffle: bool = False,
     seed: int | None = None,
+    offset: int = 0,
+    every: int | None = None,
 ) -> List[T]:
-    """Return a possibly shuffled and truncated list of ``values``."""
+    """Return a possibly shuffled and truncated list of ``values``.
+
+    The parameters apply in the following order: shuffle (if requested), offset,
+    stride (``every``), and finally the limit.  ``offset`` and ``every`` allow
+    selecting deterministic slices (e.g. skip headers, take every Nth entry)
+    independently from shuffling.
+    """
+
+    if offset < 0:
+        raise ValueError("Offset must be a non-negative integer")
+    if every is not None and every <= 0:
+        raise ValueError("Every must be a positive integer when provided")
 
     items = list(values)
     if shuffle:
         Random(seed).shuffle(items)
+    if offset:
+        items = items[offset:]
+    if every is not None:
+        items = items[::every]
     if limit is not None:
         if limit < 0:
             raise ValueError("Limit must be a non-negative integer")

@@ -18,6 +18,11 @@ const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wg
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
 const ROW_SOFTMAX_WGSL: &str =
     include_str!("../../../st-backend-wgpu/src/shaders/softmax_workgroup.wgsl");
+const FUSED_ATTENTION_WGSL_TEMPLATE: &str =
+    include_str!("../../../st-backend-wgpu/src/shaders/fused_attention_online.wgsl");
+
+const FUSED_ATTENTION_WORKGROUP: u32 = 128;
+const FUSED_ATTENTION_MAX_HEAD_DIM: u32 = 256;
 
 const FLAG_USE_BIAS: u32 = 1 << 0;
 const FLAG_FUSED_RELU: u32 = 1 << 1;
@@ -27,6 +32,9 @@ const FLAG_USE_INT8: u32 = 1 << 4;
 const FLAG_USE_F16: u32 = 1 << 5;
 
 const QUANTIZATION_MIN_VOLUME: usize = 64 * 64;
+
+const FUSED_ATTENTION_FLAG_USE_Z_BIAS: u32 = 1 << 0;
+const FUSED_ATTENTION_FLAG_USE_ATTN_BIAS: u32 = 1 << 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum ScalarType {
@@ -185,9 +193,16 @@ struct GpuContext {
     supports_subgroup: bool,
     softmax_layout: BindGroupLayout,
     softmax_pipeline: Option<Arc<ComputePipeline>>,
+    fused_attention: Option<FusedAttentionKernel>,
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
+}
+
+struct FusedAttentionKernel {
+    layout: BindGroupLayout,
+    pipeline: Arc<ComputePipeline>,
+    max_head_dim: u32,
 }
 
 impl GpuContext {
@@ -374,6 +389,110 @@ impl GpuContext {
         }))
         .ok();
 
+        let fused_attention = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            let shader_source = FUSED_ATTENTION_WGSL_TEMPLATE
+                .replace("{WORKGROUP_SIZE}", &FUSED_ATTENTION_WORKGROUP.to_string())
+                .replace("{MAX_HEAD_DIM}", &FUSED_ATTENTION_MAX_HEAD_DIM.to_string());
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_attention.shader"),
+                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+            });
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_attention.layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_attention.pipeline_layout"),
+                bind_group_layouts: &[&layout],
+                push_constant_ranges: &[],
+            });
+            let pipeline = Arc::new(device.create_compute_pipeline(
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("st.tensor.wgpu_dense.fused_attention"),
+                    layout: Some(&pipeline_layout),
+                    module: &shader,
+                    entry_point: "main",
+                },
+            ));
+            FusedAttentionKernel {
+                layout,
+                pipeline,
+                max_head_dim: FUSED_ATTENTION_MAX_HEAD_DIM,
+            }
+        }))
+        .ok();
+
         let fused_conv_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("st.tensor.wgpu_dense.fused_conv_layout"),
             entries: &[
@@ -438,6 +557,7 @@ impl GpuContext {
             supports_subgroup,
             softmax_layout,
             softmax_pipeline,
+            fused_attention,
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
@@ -496,6 +616,57 @@ impl GpuContext {
 
     fn softmax_pipeline(&self) -> Option<Arc<ComputePipeline>> {
         self.softmax_pipeline.as_ref().map(Arc::clone)
+    }
+
+    fn fused_attention_kernel(&self) -> Option<&FusedAttentionKernel> {
+        self.fused_attention.as_ref()
+    }
+
+    fn fused_attention_bind_group(
+        &self,
+        kernel: &FusedAttentionKernel,
+        queries: &Buffer,
+        keys: &Buffer,
+        values: &Buffer,
+        z_bias: &Buffer,
+        attn_bias: &Buffer,
+        output: &Buffer,
+        params: &Buffer,
+    ) -> BindGroup {
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.fused_attention.bind_group"),
+            layout: &kernel.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: queries.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: keys.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: values.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: z_bias.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: attn_bias.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: output.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: params.as_entire_binding(),
+                },
+            ],
+        })
     }
 
     fn softmax_bind_group(&self, input: &Buffer, output: &Buffer, params: &Buffer) -> BindGroup {
@@ -630,6 +801,19 @@ struct RowSoftmaxParams {
     cols: u32,
     in_stride: u32,
     out_stride: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct FusedAttentionParams {
+    contexts: u32,
+    sequence: u32,
+    head_dim: u32,
+    flags: u32,
+    scale: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 }
 
 #[repr(C, align(16))]
@@ -1246,6 +1430,184 @@ pub fn supports_row_softmax(rows: usize, cols: usize) -> bool {
     }
     if let Ok(ctx) = dense_context() {
         ctx.supports_softmax()
+    } else {
+        false
+    }
+}
+
+pub fn fused_attention(
+    queries: &[f32],
+    keys: &[f32],
+    values: &[f32],
+    contexts: usize,
+    sequence: usize,
+    head_dim: usize,
+    scale: f32,
+    z_bias: Option<&[f32]>,
+    attn_bias: Option<&[f32]>,
+) -> Result<Vec<f32>, String> {
+    if contexts == 0 || sequence == 0 || head_dim == 0 {
+        return Err("attention dimensions must be positive".into());
+    }
+
+    let volume = contexts
+        .checked_mul(sequence)
+        .and_then(|v| v.checked_mul(head_dim))
+        .ok_or_else(|| "attention volume exceeds usize range".to_string())?;
+
+    if queries.len() != volume {
+        return Err(format!(
+            "query buffer length mismatch: expected {} elements, got {}",
+            volume,
+            queries.len()
+        ));
+    }
+    if keys.len() != volume {
+        return Err(format!(
+            "key buffer length mismatch: expected {} elements, got {}",
+            volume,
+            keys.len()
+        ));
+    }
+    if values.len() != volume {
+        return Err(format!(
+            "value buffer length mismatch: expected {} elements, got {}",
+            volume,
+            values.len()
+        ));
+    }
+
+    if let Some(bias) = z_bias {
+        let expected = contexts * sequence;
+        if bias.len() != expected {
+            return Err(format!(
+                "z-bias length mismatch: expected {} elements, got {}",
+                expected,
+                bias.len()
+            ));
+        }
+    }
+
+    if let Some(bias) = attn_bias {
+        let expected = contexts
+            .checked_mul(sequence)
+            .and_then(|v| v.checked_mul(sequence))
+            .ok_or_else(|| "attention bias volume exceeds usize range".to_string())?;
+        if bias.len() != expected {
+            return Err(format!(
+                "attention bias length mismatch: expected {} elements, got {}",
+                expected,
+                bias.len()
+            ));
+        }
+    }
+
+    if contexts > u32::MAX as usize || sequence > u32::MAX as usize || head_dim > u32::MAX as usize
+    {
+        return Err("attention dimensions exceed u32 dispatch range".into());
+    }
+
+    let ctx = dense_context()?;
+    let kernel = ctx
+        .fused_attention_kernel()
+        .ok_or_else(|| "fused attention kernel unavailable on this device".to_string())?;
+
+    if (head_dim as u32) > kernel.max_head_dim {
+        return Err(format!(
+            "head dimension {} exceeds templated maximum {}",
+            head_dim, kernel.max_head_dim
+        ));
+    }
+
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let query_buf = upload_lhs(device, "st.tensor.wgpu_dense.attn.queries", queries);
+    let key_buf = upload_lhs(device, "st.tensor.wgpu_dense.attn.keys", keys);
+    let value_buf = upload_lhs(device, "st.tensor.wgpu_dense.attn.values", values);
+    let output_buf = allocate_output(device, "st.tensor.wgpu_dense.attn.output", volume);
+
+    let z_bias_buf =
+        z_bias.map(|data| upload_lhs(device, "st.tensor.wgpu_dense.attn.z_bias", data));
+    let attn_bias_buf =
+        attn_bias.map(|data| upload_lhs(device, "st.tensor.wgpu_dense.attn.attn_bias", data));
+    let zero_storage = ctx.zero_storage_buffer();
+    let z_binding = z_bias_buf
+        .as_ref()
+        .map(|buf| buf)
+        .unwrap_or_else(|| zero_storage.as_ref());
+    let attn_binding = attn_bias_buf
+        .as_ref()
+        .map(|buf| buf)
+        .unwrap_or_else(|| zero_storage.as_ref());
+
+    let flags = {
+        let mut mask = 0u32;
+        if z_bias.is_some() {
+            mask |= FUSED_ATTENTION_FLAG_USE_Z_BIAS;
+        }
+        if attn_bias.is_some() {
+            mask |= FUSED_ATTENTION_FLAG_USE_ATTN_BIAS;
+        }
+        mask
+    };
+
+    let params = FusedAttentionParams {
+        contexts: contexts as u32,
+        sequence: sequence as u32,
+        head_dim: head_dim as u32,
+        flags,
+        scale,
+        _pad0: 0.0,
+        _pad1: 0.0,
+        _pad2: 0.0,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.attn.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let bind_group = ctx.fused_attention_bind_group(
+        kernel,
+        &query_buf,
+        &key_buf,
+        &value_buf,
+        z_binding,
+        attn_binding,
+        &output_buf,
+        &params_buf,
+    );
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.attn.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.attn.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(kernel.pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(sequence as u32, contexts as u32, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &output_buf, volume)
+}
+
+pub fn supports_fused_attention(contexts: usize, sequence: usize, head_dim: usize) -> bool {
+    if contexts == 0 || sequence == 0 || head_dim == 0 {
+        return false;
+    }
+    if contexts > u32::MAX as usize || sequence > u32::MAX as usize || head_dim > u32::MAX as usize
+    {
+        return false;
+    }
+    if let Ok(ctx) = dense_context() {
+        ctx.fused_attention_kernel()
+            .filter(|kernel| (head_dim as u32) <= kernel.max_head_dim)
+            .is_some()
     } else {
         false
     }

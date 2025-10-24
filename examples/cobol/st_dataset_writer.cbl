@@ -8,8 +8,8 @@
        DATA DIVISION.
        WORKING-STORAGE SECTION.
        01  WS-ROUTE.
-           05  WS-DATASET-NAME        PIC X(44) VALUE 'ST.DATA.NARRATION(+1)'.
-           05  WS-MEMBER              PIC X(8)  VALUE 'NARRATE '.
+           05  WS-DATASET-NAME        PIC X(44) VALUE 'ST.VSAM.NARRATION'.
+           05  WS-MEMBER              PIC X(8)  VALUE SPACES.
            05  WS-DISPOSITION         PIC X(3)  VALUE 'NEW'.
            05  WS-VOLUME              PIC X(6)  VALUE 'VOL001'.
            05  WS-RECORD-FORMAT       PIC X(4)  VALUE 'FB'.
@@ -21,14 +21,25 @@
            05  WS-SPACE-PRIMARY       PIC 9(5)  VALUE 15.
            05  WS-SPACE-SECONDARY     PIC 9(5)  VALUE 5.
            05  WS-SPACE-UNIT          PIC X(3)  VALUE 'CYL'.
-           05  WS-DIRECTORY-BLOCKS    PIC 9(5)  VALUE 30.
-           05  WS-DATASET-TYPE        PIC X(8)  VALUE 'LIBRARY'.
-           05  WS-LIKE-DATASET        PIC X(44) VALUE 'ST.DATA.TEMPLATE'.
+           05  WS-DIRECTORY-BLOCKS    PIC 9(5)  VALUE 00000.
+           05  WS-DATASET-TYPE        PIC X(8)  VALUE SPACES.
+           05  WS-LIKE-DATASET        PIC X(44) VALUE 'ST.VSAM.TEMPLATE'.
+           05  WS-ORGANIZATION        PIC X(2)  VALUE 'VS'.
+           05  WS-KEY-LENGTH          PIC 9(5)  VALUE 00064.
+           05  WS-KEY-OFFSET          PIC 9(5)  VALUE 00000.
+           05  WS-CI-SIZE             PIC 9(5)  VALUE 04096.
+           05  WS-SHARE-CROSS-REGION  PIC 9     VALUE 3.
+           05  WS-SHARE-CROSS-SYSTEM  PIC 9     VALUE 3.
+           05  WS-REUSE-FLAG          PIC X     VALUE 'Y'.
+           05  WS-LOG-FLAG            PIC X     VALUE 'N'.
            05  WS-UNIT                PIC X(8)  VALUE 'SYSDA'.
+           05  WS-UNIT-COUNT          PIC 9(2)  VALUE 03.
            05  WS-AVGREC              PIC X(1)  VALUE 'K'.
+           05  WS-CATALOG-BEHAVIOR    PIC X(9)  VALUE 'CATALOG '.
            05  WS-RETENTION           PIC 9(4)  VALUE 0045.
            05  WS-RELEASE-SPACE       PIC X     VALUE 'Y'.
-           05  WS-EXPIRATION          PIC 9(7)  VALUE 2025123.
+           05  WS-ERASE-FLAG          PIC X     VALUE 'Y'.
+            05  WS-EXPIRATION          PIC 9(7)  VALUE 2025123.
        01  WS-DSORG                  PIC X(2)  VALUE SPACES.
        01  WS-TARGET-DSN             PIC X(64) VALUE SPACES.
        01  WS-TARGET-POINTER         PIC S9(4) COMP VALUE 1.
@@ -39,17 +50,28 @@
        01  WS-PRIMARY-TEXT           PIC 9(5)   VALUE ZEROES.
        01  WS-SECONDARY-TEXT         PIC 9(5)   VALUE ZEROES.
        01  WS-DIRECTORY-TEXT         PIC 9(5)   VALUE ZEROES.
+       01  WS-KEYLEN-TEXT            PIC Z(5)   VALUE ZEROES.
+       01  WS-KEYOFF-TEXT            PIC Z(5)   VALUE ZEROES.
+       01  WS-CI-TEXT                PIC Z(5)   VALUE ZEROES.
+       01  WS-UNITCOUNT-TEXT         PIC Z(2)   VALUE ZEROES.
+       01  WS-SHARECR-TEXT           PIC 9      VALUE ZERO.
+       01  WS-SHARECS-TEXT           PIC 9      VALUE ZERO.
        01  WS-RETENTION-TEXT         PIC Z(4)   VALUE ZEROES.
        01  WS-EXPIRATION-TEXT        PIC 9(7)   VALUE ZEROES.
        01  WS-RETURN-CODE            PIC S9(9) COMP VALUE ZERO.
        01  WS-MESSAGE                PIC X(80) VALUE SPACES.
 
        PROCEDURE DIVISION.
-           *> Determine DSORG based on whether a PDS member was supplied.
-           IF FUNCTION LENGTH(FUNCTION TRIM(WS-MEMBER)) > 0
-               MOVE 'PO' TO WS-DSORG
+           *> Determine DSORG, honoring explicit metadata overrides first.
+           MOVE SPACES TO WS-DSORG
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-ORGANIZATION)) > 0
+               MOVE FUNCTION TRIM(WS-ORGANIZATION) TO WS-DSORG
            ELSE
-               MOVE 'PS' TO WS-DSORG
+               IF FUNCTION LENGTH(FUNCTION TRIM(WS-MEMBER)) > 0
+                   MOVE 'PO' TO WS-DSORG
+               ELSE
+                   MOVE 'PS' TO WS-DSORG
+               END-IF
            END-IF
 
            *> Ensure the block size can hold an integral number of records.
@@ -84,6 +106,12 @@
            MOVE WS-SPACE-PRIMARY TO WS-PRIMARY-TEXT
            MOVE WS-SPACE-SECONDARY TO WS-SECONDARY-TEXT
            MOVE WS-DIRECTORY-BLOCKS TO WS-DIRECTORY-TEXT
+           MOVE WS-KEY-LENGTH TO WS-KEYLEN-TEXT
+           MOVE WS-KEY-OFFSET TO WS-KEYOFF-TEXT
+           MOVE WS-CI-SIZE TO WS-CI-TEXT
+           MOVE WS-UNIT-COUNT TO WS-UNITCOUNT-TEXT
+           MOVE WS-SHARE-CROSS-REGION TO WS-SHARECR-TEXT
+           MOVE WS-SHARE-CROSS-SYSTEM TO WS-SHARECS-TEXT
            MOVE WS-RETENTION TO WS-RETENTION-TEXT
            MOVE WS-EXPIRATION TO WS-EXPIRATION-TEXT
 
@@ -124,6 +152,48 @@
                INTO WS-ALLOC-CMD
                WITH POINTER WS-ALLOC-POINTER
            END-STRING
+
+           IF WS-KEY-LENGTH > 0
+               STRING
+                   'KEYLEN(' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-KEYLEN-TEXT) DELIMITED BY SIZE
+                   ') ' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
+
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-KEYOFF-TEXT)) > 0
+               STRING
+                   'KEYOFF(' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-KEYOFF-TEXT) DELIMITED BY SIZE
+                   ') ' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
+
+           IF WS-CI-SIZE > 0
+               STRING
+                   'CISIZE(' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-CI-TEXT) DELIMITED BY SIZE
+                   ') ' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
+
+           IF WS-SHARE-CROSS-REGION > 0 OR WS-SHARE-CROSS-SYSTEM > 0
+               STRING
+                   'SHR(' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-SHARECR-TEXT) DELIMITED BY SIZE
+                   ' ' DELIMITED BY SIZE
+                   FUNCTION TRIM(WS-SHARECS-TEXT) DELIMITED BY SIZE
+                   ') ' DELIMITED BY SIZE
+                   INTO WS-ALLOC-CMD
+                   WITH POINTER WS-ALLOC-POINTER
+               END-STRING
+           END-IF
 
            IF FUNCTION LENGTH(FUNCTION TRIM(WS-VOLUME)) > 0
                STRING
@@ -222,10 +292,20 @@
                 END-STRING
             END-IF
 
-            IF FUNCTION LENGTH(FUNCTION TRIM(WS-UNIT)) > 0
+           IF FUNCTION LENGTH(FUNCTION TRIM(WS-UNIT)) > 0
                 STRING
                     'UNIT(' DELIMITED BY SIZE
                     FUNCTION TRIM(WS-UNIT) DELIMITED BY SIZE
+                    ') ' DELIMITED BY SIZE
+                    INTO WS-ALLOC-CMD
+                    WITH POINTER WS-ALLOC-POINTER
+                END-STRING
+            END-IF
+
+            IF WS-UNIT-COUNT > 0
+                STRING
+                    'UNITCNT(' DELIMITED BY SIZE
+                    FUNCTION TRIM(WS-UNITCOUNT-TEXT) DELIMITED BY SIZE
                     ') ' DELIMITED BY SIZE
                     INTO WS-ALLOC-CMD
                     WITH POINTER WS-ALLOC-POINTER
@@ -242,6 +322,15 @@
                 END-STRING
             END-IF
 
+            IF FUNCTION LENGTH(FUNCTION TRIM(WS-CATALOG-BEHAVIOR)) > 0
+                STRING
+                    FUNCTION TRIM(WS-CATALOG-BEHAVIOR) DELIMITED BY SIZE
+                    ' ' DELIMITED BY SIZE
+                    INTO WS-ALLOC-CMD
+                    WITH POINTER WS-ALLOC-POINTER
+                END-STRING
+            END-IF
+
             IF WS-RETENTION > 0
                 STRING
                     'RETENTION(' DELIMITED BY SIZE
@@ -250,6 +339,54 @@
                     INTO WS-ALLOC-CMD
                     WITH POINTER WS-ALLOC-POINTER
                 END-STRING
+            END-IF
+
+            IF WS-REUSE-FLAG = 'Y'
+                STRING
+                    'REUSE ' DELIMITED BY SIZE
+                    INTO WS-ALLOC-CMD
+                    WITH POINTER WS-ALLOC-POINTER
+                END-STRING
+            ELSE
+                IF WS-REUSE-FLAG = 'N'
+                    STRING
+                        'NOREUSE ' DELIMITED BY SIZE
+                        INTO WS-ALLOC-CMD
+                        WITH POINTER WS-ALLOC-POINTER
+                    END-STRING
+                END-IF
+            END-IF
+
+            IF WS-LOG-FLAG = 'Y'
+                STRING
+                    'LOG ' DELIMITED BY SIZE
+                    INTO WS-ALLOC-CMD
+                    WITH POINTER WS-ALLOC-POINTER
+                END-STRING
+            ELSE
+                IF WS-LOG-FLAG = 'N'
+                    STRING
+                        'NOLOG ' DELIMITED BY SIZE
+                        INTO WS-ALLOC-CMD
+                        WITH POINTER WS-ALLOC-POINTER
+                    END-STRING
+                END-IF
+            END-IF
+
+            IF WS-ERASE-FLAG = 'Y'
+                STRING
+                    'ERASE ' DELIMITED BY SIZE
+                    INTO WS-ALLOC-CMD
+                    WITH POINTER WS-ALLOC-POINTER
+                END-STRING
+            ELSE
+                IF WS-ERASE-FLAG = 'N'
+                    STRING
+                        'NOERASE ' DELIMITED BY SIZE
+                        INTO WS-ALLOC-CMD
+                        WITH POINTER WS-ALLOC-POINTER
+                    END-STRING
+                END-IF
             END-IF
 
             IF WS-RELEASE-SPACE = 'Y'

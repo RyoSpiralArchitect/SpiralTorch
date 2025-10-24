@@ -157,6 +157,17 @@ fn build_runtime() -> Result<HipRuntime, HipErr> {
         ));
     }
 
+    let devices = finalize_devices(collect_env_devices(), true);
+    Ok(HipRuntime::new(devices))
+}
+
+fn build_runtime() -> Result<HipRuntime, HipErr> {
+    if !hip_env_available() {
+        return Err(HipErr::Other(
+            "HIP runtime not detected; set SPIRALTORCH_FORCE_HIP=1 or install ROCm".into(),
+        ));
+    }
+
     #[allow(unused_mut)]
     let mut devices = finalize_devices(collect_env_devices(), true);
 
