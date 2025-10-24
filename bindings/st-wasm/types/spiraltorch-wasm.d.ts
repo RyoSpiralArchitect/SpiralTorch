@@ -415,10 +415,21 @@ declare module "spiraltorch-wasm" {
         directory_blocks?: number;
         dataset_type?: string;
         like_dataset?: string;
+        organization?: string;
+        key_length?: number;
+        key_offset?: number;
+        control_interval_size?: number;
+        share_options_cross_region?: number;
+        share_options_cross_system?: number;
+        reuse?: boolean;
+        log?: boolean;
         unit?: string;
+        unit_count?: number;
         average_record_unit?: string;
+        catalog_behavior?: string;
         retention_period?: number;
         release_space?: boolean;
+        erase_on_delete?: boolean;
         expiration_date?: string;
     }
 
@@ -455,10 +466,21 @@ declare module "spiraltorch-wasm" {
         directory_blocks?: number;
         dataset_type?: string;
         like_dataset?: string;
+        organization?: string;
+        key_length?: number;
+        key_offset?: number;
+        control_interval_size?: number;
+        share_options_cross_region?: number;
+        share_options_cross_system?: number;
+        reuse?: boolean;
+        log?: boolean;
         unit?: string;
+        unit_count?: number;
         average_record_unit?: string;
+        catalog_behavior?: string;
         retention_period?: number;
         release_space?: boolean;
+        erase_on_delete?: boolean;
         expiration_date?: string;
     }
 
@@ -527,10 +549,21 @@ declare module "spiraltorch-wasm" {
         setDatasetDirectoryBlocks(directoryBlocks?: number | null): void;
         setDatasetType(datasetType?: string | null): void;
         setDatasetLike(likeDataset?: string | null): void;
+        setDatasetOrganization(organization?: string | null): void;
+        setDatasetKeyLength(keyLength?: number | null): void;
+        setDatasetKeyOffset(keyOffset?: number | null): void;
+        setDatasetControlIntervalSize(controlIntervalSize?: number | null): void;
+        setDatasetShareOptionsCrossRegion(shareOptionsCrossRegion?: number | null): void;
+        setDatasetShareOptionsCrossSystem(shareOptionsCrossSystem?: number | null): void;
+        setDatasetReuse(reuse?: boolean | null): void;
+        setDatasetLog(log?: boolean | null): void;
         setDatasetUnit(unit?: string | null): void;
+        setDatasetUnitCount(unitCount?: number | null): void;
         setDatasetAverageRecordUnit(averageRecordUnit?: string | null): void;
+        setDatasetCatalogBehavior(catalogBehavior?: string | null): void;
         setDatasetRetentionPeriod(retentionPeriod?: number | null): void;
         setDatasetReleaseSpace(releaseSpace?: boolean | null): void;
+        setDatasetEraseOnDelete(eraseOnDelete?: boolean | null): void;
         setDatasetExpirationDate(expirationDate?: string | null): void;
         clearDataset(): void;
         clearRoute(): void;

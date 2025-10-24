@@ -48,9 +48,11 @@ Open the printed URL (defaults to `http://localhost:5173/`) and populate the for
   Float32 series inside the browser (through WASM) when you want to test the pipeline.
 * **Mainframe routing:** Configure MQ/CICS/dataset sinks. Populate dataset members, DCB
   attributes (record format/length, block size), SMS classes, SPACE allocations, DSNTYPE,
-  LIKE templates, UNIT/AVGREC hints, retention days, RLSE, and expiration dates when staging
-  GDGs or sequential files. Any field you leave blank is omitted from the envelope so legacy
-  programs can decide how to route the narration.
+  LIKE templates, DSORG overrides, VSAM key length/offset/CI sizes, share options,
+  REUSE/LOG directives, UNIT/AVGREC hints, catalog options, unit counts, retention days,
+  RLSE/ERASE flags, and expiration dates when staging GDGs or sequential files. Any field you
+  leave blank is omitted from the envelope so legacy programs can decide how to route the
+  narration.
 * **Dispatch:** Supply the HTTP bridge endpoint that proxies requests into the mainframe. On
   submission the console shows the JSON envelope, a COBOL pointer preview, and the raw byte
   count. Hitting “Send to bridge” POSTs the `Uint8Array` returned by
