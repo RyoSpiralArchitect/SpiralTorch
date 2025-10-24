@@ -24,6 +24,11 @@
            05  WS-DIRECTORY-BLOCKS    PIC 9(5)  VALUE 30.
            05  WS-DATASET-TYPE        PIC X(8)  VALUE 'LIBRARY'.
            05  WS-LIKE-DATASET        PIC X(44) VALUE 'ST.DATA.TEMPLATE'.
+           05  WS-UNIT                PIC X(8)  VALUE 'SYSDA'.
+           05  WS-AVGREC              PIC X(1)  VALUE 'K'.
+           05  WS-RETENTION           PIC 9(4)  VALUE 0045.
+           05  WS-RELEASE-SPACE       PIC X     VALUE 'Y'.
+           05  WS-EXPIRATION          PIC 9(7)  VALUE 2025123.
        01  WS-DSORG                  PIC X(2)  VALUE SPACES.
        01  WS-TARGET-DSN             PIC X(64) VALUE SPACES.
        01  WS-TARGET-POINTER         PIC S9(4) COMP VALUE 1.
@@ -34,6 +39,8 @@
        01  WS-PRIMARY-TEXT           PIC 9(5)   VALUE ZEROES.
        01  WS-SECONDARY-TEXT         PIC 9(5)   VALUE ZEROES.
        01  WS-DIRECTORY-TEXT         PIC 9(5)   VALUE ZEROES.
+       01  WS-RETENTION-TEXT         PIC Z(4)   VALUE ZEROES.
+       01  WS-EXPIRATION-TEXT        PIC 9(7)   VALUE ZEROES.
        01  WS-RETURN-CODE            PIC S9(9) COMP VALUE ZERO.
        01  WS-MESSAGE                PIC X(80) VALUE SPACES.
 
@@ -77,6 +84,8 @@
            MOVE WS-SPACE-PRIMARY TO WS-PRIMARY-TEXT
            MOVE WS-SPACE-SECONDARY TO WS-SECONDARY-TEXT
            MOVE WS-DIRECTORY-BLOCKS TO WS-DIRECTORY-TEXT
+           MOVE WS-RETENTION TO WS-RETENTION-TEXT
+           MOVE WS-EXPIRATION TO WS-EXPIRATION-TEXT
 
            *> Assemble the BPXWDYN allocation command driven by the WASM planner metadata.
            MOVE SPACES TO WS-ALLOC-CMD
@@ -203,15 +212,63 @@
                END-STRING
            END-IF
 
-           IF FUNCTION LENGTH(FUNCTION TRIM(WS-LIKE-DATASET)) > 0
-               STRING
-                   'LIKE(''' DELIMITED BY SIZE
-                   FUNCTION TRIM(WS-LIKE-DATASET) DELIMITED BY SIZE
-                   ''') ' DELIMITED BY SIZE
-                   INTO WS-ALLOC-CMD
-                   WITH POINTER WS-ALLOC-POINTER
-               END-STRING
-           END-IF
+            IF FUNCTION LENGTH(FUNCTION TRIM(WS-LIKE-DATASET)) > 0
+                STRING
+                    'LIKE(''' DELIMITED BY SIZE
+                    FUNCTION TRIM(WS-LIKE-DATASET) DELIMITED BY SIZE
+                    ''') ' DELIMITED BY SIZE
+                    INTO WS-ALLOC-CMD
+                    WITH POINTER WS-ALLOC-POINTER
+                END-STRING
+            END-IF
+
+            IF FUNCTION LENGTH(FUNCTION TRIM(WS-UNIT)) > 0
+                STRING
+                    'UNIT(' DELIMITED BY SIZE
+                    FUNCTION TRIM(WS-UNIT) DELIMITED BY SIZE
+                    ') ' DELIMITED BY SIZE
+                    INTO WS-ALLOC-CMD
+                    WITH POINTER WS-ALLOC-POINTER
+                END-STRING
+            END-IF
+
+            IF FUNCTION LENGTH(FUNCTION TRIM(WS-AVGREC)) > 0
+                STRING
+                    'AVGREC(' DELIMITED BY SIZE
+                    FUNCTION TRIM(WS-AVGREC) DELIMITED BY SIZE
+                    ') ' DELIMITED BY SIZE
+                    INTO WS-ALLOC-CMD
+                    WITH POINTER WS-ALLOC-POINTER
+                END-STRING
+            END-IF
+
+            IF WS-RETENTION > 0
+                STRING
+                    'RETENTION(' DELIMITED BY SIZE
+                    FUNCTION TRIM(WS-RETENTION-TEXT) DELIMITED BY SIZE
+                    ') ' DELIMITED BY SIZE
+                    INTO WS-ALLOC-CMD
+                    WITH POINTER WS-ALLOC-POINTER
+                END-STRING
+            END-IF
+
+            IF WS-RELEASE-SPACE = 'Y'
+                STRING
+                    'RLSE ' DELIMITED BY SIZE
+                    INTO WS-ALLOC-CMD
+                    WITH POINTER WS-ALLOC-POINTER
+                END-STRING
+            END-IF
+
+            IF WS-EXPIRATION > 0
+                STRING
+                    'EXPDT(' DELIMITED BY SIZE
+                    FUNCTION TRIM(WS-EXPIRATION-TEXT) DELIMITED BY SIZE
+                    ') ' DELIMITED BY SIZE
+                    INTO WS-ALLOC-CMD
+                    WITH POINTER WS-ALLOC-POINTER
+                END-STRING
+            END-IF
 
            DISPLAY 'BPXWDYN command built from planner metadata:'
            DISPLAY '  ' FUNCTION TRIM(WS-ALLOC-CMD)

@@ -150,6 +150,21 @@ function buildPlanner(): CobolDispatchPlanner {
   planner.setDatasetType(datasetType || undefined);
   const datasetLike = getInputValue("dataset-like");
   planner.setDatasetLike(datasetLike || undefined);
+  const datasetUnit = getInputValue("dataset-unit");
+  planner.setDatasetUnit(datasetUnit || undefined);
+  const datasetAverageRecordUnit = getInputValue("dataset-average-record-unit");
+  planner.setDatasetAverageRecordUnit(datasetAverageRecordUnit || undefined);
+  const retentionDays = parsePositiveInteger(
+    getInputValue("dataset-retention-period"),
+    "Retention days",
+  );
+  planner.setDatasetRetentionPeriod(retentionDays ?? undefined);
+  const releaseCheckbox = document.querySelector<HTMLInputElement>(
+    "#dataset-release-space",
+  );
+  planner.setDatasetReleaseSpace(releaseCheckbox?.checked ? true : undefined);
+  const expirationDate = getInputValue("dataset-expiration-date");
+  planner.setDatasetExpirationDate(expirationDate || undefined);
 
   const metadata = getTextareaValue("metadata");
   if (metadata) {
