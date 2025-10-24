@@ -475,7 +475,9 @@ impl PreDiscardPolicy {
 
 /// Adapts pre-discard behaviour across timesteps so low-credence channels are culled
 /// proactively instead of reactively. The regulator maintains exponential moving averages
-/// over recent discard telemetry and nudges the dominance ratio toward configured targets.
+/// over recent discard telemetry, blends preservation and energy errors with configurable
+/// weights, and nudges the dominance ratio toward configured targets while penalising
+/// repeated fallbacks.
 #[derive(Clone, Debug)]
 pub struct PreDiscardRegulator {
     target_preserved_ratio: f32,
@@ -485,6 +487,9 @@ pub struct PreDiscardRegulator {
     max_step: f32,
     min_offset: f32,
     max_offset: f32,
+    channel_weight: f32,
+    energy_weight: f32,
+    fallback_penalty: f32,
     offset: f32,
     preserved_ema: Option<f32>,
     energy_ema: Option<f32>,
@@ -514,6 +519,9 @@ impl PreDiscardRegulator {
             max_step: 0.2,
             min_offset: -0.5,
             max_offset: 0.5,
+            channel_weight: 0.5,
+            energy_weight: 0.5,
+            fallback_penalty: 0.1,
             offset: 0.0,
             preserved_ema: None,
             energy_ema: None,
@@ -531,6 +539,37 @@ impl PreDiscardRegulator {
             .into());
         }
         self.smoothing = smoothing;
+        Ok(self)
+    }
+
+    /// Configures how preservation versus energy errors are blended. Both weights must be
+    /// finite and the sum must be greater than zero.
+    pub fn with_error_weights(mut self, channel_weight: f32, energy_weight: f32) -> PureResult<Self> {
+        if !channel_weight.is_finite()
+            || !energy_weight.is_finite()
+            || channel_weight < 0.0
+            || energy_weight < 0.0
+            || (channel_weight + energy_weight) <= f32::EPSILON
+        {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: channel_weight.min(energy_weight),
+            }
+            .into());
+        }
+        self.channel_weight = channel_weight;
+        self.energy_weight = energy_weight;
+        Ok(self)
+    }
+
+    /// Configures an additional penalty applied when the pre-discard policy has to fall back.
+    pub fn with_fallback_penalty(mut self, penalty: f32) -> PureResult<Self> {
+        if !penalty.is_finite() || penalty < 0.0 {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: penalty,
+            }
+            .into());
+        }
+        self.fallback_penalty = penalty;
         Ok(self)
     }
 
@@ -638,8 +677,18 @@ impl PreDiscardRegulator {
 
         let preserved_error = preserved - self.target_preserved_ratio;
         let energy_error = energy - self.target_survivor_energy_ratio;
-        let combined_error = 0.5 * preserved_error + 0.5 * energy_error;
-        let step = (-self.aggressiveness * combined_error).clamp(-self.max_step, self.max_step);
+        let total_weight = self.channel_weight + self.energy_weight;
+        let combined_error = if total_weight <= f32::EPSILON {
+            0.0
+        } else {
+            (self.channel_weight * preserved_error + self.energy_weight * energy_error)
+                / total_weight
+        };
+        let mut step = -self.aggressiveness * combined_error;
+        if telemetry.used_fallback() {
+            step -= self.fallback_penalty;
+        }
+        let step = step.clamp(-self.max_step, self.max_step);
 
         self.offset = (self.offset + step).clamp(self.min_offset, self.max_offset);
         self.observations = self.observations.saturating_add(1);
@@ -1999,6 +2048,25 @@ mod tests {
         assert!(adjusted.dominance_ratio() < base.dominance_ratio());
         assert!(regulator.observations() >= 1);
         assert!(regulator.offset() <= 0.0);
+    }
+
+    #[test]
+    fn pre_discard_regulator_penalises_fallbacks() {
+        let base = PreDiscardPolicy::new(0.9).unwrap().with_min_channels(1);
+        let mut regulator = PreDiscardRegulator::new(0.6, 0.4)
+            .unwrap()
+            .with_error_weights(0.3, 0.7)
+            .unwrap()
+            .with_fallback_penalty(0.15)
+            .unwrap();
+
+        let mut weights = vec![0.0f32, 0.0, 0.0];
+        let original = weights.clone();
+        let outcome = base.clone().apply(&mut weights, &original).unwrap();
+        assert!(outcome.telemetry().used_fallback());
+
+        regulator.observe(outcome.telemetry());
+        assert!(regulator.offset() < 0.0);
     }
 
     #[test]
