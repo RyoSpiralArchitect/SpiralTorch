@@ -3,6 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+pub mod cpu_dense;
 pub mod faer_dense;
 
 #[cfg(feature = "wgpu_frac")]
@@ -13,3 +14,6 @@ pub mod wgpu_dense;
 
 #[cfg(feature = "wgpu")]
 pub mod wgpu_util;
+
+#[cfg(feature = "hip")]
+pub mod hip_dense;

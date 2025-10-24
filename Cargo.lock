@@ -2746,7 +2746,7 @@ dependencies = [
 
 [[package]]
 name = "spiraltorch-py"
-version = "0.2.2"
+version = "0.2.4"
 dependencies = [
  "ndarray",
  "num-complex",
@@ -2766,6 +2766,7 @@ dependencies = [
  "st-spiral-rl",
  "st-tensor",
  "st-text",
+ "tracing",
 ]
 
 [[package]]
@@ -2817,7 +2818,9 @@ version = "0.4.0"
 dependencies = [
  "base64 0.21.7",
  "cc",
+ "libloading 0.8.9",
  "serde",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
@@ -2864,6 +2867,7 @@ dependencies = [
  "num-complex",
  "once_cell",
  "opentelemetry",
+ "parking_lot",
  "pollster",
  "prometheus",
  "rand",
@@ -3001,9 +3005,12 @@ dependencies = [
  "pollster",
  "rand",
  "rand_distr",
+ "rayon",
  "serde",
+ "st-backend-hip",
  "st-frac",
  "wgpu",
+ "wide",
 ]
 
 [[package]]
