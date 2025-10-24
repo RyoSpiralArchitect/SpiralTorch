@@ -1,14 +1,24 @@
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
+#[cfg(feature = "kdsl")]
+use pyo3::types::{PyDict, PyList};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
+#[cfg(feature = "kdsl")]
+use pyo3::PyRef;
 
 use crate::planner::PyRankPlan;
 
 use st_core::backend::spiralk_fft::SpiralKFftPlan;
+
 use st_core::theory::maxwell::{
     required_blocks as required_blocks_rs, MaxwellFingerprint, MaxwellSpiralKBridge,
     MaxwellSpiralKHint, MaxwellZProjector, MaxwellZPulse, MeaningGate, SequentialZ,
+};
+#[cfg(feature = "kdsl")]
+use st_kdsl::{
+    auto::{self, HeuristicHint, WilsonMetrics},
+    Ctx as SpiralKCtx, Err as SpiralKErr, Out as SpiralKOut, SoftRule as SpiralKSoftRule,
 };
 
 #[pyclass(module = "spiraltorch.spiralk", name = "FftPlan")]
@@ -66,6 +76,390 @@ impl PySpiralKFftPlan {
     fn emit_spiralk_hint(&self) -> String {
         self.inner.emit_spiralk_hint()
     }
+}
+
+#[cfg(feature = "kdsl")]
+pub(crate) fn spiralk_err_to_py(err: SpiralKErr) -> PyErr {
+    use pyo3::exceptions::PyValueError;
+    match err {
+        SpiralKErr::Parse(pos) => PyValueError::new_err(format!("parse error at pos {pos}")),
+        SpiralKErr::Tok => PyValueError::new_err("unexpected token"),
+    }
+}
+
+#[cfg(feature = "kdsl")]
+fn spiralk_out_to_dict(py: Python<'_>, out: &SpiralKOut) -> PyResult<PyObject> {
+    let hard = PyDict::new_bound(py);
+    if let Some(flag) = out.hard.use_2ce {
+        hard.set_item("use_2ce", flag)?;
+    }
+    if let Some(value) = out.hard.wg {
+        hard.set_item("workgroup", value)?;
+    }
+    if let Some(value) = out.hard.kl {
+        hard.set_item("lanes", value)?;
+    }
+    if let Some(value) = out.hard.ch {
+        hard.set_item("channel_stride", value)?;
+    }
+    if let Some(value) = out.hard.algo {
+        hard.set_item("algo", value)?;
+    }
+    if let Some(value) = out.hard.midk {
+        hard.set_item("midk_mode", value)?;
+    }
+    if let Some(value) = out.hard.bottomk {
+        hard.set_item("bottomk_mode", value)?;
+    }
+    if let Some(value) = out.hard.ctile {
+        hard.set_item("compaction_tile", value)?;
+    }
+    if let Some(value) = out.hard.tile_cols {
+        hard.set_item("tile_cols", value)?;
+    }
+    if let Some(value) = out.hard.radix {
+        hard.set_item("radix", value)?;
+    }
+    if let Some(value) = out.hard.segments {
+        hard.set_item("segments", value)?;
+    }
+
+    let soft_rules = PyList::empty_bound(py);
+    for rule in &out.soft {
+        let rule_dict = PyDict::new_bound(py);
+        match rule {
+            SpiralKSoftRule::U2 { val, w } => {
+                rule_dict.set_item("field", "use_2ce")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+            SpiralKSoftRule::Wg { val, w } => {
+                rule_dict.set_item("field", "workgroup")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+            SpiralKSoftRule::Kl { val, w } => {
+                rule_dict.set_item("field", "lanes")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+            SpiralKSoftRule::Ch { val, w } => {
+                rule_dict.set_item("field", "channel_stride")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+            SpiralKSoftRule::Algo { val, w } => {
+                rule_dict.set_item("field", "algo")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+            SpiralKSoftRule::Midk { val, w } => {
+                rule_dict.set_item("field", "midk_mode")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+            SpiralKSoftRule::Bottomk { val, w } => {
+                rule_dict.set_item("field", "bottomk_mode")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+            SpiralKSoftRule::Ctile { val, w } => {
+                rule_dict.set_item("field", "compaction_tile")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+            SpiralKSoftRule::TileCols { val, w } => {
+                rule_dict.set_item("field", "tile_cols")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+            SpiralKSoftRule::Radix { val, w } => {
+                rule_dict.set_item("field", "radix")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+            SpiralKSoftRule::Segments { val, w } => {
+                rule_dict.set_item("field", "segments")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+        }
+        soft_rules.append(rule_dict)?;
+    }
+
+    let out_dict = PyDict::new_bound(py);
+    out_dict.set_item("hard", hard)?;
+    out_dict.set_item("soft", soft_rules)?;
+    Ok(out_dict.into_py(py))
+}
+
+#[cfg(feature = "kdsl")]
+fn normalize_hint_field(field: &str) -> PyResult<&'static str> {
+    use pyo3::exceptions::PyValueError;
+    match field {
+        "use_2ce" | "u2" => Ok("use_2ce"),
+        "wg" | "workgroup" => Ok("wg"),
+        "kl" | "lanes" => Ok("kl"),
+        "ch" | "channel_stride" => Ok("ch"),
+        "algo" | "merge" => Ok("algo"),
+        "midk" | "midk_mode" => Ok("midk"),
+        "bottomk" | "bottomk_mode" => Ok("bottomk"),
+        "ctile" | "compaction_tile" => Ok("ctile"),
+        "tile_cols" => Ok("tile_cols"),
+        "radix" => Ok("radix"),
+        "segments" => Ok("segments"),
+        other => Err(PyValueError::new_err(format!(
+            "unknown SpiralK field '{other}'"
+        ))),
+    }
+}
+
+#[cfg(feature = "kdsl")]
+#[pyclass(module = "spiraltorch.spiralk", name = "SpiralKContext")]
+pub(crate) struct PySpiralKContext {
+    pub(crate) inner: SpiralKCtx,
+}
+
+#[cfg(feature = "kdsl")]
+impl PySpiralKContext {
+    pub(crate) fn from_ctx(ctx: SpiralKCtx) -> Self {
+        Self { inner: ctx }
+    }
+}
+
+#[cfg(feature = "kdsl")]
+#[pymethods]
+impl PySpiralKContext {
+    #[new]
+    #[pyo3(signature = (rows, cols, k, subgroup, subgroup_capacity, kernel_capacity, tile_cols, radix, segments))]
+    pub fn new(
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+        subgroup_capacity: u32,
+        kernel_capacity: u32,
+        tile_cols: u32,
+        radix: u32,
+        segments: u32,
+    ) -> Self {
+        let inner = SpiralKCtx {
+            r: rows,
+            c: cols,
+            k,
+            sg: subgroup,
+            sgc: subgroup_capacity,
+            kc: kernel_capacity,
+            tile_cols,
+            radix,
+            segments,
+        };
+        Self { inner }
+    }
+
+    #[getter]
+    fn rows(&self) -> u32 {
+        self.inner.r
+    }
+
+    #[getter]
+    fn cols(&self) -> u32 {
+        self.inner.c
+    }
+
+    #[getter]
+    fn k(&self) -> u32 {
+        self.inner.k
+    }
+
+    #[getter]
+    fn subgroup(&self) -> bool {
+        self.inner.sg
+    }
+
+    #[getter]
+    fn subgroup_capacity(&self) -> u32 {
+        self.inner.sgc
+    }
+
+    #[getter]
+    fn kernel_capacity(&self) -> u32 {
+        self.inner.kc
+    }
+
+    #[getter]
+    fn tile_cols(&self) -> u32 {
+        self.inner.tile_cols
+    }
+
+    #[getter]
+    fn radix(&self) -> u32 {
+        self.inner.radix
+    }
+
+    #[getter]
+    fn segments(&self) -> u32 {
+        self.inner.segments
+    }
+
+    fn eval(&self, py: Python<'_>, program: &str) -> PyResult<PyObject> {
+        let out = st_kdsl::eval_program(program, &self.inner).map_err(spiralk_err_to_py)?;
+        spiralk_out_to_dict(py, &out)
+    }
+}
+
+#[cfg(feature = "kdsl")]
+#[pyclass(module = "spiraltorch.spiralk", name = "SpiralKHeuristicHint")]
+pub(crate) struct PySpiralKHeuristicHint {
+    inner: HeuristicHint,
+}
+
+#[cfg(feature = "kdsl")]
+#[pymethods]
+impl PySpiralKHeuristicHint {
+    #[new]
+    pub fn new(
+        field: &str,
+        value_expr: String,
+        weight: f32,
+        condition_expr: String,
+    ) -> PyResult<Self> {
+        let normalized = normalize_hint_field(field)?;
+        Ok(Self {
+            inner: HeuristicHint::new(normalized, value_expr, weight, condition_expr),
+        })
+    }
+
+    #[getter]
+    fn field(&self) -> &str {
+        self.inner.field
+    }
+
+    #[getter]
+    fn value_expr(&self) -> &str {
+        &self.inner.value_expr
+    }
+
+    #[getter]
+    fn weight_expr(&self) -> &str {
+        &self.inner.weight_expr
+    }
+
+    #[getter]
+    fn condition_expr(&self) -> &str {
+        &self.inner.condition_expr
+    }
+}
+
+#[cfg(feature = "kdsl")]
+impl PySpiralKHeuristicHint {
+    pub(crate) fn inner(&self) -> &HeuristicHint {
+        &self.inner
+    }
+}
+
+#[cfg(feature = "kdsl")]
+#[pyclass(module = "spiraltorch.spiralk", name = "SpiralKWilsonMetrics")]
+pub(crate) struct PySpiralKWilsonMetrics {
+    inner: WilsonMetrics,
+}
+
+#[cfg(feature = "kdsl")]
+#[pymethods]
+impl PySpiralKWilsonMetrics {
+    #[new]
+    pub fn new(baseline_latency: f32, candidate_latency: f32, wins: u32, trials: u32) -> Self {
+        Self {
+            inner: WilsonMetrics {
+                baseline_latency,
+                candidate_latency,
+                wins,
+                trials,
+            },
+        }
+    }
+
+    #[getter]
+    fn baseline_latency(&self) -> f32 {
+        self.inner.baseline_latency
+    }
+
+    #[getter]
+    fn candidate_latency(&self) -> f32 {
+        self.inner.candidate_latency
+    }
+
+    #[getter]
+    fn wins(&self) -> u32 {
+        self.inner.wins
+    }
+
+    #[getter]
+    fn trials(&self) -> u32 {
+        self.inner.trials
+    }
+
+    fn gain(&self) -> f32 {
+        self.inner.gain()
+    }
+}
+
+#[cfg(feature = "kdsl")]
+impl PySpiralKWilsonMetrics {
+    pub(crate) fn inner(&self) -> WilsonMetrics {
+        self.inner
+    }
+}
+
+#[cfg(feature = "kdsl")]
+#[pyfunction]
+fn wilson_lower_bound(wins: u32, trials: u32, z: f32) -> f32 {
+    auto::wilson_lower_bound(wins, trials, z)
+}
+
+#[cfg(feature = "kdsl")]
+#[pyfunction]
+#[pyo3(signature = (metrics, min_gain=0.02, min_confidence=0.5))]
+fn should_rewrite(metrics: &PySpiralKWilsonMetrics, min_gain: f32, min_confidence: f32) -> bool {
+    auto::should_rewrite(&metrics.inner(), min_gain, min_confidence)
+}
+
+#[cfg(feature = "kdsl")]
+#[pyfunction]
+fn synthesize_program(
+    base_src: &str,
+    hints: Vec<PyRef<PySpiralKHeuristicHint>>,
+) -> PyResult<String> {
+    let collected: Vec<HeuristicHint> =
+        hints.into_iter().map(|hint| hint.inner().clone()).collect();
+    Ok(auto::synthesize_program(base_src, &collected))
+}
+
+#[cfg(feature = "kdsl")]
+#[pyfunction]
+#[pyo3(signature = (base_src, ctx, metrics, hints, min_gain=0.02, min_confidence=0.5))]
+fn rewrite_with_wilson(
+    py: Python<'_>,
+    base_src: &str,
+    ctx: &PySpiralKContext,
+    metrics: &PySpiralKWilsonMetrics,
+    hints: Vec<PyRef<PySpiralKHeuristicHint>>,
+    min_gain: f32,
+    min_confidence: f32,
+) -> PyResult<(PyObject, String)> {
+    let collected: Vec<HeuristicHint> =
+        hints.into_iter().map(|hint| hint.inner().clone()).collect();
+    let (out, script) = auto::rewrite_with_wilson(
+        base_src,
+        &ctx.inner,
+        metrics.inner(),
+        &collected,
+        min_gain,
+        min_confidence,
+    )
+    .map_err(spiralk_err_to_py)?;
+    let py_out = spiralk_out_to_dict(py, &out)?;
+    Ok((py_out, script))
 }
 
 #[pyclass(module = "spiraltorch.spiralk", name = "MaxwellHint")]
@@ -515,6 +909,12 @@ impl PyMaxwellProjector {
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "spiralk")?;
     module.add_class::<PySpiralKFftPlan>()?;
+    #[cfg(feature = "kdsl")]
+    {
+        module.add_class::<PySpiralKContext>()?;
+        module.add_class::<PySpiralKHeuristicHint>()?;
+        module.add_class::<PySpiralKWilsonMetrics>()?;
+    }
     module.add_class::<PyMaxwellSpiralKHint>()?;
     module.add_class::<PyMaxwellSpiralKBridge>()?;
     module.add_class::<PyMaxwellFingerprint>()?;
@@ -523,10 +923,17 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyMaxwellPulse>()?;
     module.add_class::<PyMaxwellProjector>()?;
     module.add_function(wrap_pyfunction!(required_blocks, &module)?)?;
+    #[cfg(feature = "kdsl")]
+    {
+        module.add_function(wrap_pyfunction!(wilson_lower_bound, &module)?)?;
+        module.add_function(wrap_pyfunction!(should_rewrite, &module)?)?;
+        module.add_function(wrap_pyfunction!(synthesize_program, &module)?)?;
+        module.add_function(wrap_pyfunction!(rewrite_with_wilson, &module)?)?;
+    }
     module.add("__doc__", "SpiralK DSL helpers & Maxwell bridges")?;
-    module.add(
-        "__all__",
-        vec![
+    let exports = {
+        #[allow(unused_mut)]
+        let mut list = vec![
             "FftPlan",
             "MaxwellHint",
             "MaxwellBridge",
@@ -536,8 +943,22 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
             "MaxwellPulse",
             "MaxwellProjector",
             "required_blocks",
-        ],
-    )?;
+        ];
+        #[cfg(feature = "kdsl")]
+        {
+            list.extend_from_slice(&[
+                "SpiralKContext",
+                "SpiralKHeuristicHint",
+                "SpiralKWilsonMetrics",
+                "wilson_lower_bound",
+                "should_rewrite",
+                "synthesize_program",
+                "rewrite_with_wilson",
+            ]);
+        }
+        list
+    };
+    module.add("__all__", exports)?;
     m.add_submodule(&module)?;
     Ok(())
 }
