@@ -6,11 +6,12 @@
 #![cfg(feature = "wgpu")]
 
 use crate::util::readback_f32;
-use std::sync::{Arc, OnceLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Queue};
+use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, PipelineLayout, Queue};
 
-const MATMUL_WGSL: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
+const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
 const IM2COL_WGSL: &str = include_str!("../wgpu_shaders/im2col_5d.wgsl");
 
 #[repr(C)]
@@ -22,11 +23,27 @@ struct MatmulParams {
     _pad: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct TileConfig {
+    tile_size: u32,
+}
+
+impl TileConfig {
+    const fn new(tile_size: u32) -> Self {
+        Self { tile_size }
+    }
+
+    const fn tile_size(&self) -> u32 {
+        self.tile_size
+    }
+}
+
 struct DenseContext {
     device: Arc<Device>,
     queue: Arc<Queue>,
-    pipeline: ComputePipeline,
     bind_layout: BindGroupLayout,
+    pipeline_layout: PipelineLayout,
+    matmul_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
     im2col_pipeline: ComputePipeline,
     im2col_layout: BindGroupLayout,
 }
@@ -113,16 +130,6 @@ impl DenseContext {
             bind_group_layouts: &[&bind_layout],
             push_constant_ranges: &[],
         });
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("st.tensor.wgpu_dense.shader"),
-            source: wgpu::ShaderSource::Wgsl(MATMUL_WGSL.into()),
-        });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("st.tensor.wgpu_dense.pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "main",
-        });
 
         let im2col_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("st.tensor.wgpu_dense.im2col_layout"),
@@ -180,8 +187,9 @@ impl DenseContext {
         Ok(Self {
             device,
             queue,
-            pipeline,
             bind_layout,
+            pipeline_layout,
+            matmul_pipelines: Mutex::new(HashMap::new()),
             im2col_pipeline,
             im2col_layout,
         })
@@ -195,8 +203,37 @@ impl DenseContext {
         self.queue.as_ref()
     }
 
-    fn pipeline(&self) -> &ComputePipeline {
-        &self.pipeline
+    fn pipeline_for(&self, config: TileConfig) -> Arc<ComputePipeline> {
+        let mut pipelines = self.matmul_pipelines.lock().unwrap();
+        if let Some(pipeline) = pipelines.get(&config) {
+            return pipeline.clone();
+        }
+
+        let shader_source = format!(MATMUL_WGSL_TEMPLATE, tile_size = config.tile_size());
+        let shader_label = format!(
+            "st.tensor.wgpu_dense.matmul_shader.tile{}",
+            config.tile_size()
+        );
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(&shader_label),
+                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+            });
+        let pipeline_label = format!(
+            "st.tensor.wgpu_dense.matmul_pipeline.tile{}",
+            config.tile_size()
+        );
+        let pipeline = Arc::new(self.device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some(&pipeline_label),
+                layout: Some(&self.pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+            },
+        ));
+        pipelines.insert(config, pipeline.clone());
+        pipeline
     }
 
     fn im2col_pipeline(&self) -> &ComputePipeline {
@@ -329,36 +366,21 @@ pub fn matmul(
         mapped_at_creation: false,
     });
 
-    let params = MatmulParams {
-        rows: rows as u32,
-        cols: cols as u32,
-        inner: inner as u32,
-        _pad: 0,
-    };
-    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("st.tensor.wgpu_dense.params"),
-        contents: bytemuck::bytes_of(&params),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-
-    let bind_group = ctx.bind_group(&a_buf, &b_buf, &c_buf, &params_buf);
-
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.encoder"),
     });
-    {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("st.tensor.wgpu_dense.pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(&ctx.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        let wg_x = 16u32;
-        let wg_y = 16u32;
-        let groups_x = ((cols as u32) + wg_x - 1) / wg_x;
-        let groups_y = ((rows as u32) + wg_y - 1) / wg_y;
-        pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
-    }
+    let tile_config = select_tile_config(rows, inner, cols);
+    dispatch_matmul(
+        &ctx,
+        &mut encoder,
+        &a_buf,
+        &b_buf,
+        &c_buf,
+        rows,
+        inner,
+        cols,
+        tile_config,
+    );
     queue.submit(Some(encoder.finish()));
 
     readback_f32(device, queue, &c_buf, rows * cols)
@@ -377,6 +399,7 @@ fn dispatch_matmul(
     rows: usize,
     inner: usize,
     cols: usize,
+    tile: TileConfig,
 ) {
     let params = MatmulParams {
         rows: rows as u32,
@@ -392,17 +415,17 @@ fn dispatch_matmul(
             usage: wgpu::BufferUsages::UNIFORM,
         });
     let bind_group = ctx.bind_group(lhs, rhs, out, &params_buf);
+    let pipeline = ctx.pipeline_for(tile);
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("st.tensor.wgpu_dense.matmul_pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(ctx.pipeline());
+        pass.set_pipeline(pipeline.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
-        let wg_x = 16u32;
-        let wg_y = 16u32;
-        let groups_x = ((cols as u32) + wg_x - 1) / wg_x;
-        let groups_y = ((rows as u32) + wg_y - 1) / wg_y;
+        let tile_size = tile.tile_size();
+        let groups_x = ((cols as u32) + tile_size - 1) / tile_size;
+        let groups_y = ((rows as u32) + tile_size - 1) / tile_size;
         pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
     }
 }
@@ -523,6 +546,7 @@ pub fn conv_im2col_gemm(
         pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), batch as u32);
     }
 
+    let tile_config = select_tile_config(rows, span, out_channels);
     dispatch_matmul(
         &ctx,
         &mut encoder,
@@ -532,11 +556,21 @@ pub fn conv_im2col_gemm(
         rows,
         span,
         out_channels,
+        tile_config,
     );
 
     queue.submit(Some(encoder.finish()));
 
     readback_f32(device, queue, &output_buf, rows * out_channels)
+}
+
+fn select_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
+    let max_dim = rows.max(cols);
+    if max_dim <= 64 || inner <= 64 {
+        TileConfig::new(8)
+    } else {
+        TileConfig::new(16)
+    }
 }
 
 pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {
