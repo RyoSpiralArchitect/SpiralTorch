@@ -9,6 +9,18 @@ const PLANNER_INITIALIZED_ANNOTATION: &str = "planner_initialized";
 const NARRATOR_METRIC_MIN: f32 = 0.0;
 const NARRATOR_METRIC_MAX: f32 = 1.0;
 const FALLBACK_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
+const ALLOWED_SPACE_UNITS: &[&str] = &["CYL", "TRK", "MB", "KB"];
+const ALLOWED_AVGREC_UNITS: &[&str] = &["U", "K", "M", "G"];
+const ALLOWED_DATASET_TYPES: &[&str] = &[
+    "BASIC", "LARGE", "LIBRARY", "EXTREQ", "EXTPREF", "PDS", "HFS",
+];
+const ALLOWED_DATASET_ORGANIZATIONS: &[&str] = &["PS", "PO", "VS", "DA", "IS"];
+const ALLOWED_CI_SIZES: &[u32] = &[512, 1024, 2048, 4096, 8192, 16_384, 32_768];
+const ALLOWED_CATALOG_BEHAVIORS: &[&str] = &["CATALOG", "UNCATALOG", "NOCAT"];
+const MAX_RETENTION_DAYS: u32 = 9999;
+const MAX_UNIT_COUNT: u32 = 59;
+const MAX_KEY_LENGTH: u32 = 32_767;
+const MAX_SHARE_OPTION_LEVEL: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CobolEnvelope {
@@ -71,6 +83,28 @@ pub struct CobolDatasetRoute {
     pub data_class: Option<String>,
     pub management_class: Option<String>,
     pub storage_class: Option<String>,
+    pub space_primary: Option<u32>,
+    pub space_secondary: Option<u32>,
+    pub space_unit: Option<String>,
+    pub directory_blocks: Option<u32>,
+    pub dataset_type: Option<String>,
+    pub like_dataset: Option<String>,
+    pub organization: Option<String>,
+    pub key_length: Option<u32>,
+    pub key_offset: Option<u32>,
+    pub control_interval_size: Option<u32>,
+    pub share_options_cross_region: Option<u32>,
+    pub share_options_cross_system: Option<u32>,
+    pub reuse: Option<bool>,
+    pub log: Option<bool>,
+    pub unit: Option<String>,
+    pub unit_count: Option<u32>,
+    pub average_record_unit: Option<String>,
+    pub catalog_behavior: Option<String>,
+    pub retention_period: Option<u32>,
+    pub release_space: Option<bool>,
+    pub erase_on_delete: Option<bool>,
+    pub expiration_date: Option<String>,
 }
 
 impl Default for CobolDatasetRoute {
@@ -86,6 +120,28 @@ impl Default for CobolDatasetRoute {
             data_class: None,
             management_class: None,
             storage_class: None,
+            space_primary: None,
+            space_secondary: None,
+            space_unit: None,
+            directory_blocks: None,
+            dataset_type: None,
+            like_dataset: None,
+            organization: None,
+            key_length: None,
+            key_offset: None,
+            control_interval_size: None,
+            share_options_cross_region: None,
+            share_options_cross_system: None,
+            reuse: None,
+            log: None,
+            unit: None,
+            unit_count: None,
+            average_record_unit: None,
+            catalog_behavior: None,
+            retention_period: None,
+            release_space: None,
+            erase_on_delete: None,
+            expiration_date: None,
         }
     }
 }
@@ -104,6 +160,28 @@ impl Serialize for CobolDatasetRoute {
             && self.data_class.is_none()
             && self.management_class.is_none()
             && self.storage_class.is_none()
+            && self.space_primary.is_none()
+            && self.space_secondary.is_none()
+            && self.space_unit.is_none()
+            && self.directory_blocks.is_none()
+            && self.dataset_type.is_none()
+            && self.like_dataset.is_none()
+            && self.organization.is_none()
+            && self.key_length.is_none()
+            && self.key_offset.is_none()
+            && self.control_interval_size.is_none()
+            && self.share_options_cross_region.is_none()
+            && self.share_options_cross_system.is_none()
+            && self.reuse.is_none()
+            && self.log.is_none()
+            && self.unit.is_none()
+            && self.unit_count.is_none()
+            && self.average_record_unit.is_none()
+            && self.catalog_behavior.is_none()
+            && self.retention_period.is_none()
+            && self.release_space.is_none()
+            && self.erase_on_delete.is_none()
+            && self.expiration_date.is_none()
         {
             serializer.serialize_str(&self.dataset)
         } else {
@@ -135,6 +213,72 @@ impl Serialize for CobolDatasetRoute {
             if self.storage_class.is_some() {
                 entries += 1;
             }
+            if self.space_primary.is_some() {
+                entries += 1;
+            }
+            if self.space_secondary.is_some() {
+                entries += 1;
+            }
+            if self.space_unit.is_some() {
+                entries += 1;
+            }
+            if self.directory_blocks.is_some() {
+                entries += 1;
+            }
+            if self.dataset_type.is_some() {
+                entries += 1;
+            }
+            if self.like_dataset.is_some() {
+                entries += 1;
+            }
+            if self.organization.is_some() {
+                entries += 1;
+            }
+            if self.key_length.is_some() {
+                entries += 1;
+            }
+            if self.key_offset.is_some() {
+                entries += 1;
+            }
+            if self.control_interval_size.is_some() {
+                entries += 1;
+            }
+            if self.share_options_cross_region.is_some() {
+                entries += 1;
+            }
+            if self.share_options_cross_system.is_some() {
+                entries += 1;
+            }
+            if self.reuse.is_some() {
+                entries += 1;
+            }
+            if self.log.is_some() {
+                entries += 1;
+            }
+            if self.unit.is_some() {
+                entries += 1;
+            }
+            if self.unit_count.is_some() {
+                entries += 1;
+            }
+            if self.average_record_unit.is_some() {
+                entries += 1;
+            }
+            if self.catalog_behavior.is_some() {
+                entries += 1;
+            }
+            if self.retention_period.is_some() {
+                entries += 1;
+            }
+            if self.release_space.is_some() {
+                entries += 1;
+            }
+            if self.erase_on_delete.is_some() {
+                entries += 1;
+            }
+            if self.expiration_date.is_some() {
+                entries += 1;
+            }
             let mut map = serializer.serialize_map(Some(entries))?;
             map.serialize_entry("dataset", &self.dataset)?;
             if let Some(member) = &self.member {
@@ -163,6 +307,78 @@ impl Serialize for CobolDatasetRoute {
             }
             if let Some(storage_class) = &self.storage_class {
                 map.serialize_entry("storage_class", storage_class)?;
+            }
+            if let Some(space_primary) = &self.space_primary {
+                map.serialize_entry("space_primary", space_primary)?;
+            }
+            if let Some(space_secondary) = &self.space_secondary {
+                map.serialize_entry("space_secondary", space_secondary)?;
+            }
+            if let Some(space_unit) = &self.space_unit {
+                map.serialize_entry("space_unit", space_unit)?;
+            }
+            if let Some(directory_blocks) = &self.directory_blocks {
+                map.serialize_entry("directory_blocks", directory_blocks)?;
+            }
+            if let Some(dataset_type) = &self.dataset_type {
+                map.serialize_entry("dataset_type", dataset_type)?;
+            }
+            if let Some(like_dataset) = &self.like_dataset {
+                map.serialize_entry("like_dataset", like_dataset)?;
+            }
+            if let Some(organization) = &self.organization {
+                map.serialize_entry("organization", organization)?;
+            }
+            if let Some(key_length) = &self.key_length {
+                map.serialize_entry("key_length", key_length)?;
+            }
+            if let Some(key_offset) = &self.key_offset {
+                map.serialize_entry("key_offset", key_offset)?;
+            }
+            if let Some(ci_size) = &self.control_interval_size {
+                map.serialize_entry("control_interval_size", ci_size)?;
+            }
+            if let Some(share_cr) = &self.share_options_cross_region {
+                map.serialize_entry("share_options_cross_region", share_cr)?;
+            }
+            if let Some(share_cs) = &self.share_options_cross_system {
+                map.serialize_entry("share_options_cross_system", share_cs)?;
+            }
+            if let Some(reuse) = &self.reuse {
+                map.serialize_entry("reuse", reuse)?;
+            }
+            if let Some(log) = &self.log {
+                map.serialize_entry("log", log)?;
+            }
+            if let Some(unit) = &self.unit {
+                map.serialize_entry("unit", unit)?;
+            }
+            if let Some(unit_count) = &self.unit_count {
+                map.serialize_entry("unit_count", unit_count)?;
+            }
+            if let Some(avg) = &self.average_record_unit {
+                map.serialize_entry("average_record_unit", avg)?;
+            }
+            if let Some(catalog_behavior) = &self.catalog_behavior {
+                map.serialize_entry("catalog_behavior", catalog_behavior)?;
+            }
+            if let Some(unit) = &self.unit {
+                map.serialize_entry("unit", unit)?;
+            }
+            if let Some(avg) = &self.average_record_unit {
+                map.serialize_entry("average_record_unit", avg)?;
+            }
+            if let Some(retention) = &self.retention_period {
+                map.serialize_entry("retention_period", retention)?;
+            }
+            if let Some(release_space) = &self.release_space {
+                map.serialize_entry("release_space", release_space)?;
+            }
+            if let Some(erase_on_delete) = &self.erase_on_delete {
+                map.serialize_entry("erase_on_delete", erase_on_delete)?;
+            }
+            if let Some(expiration) = &self.expiration_date {
+                map.serialize_entry("expiration_date", expiration)?;
             }
             map.end()
         }
@@ -198,6 +414,28 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                     data_class: None,
                     management_class: None,
                     storage_class: None,
+                    space_primary: None,
+                    space_secondary: None,
+                    space_unit: None,
+                    directory_blocks: None,
+                    dataset_type: None,
+                    like_dataset: None,
+                    organization: None,
+                    key_length: None,
+                    key_offset: None,
+                    control_interval_size: None,
+                    share_options_cross_region: None,
+                    share_options_cross_system: None,
+                    reuse: None,
+                    log: None,
+                    unit: None,
+                    unit_count: None,
+                    average_record_unit: None,
+                    catalog_behavior: None,
+                    retention_period: None,
+                    release_space: None,
+                    erase_on_delete: None,
+                    expiration_date: None,
                 })
             }
 
@@ -222,6 +460,28 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                 let mut data_class: Option<String> = None;
                 let mut management_class: Option<String> = None;
                 let mut storage_class: Option<String> = None;
+                let mut space_primary: Option<u32> = None;
+                let mut space_secondary: Option<u32> = None;
+                let mut space_unit: Option<String> = None;
+                let mut directory_blocks: Option<u32> = None;
+                let mut dataset_type: Option<String> = None;
+                let mut like_dataset: Option<String> = None;
+                let mut organization: Option<String> = None;
+                let mut key_length: Option<u32> = None;
+                let mut key_offset: Option<u32> = None;
+                let mut control_interval_size: Option<u32> = None;
+                let mut share_options_cross_region: Option<u32> = None;
+                let mut share_options_cross_system: Option<u32> = None;
+                let mut reuse: Option<bool> = None;
+                let mut log: Option<bool> = None;
+                let mut unit: Option<String> = None;
+                let mut unit_count: Option<u32> = None;
+                let mut average_record_unit: Option<String> = None;
+                let mut catalog_behavior: Option<String> = None;
+                let mut retention_period: Option<u32> = None;
+                let mut release_space: Option<bool> = None;
+                let mut erase_on_delete: Option<bool> = None;
+                let mut expiration_date: Option<String> = None;
 
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
@@ -258,6 +518,78 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                         "storage_class" => {
                             storage_class = map.next_value()?;
                         }
+                        "space_primary" => {
+                            space_primary = map.next_value()?;
+                        }
+                        "space_secondary" => {
+                            space_secondary = map.next_value()?;
+                        }
+                        "space_unit" => {
+                            space_unit = map.next_value()?;
+                        }
+                        "directory_blocks" => {
+                            directory_blocks = map.next_value()?;
+                        }
+                        "dataset_type" => {
+                            dataset_type = map.next_value()?;
+                        }
+                        "like_dataset" => {
+                            like_dataset = map.next_value()?;
+                        }
+                        "organization" => {
+                            organization = map.next_value()?;
+                        }
+                        "key_length" => {
+                            key_length = map.next_value()?;
+                        }
+                        "key_offset" => {
+                            key_offset = map.next_value()?;
+                        }
+                        "control_interval_size" => {
+                            control_interval_size = map.next_value()?;
+                        }
+                        "share_options_cross_region" => {
+                            share_options_cross_region = map.next_value()?;
+                        }
+                        "share_options_cross_system" => {
+                            share_options_cross_system = map.next_value()?;
+                        }
+                        "reuse" => {
+                            reuse = map.next_value()?;
+                        }
+                        "log" => {
+                            log = map.next_value()?;
+                        }
+                        "unit" => {
+                            unit = map.next_value()?;
+                        }
+                        "unit_count" => {
+                            unit_count = map.next_value()?;
+                        }
+                        "average_record_unit" => {
+                            average_record_unit = map.next_value()?;
+                        }
+                        "catalog_behavior" => {
+                            catalog_behavior = map.next_value()?;
+                        }
+                        "unit" => {
+                            unit = map.next_value()?;
+                        }
+                        "average_record_unit" => {
+                            average_record_unit = map.next_value()?;
+                        }
+                        "retention_period" => {
+                            retention_period = map.next_value()?;
+                        }
+                        "release_space" => {
+                            release_space = map.next_value()?;
+                        }
+                        "erase_on_delete" => {
+                            erase_on_delete = map.next_value()?;
+                        }
+                        "expiration_date" => {
+                            expiration_date = map.next_value()?;
+                        }
                         other => {
                             return Err(de::Error::unknown_field(
                                 other,
@@ -272,6 +604,28 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                                     "data_class",
                                     "management_class",
                                     "storage_class",
+                                    "space_primary",
+                                    "space_secondary",
+                                    "space_unit",
+                                    "directory_blocks",
+                                    "dataset_type",
+                                    "like_dataset",
+                                    "organization",
+                                    "key_length",
+                                    "key_offset",
+                                    "control_interval_size",
+                                    "share_options_cross_region",
+                                    "share_options_cross_system",
+                                    "reuse",
+                                    "log",
+                                    "unit",
+                                    "unit_count",
+                                    "average_record_unit",
+                                    "catalog_behavior",
+                                    "retention_period",
+                                    "release_space",
+                                    "erase_on_delete",
+                                    "expiration_date",
                                 ],
                             ));
                         }
@@ -290,6 +644,28 @@ impl<'de> Deserialize<'de> for CobolDatasetRoute {
                     data_class,
                     management_class,
                     storage_class,
+                    space_primary,
+                    space_secondary,
+                    space_unit,
+                    directory_blocks,
+                    dataset_type,
+                    like_dataset,
+                    organization,
+                    key_length,
+                    key_offset,
+                    control_interval_size,
+                    share_options_cross_region,
+                    share_options_cross_system,
+                    reuse,
+                    log,
+                    unit,
+                    unit_count,
+                    average_record_unit,
+                    catalog_behavior,
+                    retention_period,
+                    release_space,
+                    erase_on_delete,
+                    expiration_date,
                 })
             }
         }
@@ -626,6 +1002,365 @@ impl CobolEnvelopeBuilder {
         sanitize_dataset_route(&mut self.envelope.route.dataset);
     }
 
+    pub fn set_dataset_space_primary(&mut self, space_primary: Option<u32>) {
+        let space_primary = sanitize_positive(space_primary);
+        match (self.envelope.route.dataset.as_mut(), space_primary) {
+            (Some(route), value) => {
+                route.space_primary = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.space_primary = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_space_secondary(&mut self, space_secondary: Option<u32>) {
+        let space_secondary = sanitize_positive(space_secondary);
+        match (self.envelope.route.dataset.as_mut(), space_secondary) {
+            (Some(route), value) => {
+                route.space_secondary = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.space_secondary = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_space_unit(&mut self, space_unit: Option<String>) {
+        let space_unit = sanitize_uppercase(space_unit);
+        match (self.envelope.route.dataset.as_mut(), space_unit) {
+            (Some(route), value) => {
+                route.space_unit = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.space_unit = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_directory_blocks(&mut self, directory_blocks: Option<u32>) {
+        let directory_blocks = sanitize_positive(directory_blocks);
+        match (self.envelope.route.dataset.as_mut(), directory_blocks) {
+            (Some(route), value) => {
+                route.directory_blocks = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.directory_blocks = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_type(&mut self, dataset_type: Option<String>) {
+        let dataset_type = sanitize_uppercase(dataset_type);
+        match (self.envelope.route.dataset.as_mut(), dataset_type) {
+            (Some(route), value) => {
+                route.dataset_type = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.dataset_type = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_like(&mut self, like_dataset: Option<String>) {
+        let like_dataset = like_dataset.and_then(sanitize);
+        match (self.envelope.route.dataset.as_mut(), like_dataset) {
+            (Some(route), value) => {
+                route.like_dataset = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.like_dataset = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_organization(&mut self, organization: Option<String>) {
+        let organization = organization.and_then(sanitize);
+        match (self.envelope.route.dataset.as_mut(), organization) {
+            (Some(route), value) => {
+                route.organization = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.organization = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_key_length(&mut self, key_length: Option<u32>) {
+        let key_length = sanitize_positive(key_length);
+        match (self.envelope.route.dataset.as_mut(), key_length) {
+            (Some(route), value) => {
+                route.key_length = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.key_length = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_key_offset(&mut self, key_offset: Option<u32>) {
+        match (self.envelope.route.dataset.as_mut(), key_offset) {
+            (Some(route), value) => {
+                route.key_offset = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.key_offset = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_control_interval_size(&mut self, control_interval_size: Option<u32>) {
+        let control_interval_size = sanitize_positive(control_interval_size);
+        match (self.envelope.route.dataset.as_mut(), control_interval_size) {
+            (Some(route), value) => {
+                route.control_interval_size = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.control_interval_size = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_share_options_cross_region(
+        &mut self,
+        share_options_cross_region: Option<u32>,
+    ) {
+        let share_options_cross_region = sanitize_positive(share_options_cross_region);
+        match (
+            self.envelope.route.dataset.as_mut(),
+            share_options_cross_region,
+        ) {
+            (Some(route), value) => {
+                route.share_options_cross_region = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.share_options_cross_region = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_share_options_cross_system(
+        &mut self,
+        share_options_cross_system: Option<u32>,
+    ) {
+        let share_options_cross_system = sanitize_positive(share_options_cross_system);
+        match (
+            self.envelope.route.dataset.as_mut(),
+            share_options_cross_system,
+        ) {
+            (Some(route), value) => {
+                route.share_options_cross_system = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.share_options_cross_system = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_reuse(&mut self, reuse: Option<bool>) {
+        match (self.envelope.route.dataset.as_mut(), reuse) {
+            (Some(route), value) => {
+                route.reuse = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.reuse = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_log(&mut self, log: Option<bool>) {
+        match (self.envelope.route.dataset.as_mut(), log) {
+            (Some(route), value) => {
+                route.log = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.log = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_unit(&mut self, unit: Option<String>) {
+        let unit = unit.and_then(sanitize);
+        match (self.envelope.route.dataset.as_mut(), unit) {
+            (Some(route), value) => {
+                route.unit = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.unit = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_unit_count(&mut self, unit_count: Option<u32>) {
+        let unit_count = sanitize_positive(unit_count);
+        match (self.envelope.route.dataset.as_mut(), unit_count) {
+            (Some(route), value) => {
+                route.unit_count = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.unit_count = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_average_record_unit(&mut self, average_record_unit: Option<String>) {
+        let average_record_unit = average_record_unit.and_then(sanitize);
+        match (self.envelope.route.dataset.as_mut(), average_record_unit) {
+            (Some(route), value) => {
+                route.average_record_unit = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.average_record_unit = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_catalog_behavior(&mut self, catalog_behavior: Option<String>) {
+        let catalog_behavior = sanitize_uppercase(catalog_behavior);
+        match (self.envelope.route.dataset.as_mut(), catalog_behavior) {
+            (Some(route), value) => {
+                route.catalog_behavior = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.catalog_behavior = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_retention_period(&mut self, retention_period: Option<u32>) {
+        let retention_period = sanitize_positive(retention_period);
+        match (self.envelope.route.dataset.as_mut(), retention_period) {
+            (Some(route), value) => {
+                route.retention_period = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.retention_period = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_release_space(&mut self, release_space: Option<bool>) {
+        match (self.envelope.route.dataset.as_mut(), release_space) {
+            (Some(route), value) => {
+                route.release_space = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.release_space = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_erase_on_delete(&mut self, erase_on_delete: Option<bool>) {
+        match (self.envelope.route.dataset.as_mut(), erase_on_delete) {
+            (Some(route), value) => {
+                route.erase_on_delete = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.erase_on_delete = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_expiration_date(&mut self, expiration_date: Option<String>) {
+        let expiration_date = expiration_date.and_then(sanitize);
+        match (self.envelope.route.dataset.as_mut(), expiration_date) {
+            (Some(route), value) => {
+                route.expiration_date = value;
+            }
+            (None, Some(value)) => {
+                let mut route = CobolDatasetRoute::default();
+                route.expiration_date = Some(value);
+                self.envelope.route.dataset = Some(route);
+            }
+            (None, None) => {}
+        }
+        sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
     pub fn clear_route(&mut self) {
         self.clear_mq_route();
         self.clear_cics_route();
@@ -738,6 +1473,180 @@ impl CobolEnvelope {
                     );
                 }
             }
+            if let Some(unit) = dataset.space_unit.as_deref() {
+                if !ALLOWED_SPACE_UNITS.contains(&unit) {
+                    issues.push(format!(
+                        "dataset space unit must be one of {}",
+                        ALLOWED_SPACE_UNITS.join(", ")
+                    ));
+                }
+                if dataset.space_primary.is_none() && dataset.space_secondary.is_none() {
+                    issues.push(
+                        "specify primary or secondary space when providing a space unit"
+                            .to_string(),
+                    );
+                }
+            }
+            if dataset.space_secondary.is_some() && dataset.space_primary.is_none() {
+                issues.push("dataset secondary space requires a primary allocation".to_string());
+            }
+            if let Some(dataset_type) = dataset.dataset_type.as_deref() {
+                if !ALLOWED_DATASET_TYPES.contains(&dataset_type) {
+                    issues.push(format!(
+                        "dataset type must be one of {}",
+                        ALLOWED_DATASET_TYPES.join(", ")
+                    ));
+                }
+            }
+            if let Some(organization) = dataset.organization.as_deref() {
+                if !ALLOWED_DATASET_ORGANIZATIONS.contains(&organization) {
+                    issues.push(format!(
+                        "dataset organization must be one of {}",
+                        ALLOWED_DATASET_ORGANIZATIONS.join(", ")
+                    ));
+                }
+            }
+            if let Some(average_record_unit) = dataset.average_record_unit.as_deref() {
+                if !ALLOWED_AVGREC_UNITS.contains(&average_record_unit) {
+                    issues.push(format!(
+                        "dataset average record unit must be one of {}",
+                        ALLOWED_AVGREC_UNITS.join(", ")
+                    ));
+                }
+            }
+            if let Some(key_length) = dataset.key_length {
+                if key_length > MAX_KEY_LENGTH {
+                    issues.push(format!(
+                        "dataset key length must not exceed {} bytes",
+                        MAX_KEY_LENGTH
+                    ));
+                }
+                match dataset.record_length {
+                    Some(record_length) => {
+                        if key_length > record_length {
+                            issues.push(
+                                "dataset key length must not exceed the record length".to_string(),
+                            );
+                        }
+                        if let Some(offset) = dataset.key_offset {
+                            if offset + key_length > record_length {
+                                issues.push(
+                                    "dataset key offset plus key length must fit within the record length"
+                                        .to_string(),
+                                );
+                            }
+                        }
+                    }
+                    None => issues.push(
+                        "dataset key length requires a record length to be specified".to_string(),
+                    ),
+                }
+            }
+            if let Some(offset) = dataset.key_offset {
+                match dataset.record_length {
+                    Some(record_length) => {
+                        if offset >= record_length {
+                            issues.push(
+                                "dataset key offset must be less than the record length"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                    None => issues.push(
+                        "dataset key offset requires a record length to be specified".to_string(),
+                    ),
+                }
+            }
+            if let Some(ci_size) = dataset.control_interval_size {
+                if !ALLOWED_CI_SIZES.contains(&ci_size) {
+                    issues.push(format!(
+                        "dataset control interval size must be one of {} bytes",
+                        ALLOWED_CI_SIZES
+                            .iter()
+                            .map(|value| value.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+            }
+            let has_share_options = dataset.share_options_cross_region.is_some()
+                || dataset.share_options_cross_system.is_some();
+            if has_share_options && !matches!(dataset.organization.as_deref(), Some("VS")) {
+                issues.push(
+                    "dataset share options require a VSAM organization (DSORG VS)".to_string(),
+                );
+            }
+            if let Some(share_cr) = dataset.share_options_cross_region {
+                if share_cr > MAX_SHARE_OPTION_LEVEL {
+                    issues.push(format!(
+                        "dataset cross-region share option must not exceed {}",
+                        MAX_SHARE_OPTION_LEVEL
+                    ));
+                }
+            }
+            if let Some(share_cs) = dataset.share_options_cross_system {
+                if share_cs > MAX_SHARE_OPTION_LEVEL {
+                    issues.push(format!(
+                        "dataset cross-system share option must not exceed {}",
+                        MAX_SHARE_OPTION_LEVEL
+                    ));
+                }
+            }
+            if dataset.reuse.is_some() && !matches!(dataset.organization.as_deref(), Some("VS")) {
+                issues
+                    .push("dataset reuse hint requires a VSAM organization (DSORG VS)".to_string());
+            }
+            if dataset.log.is_some() && !matches!(dataset.organization.as_deref(), Some("VS")) {
+                issues.push("dataset log hint requires a VSAM organization (DSORG VS)".to_string());
+            }
+            if let Some(unit_count) = dataset.unit_count {
+                if unit_count > MAX_UNIT_COUNT {
+                    issues.push(format!(
+                        "dataset unit count must not exceed {}",
+                        MAX_UNIT_COUNT
+                    ));
+                }
+                if dataset.unit.is_none() {
+                    issues.push(
+                        "dataset unit count requires an allocation unit to be specified"
+                            .to_string(),
+                    );
+                }
+            }
+            if let Some(catalog_behavior) = dataset.catalog_behavior.as_deref() {
+                if !ALLOWED_CATALOG_BEHAVIORS.contains(&catalog_behavior) {
+                    issues.push(format!(
+                        "dataset catalog behavior must be one of {}",
+                        ALLOWED_CATALOG_BEHAVIORS.join(", ")
+                    ));
+                }
+            }
+            if let Some(directory_blocks) = dataset.directory_blocks {
+                if directory_blocks > 0
+                    && dataset.member.is_none()
+                    && !matches!(dataset.dataset_type.as_deref(), Some("LIBRARY" | "PDS"))
+                {
+                    issues.push(
+                        "directory blocks are only valid for partitioned dataset allocations"
+                            .to_string(),
+                    );
+                }
+            }
+            if let Some(retention) = dataset.retention_period {
+                if retention > MAX_RETENTION_DAYS {
+                    issues.push(format!(
+                        "dataset retention period must not exceed {} days",
+                        MAX_RETENTION_DAYS
+                    ));
+                }
+            }
+            if let Some(expiration) = dataset.expiration_date.as_deref() {
+                if expiration.len() != 7 || !expiration.chars().all(|ch| ch.is_ascii_digit()) {
+                    issues.push(
+                        "dataset expiration date must be a 7 digit YYYYDDD value".to_string(),
+                    );
+                }
+            }
         }
 
         if !(NARRATOR_METRIC_MIN..=NARRATOR_METRIC_MAX).contains(&self.payload.curvature) {
@@ -773,6 +1682,10 @@ fn sanitize(value: String) -> Option<String> {
 
 fn sanitize_positive(value: Option<u32>) -> Option<u32> {
     value.and_then(|candidate| if candidate > 0 { Some(candidate) } else { None })
+}
+
+fn sanitize_uppercase(value: Option<String>) -> Option<String> {
+    value.and_then(|candidate| sanitize(candidate).map(|clean| clean.to_ascii_uppercase()))
 }
 
 fn sanitize_envelope(envelope: &mut CobolEnvelope) {
@@ -872,6 +1785,30 @@ fn sanitize_dataset_route(target: &mut Option<CobolDatasetRoute>) {
         dataset.data_class = dataset.data_class.take().and_then(sanitize);
         dataset.management_class = dataset.management_class.take().and_then(sanitize);
         dataset.storage_class = dataset.storage_class.take().and_then(sanitize);
+        dataset.space_primary = sanitize_positive(dataset.space_primary.take());
+        dataset.space_secondary = sanitize_positive(dataset.space_secondary.take());
+        dataset.space_unit = sanitize_uppercase(dataset.space_unit.take());
+        dataset.directory_blocks = sanitize_positive(dataset.directory_blocks.take());
+        dataset.dataset_type = sanitize_uppercase(dataset.dataset_type.take());
+        dataset.like_dataset = dataset.like_dataset.take().and_then(sanitize);
+        dataset.organization = sanitize_uppercase(dataset.organization.take());
+        dataset.key_length = sanitize_positive(dataset.key_length.take());
+        dataset.key_offset = dataset.key_offset.take();
+        dataset.control_interval_size = sanitize_positive(dataset.control_interval_size.take());
+        dataset.share_options_cross_region =
+            sanitize_positive(dataset.share_options_cross_region.take());
+        dataset.share_options_cross_system =
+            sanitize_positive(dataset.share_options_cross_system.take());
+        dataset.reuse = dataset.reuse.take();
+        dataset.log = dataset.log.take();
+        dataset.unit = sanitize_uppercase(dataset.unit.take());
+        dataset.unit_count = sanitize_positive(dataset.unit_count.take());
+        dataset.average_record_unit = sanitize_uppercase(dataset.average_record_unit.take());
+        dataset.catalog_behavior = sanitize_uppercase(dataset.catalog_behavior.take());
+        dataset.retention_period = sanitize_positive(dataset.retention_period.take());
+        dataset.release_space = dataset.release_space.take();
+        dataset.erase_on_delete = dataset.erase_on_delete.take();
+        dataset.expiration_date = dataset.expiration_date.take().and_then(sanitize);
         if let Some(name) = dataset_name {
             dataset.dataset = name;
             *target = Some(dataset);
@@ -945,6 +1882,28 @@ mod tests {
         builder.set_dataset_data_class(Some("NARRATE".into()));
         builder.set_dataset_management_class(Some("GDG".into()));
         builder.set_dataset_storage_class(Some("FASTIO".into()));
+        builder.set_dataset_space_primary(Some(15));
+        builder.set_dataset_space_secondary(Some(5));
+        builder.set_dataset_space_unit(Some("cyl".into()));
+        builder.set_dataset_directory_blocks(Some(40));
+        builder.set_dataset_type(Some("library".into()));
+        builder.set_dataset_like(Some("HLQ.MODEL.DATA".into()));
+        builder.set_dataset_organization(Some("po".into()));
+        builder.set_dataset_key_length(Some(64));
+        builder.set_dataset_key_offset(Some(8));
+        builder.set_dataset_control_interval_size(Some(4096));
+        builder.set_dataset_share_options_cross_region(Some(3));
+        builder.set_dataset_share_options_cross_system(Some(2));
+        builder.set_dataset_reuse(Some(true));
+        builder.set_dataset_log(Some(false));
+        builder.set_dataset_unit(Some("sysda".into()));
+        builder.set_dataset_unit_count(Some(3));
+        builder.set_dataset_average_record_unit(Some("k".into()));
+        builder.set_dataset_catalog_behavior(Some("catalog".into()));
+        builder.set_dataset_retention_period(Some(45));
+        builder.set_dataset_release_space(Some(true));
+        builder.set_dataset_erase_on_delete(Some(true));
+        builder.set_dataset_expiration_date(Some("2025123".into()));
         builder.add_tag("browser");
         builder.add_annotation("generated");
         builder.merge_metadata_value(serde_json::json!({"priority": "low"}));
@@ -969,6 +1928,31 @@ mod tests {
         assert_eq!(dataset_route.data_class.as_deref(), Some("NARRATE"));
         assert_eq!(dataset_route.management_class.as_deref(), Some("GDG"));
         assert_eq!(dataset_route.storage_class.as_deref(), Some("FASTIO"));
+        assert_eq!(dataset_route.space_primary, Some(15));
+        assert_eq!(dataset_route.space_secondary, Some(5));
+        assert_eq!(dataset_route.space_unit.as_deref(), Some("CYL"));
+        assert_eq!(dataset_route.directory_blocks, Some(40));
+        assert_eq!(dataset_route.dataset_type.as_deref(), Some("LIBRARY"));
+        assert_eq!(
+            dataset_route.like_dataset.as_deref(),
+            Some("HLQ.MODEL.DATA")
+        );
+        assert_eq!(dataset_route.organization.as_deref(), Some("PO"));
+        assert_eq!(dataset_route.key_length, Some(64));
+        assert_eq!(dataset_route.key_offset, Some(8));
+        assert_eq!(dataset_route.control_interval_size, Some(4096));
+        assert_eq!(dataset_route.share_options_cross_region, Some(3));
+        assert_eq!(dataset_route.share_options_cross_system, Some(2));
+        assert_eq!(dataset_route.reuse, Some(true));
+        assert_eq!(dataset_route.log, Some(false));
+        assert_eq!(dataset_route.unit.as_deref(), Some("SYSDA"));
+        assert_eq!(dataset_route.unit_count, Some(3));
+        assert_eq!(dataset_route.average_record_unit.as_deref(), Some("K"));
+        assert_eq!(dataset_route.catalog_behavior.as_deref(), Some("CATALOG"));
+        assert_eq!(dataset_route.retention_period, Some(45));
+        assert_eq!(dataset_route.release_space, Some(true));
+        assert_eq!(dataset_route.erase_on_delete, Some(true));
+        assert_eq!(dataset_route.expiration_date.as_deref(), Some("2025123"));
         assert!(envelope.metadata.tags.contains(&"browser".to_string()));
         assert!(envelope
             .metadata
@@ -1010,6 +1994,24 @@ mod tests {
         builder.set_dataset_data_class(Some(" PRIME ".into()));
         builder.set_dataset_management_class(Some(" GDG ".into()));
         builder.set_dataset_storage_class(Some(" FASTIO ".into()));
+        builder.set_dataset_space_primary(Some(20));
+        builder.set_dataset_space_secondary(Some(4));
+        builder.set_dataset_space_unit(Some(" trk ".into()));
+        builder.set_dataset_directory_blocks(Some(8));
+        builder.set_dataset_type(Some(" pdS ".into()));
+        builder.set_dataset_like(Some("  HLQ.TEMPLATE.DATA  ".into()));
+        builder.set_dataset_organization(Some(" vs ".into()));
+        builder.set_dataset_key_length(Some(96));
+        builder.set_dataset_key_offset(Some(4));
+        builder.set_dataset_control_interval_size(Some(8192));
+        builder.set_dataset_unit(Some("  sysda  ".into()));
+        builder.set_dataset_unit_count(Some(9));
+        builder.set_dataset_average_record_unit(Some(" m ".into()));
+        builder.set_dataset_catalog_behavior(Some(" uncatalog ".into()));
+        builder.set_dataset_retention_period(Some(30));
+        builder.set_dataset_release_space(Some(true));
+        builder.set_dataset_erase_on_delete(Some(false));
+        builder.set_dataset_expiration_date(Some(" 2024456 ".into()));
         builder.set_dataset(Some("HLQ.DATA".into()));
 
         let dataset = builder.snapshot().route.dataset.expect("dataset");
@@ -1023,6 +2025,24 @@ mod tests {
         assert_eq!(dataset.data_class.as_deref(), Some("PRIME"));
         assert_eq!(dataset.management_class.as_deref(), Some("GDG"));
         assert_eq!(dataset.storage_class.as_deref(), Some("FASTIO"));
+        assert_eq!(dataset.space_primary, Some(20));
+        assert_eq!(dataset.space_secondary, Some(4));
+        assert_eq!(dataset.space_unit.as_deref(), Some("TRK"));
+        assert_eq!(dataset.directory_blocks, Some(8));
+        assert_eq!(dataset.dataset_type.as_deref(), Some("PDS"));
+        assert_eq!(dataset.like_dataset.as_deref(), Some("HLQ.TEMPLATE.DATA"));
+        assert_eq!(dataset.organization.as_deref(), Some("VS"));
+        assert_eq!(dataset.key_length, Some(96));
+        assert_eq!(dataset.key_offset, Some(4));
+        assert_eq!(dataset.control_interval_size, Some(8192));
+        assert_eq!(dataset.unit.as_deref(), Some("SYSDA"));
+        assert_eq!(dataset.unit_count, Some(9));
+        assert_eq!(dataset.average_record_unit.as_deref(), Some("M"));
+        assert_eq!(dataset.catalog_behavior.as_deref(), Some("UNCATALOG"));
+        assert_eq!(dataset.retention_period, Some(30));
+        assert_eq!(dataset.release_space, Some(true));
+        assert_eq!(dataset.erase_on_delete, Some(false));
+        assert_eq!(dataset.expiration_date.as_deref(), Some("2024456"));
     }
 
     #[test]
@@ -1038,6 +2058,24 @@ mod tests {
         builder.set_dataset_data_class(Some("NARR".into()));
         builder.set_dataset_management_class(Some("GDG".into()));
         builder.set_dataset_storage_class(Some("FAST".into()));
+        builder.set_dataset_space_primary(Some(12));
+        builder.set_dataset_space_secondary(Some(4));
+        builder.set_dataset_space_unit(Some("cyl".into()));
+        builder.set_dataset_directory_blocks(Some(24));
+        builder.set_dataset_type(Some("library".into()));
+        builder.set_dataset_like(Some("HLQ.TEMPLATE.DATA".into()));
+        builder.set_dataset_organization(Some("PO".into()));
+        builder.set_dataset_key_length(Some(32));
+        builder.set_dataset_key_offset(Some(12));
+        builder.set_dataset_control_interval_size(Some(2048));
+        builder.set_dataset_unit(Some("sysda".into()));
+        builder.set_dataset_unit_count(Some(2));
+        builder.set_dataset_average_record_unit(Some("u".into()));
+        builder.set_dataset_catalog_behavior(Some("nocat".into()));
+        builder.set_dataset_retention_period(Some(90));
+        builder.set_dataset_release_space(Some(true));
+        builder.set_dataset_erase_on_delete(Some(true));
+        builder.set_dataset_expiration_date(Some("2026001".into()));
 
         builder.set_dataset_member(None);
         builder.set_dataset_disposition(None);
@@ -1048,6 +2086,24 @@ mod tests {
         builder.set_dataset_data_class(None);
         builder.set_dataset_management_class(None);
         builder.set_dataset_storage_class(None);
+        builder.set_dataset_space_primary(None);
+        builder.set_dataset_space_secondary(None);
+        builder.set_dataset_space_unit(None);
+        builder.set_dataset_directory_blocks(None);
+        builder.set_dataset_type(None);
+        builder.set_dataset_like(None);
+        builder.set_dataset_organization(None);
+        builder.set_dataset_key_length(None);
+        builder.set_dataset_key_offset(None);
+        builder.set_dataset_control_interval_size(None);
+        builder.set_dataset_unit(None);
+        builder.set_dataset_unit_count(None);
+        builder.set_dataset_average_record_unit(None);
+        builder.set_dataset_catalog_behavior(None);
+        builder.set_dataset_retention_period(None);
+        builder.set_dataset_release_space(None);
+        builder.set_dataset_erase_on_delete(None);
+        builder.set_dataset_expiration_date(None);
 
         let dataset = builder.snapshot().route.dataset.expect("dataset");
         assert_eq!(dataset.dataset, "HLQ.DATA");
@@ -1060,6 +2116,24 @@ mod tests {
         assert!(dataset.data_class.is_none());
         assert!(dataset.management_class.is_none());
         assert!(dataset.storage_class.is_none());
+        assert!(dataset.space_primary.is_none());
+        assert!(dataset.space_secondary.is_none());
+        assert!(dataset.space_unit.is_none());
+        assert!(dataset.directory_blocks.is_none());
+        assert!(dataset.dataset_type.is_none());
+        assert!(dataset.like_dataset.is_none());
+        assert!(dataset.organization.is_none());
+        assert!(dataset.key_length.is_none());
+        assert!(dataset.key_offset.is_none());
+        assert!(dataset.control_interval_size.is_none());
+        assert!(dataset.unit.is_none());
+        assert!(dataset.unit_count.is_none());
+        assert!(dataset.average_record_unit.is_none());
+        assert!(dataset.catalog_behavior.is_none());
+        assert!(dataset.retention_period.is_none());
+        assert!(dataset.release_space.is_none());
+        assert!(dataset.erase_on_delete.is_none());
+        assert!(dataset.expiration_date.is_none());
 
         builder.set_dataset(None);
         assert!(builder.snapshot().route.dataset.is_none());
@@ -1071,6 +2145,10 @@ mod tests {
         builder.set_dataset(Some("HLQ.DATA".into()));
         builder.set_dataset_record_length(Some(0));
         builder.set_dataset_block_size(Some(0));
+        builder.set_dataset_retention_period(Some(0));
+        builder.set_dataset_key_length(Some(0));
+        builder.set_dataset_control_interval_size(Some(0));
+        builder.set_dataset_unit_count(Some(0));
         assert!(builder
             .snapshot()
             .route
@@ -1085,18 +2163,65 @@ mod tests {
             .expect("dataset")
             .block_size
             .is_none());
+        assert!(builder
+            .snapshot()
+            .route
+            .dataset
+            .expect("dataset")
+            .retention_period
+            .is_none());
+        assert!(builder
+            .snapshot()
+            .route
+            .dataset
+            .expect("dataset")
+            .key_length
+            .is_none());
+        assert!(builder
+            .snapshot()
+            .route
+            .dataset
+            .expect("dataset")
+            .control_interval_size
+            .is_none());
+        assert!(builder
+            .snapshot()
+            .route
+            .dataset
+            .expect("dataset")
+            .unit_count
+            .is_none());
 
         builder.set_dataset_record_length(Some(256));
         builder.set_dataset_block_size(Some(1024));
+        builder.set_dataset_retention_period(Some(120));
+        builder.set_dataset_key_length(Some(32));
+        builder.set_dataset_control_interval_size(Some(4096));
+        builder.set_dataset_unit_count(Some(4));
+        builder.set_dataset_key_offset(Some(0));
         let dataset = builder.snapshot().route.dataset.expect("dataset");
         assert_eq!(dataset.record_length, Some(256));
         assert_eq!(dataset.block_size, Some(1024));
+        assert_eq!(dataset.retention_period, Some(120));
+        assert_eq!(dataset.key_length, Some(32));
+        assert_eq!(dataset.control_interval_size, Some(4096));
+        assert_eq!(dataset.unit_count, Some(4));
+        assert_eq!(dataset.key_offset, Some(0));
 
         builder.set_dataset_record_length(Some(0));
         builder.set_dataset_block_size(Some(0));
+        builder.set_dataset_retention_period(Some(0));
+        builder.set_dataset_key_length(Some(0));
+        builder.set_dataset_control_interval_size(Some(0));
+        builder.set_dataset_unit_count(Some(0));
         let cleared = builder.snapshot().route.dataset.expect("dataset");
         assert!(cleared.record_length.is_none());
         assert!(cleared.block_size.is_none());
+        assert!(cleared.retention_period.is_none());
+        assert!(cleared.key_length.is_none());
+        assert!(cleared.control_interval_size.is_none());
+        assert!(cleared.unit_count.is_none());
+        assert_eq!(cleared.key_offset, Some(0));
     }
 
     #[test]
@@ -1181,6 +2306,28 @@ mod tests {
                     data_class: Some(" NARR ".to_string()),
                     management_class: Some(" GDG ".to_string()),
                     storage_class: Some(" FASTIO ".to_string()),
+                    space_primary: Some(12),
+                    space_secondary: Some(4),
+                    space_unit: Some(" cyl ".to_string()),
+                    directory_blocks: Some(30),
+                    dataset_type: Some(" library ".to_string()),
+                    like_dataset: Some("  TEMPLATE.DATA  ".to_string()),
+                    organization: Some(" vs ".to_string()),
+                    key_length: Some(128),
+                    key_offset: Some(6),
+                    control_interval_size: Some(8192),
+                    share_options_cross_region: Some(4),
+                    share_options_cross_system: Some(3),
+                    reuse: Some(true),
+                    log: Some(false),
+                    unit: Some(" sysda ".to_string()),
+                    unit_count: Some(5),
+                    average_record_unit: Some(" g ".to_string()),
+                    catalog_behavior: Some(" catalog ".to_string()),
+                    retention_period: Some(365),
+                    release_space: Some(true),
+                    erase_on_delete: Some(false),
+                    expiration_date: Some(" 2026365 ".to_string()),
                 }),
             },
             payload: CobolNarratorPayload {
@@ -1230,6 +2377,28 @@ mod tests {
         assert_eq!(dataset.data_class.as_deref(), Some("NARR"));
         assert_eq!(dataset.management_class.as_deref(), Some("GDG"));
         assert_eq!(dataset.storage_class.as_deref(), Some("FASTIO"));
+        assert_eq!(dataset.space_primary, Some(12));
+        assert_eq!(dataset.space_secondary, Some(4));
+        assert_eq!(dataset.space_unit.as_deref(), Some("CYL"));
+        assert_eq!(dataset.directory_blocks, Some(30));
+        assert_eq!(dataset.dataset_type.as_deref(), Some("LIBRARY"));
+        assert_eq!(dataset.like_dataset.as_deref(), Some("TEMPLATE.DATA"));
+        assert_eq!(dataset.organization.as_deref(), Some("VS"));
+        assert_eq!(dataset.key_length, Some(128));
+        assert_eq!(dataset.key_offset, Some(6));
+        assert_eq!(dataset.control_interval_size, Some(8192));
+        assert_eq!(dataset.share_options_cross_region, Some(4));
+        assert_eq!(dataset.share_options_cross_system, Some(3));
+        assert_eq!(dataset.reuse, Some(true));
+        assert_eq!(dataset.log, Some(false));
+        assert_eq!(dataset.unit.as_deref(), Some("SYSDA"));
+        assert_eq!(dataset.unit_count, Some(5));
+        assert_eq!(dataset.average_record_unit.as_deref(), Some("G"));
+        assert_eq!(dataset.catalog_behavior.as_deref(), Some("CATALOG"));
+        assert_eq!(dataset.retention_period, Some(365));
+        assert_eq!(dataset.release_space, Some(true));
+        assert_eq!(dataset.erase_on_delete, Some(false));
+        assert_eq!(dataset.expiration_date.as_deref(), Some("2026365"));
         assert_eq!(snapshot.metadata.tags, vec!["tag-one".to_string()]);
         assert_eq!(
             snapshot.initiators.first().expect("initiator").name,
@@ -1324,6 +2493,168 @@ mod tests {
     }
 
     #[test]
+    fn validation_flags_dataset_space_rules() {
+        let mut builder = CobolEnvelopeBuilder::new("job-dataset-space");
+        builder.add_initiator(make_initiator(
+            InitiatorKind::Automation,
+            "allocator",
+            None,
+            None,
+            None,
+            None,
+        ));
+        builder.set_dataset(Some("HLQ.DATA".into()));
+
+        builder.set_dataset_space_unit(Some("trk".into()));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("specify primary or secondary space")));
+
+        builder.set_dataset_space_secondary(Some(3));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset secondary space requires a primary")));
+
+        builder.set_dataset_space_primary(Some(10));
+        builder.set_dataset_space_unit(Some("blocks".into()));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset space unit must be one of")));
+
+        builder.set_dataset_space_unit(Some("cyl".into()));
+        builder.set_dataset_directory_blocks(Some(12));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("directory blocks are only valid")));
+
+        builder.set_dataset_organization(Some("??".into()));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset organization must be one of")));
+
+        builder.set_dataset_organization(Some("PO".into()));
+        builder.set_dataset_record_length(Some(256));
+        builder.set_dataset_key_length(Some(MAX_KEY_LENGTH + 1));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset key length must not exceed")));
+
+        builder.set_dataset_key_length(Some(128));
+        builder.set_dataset_key_offset(Some(512));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset key offset must be less")));
+
+        builder.set_dataset_key_offset(Some(200));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("offset plus key length")));
+
+        builder.set_dataset_key_offset(Some(12));
+        builder.set_dataset_key_length(Some(64));
+        builder.set_dataset_control_interval_size(Some(1234));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("control interval size must be one of")));
+
+        builder.set_dataset_control_interval_size(Some(4096));
+        builder.set_dataset_unit(None);
+        builder.set_dataset_unit_count(Some(MAX_UNIT_COUNT + 1));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("unit count must not exceed")));
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("unit count requires an allocation unit")));
+
+        builder.set_dataset_unit(Some("SYSDA".into()));
+        builder.set_dataset_unit_count(Some(3));
+        builder.set_dataset_catalog_behavior(Some("unknown".into()));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset catalog behavior must be one of")));
+
+        builder.set_dataset_catalog_behavior(Some("catalog".into()));
+        builder.set_dataset_member(Some("PAYLOAD".into()));
+        builder.set_dataset_type(Some("unsupported".into()));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset type must be one of")));
+
+        builder.set_dataset_type(Some("LIBRARY".into()));
+        builder.set_dataset_average_record_unit(Some("x".into()));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset average record unit must be one of")));
+
+        builder.set_dataset_average_record_unit(Some("K".into()));
+        builder.set_dataset_share_options_cross_region(Some(2));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset share options require a VSAM organization")));
+
+        builder.set_dataset_organization(Some("VS".into()));
+        builder.set_dataset_share_options_cross_region(Some(MAX_SHARE_OPTION_LEVEL + 1));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset cross-region share option must not exceed")));
+
+        builder.set_dataset_share_options_cross_region(Some(2));
+        builder.set_dataset_share_options_cross_system(Some(MAX_SHARE_OPTION_LEVEL + 1));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset cross-system share option must not exceed")));
+
+        builder.set_dataset_share_options_cross_system(Some(2));
+        builder.set_dataset_organization(Some("PO".into()));
+        builder.set_dataset_reuse(Some(true));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset reuse hint requires a VSAM organization")));
+
+        builder.set_dataset_organization(Some("VS".into()));
+        builder.set_dataset_reuse(Some(true));
+        builder.set_dataset_log(Some(true));
+        builder.set_dataset_organization(Some("PO".into()));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset log hint requires a VSAM organization")));
+
+        builder.set_dataset_organization(Some("VS".into()));
+        builder.set_dataset_log(Some(false));
+        builder.set_dataset_retention_period(Some(10_000));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset retention period must not exceed")));
+
+        builder.set_dataset_retention_period(Some(30));
+        builder.set_dataset_expiration_date(Some("20A5123".into()));
+        let issues = builder.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("dataset expiration date must be a 7 digit")));
+    }
+
+    #[test]
     fn validation_succeeds_for_complete_envelope() {
         let mut builder = CobolEnvelopeBuilder::new("job-ready");
         builder.add_initiator(make_initiator(
@@ -1353,6 +2684,28 @@ mod tests {
             data_class: None,
             management_class: None,
             storage_class: None,
+            space_primary: None,
+            space_secondary: None,
+            space_unit: None,
+            directory_blocks: None,
+            dataset_type: None,
+            like_dataset: None,
+            organization: None,
+            key_length: None,
+            key_offset: None,
+            control_interval_size: None,
+            share_options_cross_region: None,
+            share_options_cross_system: None,
+            reuse: None,
+            log: None,
+            unit: None,
+            unit_count: None,
+            average_record_unit: None,
+            catalog_behavior: None,
+            retention_period: None,
+            release_space: None,
+            erase_on_delete: None,
+            expiration_date: None,
         };
         let serialized = serde_json::to_string(&basic).expect("serialize");
         assert_eq!(serialized, "\"HLQ.DATA\"");
@@ -1363,18 +2716,43 @@ mod tests {
         enriched.record_format = Some("FB".into());
         enriched.record_length = Some(512);
         enriched.block_size = Some(4096);
+        enriched.space_primary = Some(15);
+        enriched.space_secondary = Some(5);
+        enriched.space_unit = Some("CYL".into());
+        enriched.directory_blocks = Some(30);
+        enriched.dataset_type = Some("LIBRARY".into());
+        enriched.like_dataset = Some("HLQ.TEMPLATE".into());
+        enriched.organization = Some("PO".into());
+        enriched.key_length = Some(128);
+        enriched.key_offset = Some(16);
+        enriched.control_interval_size = Some(4096);
+        enriched.share_options_cross_region = Some(3);
+        enriched.share_options_cross_system = Some(2);
+        enriched.reuse = Some(true);
+        enriched.log = Some(false);
+        enriched.unit = Some("SYSDA".into());
+        enriched.unit_count = Some(4);
+        enriched.average_record_unit = Some("U".into());
+        enriched.catalog_behavior = Some("CATALOG".into());
+        enriched.retention_period = Some(18);
+        enriched.release_space = Some(true);
+        enriched.erase_on_delete = Some(true);
+        enriched.expiration_date = Some("2025123".into());
         let serialized_enriched = serde_json::to_string(&enriched).expect("serialize enriched");
         assert!(serialized_enriched.contains("\"dataset\":"));
         assert!(serialized_enriched.contains("\"member\""));
         assert!(serialized_enriched.contains("\"disposition\""));
         assert!(serialized_enriched.contains("\"record_length\""));
+        assert!(serialized_enriched.contains("\"space_primary\""));
+        assert!(serialized_enriched.contains("\"dataset_type\""));
+        assert!(serialized_enriched.contains("\"share_options_cross_region\""));
 
         let parsed_basic: CobolDatasetRoute = serde_json::from_str("\"USER.DATA\"").expect("parse");
         assert_eq!(parsed_basic.dataset, "USER.DATA");
         assert!(parsed_basic.member.is_none());
 
         let parsed_enriched: CobolDatasetRoute = serde_json::from_str(
-            "{\"dataset\":\"USER.DATA\",\"member\":\"MEMBER\",\"disposition\":\"SHR\",\"volume\":\"VOL001\",\"record_format\":\"FB\",\"record_length\":256,\"block_size\":4096}",
+            "{\"dataset\":\"USER.DATA\",\"member\":\"MEMBER\",\"disposition\":\"SHR\",\"volume\":\"VOL001\",\"record_format\":\"FB\",\"record_length\":256,\"block_size\":4096,\"space_primary\":20,\"space_unit\":\"CYL\",\"directory_blocks\":12,\"dataset_type\":\"LIBRARY\",\"like_dataset\":\"USER.MODEL\",\"organization\":\"PO\",\"key_length\":120,\"key_offset\":8,\"control_interval_size\":8192,\"share_options_cross_region\":3,\"share_options_cross_system\":2,\"reuse\":true,\"log\":false,\"unit\":\"SYSDA\",\"unit_count\":3,\"average_record_unit\":\"K\",\"catalog_behavior\":\"CATALOG\",\"retention_period\":99,\"release_space\":true,\"erase_on_delete\":false,\"expiration_date\":\"2025456\"}",
         )
         .expect("parse object");
         assert_eq!(parsed_enriched.dataset, "USER.DATA");
@@ -1384,5 +2762,27 @@ mod tests {
         assert_eq!(parsed_enriched.record_format.as_deref(), Some("FB"));
         assert_eq!(parsed_enriched.record_length, Some(256));
         assert_eq!(parsed_enriched.block_size, Some(4096));
+        assert_eq!(parsed_enriched.space_primary, Some(20));
+        assert!(parsed_enriched.space_secondary.is_none());
+        assert_eq!(parsed_enriched.space_unit.as_deref(), Some("CYL"));
+        assert_eq!(parsed_enriched.directory_blocks, Some(12));
+        assert_eq!(parsed_enriched.dataset_type.as_deref(), Some("LIBRARY"));
+        assert_eq!(parsed_enriched.like_dataset.as_deref(), Some("USER.MODEL"));
+        assert_eq!(parsed_enriched.organization.as_deref(), Some("PO"));
+        assert_eq!(parsed_enriched.key_length, Some(120));
+        assert_eq!(parsed_enriched.key_offset, Some(8));
+        assert_eq!(parsed_enriched.control_interval_size, Some(8192));
+        assert_eq!(parsed_enriched.share_options_cross_region, Some(3));
+        assert_eq!(parsed_enriched.share_options_cross_system, Some(2));
+        assert_eq!(parsed_enriched.reuse, Some(true));
+        assert_eq!(parsed_enriched.log, Some(false));
+        assert_eq!(parsed_enriched.unit.as_deref(), Some("SYSDA"));
+        assert_eq!(parsed_enriched.unit_count, Some(3));
+        assert_eq!(parsed_enriched.average_record_unit.as_deref(), Some("K"));
+        assert_eq!(parsed_enriched.catalog_behavior.as_deref(), Some("CATALOG"));
+        assert_eq!(parsed_enriched.retention_period, Some(99));
+        assert_eq!(parsed_enriched.release_space, Some(true));
+        assert_eq!(parsed_enriched.erase_on_delete, Some(false));
+        assert_eq!(parsed_enriched.expiration_date.as_deref(), Some("2025456"));
     }
 }

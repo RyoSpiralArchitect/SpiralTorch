@@ -42,6 +42,18 @@ function parsePositiveInteger(raw: string, label: string): number | undefined {
   return parsed;
 }
 
+function parseNonNegativeInteger(raw: string, label: string): number | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return parsed;
+}
+
 function parseMetadata(raw: string): unknown | null {
   const trimmed = raw.trim();
   if (!trimmed) {
@@ -129,6 +141,105 @@ function buildPlanner(): CobolDispatchPlanner {
   planner.setDatasetManagementClass(datasetManagementClass || undefined);
   const datasetStorageClass = getInputValue("dataset-storage-class");
   planner.setDatasetStorageClass(datasetStorageClass || undefined);
+  const datasetSpacePrimary = parsePositiveInteger(
+    getInputValue("dataset-space-primary"),
+    "Primary space",
+  );
+  planner.setDatasetSpacePrimary(datasetSpacePrimary ?? undefined);
+  const datasetSpaceSecondary = parsePositiveInteger(
+    getInputValue("dataset-space-secondary"),
+    "Secondary space",
+  );
+  planner.setDatasetSpaceSecondary(datasetSpaceSecondary ?? undefined);
+  const datasetSpaceUnit = getInputValue("dataset-space-unit");
+  planner.setDatasetSpaceUnit(datasetSpaceUnit || undefined);
+  const datasetDirectoryBlocks = parsePositiveInteger(
+    getInputValue("dataset-directory-blocks"),
+    "Directory blocks",
+  );
+  planner.setDatasetDirectoryBlocks(datasetDirectoryBlocks ?? undefined);
+  const datasetType = getInputValue("dataset-type");
+  planner.setDatasetType(datasetType || undefined);
+  const datasetLike = getInputValue("dataset-like");
+  planner.setDatasetLike(datasetLike || undefined);
+  const datasetOrganization = getInputValue("dataset-organization");
+  planner.setDatasetOrganization(datasetOrganization || undefined);
+  const datasetKeyLength = parsePositiveInteger(
+    getInputValue("dataset-key-length"),
+    "Key length",
+  );
+  planner.setDatasetKeyLength(datasetKeyLength ?? undefined);
+  const datasetKeyOffset = parseNonNegativeInteger(
+    getInputValue("dataset-key-offset"),
+    "Key offset",
+  );
+  planner.setDatasetKeyOffset(datasetKeyOffset ?? undefined);
+  const datasetControlIntervalSize = parsePositiveInteger(
+    getInputValue("dataset-ci-size"),
+    "Control interval size",
+  );
+  planner.setDatasetControlIntervalSize(datasetControlIntervalSize ?? undefined);
+  const shareCrossRegion = parsePositiveInteger(
+    getInputValue("dataset-share-cross-region"),
+    "Cross-region share option",
+  );
+  if (shareCrossRegion != null && shareCrossRegion > 4) {
+    throw new Error("Cross-region share option must be between 1 and 4");
+  }
+  planner.setDatasetShareOptionsCrossRegion(shareCrossRegion ?? undefined);
+  const shareCrossSystem = parsePositiveInteger(
+    getInputValue("dataset-share-cross-system"),
+    "Cross-system share option",
+  );
+  if (shareCrossSystem != null && shareCrossSystem > 4) {
+    throw new Error("Cross-system share option must be between 1 and 4");
+  }
+  planner.setDatasetShareOptionsCrossSystem(shareCrossSystem ?? undefined);
+  const reuseSelect = document.querySelector<HTMLSelectElement>("#dataset-reuse");
+  const reuseValue = reuseSelect?.value?.trim() ?? "";
+  if (reuseValue === "REUSE") {
+    planner.setDatasetReuse(true);
+  } else if (reuseValue === "NOREUSE") {
+    planner.setDatasetReuse(false);
+  } else {
+    planner.setDatasetReuse(undefined);
+  }
+  const logSelect = document.querySelector<HTMLSelectElement>("#dataset-log");
+  const logValue = logSelect?.value?.trim() ?? "";
+  if (logValue === "LOG") {
+    planner.setDatasetLog(true);
+  } else if (logValue === "NOLOG") {
+    planner.setDatasetLog(false);
+  } else {
+    planner.setDatasetLog(undefined);
+  }
+  const datasetUnit = getInputValue("dataset-unit");
+  planner.setDatasetUnit(datasetUnit || undefined);
+  const datasetUnitCount = parsePositiveInteger(
+    getInputValue("dataset-unit-count"),
+    "Unit count",
+  );
+  planner.setDatasetUnitCount(datasetUnitCount ?? undefined);
+  const datasetAverageRecordUnit = getInputValue("dataset-average-record-unit");
+  planner.setDatasetAverageRecordUnit(datasetAverageRecordUnit || undefined);
+  const catalogSelect = document.querySelector<HTMLSelectElement>(
+    "#dataset-catalog-behavior",
+  );
+  const catalogBehavior = catalogSelect?.value?.trim() ?? "";
+  planner.setDatasetCatalogBehavior(catalogBehavior ? catalogBehavior : undefined);
+  const retentionDays = parsePositiveInteger(
+    getInputValue("dataset-retention-period"),
+    "Retention days",
+  );
+  planner.setDatasetRetentionPeriod(retentionDays ?? undefined);
+  const releaseCheckbox = document.querySelector<HTMLInputElement>(
+    "#dataset-release-space",
+  );
+  planner.setDatasetReleaseSpace(releaseCheckbox?.checked ? true : undefined);
+  const eraseCheckbox = document.querySelector<HTMLInputElement>("#dataset-erase");
+  planner.setDatasetEraseOnDelete(eraseCheckbox?.checked ? true : undefined);
+  const expirationDate = getInputValue("dataset-expiration-date");
+  planner.setDatasetExpirationDate(expirationDate || undefined);
 
   const metadata = getTextareaValue("metadata");
   if (metadata) {
