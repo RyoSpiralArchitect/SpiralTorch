@@ -3,6 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+enable subgroups;
+
 struct MatmulParams {
     rows: u32,
     cols: u32,
@@ -12,8 +14,9 @@ struct MatmulParams {
 
 @group(0) @binding(0) var<storage, read> lhs : array<f32>;
 @group(0) @binding(1) var<storage, read> rhs : array<f32>;
-@group(0) @binding(2) var<storage, read_write> out : array<f32>;
-@group(0) @binding(3) var<uniform> params : MatmulParams;
+@group(0) @binding(2) var<storage, read> bias : array<f32>;
+@group(0) @binding(3) var<storage, read_write> out : array<f32>;
+@group(0) @binding(4) var<uniform> params : MatmulParams;
 
 override TILE_SIZE : u32 = {tile_size}u;
 
@@ -24,6 +27,7 @@ var<workgroup> rhs_tile : array<f32, TILE_SIZE * TILE_SIZE>;
 fn main(
     @builtin(global_invocation_id) gid : vec3<u32>,
     @builtin(local_invocation_id) lid : vec3<u32>,
+    @builtin(subgroup_invocation_id) subgroup_id : u32,
 ) {
     let row = gid.y;
     let col = gid.x;
@@ -75,6 +79,17 @@ fn main(
         tile_index = tile_index + 1u;
     }
 
+    let subgroup_width = max(subgroupSize(), 1u);
+    let rows_per_subgroup = max(subgroup_width / TILE_SIZE, 1u);
+
+    var bias_lane : f32 = 0.0;
+    if ((local_row % rows_per_subgroup) == 0u) {
+        bias_lane = bias[col];
+    }
+    let source_lane = subgroup_id % TILE_SIZE;
+    let bias_value = subgroupShuffle(bias_lane, source_lane);
+
     let out_index = row * params.cols + col;
-    out[out_index] = acc;
+    let activated = max(acc + bias_value, 0.0);
+    out[out_index] = activated;
 }
