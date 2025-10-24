@@ -5,8 +5,9 @@ use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::{Bound, PyRef, PyRefMut};
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
-use st_tensor::{MatmulBackend, SoftmaxBackend, Tensor, TensorError};
+use st_tensor::{backend::cpu_dense, Layout, MatmulBackend, SoftmaxBackend, Tensor, TensorError};
 use std::ffi::{c_void, CStr};
+use std::sync::Arc;
 use tracing::warn;
 
 fn parse_backend(label: Option<&str>) -> MatmulBackend {
@@ -14,6 +15,8 @@ fn parse_backend(label: Option<&str>) -> MatmulBackend {
         "auto" => MatmulBackend::Auto,
         "faer" => MatmulBackend::CpuFaer,
         "cpu" => MatmulBackend::CpuFaer,
+        "simd" => MatmulBackend::CpuSimd,
+        "cpu-simd" => MatmulBackend::CpuSimd,
         "naive" => MatmulBackend::CpuNaive,
         #[cfg(feature = "wgpu")]
         "wgpu" => MatmulBackend::GpuWgpu,
@@ -63,6 +66,45 @@ impl TensorOutPtr {
 
     unsafe fn clone_tensor(self) -> Tensor {
         (*self.as_mut_ptr()).clone()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "CpuSimdPackedRhs")]
+#[derive(Clone)]
+pub(crate) struct PyCpuSimdPackedRhs {
+    inner: usize,
+    cols: usize,
+    data: Arc<[f32]>,
+}
+
+impl PyCpuSimdPackedRhs {
+    fn new(inner: usize, cols: usize, data: Vec<f32>) -> Self {
+        Self {
+            inner,
+            cols,
+            data: Arc::from(data.into_boxed_slice()),
+        }
+    }
+}
+
+#[pymethods]
+impl PyCpuSimdPackedRhs {
+    #[getter]
+    fn inner(&self) -> usize {
+        self.inner
+    }
+
+    #[getter]
+    fn cols(&self) -> usize {
+        self.cols
+    }
+
+    fn __len__(&self) -> PyResult<usize> {
+        Ok(self.data.len())
+    }
+
+    fn tolist(&self) -> Vec<f32> {
+        self.data.to_vec()
     }
 }
 
@@ -215,6 +257,95 @@ impl PyTensor {
             out.push(data[start..start + cols].to_vec());
         }
         out
+    }
+
+    #[pyo3(signature = (packed, *, out=None))]
+    pub fn matmul_simd_prepacked(
+        &self,
+        packed: &PyCpuSimdPackedRhs,
+        out: Option<&Bound<PyAny>>,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
+        if !matches!(self.inner.layout(), Layout::RowMajor) {
+            return Err(PyValueError::new_err(
+                "cpu-simd matmul expects a row-major left-hand side tensor",
+            ));
+        }
+
+        let (rows, inner) = self.inner.shape();
+        if inner != packed.inner {
+            return Err(PyValueError::new_err(format!(
+                "lhs inner dimension {} does not match packed rhs inner {}",
+                inner, packed.inner
+            )));
+        }
+
+        let cols = packed.cols;
+        let packed_buf = packed.data.clone();
+        let lhs = self.inner.clone();
+
+        if let Some(cell) = out {
+            let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
+            if dst.inner.shape() != (rows, cols) {
+                return Err(PyValueError::new_err(format!(
+                    "destination shape {:?} does not match ({}, {})",
+                    dst.inner.shape(),
+                    rows,
+                    cols
+                )));
+            }
+            if !matches!(dst.inner.layout(), Layout::RowMajor) {
+                return Err(PyValueError::new_err(
+                    "cpu-simd matmul expects a row-major destination tensor",
+                ));
+            }
+
+            let dst_ptr = TensorOutPtr((&mut dst.inner as *mut Tensor) as usize);
+            drop(dst);
+
+            let rows_cl = rows;
+            let inner_cl = inner;
+            let cols_cl = cols;
+            let dst_ptr_closure = dst_ptr;
+
+            py.allow_threads(move || unsafe {
+                let tensor = &mut *dst_ptr_closure.as_mut_ptr();
+                cpu_dense::matmul_packed_into(
+                    tensor.data_mut(),
+                    lhs.data(),
+                    packed_buf.as_ref(),
+                    rows_cl,
+                    inner_cl,
+                    cols_cl,
+                )
+            })
+            .map_err(|message| PyRuntimeError::new_err(message))?;
+
+            let tensor = unsafe { dst_ptr.clone_tensor() };
+            return Ok(PyTensor { inner: tensor });
+        }
+
+        let mut dst_tensor = Tensor::zeros(rows, cols).map_err(tensor_err_to_py)?;
+        let dst_ptr = TensorOutPtr((&mut dst_tensor as *mut Tensor) as usize);
+        let rows_cl = rows;
+        let inner_cl = inner;
+        let cols_cl = cols;
+        let dst_ptr_closure = dst_ptr;
+
+        py.allow_threads(move || unsafe {
+            let tensor = &mut *dst_ptr_closure.as_mut_ptr();
+            cpu_dense::matmul_packed_into(
+                tensor.data_mut(),
+                lhs.data(),
+                packed_buf.as_ref(),
+                rows_cl,
+                inner_cl,
+                cols_cl,
+            )
+        })
+        .map_err(|message| PyRuntimeError::new_err(message))?;
+
+        Ok(PyTensor { inner: dst_tensor })
     }
 
     /// Matrix multiply: self @ other
@@ -570,11 +701,32 @@ fn tensor_to_dlpack(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
     tensor.to_dlpack(py)
 }
 
+#[pyfunction]
+fn cpu_simd_prepack_rhs(py: Python<'_>, rhs: &PyTensor) -> PyResult<PyCpuSimdPackedRhs> {
+    if !matches!(rhs.inner.layout(), Layout::RowMajor) {
+        return Err(PyValueError::new_err(
+            "cpu-simd prepack expects a row-major tensor",
+        ));
+    }
+
+    let (inner, cols) = rhs.inner.shape();
+    let packed = py
+        .allow_threads(|| cpu_dense::prepack_rhs(rhs.inner.data(), inner, cols))
+        .map_err(|message| PyRuntimeError::new_err(message))?;
+
+    Ok(PyCpuSimdPackedRhs::new(inner, cols, packed))
+}
+
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyTensor>()?;
+    m.add_class::<PyCpuSimdPackedRhs>()?;
     m.add_function(wrap_pyfunction!(tensor_from_dlpack, m)?)?;
     m.add_function(wrap_pyfunction!(tensor_to_dlpack, m)?)?;
-    m.add("__doc__", "Tensor helpers and DLPack interop.")?;
+    m.add_function(wrap_pyfunction!(cpu_simd_prepack_rhs, m)?)?;
+    m.add(
+        "__doc__",
+        "Tensor helpers, CPU SIMD packing, and DLPack interop.",
+    )?;
     let _ = py;
     Ok(())
 }
