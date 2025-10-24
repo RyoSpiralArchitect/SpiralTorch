@@ -5,8 +5,13 @@
 
 use crate::module::Module;
 use crate::{PureResult, Tensor};
+use st_frac::mellin_types::{ComplexScalar, Scalar};
+use st_frac::zspace::{
+    evaluate_weighted_series_many, prepare_weighted_series, trapezoidal_weights,
+};
 use st_frac::FracBackend;
 use st_tensor::{LanguageWaveEncoder, OpenCartesianTopos, RewriteMonad, TensorBiome};
+use thiserror::Error;
 
 /// Projects Euclidean activations back into the open-cartesian Z-space manifold.
 #[derive(Clone, Debug)]
@@ -122,6 +127,56 @@ impl Module for ZSpaceProjector {
         Ok(())
     }
 }
+
+// ===== SpiralTorch: Z-space projector (add-on) =====
+#[derive(Debug, Error)]
+pub enum ProjectorError {
+    #[error("input samples must not be empty")]
+    EmptySamples,
+    #[error("z-points must not be empty")]
+    EmptyZ,
+    #[error(transparent)]
+    Mellin(#[from] st_frac::mellin_types::MellinError),
+    #[error(transparent)]
+    ZSpace(#[from] st_frac::mellin_types::ZSpaceError),
+}
+
+pub struct StableZSpaceProjector {
+    pub log_start: Scalar,
+    pub log_step: Scalar,
+    pub z_points: Vec<ComplexScalar>,
+}
+
+impl StableZSpaceProjector {
+    pub fn new(
+        log_start: Scalar,
+        log_step: Scalar,
+        z_points: Vec<ComplexScalar>,
+    ) -> Result<Self, ProjectorError> {
+        if z_points.is_empty() {
+            return Err(ProjectorError::EmptyZ);
+        }
+        Ok(Self {
+            log_start,
+            log_step,
+            z_points,
+        })
+    }
+
+    /// 1系列を z_points へ射影（Horner＋非有限チェックは st-frac 側に内包）
+    pub fn project_series(
+        &self,
+        samples: &[ComplexScalar],
+    ) -> Result<Vec<ComplexScalar>, ProjectorError> {
+        if samples.is_empty() {
+            return Err(ProjectorError::EmptySamples);
+        }
+        let weights = trapezoidal_weights(samples.len())?;
+        let weighted = prepare_weighted_series(samples, &weights)?;
+        Ok(evaluate_weighted_series_many(&weighted, &self.z_points)?)
+    }
+}
+// ===== end additions =====
 
 #[cfg(test)]
 mod tests {
