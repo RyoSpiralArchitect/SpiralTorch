@@ -432,16 +432,9 @@ impl ColorVectorField {
     /// Compute both the linear and logarithmic power spectra for the row-wise
     /// FFT in a single pass. This avoids decoding the interleaved spectrum
     /// twice when WASM callers need both representations.
-    pub fn fft_rows_power_with_db_tensors(
-        &self,
-        inverse: bool,
-    ) -> PureResult<(Tensor, Tensor)> {
+    pub fn fft_rows_power_with_db_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
         let spectrum = self.fft_rows_interleaved(inverse)?;
-        Self::power_and_power_db_tensors_from_interleaved(
-            self.height,
-            self.width,
-            &spectrum,
-        )
+        Self::power_and_power_db_tensors_from_interleaved(self.height, self.width, &spectrum)
     }
 
     /// Row-wise FFT helper that returns both the linear and logarithmic power
@@ -452,11 +445,7 @@ impl ColorVectorField {
         inverse: bool,
     ) -> PureResult<(Tensor, Tensor)> {
         let spectrum = self.fft_rows_interleaved_with_window(window, inverse)?;
-        Self::power_and_power_db_tensors_from_interleaved(
-            self.height,
-            self.width,
-            &spectrum,
-        )
+        Self::power_and_power_db_tensors_from_interleaved(self.height, self.width, &spectrum)
     }
 
     /// Row-wise FFT log-power helper mirroring [`fft_rows_power_tensor`]. The
@@ -652,16 +641,9 @@ impl ColorVectorField {
 
     /// Column-wise FFT helper returning both the linear and logarithmic power
     /// tensors in a single pass.
-    pub fn fft_cols_power_with_db_tensors(
-        &self,
-        inverse: bool,
-    ) -> PureResult<(Tensor, Tensor)> {
+    pub fn fft_cols_power_with_db_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
         let spectrum = self.fft_cols_interleaved(inverse)?;
-        Self::power_and_power_db_tensors_from_interleaved(
-            self.width,
-            self.height,
-            &spectrum,
-        )
+        Self::power_and_power_db_tensors_from_interleaved(self.width, self.height, &spectrum)
     }
 
     /// Column-wise FFT helper returning both power tensors after windowing the
@@ -672,11 +654,7 @@ impl ColorVectorField {
         inverse: bool,
     ) -> PureResult<(Tensor, Tensor)> {
         let spectrum = self.fft_cols_interleaved_with_window(window, inverse)?;
-        Self::power_and_power_db_tensors_from_interleaved(
-            self.width,
-            self.height,
-            &spectrum,
-        )
+        Self::power_and_power_db_tensors_from_interleaved(self.width, self.height, &spectrum)
     }
 
     /// Column-wise FFT log-power helper that mirrors [`fft_cols_power_tensor`].
@@ -932,16 +910,9 @@ impl ColorVectorField {
 
     /// Compute both the linear and logarithmic power tensors for the full 2D
     /// FFT using a single interleaved decode.
-    pub fn fft_2d_power_with_db_tensors(
-        &self,
-        inverse: bool,
-    ) -> PureResult<(Tensor, Tensor)> {
+    pub fn fft_2d_power_with_db_tensors(&self, inverse: bool) -> PureResult<(Tensor, Tensor)> {
         let spectrum = self.fft_2d_interleaved(inverse)?;
-        Self::power_and_power_db_tensors_from_interleaved(
-            self.height,
-            self.width,
-            &spectrum,
-        )
+        Self::power_and_power_db_tensors_from_interleaved(self.height, self.width, &spectrum)
     }
 
     /// 2D FFT helper returning both power tensors after applying a window
@@ -952,11 +923,7 @@ impl ColorVectorField {
         inverse: bool,
     ) -> PureResult<(Tensor, Tensor)> {
         let spectrum = self.fft_2d_interleaved_with_window(window, inverse)?;
-        Self::power_and_power_db_tensors_from_interleaved(
-            self.height,
-            self.width,
-            &spectrum,
-        )
+        Self::power_and_power_db_tensors_from_interleaved(self.height, self.width, &spectrum)
     }
 
     /// 2D FFT log-power helper mirroring [`fft_2d_power_tensor`]. Returns a

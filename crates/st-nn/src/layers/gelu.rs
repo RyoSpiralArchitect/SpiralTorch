@@ -48,19 +48,7 @@ impl Module for Gelu {
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
-        if input.shape() != grad_output.shape() {
-            return Err(TensorError::ShapeMismatch {
-                left: input.shape(),
-                right: grad_output.shape(),
-            });
-        }
-        let (rows, cols) = input.shape();
-        let mut data = Vec::with_capacity(rows * cols);
-        for (x, grad) in input.data().iter().zip(grad_output.data().iter()) {
-            let derivative = Self::gelu_derivative(*x);
-            data.push(derivative * grad);
-        }
-        Tensor::from_vec(rows, cols, data)
+        input.gelu_backward(grad_output)
     }
 
     fn visit_parameters(
