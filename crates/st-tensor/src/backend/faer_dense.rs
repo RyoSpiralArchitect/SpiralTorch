@@ -5,9 +5,9 @@
 
 #[cfg(feature = "faer")]
 mod imp {
-    use faer::linalg::matmul::matmul;
-    use faer::mat::Mat;
-    use faer::Parallelism;
+    use faer::get_global_parallelism;
+    use faer::linalg::matmul::matmul as faer_matmul;
+    use faer::mat;
 
     pub fn is_available() -> bool {
         true
@@ -29,25 +29,20 @@ mod imp {
             return Ok(vec![0.0; rows * cols]);
         }
 
-        let lhs = Mat::from_fn(rows, inner, |r, c| lhs[r * inner + c]);
-        let rhs = Mat::from_fn(inner, cols, |r, c| rhs[r * cols + c]);
-        let mut out = Mat::<f32>::zeros(rows, cols);
+        let lhs_view = mat::from_row_major_slice::<f32>(lhs, rows, inner);
+        let rhs_view = mat::from_row_major_slice::<f32>(rhs, inner, cols);
+        let mut buffer = vec![0.0; rows * cols];
+        let mut out_view = mat::from_row_major_slice_mut::<f32>(&mut buffer, rows, cols);
 
-        matmul(
-            Parallelism::Rayon,
-            out.as_mut(),
-            lhs.as_ref(),
-            rhs.as_ref(),
-            1.0,
+        faer_matmul(
+            out_view.as_mut(),
+            lhs_view,
+            rhs_view,
+            None,
             0.0,
+            get_global_parallelism(),
         );
 
-        let mut buffer = vec![0.0; rows * cols];
-        for r in 0..rows {
-            for c in 0..cols {
-                buffer[r * cols + c] = out[(r, c)];
-            }
-        }
         Ok(buffer)
     }
 }
