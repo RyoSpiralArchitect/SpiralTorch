@@ -88,6 +88,16 @@ fn runtime_from_ptr<'a>(handle: *const RuntimeHandle, label: &str) -> Option<&'a
     Some(unsafe { &(*handle).0 })
 }
 
+#[repr(C)]
+pub struct RoundtableSummary {
+    pub above: usize,
+    pub here: usize,
+    pub beneath: usize,
+    pub energy_above: f32,
+    pub energy_here: f32,
+    pub energy_beneath: f32,
+}
+
 fn tensor_from_data(rows: usize, cols: usize, data: &[f32]) -> PureResult<Tensor> {
     Tensor::from_vec(rows, cols, data.to_vec())
 }
@@ -1197,6 +1207,112 @@ pub extern "C" fn spiraltorch_runtime_tensor_random_normal(
     runtime_tensor_generate(runtime, "runtime_tensor_random_normal", move |runtime| {
         runtime.tensor_random_normal(rows, cols, mean, std, optional_seed(seed, has_seed))
     })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_roundtable_classify(
+    gradient: *const f32,
+    len: usize,
+    above_k: usize,
+    here_k: usize,
+    beneath_k: usize,
+    tolerance: f32,
+    assignments: *mut u8,
+    summary: *mut RoundtableSummary,
+) -> bool {
+    if gradient.is_null() {
+        set_last_error("roundtable_classify received null gradient pointer");
+        return false;
+    }
+    if len == 0 {
+        set_last_error("roundtable_classify requires a non-empty gradient");
+        return false;
+    }
+
+    let gradient = slice::from_raw_parts(gradient, len);
+    let assignments_ptr = match require_non_null_mut(assignments, "roundtable_classify assignments")
+    {
+        Ok(ptr) => ptr,
+        Err(_) => return false,
+    };
+    let summary_ptr = match require_non_null_mut(summary, "roundtable_classify summary") {
+        Ok(ptr) => ptr,
+        Err(_) => return false,
+    };
+
+    let mut indexed: Vec<(usize, f32)> = gradient
+        .iter()
+        .enumerate()
+        .map(|(idx, value)| (idx, value.abs()))
+        .collect();
+    indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut bands = vec![1u8; len];
+
+    let top = usize::min(above_k, len);
+    for &(idx, _) in indexed.iter().take(top) {
+        bands[idx] = 0;
+    }
+
+    let bottom = usize::min(beneath_k, len.saturating_sub(top));
+    for &(idx, _) in indexed.iter().rev().take(bottom) {
+        bands[idx] = 2;
+    }
+
+    if here_k > 0 {
+        let leftover = len.saturating_sub(top + bottom);
+        let here_target = usize::min(here_k, leftover);
+        if here_target > 0 {
+            let mid_end = len.saturating_sub(bottom);
+            let mut assigned = 0usize;
+            for &(idx, _) in indexed.iter().skip(top).take(mid_end.saturating_sub(top)) {
+                if bands[idx] == 1 {
+                    assigned += 1;
+                    if assigned >= here_target {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let tolerance = tolerance.max(0.0);
+    for &(idx, magnitude) in &indexed {
+        if magnitude <= tolerance {
+            bands[idx] = 1;
+        }
+    }
+
+    unsafe {
+        ptr::copy_nonoverlapping(bands.as_ptr(), assignments_ptr, len);
+    }
+
+    let mut counts = [0usize; 3];
+    let mut energy = [0f32; 3];
+    for (idx, value) in gradient.iter().enumerate() {
+        let band = bands[idx] as usize;
+        if band >= counts.len() {
+            continue;
+        }
+        counts[band] += 1;
+        let mag = value.abs();
+        let contribution = if mag.is_finite() { mag } else { 0.0 };
+        energy[band] += contribution;
+    }
+
+    unsafe {
+        *summary_ptr = RoundtableSummary {
+            above: counts[0],
+            here: counts[1],
+            beneath: counts[2],
+            energy_above: energy[0],
+            energy_here: energy[1],
+            energy_beneath: energy[2],
+        };
+    }
+
+    clear_last_error();
+    true
 }
 
 #[no_mangle]

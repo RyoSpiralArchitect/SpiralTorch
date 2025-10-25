@@ -112,6 +112,84 @@ function _wrap_runtime(handle::Ptr{Cvoid}, context::AbstractString)
     return _register_runtime_finalizer!(Runtime(handle))
 end
 
+@enum RoundtableBand::UInt8 begin
+    RoundtableBandAbove = 0
+    RoundtableBandHere = 1
+    RoundtableBandBeneath = 2
+end
+
+struct RoundtableSummary
+    above::Int
+    here::Int
+    beneath::Int
+    energy_above::Float32
+    energy_here::Float32
+    energy_beneath::Float32
+end
+
+mutable struct _CRoundtableSummary
+    above::Csize_t
+    here::Csize_t
+    beneath::Csize_t
+    energy_above::Cfloat
+    energy_here::Cfloat
+    energy_beneath::Cfloat
+end
+
+"""
+    roundtable_classify(gradient; above, here, beneath, tolerance=0.0f0)
+
+Classify the entries of `gradient` into Above/Here/Beneath bands using the same
+roundtable heuristic as the Rust runtime. Returns a tuple of band assignments
+(`Vector{RoundtableBand}`) and a [`RoundtableSummary`](@ref) with counts and
+energy totals.
+"""
+function roundtable_classify(
+    gradient::AbstractVector{<:Real};
+    above::Integer,
+    here::Integer,
+    beneath::Integer,
+    tolerance::Real=0.0f0,
+)
+    if isempty(gradient)
+        throw(ArgumentError("gradient must contain at least one value"))
+    end
+    lib = _lib()
+    data = Float32.(gradient)
+    assignments = Vector{UInt8}(undef, length(data))
+    summary_ref = Ref{_CRoundtableSummary}(_CRoundtableSummary(0, 0, 0, 0, 0, 0))
+    success = ccall(
+        (:spiraltorch_roundtable_classify, lib),
+        UInt8,
+        (Ptr{Float32}, Csize_t, Csize_t, Csize_t, Csize_t, Cfloat, Ptr{UInt8}, Ref{_CRoundtableSummary}),
+        pointer(data),
+        Csize_t(length(data)),
+        Csize_t(above),
+        Csize_t(here),
+        Csize_t(beneath),
+        Float32(tolerance),
+        pointer(assignments),
+        summary_ref,
+    )
+    if success == 0
+        error("roundtable_classify failed: " * last_error())
+    end
+    bands = Vector{RoundtableBand}(undef, length(assignments))
+    @inbounds for idx in eachindex(assignments)
+        bands[idx] = RoundtableBand(assignments[idx])
+    end
+    summary_raw = summary_ref[]
+    summary = RoundtableSummary(
+        Int(summary_raw.above),
+        Int(summary_raw.here),
+        Int(summary_raw.beneath),
+        Float32(summary_raw.energy_above),
+        Float32(summary_raw.energy_here),
+        Float32(summary_raw.energy_beneath),
+    )
+    return bands, summary
+end
+
 function _require_runtime(runtime::Runtime, label)
     if runtime.handle == C_NULL
         error("$(label) runtime handle is null")
