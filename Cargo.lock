@@ -3034,7 +3034,6 @@ dependencies = [
  "ndarray",
  "st-core",
  "st-frac",
- "st-logic",
  "st-tensor",
 ]
 
