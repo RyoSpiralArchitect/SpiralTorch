@@ -227,7 +227,8 @@ tensor shims, no translation layers, and no tracebacks.
   - **Interpretability as a first-class citizen:** Hypergrad tapes, roundtable
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
-**Current release:** `spiraltorch==0.2.4` (abi3 wheel, Python ≥3.8)  
+    
+**Current release:** `spiraltorch==0.2.6` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -235,7 +236,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.2.4
+pip install -U spiraltorch==0.2.6
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
