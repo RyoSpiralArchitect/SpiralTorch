@@ -22,7 +22,7 @@
 // ============================================================================
 
 use core::cmp::Ordering;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant, SystemTime};
 
 use st_core::backend::unison_heuristics::RankKind;
@@ -307,22 +307,28 @@ pub struct GlobalProposal {
 #[derive(Debug, Default, Clone)]
 pub struct HeurOpLog {
     entries: Vec<HeurOp>,
+    fingerprints: HashSet<u64>,
 }
 
 impl HeurOpLog {
     pub fn append(&mut self, op: HeurOp) {
-        self.entries.push(op);
+        let fingerprint = op.proposal_fingerprint();
+        if self.fingerprints.insert(fingerprint) {
+            self.entries.push(op);
+        }
     }
 
     pub fn merge(&mut self, other: &HeurOpLog) {
+        if other.entries.is_empty() {
+            return;
+        }
+        if self.entries.is_empty() && self.fingerprints.is_empty() {
+            self.entries = other.entries.clone();
+            self.fingerprints = other.fingerprints.clone();
+            return;
+        }
         for op in &other.entries {
-            if !self
-                .entries
-                .iter()
-                .any(|existing| existing.proposal_fingerprint() == op.proposal_fingerprint())
-            {
-                self.entries.push(op.clone());
-            }
+            self.append(op.clone());
         }
     }
 
@@ -353,44 +359,29 @@ impl HeurOpLog {
     /// are sorted by their declared weight and issuance timestamp so consumers
     /// can replay the most influential changes.
     pub fn top_winners(&self, limit: usize) -> Vec<HeurOp> {
-        use std::cmp::Ordering;
+        if limit == 0 {
+            return Vec::new();
+        }
 
         let mut candidates: Vec<&HeurOp> = self
             .entries
             .iter()
-            .filter(|op| matches!(op.kind, HeurOpKind::AppendSoft { .. }))
+            .filter(|op| op.is_append_soft())
             .collect();
-        candidates.sort_by(|left, right| {
-            let left_weight = match &left.kind {
-                HeurOpKind::AppendSoft { weight, .. } => *weight,
-                _ => 0.0,
-            };
-            let right_weight = match &right.kind {
-                HeurOpKind::AppendSoft { weight, .. } => *weight,
-                _ => 0.0,
-            };
-            match right_weight
-                .partial_cmp(&left_weight)
-                .unwrap_or(Ordering::Equal)
-            {
-                Ordering::Equal => left
-                    .issued_at
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .cmp(
-                        &right
-                            .issued_at
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap_or_default(),
-                    ),
-                other => other,
-            }
-        });
-        candidates
-            .into_iter()
-            .take(limit)
-            .map(|op| op.clone())
-            .collect()
+
+        if candidates.len() <= limit {
+            candidates.sort_by(|left, right| HeurOp::compare_append_soft(left, right));
+        } else {
+            let partition = limit.min(candidates.len());
+            candidates.select_nth_unstable_by(partition, |left, right| {
+                HeurOp::compare_append_soft(left, right)
+            });
+            let (top_slice, _) = candidates.split_at_mut(partition);
+            top_slice.sort_by(|left, right| HeurOp::compare_append_soft(left, right));
+            candidates.truncate(partition);
+        }
+
+        candidates.into_iter().map(|op| op.clone()).collect()
     }
 }
 
@@ -412,12 +403,36 @@ impl HeurOp {
                 note.hash(&mut hasher);
             }
         }
+        self.issued_at_epoch().as_nanos().hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn issued_at_epoch(&self) -> Duration {
         self.issued_at
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|dur| dur.as_nanos())
             .unwrap_or_default()
-            .hash(&mut hasher);
-        hasher.finish()
+    }
+
+    fn append_weight(&self) -> f32 {
+        match &self.kind {
+            HeurOpKind::AppendSoft { weight, .. } => *weight,
+            _ => 0.0,
+        }
+    }
+
+    fn is_append_soft(&self) -> bool {
+        matches!(self.kind, HeurOpKind::AppendSoft { .. })
+    }
+
+    fn compare_append_soft(left: &HeurOp, right: &HeurOp) -> Ordering {
+        match right
+            .append_weight()
+            .partial_cmp(&left.append_weight())
+            .unwrap_or(Ordering::Equal)
+        {
+            Ordering::Equal => left.issued_at_epoch().cmp(&right.issued_at_epoch()),
+            other => other,
+        }
     }
 }
 
@@ -946,6 +961,92 @@ impl BlackcatModerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn sample_op(origin: &str, script: &str, weight: f32, seconds: u64) -> HeurOp {
+        HeurOp {
+            origin: origin.to_string(),
+            kind: HeurOpKind::AppendSoft {
+                script: script.to_string(),
+                weight,
+            },
+            issued_at: SystemTime::UNIX_EPOCH + Duration::from_secs(seconds),
+        }
+    }
+
+    #[test]
+    fn heur_op_log_append_dedupes_by_fingerprint() {
+        let mut log = HeurOpLog::default();
+        let op = sample_op("node-a", "soft(topk)", 0.8, 1);
+        log.append(op.clone());
+        log.append(op.clone());
+        assert_eq!(log.entries().len(), 1);
+
+        let duplicate_time = sample_op("node-a", "soft(topk)", 0.8, 1);
+        let mut other = HeurOpLog::default();
+        other.append(duplicate_time);
+        log.merge(&other);
+        assert_eq!(log.entries().len(), 1);
+    }
+
+    #[test]
+    fn heur_op_log_merge_preserves_unique_entries() {
+        let mut left = HeurOpLog::default();
+        let first = sample_op("node-a", "soft(topk)", 0.9, 1);
+        let second = sample_op("node-b", "soft(midk)", 0.7, 2);
+        left.append(first.clone());
+        left.append(second.clone());
+
+        let mut right = HeurOpLog::default();
+        let third = sample_op("node-c", "soft(bottomk)", 0.6, 3);
+        right.append(second.clone());
+        right.append(third.clone());
+
+        left.merge(&right);
+
+        let scripts: Vec<_> = left
+            .entries()
+            .iter()
+            .map(|entry| match &entry.kind {
+                HeurOpKind::AppendSoft { script, .. } => script.clone(),
+                _ => unreachable!(),
+            })
+            .collect();
+
+        assert_eq!(
+            scripts,
+            vec![
+                "soft(topk)".to_string(),
+                "soft(midk)".to_string(),
+                "soft(bottomk)".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn top_winners_uses_weight_and_timestamp() {
+        let mut log = HeurOpLog::default();
+        let early_mid = sample_op("node-a", "soft(midk)", 0.75, 0);
+        let later_mid = sample_op("node-b", "soft(midk-late)", 0.75, 4);
+        let strongest = sample_op("node-c", "soft(topk)", 0.9, 2);
+        let weaker = sample_op("node-d", "soft(bottomk)", 0.65, 3);
+
+        log.append(early_mid.clone());
+        log.append(later_mid.clone());
+        log.append(strongest.clone());
+        log.append(weaker.clone());
+
+        let winners = log.top_winners(2);
+        assert_eq!(winners.len(), 2);
+        let scripts: Vec<_> = winners
+            .iter()
+            .map(|entry| match &entry.kind {
+                HeurOpKind::AppendSoft { script, .. } => script.clone(),
+                _ => unreachable!(),
+            })
+            .collect();
+
+        assert_eq!(scripts[0], "soft(topk)".to_string());
+        assert_eq!(scripts[1], "soft(midk)".to_string());
+    }
 
     fn sample_event(band: OutcomeBand, score: f32, psi: Option<f32>) -> DecisionEvent {
         DecisionEvent {
