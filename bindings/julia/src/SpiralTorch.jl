@@ -1,6 +1,7 @@
 module SpiralTorch
 
 using Libdl
+using Base.Threads
 
 const _lib_ref = Ref{Ptr{Cvoid}}(C_NULL)
 
