@@ -22,9 +22,14 @@ use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
-use std::f32::consts::{PI, TAU};
 use std::fmt;
 use std::sync::{Arc, Mutex};
+
+#[path = "microlocal/elliptic.rs"]
+mod elliptic;
+
+use elliptic::EllipticAccumulator;
+pub use elliptic::{EllipticTelemetry, EllipticWarp};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
 #[derive(Debug, Clone)]
@@ -386,219 +391,6 @@ fn unit_sphere_area(dim: usize) -> f32 {
     let numerator = 2.0 * std::f64::consts::PI.powf(dim_f / 2.0);
     let denominator = gamma(dim_f / 2.0);
     (numerator / denominator) as f32
-}
-
-/// Positive-curvature warp that remaps microlocal orientations onto an elliptic
-/// Z-frame.
-#[derive(Clone, Debug)]
-pub struct EllipticWarp {
-    curvature_radius: f32,
-    sheet_count: usize,
-    spin_harmonics: usize,
-}
-
-impl EllipticWarp {
-    /// Creates a warp anchored to the provided curvature radius.
-    pub fn new(curvature_radius: f32) -> Self {
-        let radius = curvature_radius.max(1e-6);
-        Self {
-            curvature_radius: radius,
-            sheet_count: 2,
-            spin_harmonics: 1,
-        }
-    }
-
-    /// Configures the number of discrete sheets representing the χ axis.
-    pub fn with_sheet_count(mut self, sheet_count: usize) -> Self {
-        self.sheet_count = sheet_count.max(1);
-        self
-    }
-
-    /// Configures the number of spin harmonics applied while computing ν.
-    pub fn with_spin_harmonics(mut self, harmonics: usize) -> Self {
-        self.spin_harmonics = harmonics.max(1);
-        self
-    }
-
-    /// Returns the curvature radius associated with the warp.
-    pub fn curvature_radius(&self) -> f32 {
-        self.curvature_radius
-    }
-
-    /// Returns the number of χ sheets encoded by the warp.
-    pub fn sheet_count(&self) -> usize {
-        self.sheet_count
-    }
-
-    /// Maximum geodesic radius reachable on the warp.
-    pub fn max_geodesic(&self) -> f32 {
-        self.curvature_radius * PI
-    }
-
-    /// Maps an orientation vector to elliptic telemetry describing the warped
-    /// coordinates. Returns `None` when the orientation is degenerate.
-    pub fn map_orientation(&self, orientation: &[f32]) -> Option<EllipticTelemetry> {
-        if orientation.is_empty() {
-            return None;
-        }
-
-        let mut dir = [0.0f32; 3];
-        for (dst, &value) in dir.iter_mut().zip(orientation.iter()).take(3) {
-            *dst = value;
-        }
-        let norm = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
-        if !norm.is_finite() || norm <= 1e-6 {
-            return None;
-        }
-        for component in dir.iter_mut() {
-            *component /= norm;
-        }
-
-        let polar = dir[2].clamp(-1.0, 1.0).acos();
-        let geodesic_radius = polar * self.curvature_radius;
-        let azimuth = dir[1].atan2(dir[0]);
-        let mut spin_alignment = (azimuth / PI).clamp(-1.0, 1.0);
-        if self.spin_harmonics > 1 {
-            spin_alignment = (spin_alignment * self.spin_harmonics as f32).sin();
-        }
-
-        let normalized = ((azimuth + PI) / TAU).rem_euclid(1.0);
-        let sheet_f = normalized * self.sheet_count as f32;
-        let mut sheet_index = sheet_f.floor() as usize;
-        if sheet_index >= self.sheet_count {
-            sheet_index = self.sheet_count - 1;
-        }
-        let sheet_position = if self.sheet_count <= 1 {
-            0.0
-        } else {
-            (sheet_f / self.sheet_count as f32).clamp(0.0, 1.0)
-        };
-
-        Some(EllipticTelemetry {
-            curvature_radius: self.curvature_radius,
-            geodesic_radius,
-            spin_alignment,
-            sheet_index,
-            sheet_position,
-            normal_bias: dir[2].clamp(-1.0, 1.0),
-            sheet_count: self.sheet_count,
-        })
-    }
-}
-
-/// Telemetry describing an elliptic Z-frame projection.
-#[derive(Clone, Debug, Default)]
-pub struct EllipticTelemetry {
-    pub curvature_radius: f32,
-    pub geodesic_radius: f32,
-    pub spin_alignment: f32,
-    pub sheet_index: usize,
-    pub sheet_position: f32,
-    pub normal_bias: f32,
-    pub sheet_count: usize,
-}
-
-impl EllipticTelemetry {
-    /// Normalised geodesic radius within \([0, 1]\).
-    pub fn normalized_radius(&self) -> f32 {
-        if self.curvature_radius <= 0.0 {
-            0.0
-        } else {
-            (self.geodesic_radius / (self.curvature_radius * PI)).clamp(0.0, 1.0)
-        }
-    }
-
-    /// Interpolates two telemetry samples.
-    pub fn lerp(&self, other: &EllipticTelemetry, t: f32) -> EllipticTelemetry {
-        let clamped = t.clamp(0.0, 1.0);
-        let sheet_count = self.sheet_count.max(other.sheet_count).max(1);
-        let sheet_position =
-            (lerp(self.sheet_position, other.sheet_position, clamped)).clamp(0.0, 1.0);
-        let sheet_index = ((sheet_position * sheet_count as f32).round() as usize)
-            .min(sheet_count.saturating_sub(1));
-        EllipticTelemetry {
-            curvature_radius: lerp(self.curvature_radius, other.curvature_radius, clamped)
-                .max(1e-6),
-            geodesic_radius: lerp(self.geodesic_radius, other.geodesic_radius, clamped).max(0.0),
-            spin_alignment: lerp(self.spin_alignment, other.spin_alignment, clamped)
-                .clamp(-1.0, 1.0),
-            sheet_index,
-            sheet_position,
-            normal_bias: lerp(self.normal_bias, other.normal_bias, clamped).clamp(-1.0, 1.0),
-            sheet_count,
-        }
-    }
-
-    /// Returns event tags that summarise the elliptic telemetry.
-    pub fn event_tags(&self) -> [String; 3] {
-        [
-            format!("elliptic.sheet:{:02}", self.sheet_index),
-            format!("elliptic.radius:{:.4}", self.normalized_radius()),
-            format!("elliptic.spin:{:.3}", self.spin_alignment),
-        ]
-    }
-}
-
-impl From<&EllipticTelemetry> for SoftlogicEllipticSample {
-    fn from(telemetry: &EllipticTelemetry) -> Self {
-        SoftlogicEllipticSample {
-            curvature_radius: telemetry.curvature_radius,
-            geodesic_radius: telemetry.geodesic_radius,
-            normalized_radius: telemetry.normalized_radius(),
-            spin_alignment: telemetry.spin_alignment,
-            sheet_index: telemetry.sheet_index as u32,
-            sheet_position: telemetry.sheet_position,
-            normal_bias: telemetry.normal_bias,
-            sheet_count: telemetry.sheet_count as u32,
-        }
-    }
-}
-
-#[derive(Default)]
-struct EllipticAccumulator {
-    curvature_sum: f32,
-    radius_sum: f32,
-    bias_sum: f32,
-    spin_sum: f32,
-    sheet_sum: f32,
-    weight: f32,
-    sheet_count: usize,
-}
-
-impl EllipticAccumulator {
-    fn accumulate(&mut self, telemetry: &EllipticTelemetry, weight: f32) {
-        if !weight.is_finite() || weight <= 0.0 {
-            return;
-        }
-        self.curvature_sum += telemetry.curvature_radius * weight;
-        self.radius_sum += telemetry.geodesic_radius * weight;
-        self.bias_sum += telemetry.normal_bias * weight;
-        self.spin_sum += telemetry.spin_alignment * weight;
-        self.sheet_sum += telemetry.sheet_position * weight;
-        self.weight += weight;
-        if telemetry.sheet_count > self.sheet_count {
-            self.sheet_count = telemetry.sheet_count;
-        }
-    }
-
-    fn finish(self) -> Option<EllipticTelemetry> {
-        if self.weight <= 0.0 {
-            return None;
-        }
-        let sheet_count = self.sheet_count.max(1);
-        let sheet_position = (self.sheet_sum / self.weight).clamp(0.0, 1.0);
-        let sheet_index = ((sheet_position * sheet_count as f32).round() as usize)
-            .min(sheet_count.saturating_sub(1));
-        Some(EllipticTelemetry {
-            curvature_radius: (self.curvature_sum / self.weight).max(1e-6),
-            geodesic_radius: (self.radius_sum / self.weight).max(0.0),
-            spin_alignment: (self.spin_sum / self.weight).clamp(-1.0, 1.0),
-            sheet_index,
-            sheet_position,
-            normal_bias: (self.bias_sum / self.weight).clamp(-1.0, 1.0),
-            sheet_count,
-        })
-    }
 }
 
 /// Projects microlocal signatures into Z-space pulses.
@@ -976,6 +768,9 @@ pub struct MicrolocalFeedback {
     pub smoothing: Option<f32>,
     pub tempo_hint: Option<f32>,
     pub stderr_hint: Option<f32>,
+    pub elliptic_radius: Option<f32>,
+    pub elliptic_sheet_count: Option<usize>,
+    pub elliptic_spin_harmonics: Option<usize>,
 }
 
 impl MicrolocalFeedback {
@@ -992,6 +787,11 @@ impl MicrolocalFeedback {
             smoothing: other.smoothing.or(self.smoothing),
             tempo_hint: other.tempo_hint.or(self.tempo_hint),
             stderr_hint: other.stderr_hint.or(self.stderr_hint),
+            elliptic_radius: other.elliptic_radius.or(self.elliptic_radius),
+            elliptic_sheet_count: other.elliptic_sheet_count.or(self.elliptic_sheet_count),
+            elliptic_spin_harmonics: other
+                .elliptic_spin_harmonics
+                .or(self.elliptic_spin_harmonics),
         }
     }
 
@@ -1024,6 +824,27 @@ impl MicrolocalFeedback {
     pub fn with_stderr_hint(mut self, stderr: f32) -> Self {
         if stderr >= 0.0 {
             self.stderr_hint = Some(stderr);
+        }
+        self
+    }
+
+    pub fn with_elliptic_radius(mut self, radius: f32) -> Self {
+        if radius.is_finite() && radius > 0.0 {
+            self.elliptic_radius = Some(radius);
+        }
+        self
+    }
+
+    pub fn with_elliptic_sheet_count(mut self, sheets: usize) -> Self {
+        if sheets > 0 {
+            self.elliptic_sheet_count = Some(sheets);
+        }
+        self
+    }
+
+    pub fn with_elliptic_spin_harmonics(mut self, harmonics: usize) -> Self {
+        if harmonics > 0 {
+            self.elliptic_spin_harmonics = Some(harmonics);
         }
         self
     }
@@ -1366,6 +1187,48 @@ impl InterfaceZConductor {
         if let Some(stderr) = feedback.stderr_hint {
             self.default_stderr_hint = Some(stderr.max(0.0));
         }
+
+        if feedback.elliptic_radius.is_some()
+            || feedback.elliptic_sheet_count.is_some()
+            || feedback.elliptic_spin_harmonics.is_some()
+        {
+            let current = self.lift.elliptic_warp().cloned();
+            let mut updated = if let Some(radius) = feedback.elliptic_radius {
+                if radius.is_finite() && radius > 0.0 {
+                    let mut warp = EllipticWarp::new(radius);
+                    if let Some(sheet) = feedback
+                        .elliptic_sheet_count
+                        .or_else(|| current.as_ref().map(|warp| warp.sheet_count()))
+                    {
+                        warp = warp.with_sheet_count(sheet);
+                    }
+                    if let Some(harmonics) = feedback
+                        .elliptic_spin_harmonics
+                        .or_else(|| current.as_ref().map(|warp| warp.spin_harmonics()))
+                    {
+                        warp = warp.with_spin_harmonics(harmonics);
+                    }
+                    Some(warp)
+                } else {
+                    current.clone()
+                }
+            } else {
+                current.clone().map(|warp| {
+                    let mut warp = warp;
+                    if let Some(sheet) = feedback.elliptic_sheet_count {
+                        warp = warp.with_sheet_count(sheet);
+                    }
+                    if let Some(harmonics) = feedback.elliptic_spin_harmonics {
+                        warp = warp.with_spin_harmonics(harmonics);
+                    }
+                    warp
+                })
+            };
+
+            if let Some(warp) = updated.take() {
+                self.lift.set_elliptic_warp(Some(warp));
+            }
+        }
     }
 
     #[cfg(test)]
@@ -1638,6 +1501,50 @@ mod tests {
             .events
             .iter()
             .any(|event| event.starts_with("elliptic.")));
+    }
+
+    #[test]
+    fn feedback_updates_elliptic_warp_parameters() {
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.3)).with_elliptic_warp(
+            EllipticWarp::new(1.0)
+                .with_sheet_count(3)
+                .with_spin_harmonics(2),
+        );
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift);
+
+        let feedback = MicrolocalFeedback::default()
+            .with_elliptic_radius(2.0)
+            .with_elliptic_sheet_count(5)
+            .with_elliptic_spin_harmonics(4);
+        conductor.apply_feedback(&feedback);
+
+        let warp = conductor
+            .lift
+            .elliptic_warp()
+            .expect("elliptic warp should be present");
+        assert!((warp.curvature_radius() - 2.0).abs() < 1e-6);
+        assert_eq!(warp.sheet_count(), 5);
+        assert_eq!(warp.spin_harmonics(), 4);
+    }
+
+    #[test]
+    fn feedback_updates_existing_warp_without_radius() {
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.3))
+            .with_elliptic_warp(EllipticWarp::new(1.2).with_sheet_count(4));
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift);
+
+        let feedback = MicrolocalFeedback::default().with_elliptic_spin_harmonics(3);
+        conductor.apply_feedback(&feedback);
+
+        let warp = conductor
+            .lift
+            .elliptic_warp()
+            .expect("elliptic warp should persist");
+        assert!((warp.curvature_radius() - 1.2).abs() < 1e-6);
+        assert_eq!(warp.sheet_count(), 4);
+        assert_eq!(warp.spin_harmonics(), 3);
     }
 
     #[test]

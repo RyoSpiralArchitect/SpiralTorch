@@ -1209,6 +1209,48 @@ impl MacroZBridge {
             feedback = feedback.with_threshold_scale(threshold_scale);
         }
 
+        if let Some(telemetry) = &pulse.elliptic {
+            let mean_curvature = contributions.mean_curvature.abs() as f32;
+            if mean_curvature.is_finite() && mean_curvature > 1.0e-6 {
+                let mut target_radius = 1.0 / mean_curvature;
+                let min_radius = (telemetry.curvature_radius * 0.5).max(1.0e-4);
+                let max_radius = (telemetry.curvature_radius * 3.0).max(min_radius);
+                if target_radius.is_finite() {
+                    target_radius = target_radius.clamp(min_radius, max_radius);
+                    feedback = feedback.with_elliptic_radius(target_radius);
+                }
+            } else {
+                feedback = feedback.with_elliptic_radius(telemetry.curvature_radius);
+            }
+
+            let anis_ratio = contributions
+                .anisotropic_curvature
+                .map(|anis| {
+                    let base = mean_curvature.max(1.0e-6) as f64;
+                    (anis.abs() / base).clamp(0.0, 4.0) as f32
+                })
+                .unwrap_or(0.0);
+            let base_sheets = telemetry.sheet_count.max(1);
+            let desired_sheets = if anis_ratio > 0.0 {
+                ((anis_ratio * 4.0).round() as usize + 2).clamp(2, 16)
+            } else {
+                base_sheets.clamp(1, 8)
+            };
+            feedback = feedback.with_elliptic_sheet_count(desired_sheets);
+
+            let spin = telemetry.spin_alignment.abs();
+            let harmonics = if spin > 0.75 {
+                5
+            } else if spin > 0.5 {
+                3
+            } else if spin > 0.25 {
+                2
+            } else {
+                1
+            };
+            feedback = feedback.with_elliptic_spin_harmonics(harmonics);
+        }
+
         feedback
     }
 
