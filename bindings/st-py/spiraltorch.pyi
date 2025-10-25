@@ -1112,6 +1112,278 @@ class ZSpaceCoherenceSequencer(_ZSpaceCoherenceSequencer):
     ...
 
 
+class MetaMembConfig:
+    def __init__(
+        self,
+        *,
+        delta: Sequence[float] | None = ...,
+        omega: Sequence[float] | None = ...,
+        theta: Sequence[float] | None = ...,
+    ) -> None: ...
+
+    @staticmethod
+    def default() -> MetaMembConfig: ...
+
+    @property
+    def delta(self) -> Tuple[float, float, float]: ...
+
+    @property
+    def omega(self) -> Tuple[float, float, float]: ...
+
+    @property
+    def theta(self) -> Tuple[float, float, float]: ...
+
+
+class CircleLockMapConfig:
+    def __init__(
+        self,
+        *,
+        lam_min: float = ...,
+        lam_max: float = ...,
+        lam_bins: int = ...,
+        wd_min: float = ...,
+        wd_max: float = ...,
+        wd_bins: int = ...,
+        burn_in: int = ...,
+        samples: int = ...,
+        qmax: int = ...,
+    ) -> None: ...
+
+    @staticmethod
+    def default() -> CircleLockMapConfig: ...
+
+    @property
+    def lam_min(self) -> float: ...
+
+    @property
+    def lam_max(self) -> float: ...
+
+    @property
+    def lam_bins(self) -> int: ...
+
+    @property
+    def wd_min(self) -> float: ...
+
+    @property
+    def wd_max(self) -> float: ...
+
+    @property
+    def wd_bins(self) -> int: ...
+
+    @property
+    def burn_in(self) -> int: ...
+
+    @property
+    def samples(self) -> int: ...
+
+    @property
+    def qmax(self) -> int: ...
+
+
+class PsiSynchroConfig:
+    def __init__(
+        self,
+        *,
+        step: float = ...,
+        samples: int = ...,
+        ticker_interval: float | None = ...,
+        min_ident_points: int = ...,
+        max_ident_points: int = ...,
+        metamemb: MetaMembConfig | None = ...,
+        circle_map: CircleLockMapConfig | None = ...,
+    ) -> None: ...
+
+    @staticmethod
+    def default() -> PsiSynchroConfig: ...
+
+    @property
+    def step(self) -> float: ...
+
+    @property
+    def samples(self) -> int: ...
+
+    @property
+    def ticker_interval(self) -> float | None: ...
+
+    @property
+    def min_ident_points(self) -> int: ...
+
+    @property
+    def max_ident_points(self) -> int: ...
+
+    @property
+    def metamemb(self) -> MetaMembConfig: ...
+
+    @property
+    def circle_map(self) -> CircleLockMapConfig: ...
+
+
+class PsiBranchState:
+    def __init__(
+        self,
+        branch_id: str,
+        *,
+        gamma: float = ...,
+        lambda_: float = ...,
+        wd: float = ...,
+        omega0: float = ...,
+        drift_coupled: float = ...,
+        phase0: float = ...,
+    ) -> None: ...
+
+    @property
+    def branch_id(self) -> str: ...
+
+    @property
+    def gamma(self) -> float: ...
+
+    @property
+    def lambda_(self) -> float: ...
+
+    @property
+    def wd(self) -> float: ...
+
+    @property
+    def omega0(self) -> float: ...
+
+    @property
+    def drift_coupled(self) -> float: ...
+
+    @property
+    def phase0(self) -> float: ...
+
+    def poincare_period(self) -> float: ...
+
+
+class ZPulseSnapshot:
+    @property
+    def source(self) -> str: ...
+
+    @property
+    def ts(self) -> int: ...
+
+    @property
+    def tempo(self) -> float: ...
+
+    @property
+    def band_energy(self) -> Tuple[float, float, float]: ...
+
+    @property
+    def drift(self) -> float: ...
+
+    @property
+    def z_bias(self) -> float: ...
+
+    @property
+    def support(self) -> Tuple[float, float, float]: ...
+
+    @property
+    def scale(self) -> Tuple[float, float] | None: ...
+
+    @property
+    def quality(self) -> float: ...
+
+    @property
+    def stderr(self) -> float: ...
+
+    @property
+    def latency_ms(self) -> float: ...
+
+
+class ArnoldTonguePeak:
+    @property
+    def ratio_p(self) -> int: ...
+
+    @property
+    def ratio_q(self) -> int: ...
+
+    @property
+    def rotation(self) -> float: ...
+
+    @property
+    def lam(self) -> float: ...
+
+    @property
+    def wd(self) -> float: ...
+
+    @property
+    def strength(self) -> float: ...
+
+    @property
+    def peak_strength(self) -> float: ...
+
+    @property
+    def error(self) -> float: ...
+
+    @property
+    def ratio(self) -> float: ...
+
+
+class HeatmapResult:
+    @property
+    def branch_id(self) -> str: ...
+
+    @property
+    def gamma(self) -> float: ...
+
+    @property
+    def kappa_hat(self) -> float: ...
+
+    @property
+    def lam_grid(self) -> List[float]: ...
+
+    @property
+    def wd_grid(self) -> List[float]: ...
+
+    @property
+    def matrix(self) -> List[List[float]]: ...
+
+    @property
+    def tongues(self) -> List[ArnoldTonguePeak]: ...
+
+    def dominant_tongue(self) -> ArnoldTonguePeak | None: ...
+
+    def to_zpulse(self, ts: int) -> ZPulseSnapshot: ...
+
+
+class PsiSynchroPulse:
+    @property
+    def branch_id(self) -> str: ...
+
+    @property
+    def pulse(self) -> ZPulseSnapshot: ...
+
+
+class PsiSynchroResult:
+    @property
+    def heatmaps(self) -> List[HeatmapResult]: ...
+
+    @property
+    def pulses(self) -> List[PsiSynchroPulse]: ...
+
+    def by_branch(self) -> List[Tuple[str, ZPulseSnapshot]]: ...
+
+
+class _PsiModule(ModuleType):
+    MetaMembConfig: type[MetaMembConfig]
+    CircleLockMapConfig: type[CircleLockMapConfig]
+    PsiSynchroConfig: type[PsiSynchroConfig]
+    PsiBranchState: type[PsiBranchState]
+    ArnoldTonguePeak: type[ArnoldTonguePeak]
+    HeatmapResult: type[HeatmapResult]
+    ZPulseSnapshot: type[ZPulseSnapshot]
+    PsiSynchroPulse: type[PsiSynchroPulse]
+    PsiSynchroResult: type[PsiSynchroResult]
+
+    def run_multibranch_demo(
+        branches: Sequence[PsiBranchState],
+        config: PsiSynchroConfig | None = ...,
+    ) -> PsiSynchroResult: ...
+
+
+psi: _PsiModule
+
+
 class _FracModule(ModuleType):
     def gl_coeffs_adaptive(alpha: float, tol: float = ..., max_len: int = ...) -> List[float]: ...
 
