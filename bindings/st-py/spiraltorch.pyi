@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Literal, Mapping, Optional, Sequence, Tuple
 from types import ModuleType
 
 def init_backend(backend: str) -> bool: ...
@@ -738,7 +738,7 @@ def zspace_eval(
 ) -> List[Tuple[float, float]]: ...
 
 def plan(
-    kind: str,
+    kind: Literal["topk", "midk", "bottomk", "fft"],
     rows: int,
     cols: int,
     k: int,
@@ -1772,7 +1772,7 @@ class _PlannerModule(ModuleType):
     RankPlan: type[RankPlan]
 
     def plan(
-        kind: str,
+        kind: Literal["topk", "midk", "bottomk", "fft"],
         rows: int,
         cols: int,
         k: int,
