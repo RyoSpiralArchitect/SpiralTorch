@@ -9,7 +9,10 @@
 //! binary interface.
 
 use st_core::runtime::golden::{GoldenRuntime, GoldenRuntimeConfig, GoldenTensorError};
-use st_tensor::{PureResult, Tensor};
+use st_tensor::{
+    dlpack::{self, DLManagedTensor},
+    MatmulBackend, PureResult, SoftmaxBackend, Tensor,
+};
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr, CString};
 use std::ptr;
@@ -273,6 +276,68 @@ pub unsafe extern "C" fn spiraltorch_tensor_copy_data(
     result.is_ok()
 }
 
+/// Exports the tensor as a managed DLPack tensor. Returns `NULL` on failure.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_to_dlpack(handle: *const Tensor) -> *mut DLManagedTensor {
+    let tensor = match as_tensor(handle, "tensor handle") {
+        Some(tensor) => tensor,
+        None => return ptr::null_mut(),
+    };
+
+    match tensor.to_dlpack() {
+        Ok(ptr) => {
+            clear_last_error();
+            ptr
+        }
+        Err(err) => {
+            set_last_error(format!("tensor_to_dlpack: {err}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Constructs a tensor from a managed DLPack tensor. Returns `NULL` on failure.
+///
+/// # Safety
+/// The caller must ensure `managed` points to a valid `DLManagedTensor`.
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_tensor_from_dlpack(
+    managed: *mut DLManagedTensor,
+) -> *mut Tensor {
+    if managed.is_null() {
+        set_last_error("tensor_from_dlpack received null managed tensor pointer");
+        return ptr::null_mut();
+    }
+
+    match Tensor::from_dlpack(managed) {
+        Ok(tensor) => {
+            clear_last_error();
+            Box::into_raw(Box::new(tensor))
+        }
+        Err(err) => {
+            set_last_error(format!("tensor_from_dlpack: {err}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Drops the exported state allocated when creating a DLPack tensor.
+///
+/// # Safety
+/// The caller must ensure `managed` either originates from
+/// `spiraltorch_tensor_to_dlpack` or has been obtained from another SpiralTorch
+/// API that documents compatibility with this function.
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_dlpack_drop_exported_state(managed: *mut DLManagedTensor) {
+    if managed.is_null() {
+        return;
+    }
+    // SAFETY: Caller guarantees pointer validity per the function contract.
+    unsafe {
+        dlpack::drop_exported_state(managed);
+    }
+}
+
 fn as_tensor<'a>(handle: *const Tensor, label: &str) -> Option<&'a Tensor> {
     let handle = match require_non_null(handle, label) {
         Ok(handle) => handle,
@@ -297,6 +362,71 @@ fn tensor_binary_op(
         None => return ptr::null_mut(),
     };
     tensor_from_result_with_message(op(left, right), context)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpiraltorchMatmulBackend {
+    Auto = 0,
+    CpuFaer = 1,
+    CpuSimd = 2,
+    CpuNaive = 3,
+    GpuWgpu = 4,
+    GpuHip = 5,
+}
+
+fn map_matmul_backend(backend: SpiraltorchMatmulBackend) -> Result<MatmulBackend, &'static str> {
+    match backend {
+        SpiraltorchMatmulBackend::Auto => Ok(MatmulBackend::Auto),
+        SpiraltorchMatmulBackend::CpuFaer => Ok(MatmulBackend::CpuFaer),
+        SpiraltorchMatmulBackend::CpuSimd => Ok(MatmulBackend::CpuSimd),
+        SpiraltorchMatmulBackend::CpuNaive => Ok(MatmulBackend::CpuNaive),
+        SpiraltorchMatmulBackend::GpuWgpu => {
+            #[cfg(feature = "wgpu")]
+            {
+                Ok(MatmulBackend::GpuWgpu)
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                Err("wgpu backend support is not compiled in")
+            }
+        }
+        SpiraltorchMatmulBackend::GpuHip => {
+            #[cfg(feature = "hip")]
+            {
+                Ok(MatmulBackend::GpuHip)
+            }
+            #[cfg(not(feature = "hip"))]
+            {
+                Err("hip backend support is not compiled in")
+            }
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpiraltorchSoftmaxBackend {
+    Auto = 0,
+    Cpu = 1,
+    GpuWgpu = 2,
+}
+
+fn map_softmax_backend(backend: SpiraltorchSoftmaxBackend) -> Result<SoftmaxBackend, &'static str> {
+    match backend {
+        SpiraltorchSoftmaxBackend::Auto => Ok(SoftmaxBackend::Auto),
+        SpiraltorchSoftmaxBackend::Cpu => Ok(SoftmaxBackend::Cpu),
+        SpiraltorchSoftmaxBackend::GpuWgpu => {
+            #[cfg(feature = "wgpu")]
+            {
+                Ok(SoftmaxBackend::GpuWgpu)
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                Err("wgpu backend support is not compiled in")
+            }
+        }
+    }
 }
 
 fn tensor_unary_op(
@@ -486,6 +616,25 @@ pub extern "C" fn spiraltorch_tensor_matmul(lhs: *const Tensor, rhs: *const Tens
     tensor_binary_op(lhs, rhs, "tensor_matmul", Tensor::matmul)
 }
 
+/// Matrix multiplication with an explicit backend override. Returns `NULL` on failure.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_matmul_with_backend(
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    backend: SpiraltorchMatmulBackend,
+) -> *mut Tensor {
+    let backend = match map_matmul_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    tensor_binary_op(lhs, rhs, "tensor_matmul_with_backend", move |lhs, rhs| {
+        lhs.matmul_with_backend(rhs, backend)
+    })
+}
+
 /// Element-wise tensor multiplication. Returns `NULL` on failure.
 #[no_mangle]
 pub extern "C" fn spiraltorch_tensor_hadamard(
@@ -493,6 +642,24 @@ pub extern "C" fn spiraltorch_tensor_hadamard(
     rhs: *const Tensor,
 ) -> *mut Tensor {
     tensor_binary_op(lhs, rhs, "tensor_hadamard", Tensor::hadamard)
+}
+
+/// Row-wise softmax with an optional backend override. Returns `NULL` on failure.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_row_softmax(
+    handle: *const Tensor,
+    backend: SpiraltorchSoftmaxBackend,
+) -> *mut Tensor {
+    let backend = match map_softmax_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    tensor_unary_op(handle, "tensor_row_softmax", move |tensor| {
+        tensor.row_softmax_with_backend(backend)
+    })
 }
 
 #[no_mangle]
@@ -614,6 +781,29 @@ pub extern "C" fn spiraltorch_runtime_tensor_matmul(
 }
 
 #[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_matmul_with_backend(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    backend: SpiraltorchMatmulBackend,
+) -> *mut Tensor {
+    let backend = match map_matmul_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    runtime_tensor_binary_op(
+        runtime,
+        lhs,
+        rhs,
+        "runtime_tensor_matmul_with_backend",
+        move |lhs, rhs| lhs.matmul_with_backend(rhs, backend),
+    )
+}
+
+#[no_mangle]
 pub extern "C" fn spiraltorch_runtime_tensor_hadamard(
     runtime: *const RuntimeHandle,
     lhs: *const Tensor,
@@ -656,6 +846,27 @@ pub extern "C" fn spiraltorch_runtime_tensor_random_normal(
     runtime_tensor_generate(runtime, "runtime_tensor_random_normal", move |runtime| {
         runtime.tensor_random_normal(rows, cols, mean, std, optional_seed(seed, has_seed))
     })
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_row_softmax(
+    runtime: *const RuntimeHandle,
+    handle: *const Tensor,
+    backend: SpiraltorchSoftmaxBackend,
+) -> *mut Tensor {
+    let backend = match map_softmax_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    runtime_tensor_unary_op(
+        runtime,
+        handle,
+        "runtime_tensor_row_softmax",
+        move |tensor| tensor.row_softmax_with_backend(backend),
+    )
 }
 
 #[cfg(test)]
@@ -973,5 +1184,196 @@ mod tests {
         spiraltorch_tensor_free(spawned);
         spiraltorch_tensor_free(direct);
         spiraltorch_runtime_free(runtime);
+    }
+
+    #[test]
+    fn tensor_matmul_with_backend_matches_auto() {
+        let lhs_data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let rhs_data = vec![5.0_f32, 6.0, 7.0, 8.0];
+        let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
+        let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
+        assert!(!lhs.is_null());
+        assert!(!rhs.is_null());
+
+        let auto = spiraltorch_tensor_matmul(lhs, rhs);
+        assert!(!auto.is_null());
+        let explicit =
+            spiraltorch_tensor_matmul_with_backend(lhs, rhs, SpiraltorchMatmulBackend::CpuNaive);
+        assert!(!explicit.is_null());
+
+        let mut auto_buffer = vec![0.0_f32; 4];
+        let mut explicit_buffer = vec![0.0_f32; 4];
+        let auto_ok = unsafe {
+            spiraltorch_tensor_copy_data(auto, auto_buffer.as_mut_ptr(), auto_buffer.len())
+        };
+        let explicit_ok = unsafe {
+            spiraltorch_tensor_copy_data(
+                explicit,
+                explicit_buffer.as_mut_ptr(),
+                explicit_buffer.len(),
+            )
+        };
+        assert!(auto_ok);
+        assert!(explicit_ok);
+        assert_eq!(auto_buffer, explicit_buffer);
+
+        spiraltorch_tensor_free(explicit);
+        spiraltorch_tensor_free(auto);
+        spiraltorch_tensor_free(rhs);
+        spiraltorch_tensor_free(lhs);
+    }
+
+    #[test]
+    fn tensor_row_softmax_matches_manual_computation() {
+        let data = vec![0.0_f32, 1.0, 2.0, 3.0];
+        let tensor = unsafe { spiraltorch_tensor_from_dense(2, 2, data.as_ptr(), data.len()) };
+        assert!(!tensor.is_null());
+
+        let softmax = spiraltorch_tensor_row_softmax(tensor, SpiraltorchSoftmaxBackend::Cpu);
+        assert!(!softmax.is_null());
+
+        let mut buffer = vec![0.0_f32; 4];
+        let copied =
+            unsafe { spiraltorch_tensor_copy_data(softmax, buffer.as_mut_ptr(), buffer.len()) };
+        assert!(copied);
+
+        let mut expected = Vec::with_capacity(4);
+        for row in 0..2 {
+            let start = row * 2;
+            let slice = &data[start..start + 2];
+            let exps: Vec<f32> = slice.iter().map(|v| v.exp()).collect();
+            let sum: f32 = exps.iter().sum();
+            expected.extend(exps.iter().map(|value| value / sum));
+        }
+
+        for (observed, expected) in buffer.iter().zip(expected.iter()) {
+            assert!((observed - expected).abs() < 1e-5);
+        }
+
+        spiraltorch_tensor_free(softmax);
+        spiraltorch_tensor_free(tensor);
+    }
+
+    #[test]
+    fn tensor_dlpack_roundtrip_preserves_data() {
+        let data = vec![1.5_f32, -2.25, 3.75, 4.5];
+        let tensor = unsafe { spiraltorch_tensor_from_dense(2, 2, data.as_ptr(), data.len()) };
+        assert!(!tensor.is_null());
+
+        let dlpack = spiraltorch_tensor_to_dlpack(tensor);
+        assert!(!dlpack.is_null());
+
+        spiraltorch_tensor_free(tensor);
+
+        let roundtrip = unsafe { spiraltorch_tensor_from_dlpack(dlpack) };
+        assert!(!roundtrip.is_null());
+
+        let mut buffer = vec![0.0_f32; data.len()];
+        let copied =
+            unsafe { spiraltorch_tensor_copy_data(roundtrip, buffer.as_mut_ptr(), buffer.len()) };
+        assert!(copied);
+        assert_eq!(buffer, data);
+
+        spiraltorch_tensor_free(roundtrip);
+    }
+
+    #[test]
+    fn runtime_matmul_with_backend_matches_auto() {
+        let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
+        assert!(!runtime.is_null());
+
+        let lhs_data = vec![1.0_f32, 0.0, 0.0, 1.0];
+        let rhs_data = vec![2.0_f32, 3.0, 4.0, 5.0];
+        let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
+        let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
+        assert!(!lhs.is_null());
+        assert!(!rhs.is_null());
+
+        let auto = spiraltorch_runtime_tensor_matmul(runtime, lhs, rhs);
+        let explicit = spiraltorch_runtime_tensor_matmul_with_backend(
+            runtime,
+            lhs,
+            rhs,
+            SpiraltorchMatmulBackend::CpuNaive,
+        );
+        assert!(!auto.is_null());
+        assert!(!explicit.is_null());
+
+        let mut auto_buffer = vec![0.0_f32; 4];
+        let mut explicit_buffer = vec![0.0_f32; 4];
+        let auto_ok = unsafe {
+            spiraltorch_tensor_copy_data(auto, auto_buffer.as_mut_ptr(), auto_buffer.len())
+        };
+        let explicit_ok = unsafe {
+            spiraltorch_tensor_copy_data(
+                explicit,
+                explicit_buffer.as_mut_ptr(),
+                explicit_buffer.len(),
+            )
+        };
+        assert!(auto_ok);
+        assert!(explicit_ok);
+        assert_eq!(auto_buffer, explicit_buffer);
+
+        spiraltorch_tensor_free(explicit);
+        spiraltorch_tensor_free(auto);
+        spiraltorch_tensor_free(rhs);
+        spiraltorch_tensor_free(lhs);
+        spiraltorch_runtime_free(runtime);
+    }
+
+    #[test]
+    fn runtime_row_softmax_matches_direct_cpu() {
+        let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
+        assert!(!runtime.is_null());
+
+        let data = vec![1.0_f32, 2.0, -1.0, -2.0, 0.5, -0.25];
+        let tensor = unsafe { spiraltorch_tensor_from_dense(3, 2, data.as_ptr(), data.len()) };
+        assert!(!tensor.is_null());
+
+        let direct = spiraltorch_tensor_row_softmax(tensor, SpiraltorchSoftmaxBackend::Cpu);
+        let runtime_softmax =
+            spiraltorch_runtime_tensor_row_softmax(runtime, tensor, SpiraltorchSoftmaxBackend::Cpu);
+        assert!(!direct.is_null());
+        assert!(!runtime_softmax.is_null());
+
+        let mut direct_buffer = vec![0.0_f32; data.len()];
+        let mut runtime_buffer = vec![0.0_f32; data.len()];
+        let direct_ok = unsafe {
+            spiraltorch_tensor_copy_data(direct, direct_buffer.as_mut_ptr(), direct_buffer.len())
+        };
+        let runtime_ok = unsafe {
+            spiraltorch_tensor_copy_data(
+                runtime_softmax,
+                runtime_buffer.as_mut_ptr(),
+                runtime_buffer.len(),
+            )
+        };
+        assert!(direct_ok);
+        assert!(runtime_ok);
+        for (lhs, rhs) in direct_buffer.iter().zip(runtime_buffer.iter()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+
+        spiraltorch_tensor_free(runtime_softmax);
+        spiraltorch_tensor_free(direct);
+        spiraltorch_tensor_free(tensor);
+        spiraltorch_runtime_free(runtime);
+    }
+
+    #[test]
+    fn dlpack_drop_exported_state_is_safe_on_null() {
+        unsafe {
+            spiraltorch_dlpack_drop_exported_state(ptr::null_mut());
+        }
+        let data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let tensor = unsafe { spiraltorch_tensor_from_dense(2, 2, data.as_ptr(), data.len()) };
+        assert!(!tensor.is_null());
+        let dlpack = spiraltorch_tensor_to_dlpack(tensor);
+        assert!(!dlpack.is_null());
+        unsafe {
+            spiraltorch_dlpack_drop_exported_state(dlpack);
+        }
+        spiraltorch_tensor_free(tensor);
     }
 }
