@@ -88,9 +88,3 @@ pub use psi_sync_impl as psi_sync;
 pub mod stv_impl;
 #[doc(inline)]
 pub use stv_impl as stv;
-
-#[path = "general_relativity.rs"]
-#[doc(hidden)]
-pub mod general_relativity_impl;
-#[doc(inline)]
-pub use general_relativity_impl as general_relativity;
