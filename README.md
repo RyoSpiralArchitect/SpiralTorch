@@ -54,6 +54,8 @@ sequenceDiagram
 >
 > **New — Conv6da with Leech enrichment.** `Conv6da` fuses six-directional adjacency with optional Leech lattice density boosts so Z-space fields aggregate neighbors with structure-aware gradients.
 
+> **New — DLPack/compat inference bridges.** Import weights over `st.from_dlpack` or the `spiraltorch.compat` adapters and feed them straight into Z-space inference via `st.weights_partial_from_dlpack`, `st.weights_partial_from_compat`, or the higher-level `st.infer_weights_from_dlpack`. PSI telemetry is now summarised live during these projections so models can modulate confidence against streaming telemetry frames.
+
 > **Expanded — Higher-order convolutions.** Fresh `Conv3d` and `Conv4d` modules now mirror the dilation-aware ergonomics of their 1D/2D siblings so volumetric stacks and temporal cubes slide straight into the same API.
 >
 > **New — Online-softmax fused attention.** A single-kernel QKᵀ + mask + softmax + V pipeline now lands in the WGPU backend, slashing bandwidth for multi-head attention while matching PyTorch semantics for drop-in migrations.
