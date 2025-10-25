@@ -4,7 +4,9 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use crate::module::{Module, Parameter};
+use num_complex::Complex32;
 use st_tensor::{PureResult, Tensor, TensorError};
+use thiserror::Error;
 
 /// Lightweight gating module that modulates Z-space activations column-wise.
 ///
@@ -122,6 +124,167 @@ impl Module for ZSpaceMixer {
         visitor(&mut self.gate)
     }
 }
+
+// ===== SpiralTorch: zspace_mixer hardening additions (non-breaking) =====
+#[derive(Debug, Error)]
+pub enum MixerError {
+    #[error("no channels")]
+    EmptyChannels,
+    #[error("channel length mismatch at chan {chan}: got {got}, expected {expected}")]
+    LengthMismatch { chan: usize, got: usize, expected: usize },
+    #[error("non-finite weight at index {index}: {value}")]
+    NonFiniteWeight { index: usize, value: f32 },
+    #[error("non-finite sample at chan {chan} index {index}")]
+    NonFiniteSample { chan: usize, index: usize },
+    #[error("degenerate normalization (zero norm)")]
+    DegenerateNorm,
+}
+pub type MixerResult<T> = Result<T, MixerError>;
+
+#[inline]
+fn st_is_finite_f32(x: f32) -> bool {
+    x.is_finite()
+}
+#[inline]
+fn st_is_finite_c32(z: Complex32) -> bool {
+    z.re.is_finite() && z.im.is_finite()
+}
+
+/// L1 正規化（重み総和=1）。総和が小さすぎる場合はエラー。
+pub fn st_norm_l1(weights: &[f32]) -> MixerResult<Vec<f32>> {
+    if weights.is_empty() {
+        return Err(MixerError::EmptyChannels);
+    }
+    let mut sum = 0f32;
+    for (i, &w) in weights.iter().enumerate() {
+        if !st_is_finite_f32(w) {
+            return Err(MixerError::NonFiniteWeight { index: i, value: w });
+        }
+        sum += w;
+    }
+    if sum.abs() < 1e-30 {
+        return Err(MixerError::DegenerateNorm);
+    }
+    Ok(weights.iter().map(|&w| w / sum).collect())
+}
+
+/// L2 正規化（||w||2 = 1）。ノルムが小さすぎる場合はエラー。
+pub fn st_norm_l2(weights: &[f32]) -> MixerResult<Vec<f32>> {
+    if weights.is_empty() {
+        return Err(MixerError::EmptyChannels);
+    }
+    let mut s2 = 0f32;
+    for (i, &w) in weights.iter().enumerate() {
+        if !st_is_finite_f32(w) {
+            return Err(MixerError::NonFiniteWeight { index: i, value: w });
+        }
+        s2 += w * w;
+    }
+    if s2 <= 0.0 {
+        return Err(MixerError::DegenerateNorm);
+    }
+    let inv = s2.sqrt().recip();
+    Ok(weights.iter().map(|&w| w * inv).collect())
+}
+
+/// 複数の複素系列を**安定に重み付き合成**する（Kahan/Neumaierでサンプル毎に補正）。
+/// - `channels`: 各チャネルは同一長の &[Complex32]
+/// - `weights`: channels.len() と同じ長さ
+/// - `use_l2`: trueでL2正規化、falseでL1正規化
+pub fn st_mix_series(
+    channels: &[&[Complex32]],
+    weights: &[f32],
+    use_l2: bool,
+) -> MixerResult<Vec<Complex32>> {
+    if channels.is_empty() {
+        return Err(MixerError::EmptyChannels);
+    }
+    if channels.len() != weights.len() {
+        return Err(MixerError::LengthMismatch {
+            chan: usize::MAX,
+            got: weights.len(),
+            expected: channels.len(),
+        });
+    }
+
+    // 長さ検証
+    let n = channels[0].len();
+    for (cidx, ch) in channels.iter().enumerate() {
+        if ch.len() != n {
+            return Err(MixerError::LengthMismatch {
+                chan: cidx,
+                got: ch.len(),
+                expected: n,
+            });
+        }
+    }
+    // 正規化
+    let w = if use_l2 {
+        st_norm_l2(weights)?
+    } else {
+        st_norm_l1(weights)?
+    };
+
+    // 出力と補正項
+    let mut out = vec![Complex32::new(0.0, 0.0); n];
+    let mut c_re = vec![0f32; n];
+    let mut c_im = vec![0f32; n];
+
+    for (cidx, (ch, &w_i)) in channels.iter().zip(w.iter()).enumerate() {
+        for i in 0..n {
+            let x = ch[i];
+            if !st_is_finite_c32(x) {
+                return Err(MixerError::NonFiniteSample { chan: cidx, index: i });
+            }
+            // 加算する量
+            let add_re = x.re * w_i;
+            let add_im = x.im * w_i;
+            // Kahan/Neumaier 的補正（実部）
+            let t_re = add_re - c_re[i];
+            let u_re = out[i].re + t_re;
+            c_re[i] = (u_re - out[i].re) - t_re;
+            out[i].re = u_re;
+            // 虚部
+            let t_im = add_im - c_im[i];
+            let u_im = out[i].im + t_im;
+            c_im[i] = (u_im - out[i].im) - t_im;
+            out[i].im = u_im;
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod st_mixer_tests {
+    use super::*;
+
+    #[test]
+    fn l1_norm_basic() {
+        let w = st_norm_l1(&[1.0, 1.0, 2.0]).unwrap();
+        let s: f32 = w.iter().sum();
+        assert!((s - 1.0).abs() < 1e-7, "sum={}", s);
+    }
+
+    #[test]
+    fn l2_norm_basic() {
+        let w = st_norm_l2(&[3.0, 4.0]).unwrap();
+        let s2: f32 = w.iter().map(|x| x * x).sum();
+        assert!((s2 - 1.0).abs() < 1e-6, "||w||2^2={}", s2);
+    }
+
+    #[test]
+    fn mix_series_matches_naive_small() {
+        let a = vec![Complex32::new(1.0, 0.0), Complex32::new(0.0, 1.0)];
+        let b = vec![Complex32::new(0.5, 0.5), Complex32::new(-0.5, 0.0)];
+        let out = st_mix_series(&[&a, &b], &[2.0, 1.0], false).unwrap(); // L1 -> [2/3, 1/3]
+        let naive: Vec<Complex32> = (0..a.len())
+            .map(|i| a[i] * (2.0 / 3.0) + b[i] * (1.0 / 3.0))
+            .collect();
+        let err: f32 = (0..a.len()).map(|i| (out[i] - naive[i]).norm()).sum();
+        assert!(err < 1e-5, "err={}", err);
+    }
+}
+// ===== end additions =====
 
 #[cfg(test)]
 mod tests {

@@ -10,7 +10,10 @@
 #[cfg(feature="wgpu")]
 pub mod wgpu_frac {
     use ndarray::{ArrayD, IxDyn, Axis};
+    use std::time::Duration;
     use wgpu::util::DeviceExt;
+
+    use super::wgpu_rt;
 
     fn flatten_rows_cols(x:&ArrayD<f32>, axis:usize) -> (Vec<f32>, u32, u32, usize) {
         // Permute so that axis is last, then view as [rows, cols]
@@ -114,15 +117,19 @@ pub mod wgpu_frac {
             mapped_at_creation: false,
         });
         encoder.copy_buffer_to_buffer(&buf_y, 0, &buf_read, 0, (n * std::mem::size_of::<f32>()) as u64);
-        queue.submit(Some(encoder.finish()));
-        let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
-        buf_read.slice(..).map_async(wgpu::MapMode::Read, move |v| { let _=sender.send(v); });
-        device.poll(wgpu::Maintain::Wait);
-        futures_lite::future::block_on(async { receiver.receive().await; });
-        let data = buf_read.slice(..).get_mapped_range();
-        let out: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
-        drop(data);
-        buf_read.unmap();
+        let cmd = encoder.finish();
+        let cmd_bufs = [cmd];
+        if let Err(e) = wgpu_rt::st_submit_with_timeout(device, queue, &cmd_bufs, Duration::from_secs(30)) {
+            panic!("wgpu fracdiff submit failed: {e}");
+        }
+        let bytes = wgpu_rt::st_map_read_with_timeout(
+            device,
+            &buf_read,
+            0..(n * std::mem::size_of::<f32>()) as u64,
+            Duration::from_secs(30),
+        )
+        .unwrap_or_else(|e| panic!("wgpu fracdiff readback failed: {e}"));
+        let out: Vec<f32> = bytemuck::cast_slice(&bytes).to_vec();
 
         // Reshape back: [rows, cols] → original permuted axes
         let y = ArrayD::from_shape_vec(IxDyn(&[rows as usize, cols as usize]), out).unwrap();
@@ -206,14 +213,18 @@ pub mod wgpu_frac {
             mapped_at_creation: false,
         });
         encoder.copy_buffer_to_buffer(&buf_y, 0, &buf_read, 0, (n_cplx*2*std::mem::size_of::<f32>()) as u64);
-        queue.submit(Some(encoder.finish()));
-        let (s,r) = futures_intrusive::channel::shared::oneshot_channel();
-        buf_read.slice(..).map_async(wgpu::MapMode::Read, move |v| { let _=s.send(v); });
-        device.poll(wgpu::Maintain::Wait);
-        futures_lite::future::block_on(async { r.receive().await; });
-        let data = buf_read.slice(..).get_mapped_range();
-        let out: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
-        drop(data); buf_read.unmap();
-        out
+        let cmd = encoder.finish();
+        let cmd_bufs = [cmd];
+        if let Err(e) = wgpu_rt::st_submit_with_timeout(device, queue, &cmd_bufs, Duration::from_secs(30)) {
+            panic!("wgpu specmul submit failed: {e}");
+        }
+        let bytes = wgpu_rt::st_map_read_with_timeout(
+            device,
+            &buf_read,
+            0..(n_cplx * 2 * std::mem::size_of::<f32>()) as u64,
+            Duration::from_secs(30),
+        )
+        .unwrap_or_else(|e| panic!("wgpu specmul readback failed: {e}"));
+        bytemuck::cast_slice(&bytes).to_vec()
     }
 }
