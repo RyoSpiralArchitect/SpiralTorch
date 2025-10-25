@@ -1132,6 +1132,29 @@ pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_add_relu_with_ba
 }
 
 #[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_matmul_with_backend(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    backend: SpiraltorchMatmulBackend,
+) -> *mut Tensor {
+    let backend = match map_matmul_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    runtime_tensor_binary_op(
+        runtime,
+        lhs,
+        rhs,
+        "runtime_tensor_matmul_with_backend",
+        move |lhs, rhs| lhs.matmul_with_backend(rhs, backend),
+    )
+}
+
+#[no_mangle]
 pub extern "C" fn spiraltorch_runtime_tensor_hadamard(
     runtime: *const RuntimeHandle,
     lhs: *const Tensor,

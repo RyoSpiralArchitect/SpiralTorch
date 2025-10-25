@@ -85,9 +85,11 @@ pub use st_core::runtime::blackcat::{
 };
 pub use trainer::{EpochStats, ModuleTrainer};
 pub use zspace_coherence::{
-    BackendCapabilities, CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile,
-    LinguisticChannelReport, LinguisticContour, PreDiscardPolicy, PreDiscardRegulator,
-    ZSpaceCoherenceSequencer,
+    heatmaps_to_zpulses, run_multibranch_demo, BackendCapabilities, CircleLockMapConfig,
+    CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile, HeatmapResult,
+    LinguisticChannelReport, LinguisticContour, MetaMembConfig, MetaMembSampler, PreDiscardPolicy,
+    PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse, SyncState, SynchroBus,
+    SynchroEvent, ZSpaceCoherenceSequencer,
 };
 
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};
