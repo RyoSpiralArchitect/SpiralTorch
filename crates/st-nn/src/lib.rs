@@ -22,6 +22,7 @@ pub mod layers;
 pub mod lightning;
 pub mod loss;
 pub mod module;
+pub mod optim;
 pub mod plan;
 pub mod roundtable;
 pub mod schedule;
@@ -34,7 +35,8 @@ pub use gnn::{
     fold_into_roundtable, fold_with_band_energy, AggregationReducer, GraphActivation,
     GraphConsensusBridge, GraphConsensusDigest, GraphContext, GraphContextBuilder, GraphLayerSpec,
     GraphMonadExport, GraphNormalization, NeighborhoodAggregation, QuadBandEnergy,
-    ZSpaceGraphConvolution, ZSpaceGraphNetwork, ZSpaceGraphNetworkBuilder,
+    RoundtableBandInfluence, RoundtableBandSignal, ZSpaceGraphConvolution, ZSpaceGraphNetwork,
+    ZSpaceGraphNetworkBuilder,
 };
 #[cfg(feature = "golden")]
 pub use golden::{
@@ -54,9 +56,12 @@ pub use language::{
     DesireRoundtableBridge, DesireRoundtableEvent, DesireRoundtableImpulse,
     DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireTelemetrySink,
     DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
-    DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, LanguagePipeline,
-    LanguagePipelineBuilder, MaxwellDesireBridge, NarrativeHint, PipelineError, PipelineResult,
-    RepressionField, SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
+    DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, GeometryBiasConfig,
+    GeometryBiasContext, GeometryBiasMetrics, GeometryBiasSnapshot, GeometryBiasUpdate,
+    GeometryCoherenceSample,
+    LanguagePipeline, LanguagePipelineBuilder, MaxwellDesireBridge, NarrativeHint, PipelineError,
+    PipelineResult, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
+    TemperatureController,
 };
 #[cfg(feature = "psi")]
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
@@ -66,24 +71,27 @@ pub use layers::sequential::Sequential;
 pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
-pub use layers::{Gelu, LayerNorm, Relu, ToposResonator, ZSpaceMixer};
+pub use layers::{Dropout, Gelu, LayerNorm, Relu, ToposResonator, ZSpaceMixer};
 pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,
     LightningStage, LightningStageReport, SpiralLightning,
 };
 pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
+pub use optim::{LocalLearningRateAdapter, SpectralLrAdapter};
 pub use plan::RankPlanner;
 pub use roundtable::{
     simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, DistMode,
     GlobalProposal, HeurOp, HeurOpKind, HeurOpLog, MetaConductor, MetaSummary, ModeratorMinutes,
-    OutcomeBand, RoundtableNode,
+    OutcomeBand, RoundtableGnnBridge, RoundtableNode,
 };
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
 };
-pub use trainer::{EpochStats, ModuleTrainer};
+pub use trainer::{
+    EpochStats, ModuleTrainer, SpectralAdjustmentMetrics, SpectralLearningRatePolicy,
+};
 #[cfg(feature = "psi")]
 pub use zspace_coherence::BranchPsiReading;
 #[cfg(feature = "golden")]

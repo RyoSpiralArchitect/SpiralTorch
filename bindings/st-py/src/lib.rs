@@ -23,6 +23,8 @@ mod trainer;
 mod vision;
 mod scale_stack;
 mod zspace;
+mod elliptic;
+mod theory;
 
 mod extras {
     use super::*;
@@ -165,6 +167,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     trainer::register(py, m)?;
     vision::register(py, m)?;
     zspace::register(py, m)?;
+    elliptic::register(py, m)?;
+    theory::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;
@@ -198,12 +202,14 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
         "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
+        "EllipticWarp","EllipticTelemetry",
+        "lorentzian_metric_scaled","assemble_zrelativity_model",
         "spiralk",
         "nn","frac","selfsup","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
         "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",
         "LinearModel","ModuleTrainer","mean_squared_error",
         "CanvasTransformer","CanvasSnapshot","apply_vision_update",
-        "NonLiner","ZSpaceCoherenceSequencer","ScaleStack",
+        "NonLiner","Dropout","ZSpaceCoherenceSequencer","ScaleStack",
         "scalar_scale_stack","semantic_scale_stack","scale_stack",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
