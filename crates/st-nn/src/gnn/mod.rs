@@ -15,7 +15,7 @@ pub mod spiralk;
 pub mod stack;
 
 #[cfg(feature = "psi")]
-pub use coherence::PsiCoherenceAdaptor;
+pub use coherence::{PsiCoherenceAdaptor, PsiCoherenceDiagnostics};
 pub use context::{GraphContext, GraphContextBuilder, GraphNormalization};
 pub use handoff::{
     embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,
