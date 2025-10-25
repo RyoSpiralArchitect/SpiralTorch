@@ -31,7 +31,7 @@ use crate::schedule::RoundtableSchedule;
 use crate::trainer::{EpochStats, ModuleTrainer};
 use crate::PureResult;
 use st_core::runtime::golden::{
-    GoldenRuntime, GoldenRuntimeConfig, GoldenRuntimeError, SpiralMutex,
+    GoldenRuntime, GoldenRuntimeConfig, GoldenRuntimeError, GoldenTaskError, SpiralMutex,
 };
 use st_tensor::TensorError;
 use std::cmp::Ordering;
@@ -781,20 +781,26 @@ impl GoldenRetriever {
         let mut dropouts = Vec::new();
         for (worker_id, handle) in handles {
             match handle.join() {
-                Ok(result) => match result {
-                    Ok(epoch_stats) => {
-                        successes.push(worker_id);
-                        stats.push(epoch_stats);
+                Ok(epoch_stats) => {
+                    successes.push(worker_id);
+                    stats.push(epoch_stats);
+                }
+                Err(GoldenTaskError::Task(err)) => {
+                    if self.allow_dropout {
+                        dropouts.push(GoldenDropoutRecord::from_error(worker_id, &err));
+                    } else {
+                        return Err(err);
                     }
-                    Err(err) => {
-                        if self.allow_dropout {
-                            dropouts.push(GoldenDropoutRecord::from_error(worker_id, &err));
-                        } else {
-                            return Err(err);
-                        }
+                }
+                Err(GoldenTaskError::Runtime(err)) => {
+                    let runtime_err = runtime_error(err);
+                    if self.allow_dropout {
+                        dropouts.push(GoldenDropoutRecord::from_error(worker_id, &runtime_err));
+                    } else {
+                        return Err(runtime_err);
                     }
-                },
-                Err(_) => {
+                }
+                Err(GoldenTaskError::Panic) => {
                     let panic_error = TensorError::IoError {
                         message: format!(
                             "golden retriever worker {worker_id} panicked during epoch"
@@ -1115,12 +1121,18 @@ impl GoldenEpochReport {
         dropouts: Vec<GoldenDropoutRecord>,
     ) -> Self {
         let workers = per_worker.len();
-        let (total_loss, total_batches) = runtime.reduce(
-            &per_worker,
-            |stats| (stats.total_loss, stats.batches),
-            |left, right| (left.0 + right.0, left.1 + right.1),
-            (0.0f32, 0usize),
-        );
+        let (total_loss, total_batches) = runtime
+            .reduce(
+                &per_worker,
+                |stats| (stats.total_loss, stats.batches),
+                |left, right| (left.0 + right.0, left.1 + right.1),
+                (0.0f32, 0usize),
+            )
+            .unwrap_or_else(|_| {
+                per_worker.iter().fold((0.0f32, 0usize), |acc, stats| {
+                    (acc.0 + stats.total_loss, acc.1 + stats.batches)
+                })
+            });
         let average_loss = if total_batches > 0 {
             total_loss / total_batches as f32
         } else {
