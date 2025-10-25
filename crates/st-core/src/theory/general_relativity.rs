@@ -27,9 +27,32 @@ use std::collections::HashMap;
 use std::f64::consts::PI;
 
 use nalgebra::{DMatrix, Matrix4, SymmetricEigen};
+use st_tensor::{dlpack::DLManagedTensor, PureResult, Tensor};
 use thiserror::Error;
 
 const DIM: usize = 4;
+
+fn matrix4_to_tensor(matrix: &Matrix4<f64>) -> PureResult<Tensor> {
+    let mut data = Vec::with_capacity(DIM * DIM);
+    for row in 0..DIM {
+        for col in 0..DIM {
+            data.push(matrix[(row, col)] as f32);
+        }
+    }
+    Tensor::from_vec(DIM, DIM, data)
+}
+
+fn dmatrix_to_tensor(matrix: &DMatrix<f64>) -> PureResult<Tensor> {
+    let mut data = Vec::with_capacity(matrix.nrows() * matrix.ncols());
+    for value in matrix.iter() {
+        data.push(*value as f32);
+    }
+    Tensor::from_vec(matrix.nrows(), matrix.ncols(), data)
+}
+
+fn scalar_to_tensor(value: f64) -> PureResult<Tensor> {
+    Tensor::from_vec(1, 1, vec![value as f32])
+}
 
 /// Error raised when the supplied metric fails the Lorentzian checks.
 #[derive(Debug, Error, PartialEq)]
@@ -265,6 +288,7 @@ impl LorentzianMetric {
 pub struct InternalMetric {
     components: DMatrix<f64>,
     inverse: DMatrix<f64>,
+    learnable: bool,
 }
 
 impl InternalMetric {
@@ -299,6 +323,7 @@ impl InternalMetric {
         Ok(Self {
             components,
             inverse,
+            learnable: false,
         })
     }
 
@@ -321,12 +346,24 @@ impl InternalMetric {
     pub fn inverse(&self) -> &DMatrix<f64> {
         &self.inverse
     }
+
+    /// Returns whether gradient-based optimisers should treat this block as a parameter.
+    pub fn is_learnable(&self) -> bool {
+        self.learnable
+    }
+
+    /// Marks the internal metric as learnable (or not) for downstream optimisation pipelines.
+    pub fn with_learnable(mut self, learnable: bool) -> Self {
+        self.learnable = learnable;
+        self
+    }
 }
 
 /// Mixed spacetime/internal block g_{μA} capturing gauge-like interactions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MixedBlock {
     components: DMatrix<f64>,
+    learnable: bool,
 }
 
 impl MixedBlock {
@@ -344,13 +381,17 @@ impl MixedBlock {
                 found_cols: components.ncols(),
             });
         }
-        Ok(Self { components })
+        Ok(Self {
+            components,
+            learnable: false,
+        })
     }
 
     /// Zero mixed block with the requested dimensions.
     pub fn zeros(base_dim: usize, internal_dim: usize) -> Self {
         Self {
             components: DMatrix::zeros(base_dim, internal_dim),
+            learnable: false,
         }
     }
 
@@ -362,6 +403,17 @@ impl MixedBlock {
     /// Immutable access to the underlying matrix.
     pub fn components(&self) -> &DMatrix<f64> {
         &self.components
+    }
+
+    /// Returns whether the mixed block should be optimised.
+    pub fn is_learnable(&self) -> bool {
+        self.learnable
+    }
+
+    /// Marks the mixed block as learnable (or not).
+    pub fn with_learnable(mut self, learnable: bool) -> Self {
+        self.learnable = learnable;
+        self
     }
 }
 
@@ -405,6 +457,7 @@ impl GaugeField {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WarpFactor {
     scale: f64,
+    learnable: bool,
 }
 
 impl WarpFactor {
@@ -413,7 +466,10 @@ impl WarpFactor {
         if scale <= 0.0 {
             return Err(MetricError::InvalidWarpFactor);
         }
-        Ok(Self { scale })
+        Ok(Self {
+            scale,
+            learnable: false,
+        })
     }
 
     /// Builds a warp factor from the exponent A so that the multiplier is exp(2A).
@@ -426,6 +482,17 @@ impl WarpFactor {
     pub fn scale(&self) -> f64 {
         self.scale
     }
+
+    /// Returns whether gradient-based optimisation should treat the warp as a parameter.
+    pub fn is_learnable(&self) -> bool {
+        self.learnable
+    }
+
+    /// Marks the warp factor as learnable (or not).
+    pub fn with_learnable(mut self, learnable: bool) -> Self {
+        self.learnable = learnable;
+        self
+    }
 }
 
 /// Combined metric on the product manifold M × Z.
@@ -436,6 +503,17 @@ pub struct ProductMetric {
     mixed: MixedBlock,
     warp: Option<WarpFactor>,
     block: DMatrix<f64>,
+}
+
+/// Flags describing which metric blocks participate in optimisation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LearnableFlags {
+    /// Whether the warp factor is learnable.
+    pub warp: bool,
+    /// Whether the mixed g_{μA} block is learnable.
+    pub mixed: bool,
+    /// Whether the internal h_{AB} block is learnable.
+    pub internal: bool,
 }
 
 impl ProductMetric {
@@ -520,6 +598,15 @@ impl ProductMetric {
     /// Warp factor applied to the spacetime metric block.
     pub fn warp(&self) -> Option<WarpFactor> {
         self.warp
+    }
+
+    /// Returns learnable flags for each metric component.
+    pub fn learnable_flags(&self) -> LearnableFlags {
+        LearnableFlags {
+            warp: self.warp.map(|warp| warp.is_learnable()).unwrap_or(false),
+            mixed: self.mixed.is_learnable(),
+            internal: self.internal.is_learnable(),
+        }
     }
 
     /// Full block matrix representing g^IJ.
@@ -728,6 +815,27 @@ impl ZRelativityFieldEquation {
     }
 }
 
+/// Tensor bundle exposing every numerical component required by ML pipelines.
+#[derive(Clone, Debug)]
+pub struct ZRelativityTensorBundle {
+    /// Full block metric on M × Z.
+    pub block_metric: Tensor,
+    /// Effective four-dimensional metric incorporating any warp factor.
+    pub effective_metric: Tensor,
+    /// Gauge potential inherited from the mixed block.
+    pub gauge_field: Tensor,
+    /// Scalar moduli derived from the internal metric.
+    pub scalar_moduli: Tensor,
+    /// Embedded Einstein equations expressed on the product manifold.
+    pub field_equation: Tensor,
+    /// Optional warp factor provided as a scalar tensor when present.
+    pub warp: Option<Tensor>,
+    /// Internal volume density \(\sqrt{\det h}\).
+    pub internal_volume_density: f32,
+    /// Coupling prefactor for stress-energy comparisons.
+    pub field_prefactor: f32,
+}
+
 /// Fully assembled Z-space relativity model including dimensional reduction data.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZRelativityModel {
@@ -790,6 +898,60 @@ impl ZRelativityModel {
             reduction,
             field_equations,
         })
+    }
+
+    /// Exposes the block metric as a SpiralTorch tensor for downstream processing.
+    pub fn as_tensor(&self) -> PureResult<Tensor> {
+        dmatrix_to_tensor(self.geometry.metric().block_matrix())
+    }
+
+    /// Converts the block metric to a managed DLPack tensor.
+    pub fn to_dlpack(&self) -> PureResult<*mut DLManagedTensor> {
+        self.as_tensor()?.to_dlpack()
+    }
+
+    /// Tensor view over the gauge field inherited from the mixed block.
+    pub fn gauge_tensor(&self) -> PureResult<Tensor> {
+        dmatrix_to_tensor(self.reduction.gauge_field().components())
+    }
+
+    /// Tensor view over the scalar moduli induced by the internal metric.
+    pub fn scalar_moduli_tensor(&self) -> PureResult<Tensor> {
+        dmatrix_to_tensor(self.reduction.scalar_moduli().components())
+    }
+
+    /// Tensor view over the effective four-dimensional metric after warping.
+    pub fn effective_metric_tensor(&self) -> PureResult<Tensor> {
+        matrix4_to_tensor(self.reduction.effective_metric().components())
+    }
+
+    /// Tensor view over the embedded field equations.
+    pub fn field_equation_tensor(&self) -> PureResult<Tensor> {
+        dmatrix_to_tensor(self.field_equations.lhs())
+    }
+
+    /// Collects every tensor representation alongside compactification scalars.
+    pub fn tensor_bundle(&self) -> PureResult<ZRelativityTensorBundle> {
+        let warp_tensor = match self.geometry.metric().warp() {
+            Some(warp) => Some(scalar_to_tensor(warp.scale())?),
+            None => None,
+        };
+
+        Ok(ZRelativityTensorBundle {
+            block_metric: self.as_tensor()?,
+            effective_metric: self.effective_metric_tensor()?,
+            gauge_field: self.gauge_tensor()?,
+            scalar_moduli: self.scalar_moduli_tensor()?,
+            field_equation: self.field_equation_tensor()?,
+            warp: warp_tensor,
+            internal_volume_density: self.geometry.internal_volume_density() as f32,
+            field_prefactor: self.field_equations.prefactor() as f32,
+        })
+    }
+
+    /// Returns the learnable flags propagated from the metric construction.
+    pub fn learnable_flags(&self) -> LearnableFlags {
+        self.geometry.metric().learnable_flags()
     }
 }
 
@@ -1893,5 +2055,161 @@ mod tests {
         for value in residual.iter() {
             assert_relative_eq!(*value, 0.0, epsilon = 1e-12);
         }
+    }
+
+    #[test]
+    fn learnable_flags_propagate_through_metric() {
+        let base_metric =
+            LorentzianMetric::try_new(Matrix4::from_diagonal(&Vector4::new(-1.0, 1.0, 1.0, 1.0)))
+                .unwrap();
+        let internal = InternalMetric::try_new(DMatrix::identity(2, 2))
+            .unwrap()
+            .with_learnable(true);
+        let mixed = MixedBlock::new(
+            DMatrix::from_row_slice(
+                DIM,
+                internal.dimension(),
+                &[0.0, 0.1, -0.1, 0.0, 0.05, -0.05, 0.02, -0.02],
+            ),
+            DIM,
+            internal.dimension(),
+        )
+        .unwrap()
+        .with_learnable(true);
+        let warp = WarpFactor::from_multiplier(1.5)
+            .unwrap()
+            .with_learnable(true);
+
+        let metric = ProductMetric::try_new(
+            base_metric,
+            internal.clone(),
+            Some(mixed.clone()),
+            Some(warp),
+        )
+        .unwrap();
+        let flags = metric.learnable_flags();
+        assert!(flags.internal);
+        assert!(flags.mixed);
+        assert!(flags.warp);
+
+        let frozen_metric = ProductMetric::try_new(
+            LorentzianMetric::try_new(Matrix4::from_diagonal(&Vector4::new(-1.0, 1.0, 1.0, 1.0)))
+                .unwrap(),
+            internal.with_learnable(false),
+            Some(mixed.with_learnable(false)),
+            Some(WarpFactor::from_multiplier(2.0).unwrap()),
+        )
+        .unwrap();
+        let frozen_flags = frozen_metric.learnable_flags();
+        assert!(!frozen_flags.internal);
+        assert!(!frozen_flags.mixed);
+        assert!(!frozen_flags.warp);
+    }
+
+    #[test]
+    fn zrelativity_tensor_bundle_exports_consistent_views() {
+        let base_metric =
+            LorentzianMetric::try_new(Matrix4::from_diagonal(&Vector4::new(-1.0, 1.0, 1.0, 1.0)))
+                .unwrap();
+        let spacetime = ZManifold::canonical();
+        let base_model = GeneralRelativityModel::new(
+            spacetime.clone(),
+            base_metric.clone(),
+            MetricDerivatives::zero(),
+            MetricSecondDerivatives::zero(),
+            SymmetryAnsatz::HomogeneousIsotropic,
+            Topology::R4,
+            vec![],
+        );
+
+        let internal =
+            InternalMetric::try_new(DMatrix::from_row_slice(2, 2, &[2.0, 0.0, 0.0, 3.0]))
+                .unwrap()
+                .with_learnable(true);
+        let mixed = MixedBlock::new(
+            DMatrix::from_row_slice(
+                DIM,
+                internal.dimension(),
+                &[0.0, 0.25, -0.25, 0.0, 0.1, -0.1, 0.05, -0.05],
+            ),
+            DIM,
+            internal.dimension(),
+        )
+        .unwrap()
+        .with_learnable(true);
+        let warp = WarpFactor::from_multiplier(2.0)
+            .unwrap()
+            .with_learnable(true);
+
+        let product_metric = ProductMetric::try_new(
+            base_metric.clone(),
+            internal.clone(),
+            Some(mixed),
+            Some(warp),
+        )
+        .unwrap();
+        let internal_space =
+            InternalSpace::new("compact Z", InternalPatch::new("torus", vec!["ψ", "χ"]));
+        let geometry = ProductGeometry::new(spacetime, internal_space, product_metric);
+        let constants = PhysicalConstants::new(6.67430e-11, 299_792_458.0);
+        let internal_volume = 2.0 * PI;
+
+        let zr_model = ZRelativityModel::assemble(
+            geometry.clone(),
+            base_model,
+            constants,
+            internal_volume,
+            0.0,
+        )
+        .unwrap();
+
+        let bundle = zr_model.tensor_bundle().unwrap();
+        assert_eq!(
+            bundle.block_metric.shape(),
+            (geometry.total_dimension(), geometry.total_dimension())
+        );
+        assert_eq!(bundle.effective_metric.shape(), (DIM, DIM));
+        assert_eq!(bundle.gauge_field.shape(), (DIM, internal.dimension()));
+        assert_eq!(
+            bundle.scalar_moduli.shape(),
+            (internal.dimension(), internal.dimension())
+        );
+        assert_eq!(
+            bundle.field_equation.shape(),
+            (geometry.total_dimension(), geometry.total_dimension())
+        );
+        assert!(bundle.warp.is_some());
+        assert_relative_eq!(bundle.warp.unwrap().data()[0], 2.0_f32, epsilon = 1e-6);
+        assert!(bundle.internal_volume_density > 0.0);
+        assert!(bundle.field_prefactor >= 0.0);
+    }
+
+    #[test]
+    fn zrelativity_block_metric_exports_dlpack() {
+        let base_metric =
+            LorentzianMetric::try_new(Matrix4::from_diagonal(&Vector4::new(-1.0, 1.0, 1.0, 1.0)))
+                .unwrap();
+        let internal = InternalMetric::try_new(DMatrix::identity(1, 1)).unwrap();
+        let product_metric =
+            ProductMetric::try_new(base_metric.clone(), internal, None, None).unwrap();
+        let spacetime = ZManifold::canonical();
+        let internal_space = InternalSpace::new("compact", InternalPatch::new("χ", vec!["χ"]));
+        let geometry = ProductGeometry::new(spacetime.clone(), internal_space, product_metric);
+        let base_model = GeneralRelativityModel::new(
+            spacetime,
+            base_metric,
+            MetricDerivatives::zero(),
+            MetricSecondDerivatives::zero(),
+            SymmetryAnsatz::StaticSpherical,
+            Topology::R4,
+            vec![],
+        );
+        let constants = PhysicalConstants::new(6.67430e-11, 299_792_458.0);
+        let zr_model =
+            ZRelativityModel::assemble(geometry, base_model, constants, 1.0, 0.0).unwrap();
+
+        let managed = zr_model.to_dlpack().unwrap();
+        let tensor = unsafe { Tensor::from_dlpack(managed).unwrap() };
+        assert_eq!(tensor.shape(), (DIM + 1, DIM + 1));
     }
 }

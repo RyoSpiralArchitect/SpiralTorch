@@ -58,3 +58,11 @@ By following this workflow you can transplant the geometric framework of general
 - **Extended field equations:** Embed the four-dimensional Einstein tensor into the higher-dimensional block structure via `ZRelativityModel::assemble`. The resulting `ZRelativityFieldEquation` packages \(G^I_{\;J} + \Lambda g^I_{\;J}\) together with the appropriate coupling prefactor for comparison against an extended stress-energy tensor.
 - **Energy-momentum on \(M \times Z\):** Use `ExtendedStressEnergy` to encode symmetric sources that live on the full block metric. Its residual with the assembled field equation diagnoses how the Z-space sector back-reacts on the four-dimensional spacetime.
 - **Python access:** The `spiraltorch` module now exposes `lorentzian_metric_scaled` for quick metric rescaling diagnostics and `assemble_zrelativity_model` to run the full Kaluza–Klein style reduction (effective metric, gauge field, moduli, and field-equation residuals) directly from Python-native lists.
+
+## 9. Bridging Z-Relativity to Tensor Workflows
+
+- **Tensor exports:** `ZRelativityModel::as_tensor`, `gauge_tensor`, `scalar_moduli_tensor`, and `field_equation_tensor` provide native `st::Tensor` views over every block. Call `to_dlpack()` for zero-copy hand-offs into PyTorch, JAX, or CuPy.
+- **Bundle access:** `ZRelativityModel::tensor_bundle` aggregates block metrics, gauge data, scalar moduli, field-equation matrices, and compactification scalars (warp, internal volume density, coupling prefactor) in one shot.
+- **Learnable blocks:** `InternalMetric`, `MixedBlock`, and `WarpFactor` accept `.with_learnable(true)` so optimisation stacks know which components participate in gradient descent. The aggregated flags surface via `ZRelativityModel::learnable_flags`.
+- **Neural module:** `st_nn::ZRelativityModule` lifts a `ZRelativityModel` into a full `nn::Module`. Python gains `spiraltorch.nn.ZRelativityModule`, exposing forward/backward passes, hyper/realgrad attachment, and a `parameter_tensor()` helper for trainer integration. Use `trainer.ModuleTrainer.train_zrelativity_step` to couple the parameter vector with conventional optimisation loops.
+- **Visual diagnostics:** `spiraltorch.vision.zrelativity_heatmap(model, field="block")` renders block metrics, gauge matrices, moduli, or the field-equation residual as heatmaps for dashboards.

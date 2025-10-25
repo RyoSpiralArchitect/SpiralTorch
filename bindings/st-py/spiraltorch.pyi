@@ -133,6 +133,51 @@ class Tensor:
     @staticmethod
     def cat_rows(tensors: Sequence[Tensor]) -> Tensor: ...
 
+def lorentzian_metric_scaled(
+    components: Sequence[Sequence[float]],
+    scale: float,
+) -> Dict[str, object]: ...
+
+def assemble_zrelativity_model(
+    base_metric: Sequence[Sequence[float]],
+    internal_metric: Sequence[Sequence[float]],
+    *,
+    mixed: Sequence[Sequence[float]] | None = ...,
+    warp: float | None = ...,
+    first_derivatives: Sequence[Sequence[Sequence[float]]] | None = ...,
+    second_derivatives: Sequence[Sequence[Sequence[Sequence[float]]]] | None = ...,
+    gravitational_constant: float,
+    speed_of_light: float,
+    internal_volume: float,
+    cosmological_constant: float = ...,
+    symmetry: str | None = ...,
+    topology: str | None = ...,
+    boundary_conditions: Sequence[str] | None = ...,
+) -> ZRelativityModel: ...
+
+class ZRelativityModel:
+    def as_tensor(self) -> Tensor: ...
+    def to_dlpack(self) -> object: ...
+    def effective_metric(self) -> Tensor: ...
+    def gauge_tensor(self) -> Tensor: ...
+    def scalar_moduli(self) -> Tensor: ...
+    def field_equations(self) -> Tensor: ...
+    def tensor_bundle(self) -> Dict[str, object]: ...
+    def reduction_summary(self) -> Dict[str, object]: ...
+    def learnable_flags(self) -> Tuple[bool, bool, bool]: ...
+    def warp_scale(self) -> float | None: ...
+    def internal_volume_density(self) -> float: ...
+    def field_prefactor(self) -> float: ...
+    def total_dimension(self) -> int: ...
+
+class ZRelativityModule:
+    def __init__(self, model: ZRelativityModel) -> None: ...
+    def forward(self, input: Tensor) -> Tensor: ...
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+    def parameter_tensor(self) -> Tensor: ...
+    def parameter_dimension(self) -> int: ...
+    def model(self) -> ZRelativityModel: ...
+
 class ComplexTensor:
     def __init__(self, rows: int, cols: int, data: Optional[Sequence[complex]] = ...) -> None: ...
     @staticmethod
@@ -242,7 +287,7 @@ class ModuleTrainer:
         self,
         inputs: Sequence[Sequence[float]],
         targets: Sequence[Sequence[float]],
-        learning_rate: float = ...,
+        learning_rate: float = ..., 
         batch_size: int = ...,
     ) -> float: ...
 
@@ -250,6 +295,13 @@ class ModuleTrainer:
         self,
         inputs: Sequence[Sequence[float]],
         targets: Sequence[Sequence[float]],
+    ) -> float: ...
+
+    def train_zrelativity_step(
+        self,
+        module: ZRelativityModule,
+        targets: Tensor,
+        learning_rate: float,
     ) -> float: ...
 
 class SpiralKFftPlan:
@@ -978,6 +1030,11 @@ def apply_vision_update(
     include_patch: bool = ...,
 ) -> CanvasSnapshot: ...
 
+def zrelativity_heatmap(
+    model: ZRelativityModel,
+    field: str,
+) -> List[List[float]]: ...
+
 def set_global_seed(seed: int) -> None: ...
 
 def golden_ratio() -> float: ...
@@ -1002,6 +1059,115 @@ def generate_plan_batch_ex(
     micro_gain: float,
     seed: Optional[int] = ...,
 ) -> List[object]: ...
+
+
+class _NonLiner:
+    def __init__(
+        self,
+        name: str,
+        features: int,
+        *,
+        activation: str = ...,
+        slope: float = ...,
+        gain: float = ...,
+        bias: float = ...,
+        curvature: float | None = ...,
+        z_scale: float | None = ...,
+        retention: float = ...,
+    ) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def reset_metrics(self) -> None: ...
+
+    def configure_geometry(
+        self,
+        *,
+        curvature: float | None = ...,
+        z_scale: float | None = ...,
+        retention: float | None = ...,
+    ) -> None: ...
+
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def activation(self) -> str: ...
+
+    @property
+    def curvature(self) -> Optional[float]: ...
+
+    @property
+    def z_scale(self) -> Optional[float]: ...
+
+    @property
+    def retention(self) -> Optional[float]: ...
+
+    @property
+    def psi_drift(self) -> Optional[float]: ...
+
+    @property
+    def last_hyperbolic_radius(self) -> Optional[float]: ...
+
+    @property
+    def gain(self) -> Tensor: ...
+
+    @property
+    def slope(self) -> Tensor: ...
+
+    @property
+    def bias(self) -> Tensor: ...
+
+    def gradients(
+        self,
+    ) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]: ...
+
+
+class _Dropout:
+    def __init__(
+        self,
+        probability: float,
+        *,
+        seed: Optional[int] = ...,
+        training: bool = ...,
+    ) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def set_training(self, training: bool) -> None: ...
+
+    def train(self) -> None: ...
+
+    def eval(self) -> None: ...
+
+    @property
+    def training(self) -> bool: ...
+
+    @property
+    def probability(self) -> float: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
 
 
 class _NnDataset:
@@ -1131,6 +1297,113 @@ class PreDiscardPolicy:
     min_channels: int
 
 
+class ZConv:
+    def __init__(
+        self,
+        name: str,
+        in_channels: int,
+        out_channels: int,
+        kernel: Tuple[int, int],
+        *,
+        stride: Tuple[int, int] = ...,
+        padding: Tuple[int, int] = ...,
+        dilation: Tuple[int, int] = ...,
+        input_hw: Tuple[int, int],
+        layout: Literal["NCHW", "NHWC"] = ...,
+    ) -> None: ...
+
+    def forward(self, x: Tensor) -> Tensor: ...
+    def backward(self, x: Tensor, grad_output: Tensor) -> Tensor: ...
+    def __call__(self, x: Tensor) -> Tensor: ...
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+    def zero_accumulators(self) -> None: ...
+    def apply_step(self, fallback_lr: float) -> None: ...
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def layout(self) -> Literal["NCHW", "NHWC"]: ...
+
+    @property
+    def in_channels(self) -> int: ...
+
+    @property
+    def out_channels(self) -> int: ...
+
+    @property
+    def input_hw(self) -> Tuple[int, int]: ...
+
+    @property
+    def output_hw(self) -> Tuple[int, int]: ...
+
+    @property
+    def output_shape(self) -> Tuple[int, int, int]: ...
+
+    @property
+    def kernel(self) -> Tuple[int, int]: ...
+
+    @property
+    def stride(self) -> Tuple[int, int]: ...
+
+    @property
+    def padding(self) -> Tuple[int, int]: ...
+
+    @property
+    def dilation(self) -> Tuple[int, int]: ...
+
+    @property
+    def psi_drift(self) -> float | None: ...
+
+
+class ZPooling:
+    def __init__(
+        self,
+        channels: int,
+        kernel: Tuple[int, int],
+        input_hw: Tuple[int, int],
+        *,
+        stride: Tuple[int, int] | None = ...,
+        padding: Tuple[int, int] = ...,
+        layout: Literal["NCHW", "NHWC"] = ...,
+        mode: Literal["max", "avg"] = ...,
+    ) -> None: ...
+
+    def forward(self, x: Tensor) -> Tensor: ...
+    def backward(self, x: Tensor, grad_output: Tensor) -> Tensor: ...
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    @property
+    def mode(self) -> Literal["max", "avg"]: ...
+
+    @property
+    def layout(self) -> Literal["NCHW", "NHWC"]: ...
+
+    @property
+    def channels(self) -> int: ...
+
+    @property
+    def input_hw(self) -> Tuple[int, int]: ...
+
+    @property
+    def output_hw(self) -> Tuple[int, int]: ...
+
+    @property
+    def kernel(self) -> Tuple[int, int]: ...
+
+    @property
+    def stride(self) -> Tuple[int, int]: ...
+
+    @property
+    def padding(self) -> Tuple[int, int]: ...
+
+
 class _ZSpaceCoherenceSequencer:
     def __init__(
         self,
@@ -1186,6 +1459,8 @@ def is_swap_invariant(arrangement: Sequence[float]) -> bool: ...
 
 
 class _NnModule(ModuleType):
+    NonLiner: type[_NonLiner]
+    Dropout: type[_Dropout]
     Dataset: type[_NnDataset]
     DataLoader: type[_NnDataLoader]
     DataLoaderIter: type[_NnDataLoaderIter]
@@ -1194,11 +1469,22 @@ class _NnModule(ModuleType):
     PreDiscardTelemetry: type[PreDiscardTelemetry]
     PreDiscardPolicy: type[PreDiscardPolicy]
     PreDiscardSnapshot: type[PreDiscardSnapshot]
+    ZRelativityModule: type[ZRelativityModule]
+    ZConv: type[ZConv]
+    ZPooling: type[ZPooling]
 
     def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...
 
 
 nn: _NnModule
+
+
+class NonLiner(_NonLiner):
+    ...
+
+
+class Dropout(_Dropout):
+    ...
 
 
 class ZSpaceCoherenceSequencer(_ZSpaceCoherenceSequencer):
@@ -2071,6 +2357,8 @@ __all__ = [
     "ZSpaceCoherenceSequencer",
     "step_many",
     "stream_zspace_training",
+    "ZConv",
+    "ZPooling",
     "compat",
     "capture",
     "share",

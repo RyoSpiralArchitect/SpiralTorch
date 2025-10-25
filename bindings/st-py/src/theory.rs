@@ -1,15 +1,16 @@
+use crate::tensor::{tensor_err_to_py, to_dlpack_impl, PyTensor};
 use nalgebra::{DMatrix, Matrix4};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 use st_core::theory::general_relativity::{
-    BoundaryCondition, BoundaryConditionKind, DimensionalReduction, ExtendedStressEnergy,
-    GeneralRelativityModel, InternalMetric, InternalPatch, InternalSpace, LorentzianMetric,
-    MetricDerivatives, MetricError, MetricSecondDerivatives, MixedBlock, PhysicalConstants,
-    ProductGeometry, ProductMetric, SymmetryAnsatz, Topology, WarpFactor, ZManifold,
-    ZRelativityModel,
+    BoundaryCondition, BoundaryConditionKind, GeneralRelativityModel, InternalMetric,
+    InternalPatch, InternalSpace, LorentzianMetric, MetricDerivatives, MetricError,
+    MetricSecondDerivatives, MixedBlock, PhysicalConstants, ProductGeometry, ProductMetric,
+    SymmetryAnsatz, Topology, WarpFactor, ZManifold, ZRelativityModel,
 };
+use st_tensor::Tensor;
 
 fn metric_error(err: MetricError) -> PyErr {
     PyValueError::new_err(err.to_string())
@@ -64,6 +65,10 @@ fn dmatrix_to_py(matrix: &DMatrix<f64>) -> Vec<Vec<f64>> {
     (0..matrix.nrows())
         .map(|i| (0..matrix.ncols()).map(|j| matrix[(i, j)]).collect())
         .collect()
+}
+
+fn tensor_to_py(py: Python<'_>, tensor: Tensor) -> PyResult<PyObject> {
+    Ok(Py::new(py, PyTensor::from_tensor(tensor))?.into_py(py))
 }
 
 fn parse_metric_derivatives(data: Option<Vec<Vec<Vec<f64>>>>) -> PyResult<MetricDerivatives> {
@@ -169,6 +174,127 @@ fn parse_boundary_conditions(boundaries: Option<Vec<String>>) -> Vec<BoundaryCon
         .collect()
 }
 
+#[pyclass(module = "spiraltorch.theory", name = "ZRelativityModel", unsendable)]
+pub struct PyZRelativityModel {
+    pub(crate) inner: ZRelativityModel,
+}
+
+#[pymethods]
+impl PyZRelativityModel {
+    pub fn as_tensor(&self) -> PyResult<PyTensor> {
+        let tensor = self.inner.as_tensor().map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(tensor))
+    }
+
+    pub fn to_dlpack(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let tensor = self.inner.as_tensor().map_err(tensor_err_to_py)?;
+        to_dlpack_impl(py, &tensor)
+    }
+
+    pub fn effective_metric(&self) -> PyResult<PyTensor> {
+        let tensor = self
+            .inner
+            .effective_metric_tensor()
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(tensor))
+    }
+
+    pub fn gauge_tensor(&self) -> PyResult<PyTensor> {
+        let tensor = self.inner.gauge_tensor().map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(tensor))
+    }
+
+    pub fn scalar_moduli(&self) -> PyResult<PyTensor> {
+        let tensor = self
+            .inner
+            .scalar_moduli_tensor()
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(tensor))
+    }
+
+    pub fn field_equations(&self) -> PyResult<PyTensor> {
+        let tensor = self
+            .inner
+            .field_equation_tensor()
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(tensor))
+    }
+
+    pub fn tensor_bundle(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let bundle = self.inner.tensor_bundle().map_err(tensor_err_to_py)?;
+        let dict = PyDict::new_bound(py);
+        dict.set_item("block_metric", tensor_to_py(py, bundle.block_metric)?)?;
+        dict.set_item(
+            "effective_metric",
+            tensor_to_py(py, bundle.effective_metric)?,
+        )?;
+        dict.set_item("gauge_field", tensor_to_py(py, bundle.gauge_field)?)?;
+        dict.set_item("scalar_moduli", tensor_to_py(py, bundle.scalar_moduli)?)?;
+        dict.set_item("field_equation", tensor_to_py(py, bundle.field_equation)?)?;
+        if let Some(warp) = bundle.warp {
+            dict.set_item("warp", tensor_to_py(py, warp)?)?;
+        } else {
+            dict.set_item("warp", py.None())?;
+        }
+        dict.set_item("internal_volume_density", bundle.internal_volume_density)?;
+        dict.set_item("field_prefactor", bundle.field_prefactor)?;
+        Ok(dict.into())
+    }
+
+    pub fn reduction_summary(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        let reduction = &self.inner.reduction;
+        dict.set_item(
+            "effective_metric",
+            tensor_to_py(
+                py,
+                self.inner
+                    .effective_metric_tensor()
+                    .map_err(tensor_err_to_py)?,
+            )?,
+        )?;
+        dict.set_item(
+            "gauge_field",
+            tensor_to_py(py, self.inner.gauge_tensor().map_err(tensor_err_to_py)?)?,
+        )?;
+        dict.set_item(
+            "scalar_moduli",
+            tensor_to_py(
+                py,
+                self.inner
+                    .scalar_moduli_tensor()
+                    .map_err(tensor_err_to_py)?,
+            )?,
+        )?;
+        dict.set_item(
+            "effective_newton_constant",
+            reduction.effective_newton_constant(),
+        )?;
+        Ok(dict.into())
+    }
+
+    pub fn learnable_flags(&self) -> (bool, bool, bool) {
+        let flags = self.inner.learnable_flags();
+        (flags.warp, flags.mixed, flags.internal)
+    }
+
+    pub fn warp_scale(&self) -> Option<f64> {
+        self.inner.geometry.metric().warp().map(|warp| warp.scale())
+    }
+
+    pub fn internal_volume_density(&self) -> f64 {
+        self.inner.geometry.internal_volume_density()
+    }
+
+    pub fn field_prefactor(&self) -> f64 {
+        self.inner.field_equations.prefactor()
+    }
+
+    pub fn total_dimension(&self) -> usize {
+        self.inner.geometry.total_dimension()
+    }
+}
+
 #[pyfunction]
 #[pyo3(signature = (components, scale))]
 pub fn lorentzian_metric_scaled(
@@ -222,7 +348,7 @@ pub fn assemble_zrelativity_model(
     symmetry: Option<String>,
     topology: Option<String>,
     boundary_conditions: Option<Vec<String>>,
-) -> PyResult<PyObject> {
+) -> PyResult<PyZRelativityModel> {
     let base = matrix4_from_py(base_metric)?;
     let base_metric = LorentzianMetric::try_new(base).map_err(metric_error)?;
     let internal_matrix = dmatrix_from_py(internal_metric)?;
@@ -274,9 +400,6 @@ pub fn assemble_zrelativity_model(
         topology,
         boundaries,
     );
-
-    let reduction = DimensionalReduction::project(&geometry, &constants, internal_volume)
-        .map_err(metric_error)?;
     let zr_model = ZRelativityModel::assemble(
         geometry.clone(),
         base_model.clone(),
@@ -285,49 +408,13 @@ pub fn assemble_zrelativity_model(
         cosmological_constant,
     )
     .map_err(metric_error)?;
-
-    let dict = PyDict::new_bound(py);
-    dict.set_item(
-        "effective_metric",
-        matrix4_to_py(reduction.effective_metric().components()),
-    )?;
-    dict.set_item(
-        "gauge_field",
-        dmatrix_to_py(reduction.gauge_field().components()),
-    )?;
-    dict.set_item(
-        "scalar_moduli",
-        dmatrix_to_py(reduction.scalar_moduli().components()),
-    )?;
-    dict.set_item(
-        "effective_newton_constant",
-        reduction.effective_newton_constant(),
-    )?;
-    dict.set_item(
-        "internal_volume_density",
-        geometry.internal_volume_density(),
-    )?;
-    dict.set_item(
-        "warp_scale",
-        geometry.metric().warp().map(|factor| factor.scale()),
-    )?;
-    dict.set_item("gauge_rank", reduction.gauge_field().internal_dimension())?;
-    dict.set_item("scalar_rank", reduction.scalar_moduli().dimension())?;
-    dict.set_item(
-        "field_equations",
-        dmatrix_to_py(zr_model.field_equations.lhs()),
-    )?;
-    dict.set_item("field_prefactor", zr_model.field_equations.prefactor())?;
-
-    let vacuum = ExtendedStressEnergy::zeros(zr_model.geometry.metric().block_matrix().nrows());
-    let residual = zr_model.field_equations.residual(&vacuum);
-    dict.set_item("vacuum_residual", dmatrix_to_py(&residual))?;
-
-    Ok(dict.into())
+    let _ = py;
+    Ok(PyZRelativityModel { inner: zr_model })
 }
 
 pub fn register(_py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(lorentzian_metric_scaled, module)?)?;
     module.add_function(wrap_pyfunction!(assemble_zrelativity_model, module)?)?;
+    module.add_class::<PyZRelativityModel>()?;
     Ok(())
 }
