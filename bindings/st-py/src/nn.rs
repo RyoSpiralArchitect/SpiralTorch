@@ -21,8 +21,9 @@ use st_nn::{
     dataset_from_vec,
     layers::{NonLiner, NonLinerActivation, NonLinerGeometry, NonLinerHyperbolicConfig},
     zspace_coherence::{
-        CoherenceDiagnostics, LinguisticChannelReport, PreDiscardPolicy, PreDiscardSnapshot,
-        PreDiscardTelemetry,
+        is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
+        CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
+        PreDiscardSnapshot, PreDiscardTelemetry,
     },
     DataLoader, Dataset, ZSpaceCoherenceSequencer,
 };
@@ -435,6 +436,12 @@ fn from_samples(samples: Vec<(PyTensor, PyTensor)>) -> PyDataLoader {
 }
 
 #[cfg(feature = "nn")]
+#[pyfunction(name = "is_swap_invariant")]
+pub(crate) fn py_is_swap_invariant(arrangement: Vec<f32>) -> bool {
+    rust_is_swap_invariant(&arrangement)
+}
+
+#[cfg(feature = "nn")]
 #[derive(Clone)]
 #[pyclass(module = "spiraltorch.nn", name = "CoherenceChannelReport")]
 pub(crate) struct PyCoherenceChannelReport {
@@ -498,12 +505,119 @@ impl PyCoherenceChannelReport {
 
 #[cfg(feature = "nn")]
 #[derive(Clone)]
+#[pyclass(module = "spiraltorch.nn", name = "CoherenceSignature", unsendable)]
+pub(crate) struct PyCoherenceSignature {
+    dominant_channel: Option<usize>,
+    energy_ratio: f32,
+    entropy: f32,
+    mean_coherence: f32,
+    swap_invariant: bool,
+}
+
+#[cfg(feature = "nn")]
+impl PyCoherenceSignature {
+    fn from_signature(signature: &CoherenceSignature) -> Self {
+        Self {
+            dominant_channel: signature.dominant_channel(),
+            energy_ratio: signature.energy_ratio(),
+            entropy: signature.entropy(),
+            mean_coherence: signature.mean_coherence(),
+            swap_invariant: signature.swap_invariant(),
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyCoherenceSignature {
+    #[getter]
+    fn dominant_channel(&self) -> Option<usize> {
+        self.dominant_channel
+    }
+
+    #[getter]
+    fn energy_ratio(&self) -> f32 {
+        self.energy_ratio
+    }
+
+    #[getter]
+    fn entropy(&self) -> f32 {
+        self.entropy
+    }
+
+    #[getter]
+    fn mean_coherence(&self) -> f32 {
+        self.mean_coherence
+    }
+
+    #[getter]
+    fn swap_invariant(&self) -> bool {
+        self.swap_invariant
+    }
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone)]
+#[pyclass(module = "spiraltorch.nn", name = "CoherenceObservation", unsendable)]
+pub(crate) struct PyCoherenceObservation {
+    observation: CoherenceObservation,
+    label: CoherenceLabel,
+}
+
+#[cfg(feature = "nn")]
+impl PyCoherenceObservation {
+    fn from_observation(observation: CoherenceObservation) -> Self {
+        let label = observation.lift_to_label();
+        Self { observation, label }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyCoherenceObservation {
+    #[getter]
+    fn is_signature(&self) -> bool {
+        matches!(self.observation, CoherenceObservation::Signature(_))
+    }
+
+    #[getter]
+    fn label(&self) -> String {
+        self.label.to_string()
+    }
+
+    #[getter]
+    fn signature(&self) -> Option<PyCoherenceSignature> {
+        match &self.observation {
+            CoherenceObservation::Signature(signature) => {
+                Some(PyCoherenceSignature::from_signature(signature))
+            }
+            CoherenceObservation::Undetermined => None,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        match &self.observation {
+            CoherenceObservation::Undetermined => format!(
+                "CoherenceObservation(label='{}', signature=None)",
+                self.label
+            ),
+            CoherenceObservation::Signature(_) => format!(
+                "CoherenceObservation(label='{}', signature=...)",
+                self.label
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone)]
 #[pyclass(module = "spiraltorch.nn", name = "CoherenceDiagnostics", unsendable)]
 pub(crate) struct PyCoherenceDiagnostics {
     aggregated: PyTensor,
     coherence: Vec<f32>,
     channel_reports: Vec<PyCoherenceChannelReport>,
     pre_discard: Option<PyPreDiscardTelemetry>,
+    observation: PyCoherenceObservation,
 }
 
 #[cfg(feature = "nn")]
@@ -732,6 +846,7 @@ impl PyPreDiscardPolicy {
 #[cfg(feature = "nn")]
 impl PyCoherenceDiagnostics {
     fn from_diagnostics(diagnostics: CoherenceDiagnostics) -> Self {
+        let observation = PyCoherenceObservation::from_observation(diagnostics.observation());
         let (aggregated, coherence, channel_reports, pre_discard) = diagnostics.into_parts();
         let channel_reports = channel_reports
             .iter()
@@ -742,6 +857,7 @@ impl PyCoherenceDiagnostics {
             coherence,
             channel_reports,
             pre_discard: pre_discard.map(PyPreDiscardTelemetry::from_telemetry),
+            observation,
         }
     }
 }
@@ -779,6 +895,11 @@ impl PyCoherenceDiagnostics {
     #[getter]
     fn pre_discard(&self) -> Option<PyPreDiscardTelemetry> {
         self.pre_discard.clone()
+    }
+
+    #[getter]
+    fn observation(&self) -> PyCoherenceObservation {
+        self.observation.clone()
     }
 }
 
@@ -936,7 +1057,10 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyDataset>()?;
     module.add_class::<PyDataLoader>()?;
     module.add_class::<PyDataLoaderIter>()?;
+    module.add_function(wrap_pyfunction!(py_is_swap_invariant, module)?)?;
     module.add_class::<PyCoherenceChannelReport>()?;
+    module.add_class::<PyCoherenceSignature>()?;
+    module.add_class::<PyCoherenceObservation>()?;
     module.add_class::<PyPreDiscardTelemetry>()?;
     module.add_class::<PyPreDiscardPolicy>()?;
     module.add_class::<PyPreDiscardSnapshot>()?;

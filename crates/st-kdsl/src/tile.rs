@@ -21,6 +21,7 @@ pub struct TileConfig {
     pub tile_k: u32,
     pub vector: u32,
     pub stages: u32,
+    pub segments: u32,
 }
 
 impl TileConfig {
@@ -38,6 +39,7 @@ pub struct TileTemplate {
     tile_k: Vec<u32>,
     vector: Vec<u32>,
     stages: Vec<u32>,
+    segments: Vec<u32>,
 }
 
 impl Default for TileTemplate {
@@ -49,6 +51,7 @@ impl Default for TileTemplate {
             tile_k: vec![16, 32],
             vector: vec![1, 2, 4],
             stages: vec![1, 2],
+            segments: vec![1],
         }
     }
 }
@@ -106,6 +109,14 @@ impl TileTemplate {
         self
     }
 
+    pub fn with_segments<I>(mut self, values: I) -> Self
+    where
+        I: IntoIterator<Item = u32>,
+    {
+        self.segments = values.into_iter().collect();
+        self
+    }
+
     pub fn push_workgroup(&mut self, workgroup: (u32, u32)) {
         self.workgroups.push(workgroup);
     }
@@ -130,8 +141,16 @@ impl TileTemplate {
         self.stages.push(value);
     }
 
+    pub fn push_segments(&mut self, value: u32) {
+        self.segments.push(value);
+    }
+
     pub fn workgroups(&self) -> &[(u32, u32)] {
         &self.workgroups
+    }
+
+    pub fn segments(&self) -> &[u32] {
+        &self.segments
     }
 
     pub fn iter(&self) -> TileIter<'_> {
@@ -152,6 +171,7 @@ impl TileTemplate {
             || self.tile_k.is_empty()
             || self.vector.is_empty()
             || self.stages.is_empty()
+            || self.segments.is_empty()
     }
 }
 
@@ -162,7 +182,8 @@ pub struct TileIter<'a> {
 }
 
 impl<'a> TileIter<'a> {
-    fn new(template: &'a TileTemplate, knowledge: TileKnowledge) -> Self {
+    pub fn new(template: &'a TileTemplate, knowledge: TileKnowledge) -> Self {
+        let knowledge = knowledge.prepared(template);
         let order = if template.is_empty() {
             Vec::new()
         } else {
@@ -189,9 +210,88 @@ impl<'a> Iterator for TileIter<'a> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct WeightedMetric {
+    pub w_wgx: f64,
+    pub w_wgy: f64,
+    pub w_tm: f64,
+    pub w_tn: f64,
+    pub w_tk: f64,
+    pub w_vec: f64,
+    pub w_stg: f64,
+    pub w_seg: f64,
+    pub p: f64,
+}
+
+impl Default for WeightedMetric {
+    fn default() -> Self {
+        Self {
+            w_wgx: 0.5,
+            w_wgy: 0.5,
+            w_tm: 0.8,
+            w_tn: 0.8,
+            w_tk: 1.2,
+            w_vec: 1.3,
+            w_stg: 0.7,
+            w_seg: 0.9,
+            p: 1.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct TemplateStats {
+    rg_wgx: f64,
+    rg_wgy: f64,
+    rg_tm: f64,
+    rg_tn: f64,
+    rg_tk: f64,
+    rg_vec: f64,
+    rg_stg: f64,
+    rg_seg: f64,
+}
+
+impl TemplateStats {
+    fn from_template(template: &TileTemplate) -> Self {
+        fn range<I>(iter: I) -> f64
+        where
+            I: IntoIterator<Item = u32>,
+        {
+            let mut iter = iter.into_iter();
+            let first = iter.next();
+            let mut min = first.unwrap_or(0);
+            let mut max = min;
+            for value in iter {
+                if value < min {
+                    min = value;
+                }
+                if value > max {
+                    max = value;
+                }
+            }
+            let diff = max.saturating_sub(min) as f64;
+            diff.max(1.0)
+        }
+
+        Self {
+            rg_wgx: range(template.workgroups.iter().map(|&(x, _)| x)),
+            rg_wgy: range(template.workgroups.iter().map(|&(_, y)| y)),
+            rg_tm: range(template.tile_m.iter().copied()),
+            rg_tn: range(template.tile_n.iter().copied()),
+            rg_tk: range(template.tile_k.iter().copied()),
+            rg_vec: range(template.vector.iter().copied()),
+            rg_stg: range(template.stages.iter().copied()),
+            rg_seg: range(template.segments.iter().copied()),
+        }
+    }
+    configs
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TileKnowledge {
     seeds: Vec<TileSeed>,
+    metric: WeightedMetric,
+    stats: TemplateStats,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -201,7 +301,7 @@ struct TileSeed {
 }
 
 impl TileKnowledge {
-    fn from_entries(entries: &[crate::autotune_store::AutoTuneEntry]) -> Self {
+    pub fn from_entries(entries: &[crate::autotune_store::AutoTuneEntry]) -> Self {
         let mut seeds = Vec::new();
         for entry in entries {
             if let Ok(snapshot) = serde_json::from_value::<TileSnapshot>(entry.params.clone()) {
@@ -213,7 +313,21 @@ impl TileKnowledge {
         }
         seeds.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(Ordering::Equal));
         seeds.dedup_by(|a, b| a.config == b.config);
-        Self { seeds }
+        Self {
+            seeds,
+            metric: WeightedMetric::default(),
+            stats: TemplateStats::default(),
+        }
+    }
+
+    fn prepared(mut self, template: &TileTemplate) -> Self {
+        self.stats = TemplateStats::from_template(template);
+        self
+    }
+
+    pub fn with_metric(mut self, metric: WeightedMetric) -> Self {
+        self.metric = metric;
+        self
     }
 
     fn plan(&self, template: &TileTemplate) -> Vec<TileConfig> {
@@ -222,18 +336,25 @@ impl TileKnowledge {
             return all;
         }
 
-        let mut scored: Vec<(f64, TileConfig)> = all
-            .drain(..)
-            .map(|cfg| (self.score_for(cfg), cfg))
-            .collect();
-        scored.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
-        scored.into_iter().map(|(_, cfg)| cfg).collect()
+        let stats = self.stats;
+        let metric = self.metric;
+        all.sort_by(|a, b| {
+            let sa = self.seeded_score(*a, stats, metric);
+            let sb = self.seeded_score(*b, stats, metric);
+            sa.partial_cmp(&sb).unwrap_or(Ordering::Equal)
+        });
+        all
     }
 
-    fn score_for(&self, config: TileConfig) -> f64 {
+    fn seeded_score(
+        &self,
+        config: TileConfig,
+        stats: TemplateStats,
+        metric: WeightedMetric,
+    ) -> f64 {
         self.seeds
             .iter()
-            .map(|seed| seed.score + distance(config, seed.config))
+            .map(|seed| seed.score + distance_weighted(config, seed.config, stats, metric))
             .fold(f64::INFINITY, f64::min)
     }
 }
@@ -246,14 +367,17 @@ fn enumerate_all(template: &TileTemplate) -> Vec<TileConfig> {
                 for &tile_k in &template.tile_k {
                     for &vector in &template.vector {
                         for &stages in &template.stages {
-                            configs.push(TileConfig {
-                                workgroup,
-                                tile_m,
-                                tile_n,
-                                tile_k,
-                                vector,
-                                stages,
-                            });
+                            for &segments in &template.segments {
+                                configs.push(TileConfig {
+                                    workgroup,
+                                    tile_m,
+                                    tile_n,
+                                    tile_k,
+                                    vector,
+                                    stages,
+                                    segments,
+                                });
+                            }
                         }
                     }
                 }
@@ -263,21 +387,59 @@ fn enumerate_all(template: &TileTemplate) -> Vec<TileConfig> {
     configs
 }
 
-fn distance(a: TileConfig, b: TileConfig) -> f64 {
-    let mut delta = 0.0;
-    delta += rel_abs_diff(a.workgroup.0 as f64, b.workgroup.0 as f64);
-    delta += rel_abs_diff(a.workgroup.1 as f64, b.workgroup.1 as f64);
-    delta += rel_abs_diff(a.tile_m as f64, b.tile_m as f64);
-    delta += rel_abs_diff(a.tile_n as f64, b.tile_n as f64);
-    delta += rel_abs_diff(a.tile_k as f64, b.tile_k as f64);
-    delta += rel_abs_diff(a.vector as f64, b.vector as f64);
-    delta += rel_abs_diff(a.stages as f64, b.stages as f64);
-    delta
-}
+fn distance_weighted(
+    a: TileConfig,
+    b: TileConfig,
+    stats: TemplateStats,
+    weights: WeightedMetric,
+) -> f64 {
+    fn component(delta: f64, range: f64, weight: f64) -> f64 {
+        if range <= 0.0 {
+            delta.abs() * weight
+        } else {
+            (delta.abs() / range.max(1.0)) * weight
+        }
+    }
 
-fn rel_abs_diff(a: f64, b: f64) -> f64 {
-    let base = a.abs().max(b.abs()).max(1.0);
-    (a - b).abs() / base
+    let comps = [
+        component(
+            a.workgroup.0 as f64 - b.workgroup.0 as f64,
+            stats.rg_wgx,
+            weights.w_wgx,
+        ),
+        component(
+            a.workgroup.1 as f64 - b.workgroup.1 as f64,
+            stats.rg_wgy,
+            weights.w_wgy,
+        ),
+        component(a.tile_m as f64 - b.tile_m as f64, stats.rg_tm, weights.w_tm),
+        component(a.tile_n as f64 - b.tile_n as f64, stats.rg_tn, weights.w_tn),
+        component(a.tile_k as f64 - b.tile_k as f64, stats.rg_tk, weights.w_tk),
+        component(
+            a.vector as f64 - b.vector as f64,
+            stats.rg_vec,
+            weights.w_vec,
+        ),
+        component(
+            a.stages as f64 - b.stages as f64,
+            stats.rg_stg,
+            weights.w_stg,
+        ),
+        component(
+            a.segments as f64 - b.segments as f64,
+            stats.rg_seg,
+            weights.w_seg,
+        ),
+    ];
+
+    let p = weights.p;
+    if (p - 1.0).abs() < f64::EPSILON {
+        comps.iter().sum()
+    } else if (p - 2.0).abs() < f64::EPSILON {
+        comps.iter().map(|v| v * v).sum::<f64>().sqrt()
+    } else {
+        comps.iter().map(|v| v.powf(p)).sum::<f64>().powf(1.0 / p)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -288,6 +450,12 @@ struct TileSnapshot {
     tile_k: u32,
     vector: u32,
     stages: u32,
+    #[serde(default = "default_segments")]
+    segments: u32,
+}
+
+fn default_segments() -> u32 {
+    1
 }
 
 impl From<TileSnapshot> for TileConfig {
@@ -299,6 +467,7 @@ impl From<TileSnapshot> for TileConfig {
             tile_k: snapshot.tile_k,
             vector: snapshot.vector,
             stages: snapshot.stages,
+            segments: snapshot.segments,
         }
     }
 }
@@ -318,7 +487,8 @@ mod tests {
             .with_tile_n([32])
             .with_tile_k([16, 32])
             .with_vector([1, 2])
-            .with_stages([1, 2]);
+            .with_stages([1, 2])
+            .with_segments([1, 2]);
         let configs: Vec<_> = template.iter().collect();
         let expected = enumerate_all(&template);
         let configs_set: HashSet<_> = configs.iter().copied().collect();
@@ -342,7 +512,8 @@ mod tests {
             .with_tile_n([32, 64])
             .with_tile_k([16, 32])
             .with_vector([1])
-            .with_stages([1]);
+            .with_stages([1])
+            .with_segments([1, 2]);
 
         let seed = TileConfig {
             workgroup: (64, 4),
@@ -351,6 +522,7 @@ mod tests {
             tile_k: 32,
             vector: 1,
             stages: 1,
+            segments: 2,
         };
         let entry = AutoTuneEntry {
             updated_unix: 0,
