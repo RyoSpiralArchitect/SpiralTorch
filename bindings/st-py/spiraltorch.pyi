@@ -1329,6 +1329,59 @@ class ZPulseSnapshot:
     def latency_ms(self) -> float: ...
 
 
+class ContextualPulseFrame:
+    @property
+    def summary(self) -> str: ...
+
+    @property
+    def highlights(self) -> List[str]: ...
+
+    @property
+    def label(self) -> str | None: ...
+
+    @property
+    def lexical_weight(self) -> float: ...
+
+    @property
+    def signature(self) -> Tuple[int, int, int] | None: ...
+
+    @property
+    def support(self) -> int: ...
+
+    @property
+    def pulse(self) -> ZPulseSnapshot: ...
+
+
+class ContextualLagrangianGate:
+    def __init__(
+        self,
+        curvature: float,
+        temperature: float,
+        *,
+        gauge: str = ...,
+        tempo_normaliser: float | None = ...,
+        energy_gain: float = ...,
+        drift_gain: float = ...,
+        bias_gain: float = ...,
+        support_gain: float = ...,
+        scale: Tuple[float, float] | None = ...,
+        quality_floor: float = ...,
+        stderr_gain: float = ...,
+    ) -> None: ...
+
+    def project(
+        self,
+        placements: Sequence[int],
+        edges: Optional[Sequence[Tuple[int, int]]] = ...,
+        *,
+        gauge: str | None = ...,
+        ts: int = ...,
+    ) -> ContextualPulseFrame: ...
+
+    @property
+    def gauge(self) -> str: ...
+
+
 class ArnoldTonguePeak:
     @property
     def ratio_p(self) -> int: ...
@@ -1958,6 +2011,8 @@ __all__ = [
     "fracdiff_gl_1d",
     "QueryPlan",
     "RecEpochReport",
+    "ContextualLagrangianGate",
+    "ContextualPulseFrame",
     "Recommender",
     "Agent",
     "AgentConfig",
