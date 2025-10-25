@@ -142,6 +142,7 @@ from .zspace_inference import (
     ZSpaceInference,
     ZSpacePosterior,
     ZSpacePartialBundle,
+    ZSpaceTelemetryFrame,
     ZSpaceInferencePipeline,
     canvas_partial_from_snapshot,
     canvas_coherence_partial,
@@ -155,14 +156,10 @@ from .zspace_inference import (
     infer_canvas_with_coherence,
     infer_with_partials,
     infer_from_partial,
-    infer_with_psi,
-    weights_partial_from_tensor,
     weights_partial_from_dlpack,
+    weights_partial_from_compat,
     infer_weights_from_dlpack,
-    psi_partial_from_reading,
-    psi_partial_from_advisory,
-    psi_partial_from_tuning,
-    fetch_latest_psi_telemetry,
+    infer_weights_from_compat,
 )
 
 # 追加API（Rust側でエクスポート済みのやつだけ拾う）

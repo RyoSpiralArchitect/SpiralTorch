@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import math
+import types
 from typing import Any, Mapping
 
 import pytest
 
 pytest.importorskip("spiraltorch")
+
+import spiraltorch as st
 
 from spiraltorch import (
     ZSpaceInferencePipeline,
@@ -25,11 +28,11 @@ from spiraltorch import (
     infer_canvas_with_coherence,
     infer_with_partials,
     infer_from_partial,
-    infer_with_psi,
-    weights_partial_from_tensor,
     weights_partial_from_dlpack,
+    weights_partial_from_compat,
     infer_weights_from_dlpack,
-    psi_partial_from_reading,
+    infer_weights_from_compat,
+    ZSpaceTelemetryFrame,
 )
 
 
@@ -118,6 +121,19 @@ def test_infer_with_partials_honours_last_strategy():
         strategy="last",
     )
     assert math.isclose(result.metrics["speed"], 0.9)
+
+
+def test_infer_with_partials_merges_telemetry_payloads():
+    vector = [0.3, -0.05, 0.21, 0.08]
+    bundle = ZSpacePartialBundle({"speed": 0.4}, telemetry={"psi.mean": 0.5})
+    result = infer_with_partials(
+        vector,
+        bundle,
+        telemetry={"psi.offset": 0.2},
+    )
+    assert result.telemetry is not None
+    payload = result.telemetry.payload
+    assert "psi.mean" in payload and "psi.offset" in payload
 
 
 def test_pipeline_blends_and_clears_partials():
@@ -321,137 +337,75 @@ def test_infer_canvas_with_coherence_projects_blended_partial():
     assert "coherence_mean" in inference.metrics
 
 
-def test_weights_partial_from_tensor_produces_expected_stats():
-    weights = [[0.5, -0.25], [0.75, 0.0]]
-    stats = weights_partial_from_tensor(weights)
-    assert math.isclose(stats["weight_count"], 4.0)
-    assert math.isclose(stats["weight_mean"], sum(sum(row) for row in weights) / 4, rel_tol=1e-6)
-    assert stats["weight_l2"] > 0.0
+class _FakeDlpackWeights:
+    def __init__(self, data: list[float]) -> None:
+        self._data = data
+
+    def __dlpack__(self) -> list[float]:
+        return list(self._data)
 
 
-def test_weights_partial_from_dlpack_invokes_capture(monkeypatch):
-    captured: dict[str, object] = {}
+class _CompatCarrier:
+    def __init__(self, data: list[float] | list[list[float]]) -> None:
+        self._data = data
 
-    class _StubTensor:
-        def __init__(self, data: list[list[float]]) -> None:
-            self._data = data
 
-        def tolist(self) -> list[list[float]]:
-            return self._data
+def test_weights_partial_from_dlpack_populates_import_metrics():
+    weights = _FakeDlpackWeights([0.4, -0.2, 0.1, 0.05])
+    bundle = weights_partial_from_dlpack(
+        weights,
+        bundle_weight=2.0,
+        telemetry={"psi.extra": 0.3},
+    )
+    metrics = bundle.resolved()
+    assert metrics["import_l2"] > 0.0
+    telemetry_map = dict(bundle.telemetry_payload() or {})
+    assert "psi.extra" in telemetry_map
 
-    def fake_capture(value: object, allow_compat: bool = True) -> _StubTensor:
-        captured["value"] = value
-        return _StubTensor([[0.1, -0.1], [0.2, -0.2]])
 
+def test_infer_weights_from_dlpack_exposes_telemetry():
+    weights = _FakeDlpackWeights([0.2, -0.1, 0.3])
+    result = infer_weights_from_dlpack(
+        [0.1, -0.2, 0.05],
+        weights,
+        telemetry={"psi.offset": 0.15},
+    )
+    assert result.telemetry is not None
+    assert "psi.offset" in result.telemetry.payload
+
+
+def test_weights_partial_from_compat_uses_adapter(monkeypatch):
+    carrier = _CompatCarrier([[0.25, -0.12], [0.06, 0.18]])
     monkeypatch.setattr(
-        "spiraltorch.zspace_inference._capture_tensor_like",
-        fake_capture,
-        raising=True,
+        st.compat,
+        "torch",
+        types.SimpleNamespace(to_tensor=lambda value: value._data),
+        raising=False,
     )
-    capsule = object()
-    stats = weights_partial_from_dlpack(capsule)
-    assert captured["value"] is capsule
-    assert math.isclose(stats["weight_count"], 4.0)
+    bundle = weights_partial_from_compat(
+        carrier,
+        adapter="torch",
+        telemetry={"psi.bridge": 0.4},
+    )
+    metrics = bundle.resolved()
+    assert metrics["import_count"] == 4.0
+    telemetry_map = dict(bundle.telemetry_payload() or {})
+    assert "psi.bridge" in telemetry_map
 
 
-def test_infer_weights_from_dlpack_yields_weight_metrics(monkeypatch):
-    class _StubTensor:
-        def __init__(self, data: list[list[float]]) -> None:
-            self._data = data
-
-        def tolist(self) -> list[list[float]]:
-            return self._data
-
-    tensor = _StubTensor([[0.2, -0.2], [0.4, 0.1]])
+def test_infer_weights_from_compat_merges_telemetry(monkeypatch):
+    carrier = _CompatCarrier([0.3, -0.18, 0.07, 0.22])
     monkeypatch.setattr(
-        "spiraltorch.zspace_inference._capture_tensor_like",
-        lambda value, allow_compat=True: tensor,
-        raising=True,
+        st.compat,
+        "torch",
+        types.SimpleNamespace(to_tensor=lambda value: value._data),
+        raising=False,
     )
-    inference = infer_weights_from_dlpack([0.2, -0.1, 0.05], object())
-    assert "weight_mean" in inference.metrics
-    assert inference.metrics["weight_mean"] != 0.0
-
-
-class _DummyPsiEvent:
-    def __init__(self, up: bool, value: float) -> None:
-        self.up = up
-        self.value = value
-
-
-class _DummyAdvisory:
-    def __init__(self) -> None:
-        self.mu_eff0 = -0.3
-        self.alpha3 = 0.8
-        self.audit_container_gap = 0.2
-        self.audit_cluster = 0.5
-        self.container_cluster = 0.4
-        self.regime = type("Regime", (), {"name": "Supercritical"})()
-
-    def stability_score(self) -> float:
-        return 0.72
-
-    def audit_overbias(self) -> bool:
-        return True
-
-    def container_reinforcement(self) -> float:
-        return 0.65
-
-
-class _DummyTuning:
-    def __init__(self) -> None:
-        self.required_components = ["act", "band"]
-        self.weight_increments = {"ACT_DRIFT": 0.2, "BAND_ENERGY": 0.1}
-        self.threshold_shifts = {"GRAD_NORM": -0.05}
-
-
-def test_psi_partial_from_reading_includes_breakdown():
-    reading = {
-        "total": 0.85,
-        "step": 42,
-        "breakdown": {"ACT_DRIFT": 0.4, "BAND_ENERGY": 0.3},
-    }
-    events = [_DummyPsiEvent(True, 0.2), _DummyPsiEvent(False, -0.1)]
-    metrics = psi_partial_from_reading(
-        reading,
-        events=events,
-        advisory=_DummyAdvisory(),
-        tuning=_DummyTuning(),
+    result = infer_weights_from_compat(
+        [0.2, -0.05, 0.19, -0.08],
+        carrier,
+        adapter="torch",
+        telemetry={"psi.hint": 0.6},
     )
-    assert math.isclose(metrics["psi_total"], 0.85, rel_tol=1e-6)
-    assert metrics["psi_component_act_drift"] == pytest.approx(0.4)
-    assert metrics["psi_event_count"] == pytest.approx(2.0)
-    assert metrics["psi_spiral_regime"] == pytest.approx(0.0)
-    assert metrics["psi_tuning_weight_total"] == pytest.approx(0.3)
-
-
-def test_infer_with_psi_fetches_latest(monkeypatch):
-    reading = {"total": 0.9, "step": 64, "breakdown": {"ACT_DRIFT": 0.5}}
-    events = [_DummyPsiEvent(True, 0.1)]
-    advisory = _DummyAdvisory()
-    tuning = _DummyTuning()
-
-    monkeypatch.setattr(
-        "spiraltorch.zspace_inference.fetch_latest_psi_telemetry",
-        lambda: (reading, events, advisory, tuning),
-        raising=True,
-    )
-    inference = infer_with_psi([0.3, -0.2, 0.1], {"speed": 0.6}, psi=True)
-    assert "psi_total" in inference.metrics
-    assert inference.metrics["psi_total"] == pytest.approx(0.9)
-
-
-def test_pipeline_uses_default_psi_source(monkeypatch):
-    reading = {"total": 0.7, "step": 21, "breakdown": {"BAND_ENERGY": 0.25}}
-    events = [_DummyPsiEvent(False, -0.2)]
-
-    monkeypatch.setattr(
-        "spiraltorch.zspace_inference.fetch_latest_psi_telemetry",
-        lambda: (reading, events, _DummyAdvisory(), _DummyTuning()),
-        raising=True,
-    )
-    pipeline = ZSpaceInferencePipeline([0.18, -0.05, 0.31], psi=True)
-    pipeline.add_partial({"speed": 0.45})
-    inference = pipeline.infer(clear=True)
-    assert "psi_total" in inference.metrics
-    assert inference.metrics["psi_total"] == pytest.approx(0.7)
+    assert result.telemetry is not None
+    assert "psi.hint" in result.telemetry.payload
