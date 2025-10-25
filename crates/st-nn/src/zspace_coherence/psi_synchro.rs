@@ -13,6 +13,7 @@
 //! channels so the components can run inside the SpiralTorch runtime without
 //! Python bindings.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::f64::consts::PI;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -355,6 +356,29 @@ impl MetaMembSampler {
     }
 }
 
+/// Summary of a single Arnold tongue peak.
+#[derive(Clone, Debug)]
+pub struct ArnoldTongueSummary {
+    pub ratio_p: i64,
+    pub ratio_q: i64,
+    pub rotation: f64,
+    pub lam: f64,
+    pub wd: f64,
+    pub strength: f64,
+    pub peak_strength: f64,
+    pub error: f64,
+}
+
+impl ArnoldTongueSummary {
+    pub fn ratio(&self) -> f64 {
+        if self.ratio_q == 0 {
+            0.0
+        } else {
+            self.ratio_p as f64 / self.ratio_q as f64
+        }
+    }
+}
+
 /// Resulting heatmap for a particular branch.
 #[derive(Clone, Debug)]
 pub struct HeatmapResult {
@@ -364,9 +388,19 @@ pub struct HeatmapResult {
     pub lam_grid: Vec<f64>,
     pub wd_grid: Vec<f64>,
     pub matrix: Vec<Vec<f64>>,
+    pub tongues: Vec<ArnoldTongueSummary>,
 }
 
 impl HeatmapResult {
+    pub fn dominant_tongue(&self) -> Option<&ArnoldTongueSummary> {
+        self.tongues
+            .iter()
+            .max_by(|a, b| match a.peak_strength.partial_cmp(&b.peak_strength) {
+                Some(order) => order,
+                None => Ordering::Equal,
+            })
+    }
+
     /// Converts the heatmap into a synthetic ZPulse snapshot for downstream Z-space consumers.
     pub fn to_zpulse(&self, ts: u64) -> ZPulse {
         let mut pulse = ZPulse::default();
@@ -440,18 +474,23 @@ impl HeatmapResult {
         pulse.band_energy = (leading_norm, central_norm, trailing_norm);
         pulse.support = ZSupport::new(leading_norm, central_norm, trailing_norm);
 
-        let dominant_lam = self
-            .lam_grid
-            .get(max_pos.0)
-            .copied()
-            .or_else(|| self.lam_grid.first().copied())
-            .unwrap_or(0.0);
-        let dominant_wd = self
-            .wd_grid
-            .get(max_pos.1)
-            .copied()
-            .or_else(|| self.wd_grid.first().copied())
-            .unwrap_or(0.0);
+        let (dominant_lam, dominant_wd, peak_value) = if let Some(tongue) = self.dominant_tongue() {
+            (tongue.lam, tongue.wd, tongue.peak_strength)
+        } else {
+            let lam = self
+                .lam_grid
+                .get(max_pos.0)
+                .copied()
+                .or_else(|| self.lam_grid.first().copied())
+                .unwrap_or(0.0);
+            let wd = self
+                .wd_grid
+                .get(max_pos.1)
+                .copied()
+                .or_else(|| self.wd_grid.first().copied())
+                .unwrap_or(0.0);
+            (lam, wd, max_value)
+        };
 
         let radius = (dominant_lam + 1.0).max(1e-3);
         let scale =
@@ -467,7 +506,7 @@ impl HeatmapResult {
         pulse.z_bias = bias;
         pulse.drift = self.kappa_hat.tanh() as f32;
 
-        let quality = (max_value / total_energy).clamp(0.0, 1.0) as f32;
+        let quality = (peak_value / total_energy).clamp(0.0, 1.0) as f32;
         pulse.quality = quality;
         pulse.stderr = (1.0 - quality).clamp(0.0, 1.0);
         pulse.latency_ms = 0.0;
@@ -702,16 +741,67 @@ impl CircleLockMap {
                         let lam_grid = linspace(config.lam_min, config.lam_max, config.lam_bins);
                         let wd_grid = linspace(config.wd_min, config.wd_max, config.wd_bins);
                         let mut matrix = vec![vec![0.0; wd_grid.len()]; lam_grid.len()];
+                        #[derive(Clone, Copy)]
+                        struct TongueAccumulator {
+                            total_strength: f64,
+                            peak_strength: f64,
+                            error: f64,
+                            lam: f64,
+                            wd: f64,
+                            rotation: f64,
+                        }
+                        let mut tongues: HashMap<(i64, i64), TongueAccumulator> = HashMap::new();
                         for (il, lam) in lam_grid.iter().copied().enumerate() {
                             let kappa = kappa_hat * lam;
                             for (iw, wd) in wd_grid.iter().copied().enumerate() {
                                 let omega = params.omega0 / wd - 1.0;
                                 let rho =
                                     rotation_number(omega, kappa, config.burn_in, config.samples);
-                                let (_, _, err) = nearest_rational(rho, config.qmax);
-                                matrix[il][iw] = 1.0 / (err + 1e-6);
+                                let (p, q, err) = nearest_rational(rho, config.qmax);
+                                let strength = 1.0 / (err + 1e-6);
+                                matrix[il][iw] = strength;
+                                if q != 0 {
+                                    let entry =
+                                        tongues.entry((p, q)).or_insert(TongueAccumulator {
+                                            total_strength: 0.0,
+                                            peak_strength: f64::MIN,
+                                            error: err,
+                                            lam,
+                                            wd,
+                                            rotation: rho,
+                                        });
+                                    entry.total_strength += strength;
+                                    let is_better_peak = strength > entry.peak_strength
+                                        || (strength == entry.peak_strength && err < entry.error);
+                                    if is_better_peak {
+                                        entry.peak_strength = strength;
+                                        entry.error = err;
+                                        entry.lam = lam;
+                                        entry.wd = wd;
+                                        entry.rotation = rho;
+                                    }
+                                }
                             }
                         }
+                        let mut tongues: Vec<ArnoldTongueSummary> = tongues
+                            .into_iter()
+                            .map(|((p, q), acc)| ArnoldTongueSummary {
+                                ratio_p: p,
+                                ratio_q: q,
+                                rotation: acc.rotation,
+                                lam: acc.lam,
+                                wd: acc.wd,
+                                strength: acc.total_strength,
+                                peak_strength: acc.peak_strength,
+                                error: acc.error,
+                            })
+                            .collect();
+                        tongues.sort_by(|a, b| {
+                            match b.peak_strength.partial_cmp(&a.peak_strength) {
+                                Some(order) => order,
+                                None => Ordering::Equal,
+                            }
+                        });
                         bus_clone.publish(SynchroEvent::HeatmapUpdate(HeatmapResult {
                             branch_id,
                             gamma: params.gamma,
@@ -719,6 +809,7 @@ impl CircleLockMap {
                             lam_grid,
                             wd_grid,
                             matrix,
+                            tongues,
                         }));
                     }
                     SynchroEvent::Shutdown => break,
