@@ -6,11 +6,12 @@
 //! full deep learning framework.  Instead we operate on plain slices of `f32`
 //! values and emit rich reports describing the transformation.
 
+mod ops;
 pub mod pruning;
 pub mod quantization;
 pub mod report;
 
-pub use pruning::{StructuredPruner, StructuredPruningConfig};
+pub use pruning::{StructuredPruner, StructuredPruningConfig, StructuredPruningWorkspace};
 pub use quantization::{QatConfig, QatObserver, QuantizationLeveling};
 pub use report::{
     CompressionReport, OptimisationError, QuantizationReport, StructuredPruningReport,
