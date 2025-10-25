@@ -18,6 +18,13 @@ pub struct AlignedVec {
     cap: usize,
 }
 
+// SAFETY: `AlignedVec` owns its allocation exclusively and only exposes shared
+// references through the standard slice APIs, mirroring the guarantees of
+// `Vec<f32>`. The raw pointer is never shared between instances, so it can be
+// safely sent and shared across threads.
+unsafe impl Send for AlignedVec {}
+unsafe impl Sync for AlignedVec {}
+
 impl AlignedVec {
     pub fn with_capacity(capacity: usize) -> Self {
         if capacity == 0 {
