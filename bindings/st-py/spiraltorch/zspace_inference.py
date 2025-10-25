@@ -5,7 +5,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from collections.abc import Iterable
-from typing import Any, Dict, Mapping, Sequence
+from importlib import import_module
+import sys
+from typing import Any, Dict, Mapping, MutableMapping, Sequence
 from types import MappingProxyType
 
 __all__ = [
@@ -18,6 +20,7 @@ __all__ = [
     "decode_zspace_embedding",
     "infer_from_partial",
     "infer_with_partials",
+    "infer_with_psi",
     "compile_inference",
     "blend_zspace_partials",
     "canvas_partial_from_snapshot",
@@ -28,6 +31,13 @@ __all__ = [
     "infer_coherence_diagnostics",
     "infer_coherence_from_sequencer",
     "infer_canvas_with_coherence",
+    "weights_partial_from_tensor",
+    "weights_partial_from_dlpack",
+    "infer_weights_from_dlpack",
+    "psi_partial_from_reading",
+    "psi_partial_from_advisory",
+    "psi_partial_from_tuning",
+    "fetch_latest_psi_telemetry",
 ]
 
 
@@ -88,6 +98,17 @@ _METRIC_ALIASES: Mapping[str, str] = MappingProxyType(
         "coherence_articulation": "coherence_articulation",
     }
 )
+
+
+def _is_dynamic_metric_key(candidate: str) -> bool:
+    candidate = candidate.lower()
+    if candidate.startswith("psi_"):
+        return True
+    if "weight_" in candidate:
+        return True
+    if candidate.startswith("telemetry_"):
+        return True
+    return False
 
 
 def _softplus(value: float) -> float:
@@ -165,10 +186,21 @@ def _canonicalise_inputs(partial: Mapping[str, Any] | None) -> dict[str, Any]:
         raise TypeError("partial observations must be provided as a mapping")
     resolved: dict[str, Any] = {}
     for key, value in partial.items():
-        canonical = _METRIC_ALIASES.get(key.lower())
+        lower = key.lower()
+        canonical = _METRIC_ALIASES.get(lower)
         if canonical is None:
+            if _is_dynamic_metric_key(lower):
+                canonical = lower
+            else:
+                raise KeyError(f"unknown metric '{key}'")
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            if canonical == "gradient":
+                resolved[canonical] = value
+                continue
             raise KeyError(f"unknown metric '{key}'")
-        resolved[canonical] = value
+        resolved[canonical] = numeric
     return resolved
 
 
@@ -202,6 +234,25 @@ def _resolve_partial(
     if weight <= 0.0:
         return None
     return mapping, weight
+
+
+def _merge_with_psi(
+    partial: Mapping[str, Any] | ZSpacePartialBundle | None,
+    psi: Any,
+) -> Mapping[str, Any] | None:
+    psi_metrics = _resolve_psi_partial(psi)
+    base: Mapping[str, Any] | None
+    if isinstance(partial, ZSpacePartialBundle):
+        base = partial.resolved()
+    else:
+        base = partial
+    if not psi_metrics:
+        return base
+    if base is None:
+        return psi_metrics
+    merged: MutableMapping[str, Any] = dict(base)
+    merged.update(psi_metrics)
+    return merged
 
 
 def blend_zspace_partials(
@@ -537,16 +588,21 @@ class ZSpaceInferenceRuntime:
             self._cached[key] = value
         return self._cached
 
-    def update(self, partial: Mapping[str, Any] | None = None) -> ZSpaceInference:
+    def update(
+        self, partial: Mapping[str, Any] | None = None, *, psi: Any | None = None
+    ) -> ZSpaceInference:
         """Fuse *partial* with any cached observations and produce an inference."""
 
         merged = self._merge(partial)
-        return self._posterior.project(merged, smoothing=self._smoothing)
+        payload = _merge_with_psi(merged, psi)
+        return self._posterior.project(payload, smoothing=self._smoothing)
 
-    def infer(self, partial: Mapping[str, Any] | None = None) -> ZSpaceInference:
+    def infer(
+        self, partial: Mapping[str, Any] | None = None, *, psi: Any | None = None
+    ) -> ZSpaceInference:
         """Alias for :meth:`update` to mirror the functional helpers."""
 
-        return self.update(partial)
+        return self.update(partial, psi=psi)
 
 
 class ZSpaceInferencePipeline:
@@ -559,12 +615,14 @@ class ZSpaceInferencePipeline:
         alpha: float = 0.35,
         smoothing: float = 0.35,
         strategy: str = "mean",
+        psi: Any | None = None,
     ) -> None:
         self._runtime = ZSpaceInferenceRuntime(
             z_state, alpha=alpha, smoothing=smoothing, accumulate=False
         )
         self._strategy = strategy
         self._partials: list[ZSpacePartialBundle] = []
+        self._psi_source: Any | None = psi
 
     @property
     def strategy(self) -> str:
@@ -621,12 +679,24 @@ class ZSpaceInferencePipeline:
 
         self._partials.clear()
 
+    @property
+    def psi_source(self) -> Any | None:
+        """Return the default PSI telemetry source consulted during inference."""
+
+        return self._psi_source
+
+    def set_psi_source(self, psi: Any | None) -> None:
+        """Update the PSI telemetry source consulted during inference."""
+
+        self._psi_source = psi
+
     def infer(
         self,
         *,
         strategy: str | None = None,
         weights: Sequence[float] | None = None,
         clear: bool = True,
+        psi: Any | None = None,
     ) -> ZSpaceInference:
         """Blend registered partials and compute the Z-space inference."""
 
@@ -634,8 +704,10 @@ class ZSpaceInferencePipeline:
         blended = blend_zspace_partials(
             self._partials, strategy=chosen_strategy, weights=weights
         )
+        psi_source = self._psi_source if psi is None else psi
+        payload = _merge_with_psi(blended, psi_source)
         inference = self._runtime.posterior.project(
-            blended, smoothing=self._runtime.smoothing
+            payload, smoothing=self._runtime.smoothing
         )
         if clear:
             self.clear()
@@ -654,11 +726,13 @@ def infer_from_partial(
     *,
     alpha: float = 0.35,
     smoothing: float = 0.35,
+    psi: Any | None = None,
 ) -> ZSpaceInference:
     """Fuse partial metric observations with a latent state to complete Z-space inference."""
 
     posterior = ZSpacePosterior(z_state, alpha=alpha)
-    return posterior.project(partial, smoothing=smoothing)
+    payload = _merge_with_psi(partial, psi)
+    return posterior.project(payload, smoothing=smoothing)
 
 
 def infer_with_partials(
@@ -668,11 +742,37 @@ def infer_with_partials(
     smoothing: float = 0.35,
     strategy: str = "mean",
     weights: Sequence[float] | None = None,
+    psi: Any | None = None,
 ) -> ZSpaceInference:
     """Infer Z-space metrics from multiple partial observations."""
 
     blended = blend_zspace_partials(partials, weights=weights, strategy=strategy)
-    return infer_from_partial(z_state, blended, alpha=alpha, smoothing=smoothing)
+    return infer_from_partial(
+        z_state,
+        blended,
+        alpha=alpha,
+        smoothing=smoothing,
+        psi=psi,
+    )
+
+
+def infer_with_psi(
+    z_state: Sequence[float],
+    partial: Mapping[str, Any] | ZSpacePartialBundle | None = None,
+    *,
+    alpha: float = 0.35,
+    smoothing: float = 0.35,
+    psi: Any = True,
+) -> ZSpaceInference:
+    """Convenience wrapper that injects PSI telemetry before projecting."""
+
+    return infer_from_partial(
+        z_state,
+        partial,
+        alpha=alpha,
+        smoothing=smoothing,
+        psi=psi,
+    )
 
 
 def compile_inference(
@@ -680,6 +780,7 @@ def compile_inference(
     *,
     alpha: float = 0.35,
     smoothing: float = 0.35,
+    psi: Any | None = None,
 ):
     """Wrap a callable so it automatically feeds its output into Z-space inference.
 
@@ -707,7 +808,7 @@ def compile_inference(
 
     if fn is None:
         return lambda actual: compile_inference(
-            actual, alpha=alpha, smoothing=smoothing
+            actual, alpha=alpha, smoothing=smoothing, psi=psi
         )
 
     if not callable(fn):
@@ -722,6 +823,7 @@ def compile_inference(
             partial,
             alpha=alpha,
             smoothing=smoothing,
+            psi=psi,
         )
 
     _compiled.__name__ = getattr(fn, "__name__", "compiled_inference")
@@ -771,6 +873,414 @@ def _merge_summary(stats: dict[str, float], summary: Mapping[str, Any] | None) -
         except (TypeError, ValueError):
             continue
     return merged
+
+
+def _iter_values(value: Any) -> list[Any]:
+    value = _maybe_call(value)
+    if value is None:
+        return []
+    if isinstance(value, Mapping):
+        return list(value.values())
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray)):
+        return list(value)
+    return [value]
+
+
+def _maybe_mapping(value: Any) -> Mapping[Any, Any] | None:
+    value = _maybe_call(value)
+    if isinstance(value, Mapping):
+        return value
+    return None
+
+
+def _extract_attr(obj: Any, name: str) -> Any:
+    if isinstance(obj, Mapping) and name in obj:
+        return obj[name]
+    return getattr(obj, name, None)
+
+
+def _maybe_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _psi_component_name(component: Any) -> str:
+    if isinstance(component, str):
+        label = component
+    else:
+        label = getattr(component, "name", None) or getattr(component, "value", None)
+        if label is None:
+            label = str(component)
+    label = label.replace("PsiComponent::", "")
+    slug = "".join(ch if ch.isalnum() else "_" for ch in label.lower()).strip("_")
+    return slug or "component"
+
+
+def _flatten_numeric(values: Any) -> list[float]:
+    stack = [_maybe_call(values)]
+    flat: list[float] = []
+    seen: set[int] = set()
+    while stack:
+        current = stack.pop()
+        current = _maybe_call(current)
+        if current is None:
+            continue
+        if isinstance(current, (str, bytes, bytearray)):
+            numeric = _maybe_float(current)
+            if numeric is not None:
+                flat.append(numeric)
+            continue
+        if isinstance(current, Mapping):
+            ident = id(current)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            stack.extend(reversed(list(current.values())))
+            continue
+        if isinstance(current, Iterable):
+            ident = id(current)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            stack.extend(reversed(list(current)))
+            continue
+        numeric = _maybe_float(current)
+        if numeric is not None:
+            flat.append(numeric)
+            continue
+        tolist = getattr(current, "tolist", None)
+        if callable(tolist):
+            try:
+                stack.append(tolist())
+                continue
+            except Exception:
+                pass
+        array = getattr(current, "__array__", None)
+        if callable(array):
+            try:
+                stack.append(array())
+                continue
+            except Exception:
+                pass
+        iterator = getattr(current, "__iter__", None)
+        if callable(iterator):
+            try:
+                stack.append(list(iterator()))
+                continue
+            except Exception:
+                pass
+    return flat
+
+
+def _capture_tensor_like(value: Any, *, allow_compat: bool = True) -> Any:
+    candidate = _maybe_call(value)
+    if candidate is None:
+        return None
+    module = sys.modules.get("spiraltorch")
+    if module is not None:
+        from_dlpack = getattr(module, "from_dlpack", None)
+        if callable(from_dlpack) and (
+            hasattr(candidate, "__dlpack__")
+            or getattr(candidate, "__capsule__", None) is not None
+            or type(candidate).__name__ == "PyCapsule"
+        ):
+            try:
+                return from_dlpack(candidate)
+            except Exception:
+                pass
+        if allow_compat:
+            compat = getattr(module, "compat", None)
+            capture = getattr(compat, "capture", None) if compat is not None else None
+            if callable(capture):
+                try:
+                    return capture(candidate)
+                except Exception:
+                    pass
+    return candidate
+
+
+def weights_partial_from_tensor(
+    weights: Any,
+    *,
+    prefix: str = "weight",
+) -> dict[str, float]:
+    """Summarise tensor weights into canonical scalar metrics."""
+
+    flat = _flatten_numeric(weights)
+    if not flat:
+        return {
+            f"{prefix}_count": 0.0,
+            f"{prefix}_l1": 0.0,
+            f"{prefix}_l2": 0.0,
+            f"{prefix}_linf": 0.0,
+            f"{prefix}_mean": 0.0,
+            f"{prefix}_var": 0.0,
+            f"{prefix}_energy": 0.0,
+            f"{prefix}_min": 0.0,
+            f"{prefix}_max": 0.0,
+            f"{prefix}_spread": 0.0,
+        }
+    count = float(len(flat))
+    total = sum(flat)
+    mean = total / len(flat)
+    variance = sum((value - mean) ** 2 for value in flat) / len(flat)
+    l2_sq = sum(value * value for value in flat)
+    energy = l2_sq / len(flat)
+    metrics = {
+        f"{prefix}_count": count,
+        f"{prefix}_l1": sum(abs(value) for value in flat),
+        f"{prefix}_l2": math.sqrt(l2_sq),
+        f"{prefix}_linf": max(abs(value) for value in flat),
+        f"{prefix}_mean": mean,
+        f"{prefix}_var": variance,
+        f"{prefix}_energy": energy,
+        f"{prefix}_min": min(flat),
+        f"{prefix}_max": max(flat),
+        f"{prefix}_spread": max(flat) - min(flat),
+    }
+    return metrics
+
+
+def weights_partial_from_dlpack(
+    weights: Any,
+    *,
+    prefix: str = "weight",
+    allow_compat: bool = True,
+) -> dict[str, float]:
+    """Capture DLPack/compat tensors and summarise them for inference."""
+
+    tensor = _capture_tensor_like(weights, allow_compat=allow_compat)
+    return weights_partial_from_tensor(tensor, prefix=prefix)
+
+
+def infer_weights_from_dlpack(
+    z_state: Sequence[float],
+    weights: Any,
+    *,
+    prefix: str = "weight",
+    allow_compat: bool = True,
+    alpha: float = 0.35,
+    smoothing: float = 0.35,
+    psi: Any | None = None,
+) -> ZSpaceInference:
+    """Project imported weights through the Z-space inference helpers."""
+
+    partial = weights_partial_from_dlpack(weights, prefix=prefix, allow_compat=allow_compat)
+    return infer_from_partial(
+        z_state,
+        partial,
+        alpha=alpha,
+        smoothing=smoothing,
+        psi=psi,
+    )
+
+
+def psi_partial_from_advisory(
+    advisory: Any,
+    *,
+    prefix: str = "psi_spiral",
+) -> dict[str, float]:
+    """Extract scalar PSI advisory diagnostics into inference metrics."""
+
+    advisory = _maybe_call(advisory)
+    if advisory is None:
+        return {}
+    metrics: dict[str, float] = {}
+    for attr in ("mu_eff0", "alpha3", "audit_container_gap", "audit_cluster", "container_cluster"):
+        value = _maybe_float(_extract_attr(advisory, attr))
+        if value is not None:
+            metrics[f"{prefix}_{attr}"] = value
+    regime = _extract_attr(advisory, "regime")
+    if regime is not None:
+        label = _psi_component_name(regime)
+        mapping = {
+            "supercritical": 0.0,
+            "degenerate": 0.5,
+            "subcritical": 1.0,
+        }
+        metrics[f"{prefix}_regime"] = mapping.get(label, 0.75)
+        metrics[f"{prefix}_regime_flag_{label}"] = 1.0
+    try:
+        stability = advisory.stability_score()  # type: ignore[attr-defined]
+    except Exception:
+        stability = None
+    stability_value = _maybe_float(stability)
+    if stability_value is not None:
+        metrics[f"{prefix}_stability"] = stability_value
+    try:
+        audit = advisory.audit_overbias()  # type: ignore[attr-defined]
+    except Exception:
+        audit = None
+    if isinstance(audit, bool):
+        metrics[f"{prefix}_audit_overbias"] = 1.0 if audit else 0.0
+    elif audit is not None:
+        metrics[f"{prefix}_audit_overbias"] = float(bool(audit))
+    try:
+        reinforcement = advisory.container_reinforcement()  # type: ignore[attr-defined]
+    except Exception:
+        reinforcement = None
+    reinforcement_value = _maybe_float(reinforcement)
+    if reinforcement_value is not None:
+        metrics[f"{prefix}_container_reinforcement"] = reinforcement_value
+    return metrics
+
+
+def psi_partial_from_tuning(
+    tuning: Any,
+    *,
+    prefix: str = "psi_tuning",
+) -> dict[str, float]:
+    """Translate PSI tuning plans into Z-space partial metrics."""
+
+    tuning = _maybe_call(tuning)
+    if tuning is None:
+        return {}
+    metrics: dict[str, float] = {}
+    required = _extract_attr(tuning, "required_components")
+    components = _iter_values(required)
+    if components:
+        metrics[f"{prefix}_required_components"] = float(len(components))
+    increments = _maybe_mapping(_extract_attr(tuning, "weight_increments"))
+    if increments:
+        total = 0.0
+        for key, value in increments.items():
+            numeric = _maybe_float(value)
+            if numeric is None:
+                continue
+            metrics[f"{prefix}_weight_{_psi_component_name(key)}"] = numeric
+            total += abs(numeric)
+        metrics[f"{prefix}_weight_total"] = total
+    thresholds = _maybe_mapping(_extract_attr(tuning, "threshold_shifts"))
+    if thresholds:
+        total = 0.0
+        for key, value in thresholds.items():
+            numeric = _maybe_float(value)
+            if numeric is None:
+                continue
+            metrics[f"{prefix}_threshold_{_psi_component_name(key)}"] = numeric
+            total += abs(numeric)
+        metrics[f"{prefix}_threshold_total"] = total
+    return metrics
+
+
+def psi_partial_from_reading(
+    reading: Any,
+    *,
+    events: Any = None,
+    advisory: Any | None = None,
+    tuning: Any | None = None,
+    prefix: str = "psi",
+) -> dict[str, float]:
+    """Build inference metrics from PSI telemetry readings."""
+
+    metrics: dict[str, float] = {}
+    reading = _maybe_call(reading)
+    if reading is not None:
+        total = _maybe_float(_extract_attr(reading, "total"))
+        if total is not None:
+            metrics[f"{prefix}_total"] = total
+        step = _maybe_float(_extract_attr(reading, "step"))
+        if step is not None:
+            metrics[f"{prefix}_step"] = step
+        breakdown = _maybe_mapping(_extract_attr(reading, "breakdown"))
+        if breakdown:
+            count = 0
+            for component, value in breakdown.items():
+                numeric = _maybe_float(value)
+                if numeric is None:
+                    continue
+                metrics[f"{prefix}_component_{_psi_component_name(component)}"] = numeric
+                count += 1
+            metrics[f"{prefix}_component_count"] = float(count)
+    event_list = [item for item in (_maybe_call(evt) for evt in _iter_values(events)) if item is not None]
+    if event_list:
+        up = down = 0.0
+        intensity = 0.0
+        for event in event_list:
+            direction = _extract_attr(event, "up")
+            if isinstance(direction, bool):
+                if direction:
+                    up += 1.0
+                else:
+                    down += 1.0
+            elif direction is not None:
+                try:
+                    if bool(direction):
+                        up += 1.0
+                    else:
+                        down += 1.0
+                except Exception:
+                    pass
+            value = _maybe_float(_extract_attr(event, "value"))
+            if value is not None:
+                intensity += abs(value)
+        metrics[f"{prefix}_event_count"] = float(len(event_list))
+        metrics[f"{prefix}_event_up"] = up
+        metrics[f"{prefix}_event_down"] = down
+        metrics[f"{prefix}_event_intensity"] = intensity
+    if advisory is not None:
+        metrics.update(psi_partial_from_advisory(advisory, prefix=f"{prefix}_spiral"))
+    if tuning is not None:
+        metrics.update(psi_partial_from_tuning(tuning, prefix=f"{prefix}_tuning"))
+    return metrics
+
+
+def fetch_latest_psi_telemetry() -> tuple[Any | None, list[Any], Any | None, Any | None]:
+    """Fetch cached PSI telemetry from the runtime hub if available."""
+
+    module = sys.modules.get("spiraltorch.telemetry.hub")
+    if module is None:
+        try:
+            module = import_module("spiraltorch.telemetry.hub")
+        except Exception:
+            module = None
+    if module is None:
+        return None, [], None, None
+
+    def _safe_call(name: str) -> Any:
+        attr = getattr(module, name, None)
+        if callable(attr):
+            try:
+                return attr()
+            except Exception:
+                return None
+        return None
+
+    reading = _safe_call("get_last_psi")
+    events = _safe_call("get_last_psi_events") or []
+    advisory = _safe_call("get_last_psi_spiral") or _safe_call("get_last_psi_spiral_advisory")
+    tuning = _safe_call("get_last_psi_spiral_tuning") or _safe_call("get_last_psi_spiral_tuning_plan")
+    return reading, list(_iter_values(events)), advisory, tuning
+
+
+def _resolve_psi_partial(psi: Any) -> dict[str, float]:
+    if psi is None or psi is False:
+        return {}
+    psi = _maybe_call(psi)
+    if psi is True:
+        reading, events, advisory, tuning = fetch_latest_psi_telemetry()
+        return psi_partial_from_reading(
+            reading,
+            events=events,
+            advisory=advisory,
+            tuning=tuning,
+        )
+    if isinstance(psi, Mapping):
+        return _canonicalise_inputs(psi)
+    if isinstance(psi, (list, tuple)):
+        reading = psi[0] if len(psi) > 0 else None
+        events = psi[1] if len(psi) > 1 else None
+        advisory = psi[2] if len(psi) > 2 else None
+        tuning = psi[3] if len(psi) > 3 else None
+        return psi_partial_from_reading(
+            reading,
+            events=events,
+            advisory=advisory,
+            tuning=tuning,
+        )
+    return psi_partial_from_reading(psi)
 
 
 def _canvas_snapshot_stats(snapshot: Any) -> dict[str, dict[str, float]]:

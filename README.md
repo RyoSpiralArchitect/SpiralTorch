@@ -68,6 +68,8 @@ sequenceDiagram
 
 > **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and opt-in attention probability/logit readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
 
+> **New — Z-space inference for imported checkpoints.** `spiraltorch.infer_weights_from_dlpack` and `spiraltorch.infer_with_psi` now project DLPack/compat weights, Canvas transformers, and PSI telemetry straight into the Z-space posterior. Warm-start inference can blend partial observations with live ψ health data so Rust sessions reuse PyTorch/JAX weights without leaving the SpiralTorch runtime.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -637,6 +639,23 @@ optimisers alongside its hypergradient updates.
 - Follow the barycenter's loss-monotone intermediates and feed them straight into
   the hypergradient tape with `Hypergrad.accumulate_barycenter_path` so the
   optimiser converges along the same Z-space path as the solver.
+
+### Z-space inference autopilot (DLPack + ψ telemetry)
+
+- `spiraltorch.weights_partial_from_dlpack` distils PyTorch/JAX/TF tensors
+  captured via DLPack or `spiraltorch.compat.capture` into weighted partials,
+  ready for `spiraltorch.infer_with_partials` and `spiraltorch.infer_weights_from_dlpack`.
+- `spiraltorch.infer_with_psi` consults `spiraltorch.fetch_latest_psi_telemetry`
+  on demand so inference blends metric overrides, Canvas partials, and live ψ
+  telemetry without writing glue code.
+- `spiraltorch.psi_partial_from_reading` and
+  `spiraltorch.psi_partial_from_advisory` expose PSI breakdowns, Hopf regime
+  flags, and tuning plans as canonical metrics that pipe directly into
+  `ZSpaceInferencePipeline` or `ZSpaceInferenceRuntime`.
+- `ZSpaceInferencePipeline(psi=True)` now reuses cached PSI telemetry when
+  blending Canvas snapshots, coherence diagnostics, and imported checkpoints—
+  ideal for warm-starting a Rust session with PyTorch weights while watching
+  the ψ health score in real time.
 - Drive the entire workflow from the high-level `SpiralSession` orchestrator in
   Rust (`st_nn::SpiralSession`) or Python (`spiraltorch.SpiralSession`) to pick
   devices, generate rank plans, synthesise barycentres, and align hypergrads via

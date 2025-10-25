@@ -25,6 +25,11 @@ from spiraltorch import (
     infer_canvas_with_coherence,
     infer_with_partials,
     infer_from_partial,
+    infer_with_psi,
+    weights_partial_from_tensor,
+    weights_partial_from_dlpack,
+    infer_weights_from_dlpack,
+    psi_partial_from_reading,
 )
 
 
@@ -314,3 +319,139 @@ def test_infer_canvas_with_coherence_projects_blended_partial():
     )
     assert "canvas_energy" in inference.metrics
     assert "coherence_mean" in inference.metrics
+
+
+def test_weights_partial_from_tensor_produces_expected_stats():
+    weights = [[0.5, -0.25], [0.75, 0.0]]
+    stats = weights_partial_from_tensor(weights)
+    assert math.isclose(stats["weight_count"], 4.0)
+    assert math.isclose(stats["weight_mean"], sum(sum(row) for row in weights) / 4, rel_tol=1e-6)
+    assert stats["weight_l2"] > 0.0
+
+
+def test_weights_partial_from_dlpack_invokes_capture(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _StubTensor:
+        def __init__(self, data: list[list[float]]) -> None:
+            self._data = data
+
+        def tolist(self) -> list[list[float]]:
+            return self._data
+
+    def fake_capture(value: object, allow_compat: bool = True) -> _StubTensor:
+        captured["value"] = value
+        return _StubTensor([[0.1, -0.1], [0.2, -0.2]])
+
+    monkeypatch.setattr(
+        "spiraltorch.zspace_inference._capture_tensor_like",
+        fake_capture,
+        raising=True,
+    )
+    capsule = object()
+    stats = weights_partial_from_dlpack(capsule)
+    assert captured["value"] is capsule
+    assert math.isclose(stats["weight_count"], 4.0)
+
+
+def test_infer_weights_from_dlpack_yields_weight_metrics(monkeypatch):
+    class _StubTensor:
+        def __init__(self, data: list[list[float]]) -> None:
+            self._data = data
+
+        def tolist(self) -> list[list[float]]:
+            return self._data
+
+    tensor = _StubTensor([[0.2, -0.2], [0.4, 0.1]])
+    monkeypatch.setattr(
+        "spiraltorch.zspace_inference._capture_tensor_like",
+        lambda value, allow_compat=True: tensor,
+        raising=True,
+    )
+    inference = infer_weights_from_dlpack([0.2, -0.1, 0.05], object())
+    assert "weight_mean" in inference.metrics
+    assert inference.metrics["weight_mean"] != 0.0
+
+
+class _DummyPsiEvent:
+    def __init__(self, up: bool, value: float) -> None:
+        self.up = up
+        self.value = value
+
+
+class _DummyAdvisory:
+    def __init__(self) -> None:
+        self.mu_eff0 = -0.3
+        self.alpha3 = 0.8
+        self.audit_container_gap = 0.2
+        self.audit_cluster = 0.5
+        self.container_cluster = 0.4
+        self.regime = type("Regime", (), {"name": "Supercritical"})()
+
+    def stability_score(self) -> float:
+        return 0.72
+
+    def audit_overbias(self) -> bool:
+        return True
+
+    def container_reinforcement(self) -> float:
+        return 0.65
+
+
+class _DummyTuning:
+    def __init__(self) -> None:
+        self.required_components = ["act", "band"]
+        self.weight_increments = {"ACT_DRIFT": 0.2, "BAND_ENERGY": 0.1}
+        self.threshold_shifts = {"GRAD_NORM": -0.05}
+
+
+def test_psi_partial_from_reading_includes_breakdown():
+    reading = {
+        "total": 0.85,
+        "step": 42,
+        "breakdown": {"ACT_DRIFT": 0.4, "BAND_ENERGY": 0.3},
+    }
+    events = [_DummyPsiEvent(True, 0.2), _DummyPsiEvent(False, -0.1)]
+    metrics = psi_partial_from_reading(
+        reading,
+        events=events,
+        advisory=_DummyAdvisory(),
+        tuning=_DummyTuning(),
+    )
+    assert math.isclose(metrics["psi_total"], 0.85, rel_tol=1e-6)
+    assert metrics["psi_component_act_drift"] == pytest.approx(0.4)
+    assert metrics["psi_event_count"] == pytest.approx(2.0)
+    assert metrics["psi_spiral_regime"] == pytest.approx(0.0)
+    assert metrics["psi_tuning_weight_total"] == pytest.approx(0.3)
+
+
+def test_infer_with_psi_fetches_latest(monkeypatch):
+    reading = {"total": 0.9, "step": 64, "breakdown": {"ACT_DRIFT": 0.5}}
+    events = [_DummyPsiEvent(True, 0.1)]
+    advisory = _DummyAdvisory()
+    tuning = _DummyTuning()
+
+    monkeypatch.setattr(
+        "spiraltorch.zspace_inference.fetch_latest_psi_telemetry",
+        lambda: (reading, events, advisory, tuning),
+        raising=True,
+    )
+    inference = infer_with_psi([0.3, -0.2, 0.1], {"speed": 0.6}, psi=True)
+    assert "psi_total" in inference.metrics
+    assert inference.metrics["psi_total"] == pytest.approx(0.9)
+
+
+def test_pipeline_uses_default_psi_source(monkeypatch):
+    reading = {"total": 0.7, "step": 21, "breakdown": {"BAND_ENERGY": 0.25}}
+    events = [_DummyPsiEvent(False, -0.2)]
+
+    monkeypatch.setattr(
+        "spiraltorch.zspace_inference.fetch_latest_psi_telemetry",
+        lambda: (reading, events, _DummyAdvisory(), _DummyTuning()),
+        raising=True,
+    )
+    pipeline = ZSpaceInferencePipeline([0.18, -0.05, 0.31], psi=True)
+    pipeline.add_partial({"speed": 0.45})
+    inference = pipeline.infer(clear=True)
+    assert "psi_total" in inference.metrics
+    assert inference.metrics["psi_total"] == pytest.approx(0.7)

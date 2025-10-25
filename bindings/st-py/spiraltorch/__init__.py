@@ -155,7 +155,17 @@ from .zspace_inference import (
     infer_canvas_with_coherence,
     infer_with_partials,
     infer_from_partial,
+    infer_with_psi,
+    weights_partial_from_tensor,
+    weights_partial_from_dlpack,
+    infer_weights_from_dlpack,
+    psi_partial_from_reading,
+    psi_partial_from_advisory,
+    psi_partial_from_tuning,
+    fetch_latest_psi_telemetry,
 )
+
+# 追加API（Rust側でエクスポート済みのやつだけ拾う）
 _EXTRAS = [
     "golden_ratio","golden_angle","set_global_seed",
     "capture","share","compat",
