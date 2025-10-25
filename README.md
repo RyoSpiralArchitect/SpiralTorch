@@ -4,6 +4,10 @@ _(Still under active repair while expanding — API changes hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
+## 🌌 SpiralTorch Manifesto
+
+Step into the paradigm shift from imitation to emergent meaning with the [SpiralTorch Manifesto](docs/spiraltorch_manifesto.md).
+
 📜 **Licensing at a glance:** SpiralTorch is AGPL-3.0-or-later by default with a commercial option for proprietary deployments. [Read the full policy.](docs/licensing.md)
 Unauthorized redistribution, scraping, or resale of this repository
 violates AGPL-3.0 and §13. Any commercial deployment requires a license.
