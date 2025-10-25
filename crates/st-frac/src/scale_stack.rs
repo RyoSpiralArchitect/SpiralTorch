@@ -23,6 +23,48 @@
 use ndarray::{ArrayD, ArrayViewD, IxDyn};
 use thiserror::Error;
 
+/// Distance metrics used for semantic interface detection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SemanticMetric {
+    /// Euclidean distance in feature space.
+    Euclidean,
+    /// Cosine distance (1 - cosine similarity) in feature space.
+    Cosine,
+}
+
+impl SemanticMetric {
+    fn distance(self, a: &[f32], b: &[f32]) -> f64 {
+        match self {
+            SemanticMetric::Euclidean => {
+                let mut sum = 0.0f64;
+                for (&lhs, &rhs) in a.iter().zip(b.iter()) {
+                    let diff = (lhs - rhs) as f64;
+                    sum += diff * diff;
+                }
+                sum.sqrt()
+            }
+            SemanticMetric::Cosine => {
+                let mut dot = 0.0f64;
+                let mut norm_a = 0.0f64;
+                let mut norm_b = 0.0f64;
+                for (&lhs, &rhs) in a.iter().zip(b.iter()) {
+                    let lhs = lhs as f64;
+                    let rhs = rhs as f64;
+                    dot += lhs * rhs;
+                    norm_a += lhs * lhs;
+                    norm_b += rhs * rhs;
+                }
+                if norm_a <= f64::EPSILON || norm_b <= f64::EPSILON {
+                    return 0.0;
+                }
+                let denom = norm_a.sqrt() * norm_b.sqrt();
+                let cos = (dot / denom).clamp(-1.0, 1.0);
+                1.0 - cos
+            }
+        }
+    }
+}
+
 /// Errors produced while constructing a [`ScaleStack`].
 #[derive(Debug, Error)]
 pub enum ScaleStackError {
@@ -35,6 +77,18 @@ pub enum ScaleStackError {
     /// The interface detection tolerance must be non-negative.
     #[error("threshold must be non-negative")]
     InvalidThreshold,
+    /// The feature axis used for semantic fields was out of bounds.
+    #[error("feature axis {axis} out of bounds for field with {field_ndim} axes")]
+    InvalidFeatureAxis { axis: usize, field_ndim: usize },
+    /// Semantic interface detection requires at least one feature component.
+    #[error("semantic fields require a non-empty feature axis")]
+    EmptyFeatureAxis,
+    /// Provided tensor could not be reshaped into the requested layout.
+    #[error("field shape mismatch: expected {expected:?}, got {actual:?}")]
+    ShapeMismatch {
+        expected: Vec<usize>,
+        actual: Vec<usize>,
+    },
 }
 
 /// Aggregate statistics at a single probing scale.
@@ -57,11 +111,26 @@ pub struct PersistenceBin {
     pub mass: f64,
 }
 
+/// How the interface detector interpreted the source field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InterfaceMode {
+    /// Scalar thresholding on a single-valued field.
+    Scalar,
+    /// Semantic thresholding over vector-valued embeddings.
+    Semantic {
+        /// Axis containing the embedding channels.
+        feature_axis: usize,
+        /// Metric used to compare feature vectors.
+        metric: SemanticMetric,
+    },
+}
+
 /// Microlocal ⇄ macrolocal bridge for binary interface fields.
 #[derive(Clone, Debug)]
 pub struct ScaleStack {
     threshold: f32,
     samples: Vec<ScaleSample>,
+    mode: InterfaceMode,
 }
 
 impl ScaleStack {
@@ -104,12 +173,82 @@ impl ScaleStack {
             prev_gate = gate_mean;
         }
 
-        Ok(Self { threshold, samples })
+        Ok(Self {
+            threshold,
+            samples,
+            mode: InterfaceMode::Scalar,
+        })
+    }
+
+    /// Construct a [`ScaleStack`] from a semantic embedding field.
+    ///
+    /// The provided `field` is interpreted as a tensor where one axis stores
+    /// feature channels (selected by `feature_axis`) and the remaining axes
+    /// describe the spatial neighbourhood that is probed across the supplied
+    /// `scales`.
+    pub fn from_semantic_field(
+        field: ArrayViewD<'_, f32>,
+        scales: &[f64],
+        threshold: f32,
+        feature_axis: usize,
+        metric: SemanticMetric,
+    ) -> Result<Self, ScaleStackError> {
+        if scales.is_empty() {
+            return Err(ScaleStackError::EmptyScales);
+        }
+        if threshold < 0.0 {
+            return Err(ScaleStackError::InvalidThreshold);
+        }
+        if !is_strictly_increasing_positive(scales) {
+            return Err(ScaleStackError::InvalidScales);
+        }
+        let ndim = field.ndim();
+        if feature_axis >= ndim {
+            return Err(ScaleStackError::InvalidFeatureAxis {
+                axis: feature_axis,
+                field_ndim: ndim,
+            });
+        }
+        let feature_dim = field.shape()[feature_axis];
+        if feature_dim == 0 {
+            return Err(ScaleStackError::EmptyFeatureAxis);
+        }
+
+        let mut samples = Vec::with_capacity(scales.len());
+        let mut prev_gate = 0.0f64;
+        for &scale in scales {
+            let radius = (scale.ceil() as usize).max(1);
+            let gate = detect_semantic_interfaces(&field, radius, threshold, feature_axis, metric);
+            let active = gate.iter().filter(|&&flag| flag).count() as f64;
+            let total = gate.len() as f64;
+            let mean = if total.abs() < f64::EPSILON {
+                0.0
+            } else {
+                active / total
+            };
+            let gate_mean = mean.max(prev_gate);
+            samples.push(ScaleSample { scale, gate_mean });
+            prev_gate = gate_mean;
+        }
+
+        Ok(Self {
+            threshold,
+            samples,
+            mode: InterfaceMode::Semantic {
+                feature_axis,
+                metric,
+            },
+        })
     }
 
     /// Access the raw scale samples (monotone gate curve).
     pub fn samples(&self) -> &[ScaleSample] {
         &self.samples
+    }
+
+    /// Returns how the source field was interpreted by the detector.
+    pub fn mode(&self) -> &InterfaceMode {
+        &self.mode
     }
 
     /// Compute the discrete persistence measure `\mu(ds)` via finite
@@ -205,6 +344,25 @@ impl ScaleStack {
         Some(ambient_dim - slope)
     }
 
+    /// Returns the first scale where the gate curve crosses `level`.
+    pub fn coherence_break_scale(&self, level: f64) -> Option<f64> {
+        if !(0.0..=1.0).contains(&level) {
+            return None;
+        }
+        self.samples
+            .iter()
+            .find(|sample| sample.gate_mean >= level)
+            .map(|sample| sample.scale)
+    }
+
+    /// Returns the breakpoints for each requested coherence level.
+    pub fn coherence_profile(&self, levels: &[f64]) -> Vec<Option<f64>> {
+        levels
+            .iter()
+            .map(|&level| self.coherence_break_scale(level))
+            .collect()
+    }
+
     /// Interface detection threshold used while constructing the stack.
     pub fn threshold(&self) -> f32 {
         self.threshold
@@ -259,6 +417,101 @@ fn detect_interfaces(field: &ArrayViewD<'_, f32>, radius: usize, threshold: f32)
             }
         }
     }
+    out
+}
+
+fn detect_semantic_interfaces(
+    field: &ArrayViewD<'_, f32>,
+    radius: usize,
+    threshold: f32,
+    feature_axis: usize,
+    metric: SemanticMetric,
+) -> ArrayD<bool> {
+    let ndim = field.ndim();
+    let feature_dim = field.shape()[feature_axis];
+    let spatial_axes: Vec<usize> = (0..ndim).filter(|&axis| axis != feature_axis).collect();
+    let spatial_shape: Vec<usize> = spatial_axes
+        .iter()
+        .map(|&axis| field.shape()[axis])
+        .collect();
+    let mut out = ArrayD::<bool>::from_elem(IxDyn(&spatial_shape), false);
+    if feature_dim == 0 {
+        return out;
+    }
+    if spatial_shape.iter().any(|&dim| dim == 0) {
+        return out;
+    }
+    let offsets = ball_offsets(spatial_axes.len(), radius);
+    let mut index = vec![0usize; spatial_axes.len()];
+    let mut center_coords = vec![0usize; ndim];
+    let mut neighbor_coords = vec![0usize; ndim];
+    let mut center_vec = vec![0f32; feature_dim];
+    let mut neighbor_vec = vec![0f32; feature_dim];
+
+    loop {
+        for (slot, &axis) in spatial_axes.iter().enumerate() {
+            center_coords[axis] = index.get(slot).copied().unwrap_or(0);
+        }
+
+        for f in 0..feature_dim {
+            center_coords[feature_axis] = f;
+            center_vec[f] = field[IxDyn(&center_coords)];
+        }
+
+        let mut triggered = false;
+        for offset in &offsets {
+            if offset.iter().all(|&delta| delta == 0) {
+                continue;
+            }
+            neighbor_coords.copy_from_slice(&center_coords);
+            let mut valid = true;
+            for (slot, &axis) in spatial_axes.iter().enumerate() {
+                let delta = offset.get(slot).copied().unwrap_or(0);
+                let coord = center_coords[axis] as isize + delta;
+                if coord < 0 || coord >= field.shape()[axis] as isize {
+                    valid = false;
+                    break;
+                }
+                neighbor_coords[axis] = coord as usize;
+            }
+            if !valid {
+                continue;
+            }
+            for f in 0..feature_dim {
+                neighbor_coords[feature_axis] = f;
+                neighbor_vec[f] = field[IxDyn(&neighbor_coords)];
+            }
+            if metric.distance(&center_vec, &neighbor_vec) > threshold as f64 {
+                triggered = true;
+                break;
+            }
+        }
+
+        if let Some(flag) = out.get_mut(IxDyn(&index)) {
+            *flag = triggered;
+        }
+
+        if spatial_axes.is_empty() {
+            break;
+        }
+
+        let mut axis = spatial_axes.len();
+        loop {
+            if axis == 0 {
+                return out;
+            }
+            axis -= 1;
+            index[axis] += 1;
+            if index[axis] < spatial_shape[axis] {
+                break;
+            }
+            index[axis] = 0;
+            if axis == 0 {
+                return out;
+            }
+        }
+    }
+
     out
 }
 
@@ -332,5 +585,72 @@ mod tests {
         let field = ArrayD::<f32>::zeros(IxDyn(&[2, 2]));
         let err = ScaleStack::from_scalar_field(field.view(), &[1.0, 0.5], 0.01).unwrap_err();
         assert!(matches!(err, ScaleStackError::InvalidScales));
+    }
+
+    #[test]
+    fn semantic_stack_marks_interface_transition() {
+        let field = array![[0.0f32, 0.0], [0.0, 0.0], [1.0, 1.0], [1.0, 1.0]].into_dyn();
+        let stack = ScaleStack::from_semantic_field(
+            field.view(),
+            &[1.0, 2.0],
+            0.25,
+            1,
+            SemanticMetric::Euclidean,
+        )
+        .unwrap();
+        assert_eq!(
+            stack.mode(),
+            &InterfaceMode::Semantic {
+                feature_axis: 1,
+                metric: SemanticMetric::Euclidean
+            }
+        );
+        assert!(stack.samples()[0].gate_mean > 0.0);
+        assert!(stack.samples()[1].gate_mean >= stack.samples()[0].gate_mean);
+    }
+
+    #[test]
+    fn semantic_stack_supports_cosine_metric() {
+        let field = array![[1.0f32, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0]].into_dyn();
+        let stack = ScaleStack::from_semantic_field(
+            field.view(),
+            &[1.0, 2.0, 3.0],
+            0.1,
+            1,
+            SemanticMetric::Cosine,
+        )
+        .unwrap();
+        assert!(stack.samples().iter().any(|sample| sample.gate_mean > 0.0));
+    }
+
+    #[test]
+    fn coherence_break_scale_reports_threshold() {
+        let field = array![[0.0f32, 0.0], [0.0, 0.0], [1.0, 1.0], [1.0, 1.0]].into_dyn();
+        let stack = ScaleStack::from_semantic_field(
+            field.view(),
+            &[1.0, 2.0, 3.0],
+            0.25,
+            1,
+            SemanticMetric::Euclidean,
+        )
+        .unwrap();
+        let breakpoint = stack.coherence_break_scale(0.5);
+        assert!(breakpoint.is_some());
+        let profile = stack.coherence_profile(&[0.25, 0.5, 0.75]);
+        assert_eq!(profile.len(), 3);
+    }
+
+    #[test]
+    fn semantic_field_with_invalid_axis_rejected() {
+        let field = ArrayD::<f32>::zeros(IxDyn(&[2, 2]));
+        let err = ScaleStack::from_semantic_field(
+            field.view(),
+            &[1.0, 2.0],
+            0.1,
+            2,
+            SemanticMetric::Euclidean,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ScaleStackError::InvalidFeatureAxis { .. }));
     }
 }

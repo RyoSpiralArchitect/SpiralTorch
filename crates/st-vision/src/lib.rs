@@ -61,6 +61,7 @@
 //! streamed through [`AtlasFrame`] snapshots.
 
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+pub mod analysis;
 pub mod models;
 pub mod xai;
 
