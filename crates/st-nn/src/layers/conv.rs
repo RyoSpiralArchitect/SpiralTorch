@@ -648,9 +648,13 @@ impl Conv2d {
         let bias_sums = grad_matrix.sum_axis0();
         let mut bias_tensor = Tensor::from_vec(1, self.out_channels, bias_sums)?;
         bias_tensor = bias_tensor.scale(1.0 / batch as f32)?;
-        let pack = self.weight.ensure_matmul_pack()?;
-        let grad_patches = grad_matrix.matmul_prepacked(&pack)?;
-        let grad_input = self.col2im(&grad_patches, batch, oh, ow)?;
+        let grad_input = if let Some(grad) = self.try_grad_input_wgpu(grad_matrix, batch, oh, ow)? {
+            grad
+        } else {
+            let pack = self.weight.ensure_matmul_pack()?;
+            let grad_patches = grad_matrix.matmul_prepacked(&pack)?;
+            self.col2im(&grad_patches, batch, oh, ow)?
+        };
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
         Ok(grad_input)
@@ -1964,6 +1968,80 @@ impl Conv2d {
             Ok(tensor) => Ok(Some(tensor)),
             Err(_) => Ok(None),
         }
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn try_grad_input_wgpu(
+        &self,
+        grad_matrix: &Tensor,
+        batch: usize,
+        oh: usize,
+        ow: usize,
+    ) -> PureResult<Option<Tensor>> {
+        if !wgpu_dense::is_available() {
+            return Ok(None);
+        }
+        let span = self.in_channels * self.kernel.0 * self.kernel.1;
+        let rows = batch * oh * ow;
+        let total_work = rows
+            .checked_mul(span)
+            .and_then(|value| value.checked_mul(self.out_channels))
+            .unwrap_or(usize::MAX);
+        if total_work < 4096 {
+            return Ok(None);
+        }
+        let pad_h = match i32::try_from(self.padding.0) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
+        let pad_w = match i32::try_from(self.padding.1) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
+        let maybe = wgpu_dense::conv_grad_input_fused(
+            grad_matrix.data(),
+            self.weight.value().data(),
+            batch,
+            self.in_channels,
+            self.input_hw.0,
+            self.input_hw.1,
+            self.kernel.0,
+            self.kernel.1,
+            self.stride.0,
+            self.stride.1,
+            pad_h,
+            pad_w,
+            self.dilation.0,
+            self.dilation.1,
+            oh,
+            ow,
+            self.out_channels,
+        );
+        let buffer = match maybe {
+            Ok(buffer) => buffer,
+            Err(_) => return Ok(None),
+        };
+        match Tensor::from_vec(
+            batch,
+            self.in_channels * self.input_hw.0 * self.input_hw.1,
+            buffer,
+        ) {
+            Ok(tensor) => Ok(Some(tensor)),
+            Err(_) => Ok(None),
+        }
+    }
+}
+
+#[cfg(not(feature = "wgpu"))]
+impl Conv2d {
+    fn try_grad_input_wgpu(
+        &self,
+        _grad_matrix: &Tensor,
+        _batch: usize,
+        _oh: usize,
+        _ow: usize,
+    ) -> PureResult<Option<Tensor>> {
+        Ok(None)
     }
 }
 

@@ -9,7 +9,10 @@
 //! binary interface.
 
 use st_core::runtime::golden::{GoldenRuntime, GoldenRuntimeConfig, GoldenTensorError};
-use st_tensor::{PureResult, Tensor};
+use st_tensor::{
+    dlpack::{self, DLManagedTensor},
+    MatmulBackend, PureResult, SoftmaxBackend, Tensor,
+};
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr, CString};
 use std::ptr;
@@ -273,6 +276,68 @@ pub unsafe extern "C" fn spiraltorch_tensor_copy_data(
     result.is_ok()
 }
 
+/// Exports the tensor as a managed DLPack tensor. Returns `NULL` on failure.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_to_dlpack(handle: *const Tensor) -> *mut DLManagedTensor {
+    let tensor = match as_tensor(handle, "tensor handle") {
+        Some(tensor) => tensor,
+        None => return ptr::null_mut(),
+    };
+
+    match tensor.to_dlpack() {
+        Ok(ptr) => {
+            clear_last_error();
+            ptr
+        }
+        Err(err) => {
+            set_last_error(format!("tensor_to_dlpack: {err}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Constructs a tensor from a managed DLPack tensor. Returns `NULL` on failure.
+///
+/// # Safety
+/// The caller must ensure `managed` points to a valid `DLManagedTensor`.
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_tensor_from_dlpack(
+    managed: *mut DLManagedTensor,
+) -> *mut Tensor {
+    if managed.is_null() {
+        set_last_error("tensor_from_dlpack received null managed tensor pointer");
+        return ptr::null_mut();
+    }
+
+    match Tensor::from_dlpack(managed) {
+        Ok(tensor) => {
+            clear_last_error();
+            Box::into_raw(Box::new(tensor))
+        }
+        Err(err) => {
+            set_last_error(format!("tensor_from_dlpack: {err}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Drops the exported state allocated when creating a DLPack tensor.
+///
+/// # Safety
+/// The caller must ensure `managed` either originates from
+/// `spiraltorch_tensor_to_dlpack` or has been obtained from another SpiralTorch
+/// API that documents compatibility with this function.
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_dlpack_drop_exported_state(managed: *mut DLManagedTensor) {
+    if managed.is_null() {
+        return;
+    }
+    // SAFETY: Caller guarantees pointer validity per the function contract.
+    unsafe {
+        dlpack::drop_exported_state(managed);
+    }
+}
+
 fn as_tensor<'a>(handle: *const Tensor, label: &str) -> Option<&'a Tensor> {
     let handle = match require_non_null(handle, label) {
         Ok(handle) => handle,
@@ -299,6 +364,71 @@ fn tensor_binary_op(
     tensor_from_result_with_message(op(left, right), context)
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpiraltorchMatmulBackend {
+    Auto = 0,
+    CpuFaer = 1,
+    CpuSimd = 2,
+    CpuNaive = 3,
+    GpuWgpu = 4,
+    GpuHip = 5,
+}
+
+fn map_matmul_backend(backend: SpiraltorchMatmulBackend) -> Result<MatmulBackend, &'static str> {
+    match backend {
+        SpiraltorchMatmulBackend::Auto => Ok(MatmulBackend::Auto),
+        SpiraltorchMatmulBackend::CpuFaer => Ok(MatmulBackend::CpuFaer),
+        SpiraltorchMatmulBackend::CpuSimd => Ok(MatmulBackend::CpuSimd),
+        SpiraltorchMatmulBackend::CpuNaive => Ok(MatmulBackend::CpuNaive),
+        SpiraltorchMatmulBackend::GpuWgpu => {
+            #[cfg(feature = "wgpu")]
+            {
+                Ok(MatmulBackend::GpuWgpu)
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                Err("wgpu backend support is not compiled in")
+            }
+        }
+        SpiraltorchMatmulBackend::GpuHip => {
+            #[cfg(feature = "hip")]
+            {
+                Ok(MatmulBackend::GpuHip)
+            }
+            #[cfg(not(feature = "hip"))]
+            {
+                Err("hip backend support is not compiled in")
+            }
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpiraltorchSoftmaxBackend {
+    Auto = 0,
+    Cpu = 1,
+    GpuWgpu = 2,
+}
+
+fn map_softmax_backend(backend: SpiraltorchSoftmaxBackend) -> Result<SoftmaxBackend, &'static str> {
+    match backend {
+        SpiraltorchSoftmaxBackend::Auto => Ok(SoftmaxBackend::Auto),
+        SpiraltorchSoftmaxBackend::Cpu => Ok(SoftmaxBackend::Cpu),
+        SpiraltorchSoftmaxBackend::GpuWgpu => {
+            #[cfg(feature = "wgpu")]
+            {
+                Ok(SoftmaxBackend::GpuWgpu)
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                Err("wgpu backend support is not compiled in")
+            }
+        }
+    }
+}
+
 fn tensor_unary_op(
     handle: *const Tensor,
     context: &str,
@@ -309,6 +439,24 @@ fn tensor_unary_op(
         None => return ptr::null_mut(),
     };
     tensor_from_result_with_message(op(tensor), context)
+}
+
+unsafe fn copy_bias_buffer(
+    bias: *const f32,
+    len: usize,
+    expected: usize,
+    context: &str,
+) -> FfiResult<Vec<f32>> {
+    if bias.is_null() {
+        return err(format!("{context} received null bias pointer"));
+    }
+    if len != expected {
+        return err(format!(
+            "{context} expected bias with {expected} elements but received {len}"
+        ));
+    }
+    let slice = slice::from_raw_parts(bias, len);
+    ok(slice.to_vec())
 }
 
 fn runtime_spawn(
@@ -486,6 +634,172 @@ pub extern "C" fn spiraltorch_tensor_matmul(lhs: *const Tensor, rhs: *const Tens
     tensor_binary_op(lhs, rhs, "tensor_matmul", Tensor::matmul)
 }
 
+/// Matrix multiplication with an explicit backend override. Returns `NULL` on failure.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_matmul_with_backend(
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    backend: SpiraltorchMatmulBackend,
+) -> *mut Tensor {
+    let backend = match map_matmul_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    tensor_binary_op(lhs, rhs, "tensor_matmul_with_backend", move |lhs, rhs| {
+        lhs.matmul_with_backend(rhs, backend)
+    })
+}
+
+unsafe fn tensor_matmul_bias_relu_core(
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+    backend: MatmulBackend,
+    context: &str,
+) -> *mut Tensor {
+    let left = match as_tensor(lhs, "lhs tensor") {
+        Some(tensor) => tensor,
+        None => return ptr::null_mut(),
+    };
+    let right = match as_tensor(rhs, "rhs tensor") {
+        Some(tensor) => tensor,
+        None => return ptr::null_mut(),
+    };
+    let (_, cols) = right.shape();
+    let bias = match copy_bias_buffer(bias, bias_len, cols, context) {
+        Ok(bias) => bias,
+        Err(_) => return ptr::null_mut(),
+    };
+    tensor_from_result_with_message(
+        left.matmul_bias_relu_with_backend(right, &bias, backend),
+        context,
+    )
+}
+
+unsafe fn tensor_matmul_bias_add_relu_core(
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+    residual: *const Tensor,
+    backend: MatmulBackend,
+    context: &str,
+) -> *mut Tensor {
+    let left = match as_tensor(lhs, "lhs tensor") {
+        Some(tensor) => tensor,
+        None => return ptr::null_mut(),
+    };
+    let right = match as_tensor(rhs, "rhs tensor") {
+        Some(tensor) => tensor,
+        None => return ptr::null_mut(),
+    };
+    let residual = match as_tensor(residual, "residual tensor") {
+        Some(tensor) => tensor,
+        None => return ptr::null_mut(),
+    };
+    let (_, cols) = right.shape();
+    let bias = match copy_bias_buffer(bias, bias_len, cols, context) {
+        Ok(bias) => bias,
+        Err(_) => return ptr::null_mut(),
+    };
+    tensor_from_result_with_message(
+        left.matmul_bias_add_relu_with_backend(right, &bias, residual, backend),
+        context,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_relu(
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+) -> *mut Tensor {
+    tensor_matmul_bias_relu_core(
+        lhs,
+        rhs,
+        bias,
+        bias_len,
+        MatmulBackend::Auto,
+        "tensor_matmul_bias_relu",
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_relu_with_backend(
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+    backend: SpiraltorchMatmulBackend,
+) -> *mut Tensor {
+    let backend = match map_matmul_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    tensor_matmul_bias_relu_core(
+        lhs,
+        rhs,
+        bias,
+        bias_len,
+        backend,
+        "tensor_matmul_bias_relu_with_backend",
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_add_relu(
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+    residual: *const Tensor,
+) -> *mut Tensor {
+    tensor_matmul_bias_add_relu_core(
+        lhs,
+        rhs,
+        bias,
+        bias_len,
+        residual,
+        MatmulBackend::Auto,
+        "tensor_matmul_bias_add_relu",
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_add_relu_with_backend(
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+    residual: *const Tensor,
+    backend: SpiraltorchMatmulBackend,
+) -> *mut Tensor {
+    let backend = match map_matmul_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    tensor_matmul_bias_add_relu_core(
+        lhs,
+        rhs,
+        bias,
+        bias_len,
+        residual,
+        backend,
+        "tensor_matmul_bias_add_relu_with_backend",
+    )
+}
+
 /// Element-wise tensor multiplication. Returns `NULL` on failure.
 #[no_mangle]
 pub extern "C" fn spiraltorch_tensor_hadamard(
@@ -493,6 +807,24 @@ pub extern "C" fn spiraltorch_tensor_hadamard(
     rhs: *const Tensor,
 ) -> *mut Tensor {
     tensor_binary_op(lhs, rhs, "tensor_hadamard", Tensor::hadamard)
+}
+
+/// Row-wise softmax with an optional backend override. Returns `NULL` on failure.
+#[no_mangle]
+pub extern "C" fn spiraltorch_tensor_row_softmax(
+    handle: *const Tensor,
+    backend: SpiraltorchSoftmaxBackend,
+) -> *mut Tensor {
+    let backend = match map_softmax_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    tensor_unary_op(handle, "tensor_row_softmax", move |tensor| {
+        tensor.row_softmax_with_backend(backend)
+    })
 }
 
 #[no_mangle]
@@ -613,6 +945,215 @@ pub extern "C" fn spiraltorch_runtime_tensor_matmul(
     runtime_tensor_binary_op(runtime, lhs, rhs, "runtime_tensor_matmul", Tensor::matmul)
 }
 
+unsafe fn runtime_tensor_matmul_bias_relu_core(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+    backend: MatmulBackend,
+    context: &str,
+) -> *mut Tensor {
+    let runtime = match runtime_from_ptr(runtime, "runtime handle") {
+        Some(runtime) => runtime,
+        None => return ptr::null_mut(),
+    };
+    let left = match as_tensor(lhs, "lhs tensor") {
+        Some(tensor) => tensor.clone(),
+        None => return ptr::null_mut(),
+    };
+    let right = match as_tensor(rhs, "rhs tensor") {
+        Some(tensor) => tensor.clone(),
+        None => return ptr::null_mut(),
+    };
+    let (_, cols) = right.shape();
+    let bias = match copy_bias_buffer(bias, bias_len, cols, context) {
+        Ok(bias) => bias,
+        Err(_) => return ptr::null_mut(),
+    };
+    runtime_spawn(runtime, context, move || {
+        left.matmul_bias_relu_with_backend(&right, &bias, backend)
+    })
+}
+
+unsafe fn runtime_tensor_matmul_bias_add_relu_core(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+    residual: *const Tensor,
+    backend: MatmulBackend,
+    context: &str,
+) -> *mut Tensor {
+    let runtime = match runtime_from_ptr(runtime, "runtime handle") {
+        Some(runtime) => runtime,
+        None => return ptr::null_mut(),
+    };
+    let left = match as_tensor(lhs, "lhs tensor") {
+        Some(tensor) => tensor.clone(),
+        None => return ptr::null_mut(),
+    };
+    let right = match as_tensor(rhs, "rhs tensor") {
+        Some(tensor) => tensor.clone(),
+        None => return ptr::null_mut(),
+    };
+    let residual_tensor = match as_tensor(residual, "residual tensor") {
+        Some(tensor) => tensor.clone(),
+        None => return ptr::null_mut(),
+    };
+    let (_, cols) = right.shape();
+    let bias = match copy_bias_buffer(bias, bias_len, cols, context) {
+        Ok(bias) => bias,
+        Err(_) => return ptr::null_mut(),
+    };
+    runtime_spawn(runtime, context, move || {
+        left.matmul_bias_add_relu_with_backend(&right, &bias, &residual_tensor, backend)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_matmul_with_backend(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    backend: SpiraltorchMatmulBackend,
+) -> *mut Tensor {
+    let backend = match map_matmul_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    runtime_tensor_binary_op(
+        runtime,
+        lhs,
+        rhs,
+        "runtime_tensor_matmul_with_backend",
+        move |lhs, rhs| lhs.matmul_with_backend(rhs, backend),
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_relu(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+) -> *mut Tensor {
+    runtime_tensor_matmul_bias_relu_core(
+        runtime,
+        lhs,
+        rhs,
+        bias,
+        bias_len,
+        MatmulBackend::Auto,
+        "runtime_tensor_matmul_bias_relu",
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_relu_with_backend(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+    backend: SpiraltorchMatmulBackend,
+) -> *mut Tensor {
+    let backend = match map_matmul_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    runtime_tensor_matmul_bias_relu_core(
+        runtime,
+        lhs,
+        rhs,
+        bias,
+        bias_len,
+        backend,
+        "runtime_tensor_matmul_bias_relu_with_backend",
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_add_relu(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+    residual: *const Tensor,
+) -> *mut Tensor {
+    runtime_tensor_matmul_bias_add_relu_core(
+        runtime,
+        lhs,
+        rhs,
+        bias,
+        bias_len,
+        residual,
+        MatmulBackend::Auto,
+        "runtime_tensor_matmul_bias_add_relu",
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_add_relu_with_backend(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    bias: *const f32,
+    bias_len: usize,
+    residual: *const Tensor,
+    backend: SpiraltorchMatmulBackend,
+) -> *mut Tensor {
+    let backend = match map_matmul_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    runtime_tensor_matmul_bias_add_relu_core(
+        runtime,
+        lhs,
+        rhs,
+        bias,
+        bias_len,
+        residual,
+        backend,
+        "runtime_tensor_matmul_bias_add_relu_with_backend",
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_matmul_with_backend(
+    runtime: *const RuntimeHandle,
+    lhs: *const Tensor,
+    rhs: *const Tensor,
+    backend: SpiraltorchMatmulBackend,
+) -> *mut Tensor {
+    let backend = match map_matmul_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    runtime_tensor_binary_op(
+        runtime,
+        lhs,
+        rhs,
+        "runtime_tensor_matmul_with_backend",
+        move |lhs, rhs| lhs.matmul_with_backend(rhs, backend),
+    )
+}
+
 #[no_mangle]
 pub extern "C" fn spiraltorch_runtime_tensor_hadamard(
     runtime: *const RuntimeHandle,
@@ -656,6 +1197,27 @@ pub extern "C" fn spiraltorch_runtime_tensor_random_normal(
     runtime_tensor_generate(runtime, "runtime_tensor_random_normal", move |runtime| {
         runtime.tensor_random_normal(rows, cols, mean, std, optional_seed(seed, has_seed))
     })
+}
+
+#[no_mangle]
+pub extern "C" fn spiraltorch_runtime_tensor_row_softmax(
+    runtime: *const RuntimeHandle,
+    handle: *const Tensor,
+    backend: SpiraltorchSoftmaxBackend,
+) -> *mut Tensor {
+    let backend = match map_softmax_backend(backend) {
+        Ok(backend) => backend,
+        Err(message) => {
+            set_last_error(message);
+            return ptr::null_mut();
+        }
+    };
+    runtime_tensor_unary_op(
+        runtime,
+        handle,
+        "runtime_tensor_row_softmax",
+        move |tensor| tensor.row_softmax_with_backend(backend),
+    )
 }
 
 #[cfg(test)]
@@ -973,5 +1535,508 @@ mod tests {
         spiraltorch_tensor_free(spawned);
         spiraltorch_tensor_free(direct);
         spiraltorch_runtime_free(runtime);
+    }
+
+    #[test]
+    fn tensor_matmul_with_backend_matches_auto() {
+        let lhs_data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let rhs_data = vec![5.0_f32, 6.0, 7.0, 8.0];
+        let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
+        let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
+        assert!(!lhs.is_null());
+        assert!(!rhs.is_null());
+
+        let auto = spiraltorch_tensor_matmul(lhs, rhs);
+        assert!(!auto.is_null());
+        let explicit =
+            spiraltorch_tensor_matmul_with_backend(lhs, rhs, SpiraltorchMatmulBackend::CpuNaive);
+        assert!(!explicit.is_null());
+
+        let mut auto_buffer = vec![0.0_f32; 4];
+        let mut explicit_buffer = vec![0.0_f32; 4];
+        let auto_ok = unsafe {
+            spiraltorch_tensor_copy_data(auto, auto_buffer.as_mut_ptr(), auto_buffer.len())
+        };
+        let explicit_ok = unsafe {
+            spiraltorch_tensor_copy_data(
+                explicit,
+                explicit_buffer.as_mut_ptr(),
+                explicit_buffer.len(),
+            )
+        };
+        assert!(auto_ok);
+        assert!(explicit_ok);
+        assert_eq!(auto_buffer, explicit_buffer);
+
+        spiraltorch_tensor_free(explicit);
+        spiraltorch_tensor_free(auto);
+        spiraltorch_tensor_free(rhs);
+        spiraltorch_tensor_free(lhs);
+    }
+
+    #[test]
+    fn tensor_matmul_bias_relu_matches_reference() {
+        let lhs_data = vec![1.0_f32, 2.0, -1.0, 0.5, 3.0, -2.0];
+        let rhs_data = vec![2.0_f32, -1.0, 0.0, 4.0, -3.0, 1.0, 1.5, 0.5, -2.5];
+        let bias = vec![0.25_f32, -0.5, 1.0];
+
+        let lhs_handle =
+            unsafe { spiraltorch_tensor_from_dense(2, 3, lhs_data.as_ptr(), lhs_data.len()) };
+        let rhs_handle =
+            unsafe { spiraltorch_tensor_from_dense(3, 3, rhs_data.as_ptr(), rhs_data.len()) };
+        assert!(!lhs_handle.is_null());
+        assert!(!rhs_handle.is_null());
+
+        let lhs_tensor = Tensor::from_vec(2, 3, lhs_data.clone()).unwrap();
+        let rhs_tensor = Tensor::from_vec(3, 3, rhs_data.clone()).unwrap();
+        let expected = lhs_tensor.matmul_bias_relu(&rhs_tensor, &bias).unwrap();
+
+        let fused = unsafe {
+            spiraltorch_tensor_matmul_bias_relu(lhs_handle, rhs_handle, bias.as_ptr(), bias.len())
+        };
+        assert!(!fused.is_null());
+
+        let mut buffer = vec![0.0_f32; expected.data().len()];
+        let copied =
+            unsafe { spiraltorch_tensor_copy_data(fused, buffer.as_mut_ptr(), buffer.len()) };
+        assert!(copied);
+        assert_eq!(buffer, expected.data());
+
+        spiraltorch_tensor_free(fused);
+        spiraltorch_tensor_free(rhs_handle);
+        spiraltorch_tensor_free(lhs_handle);
+    }
+
+    #[test]
+    fn tensor_matmul_bias_relu_with_backend_matches_auto() {
+        let lhs_data = vec![0.5_f32, -1.0, 2.0, 3.0];
+        let rhs_data = vec![1.0_f32, 0.0, -2.0, 4.0];
+        let bias = vec![0.1_f32, -0.2];
+
+        let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
+        let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
+        assert!(!lhs.is_null());
+        assert!(!rhs.is_null());
+
+        let auto =
+            unsafe { spiraltorch_tensor_matmul_bias_relu(lhs, rhs, bias.as_ptr(), bias.len()) };
+        let explicit = unsafe {
+            spiraltorch_tensor_matmul_bias_relu_with_backend(
+                lhs,
+                rhs,
+                bias.as_ptr(),
+                bias.len(),
+                SpiraltorchMatmulBackend::CpuNaive,
+            )
+        };
+        assert!(!auto.is_null());
+        assert!(!explicit.is_null());
+
+        let mut auto_buffer = vec![0.0_f32; 4];
+        let mut explicit_buffer = vec![0.0_f32; 4];
+        let auto_ok = unsafe {
+            spiraltorch_tensor_copy_data(auto, auto_buffer.as_mut_ptr(), auto_buffer.len())
+        };
+        let explicit_ok = unsafe {
+            spiraltorch_tensor_copy_data(
+                explicit,
+                explicit_buffer.as_mut_ptr(),
+                explicit_buffer.len(),
+            )
+        };
+        assert!(auto_ok);
+        assert!(explicit_ok);
+        assert_eq!(auto_buffer, explicit_buffer);
+
+        spiraltorch_tensor_free(explicit);
+        spiraltorch_tensor_free(auto);
+        spiraltorch_tensor_free(rhs);
+        spiraltorch_tensor_free(lhs);
+    }
+
+    #[test]
+    fn tensor_matmul_bias_add_relu_matches_reference() {
+        let lhs_data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let rhs_data = vec![0.5_f32, -1.0, 1.5, 2.0];
+        let bias = vec![0.5_f32, -0.25];
+        let residual_data = vec![0.2_f32, -0.1, 0.4, 0.3];
+
+        let lhs_handle =
+            unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
+        let rhs_handle =
+            unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
+        let residual_handle = unsafe {
+            spiraltorch_tensor_from_dense(2, 2, residual_data.as_ptr(), residual_data.len())
+        };
+        assert!(!lhs_handle.is_null());
+        assert!(!rhs_handle.is_null());
+        assert!(!residual_handle.is_null());
+
+        let lhs_tensor = Tensor::from_vec(2, 2, lhs_data.clone()).unwrap();
+        let rhs_tensor = Tensor::from_vec(2, 2, rhs_data.clone()).unwrap();
+        let residual_tensor = Tensor::from_vec(2, 2, residual_data.clone()).unwrap();
+        let expected = lhs_tensor
+            .matmul_bias_add_relu(&rhs_tensor, &bias, &residual_tensor)
+            .unwrap();
+
+        let fused = unsafe {
+            spiraltorch_tensor_matmul_bias_add_relu(
+                lhs_handle,
+                rhs_handle,
+                bias.as_ptr(),
+                bias.len(),
+                residual_handle,
+            )
+        };
+        assert!(!fused.is_null());
+
+        let mut buffer = vec![0.0_f32; expected.data().len()];
+        let copied =
+            unsafe { spiraltorch_tensor_copy_data(fused, buffer.as_mut_ptr(), buffer.len()) };
+        assert!(copied);
+        assert_eq!(buffer, expected.data());
+
+        spiraltorch_tensor_free(fused);
+        spiraltorch_tensor_free(residual_handle);
+        spiraltorch_tensor_free(rhs_handle);
+        spiraltorch_tensor_free(lhs_handle);
+    }
+
+    #[test]
+    fn tensor_matmul_bias_add_relu_with_backend_matches_auto() {
+        let lhs_data = vec![2.0_f32, -1.0, 0.0, 1.5];
+        let rhs_data = vec![1.0_f32, 3.0, -0.5, 2.0];
+        let bias = vec![0.3_f32, 0.7];
+        let residual_data = vec![0.1_f32, 0.2, 0.3, 0.4];
+
+        let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
+        let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
+        let residual = unsafe {
+            spiraltorch_tensor_from_dense(2, 2, residual_data.as_ptr(), residual_data.len())
+        };
+        assert!(!lhs.is_null());
+        assert!(!rhs.is_null());
+        assert!(!residual.is_null());
+
+        let auto = unsafe {
+            spiraltorch_tensor_matmul_bias_add_relu(lhs, rhs, bias.as_ptr(), bias.len(), residual)
+        };
+        let explicit = unsafe {
+            spiraltorch_tensor_matmul_bias_add_relu_with_backend(
+                lhs,
+                rhs,
+                bias.as_ptr(),
+                bias.len(),
+                residual,
+                SpiraltorchMatmulBackend::CpuNaive,
+            )
+        };
+        assert!(!auto.is_null());
+        assert!(!explicit.is_null());
+
+        let mut auto_buffer = vec![0.0_f32; 4];
+        let mut explicit_buffer = vec![0.0_f32; 4];
+        let auto_ok = unsafe {
+            spiraltorch_tensor_copy_data(auto, auto_buffer.as_mut_ptr(), auto_buffer.len())
+        };
+        let explicit_ok = unsafe {
+            spiraltorch_tensor_copy_data(
+                explicit,
+                explicit_buffer.as_mut_ptr(),
+                explicit_buffer.len(),
+            )
+        };
+        assert!(auto_ok);
+        assert!(explicit_ok);
+        assert_eq!(auto_buffer, explicit_buffer);
+
+        spiraltorch_tensor_free(explicit);
+        spiraltorch_tensor_free(auto);
+        spiraltorch_tensor_free(residual);
+        spiraltorch_tensor_free(rhs);
+        spiraltorch_tensor_free(lhs);
+    }
+
+    #[test]
+    fn tensor_matmul_bias_relu_validates_bias_length() {
+        let lhs_data = vec![1.0_f32, 0.0, 0.0, 1.0];
+        let rhs_data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let bias = vec![0.5_f32];
+
+        let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
+        let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
+        assert!(!lhs.is_null());
+        assert!(!rhs.is_null());
+
+        let fused =
+            unsafe { spiraltorch_tensor_matmul_bias_relu(lhs, rhs, bias.as_ptr(), bias.len()) };
+        assert!(fused.is_null());
+
+        let len = spiraltorch_last_error_length();
+        assert!(len > 0);
+        let mut buffer = vec![0i8; len + 1];
+        let written = spiraltorch_last_error_message(buffer.as_mut_ptr(), buffer.len());
+        assert!(written > 0);
+        let message = unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
+        assert!(message.contains("expected bias"));
+
+        spiraltorch_tensor_free(rhs);
+        spiraltorch_tensor_free(lhs);
+    }
+
+    #[test]
+    fn tensor_row_softmax_matches_manual_computation() {
+        let data = vec![0.0_f32, 1.0, 2.0, 3.0];
+        let tensor = unsafe { spiraltorch_tensor_from_dense(2, 2, data.as_ptr(), data.len()) };
+        assert!(!tensor.is_null());
+
+        let softmax = spiraltorch_tensor_row_softmax(tensor, SpiraltorchSoftmaxBackend::Cpu);
+        assert!(!softmax.is_null());
+
+        let mut buffer = vec![0.0_f32; 4];
+        let copied =
+            unsafe { spiraltorch_tensor_copy_data(softmax, buffer.as_mut_ptr(), buffer.len()) };
+        assert!(copied);
+
+        let mut expected = Vec::with_capacity(4);
+        for row in 0..2 {
+            let start = row * 2;
+            let slice = &data[start..start + 2];
+            let exps: Vec<f32> = slice.iter().map(|v| v.exp()).collect();
+            let sum: f32 = exps.iter().sum();
+            expected.extend(exps.iter().map(|value| value / sum));
+        }
+
+        for (observed, expected) in buffer.iter().zip(expected.iter()) {
+            assert!((observed - expected).abs() < 1e-5);
+        }
+
+        spiraltorch_tensor_free(softmax);
+        spiraltorch_tensor_free(tensor);
+    }
+
+    #[test]
+    fn tensor_dlpack_roundtrip_preserves_data() {
+        let data = vec![1.5_f32, -2.25, 3.75, 4.5];
+        let tensor = unsafe { spiraltorch_tensor_from_dense(2, 2, data.as_ptr(), data.len()) };
+        assert!(!tensor.is_null());
+
+        let dlpack = spiraltorch_tensor_to_dlpack(tensor);
+        assert!(!dlpack.is_null());
+
+        spiraltorch_tensor_free(tensor);
+
+        let roundtrip = unsafe { spiraltorch_tensor_from_dlpack(dlpack) };
+        assert!(!roundtrip.is_null());
+
+        let mut buffer = vec![0.0_f32; data.len()];
+        let copied =
+            unsafe { spiraltorch_tensor_copy_data(roundtrip, buffer.as_mut_ptr(), buffer.len()) };
+        assert!(copied);
+        assert_eq!(buffer, data);
+
+        spiraltorch_tensor_free(roundtrip);
+    }
+
+    #[test]
+    fn runtime_matmul_with_backend_matches_auto() {
+        let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
+        assert!(!runtime.is_null());
+
+        let lhs_data = vec![1.0_f32, 0.0, 0.0, 1.0];
+        let rhs_data = vec![2.0_f32, 3.0, 4.0, 5.0];
+        let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
+        let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
+        assert!(!lhs.is_null());
+        assert!(!rhs.is_null());
+
+        let auto = spiraltorch_runtime_tensor_matmul(runtime, lhs, rhs);
+        let explicit = spiraltorch_runtime_tensor_matmul_with_backend(
+            runtime,
+            lhs,
+            rhs,
+            SpiraltorchMatmulBackend::CpuNaive,
+        );
+        assert!(!auto.is_null());
+        assert!(!explicit.is_null());
+
+        let mut auto_buffer = vec![0.0_f32; 4];
+        let mut explicit_buffer = vec![0.0_f32; 4];
+        let auto_ok = unsafe {
+            spiraltorch_tensor_copy_data(auto, auto_buffer.as_mut_ptr(), auto_buffer.len())
+        };
+        let explicit_ok = unsafe {
+            spiraltorch_tensor_copy_data(
+                explicit,
+                explicit_buffer.as_mut_ptr(),
+                explicit_buffer.len(),
+            )
+        };
+        assert!(auto_ok);
+        assert!(explicit_ok);
+        assert_eq!(auto_buffer, explicit_buffer);
+
+        spiraltorch_tensor_free(explicit);
+        spiraltorch_tensor_free(auto);
+        spiraltorch_tensor_free(rhs);
+        spiraltorch_tensor_free(lhs);
+        spiraltorch_runtime_free(runtime);
+    }
+
+    #[test]
+    fn runtime_matmul_bias_relu_matches_direct() {
+        let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
+        assert!(!runtime.is_null());
+
+        let lhs_data = vec![1.0_f32, -2.0, 0.5, 3.0, -1.0, 4.0];
+        let rhs_data = vec![0.5_f32, 1.0, -1.5, 2.0];
+        let bias = vec![0.25_f32, -0.75];
+
+        let lhs = unsafe { spiraltorch_tensor_from_dense(3, 2, lhs_data.as_ptr(), lhs_data.len()) };
+        let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
+        assert!(!lhs.is_null());
+        assert!(!rhs.is_null());
+
+        let direct =
+            unsafe { spiraltorch_tensor_matmul_bias_relu(lhs, rhs, bias.as_ptr(), bias.len()) };
+        let spawned = unsafe {
+            spiraltorch_runtime_tensor_matmul_bias_relu(
+                runtime,
+                lhs,
+                rhs,
+                bias.as_ptr(),
+                bias.len(),
+            )
+        };
+        assert!(!direct.is_null());
+        assert!(!spawned.is_null());
+
+        let mut direct_buffer = vec![0.0_f32; 6];
+        let mut spawned_buffer = vec![0.0_f32; 6];
+        let direct_ok = unsafe {
+            spiraltorch_tensor_copy_data(direct, direct_buffer.as_mut_ptr(), direct_buffer.len())
+        };
+        let spawned_ok = unsafe {
+            spiraltorch_tensor_copy_data(spawned, spawned_buffer.as_mut_ptr(), spawned_buffer.len())
+        };
+        assert!(direct_ok);
+        assert!(spawned_ok);
+        assert_eq!(direct_buffer, spawned_buffer);
+
+        spiraltorch_tensor_free(spawned);
+        spiraltorch_tensor_free(direct);
+        spiraltorch_tensor_free(rhs);
+        spiraltorch_tensor_free(lhs);
+        spiraltorch_runtime_free(runtime);
+    }
+
+    #[test]
+    fn runtime_matmul_bias_add_relu_matches_direct() {
+        let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
+        assert!(!runtime.is_null());
+
+        let lhs_data = vec![1.0_f32, 2.0, -1.0, 0.5];
+        let rhs_data = vec![0.5_f32, -0.5, 1.5, 2.5];
+        let bias = vec![0.2_f32, -0.3];
+        let residual_data = vec![0.1_f32, 0.2, 0.3, 0.4];
+
+        let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
+        let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
+        let residual = unsafe {
+            spiraltorch_tensor_from_dense(2, 2, residual_data.as_ptr(), residual_data.len())
+        };
+        assert!(!lhs.is_null());
+        assert!(!rhs.is_null());
+        assert!(!residual.is_null());
+
+        let direct = unsafe {
+            spiraltorch_tensor_matmul_bias_add_relu(lhs, rhs, bias.as_ptr(), bias.len(), residual)
+        };
+        let spawned = unsafe {
+            spiraltorch_runtime_tensor_matmul_bias_add_relu(
+                runtime,
+                lhs,
+                rhs,
+                bias.as_ptr(),
+                bias.len(),
+                residual,
+            )
+        };
+        assert!(!direct.is_null());
+        assert!(!spawned.is_null());
+
+        let mut direct_buffer = vec![0.0_f32; 4];
+        let mut spawned_buffer = vec![0.0_f32; 4];
+        let direct_ok = unsafe {
+            spiraltorch_tensor_copy_data(direct, direct_buffer.as_mut_ptr(), direct_buffer.len())
+        };
+        let spawned_ok = unsafe {
+            spiraltorch_tensor_copy_data(spawned, spawned_buffer.as_mut_ptr(), spawned_buffer.len())
+        };
+        assert!(direct_ok);
+        assert!(spawned_ok);
+        assert_eq!(direct_buffer, spawned_buffer);
+
+        spiraltorch_tensor_free(spawned);
+        spiraltorch_tensor_free(direct);
+        spiraltorch_tensor_free(residual);
+        spiraltorch_tensor_free(rhs);
+        spiraltorch_tensor_free(lhs);
+        spiraltorch_runtime_free(runtime);
+    }
+
+    #[test]
+    fn runtime_row_softmax_matches_direct_cpu() {
+        let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
+        assert!(!runtime.is_null());
+
+        let data = vec![1.0_f32, 2.0, -1.0, -2.0, 0.5, -0.25];
+        let tensor = unsafe { spiraltorch_tensor_from_dense(3, 2, data.as_ptr(), data.len()) };
+        assert!(!tensor.is_null());
+
+        let direct = spiraltorch_tensor_row_softmax(tensor, SpiraltorchSoftmaxBackend::Cpu);
+        let runtime_softmax =
+            spiraltorch_runtime_tensor_row_softmax(runtime, tensor, SpiraltorchSoftmaxBackend::Cpu);
+        assert!(!direct.is_null());
+        assert!(!runtime_softmax.is_null());
+
+        let mut direct_buffer = vec![0.0_f32; data.len()];
+        let mut runtime_buffer = vec![0.0_f32; data.len()];
+        let direct_ok = unsafe {
+            spiraltorch_tensor_copy_data(direct, direct_buffer.as_mut_ptr(), direct_buffer.len())
+        };
+        let runtime_ok = unsafe {
+            spiraltorch_tensor_copy_data(
+                runtime_softmax,
+                runtime_buffer.as_mut_ptr(),
+                runtime_buffer.len(),
+            )
+        };
+        assert!(direct_ok);
+        assert!(runtime_ok);
+        for (lhs, rhs) in direct_buffer.iter().zip(runtime_buffer.iter()) {
+            assert!((lhs - rhs).abs() < 1e-6);
+        }
+
+        spiraltorch_tensor_free(runtime_softmax);
+        spiraltorch_tensor_free(direct);
+        spiraltorch_tensor_free(tensor);
+        spiraltorch_runtime_free(runtime);
+    }
+
+    #[test]
+    fn dlpack_drop_exported_state_is_safe_on_null() {
+        unsafe {
+            spiraltorch_dlpack_drop_exported_state(ptr::null_mut());
+        }
+        let data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let tensor = unsafe { spiraltorch_tensor_from_dense(2, 2, data.as_ptr(), data.len()) };
+        assert!(!tensor.is_null());
+        let dlpack = spiraltorch_tensor_to_dlpack(tensor);
+        assert!(!dlpack.is_null());
+        unsafe {
+            spiraltorch_dlpack_drop_exported_state(dlpack);
+        }
+        spiraltorch_tensor_free(tensor);
     }
 }
