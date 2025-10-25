@@ -25,6 +25,7 @@ classifiers = [
 # By pointing `python-source` at the crate root and explicitly listing the
 # packages that should be included we keep the packaging layout stable while
 # avoiding the missing-path error the user reported.
+features = ["pyo3/extension-module", "pyo3/abi3-py38"]
 python-source = "."
 python-packages = ["spiral", "spiraltorch"]
 
