@@ -125,24 +125,18 @@ impl core::fmt::Display for GoldenRuntimeError {
 
 impl std::error::Error for GoldenRuntimeError {}
 
-#[derive(Debug)]
-pub enum GoldenTaskError<E> {
-    Runtime(GoldenRuntimeError),
+#[derive(Debug, Error)]
+pub enum GoldenTaskError<E>
+where
+    E: std::fmt::Debug + std::fmt::Display,
+{
+    #[error("{0}")]
     Task(E),
+    #[error("{0}")]
+    Runtime(#[from] GoldenRuntimeError),
+    #[error("golden runtime task panicked")]
     Panic,
 }
-
-impl<E: core::fmt::Display> core::fmt::Display for GoldenTaskError<E> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            GoldenTaskError::Runtime(err) => write!(f, "{err}"),
-            GoldenTaskError::Task(err) => write!(f, "{err}"),
-            GoldenTaskError::Panic => write!(f, "golden runtime task panicked"),
-        }
-    }
-}
-
-impl<E> std::error::Error for GoldenTaskError<E> where E: std::error::Error + 'static {}
 
 #[derive(Debug, Clone)]
 pub struct GoldenRuntimeConfig {
@@ -162,7 +156,7 @@ impl Default for GoldenRuntimeConfig {
     }
 }
 
-type ThreadResult<R, E> = Result<R, GoldenTaskError<E>>;
+type ThreadResult<T, E> = Result<T, GoldenTaskError<E>>;
 
 enum GoldenTaskMessage {
     Run(Box<dyn FnOnce() + Send + 'static>),
@@ -231,12 +225,18 @@ fn worker_loop(receiver: Arc<Receiver<GoldenTaskMessage>>) {
     }
 }
 
-pub struct GoldenJoinHandle<R, E> {
+pub struct GoldenJoinHandle<R, E>
+where
+    E: std::fmt::Debug + std::fmt::Display,
+{
     receiver: Option<Receiver<ThreadResult<R, E>>>,
 }
 
-impl<R, E> GoldenJoinHandle<R, E> {
-    pub fn join(self) -> ThreadResult<R, E> {
+impl<R, E> GoldenJoinHandle<R, E>
+where
+    E: std::fmt::Debug + std::fmt::Display,
+{
+    pub fn join(self) -> Result<R, GoldenTaskError<E>> {
         let receiver = self
             .receiver
             .expect("golden runtime join handle already consumed");
@@ -288,7 +288,7 @@ impl GoldenRuntime {
     where
         F: FnOnce() -> Result<R, E> + Send + 'static,
         R: Send + 'static,
-        E: Send + 'static,
+        E: std::fmt::Debug + std::fmt::Display + Send + 'static,
     {
         let handle = self
             .spawn_blocking(func)
@@ -327,20 +327,24 @@ impl GoldenRuntime {
     where
         F: FnOnce() -> Result<R, E> + Send + 'static,
         R: Send + 'static,
-        E: Send + 'static,
+        E: std::fmt::Debug + std::fmt::Display + Send + 'static,
     {
         if self.inner.shutdown.load(Ordering::Acquire) {
             return Err(GoldenRuntimeError(
                 "golden runtime is shutting down and cannot accept new tasks".into(),
             ));
         }
+
         let (result_tx, result_rx) = bounded::<ThreadResult<R, E>>(1);
         let job = Box::new(move || {
-            let result = panic::catch_unwind(AssertUnwindSafe(func))
-                .map_err(|_| GoldenTaskError::Panic)
-                .and_then(|inner| inner.map_err(GoldenTaskError::Task));
+            let outcome = panic::catch_unwind(AssertUnwindSafe(func));
+            let result = match outcome {
+                Ok(inner) => inner.map_err(GoldenTaskError::Task),
+                Err(_) => Err(GoldenTaskError::Panic),
+            };
             let _ = result_tx.send(result);
         });
+
         self.inner
             .sender
             .send(GoldenTaskMessage::Run(job))
@@ -349,6 +353,7 @@ impl GoldenRuntime {
                     "golden runtime worker queue rejected task (runtime shutting down)".into(),
                 )
             })?;
+
         Ok(GoldenJoinHandle {
             receiver: Some(result_rx),
         })
@@ -369,12 +374,15 @@ impl GoldenRuntime {
     {
         let workers = self.worker_count();
         if workers <= 1 || data.len() < 2 {
-            return data
-                .iter()
-                .map(&map)
-                .fold(identity.clone(), |acc, item| fold(acc, item));
+            let mut acc = identity;
+            for item in data {
+                let mapped = map(item);
+                acc = fold(acc, mapped);
+            }
+            return Ok(acc);
         }
-        let chunk = (data.len() + workers - 1) / workers;
+
+        let chunk = ((data.len() + workers - 1) / workers).max(1);
         let mut partials = Vec::new();
         thread::scope(|scope| -> Result<(), GoldenTaskError<Infallible>> {
             let mut handles = Vec::new();
@@ -383,18 +391,18 @@ impl GoldenRuntime {
                 let map_ref = &map;
                 let fold_ref = &fold;
                 handles.push(scope.spawn(move || {
-                    chunk_items
-                        .iter()
-                        .map(map_ref)
-                        .fold(identity_clone, |acc, item| fold_ref(acc, item))
+                    chunk_items.iter().fold(identity_clone, |acc, item| {
+                        let mapped = map_ref(item);
+                        fold_ref(acc, mapped)
+                    })
                 }));
             }
+
             for handle in handles {
-                match handle.join() {
-                    Ok(value) => partials.push(value),
-                    Err(_) => return Err(GoldenTaskError::Panic),
-                }
+                let value = handle.join().map_err(|_| GoldenTaskError::Panic)?;
+                partials.push(value);
             }
+
             Ok(())
         })?;
 
