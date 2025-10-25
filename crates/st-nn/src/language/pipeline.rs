@@ -13,7 +13,7 @@ use crate::PureResult;
 use st_core::coop::ai::{CoopAgent, CoopProposal};
 use st_tensor::TensorError;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -259,11 +259,484 @@ impl DesirePipelineSink for DesireTelemetrySink {
     }
 }
 
+/// Execution context describing how geometry bias should be applied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GeometryBiasContext {
+    Inference,
+    Training,
+}
+
+/// Configuration controlling how z-space and roundtable bias signals are folded
+/// into logits before the Desire loop.
+#[derive(Clone, Debug)]
+pub struct GeometryBiasConfig {
+    apply_inference: bool,
+    apply_training: bool,
+    z_weight: f32,
+    roundtable_weight: f32,
+    metrics_window: usize,
+}
+
+impl GeometryBiasConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_inference_enabled(mut self, enabled: bool) -> Self {
+        self.apply_inference = enabled;
+        self
+    }
+
+    pub fn with_training_enabled(mut self, enabled: bool) -> Self {
+        self.apply_training = enabled;
+        self
+    }
+
+    pub fn with_z_weight(mut self, weight: f32) -> Self {
+        self.z_weight = weight;
+        self
+    }
+
+    pub fn with_roundtable_weight(mut self, weight: f32) -> Self {
+        self.roundtable_weight = weight;
+        self
+    }
+
+    pub fn with_metrics_window(mut self, window: usize) -> Self {
+        self.metrics_window = window.max(1);
+        self
+    }
+
+    pub fn apply_inference(&self) -> bool {
+        self.apply_inference
+    }
+
+    pub fn apply_training(&self) -> bool {
+        self.apply_training
+    }
+
+    pub fn z_weight(&self) -> f32 {
+        self.z_weight
+    }
+
+    pub fn roundtable_weight(&self) -> f32 {
+        self.roundtable_weight
+    }
+
+    pub fn metrics_window(&self) -> usize {
+        self.metrics_window
+    }
+}
+
+impl Default for GeometryBiasConfig {
+    fn default() -> Self {
+        Self {
+            apply_inference: true,
+            apply_training: false,
+            z_weight: 0.25,
+            roundtable_weight: 0.1,
+            metrics_window: 16,
+        }
+    }
+}
+
+/// Source signals that can be injected into the geometry bias controller.
+#[derive(Clone, Debug)]
+pub enum GeometryBiasUpdate {
+    ZSpace { signal: Vec<f32> },
+    Roundtable { signal: Vec<f32> },
+    Clear,
+}
+
+/// Snapshot of the latest geometry bias metrics.
+#[derive(Clone, Debug)]
+pub struct GeometryBiasSnapshot {
+    pub accuracy: f32,
+    pub fairness: f32,
+    pub timestamp: SystemTime,
+}
+
+/// Rolling metrics describing how injected geometry bias is behaving.
+#[derive(Clone, Debug, Default)]
+pub struct GeometryBiasMetrics {
+    pub accuracy_mean: f32,
+    pub fairness_mean: f32,
+    pub window: usize,
+    pub latest: Option<GeometryBiasSnapshot>,
+}
+
+/// Coherence-oriented summary derived from the most recent geometry bias
+/// signals. Values are already weighted according to the configured signal
+/// strengths so downstream consumers can reason about aggregate energy without
+/// needing to re-apply weights.
+#[derive(Clone, Debug)]
+pub struct GeometryCoherenceSample {
+    pub z_energy: f32,
+    pub roundtable_energy: f32,
+    pub composite_energy: f32,
+    pub timestamp: SystemTime,
+}
+
+impl GeometryCoherenceSample {
+    pub fn balance(&self) -> f32 {
+        let total = self.z_energy + self.roundtable_energy;
+        if total <= f32::EPSILON {
+            0.0
+        } else {
+            (self.z_energy - self.roundtable_energy).abs() / total
+        }
+    }
+
+    pub fn coherence(&self) -> f32 {
+        self.composite_energy
+    }
+}
+
+impl Default for GeometryCoherenceSample {
+    fn default() -> Self {
+        Self {
+            z_energy: 0.0,
+            roundtable_energy: 0.0,
+            composite_energy: 0.0,
+            timestamp: UNIX_EPOCH,
+        }
+    }
+}
+
+#[cfg(test)]
+mod geometry_bias_tests {
+    use super::*;
+    use crate::language::{
+        constant, warmup, ConceptHint, DesireAutomation, DesireLagrangian, DesirePipeline,
+        LanguagePipeline, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
+        TemperatureController,
+    };
+    use st_core::config::self_rewrite::SelfRewriteCfg;
+    use st_core::ecosystem::EcosystemRegistry;
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant, SystemTime};
+
+    fn registry_guard() -> &'static Mutex<()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD.get_or_init(|| Mutex::new(()))
+    }
+
+    fn build_geometry() -> SymbolGeometry {
+        let syn = SparseKernel::from_rows(
+            vec![vec![(0, 0.6), (1, 0.4)], vec![(0, 0.5), (1, 0.5)]],
+            1e-6,
+        )
+        .unwrap();
+        let par = SparseKernel::from_rows(
+            vec![vec![(0, 0.7), (1, 0.3)], vec![(0, 0.2), (1, 0.8)]],
+            1e-6,
+        )
+        .unwrap();
+        SymbolGeometry::new(syn, par).unwrap()
+    }
+
+    fn build_semantics() -> SemanticBridge {
+        let log_pi = vec![
+            vec![(0, (0.65f32).ln()), (1, (0.35f32).ln())],
+            vec![(0, (0.4f32).ln()), (1, (0.6f32).ln())],
+        ];
+        let row = vec![1.0, 1.0];
+        let col = vec![1.0, 1.0];
+        let anchors = HashSet::new();
+        let concept_kernel =
+            SparseKernel::from_rows(vec![vec![(0, 1.0)], vec![(1, 1.0)]], 1e-6).unwrap();
+        SemanticBridge::new(log_pi, row, col, anchors, 1e-6, concept_kernel).unwrap()
+    }
+
+    fn build_automation() -> DesireAutomation {
+        let geometry = build_geometry();
+        let repression = RepressionField::new(vec![0.05, 0.15]).unwrap();
+        let semantics = build_semantics();
+        let controller = TemperatureController::new(1.0, 0.8, 0.4, 0.4, 1.6);
+        let desire = DesireLagrangian::new(geometry, repression, semantics, controller)
+            .unwrap()
+            .with_alpha_schedule(warmup(0.0, 0.2, 1))
+            .with_beta_schedule(warmup(0.0, 0.1, 1))
+            .with_gamma_schedule(constant(0.04))
+            .with_lambda_schedule(constant(0.02))
+            .with_observation_horizon(Some(1))
+            .with_integration_horizon(Some(2));
+        let cfg = SelfRewriteCfg {
+            score_thresh: 0.0,
+            min_samples: 2,
+            cooldown_sec: 0,
+        };
+        DesireAutomation::new(desire, cfg)
+    }
+
+    #[test]
+    fn geometry_bias_observes_coherence_and_metrics() {
+        let automation = build_automation();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_geometry_bias(GeometryBiasConfig::default())
+            .build();
+        pipeline.set_bias_context(GeometryBiasContext::Inference);
+        pipeline
+            .ingest_geometry_bias(GeometryBiasUpdate::ZSpace {
+                signal: vec![0.2, -0.1],
+            })
+            .unwrap();
+        let logits = vec![0.0, 0.0];
+        let concept = ConceptHint::Distribution(vec![0.5, 0.5]);
+        let now = Instant::now();
+        let timestamp = SystemTime::now();
+        pipeline
+            .step_at(&logits, 0, &concept, now, timestamp)
+            .unwrap();
+        let metrics = pipeline.geometry_bias_metrics().expect("metrics");
+        assert!(metrics.accuracy_mean.is_finite());
+        assert!(metrics.fairness_mean.is_finite());
+        let coherence = pipeline
+            .geometry_bias_coherence()
+            .expect("coherence sample");
+        assert!(coherence.coherence().is_finite());
+        assert!(coherence.balance().is_finite());
+    }
+
+    #[test]
+    fn geometry_bias_respects_context_toggles() {
+        let automation = build_automation();
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_geometry_bias(GeometryBiasConfig::default())
+            .build();
+        pipeline
+            .ingest_geometry_bias(GeometryBiasUpdate::ZSpace {
+                signal: vec![0.15, -0.05],
+            })
+            .unwrap();
+        pipeline.set_bias_context(GeometryBiasContext::Training);
+        let logits = vec![0.1, -0.1];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let now = Instant::now();
+        let timestamp = SystemTime::now();
+        pipeline
+            .step_at(&logits, 0, &concept, now, timestamp)
+            .unwrap();
+        assert!(pipeline.geometry_bias_metrics().is_none());
+        pipeline.enable_geometry_bias_training();
+        let later = now + Duration::from_millis(50);
+        let later_ts = SystemTime::now();
+        pipeline
+            .step_at(&logits, 0, &concept, later, later_ts)
+            .unwrap();
+        assert!(pipeline.geometry_bias_metrics().is_some());
+        assert!(pipeline.geometry_bias_coherence().is_some());
+    }
+
+    #[test]
+    fn language_pipeline_records_geometry_bias_metrics() {
+        let _lock = registry_guard().lock().unwrap();
+        let registry = EcosystemRegistry::global();
+        registry.drain();
+        let pipeline = LanguagePipeline::builder("geometry-metrics").build();
+        let metrics = GeometryBiasMetrics {
+            accuracy_mean: 0.82,
+            fairness_mean: 0.9,
+            window: 8,
+            latest: Some(GeometryBiasSnapshot {
+                accuracy: 0.81,
+                fairness: 0.88,
+                timestamp: SystemTime::now(),
+            }),
+        };
+        pipeline.record_geometry_bias_metrics(&metrics);
+        let report = registry.drain();
+        assert!(report
+            .metrics
+            .iter()
+            .any(|m| m.name == "language.geometry.bias.accuracy"));
+        assert!(report
+            .metrics
+            .iter()
+            .any(|m| m.name == "language.geometry.bias.fairness"));
+        assert!(report
+            .metrics
+            .iter()
+            .any(|m| m.name == "language.geometry.bias.accuracy.latest"));
+    }
+}
+
+struct GeometryBiasHook {
+    config: GeometryBiasConfig,
+    z_signal: Option<Vec<f32>>,
+    roundtable_signal: Option<Vec<f32>>,
+    history: VecDeque<GeometryBiasSnapshot>,
+    latest: Option<GeometryBiasSnapshot>,
+    coherence: Option<GeometryCoherenceSample>,
+}
+
+impl GeometryBiasHook {
+    fn new(config: GeometryBiasConfig) -> Self {
+        Self {
+            config,
+            z_signal: None,
+            roundtable_signal: None,
+            history: VecDeque::new(),
+            latest: None,
+            coherence: None,
+        }
+    }
+
+    fn set_apply_inference(&mut self, enabled: bool) {
+        self.config.apply_inference = enabled;
+    }
+
+    fn set_apply_training(&mut self, enabled: bool) {
+        self.config.apply_training = enabled;
+    }
+
+    fn ingest(&mut self, update: GeometryBiasUpdate) -> PureResult<()> {
+        match update {
+            GeometryBiasUpdate::ZSpace { signal } => {
+                Self::validate_signal(&signal)?;
+                if signal.is_empty() {
+                    self.z_signal = None;
+                } else {
+                    self.z_signal = Some(signal);
+                }
+            }
+            GeometryBiasUpdate::Roundtable { signal } => {
+                Self::validate_signal(&signal)?;
+                if signal.is_empty() {
+                    self.roundtable_signal = None;
+                } else {
+                    self.roundtable_signal = Some(signal);
+                }
+            }
+            GeometryBiasUpdate::Clear => {
+                self.z_signal = None;
+                self.roundtable_signal = None;
+                self.history.clear();
+                self.latest = None;
+                self.coherence = None;
+            }
+        }
+        Ok(())
+    }
+
+    fn metrics(&self) -> Option<GeometryBiasMetrics> {
+        if self.history.is_empty() {
+            return None;
+        }
+        let mut accuracy_sum = 0.0f32;
+        let mut fairness_sum = 0.0f32;
+        for snapshot in &self.history {
+            accuracy_sum += snapshot.accuracy;
+            fairness_sum += snapshot.fairness;
+        }
+        let count = self.history.len() as f32;
+        if count <= 0.0 {
+            return None;
+        }
+        Some(GeometryBiasMetrics {
+            accuracy_mean: (accuracy_sum / count).clamp(0.0, 1.0),
+            fairness_mean: (fairness_sum / count).clamp(0.0, 1.0),
+            window: self.config.metrics_window,
+            latest: self.latest.clone(),
+        })
+    }
+
+    fn observe(&mut self, context: GeometryBiasContext, timestamp: SystemTime) {
+        if !self.should_apply(context) {
+            return;
+        }
+        let Some(sample) = self.build_coherence_sample(timestamp) else {
+            return;
+        };
+        self.record_metrics(&sample);
+        self.coherence = Some(sample);
+    }
+
+    fn build_coherence_sample(&self, timestamp: SystemTime) -> Option<GeometryCoherenceSample> {
+        if !self.has_signal() {
+            return None;
+        }
+        let z_energy = Self::signal_energy(self.z_signal.as_deref(), self.config.z_weight);
+        let roundtable_energy =
+            Self::signal_energy(self.roundtable_signal.as_deref(), self.config.roundtable_weight);
+        if z_energy <= f32::EPSILON && roundtable_energy <= f32::EPSILON {
+            return None;
+        }
+        let composite_energy = z_energy + roundtable_energy;
+        Some(GeometryCoherenceSample {
+            z_energy,
+            roundtable_energy,
+            composite_energy,
+            timestamp,
+        })
+    }
+
+    fn signal_energy(signal: Option<&[f32]>, weight: f32) -> f32 {
+        let Some(values) = signal else {
+            return 0.0;
+        };
+        if values.is_empty() || weight.abs() <= f32::EPSILON {
+            return 0.0;
+        }
+        let sum_sq: f32 = values.iter().map(|value| value * value).sum();
+        let len = values.len() as f32;
+        if len <= 0.0 {
+            return 0.0;
+        }
+        let rms = (sum_sq / len).sqrt();
+        (rms * weight.abs()).max(0.0)
+    }
+
+    fn should_apply(&self, context: GeometryBiasContext) -> bool {
+        let enabled = match context {
+            GeometryBiasContext::Inference => self.config.apply_inference,
+            GeometryBiasContext::Training => self.config.apply_training,
+        };
+        enabled && self.has_signal()
+    }
+
+    fn has_signal(&self) -> bool {
+        self.z_signal.is_some() || self.roundtable_signal.is_some()
+    }
+
+    fn validate_signal(signal: &[f32]) -> PureResult<()> {
+        if signal.iter().any(|value| !value.is_finite()) {
+            return Err(TensorError::InvalidValue {
+                label: "geometry bias signal must be finite",
+            });
+        }
+        Ok(())
+    }
+
+    fn record_metrics(&mut self, sample: &GeometryCoherenceSample) {
+        let accuracy = (1.0 / (1.0 + sample.coherence())).clamp(0.0, 1.0);
+        let fairness_gap = sample.balance().clamp(0.0, 1.0);
+        let fairness = (1.0 - fairness_gap).clamp(0.0, 1.0);
+        let snapshot = GeometryBiasSnapshot {
+            accuracy,
+            fairness,
+            timestamp: sample.timestamp,
+        };
+        self.latest = Some(snapshot.clone());
+        self.history.push_back(snapshot);
+        let limit = self.config.metrics_window.max(1);
+        while self.history.len() > limit {
+            self.history.pop_front();
+        }
+    }
+
+    fn latest_coherence(&self) -> Option<&GeometryCoherenceSample> {
+        self.coherence.as_ref()
+    }
+}
+
 /// Builder used to configure the braid of sinks attached to a
 /// [`DesirePipeline`].
 pub struct DesirePipelineBuilder {
     automation: DesireAutomation,
     sinks: Vec<Box<dyn DesirePipelineSink>>,
+    geometry_bias: Option<GeometryBiasConfig>,
 }
 
 impl DesirePipelineBuilder {
@@ -271,6 +744,7 @@ impl DesirePipelineBuilder {
         Self {
             automation,
             sinks: Vec::new(),
+            geometry_bias: None,
         }
     }
 
@@ -318,10 +792,17 @@ impl DesirePipelineBuilder {
         self
     }
 
+    pub fn with_geometry_bias(mut self, config: GeometryBiasConfig) -> Self {
+        self.geometry_bias = Some(config);
+        self
+    }
+
     pub fn build(self) -> DesirePipeline {
         DesirePipeline {
             automation: self.automation,
             sinks: self.sinks,
+            geometry_bias: self.geometry_bias.map(GeometryBiasHook::new),
+            bias_context: GeometryBiasContext::Inference,
         }
     }
 }
@@ -331,6 +812,8 @@ impl DesirePipelineBuilder {
 pub struct DesirePipeline {
     automation: DesireAutomation,
     sinks: Vec<Box<dyn DesirePipelineSink>>,
+    geometry_bias: Option<GeometryBiasHook>,
+    bias_context: GeometryBiasContext,
 }
 
 impl DesirePipeline {
@@ -338,6 +821,8 @@ impl DesirePipeline {
         Self {
             automation,
             sinks: Vec::new(),
+            geometry_bias: None,
+            bias_context: GeometryBiasContext::Inference,
         }
     }
 
@@ -351,6 +836,68 @@ impl DesirePipeline {
 
     pub fn automation_mut(&mut self) -> &mut DesireAutomation {
         &mut self.automation
+    }
+
+    fn ensure_geometry_bias(&mut self) -> &mut GeometryBiasHook {
+        if self.geometry_bias.is_none() {
+            self.geometry_bias = Some(GeometryBiasHook::new(GeometryBiasConfig::default()));
+        }
+        self.geometry_bias.as_mut().unwrap()
+    }
+
+    fn observe_geometry_bias(&mut self, timestamp: SystemTime) {
+        if let Some(hook) = self.geometry_bias.as_mut() {
+            hook.observe(self.bias_context, timestamp);
+        }
+    }
+
+    pub fn configure_geometry_bias(&mut self, config: GeometryBiasConfig) {
+        self.geometry_bias = Some(GeometryBiasHook::new(config));
+    }
+
+    pub fn ingest_geometry_bias(&mut self, update: GeometryBiasUpdate) -> PureResult<()> {
+        let hook = self.ensure_geometry_bias();
+        hook.ingest(update)
+    }
+
+    pub fn clear_geometry_bias(&mut self) {
+        if let Some(hook) = self.geometry_bias.as_mut() {
+            let _ = hook.ingest(GeometryBiasUpdate::Clear);
+        }
+    }
+
+    pub fn geometry_bias_metrics(&self) -> Option<GeometryBiasMetrics> {
+        self.geometry_bias.as_ref().and_then(|hook| hook.metrics())
+    }
+
+    pub fn geometry_bias_coherence(&self) -> Option<GeometryCoherenceSample> {
+        self.geometry_bias
+            .as_ref()
+            .and_then(|hook| hook.latest_coherence().cloned())
+    }
+
+    pub fn enable_geometry_bias_inference(&mut self) {
+        self.ensure_geometry_bias().set_apply_inference(true);
+    }
+
+    pub fn disable_geometry_bias_inference(&mut self) {
+        self.ensure_geometry_bias().set_apply_inference(false);
+    }
+
+    pub fn enable_geometry_bias_training(&mut self) {
+        self.ensure_geometry_bias().set_apply_training(true);
+    }
+
+    pub fn disable_geometry_bias_training(&mut self) {
+        self.ensure_geometry_bias().set_apply_training(false);
+    }
+
+    pub fn set_bias_context(&mut self, context: GeometryBiasContext) {
+        self.bias_context = context;
+    }
+
+    pub fn bias_context(&self) -> GeometryBiasContext {
+        self.bias_context
     }
 
     pub fn attach_sink<S>(&mut self, sink: S)
@@ -404,6 +951,7 @@ impl DesirePipeline {
         let step = self
             .automation
             .step(lm_logits, previous_token, concept_hint, now)?;
+        self.observe_geometry_bias(timestamp);
         self.dispatch(&step, timestamp)?;
         Ok(step)
     }
@@ -424,6 +972,7 @@ impl DesirePipeline {
             weights,
             now,
         )?;
+        self.observe_geometry_bias(timestamp);
         self.dispatch(&step, timestamp)?;
         Ok(step)
     }
@@ -1329,6 +1878,7 @@ impl DesirePsiSummary {
 }
 
 mod language_pipeline {
+    use super::GeometryBiasMetrics;
     use crate::roundtable::RoundtableNode;
     use crate::{RoundtableConfig, RoundtableSchedule};
     use st_core::ecosystem::{
@@ -1432,6 +1982,59 @@ mod language_pipeline {
 
         pub fn record_metric(&self, sample: MetricSample) {
             self.registry.record_metric(self.apply_tags(sample, &[]));
+        }
+
+        pub fn record_geometry_bias_metrics(&self, metrics: &GeometryBiasMetrics) {
+            let extras = vec![("mode".to_string(), "geometry_bias".to_string())];
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new(
+                        "language.geometry.bias.accuracy",
+                        metrics.accuracy_mean as f64,
+                    )
+                    .with_unit("score"),
+                    &extras,
+                ),
+            );
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new(
+                        "language.geometry.bias.fairness",
+                        metrics.fairness_mean as f64,
+                    )
+                    .with_unit("score"),
+                    &extras,
+                ),
+            );
+            self.registry.record_metric(
+                self.apply_tags(
+                    MetricSample::new("language.geometry.bias.window", metrics.window as f64)
+                        .with_unit("samples"),
+                    &extras,
+                ),
+            );
+            if let Some(latest) = &metrics.latest {
+                self.registry.record_metric(
+                    self.apply_tags(
+                        MetricSample::new(
+                            "language.geometry.bias.accuracy.latest",
+                            latest.accuracy as f64,
+                        )
+                        .with_unit("score"),
+                        &extras,
+                    ),
+                );
+                self.registry.record_metric(
+                    self.apply_tags(
+                        MetricSample::new(
+                            "language.geometry.bias.fairness.latest",
+                            latest.fairness as f64,
+                        )
+                        .with_unit("score"),
+                        &extras,
+                    ),
+                );
+            }
         }
 
         pub fn record_heuristic(
