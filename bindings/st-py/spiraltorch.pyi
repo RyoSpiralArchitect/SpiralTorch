@@ -984,6 +984,20 @@ class CoherenceChannelReport:
     descriptor: str | None
 
 
+class CoherenceSignature:
+    dominant_channel: int | None
+    energy_ratio: float
+    entropy: float
+    mean_coherence: float
+    swap_invariant: bool
+
+
+class CoherenceObservation:
+    is_signature: bool
+    label: str
+    signature: CoherenceSignature | None
+
+
 class CoherenceDiagnostics:
     channel_weights: List[float]
     normalized_weights: List[float]
@@ -1000,6 +1014,7 @@ class CoherenceDiagnostics:
     preserved_channels: int
     discarded_channels: int
     pre_discard: PreDiscardTelemetry | None
+    observation: CoherenceObservation
 
 
 class PreDiscardTelemetry:
@@ -1076,6 +1091,9 @@ class _ZSpaceCoherenceSequencer:
     def clear_pre_discard_snapshots(self) -> None: ...
 
     def __call__(self, x: Tensor) -> Tensor: ...
+
+
+def is_swap_invariant(arrangement: Sequence[float]) -> bool: ...
 
     def dim(self) -> int: ...
 
