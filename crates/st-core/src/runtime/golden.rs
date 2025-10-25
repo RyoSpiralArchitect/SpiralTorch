@@ -23,10 +23,11 @@
 
 #![cfg(feature = "golden")]
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use st_tensor::{Tensor, TensorError};
 use thiserror::Error;
 
@@ -145,24 +146,91 @@ impl Default for GoldenRuntimeConfig {
 /// reduction helpers keep aggregation deterministic.
 #[derive(Clone)]
 pub struct GoldenRuntime {
+    inner: Arc<GoldenRuntimeInner>,
+}
+
+struct GoldenRuntimeInner {
     workers: usize,
-    name: Arc<String>,
-    counter: Arc<AtomicUsize>,
+    name: String,
+    sender: Sender<GoldenTaskMessage>,
+    handles: Mutex<Vec<thread::JoinHandle<()>>>,
+}
+
+enum GoldenTaskMessage {
+    Run(GoldenTask),
+    Shutdown,
+}
+
+type GoldenTask = Box<dyn FnOnce() + Send + 'static>;
+
+pub struct GoldenJoinHandle<R> {
+    receiver: Option<Receiver<thread::Result<R>>>,
+}
+
+impl<R> GoldenJoinHandle<R> {
+    pub fn join(mut self) -> thread::Result<R> {
+        let receiver = self
+            .receiver
+            .take()
+            .expect("golden join handle already consumed");
+        match receiver.recv() {
+            Ok(result) => result,
+            Err(_) => Err(Box::new(GoldenRuntimeError(
+                "golden runtime worker exited before completing task".into(),
+            )) as Box<dyn std::any::Any + Send + 'static>),
+        }
+    }
+}
+
+impl Drop for GoldenRuntimeInner {
+    fn drop(&mut self) {
+        for _ in 0..self.workers {
+            let _ = self.sender.send(GoldenTaskMessage::Shutdown);
+        }
+        let mut handles = self
+            .handles
+            .lock()
+            .expect("golden runtime handles poisoned");
+        for handle in handles.drain(..) {
+            let _ = handle.join();
+        }
+    }
 }
 
 impl GoldenRuntime {
     pub fn new(config: GoldenRuntimeConfig) -> Result<Self, GoldenRuntimeError> {
         let workers = config.worker_threads.max(1);
         let name = config.thread_name.unwrap_or_else(|| "golden".into());
-        Ok(Self {
+        let (sender, receiver) = unbounded::<GoldenTaskMessage>();
+        let handles = Mutex::new(Vec::with_capacity(workers));
+        let inner = Arc::new(GoldenRuntimeInner {
             workers,
-            name: Arc::new(name),
-            counter: Arc::new(AtomicUsize::new(0)),
-        })
+            name: name.clone(),
+            sender,
+            handles,
+        });
+
+        for idx in 0..workers {
+            let thread_name = format!("{}-{}", name, idx);
+            let rx = receiver.clone();
+            let handle = thread::Builder::new()
+                .name(thread_name)
+                .spawn(move || worker_loop(rx))
+                .map_err(|err| {
+                    GoldenRuntimeError(format!("failed to spawn golden worker: {err}"))
+                })?;
+            inner
+                .handles
+                .lock()
+                .expect("golden runtime handles poisoned")
+                .push(handle);
+        }
+
+        Ok(Self { inner })
     }
 
     pub fn worker_count(&self) -> usize {
-        self.workers
+        self.inner.workers
     }
 
     pub fn execute<F, R>(&self, func: F) -> Result<R, GoldenRuntimeError>
@@ -204,17 +272,25 @@ impl GoldenRuntime {
         result.map_err(GoldenTensorError::from)
     }
 
-    pub fn spawn_blocking<F, R>(&self, func: F) -> Result<thread::JoinHandle<R>, GoldenRuntimeError>
+    pub fn spawn_blocking<F, R>(&self, func: F) -> Result<GoldenJoinHandle<R>, GoldenRuntimeError>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        let idx = self.counter.fetch_add(1, Ordering::Relaxed);
-        let label = format!("{}-{}", self.name, idx);
-        thread::Builder::new()
-            .name(label)
-            .spawn(func)
-            .map_err(|err| GoldenRuntimeError(format!("failed to spawn golden worker: {err}")))
+        let (result_tx, result_rx) = unbounded::<thread::Result<R>>();
+        let task = Box::new(move || {
+            let result = panic::catch_unwind(AssertUnwindSafe(func));
+            let _ = result_tx.send(result);
+        });
+
+        self.inner
+            .sender
+            .send(GoldenTaskMessage::Run(task))
+            .map_err(|err| GoldenRuntimeError(format!("failed to schedule golden task: {err}")))?;
+
+        Ok(GoldenJoinHandle {
+            receiver: Some(result_rx),
+        })
     }
 
     pub fn reduce<T, R, Map, Fold>(&self, data: &[T], map: Map, fold: Fold, identity: R) -> R
@@ -224,13 +300,13 @@ impl GoldenRuntime {
         Map: Fn(&T) -> R + Send + Sync,
         Fold: Fn(R, R) -> R + Send + Sync,
     {
-        if self.workers <= 1 || data.len() < 2 {
+        if self.inner.workers <= 1 || data.len() < 2 {
             return data
                 .iter()
                 .map(&map)
                 .fold(identity.clone(), |acc, item| fold(acc, item));
         }
-        let chunk = (data.len() + self.workers - 1) / self.workers;
+        let chunk = (data.len() + self.inner.workers - 1) / self.inner.workers;
         thread::scope(|scope| {
             let mut handles = Vec::new();
             for chunk_items in data.chunks(chunk) {
@@ -249,6 +325,17 @@ impl GoldenRuntime {
                 .map(|handle| handle.join().unwrap_or_else(|_| identity.clone()))
                 .fold(identity.clone(), |acc, item| fold(acc, item))
         })
+    }
+}
+
+fn worker_loop(receiver: Receiver<GoldenTaskMessage>) {
+    while let Ok(message) = receiver.recv() {
+        match message {
+            GoldenTaskMessage::Run(task) => {
+                task();
+            }
+            GoldenTaskMessage::Shutdown => break,
+        }
     }
 }
 
