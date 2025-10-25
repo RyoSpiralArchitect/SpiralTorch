@@ -22,6 +22,7 @@ pub mod layers;
 pub mod lightning;
 pub mod loss;
 pub mod module;
+pub mod optim;
 pub mod plan;
 pub mod roundtable;
 pub mod schedule;
@@ -73,6 +74,7 @@ pub use lightning::{
 };
 pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
+pub use optim::{LocalLearningRateAdapter, SpectralLrAdapter};
 pub use plan::RankPlanner;
 pub use roundtable::{
     simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, DistMode,

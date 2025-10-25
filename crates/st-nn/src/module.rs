@@ -21,8 +21,10 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+use crate::optim::LocalLearningRateAdapter;
 use crate::schedule::GradientBands;
 use st_core::backend::device_caps::DeviceCaps;
+use st_core::ops::zspace_round::SpectralFeatureSample;
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::PsychoidSample;
 use st_tensor::{
@@ -277,6 +279,43 @@ impl Parameter {
         Ok(())
     }
 
+    /// Applies the accumulated update using the provided adapter to modulate the
+    /// effective learning rate.
+    pub fn apply_step_with_adapter(
+        &mut self,
+        fallback_lr: f32,
+        mut adapter: Option<&mut dyn LocalLearningRateAdapter>,
+    ) -> PureResult<()> {
+        if let Some(adapter) = adapter.as_deref_mut() {
+            if let Some(view) = self.primary_gradient_view() {
+                let hint = adapter.sheet_hint().max(1);
+                if let Some(features) = SpectralFeatureSample::from_slice(view, hint) {
+                    let raw = adapter.scale_factor(self.name(), &features);
+                    if raw.is_finite() && raw > 0.0 && (raw - 1.0).abs() > f32::EPSILON {
+                        self.scale_accumulators(raw);
+                    }
+                }
+            }
+        }
+        self.apply_step(fallback_lr)
+    }
+
+    fn primary_gradient_view(&self) -> Option<&[f32]> {
+        if let Some(tape) = self.hypergrad.as_ref() {
+            let gradient = tape.gradient();
+            if !gradient.is_empty() {
+                return Some(gradient);
+            }
+        }
+        if let Some(tape) = self.realgrad.as_ref() {
+            let gradient = tape.gradient();
+            if !gradient.is_empty() {
+                return Some(gradient);
+            }
+        }
+        self.gradient.as_ref().map(|tensor| tensor.data())
+    }
+
     /// Scales any accumulated gradient or hypergradient buffers by the provided factor.
     pub fn scale_accumulators(&mut self, factor: f32) {
         if !factor.is_finite() {
@@ -444,6 +483,22 @@ pub trait Module {
         self.visit_parameters_mut(&mut |param| param.apply_step(fallback_lr))
     }
 
+    /// Applies every parameter update while routing the gradients through the provided adapter.
+    fn apply_step_with_adapter(
+        &mut self,
+        fallback_lr: f32,
+        adapter: Option<&mut dyn LocalLearningRateAdapter>,
+    ) -> PureResult<()> {
+        if let Some(adapter) = adapter {
+            let adapter_ref = adapter;
+            self.visit_parameters_mut(&mut |param| {
+                param.apply_step_with_adapter(fallback_lr, Some(&mut *adapter_ref))
+            })
+        } else {
+            self.apply_step(fallback_lr)
+        }
+    }
+
     /// Clears accumulators across every parameter.
     fn zero_accumulators(&mut self) -> PureResult<()> {
         self.visit_parameters_mut(&mut |param| {
@@ -536,5 +591,29 @@ mod tests {
         param.absorb_text(&encoder, "realgrad").unwrap();
         assert!(param.realgrad().is_some());
         param.apply_step(0.05).unwrap();
+    }
+
+    struct FixedAdapter {
+        factor: f32,
+    }
+
+    impl LocalLearningRateAdapter for FixedAdapter {
+        fn scale_factor(&mut self, _: &str, _: &SpectralFeatureSample) -> f32 {
+            self.factor
+        }
+    }
+
+    #[test]
+    fn parameter_respects_local_lr_adapter() {
+        let mut param = Parameter::new("weight", Tensor::zeros(1, 2).unwrap());
+        let update = Tensor::from_vec(1, 2, vec![0.5, -0.25]).unwrap();
+        param.accumulate_euclidean(&update).unwrap();
+        let mut adapter = FixedAdapter { factor: 2.0 };
+        param
+            .apply_step_with_adapter(0.1, Some(&mut adapter))
+            .unwrap();
+        let values = param.value().data();
+        assert!((values[0] + 0.1 * 0.5 * 2.0).abs() < 1e-6);
+        assert!((values[1] - 0.1 * 0.25 * 2.0).abs() < 1e-6);
     }
 }
