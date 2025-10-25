@@ -11,8 +11,12 @@
 //!   SPIRAL_SOFT_BANDIT_BLEND = <0..1>  (mixing weight for bandit feedback)
 use crate::profile::{AspectClass, DensityClass, ProblemProfile};
 
-use st_logic::{SoftMode, SolveCfg};
+use std::collections::HashMap;
+use std::path::Path;
 
+use serde_json::json;
+use st_kdsl::{autotune_store, cache_key::stable_cache_key};
+use st_logic::{SoftMode, SolveCfg};
 use st_tensor::fractional::gl_coeffs;
 
 fn emphasize(hit: bool, on_hit: f32, on_miss: f32) -> f32 {
@@ -27,6 +31,24 @@ fn fractional_energy(alpha: f32) -> f32 {
     let coeffs = gl_coeffs(alpha, 32);
     let l1 = coeffs.iter().map(|c| c.abs()).sum::<f32>().max(1e-6);
     l1.ln()
+}
+
+fn default_cfg() -> SolveCfg {
+    let soft_mode = match std::env::var("SPIRAL_SOFT_MODE").as_deref() {
+        Ok("Normalize") => SoftMode::Normalize,
+        Ok("Softmax") => SoftMode::Softmax,
+        Ok("Prob") => SoftMode::Prob,
+        _ => SoftMode::Sum,
+    };
+    let beam = std::env::var("SPIRAL_BEAM_K")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok());
+    SolveCfg {
+        noise: 0.02,
+        seed: 0x5u64,
+        beam,
+        soft_mode,
+    }
 }
 
 #[cfg(feature = "learn_store")]
@@ -519,21 +541,37 @@ pub fn choose(rows: usize, cols: usize, nnz: usize, subgroup: bool) -> Choice {
 }
 
 pub fn choose_with_profile(profile: &ProblemProfile) -> Choice {
-    let soft_mode = match std::env::var("SPIRAL_SOFT_MODE").as_deref() {
-        Ok("Normalize") => SoftMode::Normalize,
-        Ok("Softmax") => SoftMode::Softmax,
-        Ok("Prob") => SoftMode::Prob,
-        _ => SoftMode::Sum,
-    };
-    let beam_k = std::env::var("SPIRAL_BEAM_K")
+    let mut cfg = default_cfg();
+    let context = json!({
+        "rows": profile.rows(),
+        "cols": profile.cols(),
+        "nnz": profile.nnz(),
+        "subgroup": profile.subgroup(),
+    });
+    let defs: HashMap<String, String> = HashMap::new();
+    let toolchain = option_env!("RUSTC_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+    let arch = option_env!("CARGO_CFG_TARGET_ARCH").unwrap_or("unknown");
+    let key = stable_cache_key(
+        toolchain,
+        arch,
+        "wgpu_amg",
+        "heuristics",
+        Vec::new(),
+        &defs,
+        &context,
+    );
+    let store = Path::new(".spiraltorch/cache/autotune.json");
+    if std::env::var("SPIRALTORCH_AUTOTUNE")
         .ok()
-        .and_then(|s| s.parse::<usize>().ok());
-    let cfg = SolveCfg {
-        noise: 0.02,
-        seed: 0x5u64,
-        beam: beam_k,
-        soft_mode: soft_mode,
-    };
+        .map_or(true, |v| v != "0")
+    {
+        cfg = autotune_store::load_best_typed(store, &key, &context, cfg);
+    }
+    eprintln!(
+        "[autotune] key={} apply={}",
+        key,
+        std::env::var("SPIRALTORCH_AUTOTUNE").unwrap_or_default()
+    );
 
     #[allow(unused_mut)]
     let mut soft = soft_rules_from_spiralk(profile);
@@ -568,6 +606,7 @@ pub fn choose_with_profile(profile: &ProblemProfile) -> Choice {
             max_depth,
         );
     }
+    let _ = autotune_store::record_best(store, &key, &context, f64::from(choice.score), &cfg);
     choice
 }
 
