@@ -1231,15 +1231,18 @@ impl MacroZBridge {
                 })
                 .unwrap_or(0.0);
             let base_sheets = telemetry.sheet_count.max(1);
-            let desired_sheets = if anis_ratio > 0.0 {
+            let mut desired_sheets = if anis_ratio > 0.0 {
                 ((anis_ratio * 4.0).round() as usize + 2).clamp(2, 16)
             } else {
                 base_sheets.clamp(1, 8)
             };
+            let sector_hint = ((telemetry.topological_sector & 0x7) as usize + 2).clamp(2, 16);
+            let heat_hint = ((telemetry.resonance_heat * 6.0).round() as usize + 2).clamp(2, 16);
+            desired_sheets = desired_sheets.max(sector_hint).max(heat_hint);
             feedback = feedback.with_elliptic_sheet_count(desired_sheets);
 
             let spin = telemetry.spin_alignment.abs();
-            let harmonics = if spin > 0.75 {
+            let mut harmonics = if spin > 0.75 {
                 5
             } else if spin > 0.5 {
                 3
@@ -1248,7 +1251,31 @@ impl MacroZBridge {
             } else {
                 1
             };
+            if telemetry.resonance_heat > 0.45 {
+                harmonics = harmonics.max(4);
+            }
+            if telemetry.resonance_heat > 0.8 {
+                harmonics = harmonics.max(5);
+            }
+            if telemetry.noise_density > 0.6 {
+                harmonics = harmonics.min(2);
+            }
+            if telemetry.topological_sector & 0x3 == 3 {
+                harmonics = harmonics.max(4);
+            }
             feedback = feedback.with_elliptic_spin_harmonics(harmonics);
+
+            let smoothing_hint =
+                (smoothing * (1.0 - telemetry.noise_density).clamp(0.1, 0.95)).clamp(0.0, 1.0);
+            feedback = feedback.with_smoothing(smoothing_hint);
+            let bias_hint = (1.0 + telemetry.resonance_heat * 0.3)
+                * (1.0 - telemetry.noise_density * 0.5)
+                * (1.0 + telemetry.rotor_field[2].abs() * 0.2);
+            feedback = feedback.with_bias_gain(bias_gain * bias_hint);
+            let tempo_hint = vel_mag.max(0.01)
+                + telemetry.flow_vector[2].abs() * 0.25
+                + telemetry.resonance_heat * 0.2;
+            feedback = feedback.with_tempo_hint(tempo_hint.max(0.01));
         }
 
         feedback

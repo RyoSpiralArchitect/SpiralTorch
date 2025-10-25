@@ -135,6 +135,60 @@ impl MultiViewDatasetAdapter {
         })
     }
 
+    /// Samples a contiguous span of rays from a specific frame with optional stride.
+    pub fn sample_contiguous_span(
+        &self,
+        frame_index: usize,
+        start: usize,
+        count: usize,
+        stride: usize,
+    ) -> PureResult<RayBatch> {
+        if count == 0 {
+            return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 });
+        }
+        if stride == 0 {
+            return Err(TensorError::InvalidValue {
+                label: "ray_stride",
+            });
+        }
+        let frame = self
+            .frames
+            .get(frame_index)
+            .ok_or(TensorError::InvalidValue {
+                label: "frame_index",
+            })?;
+        let mut origin_buffer = Vec::with_capacity(count * self.origin_dims);
+        let mut dir_buffer = Vec::with_capacity(count * self.origin_dims);
+        let mut color_buffer = Vec::with_capacity(count * 3);
+        let mut bound_buffer = Vec::with_capacity(count * 2);
+        for i in 0..count {
+            let ray_index = start + i.saturating_mul(stride);
+            if ray_index >= frame.len() {
+                return Err(TensorError::InvalidValue { label: "ray_index" });
+            }
+            copy_row(
+                frame.origins.data(),
+                self.origin_dims,
+                ray_index,
+                &mut origin_buffer,
+            );
+            copy_row(
+                frame.directions.data(),
+                self.origin_dims,
+                ray_index,
+                &mut dir_buffer,
+            );
+            copy_row(frame.colors.data(), 3, ray_index, &mut color_buffer);
+            copy_row(frame.bounds.data(), 2, ray_index, &mut bound_buffer);
+        }
+        Ok(RayBatch {
+            origins: Tensor::from_vec(count, self.origin_dims, origin_buffer)?,
+            directions: Tensor::from_vec(count, self.origin_dims, dir_buffer)?,
+            colors: Tensor::from_vec(count, 3, color_buffer)?,
+            bounds: Tensor::from_vec(count, 2, bound_buffer)?,
+        })
+    }
+
     /// Returns an immutable view over the underlying frames.
     pub fn frames(&self) -> &[MultiViewFrame] {
         &self.frames
@@ -189,5 +243,38 @@ mod tests {
         assert_eq!(batch.directions.shape(), (4, 3));
         assert_eq!(batch.colors.shape(), (4, 3));
         assert_eq!(batch.bounds.shape(), (4, 2));
+    }
+
+    #[test]
+    fn adapter_samples_contiguous_span() {
+        let frame = MultiViewFrame::new(
+            Tensor::from_vec(
+                4,
+                3,
+                vec![0.0, 0.1, 0.2, 1.0, 1.1, 1.2, 2.0, 2.1, 2.2, 3.0, 3.1, 3.2],
+            )
+            .unwrap(),
+            Tensor::from_vec(
+                4,
+                3,
+                vec![0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.5, 0.5],
+            )
+            .unwrap(),
+            Tensor::from_vec(
+                4,
+                3,
+                vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5],
+            )
+            .unwrap(),
+            Tensor::from_vec(4, 2, vec![0.0, 1.0, 0.1, 1.1, 0.2, 1.2, 0.3, 1.3]).unwrap(),
+        )
+        .unwrap();
+        let dataset = MultiViewDatasetAdapter::new(vec![frame]).unwrap();
+        let batch = dataset
+            .sample_contiguous_span(0, 1, 2, 2)
+            .expect("contiguous sampling should succeed");
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch.origins.data(), &[1.0, 1.1, 1.2, 3.0, 3.1, 3.2]);
+        assert_eq!(batch.bounds.data(), &[0.1, 1.1, 0.3, 1.3]);
     }
 }
