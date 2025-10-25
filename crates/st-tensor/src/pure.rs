@@ -1069,7 +1069,16 @@ impl Tensor {
             let expected_row = i64::try_from(cols).map_err(|_| TensorError::DlpackError {
                 message: format!("cols {cols} exceed i64 range"),
             })?;
-            if strides != [expected_row, 1] {
+
+            // Treat degenerate layouts as contiguous row-major:
+            // * When there is a single row, the stride along that axis is irrelevant.
+            // * When there is a single column, a stride of 1 still respects row-major
+            //   assumptions and matches how column vectors are typically exported.
+            let row_ok =
+                strides[0] == expected_row || rows_i64 == 1 || (cols_i64 == 1 && strides[0] == 1);
+            let col_ok = strides[1] == 1;
+
+            if !(row_ok && col_ok) {
                 return Err(TensorError::DlpackError {
                     message: format!(
                         "only contiguous row-major tensors are supported; received strides {:?}",

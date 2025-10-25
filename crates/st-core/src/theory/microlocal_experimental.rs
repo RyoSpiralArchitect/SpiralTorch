@@ -25,7 +25,8 @@ pub mod experimental {
     //! unit tests: interface detection, orientation reconstruction, Z-lift
     //! projection, and policy-controlled fusion.
 
-    use crate::telemetry::hub::SoftlogicZFeedback;
+    use crate::telemetry::hub::{SoftlogicEllipticSample, SoftlogicZFeedback};
+    use crate::theory::microlocal::EllipticTelemetry;
     use crate::theory::microlocal_bank::GaugeBank;
     use crate::theory::zpulse::{
         ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
@@ -497,6 +498,7 @@ pub mod experimental {
         pub z_bias: f32,
         pub quality_hint: Option<f32>,
         pub standard_error: Option<f32>,
+        pub elliptic: Option<EllipticTelemetry>,
     }
 
     impl InterfaceZPulse {
@@ -566,6 +568,7 @@ pub mod experimental {
                 },
                 quality_hint: None,
                 standard_error: None,
+                elliptic: None,
             }
         }
 
@@ -594,6 +597,7 @@ pub mod experimental {
                 z_bias: lerp(current.z_bias, next.z_bias, t),
                 quality_hint: next.quality_hint.or(current.quality_hint),
                 standard_error: next.standard_error.or(current.standard_error),
+                elliptic: current.elliptic.clone().or_else(|| next.elliptic.clone()),
             }
         }
 
@@ -613,6 +617,7 @@ pub mod experimental {
                 z_bias: self.z_bias * gain,
                 quality_hint: self.quality_hint,
                 standard_error: self.standard_error,
+                elliptic: self.elliptic.clone(),
             }
         }
 
@@ -630,6 +635,7 @@ pub mod experimental {
                 scale: self.scale,
                 events: Vec::new(),
                 attributions: Vec::new(),
+                elliptic: self.elliptic.as_ref().map(SoftlogicEllipticSample::from),
             }
         }
 
@@ -654,6 +660,7 @@ pub mod experimental {
                 z_bias: 0.0,
                 quality_hint: None,
                 standard_error: None,
+                elliptic: None,
             }
         }
     }

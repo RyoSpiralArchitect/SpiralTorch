@@ -127,13 +127,14 @@ impl Geometry {
         }
 
         for &candidate in REDUCE_CANDIDATES {
-            if candidate <= max_inv {
+            if candidate <= max_wg_x && candidate <= max_inv {
                 geometry.reduce_wg = candidate;
                 return geometry;
             }
         }
 
-        geometry.reduce_wg = cmp::min(DEFAULT_REDUCE_WG, max_inv).max(1);
+        let reduce_cap = cmp::min(max_wg_x, max_inv);
+        geometry.reduce_wg = cmp::min(DEFAULT_REDUCE_WG, reduce_cap).max(1);
         geometry
     }
 }

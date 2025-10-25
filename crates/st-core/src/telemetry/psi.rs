@@ -31,12 +31,13 @@ use crate::theory::spiral_dynamics::{HopfRegime, PsiSpiralMetrics};
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct PsiComponent: u32 {
-        const LOSS         = 1 << 0;
-        const GRAD_NORM    = 1 << 1;
-        const UPDATE_RATIO = 1 << 2;
-        const ACT_DRIFT    = 1 << 3;
-        const ATTN_ENTROPY = 1 << 4;
-        const BAND_ENERGY  = 1 << 5;
+        const LOSS               = 1 << 0;
+        const GRAD_NORM          = 1 << 1;
+        const UPDATE_RATIO       = 1 << 2;
+        const ACT_DRIFT          = 1 << 3;
+        const ATTN_ENTROPY       = 1 << 4;
+        const BAND_ENERGY        = 1 << 5;
+        const POSITIVE_CURVATURE = 1 << 6;
     }
 }
 
@@ -47,6 +48,7 @@ impl PsiComponent {
             | PsiComponent::GRAD_NORM
             | PsiComponent::UPDATE_RATIO
             | PsiComponent::ACT_DRIFT
+            | PsiComponent::POSITIVE_CURVATURE
     }
 
     fn label(self) -> &'static str {
@@ -57,6 +59,7 @@ impl PsiComponent {
             PsiComponent::ACT_DRIFT => "act_drift",
             PsiComponent::ATTN_ENTROPY => "attn_entropy",
             PsiComponent::BAND_ENERGY => "band_energy",
+            PsiComponent::POSITIVE_CURVATURE => "positive_curvature",
             _ => "unknown",
         }
     }
@@ -69,8 +72,11 @@ impl PsiComponent {
             "act" | "act_drift" | "drift" => Ok(PsiComponent::ACT_DRIFT),
             "attn" | "attn_entropy" | "attention" | "entropy" => Ok(PsiComponent::ATTN_ENTROPY),
             "band" | "band_energy" | "energy" => Ok(PsiComponent::BAND_ENERGY),
+            "curv" | "curvature" | "positive_curvature" | "pos_curv" => {
+                Ok(PsiComponent::POSITIVE_CURVATURE)
+            }
             other => Err(format!(
-                "unknown psi component '{}': expected one of Loss, Grad, Update, Act, Attn, Band",
+                "unknown psi component '{}': expected one of Loss, Grad, Update, Act, Attn, Band, Curvature",
                 other
             )),
         }
@@ -140,7 +146,8 @@ impl PsiConfig {
         };
         let mut cfg = PsiConfig::default();
         cfg.enabled = true;
-        cfg.components = PsiComponent::defaults() | PsiComponent::BAND_ENERGY;
+        cfg.components =
+            PsiComponent::defaults() | PsiComponent::BAND_ENERGY | PsiComponent::POSITIVE_CURVATURE;
         cfg.ema_alpha = ema_alpha;
         cfg.sample_rate = sample_rate.max(1);
         cfg.weights.insert(PsiComponent::LOSS, 1.0);
@@ -155,6 +162,10 @@ impl PsiConfig {
             PsiComponent::BAND_ENERGY,
             (hint.band_focus / depth as f32).clamp(0.1, 0.5),
         );
+        let curvature_weight =
+            ((hint.above.max(hint.beneath)) as f32 / depth as f32).clamp(0.1, 0.6);
+        cfg.weights
+            .insert(PsiComponent::POSITIVE_CURVATURE, curvature_weight);
         cfg
     }
 
@@ -223,6 +234,7 @@ pub struct PsiInput {
     pub act_drift: f32,
     pub attn_entropy: f32,
     pub band_energy: f32,
+    pub curvature_pos: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -330,6 +342,8 @@ impl PsiSpiralAdvisory {
             required_components |= PsiComponent::ACT_DRIFT | PsiComponent::BAND_ENERGY;
             weight_increments.insert(PsiComponent::ACT_DRIFT, 0.2 * reinforcement);
             weight_increments.insert(PsiComponent::BAND_ENERGY, 0.15 * reinforcement);
+            required_components |= PsiComponent::POSITIVE_CURVATURE;
+            weight_increments.insert(PsiComponent::POSITIVE_CURVATURE, 0.1 * reinforcement);
         }
 
         let audit_bias = self.audit_container_gap.max(0.0);
@@ -450,6 +464,9 @@ impl PsiMeter {
             cfg.weights.insert(PsiComponent::UPDATE_RATIO, 0.4);
             cfg.weights.insert(PsiComponent::ACT_DRIFT, 0.2);
         }
+        cfg.weights
+            .entry(PsiComponent::POSITIVE_CURVATURE)
+            .or_insert(0.25);
         if cfg.ema_alpha <= 0.0 || cfg.ema_alpha >= 1.0 {
             cfg.ema_alpha = 0.2;
         }
@@ -472,6 +489,7 @@ impl PsiMeter {
             PsiComponent::ACT_DRIFT => x.act_drift,
             PsiComponent::ATTN_ENTROPY => x.attn_entropy,
             PsiComponent::BAND_ENERGY => x.band_energy,
+            PsiComponent::POSITIVE_CURVATURE => x.curvature_pos,
             _ => 0.0,
         }
     }
@@ -510,6 +528,7 @@ impl PsiMeter {
             PsiComponent::ACT_DRIFT,
             PsiComponent::ATTN_ENTROPY,
             PsiComponent::BAND_ENERGY,
+            PsiComponent::POSITIVE_CURVATURE,
         ]
         .iter()
         {
@@ -661,6 +680,27 @@ mod tests {
         match &events[0] {
             PsiEvent::ThresholdCross { up, .. } => assert!(!*up),
         }
+    }
+
+    #[test]
+    fn positive_curvature_component_tracks_metric() {
+        let mut cfg = PsiConfig::default();
+        cfg.enabled = true;
+        cfg.components = PsiComponent::POSITIVE_CURVATURE;
+        cfg.ema_alpha = 0.5;
+        cfg.weights.insert(PsiComponent::POSITIVE_CURVATURE, 1.0);
+        let mut meter = PsiMeter::new(cfg);
+        let (reading, _) = meter.update(&PsiInput {
+            curvature_pos: 0.8,
+            ..PsiInput::default()
+        });
+        let curvature = reading
+            .breakdown
+            .get(&PsiComponent::POSITIVE_CURVATURE)
+            .copied()
+            .unwrap_or(0.0);
+        assert!(curvature > 0.0);
+        assert!(reading.total > 0.0);
     }
 
     #[test]

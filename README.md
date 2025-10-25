@@ -227,7 +227,8 @@ tensor shims, no translation layers, and no tracebacks.
   - **Interpretability as a first-class citizen:** Hypergrad tapes, roundtable
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
-**Current release:** `spiraltorch==0.2.4` (abi3 wheel, Python ≥3.8)  
+    
+**Current release:** `spiraltorch==0.2.6` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -235,7 +236,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.2.4
+pip install -U spiraltorch==0.2.6
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -615,6 +616,7 @@ spotlights on graph-node materialisation versus return-handle delivery:
 - [Coded-Envelope Maxwell Model (M₀^code)](docs/coded_envelope_maxwell_model.md) — Technical memo on the sequential detection framework that couples physical fingerprints with semantic gating.
 - [Conceptual Entropy and Qualia](docs/conceptual_entropy_qualia.md) — SpiralTorch-oriented translation of the qualia report tracing how the term drifts across philosophy, neuroscience, and public discourse.
 - [Drift-Response Linguistics for Z-space Language Training](docs/drift_response_linguistics.md) — Full write-up of the existential load / safe radius theory, signature geometry with timing elasticities, tipping radii, and direction-aware safe radii, plus how SpiralTorch wires DRL penalties into trainers and governance loops.
+- [General Relativity Couplings inside Z-space](docs/general_relativity_zspace.md) — How Lorentzian curvature feeds Einstein tensors into ZPulse telemetry so gravitational signals steer the cooperative runtime.
 - [Invariant barrier gating and contraction notes](docs/invariant_barrier_design.md) — Design cheatsheet covering safety barriers, steady amplitudes, and contraction-rate lower bounds for Spiral dynamics controllers.
 - [COBOL web dispatch quickstart](docs/cobol_web_dispatch.md) — structure of the WASM planner and how to shuttle envelopes into MQ or CICS entrypoints.
 - [SpinoTensorVector derivation notes](docs/stv_z_space.md), Start architecting Z-space kernels with the new  covering determinant identities, kernel causality, and minimal-norm constructions ready for implementation.
