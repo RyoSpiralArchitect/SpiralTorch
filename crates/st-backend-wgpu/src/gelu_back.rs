@@ -525,7 +525,25 @@ mod tests {
         let geom = Geometry::autotune_with_limits(&limits);
         assert_eq!(geom.wg_cols, 64);
         assert_eq!(geom.wg_rows, 4);
-        assert!(geom.reduce_wg >= 256);
+        const REDUCE_CANDIDATES: &[u32] = &[512, 384, 256, 192, 128, 96, 64, 48, 32, 16];
+        let expected_reduce = REDUCE_CANDIDATES
+            .iter()
+            .copied()
+            .find(|&candidate| {
+                candidate <= limits.max_compute_workgroup_size_x
+                    && candidate <= limits.max_compute_invocations_per_workgroup
+            })
+            .unwrap_or_else(|| {
+                cmp::min(
+                    DEFAULT_REDUCE_WG,
+                    cmp::min(
+                        limits.max_compute_workgroup_size_x.max(1),
+                        limits.max_compute_invocations_per_workgroup.max(1),
+                    ),
+                )
+                .max(1)
+            });
+        assert_eq!(geom.reduce_wg, expected_reduce);
     }
 
     #[test]
