@@ -56,6 +56,7 @@ pub use language::{
     DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
     DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, GeometryBiasConfig,
     GeometryBiasContext, GeometryBiasMetrics, GeometryBiasSnapshot, GeometryBiasUpdate,
+    GeometryCoherenceSample,
     LanguagePipeline, LanguagePipelineBuilder, MaxwellDesireBridge, NarrativeHint, PipelineError,
     PipelineResult, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
     TemperatureController,

@@ -365,6 +365,44 @@ pub struct GeometryBiasMetrics {
     pub latest: Option<GeometryBiasSnapshot>,
 }
 
+/// Coherence-oriented summary derived from the most recent geometry bias
+/// signals. Values are already weighted according to the configured signal
+/// strengths so downstream consumers can reason about aggregate energy without
+/// needing to re-apply weights.
+#[derive(Clone, Debug)]
+pub struct GeometryCoherenceSample {
+    pub z_energy: f32,
+    pub roundtable_energy: f32,
+    pub composite_energy: f32,
+    pub timestamp: SystemTime,
+}
+
+impl GeometryCoherenceSample {
+    pub fn balance(&self) -> f32 {
+        let total = self.z_energy + self.roundtable_energy;
+        if total <= f32::EPSILON {
+            0.0
+        } else {
+            (self.z_energy - self.roundtable_energy).abs() / total
+        }
+    }
+
+    pub fn coherence(&self) -> f32 {
+        self.composite_energy
+    }
+}
+
+impl Default for GeometryCoherenceSample {
+    fn default() -> Self {
+        Self {
+            z_energy: 0.0,
+            roundtable_energy: 0.0,
+            composite_energy: 0.0,
+            timestamp: UNIX_EPOCH,
+        }
+    }
+}
+
 #[cfg(test)]
 mod geometry_bias_tests {
     use super::*;
@@ -433,7 +471,7 @@ mod geometry_bias_tests {
     }
 
     #[test]
-    fn geometry_bias_adjusts_logits_and_metrics() {
+    fn geometry_bias_observes_coherence_and_metrics() {
         let automation = build_automation();
         let mut pipeline = DesirePipeline::builder(automation)
             .with_geometry_bias(GeometryBiasConfig::default())
@@ -448,13 +486,17 @@ mod geometry_bias_tests {
         let concept = ConceptHint::Distribution(vec![0.5, 0.5]);
         let now = Instant::now();
         let timestamp = SystemTime::now();
-        let step = pipeline
+        pipeline
             .step_at(&logits, 0, &concept, now, timestamp)
             .unwrap();
-        assert_eq!(step.solution.indices.len(), 2);
         let metrics = pipeline.geometry_bias_metrics().expect("metrics");
         assert!(metrics.accuracy_mean.is_finite());
         assert!(metrics.fairness_mean.is_finite());
+        let coherence = pipeline
+            .geometry_bias_coherence()
+            .expect("coherence sample");
+        assert!(coherence.coherence().is_finite());
+        assert!(coherence.balance().is_finite());
     }
 
     #[test]
@@ -484,6 +526,7 @@ mod geometry_bias_tests {
             .step_at(&logits, 0, &concept, later, later_ts)
             .unwrap();
         assert!(pipeline.geometry_bias_metrics().is_some());
+        assert!(pipeline.geometry_bias_coherence().is_some());
     }
 
     #[test]
@@ -525,6 +568,7 @@ struct GeometryBiasHook {
     roundtable_signal: Option<Vec<f32>>,
     history: VecDeque<GeometryBiasSnapshot>,
     latest: Option<GeometryBiasSnapshot>,
+    coherence: Option<GeometryCoherenceSample>,
 }
 
 impl GeometryBiasHook {
@@ -535,6 +579,7 @@ impl GeometryBiasHook {
             roundtable_signal: None,
             history: VecDeque::new(),
             latest: None,
+            coherence: None,
         }
     }
 
@@ -569,36 +614,10 @@ impl GeometryBiasHook {
                 self.roundtable_signal = None;
                 self.history.clear();
                 self.latest = None;
+                self.coherence = None;
             }
         }
         Ok(())
-    }
-
-    fn project(
-        &mut self,
-        logits: &[f32],
-        context: GeometryBiasContext,
-        timestamp: SystemTime,
-    ) -> PureResult<Option<Vec<f32>>> {
-        if logits.is_empty() || !self.should_apply(context) {
-            return Ok(None);
-        }
-        let adjustments = match self.compose_adjustments(logits.len()) {
-            Some(adjustments) => adjustments,
-            None => return Ok(None),
-        };
-        let mut adjusted = logits.to_vec();
-        for (value, bias) in adjusted.iter_mut().zip(adjustments.iter()) {
-            let new_value = *value + *bias;
-            if !new_value.is_finite() {
-                return Err(TensorError::InvalidValue {
-                    label: "geometry bias produced non-finite logit",
-                });
-            }
-            *value = new_value;
-        }
-        self.record_metrics(&adjustments, timestamp);
-        Ok(Some(adjusted))
     }
 
     fn metrics(&self) -> Option<GeometryBiasMetrics> {
@@ -623,6 +642,52 @@ impl GeometryBiasHook {
         })
     }
 
+    fn observe(&mut self, context: GeometryBiasContext, timestamp: SystemTime) {
+        if !self.should_apply(context) {
+            return;
+        }
+        let Some(sample) = self.build_coherence_sample(timestamp) else {
+            return;
+        };
+        self.record_metrics(&sample);
+        self.coherence = Some(sample);
+    }
+
+    fn build_coherence_sample(&self, timestamp: SystemTime) -> Option<GeometryCoherenceSample> {
+        if !self.has_signal() {
+            return None;
+        }
+        let z_energy = Self::signal_energy(self.z_signal.as_deref(), self.config.z_weight);
+        let roundtable_energy =
+            Self::signal_energy(self.roundtable_signal.as_deref(), self.config.roundtable_weight);
+        if z_energy <= f32::EPSILON && roundtable_energy <= f32::EPSILON {
+            return None;
+        }
+        let composite_energy = z_energy + roundtable_energy;
+        Some(GeometryCoherenceSample {
+            z_energy,
+            roundtable_energy,
+            composite_energy,
+            timestamp,
+        })
+    }
+
+    fn signal_energy(signal: Option<&[f32]>, weight: f32) -> f32 {
+        let Some(values) = signal else {
+            return 0.0;
+        };
+        if values.is_empty() || weight.abs() <= f32::EPSILON {
+            return 0.0;
+        }
+        let sum_sq: f32 = values.iter().map(|value| value * value).sum();
+        let len = values.len() as f32;
+        if len <= 0.0 {
+            return 0.0;
+        }
+        let rms = (sum_sq / len).sqrt();
+        (rms * weight.abs()).max(0.0)
+    }
+
     fn should_apply(&self, context: GeometryBiasContext) -> bool {
         let enabled = match context {
             GeometryBiasContext::Inference => self.config.apply_inference,
@@ -635,39 +700,6 @@ impl GeometryBiasHook {
         self.z_signal.is_some() || self.roundtable_signal.is_some()
     }
 
-    fn compose_adjustments(&self, len: usize) -> Option<Vec<f32>> {
-        if len == 0 {
-            return None;
-        }
-        let mut adjustments = vec![0.0f32; len];
-        let mut applied = false;
-        if let Some(signal) = &self.z_signal {
-            applied |= Self::inject_signal(&mut adjustments, signal, self.config.z_weight);
-        }
-        if let Some(signal) = &self.roundtable_signal {
-            applied |= Self::inject_signal(&mut adjustments, signal, self.config.roundtable_weight);
-        }
-        if applied {
-            Some(adjustments)
-        } else {
-            None
-        }
-    }
-
-    fn inject_signal(target: &mut [f32], signal: &[f32], weight: f32) -> bool {
-        if weight.abs() <= f32::EPSILON || signal.is_empty() || target.is_empty() {
-            return false;
-        }
-        let len = signal.len();
-        for (idx, value) in target.iter_mut().enumerate() {
-            let contribution = signal[idx % len] * weight;
-            if contribution != 0.0 {
-                *value += contribution;
-            }
-        }
-        true
-    }
-
     fn validate_signal(signal: &[f32]) -> PureResult<()> {
         if signal.iter().any(|value| !value.is_finite()) {
             return Err(TensorError::InvalidValue {
@@ -677,33 +709,14 @@ impl GeometryBiasHook {
         Ok(())
     }
 
-    fn record_metrics(&mut self, adjustments: &[f32], timestamp: SystemTime) {
-        if adjustments.is_empty() {
-            return;
-        }
-        let mut mean_abs = 0.0f32;
-        let mut max_value = f32::MIN;
-        let mut min_value = f32::MAX;
-        for &value in adjustments {
-            let abs = value.abs();
-            mean_abs += abs;
-            max_value = max_value.max(value);
-            min_value = min_value.min(value);
-        }
-        let count = adjustments.len() as f32;
-        if count <= 0.0 {
-            return;
-        }
-        mean_abs /= count;
-        let accuracy = (1.0 / (1.0 + mean_abs)).clamp(0.0, 1.0);
-        let spread = (max_value - min_value).abs();
-        let denom = 1.0 + max_value.abs() + min_value.abs();
-        let fairness_gap = (spread / denom).clamp(0.0, 1.0);
+    fn record_metrics(&mut self, sample: &GeometryCoherenceSample) {
+        let accuracy = (1.0 / (1.0 + sample.coherence())).clamp(0.0, 1.0);
+        let fairness_gap = sample.balance().clamp(0.0, 1.0);
         let fairness = (1.0 - fairness_gap).clamp(0.0, 1.0);
         let snapshot = GeometryBiasSnapshot {
             accuracy,
             fairness,
-            timestamp,
+            timestamp: sample.timestamp,
         };
         self.latest = Some(snapshot.clone());
         self.history.push_back(snapshot);
@@ -711,6 +724,10 @@ impl GeometryBiasHook {
         while self.history.len() > limit {
             self.history.pop_front();
         }
+    }
+
+    fn latest_coherence(&self) -> Option<&GeometryCoherenceSample> {
+        self.coherence.as_ref()
     }
 }
 
@@ -828,15 +845,9 @@ impl DesirePipeline {
         self.geometry_bias.as_mut().unwrap()
     }
 
-    fn project_logits(
-        &mut self,
-        logits: &[f32],
-        timestamp: SystemTime,
-    ) -> PureResult<Option<Vec<f32>>> {
+    fn observe_geometry_bias(&mut self, timestamp: SystemTime) {
         if let Some(hook) = self.geometry_bias.as_mut() {
-            hook.project(logits, self.bias_context, timestamp)
-        } else {
-            Ok(None)
+            hook.observe(self.bias_context, timestamp);
         }
     }
 
@@ -857,6 +868,12 @@ impl DesirePipeline {
 
     pub fn geometry_bias_metrics(&self) -> Option<GeometryBiasMetrics> {
         self.geometry_bias.as_ref().and_then(|hook| hook.metrics())
+    }
+
+    pub fn geometry_bias_coherence(&self) -> Option<GeometryCoherenceSample> {
+        self.geometry_bias
+            .as_ref()
+            .and_then(|hook| hook.latest_coherence().cloned())
     }
 
     pub fn enable_geometry_bias_inference(&mut self) {
@@ -931,11 +948,10 @@ impl DesirePipeline {
         now: Instant,
         timestamp: SystemTime,
     ) -> PureResult<DesireAutomatedStep> {
-        let adjusted = self.project_logits(lm_logits, timestamp)?;
-        let logits_view = adjusted.as_deref().unwrap_or(lm_logits);
         let step = self
             .automation
-            .step(logits_view, previous_token, concept_hint, now)?;
+            .step(lm_logits, previous_token, concept_hint, now)?;
+        self.observe_geometry_bias(timestamp);
         self.dispatch(&step, timestamp)?;
         Ok(step)
     }
@@ -949,15 +965,14 @@ impl DesirePipeline {
         now: Instant,
         timestamp: SystemTime,
     ) -> PureResult<DesireAutomatedStep> {
-        let adjusted = self.project_logits(lm_logits, timestamp)?;
-        let logits_view = adjusted.as_deref().unwrap_or(lm_logits);
         let step = self.automation.step_with_weights(
-            logits_view,
+            lm_logits,
             previous_token,
             concept_hint,
             weights,
             now,
         )?;
+        self.observe_geometry_bias(timestamp);
         self.dispatch(&step, timestamp)?;
         Ok(step)
     }

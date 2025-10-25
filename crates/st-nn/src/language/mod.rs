@@ -29,7 +29,7 @@ pub use pipeline::{
     DesireRoundtableEvent, DesireRoundtableImpulse, DesireRoundtableSummary, DesireTelemetrySink,
     DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
     DesireTriggerEvent, GeometryBiasConfig, GeometryBiasContext, GeometryBiasMetrics,
-    GeometryBiasSnapshot, GeometryBiasUpdate,
+    GeometryBiasSnapshot, GeometryBiasUpdate, GeometryCoherenceSample,
 };
 #[cfg(feature = "psi")]
 pub use pipeline::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
