@@ -3386,6 +3386,10 @@ pub fn ramanujan_pi_gpu(iterations: usize) -> Result<f64, String> {
     Ok(values.get(0).copied().unwrap_or(0.0) as f64)
 }
 
+fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
+    select_tile_config(rows, inner, cols)
+}
+
 fn select_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     let rows = rows as u32;
     let cols = cols as u32;
