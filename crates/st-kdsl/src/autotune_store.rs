@@ -296,14 +296,27 @@ pub fn lookup_best<C: Serialize>(path: &Path, key: &str, context: &C) -> Option<
         .next()
 }
 
+pub fn load_best_typed<T, C>(path: &Path, key: &str, context: &C, default: T) -> T
+where
+    T: for<'de> Deserialize<'de> + Clone,
+    C: Serialize,
+{
+    if let Some(entry) = lookup_best(path, key, context) {
+        if let Ok(value) = serde_json::from_value::<T>(entry.params) {
+            return value;
+        }
+    }
+    default
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::Serialize;
+    use serde::{Deserialize, Serialize};
     use std::fs;
     use tempfile::NamedTempFile;
 
-    #[derive(Serialize)]
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
     struct Params {
         x: u32,
     }
@@ -324,6 +337,18 @@ mod tests {
         assert_eq!(entry.score, 2.5);
         assert_eq!(entry.params["x"].as_u64(), Some(3));
         assert_eq!(entry.features.len(), 1);
+    }
+
+    #[test]
+    fn load_best_typed_returns_best_params() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+        let ctx = Ctx { dim: 16 };
+        assert!(record_best(path, "key", &ctx, 3.0, &Params { x: 1 }).unwrap());
+        assert!(record_best(path, "key", &ctx, 2.0, &Params { x: 42 }).unwrap());
+
+        let loaded = load_best_typed(path, "key", None::<Params>);
+        assert_eq!(loaded, Some(Params { x: 42 }));
     }
 
     #[test]

@@ -730,6 +730,13 @@ def z_space_barycenter(
     coupling: Tensor | None = ...,
 ) -> ZSpaceBarycenter: ...
 
+def zspace_eval(
+    real: Sequence[float],
+    imag: Sequence[float],
+    z_re: Sequence[float],
+    z_im: Sequence[float],
+) -> List[Tuple[float, float]]: ...
+
 def plan(
     kind: str,
     rows: int,
@@ -2054,6 +2061,7 @@ __all__ = [
     "masked_mse",
     "gl_coeffs_adaptive",
     "fracdiff_gl_1d",
+    "zspace_eval",
     "QueryPlan",
     "RecEpochReport",
     "ContextualLagrangianGate",

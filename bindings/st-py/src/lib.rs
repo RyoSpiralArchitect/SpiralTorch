@@ -22,6 +22,7 @@ mod hpo;
 mod trainer;
 mod vision;
 mod scale_stack;
+mod zspace;
 
 mod extras {
     use super::*;
@@ -163,6 +164,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     scale_stack::register(py, m)?;
     trainer::register(py, m)?;
     vision::register(py, m)?;
+    zspace::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;
@@ -207,6 +209,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",
         "gl_coeffs_adaptive","fracdiff_gl_1d",
+        "zspace_eval",
         "SpiralKFftPlan","MaxwellSpiralKBridge","MaxwellSpiralKHint",
         "SpiralKContext","SpiralKWilsonMetrics","SpiralKHeuristicHint",
         "wilson_lower_bound","should_rewrite","synthesize_program","rewrite_with_wilson",

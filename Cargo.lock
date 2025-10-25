@@ -2819,6 +2819,8 @@ dependencies = [
 name = "st-amg"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
+ "st-kdsl",
  "st-logic",
  "st-tensor",
 ]
