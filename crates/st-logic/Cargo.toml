@@ -18,7 +18,6 @@ nalgebra = "0.32"
 st-softlogic = { path = "../st-softlogic" }
 serde = { version = "1", optional = true, features = ["derive"] }
 serde_json = { version = "1", optional = true }
-st-nn = { path = "../st-nn", optional = true }
 st-tensor = { path = "../st-tensor" }
 
 [package.metadata.spiraltorch]
