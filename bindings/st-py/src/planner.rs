@@ -16,11 +16,22 @@ use st_kdsl::{self, Ctx as SpiralKCtx, Hard as SpiralKHard};
 #[pyclass(module = "spiraltorch", name = "RankPlan")]
 pub(crate) struct PyRankPlan {
     inner: RankPlan,
+    kind_override: Option<&'static str>,
 }
 
 impl PyRankPlan {
     fn from_plan(inner: RankPlan) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            kind_override: None,
+        }
+    }
+
+    fn from_plan_with_override(inner: RankPlan, kind: Option<&'static str>) -> Self {
+        Self {
+            inner,
+            kind_override: kind,
+        }
     }
 
     pub(crate) fn plan(&self) -> &RankPlan {
@@ -134,7 +145,8 @@ fn apply_spiralk_overrides(
 impl PyRankPlan {
     #[getter]
     fn kind(&self) -> &'static str {
-        self.inner.kind.as_str()
+        self.kind_override
+            .unwrap_or_else(|| self.inner.kind.as_str())
     }
 
     #[getter]
@@ -258,7 +270,10 @@ impl PyRankPlan {
         let out = st_kdsl::eval_program(script, &ctx).map_err(spiralk_err_to_py)?;
         let mut updated = self.inner.clone();
         apply_spiralk_overrides(&mut updated.choice, &out.hard);
-        Ok(PyRankPlan::from_plan(updated))
+        Ok(PyRankPlan::from_plan_with_override(
+            updated,
+            self.kind_override,
+        ))
     }
 
     #[cfg(not(feature = "kdsl"))]
@@ -367,6 +382,7 @@ fn plan_impl(
     subgroup: Option<bool>,
     max_workgroup: Option<u32>,
     shared_mem_per_workgroup: Option<u32>,
+    kind_override: Option<&'static str>,
 ) -> PyResult<PyRankPlan> {
     let backend_kind = parse_backend(backend)?;
     let caps = build_caps(
@@ -377,7 +393,11 @@ fn plan_impl(
         shared_mem_per_workgroup,
     );
     let plan = plan_rank(kind, rows, cols, k, caps);
-    Ok(PyRankPlan::from_plan(plan))
+    if kind_override.is_some() {
+        Ok(PyRankPlan::from_plan_with_override(plan, kind_override))
+    } else {
+        Ok(PyRankPlan::from_plan(plan))
+    }
 }
 
 #[pyfunction]
@@ -393,13 +413,14 @@ fn plan(
     max_workgroup: Option<u32>,
     shared_mem_per_workgroup: Option<u32>,
 ) -> PyResult<PyRankPlan> {
-    let rank_kind = match kind.to_ascii_lowercase().as_str() {
-        "topk" | "top_k" => RankKind::TopK,
-        "midk" | "mid_k" => RankKind::MidK,
-        "bottomk" | "bottom_k" => RankKind::BottomK,
+    let (rank_kind, kind_override) = match kind.to_ascii_lowercase().as_str() {
+        "topk" | "top_k" => (RankKind::TopK, None),
+        "midk" | "mid_k" => (RankKind::MidK, None),
+        "bottomk" | "bottom_k" => (RankKind::BottomK, None),
+        "fft" => (RankKind::TopK, Some("fft")),
         other => {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "unknown rank kind '{other}', expected 'topk', 'midk', or 'bottomk'"
+                "unknown rank kind '{other}', expected 'topk', 'midk', 'bottomk', or 'fft'"
             )))
         }
     };
@@ -413,6 +434,7 @@ fn plan(
         subgroup,
         max_workgroup,
         shared_mem_per_workgroup,
+        kind_override,
     )
 }
 
@@ -438,6 +460,7 @@ fn plan_topk(
         subgroup,
         max_workgroup,
         shared_mem_per_workgroup,
+        None,
     )
 }
 
