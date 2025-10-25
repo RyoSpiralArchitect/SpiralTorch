@@ -7,8 +7,9 @@ use pyo3::{wrap_pyfunction, Bound};
 
 use st_core::theory::zpulse::{ZPulse, ZScale, ZSource, ZSupport};
 use st_nn::zspace_coherence::psi_synchro::{
-    heatmaps_to_zpulses, run_multibranch_demo as run_multibranch_demo_rs, CircleLockMapConfig,
-    HeatmapResult, MetaMembConfig, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse,
+    heatmaps_to_zpulses, run_multibranch_demo as run_multibranch_demo_rs, ArnoldTongueSummary,
+    CircleLockMapConfig, HeatmapResult, MetaMembConfig, PsiBranchState, PsiSynchroConfig,
+    PsiSynchroPulse,
 };
 
 fn vec3_or_default(values: Option<Vec<f64>>, default: [f64; 3], name: &str) -> PyResult<[f64; 3]> {
@@ -357,6 +358,66 @@ impl PyPsiBranchState {
     }
 }
 
+#[pyclass(module = "spiraltorch.psi", name = "ArnoldTonguePeak")]
+#[derive(Clone)]
+pub(crate) struct PyArnoldTongue {
+    inner: ArnoldTongueSummary,
+}
+
+impl PyArnoldTongue {
+    fn from_inner(inner: ArnoldTongueSummary) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyArnoldTongue {
+    #[getter]
+    pub fn ratio_p(&self) -> i64 {
+        self.inner.ratio_p
+    }
+
+    #[getter]
+    pub fn ratio_q(&self) -> i64 {
+        self.inner.ratio_q
+    }
+
+    #[getter]
+    pub fn rotation(&self) -> f64 {
+        self.inner.rotation
+    }
+
+    #[getter]
+    pub fn lam(&self) -> f64 {
+        self.inner.lam
+    }
+
+    #[getter]
+    pub fn wd(&self) -> f64 {
+        self.inner.wd
+    }
+
+    #[getter]
+    pub fn strength(&self) -> f64 {
+        self.inner.strength
+    }
+
+    #[getter]
+    pub fn peak_strength(&self) -> f64 {
+        self.inner.peak_strength
+    }
+
+    #[getter]
+    pub fn error(&self) -> f64 {
+        self.inner.error
+    }
+
+    #[getter]
+    pub fn ratio(&self) -> f64 {
+        self.inner.ratio()
+    }
+}
+
 #[pyclass(module = "spiraltorch.psi", name = "HeatmapResult")]
 #[derive(Clone)]
 pub(crate) struct PyHeatmapResult {
@@ -399,6 +460,23 @@ impl PyHeatmapResult {
     #[getter]
     pub fn matrix(&self) -> Vec<Vec<f64>> {
         self.inner.matrix.clone()
+    }
+
+    #[getter]
+    pub fn tongues(&self) -> Vec<PyArnoldTongue> {
+        self.inner
+            .tongues
+            .iter()
+            .cloned()
+            .map(PyArnoldTongue::from_inner)
+            .collect()
+    }
+
+    pub fn dominant_tongue(&self) -> Option<PyArnoldTongue> {
+        self.inner
+            .dominant_tongue()
+            .cloned()
+            .map(PyArnoldTongue::from_inner)
     }
 
     pub fn to_zpulse(&self, ts: u64) -> PyZPulse {
@@ -582,6 +660,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_class::<PyCircleLockMapConfig>()?;
     module.add_class::<PyPsiSynchroConfig>()?;
     module.add_class::<PyPsiBranchState>()?;
+    module.add_class::<PyArnoldTongue>()?;
     module.add_class::<PyHeatmapResult>()?;
     module.add_class::<PyZPulse>()?;
     module.add_class::<PyPsiSynchroPulse>()?;
@@ -594,6 +673,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
             "CircleLockMapConfig",
             "PsiSynchroConfig",
             "PsiBranchState",
+            "ArnoldTonguePeak",
             "HeatmapResult",
             "ZPulseSnapshot",
             "PsiSynchroPulse",

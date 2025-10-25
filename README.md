@@ -30,24 +30,46 @@ It’s not just an engine—it’s a **bridge** between the pragmatism of deep-l
 ```mermaid
 sequenceDiagram
   participant API as Python/TS API
-  participant Core as st-core
+  participant FFI as Bindings (PyO3 / NAPI)
+  participant Core as st-core dispatcher
+  participant Tape as Hypergrad tape
+  participant Sched as Cooperative scheduler
+  participant Plan as Engine planner & timeline
+  participant Caps as Device caps profiler
   participant Reg as Op registry
-  participant KD as st-kdsl
-  participant BE as Backend (WGPU/CUDA/CPU)
-  participant TLM as Telemetry
+  participant KD as st-kdsl codegen
+  participant BE as Backend runtimes (WGPU/CUDA/HIP/CPU)
+  participant Queue as Device queues & allocators
+  participant TLM as Telemetry hub
+  participant PSI as PSI / observability sinks
 
-  API->>Core: op(x, y, ...)
-  Core->>Reg: resolve impl/backend (caps/precision/layout)
-  alt cached kernel exists
-    Reg-->>Core: impl + schedule + kernel handle
-  else needs generation
-    Reg->>KD: codegen + parameterization
-    KD-->>Reg: kernel handle (tuned & cached)
-    Reg-->>Core: impl + schedule + kernel handle
+  API->>FFI: st.op(x, y, ...)
+  FFI->>Core: marshal call & materialise graph node
+  Core->>Tape: register autograd edges
+  Tape-->>Core: gradient token
+  Core->>Sched: request execution window
+  Sched->>Plan: assemble execution timeline
+  Plan->>Caps: query capabilities (precision/layout)
+  Caps-->>Plan: caps + heuristics
+  Plan->>Reg: resolve op implementation
+  alt compiled pipeline cached
+    Reg-->>Plan: impl + schedule + pipeline handle
+  else kernel needs emission
+    Reg->>KD: generate kernel + specialise params
+    KD-->>Reg: tuned binary + layout metadata
+    Reg-->>Plan: impl + schedule + pipeline handle
   end
-  Core->>BE: submit commands/pipeline (async)
-  BE-->>Core: completion events / result buffers
-  Core--)TLM: spans / metrics / logs
+  Plan->>BE: stage work packages
+  BE->>Queue: enqueue command buffers
+  Queue-->>BE: completion fences & buffer handles
+  BE-->>Tape: materialise gradients / result tensors
+  BE-->>Sched: completion callbacks
+  Sched-->>Core: future resolves
+  Core-->>FFI: return handles / tensors
+  FFI-->>API: deliver result to caller
+  BE--)TLM: runtime spans + counters
+  TLM-->>PSI: stream metrics / psychoid events
+  TLM--)FFI: propagate warnings back upstream
 ```
 
 > **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.

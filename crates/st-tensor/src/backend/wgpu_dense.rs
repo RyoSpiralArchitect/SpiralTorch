@@ -356,6 +356,7 @@ struct GpuContext {
     context: WgpuContext,
     pipeline_cache: PipelineCache,
     weights_cache: Mutex<HashMap<RhsCacheKey, Weak<GpuPackedRhs>>>,
+    autotune_cache: Mutex<HashMap<String, TileConfig>>,
     bind_layout: Arc<BindGroupLayout>,
     pipeline_layout: Arc<PipelineLayout>,
     zero_storage: OnceLock<Arc<Buffer>>,
@@ -373,9 +374,7 @@ struct GpuContext {
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
-    fused_grad_input_layout: BindGroupLayout,
-    fused_grad_input_pipeline_layout: PipelineLayout,
-    fused_grad_input_pipeline: OnceLock<Arc<ComputePipeline>>,
+    autotune_cache: Mutex<HashMap<String, TileConfig>>,
 }
 
 struct FusedAttentionKernel {
@@ -950,6 +949,7 @@ impl GpuContext {
             context: WgpuContext::new(device.clone(), queue.clone()),
             pipeline_cache: PipelineCache::new(device.clone()),
             weights_cache: Mutex::new(HashMap::new()),
+            autotune_cache: Mutex::new(HashMap::new()),
             bind_layout,
             pipeline_layout,
             zero_storage: OnceLock::new(),
@@ -967,9 +967,7 @@ impl GpuContext {
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
-            fused_grad_input_layout,
-            fused_grad_input_pipeline_layout,
-            fused_grad_input_pipeline: OnceLock::new(),
+            autotune_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -3056,6 +3054,10 @@ pub fn conv_grad_input_fused(
     queue.submit(Some(encoder.finish()));
 
     readback_f32(device, queue, &output_buf, input_volume)
+}
+
+fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
+    select_tile_config(rows, inner, cols)
 }
 
 fn select_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
