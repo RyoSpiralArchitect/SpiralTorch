@@ -358,6 +358,232 @@ pub struct MeaningProjection {
     pub support: usize,
 }
 
+/// Aggregate statistics describing how meaning evolves across a timeline of
+/// projections. Instead of treating each observation as a static imitation,
+/// the metrics emphasise the interplay between contextual stability and
+/// transformative shifts—mirroring the manifesto's call for emergent meaning.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeaningEmergenceMetrics {
+    pub lexical_mean: f32,
+    pub lexical_std: f32,
+    pub lexical_flux: f32,
+    pub support_mean: f32,
+    pub support_std: f32,
+    pub orientation_flip_rate: f32,
+    pub indeterminate_share: f32,
+    pub frequency_flux: f32,
+    pub coherence_score: f32,
+    pub emergence_score: f32,
+}
+
+impl MeaningEmergenceMetrics {
+    /// Builds the metrics from a chronological series of projections.
+    pub fn from_projections(projections: &[MeaningProjection]) -> Option<Self> {
+        if projections.is_empty() {
+            return None;
+        }
+
+        let count = projections.len() as f32;
+        let lexical_values: Vec<f32> = projections.iter().map(|p| p.lexical_weight()).collect();
+        let lexical_mean = lexical_values.iter().sum::<f32>() / count;
+        let lexical_std = if projections.len() > 1 {
+            let variance = lexical_values
+                .iter()
+                .map(|value| {
+                    let diff = *value - lexical_mean;
+                    diff * diff
+                })
+                .sum::<f32>()
+                / count;
+            variance.sqrt()
+        } else {
+            0.0
+        };
+
+        let support_values: Vec<f32> = projections.iter().map(|p| p.support as f32).collect();
+        let support_mean = support_values.iter().sum::<f32>() / count;
+        let support_std = if projections.len() > 1 {
+            let variance = support_values
+                .iter()
+                .map(|value| {
+                    let diff = *value - support_mean;
+                    diff * diff
+                })
+                .sum::<f32>()
+                / count;
+            variance.sqrt()
+        } else {
+            0.0
+        };
+
+        let mut lexical_flux = 0.0;
+        let mut orientation_flips = 0;
+        let mut orientation_pairs = 0;
+        let mut indeterminate = 0;
+        let mut frequency_flux = 0.0;
+        let mut frequency_pairs = 0;
+        let mut previous_orientation = None;
+        let mut previous_lexical = None;
+        let mut previous_frequency = None;
+
+        for projection in projections {
+            if projection.label.is_none() {
+                indeterminate += 1;
+            }
+
+            let orientation = orientation_sign(projection.label);
+            if let Some(prev) = previous_orientation {
+                orientation_pairs += 1;
+                if orientation != 0.0 && prev != 0.0 && orientation.signum() != prev.signum() {
+                    orientation_flips += 1;
+                }
+            }
+            previous_orientation = Some(orientation);
+
+            let lexical = projection.lexical_weight();
+            if let Some(prev) = previous_lexical {
+                lexical_flux += (lexical - prev).abs();
+            }
+            previous_lexical = Some(lexical);
+
+            if let Some((bin, _)) = projection.dominant_frequency_bin() {
+                let bin = bin as f32;
+                if let Some(prev) = previous_frequency {
+                    frequency_flux += (bin - prev).abs();
+                    frequency_pairs += 1;
+                }
+                previous_frequency = Some(bin);
+            } else {
+                previous_frequency = None;
+            }
+        }
+
+        let normaliser = (projections.len().saturating_sub(1)).max(1) as f32;
+        let lexical_flux = lexical_flux / normaliser;
+        let orientation_flip_rate = if orientation_pairs == 0 {
+            0.0
+        } else {
+            orientation_flips as f32 / orientation_pairs as f32
+        };
+        let frequency_flux = if frequency_pairs == 0 {
+            0.0
+        } else {
+            frequency_flux / frequency_pairs as f32
+        };
+        let indeterminate_share = indeterminate as f32 / count;
+
+        let coherence_score = (1.0 / (1.0 + lexical_std))
+            * (1.0 - orientation_flip_rate).max(0.0)
+            * (1.0 / (1.0 + frequency_flux * 0.1));
+        let emergence_score =
+            (lexical_flux.tanh() + frequency_flux.tanh()) * 0.5 + orientation_flip_rate;
+
+        Some(Self {
+            lexical_mean,
+            lexical_std,
+            lexical_flux,
+            support_mean,
+            support_std,
+            orientation_flip_rate,
+            indeterminate_share,
+            frequency_flux,
+            coherence_score,
+            emergence_score,
+        })
+    }
+}
+
+/// Describes how contextual projections transform from one turn to the next.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeaningTransition {
+    pub from_index: usize,
+    pub to_index: usize,
+    pub lexical_delta: f32,
+    pub orientation_flip: bool,
+    pub frequency_delta: Option<f32>,
+    pub indeterminate_step: bool,
+    pub emergence_intensity: f32,
+}
+
+impl MeaningTransition {
+    /// Builds transition descriptors for every consecutive pair of projections.
+    pub fn from_projections(projections: &[MeaningProjection]) -> Vec<Self> {
+        if projections.len() < 2 {
+            return Vec::new();
+        }
+
+        projections
+            .windows(2)
+            .enumerate()
+            .map(|(index, pair)| {
+                let from = &pair[0];
+                let to = &pair[1];
+                let lexical_delta = to.lexical_weight() - from.lexical_weight();
+                let orientation_flip = {
+                    let prev = from.orientation_sign();
+                    let next = to.orientation_sign();
+                    prev != 0.0 && next != 0.0 && prev.signum() != next.signum()
+                };
+                let frequency_delta =
+                    match (from.dominant_frequency_bin(), to.dominant_frequency_bin()) {
+                        (Some((prev, _)), Some((next, _))) => Some(next as f32 - prev as f32),
+                        _ => None,
+                    };
+                let indeterminate_step = from.label.is_none() || to.label.is_none();
+                let emergence_intensity = {
+                    let lexical_component = lexical_delta.abs().tanh();
+                    let frequency_component = frequency_delta
+                        .map(|delta| delta.abs().tanh())
+                        .unwrap_or(0.0);
+                    let orientation_component = if orientation_flip { 1.0 } else { 0.0 };
+                    let indeterminate_component = if indeterminate_step { 0.5 } else { 0.0 };
+                    lexical_component * 0.5
+                        + frequency_component * 0.5
+                        + orientation_component
+                        + indeterminate_component
+                };
+
+                MeaningTransition {
+                    from_index: index,
+                    to_index: index + 1,
+                    lexical_delta,
+                    orientation_flip,
+                    frequency_delta,
+                    indeterminate_step,
+                    emergence_intensity,
+                }
+            })
+            .collect()
+    }
+}
+
+/// Bundles emergent meaning metrics with transition-level detail so downstream
+/// tooling can reason about both global coherence and local inflection points.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeaningEmergenceProfile {
+    pub metrics: MeaningEmergenceMetrics,
+    pub transitions: Vec<MeaningTransition>,
+}
+
+impl MeaningEmergenceProfile {
+    pub fn from_projections(projections: &[MeaningProjection]) -> Option<Self> {
+        let metrics = MeaningEmergenceMetrics::from_projections(projections)?;
+        let transitions = MeaningTransition::from_projections(projections);
+        Some(Self {
+            metrics,
+            transitions,
+        })
+    }
+
+    pub fn strongest_transition(&self) -> Option<&MeaningTransition> {
+        self.transitions.iter().max_by(|left, right| {
+            left.emergence_intensity
+                .partial_cmp(&right.emergence_intensity)
+                .unwrap_or(Ordering::Equal)
+        })
+    }
+}
+
 impl MeaningProjection {
     pub fn from_arrangement(
         arrangement: &Arrangement,
@@ -390,12 +616,16 @@ impl MeaningProjection {
         self.basis.dominant_frequency()
     }
 
-    fn orientation_sign(&self) -> f32 {
-        match self.label {
-            Some(Label::A) => -1.0,
-            Some(Label::B) => 1.0,
-            None => 0.0,
-        }
+    pub fn orientation_sign(&self) -> f32 {
+        orientation_sign(self.label)
+    }
+}
+
+fn orientation_sign(label: Option<Label>) -> f32 {
+    match label {
+        Some(Label::A) => -1.0,
+        Some(Label::B) => 1.0,
+        None => 0.0,
     }
 }
 
@@ -690,5 +920,92 @@ mod tests {
         assert!(pulse.total_energy() > 0.0);
         assert!(pulse.support_mass() > 0.0);
         assert!(pulse.quality >= 0.0);
+    }
+
+    #[test]
+    fn meaning_emergence_metrics_capture_flux_and_coherence() {
+        let arrangement_a =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::B, PureAtom::B, PureAtom::A]);
+        let arrangement_b =
+            Arrangement::from_line(vec![PureAtom::B, PureAtom::B, PureAtom::A, PureAtom::A]);
+        let arrangement_c =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::A, PureAtom::B, PureAtom::B]);
+
+        let proj_a =
+            MeaningProjection::from_arrangement(&arrangement_a, OrientationGauge::Preserve)
+                .expect("projection a");
+        let proj_b =
+            MeaningProjection::from_arrangement(&arrangement_b, OrientationGauge::Preserve)
+                .expect("projection b");
+        let proj_c =
+            MeaningProjection::from_arrangement(&arrangement_c, OrientationGauge::Preserve)
+                .expect("projection c");
+
+        let metrics =
+            MeaningEmergenceMetrics::from_projections(&[proj_a, proj_b, proj_c]).expect("metrics");
+
+        assert!(metrics.lexical_mean >= 0.0);
+        assert!(metrics.lexical_std >= 0.0);
+        assert!(metrics.support_mean > 0.0);
+        assert!(metrics.orientation_flip_rate >= 0.0);
+        assert!(metrics.orientation_flip_rate <= 1.0);
+        assert!(metrics.frequency_flux >= 0.0);
+        assert!(metrics.indeterminate_share >= 0.0);
+        assert!(metrics.coherence_score >= 0.0);
+        assert!(metrics.coherence_score <= 1.0);
+        assert!(metrics.emergence_score >= metrics.orientation_flip_rate);
+    }
+
+    #[test]
+    fn meaning_transitions_surface_inflections() {
+        let arrangement_a =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::B, PureAtom::B, PureAtom::B]);
+        let arrangement_b =
+            Arrangement::from_line(vec![PureAtom::B, PureAtom::A, PureAtom::A, PureAtom::A]);
+        let arrangement_c =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::A, PureAtom::B, PureAtom::B]);
+
+        let projections = vec![
+            MeaningProjection::from_arrangement(&arrangement_a, OrientationGauge::Preserve)
+                .expect("projection a"),
+            MeaningProjection::from_arrangement(&arrangement_b, OrientationGauge::Preserve)
+                .expect("projection b"),
+            MeaningProjection::from_arrangement(&arrangement_c, OrientationGauge::Preserve)
+                .expect("projection c"),
+        ];
+
+        let transitions = MeaningTransition::from_projections(&projections);
+        assert_eq!(transitions.len(), 2);
+        assert!(transitions[0].orientation_flip);
+        assert!(transitions[0].emergence_intensity > 0.5);
+        assert!(transitions[1].frequency_delta.is_some());
+        assert!(transitions
+            .iter()
+            .any(|transition| transition.indeterminate_step));
+    }
+
+    #[test]
+    fn meaning_emergence_profile_combines_metrics_and_transitions() {
+        let arrangement_a =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::B, PureAtom::B, PureAtom::A]);
+        let arrangement_b =
+            Arrangement::from_line(vec![PureAtom::B, PureAtom::B, PureAtom::A, PureAtom::A]);
+        let arrangement_c =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::A, PureAtom::B, PureAtom::B]);
+
+        let projections = vec![
+            MeaningProjection::from_arrangement(&arrangement_a, OrientationGauge::Preserve)
+                .expect("projection a"),
+            MeaningProjection::from_arrangement(&arrangement_b, OrientationGauge::Preserve)
+                .expect("projection b"),
+            MeaningProjection::from_arrangement(&arrangement_c, OrientationGauge::Preserve)
+                .expect("projection c"),
+        ];
+
+        let profile =
+            MeaningEmergenceProfile::from_projections(&projections).expect("emergence profile");
+        assert_eq!(profile.transitions.len(), 2);
+        assert!(profile.metrics.coherence_score >= 0.0);
+        assert!(profile.strongest_transition().is_some());
     }
 }

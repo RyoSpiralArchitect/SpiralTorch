@@ -33,7 +33,7 @@ use st_core::telemetry::chrono::{
 };
 use st_core::theory::zpulse::ZPulse;
 use st_logic::contextual_observation::{
-    Arrangement, LagrangianGate, MeaningProjection, OrientationGauge,
+    Arrangement, LagrangianGate, MeaningEmergenceProfile, MeaningProjection, OrientationGauge,
 };
 #[cfg(test)]
 use st_tensor::Tensor;
@@ -401,6 +401,72 @@ impl TextResonator {
         let (narrative, projection) = self.describe_contextual_meaning(arrangement, gauge)?;
         let pulse = gate.emit(&projection, ts);
         Ok((narrative, projection, pulse))
+    }
+
+    /// Summarises a sequence of contextual projections, highlighting how meaning
+    /// coheres or transforms across turns. This provides a narrative realisation
+    /// of the manifesto's emphasis on emergent meaning.
+    pub fn describe_meaning_emergence(
+        &self,
+        projections: &[MeaningProjection],
+    ) -> ResonanceNarrative {
+        if projections.is_empty() {
+            return ResonanceNarrative::new(
+                "No contextual interactions recorded; meaning could not emerge.".to_string(),
+                Vec::new(),
+            );
+        }
+
+        match MeaningEmergenceProfile::from_projections(projections) {
+            Some(profile) => {
+                let metrics = &profile.metrics;
+                let summary = format!(
+                    "Meaning emergence {:.3} with coherence {:.3} across {} turns.",
+                    metrics.emergence_score,
+                    metrics.coherence_score,
+                    projections.len()
+                );
+                let mut highlights = vec![
+                    format!("lexical μ {:.3}", metrics.lexical_mean),
+                    format!("lexical σ {:.3}", metrics.lexical_std),
+                    format!("lexical flux {:.3}", metrics.lexical_flux),
+                    format!("support μ {:.1}", metrics.support_mean),
+                    format!("support σ {:.1}", metrics.support_std),
+                    format!(
+                        "orientation flips {:.1}%",
+                        metrics.orientation_flip_rate * 100.0
+                    ),
+                    format!("indeterminate {:.1}%", metrics.indeterminate_share * 100.0),
+                    format!("frequency flux {:.3}", metrics.frequency_flux),
+                ];
+                if let Some(transition) = profile.strongest_transition() {
+                    highlights.push(format!(
+                        "strongest transition {}→{} |Δlex| {:.3}{}{}",
+                        transition.from_index,
+                        transition.to_index,
+                        transition.lexical_delta.abs(),
+                        transition
+                            .frequency_delta
+                            .map(|delta| format!(" freq Δ {:.2}", delta))
+                            .unwrap_or_default(),
+                        if transition.orientation_flip {
+                            " flip"
+                        } else if transition.indeterminate_step {
+                            " indeterminate"
+                        } else {
+                            ""
+                        }
+                    ));
+                }
+                highlights.push("emergence favours interaction over imitation".to_string());
+                ResonanceNarrative::new(summary, highlights)
+            }
+            None => ResonanceNarrative::new(
+                "Contextual interactions remained singular; emergence metrics undefined."
+                    .to_string(),
+                Vec::new(),
+            ),
+        }
     }
 
     /// Produces a narrative describing the aggregated atlas frame.
@@ -1374,5 +1440,45 @@ mod tests {
         assert_eq!(pulse.ts, 144);
         assert!(pulse.total_energy() > 0.0);
         assert!(pulse.support_mass() > 0.0);
+    }
+
+    #[test]
+    fn meaning_emergence_narrative_reports_flux() {
+        let narrator = TextResonator::new(-1.0, 0.5).unwrap();
+        let arrangement_a =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::B, PureAtom::B, PureAtom::A]);
+        let arrangement_b =
+            Arrangement::from_line(vec![PureAtom::B, PureAtom::B, PureAtom::A, PureAtom::A]);
+        let arrangement_c =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::A, PureAtom::B, PureAtom::B]);
+
+        let proj_a =
+            MeaningProjection::from_arrangement(&arrangement_a, OrientationGauge::Preserve)
+                .unwrap();
+        let proj_b =
+            MeaningProjection::from_arrangement(&arrangement_b, OrientationGauge::Preserve)
+                .unwrap();
+        let proj_c =
+            MeaningProjection::from_arrangement(&arrangement_c, OrientationGauge::Preserve)
+                .unwrap();
+
+        let narrative = narrator.describe_meaning_emergence(&[proj_a, proj_b, proj_c]);
+        assert!(narrative.summary.contains("Meaning emergence"));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("lexical μ")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("orientation flips")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("frequency flux")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("strongest transition")));
     }
 }
