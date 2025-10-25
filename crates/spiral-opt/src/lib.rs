@@ -10,7 +10,7 @@ pub mod pruning;
 pub mod quantization;
 pub mod report;
 
-pub use pruning::{StructuredPruner, StructuredPruningConfig};
+pub use pruning::{StructuredPruner, StructuredPruningConfig, StructuredPruningWorkspace};
 pub use quantization::{QatConfig, QatObserver, QuantizationLeveling};
 pub use report::{
     CompressionReport, OptimisationError, QuantizationReport, StructuredPruningReport,
