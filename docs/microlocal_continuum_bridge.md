@@ -26,6 +26,7 @@ SpiralTorch already measures boundary activity with microlocal gauges and turns 
 - **Bias gain**: `InterfaceZLift::with_bias_gain` scales the orientation-derived drift, acting like a mobility M that governs how interface normals steer macroscopic motion.【F:crates/st-core/src/theory/microlocal.rs†L282-L351】
 - **Quality/band overrides**: composite policies enable per-source overrides, so you can privilege, suppress, or hysteretically gate contributions depending on whether you are emulating non-conserved or conserved dynamics.【F:crates/st-core/src/theory/microlocal.rs†L545-L919】
 - **Smoothing & tempo**: conductor smoothing and tempo hints control how fast the fused signal evolves, letting you approximate Mullins–Sekerka slow diffusion vs. mean-curvature fast relaxation by setting the interpolation factor and external tempo fed into emitted pulses.【F:crates/st-core/src/theory/microlocal.rs†L788-L907】
+- **Elliptic warp steering**: macro feedback can retune the positive-curvature warp by updating its radius, sheet count, and spin harmonics so the microlocal lift keeps pace with the continuum curvature bundle.【F:crates/st-core/src/theory/microlocal.rs†L392-L452】【F:crates/st-core/src/theory/microlocal.rs†L1351-L1400】【F:crates/st-core/src/theory/macro.rs†L1136-L1180】
 
 ## 5. Feedback and observability
 
