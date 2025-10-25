@@ -34,7 +34,8 @@ pub use gnn::{
     fold_into_roundtable, fold_with_band_energy, AggregationReducer, GraphActivation,
     GraphConsensusBridge, GraphConsensusDigest, GraphContext, GraphContextBuilder, GraphLayerSpec,
     GraphMonadExport, GraphNormalization, NeighborhoodAggregation, QuadBandEnergy,
-    ZSpaceGraphConvolution, ZSpaceGraphNetwork, ZSpaceGraphNetworkBuilder,
+    RoundtableBandInfluence, RoundtableBandSignal, ZSpaceGraphConvolution, ZSpaceGraphNetwork,
+    ZSpaceGraphNetworkBuilder,
 };
 #[cfg(feature = "golden")]
 pub use golden::{
@@ -66,7 +67,7 @@ pub use layers::sequential::Sequential;
 pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
-pub use layers::{Gelu, LayerNorm, Relu, ToposResonator, ZRelativityModule, ZSpaceMixer};
+pub use layers::{Dropout, Gelu, LayerNorm, Relu, ToposResonator, ZSpaceMixer};
 pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,
     LightningStage, LightningStageReport, SpiralLightning,
@@ -77,13 +78,15 @@ pub use plan::RankPlanner;
 pub use roundtable::{
     simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, DistMode,
     GlobalProposal, HeurOp, HeurOpKind, HeurOpLog, MetaConductor, MetaSummary, ModeratorMinutes,
-    OutcomeBand, RoundtableNode,
+    OutcomeBand, RoundtableGnnBridge, RoundtableNode,
 };
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
 };
-pub use trainer::{EpochStats, ModuleTrainer};
+pub use trainer::{
+    EpochStats, ModuleTrainer, SpectralAdjustmentMetrics, SpectralLearningRatePolicy,
+};
 #[cfg(feature = "psi")]
 pub use zspace_coherence::BranchPsiReading;
 #[cfg(feature = "golden")]
