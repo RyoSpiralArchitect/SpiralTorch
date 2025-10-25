@@ -11,7 +11,7 @@ use pyo3::PyAny;
 
 #[cfg(feature = "nn")]
 use st_nn::Module;
-use st_tensor::{mean_squared_error, LinearModel, Tensor};
+use st_tensor::{mean_squared_error, LinearModel, Tensor, TensorError};
 
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer")]
 pub(crate) struct PyModuleTrainer {
@@ -159,7 +159,7 @@ impl PyModuleTrainer {
         let params = module
             .inner
             .forward(&seed)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
         self.model
             .train_batch(&params, &targets.inner, learning_rate)
             .map_err(|e| PyValueError::new_err(e.to_string()))

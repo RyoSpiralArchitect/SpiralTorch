@@ -23,14 +23,14 @@ use st_nn::{
     dataset_from_vec,
     layers::{
         Dropout as RustDropout, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
-        NonLinerGeometry, NonLinerHyperbolicConfig,
+        NonLinerGeometry, NonLinerHyperbolicConfig, ZRelativityModule,
     },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
         CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
-    DataLoader, Dataset, ZRelativityModule, ZSpaceCoherenceSequencer,
+    AvgPool2d, DataLoader, Dataset, MaxPool2d, ZSpaceCoherenceSequencer,
 };
 #[cfg(feature = "nn")]
 use st_tensor::{OpenCartesianTopos, Tensor, TensorError};
@@ -531,7 +531,7 @@ impl PyNonLiner {
 #[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "Dropout", unsendable)]
 pub(crate) struct PyDropout {
-    inner: Dropout,
+    inner: RustDropout,
 }
 
 #[cfg(feature = "nn")]

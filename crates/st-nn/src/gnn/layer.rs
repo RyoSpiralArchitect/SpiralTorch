@@ -5,7 +5,8 @@
 
 #[cfg(feature = "psi")]
 use super::PsiCoherenceAdaptor;
-use super::{GraphContext, RoundtableBandInfluence};
+use super::GraphContext;
+use crate::RoundtableBandInfluence;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
@@ -280,7 +281,7 @@ impl ZSpaceGraphConvolution {
                 let scale = self
                     .roundtable
                     .as_ref()
-                    .map(|influence| influence.scale_for_step(idx))
+                    .map(|influence: &RoundtableBandInfluence| influence.scale_for_step(idx))
                     .unwrap_or(1.0);
                 let coeff = weight * scale;
                 if coeff.abs() > f32::EPSILON {
