@@ -97,6 +97,65 @@ impl NonLinerHyperbolicConfig {
     }
 }
 
+/// Elliptic geometry configuration used by [`NonLinerGeometry::Elliptic`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NonLinerEllipticConfig {
+    curvature: f32,
+    z_scale: ZScale,
+    retention: f32,
+}
+
+impl NonLinerEllipticConfig {
+    /// Creates a new elliptic configuration. `curvature` must be positive and finite while
+    /// `retention` must lie in the unit interval.
+    pub fn new(curvature: f32, z_scale: ZScale, retention: f32) -> PureResult<Self> {
+        if curvature <= 0.0 || !curvature.is_finite() {
+            return Err(TensorError::InvalidValue {
+                label: "non_liner_curvature",
+            });
+        }
+        if !retention.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "non_liner_retention",
+                value: retention,
+            });
+        }
+        if !(0.0..=1.0).contains(&retention) {
+            return Err(TensorError::InvalidValue {
+                label: "non_liner_retention",
+            });
+        }
+        Ok(Self {
+            curvature,
+            z_scale,
+            retention,
+        })
+    }
+
+    /// Returns the enforced curvature.
+    pub fn curvature(&self) -> f32 {
+        self.curvature
+    }
+
+    /// Returns the Z-scale used to interpret the Euclidean activations.
+    pub fn z_scale(&self) -> ZScale {
+        self.z_scale
+    }
+
+    /// Returns the retention ratio blending the raw Euclidean signal with its elliptic projection.
+    pub fn retention(&self) -> f32 {
+        self.retention
+    }
+
+    fn curvature_scale(&self) -> f32 {
+        self.curvature.sqrt()
+    }
+
+    fn mix(&self) -> f32 {
+        1.0 - self.retention
+    }
+}
+
 /// Geometry applied to the affine activation outputs.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NonLinerGeometry {
@@ -104,6 +163,8 @@ pub enum NonLinerGeometry {
     Euclidean,
     /// Hyperbolic projection into the Z-space manifold using the provided configuration.
     Hyperbolic(NonLinerHyperbolicConfig),
+    /// Elliptic projection into the Z-space manifold using the provided configuration.
+    Elliptic(NonLinerEllipticConfig),
 }
 
 impl Default for NonLinerGeometry {
@@ -118,27 +179,52 @@ impl NonLinerGeometry {
         Self::Hyperbolic(config)
     }
 
+    /// Convenience constructor for the elliptic variant.
+    pub fn elliptic(config: NonLinerEllipticConfig) -> Self {
+        Self::Elliptic(config)
+    }
+
     /// Returns the underlying hyperbolic configuration when present.
     pub fn as_hyperbolic(&self) -> Option<NonLinerHyperbolicConfig> {
         match self {
             Self::Hyperbolic(config) => Some(*config),
+            _ => None,
+        }
+    }
+
+    /// Returns the underlying elliptic configuration when present.
+    pub fn as_elliptic(&self) -> Option<NonLinerEllipticConfig> {
+        match self {
+            Self::Elliptic(config) => Some(*config),
+            _ => None,
+        }
+    }
+
+    /// Returns the curvature enforced by the geometry when non-Euclidean.
+    pub fn curvature(&self) -> Option<f32> {
+        match self {
+            Self::Hyperbolic(config) => Some(config.curvature()),
+            Self::Elliptic(config) => Some(config.curvature()),
             Self::Euclidean => None,
         }
     }
 
-    /// Returns the curvature enforced by the geometry when hyperbolic.
-    pub fn curvature(&self) -> Option<f32> {
-        self.as_hyperbolic().map(|config| config.curvature())
-    }
-
-    /// Returns the Z-scale when hyperbolic.
+    /// Returns the Z-scale when non-Euclidean.
     pub fn z_scale(&self) -> Option<ZScale> {
-        self.as_hyperbolic().map(|config| config.z_scale())
+        match self {
+            Self::Hyperbolic(config) => Some(config.z_scale()),
+            Self::Elliptic(config) => Some(config.z_scale()),
+            Self::Euclidean => None,
+        }
     }
 
-    /// Returns the retention ratio when hyperbolic.
+    /// Returns the retention ratio when non-Euclidean.
     pub fn retention(&self) -> Option<f32> {
-        self.as_hyperbolic().map(|config| config.retention())
+        match self {
+            Self::Hyperbolic(config) => Some(config.retention()),
+            Self::Elliptic(config) => Some(config.retention()),
+            Self::Euclidean => None,
+        }
     }
 }
 
@@ -275,6 +361,45 @@ impl NonLiner {
         )
     }
 
+    /// Creates a new elliptic non-linear layer with unit affine parameters.
+    pub fn with_elliptic(
+        name: impl Into<String>,
+        features: usize,
+        activation: NonLinerActivation,
+        config: NonLinerEllipticConfig,
+    ) -> PureResult<Self> {
+        Self::with_geometry(
+            name,
+            features,
+            activation,
+            1.0,
+            1.0,
+            0.0,
+            NonLinerGeometry::elliptic(config),
+        )
+    }
+
+    /// Creates a new elliptic non-linear layer with caller supplied affine parameters.
+    pub fn with_elliptic_init(
+        name: impl Into<String>,
+        features: usize,
+        activation: NonLinerActivation,
+        slope: f32,
+        gain: f32,
+        bias: f32,
+        config: NonLinerEllipticConfig,
+    ) -> PureResult<Self> {
+        Self::with_geometry(
+            name,
+            features,
+            activation,
+            slope,
+            gain,
+            bias,
+            NonLinerGeometry::elliptic(config),
+        )
+    }
+
     /// Returns the learnable gain parameter.
     pub fn gain(&self) -> &Parameter {
         &self.gain
@@ -365,6 +490,41 @@ impl NonLiner {
         (factor, derivative, target_radius)
     }
 
+    fn elliptic_coefficients(config: &NonLinerEllipticConfig, norm: f32) -> (f32, f32, f32) {
+        if norm <= 1.0e-6 {
+            return (1.0, 0.0, 0.0);
+        }
+        let scale = config.curvature_scale();
+        let scale_z = config.z_scale().value();
+        if scale_z <= 0.0 || !scale.is_finite() {
+            return (1.0, 0.0, 0.0);
+        }
+        let a = scale / scale_z;
+        if !a.is_finite() || a <= 0.0 {
+            return (1.0, 0.0, 0.0);
+        }
+        let u = norm / a;
+        if !u.is_finite() {
+            let factor = a / norm;
+            let derivative = -factor / norm;
+            return (factor, derivative, scale);
+        }
+        let limit = core::f32::consts::FRAC_PI_2 - 1.0e-6;
+        if u >= limit {
+            let sin_limit = limit.sin();
+            let factor = (a / norm) * sin_limit;
+            let derivative = -factor / norm;
+            let target_radius = sin_limit * scale;
+            return (factor, derivative, target_radius);
+        }
+        let sin_u = u.sin();
+        let cos_u = u.cos();
+        let factor = (a / norm) * sin_u;
+        let derivative = (cos_u - factor) / norm;
+        let target_radius = sin_u * scale;
+        (factor, derivative, target_radius)
+    }
+
     fn apply_geometry_forward(&self, rows: usize, cols: usize, data: &mut [f32]) -> Option<f32> {
         match self.geometry {
             NonLinerGeometry::Euclidean => None,
@@ -386,6 +546,39 @@ impl NonLiner {
                     let norm_sq: f32 = chunk.iter().map(|v| v * v).sum();
                     let norm = norm_sq.sqrt();
                     let (factor, _, radius) = Self::hyperbolic_coefficients(&config, norm);
+                    if mix > 0.0 && norm > 1.0e-6 {
+                        for value in chunk.iter_mut() {
+                            let projected = *value * factor;
+                            *value = retention * *value + mix * projected;
+                        }
+                    }
+                    radius_sum += radius;
+                    counted += 1;
+                }
+                Some(if counted > 0 {
+                    radius_sum / counted as f32
+                } else {
+                    0.0
+                })
+            }
+            NonLinerGeometry::Elliptic(config) => {
+                if rows == 0 || cols == 0 {
+                    return Some(0.0);
+                }
+                let retention = config.retention();
+                let mix = config.mix();
+                let mut radius_sum = 0.0f32;
+                let mut counted = 0usize;
+                for row in 0..rows {
+                    let start = row * cols;
+                    let end = start + cols;
+                    let chunk = &mut data[start..end];
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    let norm_sq: f32 = chunk.iter().map(|v| v * v).sum();
+                    let norm = norm_sq.sqrt();
+                    let (factor, _, radius) = Self::elliptic_coefficients(&config, norm);
                     if mix > 0.0 && norm > 1.0e-6 {
                         for value in chunk.iter_mut() {
                             let projected = *value * factor;
@@ -445,6 +638,44 @@ impl NonLiner {
                     }
                 }
             }
+            NonLinerGeometry::Elliptic(config) => {
+                if rows == 0 || cols == 0 {
+                    return;
+                }
+                let retention = config.retention();
+                let mix = config.mix();
+                for row in 0..rows {
+                    let start = row * cols;
+                    let end = start + cols;
+                    let raw_chunk = &raw[start..end];
+                    let grad_chunk = &mut grad[start..end];
+                    if raw_chunk.is_empty() {
+                        continue;
+                    }
+                    let norm_sq: f32 = raw_chunk.iter().map(|v| v * v).sum();
+                    let norm = norm_sq.sqrt();
+                    let (factor, derivative, _) = Self::elliptic_coefficients(&config, norm);
+                    if norm <= 1.0e-6 {
+                        let scaling = retention + mix;
+                        if (scaling - 1.0).abs() > f32::EPSILON {
+                            for grad_value in grad_chunk.iter_mut() {
+                                *grad_value *= scaling;
+                            }
+                        }
+                        continue;
+                    }
+                    let dot = raw_chunk
+                        .iter()
+                        .zip(grad_chunk.iter())
+                        .map(|(x, g)| x * g)
+                        .sum::<f32>();
+                    let scaling = retention + mix * factor;
+                    let correction = mix * derivative * dot / norm;
+                    for (raw_value, grad_value) in raw_chunk.iter().zip(grad_chunk.iter_mut()) {
+                        *grad_value = scaling * *grad_value + correction * *raw_value;
+                    }
+                }
+            }
         }
     }
 }
@@ -454,8 +685,11 @@ impl Module for NonLiner {
         let (rows, cols) = input.shape();
         if cols == 0 {
             self.last_drift.set(Some(0.0));
-            self.last_radius
-                .set(self.geometry.as_hyperbolic().map(|_| 0.0));
+            let radius = match self.geometry {
+                NonLinerGeometry::Euclidean => None,
+                NonLinerGeometry::Hyperbolic(_) | NonLinerGeometry::Elliptic(_) => Some(0.0),
+            };
+            self.last_radius.set(radius);
             return Tensor::zeros(rows, cols);
         }
 
@@ -728,6 +962,104 @@ mod tests {
         .unwrap();
         let input = Tensor::from_vec(2, 2, vec![0.25, -0.4, 0.8, -1.1]).unwrap();
         let grad_output = Tensor::from_vec(2, 2, vec![0.3, -0.2, -0.45, 0.6]).unwrap();
+
+        let grad_input = layer.backward(&input, &grad_output).unwrap();
+        let grad_output_vec = grad_output.data().to_vec();
+        let (rows, cols) = input.shape();
+        let inv_rows = 1.0 / rows as f32;
+        let epsilon = 1e-3;
+
+        for idx in 0..(rows * cols) {
+            let mut plus = input.clone();
+            plus.data_mut()[idx] += epsilon;
+            let out_plus = layer.forward(&plus).unwrap();
+            let loss_plus = out_plus
+                .data()
+                .iter()
+                .zip(grad_output_vec.iter())
+                .map(|(o, g)| o * g)
+                .sum::<f32>()
+                * inv_rows;
+
+            let mut minus = input.clone();
+            minus.data_mut()[idx] -= epsilon;
+            let out_minus = layer.forward(&minus).unwrap();
+            let loss_minus = out_minus
+                .data()
+                .iter()
+                .zip(grad_output_vec.iter())
+                .map(|(o, g)| o * g)
+                .sum::<f32>()
+                * inv_rows;
+
+            let numeric = (loss_plus - loss_minus) / (2.0 * epsilon);
+            assert!((numeric - grad_input.data()[idx]).abs() < 2e-3);
+        }
+    }
+
+    #[test]
+    fn elliptic_config_requires_positive_curvature() {
+        let scale = ZScale::new(1.0).unwrap();
+        assert!(NonLinerEllipticConfig::new(0.0, scale, 0.5).is_err());
+        assert!(NonLinerEllipticConfig::new(-0.1, scale, 0.5).is_err());
+        assert!(NonLinerEllipticConfig::new(0.5, scale, 1.2).is_err());
+    }
+
+    #[test]
+    fn elliptic_forward_projects_onto_sphere() {
+        let config = NonLinerEllipticConfig::new(0.8, ZScale::new(1.4).unwrap(), 0.25).unwrap();
+        let layer = NonLiner::with_elliptic_init(
+            "sphere",
+            3,
+            NonLinerActivation::Tanh,
+            1.1,
+            0.85,
+            -0.05,
+            config,
+        )
+        .unwrap();
+        let input = Tensor::from_vec(2, 3, vec![0.8, -1.2, 0.4, -0.9, 0.6, 0.3]).unwrap();
+        let output = layer.forward(&input).unwrap();
+
+        let curvature_scale = config.curvature_scale();
+        let retention = config.retention();
+        let mix = 1.0 - retention;
+        let z_scale = config.z_scale().value();
+        let slope = 1.1f32;
+        let gain = 0.85f32;
+        let bias = -0.05f32;
+        for row in 0..2 {
+            let start = row * 3;
+            let slice = &output.data()[start..start + 3];
+            let norm = slice.iter().map(|v| v * v).sum::<f32>().sqrt() * z_scale;
+
+            let raw: Vec<f32> = input.data()[start..start + 3]
+                .iter()
+                .map(|value| gain * (slope * *value + bias).tanh())
+                .collect();
+            let raw_norm = raw.iter().map(|v| v * v).sum::<f32>().sqrt() * z_scale;
+            let allowable = retention * raw_norm + mix * curvature_scale;
+            assert!(norm <= allowable + 1e-5);
+        }
+        let radius = layer.last_hyperbolic_radius().unwrap();
+        assert!(radius <= curvature_scale + 1e-5);
+    }
+
+    #[test]
+    fn elliptic_backward_matches_numeric_gradients() {
+        let config = NonLinerEllipticConfig::new(0.6, ZScale::new(1.1).unwrap(), 0.3).unwrap();
+        let mut layer = NonLiner::with_elliptic_init(
+            "ellipse",
+            2,
+            NonLinerActivation::Softsign,
+            0.9,
+            1.05,
+            0.1,
+            config,
+        )
+        .unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.35, -0.45, 0.7, -0.8]).unwrap();
+        let grad_output = Tensor::from_vec(2, 2, vec![0.2, -0.15, -0.35, 0.4]).unwrap();
 
         let grad_input = layer.backward(&input, &grad_output).unwrap();
         let grad_output_vec = grad_output.data().to_vec();
