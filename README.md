@@ -72,6 +72,26 @@ sequenceDiagram
   TLM--)FFI: propagate warnings back upstream
 ```
 
+### Explore the runtime interactively
+
+Prefer a guided walkthrough of the dispatcher flows? Open the
+[interactive runtime explorer](docs/interactive/README.md) for clickable
+diagrams, a narrated "story tour" of the runtime handoff, and playful
+spotlights on graph-node materialisation versus return-handle delivery:
+
+- 🎬 **Story tour.** Step through a six-beat mini adventure that explains
+  how a single API call ripples through SpiralTorch, from the first FFI
+  marshals to the triumphant return of tensor handles.
+- 🔍 **Focus toggles.** Snap to either the graph-node materialisation
+  path or the return-handle arc whenever you want to revisit a specific
+  phase.
+- 🌈 **Aurora mode.** Bathe the canvas in a psychedelic gradient to feel the
+  runtime choreography pop—the toggle sits beside the spotlight buttons.
+- ✨ **Phase constellations.** Sidebar cards cluster subsystems by stage so you
+  can intuit which teams light up together as the story advances.
+- 🧭 **Free roam.** Click any node or edge to read quick lore about the
+  component, then resume the story exactly where you left off.
+
 > **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
 >
 > **New — Conv6da with Leech enrichment.** `Conv6da` fuses six-directional adjacency with optional Leech lattice density boosts so Z-space fields aggregate neighbors with structure-aware gradients.
