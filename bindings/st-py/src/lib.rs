@@ -13,6 +13,7 @@ mod pure;
 mod planner;
 mod spiralk;
 mod frac;
+mod psi_synchro;
 mod selfsup;
 mod export;
 mod inference;
@@ -152,6 +153,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     pure::register(py, m)?;
     planner::register(py, m)?;
     spiralk::register(py, m)?;
+    psi_synchro::register(py, m)?;
     hpo::register(py, m)?;
     inference::register(py, m)?;
     frac::register(py, m)?;
