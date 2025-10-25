@@ -21,6 +21,7 @@
 //! geometries without having to re-derive the symbolic machinery.
 
 use core::fmt;
+use std::collections::HashMap;
 use std::f64::consts::PI;
 
 use nalgebra::{Matrix4, SymmetricEigen};
@@ -248,6 +249,125 @@ impl MetricSecondDerivatives {
     pub fn partial(&self, lambda: usize, rho: usize, mu: usize, nu: usize) -> f64 {
         self.partials[lambda][rho][mu][nu]
     }
+}
+
+type Offset = [i8; DIM];
+
+fn sample_metric<F>(
+    cache: &mut HashMap<Offset, Matrix4<f64>>,
+    metric_fn: &mut F,
+    point: [f64; DIM],
+    offset: Offset,
+    step: f64,
+) -> Matrix4<f64>
+where
+    F: FnMut(&[f64; DIM]) -> Matrix4<f64>,
+{
+    if let Some(value) = cache.get(&offset) {
+        return value.clone();
+    }
+
+    let mut coords = point;
+    for dim in 0..DIM {
+        coords[dim] += (offset[dim] as f64) * step;
+    }
+
+    let matrix = metric_fn(&coords);
+    cache.insert(offset, matrix.clone());
+    matrix
+}
+
+/// Approximates metric derivatives via second-order central finite differences.
+pub fn finite_difference_metric_data<F>(
+    mut metric_fn: F,
+    point: [f64; DIM],
+    step: f64,
+) -> Result<(LorentzianMetric, MetricDerivatives, MetricSecondDerivatives), MetricError>
+where
+    F: FnMut(&[f64; DIM]) -> Matrix4<f64>,
+{
+    assert!(step > 0.0, "finite difference step must be positive");
+
+    let base = metric_fn(&point);
+    let metric = LorentzianMetric::try_new(base.clone())?;
+
+    let mut cache: HashMap<Offset, Matrix4<f64>> = HashMap::new();
+    cache.insert([0_i8; DIM], base);
+
+    let mut first = [[[0.0; DIM]; DIM]; DIM];
+    for rho in 0..DIM {
+        let mut plus = [0_i8; DIM];
+        plus[rho] = 1;
+        let g_plus = sample_metric(&mut cache, &mut metric_fn, point, plus, step);
+
+        let mut minus = [0_i8; DIM];
+        minus[rho] = -1;
+        let g_minus = sample_metric(&mut cache, &mut metric_fn, point, minus, step);
+
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                first[rho][mu][nu] = (g_plus[(mu, nu)] - g_minus[(mu, nu)]) / (2.0 * step);
+            }
+        }
+    }
+
+    let base_matrix = metric.components().clone();
+    let mut second = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+    for lambda in 0..DIM {
+        for rho in 0..DIM {
+            if lambda == rho {
+                let mut plus = [0_i8; DIM];
+                plus[lambda] = 1;
+                let g_plus = sample_metric(&mut cache, &mut metric_fn, point, plus, step);
+
+                let mut minus = [0_i8; DIM];
+                minus[lambda] = -1;
+                let g_minus = sample_metric(&mut cache, &mut metric_fn, point, minus, step);
+
+                for mu in 0..DIM {
+                    for nu in 0..DIM {
+                        second[lambda][rho][mu][nu] =
+                            (g_plus[(mu, nu)] - 2.0 * base_matrix[(mu, nu)] + g_minus[(mu, nu)])
+                                / (step * step);
+                    }
+                }
+            } else {
+                let mut pp = [0_i8; DIM];
+                pp[lambda] = 1;
+                pp[rho] = 1;
+                let g_pp = sample_metric(&mut cache, &mut metric_fn, point, pp, step);
+
+                let mut pm = [0_i8; DIM];
+                pm[lambda] = 1;
+                pm[rho] = -1;
+                let g_pm = sample_metric(&mut cache, &mut metric_fn, point, pm, step);
+
+                let mut mp = [0_i8; DIM];
+                mp[lambda] = -1;
+                mp[rho] = 1;
+                let g_mp = sample_metric(&mut cache, &mut metric_fn, point, mp, step);
+
+                let mut mm = [0_i8; DIM];
+                mm[lambda] = -1;
+                mm[rho] = -1;
+                let g_mm = sample_metric(&mut cache, &mut metric_fn, point, mm, step);
+
+                for mu in 0..DIM {
+                    for nu in 0..DIM {
+                        second[lambda][rho][mu][nu] =
+                            (g_pp[(mu, nu)] - g_pm[(mu, nu)] - g_mp[(mu, nu)] + g_mm[(mu, nu)])
+                                / (4.0 * step * step);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok((
+        metric,
+        MetricDerivatives { partials: first },
+        MetricSecondDerivatives { partials: second },
+    ))
 }
 
 /// Christoffel symbols Γ^ρ_{μν} of the Levi-Civita connection.
@@ -880,12 +1000,12 @@ mod tests {
 
     #[test]
     fn minkowski_vacuum_is_flat() {
-        let metric =
-            LorentzianMetric::try_new(Matrix4::from_diagonal(&Vector4::new(-1.0, 1.0, 1.0, 1.0)))
-                .unwrap();
-
-        let first = MetricDerivatives::zero();
-        let second = MetricSecondDerivatives::zero();
+        let (metric, first, second) = finite_difference_metric_data(
+            |_: &[f64; DIM]| Matrix4::from_diagonal(&Vector4::new(-1.0, 1.0, 1.0, 1.0)),
+            [0.0; DIM],
+            1e-3,
+        )
+        .unwrap();
         let connection = LeviCivitaConnection::from_metric(&metric, &first);
         for rho in 0..DIM {
             for mu in 0..DIM {

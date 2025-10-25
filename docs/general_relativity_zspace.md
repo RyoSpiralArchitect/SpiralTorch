@@ -19,6 +19,7 @@
   \Gamma^{\rho}_{\mu\nu} = \tfrac{1}{2} g^{\rho\sigma} (\partial_\mu g_{\nu\sigma} + \partial_\nu g_{\mu\sigma} - \partial_\sigma g_{\mu\nu}).
   \]
 - **Curvature tensors:** Compute the Riemann curvature \(R^{\sigma}_{\;\mu\nu\rho}\), contract to obtain the Ricci tensor \(R_{\mu\nu} = R^{\rho}_{\;\mu\rho\nu}\), and further contract to the scalar curvature \(R = g^{\mu\nu} R_{\mu\nu}\).
+- **Numerical derivatives:** When analytic derivatives are awkward, call `theory::general_relativity::finite_difference_metric_data` to approximate \(g_{\mu\nu}\) and its first and second derivatives at a point via central differences.
 
 ## 4. Einstein Field Equations
 
