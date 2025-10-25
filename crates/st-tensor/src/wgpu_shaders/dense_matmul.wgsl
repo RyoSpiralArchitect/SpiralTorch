@@ -22,11 +22,13 @@ const FLAG_FUSED_RESIDUAL: u32 = 1u << 3u;
 const TILE_M : u32 = {tile_m}u;
 const TILE_N : u32 = {tile_n}u;
 const TILE_K : u32 = {tile_k}u;
+const TILE_MK : u32 = {tile_mk};
+const TILE_NK : u32 = {tile_nk};
 const WG_SIZE_X : u32 = {workgroup_size_x}u;
 const WG_SIZE_Y : u32 = {workgroup_size_y}u;
 
-var<workgroup> tile_a : array<f32, TILE_M * TILE_K>;
-var<workgroup> tile_b : array<f32, TILE_N * TILE_K>;
+var<workgroup> tile_a : array<f32, TILE_MK>;
+var<workgroup> tile_b : array<f32, TILE_NK>;
 
 fn load_rhs_value(k : u32, col : u32) -> f32 {{
     {rhs_load_body}

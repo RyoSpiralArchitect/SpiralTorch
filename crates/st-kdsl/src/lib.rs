@@ -19,7 +19,7 @@ pub use registry::{
     AutotuneKey, AutotuneRegistry, DeviceProfile, KernelProfile, TelemetryLog, TelemetrySample,
     TelemetrySummary,
 };
-pub use tile::{TileConfig, TileIter, TileTemplate};
+pub use tile::{TileConfig, TileIter, TileKnowledge, TileTemplate, WeightedMetric};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Ctx {

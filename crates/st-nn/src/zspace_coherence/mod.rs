@@ -22,6 +22,7 @@ pub use psi_synchro::{
     PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent,
 };
 pub use sequencer::{
-    CoherenceDiagnostics, PreDiscardPolicy, PreDiscardRegulator, PreDiscardSnapshot,
+    is_swap_invariant, CoherenceDiagnostics, CoherenceLabel, CoherenceObservation,
+    CoherenceSignature, PreDiscardPolicy, PreDiscardRegulator, PreDiscardSnapshot,
     PreDiscardTelemetry, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
 };
