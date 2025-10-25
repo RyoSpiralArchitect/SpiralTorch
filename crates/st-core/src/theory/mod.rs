@@ -57,6 +57,14 @@ pub mod sync_bridge_impl;
 #[doc(inline)]
 pub use sync_bridge_impl as sync_bridge;
 
+#[cfg(feature = "psi")]
+#[path = "psi_sync.rs"]
+#[doc(hidden)]
+pub mod psi_sync_impl;
+#[cfg(feature = "psi")]
+#[doc(inline)]
+pub use psi_sync_impl as psi_sync;
+
 #[path = "stv.rs"]
 #[doc(hidden)]
 pub mod stv_impl;

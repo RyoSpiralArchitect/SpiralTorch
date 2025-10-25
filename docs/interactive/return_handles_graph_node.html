@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Return handles & graph node explorer · SpiralTorch</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+        --bg: #0f172a;
+        --panel: #111c34;
+        --panel-border: #1e293b;
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --accent: #38bdf8;
+        --accent-strong: #0ea5e9;
+        --highlight: #fbbf24;
+        --edge: #475569;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at top left, #15254a, var(--bg));
+        color: var(--text);
+        display: flex;
+        justify-content: center;
+        padding: 32px 24px 48px;
+      }
+
+      .page {
+        width: min(1100px, 100%);
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      header {
+        background: linear-gradient(145deg, rgba(37, 99, 235, 0.18), rgba(6, 182, 212, 0.08));
+        border: 1px solid rgba(56, 189, 248, 0.25);
+        border-radius: 18px;
+        padding: 20px 24px;
+        box-shadow: 0 25px 45px rgba(15, 23, 42, 0.45);
+      }
+
+      header h1 {
+        margin: 0 0 12px;
+        font-size: clamp(1.4rem, 2vw + 0.5rem, 1.9rem);
+        letter-spacing: 0.03em;
+      }
+
+      header p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.5;
+        max-width: 820px;
+      }
+
+      header p + p {
+        margin-top: 10px;
+        color: #bae6fd;
+        font-size: 0.95rem;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      button {
+        appearance: none;
+        background: rgba(30, 64, 175, 0.55);
+        border: 1px solid rgba(129, 140, 248, 0.35);
+        color: #eef2ff;
+        padding: 10px 18px;
+        border-radius: 12px;
+        cursor: pointer;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        transition: transform 150ms ease, background 150ms ease;
+      }
+
+      button:hover:not(:disabled) {
+        background: rgba(59, 130, 246, 0.65);
+        transform: translateY(-1px);
+      }
+
+      button:active {
+        transform: translateY(1px);
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      button.story {
+        background: rgba(6, 182, 212, 0.4);
+        border-color: rgba(45, 212, 191, 0.5);
+        color: #ecfeff;
+      }
+
+      button.story:hover:not(:disabled) {
+        background: rgba(34, 211, 238, 0.6);
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 18px;
+        align-items: stretch;
+      }
+
+      .canvas-wrapper {
+        position: relative;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 18px;
+        padding: 20px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+
+      svg {
+        width: 100%;
+        height: auto;
+      }
+
+      .node circle {
+        fill: rgba(15, 118, 110, 0.25);
+        stroke: rgba(94, 234, 212, 0.7);
+        stroke-width: 2;
+        transition: fill 180ms ease, stroke 180ms ease, transform 180ms ease;
+      }
+
+      .node text {
+        fill: #f8fafc;
+        font-size: 13px;
+        pointer-events: none;
+      }
+
+      .node:hover circle {
+        fill: rgba(20, 184, 166, 0.45);
+        stroke: rgba(16, 185, 129, 0.95);
+      }
+
+      .node.active circle {
+        fill: rgba(14, 165, 233, 0.45);
+        stroke: var(--accent-strong);
+        stroke-width: 3.5;
+        transform: scale(1.05);
+      }
+
+      .edge {
+        stroke: var(--edge);
+        stroke-width: 2;
+        opacity: 0.55;
+        cursor: pointer;
+        transition: stroke 160ms ease, opacity 160ms ease, stroke-width 160ms ease;
+      }
+
+      .edge:hover {
+        stroke: rgba(165, 180, 252, 0.85);
+        opacity: 0.9;
+      }
+
+      .edge.active {
+        stroke: var(--highlight);
+        stroke-width: 4;
+        opacity: 1;
+      }
+
+      .info-panel {
+        background: rgba(8, 47, 73, 0.65);
+        border: 1px solid rgba(14, 116, 144, 0.45);
+        border-radius: 18px;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        box-shadow: 0 16px 32px rgba(15, 23, 42, 0.45);
+      }
+
+      .info-panel h2 {
+        margin: 0;
+        font-size: 1.2rem;
+      }
+
+      .info-panel p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .legend {
+        font-size: 0.85rem;
+        color: rgba(148, 163, 184, 0.85);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .storyboard {
+        background: rgba(12, 74, 110, 0.35);
+        border: 1px solid rgba(56, 189, 248, 0.35);
+        border-radius: 14px;
+        padding: 16px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .storyboard h3 {
+        margin: 0;
+        font-size: 1rem;
+        letter-spacing: 0.01em;
+      }
+
+      .storyboard ol {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .storyboard li {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 10px;
+        align-items: center;
+        background: rgba(14, 116, 144, 0.3);
+        border: 1px solid rgba(8, 145, 178, 0.4);
+        border-radius: 12px;
+        padding: 10px 12px;
+        cursor: pointer;
+        transition: transform 150ms ease, border 150ms ease, background 150ms ease;
+      }
+
+      .storyboard li:hover {
+        transform: translateY(-1px);
+        border-color: rgba(34, 211, 238, 0.6);
+      }
+
+      .storyboard li:focus-visible {
+        outline: 2px solid rgba(125, 211, 252, 0.9);
+        outline-offset: 3px;
+      }
+
+      .storyboard li.active {
+        background: rgba(2, 132, 199, 0.55);
+        border-color: rgba(125, 211, 252, 0.95);
+        box-shadow: 0 10px 25px rgba(14, 116, 144, 0.4);
+      }
+
+      .storyboard .step-index {
+        font-weight: 700;
+        font-size: 0.85rem;
+        background: rgba(34, 211, 238, 0.25);
+        border-radius: 999px;
+        padding: 4px 10px;
+      }
+
+      .storyboard .step-title {
+        font-size: 0.92rem;
+        color: #f0f9ff;
+      }
+
+      .story-hint {
+        margin: 0;
+        font-size: 0.8rem;
+        color: rgba(191, 219, 254, 0.9);
+      }
+
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .swatch {
+        width: 14px;
+        height: 14px;
+        border-radius: 6px;
+      }
+
+      .swatch.node {
+        background: linear-gradient(135deg, rgba(14, 165, 233, 0.6), rgba(59, 130, 246, 0.4));
+      }
+
+      .swatch.edge {
+        background: linear-gradient(135deg, rgba(251, 191, 36, 0.8), rgba(253, 224, 71, 0.6));
+      }
+
+      @media (max-width: 1024px) {
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .controls {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .controls button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <h1>Graph node &amp; return handle handoff</h1>
+        <p>
+          This interactive map replays the portion of the SpiralTorch runtime where bindings
+          materialise a <strong>graph node</strong> and later receive <strong>return handles</strong>.
+          Activate one of the spotlight flows or click individual nodes to inspect what each
+          component contributes during the dispatch.
+        </p>
+        <p>
+          Choose a spotlight to zoom into a phase, or jump into the story tour to feel the
+          choreography narrated beat by beat. Every stop adds a little lore so the runtime becomes
+          a playful map instead of a wall of text.
+        </p>
+        <div class="controls">
+          <button id="flow-graph-node">Highlight graph node materialisation</button>
+          <button id="flow-return-handles">Highlight return handles path</button>
+          <button id="flow-reset">Reset view</button>
+          <button id="story-play" class="story">▶ Story tour</button>
+          <button id="story-prev" class="story" disabled>⟲ Previous beat</button>
+          <button id="story-next" class="story" disabled>Next beat ⟶</button>
+        </div>
+      </header>
+      <div class="workspace">
+        <div class="canvas-wrapper">
+          <svg id="diagram" viewBox="0 0 1080 540" role="group" aria-labelledby="diagram-title">
+            <title id="diagram-title">Runtime handoff diagram</title>
+            <defs>
+              <marker
+                id="arrow"
+                markerWidth="10"
+                markerHeight="10"
+                refX="10"
+                refY="5"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(148, 163, 184, 0.9)" />
+              </marker>
+              <marker
+                id="arrow-highlight"
+                markerWidth="12"
+                markerHeight="12"
+                refX="12"
+                refY="6"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <path d="M 0 0 L 12 6 L 0 12 z" fill="var(--highlight)" />
+              </marker>
+            </defs>
+          </svg>
+        </div>
+        <aside class="info-panel" aria-live="polite">
+          <h2 id="info-title">Start exploring the flow</h2>
+          <p id="info-body">
+            Use the spotlight buttons or the Story Tour to follow the two key handoffs. Click on a
+            node or edge anytime to learn how it supports execution, then hop back into the tour or
+            the README sequence diagram for broader context.
+          </p>
+          <div class="storyboard">
+            <h3>Story beats</h3>
+            <ol id="story-steps"></ol>
+            <p class="story-hint" id="story-hint">Press ▶ Story tour to autoplay the journey.</p>
+          </div>
+          <div class="legend">
+            <span><span class="swatch node"></span> Active nodes</span>
+            <span><span class="swatch edge"></span> Active edges</span>
+          </div>
+        </aside>
+      </div>
+    </div>
+    <script>
+      const svgNS = "http://www.w3.org/2000/svg";
+
+      const nodes = [
+        {
+          id: "API",
+          label: "API",
+          detail: "High-level Python/TypeScript surface where callers invoke operations.",
+          x: 100,
+          y: 120,
+        },
+        {
+          id: "FFI",
+          label: "FFI",
+          detail:
+            "Bindings (PyO3/NAPI) that marshal arguments, manage lifetimes, and bridge into Rust.",
+          x: 260,
+          y: 120,
+        },
+        {
+          id: "Core",
+          label: "Core",
+          detail:
+            "st-core dispatcher that builds execution packets, registers nodes, and coordinates state.",
+          x: 420,
+          y: 120,
+        },
+        {
+          id: "Tape",
+          label: "Tape",
+          detail: "Hypergrad tape storing autograd edges and gradient futures for backpropagation.",
+          x: 580,
+          y: 120,
+        },
+        {
+          id: "Sched",
+          label: "Sched",
+          detail: "Cooperative scheduler that books execution windows and tracks completion fences.",
+          x: 740,
+          y: 120,
+        },
+        {
+          id: "Plan",
+          label: "Plan",
+          detail: "Planner that assembles device timelines, selects kernels, and emits work packages.",
+          x: 900,
+          y: 120,
+        },
+        {
+          id: "Caps",
+          label: "Caps",
+          detail: "Capability profiler reporting precision/layout support for each backend device.",
+          x: 900,
+          y: 260,
+        },
+        {
+          id: "Reg",
+          label: "Reg",
+          detail: "Operator registry mapping abstract ops to concrete kernel implementations.",
+          x: 740,
+          y: 260,
+        },
+        {
+          id: "KD",
+          label: "KD",
+          detail: "st-kdsl codegen emitting tuned kernels when no cached pipeline exists.",
+          x: 580,
+          y: 260,
+        },
+        {
+          id: "BE",
+          label: "BE",
+          detail: "Backend runtimes (WGPU/CUDA/HIP/CPU) executing staged command buffers.",
+          x: 740,
+          y: 420,
+        },
+        {
+          id: "Queue",
+          label: "Queue",
+          detail: "Device queues & allocators where command buffers land and synchronise.",
+          x: 900,
+          y: 420,
+        },
+        {
+          id: "TLM",
+          label: "TLM",
+          detail: "Telemetry hub broadcasting runtime spans, counters, and psychoid signals.",
+          x: 580,
+          y: 420,
+        },
+        {
+          id: "PSI",
+          label: "PSI",
+          detail: "Observability sinks ingesting telemetry for dashboards and external mirrors.",
+          x: 420,
+          y: 420,
+        },
+      ];
+
+      const edges = [
+        {
+          id: "api-ffi",
+          source: "API",
+          target: "FFI",
+          detail: "Calls move from the public API into the bindings layer.",
+        },
+        {
+          id: "ffi-core",
+          source: "FFI",
+          target: "Core",
+          detail: "Bindings marshal the call and materialise a graph node inside the dispatcher.",
+        },
+        {
+          id: "core-tape",
+          source: "Core",
+          target: "Tape",
+          detail: "Dispatcher registers the new node with the hypergrad tape for autograd.",
+        },
+        {
+          id: "tape-core",
+          source: "Tape",
+          target: "Core",
+          detail: "Tape returns gradient tokens once registration succeeds.",
+        },
+        {
+          id: "core-sched",
+          source: "Core",
+          target: "Sched",
+          detail: "Dispatcher requests an execution window from the cooperative scheduler.",
+        },
+        {
+          id: "sched-plan",
+          source: "Sched",
+          target: "Plan",
+          detail: "Scheduler asks the planner to assemble a device timeline for the work.",
+        },
+        {
+          id: "plan-caps",
+          source: "Plan",
+          target: "Caps",
+          detail: "Planner queries device capabilities to pick the right precision/layout.",
+        },
+        {
+          id: "caps-plan",
+          source: "Caps",
+          target: "Plan",
+          detail: "Capability profiler returns supported layouts and heuristics.",
+        },
+        {
+          id: "plan-reg",
+          source: "Plan",
+          target: "Reg",
+          detail: "Planner asks the op registry for an implementation.",
+        },
+        {
+          id: "reg-plan",
+          source: "Reg",
+          target: "Plan",
+          detail: "Registry hands back the cached kernel and schedule, when available.",
+        },
+        {
+          id: "reg-kd",
+          source: "Reg",
+          target: "KD",
+          detail: "If no cache exists, the registry triggers st-kdsl code generation.",
+        },
+        {
+          id: "kd-reg",
+          source: "KD",
+          target: "Reg",
+          detail: "Codegen emits a tuned binary and layout metadata back to the registry.",
+        },
+        {
+          id: "plan-be",
+          source: "Plan",
+          target: "BE",
+          detail: "Planner stages work packages on the selected backend runtime.",
+        },
+        {
+          id: "be-queue",
+          source: "BE",
+          target: "Queue",
+          detail: "Backend enqueues command buffers onto device queues and allocators.",
+        },
+        {
+          id: "queue-be",
+          source: "Queue",
+          target: "BE",
+          detail: "Queues acknowledge completion fences back to the backend runtime.",
+        },
+        {
+          id: "be-tape",
+          source: "BE",
+          target: "Tape",
+          detail: "Backend materialises gradients and tensors for the autograd tape.",
+        },
+        {
+          id: "be-sched",
+          source: "BE",
+          target: "Sched",
+          detail: "Backend notifies the scheduler about work completion.",
+        },
+        {
+          id: "core-ffi",
+          source: "Core",
+          target: "FFI",
+          detail: "Dispatcher hands return handles/tensors back to the bindings layer.",
+        },
+        {
+          id: "ffi-api",
+          source: "FFI",
+          target: "API",
+          detail: "Bindings deliver the resolved handles back to the caller.",
+        },
+        {
+          id: "be-tlm",
+          source: "BE",
+          target: "TLM",
+          detail: "Backend streams runtime spans and counters into telemetry.",
+        },
+        {
+          id: "tlm-psi",
+          source: "TLM",
+          target: "PSI",
+          detail: "Telemetry hub forwards signals to PSI observability sinks.",
+        },
+        {
+          id: "tlm-ffi",
+          source: "TLM",
+          target: "FFI",
+          detail: "Telemetry pushes warnings and notices upstream to bindings.",
+        },
+      ];
+
+      const svg = document.getElementById("diagram");
+      const infoTitle = document.getElementById("info-title");
+      const infoBody = document.getElementById("info-body");
+      const storyStepsList = document.getElementById("story-steps");
+      const storyHint = document.getElementById("story-hint");
+      const storyPlayButton = document.getElementById("story-play");
+      const storyPrevButton = document.getElementById("story-prev");
+      const storyNextButton = document.getElementById("story-next");
+
+      const defaultInfoTitle = "Start exploring the flow";
+      const defaultInfoBody =
+        "Use the spotlight buttons or the Story Tour to follow the two key handoffs. Click on a node or edge anytime to learn how it supports execution, then hop back into the tour or the README sequence diagram for broader context.";
+      const defaultHint = "Press ▶ Story tour to autoplay the journey.";
+
+      const nodeById = new Map(nodes.map((node) => [node.id, node]));
+      const nodeElements = new Map();
+      const edgeElements = new Map();
+      let storyTimer = null;
+      let currentBeatIndex = null;
+
+      const storyBeats = [
+        {
+          title: "1. Spark the call",
+          body:
+            "A Python or TypeScript call leaps from the public API into the bindings. The FFI packs arguments, lifetimes, and metadata so Rust can take over without losing intent.",
+          nodes: ["API", "FFI"],
+          edges: ["api-ffi"],
+        },
+        {
+          title: "2. Graph node crystallises",
+          body:
+            "Bindings deliver the marshalled request to st-core, which materialises a fresh graph node and registers it with the hypergrad tape. Autograd futures are now on standby.",
+          nodes: ["FFI", "Core", "Tape"],
+          edges: ["ffi-core", "core-tape", "tape-core"],
+        },
+        {
+          title: "3. Schedulers spin the plan",
+          body:
+            "The dispatcher partners with the cooperative scheduler and planner. Together they survey device caps and the op registry (plus codegen if needed) to stage the perfect pipeline.",
+          nodes: ["Core", "Sched", "Plan", "Caps", "Reg", "KD"],
+          edges: [
+            "core-sched",
+            "sched-plan",
+            "plan-caps",
+            "caps-plan",
+            "plan-reg",
+            "reg-plan",
+            "reg-kd",
+            "kd-reg",
+          ],
+        },
+        {
+          title: "4. Backends light up",
+          body:
+            "Work packages stream into the selected backend runtime. Command buffers dance through device queues, and the autograd tape readies itself for new tensors.",
+          nodes: ["Plan", "BE", "Queue", "Tape"],
+          edges: ["plan-be", "be-queue", "queue-be", "be-tape"],
+        },
+        {
+          title: "5. Telemetry keeps the vibe",
+          body:
+            "As execution wraps, telemetry pulses outward. The backend updates the scheduler, streams spans to TLM, and PSI plus the bindings listen for fresh insights.",
+          nodes: ["BE", "Sched", "TLM", "PSI", "FFI"],
+          edges: ["be-sched", "be-tlm", "tlm-psi", "tlm-ffi"],
+        },
+        {
+          title: "6. Return handles land",
+          body:
+            "st-core resolves the final tensor handles and sends them back through the bindings. The original API call receives its results, ready for the next SpiralTorch experiment.",
+          nodes: ["Core", "FFI", "API"],
+          edges: ["core-ffi", "ffi-api"],
+        },
+      ];
+
+      function setInfo(title, body) {
+        infoTitle.textContent = title;
+        infoBody.textContent = body;
+      }
+
+      function setStoryHint(text) {
+        storyHint.textContent = text;
+      }
+
+      function stopStoryTimer() {
+        if (storyTimer !== null) {
+          clearInterval(storyTimer);
+          storyTimer = null;
+        }
+      }
+
+      function highlightStoryItem(index) {
+        const items = storyStepsList.querySelectorAll("li");
+        items.forEach((item, itemIndex) => {
+          const isActive = itemIndex === index;
+          item.classList.toggle("active", isActive);
+          if (isActive) {
+            item.setAttribute("aria-current", "step");
+          } else {
+            item.removeAttribute("aria-current");
+          }
+        });
+      }
+
+      function updateStoryControls() {
+        const autoplaying = storyTimer !== null;
+        storyPlayButton.disabled = autoplaying;
+        const allowManual = !autoplaying;
+        storyPrevButton.disabled =
+          !allowManual || currentBeatIndex === null || currentBeatIndex <= 0;
+        storyNextButton.disabled =
+          !allowManual ||
+          currentBeatIndex === null ||
+          currentBeatIndex >= storyBeats.length - 1;
+      }
+
+      function resetStory() {
+        stopStoryTimer();
+        currentBeatIndex = null;
+        highlightStoryItem(null);
+        setStoryHint(defaultHint);
+        updateStoryControls();
+      }
+
+      function breakStoryForManual() {
+        if (storyTimer !== null || currentBeatIndex !== null) {
+          stopStoryTimer();
+          currentBeatIndex = null;
+          highlightStoryItem(null);
+          setStoryHint(
+            "Free roam engaged! Press ▶ to replay the story or pick any beat to jump back in."
+          );
+          updateStoryControls();
+        }
+      }
+
+      function manualStepTo(index) {
+        const clampedIndex = Math.max(0, Math.min(index, storyBeats.length - 1));
+        stopStoryTimer();
+        goToBeat(clampedIndex);
+        setStoryHint(
+          "Manual step selected. Use Next/Previous to stroll or press ▶ to relaunch autoplay."
+        );
+        updateStoryControls();
+      }
+
+      function goToBeat(index) {
+        const beat = storyBeats[index];
+        if (!beat) {
+          return;
+        }
+        clearActive();
+        activateNodes(beat.nodes);
+        activateEdges(beat.edges);
+        setInfo(beat.title, beat.body);
+        currentBeatIndex = index;
+        highlightStoryItem(index);
+        updateStoryControls();
+      }
+
+      function playStory() {
+        stopStoryTimer();
+        goToBeat(0);
+        setStoryHint(
+          "Tour in progress… enjoy the ride! Interact with the diagram at any time to pause."
+        );
+        storyTimer = setInterval(() => {
+          if (currentBeatIndex === null) {
+            goToBeat(0);
+            return;
+          }
+          if (currentBeatIndex >= storyBeats.length - 1) {
+            stopStoryTimer();
+            setStoryHint(
+              "Tour complete! Click any beat to revisit or press ▶ to relaunch."
+            );
+            updateStoryControls();
+            return;
+          }
+          goToBeat(currentBeatIndex + 1);
+        }, 3800);
+        updateStoryControls();
+      }
+
+      function clearActive() {
+        svg.querySelectorAll(".active").forEach((el) => {
+          el.classList.remove("active");
+          if (el.classList.contains("edge")) {
+            el.setAttribute("marker-end", "url(#arrow)");
+          }
+        });
+      }
+
+      function activateNodes(nodeIds) {
+        nodeIds.forEach((id) => {
+          const el = nodeElements.get(id);
+          if (el) {
+            el.classList.add("active");
+          }
+        });
+      }
+
+      function activateEdges(edgeIds) {
+        edgeIds.forEach((id) => {
+          const el = edgeElements.get(id);
+          if (el) {
+            el.classList.add("active");
+            el.setAttribute("marker-end", "url(#arrow-highlight)");
+          }
+        });
+      }
+
+      function focusNode(node) {
+        breakStoryForManual();
+        clearActive();
+        activateNodes([node.id]);
+        setInfo(node.label, node.detail);
+      }
+
+      function focusEdge(edge) {
+        breakStoryForManual();
+        clearActive();
+        activateNodes([edge.source, edge.target]);
+        activateEdges([edge.id]);
+        setInfo(`${edge.source} → ${edge.target}`, edge.detail);
+      }
+
+      const flows = {
+        graphNode: {
+          title: "Graph node materialisation",
+          body:
+            "Bindings request that the dispatcher instantiate a graph node. The FFI prepares the marshalled call, " +
+            "hands it to st-core, and the dispatcher registers the node with the execution tape before proceeding.",
+          nodes: ["FFI", "Core", "Tape"],
+          edges: ["ffi-core", "core-tape", "tape-core"],
+        },
+        returnHandles: {
+          title: "Return handles handoff",
+          body:
+            "Once execution completes, st-core resolves tensor handles and routes them back through the bindings to the API. " +
+            "This is where Python/TypeScript callers receive the actual tensors or futures.",
+          nodes: ["Core", "FFI", "API"],
+          edges: ["core-ffi", "ffi-api"],
+        },
+      };
+
+      storyBeats.forEach((beat, index) => {
+        const item = document.createElement("li");
+        item.innerHTML =
+          `<span class="step-index">${index + 1}</span><span class="step-title">${beat.title}</span>`;
+        item.dataset.index = String(index);
+        item.setAttribute("role", "button");
+        item.setAttribute("tabindex", "0");
+        item.setAttribute("aria-label", `Story beat ${index + 1}: ${beat.title}`);
+        item.addEventListener("click", (event) => {
+          event.stopPropagation();
+          manualStepTo(index);
+        });
+        item.addEventListener("keyup", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            manualStepTo(index);
+          }
+        });
+        storyStepsList.appendChild(item);
+      });
+
+      resetStory();
+      setInfo(defaultInfoTitle, defaultInfoBody);
+
+      nodes.forEach((node) => {
+        const group = document.createElementNS(svgNS, "g");
+        group.classList.add("node");
+        group.setAttribute("transform", `translate(${node.x}, ${node.y})`);
+        group.setAttribute("tabindex", "0");
+        group.setAttribute("role", "button");
+        group.setAttribute("aria-label", node.label);
+
+        const circle = document.createElementNS(svgNS, "circle");
+        circle.setAttribute("r", "40");
+        circle.setAttribute("cx", "0");
+        circle.setAttribute("cy", "0");
+        group.appendChild(circle);
+
+        const text = document.createElementNS(svgNS, "text");
+        text.setAttribute("text-anchor", "middle");
+        text.setAttribute("dy", "4");
+        text.textContent = node.label;
+        group.appendChild(text);
+
+        group.addEventListener("click", (event) => {
+          event.stopPropagation();
+          focusNode(node);
+        });
+
+        group.addEventListener("keyup", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            focusNode(node);
+          }
+        });
+
+        svg.appendChild(group);
+        nodeElements.set(node.id, group);
+      });
+
+      edges.forEach((edge) => {
+        const source = nodeById.get(edge.source);
+        const target = nodeById.get(edge.target);
+        if (!source || !target) {
+          return;
+        }
+        const line = document.createElementNS(svgNS, "line");
+        line.classList.add("edge");
+        line.setAttribute("x1", source.x);
+        line.setAttribute("y1", source.y);
+        line.setAttribute("x2", target.x);
+        line.setAttribute("y2", target.y);
+        line.setAttribute("marker-end", "url(#arrow)");
+        line.setAttribute("tabindex", "0");
+        line.setAttribute("role", "button");
+        line.setAttribute("aria-label", `${edge.source} to ${edge.target}`);
+
+        line.addEventListener("click", (event) => {
+          event.stopPropagation();
+          focusEdge(edge);
+        });
+
+        line.addEventListener("keyup", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            focusEdge(edge);
+          }
+        });
+
+        svg.insertBefore(line, svg.firstChild);
+        edgeElements.set(edge.id, line);
+      });
+
+      function runFlow(flow) {
+        breakStoryForManual();
+        clearActive();
+        activateNodes(flow.nodes);
+        activateEdges(flow.edges);
+        setInfo(flow.title, flow.body);
+      }
+
+      document.getElementById("flow-graph-node").addEventListener("click", () => {
+        runFlow(flows.graphNode);
+      });
+
+      document.getElementById("flow-return-handles").addEventListener("click", () => {
+        runFlow(flows.returnHandles);
+      });
+
+      storyPlayButton.addEventListener("click", () => {
+        playStory();
+      });
+
+      storyPrevButton.addEventListener("click", () => {
+        if (currentBeatIndex === null || currentBeatIndex <= 0) {
+          manualStepTo(0);
+        } else {
+          manualStepTo(currentBeatIndex - 1);
+        }
+      });
+
+      storyNextButton.addEventListener("click", () => {
+        if (currentBeatIndex === null) {
+          manualStepTo(0);
+        } else if (currentBeatIndex < storyBeats.length - 1) {
+          manualStepTo(currentBeatIndex + 1);
+        }
+      });
+
+      document.getElementById("flow-reset").addEventListener("click", () => {
+        resetStory();
+        clearActive();
+        setInfo(defaultInfoTitle, defaultInfoBody);
+      });
+
+      svg.addEventListener("click", () => {
+        resetStory();
+        clearActive();
+        setInfo(defaultInfoTitle, defaultInfoBody);
+      });
+    </script>
+  </body>
+</html>

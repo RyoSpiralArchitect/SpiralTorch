@@ -75,6 +75,26 @@ void *spiraltorch_runtime_tensor_random_normal(
     uint64_t seed,
     bool has_seed
 );
+
+struct spiraltorch_roundtable_summary {
+    size_t above;
+    size_t here;
+    size_t beneath;
+    float energy_above;
+    float energy_here;
+    float energy_beneath;
+};
+
+bool spiraltorch_roundtable_classify(
+    const float *gradient,
+    size_t len,
+    size_t above_k,
+    size_t here_k,
+    size_t beneath_k,
+    float tolerance,
+    uint8_t *assignments,
+    struct spiraltorch_roundtable_summary *summary
+);
 */
 import "C"
 
@@ -600,4 +620,83 @@ func (t *Tensor) Reshape(rows, cols int) (*Tensor, error) {
 	}
 	ptr := C.spiraltorch_tensor_reshape(t.handle, C.size_t(rows), C.size_t(cols))
 	return wrapTensor(ptr, "tensor_reshape")
+}
+
+// RoundtableBand identifies which SpiralTorch roundtable band owns a gradient lane.
+type RoundtableBand uint8
+
+const (
+	// RoundtableBandAbove marks entries assigned to the Above (TopK) band.
+	RoundtableBandAbove RoundtableBand = 0
+	// RoundtableBandHere marks entries assigned to the Here (MidK) band.
+	RoundtableBandHere RoundtableBand = 1
+	// RoundtableBandBeneath marks entries assigned to the Beneath (BottomK) band.
+	RoundtableBandBeneath RoundtableBand = 2
+)
+
+func (band RoundtableBand) String() string {
+	switch band {
+	case RoundtableBandAbove:
+		return "above"
+	case RoundtableBandHere:
+		return "here"
+	case RoundtableBandBeneath:
+		return "beneath"
+	default:
+		return fmt.Sprintf("unknown(%d)", uint8(band))
+	}
+}
+
+// RoundtableSummary reports how many entries landed in each band and their total absolute energy.
+type RoundtableSummary struct {
+	Above         int
+	Here          int
+	Beneath       int
+	EnergyAbove   float32
+	EnergyHere    float32
+	EnergyBeneath float32
+}
+
+// RoundtableClassify partitions the provided gradient magnitudes into Above/Here/Beneath bands.
+//
+// The classification mirrors the roundtable heuristic used by the Rust runtime: the largest
+// magnitudes are assigned to Above, the smallest to Beneath, and any remaining lanes are
+// preserved as Here unless their magnitude is below `tolerance`. The function returns one band per
+// gradient entry along with summary statistics.
+func RoundtableClassify(gradient []float32, aboveK, hereK, beneathK int, tolerance float32) ([]RoundtableBand, RoundtableSummary, error) {
+	if len(gradient) == 0 {
+		return nil, RoundtableSummary{}, fmt.Errorf("spiraltorch: roundtable_classify requires at least one gradient value")
+	}
+	assignments := make([]C.uchar, len(gradient))
+	var summary C.struct_spiraltorch_roundtable_summary
+	success := C.spiraltorch_roundtable_classify(
+		(*C.float)(unsafe.Pointer(&gradient[0])),
+		C.size_t(len(gradient)),
+		C.size_t(aboveK),
+		C.size_t(hereK),
+		C.size_t(beneathK),
+		C.float(tolerance),
+		(*C.uchar)(unsafe.Pointer(&assignments[0])),
+		&summary,
+	)
+	if !bool(success) {
+		message := lastError()
+		if message == "" {
+			message = "roundtable_classify failed"
+		}
+		return nil, RoundtableSummary{}, fmt.Errorf("spiraltorch: %s", message)
+	}
+	bands := make([]RoundtableBand, len(gradient))
+	for i := range bands {
+		bands[i] = RoundtableBand(assignments[i])
+	}
+	summaryGo := RoundtableSummary{
+		Above:         int(summary.above),
+		Here:          int(summary.here),
+		Beneath:       int(summary.beneath),
+		EnergyAbove:   float32(summary.energy_above),
+		EnergyHere:    float32(summary.energy_here),
+		EnergyBeneath: float32(summary.energy_beneath),
+	}
+	return bands, summaryGo, nil
 }
