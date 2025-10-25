@@ -470,15 +470,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam-channel"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-deque"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2870,7 +2861,6 @@ dependencies = [
  "bitflags 2.9.4",
  "bytemuck",
  "chrono",
- "crossbeam-channel",
  "cudarc",
  "dirs 5.0.1",
  "julia-ffi-poc",
@@ -2907,6 +2897,7 @@ dependencies = [
 name = "st-frac"
 version = "0.1.1"
 dependencies = [
+ "approx",
  "bytemuck",
  "libm",
  "ndarray",
