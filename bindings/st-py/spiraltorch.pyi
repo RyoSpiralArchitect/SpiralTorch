@@ -1,9 +1,50 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Literal, Mapping, Optional, Sequence, Tuple, overload
 from types import ModuleType
 
 def init_backend(backend: str) -> bool: ...
+
+class Axis:
+    name: str
+    size: int | None
+
+    def __init__(self, name: str, size: int | None = ...) -> None: ...
+    def with_size(self, size: int) -> Axis: ...
+
+
+class LabeledTensor:
+    tensor: Tensor
+    axes: tuple[Axis, Axis]
+
+    def __init__(self, data: Tensor | Sequence[Sequence[float]] | Sequence[float], axes: Sequence[Axis | str]) -> None: ...
+    @property
+    def shape(self) -> tuple[int, int]: ...
+    @property
+    def rows(self) -> int: ...
+    @property
+    def cols(self) -> int: ...
+    def to_tensor(self) -> Tensor: ...
+    def tolist(self) -> List[List[float]]: ...
+    def rename(self, axes: Sequence[Axis | str]) -> LabeledTensor: ...
+    def with_axes(self, axes: Sequence[Axis | str]) -> LabeledTensor: ...
+    def transpose(self) -> LabeledTensor: ...
+    def row_softmax(self, *, backend: str | None = ...) -> LabeledTensor: ...
+    def describe(self) -> Dict[str, object]: ...
+    def axis_names(self) -> tuple[str, str]: ...
+    def __matmul__(self, other: LabeledTensor) -> LabeledTensor: ...
+
+
+@overload
+def tensor(data: Sequence[Sequence[float]] | Sequence[float]) -> Tensor: ...
+
+
+@overload
+def tensor(data: Sequence[Sequence[float]] | Sequence[float] | Tensor, *, axes: Sequence[Axis | str]) -> LabeledTensor: ...
+
+
+def label_tensor(tensor_obj: Tensor | Sequence[Sequence[float]] | Sequence[float], axes: Sequence[Axis | str]) -> LabeledTensor: ...
+
 
 class ScaleStack:
     @property
@@ -738,7 +779,7 @@ def zspace_eval(
 ) -> List[Tuple[float, float]]: ...
 
 def plan(
-    kind: str,
+    kind: Literal["topk", "midk", "bottomk", "fft"],
     rows: int,
     cols: int,
     k: int,
@@ -1090,6 +1131,113 @@ class PreDiscardPolicy:
     min_channels: int
 
 
+class ZConv:
+    def __init__(
+        self,
+        name: str,
+        in_channels: int,
+        out_channels: int,
+        kernel: Tuple[int, int],
+        *,
+        stride: Tuple[int, int] = ...,
+        padding: Tuple[int, int] = ...,
+        dilation: Tuple[int, int] = ...,
+        input_hw: Tuple[int, int],
+        layout: Literal["NCHW", "NHWC"] = ...,
+    ) -> None: ...
+
+    def forward(self, x: Tensor) -> Tensor: ...
+    def backward(self, x: Tensor, grad_output: Tensor) -> Tensor: ...
+    def __call__(self, x: Tensor) -> Tensor: ...
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+    def zero_accumulators(self) -> None: ...
+    def apply_step(self, fallback_lr: float) -> None: ...
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def layout(self) -> Literal["NCHW", "NHWC"]: ...
+
+    @property
+    def in_channels(self) -> int: ...
+
+    @property
+    def out_channels(self) -> int: ...
+
+    @property
+    def input_hw(self) -> Tuple[int, int]: ...
+
+    @property
+    def output_hw(self) -> Tuple[int, int]: ...
+
+    @property
+    def output_shape(self) -> Tuple[int, int, int]: ...
+
+    @property
+    def kernel(self) -> Tuple[int, int]: ...
+
+    @property
+    def stride(self) -> Tuple[int, int]: ...
+
+    @property
+    def padding(self) -> Tuple[int, int]: ...
+
+    @property
+    def dilation(self) -> Tuple[int, int]: ...
+
+    @property
+    def psi_drift(self) -> float | None: ...
+
+
+class ZPooling:
+    def __init__(
+        self,
+        channels: int,
+        kernel: Tuple[int, int],
+        input_hw: Tuple[int, int],
+        *,
+        stride: Tuple[int, int] | None = ...,
+        padding: Tuple[int, int] = ...,
+        layout: Literal["NCHW", "NHWC"] = ...,
+        mode: Literal["max", "avg"] = ...,
+    ) -> None: ...
+
+    def forward(self, x: Tensor) -> Tensor: ...
+    def backward(self, x: Tensor, grad_output: Tensor) -> Tensor: ...
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    @property
+    def mode(self) -> Literal["max", "avg"]: ...
+
+    @property
+    def layout(self) -> Literal["NCHW", "NHWC"]: ...
+
+    @property
+    def channels(self) -> int: ...
+
+    @property
+    def input_hw(self) -> Tuple[int, int]: ...
+
+    @property
+    def output_hw(self) -> Tuple[int, int]: ...
+
+    @property
+    def kernel(self) -> Tuple[int, int]: ...
+
+    @property
+    def stride(self) -> Tuple[int, int]: ...
+
+    @property
+    def padding(self) -> Tuple[int, int]: ...
+
+
 class _ZSpaceCoherenceSequencer:
     def __init__(
         self,
@@ -1153,6 +1301,8 @@ class _NnModule(ModuleType):
     PreDiscardTelemetry: type[PreDiscardTelemetry]
     PreDiscardPolicy: type[PreDiscardPolicy]
     PreDiscardSnapshot: type[PreDiscardSnapshot]
+    ZConv: type[ZConv]
+    ZPooling: type[ZPooling]
 
     def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...
 
@@ -1772,7 +1922,7 @@ class _PlannerModule(ModuleType):
     RankPlan: type[RankPlan]
 
     def plan(
-        kind: str,
+        kind: Literal["topk", "midk", "bottomk", "fft"],
         rows: int,
         cols: int,
         k: int,
@@ -2030,6 +2180,8 @@ __all__ = [
     "ZSpaceCoherenceSequencer",
     "step_many",
     "stream_zspace_training",
+    "ZConv",
+    "ZPooling",
     "compat",
     "capture",
     "share",

@@ -2731,6 +2731,7 @@ dependencies = [
 name = "spiral-opt"
 version = "0.1.0"
 dependencies = [
+ "rayon",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -2758,6 +2759,7 @@ dependencies = [
 name = "spiraltorch-py"
 version = "0.2.6"
 dependencies = [
+ "nalgebra 0.32.6",
  "ndarray",
  "num-complex",
  "pyo3",

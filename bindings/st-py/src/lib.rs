@@ -24,6 +24,7 @@ mod vision;
 mod scale_stack;
 mod zspace;
 mod elliptic;
+mod theory;
 
 mod extras {
     use super::*;
@@ -167,6 +168,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     vision::register(py, m)?;
     zspace::register(py, m)?;
     elliptic::register(py, m)?;
+    theory::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;
@@ -201,6 +203,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
         "EllipticWarp","EllipticTelemetry",
+        "lorentzian_metric_scaled","assemble_zrelativity_model",
         "spiralk",
         "nn","frac","selfsup","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
         "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",

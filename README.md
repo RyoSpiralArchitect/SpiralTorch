@@ -303,104 +303,70 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 ---
 
-## Python Examples
+## Python Quickstart (wheel 0.2.6)
 
-### 1)　DLPack(You can Zero copy)
+SpiralTorch's wheel ships the compiled runtime together with a thin Python notation layer.
+Every snippet below runs against `spiraltorch==0.2.6`.
+
+### 1. Labelled tensors & notation UX
 
 ```python
-import spiraltorch as st
+from spiraltorch import Axis, tensor, label_tensor
+
+# Declare the axes that describe your data.
+time = Axis("time")
+feature = Axis("feature", 4)
+
+wave = tensor(
+    [
+        [0.20, 0.80, -0.10, 0.40],
+        [0.90, -0.30, 0.10, 0.50],
+    ],
+    axes=[time.with_size(2), feature],
+)
+
+print(wave.describe())
+softmax = wave.row_softmax()
+print(softmax.axis_names())  # ('time', 'feature')
+```
+
+`Axis` objects let you assign human-friendly names to dimensions while `tensor(...)`
+constructs an actual `spiraltorch.Tensor`. When `axes` are supplied the call returns
+a `LabeledTensor` that keeps the annotations attached to downstream ops.
+Use `label_tensor(existing_tensor, axes=...)` to retrofit notation onto values that come
+from the Rust side.
+
+### 2. Zero-copy DLPack with PyTorch
+
+```python
 import torch
 from torch.utils.dlpack import from_dlpack as torch_from_dlpack
+import spiraltorch as st
 
-# ST → Torch
-a = st.Tensor(2, 3, [1,2,3,4,5,6])
-caps = a.to_dlpack()
-t = torch_from_dlpack(caps)  
+st_tensor = st.tensor([[1, 2, 3], [4, 5, 6]])
+capsule = st_tensor.to_dlpack()
+torch_tensor = torch_from_dlpack(capsule)
 
-t += 10
-print("ST tolist after torch += 10:", a.tolist())  # ← [11,12,13,14,15,16] is okay
-
-# Torch → ST
-t2 = torch.arange(6, dtype=torch.float32).reshape(2,3)
-a2 = st.Tensor.from_dlpack(t2)      # same buffer
-t2.mul_(2)                          # in-place
-print("ST sees torch mul_:        ", a2.tolist())
+torch_tensor += 10
+print(st_tensor.tolist())  # reflects the in-place update
 ```
 
-### 2) Row softmax (GPU-accelerated when available)
+### 3. Self-supervised objectives
 
 ```python
 import spiraltorch as st
 
-logits = st.Tensor(2, 4, [3.0, 1.0, -2.0, 0.5, -0.25, 0.0, 1.5, -1.0])
-print("CPU row softmax:", logits.row_softmax().tolist())
-
-# Opt into the WGPU backend (falls back to CPU if the device lacks subgroups)
-print("WGPU row softmax:", logits.row_softmax(backend="wgpu").tolist())
-```
-
-### 3) rl.stAgent
-
-```python
-import random
-import spiraltorch as st
-
-Agent = getattr(st.rl, "stAgent", None)
-if Agent is None:
-    raise SystemExit("st.rl.stAgent not available")
-
-def reward(action):
-    p = 0.6 if action == 0 else 0.4
-    return 1.0 if random.random() < p else 0.0
-
-agent = Agent(state_dim=1, action_dim=2, discount=0.0, learning_rate=5e-2)
-
-T = 2000
-FORCE_EXPLORE = 200
-eps_hi, eps_lo = 0.3, 0.01
-
-wins = 0
-pulls = [0, 0]
-wins_by_arm = [0, 0]
-
-for t in range(1, T + 1):
-    # 最初は強制探索、それ以降は徐々にεを下げる
-    if t <= FORCE_EXPLORE:
-        a = t % 2
-    else:
-        frac = (t - FORCE_EXPLORE) / (T - FORCE_EXPLORE)
-        eps = eps_hi + (eps_lo - eps_hi) * frac
-        agent.set_epsilon(eps)
-        a = agent.select_action(0)   # 状態はダミー
-
-    r = reward(a)
-    wins += r
-    pulls[a] += 1
-    wins_by_arm[a] += r
-    agent.update(0, a, r, 0) 
-
-print(f"total win rate: {wins / T:.3f}")
-for k in range(2):
-    rate = (wins_by_arm[k] / pulls[k]) if pulls[k] else 0.0
-    print(f"arm {k}: pulls={pulls[k]}, empirical p≈{rate:.3f}")
-```
-
-### 4) Self-supervised
-
-```python
-import spiraltorch as st
-
-anchors   = [[0.1, 0.9], [0.8, 0.2]]
+anchors = [[0.1, 0.9], [0.8, 0.2]]
 positives = [[0.12, 0.88], [0.79, 0.21]]
 print("info_nce:", st.selfsup.info_nce(anchors, positives, temperature=0.1, normalize=True))
 
 pred = [[0.2, 0.8], [0.6, 0.4]]
-tgt  = [[0.0, 1.0], [1.0, 0.0]]
-mask = [[1], [0]]  # mask by column indices per row
+tgt = [[0.0, 1.0], [1.0, 0.0]]
+mask = [[1], [0]]
 print("masked_mse:", st.selfsup.masked_mse(pred, tgt, mask))
 ```
 
-### 5) Z-space trainer
+### 4. Z-space training loop
 
 ```python
 import spiraltorch as st
@@ -413,76 +379,32 @@ samples = [
 print("z:", st.step_many(trainer, samples))
 ```
 
-### 6) Vision × Canvas
+### 5. RL and recommender primitives
 
 ```python
 import spiraltorch as st
 
-vision = st.SpiralTorchVision(depth=4, height=3, width=3, alpha=0.2, window="hann", temporal=4)
-canvas = st.CanvasTransformer(width=3, height=3, smoothing=0.85)
-
-for t in range(3):
-    vol = [[[0.0+(t*0.1) for _ in range(3)] for _ in range(3)] for _ in range(4)]
-    vision.accumulate(vol)
-
-# If you packaged an apply helper under st.canvas:
-snap = st.canvas.apply_vision_update(vision, canvas, include_patch=True)
-print("canvas summary:", snap.summary)
-print("patch[0][:3]:", snap.patch[0][:3] if snap.patch else None)
-```
-
-### 7) NN data utilities
-
-```python
-import spiraltorch as st
-
-pairs = [
-    (st.Tensor(1,2,[1,0]), st.Tensor(1,2,[1,0])),
-    (st.Tensor(1,2,[0,1]), st.Tensor(1,2,[0,1])),
-]
-loader = st.nn.Dataset.from_pairs(pairs).loader().shuffle(123).batched(2).prefetch(2)
-for x, y in loader:
-    pass
-```
-
-### 8) Recommender & RL
-
-```python
-import spiraltorch as st
+agent = st.stAgent(state_dim=1, action_dim=2, discount=0.99, learning_rate=1e-3)
+action = agent.select_action(0)
+agent.update(0, action, 1.0, 0)
 
 rec = st.Recommender(users=8, items=12, factors=4, learning_rate=0.05, regularization=0.002)
-rec.train_epoch([(0,0,5.0),(0,1,3.0),(1,0,4.0)])
+rec.train_epoch([(0, 0, 5.0), (0, 1, 3.0), (1, 0, 4.0)])
 print("top-k:", rec.recommend_top_k(0, k=3))
-
-# RL: use stAgent (DQN-like), PPO, SAC
-agent = st.stAgent(state_dim=4, action_dim=2, discount=0.99, learning_rate=1e-3)
-a = agent.select_action(0); agent.update(0, a, 1.0, 1)
-
-ppo = st.PpoAgent(state_dim=4, action_dim=2, learning_rate=3e-4, clip_range=0.2)
-sac = st.SacAgent(state_dim=4, action_dim=2, temperature=0.1)
 ```
 
-### 9) Interop (PyTorch / JAX / TensorFlow)
+#### Notation cheat sheet
 
-```python
-import spiraltorch as st, torch
+- `Axis(name, size=None)` creates a named dimension; call `axis.with_size(n)` when the
+  concrete length becomes known.
+- `tensor(data, axes=[...])` returns a backend-backed tensor and, if axes are provided,
+  a `LabeledTensor` wrapper that keeps names in sync across operations like
+  `row_softmax`, `transpose`, or matrix products.
+- `label_tensor(t, axes=[...])` applies the same annotation layer to tensors produced by
+  other SpiralTorch APIs.
+- `LabeledTensor.describe()` provides a quick dictionary with `shape`, `axes`, and
+  recorded sizes—handy when iterating inside notebooks.
 
-x = st.Tensor(1,3,[1.0, 2.0, 3.0])
-xt = st.compat.torch.to_torch(x, dtype=torch.float32, device="cpu")
-x_back = st.compat.torch.from_torch(xt)
-```
-
-### 10) Math & pacing helpers
-
-```python
-import spiraltorch as st
-st.set_global_seed(42)
-print(st.golden_ratio(), st.golden_angle())
-print(st.fibonacci_pacing(12))
-print(st.pack_tribonacci_chunks(20))
-```
-
----
 
 ## Backend Matrix
 
