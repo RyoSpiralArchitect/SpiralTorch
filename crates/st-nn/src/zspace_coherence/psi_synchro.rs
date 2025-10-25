@@ -20,6 +20,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use st_core::theory::zpulse::{ZPulse, ZScale, ZSource, ZSupport};
+
 /// Per-branch dynamical parameters used to synthesise PSI samples.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PsiBranchState {
@@ -362,6 +364,135 @@ pub struct HeatmapResult {
     pub lam_grid: Vec<f64>,
     pub wd_grid: Vec<f64>,
     pub matrix: Vec<Vec<f64>>,
+}
+
+impl HeatmapResult {
+    /// Converts the heatmap into a synthetic ZPulse snapshot for downstream Z-space consumers.
+    pub fn to_zpulse(&self, ts: u64) -> ZPulse {
+        let mut pulse = ZPulse::default();
+        pulse.source = ZSource::Other("psi");
+        pulse.ts = ts;
+
+        if self.matrix.is_empty() || self.matrix[0].is_empty() {
+            return pulse;
+        }
+
+        let lam_bins = self.matrix.len();
+
+        let mut lam_profile = vec![0.0f64; lam_bins];
+        let mut total_energy = 0.0f64;
+        let mut max_value = f64::MIN;
+        let mut max_pos = (0usize, 0usize);
+
+        for (row_idx, row) in self.matrix.iter().enumerate() {
+            let mut row_sum = 0.0f64;
+            for (col_idx, value) in row.iter().enumerate() {
+                let clamped = if value.is_finite() {
+                    value.max(0.0)
+                } else {
+                    0.0
+                };
+                row_sum += clamped;
+                total_energy += clamped;
+                if clamped > max_value {
+                    max_value = clamped;
+                    max_pos = (row_idx, col_idx);
+                }
+            }
+            lam_profile[row_idx] = row_sum;
+        }
+
+        if !total_energy.is_finite() || total_energy <= f64::EPSILON {
+            return pulse;
+        }
+
+        let mut leading_sum = 0.0f64;
+        let mut central_sum = 0.0f64;
+        let mut trailing_sum = 0.0f64;
+        if lam_bins < 3 {
+            central_sum = total_energy;
+        } else {
+            let leading_end = lam_bins / 3;
+            let trailing_start = lam_bins.saturating_sub(lam_bins / 3);
+            for (idx, sum) in lam_profile.iter().copied().enumerate() {
+                if idx < leading_end {
+                    leading_sum += sum;
+                } else if idx >= trailing_start {
+                    trailing_sum += sum;
+                } else {
+                    central_sum += sum;
+                }
+            }
+        }
+
+        let normalise = |value: f64| -> f32 {
+            if total_energy <= f64::EPSILON {
+                0.0
+            } else {
+                (value / total_energy).max(0.0).min(1.0) as f32
+            }
+        };
+
+        let leading_norm = normalise(leading_sum);
+        let central_norm = normalise(central_sum);
+        let trailing_norm = normalise(trailing_sum);
+
+        pulse.band_energy = (leading_norm, central_norm, trailing_norm);
+        pulse.support = ZSupport::new(leading_norm, central_norm, trailing_norm);
+
+        let dominant_lam = self
+            .lam_grid
+            .get(max_pos.0)
+            .copied()
+            .or_else(|| self.lam_grid.first().copied())
+            .unwrap_or(0.0);
+        let dominant_wd = self
+            .wd_grid
+            .get(max_pos.1)
+            .copied()
+            .or_else(|| self.wd_grid.first().copied())
+            .unwrap_or(0.0);
+
+        let radius = (dominant_lam + 1.0).max(1e-3);
+        let scale =
+            ZScale::from_components(radius as f32, radius.ln() as f32).unwrap_or(ZScale::ONE);
+        pulse.scale = Some(scale);
+        pulse.tempo = dominant_wd as f32;
+
+        let bias = if (leading_sum + trailing_sum).abs() <= f64::EPSILON {
+            0.0
+        } else {
+            ((leading_sum - trailing_sum) / (leading_sum + trailing_sum)).clamp(-1.0, 1.0) as f32
+        };
+        pulse.z_bias = bias;
+        pulse.drift = self.kappa_hat.tanh() as f32;
+
+        let quality = (max_value / total_energy).clamp(0.0, 1.0) as f32;
+        pulse.quality = quality;
+        pulse.stderr = (1.0 - quality).clamp(0.0, 1.0);
+        pulse.latency_ms = 0.0;
+
+        pulse
+    }
+}
+
+/// PSI branch pulse derived from the Arnold tongue heatmap.
+#[derive(Clone, Debug)]
+pub struct PsiSynchroPulse {
+    pub branch_id: String,
+    pub pulse: ZPulse,
+}
+
+/// Converts heatmap outputs into ZPulse snapshots tagged with their originating branch.
+pub fn heatmaps_to_zpulses(heatmaps: &[HeatmapResult]) -> Vec<PsiSynchroPulse> {
+    heatmaps
+        .iter()
+        .enumerate()
+        .map(|(idx, heatmap)| PsiSynchroPulse {
+            branch_id: heatmap.branch_id.clone(),
+            pulse: heatmap.to_zpulse(idx as u64),
+        })
+        .collect()
 }
 
 /// Parameters controlling the Arnold tongue heatmap computation.

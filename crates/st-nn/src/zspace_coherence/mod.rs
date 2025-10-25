@@ -12,8 +12,9 @@ pub use coherence_engine::{
     LinguisticChannelReport, LinguisticContour,
 };
 pub use psi_synchro::{
-    run_multibranch_demo, CircleLockMapConfig, HeatmapResult, MetaMembConfig, MetaMembSampler,
-    PsiBranchState, PsiSynchroConfig, SyncState, SynchroBus, SynchroEvent,
+    heatmaps_to_zpulses, run_multibranch_demo, CircleLockMapConfig, HeatmapResult, MetaMembConfig,
+    MetaMembSampler, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse, SyncState, SynchroBus,
+    SynchroEvent,
 };
 pub use sequencer::{
     CoherenceDiagnostics, PreDiscardPolicy, PreDiscardRegulator, PreDiscardSnapshot,
