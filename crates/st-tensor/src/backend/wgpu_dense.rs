@@ -356,6 +356,7 @@ struct GpuContext {
     context: WgpuContext,
     pipeline_cache: PipelineCache,
     weights_cache: Mutex<HashMap<RhsCacheKey, Weak<GpuPackedRhs>>>,
+    autotune_cache: Mutex<HashMap<String, TileConfig>>,
     bind_layout: Arc<BindGroupLayout>,
     pipeline_layout: Arc<PipelineLayout>,
     zero_storage: OnceLock<Arc<Buffer>>,
@@ -948,6 +949,7 @@ impl GpuContext {
             context: WgpuContext::new(device.clone(), queue.clone()),
             pipeline_cache: PipelineCache::new(device.clone()),
             weights_cache: Mutex::new(HashMap::new()),
+            autotune_cache: Mutex::new(HashMap::new()),
             bind_layout,
             pipeline_layout,
             zero_storage: OnceLock::new(),
@@ -2907,7 +2909,158 @@ pub fn conv_im2col_gemm(
     readback_f32(device, queue, &output_buf, rows * out_channels)
 }
 
+pub fn conv_grad_input_fused(
+    grad_matrix: &[f32],
+    weights: &[f32],
+    batch: usize,
+    in_channels: usize,
+    input_h: usize,
+    input_w: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_h: i32,
+    pad_w: i32,
+    dilation_h: usize,
+    dilation_w: usize,
+    out_h: usize,
+    out_w: usize,
+    out_channels: usize,
+) -> Result<Vec<f32>, String> {
+    if batch == 0
+        || in_channels == 0
+        || kernel_h == 0
+        || kernel_w == 0
+        || out_channels == 0
+        || out_h == 0
+        || out_w == 0
+    {
+        return Err("convolution dimensions must be positive".into());
+    }
+
+    let rows = batch
+        .checked_mul(out_h)
+        .and_then(|value| value.checked_mul(out_w))
+        .ok_or_else(|| "output spatial overflow".to_string())?;
+    let span = in_channels
+        .checked_mul(kernel_h)
+        .and_then(|value| value.checked_mul(kernel_w))
+        .ok_or_else(|| "kernel span overflow".to_string())?;
+
+    if grad_matrix.len() != rows * out_channels {
+        return Err("grad matrix length mismatch".into());
+    }
+    if weights.len() != out_channels * span {
+        return Err("weight buffer length mismatch".into());
+    }
+
+    let total_bc = batch
+        .checked_mul(in_channels)
+        .ok_or_else(|| "input channel volume overflow".to_string())?;
+    if total_bc > u32::MAX as usize {
+        return Err("input channel volume exceeds GPU limits".into());
+    }
+    let input_volume = total_bc
+        .checked_mul(input_h)
+        .and_then(|value| value.checked_mul(input_w))
+        .ok_or_else(|| "input tensor volume overflow".to_string())?;
+
+    if rows > u32::MAX as usize
+        || span > u32::MAX as usize
+        || batch > u32::MAX as usize
+        || in_channels > u32::MAX as usize
+        || input_h > u32::MAX as usize
+        || input_w > u32::MAX as usize
+        || kernel_h > u32::MAX as usize
+        || kernel_w > u32::MAX as usize
+        || stride_h > u32::MAX as usize
+        || stride_w > u32::MAX as usize
+        || dilation_h > u32::MAX as usize
+        || dilation_w > u32::MAX as usize
+        || out_h > u32::MAX as usize
+        || out_w > u32::MAX as usize
+        || out_channels > u32::MAX as usize
+    {
+        return Err("convolution dimensions exceed GPU limits".into());
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let grad_matrix_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_matrix"),
+        contents: bytemuck::cast_slice(grad_matrix),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let weights_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_weights"),
+        contents: bytemuck::cast_slice(weights),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let output_buf = allocate_output(device, "st.tensor.wgpu_dense.conv.grad_input", input_volume);
+
+    let params = GradInputParams {
+        batch: batch as u32,
+        in_channels: in_channels as u32,
+        input_h: input_h as u32,
+        input_w: input_w as u32,
+        kernel_h: kernel_h as u32,
+        kernel_w: kernel_w as u32,
+        stride_h: stride_h as u32,
+        stride_w: stride_w as u32,
+        pad_h,
+        pad_w,
+        dilation_h: dilation_h as u32,
+        dilation_w: dilation_w as u32,
+        out_h: out_h as u32,
+        out_w: out_w as u32,
+        out_channels: out_channels as u32,
+        span: span as u32,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+        _pad3: 0,
+    };
+
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_input.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_input.encoder"),
+    });
+
+    let pipeline = ctx.fused_grad_input_pipeline()?;
+    let bind_group =
+        ctx.fused_grad_input_bind_group(&grad_matrix_buf, &weights_buf, &output_buf, &params_buf);
+
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.conv.grad_input.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        let groups_x = ((input_w as u32) + GRAD_INPUT_TILE_X - 1) / GRAD_INPUT_TILE_X;
+        let groups_y = ((input_h as u32) + GRAD_INPUT_TILE_Y - 1) / GRAD_INPUT_TILE_Y;
+        let groups_z = ((total_bc as u32) + GRAD_INPUT_TILE_Z - 1) / GRAD_INPUT_TILE_Z;
+        pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), groups_z.max(1));
+    }
+
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &output_buf, input_volume)
+}
+
 fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
+    select_tile_config(rows, inner, cols)
+}
+
+fn select_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     let rows = rows as u32;
     let cols = cols as u32;
     let inner = inner as u32;
