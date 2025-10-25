@@ -10,8 +10,9 @@ use crate::pure::{PackedB, PackedLayout};
 use crate::util::readback_f32;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
-use st_kdsl::autotune_store::{lookup_best, record_best};
+use st_kdsl::autotune_store::{lookup_best, lookup_similar, record_best};
 use std::any::Any;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env;
@@ -1726,7 +1727,7 @@ impl WeightBuffers {
 }
 
 fn generate_matmul_shader(key: &PipelineKey) -> String {
-    let enable_f16 = if key.use_f16 { "enable f16;\n" } else { "" };
+    let enable_f16 = "";
     let rhs_storage_type = match key.dtype {
         ScalarType::F32 => "array<f32>".to_string(),
         ScalarType::QuantizedI8 => "array<u32>".to_string(),
@@ -1745,13 +1746,10 @@ fn generate_matmul_shader(key: &PipelineKey) -> String {
             .to_string(),
     };
 
-    let fma_line = if key.use_f16 {
-        "let lhs16 = f16(lhs_val);
-            let rhs16 = f16(rhs_val);
-            acc = acc + f32(lhs16 * rhs16);"
-    } else {
-        "acc = acc + lhs_val * rhs_val;"
-    };
+    let fma_line = "acc = acc + lhs_val * rhs_val;";
+
+    let tile_mk = (key.tile_m as u64 * key.tile_k as u64) as u32;
+    let tile_nk = (key.tile_n as u64 * key.tile_k as u64) as u32;
 
     MATMUL_WGSL_TEMPLATE
         .replace("{f16_enable}", enable_f16)
@@ -1760,6 +1758,8 @@ fn generate_matmul_shader(key: &PipelineKey) -> String {
         .replace("{tile_m}", &key.tile_m.to_string())
         .replace("{tile_n}", &key.tile_n.to_string())
         .replace("{tile_k}", &key.tile_k.to_string())
+        .replace("{tile_mk}", &(tile_mk.to_string() + "u"))
+        .replace("{tile_nk}", &(tile_nk.to_string() + "u"))
         .replace("{workgroup_size_x}", &key.tile_n.to_string())
         .replace("{workgroup_size_y}", &key.tile_m.to_string())
         .replace("{fma_line}", fma_line)
@@ -3386,7 +3386,7 @@ pub fn ramanujan_pi_gpu(iterations: usize) -> Result<f64, String> {
     Ok(values.get(0).copied().unwrap_or(0.0) as f64)
 }
 
-fn select_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
+fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     let rows = rows as u32;
     let cols = cols as u32;
     let inner = inner as u32;
@@ -3467,7 +3467,24 @@ fn autotune_tile_config(
         return Some(tile);
     }
 
-    if let Some(entry) = lookup_best(path.as_path(), &key) {
+    let sample_rows = sample_dimension(bucket_rows);
+    let sample_inner = sample_dimension(bucket_inner);
+    let sample_cols = sample_dimension(bucket_cols);
+
+    let context = MatmulAutotuneContext {
+        rows: bucket_rows,
+        inner: bucket_inner,
+        cols: bucket_cols,
+        sample_rows: sample_rows.min(AUTOTUNE_SAMPLE_MAX_DIM),
+        sample_inner: sample_inner.min(AUTOTUNE_SAMPLE_MAX_DIM),
+        sample_cols: sample_cols.min(AUTOTUNE_SAMPLE_MAX_DIM),
+        revision: MATMUL_AUTOTUNE_REVISION,
+        runs: AUTOTUNE_SAMPLE_RUNS as u32,
+    };
+
+    let matches = lookup_similar(path.as_path(), &key, &context, 4);
+
+    if let Some(entry) = lookup_best(path.as_path(), &key, &context) {
         if let Ok(stored) = serde_json::from_value::<StoredTileConfig>(entry.params) {
             let tile: TileConfig = stored.into();
             if tile_supported(ctx.device(), tile) {
@@ -3480,9 +3497,6 @@ fn autotune_tile_config(
     }
 
     let device = ctx.device();
-    let sample_rows = sample_dimension(bucket_rows);
-    let sample_inner = sample_dimension(bucket_inner);
-    let sample_cols = sample_dimension(bucket_cols);
 
     let lhs_len = sample_rows.checked_mul(sample_inner)?;
     let rhs_len = sample_inner.checked_mul(sample_cols)?;
@@ -3495,7 +3509,17 @@ fn autotune_tile_config(
     let out_buf = allocate_output(device, "st.tensor.wgpu_dense.autotune.out", out_len);
 
     let mut best: Option<(TileConfig, f64)> = None;
-    for candidate in candidate_tiles(sample_rows, sample_inner, sample_cols) {
+    let seeds: Vec<(TileConfig, f64)> = matches
+        .iter()
+        .filter_map(|m| {
+            serde_json::from_value::<StoredTileConfig>(m.entry.params.clone())
+                .ok()
+                .map(|stored| (TileConfig::from(stored), m.entry.score))
+        })
+        .collect();
+    let mut candidates = candidate_tiles(sample_rows, sample_inner, sample_cols, &seeds);
+
+    for candidate in candidates.drain(..) {
         if !tile_supported(device, candidate) {
             continue;
         }
@@ -3526,7 +3550,7 @@ fn autotune_tile_config(
             cache.insert(key.clone(), tile);
         }
         let stored: StoredTileConfig = tile.into();
-        let _ = record_best(path.as_path(), &key, score, &stored);
+        let _ = record_best(path.as_path(), &key, &context, score, &stored);
         Some(tile)
     } else {
         None
@@ -3584,7 +3608,12 @@ fn tile_supported(device: &Device, tile: TileConfig) -> bool {
         && invocations <= limits.max_compute_invocations_per_workgroup
 }
 
-fn candidate_tiles(rows: usize, _inner: usize, cols: usize) -> Vec<TileConfig> {
+fn candidate_tiles(
+    rows: usize,
+    _inner: usize,
+    cols: usize,
+    seeds: &[(TileConfig, f64)],
+) -> Vec<TileConfig> {
     const BASE: [TileConfig; 12] = [
         TileConfig::new(8, 8, 8),
         TileConfig::new(8, 12, 16),
@@ -3609,12 +3638,56 @@ fn candidate_tiles(rows: usize, _inner: usize, cols: usize) -> Vec<TileConfig> {
         ordered.push(TileConfig::new(12, 24, 16));
     }
 
-    for candidate in BASE.iter().copied() {
-        if !ordered.contains(&candidate) {
-            ordered.push(candidate);
+    for (seed_cfg, _) in seeds {
+        if !ordered.contains(seed_cfg) {
+            ordered.insert(0, *seed_cfg);
         }
     }
-    ordered
+
+    let mut scored: Vec<(f64, TileConfig)> = ordered
+        .into_iter()
+        .map(|candidate| (score_candidate(candidate, seeds), candidate))
+        .collect();
+
+    scored.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
+    scored.into_iter().map(|(_, cfg)| cfg).collect()
+}
+
+fn score_candidate(candidate: TileConfig, seeds: &[(TileConfig, f64)]) -> f64 {
+    if seeds.is_empty() {
+        return 0.0;
+    }
+    seeds
+        .iter()
+        .map(|(seed_cfg, score)| score + tile_distance(candidate, *seed_cfg))
+        .fold(f64::INFINITY, f64::min)
+}
+
+fn tile_distance(a: TileConfig, b: TileConfig) -> f64 {
+    let mut delta = 0.0;
+    delta += rel_diff(a.tile_m(), b.tile_m());
+    delta += rel_diff(a.tile_n(), b.tile_n());
+    delta += rel_diff(a.tile_k(), b.tile_k());
+    delta
+}
+
+fn rel_diff(a: u32, b: u32) -> f64 {
+    let lhs = a as f64;
+    let rhs = b as f64;
+    let base = lhs.max(rhs).max(1.0);
+    (lhs - rhs).abs() / base
+}
+
+#[derive(Serialize)]
+struct MatmulAutotuneContext {
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    sample_rows: usize,
+    sample_inner: usize,
+    sample_cols: usize,
+    revision: u64,
+    runs: u32,
 }
 
 fn microbenchmark_tile(
