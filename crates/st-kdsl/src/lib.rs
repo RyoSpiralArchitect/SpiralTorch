@@ -6,6 +6,7 @@
 use thiserror::Error;
 
 pub mod auto;
+pub mod autotune_store;
 pub mod cache_key;
 pub mod ir;
 pub mod query;
