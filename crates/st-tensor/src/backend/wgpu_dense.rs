@@ -10,7 +10,7 @@ use crate::pure::{PackedB, PackedLayout};
 use crate::util::readback_f32;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
-use st_kdsl::autotune_store::{lookup_best, lookup_similar, record_best};
+use st_kdsl::autotune_store::{load_best_typed, lookup_similar, record_best};
 use std::any::Any;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -3482,10 +3482,18 @@ fn autotune_tile_config(
         runs: AUTOTUNE_SAMPLE_RUNS as u32,
     };
 
-    let matches = lookup_similar(path.as_path(), &key, &context, 4);
+    let autotune_enabled = autotune_env_enabled();
+    eprintln!("[autotune] key={key} apply={autotune_enabled}");
 
-    if let Some(entry) = lookup_best(path.as_path(), &key, &context) {
-        if let Ok(stored) = serde_json::from_value::<StoredTileConfig>(entry.params) {
+    let matches = if autotune_enabled {
+        lookup_similar(path.as_path(), &key, &context, 4)
+    } else {
+        Vec::new()
+    };
+
+    if autotune_enabled {
+        let stored = load_best_typed(path.as_path(), &key, None::<StoredTileConfig>);
+        if let Some(stored) = stored {
             let tile: TileConfig = stored.into();
             if tile_supported(ctx.device(), tile) {
                 if let Ok(mut cache) = ctx.autotune_cache.lock() {
@@ -3549,8 +3557,10 @@ fn autotune_tile_config(
         if let Ok(mut cache) = ctx.autotune_cache.lock() {
             cache.insert(key.clone(), tile);
         }
-        let stored: StoredTileConfig = tile.into();
-        let _ = record_best(path.as_path(), &key, &context, score, &stored);
+        if autotune_enabled {
+            let stored: StoredTileConfig = tile.into();
+            let _ = record_best(path.as_path(), &key, &context, score, &stored);
+        }
         Some(tile)
     } else {
         None
@@ -3796,6 +3806,12 @@ fn matmul_autotune_key(
         device = info.device,
     );
     Some((key, path))
+}
+
+fn autotune_env_enabled() -> bool {
+    env::var("SPIRALTORCH_AUTOTUNE")
+        .map(|v| v != "0")
+        .unwrap_or(true)
 }
 
 fn autotune_store_path() -> Option<PathBuf> {
