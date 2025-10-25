@@ -363,6 +363,10 @@ impl HeurOpLog {
             return Vec::new();
         }
 
+        if limit == 0 {
+            return Vec::new();
+        }
+
         let mut candidates: Vec<&HeurOp> = self
             .entries
             .iter()

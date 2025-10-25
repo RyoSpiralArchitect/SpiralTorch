@@ -1290,6 +1290,35 @@ class ZPulseSnapshot:
     def latency_ms(self) -> float: ...
 
 
+class ArnoldTonguePeak:
+    @property
+    def ratio_p(self) -> int: ...
+
+    @property
+    def ratio_q(self) -> int: ...
+
+    @property
+    def rotation(self) -> float: ...
+
+    @property
+    def lam(self) -> float: ...
+
+    @property
+    def wd(self) -> float: ...
+
+    @property
+    def strength(self) -> float: ...
+
+    @property
+    def peak_strength(self) -> float: ...
+
+    @property
+    def error(self) -> float: ...
+
+    @property
+    def ratio(self) -> float: ...
+
+
 class HeatmapResult:
     @property
     def branch_id(self) -> str: ...
@@ -1308,6 +1337,11 @@ class HeatmapResult:
 
     @property
     def matrix(self) -> List[List[float]]: ...
+
+    @property
+    def tongues(self) -> List[ArnoldTonguePeak]: ...
+
+    def dominant_tongue(self) -> ArnoldTonguePeak | None: ...
 
     def to_zpulse(self, ts: int) -> ZPulseSnapshot: ...
 
@@ -1335,6 +1369,7 @@ class _PsiModule(ModuleType):
     CircleLockMapConfig: type[CircleLockMapConfig]
     PsiSynchroConfig: type[PsiSynchroConfig]
     PsiBranchState: type[PsiBranchState]
+    ArnoldTonguePeak: type[ArnoldTonguePeak]
     HeatmapResult: type[HeatmapResult]
     ZPulseSnapshot: type[ZPulseSnapshot]
     PsiSynchroPulse: type[PsiSynchroPulse]

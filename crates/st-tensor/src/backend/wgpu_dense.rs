@@ -374,9 +374,7 @@ struct GpuContext {
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
-    fused_grad_input_layout: BindGroupLayout,
-    fused_grad_input_pipeline_layout: PipelineLayout,
-    fused_grad_input_pipeline: OnceLock<Arc<ComputePipeline>>,
+    autotune_cache: Mutex<HashMap<String, TileConfig>>,
 }
 
 struct FusedAttentionKernel {
@@ -969,9 +967,7 @@ impl GpuContext {
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
-            fused_grad_input_layout,
-            fused_grad_input_pipeline_layout,
-            fused_grad_input_pipeline: OnceLock::new(),
+            autotune_cache: Mutex::new(HashMap::new()),
         })
     }
 
