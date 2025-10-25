@@ -303,9 +303,70 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 ---
 
-## Python Examples
+## Python quickstart (wheel)
 
-### 1)　DLPack(You can Zero copy)
+> The snippets below run against the published `spiraltorch` wheel and showcase the new chat-notation helpers bundled with the Python bindings.
+
+### 1) Safety-aware generation with chat notation helpers
+
+```python
+from spiraltorch.inference import (
+    ChatMessage,
+    ChatPrompt,
+    InferenceClient,
+)
+
+client = InferenceClient(refusal_threshold=0.65)
+
+messages = ChatPrompt.from_messages(
+    [
+        ChatMessage.system("You are SpiralTorch's safety-tuned narrator."),
+        ChatMessage.user("Summarise why WGPU inference matters in two sentences."),
+    ]
+)
+
+result = client.chat(messages)
+
+if result.accepted:
+    print("model:", result.response)
+else:
+    print("refusal:", result.refusal_message)
+
+for event in client.audit_events():
+    verdict = event.verdict
+    print(f"[{event.timestamp}] {event.channel} → {verdict.dominant_risk} (score={verdict.score:.2f})")
+```
+
+`ChatMessage.system|user|assistant|tool` normalises role names, while `ChatPrompt` keeps separators and rendering styles consistent. When you only need the raw string, call `format_chat_prompt(...)` — `InferenceClient.generate(...)` now accepts plain strings, `ChatPrompt` objects, or any iterable of `(role, content)` pairs.
+
+### 2) Intuitive tensor constructors
+
+```python
+import spiraltorch as st
+import torch
+
+# Tuple-style shapes create zeroed tensors without extra keywords
+zeros = st.Tensor((2, 3))
+
+# Nested iterables flatten automatically in row-major order
+from_lists = st.Tensor([[1, 2, 3], [4, 5, 6]])
+
+# Any iterable of scalars can be reshaped via `shape=` or `rows=`/`cols=`
+from_range = st.Tensor(range(6), shape=(2, 3))
+
+# Interoperable inputs (Torch / NumPy / SpiralTorch tensors) just work
+torch_tensor = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+from_torch = st.Tensor(torch_tensor)
+
+print("zeros shape:", zeros.shape())
+print("from_lists:", from_lists.tolist())
+print("from_range:", from_range.tolist())
+print("from_torch matches torch.tolist():", from_torch.tolist() == torch_tensor.tolist())
+```
+
+`st.Tensor` now accepts tuples, keyword-only shapes, nested Python iterables, DLPack-aware tensors, or anything with a `tolist()` method. The constructor infers shapes where possible and reshapes automatically when you provide the total element count.
+
+### 3) Zero-copy tensor exchange via DLPack
 
 ```python
 import spiraltorch as st
@@ -313,21 +374,21 @@ import torch
 from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 
 # ST → Torch
-a = st.Tensor(2, 3, [1,2,3,4,5,6])
-caps = a.to_dlpack()
-t = torch_from_dlpack(caps)  
+a = st.Tensor(2, 3, [1, 2, 3, 4, 5, 6])
+capsule = a.to_dlpack()
+t = torch_from_dlpack(capsule)
 
 t += 10
-print("ST tolist after torch += 10:", a.tolist())  # ← [11,12,13,14,15,16] is okay
+print("ST after torch += 10:", a.tolist())
 
 # Torch → ST
-t2 = torch.arange(6, dtype=torch.float32).reshape(2,3)
-a2 = st.Tensor.from_dlpack(t2)      # same buffer
-t2.mul_(2)                          # in-place
-print("ST sees torch mul_:        ", a2.tolist())
+t2 = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+a2 = st.Tensor.from_dlpack(t2)
+t2.mul_(2)
+print("ST sees torch mul_:", a2.tolist())
 ```
 
-### 2) Row softmax (GPU-accelerated when available)
+### 4) Row softmax (GPU-accelerated when available)
 
 ```python
 import spiraltorch as st
@@ -339,7 +400,7 @@ print("CPU row softmax:", logits.row_softmax().tolist())
 print("WGPU row softmax:", logits.row_softmax(backend="wgpu").tolist())
 ```
 
-### 3) rl.stAgent
+### 5) rl.stAgent multi-armed bandit
 
 ```python
 import random
@@ -347,7 +408,7 @@ import spiraltorch as st
 
 Agent = getattr(st.rl, "stAgent", None)
 if Agent is None:
-    raise SystemExit("st.rl.stAgent not available")
+    raise SystemExit("st.rl.stAgent not available in this build")
 
 def reward(action):
     p = 0.6 if action == 0 else 0.4
@@ -355,7 +416,7 @@ def reward(action):
 
 agent = Agent(state_dim=1, action_dim=2, discount=0.0, learning_rate=5e-2)
 
-T = 2000
+T = 2_000
 FORCE_EXPLORE = 200
 eps_hi, eps_lo = 0.3, 0.01
 
@@ -364,20 +425,19 @@ pulls = [0, 0]
 wins_by_arm = [0, 0]
 
 for t in range(1, T + 1):
-    # 最初は強制探索、それ以降は徐々にεを下げる
     if t <= FORCE_EXPLORE:
         a = t % 2
     else:
         frac = (t - FORCE_EXPLORE) / (T - FORCE_EXPLORE)
         eps = eps_hi + (eps_lo - eps_hi) * frac
         agent.set_epsilon(eps)
-        a = agent.select_action(0)   # 状態はダミー
+        a = agent.select_action(0)
 
     r = reward(a)
     wins += r
     pulls[a] += 1
     wins_by_arm[a] += r
-    agent.update(0, a, r, 0) 
+    agent.update(0, a, r, 0)
 
 print(f"total win rate: {wins / T:.3f}")
 for k in range(2):
@@ -385,22 +445,22 @@ for k in range(2):
     print(f"arm {k}: pulls={pulls[k]}, empirical p≈{rate:.3f}")
 ```
 
-### 4) Self-supervised
+### 5) Self-supervised losses
 
 ```python
 import spiraltorch as st
 
-anchors   = [[0.1, 0.9], [0.8, 0.2]]
+anchors = [[0.1, 0.9], [0.8, 0.2]]
 positives = [[0.12, 0.88], [0.79, 0.21]]
 print("info_nce:", st.selfsup.info_nce(anchors, positives, temperature=0.1, normalize=True))
 
 pred = [[0.2, 0.8], [0.6, 0.4]]
-tgt  = [[0.0, 1.0], [1.0, 0.0]]
+tgt = [[0.0, 1.0], [1.0, 0.0]]
 mask = [[1], [0]]  # mask by column indices per row
 print("masked_mse:", st.selfsup.masked_mse(pred, tgt, mask))
 ```
 
-### 5) Z-space trainer
+### 6) Z-space trainer
 
 ```python
 import spiraltorch as st
@@ -413,7 +473,7 @@ samples = [
 print("z:", st.step_many(trainer, samples))
 ```
 
-### 6) Vision × Canvas
+### 7) Vision × Canvas
 
 ```python
 import spiraltorch as st
@@ -431,7 +491,7 @@ print("canvas summary:", snap.summary)
 print("patch[0][:3]:", snap.patch[0][:3] if snap.patch else None)
 ```
 
-### 7) NN data utilities
+### 8) NN data utilities
 
 ```python
 import spiraltorch as st
@@ -445,7 +505,7 @@ for x, y in loader:
     pass
 ```
 
-### 8) Recommender & RL
+### 9) Recommender & RL
 
 ```python
 import spiraltorch as st
@@ -462,7 +522,7 @@ ppo = st.PpoAgent(state_dim=4, action_dim=2, learning_rate=3e-4, clip_range=0.2)
 sac = st.SacAgent(state_dim=4, action_dim=2, temperature=0.1)
 ```
 
-### 9) Interop (PyTorch / JAX / TensorFlow)
+### 10) Interop (PyTorch / JAX / TensorFlow)
 
 ```python
 import spiraltorch as st, torch
