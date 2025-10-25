@@ -402,6 +402,7 @@ impl SoftLogicFlex {
             scale: scale_hint,
             events: Vec::new(),
             attributions: Vec::new(),
+            elliptic: None,
         };
         self.last_feedback = Some(feedback.clone());
         feedback
@@ -1304,6 +1305,10 @@ impl ModuleTrainer {
                 if let Some(meter) = self.psi.as_mut() {
                     let grad_l2 = Self::collect_grad_l2(module)?;
                     let act_drift = module.psi_probe().unwrap_or(0.0);
+                    let curvature_pos = self
+                        .curvature_metrics()
+                        .map(|metrics| metrics.curvature.max(0.0))
+                        .unwrap_or(0.0);
                     let input_snapshot = PsiInput {
                         loss: step_loss.abs(),
                         grad_l2,
@@ -1311,6 +1316,7 @@ impl ModuleTrainer {
                         act_drift,
                         attn_entropy: 0.0,
                         band_energy: band_energy.l1() + band_energy.drift.abs(),
+                        curvature_pos,
                     };
                     let (reading, events) = meter.update(&input_snapshot);
                     psi_snapshot = Some(reading.clone());

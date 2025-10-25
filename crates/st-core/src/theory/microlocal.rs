@@ -12,7 +12,7 @@
 //! unit tests: interface detection, orientation reconstruction, Z-lift
 //! projection, and policy-controlled fusion.
 
-use crate::telemetry::hub::SoftlogicZFeedback;
+use crate::telemetry::hub::{SoftlogicEllipticSample, SoftlogicZFeedback};
 use crate::theory::microlocal_bank::GaugeBank;
 use crate::theory::zpulse::{
     ZConductor, ZConductorCfg, ZEmitter, ZPulse, ZRegistry, ZScale, ZSource, ZSupport,
@@ -22,6 +22,7 @@ use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
+use std::f32::consts::{PI, TAU};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
@@ -387,12 +388,226 @@ fn unit_sphere_area(dim: usize) -> f32 {
     (numerator / denominator) as f32
 }
 
+/// Positive-curvature warp that remaps microlocal orientations onto an elliptic
+/// Z-frame.
+#[derive(Clone, Debug)]
+pub struct EllipticWarp {
+    curvature_radius: f32,
+    sheet_count: usize,
+    spin_harmonics: usize,
+}
+
+impl EllipticWarp {
+    /// Creates a warp anchored to the provided curvature radius.
+    pub fn new(curvature_radius: f32) -> Self {
+        let radius = curvature_radius.max(1e-6);
+        Self {
+            curvature_radius: radius,
+            sheet_count: 2,
+            spin_harmonics: 1,
+        }
+    }
+
+    /// Configures the number of discrete sheets representing the χ axis.
+    pub fn with_sheet_count(mut self, sheet_count: usize) -> Self {
+        self.sheet_count = sheet_count.max(1);
+        self
+    }
+
+    /// Configures the number of spin harmonics applied while computing ν.
+    pub fn with_spin_harmonics(mut self, harmonics: usize) -> Self {
+        self.spin_harmonics = harmonics.max(1);
+        self
+    }
+
+    /// Returns the curvature radius associated with the warp.
+    pub fn curvature_radius(&self) -> f32 {
+        self.curvature_radius
+    }
+
+    /// Returns the number of χ sheets encoded by the warp.
+    pub fn sheet_count(&self) -> usize {
+        self.sheet_count
+    }
+
+    /// Maximum geodesic radius reachable on the warp.
+    pub fn max_geodesic(&self) -> f32 {
+        self.curvature_radius * PI
+    }
+
+    /// Maps an orientation vector to elliptic telemetry describing the warped
+    /// coordinates. Returns `None` when the orientation is degenerate.
+    pub fn map_orientation(&self, orientation: &[f32]) -> Option<EllipticTelemetry> {
+        if orientation.is_empty() {
+            return None;
+        }
+
+        let mut dir = [0.0f32; 3];
+        for (dst, &value) in dir.iter_mut().zip(orientation.iter()).take(3) {
+            *dst = value;
+        }
+        let norm = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+        if !norm.is_finite() || norm <= 1e-6 {
+            return None;
+        }
+        for component in dir.iter_mut() {
+            *component /= norm;
+        }
+
+        let polar = dir[2].clamp(-1.0, 1.0).acos();
+        let geodesic_radius = polar * self.curvature_radius;
+        let azimuth = dir[1].atan2(dir[0]);
+        let mut spin_alignment = (azimuth / PI).clamp(-1.0, 1.0);
+        if self.spin_harmonics > 1 {
+            spin_alignment = (spin_alignment * self.spin_harmonics as f32).sin();
+        }
+
+        let normalized = ((azimuth + PI) / TAU).rem_euclid(1.0);
+        let sheet_f = normalized * self.sheet_count as f32;
+        let mut sheet_index = sheet_f.floor() as usize;
+        if sheet_index >= self.sheet_count {
+            sheet_index = self.sheet_count - 1;
+        }
+        let sheet_position = if self.sheet_count <= 1 {
+            0.0
+        } else {
+            (sheet_f / self.sheet_count as f32).clamp(0.0, 1.0)
+        };
+
+        Some(EllipticTelemetry {
+            curvature_radius: self.curvature_radius,
+            geodesic_radius,
+            spin_alignment,
+            sheet_index,
+            sheet_position,
+            normal_bias: dir[2].clamp(-1.0, 1.0),
+            sheet_count: self.sheet_count,
+        })
+    }
+}
+
+/// Telemetry describing an elliptic Z-frame projection.
+#[derive(Clone, Debug, Default)]
+pub struct EllipticTelemetry {
+    pub curvature_radius: f32,
+    pub geodesic_radius: f32,
+    pub spin_alignment: f32,
+    pub sheet_index: usize,
+    pub sheet_position: f32,
+    pub normal_bias: f32,
+    pub sheet_count: usize,
+}
+
+impl EllipticTelemetry {
+    /// Normalised geodesic radius within \([0, 1]\).
+    pub fn normalized_radius(&self) -> f32 {
+        if self.curvature_radius <= 0.0 {
+            0.0
+        } else {
+            (self.geodesic_radius / (self.curvature_radius * PI)).clamp(0.0, 1.0)
+        }
+    }
+
+    /// Interpolates two telemetry samples.
+    pub fn lerp(&self, other: &EllipticTelemetry, t: f32) -> EllipticTelemetry {
+        let clamped = t.clamp(0.0, 1.0);
+        let sheet_count = self.sheet_count.max(other.sheet_count).max(1);
+        let sheet_position =
+            (lerp(self.sheet_position, other.sheet_position, clamped)).clamp(0.0, 1.0);
+        let sheet_index = ((sheet_position * sheet_count as f32).round() as usize)
+            .min(sheet_count.saturating_sub(1));
+        EllipticTelemetry {
+            curvature_radius: lerp(self.curvature_radius, other.curvature_radius, clamped)
+                .max(1e-6),
+            geodesic_radius: lerp(self.geodesic_radius, other.geodesic_radius, clamped).max(0.0),
+            spin_alignment: lerp(self.spin_alignment, other.spin_alignment, clamped)
+                .clamp(-1.0, 1.0),
+            sheet_index,
+            sheet_position,
+            normal_bias: lerp(self.normal_bias, other.normal_bias, clamped).clamp(-1.0, 1.0),
+            sheet_count,
+        }
+    }
+
+    /// Returns event tags that summarise the elliptic telemetry.
+    pub fn event_tags(&self) -> [String; 3] {
+        [
+            format!("elliptic.sheet:{:02}", self.sheet_index),
+            format!("elliptic.radius:{:.4}", self.normalized_radius()),
+            format!("elliptic.spin:{:.3}", self.spin_alignment),
+        ]
+    }
+}
+
+impl From<&EllipticTelemetry> for SoftlogicEllipticSample {
+    fn from(telemetry: &EllipticTelemetry) -> Self {
+        SoftlogicEllipticSample {
+            curvature_radius: telemetry.curvature_radius,
+            geodesic_radius: telemetry.geodesic_radius,
+            normalized_radius: telemetry.normalized_radius(),
+            spin_alignment: telemetry.spin_alignment,
+            sheet_index: telemetry.sheet_index as u32,
+            sheet_position: telemetry.sheet_position,
+            normal_bias: telemetry.normal_bias,
+            sheet_count: telemetry.sheet_count as u32,
+        }
+    }
+}
+
+#[derive(Default)]
+struct EllipticAccumulator {
+    curvature_sum: f32,
+    radius_sum: f32,
+    bias_sum: f32,
+    spin_sum: f32,
+    sheet_sum: f32,
+    weight: f32,
+    sheet_count: usize,
+}
+
+impl EllipticAccumulator {
+    fn accumulate(&mut self, telemetry: &EllipticTelemetry, weight: f32) {
+        if !weight.is_finite() || weight <= 0.0 {
+            return;
+        }
+        self.curvature_sum += telemetry.curvature_radius * weight;
+        self.radius_sum += telemetry.geodesic_radius * weight;
+        self.bias_sum += telemetry.normal_bias * weight;
+        self.spin_sum += telemetry.spin_alignment * weight;
+        self.sheet_sum += telemetry.sheet_position * weight;
+        self.weight += weight;
+        if telemetry.sheet_count > self.sheet_count {
+            self.sheet_count = telemetry.sheet_count;
+        }
+    }
+
+    fn finish(self) -> Option<EllipticTelemetry> {
+        if self.weight <= 0.0 {
+            return None;
+        }
+        let sheet_count = self.sheet_count.max(1);
+        let sheet_position = (self.sheet_sum / self.weight).clamp(0.0, 1.0);
+        let sheet_index = ((sheet_position * sheet_count as f32).round() as usize)
+            .min(sheet_count.saturating_sub(1));
+        Some(EllipticTelemetry {
+            curvature_radius: (self.curvature_sum / self.weight).max(1e-6),
+            geodesic_radius: (self.radius_sum / self.weight).max(0.0),
+            spin_alignment: (self.spin_sum / self.weight).clamp(-1.0, 1.0),
+            sheet_index,
+            sheet_position,
+            normal_bias: (self.bias_sum / self.weight).clamp(-1.0, 1.0),
+            sheet_count,
+        })
+    }
+}
+
 /// Projects microlocal signatures into Z-space pulses.
 #[derive(Clone, Debug)]
 pub struct InterfaceZLift {
     weights: Vec<f32>,
     projector: LeechProjector,
     bias_gain: f32,
+    elliptic: Option<EllipticWarp>,
 }
 
 impl InterfaceZLift {
@@ -404,11 +619,17 @@ impl InterfaceZLift {
             weights,
             projector,
             bias_gain: 1.0,
+            elliptic: None,
         }
     }
 
     pub fn with_bias_gain(mut self, gain: f32) -> Self {
         self.bias_gain = gain.max(0.0);
+        self
+    }
+
+    pub fn with_elliptic_warp(mut self, warp: EllipticWarp) -> Self {
+        self.elliptic = Some(warp);
         self
     }
 
@@ -418,8 +639,16 @@ impl InterfaceZLift {
         }
     }
 
+    pub fn set_elliptic_warp(&mut self, warp: Option<EllipticWarp>) {
+        self.elliptic = warp;
+    }
+
     pub fn bias_gain(&self) -> f32 {
         self.bias_gain
+    }
+
+    pub fn elliptic_warp(&self) -> Option<&EllipticWarp> {
+        self.elliptic.as_ref()
     }
 
     pub fn project(&self, signature: &InterfaceSignature) -> InterfaceZPulse {
@@ -433,6 +662,7 @@ impl InterfaceZLift {
         let mut above = 0.0f32;
         let mut beneath = 0.0f32;
         let mut bias = 0.0f32;
+        let mut elliptic_sample = None;
 
         if let Some(orient) = &signature.orientation {
             let mut weighted = vec![0.0f32; orient.shape()[0]];
@@ -455,17 +685,40 @@ impl InterfaceZLift {
                     *value /= weight_total;
                 }
             }
-            let weight0 = self.weights.first().copied().unwrap_or(1.0);
-            let primary = weighted.first().copied().unwrap_or(0.0) * weight0;
-            let enriched = self.projector.enrich(primary.abs() as f64) as f32;
-            bias = enriched * primary.signum() * self.bias_gain;
-            above = (primary.max(0.0)) * here;
-            beneath = (-primary).max(0.0) * here;
+            if let Some(warp) = self.elliptic.as_ref() {
+                if let Some(sample) = warp.map_orientation(&weighted) {
+                    let normalized = sample.normalized_radius();
+                    let spin = sample.spin_alignment;
+                    let sheet_bias = sample.sheet_position;
+                    let mut leading = (1.0 - normalized).max(0.0);
+                    let mut trailing = normalized.max(0.0);
+                    let spin_lead = 0.5 * (1.0 + spin);
+                    let spin_trail = 0.5 * (1.0 - spin);
+                    leading *= (0.6 + 0.4 * sheet_bias).max(1e-3) * spin_lead.max(1e-3);
+                    trailing *= (0.6 + 0.4 * (1.0 - sheet_bias)).max(1e-3) * spin_trail.max(1e-3);
+                    let total = (leading + trailing).max(1e-5);
+                    above = here * (leading / total);
+                    beneath = here * (trailing / total);
+                    let enriched = self.projector.enrich(sample.normal_bias.abs() as f64) as f32;
+                    bias = enriched * sample.normal_bias.signum() * self.bias_gain;
+                    elliptic_sample = Some(sample);
+                }
+            }
+
+            if elliptic_sample.is_none() {
+                let weight0 = self.weights.first().copied().unwrap_or(1.0);
+                let primary = weighted.first().copied().unwrap_or(0.0) * weight0;
+                let enriched = self.projector.enrich(primary.abs() as f64) as f32;
+                bias = enriched * primary.signum() * self.bias_gain;
+                above = (primary.max(0.0)) * here;
+                beneath = (-primary).max(0.0) * here;
+            }
         }
 
         if signature.orientation.is_none() {
             above = 0.0;
             beneath = 0.0;
+            elliptic_sample = None;
         }
 
         let band_energy = (above.max(0.0), here, beneath.max(0.0));
@@ -485,6 +738,7 @@ impl InterfaceZLift {
             z_bias: bias,
             quality_hint: None,
             standard_error: None,
+            elliptic: elliptic_sample,
         }
     }
 }
@@ -501,6 +755,7 @@ pub struct InterfaceZPulse {
     pub z_bias: f32,
     pub quality_hint: Option<f32>,
     pub standard_error: Option<f32>,
+    pub elliptic: Option<EllipticTelemetry>,
 }
 
 impl InterfaceZPulse {
@@ -525,20 +780,23 @@ impl InterfaceZPulse {
         let mut bias_sum = 0.0f32;
         let mut bias_weight = 0.0f32;
         let mut scale_weights = Vec::new();
+        let mut elliptic_acc = EllipticAccumulator::default();
         for pulse in pulses {
             support += pulse.support;
             interface_cells += pulse.interface_cells;
             band.0 += pulse.band_energy.0;
             band.1 += pulse.band_energy.1;
             band.2 += pulse.band_energy.2;
-            let weight = pulse.support.max(1e-6);
+            let weight = scale_weight_for(pulse);
             drift_sum += pulse.drift * weight;
             drift_weight += weight;
             bias_sum += pulse.z_bias * weight;
             bias_weight += weight;
             if let Some(scale) = pulse.scale {
-                let scale_weight = scale_weight_for(pulse);
-                scale_weights.push((scale, scale_weight));
+                scale_weights.push((scale, weight));
+            }
+            if let Some(telemetry) = &pulse.elliptic {
+                elliptic_acc.accumulate(telemetry, weight);
             }
         }
 
@@ -565,6 +823,7 @@ impl InterfaceZPulse {
             },
             quality_hint: None,
             standard_error: None,
+            elliptic: elliptic_acc.finish(),
         }
     }
 
@@ -590,6 +849,12 @@ impl InterfaceZPulse {
             z_bias: lerp(current.z_bias, next.z_bias, t),
             quality_hint: next.quality_hint.or(current.quality_hint),
             standard_error: next.standard_error.or(current.standard_error),
+            elliptic: match (&current.elliptic, &next.elliptic) {
+                (Some(a), Some(b)) => Some(a.lerp(b, t)),
+                (Some(a), None) => Some(a.clone()),
+                (None, Some(b)) => Some(b.clone()),
+                (None, None) => None,
+            },
         }
     }
 
@@ -609,6 +874,7 @@ impl InterfaceZPulse {
             z_bias: self.z_bias * gain,
             quality_hint: self.quality_hint,
             standard_error: self.standard_error,
+            elliptic: self.elliptic.clone(),
         }
     }
 
@@ -627,6 +893,7 @@ impl InterfaceZPulse {
             scale: self.scale,
             events: Vec::new(),
             attributions: Vec::new(),
+            elliptic: self.elliptic.as_ref().map(SoftlogicEllipticSample::from),
         }
     }
 
@@ -647,6 +914,7 @@ impl Default for InterfaceZPulse {
             z_bias: 0.0,
             quality_hint: None,
             standard_error: None,
+            elliptic: None,
         }
     }
 }
@@ -888,6 +1156,15 @@ impl BandPolicy {
         self
     }
 
+    /// Builds a band policy tuned for positively curved (elliptic) manifolds.
+    pub fn positive_curvature(radius: f32) -> Self {
+        let curvature = radius.max(1e-6).recip();
+        let polar_bias = curvature.tanh();
+        let leading = (0.2 + 0.15 * polar_bias).clamp(0.1, 0.45);
+        let central = (0.5 + 0.25 * polar_bias).clamp(0.35, 0.9);
+        BandPolicy::new([leading, central, leading])
+    }
+
     pub fn project_quality(&self, pulse: &InterfaceZPulse) -> f32 {
         let total = pulse.total_energy().max(1e-6);
         let ratios = [
@@ -1060,6 +1337,15 @@ impl InterfaceZConductor {
         self
     }
 
+    pub fn reinforce_positive_curvature(mut self, radius: f32) -> Self {
+        let warp = EllipticWarp::new(radius);
+        let mut lift = self.lift.clone();
+        lift = lift.with_elliptic_warp(warp.clone());
+        self.lift = lift;
+        self.band_policy = Some(BandPolicy::positive_curvature(radius).with_hysteresis(0.05));
+        self
+    }
+
     pub fn apply_feedback(&mut self, feedback: &MicrolocalFeedback) {
         if let Some(scale) = feedback.threshold_scale {
             if scale > 0.0 {
@@ -1147,6 +1433,10 @@ impl InterfaceZConductor {
                 fused = InterfaceZPulse::lerp(previous, &fused, self.smoothing);
                 events.push("smoothing.applied".to_string());
             }
+        }
+
+        if let Some(elliptic) = &fused.elliptic {
+            events.extend(elliptic.event_tags().into_iter());
         }
 
         let mut budget_scale = 1.0;
@@ -1318,6 +1608,36 @@ mod tests {
         assert_neutral_scale(report.fused_pulse.scale);
         assert_neutral_scale(report.feedback.scale);
         assert_neutral_scale(report.fused_z.pulse.scale);
+    }
+
+    #[test]
+    fn elliptic_warp_injects_curvature_bias() {
+        let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+        let c_prime = mask.mapv(|v| if v > 0.5 { 1.0 } else { -1.0 });
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5))
+            .with_elliptic_warp(EllipticWarp::new(1.5).with_sheet_count(4));
+        let signature = gauge.analyze_with_label(&mask, Some(&c_prime));
+        let pulse = lift.project(&signature);
+        assert!(pulse.elliptic.is_some());
+        let telemetry = pulse.elliptic.as_ref().unwrap();
+        assert!(telemetry.normalized_radius() >= 0.0);
+    }
+
+    #[test]
+    fn conductor_emits_elliptic_events() {
+        let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+        let c_prime = mask.mapv(|v| if v > 0.5 { 1.0 } else { -1.0 });
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+        let mut conductor =
+            InterfaceZConductor::new(vec![gauge], lift).reinforce_positive_curvature(1.5);
+        let report = conductor.step(&mask, Some(&c_prime), None, None);
+        assert!(report
+            .feedback
+            .events
+            .iter()
+            .any(|event| event.starts_with("elliptic.")));
     }
 
     #[test]
