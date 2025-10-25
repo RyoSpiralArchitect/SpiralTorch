@@ -409,6 +409,21 @@ pub struct SoftlogicZFeedback {
     pub events: Vec<String>,
     /// Attribution weights per contributing Z source.
     pub attributions: Vec<(ZSource, f32)>,
+    /// Optional elliptic geometry summary captured while producing the feedback pulse.
+    pub elliptic: Option<SoftlogicEllipticSample>,
+}
+
+/// Summary of elliptic curvature sampled while producing a SoftLogic feedback pulse.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SoftlogicEllipticSample {
+    pub curvature_radius: f32,
+    pub geodesic_radius: f32,
+    pub normalized_radius: f32,
+    pub spin_alignment: f32,
+    pub sheet_index: u32,
+    pub sheet_position: f32,
+    pub normal_bias: f32,
+    pub sheet_count: u32,
 }
 
 impl SoftlogicZFeedback {
@@ -1090,6 +1105,41 @@ fn populate_softlogic_metrics(
         }
         fragment.push_metric(format!("{prefix}.attribution.total"), total);
     }
+    if let Some(elliptic) = &feedback.elliptic {
+        let elliptic_prefix = format!("{prefix}.elliptic");
+        fragment.push_metric(
+            format!("{elliptic_prefix}.curvature_radius"),
+            elliptic.curvature_radius,
+        );
+        fragment.push_metric(
+            format!("{elliptic_prefix}.geodesic_radius"),
+            elliptic.geodesic_radius,
+        );
+        fragment.push_metric(
+            format!("{elliptic_prefix}.normalized_radius"),
+            elliptic.normalized_radius,
+        );
+        fragment.push_metric(
+            format!("{elliptic_prefix}.spin_alignment"),
+            elliptic.spin_alignment,
+        );
+        fragment.push_metric(
+            format!("{elliptic_prefix}.sheet_index"),
+            elliptic.sheet_index as f32,
+        );
+        fragment.push_metric(
+            format!("{elliptic_prefix}.sheet_position"),
+            elliptic.sheet_position,
+        );
+        fragment.push_metric(
+            format!("{elliptic_prefix}.sheet_count"),
+            elliptic.sheet_count as f32,
+        );
+        fragment.push_metric(
+            format!("{elliptic_prefix}.normal_bias"),
+            elliptic.normal_bias,
+        );
+    }
 }
 
 fn z_source_label(source: &ZSource) -> String {
@@ -1681,6 +1731,7 @@ mod tests {
             scale: Some(ZScale::ONE),
             events: vec!["spike".into()],
             attributions: vec![(ZSource::Microlocal, 0.7), (ZSource::RealGrad, 0.3)],
+            elliptic: None,
         };
         let z_signal = feedback.z_signal;
         set_softlogic_z(feedback);

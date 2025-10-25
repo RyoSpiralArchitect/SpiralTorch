@@ -2571,6 +2571,7 @@ mod language_pipeline {
                     scale: None,
                     events: Vec::new(),
                     attributions: Vec::new(),
+                    elliptic: None,
                 });
 
                 let now = start + Duration::from_millis((step * 120) as u64);

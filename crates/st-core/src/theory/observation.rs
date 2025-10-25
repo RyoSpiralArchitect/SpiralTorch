@@ -308,6 +308,7 @@ mod tests {
             scale: None,
             events: Vec::new(),
             attributions: Vec::new(),
+            elliptic: None,
         }
     }
 
