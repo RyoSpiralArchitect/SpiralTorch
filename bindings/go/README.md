@@ -57,3 +57,14 @@ control flow instead of manual error string inspection.
   programs can reuse the same worker threads as the Rust API. Methods such as
   `Runtime.Matmul`, `Runtime.Add`, and `Runtime.Hadamard` mirror the tensor
   helpers while scheduling the work on the runtime.
+- `Runtime.ParallelMatmul`, `Runtime.ParallelAdd`, and `Runtime.ParallelHadamard`
+  dispatch batches of tensor pairs concurrently, automatically matching the
+  runtime's worker pool (or a caller-provided concurrency limit) so heavy
+  pipelines can be saturated from Go without manual goroutine orchestration.
+- `RoundtableClassify` maps raw gradient magnitudes into Above/Here/Beneath
+  bands using the same heuristics as the Rust roundtable scheduler, returning a
+  per-lane band assignment alongside aggregate energy summaries.
+
+See `examples/parallel_runtime` for a practical demonstration that executes
+multiple matrix multiplications in parallel before staging a batch of element-
+wise additions, then folds the results into a roundtable classification report.
