@@ -303,9 +303,153 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 ---
 
-## Python Examples
+## Python quickstart (wheel)
 
-### 1)　DLPack(You can Zero copy)
+> The snippets below run against the published `spiraltorch` wheel and showcase the new chat-notation helpers bundled with the Python bindings.
+
+### 1) Safety-aware generation with chat notation helpers
+
+```python
+from spiraltorch.inference import (
+    ChatMessage,
+    ChatPrompt,
+    InferenceClient,
+)
+
+client = InferenceClient(refusal_threshold=0.65)
+
+messages = ChatPrompt.from_messages(
+    [
+        ChatMessage.system("You are SpiralTorch's safety-tuned narrator."),
+        ChatMessage.user("Summarise why WGPU inference matters in two sentences."),
+    ]
+)
+
+result = client.chat(messages)
+
+if result.accepted:
+    print("model:", result.response)
+else:
+    print("refusal:", result.refusal_message)
+
+for event in client.audit_events():
+    verdict = event.verdict
+    print(f"[{event.timestamp}] {event.channel} → {verdict.dominant_risk} (score={verdict.score:.2f})")
+```
+
+`ChatMessage.system|user|assistant|tool` normalises role names, while `ChatPrompt` keeps separators and rendering styles consistent. When you only need the raw string, call `format_chat_prompt(...)` — `InferenceClient.generate(...)` now accepts plain strings, `ChatPrompt` objects, or any iterable of `(role, content)` pairs.
+
+### 2) Intuitive tensor constructors
+
+```python
+import spiraltorch as st
+import torch
+
+# Tuple-style shapes create zeroed tensors without extra keywords
+zeros = st.Tensor((2, 3))
+
+# Nested iterables flatten automatically in row-major order
+from_lists = st.Tensor([[1, 2, 3], [4, 5, 6]])
+
+# Any iterable of scalars can be reshaped via `shape=` or `rows=`/`cols=`
+from_range = st.Tensor(range(6), shape=(2, 3))
+
+# Interoperable inputs (Torch / NumPy / SpiralTorch tensors) just work
+torch_tensor = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+from_torch = st.Tensor(torch_tensor)
+
+print("zeros shape:", zeros.shape())
+print("from_lists:", from_lists.tolist())
+print("from_range:", from_range.tolist())
+print("from_torch matches torch.tolist():", from_torch.tolist() == torch_tensor.tolist())
+```
+
+`st.Tensor` now accepts tuples, keyword-only shapes, nested Python iterables, DLPack-aware tensors, or anything with a `tolist()` method. The constructor infers shapes where possible and reshapes automatically when you provide the total element count.
+
+### 3) Hypergrad tapes without ceremony
+
+```python
+import spiraltorch as st
+
+# Bind rows/cols or tensor shapes inline with the hg-DSL.
+weights = st.Tensor([[0.1, 0.2, 0.3]])
+tape = st.hg[weights](
+    learning_rate=0.02,
+    topos=st.hg.topos(
+        curvature=-0.9,
+        tolerance=1e-3,
+        saturation=0.8,
+        max_depth=8,
+        max_volume=32,
+    ),
+)
+
+# Slice notation pinches rows/cols; `.with_topos(...)` inlines guard creation.
+aux = st.hg[1:3](curvature=-0.85)
+guarded = st.hg[weights].with_topos(curvature=-0.9, tolerance=2e-3, max_depth=6)
+
+prediction = st.Tensor([[0.25, 0.25, 0.25]])
+target = st.Tensor([[0.0, 1.0, 0.0]])
+tape.accumulate_pair(prediction, target)
+tape.apply(weights)
+
+print("shape:", tape.shape(), "lr:", tape.learning_rate())
+print("aux curvature:", aux.curvature())
+print("guard depth:", guarded.topos().max_depth())
+```
+
+`st.hg[...]` returns a callable that already knows its shape: pass tensors,
+tuples, or even slices (`st.hg[rows:cols]`) and the helper fills in
+`rows`/`cols` before calling into the native constructor. `st.hg.topos(...)`
+aliases `hypergrad_topos`, while `partial.with_topos(...)` wraps guard creation
+inline so you can bind a tape and guard in a single expression. You can still
+feed dictionaries or `(curvature, tolerance, saturation, depth, volume)` tuples
+directly into `topos=` when needed.
+
+### 4) Z-space encoders and metric normalisers
+
+```python
+import spiraltorch as st
+
+# Encode desire text straight into the Z-space tensor manifold.
+z_vec = st.z["Spin up the roundtable", 0.4]
+
+# Normalise mixed telemetry aliases into a structured ZMetrics payload.
+metrics = st.z.metrics(
+    velocity=0.55,
+    mem=0.12,
+    stab=0.78,
+    drift=0.05,
+    grad=[0.1, -0.2, 0.05],
+)
+
+roundtable = st.z.partial(
+    metrics,
+    origin="telemetry",
+    telemetry={"roundtable": {"mean": 0.44, "focus": 0.67}},
+)
+canvas_hint = st.z.partial(speed=0.35, memory=0.22, coherence_peak=0.61, weight=0.5)
+bundle = st.z.bundle(roundtable, canvas_hint)
+
+trainer = st.ZSpaceTrainer(z_dim=z_vec.shape()[1])
+loss = trainer.step(bundle)
+
+print("z shape:", z_vec.shape(), "loss:", loss)
+```
+
+`st.z[...]` is shorthand for `encode_zspace`: strings go straight into the
+encoder, and you can append numbers, `(key, value)` pairs, or dictionaries to
+override temperature or other keyword arguments. `st.z.metrics(...)` recognises
+the common aliases (`velocity`, `mem`, `stab`, `drift`, `grad`) and emits the
+strongly typed `ZMetrics` container that `ZSpaceTrainer` expects. `st.z.partial(...)`
+wraps those metrics (or raw mappings) into a `ZSpacePartialBundle`, flattens any
+telemetry dictionaries into dotted keys, and lets you override `weight`/`origin`
+without touching the underlying map. Feed the partials directly into
+`st.z.bundle(...)` (alias `st.z.blend`) to merge telemetry-aware observations—
+keyword arguments accept every Z-space alias exposed by the wheel so you can
+mix hypergrad, Canvas, or coherence-derived metrics inline.
+
+### 5) Zero-copy tensor exchange via DLPack
 
 ```python
 import spiraltorch as st
@@ -313,21 +457,21 @@ import torch
 from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 
 # ST → Torch
-a = st.Tensor(2, 3, [1,2,3,4,5,6])
-caps = a.to_dlpack()
-t = torch_from_dlpack(caps)  
+a = st.Tensor(2, 3, [1, 2, 3, 4, 5, 6])
+capsule = a.to_dlpack()
+t = torch_from_dlpack(capsule)
 
 t += 10
-print("ST tolist after torch += 10:", a.tolist())  # ← [11,12,13,14,15,16] is okay
+print("ST after torch += 10:", a.tolist())
 
 # Torch → ST
-t2 = torch.arange(6, dtype=torch.float32).reshape(2,3)
-a2 = st.Tensor.from_dlpack(t2)      # same buffer
-t2.mul_(2)                          # in-place
-print("ST sees torch mul_:        ", a2.tolist())
+t2 = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+a2 = st.Tensor.from_dlpack(t2)
+t2.mul_(2)
+print("ST sees torch mul_:", a2.tolist())
 ```
 
-### 2) Row softmax (GPU-accelerated when available)
+### 6) Row softmax (GPU-accelerated when available)
 
 ```python
 import spiraltorch as st
@@ -339,7 +483,7 @@ print("CPU row softmax:", logits.row_softmax().tolist())
 print("WGPU row softmax:", logits.row_softmax(backend="wgpu").tolist())
 ```
 
-### 3) rl.stAgent
+### 7) rl.stAgent multi-armed bandit
 
 ```python
 import random
@@ -347,7 +491,7 @@ import spiraltorch as st
 
 Agent = getattr(st.rl, "stAgent", None)
 if Agent is None:
-    raise SystemExit("st.rl.stAgent not available")
+    raise SystemExit("st.rl.stAgent not available in this build")
 
 def reward(action):
     p = 0.6 if action == 0 else 0.4
@@ -355,7 +499,7 @@ def reward(action):
 
 agent = Agent(state_dim=1, action_dim=2, discount=0.0, learning_rate=5e-2)
 
-T = 2000
+T = 2_000
 FORCE_EXPLORE = 200
 eps_hi, eps_lo = 0.3, 0.01
 
@@ -364,20 +508,19 @@ pulls = [0, 0]
 wins_by_arm = [0, 0]
 
 for t in range(1, T + 1):
-    # 最初は強制探索、それ以降は徐々にεを下げる
     if t <= FORCE_EXPLORE:
         a = t % 2
     else:
         frac = (t - FORCE_EXPLORE) / (T - FORCE_EXPLORE)
         eps = eps_hi + (eps_lo - eps_hi) * frac
         agent.set_epsilon(eps)
-        a = agent.select_action(0)   # 状態はダミー
+        a = agent.select_action(0)
 
     r = reward(a)
     wins += r
     pulls[a] += 1
     wins_by_arm[a] += r
-    agent.update(0, a, r, 0) 
+    agent.update(0, a, r, 0)
 
 print(f"total win rate: {wins / T:.3f}")
 for k in range(2):
@@ -385,22 +528,22 @@ for k in range(2):
     print(f"arm {k}: pulls={pulls[k]}, empirical p≈{rate:.3f}")
 ```
 
-### 4) Self-supervised
+### 8) Self-supervised losses
 
 ```python
 import spiraltorch as st
 
-anchors   = [[0.1, 0.9], [0.8, 0.2]]
+anchors = [[0.1, 0.9], [0.8, 0.2]]
 positives = [[0.12, 0.88], [0.79, 0.21]]
 print("info_nce:", st.selfsup.info_nce(anchors, positives, temperature=0.1, normalize=True))
 
 pred = [[0.2, 0.8], [0.6, 0.4]]
-tgt  = [[0.0, 1.0], [1.0, 0.0]]
+tgt = [[0.0, 1.0], [1.0, 0.0]]
 mask = [[1], [0]]  # mask by column indices per row
 print("masked_mse:", st.selfsup.masked_mse(pred, tgt, mask))
 ```
 
-### 5) Z-space trainer
+### 9) Z-space trainer
 
 ```python
 import spiraltorch as st
@@ -413,7 +556,7 @@ samples = [
 print("z:", st.step_many(trainer, samples))
 ```
 
-### 6) Vision × Canvas
+### 10) Vision × Canvas
 
 ```python
 import spiraltorch as st
@@ -431,7 +574,7 @@ print("canvas summary:", snap.summary)
 print("patch[0][:3]:", snap.patch[0][:3] if snap.patch else None)
 ```
 
-### 7) NN data utilities
+### 11) NN data utilities
 
 ```python
 import spiraltorch as st
@@ -445,7 +588,7 @@ for x, y in loader:
     pass
 ```
 
-### 8) Recommender & RL
+### 12) Recommender & RL
 
 ```python
 import spiraltorch as st
@@ -462,7 +605,7 @@ ppo = st.PpoAgent(state_dim=4, action_dim=2, learning_rate=3e-4, clip_range=0.2)
 sac = st.SacAgent(state_dim=4, action_dim=2, temperature=0.1)
 ```
 
-### 9) Interop (PyTorch / JAX / TensorFlow)
+### 13) Interop (PyTorch / JAX / TensorFlow)
 
 ```python
 import spiraltorch as st, torch
@@ -472,7 +615,7 @@ xt = st.compat.torch.to_torch(x, dtype=torch.float32, device="cpu")
 x_back = st.compat.torch.from_torch(xt)
 ```
 
-### 10) Math & pacing helpers
+### 14) Math & pacing helpers
 
 ```python
 import spiraltorch as st
