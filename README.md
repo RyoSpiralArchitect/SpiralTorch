@@ -76,8 +76,17 @@ sequenceDiagram
 
 Prefer a guided walkthrough of the dispatcher flows? Open the
 [interactive runtime explorer](docs/interactive/README.md) for clickable
-diagrams, including a new focus view on graph-node materialisation and
-return-handle delivery.
+diagrams, a narrated "story tour" of the runtime handoff, and playful
+spotlights on graph-node materialisation versus return-handle delivery:
+
+- 🎬 **Story tour.** Step through a six-beat mini adventure that explains
+  how a single API call ripples through SpiralTorch, from the first FFI
+  marshals to the triumphant return of tensor handles.
+- 🔍 **Focus toggles.** Snap to either the graph-node materialisation
+  path or the return-handle arc whenever you want to revisit a specific
+  phase.
+- 🧭 **Free roam.** Click any node or edge to read quick lore about the
+  component, then resume the story exactly where you left off.
 
 > **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
 >
