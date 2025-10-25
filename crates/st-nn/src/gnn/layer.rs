@@ -3,6 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#[cfg(feature = "psi")]
+use super::PsiCoherenceAdaptor;
 use super::{GraphContext, RoundtableBandInfluence};
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
@@ -167,6 +169,8 @@ pub struct ZSpaceGraphConvolution {
     curvature: f32,
     aggregation: NeighborhoodAggregation,
     tracer: Option<Arc<Mutex<GraphFlowTracer>>>,
+    #[cfg(feature = "psi")]
+    coherence: Mutex<PsiCoherenceAdaptor>,
     roundtable: Option<RoundtableBandInfluence>,
 }
 
@@ -206,6 +210,8 @@ impl ZSpaceGraphConvolution {
             curvature,
             aggregation: NeighborhoodAggregation::default(),
             tracer: None,
+            #[cfg(feature = "psi")]
+            coherence: Mutex::new(PsiCoherenceAdaptor::default()),
             roundtable: None,
         })
     }
@@ -255,7 +261,13 @@ impl ZSpaceGraphConvolution {
     }
 
     fn aggregate_support(&self, input: &Tensor) -> PureResult<AggregatedSupport> {
-        let weights = self.aggregation.weights()?;
+        let mut weights = self.aggregation.weights()?;
+        #[cfg(feature = "psi")]
+        {
+            if let Ok(mut adaptor) = self.coherence.lock() {
+                weights = adaptor.cohere_weights(weights);
+            }
+        }
         let (rows, cols) = input.shape();
         let mut support = Tensor::zeros(rows, cols)?;
         let mut current = input.clone();
