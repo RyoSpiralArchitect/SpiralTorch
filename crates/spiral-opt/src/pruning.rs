@@ -1,6 +1,4 @@
 use crate::report::{OptimisationError, StructuredPruningReport};
-use std::cmp::Ordering;
-
 #[derive(Debug, Clone, Copy)]
 struct BlockRecord {
     start: usize,
@@ -97,15 +95,15 @@ impl StructuredPruner {
 
         workspace
             .block_norms
-            .sort_unstable_by(|a, b| a.norm_sq.partial_cmp(&b.norm_sq).unwrap_or(Ordering::Equal));
+            .sort_unstable_by(|a, b| a.norm_sq.total_cmp(&b.norm_sq));
         let target_blocks =
             ((workspace.block_norms.len() as f32) * config.target_sparsity).floor() as usize;
         let mut pruned_blocks = 0;
         let mut l2_error = 0.0f32;
         let min_keep_sq = config.min_l2_keep * config.min_l2_keep;
 
-        for (idx, block) in workspace.block_norms.iter().enumerate() {
-            if idx >= target_blocks && block.norm_sq >= min_keep_sq {
+        for block in &workspace.block_norms {
+            if pruned_blocks >= target_blocks && block.norm_sq >= min_keep_sq {
                 continue;
             }
             let range = block.start..block.start + block.len;
@@ -203,5 +201,59 @@ mod tests {
 
         assert_eq!(weights_default, weights_workspace);
         assert_eq!(report_default, report_workspace);
+    }
+
+    #[test]
+    fn l2_error_matches_pruned_energy() {
+        let mut weights = vec![1.0f32; 12];
+        let original = weights.clone();
+        let pruner = StructuredPruner::new();
+        let config = StructuredPruningConfig {
+            block_size: 4,
+            target_sparsity: 0.5,
+            min_l2_keep: 0.0,
+        };
+
+        let report = pruner
+            .apply(&mut weights, config)
+            .expect("pruning should succeed");
+
+        let observed_energy = original
+            .iter()
+            .zip(&weights)
+            .filter(|(_, &after)| after == 0.0)
+            .map(|(&before, _)| before * before)
+            .sum::<f32>()
+            .sqrt();
+
+        assert!((report.l2_error - observed_energy).abs() < 1e-6);
+    }
+
+    #[test]
+    fn min_norm_threshold_preserves_strong_blocks() {
+        let mut weights = vec![
+            5.0, 5.0, // strong block 0
+            4.0, 4.0, // strong block 1
+            0.1, 0.1, // weak block 2
+            0.2, 0.2, // weak block 3
+        ];
+        let pruner = StructuredPruner::new();
+        let config = StructuredPruningConfig {
+            block_size: 2,
+            target_sparsity: 0.25,
+            min_l2_keep: 5.0,
+        };
+
+        let report = pruner
+            .apply(&mut weights, config)
+            .expect("pruning should succeed");
+
+        assert_eq!(&weights[..4], &[5.0, 5.0, 4.0, 4.0]);
+        assert_eq!(&weights[4..], &[0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(report.pruned_blocks, 2);
+        assert_eq!(report.kept_blocks, 2);
+        assert!((report.achieved_sparsity - 0.5).abs() < 1e-6);
+        let expected_error = (0.1f32 * 0.1 * 2.0 + 0.2 * 0.2 * 2.0).sqrt();
+        assert!((report.l2_error - expected_error).abs() < 1e-6);
     }
 }
