@@ -15,6 +15,7 @@ pub mod spiral_rnn;
 pub mod topos_resonator;
 pub mod wave_gate;
 pub mod wave_rnn;
+pub mod zrelativity;
 pub mod zspace_mixer;
 pub mod zspace_projector;
 
@@ -27,5 +28,6 @@ pub use non_liner::{
 pub use normalization::LayerNorm;
 pub use softmax::ZSpaceSoftmax;
 pub use topos_resonator::ToposResonator;
+pub use zrelativity::ZRelativityModule;
 pub use zspace_mixer::ZSpaceMixer;
 pub use zspace_projector::StableZSpaceProjector;

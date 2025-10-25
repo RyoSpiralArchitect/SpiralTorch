@@ -813,7 +813,7 @@ pub(crate) fn tensor_err_to_py(err: TensorError) -> PyErr {
     }
 }
 
-fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
+pub(crate) fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
     let managed = tensor.to_dlpack().map_err(tensor_err_to_py)?;
     unsafe {
         extern "C" fn drop_capsule(ptr: *mut ffi::PyObject) {
