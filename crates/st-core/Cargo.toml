@@ -40,6 +40,7 @@ rand        = "0.8"
 serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
 toml        = "0.8"
+crossbeam-channel = "0.5"
 dirs        = "5"
 statrs      = "0.16"
 ndarray     = "0.15"
@@ -47,6 +48,7 @@ nalgebra    = "0.32"
 rustc-hash  = "1.1"
 rustfft     = "6"
 num-complex = "0.4"
+crossbeam-channel = "0.5"
 
 once_cell   = { version = "1.19", optional = true }
 bytemuck    = { version = "1.16", optional = true, features = ["derive"] }

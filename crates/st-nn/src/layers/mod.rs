@@ -20,7 +20,7 @@ pub mod zspace_projector;
 
 pub use activation::Relu;
 pub use gelu::Gelu;
-pub use non_liner::{NonLiner, NonLinerActivation};
+pub use non_liner::{NonLiner, NonLinerActivation, NonLinerGeometry, NonLinerHyperbolicConfig};
 pub use normalization::LayerNorm;
 pub use softmax::ZSpaceSoftmax;
 pub use topos_resonator::ToposResonator;

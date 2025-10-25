@@ -41,6 +41,10 @@ use crate::dlpack::{
     call_managed_deleter, drop_exported_state, DLDataType, DLDataTypeCode, DLDevice, DLDeviceType,
     DLManagedTensor, DLTensor, ExportData, ForeignTensor, ManagedTensorState,
 };
+use crate::memory::{
+    aligned_from_slice, aligned_from_vec, aligned_with_capacity, aligned_zeroed, is_ptr_aligned,
+    AlignedVec,
+};
 use core::fmt;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::StdRng;
@@ -359,7 +363,7 @@ impl fmt::Display for AttentionBackend {
 
 #[derive(Clone, Debug)]
 enum TensorBacking {
-    Owned(Arc<Vec<f32>>),
+    Owned(Arc<AlignedVec>),
     Foreign(ForeignTensor),
 }
 
@@ -369,7 +373,7 @@ pub(crate) struct TensorBuffer {
 }
 
 impl TensorBuffer {
-    fn from_vec(data: Vec<f32>) -> Self {
+    fn from_aligned(data: AlignedVec) -> Self {
         Self {
             backing: TensorBacking::Owned(Arc::new(data)),
         }
@@ -390,7 +394,7 @@ impl TensorBuffer {
 
     fn make_mut_slice(&mut self) -> &mut [f32] {
         if let TensorBacking::Foreign(foreign) = &self.backing {
-            let owned = foreign.to_vec();
+            let owned = aligned_from_slice(foreign.as_slice());
             self.backing = TensorBacking::Owned(Arc::new(owned));
         }
 
@@ -401,6 +405,13 @@ impl TensorBuffer {
         }
     }
 
+    fn as_ptr(&self) -> *const f32 {
+        match &self.backing {
+            TensorBacking::Owned(vec) => vec.as_ptr(),
+            TensorBacking::Foreign(foreign) => foreign.as_ptr(),
+        }
+    }
+
     fn export_handle(&self) -> ExportData {
         match &self.backing {
             TensorBacking::Owned(vec) => ExportData::Owned(Arc::clone(vec)),
@@ -408,7 +419,7 @@ impl TensorBuffer {
         }
     }
 
-    fn try_clone_owned(&self) -> Option<Arc<Vec<f32>>> {
+    fn try_clone_owned(&self) -> Option<Arc<AlignedVec>> {
         match &self.backing {
             TensorBacking::Owned(vec) => Some(Arc::clone(vec)),
             TensorBacking::Foreign(_) => None,
@@ -507,7 +518,7 @@ pub struct PackedB {
     inner: usize,
     tile: Tile,
     layout: PackedLayout,
-    buf: Arc<Vec<f32>>,
+    buf: Arc<AlignedVec>,
 }
 
 impl PackedB {
@@ -524,7 +535,7 @@ impl PackedB {
     fn from_row_major(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
         let rows = tensor.rows;
         let cols = tensor.cols;
-        let mut packed = vec![0.0; rows * cols];
+        let mut packed = aligned_zeroed(rows * cols);
         let data = tensor.data();
         for r in 0..rows {
             let offset = r * cols;
@@ -547,7 +558,7 @@ impl PackedB {
         let buf = tensor
             .data
             .try_clone_owned()
-            .unwrap_or_else(|| Arc::new(tensor.data().to_vec()));
+            .unwrap_or_else(|| Arc::new(aligned_from_slice(tensor.data())));
         Self {
             cols,
             inner: rows,
@@ -573,7 +584,7 @@ impl PackedB {
         let buf = tensor
             .data
             .try_clone_owned()
-            .unwrap_or_else(|| Arc::new(tensor.data().to_vec()));
+            .unwrap_or_else(|| Arc::new(aligned_from_slice(tensor.data())));
         Ok(Self {
             cols: rows,
             inner: cols,
@@ -636,29 +647,12 @@ impl PartialEq for Tensor {
 }
 
 impl Tensor {
-    fn seedable_rng(seed: Option<u64>) -> StdRng {
-        match seed {
-            Some(value) => StdRng::seed_from_u64(value),
-            None => StdRng::from_entropy(),
-        }
-    }
-
-    /// Create a tensor filled with zeros.
-    pub fn zeros(rows: usize, cols: usize) -> PureResult<Self> {
-        if rows == 0 || cols == 0 {
-            return Err(TensorError::InvalidDimensions { rows, cols });
-        }
-        Ok(Self {
-            data: Arc::new(TensorBuffer::from_vec(vec![0.0; rows * cols])),
-            rows,
-            cols,
-            layout: Layout::RowMajor,
-        })
-    }
-
-    /// Create a tensor from raw data. The provided vector must match
-    /// `rows * cols` elements.
-    pub fn from_vec(rows: usize, cols: usize, data: Vec<f32>) -> PureResult<Self> {
+    fn from_aligned(
+        rows: usize,
+        cols: usize,
+        data: AlignedVec,
+        layout: Layout,
+    ) -> PureResult<Self> {
         if rows == 0 || cols == 0 {
             return Err(TensorError::InvalidDimensions { rows, cols });
         }
@@ -670,11 +664,31 @@ impl Tensor {
             });
         }
         Ok(Self {
-            data: Arc::new(TensorBuffer::from_vec(data)),
+            data: Arc::new(TensorBuffer::from_aligned(data)),
             rows,
             cols,
-            layout: Layout::RowMajor,
+            layout,
         })
+    }
+
+    fn seedable_rng(seed: Option<u64>) -> StdRng {
+        match seed {
+            Some(value) => StdRng::seed_from_u64(value),
+            None => StdRng::from_entropy(),
+        }
+    }
+
+    /// Create a tensor filled with zeros.
+    pub fn zeros(rows: usize, cols: usize) -> PureResult<Self> {
+        let data = aligned_zeroed(rows * cols);
+        Self::from_aligned(rows, cols, data, Layout::RowMajor)
+    }
+
+    /// Create a tensor from raw data. The provided vector must match
+    /// `rows * cols` elements.
+    pub fn from_vec(rows: usize, cols: usize, data: Vec<f32>) -> PureResult<Self> {
+        let data = aligned_from_vec(data);
+        Self::from_aligned(rows, cols, data, Layout::RowMajor)
     }
 
     /// Construct a tensor by sampling a uniform distribution in `[min, max)`.
@@ -698,11 +712,11 @@ impl Tensor {
         }
         let mut rng = Self::seedable_rng(seed);
         let distribution = Uniform::new(min, max);
-        let mut data = Vec::with_capacity(rows * cols);
+        let mut data = aligned_with_capacity(rows * cols);
         for _ in 0..rows * cols {
             data.push(distribution.sample(&mut rng));
         }
-        Self::from_vec(rows, cols, data)
+        Self::from_aligned(rows, cols, data, Layout::RowMajor)
     }
 
     /// Construct a tensor by sampling a normal distribution with the provided
@@ -724,12 +738,12 @@ impl Tensor {
         }
         let mut rng = Self::seedable_rng(seed);
         let gaussian = StandardNormal;
-        let mut data = Vec::with_capacity(rows * cols);
+        let mut data = aligned_with_capacity(rows * cols);
         for _ in 0..rows * cols {
             let sample: f64 = gaussian.sample(&mut rng);
             data.push(mean + std * sample as f32);
         }
-        Self::from_vec(rows, cols, data)
+        Self::from_aligned(rows, cols, data, Layout::RowMajor)
     }
 
     /// Construct a tensor by applying a generator function to each coordinate.
@@ -740,13 +754,13 @@ impl Tensor {
         if rows == 0 || cols == 0 {
             return Err(TensorError::InvalidDimensions { rows, cols });
         }
-        let mut data = Vec::with_capacity(rows * cols);
+        let mut data = aligned_with_capacity(rows * cols);
         for r in 0..rows {
             for c in 0..cols {
                 data.push(f(r, c));
             }
         }
-        Self::from_vec(rows, cols, data)
+        Self::from_aligned(rows, cols, data, Layout::RowMajor)
     }
 
     /// Returns the `(rows, cols)` pair of the tensor.
@@ -754,9 +768,79 @@ impl Tensor {
         (self.rows, self.cols)
     }
 
+    /// Total number of elements stored in the tensor.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.rows * self.cols
+    }
+
+    /// Returns the logical stride for advancing one row and one column.
+    pub fn strides(&self) -> PureResult<(usize, usize)> {
+        match self.layout {
+            Layout::RowMajor => Ok((self.cols, 1)),
+            Layout::ColMajor => Ok((1, self.rows)),
+            Layout::Tiled { .. } => Err(TensorError::UnsupportedLayout {
+                label: "tiled layout does not expose uniform strides",
+            }),
+        }
+    }
+
+    /// Checks whether the tensor storage is contiguous for row- or column-major traversals.
+    #[inline]
+    pub fn is_contiguous(&self) -> bool {
+        matches!(self.layout, Layout::RowMajor | Layout::ColMajor)
+    }
+
+    /// Returns `true` when the backing buffer is aligned to the requested byte boundary.
+    #[inline]
+    pub fn is_aligned_to(&self, alignment: usize) -> bool {
+        is_ptr_aligned(self.data.as_ref().as_ptr(), alignment)
+    }
+
+    /// Returns `true` when the buffer is 16-byte aligned which enables `vec4` access on GPUs.
+    #[inline]
+    pub fn is_vec4_aligned(&self) -> bool {
+        self.is_aligned_to(16)
+    }
+
     /// Returns the layout descriptor attached to the tensor.
     pub fn layout(&self) -> Layout {
         self.layout
+    }
+
+    /// Returns a tensor whose buffer is reorganised to match the requested layout.
+    pub fn to_layout(&self, layout: Layout) -> PureResult<Tensor> {
+        if layout == self.layout {
+            return Ok(self.clone());
+        }
+
+        match (self.layout, layout) {
+            (Layout::RowMajor, Layout::ColMajor) => {
+                let mut data = aligned_zeroed(self.len());
+                let source = self.data();
+                for r in 0..self.rows {
+                    let offset = r * self.cols;
+                    for c in 0..self.cols {
+                        data[c * self.rows + r] = source[offset + c];
+                    }
+                }
+                Tensor::from_aligned(self.rows, self.cols, data, Layout::ColMajor)
+            }
+            (Layout::ColMajor, Layout::RowMajor) => {
+                let mut data = aligned_zeroed(self.len());
+                let source = self.data();
+                for c in 0..self.cols {
+                    let offset = c * self.rows;
+                    for r in 0..self.rows {
+                        data[r * self.cols + c] = source[offset + r];
+                    }
+                }
+                Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
+            }
+            _ => Err(TensorError::UnsupportedLayout {
+                label: "layout conversion requires row- or col-major tensors",
+            }),
+        }
     }
 
     /// Returns a read-only view of the underlying buffer.
@@ -766,6 +850,7 @@ impl Tensor {
 
     /// Returns a mutable view of the underlying buffer.
     pub fn data_mut(&mut self) -> &mut [f32] {
+        self.layout = Layout::RowMajor;
         Arc::make_mut(&mut self.data).make_mut_slice()
     }
 
@@ -819,6 +904,27 @@ impl Tensor {
         });
 
         Ok(Box::into_raw(managed))
+    }
+
+    /// Return a zero-copy view of the tensor with new row/column dimensions.
+    pub fn view(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
+        if rows == 0 || cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        if rows * cols != self.len() {
+            return Err(TensorError::DataLength {
+                expected: rows * cols,
+                got: self.len(),
+            });
+        }
+        self.layout
+            .expect_row_major("Tensor::view requires row-major storage")?;
+        Ok(Tensor {
+            data: Arc::clone(&self.data),
+            rows,
+            cols,
+            layout: Layout::RowMajor,
+        })
     }
 
     /// Construct a tensor from a managed DLPack tensor. The managed tensor is consumed.
@@ -2248,11 +2354,11 @@ impl Tensor {
                 right: other.shape(),
             });
         }
-        let mut data = Vec::with_capacity(self.data.len());
+        let mut data = aligned_with_capacity(self.len());
         for (a, b) in self.data.iter().zip(other.data.iter()) {
             data.push(a + b);
         }
-        Tensor::from_vec(self.rows, self.cols, data)
+        Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
     }
 
     /// Element-wise subtraction.
@@ -2263,20 +2369,20 @@ impl Tensor {
                 right: other.shape(),
             });
         }
-        let mut data = Vec::with_capacity(self.data.len());
+        let mut data = aligned_with_capacity(self.len());
         for (a, b) in self.data.iter().zip(other.data.iter()) {
             data.push(a - b);
         }
-        Tensor::from_vec(self.rows, self.cols, data)
+        Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
     }
 
     /// Returns a new tensor where every element is scaled by `value`.
     pub fn scale(&self, value: f32) -> PureResult<Tensor> {
-        let mut data = Vec::with_capacity(self.data.len());
+        let mut data = aligned_with_capacity(self.len());
         for &a in self.data.iter() {
             data.push(a * value);
         }
-        Tensor::from_vec(self.rows, self.cols, data)
+        Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
     }
 
     /// Element-wise product (Hadamard) between two tensors of identical shape.
@@ -2287,11 +2393,11 @@ impl Tensor {
                 right: other.shape(),
             });
         }
-        let mut data = Vec::with_capacity(self.data.len());
+        let mut data = aligned_with_capacity(self.len());
         for (a, b) in self.data.iter().zip(other.data.iter()) {
             data.push(a * b);
         }
-        Tensor::from_vec(self.rows, self.cols, data)
+        Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
     }
 
     /// Add a scaled tensor to this tensor (`self += scale * other`).
@@ -2375,14 +2481,14 @@ impl Tensor {
 
     /// Returns the transpose of the tensor.
     pub fn transpose(&self) -> Tensor {
-        let mut data = vec![0.0; self.rows * self.cols];
+        let mut data = aligned_zeroed(self.len());
         for r in 0..self.rows {
             for c in 0..self.cols {
                 data[c * self.rows + r] = self.data[r * self.cols + c];
             }
         }
         Tensor {
-            data: Arc::new(TensorBuffer::from_vec(data)),
+            data: Arc::new(TensorBuffer::from_aligned(data)),
             rows: self.cols,
             cols: self.rows,
             layout: Layout::RowMajor,
@@ -2394,13 +2500,19 @@ impl Tensor {
         if rows == 0 || cols == 0 {
             return Err(TensorError::InvalidDimensions { rows, cols });
         }
-        if rows * cols != self.data.len() {
+        if rows * cols != self.len() {
             return Err(TensorError::DataLength {
                 expected: rows * cols,
-                got: self.data.len(),
+                got: self.len(),
             });
         }
-        Tensor::from_vec(rows, cols, self.data().to_vec())
+
+        if matches!(self.layout, Layout::RowMajor) {
+            return self.view(rows, cols);
+        }
+
+        let row_major = self.to_layout(Layout::RowMajor)?;
+        row_major.view(rows, cols)
     }
 
     /// Returns the sum over rows for each column.
@@ -2435,11 +2547,11 @@ impl Tensor {
             }
             total_rows += tensor.rows;
         }
-        let mut data = Vec::with_capacity(total_rows * cols);
+        let mut data = aligned_with_capacity(total_rows * cols);
         for tensor in tensors {
             data.extend_from_slice(tensor.data.as_slice());
         }
-        Tensor::from_vec(total_rows, cols, data)
+        Tensor::from_aligned(total_rows, cols, data, Layout::RowMajor)
     }
 
     /// Computes the squared L2 norm of the tensor.
@@ -2453,7 +2565,7 @@ impl Tensor {
             return Err(TensorError::NonHyperbolicCurvature { curvature });
         }
         let scale = (-curvature).sqrt();
-        let mut data = Vec::with_capacity(self.data.len());
+        let mut data = aligned_with_capacity(self.len());
         for r in 0..self.rows {
             let start = r * self.cols;
             let end = start + self.cols;
@@ -2469,7 +2581,7 @@ impl Tensor {
                 data.extend_from_slice(chunk);
             }
         }
-        Tensor::from_vec(self.rows, self.cols, data)
+        Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
     }
 
     /// Estimates the hyperbolic distance between two flattened tensors treated as points.

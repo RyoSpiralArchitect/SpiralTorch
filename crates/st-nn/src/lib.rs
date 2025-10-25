@@ -84,12 +84,17 @@ pub use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
 };
 pub use trainer::{EpochStats, ModuleTrainer};
+#[cfg(feature = "psi")]
+pub use zspace_coherence::BranchPsiReading;
+#[cfg(feature = "golden")]
+pub use zspace_coherence::{heatmaps_to_golden_telemetry, PsiGoldenTelemetry};
 pub use zspace_coherence::{
-    heatmaps_to_zpulses, run_multibranch_demo, BackendCapabilities, CircleLockMapConfig,
-    CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile, HeatmapResult,
+    heatmaps_to_zpulses, run_multibranch_demo, run_zspace_learning_pass, ArnoldTongueSummary,
+    BackendCapabilities, BranchAtlasFragment, CircleLockMapConfig, CoherenceBackend,
+    CoherenceEngine, DomainConcept, DomainLinguisticProfile, HeatmapAnalytics, HeatmapResult,
     LinguisticChannelReport, LinguisticContour, MetaMembConfig, MetaMembSampler, PreDiscardPolicy,
-    PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse, SyncState, SynchroBus,
-    SynchroEvent, ZSpaceCoherenceSequencer,
+    PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse, PsiSynchroResult,
+    PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent, ZSpaceCoherenceSequencer,
 };
 
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};
