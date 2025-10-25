@@ -347,7 +347,7 @@ mod tests {
         assert!(record_best(path, "key", &ctx, 3.0, &Params { x: 1 }).unwrap());
         assert!(record_best(path, "key", &ctx, 2.0, &Params { x: 42 }).unwrap());
 
-        let loaded = load_best_typed(path, "key", None::<Params>);
+        let loaded = load_best_typed(path, "key", &ctx, None::<Params>);
         assert_eq!(loaded, Some(Params { x: 42 }));
     }
 
