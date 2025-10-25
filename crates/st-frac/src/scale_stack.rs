@@ -173,6 +173,15 @@ impl ScaleStack {
             if sample.gate_mean <= 0.0 {
                 continue;
             }
+            if sample.gate_mean >= 1.0 {
+                if xs.len() >= 2 {
+                    break;
+                }
+                let clipped = (1.0 - f64::EPSILON).max(f64::EPSILON);
+                xs.push((sample.scale.max(f64::EPSILON)).ln());
+                ys.push(clipped.ln());
+                continue;
+            }
             xs.push((sample.scale.max(f64::EPSILON)).ln());
             ys.push((sample.gate_mean.max(f64::EPSILON)).ln());
         }
@@ -224,16 +233,14 @@ fn detect_interfaces(field: &ArrayViewD<'_, f32>, radius: usize, threshold: f32)
     let offsets = ball_offsets(ndim, radius);
     let mut out = ArrayD::<bool>::from_elem(field.raw_dim(), false);
     for (idx, flag) in out.indexed_iter_mut() {
-        let coords = idx.slice();
         let mut min_val = f32::INFINITY;
         let mut max_val = f32::NEG_INFINITY;
         for offset in &offsets {
             let mut neigh = Vec::with_capacity(ndim);
             let mut valid = true;
-            for (coord, (&delta, &dim_len)) in
-                coords.iter().zip(offset.iter()).zip(field.shape().iter())
-            {
-                let p = *coord as isize + delta;
+            for (axis, (&delta, &dim_len)) in offset.iter().zip(field.shape().iter()).enumerate() {
+                let coord = idx[axis] as isize;
+                let p = coord + delta;
                 if p < 0 || p >= dim_len as isize {
                     valid = false;
                     break;
