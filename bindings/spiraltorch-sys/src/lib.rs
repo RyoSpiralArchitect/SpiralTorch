@@ -8,7 +8,9 @@
 //! can be used by other foreign-language integrations that require a stable
 //! binary interface.
 
-use st_core::runtime::golden::{GoldenRuntime, GoldenRuntimeConfig, GoldenTensorError};
+use st_core::runtime::golden::{
+    GoldenRuntime, GoldenRuntimeConfig, GoldenTaskError, GoldenTensorError,
+};
 use st_tensor::{
     dlpack::{self, DLManagedTensor},
     MatmulBackend, PureResult, SoftmaxBackend, Tensor,
@@ -474,10 +476,15 @@ fn runtime_spawn(
     context: &str,
     task: impl FnOnce() -> PureResult<Tensor> + Send + 'static,
 ) -> *mut Tensor {
-    match runtime.spawn_blocking::<_, PureResult<Tensor>>(task) {
+    match runtime.spawn_blocking(task) {
         Ok(handle) => match handle.join() {
-            Ok(result) => tensor_from_result_with_message(result, context),
-            Err(_) => {
+            Ok(tensor) => tensor_from_result_with_message(Ok(tensor), context),
+            Err(GoldenTaskError::Task(err)) => tensor_from_result_with_message(Err(err), context),
+            Err(GoldenTaskError::Runtime(err)) => {
+                set_last_error(format!("{context}: {err}"));
+                ptr::null_mut()
+            }
+            Err(GoldenTaskError::Panic) => {
                 set_last_error(format!("{context} task panicked"));
                 ptr::null_mut()
             }
