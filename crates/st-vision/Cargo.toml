@@ -18,6 +18,8 @@ st-logic = { path = "../st-logic" }
 st-nn = { path = "../st-nn" }
 rand = "0.8"
 st-backend-wgpu = { path = "../st-backend-wgpu", optional = true }
+st-frac = { path = "../st-frac" }
+ndarray = "0.15"
 
 [dev-dependencies]
 tempfile = "3"

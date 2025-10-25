@@ -3031,7 +3031,9 @@ dependencies = [
 name = "st-text"
 version = "0.1.0"
 dependencies = [
+ "ndarray",
  "st-core",
+ "st-frac",
  "st-logic",
  "st-tensor",
 ]
@@ -3040,9 +3042,11 @@ dependencies = [
 name = "st-vision"
 version = "0.1.0"
 dependencies = [
+ "ndarray",
  "rand",
  "st-backend-wgpu",
  "st-core",
+ "st-frac",
  "st-logic",
  "st-nn",
  "st-tensor",

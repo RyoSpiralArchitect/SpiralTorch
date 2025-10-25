@@ -24,6 +24,12 @@ pub use microlocal_impl as microlocal;
 
 pub mod microlocal_bank;
 
+#[path = "scale_persistence.rs"]
+#[doc(hidden)]
+pub mod scale_persistence_impl;
+#[doc(inline)]
+pub use scale_persistence_impl as scale_persistence;
+
 #[path = "macro.rs"]
 #[doc(hidden)]
 pub mod macro_impl;
