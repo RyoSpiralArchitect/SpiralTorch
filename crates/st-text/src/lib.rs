@@ -39,6 +39,8 @@ use st_logic::contextual_observation::{
 use st_tensor::Tensor;
 use st_tensor::{DifferentialResonance, LanguageWaveEncoder, PureResult};
 
+pub mod semantics;
+
 /// Human-readable synopsis describing what a resonance snapshot is doing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResonanceNarrative {
