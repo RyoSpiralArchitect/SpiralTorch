@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use super::GraphContext;
+use super::{GraphContext, RoundtableBandInfluence};
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
@@ -144,7 +144,7 @@ impl Default for NeighborhoodAggregation {
 #[derive(Debug, Clone)]
 struct AggregatedSupport {
     support: Tensor,
-    weights: Vec<f32>,
+    coefficients: Vec<f32>,
 }
 
 impl AggregatedSupport {
@@ -153,7 +153,7 @@ impl AggregatedSupport {
     }
 
     fn into_weights(self) -> Vec<f32> {
-        self.weights
+        self.coefficients
     }
 }
 
@@ -167,6 +167,7 @@ pub struct ZSpaceGraphConvolution {
     curvature: f32,
     aggregation: NeighborhoodAggregation,
     tracer: Option<Arc<Mutex<GraphFlowTracer>>>,
+    roundtable: Option<RoundtableBandInfluence>,
 }
 
 impl ZSpaceGraphConvolution {
@@ -205,6 +206,7 @@ impl ZSpaceGraphConvolution {
             curvature,
             aggregation: NeighborhoodAggregation::default(),
             tracer: None,
+            roundtable: None,
         })
     }
 
@@ -224,6 +226,11 @@ impl ZSpaceGraphConvolution {
     /// Attaches a shared flow tracer for interpretability tooling.
     pub fn set_tracer(&mut self, tracer: Arc<Mutex<GraphFlowTracer>>) {
         self.tracer = Some(tracer);
+    }
+
+    /// Installs a roundtable directive so message passing can adapt per band.
+    pub fn set_roundtable_influence(&mut self, influence: Option<RoundtableBandInfluence>) {
+        self.roundtable = influence;
     }
 
     /// Returns the underlying graph context.
@@ -252,15 +259,30 @@ impl ZSpaceGraphConvolution {
         let (rows, cols) = input.shape();
         let mut support = Tensor::zeros(rows, cols)?;
         let mut current = input.clone();
+        let mut effective = Vec::with_capacity(weights.len());
         for (idx, weight) in weights.iter().enumerate() {
             if idx > 0 {
                 current = self.context.propagate(&current)?;
             }
             if weight.abs() > f32::EPSILON {
-                support.add_scaled(&current, *weight)?;
+                let scale = self
+                    .roundtable
+                    .as_ref()
+                    .map(|influence| influence.scale_for_step(idx))
+                    .unwrap_or(1.0);
+                let coeff = weight * scale;
+                if coeff.abs() > f32::EPSILON {
+                    support.add_scaled(&current, coeff)?;
+                }
+                effective.push(coeff);
+            } else {
+                effective.push(*weight);
             }
         }
-        Ok(AggregatedSupport { support, weights })
+        Ok(AggregatedSupport {
+            support,
+            coefficients: effective,
+        })
     }
 
     fn backpropagate_through_aggregation(

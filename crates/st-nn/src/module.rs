@@ -21,6 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+use crate::gnn::RoundtableBandSignal;
 use crate::schedule::GradientBands;
 use st_core::backend::device_caps::DeviceCaps;
 #[cfg(feature = "psychoid")]
@@ -415,6 +416,16 @@ pub trait Module {
             total.add_scaled(&contribution, 1.0)?;
         }
         Ok(total)
+    }
+
+    /// Applies the latest roundtable band signal before a backward pass.
+    fn apply_roundtable_band(&mut self, _signal: &RoundtableBandSignal) -> PureResult<()> {
+        Ok(())
+    }
+
+    /// Clears any previously applied roundtable directives.
+    fn clear_roundtable_band(&mut self) -> PureResult<()> {
+        Ok(())
     }
 
     /// Attaches a hypergrad tape to every parameter.
