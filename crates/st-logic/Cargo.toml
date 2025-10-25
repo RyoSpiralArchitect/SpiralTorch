@@ -16,6 +16,7 @@ rand = "0.8"
 num-complex = "0.4"
 nalgebra = "0.32"
 st-softlogic = { path = "../st-softlogic" }
+st-core = { path = "../st-core" }
 serde = { version = "1", optional = true, features = ["derive"] }
 serde_json = { version = "1", optional = true }
 st-tensor = { path = "../st-tensor" }

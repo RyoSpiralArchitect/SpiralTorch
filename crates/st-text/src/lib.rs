@@ -31,7 +31,10 @@ use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::{
     ChronoFrame, ChronoHarmonics, ChronoSummary, ResonanceTemporalMetrics,
 };
-use st_logic::contextual_observation::{Arrangement, MeaningProjection, OrientationGauge};
+use st_core::theory::zpulse::ZPulse;
+use st_logic::contextual_observation::{
+    Arrangement, LagrangianGate, MeaningProjection, OrientationGauge,
+};
 #[cfg(test)]
 use st_tensor::Tensor;
 use st_tensor::{DifferentialResonance, LanguageWaveEncoder, PureResult};
@@ -384,6 +387,20 @@ impl TextResonator {
         highlights.push(format!("lexical weight {:.3}", projection.lexical_weight()));
 
         Ok((ResonanceNarrative::new(summary, highlights), projection))
+    }
+
+    /// Runs the contextual narrative through the Lagrangian gate and produces a
+    /// Z-space pulse alongside the description and projection.
+    pub fn gate_contextual_meaning(
+        &self,
+        arrangement: &Arrangement,
+        gauge: OrientationGauge,
+        gate: &LagrangianGate,
+        ts: u64,
+    ) -> PureResult<(ResonanceNarrative, MeaningProjection, ZPulse)> {
+        let (narrative, projection) = self.describe_contextual_meaning(arrangement, gauge)?;
+        let pulse = gate.emit(&projection, ts);
+        Ok((narrative, projection, pulse))
     }
 
     /// Produces a narrative describing the aggregated atlas frame.
@@ -1137,8 +1154,10 @@ fn curvature_persistence(frames: &[ChronoFrame]) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use st_core::telemetry::chrono::ChronoTimeline;
-    use st_logic::contextual_observation::{Arrangement, Label, OrientationGauge, PureAtom};
+    use st_core::{telemetry::chrono::ChronoTimeline, theory::zpulse::ZSource};
+    use st_logic::contextual_observation::{
+        Arrangement, Label, LagrangianGate, LagrangianGateConfig, OrientationGauge, PureAtom,
+    };
     use std::f32::consts::TAU;
 
     fn demo_tensor(values: &[f32]) -> Tensor {
@@ -1334,5 +1353,26 @@ mod tests {
             .highlights
             .iter()
             .any(|line| line.contains("lexical weight")));
+    }
+
+    #[test]
+    fn contextual_gate_emits_zpulse() {
+        let narrator = TextResonator::new(-0.5, 0.7).unwrap();
+        let arrangement = Arrangement::from_line(vec![
+            PureAtom::A,
+            PureAtom::B,
+            PureAtom::B,
+            PureAtom::A,
+            PureAtom::B,
+        ]);
+        let gate = LagrangianGate::new(LagrangianGateConfig::default());
+        let (_narrative, projection, pulse) = narrator
+            .gate_contextual_meaning(&arrangement, OrientationGauge::Preserve, &gate, 144)
+            .unwrap();
+        assert_eq!(projection.label, Some(Label::B));
+        assert_eq!(pulse.source, ZSource::Other("contextual-lagrangian"));
+        assert_eq!(pulse.ts, 144);
+        assert!(pulse.total_energy() > 0.0);
+        assert!(pulse.support_mass() > 0.0);
     }
 }

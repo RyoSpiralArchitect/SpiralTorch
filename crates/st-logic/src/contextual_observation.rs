@@ -27,6 +27,7 @@ use std::collections::VecDeque;
 use std::f32::consts::TAU;
 
 use num_complex::Complex32;
+use st_core::theory::zpulse::{ZPulse, ZScale, ZSource, ZSupport};
 use st_tensor::{PureResult, Tensor};
 
 /// Latent pure atoms — the unobservable `Â` and `𝐵̂` units.
@@ -388,6 +389,150 @@ impl MeaningProjection {
     pub fn dominant_frequency_bin(&self) -> Option<(usize, f32)> {
         self.basis.dominant_frequency()
     }
+
+    fn orientation_sign(&self) -> f32 {
+        match self.label {
+            Some(Label::A) => -1.0,
+            Some(Label::B) => 1.0,
+            None => 0.0,
+        }
+    }
+}
+
+/// Configuration describing how contextual meaning should be pushed through the
+/// Desire Lagrangian gate and into Z-space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LagrangianGateConfig {
+    pub tempo_normaliser: f32,
+    pub energy_gain: f32,
+    pub drift_gain: f32,
+    pub bias_gain: f32,
+    pub support_gain: f32,
+    pub quality_floor: f32,
+    pub stderr_gain: f32,
+    pub scale: Option<ZScale>,
+}
+
+impl Default for LagrangianGateConfig {
+    fn default() -> Self {
+        Self {
+            tempo_normaliser: 1.0,
+            energy_gain: 1.0,
+            drift_gain: 1.0,
+            bias_gain: 1.0,
+            support_gain: 1.0,
+            quality_floor: 0.0,
+            stderr_gain: 1.0,
+            scale: Some(ZScale::ONE),
+        }
+    }
+}
+
+impl LagrangianGateConfig {
+    pub fn tempo_normaliser(mut self, value: f32) -> Self {
+        self.tempo_normaliser = value.max(0.0);
+        self
+    }
+
+    pub fn energy_gain(mut self, value: f32) -> Self {
+        self.energy_gain = value.max(0.0);
+        self
+    }
+
+    pub fn drift_gain(mut self, value: f32) -> Self {
+        self.drift_gain = value;
+        self
+    }
+
+    pub fn bias_gain(mut self, value: f32) -> Self {
+        self.bias_gain = value;
+        self
+    }
+
+    pub fn support_gain(mut self, value: f32) -> Self {
+        self.support_gain = value.max(0.0);
+        self
+    }
+
+    pub fn quality_floor(mut self, value: f32) -> Self {
+        self.quality_floor = value.max(0.0);
+        self
+    }
+
+    pub fn stderr_gain(mut self, value: f32) -> Self {
+        self.stderr_gain = value.max(0.0);
+        self
+    }
+
+    pub fn scale(mut self, scale: Option<ZScale>) -> Self {
+        self.scale = scale;
+        self
+    }
+}
+
+/// Pushes contextual meaning projections through a Desire Lagrangian gate,
+/// emitting Z pulses that can be fed into training loops and automation layers.
+#[derive(Clone, Debug)]
+pub struct LagrangianGate {
+    config: LagrangianGateConfig,
+}
+
+impl LagrangianGate {
+    pub fn new(config: LagrangianGateConfig) -> Self {
+        Self { config }
+    }
+
+    pub fn config(&self) -> &LagrangianGateConfig {
+        &self.config
+    }
+
+    pub fn emit(&self, projection: &MeaningProjection, ts: u64) -> ZPulse {
+        let mut pulse = ZPulse::default();
+        pulse.source = ZSource::Other("contextual-lagrangian");
+        pulse.ts = ts;
+        pulse.scale = self.config.scale;
+
+        let support = projection.support.max(1) as f32;
+        pulse.tempo = projection
+            .dominant_frequency_bin()
+            .map(|(bin, _)| (bin as f32 / support) * self.config.tempo_normaliser)
+            .unwrap_or(0.0);
+
+        let lexical = projection.lexical_weight().max(0.0);
+        let signature = projection.signature.as_ref();
+        let boundary = signature.map(|s| s.boundary_edges as f32).unwrap_or(0.0);
+        let population = signature
+            .map(|s| s.absolute_population_imbalance as f32)
+            .unwrap_or(0.0);
+        let cluster = signature.map(|s| s.cluster_imbalance as f32).unwrap_or(0.0);
+
+        let orientation = projection.orientation_sign();
+        let energy_gate = (boundary + population * 0.5).max(0.0) * self.config.energy_gain;
+        let orientation_bias = orientation * lexical * self.config.bias_gain;
+        let drift = orientation * energy_gate * self.config.drift_gain;
+
+        let above = (energy_gate * 0.5 + orientation_bias.max(0.0)).max(0.0);
+        let beneath = (energy_gate * 0.5 + (-orientation_bias).max(0.0)).max(0.0);
+        let central = (lexical + cluster.abs() * 0.1).max(0.0);
+
+        let gate_factor = (1.0 + boundary.max(0.0)).ln_1p().max(1e-3);
+        let leading_support = (lexical + boundary * 0.25 + orientation_bias.max(0.0)).max(0.0)
+            * self.config.support_gain
+            * gate_factor;
+        let trailing_support = (lexical + boundary * 0.25 + (-orientation_bias).max(0.0)).max(0.0)
+            * self.config.support_gain
+            * gate_factor;
+        let central_support =
+            (lexical + population * 0.25 + cluster.abs() * 0.1).max(0.0) * self.config.support_gain;
+
+        pulse.band_energy = (above, central, beneath);
+        pulse.support = ZSupport::new(leading_support, central_support, trailing_support);
+        pulse.drift = drift;
+        pulse.z_bias = orientation_bias;
+        pulse.quality = (self.config.quality_floor + lexical + gate_factor * 0.1).min(1.0);
+        pulse.stderr = ((1.0 - lexical).max(0.0) + cluster.abs() * 0.01) * self.config.stderr_gain;
+        pulse
+    }
 }
 
 fn arrangement_signal_values(arrangement: &Arrangement) -> Vec<f32> {
@@ -428,6 +573,7 @@ fn compute_spectrum(signal: &[f32]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use st_core::theory::zpulse::ZSource;
 
     #[test]
     fn pure_arrangements_are_hidden() {
@@ -523,5 +669,26 @@ mod tests {
         assert_eq!(projection.support, 4);
         assert!(projection.lexical_weight() > 0.0);
         assert!(projection.dominant_frequency_bin().is_some());
+    }
+
+    #[test]
+    fn lagrangian_gate_emits_contextual_pulse() {
+        let arrangement = Arrangement::from_line(vec![
+            PureAtom::A,
+            PureAtom::B,
+            PureAtom::B,
+            PureAtom::B,
+            PureAtom::A,
+        ]);
+        let projection =
+            MeaningProjection::from_arrangement(&arrangement, OrientationGauge::Preserve)
+                .expect("projection");
+        let gate = LagrangianGate::new(LagrangianGateConfig::default());
+        let pulse = gate.emit(&projection, 88);
+        assert_eq!(pulse.source, ZSource::Other("contextual-lagrangian"));
+        assert_eq!(pulse.ts, 88);
+        assert!(pulse.total_energy() > 0.0);
+        assert!(pulse.support_mass() > 0.0);
+        assert!(pulse.quality >= 0.0);
     }
 }

@@ -14,6 +14,8 @@ use crate::tensor::{tensor_err_to_py, PyTensor};
 #[cfg(feature = "nn")]
 use st_core::theory::zpulse::ZScale;
 #[cfg(feature = "nn")]
+use st_nn::Module;
+#[cfg(feature = "nn")]
 use st_nn::{
     dataset::DataLoaderBatches,
     dataset_from_vec,
