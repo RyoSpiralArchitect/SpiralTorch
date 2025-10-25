@@ -687,6 +687,153 @@ _Z_METRIC_ALIAS = {
 }
 
 
+_Z_PARTIAL_ALIAS = {
+    "speed": "speed",
+    "velocity": "speed",
+    "mem": "memory",
+    "memory": "memory",
+    "stab": "stability",
+    "stability": "stability",
+    "frac": "frac",
+    "frac_reg": "frac",
+    "fractality": "frac",
+    "drs": "drs",
+    "drift": "drs",
+    "gradient": "gradient",
+    "grad": "gradient",
+    "canvas_energy": "canvas_energy",
+    "canvas_mean": "canvas_mean",
+    "canvas_peak": "canvas_peak",
+    "canvas_balance": "canvas_balance",
+    "canvas_l1": "canvas_l1",
+    "canvas_l2": "canvas_l2",
+    "canvas_linf": "canvas_linf",
+    "canvas_pixels": "canvas_pixels",
+    "canvas_patch_energy": "canvas_patch_energy",
+    "canvas_patch_mean": "canvas_patch_mean",
+    "canvas_patch_peak": "canvas_patch_peak",
+    "canvas_patch_pixels": "canvas_patch_pixels",
+    "canvas_patch_balance": "canvas_patch_balance",
+    "hypergrad_norm": "hypergrad_norm",
+    "hypergrad_balance": "hypergrad_balance",
+    "hypergrad_mean": "hypergrad_mean",
+    "hypergrad_l1": "hypergrad_l1",
+    "hypergrad_l2": "hypergrad_l2",
+    "hypergrad_linf": "hypergrad_linf",
+    "realgrad_norm": "realgrad_norm",
+    "realgrad_balance": "realgrad_balance",
+    "realgrad_mean": "realgrad_mean",
+    "realgrad_l1": "realgrad_l1",
+    "realgrad_l2": "realgrad_l2",
+    "realgrad_linf": "realgrad_linf",
+    "coherence_mean": "coherence_mean",
+    "coherence_entropy": "coherence_entropy",
+    "coherence_energy_ratio": "coherence_energy_ratio",
+    "coherence_z_bias": "coherence_z_bias",
+    "coherence_fractional_order": "coherence_fractional_order",
+    "coherence_channels": "coherence_channels",
+    "coherence_preserved": "coherence_preserved",
+    "coherence_discarded": "coherence_discarded",
+    "coherence_dominant": "coherence_dominant",
+    "coherence_peak": "coherence_peak",
+    "coherence_weight_entropy": "coherence_weight_entropy",
+    "coherence_response_peak": "coherence_response_peak",
+    "coherence_response_mean": "coherence_response_mean",
+    "coherence_strength": "coherence_strength",
+    "coherence_prosody": "coherence_prosody",
+    "coherence_articulation": "coherence_articulation",
+    "import_l1": "import_l1",
+    "import_l2": "import_l2",
+    "import_linf": "import_linf",
+    "import_mean": "import_mean",
+    "import_variance": "import_variance",
+    "import_energy": "import_energy",
+    "import_count": "import_count",
+    "import_amplitude": "import_amplitude",
+    "import_balance": "import_balance",
+    "import_focus": "import_focus",
+}
+
+
+def _coerce_gradient_values(value: _Any) -> list[float] | None:
+    if value is None:
+        return None
+    if isinstance(value, ZMetrics):
+        value = value.gradient
+    if value is None:
+        return None
+    if isinstance(value, _Mapping):
+        value = value.values()
+    if isinstance(value, (str, bytes, bytearray)):
+        raise TypeError("gradient metrics must be provided as an iterable of floats")
+    try:
+        return [float(entry) for entry in value]
+    except TypeError as exc:  # noqa: BLE001 - surface a user-friendly error message
+        raise TypeError("gradient metrics must be provided as an iterable of floats") from exc
+
+
+def _metrics_to_mapping(metrics: ZMetrics) -> dict[str, _Any]:
+    payload: dict[str, _Any] = {
+        "speed": float(metrics.speed),
+        "memory": float(metrics.memory),
+        "stability": float(metrics.stability),
+        "drs": float(metrics.drs),
+    }
+    gradient = _coerce_gradient_values(metrics.gradient)
+    if gradient is not None:
+        payload["gradient"] = gradient
+    return payload
+
+
+def _canonicalise_partial_mapping(payload: _Mapping[str, _Any] | None) -> dict[str, _Any]:
+    if payload is None:
+        return {}
+    resolved: dict[str, _Any] = {}
+    for key, value in payload.items():
+        alias = _Z_PARTIAL_ALIAS.get(key.lower())
+        if alias is None:
+            raise KeyError(f"unknown Z-space metric '{key}'")
+        if alias == "gradient":
+            gradient = _coerce_gradient_values(value)
+            if gradient is not None:
+                resolved[alias] = gradient
+            continue
+        try:
+            resolved[alias] = float(value)
+        except (TypeError, ValueError) as exc:  # noqa: BLE001 - user feedback
+            raise TypeError(
+                f"Z-space metric '{key}' must be a real number, got {value!r}"
+            ) from exc
+    return resolved
+
+
+def _flatten_telemetry(payload: _Mapping[str, _Any], *, prefix: str = "") -> dict[str, float]:
+    flattened: dict[str, float] = {}
+    for key, value in payload.items():
+        label = f"{prefix}{key}" if not prefix else f"{prefix}.{key}"
+        if isinstance(value, _Mapping):
+            flattened.update(_flatten_telemetry(value, prefix=label))
+            continue
+        try:
+            flattened[label] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return flattened
+
+
+def _normalise_telemetry_arg(payload: _Any) -> dict[str, float]:
+    if payload is None:
+        return {}
+    if isinstance(payload, ZSpacePartialBundle):
+        mapping = payload.telemetry_payload()
+        return dict(mapping or {})
+    if isinstance(payload, ZSpaceTelemetryFrame):
+        return dict(payload.payload)
+    if isinstance(payload, _Mapping):
+        return _flatten_telemetry(payload)
+    raise TypeError("telemetry payloads must be mappings or telemetry frames")
+
+
 def z_metrics(
     *,
     speed: float | None = None,
@@ -835,6 +982,97 @@ class _ZSpaceNotation:
 
     def metrics(self, **kwargs: _Any) -> ZMetrics:
         return z_metrics(**kwargs)
+
+    def partial(
+        self,
+        *args: _Any,
+        weight: float | None = None,
+        origin: str | None = None,
+        telemetry: _Any | None = None,
+        **metrics: _Any,
+    ) -> ZSpacePartialBundle:
+        base_metrics: dict[str, _Any] = {}
+        base_weight: float = 1.0
+        base_origin: str | None = None
+        telemetry_payload: dict[str, float] | None = None
+
+        if len(args) > 1:
+            raise TypeError("z.partial() accepts at most one positional argument")
+
+        if args:
+            source = args[0]
+            if isinstance(source, ZSpacePartialBundle):
+                base_metrics = source.resolved()
+                base_weight = float(source.weight)
+                base_origin = source.origin
+                telemetry_payload = dict(source.telemetry_payload() or {}) or None
+            elif isinstance(source, ZMetrics):
+                base_metrics = _metrics_to_mapping(source)
+            elif isinstance(source, _Mapping):
+                base_metrics = _canonicalise_partial_mapping(source)
+            elif source is None:
+                base_metrics = {}
+            else:
+                raise TypeError(
+                    "z.partial() positional argument must be a mapping, ZMetrics, or ZSpacePartialBundle"
+                )
+
+        extra_metrics = _canonicalise_partial_mapping(metrics) if metrics else {}
+        merged_metrics = dict(base_metrics)
+        if extra_metrics:
+            merged_metrics.update(extra_metrics)
+
+        if "gradient" in merged_metrics and merged_metrics["gradient"] is None:
+            merged_metrics.pop("gradient")
+
+        final_weight = float(weight) if weight is not None else base_weight
+        final_origin = origin if origin is not None else base_origin
+
+        if telemetry is not None:
+            telemetry_payload = dict(telemetry_payload or {})
+            telemetry_payload.update(_normalise_telemetry_arg(telemetry))
+        elif telemetry_payload is not None:
+            telemetry_payload = dict(telemetry_payload)
+
+        return ZSpacePartialBundle(
+            merged_metrics,
+            weight=final_weight,
+            origin=final_origin,
+            telemetry=telemetry_payload,
+        )
+
+    def bundle(
+        self,
+        *partials: _Any,
+        strategy: str = "mean",
+        weights: _Sequence[float] | None = None,
+    ) -> dict[str, _Any]:
+        if len(partials) == 1 and isinstance(partials[0], _SequenceABC):
+            sequence = list(partials[0])
+        else:
+            sequence = list(partials)
+
+        normalised: list[ZSpacePartialBundle | dict[str, _Any] | None] = []
+        for partial in sequence:
+            if partial is None:
+                normalised.append(None)
+                continue
+            if isinstance(partial, ZSpacePartialBundle):
+                normalised.append(partial)
+                continue
+            if isinstance(partial, ZMetrics):
+                normalised.append(ZSpacePartialBundle(_metrics_to_mapping(partial)))
+                continue
+            if isinstance(partial, _Mapping):
+                normalised.append(_canonicalise_partial_mapping(partial))
+                continue
+            raise TypeError(
+                "z.bundle() expects partial bundles, mappings, or ZMetrics entries"
+            )
+
+        return blend_zspace_partials(normalised, strategy=strategy, weights=weights)
+
+    blend = bundle
 
 
 hg = _HypergradNotation()

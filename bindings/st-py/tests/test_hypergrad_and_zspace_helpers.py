@@ -116,3 +116,40 @@ def test_z_notation_metrics_helper() -> None:
     metrics = st.z.metrics(velocity=0.4, drift=0.12)
     assert metrics.speed == 0.4
     assert metrics.drs == 0.12
+
+
+def test_z_partial_accepts_keyword_metrics() -> None:
+    partial = st.z.partial(speed=0.7, mem=0.4, frac=0.3, origin="telemetry", weight=2.5)
+    assert isinstance(partial, st.ZSpacePartialBundle)
+    resolved = partial.resolved()
+    assert resolved["speed"] == 0.7
+    assert resolved["memory"] == 0.4
+    assert resolved["frac"] == 0.3
+    assert partial.weight == 2.5
+    assert partial.origin == "telemetry"
+
+
+def test_z_partial_merges_metrics_and_telemetry() -> None:
+    base = st.z.partial(speed=0.2, telemetry={"psi": {"mean": 0.5}})
+    combined = st.z.partial(base, stability=0.9, telemetry={"z": {"bias": 0.1}})
+    resolved = combined.resolved()
+    assert resolved["speed"] == 0.2
+    assert resolved["stability"] == 0.9
+    payload = combined.telemetry_payload()
+    assert payload["psi.mean"] == 0.5
+    assert payload["z.bias"] == 0.1
+
+
+def test_z_partial_accepts_gradient_sequences() -> None:
+    partial = st.z.partial(gradient=[1, -2, 3], speed=0.6)
+    resolved = partial.resolved()
+    assert resolved["gradient"] == [1.0, -2.0, 3.0]
+    assert resolved["speed"] == 0.6
+
+
+def test_z_bundle_weighted_mean() -> None:
+    first = st.z.partial(speed=0.6, memory=0.2)
+    second = st.z.partial(speed=0.2, memory=0.4, weight=0.5)
+    bundle = st.z.bundle(first, second)
+    assert abs(bundle["speed"] - ((0.6 + 0.1) / 1.5)) < 1e-6
+    assert abs(bundle["memory"] - ((0.2 + 0.2) / 1.5)) < 1e-6

@@ -423,8 +423,16 @@ metrics = st.z.metrics(
     grad=[0.1, -0.2, 0.05],
 )
 
+roundtable = st.z.partial(
+    metrics,
+    origin="telemetry",
+    telemetry={"roundtable": {"mean": 0.44, "focus": 0.67}},
+)
+canvas_hint = st.z.partial(speed=0.35, memory=0.22, coherence_peak=0.61, weight=0.5)
+bundle = st.z.bundle(roundtable, canvas_hint)
+
 trainer = st.ZSpaceTrainer(z_dim=z_vec.shape()[1])
-loss = trainer.step(metrics)
+loss = trainer.step(bundle)
 
 print("z shape:", z_vec.shape(), "loss:", loss)
 ```
@@ -433,7 +441,13 @@ print("z shape:", z_vec.shape(), "loss:", loss)
 encoder, and you can append numbers, `(key, value)` pairs, or dictionaries to
 override temperature or other keyword arguments. `st.z.metrics(...)` recognises
 the common aliases (`velocity`, `mem`, `stab`, `drift`, `grad`) and emits the
-strongly typed `ZMetrics` container that `ZSpaceTrainer` expects.
+strongly typed `ZMetrics` container that `ZSpaceTrainer` expects. `st.z.partial(...)`
+wraps those metrics (or raw mappings) into a `ZSpacePartialBundle`, flattens any
+telemetry dictionaries into dotted keys, and lets you override `weight`/`origin`
+without touching the underlying map. Feed the partials directly into
+`st.z.bundle(...)` (alias `st.z.blend`) to merge telemetry-aware observations—
+keyword arguments accept every Z-space alias exposed by the wheel so you can
+mix hypergrad, Canvas, or coherence-derived metrics inline.
 
 ### 5) Zero-copy tensor exchange via DLPack
 
@@ -606,6 +620,14 @@ x_back = st.compat.torch.from_torch(xt)
 ```
 
 ### 14) Math & pacing helpers
+
+```python
+import spiraltorch as st
+st.set_global_seed(42)
+print(st.golden_ratio(), st.golden_angle())
+print(st.fibonacci_pacing(12))
+print(st.pack_tribonacci_chunks(20))
+```
 
 
 ## Backend Matrix
