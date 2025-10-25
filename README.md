@@ -128,7 +128,7 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-25 03:04 UTC_
+_Last updated: 2025-10-25 10:01 UTC_
 
 ```text
 ===============================================================================
@@ -138,29 +138,29 @@ _Last updated: 2025-10-25 03:04 UTC_
  COBOL                   1          416          376            8           32
  C++                     1          327          286            3           38
  CSS                     1          160          137            0           23
- Go                     11         2222         1743          191          288
+ Go                     11         2146         1674          191          281
  JSON                    6          372          372            0            0
  Julia                   8         1335         1176           14          145
- Python                 42         8770         7415           79         1276
+ Python                 48        10981         9268           79         1634
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   35          865          734           27          104
+ TOML                   35          881          749           27          105
  TypeScript              7         4898         4331          175          392
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
- HTML                    2          482          482            0            0
- |- CSS                  1          311          266            0           45
- |- JavaScript           1          616          574            0           42
- (Total)                           1409         1322            0           87
+ HTML                    2          491          491            0            0
+ |- CSS                  1          532          460            0           72
+ |- JavaScript           1          769          720            0           49
+ (Total)                           1792         1671            0          121
 -------------------------------------------------------------------------------
  Jupyter Notebooks       2            0            0            0            0
  |- Markdown             2            9            0            9            0
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               56         5765            0         4556         1209
- |- BASH                13          124           95           17           12
+ Markdown               58         5931            0         4665         1266
+ |- BASH                13          121           92           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
  |- Dockerfile           1            6            6            0            0
@@ -168,16 +168,16 @@ _Last updated: 2025-10-25 03:04 UTC_
  |- JavaScript           1           34           29            3            2
  |- JSON                 1           11           11            0            0
  |- Julia                1           29           26            0            3
- |- Python               6          726          609           20           97
+ |- Python               6          841          697           26          118
  |- Rust                 5          741          652           15           74
  |- YAML                 2           62           62            0            0
- (Total)                           7567         1554         4611         1402
+ (Total)                           7845         1639         4726         1480
 -------------------------------------------------------------------------------
- Rust                  319       136457       121871         1628        12958
- |- Markdown           196         5145            0         5036          109
- (Total)                         141602       121871         6664        13067
+ Rust                  340       151119       135026         1696        14397
+ |- Markdown           212         5934            0         5805          129
+ (Total)                         157053       135026         7501        14526
 ===============================================================================
- Total                 503       163110       139272         7230        16608
+ Total                 532       180098       154235         7407        18456
 ===============================================================================
 ```
 ---
@@ -371,18 +371,22 @@ print("from_torch matches torch.tolist():", from_torch.tolist() == torch_tensor.
 ```python
 import spiraltorch as st
 
-# Build a reusable OpenCartesianTopos with curvature-aware limits in one call.
-topos = st.hypergrad_topos(
-    curvature=-0.9,
-    tolerance=1e-3,
-    saturation=0.8,
-    max_depth=8,
-    max_volume=32,
+# Bind rows/cols or tensor shapes inline with the hg-DSL.
+weights = st.Tensor([[0.1, 0.2, 0.3]])
+tape = st.hg[weights](
+    learning_rate=0.02,
+    topos=st.hg.topos(
+        curvature=-0.9,
+        tolerance=1e-3,
+        saturation=0.8,
+        max_depth=8,
+        max_volume=32,
+    ),
 )
 
-# Accepts tuple shapes, tensors, or rows/cols without extra keywords.
-weights = st.Tensor([[0.1, 0.2, 0.3]])
-tape = st.hypergrad(weights, learning_rate=0.02, topos=topos)
+# Slice notation pinches rows/cols; `.with_topos(...)` inlines guard creation.
+aux = st.hg[1:3](curvature=-0.85)
+guarded = st.hg[weights].with_topos(curvature=-0.9, tolerance=2e-3, max_depth=6)
 
 prediction = st.Tensor([[0.25, 0.25, 0.25]])
 target = st.Tensor([[0.0, 1.0, 0.0]])
@@ -390,26 +394,54 @@ tape.accumulate_pair(prediction, target)
 tape.apply(weights)
 
 print("shape:", tape.shape(), "lr:", tape.learning_rate())
-print("summary l2:", tape.summary().l2())
+print("aux curvature:", aux.curvature())
+print("guard depth:", guarded.topos().max_depth())
 ```
 
-`st.hypergrad_topos(...)` instantiates an `OpenCartesianTopos` from keyword-only
-arguments (aliasing `depth`/`volume` automatically), while `st.hypergrad(...)`
-accepts tuple shapes, tensors, or `rows`/`cols` pairs so you can attach tapes
-without touching the native constructor. Pass dictionaries or `(curvature,
-tolerance, saturation, depth, volume)` tuples to `topos=` when you need a tape
-per module.
+`st.hg[...]` returns a callable that already knows its shape: pass tensors,
+tuples, or even slices (`st.hg[rows:cols]`) and the helper fills in
+`rows`/`cols` before calling into the native constructor. `st.hg.topos(...)`
+aliases `hypergrad_topos`, while `partial.with_topos(...)` wraps guard creation
+inline so you can bind a tape and guard in a single expression. You can still
+feed dictionaries or `(curvature, tolerance, saturation, depth, volume)` tuples
+directly into `topos=` when needed.
 
-### 4) Z-space encoders and metric normalisers
+### 4) Hypergrad sessions & operator hints
+
+```python
+import spiraltorch as st
+from spiral.hypergrad import hypergrad_session, hypergrad_summary_dict, suggest_hypergrad_operator
+
+weights = st.Tensor([[0.05, -0.15, 0.25]])
+targets = st.Tensor([[0.0, 1.0, 0.0]])
+
+with hypergrad_session(weights.shape(), learning_rate=0.03) as tape:
+    tape.accumulate_pair(weights, targets)
+    metrics = hypergrad_summary_dict(tape, include_gradient=True)
+    hints = suggest_hypergrad_operator(metrics)
+
+print("summary:", metrics["summary"])  # includes l1/l2/linf/mean_abs/rms stats
+print("wgsl operator hints:", hints)
+print("gradient sample:", metrics["gradient"][:3])
+```
+
+`hypergrad_session(...)` wraps `st.hypergrad(...)` so notebooks can accumulate,
+apply, and reset tapes without manual `try`/`finally` scaffolding. The
+`hypergrad_summary_dict(...)` helper converts native gradient summaries into a
+plain dictionary (optionally including the gradient vector), and
+`suggest_hypergrad_operator(...)` distils those metrics into shader-friendly mix
+and gain hints while preserving the underlying ratios for custom heuristics.
+
+### 5) Z-space encoders and metric normalisers
 
 ```python
 import spiraltorch as st
 
 # Encode desire text straight into the Z-space tensor manifold.
-z_vec = st.encode_zspace("Spin up the roundtable", temperature=0.4)
+z_vec = st.z["Spin up the roundtable", 0.4]
 
 # Normalise mixed telemetry aliases into a structured ZMetrics payload.
-metrics = st.z_metrics(
+metrics = st.z.metrics(
     velocity=0.55,
     mem=0.12,
     stab=0.78,
@@ -417,19 +449,33 @@ metrics = st.z_metrics(
     grad=[0.1, -0.2, 0.05],
 )
 
+roundtable = st.z.partial(
+    metrics,
+    origin="telemetry",
+    telemetry={"roundtable": {"mean": 0.44, "focus": 0.67}},
+)
+canvas_hint = st.z.partial(speed=0.35, memory=0.22, coherence_peak=0.61, weight=0.5)
+bundle = st.z.bundle(roundtable, canvas_hint)
+
 trainer = st.ZSpaceTrainer(z_dim=z_vec.shape()[1])
-loss = trainer.step(metrics)
+loss = trainer.step(bundle)
 
 print("z shape:", z_vec.shape(), "loss:", loss)
 ```
 
-`st.encode_zspace(...)` spins up a `LanguageWaveEncoder` on demand and returns a
-proper SpiralTorch tensor, so notebook prototypes never have to juggle encoder
-lifetimes. `st.z_metrics(...)` recognises common aliases (`velocity`, `mem`,
-`stab`, `drift`, `grad`) and emits the strongly typed `ZMetrics` container that
-`ZSpaceTrainer` expects.
+`st.z[...]` is shorthand for `encode_zspace`: strings go straight into the
+encoder, and you can append numbers, `(key, value)` pairs, or dictionaries to
+override temperature or other keyword arguments. `st.z.metrics(...)` recognises
+the common aliases (`velocity`, `mem`, `stab`, `drift`, `grad`) and emits the
+strongly typed `ZMetrics` container that `ZSpaceTrainer` expects. `st.z.partial(...)`
+wraps those metrics (or raw mappings) into a `ZSpacePartialBundle`, flattens any
+telemetry dictionaries into dotted keys, and lets you override `weight`/`origin`
+without touching the underlying map. Feed the partials directly into
+`st.z.bundle(...)` (alias `st.z.blend`) to merge telemetry-aware observations—
+keyword arguments accept every Z-space alias exposed by the wheel so you can
+mix hypergrad, Canvas, or coherence-derived metrics inline.
 
-### 5) Zero-copy tensor exchange via DLPack
+### 6) Zero-copy tensor exchange via DLPack
 
 ```python
 import spiraltorch as st
@@ -451,7 +497,7 @@ t2.mul_(2)
 print("ST sees torch mul_:", a2.tolist())
 ```
 
-### 6) Row softmax (GPU-accelerated when available)
+### 7) Row softmax (GPU-accelerated when available)
 
 ```python
 from spiraltorch import Axis, tensor, label_tensor
@@ -473,7 +519,7 @@ softmax = wave.row_softmax()
 print(softmax.axis_names())  # ('time', 'feature')
 ```
 
-### 7) rl.stAgent multi-armed bandit
+### 8) rl.stAgent multi-armed bandit
 
 ```python
 import torch
@@ -519,7 +565,7 @@ for k in range(2):
     print(f"arm {k}: pulls={pulls[k]}, empirical p≈{rate:.3f}")
 ```
 
-### 8) Self-supervised losses
+### 9) Self-supervised losses
 
 ```python
 import spiraltorch as st
@@ -534,7 +580,7 @@ mask = [[1], [0]]  # mask by column indices per row
 print("masked_mse:", st.selfsup.masked_mse(pred, tgt, mask))
 ```
 
-### 9) Z-space trainer
+### 10) Z-space trainer
 
 ```python
 import spiraltorch as st
@@ -547,7 +593,7 @@ samples = [
 print("z:", st.step_many(trainer, samples))
 ```
 
-### 10) Vision × Canvas
+### 11) Vision × Canvas
 
 ```python
 import spiraltorch as st
@@ -565,7 +611,7 @@ print("canvas summary:", snap.summary)
 print("patch[0][:3]:", snap.patch[0][:3] if snap.patch else None)
 ```
 
-### 11) NN data utilities
+### 12) NN data utilities
 
 ```python
 import spiraltorch as st
@@ -579,7 +625,7 @@ for x, y in loader:
     pass
 ```
 
-### 12) Recommender & RL
+### 13) Recommender & RL
 
 ```python
 import spiraltorch as st
@@ -589,7 +635,7 @@ rec.train_epoch([(0, 0, 5.0), (0, 1, 3.0), (1, 0, 4.0)])
 print("top-k:", rec.recommend_top_k(0, k=3))
 ```
 
-### 13) Interop (PyTorch / JAX / TensorFlow)
+### 14) Interop (PyTorch / JAX / TensorFlow)
 
 ```python
 import spiraltorch as st, torch
@@ -599,7 +645,15 @@ xt = st.compat.torch.to_torch(x, dtype=torch.float32, device="cpu")
 x_back = st.compat.torch.from_torch(xt)
 ```
 
-### 14) Math & pacing helpers
+### 15) Math & pacing helpers
+
+```python
+import spiraltorch as st
+st.set_global_seed(42)
+print(st.golden_ratio(), st.golden_angle())
+print(st.fibonacci_pacing(12))
+print(st.pack_tribonacci_chunks(20))
+```
 
 
 ## Backend Matrix
