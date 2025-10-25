@@ -51,3 +51,9 @@
 ---
 
 By following this workflow you can transplant the geometric framework of general relativity onto an abstract Z-space, explore how matter content shapes the curvature, and evaluate the resulting physical features.
+
+## 8. Folding Z-Space Relativity Back to Observables
+
+- **Dimensional reduction helpers:** Once a product manifold \(M \times Z\) has been specified, call `theory::general_relativity::DimensionalReduction::project` to obtain the warp-adjusted effective metric, the mixed gauge potential \(g_{\mu A}\), the internal moduli \(h_{AB}\), and the compactification-adjusted Newton constant.
+- **Extended field equations:** Embed the four-dimensional Einstein tensor into the higher-dimensional block structure via `ZRelativityModel::assemble`. The resulting `ZRelativityFieldEquation` packages \(G^I_{\;J} + \Lambda g^I_{\;J}\) together with the appropriate coupling prefactor for comparison against an extended stress-energy tensor.
+- **Energy-momentum on \(M \times Z\):** Use `ExtendedStressEnergy` to encode symmetric sources that live on the full block metric. Its residual with the assembled field equation diagnoses how the Z-space sector back-reacts on the four-dimensional spacetime.
