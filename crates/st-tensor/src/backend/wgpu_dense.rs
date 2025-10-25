@@ -356,6 +356,7 @@ struct GpuContext {
     context: WgpuContext,
     pipeline_cache: PipelineCache,
     weights_cache: Mutex<HashMap<RhsCacheKey, Weak<GpuPackedRhs>>>,
+    autotune_cache: Mutex<HashMap<String, TileConfig>>,
     bind_layout: Arc<BindGroupLayout>,
     pipeline_layout: Arc<PipelineLayout>,
     zero_storage: OnceLock<Arc<Buffer>>,
@@ -950,6 +951,7 @@ impl GpuContext {
             context: WgpuContext::new(device.clone(), queue.clone()),
             pipeline_cache: PipelineCache::new(device.clone()),
             weights_cache: Mutex::new(HashMap::new()),
+            autotune_cache: Mutex::new(HashMap::new()),
             bind_layout,
             pipeline_layout,
             zero_storage: OnceLock::new(),
@@ -3058,7 +3060,7 @@ pub fn conv_grad_input_fused(
     readback_f32(device, queue, &output_buf, input_volume)
 }
 
-fn select_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
+fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     let rows = rows as u32;
     let cols = cols as u32;
     let inner = inner as u32;
