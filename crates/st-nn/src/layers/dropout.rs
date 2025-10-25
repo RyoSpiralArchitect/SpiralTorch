@@ -68,6 +68,18 @@ impl Dropout {
         self.training
     }
 
+    /// Convenience helper that switches the layer into training mode and clears
+    /// any cached inference mask.
+    pub fn train(&mut self) {
+        self.set_training(true);
+    }
+
+    /// Convenience helper that switches the layer into evaluation mode,
+    /// dropping any cached stochastic mask so gradients flow transparently.
+    pub fn eval(&mut self) {
+        self.set_training(false);
+    }
+
     fn keep_probability(&self) -> f32 {
         1.0 - self.probability
     }

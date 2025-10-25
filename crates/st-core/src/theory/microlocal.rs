@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex};
 mod elliptic;
 
 use elliptic::EllipticAccumulator;
-pub use elliptic::{EllipticTelemetry, EllipticWarp};
+pub use elliptic::{EllipticDifferential, EllipticTelemetry, EllipticWarp, LieFrame};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
 #[derive(Debug, Clone)]
@@ -480,19 +480,55 @@ impl InterfaceZLift {
             if let Some(warp) = self.elliptic.as_ref() {
                 if let Some(sample) = warp.map_orientation(&weighted) {
                     let normalized = sample.normalized_radius();
-                    let spin = sample.spin_alignment;
+                    let spin = sample.spin_alignment.clamp(-1.0, 1.0);
                     let sheet_bias = sample.sheet_position;
                     let mut leading = (1.0 - normalized).max(0.0);
                     let mut trailing = normalized.max(0.0);
                     let spin_lead = 0.5 * (1.0 + spin);
                     let spin_trail = 0.5 * (1.0 - spin);
-                    leading *= (0.6 + 0.4 * sheet_bias).max(1e-3) * spin_lead.max(1e-3);
-                    trailing *= (0.6 + 0.4 * (1.0 - sheet_bias)).max(1e-3) * spin_trail.max(1e-3);
+                    let rotor_focus = (sample.rotor_field[2].abs() + 1.0e-3).sqrt();
+                    let lateral_flux =
+                        (sample.rotor_field[0].abs() + sample.rotor_field[1].abs()) * 0.5;
+                    let noise_gate = (1.0 - sample.noise_density).clamp(0.05, 1.0);
+                    let sector_fold = (sample.topological_sector & 0x7) as f32;
+                    let sector_bias = 1.0 + sector_fold * 0.05;
+                    let homology_phase = (sample.homology_index & 0xFF) as f32 / 255.0;
+
+                    leading *= (0.55 + 0.45 * sheet_bias + homology_phase * 0.2).max(1e-3);
+                    trailing *=
+                        (0.55 + 0.45 * (1.0 - sheet_bias) + (1.0 - homology_phase) * 0.2).max(1e-3);
+
+                    leading *= spin_lead.max(1e-3) * (1.0 + rotor_focus * 0.5) * noise_gate;
+                    trailing *= spin_trail.max(1e-3)
+                        * (1.0 + lateral_flux * 0.5)
+                        * (1.0 - noise_gate * 0.35);
+
+                    if sample.topological_sector & 1 == 0 {
+                        leading *= 1.0 + sample.resonance_heat;
+                        trailing *= 1.0 + sample.resonance_heat * 0.25;
+                    } else {
+                        trailing *= 1.0 + sample.resonance_heat;
+                        leading *= 1.0 + sample.resonance_heat * 0.25;
+                    }
+
+                    leading *= sector_bias;
+                    trailing *= (2.0 - sector_bias).max(0.25);
+
                     let total = (leading + trailing).max(1e-5);
                     above = here * (leading / total);
                     beneath = here * (trailing / total);
                     let enriched = self.projector.enrich(sample.normal_bias.abs() as f64) as f32;
+                    let topological_sign = if sample.topological_sector & 1 == 0 {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                    let flow_bias = sample.flow_vector[2].clamp(-1.0, 1.0);
                     bias = enriched * sample.normal_bias.signum() * self.bias_gain;
+                    bias *= 1.0 + spin * 0.25;
+                    bias *= 1.0 + flow_bias * 0.5;
+                    bias *= 1.0 - sample.noise_density * 0.5;
+                    bias += topological_sign * sample.resonance_heat * 0.1;
                     elliptic_sample = Some(sample);
                 }
             }
