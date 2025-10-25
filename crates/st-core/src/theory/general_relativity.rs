@@ -470,6 +470,15 @@ impl ProductMetric {
         &self.block
     }
 
+    /// Returns the spacetime block after applying any warp factor.
+    pub fn effective_base_metric(&self) -> Result<LorentzianMetric, MetricError> {
+        let mut components = self.base.components().clone();
+        if let Some(warp) = self.warp {
+            components *= warp.scale();
+        }
+        LorentzianMetric::try_new(components)
+    }
+
     /// Effective 4D Newton constant obtained after compactifying the internal space.
     pub fn effective_newton_constant(
         &self,
@@ -517,6 +526,201 @@ impl ProductGeometry {
     /// Combined dimensionality of the product manifold.
     pub fn total_dimension(&self) -> usize {
         self.metric.total_dimension()
+    }
+}
+
+/// Result of projecting the product geometry onto an effective four-dimensional theory.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DimensionalReduction {
+    effective_metric: LorentzianMetric,
+    gauge_potential: DMatrix<f64>,
+    scalar_moduli: DMatrix<f64>,
+    effective_newton_constant: f64,
+}
+
+impl DimensionalReduction {
+    /// Builds the dimensional reduction summary for a given product geometry.
+    pub fn project(
+        geometry: &ProductGeometry,
+        constants: &PhysicalConstants,
+        internal_volume: f64,
+    ) -> Result<Self, MetricError> {
+        let effective_metric = geometry.metric().effective_base_metric()?;
+        let gauge_potential = geometry.metric().mixed().components().clone();
+        let scalar_moduli = geometry.metric().internal().components().clone();
+        let effective_newton_constant = geometry
+            .metric()
+            .effective_newton_constant(constants, internal_volume);
+
+        Ok(Self {
+            effective_metric,
+            gauge_potential,
+            scalar_moduli,
+            effective_newton_constant,
+        })
+    }
+
+    /// Effective four-dimensional metric after applying the warp factor.
+    pub fn effective_metric(&self) -> &LorentzianMetric {
+        &self.effective_metric
+    }
+
+    /// Mixed gauge potential inherited from the g_{μA} block.
+    pub fn gauge_potential(&self) -> &DMatrix<f64> {
+        &self.gauge_potential
+    }
+
+    /// Returns a specific component of the gauge potential.
+    pub fn gauge_component(&self, mu: usize, a: usize) -> f64 {
+        self.gauge_potential[(mu, a)]
+    }
+
+    /// Internal scalar moduli derived from the h_{AB} block.
+    pub fn scalar_moduli(&self) -> &DMatrix<f64> {
+        &self.scalar_moduli
+    }
+
+    /// Returns a specific component of the scalar moduli matrix.
+    pub fn modulus_component(&self, a: usize, b: usize) -> f64 {
+        self.scalar_moduli[(a, b)]
+    }
+
+    /// Effective Newton constant after compactification.
+    pub fn effective_newton_constant(&self) -> f64 {
+        self.effective_newton_constant
+    }
+}
+
+/// Symmetric energy-momentum tensor living on the full product manifold.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExtendedStressEnergy {
+    components: DMatrix<f64>,
+}
+
+impl ExtendedStressEnergy {
+    /// Validates symmetry and dimensionality of the block tensor.
+    pub fn try_new(components: DMatrix<f64>, tolerance: f64) -> Result<Self, MetricError> {
+        if components.nrows() != components.ncols() {
+            return Err(MetricError::NonSquare {
+                rows: components.nrows(),
+                cols: components.ncols(),
+            });
+        }
+
+        for i in 0..components.nrows() {
+            for j in 0..components.ncols() {
+                if (components[(i, j)] - components[(j, i)]).abs() > tolerance {
+                    return Err(MetricError::NonSymmetric(tolerance));
+                }
+            }
+        }
+
+        Ok(Self { components })
+    }
+
+    /// Builds an empty (vacuum) tensor with the requested dimension.
+    pub fn zeros(dimension: usize) -> Self {
+        Self {
+            components: DMatrix::zeros(dimension, dimension),
+        }
+    }
+
+    /// Returns the full tensor components.
+    pub fn components(&self) -> &DMatrix<f64> {
+        &self.components
+    }
+}
+
+/// Einstein field equation on the product manifold.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZRelativityFieldEquation {
+    lhs: DMatrix<f64>,
+    prefactor: f64,
+}
+
+impl ZRelativityFieldEquation {
+    /// Creates a new field equation bundle given the left-hand side and coupling prefactor.
+    pub fn new(lhs: DMatrix<f64>, prefactor: f64) -> Self {
+        Self { lhs, prefactor }
+    }
+
+    /// Returns `G^I_J + Λ g^I_J` embedded in block form.
+    pub fn lhs(&self) -> &DMatrix<f64> {
+        &self.lhs
+    }
+
+    /// Computes the residual against an extended energy-momentum tensor.
+    pub fn residual(&self, stress_energy: &ExtendedStressEnergy) -> DMatrix<f64> {
+        let mut residual = self.lhs.clone();
+        let mut scaled = stress_energy.components().clone();
+        scaled.scale_mut(self.prefactor);
+        residual -= scaled;
+        residual
+    }
+}
+
+/// Fully assembled Z-space relativity model including dimensional reduction data.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZRelativityModel {
+    /// Product geometry describing the M × Z manifold.
+    pub geometry: ProductGeometry,
+    /// Four-dimensional GR model living on the spacetime factor.
+    pub base_model: GeneralRelativityModel,
+    /// Dimensional reduction summary (effective metric, gauge fields, moduli).
+    pub reduction: DimensionalReduction,
+    /// Embedded field equation on the full product manifold.
+    pub field_equations: ZRelativityFieldEquation,
+}
+
+impl ZRelativityModel {
+    /// Builds the Z-space relativity model from its constituents.
+    pub fn assemble(
+        geometry: ProductGeometry,
+        base_model: GeneralRelativityModel,
+        constants: PhysicalConstants,
+        internal_volume: f64,
+        cosmological_constant: f64,
+    ) -> Result<Self, MetricError> {
+        let reduction = DimensionalReduction::project(&geometry, &constants, internal_volume)?;
+        let total_dim = geometry.metric().block_matrix().nrows();
+        let internal_dim = geometry.internal().dimension();
+        let mut lhs = DMatrix::zeros(total_dim, total_dim);
+
+        let effective_metric = reduction.effective_metric();
+        let g_eff = effective_metric.components();
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                lhs[(mu, nu)] =
+                    base_model.einstein.component(mu, nu) + cosmological_constant * g_eff[(mu, nu)];
+            }
+        }
+
+        let internal_components = geometry.metric().internal().components();
+        for a in 0..internal_dim {
+            for b in 0..internal_dim {
+                lhs[(DIM + a, DIM + b)] = cosmological_constant * internal_components[(a, b)];
+            }
+        }
+
+        let mixed_components = geometry.metric().mixed().components();
+        for mu in 0..DIM {
+            for a in 0..internal_dim {
+                let value = cosmological_constant * mixed_components[(mu, a)];
+                lhs[(mu, DIM + a)] = value;
+                lhs[(DIM + a, mu)] = value;
+            }
+        }
+
+        let prefactor =
+            8.0 * PI * reduction.effective_newton_constant() / constants.speed_of_light.powi(4);
+        let field_equations = ZRelativityFieldEquation::new(lhs, prefactor);
+
+        Ok(Self {
+            geometry,
+            base_model,
+            reduction,
+            field_equations,
+        })
     }
 }
 
@@ -1513,5 +1717,73 @@ mod tests {
         assert_eq!(product.spacetime().patches.len(), spacetime.patches.len());
         assert_eq!(product.internal().dimension(), internal_space.dimension());
         assert!(product.metric().warp().is_some());
+    }
+
+    #[test]
+    fn zrelativity_model_projects_effective_theory() {
+        let base_metric =
+            LorentzianMetric::try_new(Matrix4::from_diagonal(&Vector4::new(-1.0, 1.0, 1.0, 1.0)))
+                .unwrap();
+        let spacetime = ZManifold::canonical();
+        let base_model = GeneralRelativityModel::new(
+            spacetime.clone(),
+            base_metric.clone(),
+            MetricDerivatives::zero(),
+            MetricSecondDerivatives::zero(),
+            SymmetryAnsatz::HomogeneousIsotropic,
+            Topology::R4,
+            vec![BoundaryCondition::new(
+                BoundaryConditionKind::AsymptoticallyFlat,
+            )],
+        );
+
+        let internal =
+            InternalMetric::try_new(DMatrix::identity(2, 2)).expect("internal metric should build");
+        let warp = WarpFactor::from_multiplier(3.0).unwrap();
+        let product_metric =
+            ProductMetric::try_new(base_metric.clone(), internal.clone(), None, Some(warp))
+                .unwrap();
+
+        let internal_space =
+            InternalSpace::new("compact Z", InternalPatch::new("torus", vec!["ψ", "χ"]));
+        let geometry = ProductGeometry::new(spacetime, internal_space, product_metric.clone());
+
+        let constants = PhysicalConstants::new(6.67430e-11, 299_792_458.0);
+        let internal_volume = 2.0 * PI;
+        let reduction =
+            DimensionalReduction::project(&geometry, &constants, internal_volume).unwrap();
+        assert_relative_eq!(
+            reduction.effective_metric().components()[(0, 0)],
+            -3.0,
+            epsilon = 1e-12
+        );
+        assert_relative_eq!(
+            reduction.effective_newton_constant(),
+            constants.gravitational_constant / internal_volume,
+            epsilon = 1e-16
+        );
+        assert_relative_eq!(reduction.gauge_component(0, 0), 0.0, epsilon = 1e-12);
+        assert_relative_eq!(reduction.modulus_component(1, 1), 1.0, epsilon = 1e-12);
+
+        let zr_model = ZRelativityModel::assemble(
+            geometry.clone(),
+            base_model.clone(),
+            constants,
+            internal_volume,
+            0.0,
+        )
+        .unwrap();
+        assert_eq!(
+            zr_model.field_equations.lhs().nrows(),
+            geometry.metric().block_matrix().nrows()
+        );
+        let residual = zr_model
+            .field_equations
+            .residual(&ExtendedStressEnergy::zeros(
+                geometry.metric().block_matrix().nrows(),
+            ));
+        for value in residual.iter() {
+            assert_relative_eq!(*value, 0.0, epsilon = 1e-12);
+        }
     }
 }
