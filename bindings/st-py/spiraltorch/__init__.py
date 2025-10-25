@@ -5,6 +5,7 @@ import math as _math
 import types as _types
 import sys
 from collections import deque as _deque
+from collections.abc import Iterable as _IterableABC, Sequence as _SequenceABC
 from dataclasses import dataclass as _dataclass
 from importlib import import_module
 from typing import (
@@ -170,6 +171,7 @@ _EXTRAS = [
     "pack_tribonacci_chunks","pack_tetranacci_chunks",
     "generate_plan_batch_ex","plan","plan_topk",
     "describe_device","hip_probe","z_space_barycenter",
+    "hypergrad","hypergrad_topos","encode_zspace","z_metrics",
 ]
 for _n in _EXTRAS:
     _value = _safe_getattr(_rs, _n, None)
@@ -187,7 +189,650 @@ for _pub, _cands in _COMPAT_ALIAS.items():
         _value = _safe_getattr(_rs, _c, None)
         if _value is not None:
             globals()[_pub] = _value
+            if _pub == "Tensor":
+                globals()["PyTensor"] = _value
             break
+
+_TENSOR_BASE = globals().get("Tensor")
+
+if _TENSOR_BASE is not None:
+    globals()["TensorBase"] = _TENSOR_BASE
+
+    _TENSOR_NO_DATA = object()
+
+    def _tensor_is_sequence(obj: _Any) -> bool:
+        return isinstance(obj, _SequenceABC) and not isinstance(
+            obj, (str, bytes, bytearray, memoryview)
+        )
+
+
+    def _tensor_is_iterable(obj: _Any) -> bool:
+        return isinstance(obj, _IterableABC) and not isinstance(
+            obj, (str, bytes, bytearray, memoryview)
+        )
+
+
+    def _tensor_coerce_index(value: _Any, label: str) -> int:
+        try:
+            index = int(value)
+        except Exception as exc:  # noqa: BLE001 - surface Pythonic error message
+            raise TypeError(f"Tensor {label} must be an integer, got {value!r}") from exc
+        if index < 0:
+            raise ValueError(f"Tensor {label} must be non-negative, got {index}")
+        return index
+
+
+    def _tensor_coerce_shape(value: _Any, label: str) -> tuple[int, int]:
+        if not _tensor_is_sequence(value):
+            raise TypeError(f"Tensor {label} must be a sequence of two integers")
+        dims = list(value)
+        if len(dims) != 2:
+            raise ValueError(
+                f"Tensor {label} must contain exactly two dimensions, got {len(dims)}"
+            )
+        rows = _tensor_coerce_index(dims[0], f"{label}[0]")
+        cols = _tensor_coerce_index(dims[1], f"{label}[1]")
+        return rows, cols
+
+
+    def _tensor_maybe_shape(value: _Any) -> tuple[int, int] | None:
+        if not _tensor_is_sequence(value):
+            return None
+        dims = list(value)
+        if len(dims) != 2:
+            return None
+        try:
+            return _tensor_coerce_shape(dims, "shape")
+        except (TypeError, ValueError):
+            return None
+
+
+    def _tensor_normalize_row(row: _Any, *, allow_empty: bool) -> list[float]:
+        if isinstance(row, _TENSOR_BASE):
+            row = row.tolist()
+        elif hasattr(row, "tolist") and not _tensor_is_sequence(row):
+            row = row.tolist()
+        if _tensor_is_sequence(row):
+            seq = list(row)
+        elif _tensor_is_iterable(row):
+            seq = list(row)
+        else:
+            raise TypeError("Tensor rows must be sequences of numbers")
+        if not allow_empty and not seq:
+            raise ValueError("Tensor rows must not be empty")
+        return [float(value) for value in seq]
+
+
+    def _tensor_flatten_data(data: _Any) -> tuple[int, int, list[float]]:
+        if isinstance(data, _TENSOR_BASE):
+            rows, cols = (int(dim) for dim in data.shape())
+            nested = data.tolist()
+            flat: list[float] = [float(value) for row in nested for value in row]
+            return rows, cols, flat
+
+        if hasattr(data, "tolist") and not _tensor_is_sequence(data):
+            return _tensor_flatten_data(data.tolist())
+
+        if _tensor_is_sequence(data):
+            items = list(data)
+        elif _tensor_is_iterable(data):
+            items = list(data)
+        else:
+            raise TypeError(
+                "Tensor data must be an iterable of floats or nested iterables"
+            )
+
+        if not items:
+            raise ValueError("Tensor data cannot be empty")
+
+        head = items[0]
+        if isinstance(head, _TENSOR_BASE):
+            head = head.tolist()
+        elif hasattr(head, "tolist") and not _tensor_is_sequence(head):
+            head = head.tolist()
+
+        if _tensor_is_sequence(head) or _tensor_is_iterable(head):
+            rows = len(items)
+            cols: int | None = None
+            flat: list[float] = []
+            for row in items:
+                normalized = _tensor_normalize_row(row, allow_empty=rows == 0)
+                if cols is None:
+                    cols = len(normalized)
+                    if cols == 0 and rows != 0:
+                        raise ValueError("Tensor rows must not be empty")
+                elif len(normalized) != cols:
+                    raise ValueError("Tensor rows must all share the same length")
+                flat.extend(normalized)
+            return rows, (0 if cols is None else cols), flat
+
+        flat = [float(value) for value in items]
+        return 1, len(flat), flat
+
+
+    def _normalize_tensor_ctor_args(
+        *args: _Any, **kwargs: _Any
+    ) -> tuple[int, int, list[float] | object]:
+        data_value = kwargs.pop("data", _TENSOR_NO_DATA)
+        shape_value = kwargs.pop("shape", None)
+        rows_value = kwargs.pop("rows", None)
+        cols_value = kwargs.pop("cols", None)
+
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Tensor() got unexpected keyword arguments: {unexpected}")
+
+        if data_value is None:
+            data_value = _TENSOR_NO_DATA
+
+        rows: int | None = None
+        cols: int | None = None
+
+        if shape_value is not None:
+            rows, cols = _tensor_coerce_shape(shape_value, "shape")
+
+        if rows_value is not None:
+            rows = _tensor_coerce_index(rows_value, "rows")
+        if cols_value is not None:
+            cols = _tensor_coerce_index(cols_value, "cols")
+
+        positional = list(args)
+        if len(positional) == 1:
+            candidate = positional[0]
+            maybe_shape = None if rows is not None or cols is not None else _tensor_maybe_shape(candidate)
+            if maybe_shape is not None:
+                rows, cols = maybe_shape
+            else:
+                if data_value is not _TENSOR_NO_DATA:
+                    raise TypeError("Tensor() got multiple values for data")
+                data_value = _TENSOR_NO_DATA if candidate is None else candidate
+        elif len(positional) == 2:
+            first, second = positional
+            maybe_shape = None if rows is not None or cols is not None else _tensor_maybe_shape(first)
+            if maybe_shape is not None:
+                rows, cols = maybe_shape
+                if data_value is not _TENSOR_NO_DATA:
+                    raise TypeError("Tensor() got multiple values for data")
+                data_value = _TENSOR_NO_DATA if second is None else second
+            else:
+                inferred_rows = _tensor_coerce_index(first, "rows")
+                inferred_cols = _tensor_coerce_index(second, "cols")
+                if rows is not None and rows != inferred_rows:
+                    raise ValueError(
+                        f"Tensor rows argument conflicts with shape: {rows} != {inferred_rows}"
+                    )
+                if cols is not None and cols != inferred_cols:
+                    raise ValueError(
+                        f"Tensor cols argument conflicts with shape: {cols} != {inferred_cols}"
+                    )
+                rows = inferred_rows
+                cols = inferred_cols
+        elif len(positional) == 3:
+            first, second, third = positional
+            inferred_rows = _tensor_coerce_index(first, "rows")
+            inferred_cols = _tensor_coerce_index(second, "cols")
+            if rows is not None and rows != inferred_rows:
+                raise ValueError(
+                    f"Tensor rows argument conflicts with shape: {rows} != {inferred_rows}"
+                )
+            if cols is not None and cols != inferred_cols:
+                raise ValueError(
+                    f"Tensor cols argument conflicts with shape: {cols} != {inferred_cols}"
+                )
+            rows = inferred_rows
+            cols = inferred_cols
+            if data_value is not _TENSOR_NO_DATA:
+                raise TypeError("Tensor() got multiple values for data")
+            data_value = _TENSOR_NO_DATA if third is None else third
+        elif len(positional) > 3:
+            raise TypeError(
+                "Tensor() takes at most 3 positional arguments"
+                f" but {len(positional)} were given"
+            )
+
+        if data_value is _TENSOR_NO_DATA:
+            if rows is None or cols is None:
+                raise TypeError("Tensor() requires a shape when data is omitted")
+            return rows, cols, _TENSOR_NO_DATA
+
+        inferred_rows, inferred_cols, flat = _tensor_flatten_data(data_value)
+        total = len(flat)
+
+        if rows is None and cols is None:
+            rows, cols = inferred_rows, inferred_cols
+        elif rows is None:
+            if cols is None:
+                raise TypeError("Tensor() could not determine rows from provided inputs")
+            if cols == 0:
+                if total != 0:
+                    raise ValueError(
+                        f"Tensor data of length {total} cannot fill ({cols}) columns"
+                    )
+                rows = 0
+            else:
+                if total % cols != 0:
+                    raise ValueError(
+                        f"Tensor data of length {total} cannot fill ({cols}) columns"
+                    )
+                rows = total // cols
+        elif cols is None:
+            if rows == 0:
+                if total != 0:
+                    raise ValueError(
+                        f"Tensor data of length {total} cannot fill ({rows}) rows"
+                    )
+                cols = 0
+            else:
+                if total % rows != 0:
+                    raise ValueError(
+                        f"Tensor data of length {total} cannot fill ({rows}) rows"
+                    )
+                cols = total // rows
+        else:
+            if rows * cols != total:
+                raise ValueError(
+                    f"Tensor data of length {total} cannot be reshaped to ({rows}, {cols})"
+                )
+
+        if rows is None or cols is None:
+            raise TypeError("Tensor() could not determine both rows and cols from the provided data")
+
+        if (rows == 0 or cols == 0) and total != 0:
+            raise ValueError(
+                f"Tensor shape ({rows}, {cols}) is incompatible with {total} data elements"
+            )
+
+        return rows, cols, flat
+
+
+    class TensorMeta(type(_TENSOR_BASE)):
+        def __instancecheck__(cls, instance: _Any) -> bool:  # noqa: D401 - delegated check
+            return isinstance(instance, _TENSOR_BASE)
+
+        def __subclasscheck__(cls, subclass: _Any) -> bool:  # noqa: D401 - delegated check
+            try:
+                return issubclass(subclass, _TENSOR_BASE)
+            except TypeError:
+                return False
+
+
+    class Tensor(_TENSOR_BASE, metaclass=TensorMeta):
+        """Flexible front-end wrapper around the native SpiralTorch tensor."""
+
+        __doc__ = getattr(_TENSOR_BASE, "__doc__", None)
+
+        def __new__(cls, *args: _Any, **kwargs: _Any):
+            rows, cols, payload = _normalize_tensor_ctor_args(*args, **kwargs)
+            if payload is _TENSOR_NO_DATA:
+                return super().__new__(cls, rows, cols)
+            return super().__new__(cls, rows, cols, payload)
+
+
+    Tensor.__module__ = __name__
+    globals()["Tensor"] = Tensor
+
+
+def _extract_shape_like(candidate: _Any, label: str) -> tuple[int, int] | None:
+    if isinstance(candidate, globals().get("Tensor", ())):
+        rows, cols = candidate.shape()
+        return int(rows), int(cols)
+    if hasattr(candidate, "shape"):
+        shape_attr = candidate.shape
+        if callable(shape_attr):
+            dims = shape_attr()
+        else:
+            dims = shape_attr
+        if _tensor_is_sequence(dims):
+            try:
+                return _tensor_coerce_shape(dims, label)
+            except (TypeError, ValueError):
+                return None
+    maybe_shape = _tensor_maybe_shape(candidate)
+    if maybe_shape is not None:
+        return maybe_shape
+    return None
+
+
+def _normalize_hypergrad_shape(
+    *args: _Any,
+    shape: _Any | None = None,
+    rows: _Any | None = None,
+    cols: _Any | None = None,
+) -> tuple[int, int]:
+    resolved_rows = _tensor_coerce_index(rows, "rows") if rows is not None else None
+    resolved_cols = _tensor_coerce_index(cols, "cols") if cols is not None else None
+
+    inferred_shape = None
+    if shape is not None:
+        inferred_shape = _extract_shape_like(shape, "shape")
+        if inferred_shape is None:
+            inferred_shape = _tensor_coerce_shape(shape, "shape")
+
+    positional = list(args)
+    if len(positional) == 1:
+        candidate = positional[0]
+        maybe_shape = _extract_shape_like(candidate, "shape")
+        if maybe_shape is not None:
+            inferred_shape = maybe_shape if inferred_shape is None else inferred_shape
+            if inferred_shape != maybe_shape:
+                raise ValueError(
+                    f"hypergrad shape {maybe_shape} conflicts with declared shape {inferred_shape}"
+                )
+        else:
+            value = _tensor_coerce_index(candidate, "rows")
+            if resolved_rows is not None and resolved_rows != value:
+                raise ValueError(
+                    f"hypergrad rows {value} conflicts with declared rows {resolved_rows}"
+                )
+            resolved_rows = value
+    elif len(positional) == 2:
+        if inferred_shape is not None:
+            raise TypeError("hypergrad() received multiple shape specifications")
+        first, second = positional
+        inferred_rows = _tensor_coerce_index(first, "rows")
+        inferred_cols = _tensor_coerce_index(second, "cols")
+        if resolved_rows is not None and resolved_rows != inferred_rows:
+            raise ValueError(
+                f"hypergrad rows {inferred_rows} conflicts with declared rows {resolved_rows}"
+            )
+        if resolved_cols is not None and resolved_cols != inferred_cols:
+            raise ValueError(
+                f"hypergrad cols {inferred_cols} conflicts with declared cols {resolved_cols}"
+            )
+        resolved_rows = inferred_rows
+        resolved_cols = inferred_cols
+    elif len(positional) > 2:
+        raise TypeError(
+            "hypergrad() takes at most 2 positional arguments"
+            f" but {len(positional)} were given"
+        )
+
+    if inferred_shape is not None:
+        rows_candidate, cols_candidate = inferred_shape
+        if resolved_rows is not None and resolved_rows != rows_candidate:
+            raise ValueError(
+                f"hypergrad rows {rows_candidate} conflicts with declared rows {resolved_rows}"
+            )
+        if resolved_cols is not None and resolved_cols != cols_candidate:
+            raise ValueError(
+                f"hypergrad cols {cols_candidate} conflicts with declared cols {resolved_cols}"
+            )
+        resolved_rows, resolved_cols = rows_candidate, cols_candidate
+
+    if resolved_rows is None or resolved_cols is None:
+        raise TypeError("hypergrad() requires a shape or explicit rows/cols")
+
+    return resolved_rows, resolved_cols
+
+
+def _require_rs_class(name: str) -> _Any:
+    existing = globals().get(name)
+    if existing is not None:
+        return existing
+    resolved = _resolve_rs_attr(name)
+    if resolved is None:
+        raise AttributeError(f"SpiralTorch native attribute '{name}' is unavailable")
+    globals()[name] = resolved
+    return resolved
+
+
+def _coerce_topos(topos: _Any | None) -> _Any | None:
+    if topos is None:
+        return None
+    topos_cls = _require_rs_class("OpenCartesianTopos")
+    if isinstance(topos, topos_cls):
+        return topos
+    if isinstance(topos, _Mapping):
+        curvature = float(topos.get("curvature", -1.0))
+        tolerance = float(topos.get("tolerance", 1e-3))
+        saturation = float(topos.get("saturation", 1.0))
+        depth = int(topos.get("max_depth", topos.get("depth", 64)))
+        volume = int(topos.get("max_volume", topos.get("volume", 512)))
+        return topos_cls(curvature, tolerance, saturation, depth, volume)
+    if _tensor_is_sequence(topos):
+        items = list(topos)
+        if len(items) != 5:
+            raise ValueError(
+                "topos sequences must provide (curvature, tolerance, saturation, depth, volume)"
+            )
+        curvature, tolerance, saturation, depth, volume = items
+        return topos_cls(
+            float(curvature),
+            float(tolerance),
+            float(saturation),
+            int(depth),
+            int(volume),
+        )
+    raise TypeError(
+        "topos must be an OpenCartesianTopos, mapping, or sequence"
+    )
+
+
+def hypergrad(
+    *shape_args: _Any,
+    curvature: float = -1.0,
+    learning_rate: float = 0.05,
+    shape: _Any | None = None,
+    rows: _Any | None = None,
+    cols: _Any | None = None,
+    topos: _Any | None = None,
+) -> _Any:
+    rows_value, cols_value = _normalize_hypergrad_shape(
+        *shape_args, shape=shape, rows=rows, cols=cols
+    )
+    tape_cls = _require_rs_class("Hypergrad")
+    guard = _coerce_topos(topos)
+    if guard is not None:
+        return tape_cls(curvature, learning_rate, rows_value, cols_value, guard)
+    return tape_cls(curvature, learning_rate, rows_value, cols_value)
+
+
+def hypergrad_topos(
+    *,
+    curvature: float = -1.0,
+    tolerance: float = 1e-3,
+    saturation: float = 1.0,
+    max_depth: int = 64,
+    max_volume: int = 512,
+) -> _Any:
+    topos_cls = _require_rs_class("OpenCartesianTopos")
+    return topos_cls(curvature, tolerance, saturation, int(max_depth), int(max_volume))
+
+
+def encode_zspace(
+    text: str,
+    *,
+    curvature: float = -1.0,
+    temperature: float = 0.5,
+    encoder: _Any | None = None,
+) -> _Any:
+    encoder_cls = _require_rs_class("LanguageWaveEncoder")
+    tensor_cls = _require_rs_class("Tensor")
+    created = False
+    if encoder is None:
+        encoder = encoder_cls(curvature, temperature)
+        created = True
+    elif not isinstance(encoder, encoder_cls):
+        raise TypeError("encoder must be a LanguageWaveEncoder instance")
+    try:
+        tensor = encoder.encode_z_space(text)
+    finally:
+        if created:
+            try:
+                encoder.close()
+            except AttributeError:
+                pass
+    if not isinstance(tensor, tensor_cls):
+        tensor = tensor_cls(tensor)
+    return tensor
+
+
+_Z_METRIC_ALIAS = {
+    "speed": "speed",
+    "velocity": "speed",
+    "mem": "memory",
+    "memory": "memory",
+    "stab": "stability",
+    "stability": "stability",
+    "drs": "drs",
+    "drift": "drs",
+    "gradient": "gradient",
+    "grad": "gradient",
+}
+
+
+def z_metrics(
+    *,
+    speed: float | None = None,
+    memory: float | None = None,
+    stability: float | None = None,
+    drs: float | None = None,
+    gradient: _Any | None = None,
+    **aliases: _Any,
+) -> ZMetrics:
+    values: dict[str, _Any] = {
+        "speed": speed,
+        "memory": memory,
+        "stability": stability,
+        "drs": drs,
+        "gradient": gradient,
+    }
+    for key, value in aliases.items():
+        alias = _Z_METRIC_ALIAS.get(key.lower())
+        if alias is None:
+            raise KeyError(f"unknown Z-space metric alias '{key}'")
+        values[alias] = value
+
+    grad_value = values.get("gradient")
+    grad_list = None
+    if grad_value is not None:
+        if isinstance(grad_value, ZMetrics):
+            base_grad = grad_value.gradient
+            if base_grad is not None:
+                grad_list = [float(v) for v in base_grad]
+        else:
+            grad_list = [float(v) for v in grad_value]
+
+    return ZMetrics(
+        speed=float(values.get("speed", 0.0) or 0.0),
+        memory=float(values.get("memory", 0.0) or 0.0),
+        stability=float(values.get("stability", 0.0) or 0.0),
+        gradient=grad_list,
+        drs=float(values.get("drs", 0.0) or 0.0),
+    )
+
+
+class _HypergradPartial:
+    """Callable proxy that bakes a shape into :func:`hypergrad`."""
+
+    __slots__ = ("_args", "_kwargs")
+
+    def __init__(self, args: _Tuple[_Any, ...], kwargs: _Dict[str, _Any]) -> None:
+        self._args = args
+        self._kwargs = kwargs
+
+    def __call__(self, *args: _Any, **kwargs: _Any) -> _Any:
+        if args:
+            raise TypeError(
+                "hypergrad notation binds the shape already; pass configuration as keyword arguments"
+            )
+        merged: _Dict[str, _Any] = dict(self._kwargs)
+        for key in ("shape", "rows", "cols"):
+            if key in merged and key in kwargs:
+                raise TypeError(
+                    f"hypergrad() shape component '{key}' was provided by the notation and cannot be overridden"
+                )
+        merged.update(kwargs)
+        return hypergrad(*self._args, **merged)
+
+    def with_topos(self, *, topos: _Any | None = None, **kwargs: _Any) -> _Any:
+        """Return a tape while constructing (or reusing) a guard inline."""
+
+        if topos is not None:
+            if kwargs:
+                raise TypeError("with_topos() cannot mix 'topos=' with additional guard kwargs")
+            return self(topos=topos)
+        if not kwargs:
+            raise TypeError("with_topos() requires either 'topos=' or guard keyword arguments")
+        return self(topos=hypergrad_topos(**kwargs))
+
+
+class _HypergradNotation:
+    """Lightweight DSL that shortens hypergrad tape construction."""
+
+    __slots__ = ()
+
+    def __call__(self, *shape_args: _Any, **kwargs: _Any) -> _Any:
+        return hypergrad(*shape_args, **kwargs)
+
+    def __getitem__(self, selector: _Any) -> _HypergradPartial:
+        if isinstance(selector, slice):
+            if selector.step is not None:
+                raise TypeError("hypergrad slice notation does not support step")
+            base_kwargs: _Dict[str, _Any] = {}
+            if selector.start is not None:
+                base_kwargs["rows"] = _tensor_coerce_index(selector.start, "rows")
+            if selector.stop is not None:
+                base_kwargs["cols"] = _tensor_coerce_index(selector.stop, "cols")
+            if not base_kwargs:
+                raise TypeError("hypergrad[:] requires at least rows or cols")
+            return _HypergradPartial((), base_kwargs)
+        if isinstance(selector, tuple):
+            if not selector:
+                raise TypeError("hypergrad[] requires a shape or tensor")
+            if len(selector) == 1:
+                return _HypergradPartial((selector[0],), {})
+            if len(selector) == 2:
+                return _HypergradPartial((), {"shape": tuple(selector)})
+            raise TypeError("hypergrad[...] accepts at most two entries")
+        return _HypergradPartial((selector,), {})
+
+    def topos(self, **kwargs: _Any) -> _Any:
+        return hypergrad_topos(**kwargs)
+
+    guard = topos
+
+class _ZSpaceNotation:
+    """Syntactic sugar for encoding text and metrics into Z-space."""
+
+    __slots__ = ()
+
+    def __call__(self, text: str, **kwargs: _Any) -> _Any:
+        return encode_zspace(text, **kwargs)
+
+    def __getitem__(self, selector: _Any) -> _Any:
+        if isinstance(selector, str):
+            return encode_zspace(selector)
+        if isinstance(selector, tuple):
+            if not selector:
+                raise TypeError("z[] requires a text payload")
+            text = selector[0]
+            if not isinstance(text, str):
+                raise TypeError("z[...] expects the first element to be text")
+            options: _Dict[str, _Any] = {}
+            for extra in selector[1:]:
+                if isinstance(extra, _Mapping):
+                    options.update(extra)
+                elif isinstance(extra, (int, float)):
+                    if "temperature" in options:
+                        raise TypeError("temperature supplied multiple times in z[...] notation")
+                    options["temperature"] = float(extra)
+                elif isinstance(extra, tuple) and len(extra) == 2 and isinstance(extra[0], str):
+                    key, value = extra
+                    if key in options:
+                        raise TypeError(f"argument '{key}' supplied multiple times in z[...] notation")
+                    options[key] = value
+                else:
+                    raise TypeError("unsupported z[...] argument; use mappings, scalars, or (key, value) pairs")
+            return encode_zspace(text, **options)
+        raise TypeError("z[...] expects text or (text, …) tuples")
+
+    def metrics(self, **kwargs: _Any) -> ZMetrics:
+        return z_metrics(**kwargs)
+
+
+hg = _HypergradNotation()
+z = _ZSpaceNotation()
 
 _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
     "nn": {
@@ -1183,6 +1828,7 @@ _mirror_into_module(
     [
         "ZMetrics",
         "ZSpaceTrainer",
+        "z_metrics",
         "step_many",
         "stream_zspace_training",
     ],
@@ -1372,6 +2018,7 @@ _EXPORTED = {
     "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
     "selfsup","export","compat","hpo","inference","zspace","vision","canvas",
     "planner","spiralk",
+    "hg","z",
     "__version__",
 }
 _EXPORTED.update(
