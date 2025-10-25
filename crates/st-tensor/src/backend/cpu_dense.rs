@@ -5,7 +5,9 @@
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use st_kdsl::autotune_store::{lookup_best, record_best};
+use serde_json;
+use st_kdsl::autotune_store::{lookup_best, lookup_similar, record_best, AutoTuneMatch};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
@@ -686,7 +688,24 @@ fn autotune_microkernel(
         return MICROKERNELS.get(index);
     }
 
-    if let Some(entry) = lookup_best(path.as_path(), &key) {
+    let sample_rows = sample_dimension(bucket_rows);
+    let sample_inner = sample_dimension(bucket_inner);
+    let sample_cols = sample_dimension(bucket_cols);
+
+    let context = CpuAutotuneContext {
+        rows: bucket_rows,
+        inner: bucket_inner,
+        cols: bucket_cols,
+        sample_rows,
+        sample_inner,
+        sample_cols,
+        revision: CPU_AUTOTUNE_REVISION,
+        runs: CPU_AUTOTUNE_SAMPLE_RUNS as u32,
+    };
+
+    let matches = lookup_similar(path.as_path(), &key, &context, 4);
+
+    if let Some(entry) = lookup_best(path.as_path(), &key, &context) {
         if let Ok(stored) = serde_json::from_value::<StoredCpuKernel>(entry.params) {
             if let Some(index) = MICROKERNELS
                 .iter()
@@ -703,10 +722,6 @@ fn autotune_microkernel(
         }
     }
 
-    let sample_rows = sample_dimension(bucket_rows);
-    let sample_inner = sample_dimension(bucket_inner);
-    let sample_cols = sample_dimension(bucket_cols);
-
     let lhs_len = sample_rows.checked_mul(sample_inner)?;
     let rhs_len = sample_inner.checked_mul(sample_cols)?;
     let out_len = sample_rows.checked_mul(sample_cols)?;
@@ -715,8 +730,14 @@ fn autotune_microkernel(
     let rhs = vec![1.0f32; rhs_len];
     let mut scratch = vec![0.0f32; out_len];
 
+    let mut ordered_indices: Vec<usize> = (0..MICROKERNELS.len()).collect();
+    if !matches.is_empty() {
+        reorder_kernels(&mut ordered_indices, &matches);
+    }
+
     let mut best: Option<(usize, f64)> = None;
-    for (index, spec) in MICROKERNELS.iter().enumerate() {
+    for index in ordered_indices {
+        let spec = &MICROKERNELS[index];
         match microbenchmark_kernel(
             spec,
             sample_rows,
@@ -748,11 +769,54 @@ fn autotune_microkernel(
         let stored = StoredCpuKernel {
             kernel: MICROKERNELS[index].name.to_string(),
         };
-        let _ = record_best(path.as_path(), &key, score, &stored);
+        let _ = record_best(path.as_path(), &key, &context, score, &stored);
         MICROKERNELS.get(index)
     } else {
         None
     }
+}
+
+fn reorder_kernels(order: &mut [usize], matches: &[AutoTuneMatch]) {
+    let mut scored: Vec<(f64, usize)> = order
+        .iter()
+        .copied()
+        .map(|index| {
+            let name = MICROKERNELS[index].name;
+            let score = matches
+                .iter()
+                .filter_map(|m| {
+                    serde_json::from_value::<StoredCpuKernel>(m.entry.params.clone()).ok()
+                })
+                .find(|stored| stored.kernel == name)
+                .and_then(|stored| {
+                    matches.iter().find_map(|m| {
+                        serde_json::from_value::<StoredCpuKernel>(m.entry.params.clone())
+                            .ok()
+                            .filter(|candidate| candidate.kernel == stored.kernel)
+                            .map(|_| m.entry.score)
+                    })
+                })
+                .unwrap_or(f64::INFINITY);
+            (score, index)
+        })
+        .collect();
+
+    scored.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
+    for (slot, (_, index)) in scored.into_iter().enumerate() {
+        order[slot] = index;
+    }
+}
+
+#[derive(Serialize)]
+struct CpuAutotuneContext {
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    sample_rows: usize,
+    sample_inner: usize,
+    sample_cols: usize,
+    revision: u64,
+    runs: u32,
 }
 
 fn microbenchmark_kernel(
