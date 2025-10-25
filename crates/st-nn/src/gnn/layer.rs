@@ -4,6 +4,8 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::GraphContext;
+#[cfg(feature = "psi")]
+use super::PsiCoherenceAdaptor;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
@@ -167,6 +169,8 @@ pub struct ZSpaceGraphConvolution {
     curvature: f32,
     aggregation: NeighborhoodAggregation,
     tracer: Option<Arc<Mutex<GraphFlowTracer>>>,
+    #[cfg(feature = "psi")]
+    coherence: Mutex<PsiCoherenceAdaptor>,
 }
 
 impl ZSpaceGraphConvolution {
@@ -205,6 +209,8 @@ impl ZSpaceGraphConvolution {
             curvature,
             aggregation: NeighborhoodAggregation::default(),
             tracer: None,
+            #[cfg(feature = "psi")]
+            coherence: Mutex::new(PsiCoherenceAdaptor::default()),
         })
     }
 
@@ -248,7 +254,13 @@ impl ZSpaceGraphConvolution {
     }
 
     fn aggregate_support(&self, input: &Tensor) -> PureResult<AggregatedSupport> {
-        let weights = self.aggregation.weights()?;
+        let mut weights = self.aggregation.weights()?;
+        #[cfg(feature = "psi")]
+        {
+            if let Ok(mut adaptor) = self.coherence.lock() {
+                weights = adaptor.cohere_weights(weights);
+            }
+        }
         let (rows, cols) = input.shape();
         let mut support = Tensor::zeros(rows, cols)?;
         let mut current = input.clone();
