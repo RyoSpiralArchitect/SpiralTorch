@@ -3492,7 +3492,7 @@ fn autotune_tile_config(
     };
 
     if autotune_enabled {
-        let stored = load_best_typed(path.as_path(), &key, None::<StoredTileConfig>);
+        let stored = load_best_typed(path.as_path(), &key, &context, None::<StoredTileConfig>);
         if let Some(stored) = stored {
             let tile: TileConfig = stored.into();
             if tile_supported(ctx.device(), tile) {
