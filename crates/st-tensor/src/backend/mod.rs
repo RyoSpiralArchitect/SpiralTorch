@@ -9,10 +9,10 @@ pub mod faer_dense;
 #[cfg(feature = "wgpu_frac")]
 pub mod wgpu_frac;
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 pub mod wgpu_dense;
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 pub mod wgpu_util;
 
 #[cfg(feature = "hip")]

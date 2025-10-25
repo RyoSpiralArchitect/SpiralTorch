@@ -7,6 +7,8 @@
 #![cfg(feature = "wgpu_frac")]
 use crate::fractional::gl_coeffs;
 use crate::util::readback_f32;
+use std::any::Any;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use wgpu::*;
 
 pub struct Frac1dKernel {
@@ -15,11 +17,14 @@ pub struct Frac1dKernel {
 }
 
 impl Frac1dKernel {
-    pub fn new(device: &Device, shader_src: &str) -> Self {
-        let module = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("frac_gl_1d"),
-            source: ShaderSource::Wgsl(shader_src.into()),
-        });
+    pub fn new(device: &Device, shader_src: &str) -> Result<Self, String> {
+        let module = catch_unwind(AssertUnwindSafe(|| {
+            device.create_shader_module(ShaderModuleDescriptor {
+                label: Some("frac_gl_1d"),
+                source: ShaderSource::Wgsl(shader_src.into()),
+            })
+        }))
+        .map_err(|payload| format!("WGSL parse error: {}", panic_payload_to_string(payload)))?;
         let bind_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("frac_gl_1d_bind"),
             entries: &[
@@ -75,11 +80,12 @@ impl Frac1dKernel {
             layout: Some(&pipeline_layout),
             module: &module,
             entry_point: "main",
+            compilation_options: Default::default(),
         });
-        Self {
+        Ok(Self {
             pipeline,
             bind_layout,
-        }
+        })
     }
 
     pub fn dispatch(
@@ -173,5 +179,15 @@ impl Frac1dKernel {
         queue.submit(Some(enc.finish()));
 
         readback_f32(device, queue, &yb, n)
+    }
+}
+
+fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
+    if let Some(msg) = payload.downcast_ref::<&str>() {
+        msg.to_string()
+    } else if let Some(msg) = payload.downcast_ref::<String>() {
+        msg.clone()
+    } else {
+        "unknown panic".to_string()
     }
 }

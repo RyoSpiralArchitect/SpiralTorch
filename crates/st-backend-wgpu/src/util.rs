@@ -4,10 +4,14 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use std::{
+    any::Any,
     borrow::Cow,
     collections::{hash_map::Entry, HashMap},
-    fs,
+    fmt, fs,
+    hash::{Hash, Hasher},
+    panic::{catch_unwind, AssertUnwindSafe},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use thiserror::Error;
@@ -35,6 +39,124 @@ pub enum ShaderLoadError {
         /// The WGSL file path searched for the override.
         file: PathBuf,
     },
+    /// WGSL failed to compile or validate when creating a shader module.
+    #[error("failed to compile WGSL shader '{label}' ({context})")]
+    Compile {
+        /// Label assigned to the shader module.
+        label: String,
+        /// Additional context, such as the originating file path.
+        context: String,
+        /// Underlying error reported by WGPU.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct ModuleCacheKey {
+    device: usize,
+    key: String,
+}
+
+impl ModuleCacheKey {
+    fn new(device: &Device, key: impl Into<String>) -> Self {
+        Self {
+            device: device as *const Device as usize,
+            key: key.into(),
+        }
+    }
+}
+
+static SHADER_MODULE_CACHE: OnceLock<Mutex<HashMap<ModuleCacheKey, Arc<wgpu::ShaderModule>>>> =
+    OnceLock::new();
+
+fn module_cache() -> &'static Mutex<HashMap<ModuleCacheKey, Arc<wgpu::ShaderModule>>> {
+    SHADER_MODULE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cache_key_for_file(device: &Device, file: &str, overrides: &[(&str, u32)]) -> ModuleCacheKey {
+    let mut key = String::from(file);
+    if !overrides.is_empty() {
+        key.push('?');
+        for (index, (name, value)) in overrides.iter().enumerate() {
+            if index > 0 {
+                key.push('&');
+            }
+            key.push_str(name);
+            key.push('=');
+            key.push_str(&value.to_string());
+        }
+    }
+    ModuleCacheKey::new(device, key)
+}
+
+fn cache_key_for_inline(device: &Device, label: &str, source: &str) -> ModuleCacheKey {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    let hash = hasher.finish();
+    ModuleCacheKey::new(device, format!("{label}#{hash:x}"))
+}
+
+fn compile_cached_module(
+    device: &Device,
+    label: &str,
+    key: ModuleCacheKey,
+    source: String,
+    context: Option<String>,
+) -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError> {
+    {
+        let cache = module_cache();
+        if let Some(module) = cache.lock().unwrap().get(&key) {
+            return Ok(Arc::clone(module));
+        }
+    }
+
+    let module = catch_unwind(AssertUnwindSafe(|| {
+        device.create_shader_module(ShaderModuleDescriptor {
+            label: Some(label),
+            source: ShaderSource::Wgsl(Cow::Owned(source)),
+        })
+    }))
+    .map_err(|payload| ShaderLoadError::Compile {
+        label: label.to_string(),
+        context: context.unwrap_or_else(|| "inline".to_string()),
+        source: Box::new(ShaderCompileError(panic_payload_to_string(payload))),
+    })?;
+
+    let cache = module_cache();
+    let module = Arc::new(module);
+    cache.lock().unwrap().insert(key, Arc::clone(&module));
+    Ok(module)
+}
+
+#[derive(Debug)]
+struct ShaderCompileError(String);
+
+impl fmt::Display for ShaderCompileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for ShaderCompileError {}
+
+fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
+    if let Some(msg) = payload.downcast_ref::<&str>() {
+        msg.to_string()
+    } else if let Some(msg) = payload.downcast_ref::<String>() {
+        msg.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
+
+pub fn create_inline_module(
+    device: &Device,
+    label: &str,
+    source: String,
+) -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError> {
+    let key = cache_key_for_inline(device, label, &source);
+    compile_cached_module(device, label, key, source, None)
 }
 
 /// Read a WGSL shader relative to `shader_dir` and return the source string.
@@ -130,20 +252,25 @@ impl ShaderCache {
         layout: Option<&wgpu::PipelineLayout>,
         overrides: &[(&str, u32)],
     ) -> Result<ComputePipeline, ShaderLoadError> {
-        let specialized = if overrides.is_empty() {
-            Cow::Borrowed(self.source(file)?)
+        let source = if overrides.is_empty() {
+            self.source(file)?.to_string()
         } else {
-            Cow::Owned(apply_overrides(self.source(file)?, file, overrides)?)
+            apply_overrides(self.source(file)?, file, overrides)?
         };
-        let module = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some(label),
-            source: ShaderSource::Wgsl(specialized),
-        });
+        let context = self.shader_dir.join(file).display().to_string();
+        let module = compile_cached_module(
+            device,
+            label,
+            cache_key_for_file(device, file, overrides),
+            source,
+            Some(context),
+        )?;
         Ok(device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some(label),
             layout,
-            module: &module,
+            module: module.as_ref(),
             entry_point,
+            compilation_options: Default::default(),
         }))
     }
 
@@ -184,16 +311,22 @@ pub fn load_compute_pipeline_with_layout(
     entry_point: &str,
     layout: Option<&wgpu::PipelineLayout>,
 ) -> Result<ComputePipeline, ShaderLoadError> {
-    let source = read_wgsl(shader_dir, file)?;
-    let module = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some(label),
-        source: ShaderSource::Wgsl(source.into()),
-    });
+    let dir = shader_dir.as_ref();
+    let source = read_wgsl(dir, file)?;
+    let context = dir.join(file).display().to_string();
+    let module = compile_cached_module(
+        device,
+        label,
+        cache_key_for_file(device, file, &[]),
+        source,
+        Some(context),
+    )?;
     Ok(device.create_compute_pipeline(&ComputePipelineDescriptor {
         label: Some(label),
         layout,
-        module: &module,
+        module: module.as_ref(),
         entry_point,
+        compilation_options: Default::default(),
     }))
 }
 
