@@ -9,10 +9,10 @@ use crate::{PureResult, Tensor, TensorError};
 use st_core::util::math::{ramanujan_pi, LeechProjector};
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense;
-#[cfg(feature = "wgpu")]
-use std::sync::OnceLock;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+#[cfg(feature = "wgpu")]
+use std::sync::OnceLock;
 
 fn validate_positive(value: usize, _label: &str) -> PureResult<()> {
     if value == 0 {

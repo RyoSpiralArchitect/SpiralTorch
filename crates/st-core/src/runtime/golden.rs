@@ -22,6 +22,7 @@
 // ============================================================================
 
 #![cfg(feature = "golden")]
+use std::convert::Infallible;
 use std::ops::{Deref, DerefMut};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -263,15 +264,16 @@ impl GoldenRuntime {
         self.inner.worker_count()
     }
 
-    pub fn execute<F, R>(&self, func: F) -> Result<R, GoldenRuntimeError>
+    pub fn execute<F, R, E>(&self, func: F) -> Result<R, GoldenTaskError<E>>
     where
-        F: FnOnce() -> R + Send + 'static,
+        F: FnOnce() -> Result<R, E> + Send + 'static,
         R: Send + 'static,
+        E: Send + 'static,
     {
-        let handle = self.spawn_blocking(func)?;
-        handle
-            .join()
-            .map_err(|_| GoldenRuntimeError("golden runtime task panicked".into()))
+        let handle = self
+            .spawn_blocking(func)
+            .map_err(GoldenTaskError::Runtime)?;
+        handle.join()
     }
 
     pub fn tensor_random_uniform(
@@ -282,10 +284,8 @@ impl GoldenRuntime {
         max: f32,
         seed: Option<u64>,
     ) -> Result<Tensor, GoldenTensorError> {
-        let result = self
-            .execute(move || Tensor::random_uniform(rows, cols, min, max, seed))
-            .map_err(GoldenTensorError::from)?;
-        result.map_err(GoldenTensorError::from)
+        self.execute(move || Tensor::random_uniform(rows, cols, min, max, seed))
+            .map_err(GoldenTensorError::from)
     }
 
     pub fn tensor_random_normal(
@@ -296,16 +296,15 @@ impl GoldenRuntime {
         std: f32,
         seed: Option<u64>,
     ) -> Result<Tensor, GoldenTensorError> {
-        let result = self
-            .execute(move || Tensor::random_normal(rows, cols, mean, std, seed))
-            .map_err(GoldenTensorError::from)?;
-        result.map_err(GoldenTensorError::from)
+        self.execute(move || Tensor::random_normal(rows, cols, mean, std, seed))
+            .map_err(GoldenTensorError::from)
     }
 
     pub fn spawn_blocking<F, R>(&self, func: F) -> Result<GoldenJoinHandle<R>, GoldenRuntimeError>
     where
-        F: FnOnce() -> R + Send + 'static,
+        F: FnOnce() -> Result<R, E> + Send + 'static,
         R: Send + 'static,
+        E: Send + 'static,
     {
         if self.inner.shutdown.load(Ordering::Acquire) {
             return Err(GoldenRuntimeError(
@@ -330,12 +329,18 @@ impl GoldenRuntime {
         })
     }
 
-    pub fn reduce<T, R, Map, Fold>(&self, data: &[T], map: Map, fold: Fold, identity: R) -> R
+    pub fn reduce<T, R, Map, Fold>(
+        &self,
+        data: &[T],
+        map: Map,
+        fold: Fold,
+        identity: R,
+    ) -> Result<R, GoldenTaskError<Infallible>>
     where
-        T: Sync,
-        R: Send + Sync + Clone,
-        Map: Fn(&T) -> R + Send + Sync,
-        Fold: Fn(R, R) -> R + Send + Sync,
+        T: Sync + 'static,
+        R: Send + Sync + Clone + 'static,
+        Map: Fn(&T) -> R + Send + Sync + 'static,
+        Fold: Fn(R, R) -> R + Send + Sync + 'static,
     {
         let workers = self.worker_count();
         if workers <= 1 || data.len() < 2 {
@@ -358,11 +363,46 @@ impl GoldenRuntime {
                         .fold(identity_clone, |acc, item| fold_ref(acc, item))
                 }));
             }
-            handles
-                .into_iter()
-                .map(|handle| handle.join().unwrap_or_else(|_| identity.clone()))
-                .fold(identity.clone(), |acc, item| fold(acc, item))
-        })
+            let identity_clone = identity.clone();
+            let map = Arc::clone(&map);
+            let fold = Arc::clone(&fold);
+            let len = chunk_items.len();
+            let offset = unsafe { chunk_items.as_ptr().offset_from(base_ptr) as usize };
+            handles.push(
+                self.spawn_blocking(move || {
+                    let base_ptr = base_ptr_usize as *const T;
+                    let slice = unsafe { std::slice::from_raw_parts(base_ptr.add(offset), len) };
+                    let mapper = &*map;
+                    let reducer = &*fold;
+                    let mut acc = identity_clone;
+                    for value in slice.iter() {
+                        let mapped = mapper(value);
+                        acc = reducer(acc, mapped);
+                    }
+                    Ok::<R, Infallible>(acc)
+                })
+                .map_err(GoldenTaskError::Runtime)?,
+            );
+        }
+
+        let mut acc = identity;
+        for handle in handles {
+            let value = handle.join()?;
+            acc = (&*fold)(acc, value);
+        }
+
+        Ok(acc)
+    }
+}
+
+fn worker_loop(receiver: Receiver<GoldenTaskMessage>) {
+    while let Ok(message) = receiver.recv() {
+        match message {
+            GoldenTaskMessage::Run(task) => {
+                task();
+            }
+            GoldenTaskMessage::Shutdown => break,
+        }
     }
 }
 
@@ -374,6 +414,18 @@ pub enum GoldenTensorError {
     Tensor(#[from] TensorError),
 }
 
+impl From<GoldenTaskError<TensorError>> for GoldenTensorError {
+    fn from(err: GoldenTaskError<TensorError>) -> Self {
+        match err {
+            GoldenTaskError::Runtime(inner) => Self::Runtime(inner),
+            GoldenTaskError::Task(inner) => Self::Tensor(inner),
+            GoldenTaskError::Panic => {
+                Self::Runtime(GoldenRuntimeError("golden runtime task panicked".into()))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,7 +435,11 @@ mod tests {
         let runtime = GoldenRuntime::new(GoldenRuntimeConfig::default()).expect("runtime");
         let mut handles = Vec::new();
         for idx in 0..runtime.worker_count() {
-            handles.push(runtime.spawn_blocking(move || idx * 2).expect("spawn"));
+            handles.push(
+                runtime
+                    .spawn_blocking(move || Ok::<usize, Infallible>(idx * 2))
+                    .expect("spawn"),
+            );
         }
         let mut total = 0usize;
         for handle in handles {
@@ -392,7 +448,9 @@ mod tests {
         assert!(total > 0);
 
         let numbers: Vec<u32> = (0..32).collect();
-        let reduced = runtime.reduce(&numbers, |value| *value as usize, |a, b| a + b, 0usize);
+        let reduced = runtime
+            .reduce(&numbers, |value| *value as usize, |a, b| a + b, 0usize)
+            .expect("reduce");
         assert_eq!(
             reduced,
             numbers.iter().copied().map(|v| v as usize).sum::<usize>()
