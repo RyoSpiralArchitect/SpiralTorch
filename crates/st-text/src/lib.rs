@@ -33,7 +33,7 @@ use st_core::telemetry::chrono::{
 };
 use st_core::theory::zpulse::ZPulse;
 use st_logic::contextual_observation::{
-    Arrangement, LagrangianGate, MeaningEmergenceMetrics, MeaningProjection, OrientationGauge,
+    Arrangement, LagrangianGate, MeaningEmergenceProfile, MeaningProjection, OrientationGauge,
 };
 #[cfg(test)]
 use st_tensor::Tensor;
@@ -419,8 +419,9 @@ impl TextResonator {
             );
         }
 
-        match MeaningEmergenceMetrics::from_projections(projections) {
-            Some(metrics) => {
+        match MeaningEmergenceProfile::from_projections(projections) {
+            Some(profile) => {
+                let metrics = &profile.metrics;
                 let summary = format!(
                     "Meaning emergence {:.3} with coherence {:.3} across {} turns.",
                     metrics.emergence_score,
@@ -440,6 +441,25 @@ impl TextResonator {
                     format!("indeterminate {:.1}%", metrics.indeterminate_share * 100.0),
                     format!("frequency flux {:.3}", metrics.frequency_flux),
                 ];
+                if let Some(transition) = profile.strongest_transition() {
+                    highlights.push(format!(
+                        "strongest transition {}→{} |Δlex| {:.3}{}{}",
+                        transition.from_index,
+                        transition.to_index,
+                        transition.lexical_delta.abs(),
+                        transition
+                            .frequency_delta
+                            .map(|delta| format!(" freq Δ {:.2}", delta))
+                            .unwrap_or_default(),
+                        if transition.orientation_flip {
+                            " flip"
+                        } else if transition.indeterminate_step {
+                            " indeterminate"
+                        } else {
+                            ""
+                        }
+                    ));
+                }
                 highlights.push("emergence favours interaction over imitation".to_string());
                 ResonanceNarrative::new(summary, highlights)
             }
@@ -1458,5 +1478,9 @@ mod tests {
             .highlights
             .iter()
             .any(|line| line.contains("frequency flux")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("strongest transition")));
     }
 }
