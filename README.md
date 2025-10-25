@@ -4,6 +4,10 @@ _(Still under active repair while expanding — API changes hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
+## 🌌 SpiralTorch Manifesto
+
+Step into the paradigm shift from imitation to emergent meaning with the [SpiralTorch Manifesto](docs/spiraltorch_manifesto.md).
+
 📜 **Licensing at a glance:** SpiralTorch is AGPL-3.0-or-later by default with a commercial option for proprietary deployments. [Read the full policy.](docs/licensing.md)
 Unauthorized redistribution, scraping, or resale of this repository
 violates AGPL-3.0 and §13. Any commercial deployment requires a license.
@@ -91,66 +95,6 @@ sequenceDiagram
   Session-->>Bridge: async completion signal
   Bridge-->>API: awaitable result / telemetry hook
 ```
-
-### Explore the runtime interactively
-
-Prefer a guided walkthrough of the dispatcher flows? Open the
-[interactive runtime explorer](docs/interactive/README.md) for clickable
-diagrams, a narrated "story tour" of the runtime handoff, and playful
-spotlights on graph-node materialisation versus return-handle delivery:
-
-- 🎬 **Story tour.** Step through a six-beat mini adventure that explains
-  how a single API call ripples through SpiralTorch, from the first FFI
-  marshals to the triumphant return of tensor handles.
-- 🔍 **Focus toggles.** Snap to either the graph-node materialisation
-  path or the return-handle arc whenever you want to revisit a specific
-  phase.
-- 🧭 **Free roam.** Click any node or edge to read quick lore about the
-  component, then resume the story exactly where you left off.
-
-### Explore the runtime interactively
-
-Prefer a guided walkthrough of the dispatcher flows? Open the
-[interactive runtime explorer](docs/interactive/README.md) for clickable
-diagrams, a narrated "story tour" of the runtime handoff, and playful
-spotlights on graph-node materialisation versus return-handle delivery:
-
-- 🎬 **Story tour.** Step through a six-beat mini adventure that explains
-  how a single API call ripples through SpiralTorch, from the first FFI
-  marshals to the triumphant return of tensor handles.
-- 🔍 **Focus toggles.** Snap to either the graph-node materialisation
-  path or the return-handle arc whenever you want to revisit a specific
-  phase.
-- 🌈 **Aurora mode.** Bathe the canvas in a psychedelic gradient to feel the
-  runtime choreography pop—the toggle sits beside the spotlight buttons.
-- ✨ **Phase constellations.** Sidebar cards cluster subsystems by stage so you
-  can intuit which teams light up together as the story advances.
-- 🧭 **Free roam.** Click any node or edge to read quick lore about the
-  component, then resume the story exactly where you left off.
-
-> **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
->
-> **New — Conv6da with Leech enrichment.** `Conv6da` fuses six-directional adjacency with optional Leech lattice density boosts so Z-space fields aggregate neighbors with structure-aware gradients.
-
-> **New — DLPack/compat inference bridges.** Import weights over `st.from_dlpack` or the `spiraltorch.compat` adapters and feed them straight into Z-space inference via `st.weights_partial_from_dlpack`, `st.weights_partial_from_compat`, or the higher-level `st.infer_weights_from_dlpack`. PSI telemetry is now summarised live during these projections so models can modulate confidence against streaming telemetry frames.
-
-> **Expanded — Higher-order convolutions.** Fresh `Conv3d` and `Conv4d` modules now mirror the dilation-aware ergonomics of their 1D/2D siblings so volumetric stacks and temporal cubes slide straight into the same API.
->
-> **New — Online-softmax fused attention.** A single-kernel QKᵀ + mask + softmax + V pipeline now lands in the WGPU backend, slashing bandwidth for multi-head attention while matching PyTorch semantics for drop-in migrations.
-
-> **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and an opt-in attention-probability readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
-
-> **In progress — Fused attention for PyTorch migrations.** The new single-kernel Q·Kᵀ + softmax + V planner keeps intermediate logits on-chip, so PyTorch users can co-train or stage migrations while retaining numerically stable attention/softmax semantics.
-
-> **In progress — Fused attention for Torch migrations.** The new single-kernel Q·Kᵀ + softmax + V planner keeps intermediate logits on-chip, so PyTorch users can co-train or stage migrations while retaining numerically stable attention/softmax semantics.
->
-> **New — Python `Tensor.scaled_dot_attention`.** The fused kernel is now exposed to Python callers with a CPU fallback, so migration experiments can drop directly into WGPU-backed attention without leaving the high-level API.
-
-> **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and opt-in attention probability/logit readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
-
-> **New — Z-space inference for imported checkpoints.** `spiraltorch.infer_weights_from_dlpack` and `spiraltorch.infer_with_psi` now project DLPack/compat weights, Canvas transformers, and PSI telemetry straight into the Z-space posterior. Warm-start inference can blend partial observations with live ψ health data so Rust sessions reuse PyTorch/JAX weights without leaving the SpiralTorch runtime.
-
-> **New — PSI synchroniser learning bundles.** Multi-branch MetaMEMB runs now deliver combined heatmaps, ZPulse snapshots, Atlas fragments, PSI component breakdowns, and Golden directives via `st.psi.run_zspace_learning(...)` so Z-space learners and distributed `golden` retrievers can coordinate straight from Rust or Python.
 
 **Licensing**
 
@@ -249,8 +193,42 @@ tensor shims, no translation layers, and no tracebacks.
 
 ---
 
+## Why it’s different
+ - **Training comes first:** Modules such as `Linear`, `Sequential`,
+   `WaveGate`, the new `ToposResonator`, and `ZSpaceProjector` stream gradients
+    into the hypergrad tape and expose a `train_epoch` loop that mirrors
+    familiar `nn.Module` patterns.
+  - **Open Z-space:** Gradient splits honour the A/B/C roundtable through the
+    new `zspace_round` ops module so Above/Here/Beneath bands stay in sync with
+    SpiralK plans without auxiliary buffers.
+  - **Hilbert-grounded Mellin bridges:** `st-frac::mellin::MellinLogGrid`
+    now exposes fallible APIs, a `Scalar` alias for f32/f64 toggling, exact
+    lattice bit-matching, and WebGPU-backed vertical/mesh sweeps that reuse the
+    same `st-frac::zspace` weights while `hilbert_inner_product` and
+    `evaluate_vertical_line` surface the lattice’s Hilbert geometry directly.
+  - **Three-voice consensus:** SpiralK heuristics, DSL directives, and the
+    generated WASM tuner table discuss every launch decision and keep the
+    transcript in the roundtable log.
+  - **Rust by default, Python ready:** Every feature—from WASM tuning to
+    hypergrad curvature—is implemented in Rust and exposed unchanged through the
+    Python bindings when needed.
+  - **Unified RL + Rec stacks:** SpiralTorchRL and SpiralTorchRec keep policy
+    gradients, recommendation factors, and hypergrad tapes inside the same
+    Z-space geometry so deployment-grade loops never leave Rust.
+  - **Z-space-native graph reasoning:** The Rust core, backend abstraction
+    layer, and Z-space operators already form the spine of a graph neural
+    network stack that embeds large-scale, hierarchical graphs with the same
+    fidelity as its tree-aligned geometry.
+  - **Semiotic suturing at the logit level:** The new `st-nn::language`
+    toolkit folds symbolic kernels, repression fields, and semantic bridges
+    into a single Lagrangian so SpiralTorch can bias logits with desire,
+    anchor S/s correspondences, and respect target entropies without leaving
+    Z-space.
+  - **Interpretability as a first-class citizen:** Hypergrad tapes, roundtable
+    transcripts, and ψ telemetry double as explainability artifacts, enabling
+    decision-path inspection without leaving the Z-space calculus.
 **Current release:** `spiraltorch==0.2.4` (abi3 wheel, Python ≥3.8)  
-**Targets:** CPU (always), Metal via WGPU (macOS), Vulkan/DX (WGPU), CUDA, HIP/ROCm
+**Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
 
@@ -348,7 +326,7 @@ t2.mul_(2)                          # in-place
 print("ST sees torch mul_:        ", a2.tolist())
 ```
 
-### 1b) Row softmax (GPU-accelerated when available)
+### 2) Row softmax (GPU-accelerated when available)
 
 ```python
 import spiraltorch as st
@@ -360,7 +338,7 @@ print("CPU row softmax:", logits.row_softmax().tolist())
 print("WGPU row softmax:", logits.row_softmax(backend="wgpu").tolist())
 ```
 
-### 2) rl.stAgent
+### 3) rl.stAgent
 
 ```python
 import random
@@ -406,7 +384,7 @@ for k in range(2):
     print(f"arm {k}: pulls={pulls[k]}, empirical p≈{rate:.3f}")
 ```
 
-### 3) Self-supervised
+### 4) Self-supervised
 
 ```python
 import spiraltorch as st
@@ -421,7 +399,7 @@ mask = [[1], [0]]  # mask by column indices per row
 print("masked_mse:", st.selfsup.masked_mse(pred, tgt, mask))
 ```
 
-### 4) Z-space trainer
+### 5) Z-space trainer
 
 ```python
 import spiraltorch as st
@@ -434,7 +412,7 @@ samples = [
 print("z:", st.step_many(trainer, samples))
 ```
 
-### 5) Vision × Canvas
+### 6) Vision × Canvas
 
 ```python
 import spiraltorch as st
@@ -452,7 +430,7 @@ print("canvas summary:", snap.summary)
 print("patch[0][:3]:", snap.patch[0][:3] if snap.patch else None)
 ```
 
-### 6) NN data utilities
+### 7) NN data utilities
 
 ```python
 import spiraltorch as st
@@ -466,7 +444,7 @@ for x, y in loader:
     pass
 ```
 
-### 7) Recommender & RL
+### 8) Recommender & RL
 
 ```python
 import spiraltorch as st
@@ -483,7 +461,7 @@ ppo = st.PpoAgent(state_dim=4, action_dim=2, learning_rate=3e-4, clip_range=0.2)
 sac = st.SacAgent(state_dim=4, action_dim=2, temperature=0.1)
 ```
 
-### 8) Interop (PyTorch / JAX / TensorFlow)
+### 9) Interop (PyTorch / JAX / TensorFlow)
 
 ```python
 import spiraltorch as st, torch
@@ -493,7 +471,7 @@ xt = st.compat.torch.to_torch(x, dtype=torch.float32, device="cpu")
 x_back = st.compat.torch.from_torch(xt)
 ```
 
-### 9) Math & pacing helpers
+### 10) Math & pacing helpers
 
 ```python
 import spiraltorch as st
@@ -519,22 +497,6 @@ print(st.pack_tribonacci_chunks(20))
 **Wheel builds** mirror these with `maturin build ... --features <backend>`.
 
 ---
-
-## Architecture Overview
-
-```
-crates/
-  st-core      # tensors, planner, telemetry, math, runtime bridges
-  st-nn        # nn helpers, datasets/loader, training loops (Rust-side)
-  st-vision    # temporal/video, projections, render utils
-  st-spiral-rl # minimal RL agents (DQN-like, PPO, SAC)
-  st-rec       # recommender primitives
-  st-text      # language wave encoders, text geometry
-  st-frac      # fractional calculus helpers
-  st-backend-hip / st-backend-wgpu  # GPU backends
-bindings/
-  st-py/       # PyO3 extension + Python façade (__init__.py, type stubs)
-```
 
 ### Python façade design
 
@@ -568,19 +530,6 @@ print("ok")
 PY
 ```
 
-### Release Checklist
-
-1. Bump versions in `bindings/st-py/pyproject.toml` (and crate manifests if needed)  
-2. `cargo check && cargo test --workspace`  
-3. `maturin build -m bindings/st-py/Cargo.toml --release [--features <backend>]`  
-4. **Upload**:  
-   ```bash
-   export TWINE_USERNAME="__token__"
-   export TWINE_PASSWORD="pypi-..."   # API token
-   python -m twine upload target/wheels/spiraltorch-*.whl
-   ```
-5. Verify on PyPI project page, tag the commit, push.
-
 ---
 
 ## Troubleshooting & FAQ
@@ -605,7 +554,7 @@ A: The type stubs (`spiraltorch.pyi`) reflect the **supported** surface. New Rus
 - Review the [Backend Feature Matrix](docs/backend_matrix.md) when validating device support or filing bugs that touch accelerators.
 - **Interop focus.** SpiralTorch now ships a living [Compatibility Strategy](docs/compatibility_strategy.md) that maps out PyTorch, TensorFlow, and JAX migration paths—from trainer APIs to checkpoint conversion—so you can bring existing stacks along for the ride. The Python wheel exposes `spiraltorch.compat.torch|jax|tensorflow` helpers that exchange tensors with those runtimes through zero-copy DLPack capsules, plus ergonomic knobs for dtype/device targeting, gradient flags, and memory format tweaks.
 
-## Julia & Go integration (draft)
+## Julia & Go integration 
 
 - Prototype workflows for future Julia/Go bindings live in [docs/ops/julia_go_development.md](docs/ops/julia_go_development.md). Follow the guide for setup, lint/test commands, and release checklists.
 
@@ -614,40 +563,50 @@ Prefer flat-space optimisation? Reach for the new Rust-side
 projection step—handy when Canvas Transformer energy needs to feed classical
 optimisers alongside its hypergradient updates.
 
-## Why it’s different
- - **Training comes first:** Modules such as `Linear`, `Sequential`,
-   `WaveGate`, the new `ToposResonator`, and `ZSpaceProjector` stream gradients
-    into the hypergrad tape and expose a `train_epoch` loop that mirrors
-    familiar `nn.Module` patterns.
-  - **Open Z-space:** Gradient splits honour the A/B/C roundtable through the
-    new `zspace_round` ops module so Above/Here/Beneath bands stay in sync with
-    SpiralK plans without auxiliary buffers.
-  - **Hilbert-grounded Mellin bridges:** `st-frac::mellin::MellinLogGrid`
-    now exposes fallible APIs, a `Scalar` alias for f32/f64 toggling, exact
-    lattice bit-matching, and WebGPU-backed vertical/mesh sweeps that reuse the
-    same `st-frac::zspace` weights while `hilbert_inner_product` and
-    `evaluate_vertical_line` surface the lattice’s Hilbert geometry directly.
-  - **Three-voice consensus:** SpiralK heuristics, DSL directives, and the
-    generated WASM tuner table discuss every launch decision and keep the
-    transcript in the roundtable log.
-  - **Rust by default, Python ready:** Every feature—from WASM tuning to
-    hypergrad curvature—is implemented in Rust and exposed unchanged through the
-    Python bindings when needed.
-  - **Unified RL + Rec stacks:** SpiralTorchRL and SpiralTorchRec keep policy
-    gradients, recommendation factors, and hypergrad tapes inside the same
-    Z-space geometry so deployment-grade loops never leave Rust.
-  - **Z-space-native graph reasoning:** The Rust core, backend abstraction
-    layer, and Z-space operators already form the spine of a graph neural
-    network stack that embeds large-scale, hierarchical graphs with the same
-    fidelity as its tree-aligned geometry.
-  - **Semiotic suturing at the logit level:** The new `st-nn::language`
-    toolkit folds symbolic kernels, repression fields, and semantic bridges
-    into a single Lagrangian so SpiralTorch can bias logits with desire,
-    anchor S/s correspondences, and respect target entropies without leaving
-    Z-space.
-  - **Interpretability as a first-class citizen:** Hypergrad tapes, roundtable
-    transcripts, and ψ telemetry double as explainability artifacts, enabling
-    decision-path inspection without leaving the Z-space calculus.
+
+### Explore the runtime interactively
+
+Prefer a guided walkthrough of the dispatcher flows? Open the
+[interactive runtime explorer](docs/interactive/README.md) for clickable
+diagrams, a narrated "story tour" of the runtime handoff, and playful
+spotlights on graph-node materialisation versus return-handle delivery:
+
+- 🎬 **Story tour.** Step through a six-beat mini adventure that explains
+  how a single API call ripples through SpiralTorch, from the first FFI
+  marshals to the triumphant return of tensor handles.
+- 🔍 **Focus toggles.** Snap to either the graph-node materialisation
+  path or the return-handle arc whenever you want to revisit a specific
+  phase.
+- 🌈 **Aurora mode.** Bathe the canvas in a psychedelic gradient to feel the
+  runtime choreography pop—the toggle sits beside the spotlight buttons.
+- ✨ **Phase constellations.** Sidebar cards cluster subsystems by stage so you
+  can intuit which teams light up together as the story advances.
+- 🧭 **Free roam.** Click any node or edge to read quick lore about the
+  component, then resume the story exactly where you left off.
+
+> **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
+>
+> **New — Conv6da with Leech enrichment.** `Conv6da` fuses six-directional adjacency with optional Leech lattice density boosts so Z-space fields aggregate neighbors with structure-aware gradients.
+
+> **New — DLPack/compat inference bridges.** Import weights over `st.from_dlpack` or the `spiraltorch.compat` adapters and feed them straight into Z-space inference via `st.weights_partial_from_dlpack`, `st.weights_partial_from_compat`, or the higher-level `st.infer_weights_from_dlpack`. PSI telemetry is now summarised live during these projections so models can modulate confidence against streaming telemetry frames.
+
+> **Expanded — Higher-order convolutions.** Fresh `Conv3d` and `Conv4d` modules now mirror the dilation-aware ergonomics of their 1D/2D siblings so volumetric stacks and temporal cubes slide straight into the same API.
+>
+> **New — Online-softmax fused attention.** A single-kernel QKᵀ + mask + softmax + V pipeline now lands in the WGPU backend, slashing bandwidth for multi-head attention while matching PyTorch semantics for drop-in migrations.
+
+> **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and an opt-in attention-probability readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
+
+> **In progress — Fused attention for PyTorch migrations.** The new single-kernel Q·Kᵀ + softmax + V planner keeps intermediate logits on-chip, so PyTorch users can co-train or stage migrations while retaining numerically stable attention/softmax semantics.
+
+> **In progress — Fused attention for Torch migrations.** The new single-kernel Q·Kᵀ + softmax + V planner keeps intermediate logits on-chip, so PyTorch users can co-train or stage migrations while retaining numerically stable attention/softmax semantics.
+>
+> **New — Python `Tensor.scaled_dot_attention`.** The fused kernel is now exposed to Python callers with a CPU fallback, so migration experiments can drop directly into WGPU-backed attention without leaving the high-level API.
+
+> **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and opt-in attention probability/logit readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
+
+> **New — Z-space inference for imported checkpoints.** `spiraltorch.infer_weights_from_dlpack` and `spiraltorch.infer_with_psi` now project DLPack/compat weights, Canvas transformers, and PSI telemetry straight into the Z-space posterior. Warm-start inference can blend partial observations with live ψ health data so Rust sessions reuse PyTorch/JAX weights without leaving the SpiralTorch runtime.
+
+> **New — PSI synchroniser learning bundles.** Multi-branch MetaMEMB runs now deliver combined heatmaps, ZPulse snapshots, Atlas fragments, PSI component breakdowns, and Golden directives via `st.psi.run_zspace_learning(...)` so Z-space learners and distributed `golden` retrievers can coordinate straight from Rust or Python.
 
 ---
 
