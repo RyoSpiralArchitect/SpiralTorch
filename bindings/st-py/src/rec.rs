@@ -150,7 +150,7 @@ impl PyRecEpochReport {
 }
 
 #[cfg(feature = "rec")]
-#[pyclass(name = "Recommender", module = "spiraltorch.rec")]
+#[pyclass(name = "Recommender", module = "spiraltorch.rec", unsendable)]
 pub(crate) struct PyRecommender {
     inner: SpiralRecommender,
 }

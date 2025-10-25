@@ -61,6 +61,7 @@
 //! streamed through [`AtlasFrame`] snapshots.
 
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+pub mod contextual;
 pub mod models;
 pub mod xai;
 
@@ -71,6 +72,10 @@ use std::sync::Arc;
 
 pub use st_tensor::wasm_canvas::{CanvasProjector, FractalCanvas};
 
+pub use contextual::{
+    arrangement_from_mask, arrangement_from_tensor, VisionContextualGate,
+    VisionContextualNarrative, VisionContextualPulse,
+};
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
 use st_logic::temporal_dynamics::TemporalVolume;
@@ -2690,7 +2695,7 @@ impl DatasetSample {
 }
 
 /// Unified dataset trait mirroring TorchVision's pythonic interfaces.
-pub trait VisionDataset: Send + Sync {
+pub trait VisionDataset {
     fn descriptor(&self) -> &DatasetDescriptor;
     fn len(&self) -> usize;
     fn get(&self, index: usize) -> PureResult<DatasetSample>;

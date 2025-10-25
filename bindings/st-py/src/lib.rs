@@ -15,6 +15,7 @@ mod spiralk;
 mod frac;
 mod psi_synchro;
 mod selfsup;
+mod text;
 mod export;
 mod inference;
 mod hpo;
@@ -154,6 +155,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     planner::register(py, m)?;
     spiralk::register(py, m)?;
     psi_synchro::register(py, m)?;
+    text::register(py, m)?;
     hpo::register(py, m)?;
     inference::register(py, m)?;
     frac::register(py, m)?;
@@ -205,6 +207,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "SpiralKFftPlan","MaxwellSpiralKBridge","MaxwellSpiralKHint",
         "SpiralKContext","SpiralKWilsonMetrics","SpiralKHeuristicHint",
         "wilson_lower_bound","should_rewrite","synthesize_program","rewrite_with_wilson",
+        "ContextualLagrangianGate","ContextualPulseFrame",
     ])?;
     Ok(())
 }

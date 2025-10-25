@@ -9,7 +9,7 @@ use pyo3::PyAny;
 
 use st_tensor::{mean_squared_error, LinearModel, Tensor};
 
-#[pyclass(module = "spiraltorch", name = "ModuleTrainer")]
+#[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
 pub(crate) struct PyModuleTrainer {
     model: LinearModel,
     input_dim: usize,
@@ -163,7 +163,7 @@ impl PyModuleTrainer {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "LinearModel")]
+#[pyclass(module = "spiraltorch", name = "LinearModel", unsendable)]
 pub(crate) struct PyLinearModel {
     inner: LinearModel,
 }

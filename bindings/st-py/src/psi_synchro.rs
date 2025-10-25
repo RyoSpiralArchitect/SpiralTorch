@@ -826,7 +826,7 @@ pub(crate) struct PyZPulse {
 }
 
 impl PyZPulse {
-    fn from_pulse(inner: ZPulse) -> Self {
+    pub(crate) fn from_pulse(inner: ZPulse) -> Self {
         Self { inner }
     }
 }

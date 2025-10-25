@@ -893,6 +893,75 @@ class CanvasSnapshot:
     summary: Dict[str, Dict[str, float]]
     patch: Optional[List[List[float]]]
 
+
+class VisionPulseFrame:
+    @property
+    def summary(self) -> str: ...
+
+    @property
+    def highlights(self) -> List[str]: ...
+
+    @property
+    def label(self) -> str | None: ...
+
+    @property
+    def lexical_weight(self) -> float: ...
+
+    @property
+    def signature(self) -> Tuple[int, int, int] | None: ...
+
+    @property
+    def support(self) -> int: ...
+
+    @property
+    def dimensions(self) -> Tuple[int, int] | None: ...
+
+    @property
+    def pulse(self) -> ZPulseSnapshot: ...
+
+
+class ContextualVisionGate:
+    def __init__(
+        self,
+        *,
+        pivot: float = ...,
+        gauge: str = ...,
+        tempo_normaliser: float | None = ...,
+        energy_gain: float = ...,
+        drift_gain: float = ...,
+        bias_gain: float = ...,
+        support_gain: float = ...,
+        scale: Tuple[float, float] | None = ...,
+        quality_floor: float = ...,
+        stderr_gain: float = ...,
+    ) -> None: ...
+
+    def project_tensor(
+        self,
+        tensor: Tensor,
+        *,
+        gauge: str | None = ...,
+        ts: int = ...,
+        pivot: float | None = ...,
+    ) -> VisionPulseFrame: ...
+
+    def project_arrangement(
+        self,
+        placements: Sequence[int],
+        edges: Sequence[Tuple[int, int]] | None = ...,
+        *,
+        gauge: str | None = ...,
+        ts: int = ...,
+        dimensions: Tuple[int, int] | None = ...,
+    ) -> VisionPulseFrame: ...
+
+    @property
+    def gauge(self) -> str: ...
+
+    @property
+    def pivot(self) -> float: ...
+
+
 def apply_vision_update(
     vision: SpiralTorchVision,
     canvas: CanvasTransformer,
@@ -1329,6 +1398,59 @@ class ZPulseSnapshot:
     def latency_ms(self) -> float: ...
 
 
+class ContextualPulseFrame:
+    @property
+    def summary(self) -> str: ...
+
+    @property
+    def highlights(self) -> List[str]: ...
+
+    @property
+    def label(self) -> str | None: ...
+
+    @property
+    def lexical_weight(self) -> float: ...
+
+    @property
+    def signature(self) -> Tuple[int, int, int] | None: ...
+
+    @property
+    def support(self) -> int: ...
+
+    @property
+    def pulse(self) -> ZPulseSnapshot: ...
+
+
+class ContextualLagrangianGate:
+    def __init__(
+        self,
+        curvature: float,
+        temperature: float,
+        *,
+        gauge: str = ...,
+        tempo_normaliser: float | None = ...,
+        energy_gain: float = ...,
+        drift_gain: float = ...,
+        bias_gain: float = ...,
+        support_gain: float = ...,
+        scale: Tuple[float, float] | None = ...,
+        quality_floor: float = ...,
+        stderr_gain: float = ...,
+    ) -> None: ...
+
+    def project(
+        self,
+        placements: Sequence[int],
+        edges: Optional[Sequence[Tuple[int, int]]] = ...,
+        *,
+        gauge: str | None = ...,
+        ts: int = ...,
+    ) -> ContextualPulseFrame: ...
+
+    @property
+    def gauge(self) -> str: ...
+
+
 class ArnoldTonguePeak:
     @property
     def ratio_p(self) -> int: ...
@@ -1628,6 +1750,8 @@ class _VisionModule(ModuleType):
     SpiralTorchVision: type[SpiralTorchVision]
     TemporalResonanceBuffer: type[TemporalResonanceBuffer]
     SliceProfile: type[SliceProfile]
+    ContextualVisionGate: type[ContextualVisionGate]
+    VisionPulseFrame: type[VisionPulseFrame]
 
 vision: _VisionModule
 
@@ -1958,6 +2082,8 @@ __all__ = [
     "fracdiff_gl_1d",
     "QueryPlan",
     "RecEpochReport",
+    "ContextualLagrangianGate",
+    "ContextualPulseFrame",
     "Recommender",
     "Agent",
     "AgentConfig",
@@ -1972,6 +2098,8 @@ __all__ = [
     "SliceProfile",
     "CanvasTransformer",
     "CanvasSnapshot",
+    "ContextualVisionGate",
+    "VisionPulseFrame",
     "apply_vision_update",
     "DashboardMetric",
     "DashboardEvent",
