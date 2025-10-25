@@ -18,6 +18,9 @@ pub struct AlignedVec {
     cap: usize,
 }
 
+unsafe impl Send for AlignedVec {}
+unsafe impl Sync for AlignedVec {}
+
 impl AlignedVec {
     pub fn with_capacity(capacity: usize) -> Self {
         if capacity == 0 {
