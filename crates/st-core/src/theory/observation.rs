@@ -69,6 +69,15 @@ impl ObservationCounts {
     pub fn inactive_gauges(&self) -> u128 {
         self.total_gauges.saturating_sub(self.active_gauges)
     }
+
+    /// Ratio of active pulses over the reported gauges.
+    pub fn pulse_activation_rate(&self) -> f32 {
+        if self.total_gauges == 0 {
+            0.0
+        } else {
+            (self.active_pulses as f32) / (self.total_gauges as f32)
+        }
+    }
 }
 
 /// Summary describing the activity detected for a single gauge.
@@ -90,6 +99,34 @@ pub struct GaugeSummary {
     pub z_bias: Option<f32>,
     /// Quality hint emitted by the microlocal conductor.
     pub quality: Option<f32>,
+}
+
+/// Aggregate statistics describing the activity of microlocal pulses.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PulseSummary {
+    /// Total number of pulses reported by the microlocal conductor.
+    pub total: u128,
+    /// Number of pulses that carried non-zero support.
+    pub active: u128,
+    /// Number of pulses that were reported but remained empty.
+    pub inactive: u128,
+    /// Mean support amongst the reported pulses (only counting ones with support).
+    pub mean_support: f32,
+    /// Maximum support detected amongst the reported pulses.
+    pub max_support: f32,
+    /// Mean drift-corrected Z bias amongst the reported pulses.
+    pub mean_z_bias: f32,
+}
+
+impl PulseSummary {
+    /// Ratio of active pulses over the total pulses inspected.
+    pub fn activation_rate(&self) -> f32 {
+        if self.total == 0 {
+            0.0
+        } else {
+            (self.active as f32) / (self.total as f32)
+        }
+    }
 }
 
 impl GaugeSummary {
@@ -118,6 +155,8 @@ pub struct ObservationBridgeSnapshot {
     pub softlogic_feedback: SoftlogicZFeedback,
     /// Activity summary for every gauge reported by the microlocal conductor.
     pub gauges: Vec<GaugeSummary>,
+    /// Summary describing the microlocal pulse activity during the report.
+    pub pulses: PulseSummary,
 }
 
 impl ObservationBridgeSnapshot {
@@ -172,6 +211,7 @@ impl ObservationBridge {
         let depth_counts = counts.depths();
         let assessment = self.coalgebra.assess(&depth_counts);
         let microlocal_feedback = merge_feedback(&drives);
+        let pulses = pulse_summary(report, &gauges);
 
         ObservationBridgeSnapshot {
             counts,
@@ -181,6 +221,7 @@ impl ObservationBridge {
             drives,
             softlogic_feedback: report.feedback.clone(),
             gauges,
+            pulses,
         }
     }
 }
@@ -255,6 +296,56 @@ fn gauge_summaries(report: &InterfaceZReport, drives: &GaugeBank<MacroDrive>) ->
             }
         })
         .collect()
+}
+
+fn pulse_summary(report: &InterfaceZReport, gauges: &[GaugeSummary]) -> PulseSummary {
+    let total = report.pulses.len() as u128;
+
+    let mut active = 0u128;
+    let mut inactive = 0u128;
+    let mut total_support = 0.0f32;
+    let mut support_samples = 0u128;
+    let mut max_support = 0.0f32;
+    let mut total_bias = 0.0f32;
+    let mut bias_samples = 0u128;
+
+    for (index, pulse) in report.pulses.iter().enumerate() {
+        if pulse.is_empty() {
+            inactive += 1;
+        } else {
+            active += 1;
+        }
+
+        if let Some(summary) = gauges.get(index) {
+            if let Some(support) = summary.pulse_support {
+                total_support += support;
+                support_samples += 1;
+                max_support = max_support.max(support);
+            }
+
+            if let Some(z_bias) = summary.z_bias {
+                total_bias += z_bias;
+                bias_samples += 1;
+            }
+        }
+    }
+
+    PulseSummary {
+        total,
+        active,
+        inactive,
+        mean_support: if support_samples == 0 {
+            0.0
+        } else {
+            total_support / (support_samples as f32)
+        },
+        max_support,
+        mean_z_bias: if bias_samples == 0 {
+            0.0
+        } else {
+            total_bias / (bias_samples as f32)
+        },
+    }
 }
 
 #[cfg(test)]
@@ -380,12 +471,20 @@ mod tests {
         assert_eq!(snapshot.drives.len(), 1);
         assert!(snapshot.has_interface());
         assert!((snapshot.counts.coverage() - 1.0).abs() < f32::EPSILON);
+        assert!((snapshot.counts.pulse_activation_rate() - 1.0).abs() < f32::EPSILON);
         assert_eq!(snapshot.gauges.len(), 1);
         let gauge = &snapshot.gauges[0];
         assert!(gauge.matched_template);
         assert!(gauge.is_active());
         assert_eq!(gauge.pulse_support, Some(1.0));
         assert_eq!(gauge.quality, Some(0.9));
+        assert_eq!(snapshot.pulses.total, 1);
+        assert_eq!(snapshot.pulses.active, 1);
+        assert_eq!(snapshot.pulses.inactive, 0);
+        assert!((snapshot.pulses.mean_support - 1.0).abs() < f32::EPSILON);
+        assert!((snapshot.pulses.max_support - 1.0).abs() < f32::EPSILON);
+        assert!((snapshot.pulses.mean_z_bias - 0.05).abs() < f32::EPSILON);
+        assert!((snapshot.pulses.activation_rate() - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -403,7 +502,15 @@ mod tests {
         assert_eq!(snapshot.drives.len(), 0);
         assert!(!snapshot.has_interface());
         assert_eq!(snapshot.counts.inactive_gauges(), 1);
+        assert_eq!(snapshot.counts.pulse_activation_rate(), 0.0);
         assert_eq!(snapshot.gauges.len(), 1);
         assert!(!snapshot.gauges[0].is_active());
+        assert_eq!(snapshot.pulses.total, 1);
+        assert_eq!(snapshot.pulses.active, 0);
+        assert_eq!(snapshot.pulses.inactive, 1);
+        assert_eq!(snapshot.pulses.mean_support, 0.0);
+        assert_eq!(snapshot.pulses.max_support, 0.0);
+        assert_eq!(snapshot.pulses.mean_z_bias, 0.0);
+        assert_eq!(snapshot.pulses.activation_rate(), 0.0);
     }
 }

@@ -1302,13 +1302,13 @@ impl ModuleTrainer {
             let mut psi_snapshot: Option<PsiReading> = None;
             #[cfg(feature = "psi")]
             {
+                let curvature_pos = self
+                    .curvature_metrics()
+                    .map(|metrics| metrics.curvature.max(0.0))
+                    .unwrap_or(0.0);
                 if let Some(meter) = self.psi.as_mut() {
                     let grad_l2 = Self::collect_grad_l2(module)?;
                     let act_drift = module.psi_probe().unwrap_or(0.0);
-                    let curvature_pos = self
-                        .curvature_metrics()
-                        .map(|metrics| metrics.curvature.max(0.0))
-                        .unwrap_or(0.0);
                     let input_snapshot = PsiInput {
                         loss: step_loss.abs(),
                         grad_l2,
