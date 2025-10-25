@@ -58,6 +58,7 @@ use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter, PsychoidReading};
+use st_core::telemetry::zspace_region::{ZSpaceRegionDescriptor, ZSpaceRegionKey};
 use st_core::theory::zpulse::ZScale;
 use st_tensor::{topos::OpenCartesianTopos, GradientSummary};
 use std::collections::HashMap;
@@ -243,6 +244,7 @@ pub struct ModuleTrainer {
     graph_last_hint: Option<String>,
     curvature_scheduler: Option<CurvatureScheduler>,
     last_curvature_metrics: Option<CurvatureMetrics>,
+    loss_strategy: LossStrategy,
     #[cfg(feature = "golden")]
     golden_pulse: Option<GoldenBlackcatPulse>,
     #[cfg(feature = "golden")]
@@ -277,6 +279,165 @@ pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
 
 fn append_cloud_targets(metadata: &mut HashMap<String, String>, targets: &[CloudConnector]) {
     CloudTargetSummary::from_targets(targets).extend_map(metadata);
+}
+
+/// Configures how regional Z-space weights influence the aggregated loss.
+#[derive(Clone, Debug)]
+pub struct RegionLossWeights {
+    default: f32,
+    overrides: HashMap<ZSpaceRegionKey, f32>,
+}
+
+impl RegionLossWeights {
+    /// Creates a weight table with the provided default multiplier.
+    pub fn new(default: f32) -> Self {
+        Self {
+            default: default.max(0.0),
+            overrides: HashMap::new(),
+        }
+    }
+
+    /// Inserts or replaces the multiplier for the supplied region key.
+    pub fn with_override(mut self, key: ZSpaceRegionKey, weight: f32) -> Self {
+        self.set_override(key, weight);
+        self
+    }
+
+    /// Updates the multiplier for the supplied region key.
+    pub fn set_override(&mut self, key: ZSpaceRegionKey, weight: f32) {
+        self.overrides.insert(key, weight.max(0.0));
+    }
+
+    /// Looks up the multiplier for the given key.
+    pub fn weight_for(&self, key: ZSpaceRegionKey) -> f32 {
+        self.overrides
+            .get(&key)
+            .copied()
+            .unwrap_or(self.default)
+            .max(0.0)
+    }
+
+    /// Returns the default multiplier applied when no overrides match.
+    pub fn default(&self) -> f32 {
+        self.default
+    }
+}
+
+impl Default for RegionLossWeights {
+    fn default() -> Self {
+        Self::new(1.0)
+    }
+}
+
+/// Optional thresholds controlling when region weights apply.
+#[derive(Clone, Debug, Default)]
+pub struct RegionLossCondition {
+    min_spin_magnitude: Option<f32>,
+    min_radius: Option<f32>,
+}
+
+impl RegionLossCondition {
+    /// Requires the absolute spin alignment to exceed the provided threshold.
+    pub fn with_min_spin_magnitude(mut self, threshold: f32) -> Self {
+        if threshold > 0.0 {
+            self.min_spin_magnitude = Some(threshold.min(1.0));
+        }
+        self
+    }
+
+    /// Requires the normalised radius to exceed the provided threshold.
+    pub fn with_min_radius(mut self, threshold: f32) -> Self {
+        if threshold > 0.0 {
+            self.min_radius = Some(threshold.clamp(0.0, 1.0));
+        }
+        self
+    }
+
+    fn satisfied(&self, descriptor: &ZSpaceRegionDescriptor) -> bool {
+        if let Some(threshold) = self.min_spin_magnitude {
+            if descriptor.spin_alignment.abs() < threshold {
+                return false;
+            }
+        }
+        if let Some(threshold) = self.min_radius {
+            if descriptor.normalized_radius < threshold {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Complete configuration describing how regional multipliers are applied.
+#[derive(Clone, Debug)]
+pub struct RegionLossConfig {
+    weights: RegionLossWeights,
+    condition: RegionLossCondition,
+}
+
+impl RegionLossConfig {
+    /// Creates a configuration with the supplied weight table and default condition.
+    pub fn new(weights: RegionLossWeights) -> Self {
+        Self {
+            weights,
+            condition: RegionLossCondition::default(),
+        }
+    }
+
+    /// Updates the condition controlling when region weights are used.
+    pub fn with_condition(mut self, condition: RegionLossCondition) -> Self {
+        self.condition = condition;
+        self
+    }
+
+    fn region_factor(
+        &self,
+        feedback: &SoftlogicZFeedback,
+    ) -> Option<(f32, ZSpaceRegionDescriptor)> {
+        let descriptor = feedback.region_descriptor()?;
+        if !self.condition.satisfied(&descriptor) {
+            return None;
+        }
+        let factor = self.weights.weight_for(descriptor.key());
+        Some((factor, descriptor))
+    }
+
+    /// Returns a reference to the underlying weights.
+    pub fn weights(&self) -> &RegionLossWeights {
+        &self.weights
+    }
+
+    /// Returns the configured condition.
+    pub fn condition(&self) -> &RegionLossCondition {
+        &self.condition
+    }
+}
+
+/// Loss aggregation strategies supported by [`ModuleTrainer`].
+#[derive(Clone, Debug)]
+pub enum LossStrategy {
+    /// Baseline behaviour using band weights only.
+    Baseline,
+    /// Applies additional region weights extracted from Softlogic feedback.
+    Region(RegionLossConfig),
+}
+
+impl Default for LossStrategy {
+    fn default() -> Self {
+        LossStrategy::Baseline
+    }
+}
+
+impl LossStrategy {
+    fn region_factor(
+        &self,
+        feedback: &SoftlogicZFeedback,
+    ) -> Option<(f32, ZSpaceRegionDescriptor)> {
+        match self {
+            LossStrategy::Baseline => None,
+            LossStrategy::Region(config) => config.region_factor(feedback),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -404,6 +565,16 @@ impl SoftLogicFlex {
             attributions: Vec::new(),
             elliptic: None,
         };
+        let mut feedback = feedback;
+        if feedback.elliptic.is_none() {
+            if let Some(last) = self
+                .last_feedback
+                .as_ref()
+                .and_then(|sample| sample.elliptic)
+            {
+                feedback.elliptic = Some(last);
+            }
+        }
         self.last_feedback = Some(feedback.clone());
         feedback
     }
@@ -497,6 +668,7 @@ impl ModuleTrainer {
             graph_last_hint: None,
             curvature_scheduler: None,
             last_curvature_metrics: None,
+            loss_strategy: LossStrategy::default(),
             #[cfg(feature = "golden")]
             golden_pulse: None,
             #[cfg(feature = "golden")]
@@ -537,6 +709,32 @@ impl ModuleTrainer {
     pub fn disable_desire_roundtable_bridge(&mut self) {
         self.desire_roundtable_bridge = None;
         self.last_desire_roundtable_summary = None;
+    }
+
+    /// Returns a new trainer with the provided loss strategy.
+    pub fn with_loss_strategy(mut self, strategy: LossStrategy) -> Self {
+        self.loss_strategy = strategy;
+        self
+    }
+
+    /// Installs a loss strategy controlling how band losses are aggregated.
+    pub fn set_loss_strategy(&mut self, strategy: LossStrategy) {
+        self.loss_strategy = strategy;
+    }
+
+    /// Configures the trainer to apply region-aware loss weights.
+    pub fn enable_region_loss(&mut self, config: RegionLossConfig) {
+        self.loss_strategy = LossStrategy::Region(config);
+    }
+
+    /// Restores the baseline loss aggregation strategy.
+    pub fn disable_region_loss(&mut self) {
+        self.loss_strategy = LossStrategy::Baseline;
+    }
+
+    /// Returns the currently configured loss strategy.
+    pub fn loss_strategy(&self) -> &LossStrategy {
+        &self.loss_strategy
     }
 
     /// Surfaces the qualitative coherence observation so schedulers can react.
@@ -1238,8 +1436,8 @@ impl ModuleTrainer {
             }
             bands.scale_inplace(weights.0, weights.1, weights.2);
             let weight_mean = (weights.0 + weights.1 + weights.2) / 3.0;
-            let weighted_loss = step_loss * weight_mean.max(0.0);
-            total_loss += weighted_loss;
+            let weighted_loss_base = step_loss * weight_mean.max(0.0);
+            let mut weighted_loss = weighted_loss_base;
             let mut extra = HashMap::new();
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
@@ -1419,11 +1617,37 @@ impl ModuleTrainer {
                 }
             };
             let scale_hint = hub::get_softlogic_z().and_then(|feedback| feedback.scale);
-            let z_feedback =
+            let mut z_feedback =
                 self.softlogic
-                    .observe(&band_energy, weighted_loss, psi_total_opt, scale_hint);
+                    .observe(&band_energy, weighted_loss_base, psi_total_opt, scale_hint);
+            if z_feedback.elliptic.is_none() {
+                if let Some(previous) = hub::get_softlogic_z() {
+                    if let Some(sample) = previous.elliptic {
+                        z_feedback.elliptic = Some(sample);
+                    }
+                }
+            }
             hub::set_softlogic_z(z_feedback.clone());
             extra.insert("softlogic_z".to_string(), z_feedback.z_signal as f64);
+            if let Some((region_factor, region_descriptor)) =
+                self.loss_strategy.region_factor(&z_feedback)
+            {
+                let factor = region_factor.max(0.0);
+                if factor > 0.0 {
+                    weighted_loss *= factor;
+                }
+                extra.insert("loss_region_factor".to_string(), factor as f64);
+                extra.insert(
+                    "region_spin_alignment".to_string(),
+                    region_descriptor.spin_alignment as f64,
+                );
+                extra.insert(
+                    "region_normalized_radius".to_string(),
+                    region_descriptor.normalized_radius as f64,
+                );
+            }
+            total_loss += weighted_loss;
+            extra.insert("loss_weighted_base".to_string(), weighted_loss_base as f64);
             let mut loop_broadcasted = false;
             if let Some(node) = self.distribution.as_mut() {
                 let outcome = OutcomeBand::from_weights(
@@ -2024,6 +2248,9 @@ mod tests {
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
+    use st_core::telemetry::hub::{SoftlogicEllipticSample, SoftlogicZFeedback};
+    use st_core::telemetry::zspace_region::{ZSpaceRadiusBand, ZSpaceRegionKey, ZSpaceSpinBand};
+    use st_core::theory::zpulse::ZSource;
     use st_tensor::topos::OpenCartesianTopos;
     use std::collections::HashMap;
     use std::time::{Duration, Instant, SystemTime};
@@ -2088,6 +2315,57 @@ mod tests {
             let tensor = Tensor::zeros(1, 1).unwrap();
             let param = Parameter::new("weight", tensor);
             Self { param, grad_value }
+        }
+    }
+
+    struct IdentityModule;
+
+    impl Module for IdentityModule {
+        fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+            Ok(input.clone())
+        }
+
+        fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+            Ok(grad_output.clone())
+        }
+
+        fn visit_parameters(
+            &self,
+            _visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            Ok(())
+        }
+
+        fn visit_parameters_mut(
+            &mut self,
+            _visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            Ok(())
+        }
+    }
+
+    struct ConstantLoss {
+        value: f32,
+    }
+
+    impl ConstantLoss {
+        fn new(value: f32) -> Self {
+            Self { value }
+        }
+    }
+
+    impl Loss for ConstantLoss {
+        fn forward(&mut self, prediction: &Tensor, _target: &Tensor) -> PureResult<Tensor> {
+            let len = prediction.data().len();
+            Tensor::from_vec(
+                prediction.shape().0,
+                prediction.shape().1,
+                vec![self.value; len],
+            )
+        }
+
+        fn backward(&mut self, prediction: &Tensor, _target: &Tensor) -> PureResult<Tensor> {
+            Tensor::zeros(prediction.shape().0, prediction.shape().1)
         }
     }
 
@@ -2221,6 +2499,62 @@ mod tests {
             .unwrap();
         let after = model.forward(&input).unwrap();
         assert_ne!(before.data(), after.data());
+    }
+
+    #[test]
+    fn region_loss_strategy_scales_total_loss() {
+        let elliptic = SoftlogicEllipticSample {
+            curvature_radius: 1.0,
+            geodesic_radius: 0.9,
+            normalized_radius: 0.9,
+            spin_alignment: 0.9,
+            sheet_index: 1,
+            sheet_position: 0.0,
+            normal_bias: 0.0,
+            sheet_count: 4,
+            topological_sector: 2,
+            homology_index: 0,
+            rotor_field: [0.0; 3],
+            flow_vector: [0.0; 3],
+            curvature_tensor: [[0.0; 3]; 3],
+            resonance_heat: 0.0,
+            noise_density: 0.0,
+            quaternion: [0.0; 4],
+            rotation: [0.0; 9],
+        };
+        let seed_feedback = SoftlogicZFeedback {
+            psi_total: 0.0,
+            weighted_loss: 0.0,
+            band_energy: (0.0, 0.0, 0.0),
+            drift: 0.0,
+            z_signal: 0.0,
+            scale: None,
+            events: Vec::new(),
+            attributions: vec![(ZSource::Microlocal, 1.0)],
+            elliptic: Some(elliptic),
+        };
+
+        let weights = RegionLossWeights::new(1.0).with_override(
+            ZSpaceRegionKey::new(ZSpaceSpinBand::Leading, ZSpaceRadiusBand::Edge),
+            2.0,
+        );
+        let config = RegionLossConfig::new(weights);
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01)
+            .with_loss_strategy(LossStrategy::Region(config));
+        trainer.softlogic.last_feedback = Some(seed_feedback);
+        let mut module = IdentityModule;
+        trainer.prepare(&mut module).unwrap();
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let dataset = vec![(
+            Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+        )];
+        let mut loss = ConstantLoss::new(1.5);
+        let stats = trainer
+            .train_epoch(&mut module, &mut loss, dataset, &schedule)
+            .unwrap();
+        assert!((stats.total_loss - 3.0).abs() < 1e-6);
     }
 
     #[test]

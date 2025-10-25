@@ -28,6 +28,7 @@ pub mod hub;
 pub mod maintainer;
 pub mod monitoring;
 pub mod xai_report;
+pub mod zspace_region;
 
 #[cfg(feature = "psi")]
 pub mod psi;

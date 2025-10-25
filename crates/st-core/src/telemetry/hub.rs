@@ -473,6 +473,15 @@ impl SoftlogicZFeedback {
                 .map(|(source, weight)| (source, weight.max(0.0))),
         );
     }
+
+    /// Returns the parsed Z-space region descriptor when elliptic telemetry is present.
+    pub fn region_descriptor(
+        &self,
+    ) -> Option<crate::telemetry::zspace_region::ZSpaceRegionDescriptor> {
+        self.elliptic
+            .as_ref()
+            .map(crate::telemetry::zspace_region::ZSpaceRegionDescriptor::from)
+    }
 }
 
 static LAST_SOFTLOGIC_Z: OnceLock<RwLock<Option<SoftlogicZFeedback>>> = OnceLock::new();
