@@ -67,7 +67,8 @@ pub mod xai;
 
 use std::cmp::min;
 use std::collections::VecDeque;
-use std::f32::consts::PI;
+use std::f32::consts::{LN_2, PI};
+use std::f32::EPSILON;
 use std::fmt;
 use std::sync::Arc;
 
@@ -243,6 +244,11 @@ impl ZSpaceStreamFrame {
         }
         ZSliceProfile::new(means, stds, energies)
     }
+
+    /// Builds a telemetry summary describing the current payload.
+    pub fn telemetry_report(&self) -> PureResult<ZSpaceTelemetryReport> {
+        Ok(self.profile()?.summarize())
+    }
 }
 
 /// Result of converting a streaming frame into a concrete Z-space volume.
@@ -257,6 +263,11 @@ impl StreamedVolume {
     /// Computes slice statistics for the contained volume.
     pub fn profile(&self) -> PureResult<ZSliceProfile> {
         self.volume.profile()
+    }
+
+    /// Derives a telemetry report for the streamed volume.
+    pub fn telemetry_report(&self) -> PureResult<ZSpaceTelemetryReport> {
+        self.volume.telemetry_report()
     }
 }
 
@@ -393,6 +404,32 @@ impl ZSpaceStreamFrameAggregator {
             atlas_frame: self.atlas_frame,
             chrono_snapshot: self.chrono_snapshot,
         })
+    }
+
+    /// Clears all buffered slices and telemetry metadata.
+    pub fn clear(&mut self) {
+        self.slices.clear();
+        self.atlas_frame = None;
+        self.chrono_snapshot = None;
+    }
+
+    /// Retains only the most recent `keep` slices in the buffer.
+    pub fn prune_oldest(&mut self, keep: usize) {
+        if keep == 0 {
+            self.clear();
+            return;
+        }
+        while self.slices.len() > keep {
+            self.slices.pop_front();
+        }
+    }
+
+    /// Summarises the buffered content as a telemetry report when populated.
+    pub fn telemetry_report(&self) -> PureResult<Option<ZSpaceTelemetryReport>> {
+        match self.as_frame() {
+            Some(frame) => Ok(Some(frame.telemetry_report()?)),
+            None => Ok(None),
+        }
     }
 }
 
@@ -584,6 +621,125 @@ impl ZSliceProfile {
     /// Fetches the mean squared energy for the given slice index.
     pub fn energy(&self, index: usize) -> f32 {
         self.energies[index]
+    }
+
+    /// Average slice mean across the volume.
+    pub fn average_mean(&self) -> f32 {
+        if self.means.is_empty() {
+            return 0.0;
+        }
+        self.means.iter().sum::<f32>() / self.means.len() as f32
+    }
+
+    /// Average slice standard deviation across the volume.
+    pub fn average_std(&self) -> f32 {
+        if self.stds.is_empty() {
+            return 0.0;
+        }
+        self.stds.iter().sum::<f32>() / self.stds.len() as f32
+    }
+
+    /// Average slice energy across the volume.
+    pub fn average_energy(&self) -> f32 {
+        if self.energies.is_empty() {
+            return 0.0;
+        }
+        self.energies.iter().sum::<f32>() / self.energies.len() as f32
+    }
+
+    /// Total energy accumulated across all slices.
+    pub fn total_energy(&self) -> f32 {
+        self.energies.iter().sum()
+    }
+
+    /// Maximum slice energy.
+    pub fn max_energy(&self) -> f32 {
+        self.energies
+            .iter()
+            .cloned()
+            .fold(0.0, |acc, value| acc.max(value))
+    }
+
+    /// Shannon entropy of the energy distribution (log base 2).
+    pub fn energy_entropy(&self) -> f32 {
+        let total = self.total_energy();
+        if total <= EPSILON {
+            return 0.0;
+        }
+        self.energies
+            .iter()
+            .filter(|energy| energy.is_finite() && **energy > 0.0)
+            .map(|energy| {
+                let p = energy / total;
+                -p * (p.ln() / LN_2)
+            })
+            .sum()
+    }
+
+    /// Converts the slice profile into a telemetry report structure.
+    pub fn summarize(&self) -> ZSpaceTelemetryReport {
+        ZSpaceTelemetryReport::from_profile(self)
+    }
+}
+
+/// High-level telemetry summary derived from a [`ZSliceProfile`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZSpaceTelemetryReport {
+    depth: usize,
+    mean_intensity: f32,
+    mean_std: f32,
+    mean_energy: f32,
+    total_energy: f32,
+    max_energy: f32,
+    energy_entropy: f32,
+}
+
+impl ZSpaceTelemetryReport {
+    fn from_profile(profile: &ZSliceProfile) -> Self {
+        Self {
+            depth: profile.depth(),
+            mean_intensity: profile.average_mean(),
+            mean_std: profile.average_std(),
+            mean_energy: profile.average_energy(),
+            total_energy: profile.total_energy(),
+            max_energy: profile.max_energy(),
+            energy_entropy: profile.energy_entropy(),
+        }
+    }
+
+    /// Number of slices described by the report.
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
+    /// Average mean intensity across the slices.
+    pub fn mean_intensity(&self) -> f32 {
+        self.mean_intensity
+    }
+
+    /// Average per-slice standard deviation.
+    pub fn mean_std(&self) -> f32 {
+        self.mean_std
+    }
+
+    /// Average per-slice energy.
+    pub fn mean_energy(&self) -> f32 {
+        self.mean_energy
+    }
+
+    /// Total energy measured across all slices.
+    pub fn total_energy(&self) -> f32 {
+        self.total_energy
+    }
+
+    /// Highest slice energy encountered.
+    pub fn max_energy(&self) -> f32 {
+        self.max_energy
+    }
+
+    /// Entropy of the energy distribution in bits.
+    pub fn energy_entropy(&self) -> f32 {
+        self.energy_entropy
     }
 }
 
@@ -810,6 +966,11 @@ impl ZSpaceVolume {
             energies.push(energy);
         }
         ZSliceProfile::new(means, stds, energies)
+    }
+
+    /// Generates a high-level telemetry summary of the volume.
+    pub fn telemetry_report(&self) -> PureResult<ZSpaceTelemetryReport> {
+        Ok(self.profile()?.summarize())
     }
 
     /// Ensures the harmonic buffer has the requested channel count, reallocating if required.
@@ -4562,6 +4723,59 @@ mod tests {
             min_energy: (mean_energy - energy_std).min(mean_energy),
             max_energy: (mean_energy + energy_std).max(mean_energy),
         }
+    }
+
+    #[test]
+    fn slice_profile_summary_computes_entropy() {
+        let slice_a = Tensor::from_vec(2, 2, vec![1.0, 1.0, 1.0, 1.0]).unwrap();
+        let slice_b = Tensor::from_vec(2, 2, vec![0.0, 2.0, 0.0, 2.0]).unwrap();
+        let frame = ZSpaceStreamFrame::new(vec![slice_a, slice_b]).unwrap();
+        let report = frame.telemetry_report().unwrap();
+        assert_eq!(report.depth(), 2);
+        assert!((report.mean_intensity() - 1.0).abs() < 1e-5);
+        assert!((report.mean_std() - 0.5).abs() < 1e-5);
+        assert!((report.mean_energy() - 1.5).abs() < 1e-5);
+        assert!((report.total_energy() - 3.0).abs() < 1e-5);
+        assert!((report.max_energy() - 2.0).abs() < 1e-5);
+        let p1 = 1.0f32 / 3.0;
+        let p2 = 2.0f32 / 3.0;
+        let expected_entropy = -(p1 * (p1.ln() / LN_2) + p2 * (p2.ln() / LN_2));
+        assert!((report.energy_entropy() - expected_entropy).abs() < 1e-5);
+    }
+
+    #[test]
+    fn streamed_volume_telemetry_matches_frame_report() {
+        let slice = Tensor::from_vec(2, 2, vec![0.25, 0.75, 1.25, 1.75]).unwrap();
+        let frame = ZSpaceStreamFrame::new(vec![slice.clone()]).unwrap();
+        let volume = frame.clone().into_streamed_volume().unwrap();
+        let frame_report = frame.telemetry_report().unwrap();
+        let volume_report = volume.telemetry_report().unwrap();
+        assert_eq!(frame_report, volume_report);
+        let z_volume_report = volume.volume.telemetry_report().unwrap();
+        assert_eq!(volume_report, z_volume_report);
+    }
+
+    #[test]
+    fn aggregator_telemetry_and_prune_behave() {
+        let slice_a = Tensor::from_vec(2, 2, vec![0.5, 0.5, 0.5, 0.5]).unwrap();
+        let slice_b = Tensor::from_vec(2, 2, vec![0.0, 2.0, 0.0, 2.0]).unwrap();
+        let mut aggregator = ZSpaceStreamFrameAggregator::new();
+        aggregator
+            .extend(ZSpaceStreamFrame::new(vec![slice_a.clone()]).unwrap())
+            .unwrap();
+        let initial = aggregator.telemetry_report().unwrap().unwrap();
+        assert_eq!(initial.depth(), 1);
+        assert!((initial.mean_intensity() - 0.5).abs() < 1e-5);
+        aggregator
+            .extend(ZSpaceStreamFrame::new(vec![slice_b.clone()]).unwrap())
+            .unwrap();
+        aggregator.prune_oldest(1);
+        assert_eq!(aggregator.len(), 1);
+        let pruned = aggregator.telemetry_report().unwrap().unwrap();
+        assert!((pruned.mean_intensity() - 1.0).abs() < 1e-5);
+        aggregator.clear();
+        assert!(aggregator.telemetry_report().unwrap().is_none());
+        assert!(aggregator.is_empty());
     }
 
     #[test]

@@ -24,6 +24,7 @@
 use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
 use super::dashboard::{DashboardFrame, DashboardRing};
 use super::maintainer::MaintainerReport;
+use super::xai_report::AttributionReport;
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
@@ -650,12 +651,26 @@ impl SoftlogicZFeedback {
                 .map(|(source, weight)| (source, weight.max(0.0))),
         );
     }
+
+    /// Returns the parsed Z-space region descriptor when elliptic telemetry is present.
+    pub fn region_descriptor(
+        &self,
+    ) -> Option<crate::telemetry::zspace_region::ZSpaceRegionDescriptor> {
+        self.elliptic
+            .as_ref()
+            .map(crate::telemetry::zspace_region::ZSpaceRegionDescriptor::from)
+    }
 }
 
 static LAST_SOFTLOGIC_Z: OnceLock<RwLock<Option<SoftlogicZFeedback>>> = OnceLock::new();
+static LAST_REGION_REPORT: OnceLock<RwLock<Option<AttributionReport>>> = OnceLock::new();
 
 fn softlogic_z_cell() -> &'static RwLock<Option<SoftlogicZFeedback>> {
     LAST_SOFTLOGIC_Z.get_or_init(|| RwLock::new(None))
+}
+
+fn region_report_cell() -> &'static RwLock<Option<AttributionReport>> {
+    LAST_REGION_REPORT.get_or_init(|| RwLock::new(None))
 }
 
 #[cfg(feature = "psi")]
@@ -905,6 +920,34 @@ pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
 
     let fragment = fragment_from_softlogic(&feedback);
     merge_atlas_fragment(fragment);
+}
+
+/// Stores the most recent region-weighted loss heatmap for explainability.
+pub fn set_region_loss_report(report: AttributionReport) {
+    match region_report_cell().write() {
+        Ok(mut guard) => {
+            *guard = Some(report);
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = Some(report);
+        }
+    }
+}
+
+/// Clears the stored region-weighted loss report.
+pub fn clear_region_loss_report() {
+    if let Ok(mut guard) = region_report_cell().write() {
+        guard.take();
+    }
+}
+
+/// Returns the last stored region heatmap report, if any.
+pub fn get_region_loss_report() -> Option<AttributionReport> {
+    region_report_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
 }
 
 /// Returns the latest SoftLogic Z feedback sample if one has been recorded.

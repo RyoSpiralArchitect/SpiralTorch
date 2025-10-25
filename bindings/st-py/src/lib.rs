@@ -209,7 +209,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",
         "LinearModel","ModuleTrainer","mean_squared_error",
         "CanvasTransformer","CanvasSnapshot","apply_vision_update",
-        "NonLiner","ZSpaceCoherenceSequencer","ScaleStack",
+        "NonLiner","Dropout","ZSpaceCoherenceSequencer","ScaleStack",
         "scalar_scale_stack","semantic_scale_stack","scale_stack",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
