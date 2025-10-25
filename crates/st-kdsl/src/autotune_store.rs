@@ -296,6 +296,19 @@ pub fn lookup_best<C: Serialize>(path: &Path, key: &str, context: &C) -> Option<
         .next()
 }
 
+pub fn load_best_typed<T, C>(path: &Path, key: &str, context: &C, default: T) -> T
+where
+    T: for<'de> Deserialize<'de> + Clone,
+    C: Serialize,
+{
+    if let Some(entry) = lookup_best(path, key, context) {
+        if let Ok(value) = serde_json::from_value::<T>(entry.params) {
+            return value;
+        }
+    }
+    default
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
