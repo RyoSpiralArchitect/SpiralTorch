@@ -1323,6 +1323,7 @@ _CORE_EXPORTS = [
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
     "ModuleTrainer","NonLiner","ZSpaceTrainer","ZSpaceCoherenceSequencer","PreDiscardTelemetry","PreDiscardPolicy",
+    "CoherenceObservation","CoherenceSignature","CoherenceChannelReport","CoherenceDiagnostics","is_swap_invariant",
     "TemporalResonanceBuffer","SpiralTorchVision",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
