@@ -51,6 +51,12 @@ pub mod maxwell_impl;
 #[doc(inline)]
 pub use maxwell_impl as maxwell;
 
+#[path = "general_relativity.rs"]
+#[doc(hidden)]
+pub mod general_relativity_impl;
+#[doc(inline)]
+pub use general_relativity_impl as general_relativity;
+
 #[path = "zpulse.rs"]
 #[doc(hidden)]
 pub mod zpulse_impl;
