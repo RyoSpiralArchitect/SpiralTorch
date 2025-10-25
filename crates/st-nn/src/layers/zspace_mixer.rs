@@ -131,7 +131,11 @@ pub enum MixerError {
     #[error("no channels")]
     EmptyChannels,
     #[error("channel length mismatch at chan {chan}: got {got}, expected {expected}")]
-    LengthMismatch { chan: usize, got: usize, expected: usize },
+    LengthMismatch {
+        chan: usize,
+        got: usize,
+        expected: usize,
+    },
     #[error("non-finite weight at index {index}: {value}")]
     NonFiniteWeight { index: usize, value: f32 },
     #[error("non-finite sample at chan {chan} index {index}")]
@@ -234,7 +238,10 @@ pub fn st_mix_series(
         for i in 0..n {
             let x = ch[i];
             if !st_is_finite_c32(x) {
-                return Err(MixerError::NonFiniteSample { chan: cidx, index: i });
+                return Err(MixerError::NonFiniteSample {
+                    chan: cidx,
+                    index: i,
+                });
             }
             // 加算する量
             let add_re = x.re * w_i;

@@ -51,7 +51,12 @@ fn save_store_atomic(path: &Path, store: &AutoTuneStore) -> io::Result<()> {
     Ok(())
 }
 
-pub fn record_best<P: Serialize>(path: &Path, key: &str, score: f64, params: &P) -> io::Result<bool> {
+pub fn record_best<P: Serialize>(
+    path: &Path,
+    key: &str,
+    score: f64,
+    params: &P,
+) -> io::Result<bool> {
     let mut store = load_store(path);
     let replace = match store.get(key) {
         None => true,
