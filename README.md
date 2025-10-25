@@ -366,7 +366,70 @@ print("from_torch matches torch.tolist():", from_torch.tolist() == torch_tensor.
 
 `st.Tensor` now accepts tuples, keyword-only shapes, nested Python iterables, DLPack-aware tensors, or anything with a `tolist()` method. The constructor infers shapes where possible and reshapes automatically when you provide the total element count.
 
-### 3) Zero-copy tensor exchange via DLPack
+### 3) Hypergrad tapes without ceremony
+
+```python
+import spiraltorch as st
+
+# Build a reusable OpenCartesianTopos with curvature-aware limits in one call.
+topos = st.hypergrad_topos(
+    curvature=-0.9,
+    tolerance=1e-3,
+    saturation=0.8,
+    max_depth=8,
+    max_volume=32,
+)
+
+# Accepts tuple shapes, tensors, or rows/cols without extra keywords.
+weights = st.Tensor([[0.1, 0.2, 0.3]])
+tape = st.hypergrad(weights, learning_rate=0.02, topos=topos)
+
+prediction = st.Tensor([[0.25, 0.25, 0.25]])
+target = st.Tensor([[0.0, 1.0, 0.0]])
+tape.accumulate_pair(prediction, target)
+tape.apply(weights)
+
+print("shape:", tape.shape(), "lr:", tape.learning_rate())
+print("summary l2:", tape.summary().l2())
+```
+
+`st.hypergrad_topos(...)` instantiates an `OpenCartesianTopos` from keyword-only
+arguments (aliasing `depth`/`volume` automatically), while `st.hypergrad(...)`
+accepts tuple shapes, tensors, or `rows`/`cols` pairs so you can attach tapes
+without touching the native constructor. Pass dictionaries or `(curvature,
+tolerance, saturation, depth, volume)` tuples to `topos=` when you need a tape
+per module.
+
+### 4) Z-space encoders and metric normalisers
+
+```python
+import spiraltorch as st
+
+# Encode desire text straight into the Z-space tensor manifold.
+z_vec = st.encode_zspace("Spin up the roundtable", temperature=0.4)
+
+# Normalise mixed telemetry aliases into a structured ZMetrics payload.
+metrics = st.z_metrics(
+    velocity=0.55,
+    mem=0.12,
+    stab=0.78,
+    drift=0.05,
+    grad=[0.1, -0.2, 0.05],
+)
+
+trainer = st.ZSpaceTrainer(z_dim=z_vec.shape()[1])
+loss = trainer.step(metrics)
+
+print("z shape:", z_vec.shape(), "loss:", loss)
+```
+
+`st.encode_zspace(...)` spins up a `LanguageWaveEncoder` on demand and returns a
+proper SpiralTorch tensor, so notebook prototypes never have to juggle encoder
+lifetimes. `st.z_metrics(...)` recognises common aliases (`velocity`, `mem`,
+`stab`, `drift`, `grad`) and emits the strongly typed `ZMetrics` container that
+`ZSpaceTrainer` expects.
+
+### 5) Zero-copy tensor exchange via DLPack
 
 ```python
 import spiraltorch as st
@@ -388,7 +451,7 @@ t2.mul_(2)
 print("ST sees torch mul_:", a2.tolist())
 ```
 
-### 4) Row softmax (GPU-accelerated when available)
+### 6) Row softmax (GPU-accelerated when available)
 
 ```python
 from spiraltorch import Axis, tensor, label_tensor
@@ -410,7 +473,7 @@ softmax = wave.row_softmax()
 print(softmax.axis_names())  # ('time', 'feature')
 ```
 
-### 5) rl.stAgent multi-armed bandit
+### 7) rl.stAgent multi-armed bandit
 
 ```python
 import torch
@@ -456,7 +519,7 @@ for k in range(2):
     print(f"arm {k}: pulls={pulls[k]}, empirical p≈{rate:.3f}")
 ```
 
-### 5) Self-supervised losses
+### 8) Self-supervised losses
 
 ```python
 import spiraltorch as st
@@ -471,7 +534,7 @@ mask = [[1], [0]]  # mask by column indices per row
 print("masked_mse:", st.selfsup.masked_mse(pred, tgt, mask))
 ```
 
-### 6) Z-space trainer
+### 9) Z-space trainer
 
 ```python
 import spiraltorch as st
@@ -484,7 +547,7 @@ samples = [
 print("z:", st.step_many(trainer, samples))
 ```
 
-### 7) Vision × Canvas
+### 10) Vision × Canvas
 
 ```python
 import spiraltorch as st
@@ -502,7 +565,7 @@ print("canvas summary:", snap.summary)
 print("patch[0][:3]:", snap.patch[0][:3] if snap.patch else None)
 ```
 
-### 8) NN data utilities
+### 11) NN data utilities
 
 ```python
 import spiraltorch as st
@@ -516,7 +579,7 @@ for x, y in loader:
     pass
 ```
 
-### 9) Recommender & RL
+### 12) Recommender & RL
 
 ```python
 import spiraltorch as st
@@ -526,7 +589,7 @@ rec.train_epoch([(0, 0, 5.0), (0, 1, 3.0), (1, 0, 4.0)])
 print("top-k:", rec.recommend_top_k(0, k=3))
 ```
 
-### 10) Interop (PyTorch / JAX / TensorFlow)
+### 13) Interop (PyTorch / JAX / TensorFlow)
 
 ```python
 import spiraltorch as st, torch
@@ -536,15 +599,7 @@ xt = st.compat.torch.to_torch(x, dtype=torch.float32, device="cpu")
 x_back = st.compat.torch.from_torch(xt)
 ```
 
-- `Axis(name, size=None)` creates a named dimension; call `axis.with_size(n)` when the
-  concrete length becomes known.
-- `tensor(data, axes=[...])` returns a backend-backed tensor and, if axes are provided,
-  a `LabeledTensor` wrapper that keeps names in sync across operations like
-  `row_softmax`, `transpose`, or matrix products.
-- `label_tensor(t, axes=[...])` applies the same annotation layer to tensors produced by
-  other SpiralTorch APIs.
-- `LabeledTensor.describe()` provides a quick dictionary with `shape`, `axes`, and
-  recorded sizes—handy when iterating inside notebooks.
+### 14) Math & pacing helpers
 
 
 ## Backend Matrix
@@ -562,23 +617,6 @@ x_back = st.compat.torch.from_torch(xt)
 
 ---
 
-### Python façade design
-
-- **Deferred exposure:** `__getattr__` forwards unknown names to the Rust extension → no need to constantly sync `__init__.py`.  
-- **Namespaced mirrors:** `nn`, `selfsup`, `vision`, `canvas`, `compat.*` are *forwarding modules*; they resolve symbols from Rust on first access.  
-- **Renames for stability:** e.g., `DqnAgent` → **`stAgent`**; the façade preserves import stability while Rust internals evolve.
-
-### Coding guidelines
-
-- **Rust**
-  - Keep public APIs thin and **feature-gated** (group domain features under logical flags).
-  - Provide *facade functions* at crate boundary to avoid leaking complex types to PyO3.
-  - Long-running ops: wrap with `pyo3::allow_threads` to release the GIL.
-
-- **Python**
-  - For new Rust exports, prefer **top-level re-exports** + **namespaced mirrors** (e.g., `selfsup.*`).
-  - Update `spiraltorch.pyi` alongside Rust exports to document the surface.
-  - Avoid heavy dependencies; keep the package import-time light.
 
 ### Tests
 
